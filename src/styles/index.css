@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-coral: var(--coral);
+  --color-coral-foreground: var(--coral-foreground);
+  --color-lilac: var(--lilac);
+  --color-lilac-foreground: var(--lilac-foreground);
+  --color-mint: var(--mint);
+  --color-mint-foreground: var(--mint-foreground);
+  --color-cream: var(--cream);
+  --color-navy: var(--navy);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+}
+
+:root {
+  --radius: 0.875rem;
+  --cream: oklch(0.985 0.008 85);
+  --navy: oklch(0.28 0.06 265);
+  --background: var(--cream);
+  --foreground: var(--navy);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--navy);
+  --muted: oklch(0.96 0.006 85);
+  --muted-foreground: oklch(0.55 0.03 260);
+  --border: oklch(0.92 0.008 85);
+  --input: oklch(0.92 0.008 85);
+  --ring: oklch(0.78 0.09 20);
+  --primary: var(--navy);
+  --primary-foreground: oklch(0.99 0.005 85);
+  --coral: oklch(0.78 0.12 22);
+  --coral-foreground: oklch(1 0 0);
+  --lilac: oklch(0.93 0.04 300);
+  --lilac-foreground: var(--navy);
+  --mint: oklch(0.93 0.045 155);
+  --mint-foreground: var(--navy);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html, body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  button { font-family: inherit; cursor: pointer; }
+  input, textarea, select { font-family: inherit; }
+}
+
+/* Custom range slider */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--coral);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+}
+
+/* Smooth transitions */
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Hide scrollbar but keep scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Calendar cell press effect */
+@keyframes cell-press {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+
+/* Highlight pulse for scroll-to-record */
+@keyframes highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.78 0.12 22 / 0.4); }
+  50% { box-shadow: 0 0 0 8px oklch(0.78 0.12 22 / 0); }
+}
+.record-highlighted {
+  animation: highlight-pulse 0.8s ease-out 2;
+}
+
+/* Slide-in from bottom for modals */
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0.5; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-slide-up {
+  animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Fade in */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}

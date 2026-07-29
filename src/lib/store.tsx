@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { AppState, DailyRecord, UserProfile, Role, AuthUser, ILogRepository } from '@/types';
-import { authRepository, isSupabaseConfigured } from '@/lib/supabase';
+import { AppState, DailyRecord, UserProfile, Role, AuthUser, ILogRepository, CoupleEvent } from '@/types';
+import { authRepository, isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { fetchFullStateFromDB } from '@/lib/sync';
+import { saveRecordToDB, deleteRecordFromDB } from '@/lib/records';
 
 const STORE_KEY = 'gomsinlog.state.v1';
 
@@ -60,6 +62,10 @@ const DEFAULT_STATE: AppState = {
     },
   },
   records: [],
+  events: [],
+  trips: [],
+  widgetLayout: ['today_briefing', 'today_word', 'contact_time', 'dday'],
+  hasSeenInstallPrompt: false,
 };
 
 interface StoreContextType {
@@ -68,6 +74,8 @@ interface StoreContextType {
   addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => void;
   updateRecord: (id: string, updates: Partial<DailyRecord>) => void;
   deleteRecord: (id: string) => void;
+  addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => void;
+  deleteEvent: (id: string) => void;
   switchRole: () => void;
   reset: () => void;
   disconnect: () => void;
@@ -75,7 +83,10 @@ interface StoreContextType {
   setSetupComplete: (complete: boolean) => void;
   setOnboardingStep: (step: number) => void;
   setHighlightedRecordId: (id?: string) => void;
+  setAuthenticatedUser: (user: AuthUser | null) => void;
   startDemo: () => void;
+  setWidgetLayout: (layout: string[]) => void;
+  setHasSeenInstallPrompt: (seen: boolean) => void;
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -95,19 +106,149 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!supabase) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const provider = (session.user.app_metadata?.provider as 'apple' | 'google' | 'email') || 'google';
+        const authUser: AuthUser = {
+          id: session.user.id,
+          email: session.user.email,
+          provider,
+        };
+        
+        const dbState = await fetchFullStateFromDB(session.user.id);
+        
+        setState((prev) => ({
+          ...prev,
+          authenticatedUser: authUser,
+          isDemoMode: false,
+          ...(dbState || {})
+        }));
+      } else if (event === 'SIGNED_OUT') {
+        setState((prev) => ({
+          ...prev,
+          authenticatedUser: null,
+        }));
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     if (isHydrated) {
       localRepository.saveState(state);
     }
   }, [state, isHydrated]);
 
+  useEffect(() => {
+    if (!supabase || !state.authenticatedUser || !state.profile.couple.coupleId) return;
+
+    const channel = supabase
+      .channel('daily_records_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'daily_records',
+          filter: `couple_id=eq.${state.profile.couple.coupleId}`,
+        },
+        async (payload) => {
+          const dbState = await fetchFullStateFromDB(state.authenticatedUser!.id);
+          if (dbState && dbState.records) {
+             setState(prev => ({ ...prev, records: dbState.records! }));
+          }
+        }
+      )
+      .subscribe();
+
+    const eventChannel = supabase
+      .channel('events_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'events',
+          filter: `couple_id=eq.${state.profile.couple.coupleId}`,
+        },
+        async (payload) => {
+          const dbState = await fetchFullStateFromDB(state.authenticatedUser!.id);
+          if (dbState && dbState.events) {
+             setState(prev => ({ ...prev, events: dbState.events! }));
+          }
+        }
+      )
+      .subscribe();
+
+    const tripsChannel = supabase
+      .channel('trips_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trips',
+          filter: `couple_id=eq.${state.profile.couple.coupleId}`,
+        },
+        async (payload) => {
+          const dbState = await fetchFullStateFromDB(state.authenticatedUser!.id);
+          if (dbState && dbState.trips) {
+             setState(prev => ({ ...prev, trips: dbState.trips! }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase?.removeChannel(channel);
+      supabase?.removeChannel(eventChannel);
+      supabase?.removeChannel(tripsChannel);
+    };
+  }, [state.profile.couple.coupleId, state.authenticatedUser]);
+
   const updateProfile = (profileUpdates: Partial<UserProfile>) => {
-    setState((prev) => ({
-      ...prev,
-      profile: {
+    setState((prev) => {
+      const newProfile = {
         ...prev.profile,
         ...profileUpdates,
-      },
-    }));
+      };
+      const newState = { ...prev, profile: newProfile };
+      
+      // Async DB Sync
+      if (newState.authenticatedUser && !newState.isDemoMode) {
+        const userId = newState.authenticatedUser.id;
+        
+        // Update basic profile and military
+        if (profileUpdates.myName || profileUpdates.military) {
+           supabase?.from('profiles').update({
+             display_name: newProfile.myName,
+             military_info: newProfile.military,
+             updated_at: new Date().toISOString()
+           }).eq('id', userId).then(({error}) => {
+             if (error) console.error('Failed to update profile:', error);
+           });
+        }
+        
+        // Update contact preferences
+        if (profileUpdates.contact) {
+           supabase?.from('contact_preferences').upsert({
+             user_id: userId,
+             weekday_start: newProfile.contact.weekdayStart,
+             weekday_end: newProfile.contact.weekdayEnd,
+             weekend_start: newProfile.contact.weekendStart,
+             weekend_end: newProfile.contact.weekendEnd
+           }).then(({error}) => {
+             if (error) console.error('Failed to update contact:', error);
+           });
+        }
+      }
+      
+      return newState;
+    });
   };
 
   const addRecord = (record: Omit<DailyRecord, 'id' | 'createdAt'>) => {
@@ -116,24 +257,67 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
-    setState((prev) => ({
-      ...prev,
-      records: [...prev.records, newRecord],
-    }));
+    setState((prev) => {
+      const newState = {
+        ...prev,
+        records: [...prev.records, newRecord],
+      };
+      if (newState.authenticatedUser && newState.profile.couple.coupleId) {
+        saveRecordToDB(newRecord, newState.profile.couple.coupleId, newState.authenticatedUser.id);
+      }
+      return newState;
+    });
   };
 
   const updateRecord = (id: string, updates: Partial<DailyRecord>) => {
-    setState((prev) => ({
-      ...prev,
-      records: prev.records.map((r) => (r.id === id ? { ...r, ...updates } : r)),
-    }));
+    setState((prev) => {
+      const newRecords = prev.records.map((r) => (r.id === id ? { ...r, ...updates } : r));
+      const newState = { ...prev, records: newRecords };
+      if (newState.authenticatedUser && newState.profile.couple.coupleId) {
+        const updatedRecord = newRecords.find(r => r.id === id);
+        if (updatedRecord) saveRecordToDB(updatedRecord, newState.profile.couple.coupleId, newState.authenticatedUser.id);
+      }
+      return newState;
+    });
   };
 
   const deleteRecord = (id: string) => {
-    setState((prev) => ({
-      ...prev,
-      records: prev.records.filter((r) => r.id !== id),
-    }));
+    setState((prev) => {
+      const newState = {
+        ...prev,
+        records: prev.records.filter((r) => r.id !== id),
+      };
+      if (newState.authenticatedUser) {
+        deleteRecordFromDB(id);
+      }
+      return newState;
+    });
+  };
+
+  const addEvent = async (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => {
+    // Optimistic
+    const newEvent: CoupleEvent = {
+      ...event,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    };
+    setState(prev => ({ ...prev, events: [...prev.events, newEvent] }));
+    
+    // DB
+    if (state.authenticatedUser) {
+       const saved = await import('@/lib/events').then(m => m.saveEventToDB(newEvent));
+       if (!saved) {
+         // rollback or show error
+         console.error('Failed to save event');
+       }
+    }
+  };
+
+  const deleteEvent = async (id: string) => {
+    setState(prev => ({ ...prev, events: prev.events.filter(e => e.id !== id) }));
+    if (state.authenticatedUser) {
+       await import('@/lib/events').then(m => m.deleteEventFromDB(id));
+    }
   };
 
   const switchRole = () => {
@@ -203,7 +387,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       setupComplete: true,
       isDemoMode: true,
-      authenticatedUser: { id: 'demo-user-id', email: 'demo@gomsinlog.app', provider: 'demo' },
+      authenticatedUser: null,
       profile: {
         ...prev.profile,
         myName: '춘향',
@@ -358,6 +542,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }));
   };
 
+  const setAuthenticatedUser = (user: AuthUser | null) => {
+    setState((prev) => ({ ...prev, authenticatedUser: user }));
+  };
+
+  const setWidgetLayout = (layout: string[]) => {
+    setState((prev) => ({ ...prev, widgetLayout: layout }));
+  };
+
+  const setHasSeenInstallPrompt = (seen: boolean) => {
+    setState((prev) => ({ ...prev, hasSeenInstallPrompt: seen }));
+  };
+
   return (
     <StoreContext.Provider
       value={{
@@ -366,6 +562,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         addRecord,
         updateRecord,
         deleteRecord,
+        addEvent,
+        deleteEvent,
         switchRole,
         reset,
         disconnect,
@@ -373,7 +571,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setSetupComplete,
         setOnboardingStep,
         setHighlightedRecordId,
+        setAuthenticatedUser,
         startDemo,
+        setWidgetLayout,
+        setHasSeenInstallPrompt,
       }}
     >
       {children}

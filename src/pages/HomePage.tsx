@@ -1,14 +1,15 @@
 import { MobileShell } from '@/components/MobileShell';
+import { WidgetDashboard } from '@/features/home/WidgetDashboard';
+import { SoldierDashboard } from '@/features/home/SoldierDashboard';
 import { useStore } from '@/lib/store';
-import { GomshinHome } from '@/features/home/GomshinHome';
-import { SoldierHome } from '@/features/home/SoldierHome';
 
 export function HomePage() {
   const { state } = useStore();
-  
+  const isGomsin = state.profile.role === 'gomsin';
+
   return (
     <MobileShell>
-      {state.profile.role === 'gomsin' ? <GomshinHome /> : <SoldierHome />}
+      {isGomsin ? <WidgetDashboard /> : <SoldierDashboard />}
     </MobileShell>
   );
 }

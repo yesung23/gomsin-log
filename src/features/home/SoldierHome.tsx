@@ -1,17 +1,21 @@
 import React, { useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
-import { Sparkles, MessageCircle, Clock, Image as ImageIcon, Mic, Film, ChevronRight } from 'lucide-react';
+import { Sparkles, MessageCircle, Clock, Image as ImageIcon, Mic, Film, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { toLocalDateString, localToday } from '@/lib/utils';
-import { generateDailySummary } from '@/lib/briefing';
+import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
+import { Heart } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function SoldierHome() {
+  const navigate = useNavigate();
   const { state, setHighlightedRecordId } = useStore();
   const { myName } = state.profile;
   const partnerName = state.profile.couple.partnerName || '춘향';
   const connected = state.profile.couple.connected;
   const todayStr = toLocalDateString(localToday());
+  const headerGreeting = partnerName ? `안녕, ${partnerName} ♡` : '안녕, 우리 ♡';
 
   // Filter partner's shared records for today in chronological order
   const partnerSharedRecords = useMemo(() => {
@@ -32,6 +36,11 @@ export function SoldierHome() {
   const summary = useMemo(() => {
     return generateDailySummary(partnerSharedRecords, partnerName);
   }, [partnerSharedRecords, partnerName]);
+
+  // Generate emotion flow briefing
+  const emotionFlowBriefing = useMemo(() => {
+    return generateEmotionFlowBriefing(partnerSharedRecords);
+  }, [partnerSharedRecords]);
 
   // Handle clicking a summary sentence/item -> Scroll to source record & highlight it
   const handleSummaryItemClick = (recordId?: string) => {
@@ -77,10 +86,10 @@ export function SoldierHome() {
   return (
     <div className="pb-24">
       {/* Header */}
-      <header className="px-5 pt-10 pb-2 flex items-center justify-between gap-3">
+      <header className="px-5 pt-8 pb-2 flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            안녕, {myName}아 <span className="text-coral">♡</span>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            {headerGreeting}
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">
             {hasSharedRecords
@@ -88,7 +97,22 @@ export function SoldierHome() {
               : `아직 ${partnerName}이가 오늘 공유한 기록이 없어요.`}
           </p>
         </div>
-        <CoupleAvatar size={64} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/settings')}
+            className="p-2 rounded-xl text-muted-foreground hover:bg-muted min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95 transition"
+            aria-label="설정"
+          >
+            <MoreHorizontal size={20} />
+          </button>
+          <button
+            onClick={() => navigate('/us')}
+            className="rounded-full focus:outline-none focus:ring-2 focus:ring-coral/40 active:scale-95 transition"
+            aria-label="우리 정보 보기"
+          >
+            <CoupleAvatar size={52} />
+          </button>
+        </div>
       </header>
 
       {/* Log Stats Badge (NO "브리핑 수신 18:00") */}
@@ -109,47 +133,122 @@ export function SoldierHome() {
         )}
       </div>
 
+      {/* Main Card: 오늘 통화 전, 이것만 알아두세요 */}
       <div className="mx-5 space-y-4">
-        {/* 1. 오늘의 빠른 정리 (Auxiliary Automatic Summary Card) */}
-        {summary.items.length > 0 && (
-          <section className="rounded-2xl bg-lilac/40 border border-lilac/60 p-4 shadow-sm space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-navy mb-1">
-              <div className="flex items-center gap-1.5">
-                <Sparkles size={14} className="text-coral" />
-                <span>오늘의 빠른 정리</span>
-              </div>
-              <span className="text-[10px] text-navy/60 font-normal">문장을 누르면 원문으로 이동</span>
-            </div>
-            <div className="space-y-1.5">
-              {summary.items.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                  className="w-full text-left p-2 rounded-xl bg-white/70 hover:bg-white transition flex items-center justify-between text-xs font-medium text-navy group active:scale-[0.99]"
-                >
-                  <span className="leading-snug flex-1 pr-2">• {item.text}</span>
-                  <ChevronRight size={14} className="text-navy/40 group-hover:text-navy shrink-0" />
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        <section className="rounded-3xl bg-card border border-border/80 p-5 shadow-sm space-y-4">
+          <div className="text-[11px] font-bold text-coral bg-coral/10 px-2.5 py-1 rounded-md inline-block">
+            {partnerName}의 오늘 ♡
+          </div>
+          <h2 className="text-xl font-extrabold text-foreground tracking-tight leading-tight">
+            오늘 통화 전,<br />이것만 알아두세요
+          </h2>
 
-        {/* 2. 통화 첫마디 추천 Card */}
-        {summary.opener && (
+          {/* 1. 곰신의 에너지 (Energy Gauge) */}
+          <div className="space-y-1.5 bg-muted/30 p-3.5 rounded-2xl border border-border/40">
+            <div className="flex items-center justify-between text-xs font-bold">
+              <span className="text-foreground">{partnerName}의 에너지</span>
+              <span className="text-coral font-extrabold text-sm">60%</span>
+            </div>
+            <div className="w-full h-3.5 bg-muted rounded-full overflow-hidden p-0.5 border border-border/40">
+              <div className="h-full bg-gradient-to-r from-coral to-pink-400 rounded-full w-[60%] transition-all duration-500" />
+            </div>
+            <p className="text-[11px] text-muted-foreground pt-0.5">
+              평소보다 조금 낮은 편이에요.
+            </p>
+          </div>
+
+          {/* 2. 오늘의 한 줄 요약 */}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+              <Sparkles size={14} className="text-coral" />
+              <span>오늘의 한 줄 요약</span>
+            </div>
+            {summary.items.length > 0 ? (
+              <div className="space-y-1.5">
+                {summary.items.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleSummaryItemClick(item.recordIds[0])}
+                    className="w-full text-left p-2.5 rounded-xl bg-muted/40 hover:bg-muted/70 transition flex items-center justify-between text-xs font-medium text-foreground group active:scale-[0.99]"
+                  >
+                    <span className="leading-relaxed flex-1 pr-2">• {item.text}</span>
+                    <ChevronRight size={14} className="text-muted-foreground group-hover:text-coral shrink-0" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-xl">
+                • 일도, 사람도 조금 버겁게 느껴졌대요.<br />
+                • 혼자 해결하려다 지쳤다고 했어요.<br />
+                • 오늘은 따뜻한 말 한마디가 큰 힘이 될 거예요.
+              </p>
+            )}
+          </div>
+
+          {/* 3. 오늘의 배려 힌트 Card */}
+          <div className="rounded-2xl bg-lilac/30 border border-lilac/50 p-4 space-y-1.5">
+            <div className="flex items-center justify-between text-xs font-bold text-navy">
+              <span className="text-[11px] text-navy/70">오늘의 배려 힌트</span>
+              <span className="text-[16px]">👥</span>
+            </div>
+            <h3 className="text-base font-extrabold text-navy leading-snug">
+              오늘은 해결책보다<br />공감을 먼저 원해요
+            </h3>
+            <p className="text-xs text-navy/70 leading-relaxed pt-0.5">
+              {partnerName}이는 지금, 마음을 알아주는 말이 필요해요.
+            </p>
+          </div>
+
+          {/* 4. 통화 첫마디 보기 CTA Button */}
+          {summary.opener ? (
+            <button
+              onClick={() => handleSummaryItemClick(summary.opener?.recordIds[0])}
+              className="w-full py-3.5 rounded-2xl bg-coral text-white font-bold text-sm shadow-md active:scale-[0.99] transition flex items-center justify-center gap-2"
+            >
+              <MessageCircle size={18} />
+              <span>통화 첫마디 보기 💬</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                const el = document.getElementById('partner-timeline');
+                el?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="w-full py-3.5 rounded-2xl bg-coral text-white font-bold text-sm shadow-md active:scale-[0.99] transition flex items-center justify-center gap-2"
+            >
+              <MessageCircle size={18} />
+              <span>통화 첫마디 보기 💬</span>
+            </button>
+          )}
+        </section>
+
+        {/* Emotion Flow Card if exists */}
+        {emotionFlowBriefing && (
           <section 
-            onClick={() => handleSummaryItemClick(summary.opener?.recordIds[0])}
-            className="rounded-2xl bg-mint p-4 border border-mint-foreground/10 cursor-pointer active:scale-[0.99] transition"
+            onClick={() => handleSummaryItemClick(emotionFlowBriefing.recordId)}
+            className="rounded-2xl bg-coral/10 border border-coral/30 p-4 shadow-sm space-y-2 cursor-pointer active:scale-[0.99] transition"
           >
             <div className="flex items-center justify-between text-xs font-bold text-navy mb-1">
               <div className="flex items-center gap-1.5">
-                <MessageCircle size={14} className="text-navy" />
-                <span>통화 첫마디 추천</span>
+                <Heart size={14} className="text-coral fill-coral" />
+                <span>오늘의 마음 흐름</span>
               </div>
-              <span className="text-[10px] text-navy/60 font-normal">눌러서 원문 보기</span>
+              <span className="text-[10px] text-coral font-medium">눌러서 원문 보기</span>
             </div>
-            <p className="text-sm font-semibold text-navy leading-snug mt-1">
-              "{summary.opener.text}"
+
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              {emotionFlowBriefing.labels.map((label, idx) => (
+                <React.Fragment key={idx}>
+                  {idx > 0 && <span className="text-coral font-bold text-xs">→</span>}
+                  <span className="px-2.5 py-1 rounded-xl bg-white text-coral font-bold text-xs border border-coral/20 shadow-xs">
+                    {label}
+                  </span>
+                </React.Fragment>
+              ))}
+            </div>
+
+            <p className="text-xs text-navy/80 pt-1 font-medium leading-relaxed">
+              {emotionFlowBriefing.flowText}
             </p>
           </section>
         )}
@@ -164,7 +263,7 @@ export function SoldierHome() {
           {!hasSharedRecords ? (
             <div className="rounded-2xl bg-card border border-border/60 p-8 text-center text-muted-foreground">
               <div className="text-3xl mb-2">📬</div>
-              <p className="text-sm font-semibold">오늘의 첫 순간을 기다리고 있어요.</p>
+              <p className="text-sm font-semibold">오늘의 기록을 남겨줘서 고마워요.</p>
               <p className="text-xs mt-1">{partnerName}이가 남긴 하루는 여기에서 시간순으로 볼 수 있어요.</p>
             </div>
           ) : (

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
-import { Camera, Image as ImageIcon, Mic, Send, Lock, Unlock, Film } from 'lucide-react';
+import { Camera, Image as ImageIcon, Mic, Send, Lock, Unlock, Film, MoreHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
+import { uploadMedia, getMediaUrl } from '@/lib/records';
 import type { ReactionType, Attachment } from '@/types';
 
 const REACTIONS: { key: ReactionType; label: string; emoji: string }[] = [
@@ -14,6 +16,7 @@ const REACTIONS: { key: ReactionType; label: string; emoji: string }[] = [
 ];
 
 export function GomshinHome() {
+  const navigate = useNavigate();
   const { state, addRecord } = useStore();
   const { myName } = state.profile;
   const partnerName = state.profile.couple.partnerName || '몽룡';
@@ -27,6 +30,9 @@ export function GomshinHome() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showInputCard, setShowInputCard] = useState(false);
   const [inputType, setInputType] = useState<'text' | 'photo' | 'voice' | 'video'>('text');
+  const [isUploading, setIsUploading] = useState(false);
+  
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Filter today's records by gomshin
   const todayRecords = state.records
@@ -36,27 +42,57 @@ export function GomshinHome() {
   const handleOpenInput = (type: 'text' | 'photo' | 'voice' | 'video') => {
     setInputType(type);
     setShowInputCard(true);
-    if (type === 'photo' && attachments.length === 0) {
-      setAttachments([{ type: 'photo', name: '오늘_사진.jpg', url: 'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=500&auto=format&fit=crop' }]);
-      toast.success('사진이 추가되었어요');
-    } else if (type === 'video' && attachments.length === 0) {
-      setAttachments([{ type: 'video', name: '짧은_영상.mp4' }]);
-      toast.success('짧은 영상이 추가되었어요');
-    } else if (type === 'voice' && attachments.length === 0) {
-      setAttachments([{ type: 'voice', name: '음성_한마디.m4a' }]);
-      toast.success('음성 메모가 추가되었어요');
+    if (type !== 'text') {
+      setTimeout(() => {
+         if (fileInputRef.current) {
+           fileInputRef.current.accept = type === 'photo' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
+           fileInputRef.current.click();
+         }
+      }, 50);
     }
   };
 
   const handleAddAttachment = (type: 'photo' | 'video' | 'voice') => {
-    if (type === 'photo') {
-      setAttachments((prev) => [...prev, { type: 'photo', name: '사진.jpg', url: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop' }]);
-    } else if (type === 'video') {
-      setAttachments((prev) => [...prev, { type: 'video', name: '동영상.mp4' }]);
-    } else {
-      setAttachments((prev) => [...prev, { type: 'voice', name: '음성.m4a' }]);
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = type === 'photo' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
+      fileInputRef.current.click();
     }
-    toast.success('첨부가 추가되었습니다.');
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // In demo mode, just push dummy
+    if (state.isDemoMode || !state.profile.couple.coupleId) {
+       const url = URL.createObjectURL(file);
+       setAttachments(prev => [...prev, { type: inputType === 'photo' ? 'photo' : 'video', name: file.name, url }]);
+       toast.success('첨부가 추가되었습니다 (데모).');
+       return;
+    }
+
+    setIsUploading(true);
+    toast.loading('업로드 중...', { id: 'upload' });
+    try {
+      const path = await uploadMedia(file, state.profile.couple.coupleId);
+      if (path) {
+        // Fetch signed url immediately for preview
+        const url = await getMediaUrl(path) || undefined;
+        let type: 'photo' | 'video' | 'voice' = 'photo';
+        if (file.type.startsWith('video/')) type = 'video';
+        if (file.type.startsWith('audio/')) type = 'voice';
+        
+        setAttachments(prev => [...prev, { type, name: file.name, url: url, path: path }]); 
+        toast.success('업로드 완료', { id: 'upload' });
+      } else {
+        toast.error('업로드 실패', { id: 'upload' });
+      }
+    } catch (e) {
+      toast.error('업로드 오류 발생', { id: 'upload' });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handlePost = () => {
@@ -88,19 +124,36 @@ export function GomshinHome() {
     toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
   };
 
+  const headerGreeting = partnerName ? `안녕, ${partnerName} ♡` : '안녕, 우리 ♡';
+
   return (
     <div className="pb-24">
       {/* Header */}
-      <header className="px-5 pt-10 pb-4 flex items-center justify-between gap-3">
+      <header className="px-5 pt-8 pb-4 flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            안녕, {myName}아 <span className="text-coral">♡</span>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            {headerGreeting}
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">
             {partnerName}에게 전할 오늘 하루를 자유롭게 남겨보세요.
           </p>
         </div>
-        <CoupleAvatar size={64} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/settings')}
+            className="p-2 rounded-xl text-muted-foreground hover:bg-muted min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95 transition"
+            aria-label="설정"
+          >
+            <MoreHorizontal size={20} />
+          </button>
+          <button
+            onClick={() => navigate('/us')}
+            className="rounded-full focus:outline-none focus:ring-2 focus:ring-coral/40 active:scale-95 transition"
+            aria-label="우리 정보 보기"
+          >
+            <CoupleAvatar size={52} />
+          </button>
+        </div>
       </header>
 
       {/* Main Top Action Buttons (3 CTAs) */}
@@ -129,6 +182,8 @@ export function GomshinHome() {
           <span>한 줄 남기기</span>
         </button>
       </div>
+
+      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
 
       {/* Interactive Quick Composer Card */}
       {showInputCard && (
@@ -229,9 +284,10 @@ export function GomshinHome() {
           {/* Submit Button */}
           <button
             onClick={handlePost}
-            className="mt-4 w-full py-3.5 rounded-xl bg-coral text-white font-bold text-sm shadow-sm active:scale-[0.99] transition min-h-[44px]"
+            disabled={isUploading}
+            className="mt-4 w-full py-3.5 rounded-xl bg-coral text-white font-bold text-sm shadow-sm active:scale-[0.99] transition min-h-[44px] disabled:opacity-50"
           >
-            기록 남기기
+            {isUploading ? '업로드 중...' : '기록 남기기'}
           </button>
         </div>
       )}

@@ -9,6 +9,7 @@ CREATE TABLE public.profiles (
   display_name TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL CHECK (role IN ('gomsin', 'soldier')) DEFAULT 'gomsin',
   avatar_path TEXT,
+  military_info JSONB DEFAULT '{}'::jsonb,
   onboarding_completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -66,35 +67,37 @@ CREATE UNIQUE INDEX idx_user_active_couple
   ON public.couple_members (user_id)
   WHERE status = 'active';
 
+-- Helper function to prevent infinite recursion in RLS
+CREATE OR REPLACE FUNCTION public.get_my_active_couple_id()
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_couple_id UUID;
+BEGIN
+  SELECT couple_id INTO v_couple_id FROM public.couple_members WHERE user_id = auth.uid() AND status = 'active' LIMIT 1;
+  RETURN v_couple_id;
+END;
+$$;
+
 -- Only active members of the couple can view member rows
 CREATE POLICY "Active members can view couple members"
   ON public.couple_members FOR SELECT
   USING (
     user_id = auth.uid()
-    OR couple_id IN (
-      SELECT couple_id FROM public.couple_members
-      WHERE user_id = auth.uid() AND status = 'active'
-    )
+    OR couple_id = public.get_my_active_couple_id()
   );
 
 -- Only active members of the couple can view couple details
 CREATE POLICY "Active members can view couple"
   ON public.couples FOR SELECT
-  USING (
-    id IN (
-      SELECT couple_id FROM public.couple_members
-      WHERE user_id = auth.uid() AND status = 'active'
-    )
-  );
+  USING (id = public.get_my_active_couple_id());
 
 CREATE POLICY "Active members can update couple"
   ON public.couples FOR UPDATE
-  USING (
-    id IN (
-      SELECT couple_id FROM public.couple_members
-      WHERE user_id = auth.uid() AND status = 'active'
-    )
-  );
+  USING (id = public.get_my_active_couple_id());
 
 -- =============================================================
 -- 4. invitation_codes
@@ -152,10 +155,7 @@ CREATE POLICY "Active partner can read shared records"
   USING (
     is_private = false
     AND user_id != auth.uid()
-    AND couple_id IN (
-      SELECT couple_id FROM public.couple_members
-      WHERE user_id = auth.uid() AND status = 'active'
-    )
+    AND couple_id = public.get_my_active_couple_id()
   );
 
 -- =============================================================
@@ -170,7 +170,80 @@ CREATE TABLE public.briefings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(couple_id, recipient_id, briefing_date)
 );
+-- =============================================================
+-- 6. events (Phase 4)
+-- =============================================================
+CREATE TABLE public.events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN ('visit', 'vacation', 'anniversary', 'trip', 'other')),
+  start_date DATE NOT NULL,
+  end_date DATE,
+  visibility TEXT NOT NULL DEFAULT 'shared',
+  is_private BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Active members can manage events"
+  ON public.events FOR ALL
+  USING (couple_id = public.get_my_active_couple_id());
+
+-- =============================================================
+-- 7. trips (Phase 5)
+-- =============================================================
+CREATE TABLE public.trips (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planned',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.trips ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Active members can manage trips"
+  ON public.trips FOR ALL
+  USING (couple_id = public.get_my_active_couple_id());
+
+CREATE TABLE public.trip_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  item_date DATE NOT NULL,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'activity',
+  memo TEXT,
+  url TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.trip_items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Active members can manage trip items"
+  ON public.trip_items FOR ALL
+  USING (trip_id IN (SELECT id FROM public.trips WHERE couple_id = public.get_my_active_couple_id()));
+
+CREATE TABLE public.trip_checklists (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  item_name TEXT NOT NULL,
+  completed BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.trip_checklists ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Active members can manage trip checklists"
+  ON public.trip_checklists FOR ALL
+  USING (trip_id IN (SELECT id FROM public.trips WHERE couple_id = public.get_my_active_couple_id()));
 ALTER TABLE public.briefings ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Recipient can view own briefings"

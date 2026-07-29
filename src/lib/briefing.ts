@@ -114,3 +114,40 @@ export function generateDailySummary(
     totalSharedCount: count,
   };
 }
+
+export interface EmotionFlowBriefingResult {
+  recordId: string;
+  flowText: string;
+  labels: string[];
+}
+
+/**
+ * Generate deterministic Soldier Briefing template for "오늘의 마음 흐름"
+ */
+export function generateEmotionFlowBriefing(records: DailyRecord[]): EmotionFlowBriefingResult | null {
+  const sharedRecords = records
+    .filter((r) => !r.isPrivate)
+    .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
+
+  for (const r of sharedRecords) {
+    if (!r.emotionFlow || r.emotionFlow.length === 0) continue;
+
+    // Filter confirmed shared items
+    const sharedFlow = r.emotionFlow
+      .filter((f) => f.source === 'user_confirmed' && f.visibility === 'shared')
+      .sort((a, b) => a.sequence - b.sequence);
+
+    if (sharedFlow.length === 0) continue;
+
+    const labels = sharedFlow.map((f) => f.displayLabel);
+    const flowText = labels.join(' → ');
+
+    return {
+      recordId: r.id,
+      flowText: `오늘의 마음: ${flowText}`,
+      labels,
+    };
+  }
+
+  return null;
+}

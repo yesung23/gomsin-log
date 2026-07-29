@@ -120,33 +120,11 @@ export function ServicePage() {
           </div>
         </div>
 
-        {/* Meal Card (Demo) */}
-        <div className="bg-mint p-5 rounded-2xl border border-mint-foreground/10">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-navy flex items-center gap-2 text-sm">
-              <Coffee className="w-4 h-4 text-navy" />
-              오늘의 식단표
-            </h3>
-            <span className="text-[11px] text-navy/70 bg-white/50 px-2 py-0.5 rounded-md font-medium">
-              MVP 예시 데이터
-            </span>
-          </div>
-          <div className="space-y-3">
-            <div className="flex gap-3 text-sm">
-              <div className="w-12 font-bold text-navy/70 text-xs">아침</div>
-              <div className="text-navy font-medium text-xs">쌀밥, 소고기무국, 계란말이</div>
-            </div>
-            <div className="w-full h-px bg-navy/10" />
-            <div className="flex gap-3 text-sm">
-              <div className="w-12 font-bold text-navy/70 text-xs">점심</div>
-              <div className="text-navy font-medium text-xs">제육볶음, 계란국, 쌈채소</div>
-            </div>
-            <div className="w-full h-px bg-navy/10" />
-            <div className="flex gap-3 text-sm">
-              <div className="w-12 font-bold text-navy/70 text-xs">저녁</div>
-              <div className="text-navy font-medium text-xs">닭갈비, 미역국, 깍두기</div>
-            </div>
-          </div>
+        {/* 휴가·진급 준비 중 안내 */}
+        <div className="bg-gray-50 rounded-2xl p-6 text-center border border-gray-200 border-dashed">
+          <Coffee className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+          <h3 className="font-bold text-gray-700 mb-1 text-sm">휴가·면회·외박 관리</h3>
+          <p className="text-xs text-gray-400">다음 업데이트에서 만나요</p>
         </div>
 
         {/* Upcoming Promo */}

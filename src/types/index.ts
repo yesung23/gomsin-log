@@ -25,11 +25,62 @@ export type ReactionType = 'good' | 'event' | 'hard' | 'thought_of_you';
 export interface Attachment {
   type: 'photo' | 'video' | 'voice';
   name: string;
-  url?: string;
+  url?: string; // Signed URL or Demo URL
+  path?: string; // Storage path
+}
+
+export type EmotionGroup =
+  | 'joy'
+  | 'love'
+  | 'anger'
+  | 'disgust'
+  | 'envy'
+  | 'fear'
+  | 'jealousy'
+  | 'sadness'
+  | 'shame'
+  | 'guilt'
+  | 'neutral'
+  | 'uncertain'
+  | 'frustration'
+  | 'concern'
+  | 'longing'
+  | 'calm'
+  | 'fatigue'
+  | 'excitement'
+  | 'surprise';
+
+export type EmotionVisibility = 'shared' | 'author_only' | 'hidden';
+
+export interface EmotionFlowItem {
+  id?: string;
+  sequence: number;
+  group: EmotionGroup;
+  displayLabel: string;
+  matchedText?: string;
+  source?: 'rule_suggested' | 'user_confirmed';
+  visibility?: EmotionVisibility;
+}
+
+export interface EmotionAnalysis {
+  primaryEmotion: EmotionGroup;
+  confidence: number;
+  flowList: EmotionFlowItem[];
+  emotionPath: string;
+  emotionSummary: string;
+}
+
+export function getEmotionPath(analysis: EmotionAnalysis): string | null {
+  if (!analysis || !analysis.flowList || analysis.flowList.length === 0) return null;
+  return (
+    analysis.emotionPath?.trim() ||
+    analysis.flowList.map((item) => item.displayLabel).join(' → ')
+  );
 }
 
 export interface DailyRecord {
   id: string;
+  userId?: string;
   date: string;       // YYYY-MM-DD
   time: string;       // HH:mm
   authorRole: Role;
@@ -37,7 +88,25 @@ export interface DailyRecord {
   reaction?: ReactionType;
   attachments?: Attachment[];
   isPrivate: boolean; // false = 우리 둘에게 공유, true = 나에게만
+  emotionFlow?: EmotionFlowItem[];
+  emotionAnalysis?: EmotionAnalysis;
+  emotionUpdatedAt?: string | null;
   createdAt: string;  // ISO
+}
+
+export type EventType = 'visit' | 'vacation' | 'anniversary' | 'trip' | 'other';
+
+export interface CoupleEvent {
+  id: string;
+  coupleId: string;
+  createdBy: string;
+  title: string;
+  eventType: EventType;
+  startDate: string; // YYYY-MM-DD
+  endDate?: string;  // YYYY-MM-DD
+  visibility: 'shared' | 'private';
+  isPrivate: boolean;
+  createdAt: string;
 }
 
 export interface SummaryItem {
@@ -45,6 +114,51 @@ export interface SummaryItem {
   text: string;
   recordIds: string[];
   kind: 'moment' | 'mood' | 'media' | 'topic';
+}
+
+export type TripStatus = 'planned' | 'ongoing' | 'completed';
+
+export interface Trip {
+  id: string;
+  coupleId: string;
+  createdBy: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  status: TripStatus;
+  createdAt: string;
+}
+
+export interface TripItem {
+  id: string;
+  tripId: string;
+  itemDate: string;
+  title: string;
+  category: 'activity' | 'food' | 'lodging' | 'transport';
+  memo?: string;
+  url?: string;
+  sortOrder: number;
+}
+
+export interface TripChecklist {
+  id: string;
+  tripId: string;
+  itemName: string;
+  completed: boolean;
+}
+
+export interface CycleSettings {
+  userId: string;
+  averageCycleLength: number;
+  averagePeriodLength: number;
+}
+
+export interface CycleEntry {
+  id: string;
+  userId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate?: string;  // YYYY-MM-DD
+  notes?: string;
 }
 
 export interface DailySummary {
@@ -97,15 +211,19 @@ export interface AppState {
   onboardingStep: number;
   profile: UserProfile;
   records: DailyRecord[];
+  events: CoupleEvent[];
+  trips: Trip[];
   isDemoMode: boolean;
   highlightedRecordId?: string;
   authenticatedUser: AuthUser | null;
+  widgetLayout: string[];
+  hasSeenInstallPrompt: boolean;
 }
 
 export interface AuthUser {
   id: string;
   email?: string;
-  provider: 'email' | 'google' | 'apple' | 'demo';
+  provider: 'apple' | 'google' | 'email';
 }
 
 /**
@@ -113,9 +231,9 @@ export interface AuthUser {
  */
 export interface IAuthRepository {
   getCurrentUser(): Promise<AuthUser | null>;
-  signInWithMagicLink(email: string): Promise<{ error?: string }>;
   signInWithGoogle(): Promise<{ error?: string }>;
   signInWithApple(): Promise<{ error?: string }>;
+  signInWithEmail(email: string): Promise<{ error?: string }>;
   signOut(): Promise<void>;
   isConfigured(): boolean;
 }

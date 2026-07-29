@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/store';
 import { generateDailySummary } from '@/lib/briefing';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
-  Image as ImageIcon, Mic, Film, Sparkles, Clock,
+  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -60,12 +61,14 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 ];
 
 export function RecordPage() {
+  const navigate = useNavigate();
   const { state, setHighlightedRecordId } = useStore();
   const { records, profile } = state;
   const today = localToday();
   const todayStr = toLocalDateString(today);
 
   // Calendar state
+  const [showCalendar, setShowCalendar] = useState(false);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState(todayStr);
@@ -157,7 +160,7 @@ export function RecordPage() {
   const handleDateSelect = (dateStr: string) => {
     setSelectedDate(dateStr);
     setMediaFilter('all');
-    // Scroll timeline into view
+    setShowCalendar(false);
     setTimeout(() => {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
@@ -210,40 +213,57 @@ export function RecordPage() {
 
   return (
     <MobileShell>
-      <div className="p-4 pb-24">
-        {/* Page Title */}
-        <h1 className="text-2xl font-bold px-1 pt-4 pb-3">기록 아카이브</h1>
-
-        {/* Month Header */}
-        <div className="flex items-center justify-between mb-3 px-1">
+      <div className="p-4 pb-28 relative min-h-screen">
+        {/* Top Header with Title and Calendar Toggle Button */}
+        <div className="flex items-center justify-between px-1 pt-4 pb-3">
+          <h1 className="text-2xl font-extrabold tracking-tight text-foreground">기록</h1>
           <button
-            onClick={goToPrevMonth}
-            className="p-2 rounded-xl hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
-            aria-label="이전 달"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-bold text-foreground">
-              {viewYear}년 {viewMonth + 1}월
-            </h2>
-            {!(viewYear === today.getFullYear() && viewMonth === today.getMonth()) && (
-              <button
-                onClick={goToToday}
-                className="text-[11px] font-bold text-coral bg-coral/10 px-3 py-1.5 rounded-lg active:scale-95 transition min-h-[36px] flex items-center justify-center"
-              >
-                오늘
-              </button>
+            onClick={() => setShowCalendar(!showCalendar)}
+            className={cn(
+              'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
+              showCalendar
+                ? 'bg-coral text-white shadow-sm'
+                : 'bg-card border border-border text-foreground hover:bg-muted'
             )}
-          </div>
-          <button
-            onClick={goToNextMonth}
-            className="p-2 rounded-xl hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
-            aria-label="다음 달"
+            aria-label="달력 보기"
           >
-            <ChevronRight size={20} />
+            <Calendar size={20} />
           </button>
         </div>
+
+        {/* Collapsible Calendar Grid */}
+        {showCalendar && (
+          <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+            {/* Month Header */}
+            <div className="flex items-center justify-between mb-3 px-1">
+              <button
+                onClick={goToPrevMonth}
+                className="p-2 rounded-xl hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                aria-label="이전 달"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-foreground">
+                  {viewYear}년 {viewMonth + 1}월
+                </h2>
+                {!(viewYear === today.getFullYear() && viewMonth === today.getMonth()) && (
+                  <button
+                    onClick={goToToday}
+                    className="text-[11px] font-bold text-coral bg-coral/10 px-3 py-1.5 rounded-lg active:scale-95 transition min-h-[36px] flex items-center justify-center"
+                  >
+                    오늘
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={goToNextMonth}
+                className="p-2 rounded-xl hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                aria-label="다음 달"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
 
         {/* Calendar Grid */}
         <div className="bg-card rounded-2xl border border-border/60 shadow-sm overflow-hidden mb-4">
@@ -343,6 +363,8 @@ export function RecordPage() {
         {!monthHasRecords && (
           <div className="text-center py-4 text-muted-foreground text-xs">
             이번 달의 첫 순간을 남겨보세요 ✨
+          </div>
+        )}
           </div>
         )}
 
@@ -501,6 +523,16 @@ export function RecordPage() {
             })
           )}
         </div>
+
+      {/* Floating CTA Button: + 지금의 마음 남기기 */}
+      <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
+        <button
+          onClick={() => navigate('/home')}
+          className="w-full py-3.5 rounded-full bg-coral text-white font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-white/20 backdrop-blur-xs"
+        >
+          <span className="text-lg">+</span>
+          <span>지금의 마음 남기기</span>
+        </button>
       </div>
 
       {/* Detail Modal */}
@@ -562,6 +594,7 @@ export function RecordPage() {
           </div>
         </div>
       )}
+      </div>
     </MobileShell>
   );
 }

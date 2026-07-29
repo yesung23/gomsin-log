@@ -1,14 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, Heart, Shield, Lock, Check, Mail, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { useStore } from '@/lib/store';
+import { authRepository, createCoupleInvitation, consumeCoupleInvitation, supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { addMonths } from '@/lib/utils';
 
 export function OnboardingPage() {
-  const { updateProfile, setSetupComplete, startDemo: runStartDemo } = useStore();
-  const [step, setStep] = useState(0); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
+  const { state, updateProfile, setSetupComplete, startDemo: runStartDemo } = useStore();
+  const [step, setStep] = useState(state.onboardingStep || 0); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
 
   // Detect iOS environment for conditional Apple Login UI
   const isIOS = useMemo(() => {
@@ -17,17 +18,19 @@ export function OnboardingPage() {
   }, []);
 
   // Form State
+  const [emailInput, setEmailInput] = useState('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [role, setRole] = useState<Role>('gomsin');
   const [nickname, setNickname] = useState('');
   const [spaceMode, setSpaceMode] = useState<'create' | 'join'>('create');
+  const [createdCoupleId, setCreatedCoupleId] = useState('');
+  const [createdInviteCode, setCreatedInviteCode] = useState('');
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [inviteCodeInput, setInviteCodeInput] = useState('');
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [anniversary, setAnniversary] = useState('');
   const [skipAnniversary, setSkipAnniversary] = useState(false);
-
-  // Email Magic Link Sub-view State
-  const [showEmailModal, setShowEmailModal] = useState(false);
-  const [emailInput, setEmailInput] = useState('');
-  const [emailSent, setEmailSent] = useState(false);
 
   // Military Info State (Soldier only)
   const [branch, setBranch] = useState<Branch>('army');
@@ -45,11 +48,73 @@ export function OnboardingPage() {
   // Total steps based on role
   const totalSteps = role === 'gomsin' ? 4 : 6;
 
-  const handleNext = () => {
+  // Handle Google OAuth Login
+  const handleGoogleLogin = async () => {
+    const res = await authRepository.signInWithGoogle();
+    if (res.error) {
+      toast.error(res.error);
+    }
+  };
+
+  // Handle Apple OAuth Login
+  const handleAppleLogin = async () => {
+    const res = await authRepository.signInWithApple();
+    if (res.error) {
+      toast.error(res.error);
+    }
+  };
+
+  const handleStartDemo = () => {
+    runStartDemo();
+  };
+
+  const handleNext = async () => {
+    // Auth Gate: Cannot advance from Step 0 without login or demo mode
+    if (step === 0 && !state.authenticatedUser && !state.isDemoMode) {
+      toast.error('로그인이 필요합니다. Google 또는 Apple로 진행해 주세요.');
+      return;
+    }
+
     if (step === 2 && nickname.trim().length < 2) {
       toast.error('닉네임은 2자 이상 입력해주세요.');
       return;
     }
+
+    // Step 3: Couple Space Invitation Generation / Consumption
+    if (step === 3) {
+      if (spaceMode === 'create') {
+        if (!createdInviteCode) {
+          setIsGeneratingCode(true);
+          const res = await createCoupleInvitation(role);
+          setIsGeneratingCode(false);
+          if (res.error) {
+            toast.error(res.error);
+            return;
+          }
+          setCreatedCoupleId(res.coupleId);
+          setCreatedInviteCode(res.code);
+          toast.success('초대 코드가 생성되었습니다!');
+        }
+      } else if (spaceMode === 'join') {
+        const cleanCode = inviteCodeInput.trim();
+        if (cleanCode.length !== 6) {
+          toast.error('6자리 초대 코드를 입력해 주세요.');
+          return;
+        }
+        setIsVerifyingCode(true);
+        const res = await consumeCoupleInvitation(cleanCode);
+        setIsVerifyingCode(false);
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        if (res.coupleId) {
+          setCreatedCoupleId(res.coupleId);
+          toast.success('커플 공간 연결 성공!');
+        }
+      }
+    }
+
     // If Gomshin reaches Step 4 (Anniversary), skip Steps 5 & 6 and jump directly to Step 7 (Completion)!
     if (role === 'gomsin' && step === 4) {
       setStep(7);
@@ -66,30 +131,13 @@ export function OnboardingPage() {
     setStep((s) => Math.max(0, s - 1));
   };
 
-  const handleAuthNotice = (provider: string) => {
-    if (provider === '이메일 Magic Link') {
-      setShowEmailModal(true);
-      return;
+  const handleCopyCode = () => {
+    if (createdInviteCode) {
+      navigator.clipboard.writeText(createdInviteCode);
+      setCopiedCode(true);
+      toast.success('초대 코드가 클립보드에 복사되었습니다.');
+      setTimeout(() => setCopiedCode(false), 2000);
     }
-    toast.info(`${provider} 인증 설정 전입니다. UI 테스트를 위해 온보딩 흐름으로 진입합니다.`);
-    setStep(1);
-  };
-
-  const handleSendMagicLink = () => {
-    if (!emailInput.trim() || !emailInput.includes('@')) {
-      toast.error('올바른 이메일 주소를 입력해주세요.');
-      return;
-    }
-    toast.info('이메일 로그인은 연결 전입니다. UI 테스트를 위해 온보딩 흐름으로 진입합니다.');
-    setEmailSent(true);
-    setTimeout(() => {
-      setShowEmailModal(false);
-      setStep(1);
-    }, 1500);
-  };
-
-  const handleStartDemo = () => {
-    runStartDemo();
   };
 
   // Branch months calculation
@@ -128,16 +176,20 @@ export function OnboardingPage() {
     setDischargeDateSource('manual');
   };
 
-  const finishSetup = () => {
+  const finishSetup = async () => {
     const nowIso = new Date().toISOString();
+    const finalNickname = nickname || (role === 'gomsin' ? '춘향' : '몽룡');
+
+    // Update Local/Global store state
     updateProfile({
-      myName: nickname || (role === 'gomsin' ? '춘향' : '몽룡'),
+      myName: finalNickname,
       role,
       onboardingCompletedAt: nowIso,
       couple: {
+        coupleId: createdCoupleId || undefined,
         partnerName: role === 'gomsin' ? '몽룡' : '춘향',
         anniversaryDate: skipAnniversary ? undefined : (anniversary || '2024-02-14'),
-        coupleCode: spaceMode === 'create' ? '123456' : (inviteCodeInput || '123456'),
+        coupleCode: createdInviteCode || inviteCodeInput || '123456',
         connected: true,
         status: 'active',
       },
@@ -157,6 +209,22 @@ export function OnboardingPage() {
         enabled: true,
       },
     });
+
+    // If Supabase client & authenticated user present, upsert user profile to DB
+    if (supabase && state.authenticatedUser) {
+      try {
+        await supabase.from('profiles').upsert({
+          id: state.authenticatedUser.id,
+          display_name: finalNickname,
+          role,
+          onboarding_completed_at: nowIso,
+          updated_at: nowIso,
+        });
+      } catch (e) {
+        console.error('[Onboarding] Profile DB save error:', e);
+      }
+    }
+
     setSetupComplete(true);
   };
 
@@ -199,7 +267,7 @@ export function OnboardingPage() {
                 {/* Primary Auth CTAs */}
                 {isIOS && (
                   <button
-                    onClick={() => handleAuthNotice('Apple')}
+                    onClick={handleAppleLogin}
                     className="w-full h-13 py-3.5 rounded-2xl bg-black text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
                   >
                     <span>Apple로 계속하기</span>
@@ -207,18 +275,10 @@ export function OnboardingPage() {
                 )}
 
                 <button
-                  onClick={() => handleAuthNotice('Google')}
+                  onClick={handleGoogleLogin}
                   className="w-full h-13 py-3.5 rounded-2xl bg-white border border-border text-foreground font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
                 >
                   <span>Google로 계속하기</span>
-                </button>
-
-                <button
-                  onClick={() => handleAuthNotice('이메일 Magic Link')}
-                  className="w-full h-13 py-3.5 rounded-2xl bg-navy text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
-                >
-                  <Mail size={18} />
-                  <span>이메일로 시작하기</span>
                 </button>
 
                 {/* Secondary Demo Start CTA */}
@@ -229,6 +289,32 @@ export function OnboardingPage() {
                   <span>데모 공간 먼저 둘러보기</span>
                   <ArrowRight size={16} />
                 </button>
+
+                {/* Temporary Email Login */}
+                <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-border">
+                  <p className="text-[11px] text-muted-foreground text-center font-bold">임시 이메일 로그인 (테스트용)</p>
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="이메일 주소 입력"
+                    className="w-full h-12 px-4 rounded-xl bg-card border border-border text-sm outline-none focus:ring-2 focus:ring-coral/40"
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!emailInput.includes('@')) return toast.error('유효한 이메일을 입력하세요.');
+                      setIsSendingEmail(true);
+                      const res = await authRepository.signInWithEmail(emailInput);
+                      setIsSendingEmail(false);
+                      if (res.error) toast.error(res.error);
+                      else toast.success('이메일로 매직링크가 전송되었습니다! 메일함을 확인해주세요.');
+                    }}
+                    disabled={isSendingEmail}
+                    className="w-full h-12 rounded-xl bg-navy text-white font-bold text-sm disabled:opacity-50"
+                  >
+                    {isSendingEmail ? '전송 중...' : '이메일로 계속하기 (매직링크)'}
+                  </button>
+                </div>
 
                 <p className="text-[11px] text-muted-foreground text-center pt-2">
                   계속하면 서비스 이용약관 및 개인정보 처리방침에 동의하는 것으로 봅니다.
@@ -346,6 +432,25 @@ export function OnboardingPage() {
                     </div>
                   </button>
 
+                  {spaceMode === 'create' && createdInviteCode && (
+                    <div className="p-4 bg-coral/10 border border-coral/30 rounded-2xl space-y-2">
+                      <div className="text-xs text-coral font-semibold">내 초대 코드 (24시간 유효)</div>
+                      <div className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-coral/20">
+                        <span className="font-mono text-2xl font-bold tracking-widest text-foreground">{createdInviteCode}</span>
+                        <button
+                          onClick={handleCopyCode}
+                          className="p-2 text-coral hover:bg-coral/10 rounded-lg transition"
+                          title="코드 복사"
+                        >
+                          {copiedCode ? <Check size={20} /> : <Copy size={20} />}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        상대방이 앱을 설치하고 [초대 코드가 있어요] 메뉴에 위 코드를 입력하면 1:1 커플 공간이 연결됩니다.
+                      </p>
+                    </div>
+                  )}
+
                   <button
                     onClick={() => setSpaceMode('join')}
                     className={`w-full p-5 rounded-2xl border text-left flex items-start gap-4 transition min-h-[72px] ${
@@ -365,24 +470,29 @@ export function OnboardingPage() {
                       <input
                         type="text"
                         value={inviteCodeInput}
-                        onChange={(e) => setInviteCodeInput(e.target.value)}
-                        placeholder="6자리 초대 코드 입력 (데모: 123456)"
-                        className="w-full h-12 px-4 rounded-xl bg-card border border-border text-sm outline-none"
+                        onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
+                        maxLength={6}
+                        placeholder="6자리 초대 코드 입력 (예: 123456)"
+                        className="w-full h-12 px-4 rounded-xl bg-card border border-border font-mono text-center text-lg tracking-widest outline-none uppercase"
                       />
                     </div>
                   )}
-
-                  <div className="p-3 bg-muted/50 rounded-xl text-xs text-muted-foreground text-center">
-                    데모 모드에서는 곰신과 군화의 연결 흐름을 자유롭게 시뮬레이션할 수 있어요.
-                  </div>
                 </div>
               </div>
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                disabled={isGeneratingCode || isVerifyingCode}
+                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                다음
+                {isGeneratingCode || isVerifyingCode ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>처리 중...</span>
+                  </>
+                ) : (
+                  <span>다음</span>
+                )}
               </button>
             </div>
           )}
@@ -615,63 +725,6 @@ export function OnboardingPage() {
           )}
 
         </main>
-
-        {/* Email Magic Link Modal */}
-        {showEmailModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl">
-              <div className="flex items-center gap-2 text-navy font-bold text-base">
-                <Mail size={20} className="text-coral" />
-                <span>이메일로 시작하기</span>
-              </div>
-              <p className="text-xs text-gray-600 leading-relaxed">
-                이메일 주소를 입력하시면 로그인 링크를 보내드립니다.
-              </p>
-
-              {!emailSent ? (
-                <div className="space-y-3">
-                  <input
-                    type="email"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="example@email.com"
-                    className="w-full h-12 px-4 rounded-xl bg-card border border-border text-sm outline-none"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setShowEmailModal(false)}
-                      className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl text-xs active:bg-gray-200 min-h-[44px]"
-                    >
-                      취소
-                    </button>
-                    <button
-                      onClick={handleSendMagicLink}
-                      className="flex-1 py-3 bg-navy text-white font-bold rounded-xl text-xs active:scale-[0.99] min-h-[44px]"
-                    >
-                      로그인 링크 보내기
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="p-3 bg-amber-50 rounded-xl text-xs text-amber-900 border border-amber-200">
-                    현재 인증 서버 설정 전입니다. 데모 모드로 먼저 둘러보실 수 있습니다.
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowEmailModal(false);
-                      handleStartDemo();
-                    }}
-                    className="w-full py-3 bg-coral text-white font-bold rounded-xl text-xs active:scale-[0.99] min-h-[44px]"
-                  >
-                    데모 모드로 시작하기
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
       </div>
     </div>
   );

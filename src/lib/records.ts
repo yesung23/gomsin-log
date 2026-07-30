@@ -97,11 +97,25 @@ export async function deleteRecordFromDB(recordId: string): Promise<boolean> {
   return true;
 }
 
-export async function uploadMedia(file: File, coupleId: string): Promise<string | null> {
-  if (!isSupabaseConfigured || !supabase || !coupleId) return null;
+export async function uploadMedia(file: File, coupleId: string, recordId: string): Promise<string | null> {
+  if (!isSupabaseConfigured || !supabase || !coupleId || !recordId) return null;
+
+  const mimeToExt: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'audio/mp4': 'm4a',
+    'audio/mpeg': 'mp3',
+    'audio/webm': 'webm'
+  };
+  const ext = mimeToExt[file.type];
+  if (!ext) {
+    console.error('Unsupported MIME type:', file.type);
+    return null;
+  }
   
-  const ext = file.name.split('.').pop();
-  const path = `${coupleId}/${crypto.randomUUID()}.${ext}`;
+  const attachmentId = crypto.randomUUID();
+  const path = `${coupleId}/${recordId}/${attachmentId}.${ext}`;
   
   const { error } = await supabase.storage.from('couple-media').upload(path, file);
   if (error) {
@@ -117,11 +131,13 @@ export async function getMediaUrl(path: string): Promise<string | null> {
   // If it's an external URL (e.g. unsplash demo), return as is
   if (path.startsWith('http')) return path;
   
-  const { data, error } = await supabase.storage.from('couple-media').createSignedUrl(path, 3600);
+  // 클라이언트에서 직접 Signed URL을 만들지 않고 Edge Function을 호출하여 권한을 검증합니다.
+  const { data, error } = await supabase.functions.invoke('create-media-signed-url', {
+    body: { path }
+  });
   if (error) {
     console.error('Signed URL error:', error);
     return null;
   }
   return data?.signedUrl || null;
 }
-

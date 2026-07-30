@@ -27,7 +27,7 @@ export function UpcomingScheduleWidget() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-navy">다가오는 일정</h2>
+        <h2 className="text-lg font-bold text-foreground">다가오는 일정</h2>
         <button 
           onClick={() => navigate('/record')}
           className="text-xs text-coral font-bold flex items-center"
@@ -37,9 +37,9 @@ export function UpcomingScheduleWidget() {
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50 shadow-sm">
+      <div className="bg-card rounded-2xl border border-border divide-y divide-border/50 shadow-sm">
         {upcomingEvents.length === 0 ? (
-          <div className="p-5 text-center text-xs text-gray-400">
+          <div className="p-5 text-center text-xs text-muted-foreground">
             예정된 일정이 없습니다.
           </div>
         ) : (
@@ -52,8 +52,8 @@ export function UpcomingScheduleWidget() {
                     {getEventIcon(e.eventType)}
                   </div>
                   <div>
-                    <div className="font-bold text-gray-900 text-sm">{e.title}</div>
-                    <div className="text-[11px] text-gray-400">{formatLocalDate(e.startDate)}</div>
+                    <div className="font-bold text-foreground text-sm">{e.title}</div>
+                    <div className="text-[11px] text-muted-foreground">{formatLocalDate(e.startDate)}</div>
                   </div>
                 </div>
                 <span className="text-indigo-500 font-bold text-xs bg-indigo-50 px-2 py-1 rounded-md">

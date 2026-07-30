@@ -190,8 +190,8 @@ export function OnboardingPage() {
         partnerName: role === 'gomsin' ? '몽룡' : '춘향',
         anniversaryDate: skipAnniversary ? undefined : (anniversary || '2024-02-14'),
         coupleCode: createdInviteCode || inviteCodeInput || '123456',
-        connected: true,
-        status: 'active',
+        connected: spaceMode === 'join',
+        status: spaceMode === 'join' ? 'active' : 'pending',
       },
       military: {
         branch,

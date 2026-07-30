@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useStore } from '@/lib/store';
@@ -8,8 +8,12 @@ export function AuthCallbackPage() {
   const navigate = useNavigate();
   const { setAuthenticatedUser, setSetupComplete, setOnboardingStep } = useStore();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const hasHandledCallback = useRef(false);
 
   useEffect(() => {
+    if (hasHandledCallback.current) return;
+    hasHandledCallback.current = true;
+
     async function handleAuthCallback() {
       if (!isSupabaseConfigured || !supabase) {
         toast.error('Supabase 환경설정이 필요합니다.');
@@ -45,7 +49,6 @@ export function AuthCallbackPage() {
           .single();
 
         if (profile && profile.onboarding_completed_at) {
-          toast.success(`환영합니다, ${profile.display_name || '사용자'}님!`);
           setSetupComplete(true);
           navigate('/home', { replace: true });
         } else {

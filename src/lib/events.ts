@@ -23,7 +23,6 @@ export async function fetchEventsFromDB(coupleId: string): Promise<CoupleEvent[]
     eventType: row.event_type,
     startDate: row.start_date,
     endDate: row.end_date,
-    visibility: row.visibility,
     isPrivate: row.is_private,
     createdAt: row.created_at,
   }));
@@ -39,7 +38,6 @@ export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'>
     event_type: event.eventType,
     start_date: event.startDate,
     end_date: event.endDate || null,
-    visibility: event.visibility,
     is_private: event.isPrivate,
     updated_at: new Date().toISOString(),
   };
@@ -65,7 +63,6 @@ export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'>
     eventType: data.event_type,
     startDate: data.start_date,
     endDate: data.end_date,
-    visibility: data.visibility,
     isPrivate: data.is_private,
     createdAt: data.created_at,
   };

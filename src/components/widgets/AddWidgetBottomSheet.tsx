@@ -35,16 +35,16 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
         onClick={onClose}
       />
       {/* Bottom Sheet */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl p-5 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col">
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl p-5 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-navy">홈 위젯 추가</h2>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 text-gray-500">
+          <h2 className="text-xl font-bold text-foreground">홈 위젯 추가</h2>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-muted text-muted-foreground">
             <X size={24} />
           </button>
         </div>
         
         {availableWidgets.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center py-10 text-gray-400">
+          <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground">
             <p>모든 위젯이 이미 홈 화면에 추가되어 있습니다.</p>
           </div>
         ) : (
@@ -55,11 +55,11 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
                 <div 
                   key={id}
                   onClick={() => handleAddWidget(id)}
-                  className="flex items-center justify-between p-4 rounded-2xl border border-gray-100 hover:border-coral/50 hover:bg-coral/5 cursor-pointer transition-all active:scale-95"
+                  className="flex items-center justify-between p-4 rounded-2xl border border-border hover:border-coral/50 hover:bg-coral/5 cursor-pointer transition-all active:scale-95"
                 >
                   <div>
-                    <div className="font-bold text-navy text-sm">{widget.label}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">{widget.description}</div>
+                    <div className="font-bold text-foreground text-sm">{widget.label}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{widget.description}</div>
                   </div>
                   <PlusCircle className="text-coral" size={24} strokeWidth={1.5} />
                 </div>

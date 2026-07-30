@@ -104,7 +104,6 @@ export interface CoupleEvent {
   eventType: EventType;
   startDate: string; // YYYY-MM-DD
   endDate?: string;  // YYYY-MM-DD
-  visibility: 'shared' | 'private';
   isPrivate: boolean;
   createdAt: string;
 }
@@ -218,6 +217,7 @@ export interface AppState {
   authenticatedUser: AuthUser | null;
   widgetLayout: string[];
   hasSeenInstallPrompt: boolean;
+  theme: 'light' | 'dark';
 }
 
 export interface AuthUser {

@@ -3,27 +3,91 @@ import { useStore } from '@/lib/store';
 import { MobileShell } from '@/components/MobileShell';
 import { 
   ArrowLeft, User, Bell, Download, Shield, Unlink, Trash2, 
-  Link, Clock, LogOut, FileText, Smartphone, Lock, AlertTriangle, ChevronRight, Settings
+  Link, Clock, LogOut, FileText, Smartphone, Lock, AlertTriangle, ChevronRight, Settings,
+  Sun, Moon
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { consumeCoupleInvitation, supabase } from '@/lib/supabase';
 
 export function SettingsPage() {
-  const { state, disconnect, signOut, reset, deleteRecord } = useStore();
+  const {
+    state,
+    updateProfile,
+    disconnect,
+    deleteAccount,
+    signOut,
+    reset,
+    deleteRecord,
+    setTheme,
+  } = useStore();
   const navigate = useNavigate();
   const { profile, isDemoMode, records } = state;
   const myName = profile.myName || '나';
   const partnerName = profile.couple.partnerName || '상대방';
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
   const ownRecords = records.filter((r) => r.authorRole === profile.role);
+  const hasCoupleSpace = !!profile.couple.coupleId;
 
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showDeleteRecordsModal, setShowDeleteRecordsModal] = useState(false);
   const [showPWAModal, setShowPWAModal] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isDeletingRecords, setIsDeletingRecords] = useState(false);
+  const [inviteCodeInput, setInviteCodeInput] = useState('');
+  const [isJoiningCouple, setIsJoiningCouple] = useState(false);
+  const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const handleToast = (msg: string) => {
     toast(msg);
+  };
+
+  const handleJoinCouple = async () => {
+    const code = inviteCodeInput.trim();
+    if (!/^\d{6}$/.test(code)) {
+      toast.error('6자리 초대 코드를 입력해 주세요.');
+      return;
+    }
+
+    setIsJoiningCouple(true);
+    const result = await consumeCoupleInvitation(code);
+    if (result.error || !result.coupleId) {
+      setIsJoiningCouple(false);
+      toast.error(result.error || '커플 공간에 연결하지 못했습니다.');
+      return;
+    }
+
+    const userId = state.authenticatedUser?.id;
+    const [{ data: membership }, { data: partnerRows }] = await Promise.all([
+      userId && supabase
+        ? supabase
+            .from('couple_members')
+            .select('role')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase
+        ? supabase.rpc('get_partner_profile')
+        : Promise.resolve({ data: null }),
+    ]);
+
+    updateProfile({
+      role: membership?.role || profile.role,
+      couple: {
+        ...profile.couple,
+        coupleId: result.coupleId,
+        coupleCode: '',
+        connected: true,
+        status: 'active',
+        partnerName: partnerRows?.[0]?.display_name || '파트너',
+      },
+    });
+    setIsJoiningCouple(false);
+    setInviteCodeInput('');
+    toast.success('우리 공간에 연결되었습니다.');
   };
 
   return (
@@ -51,11 +115,83 @@ export function SettingsPage() {
             <div>
               <h2 className="text-base font-bold text-foreground">{myName}님 ({roleLabel})</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {profile.couple.connected ? `파트너 ${partnerName}님과 연결됨` : '개인 모드 이용 중'}
+                {profile.couple.connected
+                  ? `파트너 ${partnerName}님과 연결됨`
+                  : hasCoupleSpace
+                    ? '상대방 참여 대기 중'
+                    : '개인 모드 이용 중'}
               </p>
             </div>
           </div>
         </section>
+
+        <section className="rounded-3xl bg-card border border-border p-4 shadow-sm space-y-3">
+          <div>
+            <h2 className="text-sm font-bold text-foreground">화면 테마</h2>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              눈과 상황에 편한 화면을 선택하세요. 선택은 이 기기에 저장됩니다.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-muted p-1.5">
+            <button
+              type="button"
+              onClick={() => setTheme('light')}
+              aria-pressed={(state.theme || 'light') === 'light'}
+              className={`h-11 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition ${
+                (state.theme || 'light') === 'light'
+                  ? 'bg-card text-coral shadow-sm'
+                  : 'text-muted-foreground'
+              }`}
+            >
+              <Sun size={16} />
+              라이트
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme('dark')}
+              aria-pressed={state.theme === 'dark'}
+              className={`h-11 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition ${
+                state.theme === 'dark'
+                  ? 'bg-card text-coral shadow-sm'
+                  : 'text-muted-foreground'
+              }`}
+            >
+              <Moon size={16} />
+              다크
+            </button>
+          </div>
+        </section>
+
+        {!hasCoupleSpace && !isDemoMode && (
+          <section className="rounded-3xl bg-card border border-coral/30 p-5 shadow-sm space-y-3">
+            <div>
+              <h2 className="text-sm font-bold text-foreground">우리 공간 연결하기</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                상대방 화면에 표시된 6자리 초대 코드를 입력하세요.
+              </p>
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={inviteCodeInput}
+              onChange={(event) =>
+                setInviteCodeInput(event.target.value.replace(/\D/g, '').slice(0, 6))
+              }
+              placeholder="6자리 초대 코드"
+              aria-label="6자리 초대 코드"
+              className="w-full h-12 px-4 rounded-xl bg-background border border-border text-sm tracking-[0.3em] outline-none focus:ring-2 focus:ring-coral/40"
+            />
+            <button
+              type="button"
+              onClick={handleJoinCouple}
+              disabled={isJoiningCouple || inviteCodeInput.length !== 6}
+              className="w-full h-12 rounded-xl bg-coral text-white text-sm font-bold disabled:opacity-50"
+            >
+              {isJoiningCouple ? '연결 중...' : '초대 코드로 연결하기'}
+            </button>
+          </section>
+        )}
 
         {/* General Settings */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
@@ -70,18 +206,20 @@ export function SettingsPage() {
             <ChevronRight size={16} className="text-muted-foreground" />
           </button>
 
-          <button 
-            onClick={() => handleToast(`초대 코드: ${profile.couple.coupleCode || '123456'}`)}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Link size={18} className="text-coral" />
-              <span>우리 공간 초대 코드</span>
-            </span>
-            <span className="text-xs text-coral font-bold bg-coral/10 px-2.5 py-1 rounded-lg">
-              {profile.couple.coupleCode || '123456'}
-            </span>
-          </button>
+          {hasCoupleSpace && !profile.couple.connected && profile.couple.coupleCode && (
+            <button
+              onClick={() => handleToast(`초대 코드: ${profile.couple.coupleCode}`)}
+              className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
+            >
+              <span className="flex items-center gap-3 text-foreground">
+                <Link size={18} className="text-coral" />
+                <span>우리 공간 초대 코드</span>
+              </span>
+              <span className="text-xs text-coral font-bold bg-coral/10 px-2.5 py-1 rounded-lg">
+                {profile.couple.coupleCode}
+              </span>
+            </button>
+          )}
 
           <button 
             onClick={() => handleToast('알림 설정이 저장되었습니다.')}
@@ -129,20 +267,22 @@ export function SettingsPage() {
         </section>
 
         {/* Contact Hours */}
-        <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm p-4 space-y-2">
-          <div className="flex items-center justify-between text-xs font-bold text-foreground">
-            <div className="flex items-center gap-2">
-              <Clock size={16} className="text-coral" />
-              <span>군화 연락 가능 시간 설정</span>
+        {profile.role === 'soldier' && (
+          <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm p-4 space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold text-foreground">
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-coral" />
+                <span>군화 연락 가능 시간 설정</span>
+              </div>
+              <span className="text-[11px] text-coral font-bold bg-coral/10 px-2.5 py-0.5 rounded-md">
+                {profile.contact.weekdayStart} ~ {profile.contact.weekdayEnd}
+              </span>
             </div>
-            <span className="text-[11px] text-coral font-bold bg-coral/10 px-2.5 py-0.5 rounded-md">
-              {profile.contact.weekdayStart} ~ {profile.contact.weekdayEnd}
-            </span>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            평일 저녁 연락 가능 시간을 등록하면 브리핑 추천에 반영돼요.
-          </p>
-        </section>
+            <p className="text-[11px] text-muted-foreground">
+              평일 저녁 연락 가능 시간을 등록하면 브리핑 추천에 반영돼요.
+            </p>
+          </section>
+        )}
 
         {/* Couple & Data Management */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
@@ -251,14 +391,23 @@ export function SettingsPage() {
                   취소
                 </button>
                 <button
-                  onClick={() => {
-                    disconnect();
-                    setShowDisconnectModal(false);
-                    toast.info('연결이 해제되었습니다.');
+                  onClick={async () => {
+                    if (isDisconnecting) return;
+                    setIsDisconnecting(true);
+                    const disconnected = await disconnect();
+                    setIsDisconnecting(false);
+
+                    if (disconnected) {
+                      setShowDisconnectModal(false);
+                      toast.success('연결이 해제되었습니다.');
+                    } else {
+                      toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                    }
                   }}
+                  disabled={isDisconnecting}
                   className="py-2.5 rounded-xl bg-destructive text-white text-xs font-semibold min-h-[44px]"
                 >
-                  해제하기
+                  {isDisconnecting ? '해제 중...' : '해제하기'}
                 </button>
               </div>
             </div>
@@ -281,14 +430,25 @@ export function SettingsPage() {
                   취소
                 </button>
                 <button
-                  onClick={() => {
-                    ownRecords.forEach((r) => deleteRecord(r.id));
-                    setShowDeleteRecordsModal(false);
-                    toast.success('내 기록이 모두 삭제되었습니다.');
+                  onClick={async () => {
+                    if (isDeletingRecords) return;
+                    setIsDeletingRecords(true);
+                    const results = await Promise.all(
+                      ownRecords.map((record) => deleteRecord(record.id))
+                    );
+                    setIsDeletingRecords(false);
+
+                    if (results.every(Boolean)) {
+                      setShowDeleteRecordsModal(false);
+                      toast.success('내 기록이 모두 삭제되었습니다.');
+                    } else {
+                      toast.error('일부 기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+                    }
                   }}
+                  disabled={isDeletingRecords}
                   className="flex-1 py-3 bg-destructive text-white font-bold rounded-xl text-xs active:scale-98 min-h-[44px]"
                 >
-                  전체 삭제
+                  {isDeletingRecords ? '삭제 중...' : '전체 삭제'}
                 </button>
               </div>
             </div>
@@ -304,25 +464,53 @@ export function SettingsPage() {
                 <span>계정 삭제 (회원 탈퇴)</span>
               </div>
               <div className="text-xs text-destructive bg-destructive/10 p-3.5 rounded-2xl space-y-1.5 leading-relaxed">
-                <p>• 계정을 삭제하면 내 프로필과 1:1 공간 데이터가 완전 삭제됩니다.</p>
-                <p>• 상대방과의 연결이 끊어지며 복원할 수 없습니다.</p>
+                <p>• 내 프로필, 내가 쓴 기록과 첨부파일, 로그인 계정이 삭제됩니다.</p>
+                <p>• 상대방이 직접 작성한 기록은 삭제하지 않고 연결만 해제합니다.</p>
+                <p>• 삭제한 계정과 데이터는 복원할 수 없습니다.</p>
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="delete-account-confirmation" className="text-xs font-semibold text-foreground">
+                  계속하려면 아래에 <b>탈퇴</b>를 입력하세요.
+                </label>
+                <input
+                  id="delete-account-confirmation"
+                  value={deleteAccountConfirmation}
+                  onChange={(event) => setDeleteAccountConfirmation(event.target.value)}
+                  placeholder="탈퇴"
+                  autoComplete="off"
+                  className="w-full h-11 px-3 rounded-xl bg-muted border border-border text-sm text-foreground outline-none focus:ring-2 focus:ring-destructive/30"
+                />
               </div>
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => setShowDeleteAccountModal(false)}
+                  onClick={() => {
+                    setShowDeleteAccountModal(false);
+                    setDeleteAccountConfirmation('');
+                  }}
+                  disabled={isDeletingAccount}
                   className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs active:bg-muted/80 min-h-[44px]"
                 >
                   취소
                 </button>
                 <button
-                  onClick={() => {
-                    reset();
-                    setShowDeleteAccountModal(false);
-                    toast.info('앱 상태가 초기화되었습니다.');
+                  onClick={async () => {
+                    if (isDeletingAccount || deleteAccountConfirmation !== '탈퇴') return;
+                    setIsDeletingAccount(true);
+                    const deleted = await deleteAccount();
+                    setIsDeletingAccount(false);
+
+                    if (deleted) {
+                      setShowDeleteAccountModal(false);
+                      setDeleteAccountConfirmation('');
+                      toast.success('계정과 데이터가 삭제되었습니다.');
+                    } else {
+                      toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                    }
                   }}
-                  className="flex-1 py-3 bg-destructive text-white font-bold rounded-xl text-xs active:scale-98 min-h-[44px]"
+                  disabled={isDeletingAccount || deleteAccountConfirmation !== '탈퇴'}
+                  className="flex-1 py-3 bg-destructive text-white font-bold rounded-xl text-xs active:scale-98 min-h-[44px] disabled:opacity-50"
                 >
-                  계정 삭제 진행
+                  {isDeletingAccount ? '삭제 중...' : '영구 삭제'}
                 </button>
               </div>
             </div>
@@ -354,4 +542,3 @@ export function SettingsPage() {
     </MobileShell>
   );
 }
-

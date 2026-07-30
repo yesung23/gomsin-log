@@ -30,7 +30,7 @@ export function WidgetDashboard() {
   // Filter out any invalid widgets that might be in layout but not in registry
   const activeWidgets = state.widgetLayout?.length > 0 
     ? state.widgetLayout.filter(id => WIDGET_REGISTRY[id])
-    : ['today_briefing', 'today_word', 'contact_time', 'dday'];
+    : ['today_briefing', 'today_word', 'dday'];
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -120,7 +120,7 @@ export function WidgetDashboard() {
 
               {/* Settings Button */}
               <button
-                onClick={() => navigate('/my')}
+                onClick={() => navigate('/settings')}
                 className="w-11 h-11 flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-muted/20 rounded-full active:scale-95 transition-all"
                 aria-label="설정"
               >
@@ -171,7 +171,7 @@ export function WidgetDashboard() {
         {isEditMode && activeWidgets.length < Object.keys(WIDGET_REGISTRY).length && (
           <button
             onClick={() => setIsAddWidgetOpen(true)}
-            className="w-full py-4 rounded-3xl border-2 border-dashed border-gray-300 text-gray-500 font-bold flex flex-col items-center gap-1 hover:bg-gray-50 hover:border-coral hover:text-coral transition-colors"
+            className="w-full py-4 rounded-3xl border-2 border-dashed border-border text-muted-foreground font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral transition-colors"
           >
             <Plus size={24} />
             위젯 추가
@@ -180,7 +180,7 @@ export function WidgetDashboard() {
       </div>
       
       {!isEditMode && (
-        <div className="text-center mt-6 text-xs text-gray-400">
+        <div className="text-center mt-6 text-xs text-muted-foreground">
           위젯을 길게 누르면 편집할 수 있어요
         </div>
       )}

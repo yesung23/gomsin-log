@@ -20,6 +20,8 @@ export function SchedulePage() {
   const [eventStartDate, setEventStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [eventEndDate, setEventEndDate] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
 
   // Calendar State
   const [currMonth, setCurrMonth] = useState(new Date().getMonth());
@@ -67,15 +69,34 @@ export function SchedulePage() {
       eventType,
       startDate: eventStartDate,
       endDate: eventEndDate || undefined,
-      visibility: isPrivate ? 'private' : 'shared',
       isPrivate,
     };
 
-    await addEvent(newEventPayload);
+    setIsSaving(true);
+    const saved = await addEvent(newEventPayload);
+    setIsSaving(false);
+
+    if (!saved) {
+      toast.error('일정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
+
     toast.success('새 일정이 등록되었습니다.');
     setShowAddModal(false);
     setTitle('');
     setIsPrivate(false);
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    setDeletingEventId(eventId);
+    const deleted = await deleteEvent(eventId);
+    setDeletingEventId(null);
+
+    if (deleted) {
+      toast.info('일정이 삭제되었습니다.');
+    } else {
+      toast.error('일정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    }
   };
 
   const getEventBadge = (type: EventType) => {
@@ -242,15 +263,17 @@ export function SchedulePage() {
                     <span className={`px-2.5 py-1 rounded-xl font-bold text-xs ${badge.color}`}>
                       {ddayStr}
                     </span>
-                    <button
-                      onClick={() => {
-                        deleteEvent(ev.id);
-                        toast.info('일정이 삭제되었습니다.');
-                      }}
-                      className="p-1.5 text-muted-foreground hover:text-destructive rounded-lg"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {(state.isDemoMode || ev.createdBy === state.authenticatedUser?.id) && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEvent(ev.id)}
+                        disabled={deletingEventId === ev.id}
+                        aria-label={`${ev.title} 일정 삭제`}
+                        className="p-1.5 text-muted-foreground hover:text-destructive rounded-lg disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -342,15 +365,17 @@ export function SchedulePage() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => setShowAddModal(false)}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs"
+                  disabled={isSaving}
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs disabled:opacity-50"
                 >
                   취소
                 </button>
                 <button
                   onClick={handleCreateEvent}
-                  className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs shadow-sm active:scale-95"
+                  disabled={isSaving}
+                  className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs shadow-sm active:scale-95 disabled:opacity-50"
                 >
-                  등록하기
+                  {isSaving ? '저장 중...' : '등록하기'}
                 </button>
               </div>
             </div>
@@ -360,4 +385,3 @@ export function SchedulePage() {
     </MobileShell>
   );
 }
-

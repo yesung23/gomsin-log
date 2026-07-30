@@ -32,7 +32,7 @@ export function WidgetWrapper({ id, isEditMode, onRemove, children }: WidgetWrap
       ref={setNodeRef}
       style={style}
       className={cn(
-        "relative rounded-3xl bg-white shadow-sm border border-gray-100 p-5",
+        "relative rounded-3xl bg-card shadow-sm border border-border p-5",
         isEditMode && "animate-wiggle",
         isDragging && "opacity-80 scale-105 shadow-xl rotate-2"
       )}
@@ -42,19 +42,19 @@ export function WidgetWrapper({ id, isEditMode, onRemove, children }: WidgetWrap
         <>
           <button
             onClick={() => onRemove(id)}
-            className="absolute -top-3 -right-3 z-20 w-8 h-8 bg-gray-200 hover:bg-red-500 hover:text-white text-gray-500 rounded-full flex items-center justify-center shadow-md transition-colors"
+            className="absolute -top-3 -right-3 z-20 w-8 h-8 bg-muted hover:bg-red-500 hover:text-white text-muted-foreground rounded-full flex items-center justify-center shadow-md transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
           <div 
             {...attributes} 
             {...listeners}
-            className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 w-12 h-8 bg-white border border-gray-200 rounded-full flex items-center justify-center shadow-sm cursor-grab active:cursor-grabbing"
+            className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 w-12 h-8 bg-card border border-border rounded-full flex items-center justify-center shadow-sm cursor-grab active:cursor-grabbing"
           >
-            <GripHorizontal className="w-5 h-5 text-gray-400" />
+            <GripHorizontal className="w-5 h-5 text-muted-foreground" />
           </div>
           {/* Prevent clicks on content during edit mode */}
-          <div className="absolute inset-0 bg-white/20 z-10 rounded-3xl cursor-pointer" />
+          <div className="absolute inset-0 bg-card/20 z-10 rounded-3xl cursor-pointer" />
         </>
       )}
       

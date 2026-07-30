@@ -1,6 +1,8 @@
 node_modules
 dist
+.codex-runtime/
 *.local
 .env
 .env.local
+Microsoft/
 .env.*.local

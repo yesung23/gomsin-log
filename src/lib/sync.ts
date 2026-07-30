@@ -43,8 +43,9 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
       // Fetch Partner Profile
       const { data: partnerData } = await supabase.rpc('get_partner_profile');
       
-      let partnerName = '파트너';
-      if (partnerData && partnerData.length > 0) {
+      const hasPartner = !!(partnerData && partnerData.length > 0);
+      let partnerName = '';
+      if (hasPartner) {
         partnerName = partnerData[0].display_name;
       }
 
@@ -53,8 +54,8 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
         partnerName,
         anniversaryDate: coupleData?.anniversary_date || '',
         coupleCode: '',
-        connected: true,
-        status: 'active',
+        connected: hasPartner,
+        status: hasPartner ? 'active' : 'pending',
       };
     }
 
@@ -84,7 +85,7 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
     const profile: UserProfile = {
       id: userId,
       myName: profileData.display_name,
-      role: profileData.role,
+      role: memberData?.role || profileData.role,
       avatarPath: profileData.avatar_path,
       onboardingCompletedAt: profileData.onboarding_completed_at,
       couple,
@@ -95,7 +96,7 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
     let records: DailyRecord[] = [];
     let events: CoupleEvent[] = [];
     let trips: Trip[] = [];
-    if (couple.connected && couple.coupleId) {
+    if (couple.coupleId) {
       const rawRecords = await fetchRecordsFromDB(couple.coupleId);
       // Map authorRole based on userId
       records = rawRecords.map(r => ({

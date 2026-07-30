@@ -71,7 +71,10 @@ export function UsPage() {
   };
 
   const hasEventOrTrip = (dateStr: string) => {
-    const hasEvent = events.some(e => e.startDate <= dateStr && e.endDate >= dateStr);
+    const hasEvent = events.some(e => {
+      const eventEndDate = e.endDate || e.startDate;
+      return e.startDate <= dateStr && eventEndDate >= dateStr;
+    });
     const hasTrip = trips.some(t => t.startDate <= dateStr && t.endDate >= dateStr);
     return { hasEvent, hasTrip };
   };
@@ -197,4 +200,3 @@ export function UsPage() {
     </MobileShell>
   );
 }
-

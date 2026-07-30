@@ -119,7 +119,10 @@ export function RecordPage() {
   }, [recordsByDate, selectedDate, mediaFilter]);
 
   // Stats for selected day
-  const selectedDayAllRecords = recordsByDate[selectedDate] || [];
+  const selectedDayAllRecords = useMemo(
+    () => recordsByDate[selectedDate] || [],
+    [recordsByDate, selectedDate]
+  );
   const photoCount = selectedDayAllRecords.filter((r) => r.attachments?.some((a) => a.type === 'photo')).length;
   const voiceCount = selectedDayAllRecords.filter((r) => r.attachments?.some((a) => a.type === 'voice')).length;
   const videoCount = selectedDayAllRecords.filter((r) => r.attachments?.some((a) => a.type === 'video')).length;

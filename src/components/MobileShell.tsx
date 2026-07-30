@@ -31,7 +31,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
 
   return (
-    <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-[oklch(0.95_0.008_85)]">
+    <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
       <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
         <main className="flex-1 pb-24 overflow-y-auto">{children}</main>
 
@@ -87,4 +87,3 @@ export function MobileShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
-

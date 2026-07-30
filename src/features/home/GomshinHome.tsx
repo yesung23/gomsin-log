@@ -5,7 +5,6 @@ import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { Camera, Image as ImageIcon, Mic, Send, Lock, Unlock, Film, MoreHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
-import { uploadMedia, getMediaUrl } from '@/lib/records';
 import type { ReactionType, Attachment } from '@/types';
 
 const REACTIONS: { key: ReactionType; label: string; emoji: string }[] = [
@@ -30,7 +29,7 @@ export function GomshinHome() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showInputCard, setShowInputCard] = useState(false);
   const [inputType, setInputType] = useState<'text' | 'photo' | 'voice' | 'video'>('text');
-  const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -59,7 +58,7 @@ export function GomshinHome() {
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
@@ -71,31 +70,12 @@ export function GomshinHome() {
        return;
     }
 
-    setIsUploading(true);
-    toast.loading('업로드 중...', { id: 'upload' });
-    try {
-      const path = await uploadMedia(file, state.profile.couple.coupleId);
-      if (path) {
-        // Fetch signed url immediately for preview
-        const url = await getMediaUrl(path) || undefined;
-        let type: 'photo' | 'video' | 'voice' = 'photo';
-        if (file.type.startsWith('video/')) type = 'video';
-        if (file.type.startsWith('audio/')) type = 'voice';
-        
-        setAttachments(prev => [...prev, { type, name: file.name, url: url, path: path }]); 
-        toast.success('업로드 완료', { id: 'upload' });
-      } else {
-        toast.error('업로드 실패', { id: 'upload' });
-      }
-    } catch (e) {
-      toast.error('업로드 오류 발생', { id: 'upload' });
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+    toast.info('미디어 첨부는 안전한 저장 방식으로 준비 중이에요. 지금은 글 기록을 이용해 주세요.');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handlePost = () => {
+  const handlePost = async () => {
+    if (isSaving) return;
     if (!log.trim() && attachments.length === 0 && !reaction) {
       toast.error('내용, 사진, 음성, 또는 리액션을 선택해주세요.');
       return;
@@ -104,15 +84,26 @@ export function GomshinHome() {
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-    addRecord({
-      date: todayStr,
-      time: timeStr,
-      authorRole: state.profile.role,
-      log,
-      reaction,
-      attachments: attachments.length > 0 ? attachments : undefined,
-      isPrivate,
-    });
+    setIsSaving(true);
+    let saved = false;
+    try {
+      saved = await addRecord({
+        date: todayStr,
+        time: timeStr,
+        authorRole: state.profile.role,
+        log,
+        reaction,
+        attachments: attachments.length > 0 ? attachments : undefined,
+        isPrivate,
+      });
+    } finally {
+      setIsSaving(false);
+    }
+
+    if (!saved) {
+      toast.error('기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+      return;
+    }
 
     // Reset input
     setLog('');
@@ -284,10 +275,10 @@ export function GomshinHome() {
           {/* Submit Button */}
           <button
             onClick={handlePost}
-            disabled={isUploading}
+            disabled={isSaving}
             className="mt-4 w-full py-3.5 rounded-xl bg-coral text-white font-bold text-sm shadow-sm active:scale-[0.99] transition min-h-[44px] disabled:opacity-50"
           >
-            {isUploading ? '업로드 중...' : '기록 남기기'}
+            {isSaving ? '저장 중...' : '기록 남기기'}
           </button>
         </div>
       )}

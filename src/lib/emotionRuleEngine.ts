@@ -36,7 +36,9 @@ export function normalizeText(text: string): string {
  */
 function segmentText(normalized: string): { text: string; position: number }[] {
   // Transition regex to split sentences/clauses
-  const splitPattern = /(?:[.!?,;\n]|\b(?:그런데|근데|하지만|그래도|그러다가|그러고 나서|끝나고|이후에|나중에|마지막에|그러다 보니|처음에는|처음엔|결국|덕분에|그래서)\b|(?<=는데|했지만|하고 나서|하니까|되니까|다가|됐다|졌다가|했어|했지))/g;
+  // Every alternative must consume at least one character. A zero-width
+  // lookbehind with RegExp.exec(.../g) can leave lastIndex unchanged forever.
+  const splitPattern = /(?:[.!?,;\n]+|(?:그런데|근데|하지만|그래도|그러다가|그러고 나서|끝나고|이후에|나중에|마지막에|그러다 보니|처음에는|처음엔|결국|덕분에|그래서))/g;
 
   const segments: { text: string; position: number }[] = [];
   let lastIndex = 0;
@@ -101,7 +103,10 @@ export function recommendEmotionFlow(
 
     // 1. Joy / 행복, 기쁨, 즐거움, 신남
     if (/(?:나아졌|기분(?:이|은|도)?\s*좋|좋아졌|기뻤|즐거웠|신났|행복|맛있|웃기|재밌)/.test(text)) {
-      if (!isNegated(text, '좋') && !isNegated(text, '즐겁') && !isNegated(text, '기뻐')) {
+      const isJoyNegated = ['행복', '좋', '즐겁', '기뻐', '신나'].some((keyword) =>
+        isNegated(text, keyword)
+      );
+      if (!isJoyNegated) {
         let label = '행복';
         if (text.includes('즐겁')) label = '즐거움';
         if (text.includes('신났') || text.includes('신나')) label = '신남';

@@ -1,10 +1,17 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AppState, DailyRecord, UserProfile, Role, AuthUser, ILogRepository, CoupleEvent } from '@/types';
-import { authRepository, isSupabaseConfigured, supabase } from '@/lib/supabase';
+import {
+  authRepository,
+  isSupabaseConfigured,
+  supabase,
+  disconnectCoupleFromDB,
+  deleteAccountFromDB,
+} from '@/lib/supabase';
 import { fetchFullStateFromDB } from '@/lib/sync';
 import { saveRecordToDB, deleteRecordFromDB } from '@/lib/records';
 
-const STORE_KEY = 'gomsinlog.state.v1';
+const STORE_KEY_V1 = 'gomsinlog.state.v1';
+const STORE_KEY = 'gomsinlog.state.v2';
 
 export class LocalStorageRepository implements ILogRepository {
   isConfigured(): boolean {
@@ -13,6 +20,7 @@ export class LocalStorageRepository implements ILogRepository {
 
   async loadState(): Promise<AppState | null> {
     try {
+      localStorage.removeItem(STORE_KEY_V1); // Remove legacy v1 state
       const stored = localStorage.getItem(STORE_KEY);
       if (stored) return JSON.parse(stored);
     } catch (e) {
@@ -23,7 +31,20 @@ export class LocalStorageRepository implements ILogRepository {
 
   async saveState(state: AppState): Promise<void> {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      // 보안 처리: private 기록은 로컬 스토리지에 평문으로 남지 않도록 본문/첨부파일/감정/메타데이터 제외
+      const sanitizedState = {
+        ...state,
+        records: state.records.map((r) =>
+          r.isPrivate ? {
+            id: r.id,
+            date: r.date,
+            time: r.time,
+            isPrivate: true,
+            authorRole: r.authorRole
+          } as DailyRecord : r
+        ),
+      };
+      localStorage.setItem(STORE_KEY, JSON.stringify(sanitizedState));
     } catch (e) {
       console.error('[gomsinlog] Failed to save state to localStorage', e);
     }
@@ -64,21 +85,24 @@ const DEFAULT_STATE: AppState = {
   records: [],
   events: [],
   trips: [],
-  widgetLayout: ['today_briefing', 'today_word', 'contact_time', 'dday'],
+  widgetLayout: ['today_briefing', 'today_word', 'dday'],
   hasSeenInstallPrompt: false,
+  theme: 'light',
 };
 
 interface StoreContextType {
   state: AppState;
+  isReady: boolean;
   updateProfile: (profileUpdates: Partial<UserProfile>) => void;
-  addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => void;
+  addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
   updateRecord: (id: string, updates: Partial<DailyRecord>) => void;
-  deleteRecord: (id: string) => void;
-  addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => void;
-  deleteEvent: (id: string) => void;
+  deleteRecord: (id: string) => Promise<boolean>;
+  addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
+  deleteEvent: (id: string) => Promise<boolean>;
   switchRole: () => void;
   reset: () => void;
-  disconnect: () => void;
+  disconnect: () => Promise<boolean>;
+  deleteAccount: () => Promise<boolean>;
   signOut: () => Promise<void>;
   setSetupComplete: (complete: boolean) => void;
   setOnboardingStep: (step: number) => void;
@@ -87,6 +111,7 @@ interface StoreContextType {
   startDemo: () => void;
   setWidgetLayout: (layout: string[]) => void;
   setHasSeenInstallPrompt: (seen: boolean) => void;
+  setTheme: (theme: 'light' | 'dark') => void;
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -95,18 +120,23 @@ const localRepository = new LocalStorageRepository();
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(DEFAULT_STATE);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [isAuthChecked, setIsAuthChecked] = useState(!supabase);
 
   useEffect(() => {
     localRepository.loadState().then((stored) => {
       if (stored) {
-        setState(stored);
+        setState({
+          ...DEFAULT_STATE,
+          ...stored,
+          theme: stored.theme || 'light',
+        });
       }
       setIsHydrated(true);
     });
   }, []);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !isHydrated) return;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         const provider = (session.user.app_metadata?.provider as 'apple' | 'google' | 'email') || 'google';
@@ -118,30 +148,61 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         
         const dbState = await fetchFullStateFromDB(session.user.id);
         
+        setState((prev) => {
+          const shouldKeepInviteCode =
+            !!dbState?.profile?.couple.coupleId &&
+            !dbState.profile.couple.connected &&
+            dbState.profile.couple.coupleId === prev.profile.couple.coupleId &&
+            prev.authenticatedUser?.id === session.user.id;
+
+          const remoteProfile = dbState?.profile
+            ? {
+                ...dbState.profile,
+                couple: {
+                  ...dbState.profile.couple,
+                  coupleCode: shouldKeepInviteCode
+                    ? prev.profile.couple.coupleCode
+                    : dbState.profile.couple.coupleCode,
+                },
+              }
+            : undefined;
+
+          return {
+            ...prev,
+            authenticatedUser: authUser,
+            isDemoMode: false,
+            ...(dbState || {}),
+            ...(remoteProfile ? { profile: remoteProfile } : {}),
+          };
+        });
+        setIsAuthChecked(true);
+      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
         setState((prev) => ({
-          ...prev,
-          authenticatedUser: authUser,
+          ...DEFAULT_STATE,
           isDemoMode: false,
-          ...(dbState || {})
+          widgetLayout: prev.widgetLayout,
+          hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
+          theme: prev.theme || 'light',
         }));
-      } else if (event === 'SIGNED_OUT') {
-        setState((prev) => ({
-          ...prev,
-          authenticatedUser: null,
-        }));
+        setIsAuthChecked(true);
       }
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isHydrated]);
 
   useEffect(() => {
     if (isHydrated) {
       localRepository.saveState(state);
     }
   }, [state, isHydrated]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = state.theme || 'light';
+    document.documentElement.style.colorScheme = state.theme || 'light';
+  }, [state.theme]);
 
   useEffect(() => {
     if (!supabase || !state.authenticatedUser || !state.profile.couple.coupleId) return;
@@ -210,6 +271,49 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [state.profile.couple.coupleId, state.authenticatedUser]);
 
+  useEffect(() => {
+    const client = supabase;
+    if (
+      !client ||
+      !state.authenticatedUser ||
+      !state.profile.couple.coupleId ||
+      state.profile.couple.connected
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const checkForPartner = async () => {
+      const { data, error } = await client.rpc('get_partner_profile');
+      if (cancelled || error || !data?.length) return;
+
+      setState((prev) => ({
+        ...prev,
+        profile: {
+          ...prev.profile,
+          couple: {
+            ...prev.profile.couple,
+            partnerName: data[0].display_name || '파트너',
+            coupleCode: '',
+            connected: true,
+            status: 'active',
+          },
+        },
+      }));
+    };
+
+    checkForPartner();
+    const intervalId = window.setInterval(checkForPartner, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    state.authenticatedUser,
+    state.profile.couple.connected,
+    state.profile.couple.coupleId,
+  ]);
+
   const updateProfile = (profileUpdates: Partial<UserProfile>) => {
     setState((prev) => {
       const newProfile = {
@@ -217,7 +321,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ...profileUpdates,
       };
       const newState = { ...prev, profile: newProfile };
-      
+
       // Async DB Sync
       if (newState.authenticatedUser && !newState.isDemoMode) {
         const userId = newState.authenticatedUser.id;
@@ -251,22 +355,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const addRecord = (record: Omit<DailyRecord, 'id' | 'createdAt'>) => {
+  const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {
     const newRecord: DailyRecord = {
       ...record,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
-    setState((prev) => {
-      const newState = {
-        ...prev,
-        records: [...prev.records, newRecord],
-      };
-      if (newState.authenticatedUser && newState.profile.couple.coupleId) {
-        saveRecordToDB(newRecord, newState.profile.couple.coupleId, newState.authenticatedUser.id);
+
+    if (!state.isDemoMode && state.authenticatedUser) {
+      const coupleId = state.profile.couple.coupleId;
+      if (!coupleId) {
+        console.error('Cannot save record without an active couple.');
+        return false;
       }
-      return newState;
-    });
+
+      try {
+        const saved = await saveRecordToDB(newRecord, coupleId, state.authenticatedUser.id);
+        if (!saved) return false;
+      } catch (error) {
+        console.error('Failed to save record:', error);
+        return false;
+      }
+    }
+
+    setState((prev) => ({
+      ...prev,
+      records: [...prev.records, newRecord],
+    }));
+    return true;
   };
 
   const updateRecord = (id: string, updates: Partial<DailyRecord>) => {
@@ -281,43 +397,74 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const deleteRecord = (id: string) => {
-    setState((prev) => {
-      const newState = {
-        ...prev,
-        records: prev.records.filter((r) => r.id !== id),
-      };
-      if (newState.authenticatedUser) {
-        deleteRecordFromDB(id);
+  const deleteRecord = async (id: string): Promise<boolean> => {
+    if (!state.isDemoMode && state.authenticatedUser) {
+      try {
+        const deleted = await deleteRecordFromDB(id);
+        if (!deleted) return false;
+      } catch (error) {
+        console.error('Failed to delete record:', error);
+        return false;
       }
-      return newState;
-    });
+    }
+
+    setState((prev) => ({
+      ...prev,
+      records: prev.records.filter((record) => record.id !== id),
+    }));
+    return true;
   };
 
-  const addEvent = async (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => {
-    // Optimistic
+  const addEvent = async (
+    event: Omit<CoupleEvent, 'id' | 'createdAt'>,
+  ): Promise<boolean> => {
     const newEvent: CoupleEvent = {
       ...event,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
-    setState(prev => ({ ...prev, events: [...prev.events, newEvent] }));
-    
-    // DB
-    if (state.authenticatedUser) {
-       const saved = await import('@/lib/events').then(m => m.saveEventToDB(newEvent));
-       if (!saved) {
-         // rollback or show error
-         console.error('Failed to save event');
-       }
+
+    let eventToAdd = newEvent;
+    if (!state.isDemoMode && state.authenticatedUser) {
+      if (!state.profile.couple.coupleId) {
+        console.error('Cannot save event without an active couple.');
+        return false;
+      }
+
+      try {
+        const saved = await import('@/lib/events').then((module) =>
+          module.saveEventToDB(newEvent),
+        );
+        if (!saved) return false;
+        eventToAdd = saved;
+      } catch (error) {
+        console.error('Failed to save event:', error);
+        return false;
+      }
     }
+
+    setState((prev) => ({ ...prev, events: [...prev.events, eventToAdd] }));
+    return true;
   };
 
-  const deleteEvent = async (id: string) => {
-    setState(prev => ({ ...prev, events: prev.events.filter(e => e.id !== id) }));
-    if (state.authenticatedUser) {
-       await import('@/lib/events').then(m => m.deleteEventFromDB(id));
+  const deleteEvent = async (id: string): Promise<boolean> => {
+    if (!state.isDemoMode && state.authenticatedUser) {
+      try {
+        const deleted = await import('@/lib/events').then((module) =>
+          module.deleteEventFromDB(id),
+        );
+        if (!deleted) return false;
+      } catch (error) {
+        console.error('Failed to delete event:', error);
+        return false;
+      }
     }
+
+    setState((prev) => ({
+      ...prev,
+      events: prev.events.filter((event) => event.id !== id),
+    }));
+    return true;
   };
 
   const switchRole = () => {
@@ -339,27 +486,61 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const reset = () => {
-    setState(DEFAULT_STATE);
+    setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
   };
 
-  const disconnect = () => {
-    setState((prev) => ({
-      ...prev,
-      profile: {
-        ...prev.profile,
-        couple: {
-          ...prev.profile.couple,
-          connected: false,
-          coupleCode: '',
-          status: 'disconnected',
+  const disconnect = async (): Promise<boolean> => {
+    try {
+      if (isSupabaseConfigured) {
+        const disconnected = await disconnectCoupleFromDB();
+        if (!disconnected) return false;
+      }
+      localStorage.removeItem(STORE_KEY_V1);
+      localStorage.removeItem(STORE_KEY); // 보안: 연결 해제 시 로컬 캐시 즉각 파기
+
+      setState((prev) => ({
+        ...prev,
+        profile: {
+          ...prev.profile,
+          couple: {
+            ...prev.profile.couple,
+            connected: false,
+            coupleCode: '',
+            status: 'disconnected',
+          },
         },
-      },
-    }));
+        records: [], // 연결 해제 시 기록도 초기화
+        events: [],
+        trips: [],
+      }));
+      return true;
+    } catch (e) {
+      console.error('Failed to disconnect:', e);
+      return false;
+    }
   };
 
   const signOut = async () => {
     await authRepository.signOut();
-    setState(DEFAULT_STATE);
+    localStorage.removeItem(STORE_KEY_V1);
+    localStorage.removeItem(STORE_KEY); // 보안: 로그아웃 시 로컬 캐시 즉각 파기
+    setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
+  };
+
+  const deleteAccount = async (): Promise<boolean> => {
+    if (state.isDemoMode) {
+      setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
+      return true;
+    }
+
+    const deleted = await deleteAccountFromDB();
+    if (!deleted) return false;
+
+    await authRepository.signOut();
+    localStorage.removeItem(STORE_KEY_V1);
+    localStorage.removeItem(STORE_KEY);
+    setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
+    return true;
   };
 
   const setSetupComplete = (complete: boolean) => {
@@ -554,10 +735,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, hasSeenInstallPrompt: seen }));
   };
 
+  const setTheme = (theme: 'light' | 'dark') => {
+    setState((prev) => ({ ...prev, theme }));
+  };
+
   return (
     <StoreContext.Provider
       value={{
         state,
+        isReady: isHydrated && isAuthChecked,
         updateProfile,
         addRecord,
         updateRecord,
@@ -567,6 +753,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         switchRole,
         reset,
         disconnect,
+        deleteAccount,
         signOut,
         setSetupComplete,
         setOnboardingStep,
@@ -575,6 +762,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         startDemo,
         setWidgetLayout,
         setHasSeenInstallPrompt,
+        setTheme,
       }}
     >
       {children}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { MobileShell } from '@/components/MobileShell';
@@ -34,34 +34,22 @@ export function TripDetailPage() {
   const [newItem, setNewItem] = useState({ title: '', category: 'activity' as const, memo: '', url: '' });
   const [newChecklistName, setNewChecklistName] = useState('');
 
-  useEffect(() => {
-    if (id) {
-      loadData();
-    }
-  }, [id]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!id) return;
     setLoading(true);
     const [fetchedItems, fetchedChecklists] = await Promise.all([
-      fetchTripItemsFromDB(id!),
-      fetchTripChecklistsFromDB(id!),
+      fetchTripItemsFromDB(id),
+      fetchTripChecklistsFromDB(id),
     ]);
     setItems(fetchedItems);
     setChecklists(fetchedChecklists);
     setLoading(false);
-  };
-
-  if (!trip) {
-    return (
-      <MobileShell>
-        <div className="p-5 text-center mt-20 text-muted-foreground">여행을 찾을 수 없습니다.</div>
-      </MobileShell>
-    );
-  }
+  }, [id]);
 
   // Calculate days
-  const totalDays = daysBetweenLocal(trip.startDate, trip.endDate) + 1;
+  const totalDays = trip ? daysBetweenLocal(trip.startDate, trip.endDate) + 1 : 0;
   const daysList = useMemo(() => {
+    if (!trip) return [];
     const list = [];
     const start = new Date(trip.startDate);
     for (let i = 0; i < totalDays; i++) {
@@ -74,13 +62,25 @@ export function TripDetailPage() {
       });
     }
     return list;
-  }, [trip.startDate, totalDays]);
+  }, [trip, totalDays]);
 
   const currentDayItems = useMemo(() => {
     if (!daysList[activeDayIndex]) return [];
     const currentDate = daysList[activeDayIndex].dateStr;
     return items.filter(it => it.itemDate === currentDate);
   }, [items, daysList, activeDayIndex]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  if (!trip) {
+    return (
+      <MobileShell>
+        <div className="p-5 text-center mt-20 text-muted-foreground">여행을 찾을 수 없습니다.</div>
+      </MobileShell>
+    );
+  }
 
   const handleDeleteTrip = async () => {
     if (confirm('이 여행 계획을 삭제하시겠습니까? 하위 일정 및 준비물도 함께 삭제됩니다.')) {

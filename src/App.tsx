@@ -12,7 +12,15 @@ import { TripsPage } from '@/pages/TripsPage';
 import { TripDetailPage } from '@/pages/TripDetailPage';
 
 export function App() {
-  const { state } = useStore();
+  const { state, isReady } = useStore();
+
+  if (!isReady) {
+    return (
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-coral border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <Routes>

@@ -274,67 +274,19 @@ export function MyPage() {
           </div>
         )}
 
-        {/* System Settings & Account Menu */}
-        <section className="bg-card rounded-3xl border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
+        {/* Link to Full Settings Page */}
+        <section className="bg-card rounded-3xl border border-border p-4 shadow-sm">
           <button
-            onClick={() => toast.info('알림 설정이 완료되었습니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
+            onClick={() => navigate('/settings')}
+            className="w-full py-3 px-2 flex items-center justify-between text-xs font-bold text-foreground hover:text-coral transition"
           >
-            <span>푸시 알림 설정</span>
+            <div className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-coral" />
+              <span>설정 및 계정 관리 (연결, 알림, 잠금, 로그아웃)</span>
+            </div>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          </button>
-          <button
-            onClick={() => toast.info('PWA 앱 설치 가이드입니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span>PWA 앱 설치 안내</span>
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          </button>
-          <button
-            onClick={() => setShowDisconnectModal(true)}
-            className="w-full p-4 text-left flex items-center justify-between text-destructive hover:bg-destructive/10 transition min-h-[48px]"
-          >
-            <span>커플 연결 해제</span>
-            <ChevronRight className="w-4 h-4 text-destructive/60" />
-          </button>
-          <button
-            onClick={signOut}
-            className="w-full p-4 text-left flex items-center justify-between text-muted-foreground hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span>로그아웃</span>
-            <ChevronRight className="w-4 h-4 text-muted-foreground/60" />
           </button>
         </section>
-
-        {/* Disconnect Modal */}
-        {showDisconnectModal && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 animate-in fade-in">
-            <div className="bg-card rounded-3xl p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
-              <h3 className="text-base font-bold text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                연결을 해제하면 상대방은 내 공유 기록을 더 이상 볼 수 없게 됩니다.
-              </p>
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                <button
-                  onClick={() => setShowDisconnectModal(false)}
-                  className="py-2.5 rounded-xl border border-border text-xs font-semibold min-h-[44px]"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={() => {
-                    disconnect();
-                    setShowDisconnectModal(false);
-                    toast.info('연결이 해제되었습니다.');
-                  }}
-                  className="py-2.5 rounded-xl bg-destructive text-white text-xs font-semibold min-h-[44px]"
-                >
-                  해제하기
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </MobileShell>
   );

@@ -51,6 +51,28 @@
   --mint-foreground: var(--navy);
 }
 
+[data-theme='dark'] {
+  --cream: oklch(0.17 0.018 265);
+  --navy: oklch(0.29 0.055 265);
+  --background: oklch(0.16 0.016 265);
+  --foreground: oklch(0.95 0.012 85);
+  --card: oklch(0.21 0.018 265);
+  --card-foreground: var(--foreground);
+  --muted: oklch(0.25 0.016 265);
+  --muted-foreground: oklch(0.71 0.018 255);
+  --border: oklch(0.31 0.018 265);
+  --input: oklch(0.27 0.018 265);
+  --ring: oklch(0.72 0.12 22);
+  --primary: oklch(0.82 0.1 22);
+  --primary-foreground: oklch(0.18 0.018 265);
+  --coral: oklch(0.75 0.13 22);
+  --coral-foreground: oklch(0.99 0.005 85);
+  --lilac: oklch(0.32 0.055 305);
+  --lilac-foreground: var(--foreground);
+  --mint: oklch(0.28 0.045 155);
+  --mint-foreground: var(--foreground);
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
@@ -64,6 +86,33 @@
   }
   button { font-family: inherit; cursor: pointer; }
   input, textarea, select { font-family: inherit; }
+}
+
+/* Dark-mode compatibility for older components that still use fixed utility colors. */
+[data-theme='dark'] .bg-white,
+[data-theme='dark'] .bg-gray-50 {
+  background-color: var(--card) !important;
+}
+[data-theme='dark'] .bg-gray-100 {
+  background-color: var(--muted) !important;
+}
+[data-theme='dark'] .text-navy,
+[data-theme='dark'] .text-gray-900,
+[data-theme='dark'] .text-gray-800,
+[data-theme='dark'] .text-gray-700 {
+  color: var(--foreground) !important;
+}
+[data-theme='dark'] .text-gray-400,
+[data-theme='dark'] .text-gray-500,
+[data-theme='dark'] .text-gray-600 {
+  color: var(--muted-foreground) !important;
+}
+[data-theme='dark'] .border-white,
+[data-theme='dark'] .border-gray-50,
+[data-theme='dark'] .border-gray-100,
+[data-theme='dark'] .border-gray-200,
+[data-theme='dark'] .border-gray-300 {
+  border-color: var(--border) !important;
 }
 
 /* Custom range slider */

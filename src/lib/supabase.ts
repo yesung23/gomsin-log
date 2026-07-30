@@ -60,30 +60,11 @@ export async function createCoupleInvitation(role: Role): Promise<{ coupleId: st
     });
 
     if (rpcError) {
-      // Fallback: If RPC does not exist yet, try legacy multi-step insert
-      const { data: couple, error: coupleError } = await supabase
-        .from('couples')
-        .insert({})
-        .select('id')
-        .single();
-
-      if (coupleError || !couple) {
-        return { coupleId: '', code: '', error: rpcError.message || coupleError?.message || '커플 공간 생성에 실패했습니다.' };
-      }
-
-      await supabase.from('couple_members').insert({
-        couple_id: couple.id,
-        user_id: userData.user.id,
-        role,
-        status: 'active',
-      });
-
-      await supabase.rpc('create_invitation', {
-        p_couple_id: couple.id,
-        p_code_hash: codeHash,
-      });
-
-      return { coupleId: couple.id, code };
+      return {
+        coupleId: '',
+        code: '',
+        error: rpcError.message || '커플 공간 생성에 실패했습니다.',
+      };
     }
 
     return { coupleId: coupleIdData as string, code };
@@ -122,6 +103,42 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
     return { coupleId: data as string };
   } catch (err: any) {
     return { error: err?.message || '초대 코드 확인 중 오류가 발생했습니다.' };
+  }
+}
+
+/**
+ * Disconnect active couple using disconnect_couple RPC.
+ */
+export async function disconnectCoupleFromDB(): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase.rpc('disconnect_couple');
+    if (error) {
+      console.error('Error in disconnect_couple RPC:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Failed to call disconnect_couple RPC:', err);
+    return false;
+  }
+}
+
+export async function deleteAccountFromDB(): Promise<boolean> {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase.functions.invoke('delete-account', {
+      method: 'POST',
+    });
+    if (error) {
+      console.error('Failed to delete account:', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Failed to invoke account deletion:', error);
+    return false;
   }
 }
 

@@ -317,6 +317,13 @@ export async function deleteAccountFromDB(): Promise<{ ok: boolean; warnings: st
       return { ok: false, warnings: [] };
     }
     const warnings = Array.isArray(data?.warnings) ? (data.warnings as string[]) : [];
+    // Require the explicit acknowledgement rather than inferring success from
+    // the absence of a transport error, so a partial server-side outcome can
+    // never be reported to the user as a completed deletion.
+    if (data?.success !== true) {
+      console.error('[gomsinlog] Account deletion did not confirm success:', data);
+      return { ok: false, warnings };
+    }
     return { ok: true, warnings };
   } catch (error) {
     console.error('[gomsinlog] Failed to invoke account deletion:', error);

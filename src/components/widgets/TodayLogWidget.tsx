@@ -222,13 +222,18 @@ export function TodayLogWidget() {
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     // Filter confirmed flow items
+    // The rule engine marks sensitive emotion groups as `author_only` by default.
+    // That default only applies to *suggestions*: tapping a chip on a record the
+    // author is sharing is explicit consent to share that tag. On a private
+    // record everything stays author-only. This keeps author-only items out of
+    // shared rows (see lib/privacy.ts) without silently discarding a selection.
     const userConfirmedFlow: EmotionFlowItem[] = suggestions
       .filter((s) => confirmedItemIds.includes(s.id || ''))
       .map((s, idx) => ({
         ...s,
         sequence: idx + 1,
         source: 'user_confirmed',
-        visibility: isPrivate ? 'author_only' : s.visibility,
+        visibility: isPrivate ? 'author_only' : 'shared',
       }));
 
     setIsSaving(true);
@@ -417,6 +422,12 @@ export function TodayLogWidget() {
               </div>
               <p className="text-[11px] text-muted-foreground leading-tight">
                 글의 흐름에 맞춰 제안했어요. 원하지 않으면 누르지 않아도 괜찮아요.
+              </p>
+              {/* Be explicit about who will be able to see the chosen tags. */}
+              <p className="text-[11px] font-semibold leading-tight text-muted-foreground">
+                {isPrivate
+                  ? '🔒 나만 보기 기록이라 선택한 마음도 나만 볼 수 있어요.'
+                  : `선택한 마음은 ${partnerName}에게도 함께 보여요.`}
               </p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {suggestions.map((item) => {

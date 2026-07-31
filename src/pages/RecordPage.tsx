@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/store';
 import { generateDailySummary } from '@/lib/briefing';
+import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar
@@ -76,14 +77,12 @@ export function RecordPage() {
   const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  // Compute visible records (own records + partner's non-private records)
-  const visibleRecords = useMemo(() => {
-    return records.filter((r) => {
-      const isOwn = r.authorRole === profile.role;
-      if (!isOwn && r.isPrivate) return false;
-      return true;
-    });
-  }, [records, profile.role]);
+  // Own records + the partner's shared ones, with author-only fragments removed.
+  // Uses the shared privacy helper so the rule lives in exactly one place.
+  const visibleRecords = useMemo(
+    () => visibleRecordsForViewer(records, { userId: profile.id, role: profile.role }),
+    [records, profile.id, profile.role],
+  );
 
   // Map of dateStr -> visible records for that date
   const recordsByDate = useMemo(() => {

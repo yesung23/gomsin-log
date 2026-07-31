@@ -171,9 +171,18 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
 
   try {
     const codeHash = await hashInvitationCode(normalized);
-    const { data, error } = await supabase.rpc('consume_invitation', {
-      p_code_hash: codeHash,
-    });
+
+    // `redeem_invitation` (migration 013) wraps `consume_invitation` and records
+    // failed attempts for the server-side throttle. Fall back to the bare RPC on
+    // projects where 013 has not been applied yet.
+    let { data, error } = await supabase.rpc('redeem_invitation', { p_code_hash: codeHash });
+    if (error?.code === 'PGRST202') {
+      console.warn(
+        '[gomsinlog] redeem_invitation is not deployed; falling back to consume_invitation. ' +
+          'Apply migration 013 to enable server-side brute-force protection.',
+      );
+      ({ data, error } = await supabase.rpc('consume_invitation', { p_code_hash: codeHash }));
+    }
 
     if (error) {
       const message = error.message || '';

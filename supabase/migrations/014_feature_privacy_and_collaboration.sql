@@ -294,6 +294,135 @@ REVOKE ALL ON TABLE public.trip_checklists FROM PUBLIC;
 REVOKE ALL ON TABLE public.trip_checklists FROM anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.trip_checklists TO authenticated;
 
+-- Trip items must stay inside their parent trip, and a parent range cannot be
+-- narrowed around existing collaborative items.
+CREATE OR REPLACE FUNCTION public.enforce_trip_item_date_range()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_start_date DATE;
+  v_end_date DATE;
+BEGIN
+  SELECT start_date, end_date
+    INTO v_start_date, v_end_date
+  FROM public.trips
+  WHERE id = NEW.trip_id;
+
+  IF v_start_date IS NULL OR NEW.item_date < v_start_date OR NEW.item_date > v_end_date THEN
+    RAISE EXCEPTION 'Trip item date must be within the parent trip range';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.enforce_trip_item_date_range() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.enforce_trip_item_date_range() FROM anon;
+
+DROP TRIGGER IF EXISTS enforce_trip_item_date_range ON public.trip_items;
+CREATE TRIGGER enforce_trip_item_date_range
+  BEFORE INSERT OR UPDATE OF trip_id, item_date ON public.trip_items
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_trip_item_date_range();
+
+CREATE OR REPLACE FUNCTION public.prevent_trip_range_excluding_items()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF (NEW.start_date, NEW.end_date) IS DISTINCT FROM (OLD.start_date, OLD.end_date)
+    AND EXISTS (
+      SELECT 1
+      FROM public.trip_items
+      WHERE trip_id = OLD.id
+        AND (item_date < NEW.start_date OR item_date > NEW.end_date)
+    )
+  THEN
+    RAISE EXCEPTION 'Trip range must include all existing trip items';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.prevent_trip_range_excluding_items() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.prevent_trip_range_excluding_items() FROM anon;
+
+DROP TRIGGER IF EXISTS prevent_trip_range_excluding_items ON public.trips;
+CREATE TRIGGER prevent_trip_range_excluding_items
+  BEFORE UPDATE OF start_date, end_date ON public.trips
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_trip_range_excluding_items();
+
+-- Reorder all requested rows in one transaction. SECURITY DEFINER is tightly
+-- scoped by an explicit active-couple check and fixed search_path.
+CREATE OR REPLACE FUNCTION public.reorder_trip_items(
+  p_item_ids UUID[],
+  p_sort_orders INTEGER[]
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_count INTEGER;
+  v_trip_id UUID;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+  IF p_item_ids IS NULL OR p_sort_orders IS NULL
+    OR cardinality(p_item_ids) = 0
+    OR cardinality(p_item_ids) <> cardinality(p_sort_orders)
+    OR EXISTS (
+      SELECT 1 FROM unnest(p_sort_orders) AS value
+      WHERE value IS NULL OR value < 0
+    )
+    OR (SELECT count(*) FROM unnest(p_item_ids) AS value)
+       <> (SELECT count(DISTINCT value) FROM unnest(p_item_ids) AS value)
+  THEN
+    RAISE EXCEPTION 'Invalid trip item reorder payload';
+  END IF;
+
+  PERFORM 1
+  FROM public.trip_items
+  WHERE id = ANY(p_item_ids)
+  FOR UPDATE;
+
+  SELECT count(*), min(trip_id::TEXT)::UUID
+    INTO v_count, v_trip_id
+  FROM public.trip_items
+  WHERE id = ANY(p_item_ids);
+
+  IF v_count <> cardinality(p_item_ids)
+    OR EXISTS (
+      SELECT 1 FROM public.trip_items
+      WHERE id = ANY(p_item_ids) AND trip_id <> v_trip_id
+    )
+    OR NOT EXISTS (
+      SELECT 1 FROM public.trips
+      WHERE id = v_trip_id
+        AND couple_id = public.get_my_active_couple_id()
+    )
+  THEN
+    RAISE EXCEPTION 'Trip items are not in the active couple workspace';
+  END IF;
+
+  UPDATE public.trip_items AS item
+  SET sort_order = input.sort_order,
+      updated_at = now()
+  FROM unnest(p_item_ids, p_sort_orders) AS input(id, sort_order)
+  WHERE item.id = input.id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.reorder_trip_items(UUID[], INTEGER[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.reorder_trip_items(UUID[], INTEGER[]) FROM anon;
+GRANT EXECUTE ON FUNCTION public.reorder_trip_items(UUID[], INTEGER[]) TO authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 3. Owner-only raw cycle data
 -- ---------------------------------------------------------------------------
@@ -371,17 +500,107 @@ CREATE TABLE IF NOT EXISTS public.cycle_support_signals (
     kind IN ('resting', 'need_space', 'would_like_support', 'check_in_later')
   ),
   message TEXT CHECK (message IS NULL OR char_length(message) <= 80),
-  shared_for_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  shared_for_date DATE NOT NULL DEFAULT ((now() AT TIME ZONE 'Asia/Seoul')::DATE),
   expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + INTERVAL '1 day'),
   revoked_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.cycle_support_signals
+  ALTER COLUMN shared_for_date SET DEFAULT ((now() AT TIME ZONE 'Asia/Seoul')::DATE);
+
 COMMENT ON TABLE public.cycle_support_signals IS
-  'Explicit opt-in support only; never stores raw cycle dates, symptoms, predictions, or a cycle-entry reference.';
+  'Explicit opt-in support only; optional message is user-entered partner-visible text and must not contain private details or raw cycle data.';
+COMMENT ON COLUMN public.cycle_support_signals.message IS
+  'Optional user-entered text shown verbatim to the partner; must not contain private details.';
 COMMENT ON COLUMN public.cycle_support_signals.shared_for_date IS
-  'User-selected sharing date; it is not derived from cycle_entries.';
+  'Forced to the current Asia/Seoul date by the database; never derived from cycle_entries.';
+
+CREATE OR REPLACE FUNCTION public.enforce_cycle_support_signal_contract()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_now TIMESTAMPTZ := clock_timestamp();
+  v_korea_date DATE;
+BEGIN
+  v_korea_date := (v_now AT TIME ZONE 'Asia/Seoul')::DATE;
+  IF auth.uid() IS NULL OR NEW.owner_id <> auth.uid()
+    OR NEW.couple_id <> public.get_my_active_couple_id()
+  THEN
+    RAISE EXCEPTION 'Support signal is outside the active couple workspace';
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    NEW.created_at := v_now;
+    NEW.updated_at := v_now;
+    NEW.shared_for_date := v_korea_date;
+    NEW.revoked_at := NULL;
+    IF NEW.expires_at <= v_now OR NEW.expires_at > v_now + INTERVAL '24 hours' THEN
+      RAISE EXCEPTION 'Support signal expiry must be within the next 24 hours';
+    END IF;
+
+    -- Serialize same-owner/day creation so concurrent inserts cannot both
+    -- remain active before the unique index is checked.
+    PERFORM pg_advisory_xact_lock(
+      hashtextextended(NEW.owner_id::TEXT || ':' || v_korea_date::TEXT, 0)
+    );
+    UPDATE public.cycle_support_signals
+    SET revoked_at = v_now,
+        updated_at = v_now
+    WHERE owner_id = NEW.owner_id
+      AND shared_for_date = v_korea_date
+      AND revoked_at IS NULL;
+    RETURN NEW;
+  END IF;
+
+  IF NEW.couple_id IS DISTINCT FROM OLD.couple_id
+    OR NEW.owner_id IS DISTINCT FROM OLD.owner_id
+    OR NEW.kind IS DISTINCT FROM OLD.kind
+    OR NEW.message IS DISTINCT FROM OLD.message
+    OR NEW.shared_for_date IS DISTINCT FROM OLD.shared_for_date
+    OR NEW.expires_at IS DISTINCT FROM OLD.expires_at
+    OR NEW.created_at IS DISTINCT FROM OLD.created_at
+    OR OLD.revoked_at IS NOT NULL
+    OR NEW.revoked_at IS NULL
+  THEN
+    RAISE EXCEPTION 'Support signal fields are immutable except one-way revoke';
+  END IF;
+  NEW.revoked_at := v_now;
+  NEW.updated_at := v_now;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.enforce_cycle_support_signal_contract() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.enforce_cycle_support_signal_contract() FROM anon;
+
+DROP TRIGGER IF EXISTS enforce_cycle_support_signal_contract
+  ON public.cycle_support_signals;
+
+-- Normalize pre-existing duplicates before adding the concurrency backstop.
+WITH ranked AS (
+  SELECT id, row_number() OVER (
+    PARTITION BY owner_id, shared_for_date ORDER BY created_at DESC, id DESC
+  ) AS position
+  FROM public.cycle_support_signals
+  WHERE revoked_at IS NULL
+)
+UPDATE public.cycle_support_signals AS signal
+SET revoked_at = now(), updated_at = now()
+FROM ranked
+WHERE signal.id = ranked.id AND ranked.position > 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cycle_support_signals_one_active_owner_date
+  ON public.cycle_support_signals (owner_id, shared_for_date)
+  WHERE revoked_at IS NULL;
+
+CREATE TRIGGER enforce_cycle_support_signal_contract
+  BEFORE INSERT OR UPDATE ON public.cycle_support_signals
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_cycle_support_signal_contract();
 
 CREATE INDEX IF NOT EXISTS idx_cycle_support_signals_couple_date
   ON public.cycle_support_signals (couple_id, shared_for_date)
@@ -412,7 +631,7 @@ CREATE POLICY "Active partners can select current support signals"
     auth.uid() IS NOT NULL
     AND owner_id <> auth.uid()
     AND couple_id = public.get_my_active_couple_id()
-    AND shared_for_date = CURRENT_DATE
+    AND shared_for_date = (now() AT TIME ZONE 'Asia/Seoul')::DATE
     AND revoked_at IS NULL
     AND expires_at > now()
   );
@@ -458,6 +677,15 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime'
   ) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = 'couple_members'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.couple_members;
+    END IF;
+
     IF NOT EXISTS (
       SELECT 1 FROM pg_publication_tables
       WHERE pubname = 'supabase_realtime'
@@ -512,7 +740,7 @@ COMMIT;
 -- ---------------------------------------------------------------------------
 -- Rollback approach
 -- ---------------------------------------------------------------------------
--- Back up first. In one transaction: remove the three new realtime entries,
+-- Back up first. In one transaction: remove the four new realtime entries,
 -- drop cycle_support_signals, drop cycle_entries_symptoms_check and symptoms,
 -- restore the event_type check/policies and trip policies from migration 011.
 -- Data written with event_type = 'date' must be migrated before restoring the

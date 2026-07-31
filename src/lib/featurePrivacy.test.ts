@@ -94,6 +94,6 @@ describe('feature privacy migration contract', () => {
     expect(migration).toContain('CREATE POLICY "Active members can update trip items"');
     expect(migration).toContain('CREATE POLICY "Active members can update trip checklists"');
     expect(migration).toContain('CREATE POLICY "Active partners can select current support signals"');
-    expect(migration).toMatch(/shared_for_date = CURRENT_DATE[\s\S]*revoked_at IS NULL[\s\S]*expires_at > now\(\)/);
+    expect(migration).toMatch(/shared_for_date = \(now\(\) AT TIME ZONE 'Asia\/Seoul'\)::DATE[\s\S]*revoked_at IS NULL[\s\S]*expires_at > now\(\)/);
   });
 });

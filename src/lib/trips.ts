@@ -67,6 +67,16 @@ export function validateTripDraft(draft: TripDraft): string | null {
   return null;
 }
 
+export function validateTripRangeAgainstItems(
+  draft: Pick<TripDraft, 'startDate' | 'endDate'>,
+  items: Array<Pick<TripItem, 'itemDate'>>,
+): string | null {
+  if (items.some((item) => item.itemDate < draft.startDate || item.itemDate > draft.endDate)) {
+    return '기존 일정이 포함되도록 여행 기간을 설정해 주세요.';
+  }
+  return null;
+}
+
 export function validateTripItemUrl(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -127,6 +137,16 @@ export async function fetchTripsResultFromDB(coupleId?: string): Promise<TripsFe
   if (!supabase) return failure();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return failure({ code: '42501' });
+
+  if (coupleId) {
+    const { data: activeCoupleId, error: membershipError } = await supabase
+      .rpc('get_my_active_couple_id');
+    if (membershipError) {
+      console.error('Error verifying trip workspace:', membershipError);
+      return failure(membershipError);
+    }
+    if (activeCoupleId !== coupleId) return failure({ code: '42501' });
+  }
 
   let query = supabase.from('trips').select('*').order('start_date', { ascending: true });
   if (coupleId) query = query.eq('couple_id', coupleId);
@@ -263,13 +283,12 @@ export const updateTripItem = updateTripItemInDB;
 export async function reorderTripItemsInDB(items: Array<Pick<TripItem, 'id' | 'sortOrder'>>): Promise<boolean> {
   if (!supabase) return false;
   if (items.length === 0) return true;
-  const client = supabase;
-  const updatedAt = new Date().toISOString();
-  const results = await Promise.all(items.map((item) => client.from('trip_items')
-    .update({ sort_order: item.sortOrder, updated_at: updatedAt }).eq('id', item.id).select('id').maybeSingle()));
-  const failed = results.find(({ data, error }) => error || !data);
-  if (failed) {
-    console.error('Error reordering trip items:', failed.error);
+  const { error } = await supabase.rpc('reorder_trip_items', {
+    p_item_ids: items.map((item) => item.id),
+    p_sort_orders: items.map((item) => item.sortOrder),
+  });
+  if (error) {
+    console.error('Error reordering trip items:', error);
     return false;
   }
   return true;

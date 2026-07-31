@@ -7,7 +7,7 @@ import {
   fetchCycleSupportSignalsResultFromDB,
   isCycleSupportKind,
   isValidCycleSupportMessage,
-  localToday,
+  koreaToday,
   revokeCycleSupportSignalFromDB,
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
@@ -45,7 +45,7 @@ export function CycleSupportSection({
   connected,
 }: CycleSupportSectionProps) {
   const owner = role === 'gomsin';
-  const today = localToday();
+  const today = koreaToday();
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [signals, setSignals] = useState<CycleSupportSignal[]>([]);
   const [kind, setKind] = useState<CycleSupportKind | ''>('');
@@ -255,7 +255,7 @@ export function CycleSupportSection({
           ) : owner ? (
             <div className="space-y-3">
               <div className="p-3 rounded-xl bg-muted/30 text-[10px] text-muted-foreground leading-relaxed">
-                오늘 하루 동안 보일 비의료적 응원 신호만 공유돼요. 개인 기록 내용은 포함되지 않으며 자동으로 공유되지 않아요.
+                오늘 하루 동안 보일 비의료적 응원 신호만 공유돼요. 선택 메시지는 파트너에게 그대로 보이므로 개인적인 상세 내용은 적지 마세요. 개인 기록은 자동으로 공유되지 않아요.
               </div>
               <label className="text-[10px] font-bold text-foreground space-y-1 block">
                 <span>응원 신호 *</span>
@@ -265,7 +265,7 @@ export function CycleSupportSection({
                 </select>
               </label>
               <label className="text-[10px] font-bold text-foreground space-y-1 block">
-                <span>짧은 메시지 (선택, 80자 이하)</span>
+                <span>파트너에게 보낼 짧은 메시지 (선택, 80자 이하)</span>
                 <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={80} disabled={mutationPending !== null} placeholder="예: 오늘 저녁에 짧게 통화하고 싶어요" className="w-full p-3 rounded-xl border border-border bg-card text-xs" />
                 <span className="block text-right text-[9px] text-muted-foreground">{Array.from(message).length}/80</span>
               </label>

@@ -82,11 +82,17 @@ vi.mock('@/lib/records', () => ({
       : { error: 'unsupported' },
 }));
 
+const fetchEventsResultFromDB = vi.fn().mockResolvedValue({ ok: true, events: [] });
+const saveEventToDB = vi.fn().mockResolvedValue(null);
+const updateEventInDB = vi.fn().mockResolvedValue(null);
+const deleteEventFromDB = vi.fn().mockResolvedValue(true);
+
 vi.mock('@/lib/events', () => ({
   fetchEventsFromDB: vi.fn().mockResolvedValue([]),
-  fetchEventsResultFromDB: vi.fn().mockResolvedValue({ ok: true, events: [] }),
-  saveEventToDB: vi.fn().mockResolvedValue(true),
-  deleteEventFromDB: vi.fn().mockResolvedValue(true),
+  fetchEventsResultFromDB: (...args: unknown[]) => fetchEventsResultFromDB(...(args as [string])),
+  saveEventToDB: (...args: unknown[]) => saveEventToDB(...args),
+  updateEventInDB: (...args: unknown[]) => updateEventInDB(...args),
+  deleteEventFromDB: (...args: unknown[]) => deleteEventFromDB(...args),
 }));
 
 vi.mock('@/lib/trips', () => ({
@@ -102,7 +108,7 @@ const STORE_KEY = 'gomsinlog.state.v2';
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
 
 function Probe({ files = [] as File[] }: { files?: File[] }) {
-  const { state, isReady, signOut, disconnect, addRecordWithMedia } = useStore();
+  const { state, isReady, signOut, disconnect, addRecordWithMedia, addEvent, reloadEvents } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
@@ -143,6 +149,21 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       </button>
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
+      <button onClick={() => {
+        const userId = state.authenticatedUser?.id;
+        const coupleId = state.profile.couple.coupleId;
+        if (userId && coupleId) {
+          void addEvent({
+            coupleId,
+            createdBy: userId,
+            title: 'new event',
+            eventType: 'date',
+            startDate: '2026-08-01',
+            isPrivate: false,
+          });
+        }
+      }}>add-event</button>
+      <button onClick={() => void reloadEvents()}>reload-events</button>
     </div>
   );
 }
@@ -174,6 +195,10 @@ describe('StoreProvider auth lifecycle', () => {
     mockSupabase.removeChannel.mockClear();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
     disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
+    fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
+    saveEventToDB.mockReset().mockResolvedValue(null);
+    updateEventInDB.mockReset().mockResolvedValue(null);
+    deleteEventFromDB.mockReset().mockResolvedValue(true);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -385,6 +410,104 @@ describe('StoreProvider auth lifecycle', () => {
     await waitFor(() => expect(mockSupabase.removeChannel).toHaveBeenCalledWith(sharedChannel));
   });
 
+  it('purges shared access when the own membership realtime row is revoked', async () => {
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        records: [{ id: 'rec-a', log: 'shared' }] as never,
+        events: [{ id: 'event-a' }] as never,
+        trips: [{ id: 'trip-a' }] as never,
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const membershipCall = channel.on.mock.calls.find((call) => call[1]?.table === 'couple_members');
+    expect(membershipCall?.[1]?.filter).toBe('user_id=eq.user-a');
+
+    mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: null });
+    await act(async () => {
+      membershipCall?.[2]?.({});
+    });
+
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
+    expect(screen.getByTestId('records')).toHaveTextContent('');
+    expect(screen.getByTestId('events')).toHaveTextContent('');
+    expect(screen.getByTestId('trips')).toHaveTextContent('');
+    await waitFor(() => expect(mockSupabase.removeChannel).toHaveBeenCalledWith(channel));
+  });
+
+  it('does not append an event saved for account A after switching to account B', async () => {
+    let resolveSave!: (value: unknown) => void;
+    saveEventToDB.mockReturnValue(new Promise((resolve) => { resolveSave = resolve; }));
+    fetchFullStateFromDB.mockImplementation(async (userId: string) => serverState({
+      events: userId === 'user-b' ? [{
+        id: 'event-b', coupleId: 'couple-b', createdBy: 'user-b', title: 'B',
+        eventType: 'date', startDate: '2026-08-02', isPrivate: false, createdAt: 'x',
+      }] as never : [],
+      profile: {
+        myName: userId,
+        role: 'gomsin',
+        couple: {
+          coupleId: userId === 'user-a' ? 'couple-a' : 'couple-b',
+          partnerName: 'partner', coupleCode: '', connected: true, status: 'active',
+        },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-a'));
+    screen.getByText('add-event').click();
+    await waitFor(() => expect(saveEventToDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => emitAuth('SIGNED_IN', 'user-b'));
+    await waitFor(() => expect(screen.getByTestId('events')).toHaveTextContent('event-b'));
+    await act(async () => resolveSave({
+      id: 'event-a-new', coupleId: 'couple-a', createdBy: 'user-a', title: 'A',
+      eventType: 'date', startDate: '2026-08-01', isPrivate: false, createdAt: 'x',
+    }));
+
+    expect(screen.getByTestId('events')).toHaveTextContent('event-b');
+    expect(screen.getByTestId('events')).not.toHaveTextContent('event-a-new');
+  });
+
+  it('ignores a deferred event reload after disconnect', async () => {
+    let resolveReload!: (value: unknown) => void;
+    fetchEventsResultFromDB.mockReturnValue(new Promise((resolve) => { resolveReload = resolve; }));
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+    screen.getByText('reload-events').click();
+    await waitFor(() => expect(fetchEventsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => { screen.getByText('disconnect').click(); });
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
+
+    await act(async () => resolveReload({ ok: true, events: [{ id: 'stale-event' }] }));
+    expect(screen.getByTestId('events')).toHaveTextContent('');
+  });
+
   it('does not subscribe while pending and stops the pending partner poll on disconnect', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fetchFullStateFromDB.mockResolvedValue(
@@ -577,6 +700,31 @@ describe('StoreProvider auth lifecycle', () => {
     expect(lastMediaResult?.ok).toBe(false);
     expect(lastMediaResult?.error).toBeTruthy();
     expect(screen.getByTestId('records')).toHaveTextContent('');
+  });
+
+  it('does not persist authenticated shared collections at rest', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'private-at-rest-record', log: 'shared body' }] as never,
+      events: [{ id: 'private-at-rest-event' }] as never,
+      trips: [{ id: 'private-at-rest-trip' }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('private-at-rest-record'));
+    await waitFor(() => {
+      const cached = localStorage.getItem(STORE_KEY) || '';
+      expect(cached).not.toContain('private-at-rest-record');
+      expect(cached).not.toContain('private-at-rest-event');
+      expect(cached).not.toContain('private-at-rest-trip');
+      expect(cached).not.toContain('shared body');
+    });
   });
 
   it('does not persist session-only blob URLs to localStorage', async () => {

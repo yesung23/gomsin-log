@@ -66,7 +66,12 @@ export function MyPage() {
           </button>
         </div>
 
-        {isGomsin && <CycleTrackerSection authenticated={Boolean(authenticatedUser?.id)} />}
+        {isGomsin && (
+          <CycleTrackerSection
+            key={authenticatedUser?.id || 'signed-out'}
+            userId={authenticatedUser?.id}
+          />
+        )}
 
         <CycleSupportSection
           role={profile.role}

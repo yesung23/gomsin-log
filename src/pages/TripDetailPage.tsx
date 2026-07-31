@@ -23,6 +23,7 @@ import {
   updateTripItemInDB,
   validateTripDraft,
   validateTripItemUrl,
+  validateTripRangeAgainstItems,
 } from '@/lib/trips';
 import { useStore } from '@/lib/useStore';
 import { formatLocalDate } from '@/lib/utils';
@@ -257,7 +258,8 @@ export function TripDetailPage() {
 
   const handleSaveTrip = async () => {
     if (!trip || isSavingTrip) return;
-    const validationError = validateTripDraft(tripDraft);
+    const validationError = validateTripDraft(tripDraft)
+      || validateTripRangeAgainstItems(tripDraft, items);
     if (validationError) {
       setTripError(validationError);
       return;
@@ -374,7 +376,6 @@ export function TripDetailPage() {
     const moving = currentDayItems[index];
     const target = currentDayItems[targetIndex];
     if (!moving || !target || pendingItemIds.has(moving.id) || pendingItemIds.has(target.id)) return;
-    const before = items;
     const movingOrder = moving.sortOrder;
     const targetOrder = target.sortOrder;
     setItems((current) => current.map((item) => {
@@ -389,8 +390,8 @@ export function TripDetailPage() {
       { id: target.id, sortOrder: movingOrder },
     ]);
     if (!saved) {
-      setItems(before);
-      toast.error('순서를 저장하지 못해 이전 순서로 되돌렸어요.');
+      await loadChildren();
+      toast.error('순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
     }
     setItemPending(moving.id, false);
     setItemPending(target.id, false);

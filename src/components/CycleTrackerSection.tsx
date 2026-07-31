@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
   ChevronLeft,
@@ -64,10 +64,22 @@ function formatRange(entry: CycleEntry): string {
   return entry.endDate ? `${entry.startDate} ~ ${entry.endDate}` : entry.startDate;
 }
 
-export function CycleTrackerSection({ authenticated }: { authenticated: boolean }) {
+export function CycleTrackerSection({ userId }: { userId?: string }) {
   const today = localToday();
   const initialDate = new Date();
-  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const identityRef = useRef(userId);
+  const generationRef = useRef(0);
+  if (identityRef.current !== userId) {
+    identityRef.current = userId;
+    generationRef.current += 1;
+  }
+  const captureIdentity = useCallback(() => ({ userId, generation: generationRef.current }), [userId]);
+  const isCurrentIdentity = useCallback(
+    (identity: { userId?: string; generation: number }) =>
+      identity.userId === identityRef.current && identity.generation === generationRef.current,
+    [],
+  );
+  const [loadState, setLoadState] = useState<LoadState>(userId ? 'loading' : 'unauthenticated');
   const [entries, setEntries] = useState<CycleEntry[]>([]);
   const [cycleLength, setCycleLength] = useState(28);
   const [periodLength, setPeriodLength] = useState(5);
@@ -85,17 +97,34 @@ export function CycleTrackerSection({ authenticated }: { authenticated: boolean 
   const [deletePendingId, setDeletePendingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
+  useLayoutEffect(() => {
+    setEntries([]);
+    setCycleLength(28);
+    setPeriodLength(5);
+    setCycleLengthDraft(28);
+    setPeriodLengthDraft(5);
+    setSettingsPending(false);
+    setSettingsError(null);
+    setSelectedDate(today);
+    setFormOpen(false);
+    setEditingId(null);
+    setDraft(emptyDraft(today));
+    setFormPending(false);
+    setDeletePendingId(null);
+    setFormError(null);
+    setLoadState(userId ? 'loading' : 'unauthenticated');
+  }, [today, userId]);
+
   const load = useCallback(async () => {
-    setLoadState('loading');
-    if (!authenticated) {
-      setLoadState('unauthenticated');
-      return;
-    }
+    const identity = captureIdentity();
+    setLoadState(userId ? 'loading' : 'unauthenticated');
+    if (!userId) return;
     try {
       const [entryResult, settingResult] = await Promise.all([
         fetchCycleEntriesResultFromDB(),
         fetchCycleSettingsResultFromDB(),
       ]);
+      if (!isCurrentIdentity(identity)) return;
       if (!entryResult.ok || !settingResult.ok) {
         const reasons = [
           !entryResult.ok ? entryResult.reason : null,
@@ -116,10 +145,11 @@ export function CycleTrackerSection({ authenticated }: { authenticated: boolean 
       setPeriodLengthDraft(nextPeriodLength);
       setLoadState(entryResult.entries.length === 0 ? 'empty' : 'ready');
     } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
       console.error('Failed to load private cycle data:', error);
       setLoadState('error');
     }
-  }, [authenticated]);
+  }, [captureIdentity, isCurrentIdentity, userId]);
 
   useEffect(() => {
     void load();
@@ -185,12 +215,15 @@ export function CycleTrackerSection({ authenticated }: { authenticated: boolean 
       setFormError(error);
       return;
     }
+    const identity = captureIdentity();
+    if (!identity.userId) return;
     setFormPending(true);
     setFormError(null);
     try {
       const saved = editingId
         ? await updateCycleEntryInDB(editingId, draft)
         : await saveCycleEntryToDB(draft.startDate, draft.endDate, draft.notes, draft.symptoms);
+      if (!isCurrentIdentity(identity)) return;
       if (!saved) {
         setFormError('기록을 저장하지 못했어요. 입력 내용과 연결을 확인해 주세요.');
         return;
@@ -205,18 +238,22 @@ export function CycleTrackerSection({ authenticated }: { authenticated: boolean 
       setEditingId(null);
       toast.success(editingId ? '개인 기록을 수정했어요.' : '개인 기록을 저장했어요.');
     } catch (saveError) {
+      if (!isCurrentIdentity(identity)) return;
       console.error('Failed to save private cycle entry:', saveError);
       setFormError('기록을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
-      setFormPending(false);
+      if (isCurrentIdentity(identity)) setFormPending(false);
     }
   };
 
   const deleteEntry = async (entry: CycleEntry) => {
+    const identity = captureIdentity();
+    if (!identity.userId) return;
     setDeletePendingId(entry.id);
     setFormError(null);
     try {
       const deleted = await deleteCycleEntryFromDB(entry.id);
+      if (!isCurrentIdentity(identity)) return;
       if (!deleted) {
         setFormError('기록을 삭제하지 못했어요. 다시 시도해 주세요.');
         return;
@@ -232,10 +269,11 @@ export function CycleTrackerSection({ authenticated }: { authenticated: boolean 
       }
       toast.info('개인 기록을 삭제했어요.');
     } catch (deleteError) {
+      if (!isCurrentIdentity(identity)) return;
       console.error('Failed to delete private cycle entry:', deleteError);
       setFormError('기록을 삭제하지 못했어요. 다시 시도해 주세요.');
     } finally {
-      setDeletePendingId(null);
+      if (isCurrentIdentity(identity)) setDeletePendingId(null);
     }
   };
 
@@ -245,10 +283,13 @@ export function CycleTrackerSection({ authenticated }: { authenticated: boolean 
       setSettingsError(error);
       return;
     }
+    const identity = captureIdentity();
+    if (!identity.userId) return;
     setSettingsPending(true);
     setSettingsError(null);
     try {
       const saved = await saveCycleSettingsToDB(cycleLengthDraft, periodLengthDraft);
+      if (!isCurrentIdentity(identity)) return;
       if (!saved) {
         setSettingsError('설정을 저장하지 못했어요. 다시 시도해 주세요.');
         return;
@@ -259,10 +300,11 @@ export function CycleTrackerSection({ authenticated }: { authenticated: boolean 
       setPeriodLengthDraft(saved.averagePeriodLength);
       toast.success('평균 길이 설정을 저장했어요.');
     } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
       console.error('Failed to save private cycle settings:', error);
       setSettingsError('설정을 저장하지 못했어요. 다시 시도해 주세요.');
     } finally {
-      setSettingsPending(false);
+      if (isCurrentIdentity(identity)) setSettingsPending(false);
     }
   };
 

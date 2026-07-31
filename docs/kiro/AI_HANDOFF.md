@@ -109,6 +109,25 @@ Tailwind v4는 `bg-white/60` 을
 `src/lib/platform.ts`, Android 매니페스트 intent-filter.
 (`platform.test.ts` 가 앞의 두 곳 일치를 검사합니다.)
 
+### 2-8. 일정·여행·주기 데이터 경계
+
+마이그레이션 `014_feature_privacy_and_collaboration.sql` 과 클라이언트의 방어적
+필터가 함께 동작하지만, **최종 권한 경계는 RLS**입니다.
+
+- `events`: 비공개는 작성자만, 공유는 현재 활성 커플만 읽습니다. 식별자
+  (`id`, `couple_id`, `created_by`)는 DB 트리거로 변경할 수 없습니다.
+- `trips`/`trip_items`/`trip_checklists`: 현재 활성 커플 양쪽이 공동 편집합니다.
+  일정 날짜는 여행 기간 안이어야 하고, 순서 변경은 `reorder_trip_items` RPC 한
+  트랜잭션에서 처리합니다.
+- `cycle_entries`/`cycle_settings`: 소유자만 접근하며 Realtime publication과 전역
+  store/localStorage에 넣지 않습니다.
+- `cycle_support_signals`: 사용자가 직접 고른 당일 비의료 신호와 선택 메시지만
+  파트너에게 보입니다. 최대 24시간, 즉시 철회 가능하며 원본 주기 데이터와 FK가 없습니다.
+- `collaboration_invalidations`: 제목·메시지 없이 `couple_id`, slice, 시간만 담아
+  공유→비공개/철회 후 상대 화면이 RLS 기준으로 다시 조회하도록 합니다.
+- 연결 해제·계정 전환·라우트 전환 시 로컬 공유 상태를 먼저 비우고, 오래 걸린 이전
+  요청의 결과는 identity/workspace generation으로 버립니다.
+
 ## 3. 검증 명령
 
 ```bash
@@ -124,18 +143,19 @@ npm test
 npm run build
 ```
 
-현재 상태: 테스트 **104개 통과**, TypeScript 오류 0, ESLint 오류 0(경고 11),
+현재 상태: 테스트 **152개 / 21개 파일 통과**, TypeScript 오류 0, ESLint 오류·경고 0,
 프로덕션 빌드 성공.
 
-경고 11개는 모두 `react-refresh/only-export-components` 이며 동작에 영향이 없습니다.
+Vite가 정적/동적 import가 섞인 모듈 2개(`events.ts`, `@capacitor/browser`)에 대해
+비차단 chunk 경고를 출력하지만 기능·타입·lint 실패는 아닙니다.
 
 ## 4. 아직 하지 않은 것 (사용자 승인 필요)
 
 | 작업 | 문서 |
 | --- | --- |
-| 원격 Supabase SQL 실행 (마이그레이션 013) | `SUPABASE_DEPLOYMENT_CHECKLIST.md` |
+| 원격 Supabase SQL 실행 (마이그레이션 013 → 014) | `SUPABASE_DEPLOYMENT_CHECKLIST.md` |
 | Edge Function 실제 배포 | 같음 |
-| GitHub push / master 병합 | — |
+| master 병합 | — |
 | 실제 데이터 삭제 테스트 | `MANUAL_TWO_ACCOUNT_TEST.md` §8 |
 | Google Play 제출 | `PLAY_STORE_ROADMAP.md` |
 

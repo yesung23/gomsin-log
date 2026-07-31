@@ -23,7 +23,8 @@
 | `010_revoke_anon_rpc_access.sql` | `anon` 역할의 RPC 실행 권한 회수 | **필수** |
 | `011_create_missing_feature_tables.sql` | events/trips/cycle 테이블 + Realtime publication | **필수** |
 | `012_authenticated_core_table_grants.sql` | `authenticated` 역할 테이블 권한 | **필수** |
-| `013_invitation_hardening.sql` | 초대코드 무차별 대입 방어 + 코드 재발급 | **신규 / 미적용** |
+| `013_invitation_hardening.sql` | 초대코드 무차별 대입 방어 + 코드 재발급 | **신규 / 원격 미적용** |
+| `014_feature_privacy_and_collaboration.sql` | 일정/여행/주기 RLS, sanitized support, 협업 Realtime·정합성 | **신규 / 원격 미적용** |
 
 ## 013이 하는 일
 
@@ -52,14 +53,33 @@
 않았습니다" 라는 안내를 보여줍니다. 즉 **013은 보안상 반드시 필요하지만, 앱이
 깨지지는 않습니다.**
 
+## 014가 하는 일
+
+1. **일정 프라이버시**: 비공개는 작성자만, 공유는 현재 활성 커플만 SELECT.
+   INSERT/UPDATE/DELETE는 작성자와 활성 workspace를 operation별 정책으로 검사하고
+   event 식별자 변경은 트리거로 금지합니다.
+2. **공동 여행**: 활성 커플 양쪽이 parent/child를 공동 편집합니다. child 날짜는
+   parent row를 잠근 뒤 범위를 검사하고, 순서는 `reorder_trip_items(UUID[], INTEGER[])`
+   RPC에서 한 트랜잭션으로 변경합니다.
+3. **개인 주기**: `cycle_entries`와 `cycle_settings`는 owner-only이며 Realtime
+   publication에서 명시적으로 제거합니다.
+4. **최소 배려 공유**: 별도 `cycle_support_signals`만 사용합니다. 사용자가 고른
+   비의료 enum + 선택 80자 메시지이며 한국 기준 당일, 최대 24시간, one-way revoke,
+   한 owner/couple/date당 active 1개를 강제합니다.
+5. **안전한 무효화**: `collaboration_invalidations`에는 민감 본문 없이 couple/slice/time만
+   저장해 공유→비공개·철회 시 파트너가 RLS 기준으로 다시 조회합니다.
+6. **연결 해제 복구**: `couple_members`, trip children, support, invalidation을 Realtime에
+   추가합니다. raw cycle은 추가하지 않습니다.
+
 ## 적용 순서 (사람이 직접)
 
 ```
 1. Supabase 대시보드 → Database → Backups 에서 백업 생성
-2. 스테이징 프로젝트에서 013 실행
-3. 아래 검증 쿼리 통과 확인
-4. 운영 프로젝트에 013 실행
-5. 앱에서 초대/연결 흐름 재확인
+2. 스테이징 프로젝트에서 013 실행 후 아래 013 검증
+3. 스테이징 프로젝트에서 014 실행 후 배포 체크리스트의 014 검증
+4. `docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`의 A/B/C 테스트 통과
+5. 운영 프로젝트에 013 → 014 순서로 실행
+6. 운영에서 초대/일정/여행/주기/연결 해제 흐름 재확인
 ```
 
 실행 방법: Supabase 대시보드 → **SQL Editor** → 파일 내용 전체 붙여넣기 → Run.
@@ -87,6 +107,17 @@ SELECT has_table_privilege('authenticated', 'public.invitation_codes', 'SELECT')
 SELECT has_table_privilege('authenticated', 'public.invitation_attempts', 'SELECT');
 SELECT has_table_privilege('authenticated', 'public.invitation_attempts', 'INSERT');
 ```
+
+## 014 롤백 주의
+
+014는 새 테이블·column·정책·publication을 함께 변경하므로 먼저 백업으로 복원하는
+방법을 우선합니다. 수동 롤백은 migration 파일 하단 순서대로 5개 Realtime 항목,
+`collaboration_invalidations`/`cycle_support_signals`, 관련 함수·트리거,
+`cycle_entries.symptoms`, event/trip 정책 순으로 처리합니다.
+
+- `event_type='date'` 행을 변환하기 전에 예전 constraint를 복원하지 마세요.
+- support/invalidation 테이블 삭제 전 필요한 감사 데이터를 백업하세요.
+- 원격 적용·롤백 모두 아직 실행되지 않았습니다.
 
 ## 정리 작업 (선택)
 

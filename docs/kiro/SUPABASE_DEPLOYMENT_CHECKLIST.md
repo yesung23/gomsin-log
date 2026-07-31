@@ -92,6 +92,69 @@ SELECT has_table_privilege('authenticated','public.invitation_attempts','INSERT'
 스테이징에서 (1)~(5) 모두 통과하고, 앱에서 초대/연결이 정상 동작하면
 운영 프로젝트에서 2-1, 2-2를 똑같이 반복합니다.
 
+### 2-4. 마이그레이션 014 적용 (반드시 013 다음)
+
+`014_feature_privacy_and_collaboration.sql`은 공유·개인 일정, 공동 여행, 개인 주기,
+최소 배려 신호의 RLS/Realtime/DB 정합성을 추가합니다. **013 검증이 끝난 뒤** 같은
+staging → production 순서로 적용하세요.
+
+1. staging SQL Editor에 파일 전체를 붙여넣고 Run
+2. 아래 검증 쿼리 실행
+3. `MANUAL_TWO_ACCOUNT_TEST.md`의 일정·여행·주기·연결 해제 항목 통과
+4. 그 다음에만 production에서 같은 순서 반복
+
+```sql
+-- 신규 테이블 2개가 있어야 함
+SELECT to_regclass('public.cycle_support_signals'),
+       to_regclass('public.collaboration_invalidations');
+
+-- raw cycle은 publication에 없어야 하고, 협업용 5개는 있어야 함
+SELECT tablename
+FROM pg_publication_tables
+WHERE pubname = 'supabase_realtime'
+  AND tablename IN (
+    'couple_members', 'trip_items', 'trip_checklists',
+    'cycle_support_signals', 'collaboration_invalidations',
+    'cycle_entries', 'cycle_settings'
+  )
+ORDER BY tablename;
+-- 기대: collaboration_invalidations, couple_members, cycle_support_signals,
+--       trip_checklists, trip_items만 출력
+
+-- 핵심 함수/트리거 존재 확인
+SELECT proname FROM pg_proc
+WHERE proname IN (
+  'reorder_trip_items', 'enforce_trip_item_date_range',
+  'prevent_trip_range_excluding_items', 'enforce_cycle_support_signal_contract',
+  'emit_collaboration_invalidation', 'enforce_event_identity_immutable'
+)
+ORDER BY proname;
+-- 6개 행
+
+-- 클라이언트가 raw cycle은 소유자 권한으로만 접근하고,
+-- invalidation은 읽기만 가능한지 확인
+SELECT has_table_privilege('authenticated','public.collaboration_invalidations','SELECT');
+SELECT has_table_privilege('authenticated','public.collaboration_invalidations','INSERT');
+-- 기대: true, false
+```
+
+하나라도 다르면 production에 적용하지 말고 오류·결과를 보존하세요.
+
+#### 014 롤백 원칙
+
+롤백은 데이터 손실 가능성이 있어 자동 실행하지 않습니다. 적용 전 백업으로 복원하는
+것이 가장 안전합니다. 수동 롤백이 필요하면 한 트랜잭션에서 다음 순서로 진행합니다.
+
+1. `supabase_realtime`에서 014가 추가한 5개 테이블 publication 항목 제거
+2. `collaboration_invalidations`, `cycle_support_signals` 백업 후 테이블/관련 트리거 제거
+3. `emit_collaboration_invalidation`, event/trip/support trigger 함수 제거
+4. `cycle_entries.symptoms`를 백업 후 constraint/column 제거
+5. migration 011의 event/trip 정책과 event type constraint 복원
+
+`event_type='date'` 행이나 support signal 데이터를 먼저 변환/백업하지 않고 constraint나
+테이블을 제거하면 데이터가 사라질 수 있습니다. 상세 주석은 migration 014 하단과
+`docs/kiro/ROLLBACK_GUIDE.md`를 따르세요.
+
 ---
 
 ## 3. Storage(사진·영상·음성 저장소) 확인
@@ -192,7 +255,9 @@ VITE_SUPABASE_PUBLISHABLE_KEY=<anon / publishable 키>
 
 - [ ] 백업 완료
 - [ ] 013 스테이징 적용 + 검증 통과
+- [ ] 014 스테이징 적용 + 2계정/RLS/Realtime 검증 통과
 - [ ] 013 운영 적용 + 검증 통과
+- [ ] 014 운영 적용 + 검증 통과
 - [ ] `couple-media` 버킷 비공개 확인
 - [ ] Storage 정책 존재 확인
 - [ ] Redirect URLs 3개 등록 (`gomsinlog://` 포함)

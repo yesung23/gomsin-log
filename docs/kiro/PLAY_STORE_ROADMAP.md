@@ -181,7 +181,8 @@ Play Console → 앱 콘텐츠 → 앱 접근 권한 → "모든 기능에 로�
 
 - [ ] `npm run verify` 전부 통과
 - [ ] `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` 전 항목 완료
-- [ ] 마이그레이션 013 운영 적용 완료
+- [ ] 마이그레이션 013 → 014 운영 적용 완료
+- [ ] 014의 RLS/Realtime/invalidation을 A/B/C 계정으로 검증
 - [ ] `delete-account` Edge Function 배포 완료
 - [ ] 2계정 수동 테스트 ❌ 0개
 - [ ] 실기기에서 구글 로그인 성공 (딥링크 확인)

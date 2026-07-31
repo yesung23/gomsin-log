@@ -172,7 +172,6 @@ interface StoreContextType {
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
   deleteEvent: (id: string) => Promise<boolean>;
   switchRole: () => void;
-  reset: () => void;
   disconnect: () => Promise<boolean>;
   deleteAccount: () => Promise<{ ok: boolean; warnings: string[] }>;
   signOut: () => Promise<void>;
@@ -824,8 +823,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
+  /**
+   * Demo-only role preview: swaps my name with my partner's and flips the role
+   * so both role-specific home screens can be tried without a second account.
+   *
+   * Guarded to demo mode because it is purely local. On a real account the
+   * server would still hold the original role, the next sync would revert it,
+   * and in the meantime `authorRole` on existing records would no longer match
+   * the profile -- which decides which records count as "mine".
+   */
   const switchRole = () => {
     setState((prev) => {
+      if (!prev.isDemoMode) {
+        console.warn('[gomsinlog] switchRole is a demo-only preview and was ignored.');
+        return prev;
+      }
       const { myName, role, couple } = prev.profile;
       return {
         ...prev,
@@ -840,10 +852,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         },
       };
     });
-  };
-
-  const reset = () => {
-    setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
   };
 
   const disconnect = async (): Promise<boolean> => {
@@ -1133,7 +1141,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         addEvent,
         deleteEvent,
         switchRole,
-        reset,
         disconnect,
         deleteAccount,
         signOut,

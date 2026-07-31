@@ -245,3 +245,146 @@ e7d80a2  fix(security): fail closed across collaboration races
   서버측 `Deno.env.get()` 호출뿐
 - 실제 Supabase 프로젝트 URL 없음
 - keystore / 인증서 파일 없음
+
+
+---
+
+# 7. 2차 감사 라운드 — 재검토와 후속 수정
+
+1차 감사가 끝난 브랜치를 **다시** 감사했습니다. 코드·DB RLS·Realtime·클라이언트
+상태·의존성을 각각 독립적으로 훑고, 마지막에 별도 리뷰어로 전체 diff를 behavioral
+레벨에서 재검토했습니다. 그 결과 **1차에서 만든 수정 자체가 만든 새 결함 6건**을
+포함해 추가 결함을 찾아 고쳤습니다.
+
+## 7-1. 마이그레이션 015 신설
+
+013·014 이후 남아 있던 문제를 `015_security_followup.sql` 로 정리했습니다.
+적용 순서는 `013 → 014 → 015` 이며, **원격에는 아직 적용하지 않았습니다.**
+
+| 심각도 | 문제 | 수정 |
+| --- | --- | --- |
+| HIGH | 013의 시도 횟수 제한이 `redeem_invitation` 안에만 있어, `consume_invitation` 을 직접 호출하면 통째로 우회됨 | `consume_invitation` 의 `authenticated` 실행 권한 회수, `redeem_invitation` 단일 진입점화 |
+| HIGH | 실패 기록 후 `RAISE` 해서 **기록까지 함께 롤백** → 사실상 제한이 동작하지 않음 | 예상된 실패는 예외 대신 `error_code` 반환 (`JSONB`), 기록이 커밋됨 |
+| HIGH | 연결 해제와 초대 사용이 겹치면 한쪽만 활성으로 남음 | 초대/재발급/해제/삭제 모두 `couples` 부모 row를 먼저 잠그고 잠금 후 재검증 |
+| HIGH | 계정 삭제 시 event identity 트리거가 소유권 이전을 막아, 이어서 `auth.users` cascade가 **공유 일정을 삭제** | service_role 전용 `prepare_account_deletion` + 트랜잭션 내 소유권 이전 capability |
+| MEDIUM | 비공개 일정 변경까지 무효화를 발생시켜 파트너에게 활동 타이밍 노출 | 공유 일정 변화와 공유↔비공개 전환만 발생시키도록 트리거 필터 |
+| MEDIUM | `trip_items.url` 이 DB에서 검증되지 않음, 동시 append 시 순서 충돌 | `http(s)` CHECK 제약, 부모 잠금 기반 rank 할당, 하루 단위 유니크 제약 |
+
+## 7-2. 1차 수정이 만든 결함 (2차에서 발견·수정)
+
+가장 중요한 부분입니다. 보안을 강화하면서 **기능을 깨뜨린 것들**입니다.
+
+| 심각도 | 무엇이 깨졌나 | 원인 | 수정 |
+| --- | --- | --- | --- |
+| HIGH | 계정 삭제가 **영구히 불가능**해지고 사진 업로드도 막힘 | Storage 정리 루프에 종료 조건이 없었음. 중첩 경로가 허용돼서 Storage가 그 중간 단계를 "폴더"로 보고하고 `remove()` 가 조용히 무시 → 무한 반복 | 실제 객체를 재귀 열거, 라운드 상한, Storage 경로를 3단으로 고정 |
+| HIGH | 파트너 연결을 기다리는 동안 **기록을 쓸 수 없고**, 이전에 쓴 기록은 사라져 보임 | 새 workspace 가드가 파트너 존재를 요구. 하지만 공간을 만든 사람의 멤버십은 이미 `active` 라서 RLS는 원래 허용 | "내 데이터" 범위와 "공유 workspace" 범위를 분리 |
+| HIGH | 비공개 일정 삭제 타이밍 유출이 **실제로는 닫히지 않음** | 트리거는 고쳤지만 `public.events` 가 Realtime publication에 남아 있었고, Realtime은 DELETE payload에 RLS를 적용하지 않음 | publication에서 `events` 제거 + 클라이언트의 직접 구독 제거 |
+| HIGH | WebSocket이 막힌 환경에서 **화면이 영구히 빈 상태**, 안내도 재시도도 없음 | 채널 실패 시 공유 데이터를 숨기고 아무 복구도 시작하지 않음 | HTTP 백오프 재시도(2s~30s) + `live`/`delayed`/`unavailable` 상태와 배너·재시도 버튼 |
+| HIGH | 아직 수락되지 않은 초대를 **취소할 수 없음** (파트너 대기 폴링도 계속됨) | 같은 가드가 `pending` 커플에서 조기 반환 | 파트너 없는 링크는 격리·재조정 없이 취소하는 별도 경로 |
+| MEDIUM | 여행 항목 **제목만 수정해도 저장 실패** | 순서 트리거는 "값이 바뀌었는지"가 아니라 "문장이 그 열을 언급했는지"로 발동. 클라이언트가 캐시된 `sort_order` 를 매번 되돌려 보냄 | 메타데이터 열만 보내도록 변경 |
+| MEDIUM | 앱을 다시 열 때마다 타임라인이 **빈 화면으로 깜빡임** | 모든 foreground/online/구독 시점에 선제적으로 공유 데이터를 비움 | 선제적 비우기 제거. 이미 보고 있던 내용이고, 새 내용은 RLS를 통과해야 하며, 재조정이 권위적으로 판단 |
+| MEDIUM | 시도 횟수 초과가 **자기 잠금을 무한 연장** | `rate_limited` 판정도 실패로 기록 → 재시도하는 클라이언트가 24시간 창을 계속 갱신 | 코드를 조회하기도 전에 결정되는 판정은 기록하지 않음 |
+| MEDIUM | "이미 2명" 응답이 **추측한 코드가 유효했음을 확인해 줌** | 100만 가지 공간 탐색에서 가장 비싼 절반을 대신 알려주는 셈 | `invalid_or_expired` 로 통합 |
+| MEDIUM | 삭제된 사용자의 공유 일정이 **아무도 못 읽는 상태로 영구 잔존** | 이미 연결이 끊긴 상대에게도 소유권을 넘겼음 | 활성 파트너만 상속, 없으면 명시적 삭제 후 보고 |
+| MEDIUM | auth 삭제가 실패하면 **살아 있는 계정의 업로드가 영구 차단** | 삭제 표식이 남고, 그것을 지울 수 있는 경로는 service_role 전용 | auth 삭제 재시도, 최종 실패 시 표식 정리 + "데이터는 이미 삭제됨" 응답 |
+
+## 7-3. 의존성 감사 판정
+
+`npm audit` 는 high 7건을 보고합니다. **7건 모두 조치하지 않기로 판단**했고, 근거는
+다음과 같습니다.
+
+### 프로덕션 (2건) — 전제조건 부재
+
+`react-router` / `react-router-dom@7.18.2`,
+[GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2).
+
+[GitLab Advisory Database](https://advisories.gitlab.com/pkg/npm/react-router/) 설명에
+따르면 이 권고는 CVE-2026-22030의 후속으로, **unstable RSC 코드 경로**의 CSRF 흐름을
+대상으로 합니다. (라이선스 준수를 위해 내용을 재구성했습니다.)
+
+이 앱에는 그 전제조건이 없습니다.
+
+- `src/main.tsx` 는 `BrowserRouter` 만 사용합니다 (declarative mode).
+- `loader` / `action` / `useFetcher` / react-router `<Form>` 사용처가 **하나도 없습니다.**
+  즉 Framework Mode의 서버 action handler도, RSC server action도 존재하지 않습니다.
+- 정적 Vite 빌드이므로 react-router를 실행하는 서버 자체가 없습니다.
+
+또한 **올려서 고칠 방법이 없습니다.** `react-router-dom` 의 최신 배포는 7.18.2이고
+(8.x 미배포), 취약 범위는 `>=7.12.0 <8.3.0` 입니다. npm이 제안하는 유일한 조치는
+7.11.0으로의 **다운그레이드**(마이너 7개 후퇴, breaking)이며, 적용되지 않는 취약점
+때문에 그 사이의 다른 수정들을 포기하는 것은 손해입니다.
+
+→ **수락하고 기록.** 이 앱이 Framework Mode나 RSC, 또는 loader/action을 도입하는
+순간 이 판단은 무효가 되므로, 그때 재평가해야 합니다.
+
+### 개발 전용 (5건) — 번들에 없음
+
+5건 모두 **하나의 근원**에서 나옵니다:
+`eslint@9.39.5` → `minimatch@3.1.5` → `brace-expansion@1.1.16`
+([GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg),
+확장 길이가 제한되지 않아 메모리 부족으로 프로세스가 죽는 DoS).
+
+개발 전용임을 확인한 근거:
+
+- `npm audit --omit=dev` 는 react-router만 보고합니다 (2건).
+- `npm ls --omit=dev --depth=0` 에 eslint 계열이 없습니다.
+- 빌드 산출물 `dist/assets/*.js` 에 `brace-expansion` / `minimatch` 문자열이 없습니다.
+
+조치하지 않은 이유:
+
+- 패치된 1.x 가 없습니다(취약 범위가 `<=5.0.7`). 유일한 fix는 `eslint` 10 **메이저**
+  업그레이드이며, `typescript-eslint@8.65.0` 의 호환성 확인이 선행되어야 합니다.
+- `overrides` 로 `brace-expansion` 을 5.x로 올리는 방법은 검토했으나, `minimatch@3` 이
+  CJS `require` 로 호출하는 형태와 5.x의 export 형태가 달라 lint 자체가 깨질 위험이
+  있어 적용하지 않았습니다. (참고로 `typescript-eslint` 는 이미 5.0.8,
+  `@capacitor/cli` 는 5.0.9를 쓰고 있어 그 경로들은 이미 안전합니다.)
+- 도달 경로는 lint 시점의 glob 확장이고, 그 패턴은 저장소가 소유한
+  `eslint.config.js` 에서 옵니다. 외부 입력이 아닙니다.
+
+→ **수락하고 기록.** `typescript-eslint` 가 eslint 10을 지원하면 함께 올립니다.
+
+## 7-4. 이번 라운드에서 여전히 검증하지 못한 것
+
+1차 감사의 "검증하지 못한 것" 이 그대로 유효하고, 015 때문에 항목이 늘었습니다.
+
+- **015를 원격에 적용하지 않았습니다.** 이 저장소에는 PostgreSQL이 없어
+  SQL 문법조차 실제로 파싱해 보지 못했습니다(`$$` 짝, `BEGIN`/`COMMIT` 개수 등
+  수동 확인만 했습니다). 스테이징 적용이 이 변경의 첫 실제 실행입니다.
+- **`LOCK TABLE storage.objects IN SHARE MODE` 가 Supabase 호스팅에서 허용되는지**
+  확인하지 못했습니다. 이 테이블은 `supabase_storage_admin` 소유이고, 필요한 권한이
+  없으면 `42501` 로 실패합니다(fail closed이지만 계정 삭제 기능이 동작하지 않음).
+  잠금이 유지되는 동안 프로젝트 전체 Storage 메타데이터 쓰기가 대기합니다.
+- **비공개 일정 삭제가 실제로 파트너 채널을 건드리지 않는지** 두 계정으로
+  확인해야 합니다. publication 제거가 옳은 조치라고 판단했지만, 관측으로
+  확정하지 않았습니다.
+- **`DEFERRABLE` 유니크 제약 + `SET CONSTRAINTS ... DEFERRED` 로 순서 교체가**
+  실제로 위반 없이 통과하는지 확인해야 합니다.
+- **Edge Function을 배포하지 않았고**, Deno 런타임이 이 환경에 없어 타입 체크도
+  하지 못했습니다(esbuild 파싱만 통과). 실제 계정 삭제도 실행하지 않았습니다.
+- **A/B/C 2계정 RLS·Realtime·동시성·계정 삭제 E2E 를 실행하지 않았습니다.**
+
+## 7-5. 최종 검증 결과 (2차 라운드)
+
+| 게이트 | 결과 |
+| --- | --- |
+| `npm run typecheck` | 오류 0 |
+| `npm run lint` | 오류 0, 경고 0 |
+| `npm test` | 152개 통과 / 21개 파일 |
+| `npm run build` | 성공 |
+| `git diff --check` | 이상 없음 |
+| 충돌 마커 스캔 | 없음 |
+| 민감정보 스캔 | 유출 없음 |
+| `npm audit --omit=dev` | high 2건 (위 7-3에서 판정) |
+
+테스트 수가 152개로 동일한 이유: 이번 라운드는 새 테스트를 추가하지 않고
+기존 테스트가 회귀를 잡아내는지 확인하는 데 썼습니다. 실제로 `store.test.tsx` 의
+`pending` 커플 연결 취소 테스트가 1차 수정의 회귀를 잡아냈습니다.
+
+### 아직 테스트로 고정되지 않은 것
+
+- `pending` 커플에서의 기록 쓰기 경로 (기존 테스트는 `coupleId` 자체가 없는
+  경우만 다룹니다)
+- 채널 실패 후 `SUBSCRIBED` 가 오지 않는 시나리오
+- Storage 정리 루프의 중첩 경로 케이스
+- SQL 전체 (`redeem_invitation` 의 기록 durability, deferred 유니크 순서 교체,
+  전체 row 업데이트 대 순서 트리거)

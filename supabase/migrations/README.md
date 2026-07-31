@@ -25,6 +25,7 @@
 | `012_authenticated_core_table_grants.sql` | `authenticated` 역할 테이블 권한 | **필수** |
 | `013_invitation_hardening.sql` | 초대코드 무차별 대입 방어 + 코드 재발급 | **신규 / 원격 미적용** |
 | `014_feature_privacy_and_collaboration.sql` | 일정/여행/주기 RLS, sanitized support, 협업 Realtime·정합성 | **신규 / 원격 미적용** |
+| `015_security_followup.sql` | 초대 우회·경합 차단, 계정 삭제 트랜잭션, 비공개 일정 알림 차단, 여행 URL/순서 제약 | **신규 / 원격 미적용** |
 
 ## 013이 하는 일
 
@@ -46,12 +47,19 @@
    앱은 이 테이블을 직접 읽을 필요가 없습니다(모든 변경은 SECURITY DEFINER 함수
    안에서 일어납니다). 읽기를 막아 해시 탐색과 타 커플 메타데이터 조회를 차단합니다.
 
-### 013 적용 전에도 앱은 동작합니다
+### 013·015 적용 전에는 초대 연결이 동작하지 않습니다 (의도된 동작)
 
-앱은 `redeem_invitation` 이 없으면 자동으로 기존 `consume_invitation` 으로
-되돌아가고, 콘솔에 경고를 남깁니다. 초대코드 재발급 버튼은 "서버에 아직 배포되지
-않았습니다" 라는 안내를 보여줍니다. 즉 **013은 보안상 반드시 필요하지만, 앱이
-깨지지는 않습니다.**
+예전 클라이언트는 `redeem_invitation` 이 없으면 `consume_invitation` 으로
+되돌아갔습니다. 그 fallback은 **제거했습니다.** `consume_invitation` 에는 시도
+횟수 제한이 없어서, fallback이 남아 있으면 013이 막으려는 무차별 대입을 그대로
+다시 열어주기 때문입니다.
+
+이제 클라이언트는 015의 `{ok, couple_id, error_code}` 형태만 받아들이고, 함수가
+없거나(`PGRST202`) 예전의 UUID 반환 형태이면 **연결을 거부하고** "서버에 안전한
+초대 코드 확인 기능이 아직 배포되지 않았습니다" 를 보여줍니다.
+
+즉 015 배포는 초대 기능의 **선행 조건**입니다. 나머지 화면(기록·일정·여행·주기)은
+015 없이도 동작합니다.
 
 ## 014가 하는 일
 
@@ -71,16 +79,55 @@
 6. **연결 해제 복구**: `couple_members`, trip children, support, invalidation을 Realtime에
    추가합니다. raw cycle은 추가하지 않습니다.
 
+## 015가 하는 일
+
+1. **초대 우회 차단**: `consume_invitation` 의 `authenticated` 실행 권한을 회수합니다.
+   013이 만든 제한은 `redeem_invitation` 안에만 있었기 때문에, 클라이언트가
+   `consume_invitation` 을 직접 호출하면 제한이 통째로 우회됐습니다.
+2. **실패 기록이 사라지지 않게**: 예전 `redeem_invitation` 은 실패를 기록한 뒤
+   `RAISE` 로 예외를 던졌고, 그러면 **같은 트랜잭션의 기록도 함께 롤백**됐습니다.
+   → 예상된 실패는 예외 대신 `error_code` 로 반환합니다(반환형이 `JSONB` 로 바뀜).
+   시도 횟수 초과(`rate_limited`)처럼 코드를 조회하기도 전에 결정되는 결과는
+   횟수에 포함하지 않습니다. 포함하면 재시도하는 클라이언트가 자기 잠금을
+   무한히 연장했습니다. "이미 2명" 도 `invalid_or_expired` 로 합칩니다. 구분해서
+   알려주면 추측한 해시가 살아 있는 초대와 맞았다는 사실을 알려주게 됩니다.
+3. **경합 차단**: 초대 사용·재발급·연결 해제·계정 삭제가 모두 `couples` 부모 row를
+   먼저 잠그고, 잠금을 기다린 뒤 멤버십을 다시 확인합니다. 연결 해제와 초대 사용이
+   겹칠 때 한쪽만 활성으로 남는 문제를 막습니다.
+4. **계정 삭제**: `begin/prepare/cancel_account_deletion` (service_role 전용)으로
+   미디어 정리 → 트랜잭션 정리 → auth 삭제 순서를 강제합니다. 공유 일정·여행은
+   **활성 파트너에게만** 넘기고, 남은 사람이 없으면 명시적으로 삭제합니다.
+   (예전에는 이미 연결이 끊긴 상대에게 넘겨서, 아무도 읽을 수 없는 데이터가
+   영구히 남았습니다.)
+5. **비공개 일정 알림 차단**: 무효화 트리거를 공유 일정 변화로 제한하고,
+   **`public.events` 를 Realtime publication에서 제거합니다.** Realtime은 DELETE
+   payload에 RLS를 적용하지 않아서, 트리거만 고쳐도 파트너는 "상대가 방금 비공개
+   일정을 지웠다"는 타이밍을 계속 알 수 있었습니다.
+6. **여행 정합성**: `url` 은 DB에서 `http(s)` 만 허용하고, 항목 순서는 하루 단위
+   유니크 제약 + `reorder_trip_items` 의 permutation 검증으로 고정합니다.
+7. **Storage 경로 고정**: `{couple_id}/{record_id}/{파일명}` 3단만 허용합니다.
+   더 깊은 이름을 허용하면 Storage가 그 중간 단계를 "폴더"로 보고하고
+   `remove()` 가 조용히 무시해서, 계정 삭제 시 폴더를 비울 수 없었습니다.
+
 ## 적용 순서 (사람이 직접)
 
 ```
 1. Supabase 대시보드 → Database → Backups 에서 백업 생성
 2. 스테이징 프로젝트에서 013 실행 후 아래 013 검증
 3. 스테이징 프로젝트에서 014 실행 후 배포 체크리스트의 014 검증
-4. `docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`의 A/B/C 테스트 통과
-5. 운영 프로젝트에 013 → 014 순서로 실행
-6. 운영에서 초대/일정/여행/주기/연결 해제 흐름 재확인
+4. 스테이징 프로젝트에서 015 실행 후 아래 015 검증
+5. Supabase 대시보드 → Settings → API → "Reload schema cache" 실행
+   (015가 redeem_invitation 의 반환형을 바꾸므로 PostgREST가 새 형태를
+    인식해야 합니다. 이 단계를 빼면 클라이언트가 fail closed 로 거부합니다.)
+6. `supabase functions deploy delete-account` (015 이후에)
+7. `docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`의 A/B/C 테스트 통과
+8. 운영 프로젝트에 013 → 014 → 015 순서로 실행하고 5~6단계를 반복
+9. 운영에서 초대/일정/여행/주기/연결 해제/계정 삭제 흐름 재확인
 ```
+
+> ⚠️ 015는 `trip_items.url` 에 `http(s)` 가 아닌 값이 하나라도 있으면 **전체가
+> 취소됩니다** (의도된 동작 — 데이터를 조용히 버리지 않습니다). 실행 전에 파일
+> 안의 탐지 쿼리를 먼저 돌려 해당 행을 정리하세요.
 
 실행 방법: Supabase 대시보드 → **SQL Editor** → 파일 내용 전체 붙여넣기 → Run.
 파일은 `BEGIN; ... COMMIT;` 으로 감싸져 있어 중간에 실패하면 전체가 취소됩니다.
@@ -108,6 +155,60 @@ SELECT has_table_privilege('authenticated', 'public.invitation_attempts', 'SELEC
 SELECT has_table_privilege('authenticated', 'public.invitation_attempts', 'INSERT');
 ```
 
+## 015 검증 쿼리
+
+```sql
+-- 1. consume_invitation 우회 경로가 닫혔는지 (false 여야 합니다)
+SELECT has_function_privilege('authenticated', 'public.consume_invitation(text)', 'EXECUTE');
+
+-- 2. redeem_invitation 이 JSONB 를 반환하는지 ('jsonb' 여야 합니다)
+SELECT pg_catalog.format_type(prorettype, NULL)
+FROM pg_proc WHERE proname = 'redeem_invitation';
+
+-- 3. 계정 삭제 RPC 는 service_role 만 (authenticated 는 모두 false)
+SELECT has_function_privilege('authenticated', 'public.begin_account_deletion(uuid,uuid[])', 'EXECUTE');
+SELECT has_function_privilege('authenticated', 'public.prepare_account_deletion(uuid,uuid[])', 'EXECUTE');
+SELECT has_function_privilege('authenticated', 'public.cancel_account_deletion(uuid)', 'EXECUTE');
+
+-- 4. events 가 Realtime publication 에서 빠졌는지 (0 행이어야 합니다)
+SELECT tablename FROM pg_publication_tables
+WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'events';
+
+-- 5. 무효화 채널은 남아 있어야 합니다 (1 행)
+SELECT tablename FROM pg_publication_tables
+WHERE pubname = 'supabase_realtime' AND schemaname = 'public'
+  AND tablename = 'collaboration_invalidations';
+
+-- 6. 원본 주기 기록은 여전히 publication 밖 (0 행)
+SELECT tablename FROM pg_publication_tables
+WHERE pubname = 'supabase_realtime' AND schemaname = 'public'
+  AND tablename IN ('cycle_entries','cycle_settings');
+
+-- 7. 제약/인덱스가 생성되었는지 (3 행)
+SELECT conname FROM pg_constraint
+WHERE conname IN ('trip_items_http_url_check','trip_items_unique_day_order');
+SELECT indexname FROM pg_indexes WHERE indexname = 'idx_invitation_codes_one_unused_hash';
+
+-- 8. 사용되지 않은 초대 해시가 하나뿐인지 (모든 행의 count 가 1)
+SELECT code_hash, count(*) FROM public.invitation_codes
+WHERE used = false GROUP BY code_hash HAVING count(*) > 1;
+-- 0 행이어야 합니다.
+```
+
+### 스테이징에서 반드시 사람이 확인할 것
+
+정적 분석으로는 판단할 수 없어 실제 프로젝트에서만 확인 가능한 항목입니다.
+
+- `begin_account_deletion` 의 `LOCK TABLE storage.objects IN SHARE MODE` 가
+  권한 오류(`42501`) 없이 통과하는지. 이 테이블은 `supabase_storage_admin`
+  소유이고, 잠금이 유지되는 동안 프로젝트 전체 Storage 메타데이터 쓰기가 대기합니다.
+- 비공개 일정을 A가 삭제할 때 B의 채널이 반응하지 **않는지** (4번 쿼리와 짝).
+- `reorder_trip_items` 로 같은 날 두 항목의 순서를 바꿀 때 유니크 제약 위반이
+  나지 않는지 (`DEFERRABLE` + `SET CONSTRAINTS ... DEFERRED` 동작 확인).
+- 제목만 수정하는 저장이 `Trip item order must be changed through
+  reorder_trip_items` 없이 성공하는지.
+- 계정 삭제 후 상대의 공유 일정·여행이 남아 있고 열람 가능한지.
+
 ## 014 롤백 주의
 
 014는 새 테이블·column·정책·publication을 함께 변경하므로 먼저 백업으로 복원하는
@@ -118,6 +219,18 @@ SELECT has_table_privilege('authenticated', 'public.invitation_attempts', 'INSER
 - `event_type='date'` 행을 변환하기 전에 예전 constraint를 복원하지 마세요.
 - support/invalidation 테이블 삭제 전 필요한 감사 데이터를 백업하세요.
 - 원격 적용·롤백 모두 아직 실행되지 않았습니다.
+
+## 015 롤백 주의
+
+상세 순서는 `015_security_followup.sql` 파일 하단에 있습니다. 특히:
+
+- **`consume_invitation` 의 `authenticated` 실행 권한은 되돌리지 마세요.**
+  그 회수를 롤백하면 초대코드 시도 제한 우회가 다시 열립니다.
+- 015를 되돌리면 클라이언트도 함께 되돌려야 합니다. 현재 클라이언트는 015의
+  `JSONB` 형태만 받아들이고 예전 형태는 거부합니다.
+- 순서 정규화와 모호한 초대코드 무효화는 데이터 변경이라 되돌아가지 않습니다.
+- `public.events` 를 publication 에 다시 넣으면 비공개 일정 삭제 타이밍 유출도
+  함께 돌아옵니다.
 
 ## 정리 작업 (선택)
 

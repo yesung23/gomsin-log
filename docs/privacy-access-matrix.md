@@ -50,3 +50,39 @@ GomsinLog는 프라이빗 커플 일기장으로서 철저한 데이터 격리�
   사라질 수 있으므로, 민감 본문이 없는 `collaboration_invalidations`가 재조회를 알립니다.
 - trip item 날짜 검사는 parent row를 `FOR UPDATE`로 잠그고, reorder는 단일 RPC로
   수행해 concurrent range 변경이나 부분 순서 저장을 막습니다.
+
+### F. 비공개 일정의 "활동 시각" 유출 방어 (015)
+
+내용이 새지 않아도 **언제 무엇을 했는지**는 그 자체로 사생활입니다.
+
+- Realtime은 INSERT/UPDATE에는 구독자의 SELECT 정책을 적용하지만, **DELETE
+  payload에는 RLS를 적용하지 않습니다.** 지워진 행은 replica identity 열만 담고
+  있어서 필터링될 내용이 없습니다.
+- 그래서 `public.events` 를 구독하는 파트너는, 작성자가 **비공개** 일정을 지울
+  때마다 해석할 수 없는 메시지를 받고 재조회로 반응했습니다. 내용은 못 보지만
+  "상대가 방금 비공개 일정을 하나 지웠다"는 사실과 시각은 알 수 있었습니다.
+- **조치**: 015가 `public.events` 를 publication에서 제거하고, 클라이언트도 그
+  테이블 직접 구독을 없앴습니다. 일정 알림은 트리거가 서버에서 필터링하는
+  `collaboration_invalidations` 만 통과합니다. 그 트리거는 공유 일정의 변경과
+  공유↔비공개 전환에만 기록하고, 비공개→비공개 활동에는 아무것도 남기지 않습니다.
+- 같은 이유로 `cycle_entries` / `cycle_settings` 는 publication에 **넣지 않습니다.**
+
+### G. 첨부 파일의 출처 신뢰 금지
+
+- DB의 `attachments` 에 담긴 임의의 `http(s)` URL을 그대로 렌더링하면, 그 주소가
+  tracking pixel로 동작해 열람 시각·IP·User-Agent가 외부로 나갑니다.
+- **조치**: 읽기 시점에 `{couple_id}/{record_id}/{파일명}` 형태의 정규 경로만
+  인정하고, DB에 들어 있던 `url` 값은 **버립니다.** 표시용 URL은 매번 새로
+  발급한 signed URL만 사용합니다. 서명에 실패하면 URL 없이 반환되어 아무것도
+  렌더링되지 않습니다.
+- Storage INSERT 정책도 같은 3단 경로만 허용합니다(015). 더 깊은 이름을 허용하면
+  계정 삭제 시 폴더를 비울 수 없게 되는 문제도 함께 생깁니다.
+
+### H. 로컬 저장소에는 기기 설정만
+
+- 인증된 세션에서 앱이 `localStorage` 에 저장하는 것은 `widgetLayout`,
+  `hasSeenInstallPrompt`, `theme` 뿐입니다. 프로필·커플·초대·복무·연락 설정 등
+  식별 가능한 정보는 저장하지 않습니다.
+- 남은 항목: Supabase 클라이언트의 `persistSession: true` 가 access/refresh 토큰을
+  `localStorage` 에 유지합니다(access token 클레임에 이메일 포함). 로그인 유지를
+  위해 필요한 동작이라 **수락하고 기록**합니다.

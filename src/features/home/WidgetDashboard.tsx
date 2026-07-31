@@ -109,14 +109,12 @@ export function WidgetDashboard() {
                 <Plus size={22} strokeWidth={1.5} />
               </button>
               
-              {/* Notification Button */}
-              <button
-                className="w-11 h-11 flex items-center justify-center text-foreground hover:bg-muted/20 rounded-full active:scale-95 transition-all relative"
-                aria-label="알림 센터"
-              >
-                <Bell size={24} strokeWidth={1.5} />
-                <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-coral rounded-full shadow-[0_0_0_2px_var(--background)]" />
-              </button>
+              {/*
+                A notification-centre button used to sit here with no onClick
+                handler and a permanently lit unread dot. There is no
+                notification system yet, so it has been removed rather than
+                left as a dead control that implies unread activity.
+              */}
 
               {/* Settings Button */}
               <button

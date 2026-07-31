@@ -1,5 +1,5 @@
 import React from 'react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { WIDGET_REGISTRY } from '@/lib/widgets';
 import { X, PlusCircle } from 'lucide-react';
 

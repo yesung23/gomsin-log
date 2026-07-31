@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { Settings, Plus, Bell } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {

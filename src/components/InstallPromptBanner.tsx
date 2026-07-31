@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Share, PlusSquare, X, Smartphone, Download } from 'lucide-react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 
 export function InstallPromptBanner() {
   const { state, setHasSeenInstallPrompt } = useStore();

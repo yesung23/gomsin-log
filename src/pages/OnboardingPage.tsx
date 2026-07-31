@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import {
   authRepository,
   createCoupleInvitation,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { MobileShell } from '@/components/MobileShell';
 import { 
   Calendar as CalendarIcon, Heart, ShieldCheck, Clock, Plus, 

@@ -85,7 +85,8 @@ vi.mock('@/lib/trips', () => ({
   fetchTripsFromDB: vi.fn().mockResolvedValue([]),
 }));
 
-const { StoreProvider, useStore } = await import('@/lib/store');
+const { StoreProvider } = await import('@/lib/store');
+const { useStore } = await import('@/lib/useStore');
 const STORE_KEY = 'gomsinlog.state.v2';
 
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;

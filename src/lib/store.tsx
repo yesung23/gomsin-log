@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AppState,
   DailyRecord,
@@ -30,6 +30,7 @@ import {
   resolveAttachmentUrls,
   classifyMediaFile,
 } from '@/lib/records';
+import { StoreContext } from '@/lib/storeContext';
 
 /** Which slice of shared state a realtime notification affects. */
 type SyncSlice = 'records' | 'events' | 'trips';
@@ -54,7 +55,7 @@ import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
 
-export class LocalStorageRepository implements ILogRepository {
+class LocalStorageRepository implements ILogRepository {
   isConfigured(): boolean {
     return true;
   }
@@ -158,34 +159,6 @@ function carryOverDevicePrefs(prev: AppState): Pick<AppState, 'widgetLayout' | '
   };
 }
 
-interface StoreContextType {
-  state: AppState;
-  isReady: boolean;
-  updateProfile: (profileUpdates: Partial<UserProfile>) => void;
-  addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
-  addRecordWithMedia: (
-    record: Omit<DailyRecord, 'id' | 'createdAt'>,
-    files: File[],
-  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string }>;
-  updateRecord: (id: string, updates: Partial<DailyRecord>) => Promise<boolean>;
-  deleteRecord: (id: string) => Promise<boolean>;
-  addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
-  deleteEvent: (id: string) => Promise<boolean>;
-  switchRole: () => void;
-  disconnect: () => Promise<boolean>;
-  deleteAccount: () => Promise<{ ok: boolean; warnings: string[] }>;
-  signOut: () => Promise<void>;
-  setSetupComplete: (complete: boolean) => void;
-  setOnboardingStep: (step: number) => void;
-  setHighlightedRecordId: (id?: string) => void;
-  setAuthenticatedUser: (user: AuthUser | null) => void;
-  startDemo: () => void;
-  setWidgetLayout: (layout: string[]) => void;
-  setHasSeenInstallPrompt: (seen: boolean) => void;
-  setTheme: (theme: 'light' | 'dark') => void;
-}
-
-const StoreContext = createContext<StoreContextType | null>(null);
 const localRepository = new LocalStorageRepository();
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
@@ -1157,12 +1130,4 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       {children}
     </StoreContext.Provider>
   );
-}
-
-export function useStore() {
-  const context = useContext(StoreContext);
-  if (!context) {
-    throw new Error('useStore must be used within a StoreProvider');
-  }
-  return context;
 }

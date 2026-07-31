@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { ChevronLeft, Plus, Map, Calendar, Plane } from 'lucide-react';
 import { formatLocalDate } from '@/lib/utils';
 import { saveTripToDB } from '@/lib/trips';

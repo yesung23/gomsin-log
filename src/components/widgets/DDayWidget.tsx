@@ -1,5 +1,5 @@
 import React from 'react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { Heart, Clock, Shield } from 'lucide-react';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';

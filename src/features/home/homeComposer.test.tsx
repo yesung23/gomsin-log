@@ -52,7 +52,7 @@ function makeState(): AppState {
   };
 }
 
-vi.mock('@/lib/store', () => ({
+vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: makeState(),
     isReady: true,

@@ -29,6 +29,7 @@ import {
   classifyMediaFile,
 } from '@/lib/records';
 import { StoreContext } from '@/lib/storeContext';
+import type { SharedSyncStatus } from '@/lib/storeContext';
 
 /** Which slice of shared state a realtime notification affects. */
 type SyncSlice = 'records' | 'events' | 'trips';
@@ -52,6 +53,10 @@ function workspaceRefMatches(
 }
 /** Coalesce realtime bursts into a single refetch. */
 const REALTIME_DEBOUNCE_MS = 250;
+/** First HTTP recovery attempt after the couple channel fails. */
+const REALTIME_RECOVERY_BASE_DELAY_MS = 2_000;
+/** Ceiling for the recovery backoff, which also becomes the fallback poll rate. */
+const REALTIME_RECOVERY_MAX_DELAY_MS = 30_000;
 /** Stop polling for the partner after roughly 15 minutes. */
 const PARTNER_POLL_MAX_ATTEMPTS = 26;
 /** Must match --background in styles/index.css for each theme. */
@@ -206,6 +211,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const pendingDisconnectRef = useRef<ActiveWorkspace | null>(null);
   /** Orders membership checks so an older response cannot undo a newer verdict. */
   const membershipReconciliationRef = useRef(0);
+  /**
+   * How trustworthy the shared workspace on screen currently is.
+   *
+   * `live`        - the realtime channel is subscribed and the last check passed.
+   * `delayed`     - the channel is down but shared data was re-read over HTTP,
+   *                 so it is current as of the last refresh and will not update
+   *                 on its own.
+   * `unavailable` - authorization could not be confirmed, so shared content is
+   *                 hidden until a check succeeds.
+   *
+   * Kept outside `AppState` on purpose: it describes the transport and the
+   * authorization check, not user data, and must never be persisted.
+   */
+  const [sharedSyncStatus, setSharedSyncStatus] = useState<SharedSyncStatus>('live');
+  /** Lets a recovery attempt started from the UI reuse the effect's retry path. */
+  const retrySharedAccessRef = useRef<(() => Promise<boolean>) | null>(null);
+  /** False once the couple channel reports a terminal transport failure. */
+  const realtimeHealthyRef = useRef(true);
 
   const replaceStateImmediately = useCallback((nextState: AppState) => {
     stateRef.current = nextState;
@@ -536,6 +559,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const current = stateRef.current;
     membershipReconciliationRef.current += 1;
     quarantinedWorkspaceRef.current = expected;
+    setSharedSyncStatus('unavailable');
     const nextState: AppState = {
       ...current,
       highlightedRecordId: undefined,
@@ -565,6 +589,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     membershipReconciliationRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     pendingDisconnectRef.current = null;
+    // There is no shared workspace left to be out of sync with.
+    setSharedSyncStatus('live');
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
     const nextState: AppState = {
@@ -649,6 +675,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         trips: reconcileParentTrips(tripsResult.trips),
       };
       quarantinedWorkspaceRef.current = null;
+      // Shared data is authoritative again. Whether it will keep itself up to
+      // date depends on the channel, which the caller tracks separately.
+      setSharedSyncStatus(realtimeHealthyRef.current ? 'live' : 'delayed');
       replaceStateImmediately(nextState);
       return true;
     } catch (error) {
@@ -781,6 +810,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? reconcileSharedAccess(workspace)
         : Promise.resolve(false);
 
+    /**
+     * Keep trying to re-establish the shared workspace after the channel fails.
+     *
+     * Reconciliation runs over HTTP, so it still succeeds where WebSockets are
+     * blocked entirely: the couple's data comes back and is simply marked
+     * `delayed` instead of leaving the user on a blank screen forever. The poll
+     * both refreshes that data and re-checks membership, so a disconnect during
+     * an outage is still noticed.
+     */
+    let recoveryTimer: number | undefined;
+    let recoveryAttempt = 0;
+    const clearRecovery = () => {
+      if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer);
+      recoveryTimer = undefined;
+    };
+    const scheduleRecovery = () => {
+      if (disposed || recoveryTimer !== undefined || !isCurrentActiveCouple()) return;
+      const delay = Math.min(
+        REALTIME_RECOVERY_MAX_DELAY_MS,
+        REALTIME_RECOVERY_BASE_DELAY_MS * 2 ** recoveryAttempt,
+      );
+      recoveryAttempt += 1;
+      recoveryTimer = window.setTimeout(() => {
+        recoveryTimer = undefined;
+        void (async () => {
+          const recovered = await reconcileOwnMembership();
+          if (disposed || !isCurrentActiveCouple()) return;
+          // Keep polling while the transport is down even after a successful
+          // read, because nothing else will deliver the partner's changes.
+          if (recovered) recoveryAttempt = 0;
+          if (!realtimeHealthyRef.current) scheduleRecovery();
+        })();
+      }, delay);
+    };
+    retrySharedAccessRef.current = async () => {
+      clearRecovery();
+      recoveryAttempt = 0;
+      const recovered = await reconcileOwnMembership();
+      if (!disposed && !realtimeHealthyRef.current) scheduleRecovery();
+      return recovered;
+    };
+
     // One channel covers the shared tables and the current user's own
     // membership row. A partner disconnect updates that row and revokes access.
     const channel = client
@@ -817,10 +888,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         () => scheduleRefresh('trips'),
       )
       .subscribe((status) => {
-        // A healthy subscription still proves only transport health. Membership
-        // and all slices are re-established authoritatively before revealing data.
+        // A healthy subscription proves only transport health, so membership and
+        // every slice are still re-read authoritatively. What this deliberately
+        // does *not* do is blank the screen first: the content was already on
+        // screen before, no new content can appear without passing RLS, and
+        // reconciliation purges or quarantines the moment the answer says so.
+        // Pre-emptive clearing made the timeline flash empty on every foreground.
         if (status === 'SUBSCRIBED') {
-          quarantineSharedAccess(workspace);
+          realtimeHealthyRef.current = true;
+          clearRecovery();
+          recoveryAttempt = 0;
           void reconcileOwnMembership();
           return;
         }
@@ -828,15 +905,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           !disposed
           && (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED')
         ) {
+          // Live updates have stopped, so partner changes and a partner-initiated
+          // disconnect would both go unnoticed. Hide shared content until a check
+          // succeeds, then keep re-checking over HTTP.
+          realtimeHealthyRef.current = false;
           quarantineSharedAccess(workspace);
+          scheduleRecovery();
         }
       });
 
     // Realtime messages are dropped while a mobile browser is backgrounded, so
-    // verify membership first and only refresh shared slices if it is still active.
+    // re-verify membership on return; reconciliation purges if it was revoked.
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      quarantineSharedAccess(workspace);
       void reconcileOwnMembership();
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -844,6 +925,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       disposed = true;
+      retrySharedAccessRef.current = null;
+      clearRecovery();
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('online', handleVisibility);
       timers.forEach((timer) => window.clearTimeout(timer));
@@ -1758,11 +1841,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, theme }));
   };
 
+  /**
+   * Manual recovery for the shared workspace.
+   *
+   * Only meaningful while a couple channel is mounted; without one there is
+   * nothing to re-verify and the shared workspace is not being withheld.
+   */
+  const retrySharedAccess = async (): Promise<boolean> => {
+    const retry = retrySharedAccessRef.current;
+    if (!retry) return false;
+    return retry();
+  };
+
   return (
     <StoreContext.Provider
       value={{
         state,
         isReady: isHydrated && isAuthChecked,
+        sharedSyncStatus,
+        retrySharedAccess,
         updateProfile,
         addRecord,
         addRecordWithMedia,

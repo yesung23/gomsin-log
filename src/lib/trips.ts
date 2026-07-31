@@ -261,16 +261,23 @@ export async function saveTripItemToDB(item: Omit<TripItem, 'id'>): Promise<Trip
   return mapTripItem(data);
 }
 
+/**
+ * Edit an item's own fields only.
+ *
+ * `trip_id`, `item_date` and `sort_order` are deliberately absent. The database
+ * rejects a statement that names them outside `reorder_trip_items`, and it fires
+ * on the columns a statement mentions rather than on the values changing, so
+ * echoing a cached `sort_order` back made a plain title edit fail whenever the
+ * cached rank had gone stale (the partner reordered the day, or a local
+ * optimistic reorder was rolled back). Placement is owned by the reorder RPC.
+ */
 export async function updateTripItemInDB(item: TripItem): Promise<TripItem | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.from('trip_items').update({
-    trip_id: item.tripId,
-    item_date: item.itemDate,
     title: item.title,
     category: item.category,
     memo: item.memo || null,
     url: item.url || null,
-    sort_order: item.sortOrder,
     updated_at: new Date().toISOString(),
   }).eq('id', item.id).select().maybeSingle();
   if (error || !data) {

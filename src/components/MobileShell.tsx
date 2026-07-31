@@ -3,6 +3,7 @@ import { Home, BookOpen, Heart, User } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { InstallPromptBanner } from '@/components/InstallPromptBanner';
+import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 
 const TABS = [
   {
@@ -33,7 +34,12 @@ export function MobileShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
       <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
-        <main className="flex-1 pb-24 overflow-y-auto">{children}</main>
+        <main className="flex-1 pb-24 overflow-y-auto">
+          {/* Shown above every tab, because a stale or withheld shared workspace
+              affects the timeline, the calendar and the trip list alike. */}
+          <SharedSyncBanner />
+          {children}
+        </main>
 
         {/* iOS Safari Standalone Install Banner Prompt */}
         <InstallPromptBanner />

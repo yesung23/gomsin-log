@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckSquare, ExternalLink, LoaderCircle,
@@ -55,11 +55,28 @@ export function TripDetailPage() {
   const activeCouple = Boolean(
     userId && coupleId && state.profile.couple.connected && state.profile.couple.status === 'active',
   );
-  const tripAccessKey = activeCouple ? `${userId}:${coupleId}` : '';
+  const tripAccessKey = activeCouple && id ? `${userId}:${coupleId}:${id}` : '';
   const tripAccessKeyRef = useRef(tripAccessKey);
+  const tripAccessGenerationRef = useRef(0);
+  if (tripAccessKeyRef.current !== tripAccessKey) {
+    tripAccessKeyRef.current = tripAccessKey;
+    tripAccessGenerationRef.current += 1;
+  }
+  const captureTripScope = useCallback(
+    () => ({ key: tripAccessKeyRef.current, generation: tripAccessGenerationRef.current }),
+    [],
+  );
+  const isCurrentTripScope = useCallback(
+    (scope: { key: string; generation: number }) =>
+      scope.key === tripAccessKeyRef.current
+      && scope.generation === tripAccessGenerationRef.current
+      && scope.key !== '',
+    [],
+  );
   const latestGlobalTripsRef = useRef(state.trips);
   const parentGlobalSnapshotRef = useRef<Trip[] | null>(null);
-  tripAccessKeyRef.current = tripAccessKey;
+  const parentLoadGenerationRef = useRef(0);
+  const childLoadGenerationRef = useRef(0);
   latestGlobalTripsRef.current = state.trips;
 
   const [trip, setTrip] = useState<Trip | null>(null);
@@ -85,6 +102,27 @@ export function TripDetailPage() {
   const [pendingChecklistIds, setPendingChecklistIds] = useState<Set<string>>(new Set());
   const [childActionError, setChildActionError] = useState<string | null>(null);
 
+  useLayoutEffect(() => {
+    // React Router reuses this component when only :id changes. Clear every
+    // route-owned value before paint so trip A cannot remain interactive on B.
+    parentGlobalSnapshotRef.current = null;
+    parentLoadGenerationRef.current += 1;
+    childLoadGenerationRef.current += 1;
+    setTrip(null);
+    setItems([]);
+    setChecklists([]);
+    setChildState('loading');
+    setParentState(!userId ? 'forbidden' : !activeCouple ? 'disconnected' : !id ? 'not-found' : 'loading');
+    setShowTripModal(false);
+    setShowItemModal(false);
+    setEditingItemId(null);
+    setTripError(null);
+    setItemError(null);
+    setChildActionError(null);
+    setPendingItemIds(new Set());
+    setPendingChecklistIds(new Set());
+  }, [activeCouple, id, tripAccessKey, userId]);
+
   const loadParent = useCallback(async () => {
     parentGlobalSnapshotRef.current = null;
     if (!userId) {
@@ -105,11 +143,15 @@ export function TripDetailPage() {
       return;
     }
     setParentState('loading');
-    const requestKey = tripAccessKey;
+    const loadGeneration = ++parentLoadGenerationRef.current;
+    const requestScope = captureTripScope();
     const globalSnapshot = latestGlobalTripsRef.current;
     try {
       const result = await fetchTripResultFromDB(id);
-      if (tripAccessKeyRef.current !== requestKey) return;
+      if (
+        !isCurrentTripScope(requestScope)
+        || parentLoadGenerationRef.current !== loadGeneration
+      ) return;
       if (latestGlobalTripsRef.current !== globalSnapshot) {
         const updated = latestGlobalTripsRef.current.find(
           (entry) => entry.id === id && entry.coupleId === coupleId,
@@ -137,22 +179,29 @@ export function TripDetailPage() {
       setTrip(result.trip);
       setParentState('ready');
     } catch (error) {
-      if (tripAccessKeyRef.current !== requestKey) return;
+      if (
+        !isCurrentTripScope(requestScope)
+        || parentLoadGenerationRef.current !== loadGeneration
+      ) return;
       console.error('Failed to load trip:', error);
       setParentState('error');
     }
-  }, [activeCouple, coupleId, id, tripAccessKey, userId]);
+  }, [activeCouple, captureTripScope, coupleId, id, isCurrentTripScope, userId]);
 
   const loadChildren = useCallback(async () => {
     if (!id || !activeCouple) return;
     setChildState('loading');
-    const requestKey = tripAccessKey;
+    const loadGeneration = ++childLoadGenerationRef.current;
+    const requestScope = captureTripScope();
     try {
       const [itemResult, checklistResult] = await Promise.all([
         fetchTripItemsResultFromDB(id),
         fetchTripChecklistsResultFromDB(id),
       ]);
-      if (tripAccessKeyRef.current !== requestKey) return;
+      if (
+        !isCurrentTripScope(requestScope)
+        || childLoadGenerationRef.current !== loadGeneration
+      ) return;
       if (!itemResult.ok || !checklistResult.ok) {
         const forbidden = (!itemResult.ok && itemResult.reason === 'forbidden')
           || (!checklistResult.ok && checklistResult.reason === 'forbidden');
@@ -163,11 +212,14 @@ export function TripDetailPage() {
       setChecklists(checklistResult.checklists);
       setChildState('ready');
     } catch (error) {
-      if (tripAccessKeyRef.current !== requestKey) return;
+      if (
+        !isCurrentTripScope(requestScope)
+        || childLoadGenerationRef.current !== loadGeneration
+      ) return;
       console.error('Failed to load trip details:', error);
       setChildState('error');
     }
-  }, [activeCouple, id, tripAccessKey]);
+  }, [activeCouple, captureTripScope, id, isCurrentTripScope]);
 
   useEffect(() => {
     void loadParent();
@@ -203,19 +255,30 @@ export function TripDetailPage() {
     const client = supabase;
     if (!client || !id || !activeCouple || !userId || !coupleId || parentState !== 'ready') return;
     let timer: number | undefined;
+    const channelScope = captureTripScope();
     const refresh = () => {
+      if (!isCurrentTripScope(channelScope)) return;
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => void loadChildren(), 200);
     };
     const channel = client.channel(`trip-detail:${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trip_items', filter: `trip_id=eq.${id}` }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trip_checklists', filter: `trip_id=eq.${id}` }, refresh)
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED' && isCurrentTripScope(channelScope)) refresh();
+      });
+    const recover = () => {
+      if (document.visibilityState === 'visible' && isCurrentTripScope(channelScope)) refresh();
+    };
+    document.addEventListener('visibilitychange', recover);
+    window.addEventListener('online', recover);
     return () => {
       if (timer) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', recover);
+      window.removeEventListener('online', recover);
       void client.removeChannel(channel);
     };
-  }, [activeCouple, coupleId, id, loadChildren, parentState, userId]);
+  }, [activeCouple, captureTripScope, coupleId, id, isCurrentTripScope, loadChildren, parentState, tripAccessKey, userId]);
 
   const dates = useMemo(
     () => trip ? inclusiveTripDates(trip.startDate, trip.endDate) : [],
@@ -264,6 +327,7 @@ export function TripDetailPage() {
       setTripError(validationError);
       return;
     }
+    const operationScope = captureTripScope();
     setIsSavingTrip(true);
     setTripError(null);
     try {
@@ -273,6 +337,7 @@ export function TripDetailPage() {
         endDate: tripDraft.endDate,
         status: tripDraft.status,
       });
+      if (!isCurrentTripScope(operationScope)) return;
       if (!saved) {
         setTripError('여행 정보를 수정하지 못했어요. 다시 시도해 주세요.');
         return;
@@ -281,15 +346,17 @@ export function TripDetailPage() {
       setShowTripModal(false);
       toast.success('여행 정보가 수정되었습니다.');
     } finally {
-      setIsSavingTrip(false);
+      if (isCurrentTripScope(operationScope)) setIsSavingTrip(false);
     }
   };
 
   const handleDeleteTrip = async () => {
     if (!trip || isDeletingTrip || !confirm('이 여행과 모든 일정, 준비물을 삭제하시겠습니까?')) return;
+    const operationScope = captureTripScope();
     setIsDeletingTrip(true);
     try {
       const deleted = await deleteTripFromDB(trip.id);
+      if (!isCurrentTripScope(operationScope)) return;
       if (!deleted) {
         toast.error('여행을 삭제하지 못했어요. 다시 시도해 주세요.');
         return;
@@ -297,7 +364,7 @@ export function TripDetailPage() {
       toast.success('여행이 삭제되었습니다.');
       navigate('/trips');
     } finally {
-      setIsDeletingTrip(false);
+      if (isCurrentTripScope(operationScope)) setIsDeletingTrip(false);
     }
   };
 
@@ -325,6 +392,7 @@ export function TripDetailPage() {
       setItemError(urlError);
       return;
     }
+    const operationScope = captureTripScope();
     setIsSavingItem(true);
     setItemError(null);
     const existing = editingItemId ? items.find((item) => item.id === editingItemId) : undefined;
@@ -341,6 +409,7 @@ export function TripDetailPage() {
       const saved = existing
         ? await updateTripItemInDB({ id: existing.id, ...input })
         : await saveTripItemToDB(input);
+      if (!isCurrentTripScope(operationScope)) return;
       if (!saved) {
         setItemError('일정을 저장하지 못했어요. 다시 시도해 주세요.');
         return;
@@ -351,15 +420,17 @@ export function TripDetailPage() {
       setShowItemModal(false);
       toast.success(existing ? '일정이 수정되었습니다.' : '일정이 추가되었습니다.');
     } finally {
-      setIsSavingItem(false);
+      if (isCurrentTripScope(operationScope)) setIsSavingItem(false);
     }
   };
 
   const handleDeleteItem = async (itemId: string) => {
     if (pendingItemIds.has(itemId)) return;
+    const operationScope = captureTripScope();
     setItemPending(itemId, true);
     try {
       const deleted = await deleteTripItemFromDB(itemId);
+      if (!isCurrentTripScope(operationScope)) return;
       if (!deleted) {
         toast.error('일정을 삭제하지 못했어요.');
         return;
@@ -367,7 +438,7 @@ export function TripDetailPage() {
       setItems((current) => current.filter((item) => item.id !== itemId));
       toast.success('일정이 삭제되었습니다.');
     } finally {
-      setItemPending(itemId, false);
+      if (isCurrentTripScope(operationScope)) setItemPending(itemId, false);
     }
   };
 
@@ -376,6 +447,7 @@ export function TripDetailPage() {
     const moving = currentDayItems[index];
     const target = currentDayItems[targetIndex];
     if (!moving || !target || pendingItemIds.has(moving.id) || pendingItemIds.has(target.id)) return;
+    const operationScope = captureTripScope();
     const movingOrder = moving.sortOrder;
     const targetOrder = target.sortOrder;
     setItems((current) => current.map((item) => {
@@ -389,8 +461,10 @@ export function TripDetailPage() {
       { id: moving.id, sortOrder: targetOrder },
       { id: target.id, sortOrder: movingOrder },
     ]);
+    if (!isCurrentTripScope(operationScope)) return;
     if (!saved) {
       await loadChildren();
+      if (!isCurrentTripScope(operationScope)) return;
       toast.error('순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
     }
     setItemPending(moving.id, false);
@@ -399,10 +473,12 @@ export function TripDetailPage() {
 
   const handleAddChecklist = async () => {
     if (!trip || !newChecklistName.trim() || isAddingChecklist) return;
+    const operationScope = captureTripScope();
     setIsAddingChecklist(true);
     setChildActionError(null);
     try {
       const saved = await saveTripChecklistToDB(trip.id, newChecklistName.trim());
+      if (!isCurrentTripScope(operationScope)) return;
       if (!saved) {
         setChildActionError('준비물을 추가하지 못했어요.');
         return;
@@ -410,17 +486,19 @@ export function TripDetailPage() {
       setChecklists((current) => [...current, saved]);
       setNewChecklistName('');
     } finally {
-      setIsAddingChecklist(false);
+      if (isCurrentTripScope(operationScope)) setIsAddingChecklist(false);
     }
   };
 
   const handleToggleChecklist = async (item: TripChecklist) => {
     if (pendingChecklistIds.has(item.id)) return;
+    const operationScope = captureTripScope();
     const nextCompleted = !item.completed;
     setChildActionError(null);
     setChecklistPending(item.id, true);
     setChecklists((current) => current.map((entry) => entry.id === item.id ? { ...entry, completed: nextCompleted } : entry));
     const saved = await toggleTripChecklistInDB(item.id, nextCompleted);
+    if (!isCurrentTripScope(operationScope)) return;
     if (!saved) {
       setChecklists((current) => current.map((entry) => entry.id === item.id ? { ...entry, completed: item.completed } : entry));
       const message = '체크 상태를 저장하지 못해 이전 상태로 되돌렸어요.';
@@ -432,17 +510,19 @@ export function TripDetailPage() {
 
   const handleDeleteChecklist = async (checklistId: string) => {
     if (pendingChecklistIds.has(checklistId)) return;
+    const operationScope = captureTripScope();
     setChecklistPending(checklistId, true);
     setChildActionError(null);
     try {
       const deleted = await deleteTripChecklistFromDB(checklistId);
+      if (!isCurrentTripScope(operationScope)) return;
       if (!deleted) {
         setChildActionError('준비물을 삭제하지 못했어요.');
         return;
       }
       setChecklists((current) => current.filter((entry) => entry.id !== checklistId));
     } finally {
-      setChecklistPending(checklistId, false);
+      if (isCurrentTripScope(operationScope)) setChecklistPending(checklistId, false);
     }
   };
 

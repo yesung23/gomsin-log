@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { HeartHandshake, Loader2, Radio, RotateCcw, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -37,6 +37,15 @@ function failureMessage(state: Extract<LoadState, 'unauthenticated' | 'forbidden
   return '응원 신호를 불러오지 못했어요.';
 }
 
+function nextKoreaMidnightMs(nowMs: number): number {
+  const korea = new Date(nowMs + 9 * 60 * 60 * 1000);
+  return Date.UTC(
+    korea.getUTCFullYear(),
+    korea.getUTCMonth(),
+    korea.getUTCDate() + 1,
+  ) - 9 * 60 * 60 * 1000;
+}
+
 export function CycleSupportSection({
   role,
   authenticated,
@@ -45,7 +54,24 @@ export function CycleSupportSection({
   connected,
 }: CycleSupportSectionProps) {
   const owner = role === 'gomsin';
-  const today = koreaToday();
+  const identityKey = `${authenticated ? userId || '' : ''}:${connected ? coupleId || '' : ''}:${role}`;
+  const identityRef = useRef(identityKey);
+  const generationRef = useRef(0);
+  if (identityRef.current !== identityKey) {
+    identityRef.current = identityKey;
+    generationRef.current += 1;
+  }
+  const captureIdentity = useCallback(
+    () => ({ key: identityKey, generation: generationRef.current }),
+    [identityKey],
+  );
+  const isCurrentIdentity = useCallback(
+    (identity: { key: string; generation: number }) =>
+      identity.key === identityRef.current && identity.generation === generationRef.current,
+    [],
+  );
+  const [nowIso, setNowIso] = useState(() => new Date().toISOString());
+  const today = koreaToday(new Date(nowIso));
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [signals, setSignals] = useState<CycleSupportSignal[]>([]);
   const [kind, setKind] = useState<CycleSupportKind | ''>('');
@@ -54,7 +80,19 @@ export function CycleSupportSection({
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [realtimeDisconnected, setRealtimeDisconnected] = useState(false);
 
+  useLayoutEffect(() => {
+    setSignals([]);
+    setKind('');
+    setMessage('');
+    setMutationPending(null);
+    setMutationError(null);
+    setRealtimeDisconnected(false);
+    setNowIso(new Date().toISOString());
+    setLoadState(authenticated ? (connected && coupleId ? 'loading' : 'disconnected') : 'unauthenticated');
+  }, [authenticated, connected, coupleId, identityKey]);
+
   const load = useCallback(async () => {
+    const identity = captureIdentity();
     setLoadState('loading');
     if (!authenticated) {
       setSignals([]);
@@ -68,21 +106,25 @@ export function CycleSupportSection({
     }
     try {
       const result = await fetchCycleSupportSignalsResultFromDB(coupleId);
+      if (!isCurrentIdentity(identity)) return;
       if (!result.ok) {
         setLoadState(result.reason);
         return;
       }
+      const checkedAt = new Date().toISOString();
+      setNowIso(checkedAt);
       setSignals(result.signals);
       const visibleSignals = owner
         ? result.signals.filter((signal) => signal.ownerId === userId)
         : result.signals.filter((signal) => signal.ownerId !== userId);
-      const active = activeCycleSupportSignal(visibleSignals, today, new Date().toISOString());
+      const active = activeCycleSupportSignal(visibleSignals, koreaToday(new Date(checkedAt)), checkedAt);
       setLoadState(active ? 'ready' : 'empty');
     } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
       console.error('Failed to load sanitized support signals:', error);
       setLoadState('error');
     }
-  }, [authenticated, connected, coupleId, owner, today, userId]);
+  }, [authenticated, captureIdentity, connected, coupleId, isCurrentIdentity, owner, userId]);
 
   useEffect(() => {
     void load();
@@ -91,6 +133,7 @@ export function CycleSupportSection({
   useEffect(() => {
     const client = supabase;
     if (!client || !authenticated || !userId || !connected || !coupleId) return;
+    const identity = captureIdentity();
     let timer: number | undefined;
     const refresh = () => {
       if (timer) window.clearTimeout(timer);
@@ -103,22 +146,46 @@ export function CycleSupportSection({
         {
           event: '*',
           schema: 'public',
+          table: 'collaboration_invalidations',
+          filter: `couple_id=eq.${coupleId}`,
+        },
+        (payload) => {
+          const invalidation = payload.new as Record<string, unknown>;
+          if (invalidation.slice === 'cycle_support') refresh();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
           table: 'cycle_support_signals',
           filter: `couple_id=eq.${coupleId}`,
         },
         refresh,
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') setRealtimeDisconnected(false);
+        if (!isCurrentIdentity(identity)) return;
+        if (status === 'SUBSCRIBED') {
+          setRealtimeDisconnected(false);
+          void load();
+        }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           setRealtimeDisconnected(true);
         }
       });
+    const recover = () => {
+      if (document.visibilityState === 'visible' && isCurrentIdentity(identity)) void load();
+    };
+    document.addEventListener('visibilitychange', recover);
+    window.addEventListener('online', recover);
     return () => {
       if (timer) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', recover);
+      window.removeEventListener('online', recover);
       void client.removeChannel(channel);
     };
-  }, [authenticated, connected, coupleId, load, userId]);
+  }, [authenticated, captureIdentity, connected, coupleId, isCurrentIdentity, load, userId]);
 
   const visibleSignals = useMemo(
     () => owner
@@ -127,12 +194,29 @@ export function CycleSupportSection({
     [owner, signals, userId],
   );
   const activeSignal = useMemo(
-    () => activeCycleSupportSignal(visibleSignals, today, new Date().toISOString()),
-    [today, visibleSignals],
+    () => activeCycleSupportSignal(visibleSignals, today, nowIso),
+    [nowIso, today, visibleSignals],
   );
 
+  useEffect(() => {
+    const nowMs = Date.now();
+    const futureExpiries = visibleSignals
+      .filter((signal) => !signal.revokedAt)
+      .map((signal) => Date.parse(signal.expiresAt))
+      .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > nowMs);
+    const nextBoundary = Math.min(nextKoreaMidnightMs(nowMs), ...futureExpiries);
+    const delay = Math.max(1, Math.min(nextBoundary - nowMs + 25, 2_147_483_647));
+    const timer = window.setTimeout(() => setNowIso(new Date().toISOString()), delay);
+    return () => window.clearTimeout(timer);
+  }, [nowIso, visibleSignals]);
+
   const share = async () => {
-    if (!coupleId || !kind || !isCycleSupportKind(kind)) {
+    const identity = captureIdentity();
+    if (!authenticated || !userId || !connected || !coupleId || !owner) {
+      setMutationError('활성 연결에서 본인이 직접 선택한 신호만 공유할 수 있어요.');
+      return;
+    }
+    if (!kind || !isCycleSupportKind(kind)) {
       setMutationError('공유할 응원 신호를 선택해 주세요.');
       return;
     }
@@ -149,6 +233,7 @@ export function CycleSupportSection({
         message: message.trim() || undefined,
         sharedForDate: today,
       });
+      if (!isCurrentIdentity(identity)) return;
       if (!saved) {
         setMutationError('응원 신호를 공유하지 못했어요. 연결을 확인해 주세요.');
         return;
@@ -159,19 +244,22 @@ export function CycleSupportSection({
       setMessage('');
       toast.success('오늘의 응원 신호를 공유했어요.');
     } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
       console.error('Failed to create sanitized support signal:', error);
       setMutationError('응원 신호를 공유하지 못했어요. 다시 시도해 주세요.');
     } finally {
-      setMutationPending(null);
+      if (isCurrentIdentity(identity)) setMutationPending(null);
     }
   };
 
   const revoke = async () => {
-    if (!activeSignal) return;
+    const identity = captureIdentity();
+    if (!activeSignal || !authenticated || !userId || !connected || !coupleId || !owner) return;
     setMutationPending('revoke');
     setMutationError(null);
     try {
       const revoked = await revokeCycleSupportSignalFromDB(activeSignal.id);
+      if (!isCurrentIdentity(identity)) return;
       if (!revoked) {
         setMutationError('공유를 취소하지 못했어요. 다시 시도해 주세요.');
         return;
@@ -183,10 +271,11 @@ export function CycleSupportSection({
       setLoadState('empty');
       toast.info('응원 신호 공유를 취소했어요.');
     } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
       console.error('Failed to revoke sanitized support signal:', error);
       setMutationError('공유를 취소하지 못했어요. 다시 시도해 주세요.');
     } finally {
-      setMutationPending(null);
+      if (isCurrentIdentity(identity)) setMutationPending(null);
     }
   };
 

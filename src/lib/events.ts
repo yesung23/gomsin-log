@@ -5,24 +5,31 @@ export type EventFetchResult =
   | { ok: true; events: CoupleEvent[] }
   | { ok: false; reason: 'forbidden' | 'error' };
 
-export async function fetchEventsResultFromDB(coupleId: string): Promise<EventFetchResult> {
-  if (!isSupabaseConfigured || !supabase || !coupleId) {
+export async function fetchEventsResultFromDB(coupleId?: string): Promise<EventFetchResult> {
+  if (!isSupabaseConfigured || !supabase) {
     return { ok: false, reason: 'error' };
   }
 
-  const { data: activeCoupleId, error: membershipError } = await supabase
-    .rpc('get_my_active_couple_id');
-  if (membershipError) {
-    console.error('Failed to verify event workspace:', membershipError);
-    return { ok: false, reason: 'error' };
+  if (coupleId) {
+    const { data: activeCoupleId, error: membershipError } = await supabase
+      .rpc('get_my_active_couple_id');
+    if (membershipError) {
+      console.error('Failed to verify event workspace:', membershipError);
+      return { ok: false, reason: 'error' };
+    }
+    if (activeCoupleId !== coupleId) return { ok: false, reason: 'forbidden' };
   }
-  if (activeCoupleId !== coupleId) return { ok: false, reason: 'forbidden' };
 
-  const { data, error } = await supabase
+  // RLS returns every owner-private event regardless of former couple, plus
+  // shared rows only for the active couple. When disconnected, narrowing to
+  // private rows avoids an unnecessary shared-row scan.
+  let query = supabase
     .from('events')
     .select('*')
-    .eq('couple_id', coupleId)
     .order('start_date', { ascending: true });
+  if (!coupleId) query = query.eq('is_private', true);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Failed to fetch events:', error);
@@ -45,7 +52,7 @@ export async function fetchEventsResultFromDB(coupleId: string): Promise<EventFe
   };
 }
 
-export async function fetchEventsFromDB(coupleId: string): Promise<CoupleEvent[]> {
+export async function fetchEventsFromDB(coupleId?: string): Promise<CoupleEvent[]> {
   const result = await fetchEventsResultFromDB(coupleId);
   return result.ok ? result.events : [];
 }
@@ -91,7 +98,37 @@ export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'>
 }
 
 export async function updateEventInDB(event: CoupleEvent): Promise<CoupleEvent | null> {
-  return saveEventToDB(event);
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase
+    .from('events')
+    .update({
+      title: event.title,
+      event_type: event.eventType,
+      start_date: event.startDate,
+      end_date: event.endDate || null,
+      is_private: event.isPrivate,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', event.id)
+    .eq('created_by', event.createdBy)
+    .select()
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error('Failed to update event:', error);
+    return null;
+  }
+  return {
+    id: data.id,
+    coupleId: data.couple_id,
+    createdBy: data.created_by,
+    title: data.title,
+    eventType: data.event_type,
+    startDate: data.start_date,
+    endDate: data.end_date,
+    isPrivate: data.is_private,
+    createdAt: data.created_at,
+  };
 }
 
 export async function deleteEventFromDB(eventId: string): Promise<boolean> {

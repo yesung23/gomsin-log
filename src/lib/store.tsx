@@ -34,7 +34,8 @@ import { StoreContext } from '@/lib/storeContext';
 
 /** Which slice of shared state a realtime notification affects. */
 type SyncSlice = 'records' | 'events' | 'trips';
-type ActiveWorkspace = { userId: string; coupleId: string; generation: number };
+type ActiveIdentity = { userId: string; generation: number };
+type ActiveWorkspace = ActiveIdentity & { coupleId: string };
 
 function stateMatchesWorkspace(state: AppState, workspace: ActiveWorkspace): boolean {
   return state.authenticatedUser?.id === workspace.userId
@@ -227,7 +228,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Revoke the previous account's realtime refresh authority immediately,
       // before any asynchronous state hydration for the new session begins.
       const nextSessionUserId = session?.user?.id ?? null;
-      if (sessionUserIdRef.current !== nextSessionUserId) sessionGenerationRef.current += 1;
+      const previousSessionUserId = sessionUserIdRef.current;
+      const previousHydratedUserId = hydratedUserIdRef.current;
+      const identityChanged = previousSessionUserId !== nextSessionUserId;
+      if (identityChanged) {
+        sessionGenerationRef.current += 1;
+        hydratedUserIdRef.current = null;
+        // Fail closed before account hydration starts: the previous account's
+        // React state must not remain rendered during the network request.
+        setIsAuthChecked(false);
+        const current = stateRef.current;
+        const clearedState: AppState = {
+          ...DEFAULT_STATE,
+          isDemoMode: false,
+          ...carryOverDevicePrefs(current),
+        };
+        stateRef.current = clearedState;
+        setState(clearedState);
+      }
       sessionUserIdRef.current = nextSessionUserId;
       const authGeneration = sessionGenerationRef.current;
       // The callback is intentionally sync: supabase-js serialises auth events and
@@ -254,7 +272,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
 
           const isAccountSwitch =
-            hydratedUserIdRef.current !== null && hydratedUserIdRef.current !== sessionUser.id;
+            previousHydratedUserId !== null && previousHydratedUserId !== sessionUser.id;
 
           try {
             cachePurgedRef.current = false;
@@ -433,7 +451,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         },
       },
       records: [],
-      events: [],
+      // Private schedules remain owner-readable after a disconnect; shared
+      // schedules are revoked with the couple workspace.
+      events: current.events.filter((event) =>
+        event.isPrivate && event.createdBy === current.authenticatedUser?.id),
       trips: [],
     };
     // Realtime and explicit-operation guards consult stateRef before React has
@@ -516,15 +537,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
     };
 
-    const reconcileOwnMembership = async () => {
-      if (!isCurrentActiveCouple()) return;
+    const reconcileOwnMembership = async (): Promise<boolean> => {
+      if (!isCurrentActiveCouple()) return false;
       const { data, error } = await client.rpc('get_my_active_couple_id');
-      if (!isCurrentActiveCouple()) return;
+      if (!isCurrentActiveCouple()) return false;
       if (error) {
         console.error('[gomsinlog] Failed to verify active membership:', error);
-        return;
+        return false;
       }
-      if (data !== coupleId) purgeSharedAccess(workspace);
+      if (data !== coupleId) {
+        purgeSharedAccess(workspace);
+        return false;
+      }
+      return true;
     };
 
     // One channel covers the shared tables and the current user's own
@@ -535,6 +560,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'couple_members', filter: `user_id=eq.${authUserId}` },
         () => void reconcileOwnMembership(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` },
+        (payload) => {
+          const invalidation = payload.new as Record<string, unknown>;
+          if (invalidation.slice === 'events') scheduleRefresh('events');
+        },
       )
       .on(
         'postgres_changes',
@@ -551,21 +584,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         { event: '*', schema: 'public', table: 'trips', filter: `couple_id=eq.${coupleId}` },
         () => scheduleRefresh('trips'),
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Re-check the authoritative membership after every initial subscribe
+        // or reconnect, then refresh all shared slices to discard missed rows.
+        if (status === 'SUBSCRIBED') {
+          void (async () => {
+            if (!await reconcileOwnMembership()) return;
+            scheduleRefresh('records');
+            scheduleRefresh('events');
+            scheduleRefresh('trips');
+          })();
+        }
+      });
 
     // Realtime messages are dropped while a mobile browser is backgrounded, so
-    // re-sync once on return to the foreground.
+    // verify membership first and only refresh shared slices if it is still active.
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      scheduleRefresh('records');
-      scheduleRefresh('events');
-      scheduleRefresh('trips');
+      void (async () => {
+        if (!await reconcileOwnMembership()) return;
+        scheduleRefresh('records');
+        scheduleRefresh('events');
+        scheduleRefresh('trips');
+      })();
     };
     document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', handleVisibility);
 
     return () => {
       disposed = true;
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleVisibility);
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
       void client.removeChannel(channel);
@@ -870,19 +919,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
-  const captureActiveWorkspace = (): ActiveWorkspace | null => {
+  const captureActiveIdentity = (): ActiveIdentity | null => {
     const current = stateRef.current;
     const userId = current.authenticatedUser?.id;
+    if (!userId || sessionUserIdRef.current !== userId) return null;
+    return { userId, generation: sessionGenerationRef.current };
+  };
+
+  const isCurrentIdentity = (identity: ActiveIdentity): boolean =>
+    sessionGenerationRef.current === identity.generation
+    && sessionUserIdRef.current === identity.userId
+    && stateRef.current.authenticatedUser?.id === identity.userId;
+
+  const captureActiveWorkspace = (): ActiveWorkspace | null => {
+    const identity = captureActiveIdentity();
+    const current = stateRef.current;
     const activeCoupleId = current.profile.couple.coupleId;
-    if (!userId || !activeCoupleId) return null;
+    if (!identity || !activeCoupleId) return null;
     const workspace = {
-      userId,
+      ...identity,
       coupleId: activeCoupleId,
-      generation: sessionGenerationRef.current,
     };
-    return sessionUserIdRef.current === userId && stateMatchesWorkspace(current, workspace)
-      ? workspace
-      : null;
+    return stateMatchesWorkspace(current, workspace) ? workspace : null;
   };
 
   const isCurrentWorkspace = (workspace: ActiveWorkspace): boolean =>
@@ -925,18 +983,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     id: string,
     updates: Partial<Omit<CoupleEvent, 'id' | 'coupleId' | 'createdBy' | 'createdAt'>>,
   ): Promise<boolean> => {
+    const identity = captureActiveIdentity();
     const workspace = captureActiveWorkspace();
     const current = stateRef.current;
     const existing = current.events.find((event) => event.id === id);
+    const remainsPrivate = existing?.isPrivate && updates.isPrivate !== false;
     if (
-      !workspace
+      !identity
       || !existing
-      || existing.createdBy !== workspace.userId
-      || existing.coupleId !== workspace.coupleId
+      || existing.createdBy !== identity.userId
+      || (!remainsPrivate && (
+        !workspace
+        || existing.coupleId !== workspace.coupleId
+      ))
     ) return false;
 
+    const isCurrentScope = () => isCurrentIdentity(identity)
+      && (remainsPrivate || (!!workspace && isCurrentWorkspace(workspace)));
     const updated = { ...existing, ...updates };
-    setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+    setState((prev) => isCurrentScope()
       ? { ...prev, events: prev.events.map((event) => (event.id === id ? updated : event)) }
       : prev);
 
@@ -944,21 +1009,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const saved = await import('@/lib/events').then((module) =>
         module.updateEventInDB(updated),
       );
-      if (!isCurrentWorkspace(workspace)) return false;
+      if (!isCurrentScope()) return false;
       if (!saved) {
-        setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+        setState((prev) => isCurrentScope()
           ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
           : prev);
         return false;
       }
-      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+      setState((prev) => isCurrentScope()
         ? { ...prev, events: prev.events.map((event) => (event.id === id ? saved : event)) }
         : prev);
       return true;
     } catch (error) {
-      if (!isCurrentWorkspace(workspace)) return false;
+      if (!isCurrentScope()) return false;
       console.error('Failed to update event:', error);
-      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+      setState((prev) => isCurrentScope()
         ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
         : prev);
       return false;
@@ -966,26 +1031,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteEvent = async (id: string): Promise<boolean> => {
+    const identity = captureActiveIdentity();
     const workspace = captureActiveWorkspace();
     const existing = stateRef.current.events.find((event) => event.id === id);
     if (
-      !workspace
+      !identity
       || !existing
-      || existing.createdBy !== workspace.userId
-      || existing.coupleId !== workspace.coupleId
+      || existing.createdBy !== identity.userId
+      || (!existing.isPrivate && (
+        !workspace
+        || existing.coupleId !== workspace.coupleId
+      ))
     ) return false;
 
+    const isCurrentScope = () => isCurrentIdentity(identity)
+      && (existing.isPrivate || (!!workspace && isCurrentWorkspace(workspace)));
     try {
       const deleted = await import('@/lib/events').then((module) =>
         module.deleteEventFromDB(id),
       );
-      if (!isCurrentWorkspace(workspace) || !deleted) return false;
+      if (!isCurrentScope() || !deleted) return false;
     } catch (error) {
-      if (isCurrentWorkspace(workspace)) console.error('Failed to delete event:', error);
+      if (isCurrentScope()) console.error('Failed to delete event:', error);
       return false;
     }
 
-    setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+    setState((prev) => isCurrentScope()
       ? { ...prev, events: prev.events.filter((event) => event.id !== id) }
       : prev);
     return true;
@@ -995,19 +1066,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ok: boolean;
     reason?: 'forbidden' | 'error';
   }> => {
+    const identity = captureActiveIdentity();
+    if (!identity) return { ok: false, reason: 'forbidden' };
     const workspace = captureActiveWorkspace();
-    if (!workspace) return { ok: false, reason: 'forbidden' };
 
     try {
-      const result = await fetchEventsResultFromDB(workspace.coupleId);
-      if (!isCurrentWorkspace(workspace)) return { ok: false, reason: 'forbidden' };
+      // Without an active couple the query returns only owner-private rows;
+      // with one it additionally returns that couple's shared rows under RLS.
+      const result = await fetchEventsResultFromDB(workspace?.coupleId);
+      if (!isCurrentIdentity(identity)) return { ok: false, reason: 'forbidden' };
+      if (workspace && !isCurrentWorkspace(workspace)) {
+        return { ok: false, reason: 'forbidden' };
+      }
       if (!result.ok) return result;
-      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+      setState((prev) => isCurrentIdentity(identity)
+        && (!workspace || (isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)))
         ? { ...prev, events: result.events }
         : prev);
       return { ok: true };
     } catch (error) {
-      if (!isCurrentWorkspace(workspace)) return { ok: false, reason: 'forbidden' };
+      if (!isCurrentIdentity(identity)) return { ok: false, reason: 'forbidden' };
       console.error('Failed to reload events:', error);
       return { ok: false, reason: 'error' };
     }

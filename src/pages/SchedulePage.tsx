@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -63,12 +63,14 @@ export function SchedulePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+  const reloadEventsRef = useRef(reloadEvents);
+  reloadEventsRef.current = reloadEvents;
 
   useEffect(() => {
-    if (!activeCouple) return;
+    if (!authenticatedUser?.id) return;
     let cancelled = false;
     setLoadState('loading');
-    void reloadEvents().then((result) => {
+    void reloadEventsRef.current().then((result) => {
       if (cancelled) return;
       if (result.ok) setLoadState('ready');
       else setLoadState(result.reason === 'forbidden' ? 'forbidden' : 'error');
@@ -76,7 +78,7 @@ export function SchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [activeCouple, profile.couple.coupleId, reloadEvents]);
+  }, [activeCouple, authenticatedUser?.id, profile.couple.coupleId]);
 
   const retryLoad = async () => {
     setLoadState('loading');
@@ -127,8 +129,23 @@ export function SchedulePage() {
       toast.error(validationError);
       return;
     }
-    if (!activeCouple || !authenticatedUser || !profile.couple.coupleId) {
-      const message = '로그인하고 연결된 우리 공간에서만 일정을 저장할 수 있어요.';
+    const editingEvent = editingEventId
+      ? events.find((event) => event.id === editingEventId)
+      : undefined;
+    const canEditPrivateWhileDisconnected = Boolean(
+      editingEvent
+      && editingEvent.createdBy === authenticatedUser?.id
+      && editingEvent.isPrivate
+      && isPrivate,
+    );
+    if (
+      !authenticatedUser
+      || (!activeCouple && !canEditPrivateWhileDisconnected)
+      || (!editingEventId && !profile.couple.coupleId)
+    ) {
+      const message = editingEventId
+        ? '연결이 해제된 동안에는 기존 비공개 일정만 수정할 수 있어요.'
+        : '로그인하고 연결된 우리 공간에서만 새 일정을 저장할 수 있어요.';
       setFormError(message);
       toast.error(message);
       return;
@@ -148,7 +165,7 @@ export function SchedulePage() {
       const saved = editingEventId
         ? await updateEvent(editingEventId, changes)
         : await addEvent({
-            coupleId: profile.couple.coupleId,
+            coupleId: profile.couple.coupleId!,
             createdBy: authenticatedUser.id,
             ...changes,
           });
@@ -277,12 +294,6 @@ export function SchedulePage() {
             title="로그인 권한이 필요해요"
             description="일정은 계정과 연결된 공간에서만 안전하게 확인하고 등록할 수 있어요."
           />
-        ) : !activeCouple ? (
-          <StatusCard
-            icon={<Users size={24} />}
-            title={profile.couple.status === 'pending' ? '파트너 연결을 기다리고 있어요' : '연결된 우리 공간이 없어요'}
-            description="파트너와 연결이 활성화되면 공유·개인 일정을 만들고 확인할 수 있어요."
-          />
         ) : loadState === 'loading' ? (
           <StatusCard
             icon={<RefreshCw size={24} className="animate-spin" />}
@@ -307,6 +318,13 @@ export function SchedulePage() {
           />
         ) : (
           <>
+            {!activeCouple && (
+              <StatusCard
+                icon={<Users size={24} />}
+                title={profile.couple.status === 'pending' ? '파트너 연결을 기다리고 있어요' : '연결된 우리 공간이 없어요'}
+                description="기존 비공개 일정만 본인이 계속 확인·수정할 수 있어요. 새 일정과 공유 일정은 연결 후 이용할 수 있어요."
+              />
+            )}
             <section className="rounded-3xl bg-card border border-border p-5 shadow-sm space-y-3">
               {anniversaryDate && daysTogether !== null ? (
                 <>
@@ -389,7 +407,7 @@ export function SchedulePage() {
             <section className="space-y-3">
               <div className="flex items-center justify-between px-1">
                 <h2 className="text-sm font-bold text-foreground">{selectedDate} 일정</h2>
-                <button type="button" onClick={openCreateModal} className="text-[11px] font-bold text-coral">이 날짜에 추가</button>
+                <button type="button" onClick={openCreateModal} disabled={!activeCouple} className="text-[11px] font-bold text-coral disabled:opacity-40">이 날짜에 추가</button>
               </div>
               <div className="space-y-2">
                 {selectedEvents.length > 0 ? selectedEvents.map((event) => renderEventCard(event, true)) : (
@@ -447,7 +465,7 @@ export function SchedulePage() {
                 <fieldset className="space-y-2">
                   <legend className="text-muted-foreground font-bold">공개 범위 *</legend>
                   <label className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer ${!isPrivate ? 'border-coral bg-coral/5' : 'border-border'}`}>
-                    <input type="radio" name="visibility" checked={!isPrivate} onChange={() => setIsPrivate(false)} className="accent-coral" />
+                    <input type="radio" name="visibility" checked={!isPrivate} onChange={() => setIsPrivate(false)} disabled={!activeCouple} className="accent-coral" />
                     <Users size={15} className="text-coral" />
                     <span><strong className="block text-foreground">둘이 보기 (공유)</strong><span className="text-[10px] text-muted-foreground">연결된 파트너도 읽을 수 있어요.</span></span>
                   </label>

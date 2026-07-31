@@ -252,6 +252,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return isCurrentWorkspace(workspace) ? workspace : null;
   }, [captureActiveIdentity, isCurrentWorkspace]);
 
+  /**
+   * The couple row this account is attached to, whether or not the link has
+   * been accepted yet. A pending couple has no partner and therefore no shared
+   * slices, so the active-workspace guards do not apply to it; cancelling such
+   * an invitation still has to clear the local pending couple and stop the
+   * partner poll.
+   */
+  const captureLinkedCouple = useCallback((): ActiveWorkspace | null => {
+    const identity = captureActiveIdentity();
+    const linkedCoupleId = stateRef.current.profile.couple.coupleId;
+    if (!identity || !linkedCoupleId) return null;
+    return { ...identity, coupleId: linkedCoupleId };
+  }, [captureActiveIdentity]);
+
+  const isCurrentLinkedCouple = useCallback((workspace: ActiveWorkspace): boolean =>
+    isCurrentIdentity(workspace)
+    && stateRef.current.profile.couple.coupleId === workspace.coupleId,
+  [isCurrentIdentity]);
+
   useEffect(() => {
     localRepository.loadState().then((stored) => {
       if (stored) {
@@ -1414,6 +1433,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  /**
+   * Cancel a couple link that was never accepted. There is no partner and no
+   * shared row to revoke, so nothing has to be quarantined or reconciled: the
+   * only requirement is that a confirmed cancellation drops the local pending
+   * couple so the invitation UI and the partner poll both stop.
+   */
+  const cancelPendingLink = async (): Promise<boolean> => {
+    const pending = captureLinkedCouple();
+    if (!pending || workspaceRefMatches(pendingDisconnectRef.current, pending)) return false;
+    pendingDisconnectRef.current = pending;
+    const clearPendingDisconnect = () => {
+      if (workspaceRefMatches(pendingDisconnectRef.current, pending)) {
+        pendingDisconnectRef.current = null;
+      }
+    };
+    try {
+      const disconnected = await disconnectCoupleFromDB();
+      clearPendingDisconnect();
+      if (!disconnected || !isCurrentLinkedCouple(pending)) return false;
+      return purgeSharedAccess(pending);
+    } catch (error) {
+      clearPendingDisconnect();
+      console.error('Failed to cancel the pending couple link:', error);
+      return false;
+    }
+  };
+
   const disconnect = async (): Promise<boolean> => {
     const current = stateRef.current;
     if (current.isDemoMode) {
@@ -1422,7 +1468,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
 
     const workspace = captureActiveWorkspace();
-    if (!workspace || workspaceRefMatches(pendingDisconnectRef.current, workspace)) return false;
+    if (!workspace) return cancelPendingLink();
+    if (workspaceRefMatches(pendingDisconnectRef.current, workspace)) return false;
     // Hide all shared content before the RPC leaves this turn. The couple id is
     // retained so a failed request can be recovered authoritatively.
     pendingDisconnectRef.current = workspace;

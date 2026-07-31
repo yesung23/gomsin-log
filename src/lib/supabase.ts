@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { authRedirectUrl, isNativePlatform } from '@/lib/platform';
 import type { AuthUser, IAuthRepository, ILogRepository, AppState, Role } from '@/types';
 
 /**
@@ -351,40 +352,52 @@ export class SupabaseAuthRepository implements IAuthRepository {
     }
   }
 
-  async signInWithGoogle(): Promise<{ error?: string }> {
+  /**
+   * Start an OAuth sign-in.
+   *
+   * On the web Supabase redirects the page as usual. In the Capacitor shell the
+   * provider must open in the system browser -- Google blocks its sign-in page
+   * inside an embedded WebView -- so we ask Supabase for the URL instead of
+   * navigating, open it in a Custom Tab, and let the `appUrlOpen` deep-link
+   * handler (lib/deepLinks.ts) finish the exchange.
+   */
+  private async startOAuth(provider: 'google' | 'apple'): Promise<{ error?: string }> {
     if (!supabase) {
       return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
     }
-    const redirectTo = `${window.location.origin}/auth/callback`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo },
+
+    const redirectTo = authRedirectUrl();
+    const native = isNativePlatform();
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo, skipBrowserRedirect: native },
     });
+
     if (error) return { error: error.message };
+
+    if (native && data?.url) {
+      const { Browser } = await import('@capacitor/browser');
+      await Browser.open({ url: data.url, presentationStyle: 'popover' });
+    }
     return {};
   }
 
+  async signInWithGoogle(): Promise<{ error?: string }> {
+    return this.startOAuth('google');
+  }
+
   async signInWithApple(): Promise<{ error?: string }> {
-    if (!supabase) {
-      return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
-    }
-    const redirectTo = `${window.location.origin}/auth/callback`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'apple',
-      options: { redirectTo },
-    });
-    if (error) return { error: error.message };
-    return {};
+    return this.startOAuth('apple');
   }
 
   async signInWithEmail(email: string): Promise<{ error?: string }> {
     if (!supabase) {
       return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
     }
-    const redirectTo = `${window.location.origin}/auth/callback`;
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: redirectTo },
+      options: { emailRedirectTo: authRedirectUrl() },
     });
     return { error: error?.message };
   }

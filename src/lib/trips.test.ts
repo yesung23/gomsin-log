@@ -6,6 +6,7 @@ import {
   recordsInInclusiveRange,
   validateTripDraft,
   validateTripItemUrl,
+  validateTripRangeAgainstItems,
 } from '@/lib/trips';
 
 describe('trip planner helpers', () => {
@@ -15,6 +16,17 @@ describe('trip planner helpers', () => {
     expect(validateTripDraft({ title: '부산', startDate: '2026-08-10', endDate: '' })).toContain('오는 날');
     expect(validateTripDraft({ title: '부산', startDate: '2026-08-12', endDate: '2026-08-10' })).toContain('빠를');
     expect(validateTripDraft({ title: ' 부산 ', startDate: '2026-08-10', endDate: '2026-08-10' })).toBeNull();
+  });
+
+  it('rejects shrinking a trip around existing itinerary dates', () => {
+    expect(validateTripRangeAgainstItems(
+      { startDate: '2026-08-10', endDate: '2026-08-12' },
+      [{ itemDate: '2026-08-09' }],
+    )).toContain('기존 일정');
+    expect(validateTripRangeAgainstItems(
+      { startDate: '2026-08-10', endDate: '2026-08-12' },
+      [{ itemDate: '2026-08-10' }, { itemDate: '2026-08-12' }],
+    )).toBeNull();
   });
 
   it('accepts only optional http and https itinerary links', () => {

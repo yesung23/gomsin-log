@@ -10,6 +10,14 @@ export async function fetchEventsResultFromDB(coupleId: string): Promise<EventFe
     return { ok: false, reason: 'error' };
   }
 
+  const { data: activeCoupleId, error: membershipError } = await supabase
+    .rpc('get_my_active_couple_id');
+  if (membershipError) {
+    console.error('Failed to verify event workspace:', membershipError);
+    return { ok: false, reason: 'error' };
+  }
+  if (activeCoupleId !== coupleId) return { ok: false, reason: 'forbidden' };
+
   const { data, error } = await supabase
     .from('events')
     .select('*')

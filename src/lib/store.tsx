@@ -34,6 +34,14 @@ import { StoreContext } from '@/lib/storeContext';
 
 /** Which slice of shared state a realtime notification affects. */
 type SyncSlice = 'records' | 'events' | 'trips';
+type ActiveWorkspace = { userId: string; coupleId: string; generation: number };
+
+function stateMatchesWorkspace(state: AppState, workspace: ActiveWorkspace): boolean {
+  return state.authenticatedUser?.id === workspace.userId
+    && state.profile.couple.coupleId === workspace.coupleId
+    && state.profile.couple.connected
+    && state.profile.couple.status === 'active';
+}
 /** Coalesce realtime bursts into a single refetch. */
 const REALTIME_DEBOUNCE_MS = 250;
 /** Stop polling for the partner after roughly 15 minutes. */
@@ -73,33 +81,40 @@ class LocalStorageRepository implements ILogRepository {
 
   async saveState(state: AppState): Promise<void> {
     try {
+      const records = state.isDemoMode
+        ? state.records.map((record) => {
+            // Private records: keep only the skeleton so the body never sits in
+            // localStorage as plaintext. The server remains the source of truth.
+            if (record.isPrivate) {
+              return {
+                id: record.id,
+                date: record.date,
+                time: record.time,
+                isPrivate: true,
+                authorRole: record.authorRole,
+              } as DailyRecord;
+            }
+
+            if (!record.attachments?.length) return record;
+            return {
+              ...record,
+              attachments: record.attachments
+                // Blob URLs are session-only; persisting them guarantees a broken
+                // image after reload.
+                .filter((att) => !(att.url?.startsWith('blob:') && !att.path))
+                .map((att) =>
+                  att.url?.startsWith('blob:') ? { ...att, url: undefined } : att,
+                ),
+            };
+          })
+        : [];
       const sanitizedState = {
         ...state,
-        records: state.records.map((record) => {
-          // Private records: keep only the skeleton so the body never sits in
-          // localStorage as plaintext. The server remains the source of truth.
-          if (record.isPrivate) {
-            return {
-              id: record.id,
-              date: record.date,
-              time: record.time,
-              isPrivate: true,
-              authorRole: record.authorRole,
-            } as DailyRecord;
-          }
-
-          if (!record.attachments?.length) return record;
-          return {
-            ...record,
-            attachments: record.attachments
-              // Blob URLs are session-only; persisting them guarantees a broken
-              // image after reload.
-              .filter((att) => !(att.url?.startsWith('blob:') && !att.path))
-              .map((att) =>
-                att.url?.startsWith('blob:') ? { ...att, url: undefined } : att,
-              ),
-          };
-        }),
+        // Authenticated shared state is server-owned and must not survive a
+        // partner-initiated revocation in browser storage.
+        records,
+        events: state.isDemoMode ? state.events : [],
+        trips: state.isDemoMode ? state.trips : [],
       };
       localStorage.setItem(STORE_KEY, JSON.stringify(sanitizedState));
     } catch (e) {
@@ -174,6 +189,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const hydratedUserIdRef = useRef<string | null>(null);
   /** Current authenticated session owner, updated synchronously before async auth hydration. */
   const sessionUserIdRef = useRef<string | null>(null);
+  /** Invalidates post-await writes from a previous authenticated identity. */
+  const sessionGenerationRef = useRef(0);
   /** Set while signing out / deleting so the persistence effect cannot resurrect the cache. */
   const cachePurgedRef = useRef(false);
   /** Always-current state, so actions can read it without depending on stale closures. */
@@ -183,11 +200,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localRepository.loadState().then((stored) => {
       if (stored) {
+        const safeStored = stored.isDemoMode
+          ? stored
+          : { ...stored, records: [], events: [], trips: [] };
         setState({
           ...DEFAULT_STATE,
-          ...stored,
+          ...safeStored,
           // Respect the system preference until the user picks a theme explicitly.
-          theme: stored.theme || preferredTheme(),
+          theme: safeStored.theme || preferredTheme(),
         });
         if (stored.authenticatedUser?.id) {
           hydratedUserIdRef.current = stored.authenticatedUser.id;
@@ -206,7 +226,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       // Revoke the previous account's realtime refresh authority immediately,
       // before any asynchronous state hydration for the new session begins.
-      sessionUserIdRef.current = session?.user?.id ?? null;
+      const nextSessionUserId = session?.user?.id ?? null;
+      if (sessionUserIdRef.current !== nextSessionUserId) sessionGenerationRef.current += 1;
+      sessionUserIdRef.current = nextSessionUserId;
+      const authGeneration = sessionGenerationRef.current;
       // The callback is intentionally sync: supabase-js serialises auth events and
       // awaiting inside it can deadlock other auth calls.
       void (async () => {
@@ -241,7 +264,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               AUTH_SYNC_TIMEOUT_MS,
               null,
             );
-            if (disposed) return;
+            if (
+              disposed
+              || sessionGenerationRef.current !== authGeneration
+              || sessionUserIdRef.current !== sessionUser.id
+            ) return;
 
             setState((prev) => {
               // On an account switch, start from a clean slate so none of the
@@ -297,7 +324,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             hydratedUserIdRef.current = dbState ? sessionUser.id : null;
           } finally {
             // Always release the splash screen, even when the sync failed.
-            if (!disposed) setIsAuthChecked(true);
+            if (
+              !disposed
+              && sessionGenerationRef.current === authGeneration
+              && sessionUserIdRef.current === sessionUser.id
+            ) setIsAuthChecked(true);
           }
           return;
         }
@@ -373,6 +404,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const coupleStatus = state.profile.couple.status;
   const authUserId = state.authenticatedUser?.id;
 
+  const purgeSharedAccess = useCallback((expected?: ActiveWorkspace): boolean => {
+    const current = stateRef.current;
+    if (
+      expected
+      && (
+        sessionGenerationRef.current !== expected.generation
+        || sessionUserIdRef.current !== expected.userId
+        || current.authenticatedUser?.id !== expected.userId
+        || current.profile.couple.coupleId !== expected.coupleId
+      )
+    ) return false;
+
+    localStorage.removeItem(STORE_KEY_V1);
+    localStorage.removeItem(STORE_KEY);
+    const nextState: AppState = {
+      ...current,
+      highlightedRecordId: undefined,
+      profile: {
+        ...current.profile,
+        couple: {
+          coupleId: undefined,
+          partnerName: '',
+          anniversaryDate: undefined,
+          coupleCode: '',
+          connected: false,
+          status: 'disconnected',
+        },
+      },
+      records: [],
+      events: [],
+      trips: [],
+    };
+    // Realtime and explicit-operation guards consult stateRef before React has
+    // committed the cleanup render.
+    stateRef.current = nextState;
+    setState(nextState);
+    return true;
+  }, []);
+
   useEffect(() => {
     const client = supabase;
     const activeCouple = coupleConnected && coupleStatus === 'active';
@@ -386,15 +456,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) return;
 
     let disposed = false;
+    const generation = sessionGenerationRef.current;
+    const workspace: ActiveWorkspace = { userId: authUserId, coupleId, generation };
     const timers = new Map<SyncSlice, number>();
     const isCurrentActiveCouple = () => {
       const current = stateRef.current;
       return !disposed
+        && sessionGenerationRef.current === generation
         && sessionUserIdRef.current === authUserId
-        && current.authenticatedUser?.id === authUserId
-        && current.profile.couple.coupleId === coupleId
-        && current.profile.couple.connected
-        && current.profile.couple.status === 'active';
+        && stateMatchesWorkspace(current, workspace);
     };
 
     const refreshSlice = async (slice: SyncSlice) => {
@@ -446,9 +516,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
     };
 
-    // One channel, three table filters: fewer websocket subscriptions to manage.
+    const reconcileOwnMembership = async () => {
+      if (!isCurrentActiveCouple()) return;
+      const { data, error } = await client.rpc('get_my_active_couple_id');
+      if (!isCurrentActiveCouple()) return;
+      if (error) {
+        console.error('[gomsinlog] Failed to verify active membership:', error);
+        return;
+      }
+      if (data !== coupleId) purgeSharedAccess(workspace);
+    };
+
+    // One channel covers the shared tables and the current user's own
+    // membership row. A partner disconnect updates that row and revokes access.
     const channel = client
       .channel(`couple-sync:${coupleId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'couple_members', filter: `user_id=eq.${authUserId}` },
+        () => void reconcileOwnMembership(),
+      )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'daily_records', filter: `couple_id=eq.${coupleId}` },
@@ -483,16 +570,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       timers.clear();
       void client.removeChannel(channel);
     };
-  }, [authUserId, coupleConnected, coupleId, coupleStatus, isAuthChecked]);
+  }, [authUserId, coupleConnected, coupleId, coupleStatus, isAuthChecked, purgeSharedAccess]);
 
   /**
    * Wait for the partner to redeem the invite code.
    *
-   * `couple_members` is not part of the realtime publication, so this has to
-   * poll. The previous version polled every 10s forever, including while the
-   * tab was hidden and while every request was failing. This version only polls
-   * in the foreground, backs off, and eventually gives up instead of hammering
-   * the API for the lifetime of the session.
+   * Pending couples keep a bounded poll because the active shared-space channel
+   * is intentionally not mounted until both partners are connected.
    */
   useEffect(() => {
     const client = supabase;
@@ -786,22 +870,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
+  const captureActiveWorkspace = (): ActiveWorkspace | null => {
+    const current = stateRef.current;
+    const userId = current.authenticatedUser?.id;
+    const activeCoupleId = current.profile.couple.coupleId;
+    if (!userId || !activeCoupleId) return null;
+    const workspace = {
+      userId,
+      coupleId: activeCoupleId,
+      generation: sessionGenerationRef.current,
+    };
+    return sessionUserIdRef.current === userId && stateMatchesWorkspace(current, workspace)
+      ? workspace
+      : null;
+  };
+
+  const isCurrentWorkspace = (workspace: ActiveWorkspace): boolean =>
+    sessionGenerationRef.current === workspace.generation
+    && sessionUserIdRef.current === workspace.userId
+    && stateMatchesWorkspace(stateRef.current, workspace);
+
   const addEvent = async (
     event: Omit<CoupleEvent, 'id' | 'createdAt'>,
   ): Promise<boolean> => {
-    const current = stateRef.current;
-    const userId = current.authenticatedUser?.id;
-    const couple = current.profile.couple;
+    const workspace = captureActiveWorkspace();
     if (
-      !userId ||
-      !couple.coupleId ||
-      !couple.connected ||
-      couple.status !== 'active' ||
-      event.createdBy !== userId ||
-      event.coupleId !== couple.coupleId
-    ) {
-      return false;
-    }
+      !workspace
+      || event.createdBy !== workspace.userId
+      || event.coupleId !== workspace.coupleId
+    ) return false;
 
     const newEvent: CoupleEvent = {
       ...event,
@@ -813,11 +910,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const saved = await import('@/lib/events').then((module) =>
         module.saveEventToDB(newEvent),
       );
-      if (!saved) return false;
-      setState((prev) => ({ ...prev, events: [...prev.events, saved] }));
+      if (!isCurrentWorkspace(workspace) || !saved) return false;
+      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+        ? { ...prev, events: [...prev.events, saved] }
+        : prev);
       return true;
     } catch (error) {
-      console.error('Failed to save event:', error);
+      if (isCurrentWorkspace(workspace)) console.error('Failed to save event:', error);
       return false;
     }
   };
@@ -826,84 +925,93 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     id: string,
     updates: Partial<Omit<CoupleEvent, 'id' | 'coupleId' | 'createdBy' | 'createdAt'>>,
   ): Promise<boolean> => {
+    const workspace = captureActiveWorkspace();
     const current = stateRef.current;
-    const userId = current.authenticatedUser?.id;
     const existing = current.events.find((event) => event.id === id);
-    if (!userId || !existing || existing.createdBy !== userId) return false;
+    if (
+      !workspace
+      || !existing
+      || existing.createdBy !== workspace.userId
+      || existing.coupleId !== workspace.coupleId
+    ) return false;
 
     const updated = { ...existing, ...updates };
-    setState((prev) => ({
-      ...prev,
-      events: prev.events.map((event) => (event.id === id ? updated : event)),
-    }));
+    setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+      ? { ...prev, events: prev.events.map((event) => (event.id === id ? updated : event)) }
+      : prev);
 
     try {
       const saved = await import('@/lib/events').then((module) =>
         module.updateEventInDB(updated),
       );
+      if (!isCurrentWorkspace(workspace)) return false;
       if (!saved) {
-        setState((prev) => ({
-          ...prev,
-          events: prev.events.map((event) => (event.id === id ? existing : event)),
-        }));
+        setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+          ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
+          : prev);
         return false;
       }
-      setState((prev) => ({
-        ...prev,
-        events: prev.events.map((event) => (event.id === id ? saved : event)),
-      }));
+      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+        ? { ...prev, events: prev.events.map((event) => (event.id === id ? saved : event)) }
+        : prev);
       return true;
     } catch (error) {
+      if (!isCurrentWorkspace(workspace)) return false;
       console.error('Failed to update event:', error);
-      setState((prev) => ({
-        ...prev,
-        events: prev.events.map((event) => (event.id === id ? existing : event)),
-      }));
+      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+        ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
+        : prev);
       return false;
     }
   };
 
   const deleteEvent = async (id: string): Promise<boolean> => {
-    const current = stateRef.current;
-    const userId = current.authenticatedUser?.id;
-    const existing = current.events.find((event) => event.id === id);
-    if (!userId || !existing || existing.createdBy !== userId) return false;
+    const workspace = captureActiveWorkspace();
+    const existing = stateRef.current.events.find((event) => event.id === id);
+    if (
+      !workspace
+      || !existing
+      || existing.createdBy !== workspace.userId
+      || existing.coupleId !== workspace.coupleId
+    ) return false;
 
     try {
       const deleted = await import('@/lib/events').then((module) =>
         module.deleteEventFromDB(id),
       );
-      if (!deleted) return false;
+      if (!isCurrentWorkspace(workspace) || !deleted) return false;
     } catch (error) {
-      console.error('Failed to delete event:', error);
+      if (isCurrentWorkspace(workspace)) console.error('Failed to delete event:', error);
       return false;
     }
 
-    setState((prev) => ({
-      ...prev,
-      events: prev.events.filter((event) => event.id !== id),
-    }));
+    setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+      ? { ...prev, events: prev.events.filter((event) => event.id !== id) }
+      : prev);
     return true;
   };
 
-  const reloadEvents = useCallback(async (): Promise<{
+  const reloadEvents = async (): Promise<{
     ok: boolean;
     reason?: 'forbidden' | 'error';
   }> => {
-    const current = stateRef.current;
-    const coupleId = current.profile.couple.coupleId;
-    if (!current.authenticatedUser?.id || !coupleId) return { ok: false, reason: 'forbidden' };
+    const workspace = captureActiveWorkspace();
+    if (!workspace) return { ok: false, reason: 'forbidden' };
 
     try {
-      const result = await fetchEventsResultFromDB(coupleId);
+      const result = await fetchEventsResultFromDB(workspace.coupleId);
+      if (!isCurrentWorkspace(workspace)) return { ok: false, reason: 'forbidden' };
       if (!result.ok) return result;
-      setState((prev) => ({ ...prev, events: result.events }));
+      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+        ? { ...prev, events: result.events }
+        : prev);
       return { ok: true };
     } catch (error) {
+      if (!isCurrentWorkspace(workspace)) return { ok: false, reason: 'forbidden' };
       console.error('Failed to reload events:', error);
       return { ok: false, reason: 'error' };
     }
-  }, []);
+  };
 
   /**
    * Demo-only role preview: swaps my name with my partner's and flips the role
@@ -937,38 +1045,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const disconnect = async (): Promise<boolean> => {
+    const current = stateRef.current;
+    const disconnectIdentity = current.authenticatedUser?.id && current.profile.couple.coupleId
+      ? {
+          userId: current.authenticatedUser.id,
+          coupleId: current.profile.couple.coupleId,
+          generation: sessionGenerationRef.current,
+        }
+      : undefined;
     try {
       if (isSupabaseConfigured) {
         const disconnected = await disconnectCoupleFromDB();
         if (!disconnected) return false;
       }
-      localStorage.removeItem(STORE_KEY_V1);
-      localStorage.removeItem(STORE_KEY); // 보안: 연결 해제 시 로컬 캐시 즉각 파기
-
-      const current = stateRef.current;
-      const nextState: AppState = {
-        ...current,
-        highlightedRecordId: undefined,
-        profile: {
-          ...current.profile,
-          couple: {
-            coupleId: undefined,
-            partnerName: '',
-            anniversaryDate: undefined,
-            coupleCode: '',
-            connected: false,
-            status: 'disconnected',
-          },
-        },
-        records: [],
-        events: [],
-        trips: [],
-      };
-      // Realtime callbacks consult stateRef, so revoke their authority before
-      // React commits the render and runs effect cleanup.
-      stateRef.current = nextState;
-      setState(nextState);
-      return true;
+      return purgeSharedAccess(disconnectIdentity);
     } catch (e) {
       console.error('Failed to disconnect:', e);
       return false;
@@ -981,6 +1071,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const purgeLocalAccountData = () => {
     hydratedUserIdRef.current = null;
+    if (sessionUserIdRef.current !== null) sessionGenerationRef.current += 1;
     sessionUserIdRef.current = null;
     cachePurgedRef.current = true;
     localStorage.removeItem(STORE_KEY_V1);

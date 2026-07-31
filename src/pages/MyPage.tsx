@@ -282,7 +282,7 @@ export function MyPage() {
           >
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4 text-coral" />
-              <span>설정 및 계정 관리 (연결, 알림, 잠금, 로그아웃)</span>
+              <span>설정 및 계정 관리 (프로필, 연결, 내보내기, 로그아웃)</span>
             </div>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </button>

@@ -20,11 +20,12 @@
 2. **단순하고 명확한 프라이버시 (기본: 우리 공유)**:
    - **기본값**: 우리 둘에게 공유 (`is_private = false`).
    - **필요 시**: "나에게만 남기기" (`is_private = true`) 작은 토글 제공.
-   - `is_private = true` 기록은 상대방 타임라인, 달력 및 자동 빠른 정리 분석에서 **완전히 제외**됩니다. (현재 데모 모드는 UI 모의 격리이며, 실제 서버 DB RLS 연동 시 강제 적용됩니다)
+   - `is_private = true` 기록은 상대방 타임라인, 달력 및 자동 빠른 정리 분석에서 **완전히 제외**됩니다. 서버에서는 RLS 정책이 상대방의 조회를 차단하고, 클라이언트에서도 `src/lib/privacy.ts` 가 한 번 더 걸러냅니다.
 
 3. **곰신의 쉬운 기록 (2~3터치)**:
    - 감정, 에너지 슬라이더, 배려 요청 필수 입력을 강요하지 않습니다.
-   - `지금 찍기` / `사진 올리기` / `한 줄 남기기` 3개 주요 CTA를 최우선으로 배치합니다.
+   - `지금찍기` / `사진·영상` / `음성` / `한줄` 4개 주요 CTA를 최우선으로 배치합니다.
+   - 곰신과 군화 **양쪽 모두** 동일한 작성기로 글과 미디어를 남길 수 있습니다.
    - 선택 리액션: `좋았어` / `이런 일이 있었어` / `힘들었어` / `네 생각났어` (선택 사항).
 
 4. **군화 홈의 본질: 시간순 타임라인**:
@@ -38,20 +39,43 @@
 ## 2. 기술 스택 및 오프라인 데모 모드
 
 - **Core**: React 19 + TypeScript + Vite 6 + Tailwind CSS v4 + React Router v7 + Sonner
-- **상태 및 데이터**: Repository 레이어 추상화 (`ILogRepository`), LocalStorage 데모 연동 (`gomsinlog.state.v1`)
+- **백엔드**: Supabase (Postgres + RLS, Auth, 비공개 Storage 버킷, Edge Function)
+- **상태 및 데이터**: Repository 레이어 추상화 (`ILogRepository`), LocalStorage 캐시 (`gomsinlog.state.v2`)
+- **네이티브**: Capacitor 7 (Android / Google Play)
 
 ```bash
-# 개발 서버 실행
-npm run dev
+npm install
 
-# 프로덕션 빌드 (tsc -b && vite build)
-npm run build
+npm run verify      # 타입검사 + 린트 + 테스트 + 빌드 (한 번에)
 
-# 코드 린트 검사
-npm run lint
+npm run typecheck   # tsc -b --force
+npm run lint        # eslint
+npm test            # vitest (104개)
+npm run build       # 프로덕션 빌드
+
+# Capacitor (Android)
+npm run cap:add:android   # android/ 생성 (최초 1회)
+npm run cap:sync          # 빌드 + android/ 동기화
+npm run cap:open          # Android Studio 열기
 ```
 
-> **참고**: Supabase `.env` 자격증명이 제공되지 않은 환경에서는 즉시 오프라인 데모 모드로 동작하며, 데모 데이터는 브라우저 `localStorage`에만 저장됩니다.
+> **참고**: Supabase `.env` 자격증명이 없으면 오프라인 데모 모드로 동작하며, 데모
+> 데이터는 브라우저 `localStorage`에만 저장됩니다. 데모 모드에서 첨부한 파일은
+> 세션 동안만 미리보기로 보이고 저장되지 않습니다.
+
+### 문서
+
+시작 지점은 **[`docs/kiro/AI_HANDOFF.md`](docs/kiro/AI_HANDOFF.md)** 입니다.
+
+| 문서 | 용도 |
+| --- | --- |
+| [`docs/kiro/AI_HANDOFF.md`](docs/kiro/AI_HANDOFF.md) | 실제 라우트 구조와 반드시 알아야 할 구조적 제약 |
+| [`docs/kiro/RELEASE_AUDIT_2026-07-31.md`](docs/kiro/RELEASE_AUDIT_2026-07-31.md) | 수정한 결함과 남은 위험 |
+| [`docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`](docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md) | 배포 절차 (비개발자용) |
+| [`docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`](docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md) | 2계정 수동 검증 |
+| [`docs/kiro/PLAY_STORE_ROADMAP.md`](docs/kiro/PLAY_STORE_ROADMAP.md) | Google Play 출시 |
+| [`docs/kiro/ROLLBACK_GUIDE.md`](docs/kiro/ROLLBACK_GUIDE.md) | 문제 발생 시 되돌리기 |
+| [`supabase/migrations/README.md`](supabase/migrations/README.md) | 마이그레이션 목록과 적용 순서 |
 
 ---
 

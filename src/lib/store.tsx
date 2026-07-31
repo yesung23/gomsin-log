@@ -15,7 +15,7 @@ import {
   deleteAccountFromDB,
   saveCoupleAnniversary,
 } from '@/lib/supabase';
-import { fetchFullStateFromDB } from '@/lib/sync';
+import { fetchFullStateFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
 import { fetchEventsResultFromDB } from '@/lib/events';
 import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
 import { visibleRecordsForViewer } from '@/lib/privacy';
@@ -208,6 +208,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(DEFAULT_STATE);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isAuthChecked, setIsAuthChecked] = useState(!supabase);
+  const [authSyncUnavailable, setAuthSyncUnavailable] = useState(false);
   /**
    * The user id whose server state we have already loaded. Lets us ignore
    * TOKEN_REFRESHED / USER_UPDATED events instead of re-running the full sync,
@@ -370,6 +371,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         membershipReconciliationRef.current += 1;
         quarantinedWorkspaceRef.current = null;
         pendingDisconnectRef.current = null;
+        retrySharedAccessRef.current = null;
+        realtimeHealthyRef.current = true;
+        setSharedSyncStatus('live');
+        setAuthSyncUnavailable(false);
         hydratedUserIdRef.current = null;
         // Fail closed before account hydration starts: the previous account's
         // React state must not remain rendered during the network request.
@@ -418,7 +423,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             const dbState = await withTimeout(
               fetchFullStateFromDB(sessionUser.id),
               AUTH_SYNC_TIMEOUT_MS,
-              null,
+              FULL_STATE_UNAVAILABLE,
             );
             if (
               disposed
@@ -438,6 +443,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ) return;
 
             const prev = stateRef.current;
+            const syncUnavailable = dbState === FULL_STATE_UNAVAILABLE;
+            setAuthSyncUnavailable(syncUnavailable);
             const nextState = (() => {
               // On an account switch, start from a clean slate so none of the
               // previous account's records/profile can survive.
@@ -445,10 +452,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ? { ...DEFAULT_STATE, ...carryOverDevicePrefs(prev) }
                 : prev;
 
+              if (dbState === FULL_STATE_UNAVAILABLE) {
+                // Keep the authenticated identity but expose a dedicated retry
+                // screen. Shared and account-scoped data remain cleared; a
+                // retryable outage must never masquerade as a new account.
+                return {
+                  ...base,
+                  authenticatedUser: authUser,
+                  isDemoMode: false,
+                  records: [],
+                  events: [],
+                  trips: [],
+                };
+              }
+
               if (!dbState) {
-                // Signed in, but the server has no profile row for this user yet
-                // (brand new account) or the sync failed. Either way, do not present
-                // stale or demo content as if it belonged to this account.
+                // A successful empty profile lookup identifies a brand-new
+                // account. Only this verified case may enter onboarding.
                 return {
                   ...base,
                   authenticatedUser: authUser,
@@ -490,7 +510,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             })();
             replaceStateImmediately(nextState);
 
-            hydratedUserIdRef.current = dbState ? sessionUser.id : null;
+            hydratedUserIdRef.current = dbState && dbState !== FULL_STATE_UNAVAILABLE
+              ? sessionUser.id
+              : null;
           } finally {
             // Always release the splash screen, even when the sync failed.
             if (
@@ -609,6 +631,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     membershipReconciliationRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     pendingDisconnectRef.current = null;
+    retrySharedAccessRef.current = null;
+    realtimeHealthyRef.current = true;
     // There is no shared workspace left to be out of sync with.
     setSharedSyncStatus('live');
     localStorage.removeItem(STORE_KEY_V1);
@@ -855,11 +879,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       recoveryTimer = window.setTimeout(() => {
         recoveryTimer = undefined;
         void (async () => {
-          const recovered = await reconcileOwnMembership();
+          await reconcileOwnMembership();
           if (disposed || !isCurrentActiveCouple()) return;
           // Keep polling while the transport is down even after a successful
-          // read, because nothing else will deliver the partner's changes.
-          if (recovered) recoveryAttempt = 0;
+          // read, because nothing else will deliver the partner's changes. Do
+          // not reset the attempt after success: the delay must continue growing
+          // to the 30-second fallback cadence rather than polling four HTTP
+          // endpoints every two seconds forever.
           if (!realtimeHealthyRef.current) scheduleRecovery();
         })();
       }, delay);
@@ -1881,6 +1907,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       value={{
         state,
         isReady: isHydrated && isAuthChecked,
+        authSyncUnavailable,
         sharedSyncStatus,
         retrySharedAccess,
         updateProfile,

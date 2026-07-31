@@ -70,11 +70,19 @@ export function SettingsPage() {
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
 
   useEscapeKey(() => {
-    if (showDeleteAccountModal) setShowDeleteAccountModal(false);
-    else if (showDeleteRecordsModal) setShowDeleteRecordsModal(false);
-    else if (showDisconnectModal) setShowDisconnectModal(false);
-    else if (showPWAModal) setShowPWAModal(false);
-    else if (showProfileModal) setShowProfileModal(false);
+    if (showDeleteAccountModal) {
+      if (isDeletingAccount) return;
+      setShowDeleteAccountModal(false);
+      setDeleteAccountConfirmation('');
+    } else if (showDeleteRecordsModal) {
+      if (!isDeletingRecords) setShowDeleteRecordsModal(false);
+    } else if (showDisconnectModal) {
+      if (!isDisconnecting) setShowDisconnectModal(false);
+    } else if (showPWAModal) {
+      setShowPWAModal(false);
+    } else if (showProfileModal) {
+      setShowProfileModal(false);
+    }
   }, showDeleteAccountModal || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
 
   useLayoutEffect(() => {
@@ -629,7 +637,8 @@ export function SettingsPage() {
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
                   onClick={() => setShowDisconnectModal(false)}
-                  className="py-2.5 rounded-xl border border-border text-xs font-semibold min-h-[44px]"
+                  disabled={isDisconnecting}
+                  className="py-2.5 rounded-xl border border-border text-xs font-semibold min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -637,14 +646,19 @@ export function SettingsPage() {
                   onClick={async () => {
                     if (isDisconnecting) return;
                     setIsDisconnecting(true);
-                    const disconnected = await disconnect();
-                    setIsDisconnecting(false);
-
-                    if (disconnected) {
-                      setShowDisconnectModal(false);
-                      toast.success('연결이 해제되었습니다.');
-                    } else {
+                    try {
+                      const disconnected = await disconnect();
+                      if (disconnected) {
+                        setShowDisconnectModal(false);
+                        toast.success('연결이 해제되었습니다.');
+                      } else {
+                        toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                      }
+                    } catch (error) {
+                      console.error('[Settings] Couple disconnect failed:', error);
                       toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                    } finally {
+                      setIsDisconnecting(false);
                     }
                   }}
                   disabled={isDisconnecting}
@@ -668,7 +682,8 @@ export function SettingsPage() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => setShowDeleteRecordsModal(false)}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs active:bg-muted/80 min-h-[44px]"
+                  disabled={isDeletingRecords}
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs active:bg-muted/80 min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -676,16 +691,21 @@ export function SettingsPage() {
                   onClick={async () => {
                     if (isDeletingRecords) return;
                     setIsDeletingRecords(true);
-                    const results = await Promise.all(
-                      ownRecords.map((record) => deleteRecord(record.id))
-                    );
-                    setIsDeletingRecords(false);
-
-                    if (results.every(Boolean)) {
-                      setShowDeleteRecordsModal(false);
-                      toast.success('내 기록이 모두 삭제되었습니다.');
-                    } else {
+                    try {
+                      const results = await Promise.all(
+                        ownRecords.map((record) => deleteRecord(record.id))
+                      );
+                      if (results.every(Boolean)) {
+                        setShowDeleteRecordsModal(false);
+                        toast.success('내 기록이 모두 삭제되었습니다.');
+                      } else {
+                        toast.error('일부 기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+                      }
+                    } catch (error) {
+                      console.error('[Settings] Record deletion failed:', error);
                       toast.error('일부 기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+                    } finally {
+                      setIsDeletingRecords(false);
                     }
                   }}
                   disabled={isDeletingRecords}
@@ -739,33 +759,38 @@ export function SettingsPage() {
                   onClick={async () => {
                     if (isDeletingAccount || deleteAccountConfirmation !== '탈퇴') return;
                     setIsDeletingAccount(true);
-                    const result = await deleteAccount();
-                    setIsDeletingAccount(false);
+                    try {
+                      const result = await deleteAccount();
+                      if (!result.ok) {
+                        toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                        return;
+                      }
 
-                    if (!result.ok) {
-                      toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-                      return;
-                    }
+                      setShowDeleteAccountModal(false);
+                      setDeleteAccountConfirmation('');
 
-                    setShowDeleteAccountModal(false);
-                    setDeleteAccountConfirmation('');
-
-                    // Report a partial cleanup honestly rather than claiming
-                    // everything was removed.
-                    const mediaWarning = result.warnings.some((w) =>
-                      w.startsWith('media_not_fully_removed'),
-                    );
-                    if (mediaWarning) {
-                      toast.warning(
-                        '계정은 삭제되었지만 일부 첨부파일이 남아 있을 수 있습니다. 문의해 주시면 완전히 삭제해 드립니다.',
-                        { duration: 10000 },
+                      // Report a partial cleanup honestly rather than claiming
+                      // everything was removed.
+                      const mediaWarning = result.warnings.some((w) =>
+                        w.startsWith('media_not_fully_removed'),
                       );
-                    } else if (result.warnings.length > 0) {
-                      toast.warning('계정은 삭제되었지만 일부 정리 작업이 지연되었습니다.', {
-                        duration: 8000,
-                      });
-                    } else {
-                      toast.success('계정과 데이터가 삭제되었습니다.');
+                      if (mediaWarning) {
+                        toast.warning(
+                          '계정은 삭제되었지만 일부 첨부파일이 남아 있을 수 있습니다. 문의해 주시면 완전히 삭제해 드립니다.',
+                          { duration: 10000 },
+                        );
+                      } else if (result.warnings.length > 0) {
+                        toast.warning('계정은 삭제되었지만 일부 정리 작업이 지연되었습니다.', {
+                          duration: 8000,
+                        });
+                      } else {
+                        toast.success('계정과 데이터가 삭제되었습니다.');
+                      }
+                    } catch (error) {
+                      console.error('[Settings] Account deletion failed:', error);
+                      toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                    } finally {
+                      setIsDeletingAccount(false);
                     }
                   }}
                   disabled={isDeletingAccount || deleteAccountConfirmation !== '탈퇴'}

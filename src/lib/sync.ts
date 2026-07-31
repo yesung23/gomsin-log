@@ -1,11 +1,14 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { AppState, UserProfile, CoupleInfo, MilitaryInfo, ContactPreferences, DailyRecord, CoupleEvent, Trip, Role } from '@/types';
-import { fetchRecordsFromDB } from '@/lib/records';
+import { fetchRecordsResultFromDB } from '@/lib/records';
 import { visibleRecordsForViewer } from '@/lib/privacy';
-import { fetchEventsFromDB } from '@/lib/events';
-import { fetchTripsFromDB } from '@/lib/trips';
+import { fetchEventsResultFromDB } from '@/lib/events';
+import { fetchTripsResultFromDB } from '@/lib/trips';
 
-export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppState> | null> {
+export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
+export type FullStateFetchResult = Partial<AppState> | null | typeof FULL_STATE_UNAVAILABLE;
+
+export async function fetchFullStateFromDB(userId: string): Promise<FullStateFetchResult> {
   if (!isSupabaseConfigured || !supabase || !userId) return null;
 
   try {
@@ -14,9 +17,12 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
-    if (profileError || !profileData) return null;
+    // A successful empty lookup is a genuinely new account. Query failures are
+    // retryable and must not be confused with onboarding.
+    if (profileError) return FULL_STATE_UNAVAILABLE;
+    if (!profileData) return null;
 
     // 2. Fetch Couple Member Status
     const { data: memberData, error: memberError } = await supabase
@@ -26,23 +32,30 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
       .eq('status', 'active')
       .maybeSingle();
 
+    // An authorization/network failure is not proof that membership is absent.
+    // Returning an empty "disconnected" snapshot would overwrite known-good
+    // state and mislead the user; surface a retryable unavailable result instead.
+    if (memberError) return FULL_STATE_UNAVAILABLE;
+
     let couple: CoupleInfo = {
       partnerName: '',
       coupleCode: '',
       connected: false,
-      status: 'pending',
+      status: 'disconnected',
     };
 
     if (memberData && memberData.couple_id) {
       // Fetch Couple Details
-      const { data: coupleData } = await supabase
+      const { data: coupleData, error: coupleError } = await supabase
         .from('couples')
         .select('*')
         .eq('id', memberData.couple_id)
         .single();
+      if (coupleError || !coupleData) return FULL_STATE_UNAVAILABLE;
 
       // Fetch Partner Profile
-      const { data: partnerData } = await supabase.rpc('get_partner_profile');
+      const { data: partnerData, error: partnerError } = await supabase.rpc('get_partner_profile');
+      if (partnerError) return FULL_STATE_UNAVAILABLE;
       
       const hasPartner = !!(partnerData && partnerData.length > 0);
       let partnerName = '';
@@ -61,11 +74,12 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
     }
 
     // 3. Fetch Contact Preferences
-    const { data: contactData } = await supabase
+    const { data: contactData, error: contactError } = await supabase
       .from('contact_preferences')
       .select('*')
       .eq('user_id', userId)
       .maybeSingle();
+    if (contactError) return FULL_STATE_UNAVAILABLE;
 
     const contact: ContactPreferences = {
       weekdayStart: contactData?.weekday_start || '18:00',
@@ -94,34 +108,41 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
       contact,
     };
 
-    let records: DailyRecord[] = [];
-    let events: CoupleEvent[] = [];
-    let trips: Trip[] = [];
     /**
      * The owner of a couple space holds an `active` membership from the moment
      * they create it, so RLS already returns their own rows while the invitation
      * is outstanding. Requiring a partner here meant a user who journalled while
      * waiting saw their entries vanish on the next load.
      */
-    const coupleSpaceId = couple.status === 'disconnected' ? undefined : couple.coupleId;
-    if (coupleSpaceId) {
-      const rawRecords = await fetchRecordsFromDB(coupleSpaceId);
-      const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
-      // Map authorRole based on userId, then drop anything this viewer is not
-      // entitled to see (defence in depth on top of RLS).
-      records = visibleRecordsForViewer(
-        rawRecords.map((r) => ({
-          ...r,
-          authorRole: r.userId === userId ? profile.role : partnerRole,
-        })),
-        { userId, role: profile.role },
-      );
-
-      trips = await fetchTripsFromDB(coupleSpaceId);
+    const coupleSpaceId = couple.coupleId;
+    const [recordsResult, eventsResult, tripsResult] = await Promise.all([
+      coupleSpaceId
+        ? fetchRecordsResultFromDB(coupleSpaceId)
+        : Promise.resolve({ ok: true as const, records: [] as DailyRecord[] }),
+      // Private schedules remain available to their author after disconnect;
+      // RLS adds shared rows only for an active couple membership.
+      fetchEventsResultFromDB(coupleSpaceId),
+      coupleSpaceId
+        ? fetchTripsResultFromDB(coupleSpaceId)
+        : Promise.resolve({ ok: true as const, trips: [] as Trip[] }),
+    ]);
+    if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
+      return FULL_STATE_UNAVAILABLE;
     }
-    // Private schedules remain available to their author after disconnect;
-    // RLS adds shared rows only for a couple this account is still a member of.
-    events = await fetchEventsFromDB(coupleSpaceId);
+
+    const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
+    // Map authorRole based on userId, then drop anything this viewer is not
+    // entitled to see (defence in depth on top of RLS).
+    const records = visibleRecordsForViewer(
+      recordsResult.records.map((record) => ({
+        ...record,
+        authorRole: record.userId === userId ? profile.role : partnerRole,
+      })),
+      { userId, role: profile.role },
+    );
+
+    const events: CoupleEvent[] = eventsResult.events;
+    const trips: Trip[] = tripsResult.trips;
 
     return {
       profile,
@@ -132,6 +153,6 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
     };
   } catch (err) {
     console.error('fetchFullStateFromDB error:', err);
-    return null;
+    return FULL_STATE_UNAVAILABLE;
   }
 }

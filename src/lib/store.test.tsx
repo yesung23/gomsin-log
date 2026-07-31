@@ -49,8 +49,10 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 const fetchFullStateFromDB = vi.fn();
+const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
 vi.mock('@/lib/sync', () => ({
   fetchFullStateFromDB: (userId: string) => fetchFullStateFromDB(userId),
+  FULL_STATE_UNAVAILABLE,
 }));
 
 /** Ordered log of media-related calls, used to assert the two-phase upload flow. */
@@ -112,10 +114,11 @@ const STORE_KEY = 'gomsinlog.state.v2';
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
 
 function Probe({ files = [] as File[] }: { files?: File[] }) {
-  const { state, isReady, sharedSyncStatus, signOut, disconnect, addRecordWithMedia, addEvent, reloadEvents } = useStore();
+  const { state, isReady, authSyncUnavailable, sharedSyncStatus, signOut, disconnect, addRecordWithMedia, addEvent, reloadEvents } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
+      <span data-testid="authSync">{authSyncUnavailable ? 'unavailable' : 'available'}</span>
       <span data-testid="syncStatus">{sharedSyncStatus}</span>
       <span data-testid="demo">{String(state.isDemoMode)}</span>
       <span data-testid="setup">{String(state.setupComplete)}</span>
@@ -256,10 +259,10 @@ describe('StoreProvider auth lifecycle', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
-    // Signed in, but no server profile could be loaded -> must go through onboarding
-    // rather than render stale content.
+    // A timeout is retryable and must be surfaced separately from a verified
+    // missing profile, so the app does not silently classify it as onboarding.
     expect(screen.getByTestId('user')).toHaveTextContent('user-a');
-    expect(screen.getByTestId('setup')).toHaveTextContent('false');
+    expect(screen.getByTestId('authSync')).toHaveTextContent('unavailable');
   });
 
   it('does not leak the previous account\'s records when switching accounts', async () => {
@@ -952,7 +955,7 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
   });
 
-  it('shows sharedSyncStatus as unavailable when the channel reports CHANNEL_ERROR', async () => {
+  it('shows sharedSyncStatus as unavailable on channel error and resets it on account switch', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fetchFullStateFromDB.mockResolvedValue(
       serverState({
@@ -981,6 +984,10 @@ describe('StoreProvider auth lifecycle', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable'));
+
+    await act(async () => emitAuth('SIGNED_IN', 'user-b'));
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-b'));
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
   });
 
   it('recovers shared data via HTTP after channel failure', async () => {
@@ -1026,6 +1033,52 @@ describe('StoreProvider auth lifecycle', () => {
 
     await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('delayed'));
     expect(screen.getByTestId('records')).toHaveTextContent('rec-recovered');
+
+    const callsAfterFirstRecovery = mockSupabase.rpc.mock.calls.length;
+    await act(async () => {
+      // The next poll must back off to 4 seconds. The old implementation reset
+      // after every successful HTTP read and hit all shared endpoints every 2s.
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 3);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(29_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 4);
+
+    // The cap remains 30 seconds for subsequent recovery polls.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 5);
   });
 
   it('does not blank the timeline on foreground return', async () => {

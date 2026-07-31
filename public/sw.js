@@ -1,78 +1,82 @@
-const CACHE_NAME = 'gomsinlog-app-shell-v2';
+const CACHE_NAME = 'gomsinlog-app-shell-__BUILD_ID__';
+const BUILD_ASSETS = [
+  /* __BUILD_ASSETS__ */
+];
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/offline.html',
   '/manifest.json',
   '/favicon.svg',
+  '/icons/apple-touch-icon.png',
+  '/icons/icon-192.svg',
+  '/icons/icon-512.svg',
+  ...BUILD_ASSETS,
 ];
+const CACHEABLE_DESTINATIONS = new Set([
+  'script',
+  'style',
+  'image',
+  'font',
+  'manifest',
+]);
 
-// Install: Cache essential app shell including the offline fallback
+// Installation must fail if the offline shell cannot be cached. Silently
+// accepting a partial cache installs a worker that promises offline support but
+// cannot provide it.
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[SW] Cache addAll warning:', err);
-      });
-    })
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)));
 });
 
-// Listen for skip waiting message from the main thread
+// A new worker activates only after the user accepts the update prompt.
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
-// Activate: Clean up old caches & take control immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((name) => {
-          if (name !== CACHE_NAME) {
-            console.info('[SW] Clearing legacy cache:', name);
-            return caches.delete(name);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches.keys()
+      .then((cacheNames) => Promise.all(
+        cacheNames.map((name) => name === CACHE_NAME ? undefined : caches.delete(name)),
+      ))
+      .then(() => self.clients.claim()),
   );
 });
 
-// Fetch: Network-First strategy with offline fallback page for navigations
 self.addEventListener('fetch', (event) => {
-  // Only intercept GET requests
-  if (event.request.method !== 'GET') return;
+  const request = event.request;
+  if (request.method !== 'GET') return;
 
-  // Skip non-http(s) requests (chrome-extension, etc)
-  const url = new URL(event.request.url);
-  if (!url.protocol.startsWith('http')) return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Never cache navigation URLs. In particular, an OAuth callback can contain
+  // a one-time authorization code in its query string; using it as a Cache
+  // Storage key unnecessarily persists that sensitive value. Navigations are
+  // network-first and fall back to the already-cached SPA shell.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(async () =>
+        (await caches.match('/index.html')) ?? caches.match('/offline.html')),
+    );
+    return;
+  }
+
+  // Only immutable/static browser resources are runtime-cached. Same-origin API
+  // responses and arbitrary GET endpoints pass through untouched.
+  if (!CACHEABLE_DESTINATIONS.has(request.destination)) return;
 
   event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        // Cache successful static asset responses
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
+    fetch(request)
+      .then((response) => {
+        const cacheControl = response.headers.get('Cache-Control') || '';
+        if (response.ok && response.type === 'basic' && !/\bno-store\b/i.test(cacheControl)) {
+          event.waitUntil(
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone())),
+          );
         }
-        return networkResponse;
+        return response;
       })
-      .catch(() => {
-        // Fallback to cache if offline
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          // For navigation requests, show the offline page
-          if (event.request.mode === 'navigate') {
-            return caches.match('/offline.html');
-          }
-        });
-      })
+      .catch(async () => (await caches.match(request)) ?? Response.error()),
   );
 });

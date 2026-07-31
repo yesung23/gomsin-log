@@ -1,7 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { HomePage } from '@/pages/HomePage';
 
 // Eagerly loaded: auth callback must resolve immediately on redirect.
@@ -47,8 +46,28 @@ function PageLoader() {
   );
 }
 
+function AuthSyncUnavailable() {
+  return (
+    <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
+      <section role="alert" className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm space-y-3">
+        <h1 className="text-base font-bold text-foreground">계정 정보를 확인하지 못했어요</h1>
+        <p className="text-xs leading-5 text-muted-foreground">
+          인터넷 연결을 확인한 뒤 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="w-full min-h-[44px] rounded-xl bg-coral px-4 py-3 text-xs font-bold text-white"
+        >
+          다시 시도
+        </button>
+      </section>
+    </main>
+  );
+}
+
 export function App() {
-  const { state, isReady } = useStore();
+  const { state, isReady, authSyncUnavailable } = useStore();
 
   if (!isReady) {
     return (
@@ -58,8 +77,19 @@ export function App() {
     );
   }
 
+  if (authSyncUnavailable) {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/legal/:doc" element={<LegalPage />} />
+          <Route path="*" element={<AuthSyncUnavailable />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
   return (
-    <ErrorBoundary>
     <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
@@ -87,6 +117,5 @@ export function App() {
         )}
       </Routes>
     </Suspense>
-    </ErrorBoundary>
   );
 }

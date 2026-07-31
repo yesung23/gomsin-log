@@ -1,9 +1,9 @@
 # Security headers for hosting platforms that respect this file (Netlify,
 # Cloudflare Pages). Other platforms need equivalent configuration.
 #
-# The Supabase project URL is injected at build time via VITE_SUPABASE_URL,
-# so CSP is enforced via the meta tag in index.html rather than here (the
-# connect-src must match the actual project).
+# CSP is intentionally configured by the deployment platform, because the
+# Supabase project URL is injected at build time and connect-src must match the
+# actual project. index.html does not claim to enforce a static CSP.
 
 /*
   X-Content-Type-Options: nosniff

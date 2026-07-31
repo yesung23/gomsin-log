@@ -97,7 +97,10 @@ export function SchedulePage() {
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
 
-  useEscapeKey(() => setShowEventModal(false), showEventModal);
+  useEscapeKey(
+    () => setShowEventModal(false),
+    showEventModal && !isSaving && deletingEventId === null,
+  );
 
   useLayoutEffect(() => {
     // Copied event details must never survive an account/workspace/access change.

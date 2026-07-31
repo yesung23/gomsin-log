@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { toast } from 'sonner';
 import { StoreProvider } from '@/lib/store';
 import { App } from '@/App';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemedToaster } from '@/components/ThemedToaster';
 import { registerAuthDeepLinkHandler } from '@/lib/deepLinks';
 import { isNativePlatform } from '@/lib/platform';
@@ -14,12 +15,14 @@ registerAuthDeepLinkHandler();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <StoreProvider>
-        <App />
-        <ThemedToaster />
-      </StoreProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <StoreProvider>
+          <App />
+          <ThemedToaster />
+        </StoreProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>
 );
 
@@ -28,38 +31,45 @@ createRoot(document.getElementById('root')!).render(
 // there would only add a second, stale cache layer.
 if (import.meta.env.PROD && !isNativePlatform() && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then((reg) => {
-      console.info('[PWA] Service Worker registered with scope:', reg.scope);
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      console.info('[PWA] Service Worker registered with scope:', registration.scope);
 
-      reg.addEventListener('updatefound', () => {
-        const newWorker = reg.installing;
-        if (!newWorker) return;
+      let updatePromptOpen = false;
+      const offerUpdate = (candidate: ServiceWorker | null) => {
+        if (!candidate || !navigator.serviceWorker.controller || updatePromptOpen) return;
+        updatePromptOpen = true;
+        toast('새 버전이 있어요', {
+          duration: Infinity,
+          action: {
+            label: '지금 업데이트',
+            onClick: () => {
+              // Listen before posting: activation can be fast enough to emit
+              // controllerchange in the same task on some browsers.
+              navigator.serviceWorker.addEventListener(
+                'controllerchange',
+                () => window.location.reload(),
+                { once: true },
+              );
+              const waiting = registration.waiting ?? candidate;
+              waiting.postMessage({ type: 'SKIP_WAITING' });
+            },
+          },
+        });
+      };
 
-        newWorker.addEventListener('statechange', () => {
-          if (
-            newWorker.state === 'installed' &&
-            navigator.serviceWorker.controller
-          ) {
-            toast('새 버전이 있어요', {
-              duration: Infinity,
-              action: {
-                label: '지금 업데이트',
-                onClick: () => {
-                  reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
-                  navigator.serviceWorker.addEventListener(
-                    'controllerchange',
-                    () => {
-                      window.location.reload();
-                    }
-                  );
-                },
-              },
-            });
-          }
+      // The update may have finished installing while the app was closed or
+      // before this listener was attached. `updatefound` will not fire again for
+      // an already-waiting worker, so check it immediately.
+      offerUpdate(registration.waiting);
+      registration.addEventListener('updatefound', () => {
+        const installing = registration.installing;
+        if (!installing) return;
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'installed') offerUpdate(registration.waiting ?? installing);
         });
       });
-    }).catch((err) => {
-      console.warn('[PWA] Service Worker registration skipped/failed:', err);
+    }).catch((error) => {
+      console.warn('[PWA] Service Worker registration skipped/failed:', error);
     });
   });
 }

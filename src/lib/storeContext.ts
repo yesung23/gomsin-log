@@ -12,6 +12,8 @@ export type SharedSyncStatus = 'live' | 'delayed' | 'unavailable';
 export interface StoreContextType {
   state: AppState;
   isReady: boolean;
+  /** Initial account hydration failed; account existence must not be inferred. */
+  authSyncUnavailable: boolean;
   sharedSyncStatus: SharedSyncStatus;
   /** Re-verify membership and re-read every shared slice through RLS. */
   retrySharedAccess: () => Promise<boolean>;

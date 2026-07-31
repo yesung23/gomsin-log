@@ -70,6 +70,8 @@ describe('feature privacy migration contract', () => {
     expect(migration).toContain('CREATE POLICY "Creators can insert events"');
     expect(migration).toContain('CREATE POLICY "Creators can update eligible events"');
     expect(migration).toContain('CREATE POLICY "Creators can delete eligible events"');
+    expect(migration).toContain('enforce_event_identity_immutable');
+    expect(migration).toContain('Event identity fields are immutable');
     expect(migration).toMatch(/is_private = true AND created_by = auth\.uid\(\)/);
     expect(migration).toMatch(/is_private = false\s+AND couple_id = public\.get_my_active_couple_id\(\)/);
   });
@@ -81,6 +83,7 @@ describe('feature privacy migration contract', () => {
 
     expect(supportTable).toBeTruthy();
     expect(supportTable).not.toMatch(/cycle_entry|start_date|end_date|symptom|prediction/i);
+    expect(migration).toContain('ALTER PUBLICATION supabase_realtime ADD TABLE public.collaboration_invalidations');
     expect(migration).toContain('ALTER PUBLICATION supabase_realtime ADD TABLE public.trip_items');
     expect(migration).toContain('ALTER PUBLICATION supabase_realtime ADD TABLE public.trip_checklists');
     expect(migration).toContain('ALTER PUBLICATION supabase_realtime ADD TABLE public.cycle_support_signals');

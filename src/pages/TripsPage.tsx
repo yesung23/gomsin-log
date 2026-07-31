@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, ChevronLeft, LoaderCircle, Map, Plane, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,7 +28,31 @@ export function TripsPage() {
   );
   const tripAccessKey = activeCouple ? `${userId}:${coupleId}` : '';
   const tripAccessKeyRef = useRef(tripAccessKey);
-  tripAccessKeyRef.current = tripAccessKey;
+  const tripAccessGenerationRef = useRef(0);
+  if (tripAccessKeyRef.current !== tripAccessKey) {
+    tripAccessKeyRef.current = tripAccessKey;
+    tripAccessGenerationRef.current += 1;
+  }
+  const captureTripScope = useCallback(
+    () => ({ key: tripAccessKeyRef.current, generation: tripAccessGenerationRef.current }),
+    [],
+  );
+  const isCurrentTripScope = useCallback(
+    (scope: { key: string; generation: number }) =>
+      scope.key === tripAccessKeyRef.current
+      && scope.generation === tripAccessGenerationRef.current
+      && scope.key !== '',
+    [],
+  );
+
+  useLayoutEffect(() => {
+    // Clear route-local shared data before paint on disconnect or workspace switch.
+    setTrips(activeCouple ? reconcileParentTrips(state.trips) : []);
+    setShowModal(false);
+    setIsCreating(false);
+    setFormError(null);
+    setLoadState(activeCouple ? 'loading' : userId ? 'disconnected' : 'forbidden');
+  }, [activeCouple, state.trips, tripAccessKey, userId]);
 
   const loadTrips = useCallback(async () => {
     if (!userId) {
@@ -40,12 +64,12 @@ export function TripsPage() {
       return;
     }
     setLoadState('loading');
-    const requestKey = tripAccessKey;
+    const requestScope = captureTripScope();
     const globalSnapshot = globalTripsSnapshotRef.current;
     try {
       const result = await fetchTripsResultFromDB(coupleId);
       if (
-        tripAccessKeyRef.current !== requestKey ||
+        !isCurrentTripScope(requestScope) ||
         globalTripsSnapshotRef.current !== globalSnapshot
       ) return;
       if (!result.ok) {
@@ -56,23 +80,27 @@ export function TripsPage() {
       setLoadState('ready');
     } catch (error) {
       if (
-        tripAccessKeyRef.current !== requestKey ||
+        !isCurrentTripScope(requestScope) ||
         globalTripsSnapshotRef.current !== globalSnapshot
       ) return;
       console.error('Failed to load trips:', error);
       setLoadState('error');
     }
-  }, [activeCouple, coupleId, tripAccessKey, userId]);
+  }, [activeCouple, captureTripScope, coupleId, isCurrentTripScope, userId]);
 
   useEffect(() => {
     void loadTrips();
   }, [loadTrips]);
 
   useEffect(() => {
+    if (!activeCouple) {
+      setTrips([]);
+      return;
+    }
     if (globalTripsSnapshotRef.current === state.trips) return;
     globalTripsSnapshotRef.current = state.trips;
     setTrips(reconcileParentTrips(state.trips));
-    if (activeCouple) setLoadState('ready');
+    setLoadState('ready');
   }, [activeCouple, state.trips]);
 
   useEffect(() => {
@@ -98,6 +126,7 @@ export function TripsPage() {
       return;
     }
 
+    const operationScope = captureTripScope();
     setIsCreating(true);
     setFormError(null);
     try {
@@ -106,6 +135,7 @@ export function TripsPage() {
         startDate: newTrip.startDate,
         endDate: newTrip.endDate,
       }, coupleId, userId);
+      if (!isCurrentTripScope(operationScope)) return;
       if (!saved) {
         const message = '여행을 만들지 못했어요. 입력 내용은 유지되니 다시 시도해 주세요.';
         setFormError(message);
@@ -119,21 +149,25 @@ export function TripsPage() {
       toast.success('여행 계획이 생성되었습니다!');
       navigate(`/trips/${saved.id}`);
     } catch {
+      if (!isCurrentTripScope(operationScope)) return;
       const message = '여행을 만들지 못했어요. 인터넷 연결을 확인해 주세요.';
       setFormError(message);
       toast.error(message);
     } finally {
-      setIsCreating(false);
+      if (isCurrentTripScope(operationScope)) setIsCreating(false);
     }
   };
 
   const sortedTrips = [...trips].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const visibleLoadState: LoadState = !userId
+    ? 'forbidden'
+    : !activeCouple ? 'disconnected' : loadState;
 
   const statePanel = (() => {
-    if (loadState === 'loading') {
+    if (visibleLoadState === 'loading') {
       return <div className="py-24 flex justify-center"><LoaderCircle className="w-7 h-7 animate-spin text-indigo-500" aria-label="여행 불러오는 중" /></div>;
     }
-    if (loadState === 'error') {
+    if (visibleLoadState === 'error') {
       return (
         <div className="text-center py-20 space-y-4">
           <RefreshCw className="w-10 h-10 text-muted-foreground mx-auto" />
@@ -142,7 +176,7 @@ export function TripsPage() {
         </div>
       );
     }
-    if (loadState === 'forbidden') {
+    if (visibleLoadState === 'forbidden') {
       return (
         <div className="text-center py-20 space-y-3">
           <ShieldAlert className="w-10 h-10 text-amber-500 mx-auto" />
@@ -151,7 +185,7 @@ export function TripsPage() {
         </div>
       );
     }
-    if (loadState === 'disconnected') {
+    if (visibleLoadState === 'disconnected') {
       const pending = state.profile.couple.status === 'pending';
       return (
         <div className="text-center py-20 space-y-3">
@@ -196,7 +230,7 @@ export function TripsPage() {
           <button onClick={() => navigate('/us')} className="p-1.5 -ml-1.5 rounded-full hover:bg-gray-100" aria-label="뒤로"><ChevronLeft className="w-5 h-5 text-gray-700" /></button>
           <h1 className="font-bold text-gray-900 text-lg flex items-center gap-2"><Plane className="w-5 h-5 text-indigo-500" />여행 플래너</h1>
         </div>
-        <button onClick={openCreate} disabled={loadState !== 'ready'} className="p-1.5 -mr-1.5 rounded-full hover:bg-indigo-50 text-indigo-600 disabled:opacity-30" aria-label="새 여행"><Plus className="w-5 h-5" /></button>
+        <button onClick={openCreate} disabled={visibleLoadState !== 'ready'} className="p-1.5 -mr-1.5 rounded-full hover:bg-indigo-50 text-indigo-600 disabled:opacity-30" aria-label="새 여행"><Plus className="w-5 h-5" /></button>
       </div>
       <div className="p-5 pb-24">{statePanel}</div>
 

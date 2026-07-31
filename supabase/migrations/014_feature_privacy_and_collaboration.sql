@@ -109,6 +109,83 @@ REVOKE ALL ON TABLE public.events FROM PUBLIC;
 REVOKE ALL ON TABLE public.events FROM anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.events TO authenticated;
 
+CREATE OR REPLACE FUNCTION public.enforce_event_identity_immutable()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+    OR NEW.couple_id IS DISTINCT FROM OLD.couple_id
+    OR NEW.created_by IS DISTINCT FROM OLD.created_by
+  THEN
+    RAISE EXCEPTION 'Event identity fields are immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.enforce_event_identity_immutable() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.enforce_event_identity_immutable() FROM anon;
+DROP TRIGGER IF EXISTS enforce_event_identity_immutable ON public.events;
+CREATE TRIGGER enforce_event_identity_immutable
+  BEFORE UPDATE ON public.events
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_event_identity_immutable();
+
+-- Non-sensitive slice invalidations remain readable after a source row becomes
+-- private/revoked, allowing partners to discard stale in-memory content without
+-- exposing the changed row itself through Realtime.
+CREATE TABLE IF NOT EXISTS public.collaboration_invalidations (
+  couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+  slice TEXT NOT NULL CHECK (slice IN ('events', 'cycle_support')),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (couple_id, slice)
+);
+
+ALTER TABLE public.collaboration_invalidations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Active members can read collaboration invalidations"
+  ON public.collaboration_invalidations;
+CREATE POLICY "Active members can read collaboration invalidations"
+  ON public.collaboration_invalidations FOR SELECT
+  USING (
+    auth.uid() IS NOT NULL
+    AND couple_id = public.get_my_active_couple_id()
+  );
+
+REVOKE ALL ON TABLE public.collaboration_invalidations FROM PUBLIC;
+REVOKE ALL ON TABLE public.collaboration_invalidations FROM anon;
+GRANT SELECT ON TABLE public.collaboration_invalidations TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.emit_collaboration_invalidation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_couple_id UUID;
+BEGIN
+  v_couple_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.couple_id ELSE NEW.couple_id END;
+  INSERT INTO public.collaboration_invalidations (couple_id, slice, updated_at)
+  VALUES (v_couple_id, TG_ARGV[0], clock_timestamp())
+  ON CONFLICT (couple_id, slice)
+  DO UPDATE SET updated_at = EXCLUDED.updated_at;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.emit_collaboration_invalidation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.emit_collaboration_invalidation() FROM anon;
+
+DROP TRIGGER IF EXISTS emit_event_collaboration_invalidation ON public.events;
+CREATE TRIGGER emit_event_collaboration_invalidation
+  AFTER INSERT OR UPDATE OR DELETE ON public.events
+  FOR EACH ROW EXECUTE FUNCTION public.emit_collaboration_invalidation('events');
+
 -- ---------------------------------------------------------------------------
 -- 2. Shared trip planner: both active members have full CRUD
 -- ---------------------------------------------------------------------------
@@ -306,10 +383,14 @@ DECLARE
   v_start_date DATE;
   v_end_date DATE;
 BEGIN
+  -- Lock the parent row before validating. Parent range updates already lock
+  -- this same row, so item writes and range changes serialize instead of each
+  -- validating against a stale concurrent state.
   SELECT start_date, end_date
     INTO v_start_date, v_end_date
   FROM public.trips
-  WHERE id = NEW.trip_id;
+  WHERE id = NEW.trip_id
+  FOR UPDATE;
 
   IF v_start_date IS NULL OR NEW.item_date < v_start_date OR NEW.item_date > v_end_date THEN
     RAISE EXCEPTION 'Trip item date must be within the parent trip range';
@@ -552,6 +633,7 @@ BEGIN
     SET revoked_at = v_now,
         updated_at = v_now
     WHERE owner_id = NEW.owner_id
+      AND couple_id = NEW.couple_id
       AND shared_for_date = v_korea_date
       AND revoked_at IS NULL;
     RETURN NEW;
@@ -584,7 +666,7 @@ DROP TRIGGER IF EXISTS enforce_cycle_support_signal_contract
 -- Normalize pre-existing duplicates before adding the concurrency backstop.
 WITH ranked AS (
   SELECT id, row_number() OVER (
-    PARTITION BY owner_id, shared_for_date ORDER BY created_at DESC, id DESC
+    PARTITION BY owner_id, couple_id, shared_for_date ORDER BY created_at DESC, id DESC
   ) AS position
   FROM public.cycle_support_signals
   WHERE revoked_at IS NULL
@@ -594,13 +676,20 @@ SET revoked_at = now(), updated_at = now()
 FROM ranked
 WHERE signal.id = ranked.id AND ranked.position > 1;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_cycle_support_signals_one_active_owner_date
-  ON public.cycle_support_signals (owner_id, shared_for_date)
+DROP INDEX IF EXISTS public.idx_cycle_support_signals_one_active_owner_date;
+CREATE UNIQUE INDEX idx_cycle_support_signals_one_active_owner_date
+  ON public.cycle_support_signals (owner_id, couple_id, shared_for_date)
   WHERE revoked_at IS NULL;
 
 CREATE TRIGGER enforce_cycle_support_signal_contract
   BEFORE INSERT OR UPDATE ON public.cycle_support_signals
   FOR EACH ROW EXECUTE FUNCTION public.enforce_cycle_support_signal_contract();
+
+DROP TRIGGER IF EXISTS emit_cycle_support_collaboration_invalidation
+  ON public.cycle_support_signals;
+CREATE TRIGGER emit_cycle_support_collaboration_invalidation
+  AFTER INSERT OR UPDATE OR DELETE ON public.cycle_support_signals
+  FOR EACH ROW EXECUTE FUNCTION public.emit_collaboration_invalidation('cycle_support');
 
 CREATE INDEX IF NOT EXISTS idx_cycle_support_signals_couple_date
   ON public.cycle_support_signals (couple_id, shared_for_date)
@@ -681,6 +770,15 @@ BEGIN
       SELECT 1 FROM pg_publication_tables
       WHERE pubname = 'supabase_realtime'
         AND schemaname = 'public'
+        AND tablename = 'collaboration_invalidations'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.collaboration_invalidations;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
         AND tablename = 'couple_members'
     ) THEN
       ALTER PUBLICATION supabase_realtime ADD TABLE public.couple_members;
@@ -740,8 +838,9 @@ COMMIT;
 -- ---------------------------------------------------------------------------
 -- Rollback approach
 -- ---------------------------------------------------------------------------
--- Back up first. In one transaction: remove the four new realtime entries,
--- drop cycle_support_signals, drop cycle_entries_symptoms_check and symptoms,
+-- Back up first. In one transaction: remove the five new realtime entries,
+-- drop collaboration_invalidations and cycle_support_signals (their triggers
+-- drop with the tables), drop emit_collaboration_invalidation, drop cycle_entries_symptoms_check and symptoms,
 -- restore the event_type check/policies and trip policies from migration 011.
 -- Data written with event_type = 'date' must be migrated before restoring the
 -- old event_type constraint.

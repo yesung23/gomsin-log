@@ -110,9 +110,15 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
         { userId, role: profile.role },
       );
 
-      events = await fetchEventsFromDB(couple.coupleId);
       trips = await fetchTripsFromDB(couple.coupleId);
     }
+    // Private schedules remain available to their author after disconnect;
+    // RLS adds shared rows only when this couple is currently active.
+    events = await fetchEventsFromDB(
+      couple.coupleId && couple.connected && couple.status === 'active'
+        ? couple.coupleId
+        : undefined,
+    );
 
     return {
       profile,

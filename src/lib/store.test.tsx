@@ -287,6 +287,37 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('name')).toHaveTextContent('');
   });
 
+  it('fails closed immediately while a different account is hydrating', async () => {
+    let resolveUserB!: (value: Partial<AppState> | null) => void;
+    fetchFullStateFromDB.mockImplementation((userId: string) => {
+      if (userId === 'user-a') {
+        return Promise.resolve(serverState({
+          records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'A secret', isPrivate: true, createdAt: 'x' }] as never,
+          events: [{ id: 'event-a' }] as never,
+          profile: { myName: 'A', role: 'gomsin', couple: { partnerName: '', coupleCode: '', connected: false, status: 'pending' }, military: {} as never, contact: {} as never } as never,
+        }));
+      }
+      return new Promise((resolve) => { resolveUserB = resolve; });
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('rec-a'));
+
+    await act(async () => emitAuth('SIGNED_IN', 'user-b'));
+
+    expect(screen.getByTestId('ready')).toHaveTextContent('loading');
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(screen.getByTestId('records')).toHaveTextContent('');
+    expect(screen.getByTestId('events')).toHaveTextContent('');
+    expect(screen.getByTestId('name')).toHaveTextContent('');
+
+    await act(async () => resolveUserB(null));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('user')).toHaveTextContent('user-b');
+  });
+
   it('keeps an explicitly started demo session across a reload', async () => {
     const demoState: Partial<AppState> = {
       setupComplete: true,
@@ -369,7 +400,10 @@ describe('StoreProvider auth lifecycle', () => {
     fetchFullStateFromDB.mockResolvedValue(
       serverState({
         records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'shared', isPrivate: false, createdAt: 'x' }] as never,
-        events: [{ id: 'event-a' }] as never,
+        events: [
+          { id: 'event-shared', isPrivate: false, createdBy: 'user-a' },
+          { id: 'event-private', isPrivate: true, createdBy: 'user-a' },
+        ] as never,
         trips: [{ id: 'trip-a' }] as never,
         profile: {
           myName: '춘향',
@@ -403,7 +437,8 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('partner')).toHaveTextContent('none');
     expect(screen.getByTestId('anniversary')).toHaveTextContent('none');
     expect(screen.getByTestId('records')).toHaveTextContent('');
-    expect(screen.getByTestId('events')).toHaveTextContent('');
+    expect(screen.getByTestId('events')).toHaveTextContent('event-private');
+    expect(screen.getByTestId('events')).not.toHaveTextContent('event-shared');
     expect(screen.getByTestId('trips')).toHaveTextContent('');
     expect(screen.getByTestId('name')).toHaveTextContent('춘향');
     expect(screen.getByTestId('user')).toHaveTextContent('user-a');
@@ -444,6 +479,88 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('events')).toHaveTextContent('');
     expect(screen.getByTestId('trips')).toHaveTextContent('');
     await waitFor(() => expect(mockSupabase.removeChannel).toHaveBeenCalledWith(channel));
+  });
+
+  it('reconciles membership on foreground and purges a missed disconnect', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'rec-a', log: 'shared' }] as never,
+      events: [{ id: 'event-a', isPrivate: false, createdBy: 'user-a' }] as never,
+      trips: [{ id: 'trip-a' }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+
+    mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: null });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
+    expect(screen.getByTestId('records')).toHaveTextContent('');
+    expect(screen.getByTestId('events')).toHaveTextContent('');
+    expect(screen.getByTestId('trips')).toHaveTextContent('');
+  });
+
+  it('reconciles membership when a visible client comes back online', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'rec-a', log: 'shared' }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+
+    mockSupabase.rpc.mockResolvedValueOnce({ data: null, error: null });
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
+    expect(screen.getByTestId('records')).toHaveTextContent('');
+  });
+
+  it('refetches events from RLS-visible rows after a privacy invalidation', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      events: [{ id: 'event-shared', isPrivate: false, createdBy: 'partner-a' }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('events')).toHaveTextContent('event-shared'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+    expect(invalidationCall).toBeDefined();
+
+    fetchEventsResultFromDB.mockResolvedValueOnce({ ok: true, events: [] });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'events' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('events')).toHaveTextContent(''));
   });
 
   it('does not append an event saved for account A after switching to account B', async () => {

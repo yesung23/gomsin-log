@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   inclusiveTripDates,
   parseTripPeriodParams,
+  reconcileParentTrips,
   recordsInInclusiveRange,
   validateTripDraft,
   validateTripItemUrl,
@@ -29,6 +30,25 @@ describe('trip planner helpers', () => {
       '2026-08-31',
       '2026-09-01',
       '2026-09-02',
+    ]);
+  });
+
+  it('reconciles parent trip snapshots by id without duplicate rows', () => {
+    const base = {
+      coupleId: 'couple-1',
+      createdBy: 'user-a',
+      startDate: '2026-08-10',
+      endDate: '2026-08-12',
+      status: 'planned' as const,
+      createdAt: '2026-08-01T00:00:00Z',
+    };
+    expect(reconcileParentTrips([
+      { ...base, id: 'trip-1', title: '이전 제목' },
+      { ...base, id: 'trip-2', title: '부산' },
+      { ...base, id: 'trip-1', title: '새 제목' },
+    ])).toEqual([
+      { ...base, id: 'trip-1', title: '새 제목' },
+      { ...base, id: 'trip-2', title: '부산' },
     ]);
   });
 

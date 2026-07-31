@@ -57,10 +57,12 @@ export function CycleSupportSection({
   const load = useCallback(async () => {
     setLoadState('loading');
     if (!authenticated) {
+      setSignals([]);
       setLoadState('unauthenticated');
       return;
     }
     if (!connected || !coupleId) {
+      setSignals([]);
       setLoadState('disconnected');
       return;
     }
@@ -88,7 +90,7 @@ export function CycleSupportSection({
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !authenticated || !connected || !coupleId) return;
+    if (!client || !authenticated || !userId || !connected || !coupleId) return;
     let timer: number | undefined;
     const refresh = () => {
       if (timer) window.clearTimeout(timer);
@@ -116,7 +118,7 @@ export function CycleSupportSection({
       if (timer) window.clearTimeout(timer);
       void client.removeChannel(channel);
     };
-  }, [authenticated, connected, coupleId, load]);
+  }, [authenticated, connected, coupleId, load, userId]);
 
   const visibleSignals = useMemo(
     () => owner

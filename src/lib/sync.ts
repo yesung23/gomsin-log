@@ -97,7 +97,7 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
     let records: DailyRecord[] = [];
     let events: CoupleEvent[] = [];
     let trips: Trip[] = [];
-    if (couple.coupleId) {
+    if (couple.coupleId && couple.connected && couple.status === 'active') {
       const rawRecords = await fetchRecordsFromDB(couple.coupleId);
       const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
       // Map authorRole based on userId, then drop anything this viewer is not
@@ -111,7 +111,7 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
       );
 
       events = await fetchEventsFromDB(couple.coupleId);
-      trips = await fetchTripsFromDB(); // it uses session for user
+      trips = await fetchTripsFromDB(couple.coupleId);
     }
 
     return {

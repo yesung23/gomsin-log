@@ -18,8 +18,8 @@ import {
   saveCoupleAnniversary,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB } from '@/lib/sync';
-import { fetchEventsFromDB, fetchEventsResultFromDB } from '@/lib/events';
-import { fetchTripsFromDB } from '@/lib/trips';
+import { fetchEventsResultFromDB } from '@/lib/events';
+import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   saveRecordToDB,
@@ -172,6 +172,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * records to account B.
    */
   const hydratedUserIdRef = useRef<string | null>(null);
+  /** Current authenticated session owner, updated synchronously before async auth hydration. */
+  const sessionUserIdRef = useRef<string | null>(null);
   /** Set while signing out / deleting so the persistence effect cannot resurrect the cache. */
   const cachePurgedRef = useRef(false);
   /** Always-current state, so actions can read it without depending on stale closures. */
@@ -202,6 +204,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     let disposed = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Revoke the previous account's realtime refresh authority immediately,
+      // before any asynchronous state hydration for the new session begins.
+      sessionUserIdRef.current = session?.user?.id ?? null;
       // The callback is intentionally sync: supabase-js serialises auth events and
       // awaiting inside it can deadlock other auth calls.
       void (async () => {
@@ -364,21 +369,40 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * user action.
    */
   const coupleId = state.profile.couple.coupleId;
+  const coupleConnected = state.profile.couple.connected;
+  const coupleStatus = state.profile.couple.status;
   const authUserId = state.authenticatedUser?.id;
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !coupleId || !authUserId) return;
+    const activeCouple = coupleConnected && coupleStatus === 'active';
+    if (
+      !client ||
+      !isAuthChecked ||
+      !activeCouple ||
+      !coupleId ||
+      !authUserId ||
+      sessionUserIdRef.current !== authUserId
+    ) return;
 
     let disposed = false;
     const timers = new Map<SyncSlice, number>();
+    const isCurrentActiveCouple = () => {
+      const current = stateRef.current;
+      return !disposed
+        && sessionUserIdRef.current === authUserId
+        && current.authenticatedUser?.id === authUserId
+        && current.profile.couple.coupleId === coupleId
+        && current.profile.couple.connected
+        && current.profile.couple.status === 'active';
+    };
 
     const refreshSlice = async (slice: SyncSlice) => {
-      if (disposed) return;
+      if (!isCurrentActiveCouple()) return;
       try {
         if (slice === 'records') {
           const raw = await fetchRecordsFromDB(coupleId);
-          if (disposed) return;
+          if (!isCurrentActiveCouple()) return;
           const role = stateRef.current.profile.role;
           const partnerRole: Role = role === 'gomsin' ? 'soldier' : 'gomsin';
           const records = visibleRecordsForViewer(
@@ -388,16 +412,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             })),
             { userId: authUserId, role },
           );
-          setState((prev) => ({ ...prev, records }));
+          if (isCurrentActiveCouple()) setState((prev) => ({ ...prev, records }));
           return;
         }
         if (slice === 'events') {
-          const events = await fetchEventsFromDB(coupleId);
-          if (!disposed) setState((prev) => ({ ...prev, events }));
+          const result = await fetchEventsResultFromDB(coupleId);
+          if (result.ok && isCurrentActiveCouple()) {
+            setState((prev) => ({ ...prev, events: result.events }));
+          }
           return;
         }
-        const trips = await fetchTripsFromDB();
-        if (!disposed) setState((prev) => ({ ...prev, trips }));
+        const result = await fetchTripsResultFromDB(coupleId);
+        if (result.ok && isCurrentActiveCouple()) {
+          setState((prev) => ({ ...prev, trips: reconcileParentTrips(result.trips) }));
+        }
       } catch (error) {
         console.error(`[gomsinlog] Realtime refresh of ${slice} failed:`, error);
       }
@@ -406,6 +434,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Coalesce bursts (e.g. a record insert immediately followed by the
     // attachment patch) into a single refresh.
     const scheduleRefresh = (slice: SyncSlice) => {
+      if (!isCurrentActiveCouple()) return;
       const existing = timers.get(slice);
       if (existing) window.clearTimeout(existing);
       timers.set(
@@ -454,7 +483,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       timers.clear();
       void client.removeChannel(channel);
     };
-  }, [coupleId, authUserId]);
+  }, [authUserId, coupleConnected, coupleId, coupleStatus, isAuthChecked]);
 
   /**
    * Wait for the partner to redeem the invite code.
@@ -465,11 +494,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * in the foreground, backs off, and eventually gives up instead of hammering
    * the API for the lifetime of the session.
    */
-  const coupleConnected = state.profile.couple.connected;
-
   useEffect(() => {
     const client = supabase;
-    if (!client || !authUserId || !coupleId || coupleConnected) return;
+    if (
+      !client ||
+      !isAuthChecked ||
+      !authUserId ||
+      !coupleId ||
+      coupleConnected ||
+      coupleStatus !== 'pending' ||
+      sessionUserIdRef.current !== authUserId
+    ) return;
 
     let cancelled = false;
     let timeoutId: number | undefined;
@@ -486,7 +521,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       attempts += 1;
       const { data, error } = await client.rpc('get_partner_profile');
-      if (cancelled) return;
+      const current = stateRef.current;
+      if (
+        cancelled ||
+        sessionUserIdRef.current !== authUserId ||
+        current.authenticatedUser?.id !== authUserId ||
+        current.profile.couple.coupleId !== coupleId ||
+        current.profile.couple.status !== 'pending'
+      ) return;
 
       if (!error && data?.length) {
         setState((prev) => ({
@@ -533,7 +575,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener('visibilitychange', handleVisibility);
       if (timeoutId) window.clearTimeout(timeoutId);
     };
-  }, [authUserId, coupleId, coupleConnected]);
+  }, [authUserId, coupleConnected, coupleId, coupleStatus, isAuthChecked]);
 
   const updateProfile = (profileUpdates: Partial<UserProfile>) => {
     // Compute the next profile outside the updater. React StrictMode invokes
@@ -903,21 +945,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem(STORE_KEY_V1);
       localStorage.removeItem(STORE_KEY); // 보안: 연결 해제 시 로컬 캐시 즉각 파기
 
-      setState((prev) => ({
-        ...prev,
+      const current = stateRef.current;
+      const nextState: AppState = {
+        ...current,
+        highlightedRecordId: undefined,
         profile: {
-          ...prev.profile,
+          ...current.profile,
           couple: {
-            ...prev.profile.couple,
-            connected: false,
+            coupleId: undefined,
+            partnerName: '',
+            anniversaryDate: undefined,
             coupleCode: '',
+            connected: false,
             status: 'disconnected',
           },
         },
-        records: [], // 연결 해제 시 기록도 초기화
+        records: [],
         events: [],
         trips: [],
-      }));
+      };
+      // Realtime callbacks consult stateRef, so revoke their authority before
+      // React commits the render and runs effect cleanup.
+      stateRef.current = nextState;
+      setState(nextState);
       return true;
     } catch (e) {
       console.error('Failed to disconnect:', e);
@@ -931,14 +981,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const purgeLocalAccountData = () => {
     hydratedUserIdRef.current = null;
+    sessionUserIdRef.current = null;
     cachePurgedRef.current = true;
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
-    setState((prev) => ({
+    const current = stateRef.current;
+    const nextState: AppState = {
       ...DEFAULT_STATE,
       isDemoMode: false,
-      ...carryOverDevicePrefs(prev),
-    }));
+      ...carryOverDevicePrefs(current),
+    };
+    stateRef.current = nextState;
+    setState(nextState);
   };
 
   const signOut = async () => {

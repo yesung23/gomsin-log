@@ -6,6 +6,7 @@ type AuthCallback = (event: string, session: { user: { id: string; email?: strin
 
 const authCallbacks: AuthCallback[] = [];
 const unsubscribe = vi.fn();
+const createdChannels: Array<{ name: string; on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn> }> = [];
 
 const mockSupabase = {
   auth: {
@@ -17,13 +18,17 @@ const mockSupabase = {
     getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
   },
   // Supports the chained .on().on().on().subscribe() builder the store uses.
-  channel: () => {
+  channel: vi.fn((name: string) => {
     const chainable = {
-      on: () => chainable,
-      subscribe: () => chainable,
+      name,
+      on: vi.fn(),
+      subscribe: vi.fn(),
     };
+    chainable.on.mockReturnValue(chainable);
+    chainable.subscribe.mockReturnValue(chainable);
+    createdChannels.push(chainable);
     return chainable;
-  },
+  }),
   removeChannel: vi.fn(),
   rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   from: () => ({
@@ -32,11 +37,13 @@ const mockSupabase = {
   }),
 };
 
+const disconnectCoupleFromDB = vi.fn().mockResolvedValue(true);
+
 vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
   isSupabaseConfigured: true,
   authRepository: { signOut: vi.fn().mockResolvedValue(undefined) },
-  disconnectCoupleFromDB: vi.fn().mockResolvedValue(true),
+  disconnectCoupleFromDB,
   deleteAccountFromDB: vi.fn().mockResolvedValue(true),
   saveCoupleAnniversary: vi.fn().mockResolvedValue(true),
 }));
@@ -77,12 +84,15 @@ vi.mock('@/lib/records', () => ({
 
 vi.mock('@/lib/events', () => ({
   fetchEventsFromDB: vi.fn().mockResolvedValue([]),
+  fetchEventsResultFromDB: vi.fn().mockResolvedValue({ ok: true, events: [] }),
   saveEventToDB: vi.fn().mockResolvedValue(true),
   deleteEventFromDB: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('@/lib/trips', () => ({
   fetchTripsFromDB: vi.fn().mockResolvedValue([]),
+  fetchTripsResultFromDB: vi.fn().mockResolvedValue({ ok: true, trips: [] }),
+  reconcileParentTrips: (trips: unknown[]) => trips,
 }));
 
 const { StoreProvider } = await import('@/lib/store');
@@ -92,7 +102,7 @@ const STORE_KEY = 'gomsinlog.state.v2';
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
 
 function Probe({ files = [] as File[] }: { files?: File[] }) {
-  const { state, isReady, signOut, addRecordWithMedia } = useStore();
+  const { state, isReady, signOut, disconnect, addRecordWithMedia } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
@@ -100,7 +110,12 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <span data-testid="setup">{String(state.setupComplete)}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
+      <span data-testid="couple">{state.profile.couple.coupleId ?? 'none'}</span>
+      <span data-testid="partner">{state.profile.couple.partnerName || 'none'}</span>
+      <span data-testid="anniversary">{state.profile.couple.anniversaryDate ?? 'none'}</span>
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
+      <span data-testid="events">{state.events.map((event) => event.id).join(',')}</span>
+      <span data-testid="trips">{state.trips.map((trip) => trip.id).join(',')}</span>
       <span data-testid="attachments">
         {state.records
           .flatMap((r) => r.attachments || [])
@@ -127,6 +142,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
         post
       </button>
       <button onClick={() => void signOut()}>signout</button>
+      <button onClick={() => void disconnect()}>disconnect</button>
     </div>
   );
 }
@@ -151,8 +167,13 @@ function serverState(overrides: Partial<AppState>): Partial<AppState> {
 describe('StoreProvider auth lifecycle', () => {
   beforeEach(() => {
     authCallbacks.length = 0;
+    createdChannels.length = 0;
     localStorage.clear();
     fetchFullStateFromDB.mockReset();
+    mockSupabase.channel.mockClear();
+    mockSupabase.removeChannel.mockClear();
+    mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
+    disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -317,6 +338,118 @@ describe('StoreProvider auth lifecycle', () => {
       expect(parsed.authenticatedUser).toBeNull();
       expect(cached).not.toContain('secret');
     }
+  });
+
+  it('clears the couple id and shared state, then tears down realtime after disconnect', async () => {
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'shared', isPrivate: false, createdAt: 'x' }] as never,
+        events: [{ id: 'event-a' }] as never,
+        trips: [{ id: 'trip-a' }] as never,
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: {
+            coupleId: 'couple-1',
+            partnerName: '몽룡',
+            anniversaryDate: '2025-01-01',
+            coupleCode: '',
+            connected: true,
+            status: 'active',
+          },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+    const sharedChannel = createdChannels.find((channel) => channel.name === 'couple-sync:couple-1');
+    expect(sharedChannel).toBeDefined();
+
+    await act(async () => {
+      screen.getByText('disconnect').click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
+    expect(screen.getByTestId('partner')).toHaveTextContent('none');
+    expect(screen.getByTestId('anniversary')).toHaveTextContent('none');
+    expect(screen.getByTestId('records')).toHaveTextContent('');
+    expect(screen.getByTestId('events')).toHaveTextContent('');
+    expect(screen.getByTestId('trips')).toHaveTextContent('');
+    expect(screen.getByTestId('name')).toHaveTextContent('춘향');
+    expect(screen.getByTestId('user')).toHaveTextContent('user-a');
+    await waitFor(() => expect(mockSupabase.removeChannel).toHaveBeenCalledWith(sharedChannel));
+  });
+
+  it('does not subscribe while pending and stops the pending partner poll on disconnect', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: {
+            coupleId: 'couple-pending',
+            partnerName: '',
+            coupleCode: '123456',
+            connected: false,
+            status: 'pending',
+          },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.rpc).toHaveBeenCalledTimes(1));
+    expect(mockSupabase.channel).not.toHaveBeenCalled();
+
+    await act(async () => {
+      screen.getByText('disconnect').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
+    const callsAfterDisconnect = mockSupabase.rpc.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterDisconnect);
+  });
+
+  it('replaces the active couple channel when the authenticated account changes', async () => {
+    fetchFullStateFromDB.mockImplementation(async (userId: string) =>
+      serverState({
+        profile: {
+          myName: userId,
+          role: 'gomsin',
+          couple: {
+            coupleId: userId === 'user-a' ? 'couple-a' : 'couple-b',
+            partnerName: 'partner',
+            coupleCode: '',
+            connected: true,
+            status: 'active',
+          },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-a'));
+    const firstChannel = createdChannels.find((channel) => channel.name === 'couple-sync:couple-a');
+
+    await act(async () => emitAuth('SIGNED_IN', 'user-b'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-b'));
+    expect(mockSupabase.removeChannel).toHaveBeenCalledWith(firstChannel);
   });
 
   it('saves the record row before uploading media (storage RLS requires it)', async () => {

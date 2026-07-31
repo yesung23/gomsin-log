@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckSquare, ExternalLink, LoaderCircle,
@@ -54,6 +54,12 @@ export function TripDetailPage() {
   const activeCouple = Boolean(
     userId && coupleId && state.profile.couple.connected && state.profile.couple.status === 'active',
   );
+  const tripAccessKey = activeCouple ? `${userId}:${coupleId}` : '';
+  const tripAccessKeyRef = useRef(tripAccessKey);
+  const latestGlobalTripsRef = useRef(state.trips);
+  const parentGlobalSnapshotRef = useRef<Trip[] | null>(null);
+  tripAccessKeyRef.current = tripAccessKey;
+  latestGlobalTripsRef.current = state.trips;
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [parentState, setParentState] = useState<ParentState>('loading');
@@ -79,45 +85,73 @@ export function TripDetailPage() {
   const [childActionError, setChildActionError] = useState<string | null>(null);
 
   const loadParent = useCallback(async () => {
+    parentGlobalSnapshotRef.current = null;
     if (!userId) {
+      setTrip(null);
       setParentState('forbidden');
       return;
     }
     if (!activeCouple || !coupleId) {
+      setTrip(null);
+      setItems([]);
+      setChecklists([]);
       setParentState('disconnected');
       return;
     }
     if (!id) {
+      setTrip(null);
       setParentState('not-found');
       return;
     }
     setParentState('loading');
+    const requestKey = tripAccessKey;
+    const globalSnapshot = latestGlobalTripsRef.current;
     try {
       const result = await fetchTripResultFromDB(id);
+      if (tripAccessKeyRef.current !== requestKey) return;
+      if (latestGlobalTripsRef.current !== globalSnapshot) {
+        const updated = latestGlobalTripsRef.current.find(
+          (entry) => entry.id === id && entry.coupleId === coupleId,
+        );
+        parentGlobalSnapshotRef.current = latestGlobalTripsRef.current;
+        if (!updated) {
+          setTrip(null);
+          setParentState('not-found');
+          return;
+        }
+        setTrip(updated);
+        setParentState('ready');
+        return;
+      }
       if (!result.ok) {
         setParentState(result.reason === 'forbidden' ? 'forbidden' : 'error');
         return;
       }
       if (!result.trip || result.trip.coupleId !== coupleId) {
+        setTrip(null);
         setParentState('not-found');
         return;
       }
+      parentGlobalSnapshotRef.current = latestGlobalTripsRef.current;
       setTrip(result.trip);
       setParentState('ready');
     } catch (error) {
+      if (tripAccessKeyRef.current !== requestKey) return;
       console.error('Failed to load trip:', error);
       setParentState('error');
     }
-  }, [activeCouple, coupleId, id, userId]);
+  }, [activeCouple, coupleId, id, tripAccessKey, userId]);
 
   const loadChildren = useCallback(async () => {
-    if (!id) return;
+    if (!id || !activeCouple) return;
     setChildState('loading');
+    const requestKey = tripAccessKey;
     try {
       const [itemResult, checklistResult] = await Promise.all([
         fetchTripItemsResultFromDB(id),
         fetchTripChecklistsResultFromDB(id),
       ]);
+      if (tripAccessKeyRef.current !== requestKey) return;
       if (!itemResult.ok || !checklistResult.ok) {
         const forbidden = (!itemResult.ok && itemResult.reason === 'forbidden')
           || (!checklistResult.ok && checklistResult.reason === 'forbidden');
@@ -128,14 +162,37 @@ export function TripDetailPage() {
       setChecklists(checklistResult.checklists);
       setChildState('ready');
     } catch (error) {
+      if (tripAccessKeyRef.current !== requestKey) return;
       console.error('Failed to load trip details:', error);
       setChildState('error');
     }
-  }, [id]);
+  }, [activeCouple, id, tripAccessKey]);
 
   useEffect(() => {
     void loadParent();
   }, [loadParent]);
+
+  useEffect(() => {
+    const previousSnapshot = parentGlobalSnapshotRef.current;
+    if (
+      parentState !== 'ready' ||
+      !id ||
+      !coupleId ||
+      previousSnapshot === null ||
+      previousSnapshot === state.trips
+    ) return;
+
+    parentGlobalSnapshotRef.current = state.trips;
+    const updated = state.trips.find((entry) => entry.id === id && entry.coupleId === coupleId);
+    if (!updated) {
+      setTrip(null);
+      setItems([]);
+      setChecklists([]);
+      setParentState('not-found');
+      return;
+    }
+    setTrip(updated);
+  }, [coupleId, id, parentState, state.trips]);
 
   useEffect(() => {
     if (parentState === 'ready') void loadChildren();
@@ -143,7 +200,7 @@ export function TripDetailPage() {
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !id || parentState !== 'ready') return;
+    if (!client || !id || !activeCouple || !userId || !coupleId || parentState !== 'ready') return;
     let timer: number | undefined;
     const refresh = () => {
       if (timer) window.clearTimeout(timer);
@@ -157,7 +214,7 @@ export function TripDetailPage() {
       if (timer) window.clearTimeout(timer);
       void client.removeChannel(channel);
     };
-  }, [id, loadChildren, parentState]);
+  }, [activeCouple, coupleId, id, loadChildren, parentState, userId]);
 
   const dates = useMemo(
     () => trip ? inclusiveTripDates(trip.startDate, trip.endDate) : [],
@@ -388,14 +445,20 @@ export function TripDetailPage() {
     }
   };
 
-  if (parentState !== 'ready' || !trip) {
-    const content = parentState === 'loading'
+  const visibleParentState: ParentState = !userId
+    ? 'forbidden'
+    : !activeCouple
+      ? 'disconnected'
+      : parentState;
+
+  if (visibleParentState !== 'ready' || !trip) {
+    const content = visibleParentState === 'loading'
       ? <LoaderCircle className="w-8 h-8 animate-spin text-coral mx-auto" aria-label="여행 불러오는 중" />
-      : parentState === 'not-found'
+      : visibleParentState === 'not-found'
         ? <><MapPin className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 찾을 수 없어요</p><p className="text-sm text-muted-foreground">삭제되었거나 존재하지 않는 여행이에요.</p></>
-        : parentState === 'disconnected'
+        : visibleParentState === 'disconnected'
           ? <><Unlink className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">우리 공간 연결이 필요해요</p><p className="text-sm text-muted-foreground">두 사람이 연결된 뒤 여행을 열 수 있어요.</p></>
-          : parentState === 'forbidden'
+          : visibleParentState === 'forbidden'
             ? <><ShieldAlert className="w-10 h-10 mx-auto text-amber-500" /><p className="font-bold">이 여행에 접근할 권한이 없어요</p></>
             : <><RefreshCw className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 불러오지 못했어요</p><button onClick={() => void loadParent()} className="px-5 py-2.5 bg-coral text-white rounded-xl font-bold text-sm">다시 시도</button></>;
     return <MobileShell><div className="p-6 text-center mt-20 space-y-3">{content}<button onClick={() => navigate('/trips')} className="block mx-auto text-sm text-muted-foreground underline">여행 목록으로</button></div></MobileShell>;

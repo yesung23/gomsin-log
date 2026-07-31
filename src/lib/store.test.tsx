@@ -69,10 +69,13 @@ const removeRecordMedia = vi.fn(async () => {
 
 const fetchRecordsFromDB = vi.fn(async () => []);
 
+const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
+
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
   deleteRecordFromDB: vi.fn().mockResolvedValue(true),
   fetchRecordsFromDB: (...args: unknown[]) => fetchRecordsFromDB(...(args as [])),
+  fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
   uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(...(args as [File])),
   removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
@@ -103,15 +106,17 @@ vi.mock('@/lib/trips', () => ({
 
 const { StoreProvider } = await import('@/lib/store');
 const { useStore } = await import('@/lib/useStore');
+const { fetchTripsResultFromDB: fetchTripsResultFromDBMock } = await import('@/lib/trips') as unknown as { fetchTripsResultFromDB: ReturnType<typeof vi.fn> };
 const STORE_KEY = 'gomsinlog.state.v2';
 
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
 
 function Probe({ files = [] as File[] }: { files?: File[] }) {
-  const { state, isReady, signOut, disconnect, addRecordWithMedia, addEvent, reloadEvents } = useStore();
+  const { state, isReady, sharedSyncStatus, signOut, disconnect, addRecordWithMedia, addEvent, reloadEvents } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
+      <span data-testid="syncStatus">{sharedSyncStatus}</span>
       <span data-testid="demo">{String(state.isDemoMode)}</span>
       <span data-testid="setup">{String(state.setupComplete)}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
@@ -191,11 +196,13 @@ describe('StoreProvider auth lifecycle', () => {
     createdChannels.length = 0;
     localStorage.clear();
     fetchFullStateFromDB.mockReset();
+    fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
     disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
+    fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });
     saveEventToDB.mockReset().mockResolvedValue(null);
     updateEventInDB.mockReset().mockResolvedValue(null);
     deleteEventFromDB.mockReset().mockResolvedValue(true);
@@ -905,5 +912,157 @@ describe('StoreProvider auth lifecycle', () => {
 
     // No extra full-state fetch: a refreshed token changes nothing.
     expect(fetchFullStateFromDB.mock.calls.length).toBe(callsAfterSignIn);
+  });
+
+  it('allows record creation in a pending (solo) couple space', async () => {
+    lastMediaResult = null;
+    saveRecordToDB.mockClear();
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-solo', partnerName: '', coupleCode: '999999', connected: false, status: 'pending' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(
+      <StoreProvider>
+        <Probe />
+      </StoreProvider>,
+    );
+
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => {
+      emitAuth('SIGNED_IN', 'user-a');
+    });
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('couple')).toHaveTextContent('couple-solo');
+
+    await act(async () => {
+      screen.getByText('post').click();
+    });
+
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+    expect(lastMediaResult?.ok).toBe(true);
+    expect(saveRecordToDB).toHaveBeenCalled();
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+  });
+
+  it('shows sharedSyncStatus as unavailable when the channel reports CHANNEL_ERROR', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'shared', isPrivate: false, createdAt: 'x' }] as never,
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+
+    const channel = createdChannels.find((c) => c.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+
+    await act(async () => {
+      subscribeCallback?.('CHANNEL_ERROR');
+    });
+
+    await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable'));
+  });
+
+  it('recovers shared data via HTTP after channel failure', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'shared', isPrivate: false, createdAt: 'x' }] as never,
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+
+    const channel = createdChannels.find((c) => c.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+
+    // Set up mocks for the HTTP recovery path BEFORE triggering the error
+    mockSupabase.rpc.mockReset().mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB.mockResolvedValue({
+      ok: true,
+      records: [{ id: 'rec-recovered', date: '2026-07-31', time: '12:00', userId: 'user-a', log: 'recovered', isPrivate: false, createdAt: 'x' }],
+    });
+    fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
+
+    await act(async () => {
+      subscribeCallback?.('CHANNEL_ERROR');
+    });
+    await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable'));
+    expect(screen.getByTestId('records')).toHaveTextContent('');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('delayed'));
+    expect(screen.getByTestId('records')).toHaveTextContent('rec-recovered');
+  });
+
+  it('does not blank the timeline on foreground return', async () => {
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'visible', isPrivate: false, createdAt: 'x' }] as never,
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('rec-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+
+    // Membership check returns valid couple - data should be refreshed, never blanked
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB.mockResolvedValue({
+      ok: true,
+      records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', userId: 'user-a', log: 'visible', isPrivate: false, createdAt: 'x' }],
+    });
+    fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
+
+    // Simulate a foreground return
+    await act(async () => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    // After reconciliation resolves with confirmed membership, records must survive
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('rec-a'));
   });
 });

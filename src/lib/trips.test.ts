@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   inclusiveTripDates,
   parseTripPeriodParams,
@@ -8,6 +8,34 @@ import {
   validateTripItemUrl,
   validateTripRangeAgainstItems,
 } from '@/lib/trips';
+
+const { mockUpdatePayload, mockSupabase } = vi.hoisted(() => {
+  const mockUpdatePayload = vi.fn();
+  const mockSupabase = {
+    from: vi.fn(() => ({
+      update: (payload: Record<string, unknown>) => {
+        mockUpdatePayload(payload);
+        return {
+          eq: () => ({
+            select: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { id: 'item-1', trip_id: 'trip-1', item_date: '2026-08-10', title: 'updated', category: 'food', memo: null, url: null, sort_order: 1, updated_at: '2026-08-01T00:00:00Z', created_at: '2026-08-01T00:00:00Z' },
+                  error: null,
+                }),
+            }),
+          }),
+        };
+      },
+    })),
+  };
+  return { mockUpdatePayload, mockSupabase };
+});
+
+vi.mock('@/lib/supabase', () => ({
+  supabase: mockSupabase,
+  isSupabaseConfigured: true,
+}));
 
 describe('trip planner helpers', () => {
   it('validates required trip fields and chronological dates', () => {
@@ -78,5 +106,33 @@ describe('trip planner helpers', () => {
     ]);
     expect(parseTripPeriodParams(new URLSearchParams('from=2026-02-30&to=2026-03-01&trip=trip-1'))).toBeNull();
     expect(parseTripPeriodParams(new URLSearchParams('from=2026-08-12&to=2026-08-10&trip=trip-1'))).toBeNull();
+  });
+});
+
+describe('updateTripItemInDB', () => {
+  it('does not send topology columns', async () => {
+    const { updateTripItemInDB } = await import('@/lib/trips');
+    mockUpdatePayload.mockClear();
+
+    await updateTripItemInDB({
+      id: 'item-1',
+      tripId: 'trip-1',
+      itemDate: '2026-08-10',
+      title: '해운대',
+      category: 'activity',
+      memo: 'fun',
+      url: 'https://example.com',
+      sortOrder: 3,
+    });
+
+    expect(mockUpdatePayload).toHaveBeenCalledTimes(1);
+    const payload = mockUpdatePayload.mock.calls[0][0];
+    expect(payload).toHaveProperty('title');
+    expect(payload).toHaveProperty('category');
+    expect(payload).toHaveProperty('memo');
+    expect(payload).toHaveProperty('url');
+    expect(payload).not.toHaveProperty('trip_id');
+    expect(payload).not.toHaveProperty('item_date');
+    expect(payload).not.toHaveProperty('sort_order');
   });
 });

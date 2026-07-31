@@ -13,7 +13,12 @@ export interface StoreContextType {
   updateRecord: (id: string, updates: Partial<DailyRecord>) => Promise<boolean>;
   deleteRecord: (id: string) => Promise<boolean>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
+  updateEvent: (
+    id: string,
+    updates: Partial<Omit<CoupleEvent, 'id' | 'coupleId' | 'createdBy' | 'createdAt'>>,
+  ) => Promise<boolean>;
   deleteEvent: (id: string) => Promise<boolean>;
+  reloadEvents: () => Promise<{ ok: boolean; reason?: 'forbidden' | 'error' }>;
   switchRole: () => void;
   disconnect: () => Promise<boolean>;
   deleteAccount: () => Promise<{ ok: boolean; warnings: string[] }>;

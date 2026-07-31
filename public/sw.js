@@ -14,8 +14,15 @@ self.addEventListener('install', (event) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
         console.warn('[SW] Cache addAll warning:', err);
       });
-    }).then(() => self.skipWaiting())
+    })
   );
+});
+
+// Listen for skip waiting message from the main thread
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Activate: Clean up old caches & take control immediately

@@ -46,7 +46,7 @@ supabase/migrations/README.md
 
 | # | 문제 | 위치 | 수정 |
 | --- | --- | --- | --- |
-| 1 | **계정 삭제가 상대방의 멤버십까지 `disconnected` 로 바꿈.** `get_my_active_couple_id()` 가 NULL을 반환하게 되어 상대방이 **자기 기록조차 읽고 쓸 수 없게** 됨 | `delete-account/index.ts` | 상대방은 `active` 유지. 떠나는 사람 행은 CASCADE로 자동 삭제 | 
+| 1 | **계정 삭제가 상대방의 멤버십까지 `disconnected` 로 바꿈.** `get_my_active_couple_id()` 가 NULL을 반환하게 되어 상대방이 **자기 기록조차 읽고 쓸 수 없게** 됨 | `delete-account/index.ts` | 상대방은 `active` 유지. 떠나는 사람 행은 CASCADE로 자동 삭제 |
 | 2 | **계정 삭제가 공유 일정·여행을 파괴.** `events.created_by`/`trips.created_by` 가 `ON DELETE CASCADE` | 같음 | 공유 항목은 남은 상대방에게 소유권 이전, 개인(비공개) 일정만 삭제 |
 | 3 | **계정 삭제가 상대방의 브리핑을 삭제** (`couple_id` 기준) | 같음 | `recipient_id` 기준으로만 삭제 |
 | 4 | **비공개로 표시된 감정 항목이 공유 기록에 함께 저장되어 상대방에게 전달됨.** 규칙 엔진이 민감 감정군을 공유 기록에서도 `author_only` 로 표시하는데 아무도 그 플래그를 적용하지 않았음 | `emotionRuleEngine.ts:218`, `records.ts` | 새 `lib/privacy.ts` 가 저장 전 필터링 + 읽기 시 방어적 제거 |

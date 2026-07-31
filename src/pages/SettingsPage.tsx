@@ -559,8 +559,8 @@ export function SettingsPage() {
         {/* Profile Edit Modal */}
         {showProfileModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
-              <h3 className="text-base font-bold text-foreground">내 프로필 수정</h3>
+            <div role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+              <h3 id="profile-modal-title" className="text-base font-bold text-foreground">내 프로필 수정</h3>
 
               <div className="space-y-2">
                 <label htmlFor="edit-nickname" className="text-xs font-semibold text-muted-foreground">
@@ -612,8 +612,8 @@ export function SettingsPage() {
         {/* Disconnect Modal */}
         {showDisconnectModal && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 animate-in fade-in">
-            <div className="bg-card rounded-3xl p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
-              <h3 className="text-base font-bold text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
+            <div role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="bg-card rounded-3xl p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
+              <h3 id="disconnect-modal-title" className="text-base font-bold text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 연결을 해제하면 상대방은 내 공유 기록을 더 이상 볼 수 없게 됩니다.
               </p>
@@ -651,8 +651,8 @@ export function SettingsPage() {
         {/* Delete Records Modal */}
         {showDeleteRecordsModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
-              <h3 className="text-base font-bold text-foreground">내 기록 전체 삭제</h3>
+            <div role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+              <h3 id="delete-records-modal-title" className="text-base font-bold text-foreground">내 기록 전체 삭제</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 내가 작성한 총 {ownRecords.length}개의 일상 기록이 삭제됩니다. 정말 삭제하시겠습니까?
               </p>
@@ -692,10 +692,10 @@ export function SettingsPage() {
         {/* Delete Account Modal */}
         {showDeleteAccountModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-destructive font-bold text-base">
                 <AlertTriangle size={20} />
-                <span>계정 삭제 (회원 탈퇴)</span>
+                <span id="delete-account-modal-title">계정 삭제 (회원 탈퇴)</span>
               </div>
               <div className="text-xs text-destructive bg-destructive/10 p-3.5 rounded-2xl space-y-1.5 leading-relaxed">
                 <p>• 내 프로필, 내가 쓴 기록과 첨부파일, 로그인 계정이 삭제됩니다.</p>
@@ -772,10 +772,10 @@ export function SettingsPage() {
         {/* PWA Modal */}
         {showPWAModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground font-bold text-base">
                 <Smartphone size={20} className="text-coral" />
-                <span>PWA 앱 설치 안내</span>
+                <span id="pwa-modal-title">PWA 앱 설치 안내</span>
               </div>
               <div className="text-xs text-muted-foreground space-y-2 leading-relaxed bg-muted/40 p-3.5 rounded-2xl border border-border">
                 <p>• <b>iPhone Safari:</b> 하단 공유 아이콘 탭 → '홈 화면에 추가'</p>

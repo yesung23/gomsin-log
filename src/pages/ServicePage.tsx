@@ -236,8 +236,8 @@ export function ServicePage() {
       {/* Edit Modal */}
       {isEditing && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-card border border-border w-full max-w-md rounded-3xl p-6 shadow-xl space-y-4 max-h-[90dvh] overflow-y-auto">
-            <h3 className="text-lg font-bold text-foreground">복무 정보 수정</h3>
+          <div role="dialog" aria-modal="true" aria-labelledby="service-edit-modal-title" className="bg-card border border-border w-full max-w-md rounded-3xl p-6 shadow-xl space-y-4 max-h-[90dvh] overflow-y-auto">
+            <h3 id="service-edit-modal-title" className="text-lg font-bold text-foreground">복무 정보 수정</h3>
 
             <div className="space-y-4">
               <div>

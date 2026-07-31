@@ -1,0 +1,13 @@
+# Security headers for hosting platforms that respect this file (Netlify,
+# Cloudflare Pages). Other platforms need equivalent configuration.
+#
+# The Supabase project URL is injected at build time via VITE_SUPABASE_URL,
+# so CSP is enforced via the meta tag in index.html rather than here (the
+# connect-src must match the actual project).
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=()
+  X-DNS-Prefetch-Control: off

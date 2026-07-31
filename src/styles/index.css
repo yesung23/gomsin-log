@@ -118,31 +118,85 @@
   input, textarea, select { font-family: inherit; }
 }
 
-/* Dark-mode compatibility for older components that still use fixed utility colors. */
-[data-theme='dark'] .bg-white,
-[data-theme='dark'] .bg-gray-50 {
-  background-color: var(--card) !important;
-}
-[data-theme='dark'] .bg-gray-100 {
-  background-color: var(--muted) !important;
-}
-[data-theme='dark'] .text-navy,
-[data-theme='dark'] .text-gray-900,
-[data-theme='dark'] .text-gray-800,
-[data-theme='dark'] .text-gray-700 {
-  color: var(--foreground) !important;
-}
-[data-theme='dark'] .text-gray-400,
-[data-theme='dark'] .text-gray-500,
-[data-theme='dark'] .text-gray-600 {
-  color: var(--muted-foreground) !important;
-}
-[data-theme='dark'] .border-white,
-[data-theme='dark'] .border-gray-50,
-[data-theme='dark'] .border-gray-100,
-[data-theme='dark'] .border-gray-200,
-[data-theme='dark'] .border-gray-300 {
-  border-color: var(--border) !important;
+/*
+ * Dark mode for components that still use fixed Tailwind palette utilities.
+ *
+ * Tailwind v4 compiles `bg-white` to `background-color: var(--color-white)` and
+ * `bg-white/60` to `color-mix(in oklab, var(--color-white) 60%, transparent)`.
+ * Remapping the palette variables therefore fixes every utility -- including
+ * every opacity variant -- in one place.
+ *
+ * This replaced a list of `!important` overrides on specific class names, which
+ * could not match opacity variants such as `bg-white/60` (used by the record
+ * timeline) and so left unreadable light-on-light surfaces in dark mode.
+ */
+[data-theme='dark'] {
+  /*
+   * `--color-white` is deliberately NOT remapped: it also drives `text-white`
+   * on coral/navy buttons and the dots on a selected calendar cell, which must
+   * stay white in both themes. The handful of components that used `bg-white`
+   * as a page surface were changed to `bg-card` instead.
+   */
+  /* Neutral surfaces map onto the semantic card/muted/border tokens. */
+  --color-gray-50: var(--muted);
+  --color-gray-100: var(--muted);
+  --color-gray-200: var(--border);
+  --color-gray-300: var(--border);
+  --color-gray-400: var(--muted-foreground);
+  --color-gray-500: var(--muted-foreground);
+  --color-gray-600: var(--muted-foreground);
+  --color-gray-700: var(--foreground);
+  --color-gray-800: var(--foreground);
+  --color-gray-900: var(--foreground);
+  --color-gray-950: var(--foreground);
+
+  /* Accent tints: dark surfaces with light text of the same hue. */
+  --color-amber-50: oklch(0.27 0.04 80);
+  --color-amber-100: oklch(0.31 0.05 80);
+  --color-amber-200: oklch(0.36 0.06 80);
+  --color-amber-600: oklch(0.84 0.1 85);
+  --color-amber-700: oklch(0.86 0.09 85);
+  --color-amber-800: oklch(0.89 0.08 85);
+  --color-amber-900: oklch(0.92 0.06 85);
+  --color-amber-950: oklch(0.95 0.04 85);
+
+  --color-indigo-50: oklch(0.26 0.04 275);
+  --color-indigo-100: oklch(0.3 0.05 275);
+  --color-indigo-400: oklch(0.74 0.11 275);
+  --color-indigo-500: oklch(0.76 0.11 275);
+  --color-indigo-600: oklch(0.8 0.1 275);
+
+  --color-blue-50: oklch(0.26 0.04 255);
+  --color-blue-100: oklch(0.3 0.05 255);
+  --color-blue-400: oklch(0.75 0.11 255);
+  --color-blue-500: oklch(0.78 0.11 255);
+  --color-blue-600: oklch(0.81 0.1 255);
+
+  --color-emerald-50: oklch(0.25 0.04 160);
+  --color-emerald-100: oklch(0.29 0.05 160);
+  --color-emerald-500: oklch(0.75 0.12 160);
+  --color-emerald-600: oklch(0.79 0.11 160);
+
+  --color-teal-50: oklch(0.25 0.04 185);
+  --color-teal-100: oklch(0.29 0.05 185);
+  --color-teal-500: oklch(0.75 0.11 185);
+  --color-teal-600: oklch(0.79 0.1 185);
+
+  --color-pink-50: oklch(0.27 0.04 350);
+  --color-pink-100: oklch(0.31 0.05 350);
+  --color-pink-500: oklch(0.78 0.12 350);
+
+  --color-purple-100: oklch(0.3 0.05 305);
+
+  --color-yellow-50: oklch(0.27 0.04 95);
+  --color-yellow-100: oklch(0.31 0.05 95);
+  --color-yellow-600: oklch(0.85 0.1 95);
+  --color-yellow-800: oklch(0.9 0.07 95);
+
+  --color-red-50: oklch(0.27 0.05 25);
+  --color-red-400: oklch(0.72 0.16 25);
+  --color-red-500: oklch(0.7 0.18 25);
+  --color-red-600: oklch(0.74 0.17 25);
 }
 
 /* Custom range slider */
@@ -162,7 +216,8 @@ input[type='range']::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--coral);
   cursor: pointer;
-  border: 2px solid white;
+  /* Token, not a literal white, so the thumb stays visible in dark mode. */
+  border: 2px solid var(--card);
   box-shadow: 0 1px 4px rgba(0,0,0,0.15);
 }
 

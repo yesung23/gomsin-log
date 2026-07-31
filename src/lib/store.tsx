@@ -37,6 +37,18 @@ type SyncSlice = 'records' | 'events' | 'trips';
 const REALTIME_DEBOUNCE_MS = 250;
 /** Stop polling for the partner after roughly 15 minutes. */
 const PARTNER_POLL_MAX_ATTEMPTS = 26;
+/** Must match --background in styles/index.css for each theme. */
+const LIGHT_THEME_COLOR = '#FAF8F5';
+const DARK_THEME_COLOR = '#16181D';
+
+/**
+ * The theme to use on a device that has never chosen one, so the app opens in
+ * dark mode for users whose system is set to dark instead of flashing light.
+ */
+function preferredTheme(): 'light' | 'dark' {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
 import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
@@ -200,11 +212,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState({
           ...DEFAULT_STATE,
           ...stored,
-          theme: stored.theme || 'light',
+          // Respect the system preference until the user picks a theme explicitly.
+          theme: stored.theme || preferredTheme(),
         });
         if (stored.authenticatedUser?.id) {
           hydratedUserIdRef.current = stored.authenticatedUser.id;
         }
+      } else {
+        setState((prev) => ({ ...prev, theme: preferredTheme() }));
       }
       setIsHydrated(true);
     });
@@ -352,8 +367,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [state, isHydrated]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = state.theme || 'light';
-    document.documentElement.style.colorScheme = state.theme || 'light';
+    const theme = state.theme || 'light';
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+
+    // Keep the browser/OS chrome in sync. index.html hardcoded a light
+    // theme-color, so the status bar stayed light while the app was dark.
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (meta) {
+      meta.content = theme === 'dark' ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+    }
   }, [state.theme]);
 
   /**

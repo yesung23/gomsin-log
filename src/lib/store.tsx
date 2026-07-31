@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, DailyRecord, UserProfile, Role, AuthUser, ILogRepository, CoupleEvent } from '@/types';
 import {
   authRepository,
@@ -6,9 +6,11 @@ import {
   supabase,
   disconnectCoupleFromDB,
   deleteAccountFromDB,
+  saveCoupleAnniversary,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB } from '@/lib/sync';
 import { saveRecordToDB, deleteRecordFromDB } from '@/lib/records';
+import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
@@ -90,12 +92,24 @@ const DEFAULT_STATE: AppState = {
   theme: 'light',
 };
 
+/**
+ * Preferences that belong to the device rather than to the signed-in account.
+ * These survive sign-out and account switches; everything else must not.
+ */
+function carryOverDevicePrefs(prev: AppState): Pick<AppState, 'widgetLayout' | 'hasSeenInstallPrompt' | 'theme'> {
+  return {
+    widgetLayout: prev.widgetLayout,
+    hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
+    theme: prev.theme || 'light',
+  };
+}
+
 interface StoreContextType {
   state: AppState;
   isReady: boolean;
   updateProfile: (profileUpdates: Partial<UserProfile>) => void;
   addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
-  updateRecord: (id: string, updates: Partial<DailyRecord>) => void;
+  updateRecord: (id: string, updates: Partial<DailyRecord>) => Promise<boolean>;
   deleteRecord: (id: string) => Promise<boolean>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
   deleteEvent: (id: string) => Promise<boolean>;
@@ -121,6 +135,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(DEFAULT_STATE);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isAuthChecked, setIsAuthChecked] = useState(!supabase);
+  /**
+   * The user id whose server state we have already loaded. Lets us ignore
+   * TOKEN_REFRESHED / USER_UPDATED events instead of re-running the full sync,
+   * and lets us detect an account switch so we never show account A's cached
+   * records to account B.
+   */
+  const hydratedUserIdRef = useRef<string | null>(null);
+  /** Set while signing out / deleting so the persistence effect cannot resurrect the cache. */
+  const cachePurgedRef = useRef(false);
+  /** Always-current state, so actions can read it without depending on stale closures. */
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
     localRepository.loadState().then((stored) => {
@@ -130,6 +156,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...stored,
           theme: stored.theme || 'light',
         });
+        if (stored.authenticatedUser?.id) {
+          hydratedUserIdRef.current = stored.authenticatedUser.id;
+        }
       }
       setIsHydrated(true);
     });
@@ -137,66 +166,143 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!supabase || !isHydrated) return;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const provider = (session.user.app_metadata?.provider as 'apple' | 'google' | 'email') || 'google';
-        const authUser: AuthUser = {
-          id: session.user.id,
-          email: session.user.email,
-          provider,
-        };
-        
-        const dbState = await fetchFullStateFromDB(session.user.id);
-        
-        setState((prev) => {
-          const shouldKeepInviteCode =
-            !!dbState?.profile?.couple.coupleId &&
-            !dbState.profile.couple.connected &&
-            dbState.profile.couple.coupleId === prev.profile.couple.coupleId &&
-            prev.authenticatedUser?.id === session.user.id;
+    let disposed = false;
 
-          const remoteProfile = dbState?.profile
-            ? {
-                ...dbState.profile,
-                couple: {
-                  ...dbState.profile.couple,
-                  coupleCode: shouldKeepInviteCode
-                    ? prev.profile.couple.coupleCode
-                    : dbState.profile.couple.coupleCode,
-                },
-              }
-            : undefined;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // The callback is intentionally sync: supabase-js serialises auth events and
+      // awaiting inside it can deadlock other auth calls.
+      void (async () => {
+        if (disposed) return;
 
-          return {
-            ...prev,
-            authenticatedUser: authUser,
-            isDemoMode: false,
-            ...(dbState || {}),
-            ...(remoteProfile ? { profile: remoteProfile } : {}),
+        if (session?.user) {
+          const sessionUser = session.user;
+          const provider = (sessionUser.app_metadata?.provider as AuthUser['provider']) || 'google';
+          const authUser: AuthUser = {
+            id: sessionUser.id,
+            email: sessionUser.email,
+            provider,
           };
-        });
-        setIsAuthChecked(true);
-      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
-        setState((prev) => ({
-          ...DEFAULT_STATE,
-          isDemoMode: false,
-          widgetLayout: prev.widgetLayout,
-          hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
-          theme: prev.theme || 'light',
-        }));
-        setIsAuthChecked(true);
-      }
+
+          // A refreshed token for the account we already loaded changes nothing.
+          if (
+            (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') &&
+            hydratedUserIdRef.current === sessionUser.id
+          ) {
+            setIsAuthChecked(true);
+            return;
+          }
+
+          const isAccountSwitch =
+            hydratedUserIdRef.current !== null && hydratedUserIdRef.current !== sessionUser.id;
+
+          try {
+            cachePurgedRef.current = false;
+            // A hanging fetch must never keep the app behind the splash spinner.
+            const dbState = await withTimeout(
+              fetchFullStateFromDB(sessionUser.id),
+              AUTH_SYNC_TIMEOUT_MS,
+              null,
+            );
+            if (disposed) return;
+
+            setState((prev) => {
+              // On an account switch, start from a clean slate so none of the
+              // previous account's records/profile can survive.
+              const base: AppState = isAccountSwitch
+                ? { ...DEFAULT_STATE, ...carryOverDevicePrefs(prev) }
+                : prev;
+
+              if (!dbState) {
+                // Signed in, but the server has no profile row for this user yet
+                // (brand new account) or the sync failed. Either way, do not present
+                // stale or demo content as if it belonged to this account.
+                return {
+                  ...base,
+                  authenticatedUser: authUser,
+                  isDemoMode: false,
+                  setupComplete: false,
+                  records: [],
+                  events: [],
+                  trips: [],
+                };
+              }
+
+              // The plaintext invite code only exists on the creator's device
+              // (the server stores a hash), so keep it while the partner has not joined.
+              const shouldKeepInviteCode =
+                !!dbState.profile?.couple.coupleId &&
+                !dbState.profile.couple.connected &&
+                dbState.profile.couple.coupleId === prev.profile.couple.coupleId &&
+                prev.authenticatedUser?.id === sessionUser.id;
+
+              const remoteProfile = dbState.profile
+                ? {
+                    ...dbState.profile,
+                    couple: {
+                      ...dbState.profile.couple,
+                      coupleCode: shouldKeepInviteCode
+                        ? prev.profile.couple.coupleCode
+                        : dbState.profile.couple.coupleCode,
+                    },
+                  }
+                : undefined;
+
+              return {
+                ...base,
+                authenticatedUser: authUser,
+                isDemoMode: false,
+                ...dbState,
+                ...(remoteProfile ? { profile: remoteProfile } : {}),
+              };
+            });
+
+            hydratedUserIdRef.current = dbState ? sessionUser.id : null;
+          } finally {
+            // Always release the splash screen, even when the sync failed.
+            if (!disposed) setIsAuthChecked(true);
+          }
+          return;
+        }
+
+        if (event === 'SIGNED_OUT') {
+          hydratedUserIdRef.current = null;
+          setState((prev) => ({
+            ...DEFAULT_STATE,
+            isDemoMode: false,
+            ...carryOverDevicePrefs(prev),
+          }));
+          setIsAuthChecked(true);
+          return;
+        }
+
+        if (event === 'INITIAL_SESSION') {
+          hydratedUserIdRef.current = null;
+          setState((prev) =>
+            // A demo session the user explicitly started must survive a reload.
+            prev.isDemoMode && prev.setupComplete
+              ? prev
+              : { ...DEFAULT_STATE, isDemoMode: false, ...carryOverDevicePrefs(prev) },
+          );
+          setIsAuthChecked(true);
+        }
+      })();
     });
 
     return () => {
+      disposed = true;
       subscription.unsubscribe();
     };
   }, [isHydrated]);
 
   useEffect(() => {
-    if (isHydrated) {
-      localRepository.saveState(state);
+    if (!isHydrated) return;
+    // After an explicit sign-out / account deletion the cache stays empty until
+    // the next real state change, so the purge cannot be silently undone.
+    if (cachePurgedRef.current) {
+      cachePurgedRef.current = false;
+      return;
     }
+    localRepository.saveState(state);
   }, [state, isHydrated]);
 
   useEffect(() => {
@@ -315,44 +421,53 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   ]);
 
   const updateProfile = (profileUpdates: Partial<UserProfile>) => {
-    setState((prev) => {
-      const newProfile = {
-        ...prev.profile,
-        ...profileUpdates,
-      };
-      const newState = { ...prev, profile: newProfile };
+    // Compute the next profile outside the updater. React StrictMode invokes
+    // updaters twice, so performing network writes inside one would fire every
+    // request twice.
+    const prev = stateRef.current;
+    const newProfile: UserProfile = { ...prev.profile, ...profileUpdates };
+    setState((current) => ({ ...current, profile: { ...current.profile, ...profileUpdates } }));
 
-      // Async DB Sync
-      if (newState.authenticatedUser && !newState.isDemoMode) {
-        const userId = newState.authenticatedUser.id;
-        
-        // Update basic profile and military
-        if (profileUpdates.myName || profileUpdates.military) {
-           supabase?.from('profiles').update({
-             display_name: newProfile.myName,
-             military_info: newProfile.military,
-             updated_at: new Date().toISOString()
-           }).eq('id', userId).then(({error}) => {
-             if (error) console.error('Failed to update profile:', error);
-           });
-        }
-        
-        // Update contact preferences
-        if (profileUpdates.contact) {
-           supabase?.from('contact_preferences').upsert({
-             user_id: userId,
-             weekday_start: newProfile.contact.weekdayStart,
-             weekday_end: newProfile.contact.weekdayEnd,
-             weekend_start: newProfile.contact.weekendStart,
-             weekend_end: newProfile.contact.weekendEnd
-           }).then(({error}) => {
-             if (error) console.error('Failed to update contact:', error);
-           });
-        }
-      }
-      
-      return newState;
-    });
+    if (!supabase || !prev.authenticatedUser || prev.isDemoMode) return;
+    const userId = prev.authenticatedUser.id;
+
+    if (profileUpdates.myName || profileUpdates.military || profileUpdates.role) {
+      void supabase
+        .from('profiles')
+        .update({
+          display_name: newProfile.myName,
+          role: newProfile.role,
+          military_info: newProfile.military,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId)
+        .then(({ error }) => {
+          if (error) console.error('[gomsinlog] Failed to update profile:', error);
+        });
+    }
+
+    if (profileUpdates.contact) {
+      void supabase
+        .from('contact_preferences')
+        .upsert({
+          user_id: userId,
+          weekday_start: newProfile.contact.weekdayStart,
+          weekday_end: newProfile.contact.weekdayEnd,
+          weekend_start: newProfile.contact.weekendStart,
+          weekend_end: newProfile.contact.weekendEnd,
+        })
+        .then(({ error }) => {
+          if (error) console.error('[gomsinlog] Failed to update contact preferences:', error);
+        });
+    }
+
+    // The anniversary lives on the shared `couples` row. Without this it was only
+    // ever kept locally and silently reset to empty on the next login.
+    const nextAnniversary = profileUpdates.couple?.anniversaryDate;
+    const coupleId = newProfile.couple.coupleId;
+    if (coupleId && nextAnniversary && nextAnniversary !== prev.profile.couple.anniversaryDate) {
+      void saveCoupleAnniversary(coupleId, nextAnniversary);
+    }
   };
 
   const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {
@@ -385,16 +500,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
-  const updateRecord = (id: string, updates: Partial<DailyRecord>) => {
-    setState((prev) => {
-      const newRecords = prev.records.map((r) => (r.id === id ? { ...r, ...updates } : r));
-      const newState = { ...prev, records: newRecords };
-      if (newState.authenticatedUser && newState.profile.couple.coupleId) {
-        const updatedRecord = newRecords.find(r => r.id === id);
-        if (updatedRecord) saveRecordToDB(updatedRecord, newState.profile.couple.coupleId, newState.authenticatedUser.id);
+  const updateRecord = async (id: string, updates: Partial<DailyRecord>): Promise<boolean> => {
+    // Computed outside the updater so StrictMode's double invocation cannot
+    // fire the DB write twice.
+    const prev = stateRef.current;
+    const existing = prev.records.find((r) => r.id === id);
+    if (!existing) return false;
+    const updated: DailyRecord = { ...existing, ...updates };
+
+    if (!prev.isDemoMode && prev.authenticatedUser) {
+      const coupleId = prev.profile.couple.coupleId;
+      if (!coupleId) return false;
+      // Only the author may edit a record; the server enforces this too but
+      // failing fast keeps local state consistent with the server.
+      if (existing.userId && existing.userId !== prev.authenticatedUser.id) return false;
+      try {
+        const saved = await saveRecordToDB(updated, coupleId, prev.authenticatedUser.id);
+        if (!saved) return false;
+      } catch (error) {
+        console.error('[gomsinlog] Failed to update record:', error);
+        return false;
       }
-      return newState;
-    });
+    }
+
+    setState((current) => ({
+      ...current,
+      records: current.records.map((r) => (r.id === id ? { ...r, ...updates } : r)),
+    }));
+    return true;
   };
 
   const deleteRecord = async (id: string): Promise<boolean> => {
@@ -520,26 +653,50 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signOut = async () => {
-    await authRepository.signOut();
+  /**
+   * Drop every trace of the signed-in account from this device.
+   * Only device-level preferences (theme, widget layout) are kept.
+   */
+  const purgeLocalAccountData = () => {
+    hydratedUserIdRef.current = null;
+    cachePurgedRef.current = true;
     localStorage.removeItem(STORE_KEY_V1);
-    localStorage.removeItem(STORE_KEY); // 보안: 로그아웃 시 로컬 캐시 즉각 파기
-    setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
+    localStorage.removeItem(STORE_KEY);
+    setState((prev) => ({
+      ...DEFAULT_STATE,
+      isDemoMode: false,
+      ...carryOverDevicePrefs(prev),
+    }));
+  };
+
+  const signOut = async () => {
+    // Purge locally first: even if the network call fails, this device must not
+    // keep the previous account's records readable.
+    purgeLocalAccountData();
+    try {
+      await authRepository.signOut();
+    } catch (error) {
+      console.error('[gomsinlog] Sign-out request failed; local session was cleared anyway', error);
+    }
   };
 
   const deleteAccount = async (): Promise<boolean> => {
-    if (state.isDemoMode) {
-      setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
+    if (stateRef.current.isDemoMode) {
+      purgeLocalAccountData();
       return true;
     }
 
     const deleted = await deleteAccountFromDB();
+    // Only purge after the server confirms deletion, so a failed attempt leaves
+    // the user signed in and able to retry.
     if (!deleted) return false;
 
-    await authRepository.signOut();
-    localStorage.removeItem(STORE_KEY_V1);
-    localStorage.removeItem(STORE_KEY);
-    setState((prev) => ({ ...DEFAULT_STATE, theme: prev.theme || 'light' }));
+    purgeLocalAccountData();
+    try {
+      await authRepository.signOut();
+    } catch (error) {
+      console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared', error);
+    }
     return true;
   };
 

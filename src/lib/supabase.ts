@@ -111,14 +111,11 @@ export async function createCoupleInvitation(role: Role): Promise<{ coupleId: st
 }
 
 /**
- * Consume an invitation code via RPC consume_invitation.
- */
-/**
  * Client-side brute-force damper for invitation codes.
  *
  * This is only a first line of defence for the honest UI path -- it is trivially
- * bypassed by calling the RPC directly, which is why `consume_invitation` also
- * enforces a server-side throttle (see migration 013). Keeping it here gives
+ * bypassed by calling an RPC directly, so migration 015's `redeem_invitation`
+ * also serializes and rate-limits attempts. Keeping this local guard gives
  * immediate feedback and avoids hammering the server.
  */
 const INVITE_ATTEMPT_LIMIT = 5;
@@ -149,9 +146,44 @@ function clearInviteAttempts() {
   inviteAttempts.length = 0;
 }
 
-/**
- * Consume an invitation code via RPC consume_invitation.
- */
+type InvitationRedemptionResult = {
+  ok: boolean;
+  couple_id: string | null;
+  error_code: string | null;
+};
+
+function parseInvitationRedemptionResult(value: unknown): InvitationRedemptionResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const result = value as Record<string, unknown>;
+  if (typeof result.ok !== 'boolean') return null;
+  if (result.couple_id !== null && typeof result.couple_id !== 'string') return null;
+  if (result.error_code !== null && typeof result.error_code !== 'string') return null;
+  return {
+    ok: result.ok,
+    couple_id: result.couple_id as string | null,
+    error_code: result.error_code as string | null,
+  };
+}
+
+function invitationErrorMessage(errorCode: string | null): string {
+  switch (errorCode) {
+    case 'rate_limited':
+      return '초대 코드 시도 횟수를 초과했습니다. 잠시 후 다시 시도해 주세요.';
+    case 'invalid_or_expired':
+    case 'invalid_request':
+      return '유효하지 않거나 만료된 초대 코드입니다. (유효기간: 24시간)';
+    case 'couple_full':
+      return '이미 2명이 참여한 커플 공간입니다.';
+    case 'already_connected':
+      return '이미 다른 커플 공간에 연결되어 있습니다. 먼저 연결을 해제해 주세요.';
+    case 'self_invitation':
+      return '내가 만든 초대 코드로는 연결할 수 없습니다. 상대방에게 코드를 전달해 주세요.';
+    default:
+      return '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+  }
+}
+
+/** Consume an invitation through migration 015's sole authenticated API. */
 export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?: string; error?: string }> {
   const normalized = code.trim();
   if (!/^\d{6}$/.test(normalized)) {
@@ -172,44 +204,40 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
 
   try {
     const codeHash = await hashInvitationCode(normalized);
-
-    // `redeem_invitation` (migration 013) wraps `consume_invitation` and records
-    // failed attempts for the server-side throttle. Fall back to the bare RPC on
-    // projects where 013 has not been applied yet.
-    let { data, error } = await supabase.rpc('redeem_invitation', { p_code_hash: codeHash });
-    if (error?.code === 'PGRST202') {
-      console.warn(
-        '[gomsinlog] redeem_invitation is not deployed; falling back to consume_invitation. ' +
-          'Apply migration 013 to enable server-side brute-force protection.',
-      );
-      ({ data, error } = await supabase.rpc('consume_invitation', { p_code_hash: codeHash }));
-    }
+    const { data, error } = await supabase.rpc('redeem_invitation', { p_code_hash: codeHash });
 
     if (error) {
-      const message = error.message || '';
-      if (message.includes('Too many invitation attempts')) {
-        return { error: '초대 코드 시도 횟수를 초과했습니다. 잠시 후 다시 시도해 주세요.' };
+      if (error.code === 'PGRST202') {
+        return {
+          error: '서버에 안전한 초대 코드 확인 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
+        };
       }
-      if (message.includes('Invalid or expired')) {
-        return { error: '유효하지 않거나 만료된 초대 코드입니다. (유효기간: 24시간)' };
-      }
-      if (message.includes('Couple space is full')) {
-        return { error: '이미 2명이 참여한 커플 공간입니다.' };
-      }
-      if (message.includes('already in an active couple')) {
-        return { error: '이미 다른 커플 공간에 연결되어 있습니다. 먼저 연결을 해제해 주세요.' };
-      }
-      if (message.includes('own invitation')) {
-        return { error: '내가 만든 초대 코드로는 연결할 수 없습니다. 상대방에게 코드를 전달해 주세요.' };
-      }
-      console.error('[gomsinlog] consume_invitation failed:', error);
+      console.error('[gomsinlog] redeem_invitation failed:', error);
+      return { error: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+    }
+
+    const result = parseInvitationRedemptionResult(data);
+    if (!result) {
+      // Migration 013 returned a bare UUID. Refuse that legacy shape instead of
+      // falling back to consume_invitation and bypassing durable throttling.
+      console.error('[gomsinlog] Unexpected redeem_invitation result; migration 015 is required.');
+      return {
+        error: '서버에 안전한 초대 코드 확인 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
+      };
+    }
+
+    if (!result.ok) {
+      return { error: invitationErrorMessage(result.error_code) };
+    }
+    if (!result.couple_id || result.error_code !== null) {
+      console.error('[gomsinlog] Invalid successful redeem_invitation result:', result);
       return { error: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
     }
 
     clearInviteAttempts();
-    return { coupleId: data as string };
+    return { coupleId: result.couple_id };
   } catch (err: any) {
-    console.error('[gomsinlog] consume_invitation threw:', err);
+    console.error('[gomsinlog] redeem_invitation threw:', err);
     return { error: '초대 코드 확인 중 오류가 발생했습니다. 인터넷 연결을 확인해 주세요.' };
   }
 }

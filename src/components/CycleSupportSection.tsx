@@ -34,7 +34,7 @@ interface CycleSupportSectionProps {
 function failureMessage(state: Extract<LoadState, 'unauthenticated' | 'forbidden' | 'error'>) {
   if (state === 'unauthenticated') return '응원 신호를 보려면 로그인해 주세요.';
   if (state === 'forbidden') return '이 응원 신호에 접근할 권한이 없어요.';
-  return '응원 신호를 불러오지 못했어요.';
+  return '응원 신호의 최신 상태를 확인하지 못했어요. 안전을 위해 이전 확인 내용은 숨겼어요.';
 }
 
 function nextKoreaMidnightMs(nowMs: number): number {
@@ -79,6 +79,8 @@ export function CycleSupportSection({
   const [mutationPending, setMutationPending] = useState<'share' | 'revoke' | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [realtimeDisconnected, setRealtimeDisconnected] = useState(false);
+  const verificationGenerationRef = useRef(0);
+  const verificationBlockedRef = useRef(false);
 
   useLayoutEffect(() => {
     setSignals([]);
@@ -87,12 +89,19 @@ export function CycleSupportSection({
     setMutationPending(null);
     setMutationError(null);
     setRealtimeDisconnected(false);
+    verificationBlockedRef.current = false;
     setNowIso(new Date().toISOString());
     setLoadState(authenticated ? (connected && coupleId ? 'loading' : 'disconnected') : 'unauthenticated');
   }, [authenticated, connected, coupleId, identityKey]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (allowWhileRealtimeFailed = false) => {
     const identity = captureIdentity();
+    const verificationGeneration = verificationGenerationRef.current;
+    if (verificationBlockedRef.current && !allowWhileRealtimeFailed) {
+      setSignals([]);
+      setLoadState('error');
+      return;
+    }
     setLoadState('loading');
     if (!authenticated) {
       setSignals([]);
@@ -106,8 +115,12 @@ export function CycleSupportSection({
     }
     try {
       const result = await fetchCycleSupportSignalsResultFromDB(coupleId);
-      if (!isCurrentIdentity(identity)) return;
+      if (
+        !isCurrentIdentity(identity)
+        || verificationGenerationRef.current !== verificationGeneration
+      ) return;
       if (!result.ok) {
+        setSignals([]);
         setLoadState(result.reason);
         return;
       }
@@ -120,8 +133,12 @@ export function CycleSupportSection({
       const active = activeCycleSupportSignal(visibleSignals, koreaToday(new Date(checkedAt)), checkedAt);
       setLoadState(active ? 'ready' : 'empty');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (
+        !isCurrentIdentity(identity)
+        || verificationGenerationRef.current !== verificationGeneration
+      ) return;
       console.error('Failed to load sanitized support signals:', error);
+      setSignals([]);
       setLoadState('error');
     }
   }, [authenticated, captureIdentity, connected, coupleId, isCurrentIdentity, owner, userId]);
@@ -135,6 +152,7 @@ export function CycleSupportSection({
     if (!client || !authenticated || !userId || !connected || !coupleId) return;
     const identity = captureIdentity();
     let timer: number | undefined;
+    let disposed = false;
     const refresh = () => {
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => void load(), 150);
@@ -165,13 +183,22 @@ export function CycleSupportSection({
         refresh,
       )
       .subscribe((status) => {
-        if (!isCurrentIdentity(identity)) return;
+        if (disposed || !isCurrentIdentity(identity)) return;
         if (status === 'SUBSCRIBED') {
+          verificationBlockedRef.current = false;
           setRealtimeDisconnected(false);
           void load();
         }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          if (timer) {
+            window.clearTimeout(timer);
+            timer = undefined;
+          }
+          verificationBlockedRef.current = true;
+          verificationGenerationRef.current += 1;
+          setSignals([]);
           setRealtimeDisconnected(true);
+          setLoadState('error');
         }
       });
     const recover = () => {
@@ -180,6 +207,7 @@ export function CycleSupportSection({
     document.addEventListener('visibilitychange', recover);
     window.addEventListener('online', recover);
     return () => {
+      disposed = true;
       if (timer) window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', recover);
       window.removeEventListener('online', recover);
@@ -306,7 +334,7 @@ export function CycleSupportSection({
         <div className="p-4 rounded-2xl bg-muted/40 border border-border text-center space-y-3" role="alert">
           <p className="text-xs text-muted-foreground">{failureMessage(loadState)}</p>
           {loadState === 'error' && (
-            <button type="button" onClick={() => void load()} className="px-4 py-2 rounded-xl bg-foreground text-background text-xs font-bold">
+            <button type="button" onClick={() => void load(true)} className="px-4 py-2 rounded-xl bg-foreground text-background text-xs font-bold">
               다시 시도
             </button>
           )}
@@ -317,8 +345,8 @@ export function CycleSupportSection({
         <>
           {realtimeDisconnected && (
             <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[10px] text-amber-900" role="status">
-              <span>실시간 연결이 끊겼어요. 마지막 확인 내용을 표시해요.</span>
-              <button type="button" onClick={() => void load()} className="p-1" aria-label="응원 신호 다시 확인"><RotateCcw className="w-3.5 h-3.5" /></button>
+              <span>실시간 확인이 중단됐어요. 최신 상태를 다시 확인해 주세요.</span>
+              <button type="button" onClick={() => void load(true)} className="p-1" aria-label="응원 신호 다시 확인"><RotateCcw className="w-3.5 h-3.5" /></button>
             </div>
           )}
 

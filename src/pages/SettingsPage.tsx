@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '@/lib/useStore';
 import { MobileShell } from '@/components/MobileShell';
 import {
@@ -26,6 +26,25 @@ export function SettingsPage() {
   } = useStore();
   const navigate = useNavigate();
   const { profile, isDemoMode, records } = state;
+  const settingsIdentityKey = state.authenticatedUser?.id || '';
+  const identityRef = useRef(settingsIdentityKey);
+  const identityGenerationRef = useRef(0);
+  const instanceActiveRef = useRef(true);
+  if (identityRef.current !== settingsIdentityKey) {
+    identityRef.current = settingsIdentityKey;
+    identityGenerationRef.current += 1;
+  }
+  const captureIdentity = useCallback(
+    () => ({ userId: settingsIdentityKey, generation: identityGenerationRef.current }),
+    [settingsIdentityKey],
+  );
+  const isCurrentIdentity = useCallback(
+    (identity: { userId: string; generation: number }) =>
+      instanceActiveRef.current
+      && identity.userId === identityRef.current
+      && identity.generation === identityGenerationRef.current,
+    [],
+  );
   const myName = profile.myName || '나';
   const partnerName = profile.couple.partnerName || '상대방';
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
@@ -48,6 +67,19 @@ export function SettingsPage() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editName, setEditName] = useState(profile.myName);
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
+
+  useLayoutEffect(() => {
+    instanceActiveRef.current = true;
+    return () => {
+      instanceActiveRef.current = false;
+      identityGenerationRef.current += 1;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    setInviteCodeInput('');
+    setIsJoiningCouple(false);
+  }, [settingsIdentityKey]);
 
   /**
    * Export the records this user authored as a JSON file.
@@ -127,6 +159,12 @@ export function SettingsPage() {
   };
 
   const handleJoinCouple = async () => {
+    if (isJoiningCouple) return;
+    const identity = captureIdentity();
+    if (!identity.userId) {
+      toast.error('로그인한 계정에서만 커플 공간에 연결할 수 있어요.');
+      return;
+    }
     const code = inviteCodeInput.trim();
     if (!/^\d{6}$/.test(code)) {
       toast.error('6자리 초대 코드를 입력해 주세요.');
@@ -134,42 +172,69 @@ export function SettingsPage() {
     }
 
     setIsJoiningCouple(true);
-    const result = await consumeCoupleInvitation(code);
-    if (result.error || !result.coupleId) {
-      setIsJoiningCouple(false);
-      toast.error(result.error || '커플 공간에 연결하지 못했습니다.');
-      return;
+    try {
+      const result = await consumeCoupleInvitation(code);
+      if (!isCurrentIdentity(identity)) return;
+      if (result.error || !result.coupleId) {
+        toast.error(result.error || '커플 공간에 연결하지 못했습니다.');
+        return;
+      }
+
+      let nextRole = profile.role;
+      let partnerName = '파트너';
+      try {
+        const [membershipResult, partnerResult] = await Promise.all([
+          supabase
+            ? supabase
+                .from('couple_members')
+                .select('role')
+                .eq('user_id', identity.userId)
+                .eq('status', 'active')
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+          supabase
+            ? supabase.rpc('get_partner_profile')
+            : Promise.resolve({ data: null, error: null }),
+        ]);
+        if (!isCurrentIdentity(identity)) return;
+        if (membershipResult.error) {
+          console.error('[Settings] Membership lookup failed:', membershipResult.error);
+        } else if (membershipResult.data?.role) {
+          nextRole = membershipResult.data.role;
+        }
+        if (partnerResult.error) {
+          console.error('[Settings] Partner profile lookup failed:', partnerResult.error);
+        } else if (partnerResult.data?.[0]?.display_name) {
+          partnerName = partnerResult.data[0].display_name;
+        }
+      } catch (error) {
+        if (!isCurrentIdentity(identity)) return;
+        // Redemption already succeeded; keep explicit safe fallbacks if enrichment failed.
+        console.error('[Settings] Couple membership enrichment failed:', error);
+      }
+
+      if (!isCurrentIdentity(identity)) return;
+      updateProfile({
+        role: nextRole,
+        couple: {
+          ...profile.couple,
+          coupleId: result.coupleId,
+          coupleCode: '',
+          connected: true,
+          status: 'active',
+          partnerName,
+        },
+      });
+      if (!isCurrentIdentity(identity)) return;
+      setInviteCodeInput('');
+      toast.success('우리 공간에 연결되었습니다.');
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('[Settings] Couple join failed:', error);
+      toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsJoiningCouple(false);
     }
-
-    const userId = state.authenticatedUser?.id;
-    const [{ data: membership }, { data: partnerRows }] = await Promise.all([
-      userId && supabase
-        ? supabase
-            .from('couple_members')
-            .select('role')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      supabase
-        ? supabase.rpc('get_partner_profile')
-        : Promise.resolve({ data: null }),
-    ]);
-
-    updateProfile({
-      role: membership?.role || profile.role,
-      couple: {
-        ...profile.couple,
-        coupleId: result.coupleId,
-        coupleCode: '',
-        connected: true,
-        status: 'active',
-        partnerName: partnerRows?.[0]?.display_name || '파트너',
-      },
-    });
-    setIsJoiningCouple(false);
-    setInviteCodeInput('');
-    toast.success('우리 공간에 연결되었습니다.');
   };
 
   return (

@@ -32,6 +32,8 @@ function mapTrip(row: Record<string, unknown>): Trip {
 }
 
 function mapTripItem(row: Record<string, unknown>): TripItem {
+  const rawUrl = typeof row.url === 'string' ? row.url.trim() : '';
+  const safeUrl = rawUrl && validateTripItemUrl(rawUrl) === null ? rawUrl : undefined;
   return {
     id: row.id as string,
     tripId: row.trip_id as string,
@@ -39,7 +41,7 @@ function mapTripItem(row: Record<string, unknown>): TripItem {
     title: row.title as string,
     category: row.category as TripItem['category'],
     memo: (row.memo as string | null) || undefined,
-    url: (row.url as string | null) || undefined,
+    url: safeUrl,
     sortOrder: row.sort_order as number,
   };
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { useStore } from '@/lib/useStore';
@@ -15,6 +15,27 @@ import { addMonths } from '@/lib/utils';
 
 export function OnboardingPage() {
   const { state, updateProfile, setSetupComplete, startDemo: runStartDemo } = useStore();
+  const onboardingIdentityKey = state.isDemoMode
+    ? `demo:${state.authenticatedUser?.id || ''}`
+    : `user:${state.authenticatedUser?.id || ''}`;
+  const identityRef = useRef(onboardingIdentityKey);
+  const identityGenerationRef = useRef(0);
+  const instanceActiveRef = useRef(true);
+  if (identityRef.current !== onboardingIdentityKey) {
+    identityRef.current = onboardingIdentityKey;
+    identityGenerationRef.current += 1;
+  }
+  const captureIdentity = useCallback(
+    () => ({ key: onboardingIdentityKey, generation: identityGenerationRef.current }),
+    [onboardingIdentityKey],
+  );
+  const isCurrentIdentity = useCallback(
+    (identity: { key: string; generation: number }) =>
+      instanceActiveRef.current
+      && identity.key === identityRef.current
+      && identity.generation === identityGenerationRef.current,
+    [],
+  );
   const [step, setStep] = useState(state.onboardingStep || 0); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
 
   // Detect iOS environment for conditional Apple Login UI
@@ -53,6 +74,24 @@ export function OnboardingPage() {
   const [weekendStart, setWeekendStart] = useState('12:00');
   const [weekendEnd, setWeekendEnd] = useState('21:00');
 
+  useLayoutEffect(() => {
+    instanceActiveRef.current = true;
+    return () => {
+      instanceActiveRef.current = false;
+      identityGenerationRef.current += 1;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    setCreatedCoupleId('');
+    setCreatedInviteCode('');
+    setJoinedPartnerName('');
+    setCopiedCode(false);
+    setIsGeneratingCode(false);
+    setIsVerifyingCode(false);
+    setIsFinishing(false);
+  }, [onboardingIdentityKey]);
+
   // Total steps based on role
   const totalSteps = role === 'gomsin' ? 4 : 6;
 
@@ -90,18 +129,28 @@ export function OnboardingPage() {
 
     // Step 3: Couple Space Invitation Generation / Consumption
     if (step === 3) {
-      if (spaceMode === 'create') {
-        if (!createdInviteCode) {
-          setIsGeneratingCode(true);
+      if (isGeneratingCode || isVerifyingCode) return;
+      const identity = captureIdentity();
+
+      if (spaceMode === 'create' && !createdInviteCode) {
+        setIsGeneratingCode(true);
+        try {
           const res = await createCoupleInvitation(role);
-          setIsGeneratingCode(false);
-          if (res.error) {
-            toast.error(res.error);
+          if (!isCurrentIdentity(identity)) return;
+          if (res.error || !res.coupleId || !res.code) {
+            toast.error(res.error || '초대 코드를 생성하지 못했습니다.');
             return;
           }
           setCreatedCoupleId(res.coupleId);
           setCreatedInviteCode(res.code);
           toast.success('초대 코드가 생성되었습니다!');
+        } catch (error) {
+          if (!isCurrentIdentity(identity)) return;
+          console.error('[Onboarding] Invitation creation failed:', error);
+          toast.error('초대 코드를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          return;
+        } finally {
+          if (isCurrentIdentity(identity)) setIsGeneratingCode(false);
         }
       } else if (spaceMode === 'join') {
         const cleanCode = inviteCodeInput.trim();
@@ -110,23 +159,42 @@ export function OnboardingPage() {
           return;
         }
         setIsVerifyingCode(true);
-        const res = await consumeCoupleInvitation(cleanCode);
-        if (res.error) {
-          setIsVerifyingCode(false);
-          toast.error(res.error);
-          return;
-        }
-        if (res.coupleId) {
-          setCreatedCoupleId(res.coupleId);
-          // Read the real partner name instead of inventing one.
-          if (supabase) {
-            const { data: partnerRows } = await supabase.rpc('get_partner_profile');
-            if (partnerRows?.[0]?.display_name) setJoinedPartnerName(partnerRows[0].display_name);
+        try {
+          const res = await consumeCoupleInvitation(cleanCode);
+          if (!isCurrentIdentity(identity)) return;
+          if (res.error || !res.coupleId) {
+            toast.error(res.error || '커플 공간에 연결하지 못했습니다.');
+            return;
           }
+
+          setCreatedCoupleId(res.coupleId);
+          if (supabase) {
+            try {
+              const { data: partnerRows, error: partnerError } = await supabase.rpc('get_partner_profile');
+              if (!isCurrentIdentity(identity)) return;
+              if (partnerError) {
+                console.error('[Onboarding] Partner profile lookup failed:', partnerError);
+              } else if (partnerRows?.[0]?.display_name) {
+                setJoinedPartnerName(partnerRows[0].display_name);
+              }
+            } catch (error) {
+              if (!isCurrentIdentity(identity)) return;
+              console.error('[Onboarding] Partner profile lookup failed:', error);
+            }
+          }
+          if (!isCurrentIdentity(identity)) return;
           toast.success('커플 공간 연결 성공!');
+        } catch (error) {
+          if (!isCurrentIdentity(identity)) return;
+          console.error('[Onboarding] Invitation verification failed:', error);
+          toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          return;
+        } finally {
+          if (isCurrentIdentity(identity)) setIsVerifyingCode(false);
         }
-        setIsVerifyingCode(false);
       }
+
+      if (!isCurrentIdentity(identity)) return;
     }
 
     // If Gomshin reaches Step 4 (Anniversary), skip Steps 5 & 6 and jump directly to Step 7 (Completion)!
@@ -192,6 +260,7 @@ export function OnboardingPage() {
 
   const finishSetup = async () => {
     if (isFinishing) return;
+    const identity = captureIdentity();
     const nowIso = new Date().toISOString();
     const finalNickname = nickname.trim();
     if (finalNickname.length < 2) {
@@ -214,67 +283,80 @@ export function OnboardingPage() {
     const contact = { weekdayStart, weekdayEnd, weekendStart, weekendEnd, enabled: true };
 
     setIsFinishing(true);
+    try {
+      // Persist to the server FIRST. Previously the client marked onboarding as
+      // complete even when the write failed, so the next login sent the user
+      // straight back through onboarding.
+      if (supabase && state.authenticatedUser && !state.isDemoMode) {
+        const userId = state.authenticatedUser.id;
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: userId,
+          display_name: finalNickname,
+          role,
+          military_info: military,
+          onboarding_completed_at: nowIso,
+          updated_at: nowIso,
+        });
+        if (!isCurrentIdentity(identity)) return;
 
-    // Persist to the server FIRST. Previously the client marked onboarding as
-    // complete even when the write failed, so the next login sent the user
-    // straight back through onboarding.
-    if (supabase && state.authenticatedUser && !state.isDemoMode) {
-      const userId = state.authenticatedUser.id;
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: userId,
-        display_name: finalNickname,
+        if (profileError) {
+          console.error('[Onboarding] Profile save failed:', profileError);
+          toast.error('프로필을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+          return;
+        }
+
+        const { error: contactError } = await supabase.from('contact_preferences').upsert({
+          user_id: userId,
+          weekday_start: weekdayStart,
+          weekday_end: weekdayEnd,
+          weekend_start: weekendStart,
+          weekend_end: weekendEnd,
+        });
+        if (!isCurrentIdentity(identity)) return;
+        if (contactError) {
+          // Non-blocking: contact hours are editable later from settings.
+          console.error('[Onboarding] Contact preferences save failed:', contactError);
+        }
+
+        if (createdCoupleId && anniversaryDate) {
+          const anniversarySaved = await saveCoupleAnniversary(createdCoupleId, anniversaryDate);
+          if (!isCurrentIdentity(identity)) return;
+          if (!anniversarySaved) {
+            console.error('[Onboarding] Anniversary save failed.');
+          }
+        }
+      }
+
+      if (!isCurrentIdentity(identity)) return;
+      // Only now mirror it into local state.
+      updateProfile({
+        myName: finalNickname,
         role,
-        military_info: military,
-        onboarding_completed_at: nowIso,
-        updated_at: nowIso,
+        onboardingCompletedAt: nowIso,
+        couple: {
+          ...state.profile.couple,
+          coupleId: createdCoupleId || undefined,
+          // No invented partner name: it is filled in for real once the partner joins.
+          partnerName: joinedPartnerName || '',
+          anniversaryDate,
+          // Only the space creator holds a shareable code.
+          coupleCode: spaceMode === 'create' ? createdInviteCode : '',
+          connected: spaceMode === 'join',
+          status: spaceMode === 'join' ? 'active' : 'pending',
+        },
+        military,
+        contact,
       });
 
-      if (profileError) {
-        console.error('[Onboarding] Profile save failed:', profileError);
-        setIsFinishing(false);
-        toast.error('프로필을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
-        return;
-      }
-
-      const { error: contactError } = await supabase.from('contact_preferences').upsert({
-        user_id: userId,
-        weekday_start: weekdayStart,
-        weekday_end: weekdayEnd,
-        weekend_start: weekendStart,
-        weekend_end: weekendEnd,
-      });
-      if (contactError) {
-        // Non-blocking: contact hours are editable later from settings.
-        console.error('[Onboarding] Contact preferences save failed:', contactError);
-      }
-
-      if (createdCoupleId && anniversaryDate) {
-        await saveCoupleAnniversary(createdCoupleId, anniversaryDate);
-      }
+      if (!isCurrentIdentity(identity)) return;
+      setSetupComplete(true);
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('[Onboarding] Final setup failed:', error);
+      toast.error('설정을 완료하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsFinishing(false);
     }
-
-    // Only now mirror it into local state.
-    updateProfile({
-      myName: finalNickname,
-      role,
-      onboardingCompletedAt: nowIso,
-      couple: {
-        ...state.profile.couple,
-        coupleId: createdCoupleId || undefined,
-        // No invented partner name: it is filled in for real once the partner joins.
-        partnerName: joinedPartnerName || '',
-        anniversaryDate,
-        // Only the space creator holds a shareable code.
-        coupleCode: spaceMode === 'create' ? createdInviteCode : '',
-        connected: spaceMode === 'join',
-        status: spaceMode === 'join' ? 'active' : 'pending',
-      },
-      military,
-      contact,
-    });
-
-    setIsFinishing(false);
-    setSetupComplete(true);
   };
 
   return (

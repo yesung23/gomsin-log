@@ -96,6 +96,11 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [formPending, setFormPending] = useState(false);
   const [deletePendingId, setDeletePendingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const loadCoordinatorRef = useRef<{
+    key: string;
+    queued: boolean;
+    promise: Promise<void>;
+  } | null>(null);
 
   useLayoutEffect(() => {
     setEntries([]);
@@ -115,7 +120,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setLoadState(userId ? 'loading' : 'unauthenticated');
   }, [today, userId]);
 
-  const load = useCallback(async () => {
+  const performLoad = useCallback(async () => {
     const identity = captureIdentity();
     setLoadState(userId ? 'loading' : 'unauthenticated');
     if (!userId) return;
@@ -151,8 +156,47 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     }
   }, [captureIdentity, isCurrentIdentity, userId]);
 
+  const load = useCallback((): Promise<void> => {
+    const key = userId || '';
+    const active = loadCoordinatorRef.current;
+    if (active?.key === key) {
+      active.queued = true;
+      return active.promise;
+    }
+
+    const coordinator = {
+      key,
+      queued: false,
+      promise: Promise.resolve(),
+    };
+    const run = async () => {
+      do {
+        coordinator.queued = false;
+        await performLoad();
+      } while (coordinator.queued && identityRef.current === userId);
+    };
+    coordinator.promise = run().finally(() => {
+      if (loadCoordinatorRef.current === coordinator) loadCoordinatorRef.current = null;
+    });
+    loadCoordinatorRef.current = coordinator;
+    return coordinator.promise;
+  }, [performLoad, userId]);
+
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const recoverVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const recoverOnline = () => void load();
+    document.addEventListener('visibilitychange', recoverVisible);
+    window.addEventListener('online', recoverOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', recoverVisible);
+      window.removeEventListener('online', recoverOnline);
+    };
   }, [load]);
 
   const cells = useMemo(

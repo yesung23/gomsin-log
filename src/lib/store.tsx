@@ -5,13 +5,11 @@ import {
   UserProfile,
   Role,
   AuthUser,
-  ILogRepository,
   CoupleEvent,
   Attachment,
 } from '@/types';
 import {
   authRepository,
-  isSupabaseConfigured,
   supabase,
   disconnectCoupleFromDB,
   deleteAccountFromDB,
@@ -24,7 +22,7 @@ import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   saveRecordToDB,
   deleteRecordFromDB,
-  fetchRecordsFromDB,
+  fetchRecordsResultFromDB,
   uploadRecordMedia,
   removeRecordMedia,
   resolveAttachmentUrls,
@@ -42,6 +40,15 @@ function stateMatchesWorkspace(state: AppState, workspace: ActiveWorkspace): boo
     && state.profile.couple.coupleId === workspace.coupleId
     && state.profile.couple.connected
     && state.profile.couple.status === 'active';
+}
+
+function workspaceRefMatches(
+  value: ActiveWorkspace | null,
+  workspace: ActiveWorkspace,
+): boolean {
+  return value?.generation === workspace.generation
+    && value.userId === workspace.userId
+    && value.coupleId === workspace.coupleId;
 }
 /** Coalesce realtime bursts into a single refetch. */
 const REALTIME_DEBOUNCE_MS = 250;
@@ -64,60 +71,56 @@ import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
 
-class LocalStorageRepository implements ILogRepository {
+class LocalStorageRepository {
   isConfigured(): boolean {
     return true;
   }
 
-  async loadState(): Promise<AppState | null> {
+  async loadState(): Promise<Partial<AppState> | null> {
     try {
       localStorage.removeItem(STORE_KEY_V1); // Remove legacy v1 state
       const stored = localStorage.getItem(STORE_KEY);
-      if (stored) return JSON.parse(stored);
+      if (!stored) return null;
+      const parsed: unknown = JSON.parse(stored);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        localStorage.removeItem(STORE_KEY);
+        return null;
+      }
+      return parsed as Partial<AppState>;
     } catch (e) {
+      // Corrupt state must not be retried on every launch.
+      localStorage.removeItem(STORE_KEY);
       console.error('[gomsinlog] Failed to load state from localStorage', e);
+      return null;
     }
-    return null;
   }
 
-  async saveState(state: AppState): Promise<void> {
+  async saveState(state: AppState, hasAuthenticatedSession = false): Promise<void> {
     try {
-      const records = state.isDemoMode
-        ? state.records.map((record) => {
-            // Private records: keep only the skeleton so the body never sits in
-            // localStorage as plaintext. The server remains the source of truth.
-            if (record.isPrivate) {
-              return {
-                id: record.id,
-                date: record.date,
-                time: record.time,
-                isPrivate: true,
-                authorRole: record.authorRole,
-              } as DailyRecord;
-            }
+      if (hasAuthenticatedSession || !state.isDemoMode) {
+        // Authenticated browser storage is a strict device-preference whitelist.
+        // Auth, profile, couple, invite, military, contact and shared/private
+        // content all remain server/session-owned.
+        localStorage.setItem(STORE_KEY, JSON.stringify(carryOverDevicePrefs(state)));
+        return;
+      }
 
-            if (!record.attachments?.length) return record;
-            return {
-              ...record,
-              attachments: record.attachments
-                // Blob URLs are session-only; persisting them guarantees a broken
-                // image after reload.
-                .filter((att) => !(att.url?.startsWith('blob:') && !att.path))
-                .map((att) =>
-                  att.url?.startsWith('blob:') ? { ...att, url: undefined } : att,
-                ),
-            };
-          })
-        : [];
-      const sanitizedState = {
-        ...state,
-        // Authenticated shared state is server-owned and must not survive a
-        // partner-initiated revocation in browser storage.
-        records,
-        events: state.isDemoMode ? state.events : [],
-        trips: state.isDemoMode ? state.trips : [],
-      };
-      localStorage.setItem(STORE_KEY, JSON.stringify(sanitizedState));
+      const records = state.records.map((record) => {
+        if (!record.attachments?.length) return record;
+        return {
+          ...record,
+          attachments: record.attachments
+            // Blob URLs are session-only; persisting them guarantees a broken
+            // image after reload.
+            .filter((attachment) => !(attachment.url?.startsWith('blob:') && !attachment.path))
+            .map((attachment) =>
+              attachment.url?.startsWith('blob:')
+                ? { ...attachment, url: undefined }
+                : attachment,
+            ),
+        };
+      });
+      localStorage.setItem(STORE_KEY, JSON.stringify({ ...state, records }));
     } catch (e) {
       console.error('[gomsinlog] Failed to save state to localStorage', e);
     }
@@ -197,24 +200,93 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /** Always-current state, so actions can read it without depending on stale closures. */
   const stateRef = useRef(state);
   stateRef.current = state;
+  /** Workspace whose shared slices are hidden pending authoritative recovery. */
+  const quarantinedWorkspaceRef = useRef<ActiveWorkspace | null>(null);
+  /** Blocks background recovery until an explicit disconnect RPC has settled. */
+  const pendingDisconnectRef = useRef<ActiveWorkspace | null>(null);
+  /** Orders membership checks so an older response cannot undo a newer verdict. */
+  const membershipReconciliationRef = useRef(0);
+
+  const replaceStateImmediately = useCallback((nextState: AppState) => {
+    stateRef.current = nextState;
+    setState(nextState);
+  }, []);
+
+  const updateStateImmediately = useCallback((
+    updater: (current: AppState) => AppState,
+  ): AppState => {
+    const current = stateRef.current;
+    const nextState = updater(current);
+    if (nextState !== current) replaceStateImmediately(nextState);
+    return nextState;
+  }, [replaceStateImmediately]);
+
+  const captureActiveIdentity = useCallback((): ActiveIdentity | null => {
+    const current = stateRef.current;
+    const userId = current.authenticatedUser?.id;
+    if (!userId || sessionUserIdRef.current !== userId) return null;
+    return { userId, generation: sessionGenerationRef.current };
+  }, []);
+
+  const isCurrentIdentity = useCallback((identity: ActiveIdentity): boolean =>
+    sessionGenerationRef.current === identity.generation
+    && sessionUserIdRef.current === identity.userId
+    && stateRef.current.authenticatedUser?.id === identity.userId, []);
+
+  const matchesCurrentWorkspace = useCallback((workspace: ActiveWorkspace): boolean =>
+    sessionGenerationRef.current === workspace.generation
+    && sessionUserIdRef.current === workspace.userId
+    && stateMatchesWorkspace(stateRef.current, workspace), []);
+
+  const isCurrentWorkspace = useCallback((workspace: ActiveWorkspace): boolean =>
+    matchesCurrentWorkspace(workspace)
+    && !workspaceRefMatches(quarantinedWorkspaceRef.current, workspace),
+  [matchesCurrentWorkspace]);
+
+  const captureActiveWorkspace = useCallback((): ActiveWorkspace | null => {
+    const identity = captureActiveIdentity();
+    const current = stateRef.current;
+    const activeCoupleId = current.profile.couple.coupleId;
+    if (!identity || !activeCoupleId) return null;
+    const workspace = { ...identity, coupleId: activeCoupleId };
+    return isCurrentWorkspace(workspace) ? workspace : null;
+  }, [captureActiveIdentity, isCurrentWorkspace]);
 
   useEffect(() => {
     localRepository.loadState().then((stored) => {
       if (stored) {
-        const safeStored = stored.isDemoMode
-          ? stored
-          : { ...stored, records: [], events: [], trips: [] };
-        setState({
-          ...DEFAULT_STATE,
-          ...safeStored,
-          // Respect the system preference until the user picks a theme explicitly.
-          theme: safeStored.theme || preferredTheme(),
-        });
-        if (stored.authenticatedUser?.id) {
-          hydratedUserIdRef.current = stored.authenticatedUser.id;
-        }
+        const theme = stored.theme === 'light' || stored.theme === 'dark'
+          ? stored.theme
+          : preferredTheme();
+        const devicePrefs = {
+          widgetLayout: Array.isArray(stored.widgetLayout)
+            && stored.widgetLayout.every((item) => typeof item === 'string')
+            ? stored.widgetLayout
+            : DEFAULT_STATE.widgetLayout,
+          hasSeenInstallPrompt: typeof stored.hasSeenInstallPrompt === 'boolean'
+            ? stored.hasSeenInstallPrompt
+            : DEFAULT_STATE.hasSeenInstallPrompt,
+          theme,
+        };
+        const nextState: AppState = stored.isDemoMode === true
+          ? {
+              ...DEFAULT_STATE,
+              ...stored,
+              ...devicePrefs,
+              isDemoMode: true,
+              authenticatedUser: null,
+            } as AppState
+          : {
+              ...DEFAULT_STATE,
+              ...devicePrefs,
+              isDemoMode: false,
+            };
+        stateRef.current = nextState;
+        setState(nextState);
       } else {
-        setState((prev) => ({ ...prev, theme: preferredTheme() }));
+        const nextState = { ...stateRef.current, theme: preferredTheme() };
+        stateRef.current = nextState;
+        setState(nextState);
       }
       setIsHydrated(true);
     });
@@ -233,6 +305,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const identityChanged = previousSessionUserId !== nextSessionUserId;
       if (identityChanged) {
         sessionGenerationRef.current += 1;
+        membershipReconciliationRef.current += 1;
+        quarantinedWorkspaceRef.current = null;
+        pendingDisconnectRef.current = null;
         hydratedUserIdRef.current = null;
         // Fail closed before account hydration starts: the previous account's
         // React state must not remain rendered during the network request.
@@ -288,7 +363,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               || sessionUserIdRef.current !== sessionUser.id
             ) return;
 
-            setState((prev) => {
+            const prev = stateRef.current;
+            const nextState = (() => {
               // On an account switch, start from a clean slate so none of the
               // previous account's records/profile can survive.
               const base: AppState = isAccountSwitch
@@ -337,7 +413,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ...dbState,
                 ...(remoteProfile ? { profile: remoteProfile } : {}),
               };
-            });
+            })();
+            replaceStateImmediately(nextState);
 
             hydratedUserIdRef.current = dbState ? sessionUser.id : null;
           } finally {
@@ -353,23 +430,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         if (event === 'SIGNED_OUT') {
           hydratedUserIdRef.current = null;
-          setState((prev) => ({
+          const nextState: AppState = {
             ...DEFAULT_STATE,
             isDemoMode: false,
-            ...carryOverDevicePrefs(prev),
-          }));
+            ...carryOverDevicePrefs(stateRef.current),
+          };
+          replaceStateImmediately(nextState);
           setIsAuthChecked(true);
           return;
         }
 
         if (event === 'INITIAL_SESSION') {
           hydratedUserIdRef.current = null;
-          setState((prev) =>
-            // A demo session the user explicitly started must survive a reload.
-            prev.isDemoMode && prev.setupComplete
-              ? prev
-              : { ...DEFAULT_STATE, isDemoMode: false, ...carryOverDevicePrefs(prev) },
-          );
+          const current = stateRef.current;
+          // A demo session the user explicitly started must survive a reload.
+          const nextState = current.isDemoMode && current.setupComplete
+            ? current
+            : { ...DEFAULT_STATE, isDemoMode: false, ...carryOverDevicePrefs(current) };
+          replaceStateImmediately(nextState);
           setIsAuthChecked(true);
         }
       })();
@@ -379,18 +457,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       disposed = true;
       subscription.unsubscribe();
     };
-  }, [isHydrated]);
+  }, [isHydrated, replaceStateImmediately]);
 
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || (supabase && !isAuthChecked)) return;
     // After an explicit sign-out / account deletion the cache stays empty until
     // the next real state change, so the purge cannot be silently undone.
     if (cachePurgedRef.current) {
       cachePurgedRef.current = false;
       return;
     }
-    localRepository.saveState(state);
-  }, [state, isHydrated]);
+    localRepository.saveState(state, sessionUserIdRef.current !== null);
+  }, [state, isHydrated, isAuthChecked]);
 
   useEffect(() => {
     const theme = state.theme || 'light';
@@ -422,6 +500,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const coupleStatus = state.profile.couple.status;
   const authUserId = state.authenticatedUser?.id;
 
+  const quarantineSharedAccess = useCallback((expected: ActiveWorkspace): boolean => {
+    if (!matchesCurrentWorkspace(expected)) return false;
+    const current = stateRef.current;
+    membershipReconciliationRef.current += 1;
+    quarantinedWorkspaceRef.current = expected;
+    const nextState: AppState = {
+      ...current,
+      highlightedRecordId: undefined,
+      records: [],
+      // Only owner-private schedules remain visible while shared authorization
+      // is uncertain. No snapshot is retained for later restoration.
+      events: current.events.filter((event) =>
+        event.isPrivate && event.createdBy === expected.userId),
+      trips: [],
+    };
+    replaceStateImmediately(nextState);
+    return true;
+  }, [matchesCurrentWorkspace, replaceStateImmediately]);
+
   const purgeSharedAccess = useCallback((expected?: ActiveWorkspace): boolean => {
     const current = stateRef.current;
     if (
@@ -434,6 +531,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       )
     ) return false;
 
+    membershipReconciliationRef.current += 1;
+    quarantinedWorkspaceRef.current = null;
+    pendingDisconnectRef.current = null;
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
     const nextState: AppState = {
@@ -457,12 +557,81 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         event.isPrivate && event.createdBy === current.authenticatedUser?.id),
       trips: [],
     };
-    // Realtime and explicit-operation guards consult stateRef before React has
-    // committed the cleanup render.
-    stateRef.current = nextState;
-    setState(nextState);
+    replaceStateImmediately(nextState);
     return true;
-  }, []);
+  }, [replaceStateImmediately]);
+
+  const reconcileSharedAccess = useCallback(async (
+    workspace: ActiveWorkspace,
+  ): Promise<boolean> => {
+    const client = supabase;
+    const canReconcile = () => matchesCurrentWorkspace(workspace)
+      && !workspaceRefMatches(pendingDisconnectRef.current, workspace);
+    if (!client || !canReconcile()) return false;
+
+    const reconciliation = ++membershipReconciliationRef.current;
+    const isLatestCurrentWorkspace = () =>
+      membershipReconciliationRef.current === reconciliation
+      && canReconcile();
+
+    try {
+      const { data, error } = await client.rpc('get_my_active_couple_id');
+      if (!isLatestCurrentWorkspace()) return false;
+      if (error) {
+        console.error('[gomsinlog] Failed to verify active membership:', error);
+        quarantineSharedAccess(workspace);
+        return false;
+      }
+      if (data !== workspace.coupleId) {
+        purgeSharedAccess(workspace);
+        return false;
+      }
+
+      // Recovery is never snapshot-based: every shared slice must be read again
+      // through the caller's current RLS policy after membership is confirmed.
+      const [recordsResult, eventsResult, tripsResult] = await Promise.all([
+        fetchRecordsResultFromDB(workspace.coupleId),
+        fetchEventsResultFromDB(workspace.coupleId),
+        fetchTripsResultFromDB(workspace.coupleId),
+      ]);
+      if (!isLatestCurrentWorkspace()) return false;
+      if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
+        console.error('[gomsinlog] Authoritative shared workspace refresh failed');
+        quarantineSharedAccess(workspace);
+        return false;
+      }
+
+      const current = stateRef.current;
+      const role = current.profile.role;
+      const partnerRole: Role = role === 'gomsin' ? 'soldier' : 'gomsin';
+      const records = visibleRecordsForViewer(
+        recordsResult.records.map((record) => ({
+          ...record,
+          authorRole: record.userId === workspace.userId ? role : partnerRole,
+        })),
+        { userId: workspace.userId, role },
+      );
+      const nextState: AppState = {
+        ...current,
+        records,
+        events: eventsResult.events,
+        trips: reconcileParentTrips(tripsResult.trips),
+      };
+      quarantinedWorkspaceRef.current = null;
+      replaceStateImmediately(nextState);
+      return true;
+    } catch (error) {
+      if (!isLatestCurrentWorkspace()) return false;
+      console.error('[gomsinlog] Failed to reconcile shared access:', error);
+      quarantineSharedAccess(workspace);
+      return false;
+    }
+  }, [
+    matchesCurrentWorkspace,
+    purgeSharedAccess,
+    quarantineSharedAccess,
+    replaceStateImmediately,
+  ]);
 
   useEffect(() => {
     const client = supabase;
@@ -488,37 +657,76 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         && stateMatchesWorkspace(current, workspace);
     };
 
+    const isWorkspaceQuarantined = () => {
+      const quarantined = quarantinedWorkspaceRef.current;
+      return quarantined?.generation === workspace.generation
+        && quarantined.userId === workspace.userId
+        && quarantined.coupleId === workspace.coupleId;
+    };
+
     const refreshSlice = async (slice: SyncSlice) => {
       if (!isCurrentActiveCouple()) return;
+      // Once authorization is uncertain, a single-slice refresh cannot reveal
+      // content. Recovery requires membership plus a full RLS-backed refetch.
+      if (isWorkspaceQuarantined()) {
+        await reconcileSharedAccess(workspace);
+        return;
+      }
+      const authorizationRevision = membershipReconciliationRef.current;
+      const isCurrentRefresh = () => isCurrentActiveCouple()
+        && !isWorkspaceQuarantined()
+        && membershipReconciliationRef.current === authorizationRevision;
       try {
         if (slice === 'records') {
-          const raw = await fetchRecordsFromDB(coupleId);
-          if (!isCurrentActiveCouple()) return;
+          const result = await fetchRecordsResultFromDB(coupleId);
+          if (!isCurrentRefresh()) return;
+          if (!result.ok) {
+            quarantineSharedAccess(workspace);
+            return;
+          }
           const role = stateRef.current.profile.role;
           const partnerRole: Role = role === 'gomsin' ? 'soldier' : 'gomsin';
           const records = visibleRecordsForViewer(
-            raw.map((r) => ({
-              ...r,
-              authorRole: r.userId === authUserId ? role : partnerRole,
+            result.records.map((record) => ({
+              ...record,
+              authorRole: record.userId === authUserId ? role : partnerRole,
             })),
             { userId: authUserId, role },
           );
-          if (isCurrentActiveCouple()) setState((prev) => ({ ...prev, records }));
+          if (isCurrentActiveCouple()) {
+            updateStateImmediately((current) =>
+              isCurrentActiveCouple() ? { ...current, records } : current,
+            );
+          }
           return;
         }
         if (slice === 'events') {
           const result = await fetchEventsResultFromDB(coupleId);
-          if (result.ok && isCurrentActiveCouple()) {
-            setState((prev) => ({ ...prev, events: result.events }));
+          if (!isCurrentRefresh()) return;
+          if (!result.ok) {
+            quarantineSharedAccess(workspace);
+            return;
           }
+          updateStateImmediately((current) =>
+            isCurrentActiveCouple() ? { ...current, events: result.events } : current,
+          );
           return;
         }
         const result = await fetchTripsResultFromDB(coupleId);
-        if (result.ok && isCurrentActiveCouple()) {
-          setState((prev) => ({ ...prev, trips: reconcileParentTrips(result.trips) }));
+        if (!isCurrentActiveCouple() || isWorkspaceQuarantined()) return;
+        if (!result.ok) {
+          quarantineSharedAccess(workspace);
+          return;
         }
+        updateStateImmediately((current) =>
+          isCurrentActiveCouple()
+            ? { ...current, trips: reconcileParentTrips(result.trips) }
+            : current,
+        );
       } catch (error) {
+        if (!isCurrentRefresh()) return;
         console.error(`[gomsinlog] Realtime refresh of ${slice} failed:`, error);
+        quarantineSharedAccess(workspace);
       }
     };
 
@@ -537,20 +745,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
     };
 
-    const reconcileOwnMembership = async (): Promise<boolean> => {
-      if (!isCurrentActiveCouple()) return false;
-      const { data, error } = await client.rpc('get_my_active_couple_id');
-      if (!isCurrentActiveCouple()) return false;
-      if (error) {
-        console.error('[gomsinlog] Failed to verify active membership:', error);
-        return false;
-      }
-      if (data !== coupleId) {
-        purgeSharedAccess(workspace);
-        return false;
-      }
-      return true;
-    };
+    const reconcileOwnMembership = (): Promise<boolean> =>
+      isCurrentActiveCouple()
+        ? reconcileSharedAccess(workspace)
+        : Promise.resolve(false);
 
     // One channel covers the shared tables and the current user's own
     // membership row. A partner disconnect updates that row and revokes access.
@@ -559,7 +757,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'couple_members', filter: `user_id=eq.${authUserId}` },
-        () => void reconcileOwnMembership(),
+        () => {
+          quarantineSharedAccess(workspace);
+          void reconcileOwnMembership();
+        },
       )
       .on(
         'postgres_changes',
@@ -585,15 +786,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         () => scheduleRefresh('trips'),
       )
       .subscribe((status) => {
-        // Re-check the authoritative membership after every initial subscribe
-        // or reconnect, then refresh all shared slices to discard missed rows.
+        // A healthy subscription still proves only transport health. Membership
+        // and all slices are re-established authoritatively before revealing data.
         if (status === 'SUBSCRIBED') {
-          void (async () => {
-            if (!await reconcileOwnMembership()) return;
-            scheduleRefresh('records');
-            scheduleRefresh('events');
-            scheduleRefresh('trips');
-          })();
+          quarantineSharedAccess(workspace);
+          void reconcileOwnMembership();
+          return;
+        }
+        if (
+          !disposed
+          && (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED')
+        ) {
+          quarantineSharedAccess(workspace);
         }
       });
 
@@ -601,12 +805,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // verify membership first and only refresh shared slices if it is still active.
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      void (async () => {
-        if (!await reconcileOwnMembership()) return;
-        scheduleRefresh('records');
-        scheduleRefresh('events');
-        scheduleRefresh('trips');
-      })();
+      quarantineSharedAccess(workspace);
+      void reconcileOwnMembership();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('online', handleVisibility);
@@ -619,7 +819,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       timers.clear();
       void client.removeChannel(channel);
     };
-  }, [authUserId, coupleConnected, coupleId, coupleStatus, isAuthChecked, purgeSharedAccess]);
+  }, [
+    authUserId,
+    coupleConnected,
+    coupleId,
+    coupleStatus,
+    isAuthChecked,
+    quarantineSharedAccess,
+    reconcileSharedAccess,
+    updateStateImmediately,
+  ]);
 
   /**
    * Wait for the partner to redeem the invite code.
@@ -664,7 +873,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ) return;
 
       if (!error && data?.length) {
-        setState((prev) => ({
+        updateStateImmediately((prev) => ({
           ...prev,
           profile: {
             ...prev.profile,
@@ -708,7 +917,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener('visibilitychange', handleVisibility);
       if (timeoutId) window.clearTimeout(timeoutId);
     };
-  }, [authUserId, coupleConnected, coupleId, coupleStatus, isAuthChecked]);
+  }, [
+    authUserId,
+    coupleConnected,
+    coupleId,
+    coupleStatus,
+    isAuthChecked,
+    updateStateImmediately,
+  ]);
 
   const updateProfile = (profileUpdates: Partial<UserProfile>) => {
     // Compute the next profile outside the updater. React StrictMode invokes
@@ -716,7 +932,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // request twice.
     const prev = stateRef.current;
     const newProfile: UserProfile = { ...prev.profile, ...profileUpdates };
-    setState((current) => ({ ...current, profile: { ...current.profile, ...profileUpdates } }));
+    updateStateImmediately((current) => ({
+      ...current,
+      profile: { ...current.profile, ...profileUpdates },
+    }));
 
     if (!supabase || !prev.authenticatedUser || prev.isDemoMode) return;
     const userId = prev.authenticatedUser.id;
@@ -777,17 +996,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     record: Omit<DailyRecord, 'id' | 'createdAt'>,
     files: File[],
   ): Promise<{ ok: boolean; failedFiles: string[]; error?: string }> => {
-    const prev = stateRef.current;
+    const initial = stateRef.current;
     const recordId = crypto.randomUUID();
-    const newRecord: DailyRecord = {
+    const baseRecord: DailyRecord = {
       ...record,
       id: recordId,
       createdAt: new Date().toISOString(),
     };
 
-    // Demo / offline: keep session-only preview URLs. These are deliberately not
-    // persisted (see saveState) so a reload never shows a broken image.
-    if (prev.isDemoMode || !prev.authenticatedUser) {
+    // Demo previews are explicitly local, even when Supabase is configured.
+    if (initial.isDemoMode) {
       const previews: Attachment[] = files.map((file) => {
         const classified = classifyMediaFile(file);
         return {
@@ -797,156 +1015,207 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         };
       });
       const demoRecord: DailyRecord = {
-        ...newRecord,
-        attachments: [...(newRecord.attachments || []), ...previews],
+        ...baseRecord,
+        attachments: [...(baseRecord.attachments || []), ...previews],
       };
-      setState((current) => ({ ...current, records: [...current.records, demoRecord] }));
-      return { ok: true, failedFiles: [] };
+      updateStateImmediately((current) => current.isDemoMode
+        ? { ...current, records: [...current.records, demoRecord] }
+        : current);
+      return stateRef.current.isDemoMode
+        ? { ok: true, failedFiles: [] }
+        : { ok: false, failedFiles: files.map((file) => file.name) };
     }
 
-    const coupleId = prev.profile.couple.coupleId;
-    if (!coupleId) {
+    const workspace = captureActiveWorkspace();
+    if (!workspace) {
       return {
         ok: false,
-        failedFiles: files.map((f) => f.name),
+        failedFiles: files.map((file) => file.name),
         error: '커플 공간이 연결된 뒤에 기록을 남길 수 있어요.',
       };
     }
-    const userId = prev.authenticatedUser.id;
+    const newRecord: DailyRecord = { ...baseRecord, userId: workspace.userId };
+    const staleResult = {
+      ok: false,
+      failedFiles: files.map((file) => file.name),
+      error: '계정 또는 커플 공간이 변경되어 작업을 중단했어요.',
+    };
 
-    // Phase 1: persist the row so the storage policy can authorise the uploads.
     try {
-      const saved = await saveRecordToDB(newRecord, coupleId, userId);
+      const saved = await saveRecordToDB(
+        newRecord,
+        workspace.coupleId,
+        workspace.userId,
+      );
+      if (!isCurrentWorkspace(workspace)) return staleResult;
       if (!saved) {
-        return { ok: false, failedFiles: files.map((f) => f.name), error: '기록을 저장하지 못했어요.' };
+        return { ok: false, failedFiles: files.map((file) => file.name), error: '기록을 저장하지 못했어요.' };
       }
     } catch (error) {
+      if (!isCurrentWorkspace(workspace)) return staleResult;
       console.error('[gomsinlog] Failed to save record:', error);
-      return { ok: false, failedFiles: files.map((f) => f.name), error: '기록을 저장하지 못했어요.' };
+      return { ok: false, failedFiles: files.map((file) => file.name), error: '기록을 저장하지 못했어요.' };
     }
 
-    // Phase 2: upload the files.
     const attachments: Attachment[] = [...(newRecord.attachments || [])];
+    const uploadedPaths: string[] = [];
     const failedFiles: string[] = [];
     for (const file of files) {
-      const result = await uploadRecordMedia(file, coupleId, recordId);
+      if (!isCurrentWorkspace(workspace)) return staleResult;
+      const result = await uploadRecordMedia(file, workspace.coupleId, recordId);
+      if (!isCurrentWorkspace(workspace)) return staleResult;
       if ('error' in result) {
         failedFiles.push(file.name);
         console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
         continue;
       }
       attachments.push(result.attachment);
+      if (result.attachment.path) uploadedPaths.push(result.attachment.path);
     }
 
     let finalRecord: DailyRecord = { ...newRecord, attachments };
-
-    // Phase 3: patch the row with attachment metadata.
     if (attachments.length > 0) {
       try {
-        const patched = await saveRecordToDB(finalRecord, coupleId, userId);
+        const patched = await saveRecordToDB(
+          finalRecord,
+          workspace.coupleId,
+          workspace.userId,
+        );
+        if (!isCurrentWorkspace(workspace)) return staleResult;
         if (!patched) {
-          // The text is already safe on the server; drop the orphaned objects so
-          // the bucket does not accumulate files no record points at.
-          await removeRecordMedia(attachments.map((a) => a.path).filter(Boolean) as string[]);
-          failedFiles.push(...files.map((f) => f.name));
+          await removeRecordMedia(uploadedPaths);
+          if (!isCurrentWorkspace(workspace)) return staleResult;
+          failedFiles.push(...files.map((file) => file.name));
           finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
         }
       } catch (error) {
+        if (!isCurrentWorkspace(workspace)) return staleResult;
         console.error('[gomsinlog] Failed to attach media to record:', error);
-        await removeRecordMedia(attachments.map((a) => a.path).filter(Boolean) as string[]);
-        failedFiles.push(...files.map((f) => f.name));
+        await removeRecordMedia(uploadedPaths);
+        if (!isCurrentWorkspace(workspace)) return staleResult;
+        failedFiles.push(...files.map((file) => file.name));
         finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
       }
     }
 
-    // Make the freshly uploaded files viewable right away.
-    if (finalRecord.attachments && finalRecord.attachments.length > 0) {
+    if (finalRecord.attachments?.length) {
       finalRecord = {
         ...finalRecord,
-        attachments: await resolveAttachmentUrls(finalRecord.attachments),
+        attachments: await resolveAttachmentUrls(
+          finalRecord.attachments,
+          workspace.coupleId,
+          recordId,
+        ),
       };
+      if (!isCurrentWorkspace(workspace)) return staleResult;
     }
 
-    setState((current) => ({ ...current, records: [...current.records, finalRecord] }));
-    return { ok: true, failedFiles: Array.from(new Set(failedFiles)) };
+    const recordToCommit = finalRecord;
+    updateStateImmediately((current) =>
+      isCurrentWorkspace(workspace) && stateMatchesWorkspace(current, workspace)
+        ? { ...current, records: [...current.records, recordToCommit] }
+        : current,
+    );
+    return isCurrentWorkspace(workspace)
+      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
+      : staleResult;
   };
 
   const updateRecord = async (id: string, updates: Partial<DailyRecord>): Promise<boolean> => {
-    // Computed outside the updater so StrictMode's double invocation cannot
-    // fire the DB write twice.
-    const prev = stateRef.current;
-    const existing = prev.records.find((r) => r.id === id);
+    const initial = stateRef.current;
+    const existing = initial.records.find((record) => record.id === id);
     if (!existing) return false;
-    const updated: DailyRecord = { ...existing, ...updates };
+    // Identity-bearing fields are immutable even if an older caller still
+    // passes the broad Partial<DailyRecord> API.
+    const updated: DailyRecord = {
+      ...existing,
+      ...updates,
+      id: existing.id,
+      userId: existing.userId,
+      createdAt: existing.createdAt,
+    };
 
-    if (!prev.isDemoMode && prev.authenticatedUser) {
-      const coupleId = prev.profile.couple.coupleId;
-      if (!coupleId) return false;
-      // Only the author may edit a record; the server enforces this too but
-      // failing fast keeps local state consistent with the server.
-      if (existing.userId && existing.userId !== prev.authenticatedUser.id) return false;
-      try {
-        const saved = await saveRecordToDB(updated, coupleId, prev.authenticatedUser.id);
-        if (!saved) return false;
-      } catch (error) {
-        console.error('[gomsinlog] Failed to update record:', error);
-        return false;
-      }
+    if (initial.isDemoMode) {
+      updateStateImmediately((current) => current.isDemoMode
+        ? {
+            ...current,
+            records: current.records.map((record) => record.id === id ? updated : record),
+          }
+        : current);
+      return stateRef.current.isDemoMode;
     }
 
-    setState((current) => ({
-      ...current,
-      records: current.records.map((r) => (r.id === id ? { ...r, ...updates } : r)),
-    }));
-    return true;
+    const workspace = captureActiveWorkspace();
+    if (!workspace || existing.userId !== workspace.userId) return false;
+    try {
+      const saved = await saveRecordToDB(updated, workspace.coupleId, workspace.userId);
+      if (!isCurrentWorkspace(workspace) || !saved) return false;
+    } catch (error) {
+      if (isCurrentWorkspace(workspace)) {
+        console.error('[gomsinlog] Failed to update record:', error);
+      }
+      return false;
+    }
+
+    let recordToCommit = updated;
+    if (updated.attachments?.length) {
+      recordToCommit = {
+        ...updated,
+        attachments: await resolveAttachmentUrls(
+          updated.attachments,
+          workspace.coupleId,
+          updated.id,
+        ),
+      };
+      if (!isCurrentWorkspace(workspace)) return false;
+    }
+
+    updateStateImmediately((current) =>
+      isCurrentWorkspace(workspace) && stateMatchesWorkspace(current, workspace)
+        ? {
+            ...current,
+            records: current.records.map((record) =>
+              record.id === id ? recordToCommit : record,
+            ),
+          }
+        : current,
+    );
+    return isCurrentWorkspace(workspace);
   };
 
   const deleteRecord = async (id: string): Promise<boolean> => {
-    if (!state.isDemoMode && state.authenticatedUser) {
-      try {
-        const deleted = await deleteRecordFromDB(id);
-        if (!deleted) return false;
-      } catch (error) {
-        console.error('Failed to delete record:', error);
-        return false;
-      }
+    const initial = stateRef.current;
+    const existing = initial.records.find((record) => record.id === id);
+    if (!existing) return false;
+
+    if (initial.isDemoMode) {
+      updateStateImmediately((current) => current.isDemoMode
+        ? { ...current, records: current.records.filter((record) => record.id !== id) }
+        : current);
+      return stateRef.current.isDemoMode;
     }
 
-    setState((prev) => ({
-      ...prev,
-      records: prev.records.filter((record) => record.id !== id),
-    }));
-    return true;
+    const workspace = captureActiveWorkspace();
+    if (!workspace || existing.userId !== workspace.userId) return false;
+    try {
+      const deleted = await deleteRecordFromDB(
+        id,
+        workspace.userId,
+        workspace.coupleId,
+      );
+      if (!isCurrentWorkspace(workspace) || !deleted) return false;
+    } catch (error) {
+      if (isCurrentWorkspace(workspace)) console.error('Failed to delete record:', error);
+      return false;
+    }
+
+    updateStateImmediately((current) =>
+      isCurrentWorkspace(workspace) && stateMatchesWorkspace(current, workspace)
+        ? { ...current, records: current.records.filter((record) => record.id !== id) }
+        : current,
+    );
+    return isCurrentWorkspace(workspace);
   };
-
-  const captureActiveIdentity = (): ActiveIdentity | null => {
-    const current = stateRef.current;
-    const userId = current.authenticatedUser?.id;
-    if (!userId || sessionUserIdRef.current !== userId) return null;
-    return { userId, generation: sessionGenerationRef.current };
-  };
-
-  const isCurrentIdentity = (identity: ActiveIdentity): boolean =>
-    sessionGenerationRef.current === identity.generation
-    && sessionUserIdRef.current === identity.userId
-    && stateRef.current.authenticatedUser?.id === identity.userId;
-
-  const captureActiveWorkspace = (): ActiveWorkspace | null => {
-    const identity = captureActiveIdentity();
-    const current = stateRef.current;
-    const activeCoupleId = current.profile.couple.coupleId;
-    if (!identity || !activeCoupleId) return null;
-    const workspace = {
-      ...identity,
-      coupleId: activeCoupleId,
-    };
-    return stateMatchesWorkspace(current, workspace) ? workspace : null;
-  };
-
-  const isCurrentWorkspace = (workspace: ActiveWorkspace): boolean =>
-    sessionGenerationRef.current === workspace.generation
-    && sessionUserIdRef.current === workspace.userId
-    && stateMatchesWorkspace(stateRef.current, workspace);
 
   const addEvent = async (
     event: Omit<CoupleEvent, 'id' | 'createdAt'>,
@@ -969,7 +1238,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         module.saveEventToDB(newEvent),
       );
       if (!isCurrentWorkspace(workspace) || !saved) return false;
-      setState((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+      updateStateImmediately((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
         ? { ...prev, events: [...prev.events, saved] }
         : prev);
       return true;
@@ -1001,7 +1270,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const isCurrentScope = () => isCurrentIdentity(identity)
       && (remainsPrivate || (!!workspace && isCurrentWorkspace(workspace)));
     const updated = { ...existing, ...updates };
-    setState((prev) => isCurrentScope()
+    updateStateImmediately((prev) => isCurrentScope()
       ? { ...prev, events: prev.events.map((event) => (event.id === id ? updated : event)) }
       : prev);
 
@@ -1011,12 +1280,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
       if (!isCurrentScope()) return false;
       if (!saved) {
-        setState((prev) => isCurrentScope()
+        updateStateImmediately((prev) => isCurrentScope()
           ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
           : prev);
         return false;
       }
-      setState((prev) => isCurrentScope()
+      updateStateImmediately((prev) => isCurrentScope()
         ? { ...prev, events: prev.events.map((event) => (event.id === id ? saved : event)) }
         : prev);
       return true;
@@ -1056,7 +1325,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
 
-    setState((prev) => isCurrentScope()
+    updateStateImmediately((prev) => isCurrentScope()
       ? { ...prev, events: prev.events.filter((event) => event.id !== id) }
       : prev);
     return true;
@@ -1069,6 +1338,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const identity = captureActiveIdentity();
     if (!identity) return { ok: false, reason: 'forbidden' };
     const workspace = captureActiveWorkspace();
+    const current = stateRef.current;
+    if (
+      !workspace
+      && current.profile.couple.coupleId
+      && current.profile.couple.connected
+      && current.profile.couple.status === 'active'
+    ) return { ok: false, reason: 'forbidden' };
 
     try {
       // Without an active couple the query returns only owner-private rows;
@@ -1079,7 +1355,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, reason: 'forbidden' };
       }
       if (!result.ok) return result;
-      setState((prev) => isCurrentIdentity(identity)
+      updateStateImmediately((prev) => isCurrentIdentity(identity)
         && (!workspace || (isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)))
         ? { ...prev, events: result.events }
         : prev);
@@ -1101,7 +1377,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * the profile -- which decides which records count as "mine".
    */
   const switchRole = () => {
-    setState((prev) => {
+    updateStateImmediately((prev) => {
       if (!prev.isDemoMode) {
         console.warn('[gomsinlog] switchRole is a demo-only preview and was ignored.');
         return prev;
@@ -1124,21 +1400,41 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const disconnect = async (): Promise<boolean> => {
     const current = stateRef.current;
-    const disconnectIdentity = current.authenticatedUser?.id && current.profile.couple.coupleId
-      ? {
-          userId: current.authenticatedUser.id,
-          coupleId: current.profile.couple.coupleId,
-          generation: sessionGenerationRef.current,
-        }
-      : undefined;
-    try {
-      if (isSupabaseConfigured) {
-        const disconnected = await disconnectCoupleFromDB();
-        if (!disconnected) return false;
+    if (current.isDemoMode) {
+      // Demo mode never calls the configured backend.
+      return purgeSharedAccess();
+    }
+
+    const workspace = captureActiveWorkspace();
+    if (!workspace || workspaceRefMatches(pendingDisconnectRef.current, workspace)) return false;
+    // Hide all shared content before the RPC leaves this turn. The couple id is
+    // retained so a failed request can be recovered authoritatively.
+    pendingDisconnectRef.current = workspace;
+    quarantineSharedAccess(workspace);
+    const clearPendingDisconnect = () => {
+      if (workspaceRefMatches(pendingDisconnectRef.current, workspace)) {
+        pendingDisconnectRef.current = null;
       }
-      return purgeSharedAccess(disconnectIdentity);
-    } catch (e) {
-      console.error('Failed to disconnect:', e);
+    };
+
+    try {
+      const disconnected = await disconnectCoupleFromDB();
+      if (!matchesCurrentWorkspace(workspace)) {
+        clearPendingDisconnect();
+        return false;
+      }
+      clearPendingDisconnect();
+      if (disconnected) return purgeSharedAccess(workspace);
+      await reconcileSharedAccess(workspace);
+      return false;
+    } catch (error) {
+      if (!matchesCurrentWorkspace(workspace)) {
+        clearPendingDisconnect();
+        return false;
+      }
+      console.error('Failed to disconnect:', error);
+      clearPendingDisconnect();
+      await reconcileSharedAccess(workspace);
       return false;
     }
   };
@@ -1147,8 +1443,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * Drop every trace of the signed-in account from this device.
    * Only device-level preferences (theme, widget layout) are kept.
    */
-  const purgeLocalAccountData = () => {
+  const purgeLocalAccountData = (expected?: ActiveIdentity): boolean => {
+    if (expected && !isCurrentIdentity(expected)) return false;
     hydratedUserIdRef.current = null;
+    membershipReconciliationRef.current += 1;
+    quarantinedWorkspaceRef.current = null;
     if (sessionUserIdRef.current !== null) sessionGenerationRef.current += 1;
     sessionUserIdRef.current = null;
     cachePurgedRef.current = true;
@@ -1160,8 +1459,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       isDemoMode: false,
       ...carryOverDevicePrefs(current),
     };
-    stateRef.current = nextState;
-    setState(nextState);
+    replaceStateImmediately(nextState);
+    return true;
   };
 
   const signOut = async () => {
@@ -1181,12 +1480,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: true, warnings: [] };
     }
 
+    const identity = captureActiveIdentity();
+    if (!identity) return { ok: false, warnings: [] };
     const result = await deleteAccountFromDB();
-    // Only purge after the server confirms deletion, so a failed attempt leaves
-    // the user signed in and able to retry.
+    // Account A's completion must never clear a session that has switched to B.
+    if (!isCurrentIdentity(identity)) {
+      return { ok: false, warnings: result.warnings };
+    }
     if (!result.ok) return result;
 
-    purgeLocalAccountData();
+    if (!purgeLocalAccountData(identity)) return result;
     try {
       await authRepository.signOut();
     } catch (error) {
@@ -1196,15 +1499,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setSetupComplete = (complete: boolean) => {
-    setState((prev) => ({ ...prev, setupComplete: complete }));
+    updateStateImmediately((prev) => ({ ...prev, setupComplete: complete }));
   };
 
   const setOnboardingStep = (step: number) => {
-    setState((prev) => ({ ...prev, onboardingStep: step }));
+    updateStateImmediately((prev) => ({ ...prev, onboardingStep: step }));
   };
 
   const setHighlightedRecordId = (id?: string) => {
-    setState((prev) => ({ ...prev, highlightedRecordId: id }));
+    updateStateImmediately((prev) => ({ ...prev, highlightedRecordId: id }));
   };
 
   const startDemo = () => {
@@ -1216,17 +1519,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return d.toISOString().split('T')[0];
     };
 
-    setState((prev) => ({
-      ...prev,
+    updateStateImmediately((prev) => ({
+      ...DEFAULT_STATE,
+      ...carryOverDevicePrefs(prev),
       setupComplete: true,
       isDemoMode: true,
       authenticatedUser: null,
       profile: {
-        ...prev.profile,
+        ...DEFAULT_STATE.profile,
         myName: '춘향',
         role: 'gomsin',
         couple: {
-          ...prev.profile.couple,
+          ...DEFAULT_STATE.profile.couple,
           partnerName: '몽룡',
           coupleCode: '123456',
           connected: true,
@@ -1376,19 +1680,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setAuthenticatedUser = (user: AuthUser | null) => {
-    setState((prev) => ({ ...prev, authenticatedUser: user }));
+    updateStateImmediately((prev) => ({ ...prev, authenticatedUser: user }));
   };
 
   const setWidgetLayout = (layout: string[]) => {
-    setState((prev) => ({ ...prev, widgetLayout: layout }));
+    updateStateImmediately((prev) => ({ ...prev, widgetLayout: layout }));
   };
 
   const setHasSeenInstallPrompt = (seen: boolean) => {
-    setState((prev) => ({ ...prev, hasSeenInstallPrompt: seen }));
+    updateStateImmediately((prev) => ({ ...prev, hasSeenInstallPrompt: seen }));
   };
 
   const setTheme = (theme: 'light' | 'dark') => {
-    setState((prev) => ({ ...prev, theme }));
+    updateStateImmediately((prev) => ({ ...prev, theme }));
   };
 
   return (

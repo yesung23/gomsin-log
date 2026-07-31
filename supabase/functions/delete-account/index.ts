@@ -1,33 +1,18 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 /**
- * Account deletion.
+ * Account deletion is deliberately split across service boundaries:
  *
- * Design constraints that shaped this implementation:
+ * 1. Enumerate the caller's daily records and completely remove their Storage
+ *    objects. A listing/removal failure aborts before relational/auth changes.
+ * 2. Call the service-role-only prepare_account_deletion RPC. It verifies that
+ *    the record set did not change, locks couple rows first, transfers shared
+ *    plan ownership, removes private/blocking rows, and deletes records in one
+ *    database transaction.
+ * 3. Delete the Auth user only after database preparation succeeds.
  *
- * 1. `events.created_by` and `trips.created_by` are `ON DELETE CASCADE` on
- *    `auth.users`. Deleting the user therefore destroys every shared plan they
- *    created, which the partner also depends on. Shared plans are reassigned to
- *    the surviving partner before the user row is removed.
- *
- * 2. `couple_members.status` must NOT be flipped to 'disconnected' for the
- *    partner. `get_my_active_couple_id()` returns NULL for a non-active member,
- *    and every RLS policy keys off it, so disconnecting the partner would leave
- *    them unable to read or write even their OWN records. The leaving user's
- *    membership row disappears via CASCADE, which is sufficient.
- *
- * 3. `invitation_codes.created_by/used_by` and `briefings.recipient_id` have NO
- *    cascade, so those rows must be removed first or the user delete fails with
- *    a foreign key violation.
- *
- * 4. Only data the caller owns is deleted. `briefings` are removed by
- *    `recipient_id` only -- deleting by `couple_id` (the previous behaviour)
- *    destroyed briefings addressed to the partner.
- *
- * The operation is not a single transaction (storage and auth live outside
- * Postgres), so it is ordered so that every step is either idempotent or
- * retry-safe, and non-critical failures are reported as warnings instead of
- * aborting a deletion the user explicitly asked for.
+ * Storage, Postgres, and Auth cannot share one transaction. Every phase is
+ * retry-safe, but a failed later phase may follow a completed media cleanup.
  */
 
 const corsHeaders = {
@@ -50,48 +35,46 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 }
 
 type Admin = ReturnType<typeof createClient>;
+type RecordMediaScope = { id: string; couple_id: string };
 
 /**
- * Remove every object under `{coupleId}/{recordId}/`.
- * Returns the folders it could not fully clear so the caller can warn instead
- * of aborting.
+ * Remove and then confirm the absence of every object under each record path.
+ * Re-listing offset zero after every batch avoids skipped entries after delete.
  */
-async function removeRecordMedia(
+async function removeAndConfirmRecordMedia(
   admin: Admin,
-  coupleId: string,
-  recordIds: string[],
-): Promise<string[]> {
+  records: RecordMediaScope[],
+): Promise<void> {
   const bucket = admin.storage.from(MEDIA_BUCKET);
-  const failed: string[] = [];
 
-  for (const recordId of recordIds) {
-    const folder = `${coupleId}/${recordId}`;
-    try {
-      // Re-list from offset 0 each round: removing objects shifts the listing,
-      // so advancing an offset would skip entries.
-      for (;;) {
-        const { data: files, error } = await bucket.list(folder, { limit: STORAGE_PAGE_SIZE });
-        if (error) throw error;
-        if (!files?.length) break;
+  for (const record of records) {
+    const folder = `${record.couple_id}/${record.id}`;
 
-        const paths = files
-          .filter((file) => file.name && file.name !== '.emptyFolderPlaceholder')
-          .map((file) => `${folder}/${file.name}`);
-
-        if (paths.length === 0) break;
-
-        const { error: removeError } = await bucket.remove(paths);
-        if (removeError) throw removeError;
-
-        if (files.length < STORAGE_PAGE_SIZE) break;
+    for (;;) {
+      const { data: files, error: listError } = await bucket.list(folder, {
+        limit: STORAGE_PAGE_SIZE,
+        offset: 0,
+      });
+      if (listError) {
+        throw new Error(`Unable to list media folder ${folder}: ${listError.message}`);
       }
-    } catch (error) {
-      console.error(`[delete-account] Failed to clear media folder ${folder}`, error);
-      failed.push(folder);
+      if (!files?.length) break;
+
+      const paths = files
+        .filter((file) => Boolean(file.name))
+        .map((file) => `${folder}/${file.name}`);
+      if (paths.length !== files.length) {
+        throw new Error(`Unable to identify every object in media folder ${folder}`);
+      }
+
+      const { error: removeError } = await bucket.remove(paths);
+      if (removeError) {
+        throw new Error(`Unable to clear media folder ${folder}: ${removeError.message}`);
+      }
+      // Always re-list, including short batches, to confirm Storage accepted
+      // every removal rather than treating a successful request as proof.
     }
   }
-
-  return failed;
 }
 
 Deno.serve(async (request) => {
@@ -120,163 +103,95 @@ Deno.serve(async (request) => {
 
   const token = authorization.slice('Bearer '.length);
   const { data: { user }, error: userError } = await admin.auth.getUser(token);
-
   if (userError || !user) {
-    // A token for an already-deleted user lands here. Treat it as done so a
-    // retry after a partial failure does not look like a new error.
     return jsonResponse({ error: 'Invalid or expired session' }, 401);
   }
 
   const userId = user.id;
-  const warnings: string[] = [];
+  let deletionMarkerStarted = false;
+  let databasePreparationCompleted = false;
 
   try {
-    // ---------------------------------------------------------------
-    // 1. Work out which couples the user belongs to, and who remains.
-    // ---------------------------------------------------------------
-    const { data: memberships, error: membershipError } = await admin
-      .from('couple_members')
-      .select('couple_id')
-      .eq('user_id', userId);
-    if (membershipError) throw membershipError;
-
-    const coupleIds = Array.from(
-      new Set((memberships || []).map((row) => row.couple_id as string).filter(Boolean)),
-    );
-
-    /** couple_id -> surviving partner user id (if any). */
-    const survivingPartner = new Map<string, string>();
-    if (coupleIds.length > 0) {
-      const { data: others, error: othersError } = await admin
-        .from('couple_members')
-        .select('couple_id, user_id, status')
-        .in('couple_id', coupleIds)
-        .neq('user_id', userId);
-      if (othersError) throw othersError;
-
-      for (const row of others || []) {
-        // Prefer an active member; fall back to any remaining member.
-        const existing = survivingPartner.get(row.couple_id as string);
-        if (!existing || row.status === 'active') {
-          survivingPartner.set(row.couple_id as string, row.user_id as string);
-        }
-      }
-    }
-
-    // ---------------------------------------------------------------
-    // 2. Preserve shared plans by handing them to the surviving partner.
-    //    Without this, the CASCADE on created_by deletes the couple's
-    //    shared events, trips, trip items and checklists.
-    // ---------------------------------------------------------------
-    for (const coupleId of coupleIds) {
-      const partnerId = survivingPartner.get(coupleId);
-      if (!partnerId) continue; // Nobody left to own them; cascade may clean up.
-
-      // Personal (private) events are the user's own content -> delete.
-      const { error: privateEventError } = await admin
-        .from('events')
-        .delete()
-        .eq('created_by', userId)
-        .eq('couple_id', coupleId)
-        .eq('is_private', true);
-      if (privateEventError) {
-        console.error('[delete-account] Failed to delete private events', privateEventError);
-        warnings.push('private_events_not_deleted');
-      }
-
-      // Shared events belong to both people -> transfer ownership.
-      const { error: sharedEventError } = await admin
-        .from('events')
-        .update({ created_by: partnerId })
-        .eq('created_by', userId)
-        .eq('couple_id', coupleId)
-        .eq('is_private', false);
-      if (sharedEventError) {
-        console.error('[delete-account] Failed to transfer shared events', sharedEventError);
-        warnings.push('shared_events_not_transferred');
-      }
-
-      // Trips have no privacy flag: every trip in a couple space is shared.
-      const { error: tripError } = await admin
-        .from('trips')
-        .update({ created_by: partnerId })
-        .eq('created_by', userId)
-        .eq('couple_id', coupleId);
-      if (tripError) {
-        console.error('[delete-account] Failed to transfer trips', tripError);
-        warnings.push('trips_not_transferred');
-      }
-    }
-
-    // ---------------------------------------------------------------
-    // 3. Remove rows that have no cascade and would block the user delete.
-    // ---------------------------------------------------------------
-    const { error: invitationError } = await admin
-      .from('invitation_codes')
-      .delete()
-      .or(`created_by.eq.${userId},used_by.eq.${userId}`);
-    if (invitationError) throw invitationError;
-
-    // Only briefings addressed to this user. Deleting by couple_id would
-    // destroy the partner's briefings too.
-    const { error: briefingError } = await admin
-      .from('briefings')
-      .delete()
-      .eq('recipient_id', userId);
-    if (briefingError) throw briefingError;
-
-    // ---------------------------------------------------------------
-    // 4. Delete the user's own records and their media.
-    //    The partner's records are never touched.
-    // ---------------------------------------------------------------
-    const { data: records, error: recordsError } = await admin
+    // Read-only preflight. These exact IDs are passed to the transactional RPC,
+    // which fails closed if a record appeared/disappeared during media cleanup.
+    const { data: recordRows, error: recordsError } = await admin
       .from('daily_records')
       .select('id, couple_id')
       .eq('user_id', userId);
     if (recordsError) throw recordsError;
 
-    for (const coupleId of coupleIds) {
-      const recordIds = (records || [])
-        .filter((record) => record.couple_id === coupleId)
-        .map((record) => record.id as string);
-      if (recordIds.length === 0) continue;
+    const records = (recordRows || []) as RecordMediaScope[];
 
-      const failedFolders = await removeRecordMedia(admin, coupleId, recordIds);
-      if (failedFolders.length > 0) {
-        // Orphaned objects are a cleanup concern, not a reason to keep the
-        // account alive against the user's wishes.
-        warnings.push(`media_not_fully_removed:${failedFolders.length}`);
+    // This marker is non-destructive. Migration 015's Storage INSERT policy
+    // uses it to close the upload race while media is being removed/confirmed.
+    const { error: beginError } = await admin.rpc('begin_account_deletion', {
+      p_user_id: userId,
+      p_expected_record_ids: records.map((record) => record.id),
+    });
+    if (beginError) throw beginError;
+    deletionMarkerStarted = true;
+
+    try {
+      await removeAndConfirmRecordMedia(admin, records);
+    } catch (mediaError) {
+      const { error: cancelError } = await admin.rpc('cancel_account_deletion', {
+        p_user_id: userId,
+      });
+      if (cancelError) {
+        console.error('[delete-account] Failed to clear deletion marker', cancelError);
+      } else {
+        deletionMarkerStarted = false;
       }
+      console.error('[delete-account] Media cleanup failed; database untouched', mediaError);
+      return jsonResponse(
+        {
+          error: 'Account deletion failed because stored media could not be fully removed. Please try again.',
+          warnings: [],
+        },
+        500,
+      );
     }
 
-    const { error: deleteRecordsError } = await admin
-      .from('daily_records')
-      .delete()
-      .eq('user_id', userId);
-    if (deleteRecordsError) throw deleteRecordsError;
+    // Migration 015 owns all destructive relational work. In particular,
+    // ownership transfer is no longer a best-effort direct table update: an
+    // RPC error aborts before auth deletion, preventing ON DELETE CASCADE from
+    // destroying shared events or trips.
+    const { data: preparation, error: preparationError } = await admin.rpc(
+      'prepare_account_deletion',
+      {
+        p_user_id: userId,
+        p_expected_record_ids: records.map((record) => record.id),
+      },
+    );
+    if (preparationError) throw preparationError;
+    if (!preparation || preparation.ok !== true) {
+      throw new Error('Account deletion database preparation did not confirm success');
+    }
+    databasePreparationCompleted = true;
 
-    // ---------------------------------------------------------------
-    // 5. Delete the auth user. CASCADE removes the profile, this user's
-    //    couple_members row, contact preferences and cycle data.
-    //    The partner's membership stays 'active' on purpose so they keep
-    //    access to their own history.
-    // ---------------------------------------------------------------
     const { error: deleteUserError } = await admin.auth.admin.deleteUser(userId);
     if (deleteUserError) throw deleteUserError;
 
     console.log('[delete-account] Completed', {
-      couples: coupleIds.length,
-      records: (records || []).length,
-      warnings: warnings.length,
+      records: records.length,
+      preparation,
     });
 
-    return jsonResponse({ success: true, warnings });
+    return jsonResponse({ success: true, warnings: [] });
   } catch (error) {
+    if (deletionMarkerStarted && !databasePreparationCompleted) {
+      const { error: cancelError } = await admin.rpc('cancel_account_deletion', {
+        p_user_id: userId,
+      });
+      if (cancelError) {
+        console.error('[delete-account] Failed to clear deletion marker', cancelError);
+      }
+    }
     console.error('[delete-account] Deletion failed', error);
     return jsonResponse(
       {
-        error: 'Account deletion failed. Nothing was confirmed as deleted; please try again.',
-        warnings,
+        error: 'Account deletion failed. Please try again.',
+        warnings: [],
       },
       500,
     );

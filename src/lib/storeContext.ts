@@ -1,9 +1,20 @@
 import { createContext } from 'react';
 import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent } from '@/types';
 
+/**
+ * Trustworthiness of the shared couple workspace currently on screen.
+ *
+ * `live` needs no explanation to the user. `delayed` and `unavailable` both do,
+ * because in one case the data is real but frozen and in the other it is hidden.
+ */
+export type SharedSyncStatus = 'live' | 'delayed' | 'unavailable';
+
 export interface StoreContextType {
   state: AppState;
   isReady: boolean;
+  sharedSyncStatus: SharedSyncStatus;
+  /** Re-verify membership and re-read every shared slice through RLS. */
+  retrySharedAccess: () => Promise<boolean>;
   updateProfile: (profileUpdates: Partial<UserProfile>) => void;
   addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
   addRecordWithMedia: (

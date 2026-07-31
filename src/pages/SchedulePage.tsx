@@ -42,11 +42,21 @@ export function SchedulePage() {
   const { state, addEvent, updateEvent, deleteEvent, reloadEvents } = useStore();
   const { profile, events, authenticatedUser } = state;
   const today = toLocalDateString(localToday());
+  /** Both partners present: required before a schedule can be shared. */
   const activeCouple = Boolean(
     authenticatedUser?.id &&
       profile.couple.coupleId &&
       profile.couple.connected &&
       profile.couple.status === 'active',
+  );
+  /**
+   * A couple space exists and this account still belongs to it, with or without
+   * a partner. Enough to keep a private schedule, which is the author's own row.
+   */
+  const hasCoupleSpace = Boolean(
+    authenticatedUser?.id &&
+      profile.couple.coupleId &&
+      profile.couple.status !== 'disconnected',
   );
   const scheduleAccessKey = authenticatedUser?.id
     ? `${authenticatedUser.id}:${profile.couple.coupleId || ''}:${profile.couple.connected ? 'connected' : 'disconnected'}:${profile.couple.status}`
@@ -128,13 +138,14 @@ export function SchedulePage() {
   };
 
   const openCreateModal = () => {
-    if (!activeCouple) return;
+    if (!hasCoupleSpace) return;
     setEditingEventId(null);
     setTitle('');
     setEventType('visit');
     setEventStartDate(selectedDate);
     setEventEndDate('');
-    setIsPrivate(false);
+    // Without a partner there is nobody to share with, so default to private.
+    setIsPrivate(!activeCouple);
     setFormError(null);
     setShowEventModal(true);
   };
@@ -178,14 +189,16 @@ export function SchedulePage() {
       && editingEvent.isPrivate
       && isPrivate,
     );
-    if (
-      !authenticatedUser
-      || (!activeCouple && !canEditPrivateWhileDisconnected)
-      || (!editingEventId && !profile.couple.coupleId)
-    ) {
+    // Sharing needs a partner; keeping a schedule to yourself does not.
+    const canSave = editingEventId
+      ? (activeCouple || canEditPrivateWhileDisconnected)
+      : (hasCoupleSpace && (isPrivate || activeCouple));
+    if (!authenticatedUser || !canSave) {
       const message = editingEventId
         ? '연결이 해제된 동안에는 기존 비공개 일정만 수정할 수 있어요.'
-        : '로그인하고 연결된 우리 공간에서만 새 일정을 저장할 수 있어요.';
+        : hasCoupleSpace
+          ? '공유 일정은 파트너와 연결된 뒤에 등록할 수 있어요. 나만 보기로는 지금 저장할 수 있어요.'
+          : '로그인하고 우리 공간을 만든 뒤에 새 일정을 저장할 수 있어요.';
       setFormError(message);
       toast.error(message);
       return;
@@ -326,7 +339,7 @@ export function SchedulePage() {
           <button
             type="button"
             onClick={openCreateModal}
-            disabled={!activeCouple || loadState !== 'ready'}
+            disabled={!hasCoupleSpace || loadState !== 'ready'}
             className="p-2.5 rounded-xl bg-coral text-white font-bold text-xs flex items-center gap-1 shadow-sm active:scale-95 transition min-h-[44px] disabled:opacity-40 disabled:active:scale-100"
           >
             <Plus size={16} />
@@ -368,7 +381,9 @@ export function SchedulePage() {
               <StatusCard
                 icon={<Users size={24} />}
                 title={profile.couple.status === 'pending' ? '파트너 연결을 기다리고 있어요' : '연결된 우리 공간이 없어요'}
-                description="기존 비공개 일정만 본인이 계속 확인·수정할 수 있어요. 새 일정과 공유 일정은 연결 후 이용할 수 있어요."
+                description={profile.couple.status === 'pending'
+                  ? '지금은 나만 보기 일정만 등록할 수 있어요. 공유 일정은 파트너가 연결되면 열려요.'
+                  : '기존 비공개 일정만 본인이 계속 확인·수정할 수 있어요. 새 일정과 공유 일정은 연결 후 이용할 수 있어요.'}
               />
             )}
             <section className="rounded-3xl bg-card border border-border p-5 shadow-sm space-y-3">
@@ -453,7 +468,7 @@ export function SchedulePage() {
             <section className="space-y-3">
               <div className="flex items-center justify-between px-1">
                 <h2 className="text-sm font-bold text-foreground">{selectedDate} 일정</h2>
-                <button type="button" onClick={openCreateModal} disabled={!activeCouple} className="text-[11px] font-bold text-coral disabled:opacity-40">이 날짜에 추가</button>
+                <button type="button" onClick={openCreateModal} disabled={!hasCoupleSpace} className="text-[11px] font-bold text-coral disabled:opacity-40">이 날짜에 추가</button>
               </div>
               <div className="space-y-2">
                 {selectedEvents.length > 0 ? selectedEvents.map((event) => renderEventCard(event, true)) : (

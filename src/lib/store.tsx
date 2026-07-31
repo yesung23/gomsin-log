@@ -36,9 +36,28 @@ type SyncSlice = 'records' | 'events' | 'trips';
 type ActiveIdentity = { userId: string; generation: number };
 type ActiveWorkspace = ActiveIdentity & { coupleId: string };
 
-function stateMatchesWorkspace(state: AppState, workspace: ActiveWorkspace): boolean {
+/**
+ * The couple space this account belongs to, whether or not a partner has joined.
+ *
+ * `create_couple_and_invitation` inserts the creator's membership as `active`, so
+ * `get_my_active_couple_id()` already returns this couple and RLS already accepts
+ * the owner's reads and writes while the invitation is outstanding. This is the
+ * right scope for anything that only touches the caller's own rows.
+ */
+function stateMatchesLinkedCouple(state: AppState, workspace: ActiveWorkspace): boolean {
   return state.authenticatedUser?.id === workspace.userId
     && state.profile.couple.coupleId === workspace.coupleId
+    && state.profile.couple.status !== 'disconnected';
+}
+
+/**
+ * A couple space with both partners present.
+ *
+ * Required for anything that can expose one partner's data to the other, which
+ * is why realtime, quarantine and reconciliation all key on it.
+ */
+function stateMatchesWorkspace(state: AppState, workspace: ActiveWorkspace): boolean {
+  return stateMatchesLinkedCouple(state, workspace)
     && state.profile.couple.connected
     && state.profile.couple.status === 'active';
 }
@@ -276,22 +295,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [captureActiveIdentity, isCurrentWorkspace]);
 
   /**
-   * The couple row this account is attached to, whether or not the link has
-   * been accepted yet. A pending couple has no partner and therefore no shared
-   * slices, so the active-workspace guards do not apply to it; cancelling such
-   * an invitation still has to clear the local pending couple and stop the
-   * partner poll.
+   * The couple space this account is attached to, accepted or not.
+   *
+   * Used by everything that only reads or writes the caller's own rows: the
+   * owner of an unaccepted couple space can already do so under RLS, so gating
+   * those actions on the partner's arrival only loses the user's own work.
    */
   const captureLinkedCouple = useCallback((): ActiveWorkspace | null => {
     const identity = captureActiveIdentity();
     const linkedCoupleId = stateRef.current.profile.couple.coupleId;
     if (!identity || !linkedCoupleId) return null;
-    return { ...identity, coupleId: linkedCoupleId };
+    const workspace = { ...identity, coupleId: linkedCoupleId };
+    return stateMatchesLinkedCouple(stateRef.current, workspace) ? workspace : null;
   }, [captureActiveIdentity]);
 
   const isCurrentLinkedCouple = useCallback((workspace: ActiveWorkspace): boolean =>
     isCurrentIdentity(workspace)
-    && stateRef.current.profile.couple.coupleId === workspace.coupleId,
+    && stateMatchesLinkedCouple(stateRef.current, workspace),
   [isCurrentIdentity]);
 
   useEffect(() => {
@@ -1140,12 +1160,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         : { ok: false, failedFiles: files.map((file) => file.name) };
     }
 
-    const workspace = captureActiveWorkspace();
+    const workspace = captureLinkedCouple();
     if (!workspace) {
       return {
         ok: false,
         failedFiles: files.map((file) => file.name),
-        error: '커플 공간이 연결된 뒤에 기록을 남길 수 있어요.',
+        error: '커플 공간을 만든 뒤에 기록을 남길 수 있어요.',
       };
     }
     const newRecord: DailyRecord = { ...baseRecord, userId: workspace.userId };
@@ -1161,12 +1181,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         workspace.coupleId,
         workspace.userId,
       );
-      if (!isCurrentWorkspace(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
       if (!saved) {
         return { ok: false, failedFiles: files.map((file) => file.name), error: '기록을 저장하지 못했어요.' };
       }
     } catch (error) {
-      if (!isCurrentWorkspace(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
       console.error('[gomsinlog] Failed to save record:', error);
       return { ok: false, failedFiles: files.map((file) => file.name), error: '기록을 저장하지 못했어요.' };
     }
@@ -1175,9 +1195,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const uploadedPaths: string[] = [];
     const failedFiles: string[] = [];
     for (const file of files) {
-      if (!isCurrentWorkspace(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
       const result = await uploadRecordMedia(file, workspace.coupleId, recordId);
-      if (!isCurrentWorkspace(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
       if ('error' in result) {
         failedFiles.push(file.name);
         console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
@@ -1195,18 +1215,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           workspace.coupleId,
           workspace.userId,
         );
-        if (!isCurrentWorkspace(workspace)) return staleResult;
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (!patched) {
           await removeRecordMedia(uploadedPaths);
-          if (!isCurrentWorkspace(workspace)) return staleResult;
+          if (!isCurrentLinkedCouple(workspace)) return staleResult;
           failedFiles.push(...files.map((file) => file.name));
           finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
         }
       } catch (error) {
-        if (!isCurrentWorkspace(workspace)) return staleResult;
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
         console.error('[gomsinlog] Failed to attach media to record:', error);
         await removeRecordMedia(uploadedPaths);
-        if (!isCurrentWorkspace(workspace)) return staleResult;
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
         failedFiles.push(...files.map((file) => file.name));
         finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
       }
@@ -1221,16 +1241,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           recordId,
         ),
       };
-      if (!isCurrentWorkspace(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
     }
 
     const recordToCommit = finalRecord;
     updateStateImmediately((current) =>
-      isCurrentWorkspace(workspace) && stateMatchesWorkspace(current, workspace)
+      isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? { ...current, records: [...current.records, recordToCommit] }
         : current,
     );
-    return isCurrentWorkspace(workspace)
+    return isCurrentLinkedCouple(workspace)
       ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
       : staleResult;
   };
@@ -1259,13 +1279,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return stateRef.current.isDemoMode;
     }
 
-    const workspace = captureActiveWorkspace();
+    const workspace = captureLinkedCouple();
     if (!workspace || existing.userId !== workspace.userId) return false;
     try {
       const saved = await saveRecordToDB(updated, workspace.coupleId, workspace.userId);
-      if (!isCurrentWorkspace(workspace) || !saved) return false;
+      if (!isCurrentLinkedCouple(workspace) || !saved) return false;
     } catch (error) {
-      if (isCurrentWorkspace(workspace)) {
+      if (isCurrentLinkedCouple(workspace)) {
         console.error('[gomsinlog] Failed to update record:', error);
       }
       return false;
@@ -1281,11 +1301,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           updated.id,
         ),
       };
-      if (!isCurrentWorkspace(workspace)) return false;
+      if (!isCurrentLinkedCouple(workspace)) return false;
     }
 
     updateStateImmediately((current) =>
-      isCurrentWorkspace(workspace) && stateMatchesWorkspace(current, workspace)
+      isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? {
             ...current,
             records: current.records.map((record) =>
@@ -1294,7 +1314,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
         : current,
     );
-    return isCurrentWorkspace(workspace);
+    return isCurrentLinkedCouple(workspace);
   };
 
   const deleteRecord = async (id: string): Promise<boolean> => {
@@ -1309,7 +1329,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return stateRef.current.isDemoMode;
     }
 
-    const workspace = captureActiveWorkspace();
+    const workspace = captureLinkedCouple();
     if (!workspace || existing.userId !== workspace.userId) return false;
     try {
       const deleted = await deleteRecordFromDB(
@@ -1317,24 +1337,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         workspace.userId,
         workspace.coupleId,
       );
-      if (!isCurrentWorkspace(workspace) || !deleted) return false;
+      if (!isCurrentLinkedCouple(workspace) || !deleted) return false;
     } catch (error) {
-      if (isCurrentWorkspace(workspace)) console.error('Failed to delete record:', error);
+      if (isCurrentLinkedCouple(workspace)) console.error('Failed to delete record:', error);
       return false;
     }
 
     updateStateImmediately((current) =>
-      isCurrentWorkspace(workspace) && stateMatchesWorkspace(current, workspace)
+      isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? { ...current, records: current.records.filter((record) => record.id !== id) }
         : current,
     );
-    return isCurrentWorkspace(workspace);
+    return isCurrentLinkedCouple(workspace);
   };
 
   const addEvent = async (
     event: Omit<CoupleEvent, 'id' | 'createdAt'>,
   ): Promise<boolean> => {
-    const workspace = captureActiveWorkspace();
+    const workspace = captureLinkedCouple();
     if (
       !workspace
       || event.createdBy !== workspace.userId
@@ -1351,13 +1371,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const saved = await import('@/lib/events').then((module) =>
         module.saveEventToDB(newEvent),
       );
-      if (!isCurrentWorkspace(workspace) || !saved) return false;
-      updateStateImmediately((prev) => isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)
+      if (!isCurrentLinkedCouple(workspace) || !saved) return false;
+      updateStateImmediately((prev) => isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(prev, workspace)
         ? { ...prev, events: [...prev.events, saved] }
         : prev);
       return true;
     } catch (error) {
-      if (isCurrentWorkspace(workspace)) console.error('Failed to save event:', error);
+      if (isCurrentLinkedCouple(workspace)) console.error('Failed to save event:', error);
       return false;
     }
   };
@@ -1451,35 +1471,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }> => {
     const identity = captureActiveIdentity();
     if (!identity) return { ok: false, reason: 'forbidden' };
-    const workspace = captureActiveWorkspace();
+    // Reads are scoped to the couple space this account belongs to; quarantine
+    // and recovery only apply once a partner is actually present.
+    const linked = captureLinkedCouple();
+    const shared = captureActiveWorkspace();
     const current = stateRef.current;
     if (
-      !workspace
+      !shared
       && current.profile.couple.coupleId
       && current.profile.couple.connected
       && current.profile.couple.status === 'active'
     ) return { ok: false, reason: 'forbidden' };
 
     try {
-      // Without an active couple the query returns only owner-private rows;
-      // with one it additionally returns that couple's shared rows under RLS.
-      const result = await fetchEventsResultFromDB(workspace?.coupleId);
+      // Without a couple space the query returns only owner-private rows; with
+      // one it additionally returns that couple's shared rows under RLS.
+      const result = await fetchEventsResultFromDB(linked?.coupleId);
       if (!isCurrentIdentity(identity)) return { ok: false, reason: 'forbidden' };
-      if (workspace && !isCurrentWorkspace(workspace)) {
+      if (linked && !isCurrentLinkedCouple(linked)) {
         return { ok: false, reason: 'forbidden' };
       }
       if (!result.ok) {
-        if (workspace) quarantineSharedAccess(workspace);
+        if (shared) quarantineSharedAccess(shared);
         return result;
       }
       updateStateImmediately((prev) => isCurrentIdentity(identity)
-        && (!workspace || (isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)))
+        && (!linked || (isCurrentLinkedCouple(linked) && stateMatchesLinkedCouple(prev, linked)))
         ? { ...prev, events: result.events }
         : prev);
       return { ok: true };
     } catch (error) {
       if (!isCurrentIdentity(identity)) return { ok: false, reason: 'forbidden' };
-      if (workspace) quarantineSharedAccess(workspace);
+      if (shared) quarantineSharedAccess(shared);
       console.error('Failed to reload events:', error);
       return { ok: false, reason: 'error' };
     }

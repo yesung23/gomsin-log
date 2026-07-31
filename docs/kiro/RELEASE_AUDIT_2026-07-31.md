@@ -158,6 +158,8 @@ supabase/migrations/README.md
 
 ## 5. 커밋 목록
 
+기준: `master` = `bf6ba0b` (변경하지 않음)
+
 ```
 efaf048  test: add jsdom + testing-library harness
 6821da8  fix(auth): splash deadlock, PKCE race, cross-account leak
@@ -173,4 +175,27 @@ c94b92a  fix(theme): dark mode across every routed screen
 f981eb7  chore: delete unreferenced dead code
 e738a07  feat(security): server-side invite throttle + migration guide
 ce6c7e7  feat(capacitor): Android shell with native OAuth
+e23da57  docs: kiro handoff, audit, deployment, test, rollback guides
+fce7577  docs: refresh README/.env.example, guard demo-only role switch
 ```
+
+총 60개 파일, +7,663 / -1,852 행.
+
+## 6. 최종 검증 결과
+
+| 게이트 | 명령 | 결과 |
+| --- | --- | --- |
+| TypeScript | `npm run typecheck` | 오류 0 |
+| ESLint | `npm run lint` | 오류 0, 경고 10 |
+| 테스트 | `npm test` | 104개 통과 / 11개 파일 |
+| 프로덕션 빌드 | `npm run build` | 성공 (525KB, gzip 154KB) |
+| 공백·충돌 마커 | `git diff --check` | 이상 없음 |
+| 민감정보 스캔 | JWT/service_role/keystore/프로젝트 URL | 유출 없음 |
+
+민감정보 스캔 상세:
+- 추적되는 `.env` 파일 없음 (`.env.example` 템플릿만 존재, 실제 값 없음)
+- JWT 형태 문자열 없음
+- `service_role` 문자열은 모두 "넣지 말라"는 주석과 Edge Function의
+  서버측 `Deno.env.get()` 호출뿐
+- 실제 Supabase 프로젝트 URL 없음
+- keystore / 인증서 파일 없음

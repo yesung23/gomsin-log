@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   generateInvitationCode,
   hashInvitationCode,
@@ -72,5 +72,105 @@ describe('consumeCoupleInvitation input validation', () => {
     const other = await consumeCoupleInvitation('999999');
     expect(other.error).toBeTruthy();
     expect(other.coupleId).toBeUndefined();
+  });
+});
+
+describe('createCoupleInvitation retry logic', () => {
+  const mockRpc = vi.fn();
+  let createCoupleInvitationOnline: typeof import('@/lib/supabase')['createCoupleInvitation'];
+  let resetForTest: typeof import('@/lib/supabase')['__resetInviteAttemptsForTest'];
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRpc.mockReset();
+    vi.doMock('@supabase/supabase-js', () => ({
+      createClient: () => ({
+        auth: {
+          getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-a' } } }),
+        },
+        rpc: mockRpc,
+      }),
+    }));
+    vi.doMock('@/lib/platform', () => ({
+      authRedirectUrl: () => 'http://localhost',
+      isNativePlatform: () => false,
+    }));
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
+    const mod = await import('@/lib/supabase');
+    createCoupleInvitationOnline = mod.createCoupleInvitation;
+    resetForTest = mod.__resetInviteAttemptsForTest;
+    resetForTest();
+  });
+
+  it('retries on a code hash collision (23505) up to 5 times', async () => {
+    mockRpc
+      .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate' } })
+      .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate' } })
+      .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate' } })
+      .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate' } })
+      .mockResolvedValueOnce({ data: 'couple-new', error: null });
+
+    const result = await createCoupleInvitationOnline('gomsin');
+    expect(result.coupleId).toBe('couple-new');
+    expect(result.code).toMatch(/^\d{6}$/);
+    expect(result.error).toBeUndefined();
+    expect(mockRpc).toHaveBeenCalledTimes(5);
+  });
+
+  it('gives up after INVITATION_CODE_ATTEMPTS collisions', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate' } });
+
+    const result = await createCoupleInvitationOnline('gomsin');
+    expect(result.coupleId).toBe('');
+    expect(result.code).toBe('');
+    expect(result.error).toBeTruthy();
+    expect(mockRpc).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe('consumeCoupleInvitation with supabase configured', () => {
+  const mockRpc = vi.fn();
+  let consumeOnline: typeof import('@/lib/supabase')['consumeCoupleInvitation'];
+  let resetForTest: typeof import('@/lib/supabase')['__resetInviteAttemptsForTest'];
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRpc.mockReset();
+    vi.doMock('@supabase/supabase-js', () => ({
+      createClient: () => ({
+        auth: {
+          getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-a' } } }),
+        },
+        rpc: mockRpc,
+      }),
+    }));
+    vi.doMock('@/lib/platform', () => ({
+      authRedirectUrl: () => 'http://localhost',
+      isNativePlatform: () => false,
+    }));
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');
+    const mod = await import('@/lib/supabase');
+    consumeOnline = mod.consumeCoupleInvitation;
+    resetForTest = mod.__resetInviteAttemptsForTest;
+    resetForTest();
+  });
+
+  it('couple_full is no longer returned as an error code', async () => {
+    // The server returns couple_full via the structured result from redeem_invitation.
+    // Migration 015 should no longer return this, but if it does, the client maps
+    // it to a user-facing message rather than exposing the code as an existence oracle.
+    mockRpc.mockResolvedValueOnce({
+      data: { ok: false, couple_id: null, error_code: 'couple_full' },
+      error: null,
+    });
+
+    const result = await consumeOnline('123456');
+    expect(result.error).toBeTruthy();
+    // The message should be a human-readable Korean string, not the raw code
+    expect(result.error).not.toBe('couple_full');
+    expect(result.error).toContain('2명');
+    expect(result.coupleId).toBeUndefined();
   });
 });

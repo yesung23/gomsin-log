@@ -1,8 +1,14 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { CoupleEvent } from '@/types';
 
-export async function fetchEventsFromDB(coupleId: string): Promise<CoupleEvent[]> {
-  if (!isSupabaseConfigured || !supabase || !coupleId) return [];
+export type EventFetchResult =
+  | { ok: true; events: CoupleEvent[] }
+  | { ok: false; reason: 'forbidden' | 'error' };
+
+export async function fetchEventsResultFromDB(coupleId: string): Promise<EventFetchResult> {
+  if (!isSupabaseConfigured || !supabase || !coupleId) {
+    return { ok: false, reason: 'error' };
+  }
 
   const { data, error } = await supabase
     .from('events')
@@ -12,20 +18,28 @@ export async function fetchEventsFromDB(coupleId: string): Promise<CoupleEvent[]
 
   if (error) {
     console.error('Failed to fetch events:', error);
-    return [];
+    return { ok: false, reason: error.code === '42501' ? 'forbidden' : 'error' };
   }
 
-  return data.map((row: any) => ({
-    id: row.id,
-    coupleId: row.couple_id,
-    createdBy: row.created_by,
-    title: row.title,
-    eventType: row.event_type,
-    startDate: row.start_date,
-    endDate: row.end_date,
-    isPrivate: row.is_private,
-    createdAt: row.created_at,
-  }));
+  return {
+    ok: true,
+    events: data.map((row: any) => ({
+      id: row.id,
+      coupleId: row.couple_id,
+      createdBy: row.created_by,
+      title: row.title,
+      eventType: row.event_type,
+      startDate: row.start_date,
+      endDate: row.end_date,
+      isPrivate: row.is_private,
+      createdAt: row.created_at,
+    })),
+  };
+}
+
+export async function fetchEventsFromDB(coupleId: string): Promise<CoupleEvent[]> {
+  const result = await fetchEventsResultFromDB(coupleId);
+  return result.ok ? result.events : [];
 }
 
 export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'> & { id?: string }): Promise<CoupleEvent | null> {

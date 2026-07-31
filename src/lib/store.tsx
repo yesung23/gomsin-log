@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AppState,
   DailyRecord,
@@ -18,7 +18,7 @@ import {
   saveCoupleAnniversary,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB } from '@/lib/sync';
-import { fetchEventsFromDB } from '@/lib/events';
+import { fetchEventsFromDB, fetchEventsResultFromDB } from '@/lib/events';
 import { fetchTripsFromDB } from '@/lib/trips';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
@@ -747,46 +747,94 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addEvent = async (
     event: Omit<CoupleEvent, 'id' | 'createdAt'>,
   ): Promise<boolean> => {
+    const current = stateRef.current;
+    const userId = current.authenticatedUser?.id;
+    const couple = current.profile.couple;
+    if (
+      !userId ||
+      !couple.coupleId ||
+      !couple.connected ||
+      couple.status !== 'active' ||
+      event.createdBy !== userId ||
+      event.coupleId !== couple.coupleId
+    ) {
+      return false;
+    }
+
     const newEvent: CoupleEvent = {
       ...event,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
 
-    let eventToAdd = newEvent;
-    if (!state.isDemoMode && state.authenticatedUser) {
-      if (!state.profile.couple.coupleId) {
-        console.error('Cannot save event without an active couple.');
-        return false;
-      }
-
-      try {
-        const saved = await import('@/lib/events').then((module) =>
-          module.saveEventToDB(newEvent),
-        );
-        if (!saved) return false;
-        eventToAdd = saved;
-      } catch (error) {
-        console.error('Failed to save event:', error);
-        return false;
-      }
+    try {
+      const saved = await import('@/lib/events').then((module) =>
+        module.saveEventToDB(newEvent),
+      );
+      if (!saved) return false;
+      setState((prev) => ({ ...prev, events: [...prev.events, saved] }));
+      return true;
+    } catch (error) {
+      console.error('Failed to save event:', error);
+      return false;
     }
+  };
 
-    setState((prev) => ({ ...prev, events: [...prev.events, eventToAdd] }));
-    return true;
+  const updateEvent = async (
+    id: string,
+    updates: Partial<Omit<CoupleEvent, 'id' | 'coupleId' | 'createdBy' | 'createdAt'>>,
+  ): Promise<boolean> => {
+    const current = stateRef.current;
+    const userId = current.authenticatedUser?.id;
+    const existing = current.events.find((event) => event.id === id);
+    if (!userId || !existing || existing.createdBy !== userId) return false;
+
+    const updated = { ...existing, ...updates };
+    setState((prev) => ({
+      ...prev,
+      events: prev.events.map((event) => (event.id === id ? updated : event)),
+    }));
+
+    try {
+      const saved = await import('@/lib/events').then((module) =>
+        module.updateEventInDB(updated),
+      );
+      if (!saved) {
+        setState((prev) => ({
+          ...prev,
+          events: prev.events.map((event) => (event.id === id ? existing : event)),
+        }));
+        return false;
+      }
+      setState((prev) => ({
+        ...prev,
+        events: prev.events.map((event) => (event.id === id ? saved : event)),
+      }));
+      return true;
+    } catch (error) {
+      console.error('Failed to update event:', error);
+      setState((prev) => ({
+        ...prev,
+        events: prev.events.map((event) => (event.id === id ? existing : event)),
+      }));
+      return false;
+    }
   };
 
   const deleteEvent = async (id: string): Promise<boolean> => {
-    if (!state.isDemoMode && state.authenticatedUser) {
-      try {
-        const deleted = await import('@/lib/events').then((module) =>
-          module.deleteEventFromDB(id),
-        );
-        if (!deleted) return false;
-      } catch (error) {
-        console.error('Failed to delete event:', error);
-        return false;
-      }
+    const current = stateRef.current;
+    const userId = current.authenticatedUser?.id;
+    const existing = current.events.find((event) => event.id === id);
+    if (!userId || !existing || existing.createdBy !== userId) return false;
+
+    try {
+      const deleted = await import('@/lib/events').then((module) =>
+        module.deleteEventFromDB(id),
+      );
+      if (!deleted) return false;
+    } catch (error) {
+      console.error('Failed to delete event:', error);
+      return false;
     }
 
     setState((prev) => ({
@@ -795,6 +843,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }));
     return true;
   };
+
+  const reloadEvents = useCallback(async (): Promise<{
+    ok: boolean;
+    reason?: 'forbidden' | 'error';
+  }> => {
+    const current = stateRef.current;
+    const coupleId = current.profile.couple.coupleId;
+    if (!current.authenticatedUser?.id || !coupleId) return { ok: false, reason: 'forbidden' };
+
+    try {
+      const result = await fetchEventsResultFromDB(coupleId);
+      if (!result.ok) return result;
+      setState((prev) => ({ ...prev, events: result.events }));
+      return { ok: true };
+    } catch (error) {
+      console.error('Failed to reload events:', error);
+      return { ok: false, reason: 'error' };
+    }
+  }, []);
 
   /**
    * Demo-only role preview: swaps my name with my partner's and flips the role
@@ -1112,7 +1179,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         updateRecord,
         deleteRecord,
         addEvent,
+        updateEvent,
         deleteEvent,
+        reloadEvents,
         switchRole,
         disconnect,
         deleteAccount,

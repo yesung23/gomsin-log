@@ -9,9 +9,18 @@
     "build": "tsc -b && vite build --configLoader runner",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "vitest run --config vitest.config.ts --configLoader runner"
+    "typecheck": "tsc -b --force",
+    "test": "vitest run --config vitest.config.ts --configLoader runner",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "cap:add:android": "cap add android",
+    "cap:sync": "npm run build && cap sync android",
+    "cap:open": "cap open android",
+    "cap:assemble": "npm run cap:sync && cd android && ./gradlew bundleRelease"
   },
   "dependencies": {
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/browser": "^7.0.5",
+    "@capacitor/core": "^7.6.8",
     "@dnd-kit/core": "^6.1.0",
     "@dnd-kit/sortable": "^8.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -27,6 +36,8 @@
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/cli": "^7.6.8",
     "@eslint/js": "^9.32.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",

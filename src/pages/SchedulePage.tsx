@@ -62,6 +62,21 @@ export function SchedulePage() {
       return;
     }
 
+    // Placeholder ids used to be substituted here ('demo-couple-id' /
+    // 'demo-user-id'). Outside demo mode those produce rows that violate the
+    // `created_by = auth.uid()` check, so the insert failed with a confusing
+    // error. Fail early with an actionable message instead.
+    if (!state.isDemoMode) {
+      if (!profile.couple.coupleId) {
+        toast.error('우리 공간이 연결된 뒤에 일정을 등록할 수 있어요.');
+        return;
+      }
+      if (!profile.id) {
+        toast.error('로그인 정보를 확인하지 못했어요. 앱을 새로고침한 뒤 다시 시도해 주세요.');
+        return;
+      }
+    }
+
     const newEventPayload: Omit<CoupleEvent, 'id' | 'createdAt'> = {
       coupleId: profile.couple.coupleId || 'demo-couple-id',
       createdBy: profile.id || 'demo-user-id',

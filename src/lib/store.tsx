@@ -18,14 +18,25 @@ import {
   saveCoupleAnniversary,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB } from '@/lib/sync';
+import { fetchEventsFromDB } from '@/lib/events';
+import { fetchTripsFromDB } from '@/lib/trips';
+import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   saveRecordToDB,
   deleteRecordFromDB,
+  fetchRecordsFromDB,
   uploadRecordMedia,
   removeRecordMedia,
   resolveAttachmentUrls,
   classifyMediaFile,
 } from '@/lib/records';
+
+/** Which slice of shared state a realtime notification affects. */
+type SyncSlice = 'records' | 'events' | 'trips';
+/** Coalesce realtime bursts into a single refetch. */
+const REALTIME_DEBOUNCE_MS = 250;
+/** Stop polling for the partner after roughly 15 minutes. */
+const PARTNER_POLL_MAX_ATTEMPTS = 26;
 import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
@@ -345,115 +356,189 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.style.colorScheme = state.theme || 'light';
   }, [state.theme]);
 
-  useEffect(() => {
-    if (!supabase || !state.authenticatedUser || !state.profile.couple.coupleId) return;
-
-    const channel = supabase
-      .channel('daily_records_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'daily_records',
-          filter: `couple_id=eq.${state.profile.couple.coupleId}`,
-        },
-        async (payload) => {
-          const dbState = await fetchFullStateFromDB(state.authenticatedUser!.id);
-          if (dbState && dbState.records) {
-             setState(prev => ({ ...prev, records: dbState.records! }));
-          }
-        }
-      )
-      .subscribe();
-
-    const eventChannel = supabase
-      .channel('events_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'events',
-          filter: `couple_id=eq.${state.profile.couple.coupleId}`,
-        },
-        async (payload) => {
-          const dbState = await fetchFullStateFromDB(state.authenticatedUser!.id);
-          if (dbState && dbState.events) {
-             setState(prev => ({ ...prev, events: dbState.events! }));
-          }
-        }
-      )
-      .subscribe();
-
-    const tripsChannel = supabase
-      .channel('trips_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'trips',
-          filter: `couple_id=eq.${state.profile.couple.coupleId}`,
-        },
-        async (payload) => {
-          const dbState = await fetchFullStateFromDB(state.authenticatedUser!.id);
-          if (dbState && dbState.trips) {
-             setState(prev => ({ ...prev, trips: dbState.trips! }));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase?.removeChannel(channel);
-      supabase?.removeChannel(eventChannel);
-      supabase?.removeChannel(tripsChannel);
-    };
-  }, [state.profile.couple.coupleId, state.authenticatedUser]);
+  /**
+   * Realtime sync for the shared couple space.
+   *
+   * Deliberately keyed on primitive ids: the previous version depended on the
+   * `authenticatedUser` object, which is recreated on every auth event, so the
+   * subscriptions were torn down and re-established repeatedly.
+   *
+   * Each notification refreshes only the affected slice. Previously every
+   * payload re-ran the whole `fetchFullStateFromDB` (5-6 queries plus one
+   * signing request per attachment) and three handlers could fire for a single
+   * user action.
+   */
+  const coupleId = state.profile.couple.coupleId;
+  const authUserId = state.authenticatedUser?.id;
 
   useEffect(() => {
     const client = supabase;
-    if (
-      !client ||
-      !state.authenticatedUser ||
-      !state.profile.couple.coupleId ||
-      state.profile.couple.connected
-    ) {
-      return;
-    }
+    if (!client || !coupleId || !authUserId) return;
+
+    let disposed = false;
+    const timers = new Map<SyncSlice, number>();
+
+    const refreshSlice = async (slice: SyncSlice) => {
+      if (disposed) return;
+      try {
+        if (slice === 'records') {
+          const raw = await fetchRecordsFromDB(coupleId);
+          if (disposed) return;
+          const role = stateRef.current.profile.role;
+          const partnerRole: Role = role === 'gomsin' ? 'soldier' : 'gomsin';
+          const records = visibleRecordsForViewer(
+            raw.map((r) => ({
+              ...r,
+              authorRole: r.userId === authUserId ? role : partnerRole,
+            })),
+            { userId: authUserId, role },
+          );
+          setState((prev) => ({ ...prev, records }));
+          return;
+        }
+        if (slice === 'events') {
+          const events = await fetchEventsFromDB(coupleId);
+          if (!disposed) setState((prev) => ({ ...prev, events }));
+          return;
+        }
+        const trips = await fetchTripsFromDB();
+        if (!disposed) setState((prev) => ({ ...prev, trips }));
+      } catch (error) {
+        console.error(`[gomsinlog] Realtime refresh of ${slice} failed:`, error);
+      }
+    };
+
+    // Coalesce bursts (e.g. a record insert immediately followed by the
+    // attachment patch) into a single refresh.
+    const scheduleRefresh = (slice: SyncSlice) => {
+      const existing = timers.get(slice);
+      if (existing) window.clearTimeout(existing);
+      timers.set(
+        slice,
+        window.setTimeout(() => {
+          timers.delete(slice);
+          void refreshSlice(slice);
+        }, REALTIME_DEBOUNCE_MS),
+      );
+    };
+
+    // One channel, three table filters: fewer websocket subscriptions to manage.
+    const channel = client
+      .channel(`couple-sync:${coupleId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'daily_records', filter: `couple_id=eq.${coupleId}` },
+        () => scheduleRefresh('records'),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'events', filter: `couple_id=eq.${coupleId}` },
+        () => scheduleRefresh('events'),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'trips', filter: `couple_id=eq.${coupleId}` },
+        () => scheduleRefresh('trips'),
+      )
+      .subscribe();
+
+    // Realtime messages are dropped while a mobile browser is backgrounded, so
+    // re-sync once on return to the foreground.
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      scheduleRefresh('records');
+      scheduleRefresh('events');
+      scheduleRefresh('trips');
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', handleVisibility);
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+      void client.removeChannel(channel);
+    };
+  }, [coupleId, authUserId]);
+
+  /**
+   * Wait for the partner to redeem the invite code.
+   *
+   * `couple_members` is not part of the realtime publication, so this has to
+   * poll. The previous version polled every 10s forever, including while the
+   * tab was hidden and while every request was failing. This version only polls
+   * in the foreground, backs off, and eventually gives up instead of hammering
+   * the API for the lifetime of the session.
+   */
+  const coupleConnected = state.profile.couple.connected;
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !authUserId || !coupleId || coupleConnected) return;
 
     let cancelled = false;
-    const checkForPartner = async () => {
-      const { data, error } = await client.rpc('get_partner_profile');
-      if (cancelled || error || !data?.length) return;
+    let timeoutId: number | undefined;
+    let attempts = 0;
 
-      setState((prev) => ({
-        ...prev,
-        profile: {
-          ...prev.profile,
-          couple: {
-            ...prev.profile.couple,
-            partnerName: data[0].display_name || '파트너',
-            coupleCode: '',
-            connected: true,
-            status: 'active',
+    const checkForPartner = async () => {
+      if (cancelled) return;
+
+      // Don't poll a backgrounded tab; visibilitychange re-arms it.
+      if (document.visibilityState !== 'visible') {
+        schedule();
+        return;
+      }
+
+      attempts += 1;
+      const { data, error } = await client.rpc('get_partner_profile');
+      if (cancelled) return;
+
+      if (!error && data?.length) {
+        setState((prev) => ({
+          ...prev,
+          profile: {
+            ...prev.profile,
+            couple: {
+              ...prev.profile.couple,
+              partnerName: data[0].display_name || '파트너',
+              // The invite code has served its purpose once the partner joins.
+              coupleCode: '',
+              connected: true,
+              status: 'active',
+            },
           },
-        },
-      }));
+        }));
+        return; // Connected: stop polling.
+      }
+
+      if (error) console.error('[gomsinlog] Partner lookup failed:', error);
+      if (attempts >= PARTNER_POLL_MAX_ATTEMPTS) return; // Give up quietly.
+      schedule();
     };
 
-    checkForPartner();
-    const intervalId = window.setInterval(checkForPartner, 10_000);
+    const schedule = () => {
+      if (cancelled) return;
+      // 10s for the first minute, then 30s, then 60s.
+      const delay =
+        attempts < 6 ? 10_000 : attempts < 16 ? 30_000 : 60_000;
+      timeoutId = window.setTimeout(() => void checkForPartner(), delay);
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible' || cancelled) return;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      void checkForPartner();
+    };
+
+    void checkForPartner();
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (timeoutId) window.clearTimeout(timeoutId);
     };
-  }, [
-    state.authenticatedUser,
-    state.profile.couple.connected,
-    state.profile.couple.coupleId,
-  ]);
+  }, [authUserId, coupleId, coupleConnected]);
 
   const updateProfile = (profileUpdates: Partial<UserProfile>) => {
     // Compute the next profile outside the updater. React StrictMode invokes

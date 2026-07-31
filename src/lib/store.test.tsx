@@ -16,7 +16,14 @@ const mockSupabase = {
     signOut: vi.fn().mockResolvedValue({ error: null }),
     getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
   },
-  channel: () => ({ on: () => ({ subscribe: () => ({}) }), subscribe: () => ({}) }),
+  // Supports the chained .on().on().on().subscribe() builder the store uses.
+  channel: () => {
+    const chainable = {
+      on: () => chainable,
+      subscribe: () => chainable,
+    };
+    return chainable;
+  },
   removeChannel: vi.fn(),
   rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   from: () => ({
@@ -53,9 +60,12 @@ const removeRecordMedia = vi.fn(async () => {
   callOrder.push('removeMedia');
 });
 
+const fetchRecordsFromDB = vi.fn(async () => []);
+
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
   deleteRecordFromDB: vi.fn().mockResolvedValue(true),
+  fetchRecordsFromDB: (...args: unknown[]) => fetchRecordsFromDB(...(args as [])),
   uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(...(args as [File])),
   removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
@@ -63,6 +73,16 @@ vi.mock('@/lib/records', () => ({
     file.type.startsWith('image/')
       ? { ext: 'png', type: 'photo' }
       : { error: 'unsupported' },
+}));
+
+vi.mock('@/lib/events', () => ({
+  fetchEventsFromDB: vi.fn().mockResolvedValue([]),
+  saveEventToDB: vi.fn().mockResolvedValue(true),
+  deleteEventFromDB: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock('@/lib/trips', () => ({
+  fetchTripsFromDB: vi.fn().mockResolvedValue([]),
 }));
 
 const { StoreProvider, useStore } = await import('@/lib/store');

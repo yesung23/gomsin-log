@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useStore } from '@/lib/store';
 import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
-import { Heart, Calendar as CalendarIcon, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
+import { Heart, Calendar as CalendarIcon, CalendarDays, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn, toLocalDateString, localToday } from '@/lib/utils';
 
@@ -84,13 +84,23 @@ export function UsPage() {
       <div className="pb-28 px-5 pt-8 space-y-5">
         <div className="flex items-center justify-between px-1">
           <h1 className="text-2xl font-extrabold tracking-tight text-foreground">우리</h1>
-          <button
-            onClick={() => navigate('/trips')}
-            className="text-xs font-bold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
-          >
-            <Plane size={14} />
-            <span>여행 플래너</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* /schedule had no entry point anywhere in the UI before this. */}
+            <button
+              onClick={() => navigate('/schedule')}
+              className="text-xs font-bold text-navy bg-navy/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+            >
+              <CalendarDays size={14} />
+              <span>일정</span>
+            </button>
+            <button
+              onClick={() => navigate('/trips')}
+              className="text-xs font-bold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+            >
+              <Plane size={14} />
+              <span>여행</span>
+            </button>
+          </div>
         </div>
 
         {/* Profile */}

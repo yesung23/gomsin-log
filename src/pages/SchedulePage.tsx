@@ -22,6 +22,7 @@ import {
   upcomingEvents,
   validateEventDraft,
 } from '@/lib/calendar';
+import { useEscapeKey } from '@/lib/hooks';
 import { nextAnniversaryMilestone } from '@/lib/milestones';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
 import { useStore } from '@/lib/useStore';
@@ -95,6 +96,8 @@ export function SchedulePage() {
   const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
+
+  useEscapeKey(() => setShowEventModal(false), showEventModal);
 
   useLayoutEffect(() => {
     // Copied event details must never survive an account/workspace/access change.

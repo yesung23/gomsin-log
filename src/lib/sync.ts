@@ -97,8 +97,15 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
     let records: DailyRecord[] = [];
     let events: CoupleEvent[] = [];
     let trips: Trip[] = [];
-    if (couple.coupleId && couple.connected && couple.status === 'active') {
-      const rawRecords = await fetchRecordsFromDB(couple.coupleId);
+    /**
+     * The owner of a couple space holds an `active` membership from the moment
+     * they create it, so RLS already returns their own rows while the invitation
+     * is outstanding. Requiring a partner here meant a user who journalled while
+     * waiting saw their entries vanish on the next load.
+     */
+    const coupleSpaceId = couple.status === 'disconnected' ? undefined : couple.coupleId;
+    if (coupleSpaceId) {
+      const rawRecords = await fetchRecordsFromDB(coupleSpaceId);
       const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
       // Map authorRole based on userId, then drop anything this viewer is not
       // entitled to see (defence in depth on top of RLS).
@@ -110,15 +117,11 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
         { userId, role: profile.role },
       );
 
-      trips = await fetchTripsFromDB(couple.coupleId);
+      trips = await fetchTripsFromDB(coupleSpaceId);
     }
     // Private schedules remain available to their author after disconnect;
-    // RLS adds shared rows only when this couple is currently active.
-    events = await fetchEventsFromDB(
-      couple.coupleId && couple.connected && couple.status === 'active'
-        ? couple.coupleId
-        : undefined,
-    );
+    // RLS adds shared rows only for a couple this account is still a member of.
+    events = await fetchEventsFromDB(coupleSpaceId);
 
     return {
       profile,

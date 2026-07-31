@@ -13,6 +13,7 @@ import {
   regenerateCoupleInvitation,
   supabase,
 } from '@/lib/supabase';
+import { useEscapeKey } from '@/lib/hooks';
 
 export function SettingsPage() {
   const {
@@ -67,6 +68,14 @@ export function SettingsPage() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editName, setEditName] = useState(profile.myName);
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
+
+  useEscapeKey(() => {
+    if (showDeleteAccountModal) setShowDeleteAccountModal(false);
+    else if (showDeleteRecordsModal) setShowDeleteRecordsModal(false);
+    else if (showDisconnectModal) setShowDisconnectModal(false);
+    else if (showPWAModal) setShowPWAModal(false);
+    else if (showProfileModal) setShowProfileModal(false);
+  }, showDeleteAccountModal || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
 
   useLayoutEffect(() => {
     instanceActiveRef.current = true;

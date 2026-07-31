@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
+import { useEscapeKey } from '@/lib/hooks';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
 import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
 import { ArrowLeft, Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';
@@ -55,6 +56,8 @@ export function ServicePage() {
   const [editDischargeSource, setEditDischargeSource] = useState<DischargeDateSource>(
     military?.dischargeDateSource || 'calculated',
   );
+
+  useEscapeKey(() => setIsEditing(false), isEditing);
 
   const isSoldier = profile.role === 'soldier';
   const soldierName = isSoldier ? profile.myName || '나' : profile.couple.partnerName || '군화';

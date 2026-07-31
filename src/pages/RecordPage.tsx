@@ -1,8 +1,9 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
+import { useEscapeKey } from '@/lib/hooks';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
@@ -83,6 +84,9 @@ export function RecordPage() {
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  const closeSelectedRecord = useCallback(() => setSelectedRecord(null), []);
+  useEscapeKey(closeSelectedRecord, selectedRecord !== null);
 
   // Own records + the partner's shared ones, with author-only fragments removed.
   // Uses the shared privacy helper so the rule lives in exactly one place.

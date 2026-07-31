@@ -94,7 +94,7 @@ export interface DailyRecord {
   createdAt: string;  // ISO
 }
 
-export type EventType = 'visit' | 'vacation' | 'anniversary' | 'trip' | 'other';
+export type EventType = 'visit' | 'vacation' | 'anniversary' | 'date' | 'trip' | 'other';
 
 export interface CoupleEvent {
   id: string;
@@ -152,12 +152,46 @@ export interface CycleSettings {
   averagePeriodLength: number;
 }
 
+export const CYCLE_SYMPTOMS = [
+  'cramps',
+  'headache',
+  'fatigue',
+  'bloating',
+  'mood_changes',
+  'backache',
+] as const;
+
+export type CycleSymptom = (typeof CYCLE_SYMPTOMS)[number];
+
 export interface CycleEntry {
   id: string;
   userId: string;
   startDate: string; // YYYY-MM-DD
   endDate?: string;  // YYYY-MM-DD
   notes?: string;
+  symptoms: CycleSymptom[];
+}
+
+export const CYCLE_SUPPORT_KINDS = [
+  'resting',
+  'need_space',
+  'would_like_support',
+  'check_in_later',
+] as const;
+
+export type CycleSupportKind = (typeof CYCLE_SUPPORT_KINDS)[number];
+
+export interface CycleSupportSignal {
+  id: string;
+  coupleId: string;
+  ownerId: string;
+  kind: CycleSupportKind;
+  message?: string;
+  sharedForDate: string; // YYYY-MM-DD, explicitly selected by the owner
+  expiresAt: string;
+  revokedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DailySummary {

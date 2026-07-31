@@ -6,14 +6,44 @@
 
 | 항목 | 시작 | 현재 |
 | --- | --- | --- |
-| 자동 테스트 | 16개 | **104개** |
+| 자동 테스트 | 16개 | **152개 / 21개 파일** |
 | TypeScript 오류 | 0 | 0 |
-| ESLint 오류 | 0 (경고 10) | 0 (경고 11) |
+| ESLint 오류 | 0 (경고 10) | **0 (경고 0)** |
 | 프로덕션 빌드 | 성공 | 성공 |
 | 실제 Supabase 검증 | 없음 | **없음 (사용자 승인 필요)** |
 
-남은 ESLint 경고 11개는 모두 `react-refresh/only-export-components` 로,
-개발 중 핫리로드 편의에 관한 것이며 동작에 영향이 없습니다.
+현재 ESLint 오류·경고는 0개입니다. Vite의 정적/동적 import 혼용 경고 2개는
+기존 비차단 chunk 경고입니다.
+
+## 공유 일정·여행·주기 확장 감사 (추가)
+
+기준 커밋 `b9c069d` 이후 다음 기능과 보안 경계를 추가했습니다.
+
+| 영역 | 완료 내용 |
+| --- | --- |
+| 일정 | 월간 달력, 6개 유형, 다일 범위, D-Day, 전체 CRUD, 작성자 전용 비공개, 활성 커플 공유 |
+| 여행 | 여행/날짜별 일정/수동 장소/메모/http(s) 링크/체크리스트 CRUD, 양쪽 공동 편집, 기간 기록 보기 |
+| 주기 | 시작·종료·증상·메모·설정 CRUD, 개인 달력, 단순 다음 시작일 예상 |
+| 최소 공유 | 별도 support signal, 명시적 opt-in, 당일·최대 24시간, 80자 선택 메시지, 즉시 철회 |
+| 권한 회수 | 연결 해제·계정/라우트 전환 fail-closed, membership Realtime + foreground/online 재검증 |
+| DB 정합성 | event identity 불변, trip item 날짜 잠금, atomic reorder, 비민감 collaboration invalidation |
+
+최종 semantic review는 **APPROVED / PASS**였고 BLOCKER/HIGH 코드 결함은 없습니다.
+후속 MEDIUM 2건(같은 날 새 커플 support signal 충돌, 동일 여행 child 조회 순서)도
+각각 커플 범위 unique index와 요청 generation으로 추가 수정했습니다.
+
+### 의도적으로 구현하지 않은 범위
+
+지도·장소검색 API, 예약, AI, 결제, 광고, 위치추적, 채팅, 의료진단,
+임신/가임기 판단은 구현하지 않았습니다.
+
+### 원격 검증 경계
+
+마이그레이션 `014_feature_privacy_and_collaboration.sql`은 SQL 문자열 contract와
+클라이언트 자동 테스트만 통과했습니다. 원격 staging/production에는 적용하지 않았고,
+실제 Supabase RLS·Realtime·두 트랜잭션 동시성 E2E도 실행하지 않았습니다.
+반드시 `SUPABASE_DEPLOYMENT_CHECKLIST.md` 순서로 staging 적용 후
+`MANUAL_TWO_ACCOUNT_TEST.md`를 통과해야 출시할 수 있습니다.
 
 ---
 
@@ -98,7 +128,8 @@ supabase/migrations/README.md
 
 ## 3. 테스트
 
-104개 (시작 16개). 새로 추가한 것:
+초기 하드닝 단계에서 104개(시작 16개)까지 추가했고, 공유 일정·여행·주기 확장 후
+최종 **152개 / 21개 파일**입니다. 초기 단계에서 새로 추가한 주요 테스트:
 
 | 파일 | 개수 | 검증 대상 |
 | --- | --- | --- |
@@ -130,6 +161,9 @@ supabase/migrations/README.md
 3. 마이그레이션 013이 실제 스키마에서 오류 없이 적용되는지
 4. 계정 삭제의 소유권 이전이 실제 FK 제약과 맞물려 동작하는지
 5. 네이티브 딥링크로 구글 로그인이 완료되는지 (실기기 필요)
+6. 마이그레이션 014의 event/trip/cycle/support RLS와 Realtime publication이 실제
+   원격 스키마에서 의도대로 동작하는지
+7. trip item insert와 parent 기간 변경이 경합할 때 row lock이 모순 commit을 막는지
 
 → `docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md` 를 사람이 수행해야 합니다.
 
@@ -138,8 +172,10 @@ supabase/migrations/README.md
 - **푸시 알림 없음.** 상대가 기록을 남겨도 알림이 없습니다. 관련 UI는 거짓 표시를
   피하려고 제거했습니다.
 - **채팅 없음** (의도적).
-- `couple_members` 가 Realtime publication에 없어 상대방 연결 감지는 폴링입니다.
-  publication에 추가하면 폴링을 없앨 수 있습니다.
+- `couple_members`는 Realtime publication에 포함하며, 클라이언트가 변경을 구독합니다.
+  websocket 이벤트 누락에 대비해 foreground/online 복귀와 채널 재구독 시에도
+  authoritative membership RPC를 다시 호출합니다. 이 동작은 로컬 자동 테스트만
+  완료했으며 원격 Realtime 전달과 RLS 조합은 staging A/B/C 검증이 필요합니다.
 - 상대방이 탈퇴하면 남은 사람은 "연결 대기" 상태로 보입니다. 데이터는 안전하지만
   "상대가 떠났습니다" 라는 명확한 안내는 없습니다. (`couple_members.status` 의
   CHECK 제약이 `pending|active|disconnected` 만 허용해 새 상태값을 넣을 수 없었음)
@@ -177,18 +213,28 @@ e738a07  feat(security): server-side invite throttle + migration guide
 ce6c7e7  feat(capacitor): Android shell with native OAuth
 e23da57  docs: kiro handoff, audit, deployment, test, rollback guides
 fce7577  docs: refresh README/.env.example, guard demo-only role switch
+
+# 공유 일정·여행·주기 확장 (b9c069d 이후)
+4e0fffd  feat(data): secure collaborative planning models
+edb6611  feat(calendar): complete private and shared event planning
+7eeec86  feat(trips): complete collaborative travel planner
+03d395b  feat(cycle): add private tracking and opt-in support
+8ea2de5  fix(sync): revoke shared access and reconcile realtime state
+6e6f8ff  fix(security): close identity and collaboration races
+e7d80a2  fix(security): fail closed across collaboration races
 ```
 
-총 60개 파일, +7,663 / -1,852 행.
+초기 하드닝 구간은 총 60개 파일, +7,663 / -1,852 행이었고, 이후 위 7개
+기능·보안 커밋으로 공유 일정·여행·주기 범위를 추가했습니다.
 
 ## 6. 최종 검증 결과
 
 | 게이트 | 명령 | 결과 |
 | --- | --- | --- |
 | TypeScript | `npm run typecheck` | 오류 0 |
-| ESLint | `npm run lint` | 오류 0, 경고 10 |
-| 테스트 | `npm test` | 104개 통과 / 11개 파일 |
-| 프로덕션 빌드 | `npm run build` | 성공 (525KB, gzip 154KB) |
+| ESLint | `npm run lint` | 오류 0, 경고 0 |
+| 테스트 | `npm test` | **152개 통과 / 21개 파일** |
+| 프로덕션 빌드 | `npm run build` | 성공 (비차단 Vite chunk 경고 2개) |
 | 공백·충돌 마커 | `git diff --check` | 이상 없음 |
 | 민감정보 스캔 | JWT/service_role/keystore/프로젝트 URL | 유출 없음 |
 

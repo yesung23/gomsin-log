@@ -82,11 +82,17 @@ export function validateTripRangeAgainstItems(
 export function validateTripItemUrl(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
+  if (trimmed.length > 2048) return '링크 주소가 너무 길어요. (최대 2,048자)';
   try {
     const parsed = new URL(trimmed);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-      ? null
-      : '링크는 http 또는 https 주소만 사용할 수 있어요.';
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return '링크는 http 또는 https 주소만 사용할 수 있어요.';
+    }
+    // Match the DB constraint: host must be non-empty and no whitespace anywhere.
+    if (!parsed.hostname || /\s/.test(trimmed)) {
+      return '올바른 링크 주소를 입력해 주세요.';
+    }
+    return null;
   } catch {
     return '올바른 링크 주소를 입력해 주세요.';
   }

@@ -65,6 +65,19 @@ describe('trip planner helpers', () => {
     expect(validateTripItemUrl('not a url')).toContain('올바른');
   });
 
+  it('rejects URLs over 2048 characters', () => {
+    const longUrl = 'https://example.com/' + 'a'.repeat(2040);
+    expect(validateTripItemUrl(longUrl)).toContain('길어');
+  });
+
+  it('rejects URLs with whitespace', () => {
+    expect(validateTripItemUrl('https://exam ple.com/path')).toContain('올바른');
+  });
+
+  it('rejects URLs without a hostname', () => {
+    expect(validateTripItemUrl('http://')).toContain('올바른');
+  });
+
   it('builds inclusive date tabs across a month boundary', () => {
     expect(inclusiveTripDates('2026-08-31', '2026-09-02')).toEqual([
       '2026-08-31',

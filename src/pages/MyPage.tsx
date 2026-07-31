@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { 
   User, Shield, Lock, ChevronRight, AlertTriangle, 
   HeartPulse, ShieldAlert, Sparkles, CheckCircle2, ChevronLeft, Calendar, Settings, Plus, Trash2

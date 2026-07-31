@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { MobileShell } from '@/components/MobileShell';
 import { 
   ArrowLeft, Calendar, MapPin, Plus, Trash2, ExternalLink, 

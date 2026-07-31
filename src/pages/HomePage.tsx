@@ -1,7 +1,7 @@
 import { MobileShell } from '@/components/MobileShell';
 import { WidgetDashboard } from '@/features/home/WidgetDashboard';
 import { SoldierDashboard } from '@/features/home/SoldierDashboard';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 
 export function HomePage() {
   const { state } = useStore();

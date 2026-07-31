@@ -1,5 +1,5 @@
 import { Toaster } from 'sonner';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 
 export function ThemedToaster() {
   const { state } = useStore();

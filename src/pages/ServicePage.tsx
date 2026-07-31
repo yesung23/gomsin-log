@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
 import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
 import { ArrowLeft, Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {

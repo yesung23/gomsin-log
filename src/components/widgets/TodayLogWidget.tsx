@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import {
   Camera, Image as ImageIcon, Send, Lock, Unlock, Check, Heart,
   Mic, Square, X, Film, Music,

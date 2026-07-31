@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
@@ -9,6 +9,7 @@ import {
   Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
+import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
 import { toast } from 'sonner';
 import type { DailyRecord } from '@/types';
 
@@ -63,26 +64,42 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 
 export function RecordPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { state, setHighlightedRecordId } = useStore();
   const { records, profile } = state;
   const today = localToday();
   const todayStr = toLocalDateString(today);
+  const tripPeriod = useMemo(() => parseTripPeriodParams(searchParams), [searchParams]);
+  const hasTripPeriodQuery = searchParams.has('trip') || searchParams.has('from') || searchParams.has('to');
+  const periodTrip = tripPeriod
+    ? state.trips.find((trip) => trip.id === tripPeriod.tripId) || null
+    : null;
 
   // Calendar state
   const [showCalendar, setShowCalendar] = useState(false);
-  const [viewYear, setViewYear] = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [viewYear, setViewYear] = useState(() => Number((tripPeriod?.from || todayStr).slice(0, 4)));
+  const [viewMonth, setViewMonth] = useState(() => Number((tripPeriod?.from || todayStr).slice(5, 7)) - 1);
+  const [selectedDate, setSelectedDate] = useState(tripPeriod?.from || todayStr);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
 
   // Own records + the partner's shared ones, with author-only fragments removed.
   // Uses the shared privacy helper so the rule lives in exactly one place.
-  const visibleRecords = useMemo(
-    () => visibleRecordsForViewer(records, { userId: profile.id, role: profile.role }),
-    [records, profile.id, profile.role],
-  );
+  const visibleRecords = useMemo(() => {
+    const permitted = visibleRecordsForViewer(records, { userId: profile.id, role: profile.role });
+    return tripPeriod
+      ? recordsInInclusiveRange(permitted, tripPeriod.from, tripPeriod.to)
+      : permitted;
+  }, [records, profile.id, profile.role, tripPeriod]);
+
+  useEffect(() => {
+    if (!tripPeriod) return;
+    setSelectedDate(tripPeriod.from);
+    setViewYear(Number(tripPeriod.from.slice(0, 4)));
+    setViewMonth(Number(tripPeriod.from.slice(5, 7)) - 1);
+    setMediaFilter('all');
+  }, [tripPeriod]);
 
   // Map of dateStr -> visible records for that date
   const recordsByDate = useMemo(() => {
@@ -233,6 +250,28 @@ export function RecordPage() {
           </button>
         </div>
 
+        {tripPeriod ? (
+          <div className="mb-4 rounded-2xl border border-coral/30 bg-coral/10 p-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-foreground">
+                {periodTrip ? `${periodTrip.title} 여행 기간` : '여행 기간 기록'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {formatLocalDate(tripPeriod.from)} ~ {formatLocalDate(tripPeriod.to)} · 이 기간의 기록만 표시해요.
+              </p>
+              {!periodTrip && (
+                <p className="text-[11px] text-amber-700 mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
+              )}
+            </div>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-xs font-bold text-coral underline">기간 보기 해제</button>
+          </div>
+        ) : hasTripPeriodQuery ? (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-amber-800">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-xs font-bold text-amber-800 underline">지우기</button>
+          </div>
+        ) : null}
+
         {/* Collapsible Calendar Grid */}
         {showCalendar && (
           <div className="animate-in fade-in slide-in-from-top-2 duration-200">
@@ -303,15 +342,19 @@ export function RecordPage() {
               if (isSelected) ariaLabel += ', 선택됨';
               if (isTodayCell) ariaLabel += ', 오늘';
 
+              const isOutsideTripPeriod = Boolean(
+                tripPeriod && (dateStr < tripPeriod.from || dateStr > tripPeriod.to),
+              );
+
               return (
                 <button
                   key={idx}
-                  onClick={() => cell.inMonth && handleDateSelect(dateStr)}
-                  disabled={!cell.inMonth}
+                  onClick={() => cell.inMonth && !isOutsideTripPeriod && handleDateSelect(dateStr)}
+                  disabled={!cell.inMonth || isOutsideTripPeriod}
                   aria-label={ariaLabel}
                   className={cn(
                     'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
-                    !cell.inMonth && 'opacity-0 pointer-events-none',
+                    (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
                     isSelected && 'bg-coral text-white',
                     !isSelected && isTodayCell && 'ring-2 ring-coral/50 ring-inset rounded-lg',

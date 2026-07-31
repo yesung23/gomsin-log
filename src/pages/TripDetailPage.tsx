@@ -1,383 +1,499 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useStore } from '@/lib/useStore';
-import { MobileShell } from '@/components/MobileShell';
-import { 
-  ArrowLeft, Calendar, MapPin, Plus, Trash2, ExternalLink, 
-  CheckSquare, Square, PenTool, CheckCircle2 
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckSquare, ExternalLink, LoaderCircle,
+  MapPin, PenTool, Pencil, Plus, RefreshCw, ShieldAlert, Square, Trash2, Unlink,
 } from 'lucide-react';
-import { 
-  fetchTripItemsFromDB, saveTripItemToDB, deleteTripItemFromDB, 
-  deleteTripFromDB, fetchTripChecklistsFromDB, saveTripChecklistToDB, 
-  toggleTripChecklistInDB, deleteTripChecklistFromDB 
-} from '@/lib/trips';
-import { TripItem, TripChecklist } from '@/types';
-import { formatLocalDate, daysBetweenLocal, toLocalDateString } from '@/lib/utils';
 import { toast } from 'sonner';
+import { MobileShell } from '@/components/MobileShell';
+import { supabase } from '@/lib/supabase';
+import {
+  deleteTripChecklistFromDB,
+  deleteTripFromDB,
+  deleteTripItemFromDB,
+  fetchTripChecklistsResultFromDB,
+  fetchTripItemsResultFromDB,
+  fetchTripResultFromDB,
+  inclusiveTripDates,
+  reorderTripItemsInDB,
+  saveTripChecklistToDB,
+  saveTripItemToDB,
+  toggleTripChecklistInDB,
+  updateTripInDB,
+  updateTripItemInDB,
+  validateTripDraft,
+  validateTripItemUrl,
+} from '@/lib/trips';
+import { useStore } from '@/lib/useStore';
+import { formatLocalDate } from '@/lib/utils';
+import type { Trip, TripChecklist, TripItem, TripStatus } from '@/types';
+
+type ParentState = 'loading' | 'ready' | 'not-found' | 'forbidden' | 'error' | 'disconnected';
+type ChildState = 'loading' | 'ready' | 'error' | 'forbidden';
+type ItemDraft = Pick<TripItem, 'title' | 'category'> & { memo: string; url: string };
+
+const EMPTY_ITEM: ItemDraft = { title: '', category: 'activity', memo: '', url: '' };
+const CATEGORY_OPTIONS: Array<{ value: TripItem['category']; label: string }> = [
+  { value: 'activity', label: '활동' },
+  { value: 'food', label: '음식' },
+  { value: 'lodging', label: '숙소' },
+  { value: 'transport', label: '교통' },
+];
+const STATUS_OPTIONS: Array<{ value: TripStatus; label: string }> = [
+  { value: 'planned', label: '계획중' },
+  { value: 'ongoing', label: '여행중' },
+  { value: 'completed', label: '다녀옴' },
+];
 
 export function TripDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { state } = useStore();
+  const userId = state.authenticatedUser?.id;
+  const coupleId = state.profile.couple.coupleId;
+  const activeCouple = Boolean(
+    userId && coupleId && state.profile.couple.connected && state.profile.couple.status === 'active',
+  );
 
-  const trip = useMemo(() => {
-    return state.trips.find(t => t.id === id);
-  }, [state.trips, id]);
-
+  const [trip, setTrip] = useState<Trip | null>(null);
+  const [parentState, setParentState] = useState<ParentState>('loading');
+  const [childState, setChildState] = useState<ChildState>('loading');
   const [items, setItems] = useState<TripItem[]>([]);
   const [checklists, setChecklists] = useState<TripChecklist[]>([]);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'schedule' | 'checklist'>('schedule');
   const [activeDayIndex, setActiveDayIndex] = useState(0);
-  
+  const [showTripModal, setShowTripModal] = useState(false);
+  const [tripDraft, setTripDraft] = useState({ title: '', startDate: '', endDate: '', status: 'planned' as TripStatus });
+  const [tripError, setTripError] = useState<string | null>(null);
+  const [isSavingTrip, setIsSavingTrip] = useState(false);
+  const [isDeletingTrip, setIsDeletingTrip] = useState(false);
   const [showItemModal, setShowItemModal] = useState(false);
-  const [newItem, setNewItem] = useState({ title: '', category: 'activity' as const, memo: '', url: '' });
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [itemDraft, setItemDraft] = useState<ItemDraft>(EMPTY_ITEM);
+  const [itemError, setItemError] = useState<string | null>(null);
+  const [isSavingItem, setIsSavingItem] = useState(false);
+  const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(new Set());
   const [newChecklistName, setNewChecklistName] = useState('');
+  const [isAddingChecklist, setIsAddingChecklist] = useState(false);
+  const [pendingChecklistIds, setPendingChecklistIds] = useState<Set<string>>(new Set());
+  const [childActionError, setChildActionError] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadParent = useCallback(async () => {
+    if (!userId) {
+      setParentState('forbidden');
+      return;
+    }
+    if (!activeCouple || !coupleId) {
+      setParentState('disconnected');
+      return;
+    }
+    if (!id) {
+      setParentState('not-found');
+      return;
+    }
+    setParentState('loading');
+    try {
+      const result = await fetchTripResultFromDB(id);
+      if (!result.ok) {
+        setParentState(result.reason === 'forbidden' ? 'forbidden' : 'error');
+        return;
+      }
+      if (!result.trip || result.trip.coupleId !== coupleId) {
+        setParentState('not-found');
+        return;
+      }
+      setTrip(result.trip);
+      setParentState('ready');
+    } catch (error) {
+      console.error('Failed to load trip:', error);
+      setParentState('error');
+    }
+  }, [activeCouple, coupleId, id, userId]);
+
+  const loadChildren = useCallback(async () => {
     if (!id) return;
-    setLoading(true);
-    const [fetchedItems, fetchedChecklists] = await Promise.all([
-      fetchTripItemsFromDB(id),
-      fetchTripChecklistsFromDB(id),
-    ]);
-    setItems(fetchedItems);
-    setChecklists(fetchedChecklists);
-    setLoading(false);
+    setChildState('loading');
+    try {
+      const [itemResult, checklistResult] = await Promise.all([
+        fetchTripItemsResultFromDB(id),
+        fetchTripChecklistsResultFromDB(id),
+      ]);
+      if (!itemResult.ok || !checklistResult.ok) {
+        const forbidden = (!itemResult.ok && itemResult.reason === 'forbidden')
+          || (!checklistResult.ok && checklistResult.reason === 'forbidden');
+        setChildState(forbidden ? 'forbidden' : 'error');
+        return;
+      }
+      setItems(itemResult.items);
+      setChecklists(checklistResult.checklists);
+      setChildState('ready');
+    } catch (error) {
+      console.error('Failed to load trip details:', error);
+      setChildState('error');
+    }
   }, [id]);
 
-  // Calculate days
-  const totalDays = trip ? daysBetweenLocal(trip.startDate, trip.endDate) + 1 : 0;
-  const daysList = useMemo(() => {
-    if (!trip) return [];
-    const list = [];
-    const start = new Date(trip.startDate);
-    for (let i = 0; i < totalDays; i++) {
-      const d = new Date(start);
-      d.setDate(d.getDate() + i);
-      list.push({
-        index: i,
-        label: `${i + 1}일차`,
-        dateStr: toLocalDateString(d)
-      });
-    }
-    return list;
-  }, [trip, totalDays]);
-
-  const currentDayItems = useMemo(() => {
-    if (!daysList[activeDayIndex]) return [];
-    const currentDate = daysList[activeDayIndex].dateStr;
-    return items.filter(it => it.itemDate === currentDate);
-  }, [items, daysList, activeDayIndex]);
+  useEffect(() => {
+    void loadParent();
+  }, [loadParent]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (parentState === 'ready') void loadChildren();
+  }, [loadChildren, parentState]);
 
-  if (!trip) {
-    return (
-      <MobileShell>
-        <div className="p-5 text-center mt-20 text-muted-foreground">여행을 찾을 수 없습니다.</div>
-      </MobileShell>
-    );
-  }
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !id || parentState !== 'ready') return;
+    let timer: number | undefined;
+    const refresh = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void loadChildren(), 200);
+    };
+    const channel = client.channel(`trip-detail:${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trip_items', filter: `trip_id=eq.${id}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trip_checklists', filter: `trip_id=eq.${id}` }, refresh)
+      .subscribe();
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      void client.removeChannel(channel);
+    };
+  }, [id, loadChildren, parentState]);
 
-  const handleDeleteTrip = async () => {
-    if (confirm('이 여행 계획을 삭제하시겠습니까? 하위 일정 및 준비물도 함께 삭제됩니다.')) {
-      await deleteTripFromDB(trip.id);
-      toast.success('여행이 삭제되었습니다.');
-      navigate('/trips');
+  const dates = useMemo(
+    () => trip ? inclusiveTripDates(trip.startDate, trip.endDate) : [],
+    [trip],
+  );
+  const activeDate = dates[activeDayIndex] || dates[0];
+  const currentDayItems = useMemo(
+    () => items.filter((item) => item.itemDate === activeDate)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title)),
+    [activeDate, items],
+  );
+
+  useEffect(() => {
+    if (activeDayIndex >= dates.length) setActiveDayIndex(0);
+  }, [activeDayIndex, dates.length]);
+
+  const setItemPending = (itemId: string, pending: boolean) => {
+    setPendingItemIds((current) => {
+      const next = new Set(current);
+      if (pending) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
+  };
+  const setChecklistPending = (checklistId: string, pending: boolean) => {
+    setPendingChecklistIds((current) => {
+      const next = new Set(current);
+      if (pending) next.add(checklistId);
+      else next.delete(checklistId);
+      return next;
+    });
+  };
+
+  const openTripEdit = () => {
+    if (!trip) return;
+    setTripDraft({ title: trip.title, startDate: trip.startDate, endDate: trip.endDate, status: trip.status });
+    setTripError(null);
+    setShowTripModal(true);
+  };
+
+  const handleSaveTrip = async () => {
+    if (!trip || isSavingTrip) return;
+    const validationError = validateTripDraft(tripDraft);
+    if (validationError) {
+      setTripError(validationError);
+      return;
+    }
+    setIsSavingTrip(true);
+    setTripError(null);
+    try {
+      const saved = await updateTripInDB(trip.id, {
+        title: tripDraft.title.trim(),
+        startDate: tripDraft.startDate,
+        endDate: tripDraft.endDate,
+        status: tripDraft.status,
+      });
+      if (!saved) {
+        setTripError('여행 정보를 수정하지 못했어요. 다시 시도해 주세요.');
+        return;
+      }
+      setTrip(saved);
+      setShowTripModal(false);
+      toast.success('여행 정보가 수정되었습니다.');
+    } finally {
+      setIsSavingTrip(false);
     }
   };
 
+  const handleDeleteTrip = async () => {
+    if (!trip || isDeletingTrip || !confirm('이 여행과 모든 일정, 준비물을 삭제하시겠습니까?')) return;
+    setIsDeletingTrip(true);
+    try {
+      const deleted = await deleteTripFromDB(trip.id);
+      if (!deleted) {
+        toast.error('여행을 삭제하지 못했어요. 다시 시도해 주세요.');
+        return;
+      }
+      toast.success('여행이 삭제되었습니다.');
+      navigate('/trips');
+    } finally {
+      setIsDeletingTrip(false);
+    }
+  };
+
+  const openNewItem = () => {
+    setEditingItemId(null);
+    setItemDraft(EMPTY_ITEM);
+    setItemError(null);
+    setShowItemModal(true);
+  };
+  const openEditItem = (item: TripItem) => {
+    setEditingItemId(item.id);
+    setItemDraft({ title: item.title, category: item.category, memo: item.memo || '', url: item.url || '' });
+    setItemError(null);
+    setShowItemModal(true);
+  };
+
   const handleSaveItem = async () => {
-    if (!newItem.title.trim()) {
-      toast.error('장소 또는 제목을 입력해주세요.');
+    if (!trip || !activeDate || isSavingItem) return;
+    if (!itemDraft.title.trim()) {
+      setItemError('장소 또는 제목을 입력해 주세요.');
       return;
     }
-    const currentDate = daysList[activeDayIndex].dateStr;
-    const saved = await saveTripItemToDB({
-      tripId: trip.id,
-      itemDate: currentDate,
-      title: newItem.title.trim(),
-      category: newItem.category,
-      memo: newItem.memo.trim() || undefined,
-      url: newItem.url.trim() || undefined,
-      sortOrder: currentDayItems.length
-    });
-
-    if (saved) {
-      setItems(prev => [...prev, saved]);
+    const urlError = validateTripItemUrl(itemDraft.url);
+    if (urlError) {
+      setItemError(urlError);
+      return;
+    }
+    setIsSavingItem(true);
+    setItemError(null);
+    const existing = editingItemId ? items.find((item) => item.id === editingItemId) : undefined;
+    try {
+      const input = {
+        tripId: trip.id,
+        itemDate: existing?.itemDate || activeDate,
+        title: itemDraft.title.trim(),
+        category: itemDraft.category,
+        memo: itemDraft.memo.trim() || undefined,
+        url: itemDraft.url.trim() || undefined,
+        sortOrder: existing?.sortOrder ?? currentDayItems.length,
+      };
+      const saved = existing
+        ? await updateTripItemInDB({ id: existing.id, ...input })
+        : await saveTripItemToDB(input);
+      if (!saved) {
+        setItemError('일정을 저장하지 못했어요. 다시 시도해 주세요.');
+        return;
+      }
+      setItems((current) => existing
+        ? current.map((item) => item.id === saved.id ? saved : item)
+        : [...current, saved]);
       setShowItemModal(false);
-      setNewItem({ title: '', category: 'activity', memo: '', url: '' });
-      toast.success('일정이 추가되었습니다.');
+      toast.success(existing ? '일정이 수정되었습니다.' : '일정이 추가되었습니다.');
+    } finally {
+      setIsSavingItem(false);
     }
   };
 
   const handleDeleteItem = async (itemId: string) => {
-    const ok = await deleteTripItemFromDB(itemId);
-    if (ok) {
-      setItems(prev => prev.filter(i => i.id !== itemId));
+    if (pendingItemIds.has(itemId)) return;
+    setItemPending(itemId, true);
+    try {
+      const deleted = await deleteTripItemFromDB(itemId);
+      if (!deleted) {
+        toast.error('일정을 삭제하지 못했어요.');
+        return;
+      }
+      setItems((current) => current.filter((item) => item.id !== itemId));
       toast.success('일정이 삭제되었습니다.');
+    } finally {
+      setItemPending(itemId, false);
     }
   };
 
+  const handleMoveItem = async (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    const moving = currentDayItems[index];
+    const target = currentDayItems[targetIndex];
+    if (!moving || !target || pendingItemIds.has(moving.id) || pendingItemIds.has(target.id)) return;
+    const before = items;
+    const movingOrder = moving.sortOrder;
+    const targetOrder = target.sortOrder;
+    setItems((current) => current.map((item) => {
+      if (item.id === moving.id) return { ...item, sortOrder: targetOrder };
+      if (item.id === target.id) return { ...item, sortOrder: movingOrder };
+      return item;
+    }));
+    setItemPending(moving.id, true);
+    setItemPending(target.id, true);
+    const saved = await reorderTripItemsInDB([
+      { id: moving.id, sortOrder: targetOrder },
+      { id: target.id, sortOrder: movingOrder },
+    ]);
+    if (!saved) {
+      setItems(before);
+      toast.error('순서를 저장하지 못해 이전 순서로 되돌렸어요.');
+    }
+    setItemPending(moving.id, false);
+    setItemPending(target.id, false);
+  };
+
   const handleAddChecklist = async () => {
-    if (!newChecklistName.trim()) return;
-    const saved = await saveTripChecklistToDB(trip.id, newChecklistName.trim());
-    if (saved) {
-      setChecklists(prev => [...prev, saved]);
+    if (!trip || !newChecklistName.trim() || isAddingChecklist) return;
+    setIsAddingChecklist(true);
+    setChildActionError(null);
+    try {
+      const saved = await saveTripChecklistToDB(trip.id, newChecklistName.trim());
+      if (!saved) {
+        setChildActionError('준비물을 추가하지 못했어요.');
+        return;
+      }
+      setChecklists((current) => [...current, saved]);
       setNewChecklistName('');
-      toast.success('준비물이 추가되었습니다.');
+    } finally {
+      setIsAddingChecklist(false);
     }
   };
 
   const handleToggleChecklist = async (item: TripChecklist) => {
-    const nextVal = !item.completed;
-    setChecklists(prev => prev.map(c => c.id === item.id ? { ...c, completed: nextVal } : c));
-    await toggleTripChecklistInDB(item.id, nextVal);
+    if (pendingChecklistIds.has(item.id)) return;
+    const nextCompleted = !item.completed;
+    setChildActionError(null);
+    setChecklistPending(item.id, true);
+    setChecklists((current) => current.map((entry) => entry.id === item.id ? { ...entry, completed: nextCompleted } : entry));
+    const saved = await toggleTripChecklistInDB(item.id, nextCompleted);
+    if (!saved) {
+      setChecklists((current) => current.map((entry) => entry.id === item.id ? { ...entry, completed: item.completed } : entry));
+      const message = '체크 상태를 저장하지 못해 이전 상태로 되돌렸어요.';
+      setChildActionError(message);
+      toast.error(message);
+    }
+    setChecklistPending(item.id, false);
   };
 
   const handleDeleteChecklist = async (checklistId: string) => {
-    const ok = await deleteTripChecklistFromDB(checklistId);
-    if (ok) {
-      setChecklists(prev => prev.filter(c => c.id !== checklistId));
+    if (pendingChecklistIds.has(checklistId)) return;
+    setChecklistPending(checklistId, true);
+    setChildActionError(null);
+    try {
+      const deleted = await deleteTripChecklistFromDB(checklistId);
+      if (!deleted) {
+        setChildActionError('준비물을 삭제하지 못했어요.');
+        return;
+      }
+      setChecklists((current) => current.filter((entry) => entry.id !== checklistId));
+    } finally {
+      setChecklistPending(checklistId, false);
     }
   };
+
+  if (parentState !== 'ready' || !trip) {
+    const content = parentState === 'loading'
+      ? <LoaderCircle className="w-8 h-8 animate-spin text-coral mx-auto" aria-label="여행 불러오는 중" />
+      : parentState === 'not-found'
+        ? <><MapPin className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 찾을 수 없어요</p><p className="text-sm text-muted-foreground">삭제되었거나 존재하지 않는 여행이에요.</p></>
+        : parentState === 'disconnected'
+          ? <><Unlink className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">우리 공간 연결이 필요해요</p><p className="text-sm text-muted-foreground">두 사람이 연결된 뒤 여행을 열 수 있어요.</p></>
+          : parentState === 'forbidden'
+            ? <><ShieldAlert className="w-10 h-10 mx-auto text-amber-500" /><p className="font-bold">이 여행에 접근할 권한이 없어요</p></>
+            : <><RefreshCw className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 불러오지 못했어요</p><button onClick={() => void loadParent()} className="px-5 py-2.5 bg-coral text-white rounded-xl font-bold text-sm">다시 시도</button></>;
+    return <MobileShell><div className="p-6 text-center mt-20 space-y-3">{content}<button onClick={() => navigate('/trips')} className="block mx-auto text-sm text-muted-foreground underline">여행 목록으로</button></div></MobileShell>;
+  }
 
   return (
     <MobileShell>
       <div className="pb-28">
-        {/* Top Header */}
-        <div className="bg-card border-b border-border px-5 py-4 flex items-center justify-between sticky top-0 z-30">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/trips')} className="p-1 -ml-1 text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h1 className="font-bold text-foreground text-lg truncate max-w-[200px]">{trip.title}</h1>
+        <header className="bg-card border-b border-border px-5 py-4 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={() => navigate('/trips')} className="p-1 -ml-1 text-muted-foreground" aria-label="여행 목록"><ArrowLeft className="w-5 h-5" /></button>
+            <h1 className="font-bold text-foreground text-lg truncate">{trip.title}</h1>
           </div>
-          <button onClick={handleDeleteTrip} className="p-1.5 -mr-1.5 rounded-full hover:bg-red-50 text-red-500 transition-colors">
-            <Trash2 className="w-5 h-5" />
-          </button>
-        </div>
+          <div className="flex items-center">
+            <button onClick={openTripEdit} disabled={isDeletingTrip} className="p-2 text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil className="w-4 h-4" /></button>
+            <button onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip} className="p-2 -mr-2 text-red-500 disabled:opacity-40" aria-label="여행 삭제"><Trash2 className="w-5 h-5" /></button>
+          </div>
+        </header>
 
-        {/* Date Info & Record Entry Banner */}
         <div className="bg-coral/10 border-b border-coral/20 px-5 py-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-coral font-bold text-sm">
-              <Calendar className="w-4 h-4" />
-              <span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span>
-            </div>
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-coral text-white">
-              {totalDays}일간의 여정
-            </span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-coral font-bold text-sm"><Calendar className="w-4 h-4" /><span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span></div>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-coral text-white shrink-0">{dates.length}일간</span>
           </div>
-
-          {/* Post-Trip Log CTA */}
-          <button
-            onClick={() => navigate('/record')}
-            className="w-full py-2.5 px-3 rounded-2xl bg-card border border-coral/30 text-coral font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition"
-          >
-            <PenTool size={14} />
-            <span>이 여행의 사진과 추억 기록 남기기 📝</span>
-          </button>
+          <button onClick={() => navigate(`/record?from=${trip.startDate}&to=${trip.endDate}&trip=${trip.id}`)} className="w-full py-2.5 px-3 rounded-2xl bg-card border border-coral/30 text-coral font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm"><PenTool size={14} />이 여행 기간의 추억 보기·남기기</button>
         </div>
 
-        {/* Main Section Tabs (Schedule vs Checklist) */}
         <div className="flex border-b border-border bg-card">
-          <button
-            onClick={() => setActiveTab('schedule')}
-            className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition ${
-              activeTab === 'schedule' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'
-            }`}
-          >
-            일정 동선 ({items.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('checklist')}
-            className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition ${
-              activeTab === 'checklist' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'
-            }`}
-          >
-            준비물 체크리스트 ({checklists.length})
-          </button>
+          <button onClick={() => setActiveTab('schedule')} className={`flex-1 py-3 text-xs font-bold border-b-2 ${activeTab === 'schedule' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'}`}>일정 ({items.length})</button>
+          <button onClick={() => setActiveTab('checklist')} className={`flex-1 py-3 text-xs font-bold border-b-2 ${activeTab === 'checklist' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'}`}>준비물 ({checklists.length})</button>
         </div>
 
-        {activeTab === 'schedule' ? (
+        {childState !== 'ready' ? (
+          <div className="p-8 text-center space-y-3">
+            {childState === 'loading' ? <LoaderCircle className="w-7 h-7 animate-spin text-coral mx-auto" /> : <><p className="font-bold text-sm">{childState === 'forbidden' ? '일정과 준비물을 볼 권한이 없어요.' : '일정과 준비물을 불러오지 못했어요.'}</p><button onClick={() => void loadChildren()} className="px-4 py-2 bg-coral text-white rounded-xl text-xs font-bold">다시 시도</button></>}
+          </div>
+        ) : activeTab === 'schedule' ? (
           <>
-            {/* Day Tabs */}
             <div className="bg-card border-b border-border px-2 flex overflow-x-auto no-scrollbar">
-              {daysList.map((day, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveDayIndex(i)}
-                  className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 transition-colors ${
-                    activeDayIndex === i 
-                      ? 'border-navy text-navy font-black' 
-                      : 'border-transparent text-muted-foreground'
-                  }`}
-                >
-                  {day.label} <span className="text-[11px] font-normal">({day.dateStr.slice(5)})</span>
-                </button>
-              ))}
+              {dates.map((date, index) => <button key={date} onClick={() => setActiveDayIndex(index)} className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 ${activeDayIndex === index ? 'border-navy text-navy' : 'border-transparent text-muted-foreground'}`}>{index + 1}일차 <span className="font-normal">({date.slice(5)})</span></button>)}
             </div>
-
-            {/* Items List */}
             <div className="p-5">
-              {loading ? (
-                <div className="text-center py-10 text-xs text-muted-foreground">로딩 중...</div>
-              ) : currentDayItems.length === 0 ? (
-                <div className="bg-card border border-dashed border-border/80 rounded-2xl p-8 text-center space-y-2">
-                  <MapPin className="w-8 h-8 text-muted-foreground mx-auto" />
-                  <p className="text-xs font-bold text-foreground">{daysList[activeDayIndex]?.label}의 첫 방문 장소를 추가해보세요.</p>
-                </div>
+              {currentDayItems.length === 0 ? (
+                <div className="bg-card border border-dashed border-border rounded-2xl p-8 text-center"><MapPin className="w-8 h-8 text-muted-foreground mx-auto mb-2" /><p className="text-xs font-bold">직접 장소나 할 일을 추가해 보세요.</p></div>
               ) : (
-                <div className="space-y-3 relative before:absolute before:left-4 before:top-4 before:bottom-4 before:w-0.5 before:bg-border">
-                  {currentDayItems.map((item, idx) => (
-                    <div key={item.id} className="relative pl-9">
-                      <div className="absolute left-2 top-3 -translate-x-1/2 w-4 h-4 rounded-full bg-coral border-2 border-background flex items-center justify-center">
-                        <span className="text-[9px] text-white font-bold">{idx + 1}</span>
-                      </div>
-                      <div className="bg-card border border-border rounded-2xl p-4 shadow-sm flex items-start justify-between">
-                        <div className="space-y-1">
-                          <h4 className="font-bold text-foreground text-sm flex items-center gap-1.5">
-                            {item.title}
-                            {item.url && (
-                              <a href={item.url} target="_blank" rel="noreferrer" className="text-coral hover:underline">
-                                <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
-                            )}
-                          </h4>
-                          {item.memo && <p className="text-xs text-muted-foreground leading-relaxed">{item.memo}</p>}
+                <div className="space-y-3">
+                  {currentDayItems.map((item, index) => {
+                    const pending = pendingItemIds.has(item.id);
+                    return <div key={item.id} className="bg-card border border-border rounded-2xl p-4 shadow-sm flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-coral text-white text-[10px] font-bold flex items-center justify-center shrink-0">{index + 1}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2"><h3 className="font-bold text-sm truncate">{item.title}</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
+                        {item.memo && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{item.memo}</p>}
+                        <div className="flex gap-1 mt-2">
+                          <button onClick={() => void handleMoveItem(index, -1)} disabled={index === 0 || pending} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="위로 이동"><ArrowUp className="w-4 h-4" /></button>
+                          <button onClick={() => void handleMoveItem(index, 1)} disabled={index === currentDayItems.length - 1 || pending} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="아래로 이동"><ArrowDown className="w-4 h-4" /></button>
+                          <button onClick={() => openEditItem(item)} disabled={pending} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="일정 수정"><Pencil className="w-4 h-4" /></button>
+                          <button onClick={() => void handleDeleteItem(item.id)} disabled={pending} className="p-1.5 text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 className="w-4 h-4" /></button>
                         </div>
-                        <button onClick={() => handleDeleteItem(item.id)} className="text-muted-foreground hover:text-destructive p-1">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
-                    </div>
-                  ))}
+                    </div>;
+                  })}
                 </div>
               )}
             </div>
-
-            {/* FAB Add Item */}
-            <button 
-              onClick={() => setShowItemModal(true)}
-              className="fixed bottom-6 right-5 w-14 h-14 bg-coral rounded-full flex items-center justify-center text-white shadow-lg hover:bg-coral/90 transition-all active:scale-95 z-40"
-            >
-              <Plus className="w-7 h-7" />
-            </button>
+            <button onClick={openNewItem} className="fixed bottom-6 right-5 w-14 h-14 bg-coral rounded-full flex items-center justify-center text-white shadow-lg z-40" aria-label="일정 추가"><Plus className="w-7 h-7" /></button>
           </>
         ) : (
-          /* Checklist Section */
           <div className="p-5 space-y-4">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="새 준비물 추가 (예: 기차표, 돗자리, 카고바지)"
-                value={newChecklistName}
-                onChange={(e) => setNewChecklistName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddChecklist()}
-                className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-xs outline-none focus:border-coral"
-              />
-              <button
-                onClick={handleAddChecklist}
-                className="px-4 bg-coral text-white font-bold text-xs rounded-xl shadow-sm active:scale-95"
-              >
-                추가
-              </button>
-            </div>
+            <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-xs outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim()} className="px-4 bg-coral text-white font-bold text-xs rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
+            {childActionError && <p className="text-xs text-red-600" role="alert">{childActionError}</p>}
             <div className="space-y-2">
-              {checklists.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-card border border-border p-3.5 rounded-2xl flex items-center justify-between text-xs font-semibold"
-                >
-                  <button
-                    onClick={() => handleToggleChecklist(item)}
-                    className="flex items-center gap-2 text-foreground text-left"
-                  >
-                    {item.completed ? (
-                      <CheckSquare className="w-5 h-5 text-coral" />
-                    ) : (
-                      <Square className="w-5 h-5 text-muted-foreground" />
-                    )}
-                    <span className={item.completed ? 'line-through text-muted-foreground' : ''}>
-                      {item.itemName}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => handleDeleteChecklist(item.id)}
-                    className="text-muted-foreground hover:text-destructive p-1"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-
-              {checklists.length === 0 && (
-                <div className="bg-card border border-dashed border-border/80 rounded-2xl p-6 text-center text-xs text-muted-foreground">
-                  함께 준비할 짐이나 할 일을 작성해보세요.
-                </div>
-              )}
+              {checklists.map((item) => {
+                const pending = pendingChecklistIds.has(item.id);
+                return <div key={item.id} className="bg-card border border-border p-3.5 rounded-2xl flex items-center justify-between text-xs font-semibold">
+                  <button onClick={() => void handleToggleChecklist(item)} disabled={pending} className="flex items-center gap-2 text-left disabled:opacity-50">{item.completed ? <CheckSquare className="w-5 h-5 text-coral" /> : <Square className="w-5 h-5 text-muted-foreground" />}<span className={item.completed ? 'line-through text-muted-foreground' : ''}>{item.itemName}</span></button>
+                  <button onClick={() => void handleDeleteChecklist(item.id)} disabled={pending} className="text-muted-foreground hover:text-destructive p-1 disabled:opacity-40" aria-label="준비물 삭제"><Trash2 className="w-4 h-4" /></button>
+                </div>;
+              })}
+              {checklists.length === 0 && <div className="bg-card border border-dashed border-border rounded-2xl p-6 text-center text-xs text-muted-foreground">함께 준비할 짐이나 할 일을 작성해 보세요.</div>}
             </div>
           </div>
         )}
 
-        {/* Add Item Modal */}
-        {showItemModal && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-            <div className="bg-card border border-border w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-in slide-in-from-bottom-4">
-              <h2 className="text-lg font-bold text-foreground mb-4">{daysList[activeDayIndex]?.label} 일정 추가</h2>
-              <div className="space-y-3 text-xs">
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">상호명 또는 장소명 *</label>
-                  <input
-                    type="text"
-                    placeholder="예: 오설록 티 뮤지엄"
-                    value={newItem.title}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, title: e.target.value }))}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-3 outline-none focus:border-coral"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">링크 (선택)</label>
-                  <input
-                    type="url"
-                    placeholder="https://"
-                    value={newItem.url}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, url: e.target.value }))}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-3 outline-none focus:border-coral"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">간단 메모 (선택)</label>
-                  <textarea
-                    placeholder="예: 녹차 아이스크림 꼭 먹기"
-                    value={newItem.memo}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, memo: e.target.value }))}
-                    rows={2}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-3 outline-none focus:border-coral resize-none"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => setShowItemModal(false)}
-                  className="flex-1 bg-muted text-foreground font-bold py-3 rounded-xl hover:bg-muted/80 text-xs"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={handleSaveItem}
-                  className="flex-1 bg-coral text-white font-bold py-3 rounded-xl hover:bg-coral/90 text-xs shadow-sm"
-                >
-                  추가
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {showTripModal && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">여행 정보 수정</h2><div className="space-y-3 text-xs">
+          <label className="block font-bold">여행 이름<input value={tripDraft.title} onChange={(event) => setTripDraft((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
+          <div className="flex gap-2"><label className="flex-1 font-bold">가는 날<input type="date" value={tripDraft.startDate} onChange={(event) => setTripDraft((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label><label className="flex-1 font-bold">오는 날<input type="date" min={tripDraft.startDate} value={tripDraft.endDate} onChange={(event) => setTripDraft((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label></div>
+          <label className="block font-bold">상태<select value={tripDraft.status} onChange={(event) => setTripDraft((current) => ({ ...current, status: event.target.value as TripStatus }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3">{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          {tripError && <p className="text-red-600" role="alert">{tripError}</p>}
+        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
+
+        {showItemModal && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-xs">
+          <label className="block font-bold">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
+          <fieldset><legend className="font-bold mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`py-2 rounded-xl border ${itemDraft.category === option.value ? 'bg-coral text-white border-coral' : 'border-border'}`}>{option.label}</button>)}</div></fieldset>
+          <label className="block font-bold">링크 (선택)<input type="url" value={itemDraft.url} onChange={(event) => setItemDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
+          <label className="block font-bold">메모 (선택)<textarea value={itemDraft.memo} onChange={(event) => setItemDraft((current) => ({ ...current, memo: event.target.value }))} rows={3} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
+          {itemError && <p className="text-red-600" role="alert">{itemError}</p>}
+        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
       </div>
     </MobileShell>
   );

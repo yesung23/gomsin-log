@@ -186,7 +186,11 @@ BEGIN
             AND status = 'active';
 
           IF v_active_count >= 2 THEN
-            v_error_code := 'couple_full';
+            -- Deliberately indistinguishable from a code that never existed.
+            -- Reporting "that space is full" would confirm to a guesser that the
+            -- hash matched a live invitation, which is the expensive half of
+            -- searching a six-digit space.
+            v_error_code := 'invalid_or_expired';
           ELSIF v_active_count <> 1
             OR v_inviter_role NOT IN ('gomsin', 'soldier')
           THEN
@@ -238,7 +242,7 @@ BEGIN
         SELECT 1 FROM public.couple_members
         WHERE user_id = v_uid AND status = 'active'
       ) THEN 'already_connected'
-      ELSE 'couple_full'
+      ELSE 'invalid_or_expired'
     END;
   WHEN OTHERS THEN
     -- The subtransaction rolls back partial redemption work. Do not re-raise:
@@ -246,8 +250,20 @@ BEGIN
     v_error_code := 'internal_error';
   END;
 
-  INSERT INTO public.invitation_attempts (user_id, succeeded)
-  VALUES (v_uid, false);
+  -- The ledger exists to throttle guessing, so only verdicts that actually
+  -- tested a code hash are recorded.
+  --
+  -- Recording 'rate_limited' was self-defeating: each rejected call added a
+  -- failure inside the same rolling window, so any client that retries kept its
+  -- own lockout alive indefinitely instead of for 24 hours. 'already_connected'
+  -- and 'invalid_request' are both decided before the code is looked up, so
+  -- they reveal nothing and must not consume the caller's quota either.
+  IF COALESCE(v_error_code, 'internal_error') NOT IN (
+    'rate_limited', 'already_connected', 'invalid_request'
+  ) THEN
+    INSERT INTO public.invitation_attempts (user_id, succeeded)
+    VALUES (v_uid, false);
+  END IF;
 
   RETURN jsonb_build_object(
     'ok', false,
@@ -516,6 +532,13 @@ CREATE POLICY "Active members can insert into couple-media"
     bucket_id = 'couple-media'
     AND NOT public.is_my_account_deletion_pending()
     AND (storage.foldername(name))[1] = public.get_my_active_couple_id()::TEXT
+    -- Pinning only the first two segments still allowed
+    -- {couple}/{record}/nested/file.jpg. Storage then reports "nested" as a
+    -- pseudo-folder that remove() silently ignores, which made a record folder
+    -- impossible to empty during account deletion. The path shape is now exactly
+    -- {couple_id}/{record_id}/{filename}, matching what the client reads back.
+    AND array_length(storage.foldername(name), 1) = 2
+    AND name !~ '(^|/)\.'
     AND EXISTS (
       SELECT 1 FROM public.daily_records
       WHERE id::TEXT = (storage.foldername(name))[2]
@@ -608,7 +631,9 @@ DECLARE
   v_count INTEGER;
   v_private_events INTEGER := 0;
   v_shared_events INTEGER := 0;
+  v_orphaned_events INTEGER := 0;
   v_trips INTEGER := 0;
+  v_orphaned_trips INTEGER := 0;
   v_records INTEGER := 0;
 BEGIN
   IF auth.role() IS DISTINCT FROM 'service_role' THEN
@@ -657,12 +682,17 @@ BEGIN
     WHERE id = v_membership.couple_id
     FOR UPDATE;
 
+    -- Only an *active* partner can inherit. A former member's
+    -- get_my_active_couple_id() no longer returns this couple, so handing them
+    -- the rows would keep a deleted user's schedule titles and trip plans alive
+    -- indefinitely, attributed to someone RLS will never let read them.
     SELECT other.user_id
     INTO v_partner_id
     FROM public.couple_members AS other
     WHERE other.couple_id = v_membership.couple_id
       AND other.user_id <> p_user_id
-    ORDER BY (other.status = 'active') DESC, other.joined_at, other.id
+      AND other.status = 'active'
+    ORDER BY other.joined_at, other.id
     LIMIT 1;
 
     DELETE FROM public.events
@@ -689,8 +719,27 @@ BEGIN
         AND created_by = p_user_id;
       GET DIAGNOSTICS v_count = ROW_COUNT;
       v_trips := v_trips + v_count;
+    ELSE
+      -- Nobody is left in this couple who could ever read these rows. Delete
+      -- them here rather than letting the auth cascade do it silently, so the
+      -- outcome is deliberate and reported.
+      DELETE FROM public.events
+      WHERE couple_id = v_membership.couple_id
+        AND created_by = p_user_id;
+      GET DIAGNOSTICS v_count = ROW_COUNT;
+      v_orphaned_events := v_orphaned_events + v_count;
+
+      DELETE FROM public.trips
+      WHERE couple_id = v_membership.couple_id
+        AND created_by = p_user_id;
+      GET DIAGNOSTICS v_count = ROW_COUNT;
+      v_orphaned_trips := v_orphaned_trips + v_count;
     END IF;
   END LOOP;
+
+  -- Narrow the capability to the loop that needs it: the deletes below must not
+  -- run with the identity-immutability triggers disarmed.
+  PERFORM set_config('app.plan_ownership_transfer', 'off', true);
 
   DELETE FROM public.invitation_codes
   WHERE created_by = p_user_id OR used_by = p_user_id;
@@ -704,7 +753,9 @@ BEGIN
     'ok', true,
     'private_events_deleted', v_private_events,
     'shared_events_transferred', v_shared_events,
+    'shared_events_deleted', v_orphaned_events,
     'trips_transferred', v_trips,
+    'trips_deleted', v_orphaned_trips,
     'records_deleted', v_records
   );
 END;
@@ -772,6 +823,32 @@ CREATE TRIGGER emit_event_collaboration_invalidation
   AFTER INSERT OR UPDATE OR DELETE ON public.events
   FOR EACH ROW EXECUTE FUNCTION public.emit_event_collaboration_invalidation();
 
+-- Filtering the trigger is not sufficient on its own: migration 011 added
+-- public.events to the realtime publication, and a partner subscribed to that
+-- table is notified of the author's private-event DELETEs regardless.
+--
+-- Realtime evaluates the subscriber's SELECT policy against the new row for
+-- INSERT and UPDATE, so a private row is filtered out. DELETE is the exception
+-- -- the old tuple carries only replica-identity columns and no RLS check is
+-- applied -- so the partner receives a message it cannot resolve and reacts by
+-- refetching. No content crosses the boundary, but the timing of the author's
+-- private-event deletion does, which is exactly the leak this section closes.
+--
+-- collaboration_invalidations is the only notification channel for events from
+-- here on, and it is written by the filtered trigger above.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'events'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime DROP TABLE public.events;
+  END IF;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- 4. Trip URL and deterministic per-day ordering invariants
 -- ---------------------------------------------------------------------------
@@ -787,8 +864,18 @@ ALTER TABLE public.trip_items
       AND url ~* '^https?://[^/?#[:space:]]+([/?#][^[:space:]]*)?$'
     )
   ) NOT VALID;
--- Validation intentionally fails without discarding a legacy non-http URL.
--- Normalize such data explicitly before retrying this transactional migration.
+-- Validation intentionally fails rather than discarding a legacy non-http URL.
+-- The whole file is one transaction, so an abort leaves the database untouched.
+-- Run this first to see exactly what would block it, and clear or correct those
+-- rows before retrying:
+--
+--   SELECT id, trip_id, title, url
+--   FROM public.trip_items
+--   WHERE url IS NOT NULL
+--     AND NOT (
+--       char_length(url) <= 2048
+--       AND url ~* '^https?://[^/?#[:space:]]+([/?#][^[:space:]]*)?$'
+--     );
 ALTER TABLE public.trip_items VALIDATE CONSTRAINT trip_items_http_url_check;
 
 -- Metadata-only updates must not acquire item->trip locks. Actual topology/rank
@@ -992,6 +1079,22 @@ BEGIN
     RAISE EXCEPTION 'Invalid or conflicting trip item reorder payload';
   END IF;
 
+  -- The supplied ranks must be a rearrangement of the ranks those items already
+  -- hold. Distinctness alone allowed {0, 5000}, after which appends allocate
+  -- 5001 and the gapless per-day ordering this migration just normalized drifts
+  -- apart again.
+  IF EXISTS (
+    SELECT sort_order FROM public.trip_items WHERE id = ANY(p_item_ids)
+    EXCEPT
+    SELECT value FROM unnest(p_sort_orders) AS value
+  ) OR EXISTS (
+    SELECT value FROM unnest(p_sort_orders) AS value
+    EXCEPT
+    SELECT sort_order FROM public.trip_items WHERE id = ANY(p_item_ids)
+  ) THEN
+    RAISE EXCEPTION 'Trip item reorder must permute the existing ranks';
+  END IF;
+
   SET CONSTRAINTS trip_items_unique_day_order DEFERRED;
   PERFORM set_config('app.trip_item_reorder', 'on', true);
   UPDATE public.trip_items AS item
@@ -1003,7 +1106,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.reorder_trip_items(UUID[], INTEGER[]) IS
-  'Atomically reorders same-day items after duplicate and untouched-rank collision validation.';
+  'Atomically permutes the ranks of same-day items. Rejects duplicates, untouched-rank collisions, and any payload that is not a rearrangement of the ranks the given items already hold.';
 
 REVOKE ALL ON FUNCTION public.reorder_trip_items(UUID[], INTEGER[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.reorder_trip_items(UUID[], INTEGER[]) FROM anon;

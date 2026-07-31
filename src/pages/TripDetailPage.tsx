@@ -119,6 +119,10 @@ export function TripDetailPage() {
     setTripError(null);
     setItemError(null);
     setChildActionError(null);
+    setIsSavingTrip(false);
+    setIsDeletingTrip(false);
+    setIsSavingItem(false);
+    setIsAddingChecklist(false);
     setPendingItemIds(new Set());
     setPendingChecklistIds(new Set());
   }, [activeCouple, id, tripAccessKey, userId]);
@@ -345,6 +349,10 @@ export function TripDetailPage() {
       setTrip(saved);
       setShowTripModal(false);
       toast.success('여행 정보가 수정되었습니다.');
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to update trip:', error);
+      setTripError('여행 정보를 수정하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
     } finally {
       if (isCurrentTripScope(operationScope)) setIsSavingTrip(false);
     }
@@ -363,6 +371,10 @@ export function TripDetailPage() {
       }
       toast.success('여행이 삭제되었습니다.');
       navigate('/trips');
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to delete trip:', error);
+      toast.error('여행을 삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
     } finally {
       if (isCurrentTripScope(operationScope)) setIsDeletingTrip(false);
     }
@@ -392,10 +404,14 @@ export function TripDetailPage() {
       setItemError(urlError);
       return;
     }
+    const existing = editingItemId ? items.find((item) => item.id === editingItemId) : undefined;
+    if (editingItemId && !existing) {
+      setItemError('수정하려던 일정을 더 이상 찾을 수 없어요. 목록을 다시 확인해 주세요.');
+      return;
+    }
     const operationScope = captureTripScope();
     setIsSavingItem(true);
     setItemError(null);
-    const existing = editingItemId ? items.find((item) => item.id === editingItemId) : undefined;
     try {
       const input = {
         tripId: trip.id,
@@ -419,6 +435,10 @@ export function TripDetailPage() {
         : [...current, saved]);
       setShowItemModal(false);
       toast.success(existing ? '일정이 수정되었습니다.' : '일정이 추가되었습니다.');
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to save trip item:', error);
+      setItemError('일정을 저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
     } finally {
       if (isCurrentTripScope(operationScope)) setIsSavingItem(false);
     }
@@ -437,6 +457,10 @@ export function TripDetailPage() {
       }
       setItems((current) => current.filter((item) => item.id !== itemId));
       toast.success('일정이 삭제되었습니다.');
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to delete trip item:', error);
+      toast.error('일정을 삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
     } finally {
       if (isCurrentTripScope(operationScope)) setItemPending(itemId, false);
     }
@@ -450,6 +474,13 @@ export function TripDetailPage() {
     const operationScope = captureTripScope();
     const movingOrder = moving.sortOrder;
     const targetOrder = target.sortOrder;
+    const rollback = () => {
+      setItems((current) => current.map((item) => {
+        if (item.id === moving.id) return { ...item, sortOrder: movingOrder };
+        if (item.id === target.id) return { ...item, sortOrder: targetOrder };
+        return item;
+      }));
+    };
     setItems((current) => current.map((item) => {
       if (item.id === moving.id) return { ...item, sortOrder: targetOrder };
       if (item.id === target.id) return { ...item, sortOrder: movingOrder };
@@ -457,18 +488,31 @@ export function TripDetailPage() {
     }));
     setItemPending(moving.id, true);
     setItemPending(target.id, true);
-    const saved = await reorderTripItemsInDB([
-      { id: moving.id, sortOrder: targetOrder },
-      { id: target.id, sortOrder: movingOrder },
-    ]);
-    if (!isCurrentTripScope(operationScope)) return;
-    if (!saved) {
+    try {
+      const saved = await reorderTripItemsInDB([
+        { id: moving.id, sortOrder: targetOrder },
+        { id: target.id, sortOrder: movingOrder },
+      ]);
+      if (!isCurrentTripScope(operationScope)) return;
+      if (!saved) {
+        rollback();
+        await loadChildren();
+        if (!isCurrentTripScope(operationScope)) return;
+        toast.error('순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
+      }
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      rollback();
+      console.error('Failed to reorder trip items:', error);
       await loadChildren();
       if (!isCurrentTripScope(operationScope)) return;
-      toast.error('순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
+      toast.error('연결 오류로 순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
+    } finally {
+      if (isCurrentTripScope(operationScope)) {
+        setItemPending(moving.id, false);
+        setItemPending(target.id, false);
+      }
     }
-    setItemPending(moving.id, false);
-    setItemPending(target.id, false);
   };
 
   const handleAddChecklist = async () => {
@@ -485,6 +529,10 @@ export function TripDetailPage() {
       }
       setChecklists((current) => [...current, saved]);
       setNewChecklistName('');
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to add trip checklist item:', error);
+      setChildActionError('준비물을 추가하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
     } finally {
       if (isCurrentTripScope(operationScope)) setIsAddingChecklist(false);
     }
@@ -497,15 +545,27 @@ export function TripDetailPage() {
     setChildActionError(null);
     setChecklistPending(item.id, true);
     setChecklists((current) => current.map((entry) => entry.id === item.id ? { ...entry, completed: nextCompleted } : entry));
-    const saved = await toggleTripChecklistInDB(item.id, nextCompleted);
-    if (!isCurrentTripScope(operationScope)) return;
-    if (!saved) {
-      setChecklists((current) => current.map((entry) => entry.id === item.id ? { ...entry, completed: item.completed } : entry));
-      const message = '체크 상태를 저장하지 못해 이전 상태로 되돌렸어요.';
+    try {
+      const saved = await toggleTripChecklistInDB(item.id, nextCompleted);
+      if (!isCurrentTripScope(operationScope)) return;
+      if (!saved) {
+        await loadChildren();
+        if (!isCurrentTripScope(operationScope)) return;
+        const message = '체크 상태를 저장하지 못해 서버의 최신 상태를 다시 확인했어요.';
+        setChildActionError(message);
+        toast.error(message);
+      }
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to toggle trip checklist item:', error);
+      await loadChildren();
+      if (!isCurrentTripScope(operationScope)) return;
+      const message = '연결 오류로 체크 상태를 저장하지 못해 서버의 최신 상태를 다시 확인했어요.';
       setChildActionError(message);
       toast.error(message);
+    } finally {
+      if (isCurrentTripScope(operationScope)) setChecklistPending(item.id, false);
     }
-    setChecklistPending(item.id, false);
   };
 
   const handleDeleteChecklist = async (checklistId: string) => {
@@ -521,6 +581,10 @@ export function TripDetailPage() {
         return;
       }
       setChecklists((current) => current.filter((entry) => entry.id !== checklistId));
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to delete trip checklist item:', error);
+      setChildActionError('준비물을 삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
     } finally {
       if (isCurrentTripScope(operationScope)) setChecklistPending(checklistId, false);
     }

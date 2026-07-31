@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -48,6 +48,26 @@ export function SchedulePage() {
       profile.couple.connected &&
       profile.couple.status === 'active',
   );
+  const scheduleAccessKey = authenticatedUser?.id
+    ? `${authenticatedUser.id}:${profile.couple.coupleId || ''}:${profile.couple.connected ? 'connected' : 'disconnected'}:${profile.couple.status}`
+    : '';
+  const accessKeyRef = useRef(scheduleAccessKey);
+  const accessGenerationRef = useRef(0);
+  if (accessKeyRef.current !== scheduleAccessKey) {
+    accessKeyRef.current = scheduleAccessKey;
+    accessGenerationRef.current += 1;
+  }
+  const captureAccess = useCallback(
+    () => ({ key: scheduleAccessKey, generation: accessGenerationRef.current }),
+    [scheduleAccessKey],
+  );
+  const isCurrentAccess = useCallback(
+    (access: { key: string; generation: number }) =>
+      access.key === accessKeyRef.current
+      && access.generation === accessGenerationRef.current
+      && access.key !== '',
+    [],
+  );
 
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [selectedDate, setSelectedDate] = useState(today);
@@ -66,6 +86,20 @@ export function SchedulePage() {
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
 
+  useLayoutEffect(() => {
+    // Copied event details must never survive an account/workspace/access change.
+    setShowEventModal(false);
+    setEditingEventId(null);
+    setTitle('');
+    setEventType('visit');
+    setEventStartDate(today);
+    setEventEndDate('');
+    setIsPrivate(false);
+    setFormError(null);
+    setIsSaving(false);
+    setDeletingEventId(null);
+  }, [scheduleAccessKey, today]);
+
   useEffect(() => {
     if (!authenticatedUser?.id) return;
     let cancelled = false;
@@ -78,7 +112,7 @@ export function SchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [activeCouple, authenticatedUser?.id, profile.couple.coupleId]);
+  }, [authenticatedUser?.id, scheduleAccessKey]);
 
   const retryLoad = async () => {
     setLoadState('loading');
@@ -132,6 +166,12 @@ export function SchedulePage() {
     const editingEvent = editingEventId
       ? events.find((event) => event.id === editingEventId)
       : undefined;
+    if (editingEventId && !editingEvent) {
+      const message = '이 일정은 더 이상 확인할 수 없어요. 목록을 새로 확인해 주세요.';
+      setFormError(message);
+      toast.error(message);
+      return;
+    }
     const canEditPrivateWhileDisconnected = Boolean(
       editingEvent
       && editingEvent.createdBy === authenticatedUser?.id
@@ -151,6 +191,7 @@ export function SchedulePage() {
       return;
     }
 
+    const access = captureAccess();
     setIsSaving(true);
     setFormError(null);
     const changes = {
@@ -169,6 +210,7 @@ export function SchedulePage() {
             createdBy: authenticatedUser.id,
             ...changes,
           });
+      if (!isCurrentAccess(access)) return;
       if (!saved) {
         const message = '일정을 저장하지 못했습니다. 입력 내용은 유지되니 다시 시도해 주세요.';
         setFormError(message);
@@ -179,25 +221,29 @@ export function SchedulePage() {
       setSelectedDate(eventStartDate);
       setShowEventModal(false);
     } catch {
+      if (!isCurrentAccess(access)) return;
       const message = '일정을 저장하지 못했습니다. 입력 내용은 유지되니 다시 시도해 주세요.';
       setFormError(message);
       toast.error(message);
     } finally {
-      setIsSaving(false);
+      if (isCurrentAccess(access)) setIsSaving(false);
     }
   };
 
   const handleDeleteEvent = async (event: CoupleEvent) => {
     if (deletingEventId || event.createdBy !== authenticatedUser?.id) return;
+    const access = captureAccess();
     setDeletingEventId(event.id);
     try {
       const deleted = await deleteEvent(event.id);
+      if (!isCurrentAccess(access)) return;
       if (deleted) toast.success('일정이 삭제되었습니다.');
       else toast.error('일정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } catch {
+      if (!isCurrentAccess(access)) return;
       toast.error('일정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
-      setDeletingEventId(null);
+      if (isCurrentAccess(access)) setDeletingEventId(null);
     }
   };
 

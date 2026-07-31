@@ -6,8 +6,94 @@ import { DailyRecord, Role, Attachment } from '@/types';
 // Records Synchronization
 // ==========================================
 
-export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[]> {
-  if (!isSupabaseConfigured || !supabase || !coupleId) return [];
+export type RecordsFetchResult =
+  | { ok: true; records: DailyRecord[] }
+  | { ok: false; records: []; error: unknown };
+
+const ATTACHMENT_TYPES: ReadonlySet<Attachment['type']> = new Set([
+  'photo',
+  'video',
+  'voice',
+]);
+
+/**
+ * Storage objects created by this app always live at exactly
+ * `{coupleId}/{recordId}/{filename}`. Treat attachment JSON from Postgres as
+ * untrusted and reject anything outside that namespace before it is signed.
+ */
+export function isCanonicalRecordMediaPath(
+  path: unknown,
+  coupleId: string,
+  recordId: string,
+): path is string {
+  if (typeof path !== 'string' || !coupleId || !recordId) return false;
+  const parts = path.split('/');
+  if (parts.length !== 3 || parts[0] !== coupleId || parts[1] !== recordId) return false;
+  const filename = parts[2];
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(filename)
+    && path === `${coupleId}/${recordId}/${filename}`;
+}
+
+function mapAuthenticatedAttachment(
+  value: unknown,
+  coupleId: string,
+  recordId: string,
+  allowLegacyPathInUrl: boolean,
+): Attachment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (!ATTACHMENT_TYPES.has(candidate.type as Attachment['type'])) return null;
+  if (typeof candidate.name !== 'string' || !candidate.name.trim()) return null;
+
+  const path = isCanonicalRecordMediaPath(candidate.path, coupleId, recordId)
+    ? candidate.path
+    : allowLegacyPathInUrl && isCanonicalRecordMediaPath(candidate.url, coupleId, recordId)
+      ? candidate.url
+      : null;
+  if (!path) return null;
+
+  // Never trust or retain a URL supplied by a database row. A fresh URL is
+  // generated below only after the canonical path has passed validation.
+  return {
+    type: candidate.type as Attachment['type'],
+    name: candidate.name,
+    path,
+  };
+}
+
+async function signValidatedAttachments(attachments: Attachment[]): Promise<Attachment[]> {
+  if (!isSupabaseConfigured || !supabase || attachments.length === 0) return attachments;
+
+  const paths = Array.from(new Set(
+    attachments.map((attachment) => attachment.path).filter((path): path is string => !!path),
+  ));
+  if (paths.length === 0) return attachments;
+
+  const { data, error } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+
+  if (error) {
+    console.error('[gomsinlog] Failed to sign media URLs:', error);
+    return attachments;
+  }
+
+  const byPath = new Map<string, string>();
+  (data || []).forEach((entry) => {
+    if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl);
+  });
+
+  return attachments.map((attachment) =>
+    attachment.path && byPath.has(attachment.path)
+      ? { ...attachment, url: byPath.get(attachment.path) }
+      : attachment,
+  );
+}
+
+export async function fetchRecordsResultFromDB(coupleId: string): Promise<RecordsFetchResult> {
+  if (!isSupabaseConfigured || !supabase || !coupleId) {
+    return { ok: false, records: [], error: new Error('Records database is unavailable') };
+  }
 
   const { data, error } = await supabase
     .from('daily_records')
@@ -18,52 +104,55 @@ export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[
 
   if (error) {
     console.error('Failed to fetch records:', error);
-    return [];
+    return { ok: false, records: [], error };
   }
 
-  // Normalise rows first, migrating any legacy rows that stored the storage path
-  // in `url` instead of `path`.
-  const records: DailyRecord[] = data.map((row: any) => {
-    const attachments: Attachment[] = (row.attachments || []).map((att: Attachment) => {
-      if (!att.path && att.url && !att.url.startsWith('http')) {
-        return { ...att, path: att.url, url: undefined };
-      }
-      return att;
-    });
-
-    return {
-      id: row.id,
-      date: row.record_date,
-      time: row.record_time,
-      authorRole: 'gomsin', // recomputed from user_id in sync.ts
-      log: row.log_text,
-      reaction: row.reaction,
-      attachments,
-      isPrivate: row.is_private,
-      emotionFlow: row.emotion_flow || [],
-      emotionUpdatedAt: row.emotion_updated_at || null,
-      createdAt: row.created_at,
-      userId: row.user_id,
-    };
-  });
-
-  // Sign every attachment across all records in one request instead of one
-  // network round trip per file.
-  const allAttachments = records.flatMap((record) => record.attachments || []);
-  if (allAttachments.length === 0) return records;
-
-  const signed = await resolveAttachmentUrls(allAttachments);
-  const urlByPath = new Map<string, string>();
-  signed.forEach((att) => {
-    if (att.path && att.url) urlByPath.set(att.path, att.url);
-  });
-
-  return records.map((record) => ({
-    ...record,
-    attachments: record.attachments?.map((att) =>
-      att.path && urlByPath.has(att.path) ? { ...att, url: urlByPath.get(att.path) } : att,
-    ),
+  const records: DailyRecord[] = (data || []).map((row: any) => ({
+    id: row.id,
+    date: row.record_date,
+    time: row.record_time,
+    authorRole: 'gomsin', // recomputed from user_id in sync.ts
+    log: row.log_text,
+    reaction: row.reaction,
+    attachments: Array.isArray(row.attachments)
+      ? row.attachments
+          .map((attachment: unknown) =>
+            mapAuthenticatedAttachment(attachment, coupleId, row.id, true),
+          )
+          .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
+      : [],
+    isPrivate: row.is_private,
+    emotionFlow: row.emotion_flow || [],
+    emotionUpdatedAt: row.emotion_updated_at || null,
+    createdAt: row.created_at,
+    userId: row.user_id,
   }));
+
+  const allAttachments = records.flatMap((record) => record.attachments || []);
+  if (allAttachments.length === 0) return { ok: true, records };
+
+  const signed = await signValidatedAttachments(allAttachments);
+  const urlByPath = new Map<string, string>();
+  signed.forEach((attachment) => {
+    if (attachment.path && attachment.url) urlByPath.set(attachment.path, attachment.url);
+  });
+
+  return {
+    ok: true,
+    records: records.map((record) => ({
+      ...record,
+      attachments: record.attachments?.map((attachment) =>
+        attachment.path && urlByPath.has(attachment.path)
+          ? { ...attachment, url: urlByPath.get(attachment.path) }
+          : attachment,
+      ),
+    })),
+  };
+}
+
+export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[]> {
+  const result = await fetchRecordsResultFromDB(coupleId);
+  return result.ok ? result.records : [];
 }
 
 export async function saveRecordToDB(record: DailyRecord, coupleId: string, userId: string): Promise<boolean> {
@@ -81,11 +170,12 @@ export async function saveRecordToDB(record: DailyRecord, coupleId: string, user
       reaction: record.reaction || null,
       // Never persist the signed URL: it expires, and `path` is the durable
       // reference we re-sign on every read.
-      attachments: (record.attachments || []).map((att) => ({
-        type: att.type,
-        name: att.name,
-        path: att.path,
-      })),
+      attachments: (record.attachments || [])
+        .map((attachment) =>
+          mapAuthenticatedAttachment(attachment, coupleId, record.id, false),
+        )
+        .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
+        .map(({ type, name, path }) => ({ type, name, path })),
       is_private: record.isPrivate,
       // Author-only emotion items must not travel inside a shared row, because
       // the partner is allowed to read that row.
@@ -101,19 +191,33 @@ export async function saveRecordToDB(record: DailyRecord, coupleId: string, user
   return true;
 }
 
-export async function deleteRecordFromDB(recordId: string): Promise<boolean> {
-  if (!isSupabaseConfigured || !supabase) return false;
+export async function deleteRecordFromDB(
+  recordId: string,
+  expectedUserId: string,
+  expectedCoupleId: string,
+): Promise<boolean> {
+  if (
+    !isSupabaseConfigured
+    || !supabase
+    || !recordId
+    || !expectedUserId
+    || !expectedCoupleId
+  ) return false;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('daily_records')
     .delete()
-    .eq('id', recordId);
+    .eq('id', recordId)
+    .eq('user_id', expectedUserId)
+    .eq('couple_id', expectedCoupleId)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     console.error('Failed to delete record:', error);
     return false;
   }
-  return true;
+  return data?.id === recordId;
 }
 
 // ==========================================
@@ -238,29 +342,15 @@ export async function removeRecordMedia(paths: string[]): Promise<void> {
  * decides what may be viewed: the author sees their own files, the partner sees
  * only files attached to shared (non-private) records.
  */
-export async function resolveAttachmentUrls(attachments: Attachment[]): Promise<Attachment[]> {
-  if (!isSupabaseConfigured || !supabase || attachments.length === 0) return attachments;
-
-  const needsSigning = attachments.filter(
-    (att) => att.path && !att.path.startsWith('http'),
-  );
-  if (needsSigning.length === 0) return attachments;
-
-  const { data, error } = await supabase.storage
-    .from(MEDIA_BUCKET)
-    .createSignedUrls(needsSigning.map((att) => att.path as string), SIGNED_URL_TTL_SECONDS);
-
-  if (error) {
-    console.error('[gomsinlog] Failed to sign media URLs:', error);
-    return attachments;
-  }
-
-  const byPath = new Map<string, string>();
-  (data || []).forEach((entry) => {
-    if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl);
-  });
-
-  return attachments.map((att) =>
-    att.path && byPath.has(att.path) ? { ...att, url: byPath.get(att.path) } : att,
-  );
+export async function resolveAttachmentUrls(
+  attachments: Attachment[],
+  coupleId: string,
+  recordId: string,
+): Promise<Attachment[]> {
+  const validated = attachments
+    .map((attachment) =>
+      mapAuthenticatedAttachment(attachment, coupleId, recordId, false),
+    )
+    .filter((attachment: Attachment | null): attachment is Attachment => !!attachment);
+  return signValidatedAttachments(validated);
 }

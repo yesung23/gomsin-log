@@ -53,6 +53,12 @@ function mapTripChecklist(row: Record<string, unknown>): TripChecklist {
   };
 }
 
+export function reconcileParentTrips(trips: Trip[]): Trip[] {
+  const byId = new Map<string, Trip>();
+  trips.forEach((trip) => byId.set(trip.id, trip));
+  return Array.from(byId.values());
+}
+
 export function validateTripDraft(draft: TripDraft): string | null {
   if (!draft.title.trim()) return '여행 이름을 입력해 주세요.';
   if (!draft.startDate) return '가는 날을 선택해 주세요.';

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, ChevronLeft, LoaderCircle, Map, Plane, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 import { MobileShell } from '@/components/MobileShell';
-import { fetchTripsResultFromDB, saveTripToDB, validateTripDraft } from '@/lib/trips';
+import { fetchTripsResultFromDB, reconcileParentTrips, saveTripToDB, validateTripDraft } from '@/lib/trips';
 import { useStore } from '@/lib/useStore';
 import { formatLocalDate } from '@/lib/utils';
 import type { Trip } from '@/types';
@@ -13,7 +13,8 @@ type LoadState = 'loading' | 'ready' | 'error' | 'forbidden' | 'disconnected';
 export function TripsPage() {
   const { state } = useStore();
   const navigate = useNavigate();
-  const [trips, setTrips] = useState<Trip[]>([]);
+  const [trips, setTrips] = useState<Trip[]>(() => reconcileParentTrips(state.trips));
+  const globalTripsSnapshotRef = useRef(state.trips);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [showModal, setShowModal] = useState(false);
   const [newTrip, setNewTrip] = useState({ title: '', startDate: '', endDate: '' });
@@ -25,6 +26,9 @@ export function TripsPage() {
   const activeCouple = Boolean(
     userId && coupleId && state.profile.couple.connected && state.profile.couple.status === 'active',
   );
+  const tripAccessKey = activeCouple ? `${userId}:${coupleId}` : '';
+  const tripAccessKeyRef = useRef(tripAccessKey);
+  tripAccessKeyRef.current = tripAccessKey;
 
   const loadTrips = useCallback(async () => {
     if (!userId) {
@@ -36,23 +40,44 @@ export function TripsPage() {
       return;
     }
     setLoadState('loading');
+    const requestKey = tripAccessKey;
+    const globalSnapshot = globalTripsSnapshotRef.current;
     try {
       const result = await fetchTripsResultFromDB(coupleId);
+      if (
+        tripAccessKeyRef.current !== requestKey ||
+        globalTripsSnapshotRef.current !== globalSnapshot
+      ) return;
       if (!result.ok) {
         setLoadState(result.reason === 'forbidden' ? 'forbidden' : 'error');
         return;
       }
-      setTrips(result.trips);
+      setTrips(reconcileParentTrips(result.trips));
       setLoadState('ready');
     } catch (error) {
+      if (
+        tripAccessKeyRef.current !== requestKey ||
+        globalTripsSnapshotRef.current !== globalSnapshot
+      ) return;
       console.error('Failed to load trips:', error);
       setLoadState('error');
     }
-  }, [activeCouple, coupleId, userId]);
+  }, [activeCouple, coupleId, tripAccessKey, userId]);
 
   useEffect(() => {
     void loadTrips();
   }, [loadTrips]);
+
+  useEffect(() => {
+    if (globalTripsSnapshotRef.current === state.trips) return;
+    globalTripsSnapshotRef.current = state.trips;
+    setTrips(reconcileParentTrips(state.trips));
+    if (activeCouple) setLoadState('ready');
+  }, [activeCouple, state.trips]);
+
+  useEffect(() => {
+    if (!activeCouple) setShowModal(false);
+  }, [activeCouple]);
 
   const openCreate = () => {
     if (loadState !== 'ready' || !activeCouple) return;
@@ -88,7 +113,7 @@ export function TripsPage() {
         return;
       }
       // Do not wait for realtime before exposing the confirmed row locally.
-      setTrips((current) => [...current.filter((trip) => trip.id !== saved.id), saved]);
+      setTrips((current) => reconcileParentTrips([...current, saved]));
       setShowModal(false);
       setNewTrip({ title: '', startDate: '', endDate: '' });
       toast.success('여행 계획이 생성되었습니다!');

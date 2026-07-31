@@ -507,7 +507,7 @@ export function RecordPage() {
                       {r.attachments.map((att, i) => (
                         <div key={i} className="rounded-xl overflow-hidden bg-muted border border-border">
                           {att.type === 'photo' && att.url ? (
-                            <img src={att.url} alt={att.name} className="w-full h-36 object-cover rounded-xl" />
+                            <img src={att.url} alt={att.name} loading="lazy" className="w-full h-36 object-cover rounded-xl" />
                           ) : (
                             <div className="p-3 text-xs flex items-center gap-2 font-medium">
                               {att.type === 'photo' && <ImageIcon size={16} className="text-coral" />}
@@ -579,7 +579,7 @@ export function RecordPage() {
                   {selectedRecord.attachments.map((att, idx) => (
                     <div key={idx} className="rounded-xl overflow-hidden bg-muted border border-border">
                       {att.type === 'photo' && att.url ? (
-                        <img src={att.url} alt={att.name} className="w-full h-48 object-cover rounded-xl" />
+                        <img src={att.url} alt={att.name} loading="lazy" className="w-full h-48 object-cover rounded-xl" />
                       ) : (
                         <div className="p-3 text-xs flex items-center gap-2 font-medium">
                           {att.type === 'photo' && <ImageIcon size={16} className="text-coral" />}

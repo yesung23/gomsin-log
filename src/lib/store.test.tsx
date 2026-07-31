@@ -39,16 +39,39 @@ vi.mock('@/lib/sync', () => ({
   fetchFullStateFromDB: (userId: string) => fetchFullStateFromDB(userId),
 }));
 
+/** Ordered log of media-related calls, used to assert the two-phase upload flow. */
+const callOrder: string[] = [];
+const saveRecordToDB = vi.fn(async () => {
+  callOrder.push('saveRecord');
+  return true;
+});
+const uploadRecordMedia = vi.fn(async (file: File) => {
+  callOrder.push(`upload:${file.name}`);
+  return { attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` } };
+});
+const removeRecordMedia = vi.fn(async () => {
+  callOrder.push('removeMedia');
+});
+
 vi.mock('@/lib/records', () => ({
-  saveRecordToDB: vi.fn().mockResolvedValue(true),
+  saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
   deleteRecordFromDB: vi.fn().mockResolvedValue(true),
+  uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(...(args as [File])),
+  removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
+  resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
+  classifyMediaFile: (file: { type: string }) =>
+    file.type.startsWith('image/')
+      ? { ext: 'png', type: 'photo' }
+      : { error: 'unsupported' },
 }));
 
 const { StoreProvider, useStore } = await import('@/lib/store');
 const STORE_KEY = 'gomsinlog.state.v2';
 
-function Probe() {
-  const { state, isReady, signOut } = useStore();
+let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
+
+function Probe({ files = [] as File[] }: { files?: File[] }) {
+  const { state, isReady, signOut, addRecordWithMedia } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
@@ -57,6 +80,31 @@ function Probe() {
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
+      <span data-testid="attachments">
+        {state.records
+          .flatMap((r) => r.attachments || [])
+          .map((a) => a.name)
+          .join(',')}
+      </span>
+      <span data-testid="logs">{state.records.map((r) => r.log).join('|')}</span>
+      <button
+        onClick={() => {
+          void addRecordWithMedia(
+            {
+              date: '2026-07-31',
+              time: '12:00',
+              authorRole: 'gomsin',
+              log: '오늘의 기록',
+              isPrivate: false,
+            },
+            files,
+          ).then((result) => {
+            lastMediaResult = result;
+          });
+        }}
+      >
+        post
+      </button>
       <button onClick={() => void signOut()}>signout</button>
     </div>
   );
@@ -248,6 +296,170 @@ describe('StoreProvider auth lifecycle', () => {
       expect(parsed.authenticatedUser).toBeNull();
       expect(cached).not.toContain('secret');
     }
+  });
+
+  it('saves the record row before uploading media (storage RLS requires it)', async () => {
+    callOrder.length = 0;
+    saveRecordToDB.mockClear();
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    const files = [
+      new File(['a'], 'first.png', { type: 'image/png' }),
+      new File(['b'], 'second.png', { type: 'image/png' }),
+    ];
+
+    render(
+      <StoreProvider>
+        <Probe files={files} />
+      </StoreProvider>,
+    );
+
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => {
+      emitAuth('SIGNED_IN', 'user-a');
+    });
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+
+    await act(async () => {
+      screen.getByText('post').click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('attachments')).toHaveTextContent('first.png'));
+
+    // The storage INSERT policy checks that daily_records already contains the
+    // row, so the first call must be the record save.
+    expect(callOrder[0]).toBe('saveRecord');
+    expect(callOrder).toContain('upload:first.png');
+    expect(callOrder).toContain('upload:second.png');
+    expect(callOrder.indexOf('saveRecord')).toBeLessThan(callOrder.indexOf('upload:first.png'));
+    // A second save patches the row with the attachment metadata.
+    expect(callOrder.filter((c) => c === 'saveRecord')).toHaveLength(2);
+    expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
+  });
+
+  it('keeps the written text when a media upload fails, and reports the failure', async () => {
+    callOrder.length = 0;
+    lastMediaResult = null;
+    uploadRecordMedia.mockImplementationOnce(async () => {
+      callOrder.push('upload:fail');
+      return { error: '파일을 올리지 못했어요.' };
+    });
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(
+      <StoreProvider>
+        <Probe files={[new File(['a'], 'broken.png', { type: 'image/png' })]} />
+      </StoreProvider>,
+    );
+
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => {
+      emitAuth('SIGNED_IN', 'user-a');
+    });
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+
+    await act(async () => {
+      screen.getByText('post').click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록'));
+    // Text survived, the failure is surfaced to the caller instead of silently swallowed.
+    expect(lastMediaResult?.ok).toBe(true);
+    expect(lastMediaResult?.failedFiles).toEqual(['broken.png']);
+    expect(screen.getByTestId('attachments')).toHaveTextContent('');
+  });
+
+  it('refuses to create a record when no couple space is connected', async () => {
+    lastMediaResult = null;
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { partnerName: '', coupleCode: '', connected: false, status: 'pending' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(
+      <StoreProvider>
+        <Probe />
+      </StoreProvider>,
+    );
+
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => {
+      emitAuth('SIGNED_IN', 'user-a');
+    });
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+
+    await act(async () => {
+      screen.getByText('post').click();
+    });
+
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+    expect(lastMediaResult?.ok).toBe(false);
+    expect(lastMediaResult?.error).toBeTruthy();
+    expect(screen.getByTestId('records')).toHaveTextContent('');
+  });
+
+  it('does not persist session-only blob URLs to localStorage', async () => {
+    const demoState: Partial<AppState> = {
+      setupComplete: true,
+      isDemoMode: true,
+      profile: { myName: '춘향', role: 'gomsin', couple: { partnerName: '몽룡', coupleCode: '123456', connected: true, status: 'active' }, military: {} as never, contact: {} as never } as never,
+      records: [],
+    };
+    localStorage.setItem(STORE_KEY, JSON.stringify(demoState));
+
+    render(
+      <StoreProvider>
+        <Probe files={[new File(['a'], 'demo.png', { type: 'image/png' })]} />
+      </StoreProvider>,
+    );
+
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => {
+      emitAuth('INITIAL_SESSION', null);
+    });
+    await waitFor(() => expect(screen.getByTestId('demo')).toHaveTextContent('true'));
+
+    await act(async () => {
+      screen.getByText('post').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('attachments')).toHaveTextContent('demo.png'));
+
+    // Visible in-session, but a persisted blob: URL would render as a broken
+    // image after reload, so the preview-only attachment is dropped from the cache.
+    await waitFor(() => {
+      const cached = localStorage.getItem(STORE_KEY) || '';
+      expect(cached).not.toContain('blob:');
+      expect(cached).not.toContain('demo.png');
+      // The written text itself is still cached.
+      expect(cached).toContain('오늘의 기록');
+    });
   });
 
   it('ignores a token refresh for the account that is already loaded', async () => {

@@ -1,5 +1,14 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { AppState, DailyRecord, UserProfile, Role, AuthUser, ILogRepository, CoupleEvent } from '@/types';
+import {
+  AppState,
+  DailyRecord,
+  UserProfile,
+  Role,
+  AuthUser,
+  ILogRepository,
+  CoupleEvent,
+  Attachment,
+} from '@/types';
 import {
   authRepository,
   isSupabaseConfigured,
@@ -9,7 +18,14 @@ import {
   saveCoupleAnniversary,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB } from '@/lib/sync';
-import { saveRecordToDB, deleteRecordFromDB } from '@/lib/records';
+import {
+  saveRecordToDB,
+  deleteRecordFromDB,
+  uploadRecordMedia,
+  removeRecordMedia,
+  resolveAttachmentUrls,
+  classifyMediaFile,
+} from '@/lib/records';
 import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
@@ -33,18 +49,33 @@ export class LocalStorageRepository implements ILogRepository {
 
   async saveState(state: AppState): Promise<void> {
     try {
-      // 보안 처리: private 기록은 로컬 스토리지에 평문으로 남지 않도록 본문/첨부파일/감정/메타데이터 제외
       const sanitizedState = {
         ...state,
-        records: state.records.map((r) =>
-          r.isPrivate ? {
-            id: r.id,
-            date: r.date,
-            time: r.time,
-            isPrivate: true,
-            authorRole: r.authorRole
-          } as DailyRecord : r
-        ),
+        records: state.records.map((record) => {
+          // Private records: keep only the skeleton so the body never sits in
+          // localStorage as plaintext. The server remains the source of truth.
+          if (record.isPrivate) {
+            return {
+              id: record.id,
+              date: record.date,
+              time: record.time,
+              isPrivate: true,
+              authorRole: record.authorRole,
+            } as DailyRecord;
+          }
+
+          if (!record.attachments?.length) return record;
+          return {
+            ...record,
+            attachments: record.attachments
+              // Blob URLs are session-only; persisting them guarantees a broken
+              // image after reload.
+              .filter((att) => !(att.url?.startsWith('blob:') && !att.path))
+              .map((att) =>
+                att.url?.startsWith('blob:') ? { ...att, url: undefined } : att,
+              ),
+          };
+        }),
       };
       localStorage.setItem(STORE_KEY, JSON.stringify(sanitizedState));
     } catch (e) {
@@ -109,6 +140,10 @@ interface StoreContextType {
   isReady: boolean;
   updateProfile: (profileUpdates: Partial<UserProfile>) => void;
   addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
+  addRecordWithMedia: (
+    record: Omit<DailyRecord, 'id' | 'createdAt'>,
+    files: File[],
+  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string }>;
   updateRecord: (id: string, updates: Partial<DailyRecord>) => Promise<boolean>;
   deleteRecord: (id: string) => Promise<boolean>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
@@ -471,33 +506,114 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {
+    const result = await addRecordWithMedia(record, []);
+    return result.ok;
+  };
+
+  /**
+   * Create a record and attach media files to it.
+   *
+   * Two phases are required by the storage RLS policy (migration 007): the
+   * `daily_records` row must already exist before any object may be written to
+   * `{coupleId}/{recordId}/...`. So we save the row, upload, then patch the row
+   * with the resulting attachment metadata.
+   */
+  const addRecordWithMedia = async (
+    record: Omit<DailyRecord, 'id' | 'createdAt'>,
+    files: File[],
+  ): Promise<{ ok: boolean; failedFiles: string[]; error?: string }> => {
+    const prev = stateRef.current;
+    const recordId = crypto.randomUUID();
     const newRecord: DailyRecord = {
       ...record,
-      id: crypto.randomUUID(),
+      id: recordId,
       createdAt: new Date().toISOString(),
     };
 
-    if (!state.isDemoMode && state.authenticatedUser) {
-      const coupleId = state.profile.couple.coupleId;
-      if (!coupleId) {
-        console.error('Cannot save record without an active couple.');
-        return false;
-      }
+    // Demo / offline: keep session-only preview URLs. These are deliberately not
+    // persisted (see saveState) so a reload never shows a broken image.
+    if (prev.isDemoMode || !prev.authenticatedUser) {
+      const previews: Attachment[] = files.map((file) => {
+        const classified = classifyMediaFile(file);
+        return {
+          type: 'error' in classified ? 'photo' : classified.type,
+          name: file.name,
+          url: URL.createObjectURL(file),
+        };
+      });
+      const demoRecord: DailyRecord = {
+        ...newRecord,
+        attachments: [...(newRecord.attachments || []), ...previews],
+      };
+      setState((current) => ({ ...current, records: [...current.records, demoRecord] }));
+      return { ok: true, failedFiles: [] };
+    }
 
+    const coupleId = prev.profile.couple.coupleId;
+    if (!coupleId) {
+      return {
+        ok: false,
+        failedFiles: files.map((f) => f.name),
+        error: '커플 공간이 연결된 뒤에 기록을 남길 수 있어요.',
+      };
+    }
+    const userId = prev.authenticatedUser.id;
+
+    // Phase 1: persist the row so the storage policy can authorise the uploads.
+    try {
+      const saved = await saveRecordToDB(newRecord, coupleId, userId);
+      if (!saved) {
+        return { ok: false, failedFiles: files.map((f) => f.name), error: '기록을 저장하지 못했어요.' };
+      }
+    } catch (error) {
+      console.error('[gomsinlog] Failed to save record:', error);
+      return { ok: false, failedFiles: files.map((f) => f.name), error: '기록을 저장하지 못했어요.' };
+    }
+
+    // Phase 2: upload the files.
+    const attachments: Attachment[] = [...(newRecord.attachments || [])];
+    const failedFiles: string[] = [];
+    for (const file of files) {
+      const result = await uploadRecordMedia(file, coupleId, recordId);
+      if ('error' in result) {
+        failedFiles.push(file.name);
+        console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
+        continue;
+      }
+      attachments.push(result.attachment);
+    }
+
+    let finalRecord: DailyRecord = { ...newRecord, attachments };
+
+    // Phase 3: patch the row with attachment metadata.
+    if (attachments.length > 0) {
       try {
-        const saved = await saveRecordToDB(newRecord, coupleId, state.authenticatedUser.id);
-        if (!saved) return false;
+        const patched = await saveRecordToDB(finalRecord, coupleId, userId);
+        if (!patched) {
+          // The text is already safe on the server; drop the orphaned objects so
+          // the bucket does not accumulate files no record points at.
+          await removeRecordMedia(attachments.map((a) => a.path).filter(Boolean) as string[]);
+          failedFiles.push(...files.map((f) => f.name));
+          finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
+        }
       } catch (error) {
-        console.error('Failed to save record:', error);
-        return false;
+        console.error('[gomsinlog] Failed to attach media to record:', error);
+        await removeRecordMedia(attachments.map((a) => a.path).filter(Boolean) as string[]);
+        failedFiles.push(...files.map((f) => f.name));
+        finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
       }
     }
 
-    setState((prev) => ({
-      ...prev,
-      records: [...prev.records, newRecord],
-    }));
-    return true;
+    // Make the freshly uploaded files viewable right away.
+    if (finalRecord.attachments && finalRecord.attachments.length > 0) {
+      finalRecord = {
+        ...finalRecord,
+        attachments: await resolveAttachmentUrls(finalRecord.attachments),
+      };
+    }
+
+    setState((current) => ({ ...current, records: [...current.records, finalRecord] }));
+    return { ok: true, failedFiles: Array.from(new Set(failedFiles)) };
   };
 
   const updateRecord = async (id: string, updates: Partial<DailyRecord>): Promise<boolean> => {
@@ -903,6 +1019,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         isReady: isHydrated && isAuthChecked,
         updateProfile,
         addRecord,
+        addRecordWithMedia,
         updateRecord,
         deleteRecord,
         addEvent,

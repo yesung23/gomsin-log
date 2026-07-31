@@ -1,28 +1,37 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '@/lib/store';
-import { Camera, Image as ImageIcon, Send, Lock, Unlock, Check, Heart } from 'lucide-react';
+import {
+  Camera, Image as ImageIcon, Send, Lock, Unlock, Check, Heart,
+  Mic, Square, X, Film, Music,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
-import type { ReactionType, Attachment, EmotionFlowItem } from '@/types';
+import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
+import type { ReactionType, EmotionFlowItem } from '@/types';
 
 export function TodayLogWidget() {
-  const { state, addRecord } = useStore();
+  const { state, addRecordWithMedia } = useStore();
   const partnerName = state.profile.couple.partnerName || '파트너';
   const todayStr = toLocalDateString(localToday());
 
   const [log, setLog] = useState('');
   const [reaction, setReaction] = useState<ReactionType | undefined>(undefined);
   const [isPrivate, setIsPrivate] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  /** Files chosen but not yet uploaded; upload happens on save. */
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showInputCard, setShowInputCard] = useState(false);
-  const [inputType, setInputType] = useState<'text' | 'photo' | 'instant'>('text');
   const [isSaving, setIsSaving] = useState(false);
-  
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+
   // State for rule-suggested confirmed IDs
   const [confirmedItemIds, setConfirmedItemIds] = useState<string[]>([]);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = React.useRef<Blob[]>([]);
+  const recordTimerRef = React.useRef<number | null>(null);
 
   const [debouncedLog, setDebouncedLog] = useState('');
 
@@ -39,39 +48,152 @@ export function TodayLogWidget() {
     return recommendEmotionFlow(debouncedLog, undefined, { isPrivate });
   }, [debouncedLog, isPrivate]);
 
+  const MAX_ATTACHMENTS = 4;
+
   const handleOpenInput = (type: 'text' | 'photo' | 'instant') => {
-    setInputType(type);
     setShowInputCard(true);
-    if (type !== 'text') {
-      setTimeout(() => {
-         if (fileInputRef.current) {
-           fileInputRef.current.accept = 'image/*';
-           if (type === 'instant') {
-             fileInputRef.current.setAttribute('capture', 'environment');
-           } else {
-             fileInputRef.current.removeAttribute('capture');
-           }
-           fileInputRef.current.click();
-         }
-      }, 50);
-    }
+    if (type === 'text') return;
+
+    setTimeout(() => {
+      const input = fileInputRef.current;
+      if (!input) return;
+      // 'instant' opens the camera directly; 'photo' opens the gallery and also
+      // allows videos.
+      input.accept = type === 'instant' ? 'image/*,video/*' : MEDIA_ACCEPT;
+      if (type === 'instant') input.setAttribute('capture', 'environment');
+      else input.removeAttribute('capture');
+      input.click();
+    }, 50);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    if (state.isDemoMode || !state.profile.couple.coupleId) {
-       const url = URL.createObjectURL(file);
-       setAttachments(prev => [...prev, { type: 'photo', name: file.name, url }]);
-       toast.success('사진이 추가되었습니다 (데모).');
-       return;
+    const selected = Array.from(e.target.files || []);
+    // Reset immediately so picking the same file twice still fires onChange.
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (selected.length === 0) return;
+
+    const accepted: File[] = [];
+    for (const file of selected) {
+      if (pendingFiles.length + accepted.length >= MAX_ATTACHMENTS) {
+        toast.info(`첨부는 한 번에 ${MAX_ATTACHMENTS}개까지 가능해요.`);
+        break;
+      }
+      const classified = classifyMediaFile(file);
+      if ('error' in classified) {
+        toast.error(`${file.name}: ${classified.error}`);
+        continue;
+      }
+      accepted.push(file);
     }
 
-    // Secured storage requires a persisted record ID before file upload.
-    toast.info('사진 첨부는 안전한 저장 방식으로 준비 중이에요. 지금은 글 기록을 이용해 주세요.');
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (accepted.length > 0) {
+      setPendingFiles((prev) => [...prev, ...accepted]);
+    }
   };
+
+  const removePendingFile = (index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  /** Pick a recording MIME type this browser actually supports. */
+  const pickAudioMimeType = (): string | undefined => {
+    if (typeof MediaRecorder === 'undefined') return undefined;
+    const candidates = ['audio/webm', 'audio/mp4', 'audio/ogg'];
+    return candidates.find((type) => MediaRecorder.isTypeSupported(type));
+  };
+
+  const stopRecordingTimer = () => {
+    if (recordTimerRef.current !== null) {
+      window.clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+  };
+
+  const handleStartRecording = async () => {
+    if (isRecording) return;
+    if (typeof navigator.mediaDevices?.getUserMedia !== 'function' || typeof MediaRecorder === 'undefined') {
+      toast.error('이 기기에서는 음성 녹음을 지원하지 않아요.');
+      return;
+    }
+
+    const mimeType = pickAudioMimeType();
+    if (!mimeType) {
+      toast.error('이 브라우저에서는 음성 녹음을 지원하지 않아요.');
+      return;
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      console.error('[gomsinlog] Microphone permission denied:', error);
+      toast.error('마이크 권한이 필요해요. 브라우저 설정에서 허용해 주세요.');
+      return;
+    }
+
+    recordedChunksRef.current = [];
+    const recorder = new MediaRecorder(stream, { mimeType });
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) recordedChunksRef.current.push(event.data);
+    };
+
+    recorder.onstop = () => {
+      stopRecordingTimer();
+      // Always release the microphone, even if the blob turns out unusable.
+      stream.getTracks().forEach((track) => track.stop());
+      setIsRecording(false);
+
+      const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+      recordedChunksRef.current = [];
+      if (blob.size === 0) {
+        toast.error('녹음된 소리가 없어요. 다시 시도해 주세요.');
+        return;
+      }
+
+      const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+      const file = new File([blob], `음성기록-${Date.now()}.${ext}`, { type: mimeType });
+      const classified = classifyMediaFile(file);
+      if ('error' in classified) {
+        toast.error(classified.error);
+        return;
+      }
+      setPendingFiles((prev) =>
+        prev.length >= MAX_ATTACHMENTS ? prev : [...prev, file],
+      );
+      toast.success('음성 기록이 추가되었어요.');
+    };
+
+    recorder.start();
+    setIsRecording(true);
+    setRecordSeconds(0);
+    setShowInputCard(true);
+    recordTimerRef.current = window.setInterval(() => {
+      setRecordSeconds((s) => {
+        // Hard stop at 3 minutes so a forgotten recording cannot grow unbounded.
+        if (s + 1 >= 180) {
+          recorder.state !== 'inactive' && recorder.stop();
+          return 180;
+        }
+        return s + 1;
+      });
+    }, 1000);
+  };
+
+  const handleStopRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+  };
+
+  // Release the microphone and timer if the widget unmounts mid-recording.
+  React.useEffect(() => {
+    return () => {
+      stopRecordingTimer();
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+    };
+  }, []);
 
   const toggleConfirmSuggestion = (itemId: string) => {
     if (confirmedItemIds.includes(itemId)) {
@@ -87,8 +209,12 @@ export function TodayLogWidget() {
 
   const handlePost = async () => {
     if (isSaving) return;
-    if (!log.trim() && attachments.length === 0 && !reaction) {
-      toast.error('내용, 사진, 또는 리액션을 선택해주세요.');
+    if (isRecording) {
+      toast.info('녹음을 먼저 마쳐주세요.');
+      return;
+    }
+    if (!log.trim() && pendingFiles.length === 0 && !reaction) {
+      toast.error('내용, 첨부파일, 또는 리액션을 선택해주세요.');
       return;
     }
 
@@ -106,34 +232,44 @@ export function TodayLogWidget() {
       }));
 
     setIsSaving(true);
-    let saved = false;
+    let result: { ok: boolean; failedFiles: string[]; error?: string };
     try {
-      saved = await addRecord({
-        date: todayStr,
-        time: timeStr,
-        authorRole: state.profile.role,
-        log,
-        reaction,
-        attachments: attachments.length > 0 ? attachments : undefined,
-        isPrivate,
-        emotionFlow: userConfirmedFlow,
-        emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
-      });
+      result = await addRecordWithMedia(
+        {
+          date: todayStr,
+          time: timeStr,
+          authorRole: state.profile.role,
+          log,
+          reaction,
+          isPrivate,
+          emotionFlow: userConfirmedFlow,
+          emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
+        },
+        pendingFiles,
+      );
     } finally {
       setIsSaving(false);
     }
 
-    if (!saved) {
-      toast.error('기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+    if (!result.ok) {
+      toast.error(result.error || '기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
       return;
     }
 
     setLog('');
     setReaction(undefined);
-    setAttachments([]);
+    setPendingFiles([]);
     setConfirmedItemIds([]);
     setIsPrivate(false);
     setShowInputCard(false);
+
+    if (result.failedFiles.length > 0) {
+      // Be explicit: the text was saved, the files were not.
+      toast.warning(
+        `기록은 저장했지만 첨부 ${result.failedFiles.length}개를 올리지 못했어요. 잠시 후 다시 첨부해 주세요.`,
+      );
+      return;
+    }
     toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
   };
 
@@ -146,34 +282,58 @@ export function TodayLogWidget() {
     <div className="flex flex-col">
       <h2 className="text-lg font-bold text-foreground mb-4">오늘의 기록</h2>
       
-      {/* Gomshin 3 Main Actions: 지금찍기, 사진올리기, 한줄남기기 */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* Main actions: 지금찍기, 사진·영상, 음성, 한줄남기기 */}
+      <div className="grid grid-cols-4 gap-2">
         <button
           onClick={() => handleOpenInput('instant')}
-          className="flex flex-col items-center justify-center py-4 px-2 rounded-2xl bg-coral/15 border border-coral/30 text-coral font-bold text-sm active:scale-95 transition min-h-[60px]"
+          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-coral/15 border border-coral/30 text-coral font-bold text-xs active:scale-95 transition min-h-[60px]"
         >
-          <Camera size={22} className="mb-1" />
+          <Camera size={20} className="mb-1" />
           <span>지금찍기</span>
         </button>
 
         <button
           onClick={() => handleOpenInput('photo')}
-          className="flex flex-col items-center justify-center py-4 px-2 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-sm active:scale-95 transition min-h-[60px]"
+          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-xs active:scale-95 transition min-h-[60px]"
         >
-          <ImageIcon size={22} className="mb-1 text-muted-foreground" />
-          <span>사진올리기</span>
+          <ImageIcon size={20} className="mb-1 text-muted-foreground" />
+          <span>사진·영상</span>
+        </button>
+
+        <button
+          onClick={isRecording ? handleStopRecording : handleStartRecording}
+          aria-pressed={isRecording}
+          className={`flex flex-col items-center justify-center py-4 px-1 rounded-2xl border font-semibold text-xs active:scale-95 transition min-h-[60px] ${
+            isRecording
+              ? 'bg-destructive/15 border-destructive/40 text-destructive'
+              : 'bg-muted/60 border-border text-foreground'
+          }`}
+        >
+          {isRecording ? <Square size={20} className="mb-1" /> : <Mic size={20} className="mb-1 text-muted-foreground" />}
+          <span>
+            {isRecording
+              ? `${String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:${String(recordSeconds % 60).padStart(2, '0')}`
+              : '음성'}
+          </span>
         </button>
 
         <button
           onClick={() => handleOpenInput('text')}
-          className="flex flex-col items-center justify-center py-4 px-2 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-sm active:scale-95 transition min-h-[60px]"
+          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-xs active:scale-95 transition min-h-[60px]"
         >
-          <Send size={22} className="mb-1 text-muted-foreground" />
-          <span>한줄남기기</span>
+          <Send size={20} className="mb-1 text-muted-foreground" />
+          <span>한줄</span>
         </button>
       </div>
 
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+      <input
+        type="file"
+        ref={fileInputRef}
+        multiple
+        accept={MEDIA_ACCEPT}
+        className="hidden"
+        onChange={handleFileSelect}
+      />
 
       {/* Input Composer */}
       {showInputCard && (
@@ -197,9 +357,53 @@ export function TodayLogWidget() {
             className="w-full h-24 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />
 
-          {attachments.length > 0 && (
-            <div className="text-xs text-coral font-bold">
-              📷 {attachments.length}개의 사진 첨부됨
+          {isRecording && (
+            <div className="flex items-center gap-2 text-xs font-bold text-destructive bg-destructive/10 border border-destructive/30 rounded-xl px-3 py-2">
+              <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
+              <span>
+                녹음 중 {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:
+                {String(recordSeconds % 60).padStart(2, '0')}
+              </span>
+              <button
+                type="button"
+                onClick={handleStopRecording}
+                className="ml-auto px-2 py-1 rounded-lg bg-destructive text-destructive-foreground font-bold"
+              >
+                녹음 종료
+              </button>
+            </div>
+          )}
+
+          {pendingFiles.length > 0 && (
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold text-muted-foreground">
+                첨부 {pendingFiles.length}개 (저장할 때 업로드돼요)
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {pendingFiles.map((file, index) => {
+                  const classified = classifyMediaFile(file);
+                  const kind = 'error' in classified ? 'photo' : classified.type;
+                  return (
+                    <span
+                      key={`${file.name}-${index}`}
+                      className="flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-xl bg-muted border border-border text-[11px] font-semibold text-foreground"
+                    >
+                      {kind === 'photo' && <ImageIcon size={13} className="text-coral shrink-0" />}
+                      {kind === 'video' && <Film size={13} className="text-info shrink-0" />}
+                      {kind === 'voice' && <Music size={13} className="text-coral shrink-0" />}
+                      <span className="truncate max-w-[130px]">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removePendingFile(index)}
+                        aria-label={`${file.name} 첨부 제거`}
+                        className="text-muted-foreground hover:text-destructive shrink-0"
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
 

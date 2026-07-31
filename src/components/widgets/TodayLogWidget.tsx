@@ -173,7 +173,7 @@ export function TodayLogWidget() {
       setRecordSeconds((s) => {
         // Hard stop at 3 minutes so a forgotten recording cannot grow unbounded.
         if (s + 1 >= 180) {
-          recorder.state !== 'inactive' && recorder.stop();
+          if (recorder.state !== 'inactive') recorder.stop();
           return 180;
         }
         return s + 1;

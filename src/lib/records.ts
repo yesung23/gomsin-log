@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { emotionFlowForStorage } from '@/lib/privacy';
 import { DailyRecord, Role, Attachment } from '@/types';
 
 // ==========================================
@@ -78,9 +79,17 @@ export async function saveRecordToDB(record: DailyRecord, coupleId: string, user
       record_time: record.time,
       log_text: record.log,
       reaction: record.reaction || null,
-      attachments: record.attachments || [],
+      // Never persist the signed URL: it expires, and `path` is the durable
+      // reference we re-sign on every read.
+      attachments: (record.attachments || []).map((att) => ({
+        type: att.type,
+        name: att.name,
+        path: att.path,
+      })),
       is_private: record.isPrivate,
-      emotion_flow: record.emotionFlow || [],
+      // Author-only emotion items must not travel inside a shared row, because
+      // the partner is allowed to read that row.
+      emotion_flow: emotionFlowForStorage(record),
       emotion_updated_at: record.emotionUpdatedAt || null,
       updated_at: new Date().toISOString(),
     });

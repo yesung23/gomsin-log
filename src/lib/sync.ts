@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { AppState, UserProfile, CoupleInfo, MilitaryInfo, ContactPreferences, DailyRecord, CoupleEvent, Trip } from '@/types';
+import { AppState, UserProfile, CoupleInfo, MilitaryInfo, ContactPreferences, DailyRecord, CoupleEvent, Trip, Role } from '@/types';
 import { fetchRecordsFromDB } from '@/lib/records';
+import { visibleRecordsForViewer } from '@/lib/privacy';
 import { fetchEventsFromDB } from '@/lib/events';
 import { fetchTripsFromDB } from '@/lib/trips';
 
@@ -98,12 +99,17 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
     let trips: Trip[] = [];
     if (couple.coupleId) {
       const rawRecords = await fetchRecordsFromDB(couple.coupleId);
-      // Map authorRole based on userId
-      records = rawRecords.map(r => ({
-        ...r,
-        authorRole: r.userId === userId ? profile.role : (profile.role === 'gomsin' ? 'soldier' : 'gomsin'),
-      }));
-      
+      const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
+      // Map authorRole based on userId, then drop anything this viewer is not
+      // entitled to see (defence in depth on top of RLS).
+      records = visibleRecordsForViewer(
+        rawRecords.map((r) => ({
+          ...r,
+          authorRole: r.userId === userId ? profile.role : partnerRole,
+        })),
+        { userId, role: profile.role },
+      );
+
       events = await fetchEventsFromDB(couple.coupleId);
       trips = await fetchTripsFromDB(); // it uses session for user
     }

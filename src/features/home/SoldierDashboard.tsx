@@ -11,20 +11,20 @@ import { useNavigate } from 'react-router-dom';
 import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
+import { isOwnRecord } from '@/lib/privacy';
 
 export function SoldierDashboard() {
   const { state, setHighlightedRecordId } = useStore();
   const navigate = useNavigate();
   const { profile, records } = state;
   const partnerName = profile.couple.partnerName || '상대방';
+  const viewer = { userId: profile.id, role: profile.role };
 
-  // Get today's shared records
+  // What the partner shared with me today.
   const todayStr = toLocalDateString(localToday());
   const sharedRecords = records.filter(
     (record) =>
-      record.date === todayStr &&
-      record.authorRole !== profile.role &&
-      !record.isPrivate,
+      record.date === todayStr && !isOwnRecord(record, viewer) && !record.isPrivate,
   );
 
   const dailySummary = generateDailySummary(sharedRecords, partnerName);
@@ -32,7 +32,7 @@ export function SoldierDashboard() {
 
   // My own records for today, so the count reflects what I actually wrote.
   const myTodayRecords = records.filter(
-    (record) => record.date === todayStr && record.authorRole === profile.role,
+    (record) => record.date === todayStr && isOwnRecord(record, viewer),
   );
 
   // Describe what the partner actually shared. The previous version rendered a

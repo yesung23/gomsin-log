@@ -155,6 +155,95 @@ SELECT has_table_privilege('authenticated','public.collaboration_invalidations',
 테이블을 제거하면 데이터가 사라질 수 있습니다. 상세 주석은 migration 014 하단과
 `docs/kiro/ROLLBACK_GUIDE.md`를 따르세요.
 
+### 2-5. 마이그레이션 015 적용 (반드시 014 다음)
+
+`015_security_followup.sql`은 013·014에서 남은 보안 구멍과 경합을 막습니다.
+**이 마이그레이션은 초대 연결 기능의 선행 조건입니다** — 현재 앱은 015의 새 응답
+형태만 받아들이므로, 015 없이는 초대 코드 입력이 거부됩니다(의도된 fail closed).
+
+> ⚠️ **먼저 이 쿼리를 돌리세요.** 결과가 한 줄이라도 나오면 015는 실패합니다.
+> (일부러 그렇게 만들었습니다. 잘못된 주소를 조용히 버리지 않기 위해서입니다.)
+>
+> ```sql
+> SELECT id, trip_id, title, url
+> FROM public.trip_items
+> WHERE url IS NOT NULL
+>   AND NOT (
+>     char_length(url) <= 2048
+>     AND url ~* '^https?://[^/?#[:space:]]+([/?#][^[:space:]]*)?$'
+>   );
+> ```
+>
+> 나온 행의 `url` 을 올바른 `http(s)` 주소로 고치거나 비우고(`NULL`) 다시 시도하세요.
+
+1. staging SQL Editor에 파일 전체를 붙여넣고 Run
+2. 아래 검증 쿼리 실행
+3. **Settings → API → "Reload schema cache" 를 누르세요.**
+   015가 `redeem_invitation` 의 응답 형태를 바꾸기 때문에, 이걸 하지 않으면
+   앱이 예전 형태로 보고 초대 연결을 거부합니다.
+4. `supabase functions deploy delete-account` (아래 5번 항목) 를 015 **이후에** 실행
+5. `MANUAL_TWO_ACCOUNT_TEST.md` 통과
+6. 그 다음에만 production에서 1~4를 반복
+
+```sql
+-- 1) 초대 제한 우회 경로가 닫혔는지 (false 여야 함)
+SELECT has_function_privilege('authenticated','public.consume_invitation(text)','EXECUTE');
+
+-- 2) redeem_invitation 이 새 형태(jsonb)인지
+SELECT pg_catalog.format_type(prorettype, NULL)
+FROM pg_proc WHERE proname = 'redeem_invitation';
+-- 기대: jsonb
+
+-- 3) 계정 삭제 RPC 3개는 앱에서 호출 불가 (모두 false)
+SELECT has_function_privilege('authenticated','public.begin_account_deletion(uuid,uuid[])','EXECUTE');
+SELECT has_function_privilege('authenticated','public.prepare_account_deletion(uuid,uuid[])','EXECUTE');
+SELECT has_function_privilege('authenticated','public.cancel_account_deletion(uuid)','EXECUTE');
+
+-- 4) events 가 Realtime 목록에서 빠졌는지 (0 행이어야 함)
+--    비공개 일정을 지운 "시각"이 상대에게 전달되는 통로였습니다.
+SELECT tablename FROM pg_publication_tables
+WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'events';
+
+-- 5) 대신 쓰는 무효화 통로는 남아 있어야 함 (1 행)
+SELECT tablename FROM pg_publication_tables
+WHERE pubname = 'supabase_realtime' AND schemaname = 'public'
+  AND tablename = 'collaboration_invalidations';
+
+-- 6) 제약/인덱스 생성 확인
+SELECT conname FROM pg_constraint
+WHERE conname IN ('trip_items_http_url_check','trip_items_unique_day_order');
+-- 2 행
+SELECT indexname FROM pg_indexes
+WHERE indexname = 'idx_invitation_codes_one_unused_hash';
+-- 1 행
+
+-- 7) 사용되지 않은 초대 해시가 중복되지 않는지 (0 행)
+SELECT code_hash, count(*) FROM public.invitation_codes
+WHERE used = false GROUP BY code_hash HAVING count(*) > 1;
+```
+
+하나라도 다르면 production에 적용하지 말고 오류·결과를 보존하세요.
+
+#### 015에서 사람이 직접 확인해야 하는 것
+
+코드만 봐서는 알 수 없어 실제 프로젝트에서만 확인되는 항목입니다. 스테이징에서
+이 4가지를 반드시 눈으로 확인하세요.
+
+1. **계정 삭제가 권한 오류 없이 끝나는지.** 삭제 준비 단계에서 Storage 테이블을
+   잠깐 잠그는데, 그 권한이 없으면 `42501` 오류로 실패합니다(데이터는 안전).
+2. **A가 "나만 보기" 일정을 지웠을 때 B 화면이 반응하지 않는지.**
+3. **같은 날 여행 항목 두 개의 순서를 서로 바꿀 때** 오류 없이 저장되는지.
+4. **여행 항목의 제목만 수정해도** 저장되는지 (순서 관련 오류가 나오면 안 됩니다).
+
+#### 015 롤백 원칙
+
+상세 순서는 migration 015 파일 하단에 있습니다. 두 가지만 특별히 주의하세요.
+
+- **`consume_invitation` 의 앱 실행 권한은 되돌리지 마세요.** 그것만 되돌려도
+  초대코드 무차별 대입 제한이 통째로 우회됩니다.
+- 015를 되돌리면 앱도 이전 버전으로 함께 되돌려야 합니다. 현재 앱은 015의
+  새 응답 형태만 받아들입니다.
+
 ---
 
 ## 3. Storage(사진·영상·음성 저장소) 확인
@@ -211,6 +300,10 @@ gomsinlog://auth/callback
 
 **이것을 하지 않으면 "계정 삭제" 버튼이 실패합니다.**
 
+> ⚠️ **마이그레이션 015보다 먼저 배포하지 마세요.** 이 함수는 015가 만드는
+> `begin/prepare/cancel_account_deletion` 을 호출합니다. 순서가 뒤바뀌면 삭제가
+> 실패합니다(데이터는 지워지지 않습니다).
+
 이 단계만은 컴퓨터에서 명령어를 입력해야 합니다. 개발자에게 아래를 전달하세요.
 
 ```bash
@@ -254,10 +347,15 @@ VITE_SUPABASE_PUBLISHABLE_KEY=<anon / publishable 키>
 ## 7. 마지막 확인
 
 - [ ] 백업 완료
+- [ ] `trip_items.url` 탐지 쿼리 결과 0 행 (015 실패 예방)
 - [ ] 013 스테이징 적용 + 검증 통과
 - [ ] 014 스테이징 적용 + 2계정/RLS/Realtime 검증 통과
+- [ ] 015 스테이징 적용 + 검증 통과 + 사람 확인 4항목 통과
+- [ ] 스테이징 schema cache 재적재 후 초대 코드 연결 성공 확인
 - [ ] 013 운영 적용 + 검증 통과
 - [ ] 014 운영 적용 + 검증 통과
+- [ ] 015 운영 적용 + 검증 통과
+- [ ] 운영 schema cache 재적재 (안 하면 초대 연결이 거부됩니다)
 - [ ] `couple-media` 버킷 비공개 확인
 - [ ] Storage 정책 존재 확인
 - [ ] Redirect URLs 3개 등록 (`gomsinlog://` 포함)

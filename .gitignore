@@ -22,3 +22,7 @@ keystore.properties
 
 # TypeScript incremental build cache (build artifact)
 *.tsbuildinfo
+
+# Scratch output from review tooling. Conclusions that matter are written into
+# docs/kiro/RELEASE_AUDIT_2026-07-31.md instead.
+/semantic-review

@@ -897,11 +897,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         { event: '*', schema: 'public', table: 'daily_records', filter: `couple_id=eq.${coupleId}` },
         () => scheduleRefresh('records'),
       )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'events', filter: `couple_id=eq.${coupleId}` },
-        () => scheduleRefresh('events'),
-      )
+      // No direct `events` subscription. Realtime does not apply RLS to DELETE
+      // payloads, so subscribing to the table told the partner exactly when the
+      // author deleted a *private* schedule. Migration 015 removes events from
+      // the publication and routes shared-event changes through
+      // collaboration_invalidations, which is filtered server-side.
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'trips', filter: `couple_id=eq.${coupleId}` },

@@ -72,6 +72,21 @@ export async function saveCoupleAnniversary(coupleId: string, anniversaryDate: s
   return true;
 }
 
+/** Draws before giving up on finding a code hash that is not already in use. */
+const INVITATION_CODE_ATTEMPTS = 5;
+
+/**
+ * Did the unused-code-hash uniqueness index reject this issuance?
+ *
+ * Migration 015 keeps at most one unused hash so a redeemer can never be routed
+ * to the wrong couple. The trade-off is that issuing a code can collide, which
+ * is retryable rather than an error worth showing anyone.
+ */
+function isInvitationCodeCollision(error: { code?: string; message?: string }): boolean {
+  return error.code === '23505'
+    || (error.message || '').includes('idx_invitation_codes_one_unused_hash');
+}
+
 /**
  * Create a new couple in Supabase and generate invitation code via RPC.
  */
@@ -87,24 +102,36 @@ export async function createCoupleInvitation(role: Role): Promise<{ coupleId: st
       return { coupleId: '', code: '', error: '인증되지 않은 사용자입니다. 로그인 후 다시 시도해주세요.' };
     }
 
-    const code = generateInvitationCode();
-    const codeHash = await hashInvitationCode(code);
+    // Only one unused code hash may exist at a time, so a six-digit code that
+    // happens to match another couple's outstanding invitation is rejected.
+    // The server cannot pick a different code -- it only ever sees the hash --
+    // so drawing again is the client's job.
+    for (let attempt = 1; attempt <= INVITATION_CODE_ATTEMPTS; attempt += 1) {
+      const code = generateInvitationCode();
+      const codeHash = await hashInvitationCode(code);
 
-    // Call atomic SECURITY DEFINER RPC to create couple, member, and invitation
-    const { data: coupleIdData, error: rpcError } = await supabase.rpc('create_couple_and_invitation', {
-      p_role: role,
-      p_code_hash: codeHash,
-    });
+      // Atomic SECURITY DEFINER RPC creating couple, member and invitation.
+      const { data: coupleIdData, error: rpcError } = await supabase.rpc('create_couple_and_invitation', {
+        p_role: role,
+        p_code_hash: codeHash,
+      });
 
-    if (rpcError) {
+      if (!rpcError) return { coupleId: coupleIdData as string, code };
+      if (isInvitationCodeCollision(rpcError) && attempt < INVITATION_CODE_ATTEMPTS) continue;
+      if (isInvitationCodeCollision(rpcError)) {
+        return {
+          coupleId: '',
+          code: '',
+          error: '초대 코드를 발급하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        };
+      }
       return {
         coupleId: '',
         code: '',
         error: rpcError.message || '커플 공간 생성에 실패했습니다.',
       };
     }
-
-    return { coupleId: coupleIdData as string, code };
+    return { coupleId: '', code: '', error: '커플 공간 생성에 실패했습니다.' };
   } catch (err: any) {
     return { coupleId: '', code: '', error: err?.message || '초대 코드 생성 중 오류가 발생했습니다.' };
   }
@@ -172,6 +199,9 @@ function invitationErrorMessage(errorCode: string | null): string {
     case 'invalid_or_expired':
     case 'invalid_request':
       return '유효하지 않거나 만료된 초대 코드입니다. (유효기간: 24시간)';
+    // Migration 015 no longer returns this: telling the caller the space was
+    // full confirmed that their guessed hash matched a live invitation. Kept so
+    // a project still on 013 during a deploy window stays readable.
     case 'couple_full':
       return '이미 2명이 참여한 커플 공간입니다.';
     case 'already_connected':
@@ -252,11 +282,12 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
 export async function regenerateCoupleInvitation(): Promise<{ code?: string; error?: string }> {
   if (!supabase) return { code: generateInvitationCode() };
 
-  const code = generateInvitationCode();
   try {
-    const codeHash = await hashInvitationCode(code);
-    const { error } = await supabase.rpc('regenerate_invitation', { p_code_hash: codeHash });
-    if (error) {
+    for (let attempt = 1; attempt <= INVITATION_CODE_ATTEMPTS; attempt += 1) {
+      const code = generateInvitationCode();
+      const codeHash = await hashInvitationCode(code);
+      const { error } = await supabase.rpc('regenerate_invitation', { p_code_hash: codeHash });
+      if (!error) return { code };
       // PGRST202 = the function is not deployed on this project yet.
       if (error.code === 'PGRST202') {
         return {
@@ -270,10 +301,14 @@ export async function regenerateCoupleInvitation(): Promise<{ code?: string; err
       if ((error.message || '').includes('already connected')) {
         return { error: '이미 두 사람이 연결되어 있어 초대 코드가 필요하지 않습니다.' };
       }
-      console.error('[gomsinlog] regenerate_invitation failed:', error);
+      // A collided draw is retryable; anything else is not.
+      if (isInvitationCodeCollision(error) && attempt < INVITATION_CODE_ATTEMPTS) continue;
+      if (!isInvitationCodeCollision(error)) {
+        console.error('[gomsinlog] regenerate_invitation failed:', error);
+      }
       return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
     }
-    return { code };
+    return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
   } catch (err: any) {
     console.error('[gomsinlog] regenerate_invitation threw:', err);
     return { error: '초대 코드 재발급 중 오류가 발생했습니다.' };

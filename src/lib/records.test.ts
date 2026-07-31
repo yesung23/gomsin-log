@@ -1,10 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   classifyMediaFile,
   buildMediaPath,
   MAX_BYTES,
   MEDIA_ACCEPT,
+  isCanonicalRecordMediaPath,
+  deleteRecordFromDB,
 } from '@/lib/records';
+
+const { mockFrom, mockSupabase } = vi.hoisted(() => {
+  const mockFrom = vi.fn();
+  const mockSupabase = { from: mockFrom };
+  return { mockFrom, mockSupabase };
+});
+
+vi.mock('@/lib/supabase', () => ({
+  supabase: mockSupabase,
+  isSupabaseConfigured: true,
+}));
 
 describe('classifyMediaFile', () => {
   it('classifies allowed photo types', () => {
@@ -107,5 +120,114 @@ describe('MEDIA_ACCEPT', () => {
     expect(MEDIA_ACCEPT).toContain('image/');
     expect(MEDIA_ACCEPT).toContain('video/');
     expect(MEDIA_ACCEPT).toContain('audio/');
+  });
+});
+
+describe('isCanonicalRecordMediaPath', () => {
+  const couple = 'couple-abc';
+  const record = 'record-123';
+
+  it('accepts a valid 3-segment path', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/file.jpg`, couple, record)).toBe(true);
+  });
+
+  it('accepts a filename containing a UUID', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/a1b2c3d4-e5f6.png`, couple, record)).toBe(true);
+  });
+
+  it('accepts a filename with dots and dashes', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/photo-2026.01.31.webp`, couple, record)).toBe(true);
+  });
+
+  it('rejects a 4-segment (nested) path', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/nested/file.jpg`, couple, record)).toBe(false);
+  });
+
+  it('rejects a 2-segment (insufficient) path', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/file.jpg`, couple, record)).toBe(false);
+  });
+
+  it('rejects when couple ID does not match', () => {
+    expect(isCanonicalRecordMediaPath(`wrong-couple/${record}/file.jpg`, couple, record)).toBe(false);
+  });
+
+  it('rejects when record ID does not match', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/wrong-record/file.jpg`, couple, record)).toBe(false);
+  });
+
+  it('rejects an empty filename', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/`, couple, record)).toBe(false);
+  });
+
+  it('rejects a filename starting with a dot', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/.hidden`, couple, record)).toBe(false);
+  });
+
+  it('rejects a filename containing a slash', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/a/b`, couple, record)).toBe(false);
+  });
+
+  it('rejects an external URL', () => {
+    expect(isCanonicalRecordMediaPath('https://evil.com/tracker.gif', couple, record)).toBe(false);
+  });
+
+  it('rejects undefined path', () => {
+    expect(isCanonicalRecordMediaPath(undefined, couple, record)).toBe(false);
+  });
+
+  it('rejects null path', () => {
+    expect(isCanonicalRecordMediaPath(null, couple, record)).toBe(false);
+  });
+
+  it('rejects numeric path', () => {
+    expect(isCanonicalRecordMediaPath(123, couple, record)).toBe(false);
+  });
+
+  it('rejects when coupleId is empty string', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/file.jpg`, '', record)).toBe(false);
+  });
+
+  it('rejects when recordId is empty string', () => {
+    expect(isCanonicalRecordMediaPath(`${couple}/${record}/file.jpg`, couple, '')).toBe(false);
+  });
+});
+
+describe('deleteRecordFromDB', () => {
+  const recordId = 'rec-001';
+  const userId = 'user-001';
+  const coupleId = 'couple-001';
+
+  it('calls .from(daily_records).delete().eq(id).eq(user_id).eq(couple_id).select(id).maybeSingle()', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: recordId }, error: null });
+    const select = vi.fn().mockReturnValue({ maybeSingle });
+    const eqCoupleId = vi.fn().mockReturnValue({ select });
+    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
+    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
+    const del = vi.fn().mockReturnValue({ eq: eqId });
+    mockFrom.mockReturnValue({ delete: del });
+
+    const result = await deleteRecordFromDB(recordId, userId, coupleId);
+
+    expect(result).toBe(true);
+    expect(mockFrom).toHaveBeenCalledWith('daily_records');
+    expect(eqId).toHaveBeenCalledWith('id', recordId);
+    expect(eqUserId).toHaveBeenCalledWith('user_id', userId);
+    expect(eqCoupleId).toHaveBeenCalledWith('couple_id', coupleId);
+    expect(select).toHaveBeenCalledWith('id');
+    expect(maybeSingle).toHaveBeenCalled();
+  });
+
+  it('returns false when no row is returned', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    const select = vi.fn().mockReturnValue({ maybeSingle });
+    const eqCoupleId = vi.fn().mockReturnValue({ select });
+    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
+    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
+    const del = vi.fn().mockReturnValue({ eq: eqId });
+    mockFrom.mockReturnValue({ delete: del });
+
+    const result = await deleteRecordFromDB(recordId, userId, coupleId);
+
+    expect(result).toBe(false);
   });
 });

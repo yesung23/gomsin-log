@@ -2,7 +2,13 @@ import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { useStore } from '@/lib/store';
-import { authRepository, createCoupleInvitation, consumeCoupleInvitation, supabase } from '@/lib/supabase';
+import {
+  authRepository,
+  createCoupleInvitation,
+  consumeCoupleInvitation,
+  saveCoupleAnniversary,
+  supabase,
+} from '@/lib/supabase';
 import { toast } from 'sonner';
 import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { addMonths } from '@/lib/utils';
@@ -29,6 +35,8 @@ export function OnboardingPage() {
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [joinedPartnerName, setJoinedPartnerName] = useState('');
+  const [isFinishing, setIsFinishing] = useState(false);
   const [anniversary, setAnniversary] = useState('');
   const [skipAnniversary, setSkipAnniversary] = useState(false);
 
@@ -97,21 +105,27 @@ export function OnboardingPage() {
         }
       } else if (spaceMode === 'join') {
         const cleanCode = inviteCodeInput.trim();
-        if (cleanCode.length !== 6) {
-          toast.error('6자리 초대 코드를 입력해 주세요.');
+        if (!/^\d{6}$/.test(cleanCode)) {
+          toast.error('숫자 6자리 초대 코드를 입력해 주세요.');
           return;
         }
         setIsVerifyingCode(true);
         const res = await consumeCoupleInvitation(cleanCode);
-        setIsVerifyingCode(false);
         if (res.error) {
+          setIsVerifyingCode(false);
           toast.error(res.error);
           return;
         }
         if (res.coupleId) {
           setCreatedCoupleId(res.coupleId);
+          // Read the real partner name instead of inventing one.
+          if (supabase) {
+            const { data: partnerRows } = await supabase.rpc('get_partner_profile');
+            if (partnerRows?.[0]?.display_name) setJoinedPartnerName(partnerRows[0].display_name);
+          }
           toast.success('커플 공간 연결 성공!');
         }
+        setIsVerifyingCode(false);
       }
     }
 
@@ -177,59 +191,94 @@ export function OnboardingPage() {
   };
 
   const finishSetup = async () => {
+    if (isFinishing) return;
     const nowIso = new Date().toISOString();
-    const finalNickname = nickname || (role === 'gomsin' ? '춘향' : '몽룡');
+    const finalNickname = nickname.trim();
+    if (finalNickname.length < 2) {
+      toast.error('닉네임을 2자 이상 입력해 주세요.');
+      setStep(2);
+      return;
+    }
 
-    // Update Local/Global store state
+    const anniversaryDate = skipAnniversary ? undefined : anniversary || undefined;
+    const military = {
+      branch,
+      militaryStatus,
+      enlistmentDate:
+        role === 'soldier' && militaryStatus !== 'unknown' ? enlistmentDate : undefined,
+      expectedDischargeDate:
+        role === 'soldier' && militaryStatus !== 'unknown' ? expectedDischargeDate : undefined,
+      dischargeDateSource,
+      memo: '',
+    };
+    const contact = { weekdayStart, weekdayEnd, weekendStart, weekendEnd, enabled: true };
+
+    setIsFinishing(true);
+
+    // Persist to the server FIRST. Previously the client marked onboarding as
+    // complete even when the write failed, so the next login sent the user
+    // straight back through onboarding.
+    if (supabase && state.authenticatedUser && !state.isDemoMode) {
+      const userId = state.authenticatedUser.id;
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: userId,
+        display_name: finalNickname,
+        role,
+        military_info: military,
+        onboarding_completed_at: nowIso,
+        updated_at: nowIso,
+      });
+
+      if (profileError) {
+        console.error('[Onboarding] Profile save failed:', profileError);
+        setIsFinishing(false);
+        toast.error('프로필을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+        return;
+      }
+
+      const { error: contactError } = await supabase.from('contact_preferences').upsert({
+        user_id: userId,
+        weekday_start: weekdayStart,
+        weekday_end: weekdayEnd,
+        weekend_start: weekendStart,
+        weekend_end: weekendEnd,
+      });
+      if (contactError) {
+        // Non-blocking: contact hours are editable later from settings.
+        console.error('[Onboarding] Contact preferences save failed:', contactError);
+      }
+
+      if (createdCoupleId && anniversaryDate) {
+        await saveCoupleAnniversary(createdCoupleId, anniversaryDate);
+      }
+    }
+
+    // Only now mirror it into local state.
     updateProfile({
       myName: finalNickname,
       role,
       onboardingCompletedAt: nowIso,
       couple: {
+        ...state.profile.couple,
         coupleId: createdCoupleId || undefined,
-        partnerName: role === 'gomsin' ? '몽룡' : '춘향',
-        anniversaryDate: skipAnniversary ? undefined : (anniversary || '2024-02-14'),
-        coupleCode: createdInviteCode || inviteCodeInput || '123456',
+        // No invented partner name: it is filled in for real once the partner joins.
+        partnerName: joinedPartnerName || '',
+        anniversaryDate,
+        // Only the space creator holds a shareable code.
+        coupleCode: spaceMode === 'create' ? createdInviteCode : '',
         connected: spaceMode === 'join',
         status: spaceMode === 'join' ? 'active' : 'pending',
       },
-      military: {
-        branch,
-        militaryStatus,
-        enlistmentDate: role === 'soldier' && militaryStatus !== 'unknown' ? enlistmentDate : undefined,
-        expectedDischargeDate: role === 'soldier' && militaryStatus !== 'unknown' ? expectedDischargeDate : undefined,
-        dischargeDateSource,
-        memo: '',
-      },
-      contact: {
-        weekdayStart,
-        weekdayEnd,
-        weekendStart,
-        weekendEnd,
-        enabled: true,
-      },
+      military,
+      contact,
     });
 
-    // If Supabase client & authenticated user present, upsert user profile to DB
-    if (supabase && state.authenticatedUser) {
-      try {
-        await supabase.from('profiles').upsert({
-          id: state.authenticatedUser.id,
-          display_name: finalNickname,
-          role,
-          onboarding_completed_at: nowIso,
-          updated_at: nowIso,
-        });
-      } catch (e) {
-        console.error('[Onboarding] Profile DB save error:', e);
-      }
-    }
-
+    setIsFinishing(false);
     setSetupComplete(true);
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-[oklch(0.95_0.008_85)]">
+    <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
       <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
         
         {/* Step Header (Steps 1~6) */}
@@ -276,7 +325,7 @@ export function OnboardingPage() {
 
                 <button
                   onClick={handleGoogleLogin}
-                  className="w-full h-13 py-3.5 rounded-2xl bg-white border border-border text-foreground font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
+                  className="w-full h-13 py-3.5 rounded-2xl bg-card border border-border text-foreground font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
                 >
                   <span>Google로 계속하기</span>
                 </button>
@@ -435,7 +484,7 @@ export function OnboardingPage() {
                   {spaceMode === 'create' && createdInviteCode && (
                     <div className="p-4 bg-coral/10 border border-coral/30 rounded-2xl space-y-2">
                       <div className="text-xs text-coral font-semibold">내 초대 코드 (24시간 유효)</div>
-                      <div className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-coral/20">
+                      <div className="flex items-center justify-between bg-card px-4 py-3 rounded-xl border border-coral/20">
                         <span className="font-mono text-2xl font-bold tracking-widest text-foreground">{createdInviteCode}</span>
                         <button
                           onClick={handleCopyCode}
@@ -470,10 +519,13 @@ export function OnboardingPage() {
                       <input
                         type="text"
                         value={inviteCodeInput}
-                        onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
+                        onChange={(e) => setInviteCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
                         maxLength={6}
-                        placeholder="6자리 초대 코드 입력 (예: 123456)"
-                        className="w-full h-12 px-4 rounded-xl bg-card border border-border font-mono text-center text-lg tracking-widest outline-none uppercase"
+                        placeholder="숫자 6자리 초대 코드"
+                        aria-label="숫자 6자리 초대 코드"
+                        className="w-full h-12 px-4 rounded-xl bg-card border border-border text-foreground font-mono text-center text-lg tracking-widest outline-none focus:ring-2 focus:ring-coral/40"
                       />
                     </div>
                   )}
@@ -717,9 +769,14 @@ export function OnboardingPage() {
 
               <button
                 onClick={finishSetup}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[52px] shadow-md"
+                disabled={isFinishing}
+                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[52px] shadow-md disabled:opacity-60"
               >
-                {role === 'gomsin' ? '오늘의 첫 순간 남기기' : '오늘의 로그 기다리기'}
+                {isFinishing
+                  ? '저장 중...'
+                  : role === 'gomsin'
+                    ? '오늘의 첫 순간 남기기'
+                    : '오늘의 로그 기다리기'}
               </button>
             </div>
           )}

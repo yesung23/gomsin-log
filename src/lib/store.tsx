@@ -351,6 +351,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
           try {
             cachePurgedRef.current = false;
+            const authReconciliationRevision = membershipReconciliationRef.current;
             // A hanging fetch must never keep the app behind the splash spinner.
             const dbState = await withTimeout(
               fetchFullStateFromDB(sessionUser.id),
@@ -361,6 +362,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               disposed
               || sessionGenerationRef.current !== authGeneration
               || sessionUserIdRef.current !== sessionUser.id
+              || membershipReconciliationRef.current !== authReconciliationRevision
+              || workspaceRefMatches(quarantinedWorkspaceRef.current, {
+                userId: sessionUser.id,
+                coupleId: stateRef.current.profile.couple.coupleId || '',
+                generation: authGeneration,
+              })
+              || workspaceRefMatches(pendingDisconnectRef.current, {
+                userId: sessionUser.id,
+                coupleId: stateRef.current.profile.couple.coupleId || '',
+                generation: authGeneration,
+              })
             ) return;
 
             const prev = stateRef.current;
@@ -693,9 +705,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             })),
             { userId: authUserId, role },
           );
-          if (isCurrentActiveCouple()) {
+          if (isCurrentRefresh()) {
             updateStateImmediately((current) =>
-              isCurrentActiveCouple() ? { ...current, records } : current,
+              isCurrentRefresh() ? { ...current, records } : current,
             );
           }
           return;
@@ -708,18 +720,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           updateStateImmediately((current) =>
-            isCurrentActiveCouple() ? { ...current, events: result.events } : current,
+            isCurrentRefresh() ? { ...current, events: result.events } : current,
           );
           return;
         }
         const result = await fetchTripsResultFromDB(coupleId);
-        if (!isCurrentActiveCouple() || isWorkspaceQuarantined()) return;
+        if (!isCurrentRefresh()) return;
         if (!result.ok) {
           quarantineSharedAccess(workspace);
           return;
         }
         updateStateImmediately((current) =>
-          isCurrentActiveCouple()
+          isCurrentRefresh()
             ? { ...current, trips: reconcileParentTrips(result.trips) }
             : current,
         );
@@ -1292,7 +1304,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if (!isCurrentScope()) return false;
       console.error('Failed to update event:', error);
-      setState((prev) => isCurrentScope()
+      updateStateImmediately((prev) => isCurrentScope()
         ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
         : prev);
       return false;
@@ -1354,7 +1366,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (workspace && !isCurrentWorkspace(workspace)) {
         return { ok: false, reason: 'forbidden' };
       }
-      if (!result.ok) return result;
+      if (!result.ok) {
+        if (workspace) quarantineSharedAccess(workspace);
+        return result;
+      }
       updateStateImmediately((prev) => isCurrentIdentity(identity)
         && (!workspace || (isCurrentWorkspace(workspace) && stateMatchesWorkspace(prev, workspace)))
         ? { ...prev, events: result.events }
@@ -1362,6 +1377,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: true };
     } catch (error) {
       if (!isCurrentIdentity(identity)) return { ok: false, reason: 'forbidden' };
+      if (workspace) quarantineSharedAccess(workspace);
       console.error('Failed to reload events:', error);
       return { ok: false, reason: 'error' };
     }

@@ -68,17 +68,23 @@ export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'>
   };
 }
 
+export async function updateEventInDB(event: CoupleEvent): Promise<CoupleEvent | null> {
+  return saveEventToDB(event);
+}
+
 export async function deleteEventFromDB(eventId: string): Promise<boolean> {
   if (!isSupabaseConfigured || !supabase) return false;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('events')
     .delete()
-    .eq('id', eventId);
+    .eq('id', eventId)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     console.error('Failed to delete event:', error);
     return false;
   }
-  return true;
+  return !!data;
 }

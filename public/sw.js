@@ -1,12 +1,13 @@
-const CACHE_NAME = 'gomsinlog-app-shell-v1';
+const CACHE_NAME = 'gomsinlog-app-shell-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
+  '/offline.html',
   '/manifest.json',
   '/favicon.svg',
 ];
 
-// Install: Cache essential app shell
+// Install: Cache essential app shell including the offline fallback
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -33,7 +34,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch: Network-First strategy (fallback to cache if offline)
+// Fetch: Network-First strategy with offline fallback page for navigations
 self.addEventListener('fetch', (event) => {
   // Only intercept GET requests
   if (event.request.method !== 'GET') return;
@@ -60,8 +61,9 @@ self.addEventListener('fetch', (event) => {
           if (cachedResponse) {
             return cachedResponse;
           }
+          // For navigation requests, show the offline page
           if (event.request.mode === 'navigate') {
-            return caches.match('/index.html');
+            return caches.match('/offline.html');
           }
         });
       })

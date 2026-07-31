@@ -16,6 +16,9 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: true,
+        // Pinned explicitly so the callback page's `exchangeCodeForSession` path
+        // always matches the flow the provider redirect actually uses.
+        flowType: 'pkce',
       },
     })
   : null;
@@ -34,13 +37,47 @@ export async function hashInvitationCode(code: string): Promise<string> {
 }
 
 /**
+ * Generate a 6-digit invitation code using a cryptographically secure RNG.
+ *
+ * `Math.random()` is not suitable here: its output is predictable, which would
+ * let an attacker guess codes that are valid for the next 24 hours.
+ * Rejection sampling keeps the distribution uniform across 100000-999999.
+ */
+export function generateInvitationCode(): string {
+  const range = 900000; // 100000..999999
+  const limit = Math.floor(0xffffffff / range) * range;
+  const buf = new Uint32Array(1);
+  let value: number;
+  do {
+    crypto.getRandomValues(buf);
+    value = buf[0];
+  } while (value >= limit);
+  return String(100000 + (value % range));
+}
+
+/**
+ * Persist the couple anniversary on the shared `couples` row.
+ */
+export async function saveCoupleAnniversary(coupleId: string, anniversaryDate: string): Promise<boolean> {
+  if (!supabase || !coupleId || !anniversaryDate) return false;
+  const { error } = await supabase
+    .from('couples')
+    .update({ anniversary_date: anniversaryDate, updated_at: new Date().toISOString() })
+    .eq('id', coupleId);
+  if (error) {
+    console.error('[gomsinlog] Failed to save anniversary date:', error);
+    return false;
+  }
+  return true;
+}
+
+/**
  * Create a new couple in Supabase and generate invitation code via RPC.
  */
 export async function createCoupleInvitation(role: Role): Promise<{ coupleId: string; code: string; error?: string }> {
   if (!supabase) {
     // Offline/Demo Fallback
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    return { coupleId: crypto.randomUUID(), code };
+    return { coupleId: crypto.randomUUID(), code: generateInvitationCode() };
   }
 
   try {
@@ -49,8 +86,7 @@ export async function createCoupleInvitation(role: Role): Promise<{ coupleId: st
       return { coupleId: '', code: '', error: '인증되지 않은 사용자입니다. 로그인 후 다시 시도해주세요.' };
     }
 
-    // Generate 6-digit code and hash it
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = generateInvitationCode();
     const codeHash = await hashInvitationCode(code);
 
     // Call atomic SECURITY DEFINER RPC to create couple, member, and invitation
@@ -76,33 +112,133 @@ export async function createCoupleInvitation(role: Role): Promise<{ coupleId: st
 /**
  * Consume an invitation code via RPC consume_invitation.
  */
+/**
+ * Client-side brute-force damper for invitation codes.
+ *
+ * This is only a first line of defence for the honest UI path -- it is trivially
+ * bypassed by calling the RPC directly, which is why `consume_invitation` also
+ * enforces a server-side throttle (see migration 013). Keeping it here gives
+ * immediate feedback and avoids hammering the server.
+ */
+const INVITE_ATTEMPT_LIMIT = 5;
+const INVITE_ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
+const inviteAttempts: number[] = [];
+
+export function __resetInviteAttemptsForTest() {
+  inviteAttempts.length = 0;
+}
+
+function registerInviteAttempt(): { allowed: boolean; retryAfterSeconds: number } {
+  const now = Date.now();
+  while (inviteAttempts.length > 0 && now - inviteAttempts[0] > INVITE_ATTEMPT_WINDOW_MS) {
+    inviteAttempts.shift();
+  }
+  if (inviteAttempts.length >= INVITE_ATTEMPT_LIMIT) {
+    const retryAfterSeconds = Math.ceil(
+      (INVITE_ATTEMPT_WINDOW_MS - (now - inviteAttempts[0])) / 1000,
+    );
+    return { allowed: false, retryAfterSeconds };
+  }
+  inviteAttempts.push(now);
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+/** Clear the local damper after a successful redemption. */
+function clearInviteAttempts() {
+  inviteAttempts.length = 0;
+}
+
+/**
+ * Consume an invitation code via RPC consume_invitation.
+ */
 export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?: string; error?: string }> {
+  const normalized = code.trim();
+  if (!/^\d{6}$/.test(normalized)) {
+    return { error: '초대 코드는 숫자 6자리입니다. 다시 확인해 주세요.' };
+  }
+
   if (!supabase) {
-    if (code.trim() === '123456' || code.trim().length === 6) {
-      return { coupleId: 'demo-couple-id' };
-    }
+    // Offline demo space only accepts the demo code.
+    if (normalized === '123456') return { coupleId: 'demo-couple-id' };
     return { error: '올바르지 않거나 만료된 초대 코드입니다.' };
   }
 
+  const throttle = registerInviteAttempt();
+  if (!throttle.allowed) {
+    const minutes = Math.max(1, Math.ceil(throttle.retryAfterSeconds / 60));
+    return { error: `시도 횟수가 많습니다. 약 ${minutes}분 후에 다시 시도해 주세요.` };
+  }
+
   try {
-    const codeHash = await hashInvitationCode(code);
+    const codeHash = await hashInvitationCode(normalized);
     const { data, error } = await supabase.rpc('consume_invitation', {
       p_code_hash: codeHash,
     });
 
     if (error) {
-      if (error.message.includes('Invalid or expired')) {
+      const message = error.message || '';
+      if (message.includes('Too many invitation attempts')) {
+        return { error: '초대 코드 시도 횟수를 초과했습니다. 잠시 후 다시 시도해 주세요.' };
+      }
+      if (message.includes('Invalid or expired')) {
         return { error: '유효하지 않거나 만료된 초대 코드입니다. (유효기간: 24시간)' };
       }
-      if (error.message.includes('Couple space is full')) {
-        return { error: '이미 2명이 가입한 커플 공간입니다.' };
+      if (message.includes('Couple space is full')) {
+        return { error: '이미 2명이 참여한 커플 공간입니다.' };
       }
-      return { error: error.message };
+      if (message.includes('already in an active couple')) {
+        return { error: '이미 다른 커플 공간에 연결되어 있습니다. 먼저 연결을 해제해 주세요.' };
+      }
+      if (message.includes('own invitation')) {
+        return { error: '내가 만든 초대 코드로는 연결할 수 없습니다. 상대방에게 코드를 전달해 주세요.' };
+      }
+      console.error('[gomsinlog] consume_invitation failed:', error);
+      return { error: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
     }
 
+    clearInviteAttempts();
     return { coupleId: data as string };
   } catch (err: any) {
-    return { error: err?.message || '초대 코드 확인 중 오류가 발생했습니다.' };
+    console.error('[gomsinlog] consume_invitation threw:', err);
+    return { error: '초대 코드 확인 중 오류가 발생했습니다. 인터넷 연결을 확인해 주세요.' };
+  }
+}
+
+/**
+ * Mint a fresh invitation code for the caller's existing couple.
+ *
+ * Needed because the server only stores a hash of the code: if the creator
+ * clears their browser storage before the partner joins, the plaintext code is
+ * gone and the unique-active-couple constraint prevents creating a new space.
+ */
+export async function regenerateCoupleInvitation(): Promise<{ code?: string; error?: string }> {
+  if (!supabase) return { code: generateInvitationCode() };
+
+  const code = generateInvitationCode();
+  try {
+    const codeHash = await hashInvitationCode(code);
+    const { error } = await supabase.rpc('regenerate_invitation', { p_code_hash: codeHash });
+    if (error) {
+      // PGRST202 = the function is not deployed on this project yet.
+      if (error.code === 'PGRST202') {
+        return {
+          error:
+            '서버에 초대 코드 재발급 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
+        };
+      }
+      if ((error.message || '').includes('No active couple')) {
+        return { error: '연결할 커플 공간이 없습니다. 먼저 우리 공간을 만들어 주세요.' };
+      }
+      if ((error.message || '').includes('already connected')) {
+        return { error: '이미 두 사람이 연결되어 있어 초대 코드가 필요하지 않습니다.' };
+      }
+      console.error('[gomsinlog] regenerate_invitation failed:', error);
+      return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+    }
+    return { code };
+  } catch (err: any) {
+    console.error('[gomsinlog] regenerate_invitation threw:', err);
+    return { error: '초대 코드 재발급 중 오류가 발생했습니다.' };
   }
 }
 

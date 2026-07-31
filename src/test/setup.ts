@@ -1,5 +1,6 @@
 import { afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
 
 // jsdom does not implement these, but the app touches them during render.
 if (!('matchMedia' in window)) {

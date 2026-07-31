@@ -27,7 +27,8 @@ export function DDayWidget() {
       <div 
         className="bg-gradient-to-br from-lilac to-coral/20 p-5 rounded-2xl border border-border relative overflow-hidden flex flex-col justify-center cursor-pointer"
         onClick={() => {
-          if (!anniversaryDate) navigate('/my');
+          // The anniversary is edited from the profile section in settings.
+          if (!anniversaryDate) navigate('/settings');
         }}
       >
         <Heart className="w-24 h-24 text-white/40 absolute -right-4 -bottom-4 rotate-12" />

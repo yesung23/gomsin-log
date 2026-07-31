@@ -1,14 +1,18 @@
 import { useState } from 'react';
 import { useStore } from '@/lib/store';
 import { MobileShell } from '@/components/MobileShell';
-import { 
-  ArrowLeft, User, Bell, Download, Shield, Unlink, Trash2, 
-  Link, Clock, LogOut, FileText, Smartphone, Lock, AlertTriangle, ChevronRight, Settings,
-  Sun, Moon
+import {
+  ArrowLeft, Shield, Unlink, Trash2, User, FileText,
+  Clock, LogOut, Smartphone, AlertTriangle, ChevronRight,
+  Sun, Moon, Copy, Check, RefreshCw, Download,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { consumeCoupleInvitation, supabase } from '@/lib/supabase';
+import {
+  consumeCoupleInvitation,
+  regenerateCoupleInvitation,
+  supabase,
+} from '@/lib/supabase';
 
 export function SettingsPage() {
   const {
@@ -17,7 +21,6 @@ export function SettingsPage() {
     disconnect,
     deleteAccount,
     signOut,
-    reset,
     deleteRecord,
     setTheme,
   } = useStore();
@@ -39,9 +42,88 @@ export function SettingsPage() {
   const [isJoiningCouple, setIsJoiningCouple] = useState(false);
   const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState('');
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [editName, setEditName] = useState(profile.myName);
+  const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
 
-  const handleToast = (msg: string) => {
-    toast(msg);
+  /**
+   * Export the records this user authored as a JSON file.
+   * Runs entirely on the device so it also works offline and in demo mode.
+   */
+  const handleExportMyData = () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        app: 'gomsinlog',
+        schemaVersion: 1,
+        profile: {
+          myName: profile.myName,
+          role: profile.role,
+          anniversaryDate: profile.couple.anniversaryDate ?? null,
+          military: profile.role === 'soldier' ? profile.military : null,
+        },
+        // Only the caller's own records; the partner's content is not theirs to export.
+        records: ownRecords.map((record) => ({
+          date: record.date,
+          time: record.time,
+          log: record.log,
+          reaction: record.reaction ?? null,
+          isPrivate: record.isPrivate,
+          emotionFlow: record.emotionFlow ?? [],
+          // Storage paths only: signed URLs expire and would be useless in a backup.
+          attachments: (record.attachments ?? []).map((a) => ({
+            type: a.type,
+            name: a.name,
+            path: a.path ?? null,
+          })),
+          createdAt: record.createdAt,
+        })),
+        events: state.events.map((e) => ({
+          title: e.title,
+          eventType: e.eventType,
+          startDate: e.startDate,
+          endDate: e.endDate ?? null,
+          isPrivate: e.isPrivate,
+        })),
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `gomsinlog-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`내 기록 ${ownRecords.length}개를 내보냈어요.`);
+    } catch (error) {
+      console.error('[gomsinlog] Export failed:', error);
+      toast.error('내보내기에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleSaveProfile = () => {
+    const nextName = editName.trim();
+    if (nextName.length < 2 || nextName.length > 12) {
+      toast.error('닉네임은 2~12자로 입력해 주세요.');
+      return;
+    }
+    updateProfile({
+      myName: nextName,
+      couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
+    });
+    setShowProfileModal(false);
+    toast.success('프로필이 저장되었습니다.');
   };
 
   const handleJoinCouple = async () => {
@@ -162,6 +244,71 @@ export function SettingsPage() {
           </div>
         </section>
 
+        {/* Invite code for the space creator, until the partner actually joins. */}
+        {hasCoupleSpace && !profile.couple.connected && !isDemoMode && (
+          <section className="rounded-3xl bg-card border border-coral/30 p-5 shadow-sm space-y-3">
+            <div>
+              <h2 className="text-sm font-bold text-foreground">우리 공간 초대 코드</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                상대방이 앱에서 이 코드를 입력하면 두 사람의 공간이 연결됩니다. 코드는 24시간 동안 유효해요.
+              </p>
+            </div>
+
+            {profile.couple.coupleCode ? (
+              <div className="flex items-center justify-between bg-muted px-4 py-3 rounded-2xl border border-border">
+                <span className="font-mono text-2xl font-bold tracking-[0.2em] text-foreground">
+                  {profile.couple.coupleCode}
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(profile.couple.coupleCode);
+                      setCopiedInvite(true);
+                      toast.success('초대 코드를 복사했어요.');
+                      setTimeout(() => setCopiedInvite(false), 2000);
+                    } catch {
+                      toast.error('복사에 실패했어요. 코드를 직접 입력해 주세요.');
+                    }
+                  }}
+                  aria-label="초대 코드 복사"
+                  className="p-2 text-coral hover:bg-coral/10 rounded-xl transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                >
+                  {copiedInvite ? <Check size={20} /> : <Copy size={20} />}
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-warning-foreground bg-warning-surface border border-warning/30 rounded-2xl p-3 leading-relaxed">
+                이 기기에 저장된 초대 코드가 없습니다. 보안을 위해 서버에는 코드 원본을 저장하지 않으므로,
+                아래에서 새 코드를 발급해 상대방에게 전달해 주세요.
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={async () => {
+                if (isRegenerating) return;
+                setIsRegenerating(true);
+                const result = await regenerateCoupleInvitation();
+                setIsRegenerating(false);
+                if (result.error || !result.code) {
+                  toast.error(result.error || '초대 코드를 재발급하지 못했습니다.');
+                  return;
+                }
+                updateProfile({
+                  couple: { ...profile.couple, coupleCode: result.code },
+                });
+                toast.success('새 초대 코드가 발급되었습니다. 이전 코드는 더 이상 사용할 수 없어요.');
+              }}
+              disabled={isRegenerating}
+              className="w-full h-12 rounded-xl border border-coral/40 text-coral text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={isRegenerating ? 'animate-spin' : undefined} />
+              {isRegenerating ? '발급 중...' : '새 초대 코드 발급하기'}
+            </button>
+          </section>
+        )}
+
         {!hasCoupleSpace && !isDemoMode && (
           <section className="rounded-3xl bg-card border border-coral/30 p-5 shadow-sm space-y-3">
             <div>
@@ -195,8 +342,12 @@ export function SettingsPage() {
 
         {/* General Settings */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
-          <button 
-            onClick={() => handleToast('프로필 편집 기능 준비 중입니다.')}
+          <button
+            onClick={() => {
+              setEditName(profile.myName);
+              setEditAnniversary(profile.couple.anniversaryDate || '');
+              setShowProfileModal(true);
+            }}
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
@@ -206,31 +357,18 @@ export function SettingsPage() {
             <ChevronRight size={16} className="text-muted-foreground" />
           </button>
 
-          {hasCoupleSpace && !profile.couple.connected && profile.couple.coupleCode && (
+          {profile.role === 'soldier' && (
             <button
-              onClick={() => handleToast(`초대 코드: ${profile.couple.coupleCode}`)}
+              onClick={() => navigate('/service')}
               className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
             >
               <span className="flex items-center gap-3 text-foreground">
-                <Link size={18} className="text-coral" />
-                <span>우리 공간 초대 코드</span>
+                <Shield size={18} className="text-coral" />
+                <span>복무 정보 수정</span>
               </span>
-              <span className="text-xs text-coral font-bold bg-coral/10 px-2.5 py-1 rounded-lg">
-                {profile.couple.coupleCode}
-              </span>
+              <ChevronRight size={16} className="text-muted-foreground" />
             </button>
           )}
-
-          <button 
-            onClick={() => handleToast('알림 설정이 저장되었습니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Bell size={18} className="text-coral" />
-              <span>푸시 알림 설정</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
 
           <button 
             onClick={() => setShowPWAModal(true)}
@@ -241,28 +379,6 @@ export function SettingsPage() {
               <span>PWA 홈 화면 설치 방법</span>
             </span>
             <span className="text-[11px] text-muted-foreground font-normal">Safari/Chrome</span>
-          </button>
-
-          <button 
-            onClick={() => handleToast('곰신로그의 기록은 1:1 연결된 상대에게만 안전하게 공유됩니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Shield size={18} className="text-coral" />
-              <span>1:1 비공개 로그 및 보안 원칙</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
-
-          <button 
-            onClick={() => handleToast('생체인증 잠금 기능 준비 중입니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Lock size={18} className="text-coral" />
-              <span>민감 기록 생체인증 잠금</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
           </button>
         </section>
 
@@ -286,15 +402,18 @@ export function SettingsPage() {
 
         {/* Couple & Data Management */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
-          <button 
-            onClick={() => handleToast('내 기록 PDF/JSON 내보내기 기능이 곧 출시됩니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
+          <button
+            onClick={handleExportMyData}
+            disabled={isExporting}
+            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px] disabled:opacity-50"
           >
             <span className="flex items-center gap-3 text-foreground">
               <Download size={18} className="text-navy" />
-              <span>내 기록 백업 & 내보내기</span>
+              <span>내 기록 JSON으로 내보내기</span>
             </span>
-            <span className="text-[11px] text-muted-foreground">준비 중</span>
+            <span className="text-[11px] text-muted-foreground font-normal">
+              {isExporting ? '내보내는 중...' : `${ownRecords.length}개`}
+            </span>
           </button>
 
           <button 
@@ -322,8 +441,8 @@ export function SettingsPage() {
 
         {/* Account Management & Reset */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
-          <button 
-            onClick={() => handleToast('서비스 이용약관 준비 중')}
+          <button
+            onClick={() => navigate('/legal/terms')}
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
@@ -333,8 +452,8 @@ export function SettingsPage() {
             <ChevronRight size={16} className="text-muted-foreground" />
           </button>
 
-          <button 
-            onClick={() => handleToast('개인정보 처리방침 준비 중')}
+          <button
+            onClick={() => navigate('/legal/privacy')}
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
@@ -367,13 +486,63 @@ export function SettingsPage() {
           </button>
         </section>
 
-        {/* Reset App State */}
-        <button 
-          onClick={reset}
-          className="w-full py-4 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground font-medium text-xs min-h-[44px]"
-        >
-          앱 상태 초기화 (처음 온보딩 화면으로 돌아가기)
-        </button>
+        <p className="text-center text-[11px] text-muted-foreground leading-relaxed px-4">
+          곰신로그의 기록은 1:1로 연결된 상대에게만 공유되며, '나만 보기'로 남긴 기록은
+          상대방에게 전송되지 않습니다.
+        </p>
+
+        {/* Profile Edit Modal */}
+        {showProfileModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+              <h3 className="text-base font-bold text-foreground">내 프로필 수정</h3>
+
+              <div className="space-y-2">
+                <label htmlFor="edit-nickname" className="text-xs font-semibold text-muted-foreground">
+                  내 닉네임 (2~12자)
+                </label>
+                <input
+                  id="edit-nickname"
+                  value={editName}
+                  onChange={(event) => setEditName(event.target.value.slice(0, 12))}
+                  maxLength={12}
+                  className="w-full h-12 px-3 rounded-xl bg-muted border border-border text-sm text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="edit-anniversary" className="text-xs font-semibold text-muted-foreground">
+                  사귄 날짜
+                </label>
+                <input
+                  id="edit-anniversary"
+                  type="date"
+                  value={editAnniversary}
+                  onChange={(event) => setEditAnniversary(event.target.value)}
+                  className="w-full h-12 px-3 rounded-xl bg-muted border border-border text-sm text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  두 사람이 함께 보는 날짜예요. 저장하면 상대방 화면의 디데이에도 반영됩니다.
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowProfileModal(false)}
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs min-h-[44px]"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleSaveProfile}
+                  className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px]"
+                >
+                  저장하기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Disconnect Modal */}
         {showDisconnectModal && (

@@ -29,7 +29,7 @@ export function UpcomingScheduleWidget() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-foreground">다가오는 일정</h2>
         <button 
-          onClick={() => navigate('/record')}
+          onClick={() => navigate('/schedule')}
           className="text-xs text-coral font-bold flex items-center"
         >
           <Plus className="w-3 h-3 mr-0.5" />

@@ -10,6 +10,8 @@ import { MyPage } from '@/pages/MyPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TripsPage } from '@/pages/TripsPage';
 import { TripDetailPage } from '@/pages/TripDetailPage';
+import { ServicePage } from '@/pages/ServicePage';
+import { LegalPage } from '@/pages/LegalPage';
 
 export function App() {
   const { state, isReady } = useStore();
@@ -25,6 +27,8 @@ export function App() {
   return (
     <Routes>
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      {/* Legal documents must be reachable before sign-in too (store listing requirement). */}
+      <Route path="/legal/:doc" element={<LegalPage />} />
       {!state.setupComplete ? (
         <>
           <Route path="/onboarding" element={<OnboardingPage />} />
@@ -36,6 +40,7 @@ export function App() {
           <Route path="/home" element={<HomePage />} />
           <Route path="/record" element={<RecordPage />} />
           <Route path="/schedule" element={<SchedulePage />} />
+          <Route path="/service" element={<ServicePage />} />
           <Route path="/us" element={<UsPage />} />
           <Route path="/my" element={<MyPage />} />
           <Route path="/settings" element={<SettingsPage />} />

@@ -665,15 +665,33 @@ export function SettingsPage() {
                   onClick={async () => {
                     if (isDeletingAccount || deleteAccountConfirmation !== '탈퇴') return;
                     setIsDeletingAccount(true);
-                    const deleted = await deleteAccount();
+                    const result = await deleteAccount();
                     setIsDeletingAccount(false);
 
-                    if (deleted) {
-                      setShowDeleteAccountModal(false);
-                      setDeleteAccountConfirmation('');
-                      toast.success('계정과 데이터가 삭제되었습니다.');
-                    } else {
+                    if (!result.ok) {
                       toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                      return;
+                    }
+
+                    setShowDeleteAccountModal(false);
+                    setDeleteAccountConfirmation('');
+
+                    // Report a partial cleanup honestly rather than claiming
+                    // everything was removed.
+                    const mediaWarning = result.warnings.some((w) =>
+                      w.startsWith('media_not_fully_removed'),
+                    );
+                    if (mediaWarning) {
+                      toast.warning(
+                        '계정은 삭제되었지만 일부 첨부파일이 남아 있을 수 있습니다. 문의해 주시면 완전히 삭제해 드립니다.',
+                        { duration: 10000 },
+                      );
+                    } else if (result.warnings.length > 0) {
+                      toast.warning('계정은 삭제되었지만 일부 정리 작업이 지연되었습니다.', {
+                        duration: 8000,
+                      });
+                    } else {
+                      toast.success('계정과 데이터가 삭제되었습니다.');
                     }
                   }}
                   disabled={isDeletingAccount || deleteAccountConfirmation !== '탈퇴'}

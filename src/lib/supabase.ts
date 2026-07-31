@@ -260,21 +260,29 @@ export async function disconnectCoupleFromDB(): Promise<boolean> {
   }
 }
 
-export async function deleteAccountFromDB(): Promise<boolean> {
-  if (!supabase) return false;
+/**
+ * Ask the server to delete this account.
+ *
+ * Returns the warnings the function reported so the UI can tell the user when
+ * something (e.g. stored media) could not be fully removed, instead of claiming
+ * an unqualified success.
+ */
+export async function deleteAccountFromDB(): Promise<{ ok: boolean; warnings: string[] }> {
+  if (!supabase) return { ok: false, warnings: [] };
 
   try {
-    const { error } = await supabase.functions.invoke('delete-account', {
+    const { data, error } = await supabase.functions.invoke('delete-account', {
       method: 'POST',
     });
     if (error) {
-      console.error('Failed to delete account:', error);
-      return false;
+      console.error('[gomsinlog] Failed to delete account:', error);
+      return { ok: false, warnings: [] };
     }
-    return true;
+    const warnings = Array.isArray(data?.warnings) ? (data.warnings as string[]) : [];
+    return { ok: true, warnings };
   } catch (error) {
-    console.error('Failed to invoke account deletion:', error);
-    return false;
+    console.error('[gomsinlog] Failed to invoke account deletion:', error);
+    return { ok: false, warnings: [] };
   }
 }
 

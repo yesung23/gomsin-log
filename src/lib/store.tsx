@@ -162,7 +162,7 @@ interface StoreContextType {
   switchRole: () => void;
   reset: () => void;
   disconnect: () => Promise<boolean>;
-  deleteAccount: () => Promise<boolean>;
+  deleteAccount: () => Promise<{ ok: boolean; warnings: string[] }>;
   signOut: () => Promise<void>;
   setSetupComplete: (complete: boolean) => void;
   setOnboardingStep: (step: number) => void;
@@ -881,16 +881,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const deleteAccount = async (): Promise<boolean> => {
+  const deleteAccount = async (): Promise<{ ok: boolean; warnings: string[] }> => {
     if (stateRef.current.isDemoMode) {
       purgeLocalAccountData();
-      return true;
+      return { ok: true, warnings: [] };
     }
 
-    const deleted = await deleteAccountFromDB();
+    const result = await deleteAccountFromDB();
     // Only purge after the server confirms deletion, so a failed attempt leaves
     // the user signed in and able to retry.
-    if (!deleted) return false;
+    if (!result.ok) return result;
 
     purgeLocalAccountData();
     try {
@@ -898,7 +898,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared', error);
     }
-    return true;
+    return result;
   };
 
   const setSetupComplete = (complete: boolean) => {

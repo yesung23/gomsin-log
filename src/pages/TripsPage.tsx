@@ -44,7 +44,7 @@ export function TripsPage() {
   return (
     <MobileShell>
       {/* Header */}
-      <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-xl border-b border-gray-100 flex items-center justify-between px-5 h-14">
+      <div className="sticky top-0 z-30 bg-card/80 backdrop-blur-xl border-b border-gray-100 flex items-center justify-between px-5 h-14">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/us')} className="p-1.5 -ml-1.5 rounded-full hover:bg-gray-100 transition-colors">
             <ChevronLeft className="w-5 h-5 text-gray-700" />
@@ -80,7 +80,7 @@ export function TripsPage() {
               <div 
                 key={trip.id} 
                 onClick={() => navigate(`/trips/${trip.id}`)}
-                className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+                className="bg-card border border-border rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
               >
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-bold text-gray-900 text-lg">{trip.title}</h3>
@@ -103,7 +103,7 @@ export function TripsPage() {
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-          <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-in slide-in-from-bottom-4">
+          <div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-in slide-in-from-bottom-4">
             <h2 className="text-xl font-bold text-gray-900 mb-6">새 여행 만들기</h2>
             <div className="space-y-4">
               <div>

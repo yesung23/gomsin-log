@@ -413,7 +413,7 @@ export function RecordPage() {
               <button
                 key={item.id}
                 onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                className="w-full text-left p-2 rounded-xl bg-white/60 hover:bg-white transition flex items-center justify-between text-xs font-medium text-navy group active:scale-[0.99]"
+                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-xs font-medium text-navy group active:scale-[0.99]"
               >
                 <span className="leading-snug flex-1 pr-2">• {item.text}</span>
                 <ChevronRight size={13} className="text-navy/30 group-hover:text-navy shrink-0" />
@@ -540,7 +540,7 @@ export function RecordPage() {
       {/* Detail Modal */}
       {selectedRecord && (
         <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
+          <div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold text-gray-900">
                 {formatLocalDate(selectedRecord.date)} {selectedRecord.time}

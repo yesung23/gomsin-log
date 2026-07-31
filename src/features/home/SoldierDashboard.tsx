@@ -1,7 +1,6 @@
 import React from 'react';
 import { useStore } from '@/lib/store';
 import {
-  Battery,
   Sparkles,
   Heart,
   ChevronRight,
@@ -11,6 +10,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
 import { toLocalDateString, localToday } from '@/lib/utils';
+import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 
 export function SoldierDashboard() {
   const { state, setHighlightedRecordId } = useStore();
@@ -30,14 +30,20 @@ export function SoldierDashboard() {
   const dailySummary = generateDailySummary(sharedRecords, partnerName);
   const emotionBriefing = generateEmotionFlowBriefing(sharedRecords);
 
-  // Compute energy based on shared records
-  const energyLevel = Math.min(100, Math.max(30, sharedRecords.length * 25));
-  const energyLabel = sharedRecords.length === 0
-    ? '오늘 남긴 순간이 아직 없어요'
+  // My own records for today, so the count reflects what I actually wrote.
+  const myTodayRecords = records.filter(
+    (record) => record.date === todayStr && record.authorRole === profile.role,
+  );
+
+  // Describe what the partner actually shared. The previous version rendered a
+  // progress bar from `sharedRecords.length * 25`, which looked like a measured
+  // "energy level" but was only a record count in disguise.
+  const moodLabel = sharedRecords.length === 0
+    ? '오늘 공유된 순간이 아직 없어요'
     : sharedRecords.some(r => r.reaction === 'hard')
     ? '조금 힘든 일이 있었어요 🥹'
     : sharedRecords.some(r => r.reaction === 'good' || r.reaction === 'thought_of_you')
-    ? '기분 좋은 상태예요 😊'
+    ? '기분 좋은 순간을 남겼어요 😊'
     : '평온하게 하루를 보내고 있어요 ✨';
 
   const careHint = sharedRecords.some(r => r.reaction === 'hard')
@@ -118,21 +124,19 @@ export function SoldierDashboard() {
 
         <div className="grid grid-cols-2 gap-3">
           <section className="bg-card rounded-3xl p-4 shadow-sm border border-border">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="w-8 h-8 rounded-full bg-mint text-emerald-600 flex items-center justify-center">
-                <Battery className="w-4 h-4" />
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-8 h-8 rounded-full bg-mint text-success flex items-center justify-center">
+                <Sparkles className="w-4 h-4" />
               </span>
               <h3 className="text-xs font-extrabold text-foreground">{partnerName}의 하루</h3>
             </div>
-            <div className="space-y-3">
-              <div className="h-2.5 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${energyLevel}%` }}
-                />
-              </div>
+            <div className="space-y-2">
+              <p className="text-2xl font-black text-foreground leading-none">
+                {sharedRecords.length}
+                <span className="text-xs font-bold text-muted-foreground ml-1">개 공유</span>
+              </p>
               <p className="text-[11px] font-semibold text-muted-foreground leading-relaxed break-keep">
-                {energyLabel}
+                {moodLabel}
               </p>
             </div>
           </section>
@@ -180,6 +184,36 @@ export function SoldierDashboard() {
             )}
           </p>
         </button>
+
+        {/*
+          군화도 글과 사진·영상·음성 기록을 남길 수 있어야 합니다.
+          이전에는 이 화면이 읽기 전용이어서 군화는 아무것도 작성할 수 없었습니다.
+        */}
+        <section className="bg-card rounded-3xl p-5 shadow-sm border border-border">
+          <TodayLogWidget />
+        </section>
+
+        <div className="rounded-3xl border border-border bg-muted/40 p-4 flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-extrabold text-foreground">내 복무 현황</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              전역일과 복무율을 확인하고 수정할 수 있어요
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/service')}
+            className="text-xs font-bold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition"
+          >
+            보기
+          </button>
+        </div>
+
+        {myTodayRecords.length > 0 && (
+          <p className="text-center text-[11px] text-muted-foreground">
+            오늘 내가 남긴 기록 {myTodayRecords.length}개
+          </p>
+        )}
       </div>
     </div>
   );

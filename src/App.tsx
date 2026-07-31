@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { HomePage } from '@/pages/HomePage';
 
 // Eagerly loaded: auth callback must resolve immediately on redirect.
@@ -58,6 +59,7 @@ export function App() {
   }
 
   return (
+    <ErrorBoundary>
     <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
@@ -85,5 +87,6 @@ export function App() {
         )}
       </Routes>
     </Suspense>
+    </ErrorBoundary>
   );
 }

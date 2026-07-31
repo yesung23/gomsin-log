@@ -3,6 +3,7 @@ import { Home, BookOpen, Heart, User } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { InstallPromptBanner } from '@/components/InstallPromptBanner';
+import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 
 const TABS = [
@@ -43,6 +44,9 @@ export function MobileShell({ children }: { children: ReactNode }) {
 
         {/* iOS Safari Standalone Install Banner Prompt */}
         <InstallPromptBanner />
+
+        {/* Offline indicator – sits visually above the tab bar */}
+        <OfflineBanner />
 
         {/* Fixed 4-Tab Navigation Bar (홈 | 기록 | 우리 | 마이) */}
         <nav

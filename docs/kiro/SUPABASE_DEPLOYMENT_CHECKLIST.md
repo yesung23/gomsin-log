@@ -383,6 +383,39 @@ Auth `app_metadata` 에 `account_deletion_pending: true` 를 기록합니다.
 > 배포와 설정은 운영자가 직접 해야 하는 단계입니다.
 
 ---
+## 5-3. 의존성 보안 권고 처리 기록
+
+`npm audit` 결과에 남는 항목은 아래 두 건뿐이며, 각각 근거가 기록되어 있습니다.
+
+### `brace-expansion` — GHSA-mh99-v99m-4gvg (해결됨)
+
+- 개발 도구 전용 경로(`eslint` → `minimatch@3` → `brace-expansion`)에서만 나타났던
+  5건의 권고입니다. 런타임 번들에는 포함되지 않습니다.
+- `package.json` 의 `overrides` 로 **1.1.18** 에 고정해 해결했습니다.
+- 이전 감사 문서(7-3절)는 "1.x 라인에 패치된 릴리스가 없다"고 결론했지만,
+  **레지스트리를 직접 확인한 결과 1.x 라인에 1.1.18 이 존재합니다**(5.x 라인은 5.0.9).
+  레지스트리 확인이 감사 문서의 결론을 대체합니다.
+- **5.x 가 아니라 1.x 를 선택한 이유**: `minimatch@3` 은 CommonJS `require` 형태로
+  이 패키지를 불러옵니다. 5.x 는 export 형태가 바뀌어 lint 가 깨질 위험이 있고,
+  그것이 감사 7-3절이 지적한 바로 그 위험입니다.
+- **안전성 증거**: 고정 후 `npm run lint` 가 **에러 0건 / 경고 0건**입니다.
+  `brace-expansion` 변경이 `minimatch@3` 의 CJS `require` 를 깨뜨린다면 그것은
+  수정이 아니라 회귀이므로, 우회하지 말고 되돌려야 합니다.
+- **`npm audit fix --force` 는 절대 실행하지 않습니다.**
+
+### `react-router` — GHSA-qwww-vcr4-c8h2 (조건부 수용)
+
+- 대상: `react-router` / `react-router-dom` **7.18.2** (핀 고정).
+- **적용되지 않는 이유(전제 조건)**: 이 앱은 정적 Vite SPA 이고 `BrowserRouter` 만
+  선언적으로 사용합니다. Framework Mode 없음, RSC 없음, `loader` 없음, `action` 없음,
+  `useFetcher` 없음, react-router `<Form>` 없음, 서버 라우트 없음. 권고는 RSC 모드의
+  action 실행 경로에 관한 것이므로 이 구성에서는 도달할 수 없습니다.
+- **수용이 무효화되는 조건(invalidation trigger)**: 위 기능 **중 하나라도** 도입하면
+  이 수용은 무효가 되며 즉시 재평가해야 합니다.
+- 7.11.0 으로의 무조건 다운그레이드와 메이저 업그레이드는 **모두 금지**합니다.
+  전자는 이 저장소가 검증한 동작을 되돌리고, 후자는 검증되지 않은 변경입니다.
+
+---
 
 ## 6. 앱 환경변수
 

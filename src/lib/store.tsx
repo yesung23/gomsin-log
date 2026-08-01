@@ -16,7 +16,12 @@ import {
   saveCoupleAnniversary,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
-import { fetchEventsResultFromDB } from '@/lib/events';
+import {
+  deleteEventFromDB,
+  fetchEventsResultFromDB,
+  saveEventToDB,
+  updateEventInDB,
+} from '@/lib/events';
 import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
@@ -1682,9 +1687,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const saved = await import('@/lib/events').then((module) =>
-        module.saveEventToDB(newEvent),
-      );
+      const saved = await saveEventToDB(newEvent);
       if (!isCurrentLinkedCouple(workspace) || !saved) return false;
       updateStateImmediately((prev) => isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(prev, workspace)
         ? { ...prev, events: [...prev.events, saved] }
@@ -1725,9 +1728,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       : prev);
 
     try {
-      const saved = await import('@/lib/events').then((module) =>
-        module.updateEventInDB(updated),
-      );
+      const saved = await updateEventInDB(updated);
       if (!isCurrentScope()) return false;
       if (!saved) {
         updateStateImmediately((prev) => isCurrentScope()
@@ -1768,9 +1769,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
     if (!isCurrentScope()) return false;
     try {
-      const deleted = await import('@/lib/events').then((module) =>
-        module.deleteEventFromDB(id),
-      );
+      const deleted = await deleteEventFromDB(id);
       if (!isCurrentScope() || !deleted) return false;
     } catch (error) {
       if (isCurrentScope()) console.error('Failed to delete event:', error);

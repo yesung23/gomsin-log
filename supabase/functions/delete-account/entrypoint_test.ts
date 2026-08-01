@@ -145,8 +145,26 @@ const COMPARED_HEADERS = [
 
 function comparableHeaders(response: Response): Record<string, string | null> {
   const result: Record<string, string | null> = {};
-  for (const name of COMPARED_HEADERS) result[name] = response.headers.get(name);
+  for (const name of COMPARED_HEADERS) {
+    const value = response.headers.get(name);
+    // Deno.serve may add Accept-Encoding when its HTTP layer negotiates
+    // compression. That is transport metadata, not a CORS behavior difference.
+    result[name] = name === 'vary' && value
+      ? value.split(',')
+        .map((token) => token.trim())
+        .filter((token) => token.toLowerCase() !== 'accept-encoding')
+        .sort()
+        .join(', ')
+      : value;
+  }
   return result;
+}
+
+function assertVariesOnOrigin(response: Response, message: string): void {
+  const varyTokens = (response.headers.get('vary') ?? '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase());
+  assert(varyTokens.includes('origin'), message);
 }
 
 Deno.test({
@@ -214,7 +232,7 @@ Deno.test({
         });
         await response.text();
         assertEquals(response.status, 500, `${method} must fail closed with 500`);
-        assertEquals(response.headers.get('vary'), 'Origin', `${method} must still send Vary`);
+        assertVariesOnOrigin(response, `${method} must still send Vary: Origin`);
         assertEquals(
           response.headers.get('access-control-allow-origin'),
           null,
@@ -247,7 +265,7 @@ Deno.test({
       await response.text();
 
       assertEquals(response.status, 401, 'an unverifiable token must yield 401');
-      assertEquals(response.headers.get('vary'), 'Origin', 'Vary must still be present');
+      assertVariesOnOrigin(response, 'Vary: Origin must still be present');
       assertEquals(
         response.headers.get('access-control-allow-origin'),
         ALLOWED,

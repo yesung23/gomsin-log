@@ -1,11 +1,24 @@
 # Security headers for hosting platforms that respect this file (Netlify,
 # Cloudflare Pages). Other platforms need equivalent configuration.
 #
-# CSP is intentionally configured by the deployment platform, because the
-# Supabase project URL is injected at build time and connect-src must match the
-# actual project. index.html does not claim to enforce a static CSP.
+# CSP is now shipped from this file. This SUPERSEDES the earlier deliberate
+# decision to delegate it to the deployment platform.
+#
+#   Why that decision was made: the Supabase project URL is injected at build
+#   time, so a static policy committed here could not name the actual project
+#   and connect-src would either be wrong or wide open.
+#
+#   Why reversing it is safe now: `vite.config.ts` validates VITE_SUPABASE_URL
+#   (parseable, https except for localhost/127.0.0.1) and substitutes the two
+#   markers below during `closeBundle`, then asserts that no marker survives. A
+#   misconfigured production build fails instead of emitting a policy with
+#   literal placeholders, and no real project URL is ever committed here.
+#
+#   Still required from the operator: platforms that ignore `_headers` need the
+#   equivalent configuration applied by hand.
 
 /*
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: __SUPABASE_HTTP_SRC__ https://images.unsplash.com; media-src 'self' data: blob: __SUPABASE_HTTP_SRC__; font-src 'self' data:; connect-src 'self' __SUPABASE_CONNECT_SRC__; worker-src 'self'; manifest-src 'self'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

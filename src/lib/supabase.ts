@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Browser } from '@capacitor/browser';
 import { authRedirectUrl, isNativePlatform } from '@/lib/platform';
 import {
   classifyDeletionErrorBody,
@@ -470,7 +471,10 @@ export class SupabaseAuthRepository implements IAuthRepository {
     if (error) return { error: error.message };
 
     if (native && data?.url) {
-      const { Browser } = await import('@capacitor/browser');
+      // Statically imported: `src/main.tsx` already pulls in `@/lib/deepLinks`,
+      // which imports `@capacitor/browser` statically, so the module is already
+      // in the eager graph and there is no bundle-size cost. The
+      // `isNativePlatform()` guard still keeps `Browser.open` off the web path.
       await Browser.open({ url: data.url, presentationStyle: 'popover' });
     }
     return {};

@@ -124,6 +124,25 @@ export default defineConfig({
     emitCspHeaders(() => validatedBuildEnvironment),
     injectServiceWorkerManifest(),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        /**
+         * Split by import identity so the entry chunk stops crossing the 500 kB
+         * warning threshold. Module evaluation order does not change
+         * observably: these are all library entry points that were already in
+         * the eager graph.
+         */
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router', 'react-router-dom'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-dnd': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+          'vendor-date-fns': ['date-fns'],
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
+  },
   server: {
     watch: {
       ignored: ['**/.codex-runtime/**'],

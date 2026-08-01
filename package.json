@@ -56,5 +56,8 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^6.3.5",
     "vitest": "3.2.6"
+  },
+  "overrides": {
+    "brace-expansion": "1.1.18"
   }
 }

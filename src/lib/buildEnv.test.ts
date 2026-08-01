@@ -106,7 +106,7 @@ describe('C3 - a valid build emits a complete, marker-free CSP', () => {
       '  Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
       '  X-DNS-Prefetch-Control: off',
     ]) {
-      expect(headers.split('\n')).toContain(header);
+      expect(headers.split(/\r?\n/)).toContain(header);
     }
   });
 

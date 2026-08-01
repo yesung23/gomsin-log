@@ -498,7 +498,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -532,7 +532,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -617,11 +617,11 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={isGeneratingCode || isVerifyingCode}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <div className="w-5 h-5 border-2 border-coral-foreground border-t-transparent rounded-full animate-spin" />
                     <span>처리 중...</span>
                   </>
                 ) : (
@@ -666,7 +666,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 {role === 'gomsin' ? '완료' : '다음'}
               </button>
@@ -758,7 +758,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -818,7 +818,7 @@ export function OnboardingPage() {
               <div className="space-y-2">
                 <button
                   onClick={handleNext}
-                  className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                  className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
                 >
                   완료하기
                 </button>

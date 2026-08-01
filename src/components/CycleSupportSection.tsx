@@ -354,16 +354,16 @@ export function CycleSupportSection({
             <div className="p-4 rounded-2xl bg-mint/40 border border-mint-foreground/20 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[10px] font-bold text-navy">오늘 공유된 신호</p>
-                  <p className="text-sm font-extrabold text-navy mt-1">{kindLabels[activeSignal.kind]}</p>
+                  <p className="text-[10px] font-bold text-mint-foreground">오늘 공유된 신호</p>
+                  <p className="text-sm font-extrabold text-mint-foreground mt-1">{kindLabels[activeSignal.kind]}</p>
                 </div>
-                <Radio className="w-4 h-4 text-navy shrink-0" />
+                <Radio className="w-4 h-4 text-mint-foreground shrink-0" />
               </div>
               {activeSignal.message && (
-                <p className="text-xs text-navy/80 bg-white/60 rounded-xl p-3">{activeSignal.message}</p>
+                <p className="text-xs text-mint-foreground/80 bg-card/60 rounded-xl p-3">{activeSignal.message}</p>
               )}
               {owner && (
-                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-navy/20 text-navy text-xs font-bold disabled:opacity-50 min-h-[42px]">
+                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-mint-foreground/20 text-mint-foreground text-xs font-bold disabled:opacity-50 min-h-[42px]">
                   {mutationPending === 'revoke' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
                   {mutationPending === 'revoke' ? '공유 취소 중' : '공유 취소'}
                 </button>
@@ -387,7 +387,7 @@ export function CycleSupportSection({
                 <span className="block text-right text-[9px] text-muted-foreground">{Array.from(message).length}/80</span>
               </label>
               {mutationError && <p className="text-[11px] text-destructive" role="alert">{mutationError}</p>}
-              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-coral text-white text-xs font-bold disabled:opacity-50 min-h-[42px]">
+              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-coral text-coral-foreground text-xs font-bold disabled:opacity-50 min-h-[42px]">
                 {mutationPending === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {mutationPending === 'share' ? '공유 중' : '오늘만 공유하기'}
               </button>

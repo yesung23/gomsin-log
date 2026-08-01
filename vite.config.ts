@@ -5,6 +5,11 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'url';
+import {
+  injectCspOrigins,
+  validateBuildEnvironment,
+  type ValidatedBuildEnvironment,
+} from './build/buildEnv';
 
 const SERVICE_WORKER_ASSET_MARKER = '/* __BUILD_ASSETS__ */';
 const SERVICE_WORKER_BUILD_ID = '__BUILD_ID__';
@@ -16,6 +21,54 @@ function listFiles(directory: string, prefix = ''): string[] {
       ? listFiles(resolve(directory, entry.name), relativePath)
       : [relativePath];
   });
+}
+
+/**
+ * Refuse to produce a production artifact from an unusable configuration.
+ *
+ * A build with no Supabase URL/key used to succeed and emit a bundle that was
+ * permanently stuck in demo mode. Scoped to `apply: 'build'` and production
+ * mode, so `vite dev` is unaffected; `npm test` loads `vitest.config.ts` and
+ * cannot be affected at all.
+ */
+function validateBuildEnvironmentPlugin(
+  onValidated: (validated: ValidatedBuildEnvironment) => void,
+): Plugin {
+  return {
+    name: 'validate-build-environment',
+    apply: 'build',
+    config(_config, { mode }) {
+      if (mode !== 'production') return;
+      const validated = validateBuildEnvironment({
+        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
+        VITE_SUPABASE_PUBLISHABLE_KEY: process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+      });
+      onValidated(validated);
+    },
+  };
+}
+
+/**
+ * Substitute the CSP marker tokens in `dist/_headers`.
+ *
+ * Registered BEFORE `injectServiceWorkerManifest()` so its `closeBundle` runs
+ * first: that plugin hashes every file in `dist` except `sw.js` to derive
+ * `SERVICE_WORKER_BUILD_ID`, and `_headers` is one of them, so substituting
+ * afterwards would make the build id reflect pre-substitution content.
+ */
+function emitCspHeaders(getValidated: () => ValidatedBuildEnvironment | null): Plugin {
+  return {
+    name: 'emit-csp-headers',
+    apply: 'build',
+    closeBundle() {
+      const validated = getValidated();
+      if (!validated) return;
+      const headersPath = resolve(process.cwd(), 'dist', '_headers');
+      const headers = readFileSync(headersPath, 'utf8');
+      writeFileSync(headersPath, injectCspOrigins(headers, validated));
+    },
+  };
 }
 
 /**
@@ -59,8 +112,18 @@ function injectServiceWorkerManifest(): Plugin {
   };
 }
 
+let validatedBuildEnvironment: ValidatedBuildEnvironment | null = null;
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), injectServiceWorkerManifest()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    validateBuildEnvironmentPlugin((validated) => { validatedBuildEnvironment = validated; }),
+    // Order matters: CSP substitution must happen before the service-worker
+    // build id is derived from the contents of `dist`.
+    emitCspHeaders(() => validatedBuildEnvironment),
+    injectServiceWorkerManifest(),
+  ],
   server: {
     watch: {
       ignored: ['**/.codex-runtime/**'],

@@ -106,16 +106,38 @@ const { useStore } = await import('@/lib/useStore');
 const STORE_KEY = 'gomsinlog.state.v2';
 
 let lastDeleteResult: boolean | null = null;
+let lastUpdateResult: boolean | null = null;
 
 function Probe() {
-  const { state, isReady, deleteRecord } = useStore();
+  const { state, isReady, deleteRecord, updateRecord } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
+      <span data-testid="emotionFlow">{JSON.stringify(state.records.find((r) => r.id === 'rec-1')?.emotionFlow ?? null)}</span>
+      <span data-testid="emotionUpdatedAt">{state.records.find((r) => r.id === 'rec-1')?.emotionUpdatedAt ?? 'null'}</span>
+      <span data-testid="log">{state.records.find((r) => r.id === 'rec-1')?.log ?? ''}</span>
       <button
         data-testid="delete-rec1"
         onClick={async () => { lastDeleteResult = await deleteRecord('rec-1'); }}
+      />
+      <button
+        data-testid="update-text-changed"
+        onClick={async () => {
+          lastUpdateResult = await updateRecord('rec-1', {
+            log: 'changed text',
+            emotionFlow: [],
+            emotionUpdatedAt: null,
+          });
+        }}
+      />
+      <button
+        data-testid="update-text-same"
+        onClick={async () => {
+          lastUpdateResult = await updateRecord('rec-1', {
+            log: 'hello',
+          });
+        }}
       />
     </div>
   );
@@ -169,10 +191,13 @@ describe('deleteRecord with storage cleanup', () => {
     createdChannels.length = 0;
     callOrder.length = 0;
     lastDeleteResult = null;
+    lastUpdateResult = null;
     removeRecordMedia.mockReset();
     removeRecordMedia.mockImplementation(async () => { callOrder.push('removeRecordMedia'); });
     deleteRecordFromDB.mockReset();
     deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return true; });
+    saveRecordToDB.mockReset();
+    saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return true; });
     localStorage.clear();
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1', app_metadata: {} } } });
   });
@@ -308,5 +333,103 @@ describe('deleteRecord with storage cleanup', () => {
     expect(removeRecordMedia).not.toHaveBeenCalled();
     expect(deleteRecordFromDB).toHaveBeenCalled();
     expect(screen.getByTestId('records').textContent).toBe('');
+  });
+});
+
+describe('updateRecord emotion clearing on text change', () => {
+  beforeEach(() => {
+    authCallbacks.length = 0;
+    createdChannels.length = 0;
+    callOrder.length = 0;
+    lastDeleteResult = null;
+    lastUpdateResult = null;
+    removeRecordMedia.mockReset();
+    removeRecordMedia.mockImplementation(async () => { callOrder.push('removeRecordMedia'); });
+    deleteRecordFromDB.mockReset();
+    deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return true; });
+    saveRecordToDB.mockReset();
+    saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return true; });
+    localStorage.clear();
+    mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1', app_metadata: {} } } });
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  async function setup(records: DailyRecord[]) {
+    const stateWithRecords = buildConnectedState(records);
+    localStorage.setItem(STORE_KEY, JSON.stringify(stateWithRecords));
+    fetchFullStateFromDB.mockResolvedValue(stateWithRecords);
+
+    const { unmount } = render(
+      <StoreProvider><Probe /></StoreProvider>,
+    );
+
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      authCallbacks.forEach((cb) =>
+        cb('SIGNED_IN', { user: { id: 'user-1', email: 'a@b.com', app_metadata: {} } }),
+      );
+    });
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('ready'));
+    return unmount;
+  }
+
+  it('clears emotionFlow and emotionUpdatedAt when text changes', async () => {
+    const records: DailyRecord[] = [{
+      id: 'rec-1',
+      userId: 'user-1',
+      date: '2026-01-01',
+      time: '10:00',
+      authorRole: 'gomsin',
+      log: 'hello',
+      isPrivate: false,
+      emotionFlow: [{ id: 'e1', sequence: 1, group: 'joy', displayLabel: '기쁨', source: 'user_confirmed', visibility: 'shared' }],
+      emotionUpdatedAt: '2026-01-01T10:00:00.000Z',
+      createdAt: '2026-01-01T10:00:00.000Z',
+    }];
+    await setup(records);
+
+    // Verify initial state has emotions
+    expect(screen.getByTestId('emotionFlow').textContent).toContain('e1');
+    expect(screen.getByTestId('emotionUpdatedAt').textContent).not.toBe('null');
+
+    await act(async () => {
+      screen.getByTestId('update-text-changed').click();
+    });
+    await waitFor(() => expect(lastUpdateResult).toBe(true));
+
+    // emotionFlow should be cleared
+    expect(screen.getByTestId('emotionFlow').textContent).toBe('[]');
+    expect(screen.getByTestId('emotionUpdatedAt').textContent).toBe('null');
+    expect(screen.getByTestId('log').textContent).toBe('changed text');
+  });
+
+  it('preserves emotionFlow when text does not change', async () => {
+    const records: DailyRecord[] = [{
+      id: 'rec-1',
+      userId: 'user-1',
+      date: '2026-01-01',
+      time: '10:00',
+      authorRole: 'gomsin',
+      log: 'hello',
+      isPrivate: false,
+      emotionFlow: [{ id: 'e1', sequence: 1, group: 'joy', displayLabel: '기쁨', source: 'user_confirmed', visibility: 'shared' }],
+      emotionUpdatedAt: '2026-01-01T10:00:00.000Z',
+      createdAt: '2026-01-01T10:00:00.000Z',
+    }];
+    await setup(records);
+
+    await act(async () => {
+      screen.getByTestId('update-text-same').click();
+    });
+    await waitFor(() => expect(lastUpdateResult).toBe(true));
+
+    // emotionFlow should be preserved since text didn't change
+    expect(screen.getByTestId('emotionFlow').textContent).toContain('e1');
+    expect(screen.getByTestId('emotionUpdatedAt').textContent).not.toBe('null');
+    expect(screen.getByTestId('log').textContent).toBe('hello');
   });
 });

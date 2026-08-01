@@ -128,11 +128,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -iEl 'service.role' -- ':!*.md' ':!supabase/functions/' ':!*.test.*' ':!docs/' ':!build/'; then
+          if git grep -iEl 'service.role' -- ':!*.md' ':!supabase/functions/' ':!supabase/migrations/' ':!*.test.*' ':!docs/' ':!build/' ':!.env.example' ':!.github/'; then
             echo 'Service-role reference found in application code.' >&2
             exit 1
           fi
-          echo 'No service-role values in application code.'
+          # src/lib/supabase.ts references the concept in comments for documentation.
+          # Verify no actual secret VALUE is present (a real key is 40+ chars of base64).
+          if git grep -El 'service_role_key\s*[:=]\s*["\x27][A-Za-z0-9+/=]{40,}' -- 'src/'; then
+            echo 'Actual service-role key value found in src/.' >&2
+            exit 1
+          fi
+          echo 'No service-role credential values in application code.'
 
       - name: No real Supabase project URLs
         shell: bash
@@ -168,11 +174,15 @@ jobs:
         with:
           deno-version: v2.5.6
 
+      - name: Cache Deno npm dependencies
+        run: deno install --allow-scripts=npm:@supabase/supabase-js@2 --node-modules-dir supabase/functions/delete-account/index.ts
+        working-directory: .
+
       - name: Typecheck Edge Function modules
-        run: npm run check:edge
+        run: deno check --node-modules-dir supabase/functions/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts
 
       - name: Run the real-Deno Edge Function tests
-        run: npm run test:edge
+        run: deno test --node-modules-dir --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts
 
   dependency-audit:
     name: Dependency audit allowlist

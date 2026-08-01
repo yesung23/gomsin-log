@@ -85,7 +85,7 @@ default branch. These are human release gates; task 12 records them as unperform
 
 ---
 
-- [ ] 1. Write bug condition exploration tests for all five clusters
+- [x] 1. Write bug condition exploration tests for all five clusters
   - **Property 1: Bug Condition** - Five verified defects are reproduced as counterexamples
   - **CRITICAL**: These tests MUST FAIL on unfixed code - failure confirms the bugs exist
   - **DO NOT attempt to fix the test or the code when they fail**
@@ -111,7 +111,7 @@ default branch. These are human release gates; task 12 records them as unperform
   - Mark this task complete when the tests are written, run, and every failure is documented
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.11, 1.12, 1.13, 1.14, 1.15, 1.16, 1.17, 1.18, 1.19, 1.20, 1.21, 1.25, 1.26, 1.27, 1.28_
 
-- [ ] 2. Write preservation property tests (BEFORE implementing any fix)
+- [x] 2. Write preservation property tests (BEFORE implementing any fix)
   - **Property 2: Preservation** - Non-buggy inputs behave exactly as at `7d82e3e`
   - **IMPORTANT**: Follow observation-first methodology - observe the UNFIXED code, then assert what you observed. Never assert assumed behavior
   - **Baseline**: the measured suite on this branch is **206 tests across 23 files**. Record the exact `npm test` summary line before any source change; this number plus the new suites from clauses 2.15 and 2.22 is what task 9 must confirm
@@ -134,9 +134,9 @@ default branch. These are human release gates; task 12 records them as unperform
   - Mark this task complete when the tests are written, run, and passing on unfixed code, and the 206/23 baseline is recorded
   - _Requirements: 2.10, 2.34, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.15, 3.16, 3.17_
 
-- [ ] 3. C1 — Fix for partial account deletion being misreported and leaving private data on screen
+- [x] 3. C1 — Fix for partial account deletion being misreported and leaving private data on screen
 
-  - [ ] 3.1 Add the typed outcome union in the new `src/lib/accountDeletion.ts`
+  - [x] 3.1 Add the typed outcome union in the new `src/lib/accountDeletion.ts`
     - Declare `AccountDeletionOutcome` as `{ status: 'deleted'; dataRemoved: true; warnings: string[] } | { status: 'partially_deleted'; dataRemoved: true; warnings: string[] } | { status: 'failed'; dataRemoved: false; warnings: string[] }`
     - Add `classifyDeletionSuccess(body)` → `deleted` only when `body.success === true`, else `failed`
     - Add `classifyDeletionErrorBody(body)` → `partially_deleted` when `body.dataRemoved === true`, else `failed`
@@ -147,7 +147,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2 — the `deleted` gate stays an explicit `success === true` check, never inferred from the absence of a transport error_
     - _Requirements: 2.1, 2.2_
 
-  - [ ] 3.2 Read the error response body in `deleteAccountFromDB`
+  - [x] 3.2 Read the error response body in `deleteAccountFromDB`
     - On `error`, detect `FunctionsHttpError` and `await error.context.json()` inside a `try`; `context` is a `Response` whose body may be consumed only once, so read it exactly once and pass the parsed value onward
     - A relay/fetch error with no `context`, or a parse failure, classifies as `failed` with `dataRemoved: false`
     - Change the signature to `Promise<AccountDeletionOutcome>`; keep the existing explicit `data?.success !== true` check as the `deleted` gate
@@ -157,7 +157,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2 — success and `dataRemoved: false` paths unchanged_
     - _Requirements: 2.1, 2.2_
 
-  - [ ] 3.3 Add `purgeLocalContentRetainingIdentity` alongside `purgeLocalAccountData`
+  - [x] 3.3 Add `purgeLocalContentRetainingIdentity` alongside `purgeLocalAccountData`
     - Do NOT modify or replace `purgeLocalAccountData` — sign-out, account switch and fully successful deletion must keep using it unchanged
     - Apply clause 2.4's key-level split exactly: `localStorage.removeItem(STORE_KEY_V1)`; rewrite `STORE_KEY` through the existing `saveState` path; retain `authenticatedUser` and the `sb-*` session keys (no sign-out); clear `records`, `events`, `trips`; reset all five `profile` fields, `setupComplete`, `onboardingStep`, `highlightedRecordId` to `DEFAULT_STATE`; set `isDemoMode: false`
     - Leave `carryOverDevicePrefs` (`store.tsx:197-203`) **exactly as at `7d82e3e`** — the recovery marker does not go through it and is written by task 3.5's helper to its own top-level key, so `STORE_KEY` and the marker cannot disturb each other in either direction (clause 3.11)
@@ -170,7 +170,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2, clauses 3.7, 3.8 — `purgeLocalAccountData`, sign-out, account switch and demo mode untouched_
     - _Requirements: 2.4_
 
-  - [ ] 3.4 Expose `accountDeletionRecovery` state, retry and logout
+  - [x] 3.4 Expose `accountDeletionRecovery` state, retry and logout
     - Add `accountDeletionRecovery: { warnings: string[] } | null` to `StoreContextType` (`src/lib/storeContext.ts`) and to the `StoreProvider` value, so every consumer reads one authoritative flag instead of inferring recovery from route or toast state
     - Add `retryAccountDeletion()`; reuse the existing `signOut()` for the logout action
     - Rewrite `deleteAccount` to return `AccountDeletionOutcome`, keeping the demo-mode short-circuit and the `isCurrentIdentity` guard, then branching: `deleted` → existing `purgeLocalAccountData` + `signOut`, **then** `clearRecoveryMarker(userId)` because Auth deletion is now confirmed; `partially_deleted` → `markRecoveryPending(userId)` **first**, then `purgeLocalContentRetainingIdentity` + set recovery; `failed` → return unchanged with no purge, no recovery and no marker
@@ -182,7 +182,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2, clause 2.10 — a `failed` outcome enters no recovery_
     - _Requirements: 2.3, 2.6, 2.7, 2.8, 2.10_
 
-  - [ ] 3.5 Add the dedicated per-user recovery marker helpers in `src/lib/accountDeletion.ts`
+  - [x] 3.5 Add the dedicated per-user recovery marker helpers in `src/lib/accountDeletion.ts`
     - **DECISION 2, secondary authority.** The **rejected** approach was a boolean inside `STORE_KEY` persisted by widening `carryOverDevicePrefs`; it is **fail-open** — dropped by `loadState`'s `removeItem` on corrupt JSON (`store.tsx:103-116`), cleared on logout, and bypassed by clearing site data or changing device, each of which admits the user to a normal app over deleted data. Do not implement it in any form
     - `carryOverDevicePrefs` (`src/lib/store.tsx:197-203`) is left **exactly as at `7d82e3e`**. Do not add a fourth key to it, and do not route the marker through `saveState`/`loadState`
     - Add to `src/lib/accountDeletion.ts`, keeping the module pure and unit-testable without a store or a Supabase client: `const RECOVERY_KEY_PREFIX = 'gomsinlog.accountDeletionRecovery.v1.'`; `recoveryKeyFor(userId)` → `RECOVERY_KEY_PREFIX + userId`; `markRecoveryPending(userId)` → `localStorage.setItem(recoveryKeyFor(userId), 'true')`; `readRecoveryMarker(userId)` → `'absent' | 'active'`; `clearRecoveryMarker(userId)`
@@ -200,7 +200,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2 and Property 9, clauses 3.7, 3.11 — `purgeLocalAccountData` is unchanged and leaves the marker in place; `carryOverDevicePrefs` is unchanged, so `widgetLayout`, `hasSeenInstallPrompt` and `theme` still survive sign-out and account switches and `prefers-color-scheme` is still honoured_
     - _Requirements: 2.3, 2.4, 2.5, 2.33, 2.34, 2.35, 2.37, 3.11_
 
-  - [ ] 3.6 Write the server-side pending flag in `supabase/functions/delete-account/index.ts`
+  - [x] 3.6 Write the server-side pending flag in `supabase/functions/delete-account/index.ts`
     - **DECISION 2, primary authority.** Add the admin-only write `app_metadata.account_deletion_pending = true` using the existing service-role client (`index.ts:164-166`) via `admin.auth.admin.updateUserById(userId, { app_metadata: { ...(user.app_metadata ?? {}), account_deletion_pending: true } })`
     - **Placement is load-bearing**: immediately after `const userId = user.id;` (`index.ts:174`) and **BEFORE** the `try` block that opens the deletion sequence (`:178`) — so before the read-only `daily_records` preflight (`:180-185`) and before `begin_account_deletion` (`:191-195`). Clause 2.32 makes the flag a hard gate on *anything* that touches the account, and the preflight also establishes the record-id set the transactional RPC is later held to
     - Being **outside** the `try` is also deliberate: the existing `catch` (`:262`) runs `cancel_account_deletion` and reports `dataRemoved: databasePreparationCompleted` (`:290`), neither of which is the right response to a flag-write failure, so this step returns its own response directly
@@ -214,7 +214,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 4, clause 3.17 — the deletion sequence is preserved **once entered**, with every step and constant unchanged; it is no longer byte-for-byte because it is now preceded by and gated on this write_
     - _Requirements: 2.31, 2.32_
 
-  - [ ] 3.7 Detect recovery with `getUser()` inside the `onAuthStateChange` async body
+  - [x] 3.7 Detect recovery with `getUser()` inside the `onAuthStateChange` async body
     - Insert the check in the existing `supabase.auth.onAuthStateChange` subscription (`store.tsx:362`), in the async body for a `session?.user`, **after** `authUser` is built (`:400-405`) and after the `TOKEN_REFRESHED` / `USER_UPDATED` short-circuit (`:407-413`), and **before** the `fetchFullStateFromDB` await (`:423-427`)
     - **Read the local marker synchronously FIRST** for `sessionUser.id`; if it is `'active'`, set `accountDeletionRecovery` immediately, so the `App.tsx` gate is authoritative on first paint with no network time spent
     - **Then the server round-trip**: `supabase.auth.getUser()`, reading `data.user?.app_metadata?.account_deletion_pending`. Do **NOT** read `session.user.app_metadata` — the session's JWT was issued before the flag was written and reports the stale value on exactly the reload that must catch it (clause 2.36). A `true` result sets recovery **regardless** of the local marker or any cached claim, and also writes the local marker so the next reload is instant
@@ -227,7 +227,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2, clause 3.8 — the auth bootstrap's existing ordering, the `TOKEN_REFRESHED` / `USER_UPDATED` short-circuit, `fetchFullStateFromDB` under `withTimeout`, and demo mode's `INITIAL_SESSION` refresh survival are unchanged_
     - _Requirements: 2.5, 2.36_
 
-  - [ ] 3.8 Gate routing on recovery in `src/App.tsx`
+  - [x] 3.8 Gate routing on recovery in `src/App.tsx`
     - When `accountDeletionRecovery` is non-null, render only the recovery screen for every path except `/auth/callback` and `/legal/:doc`, which must stay reachable
     - Offer exactly two actions: retry deletion, and log out
     - Place the gate **immediately before the existing `authSyncUnavailable` branch** (`App.tsx:80-90`) so it **takes precedence over it**, reusing the established pattern rather than inventing routing: a sync outage must not replace the recovery screen with a retry-sync screen that offers no path to completing the deletion. Both branches stay after the `!isReady` spinner, so no authenticated route can render before `isReady` is true
@@ -238,7 +238,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 12 — routing for every non-recovery session is unchanged, and the `authSyncUnavailable` branch still behaves as at `7d82e3e` whenever recovery is inactive_
     - _Requirements: 2.5, 2.6, 2.32_
 
-  - [ ] 3.9 Tell the truth in `src/pages/SettingsPage.tsx`
+  - [x] 3.9 Tell the truth in `src/pages/SettingsPage.tsx`
     - For the `partially_deleted` outcome **only**, replace the generic toast at line 765: state that the user's data has been deleted but the login account has not, and that the deletion must be completed
     - `failed` keeps `계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.`; `deleted` keeps its existing `media_not_fully_removed` warning toast
     - _Bug_Condition: isBugCondition C1 — clause 1.3, the generic message claims nothing was deleted_
@@ -246,7 +246,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2, clause 2.10 — the generic message survives for genuine total failure_
     - _Requirements: 2.9, 2.10_
 
-  - [ ] 3.10 Record the operator note in `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`
+  - [x] 3.10 Record the operator note in `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`
     - Record that `app_metadata.account_deletion_pending` is now written by the `delete-account` Edge Function with the service-role key, and that it is the **primary authority** for deletion recovery
     - Record that the flag is **intentionally left set on Auth-deletion failure** — that is not a bug to be tidied up, it is what keeps recovery active for an account whose data is already gone
     - Record that an operator who clears it by hand is **re-admitting a user to an app whose data is gone**
@@ -257,7 +257,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 14 — deployment, remote configuration and Edge Function deployment stay unperformed_
     - _Requirements: 2.31, 2.34_
 
-  - [ ] 3.11 Verify the C1 bug condition exploration tests now pass
+  - [x] 3.11 Verify the C1 bug condition exploration tests now pass
     - **Property 1: Expected Behavior** - Partial deletion is classified truthfully and contained
     - **IMPORTANT**: Re-run the SAME C1 tests from task 1 - do NOT write new tests
     - The task 1 tests encode the expected behavior; their passing is what confirms it
@@ -265,7 +265,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - **EXPECTED OUTCOME**: Tests PASS (confirms C1 is fixed)
     - _Requirements: Expected Behavior Properties from design (Property 1) — 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.31, 2.32, 2.36_
 
-  - [ ] 3.12 Verify the C1 preservation tests still pass
+  - [x] 3.12 Verify the C1 preservation tests still pass
     - **Property 2: Preservation** - Successful and total-failure deletion paths are unchanged
     - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
     - Pay particular attention to the highest-regression-risk area named in design.md: retaining the session while purging content inverts the existing purge invariant, so assert the hydration and sync effects re-fetch nothing
@@ -273,7 +273,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - Confirm the amended clause 3.17 claim as stated, not as it used to read: the deletion sequence is preserved **once entered**, with every step and constant unchanged — it is no longer byte-for-byte, because entry is now gated on task 3.6's write
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
 
-  - [ ] 3.13 Implement the nine-test Deletion-Recovery Suite (clause 2.38, gate 2.29(k))
+  - [x] 3.13 Implement the nine-test Deletion-Recovery Suite (clause 2.38, gate 2.29(k))
     - These nine tests are one suite because each closes a bypass the others leave open; run them as one carried-forward flow (partial deletion → reload → logout → same-user re-login → other-user session → back to the first user) rather than nine isolated snapshots
     - **1 — Marker created on partial deletion**: `deleteAccount` against a `500 { dataRemoved: true }` response creates `gomsinlog.accountDeletionRecovery.v1.<userId>` with a boolean value and **no** warnings, storage paths or profile/couple/record/event/trip content; `STORE_KEY` holds only `carryOverDevicePrefs`; `authenticatedUser` is retained
     - **2 — Logout preserves the marker**: the logout action from the recovery screen runs `purgeLocalAccountData` + `signOut`, `STORE_KEY_V1` and `STORE_KEY` are gone, the marker **still exists**, and the account is not presented as deleted (clauses 2.8, 2.34)
@@ -293,7 +293,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - Do **not** commit C1 here: the tri-state work of tasks 3.14-3.19 is part of the same cluster, so the commit gate moves to 3.19
     - _Requirements: 2.29, 2.38_
 
-  - [ ] 3.14 Add the tri-state `DeletionStatus` union and the pure `classifyDeletionStatus` resolver in `src/lib/accountDeletion.ts`
+  - [x] 3.14 Add the tri-state `DeletionStatus` union and the pure `classifyDeletionStatus` resolver in `src/lib/accountDeletion.ts`
     - **DECISION 4.** Deletion status has **three** variants, not two and not two-plus-a-null. Declare in the same new pure module as tasks 3.1 and 3.5, so the resolver is exhaustively unit-testable with no network, no store and no Supabase client: `export type DeletionStatus = { kind: 'pending' } | { kind: 'clear' } | { kind: 'unknown' }`
     - Declare the two independent authorities as the resolver's inputs, each already three-valued in effect: `export type MarkerState = 'absent' | 'active'` — where `'active'` **includes malformed** (clauses 2.35, 2.41) — and `export type ServerAnswer = { kind: 'pending' } | { kind: 'not_pending' } | { kind: 'unavailable' }`, where `unavailable` means `getUser()` **could not complete** (reject, timeout, offline) and is therefore **not an answer**
     - Implement `classifyDeletionStatus(marker: MarkerState, server: ServerAnswer): DeletionStatus` as a **pure, total** function ordered **exactly as the clause 2.39 table**: order 1 — `marker === 'active'` ⇒ `pending`, then `server.kind === 'pending'` ⇒ `pending`; order 2 — `server.kind === 'not_pending'` ⇒ `clear`; order 3 — `server.kind === 'unavailable'` ⇒ `unknown`; then `return assertNever(server)`
@@ -307,7 +307,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2, clause 3.11 — the module stays pure and dependency-free; `carryOverDevicePrefs` is untouched and `DeletionStatus` never enters `AppState`_
     - _Requirements: 2.39, 2.42, 2.43_
 
-  - [ ] 3.15 Add the `ensureNotPendingBeforeServerCall()` gate at the real sync and mutation entry points
+  - [x] 3.15 Add the `ensureNotPendingBeforeServerCall()` gate at the real sync and mutation entry points
     - Add one `StoreProvider`-internal helper returning `Promise<DeletionStatus>`: it re-issues the authoritative check of task 3.7 and, on `pending`, performs the abort of task 3.16. Place it at the top of the **existing** entry points below, in the same position as the guards those functions already have, so it always runs **before the first `await` that issues a request**
     - **`refreshSlice(slice)` — `store.tsx:771`**: the gate goes immediately **after** the existing `if (!isCurrentActiveCouple()) return;` at `store.tsx:772` and **before** the `isWorkspaceQuarantined()` branch at `:775-778`, so the quarantine branch's own call into `reconcileSharedAccess` is covered by the same decision. This covers `scheduleRefresh` (`:839-850`) and the three channel handlers at `:918`, `:924`, `:934`
     - **`reconcileSharedAccess(workspace)` — `store.tsx:665`**: the gate goes immediately **after** `if (!client || !canReconcile()) return false;` at `store.tsx:670`, **before** `++membershipReconciliationRef.current` at `:672` and **before** the first request, `client.rpc('get_my_active_couple_id')` at `store.tsx:679`. This is the single funnel for `reconcileOwnMembership` (`:852-855`), the `scheduleRecovery` poll (`:869-891`), the `visibilitychange` / `online` handler (`:965-970`) and `retrySharedAccessRef.current` (`:893-899`), which the context-exposed `retrySharedAccess` (`:1899`) invokes. **`window.addEventListener('online', handleVisibility)` (`store.tsx:970`) is the concrete path by which the offline secondary device of clause 2.47 is caught** when connectivity returns
@@ -320,7 +320,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2 and Property 12, clauses 3.7, 3.8 — each gated function keeps its existing guards, capture order, return values and failure shapes; the exempt paths and the initial-hydration ordering are unchanged_
     - _Requirements: 2.44, 2.45_
 
-  - [ ] 3.16 Add `abortForPendingDeletion(identity)` — abort with no writes applied, then purge and enter recovery
+  - [x] 3.16 Add `abortForPendingDeletion(identity)` — abort with no writes applied, then purge and enter recovery
     - Called by `ensureNotPendingBeforeServerCall` when the retry returns `pending`, and it runs **synchronously with respect to the caller's first request**: the caller `return`s on the gate's non-`clear` result and never reaches its request
     - Sequence, in this order: (1) `markRecoveryPending(userId)` (task 3.5) — mark the marker **first**, so the verdict is durable across a reload and does not depend on repeating the round-trip; (2) **reuse the existing `purgeLocalContentRetainingIdentity(identity)` of task 3.3 unchanged** — content goes, identity and session stay, `carryOverDevicePrefs` (`store.tsx:197-203`) untouched; (3) set `accountDeletionRecovery` (task 3.4) so the `App.tsx` gate of task 3.8 blocks every normal route on the next render; (4) bump `membershipReconciliationRef.current`, call `clearRecovery()` (`store.tsx:867-870`), and clear the `timers` debounce map (`store.tsx:842-849`, the same clearing the teardown already does at `:978-979`) so nothing deferred can fire afterwards; (5) return `{ kind: 'pending' }`, on which **every gated caller returns its existing failure value** — `false`, or the `staleResult` shape at `store.tsx:1200-1204` — **without issuing anything**
     - **Preserve the "no writes applied" argument explicitly; it is the claim most worth being concrete about.** Record all four legs: the **shared-sync paths are read-only** — `refreshSlice` and `reconcileSharedAccess` issue only `rpc('get_my_active_couple_id')` (`:679`) and the three `fetch*ResultFromDB` SELECTs (`:698-702`, `:788`, `:808`, `:820`; `records.ts:93`, `events.ts:8`, `trips.ts:144`) and modify **no server state at all**, so the claim is about their **local** writes — `updateStateImmediately` (`:800-804`, `:812-814`) and `replaceStateImmediately` (`:719`) — every one of which is **downstream of the awaited fetch**, so returning at the gate means no fetched row can be applied to state after the purge
@@ -332,7 +332,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2, clauses 2.4, 3.11 — the partial-purge path and `purgeLocalAccountData` are reused unchanged, device preferences survive, and the existing revision-guard machinery is not replaced_
     - _Requirements: 2.46_
 
-  - [ ] 3.17 Prevent `unknown` from ever being cached, promoted or logged as settled
+  - [x] 3.17 Prevent `unknown` from ever being cached, promoted or logged as settled
     - **It cannot reach `localStorage` by construction**: `saveState` persists only the `carryOverDevicePrefs` whitelist (`store.tsx:128`, `:197-203`), left **exactly as at `7d82e3e`** (clause 3.11) and containing no deletion field. `DeletionStatus` lives in React state and a ref and is **never added to `AppState`**
     - **The gate never reads a cached verdict**: `ensureNotPendingBeforeServerCall` re-issues `getUser()` on **every** entry. The ref holding the last observed status is for rendering and logging **only, never as a decision input**
     - **There is no promotion path**: the only writers of `DeletionStatus` are `classifyDeletionStatus` (task 3.14) and the marker read of task 3.5. No `if (attempts > n) status = clear`, no expiry, no elapsed-time promotion, no promotion from an unrelated successful request, no `??` default and no `||` fallback — **every** transition out of `unknown` comes from an authoritative answer or a positive marker
@@ -343,7 +343,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 2, clause 3.11 — `carryOverDevicePrefs`, `saveState` and `loadState` are unchanged, and `async.ts`'s existing warning behaviour is untouched_
     - _Requirements: 2.43, 2.45_
 
-  - [ ] 3.18 Keep the three availability axes separate and never conflated
+  - [x] 3.18 Keep the three availability axes separate and never conflated
     - Stated explicitly because the codebase already has **two** availability-shaped values, and reusing either recreates defect 1.28: `SharedSyncStatus` = `'live' | 'delayed' | 'unavailable'` (`src/lib/storeContext.ts:10`, `:17`) means **how fresh the shared couple workspace on screen is**; `authSyncUnavailable: boolean` (`storeContext.ts:16`, set from `FULL_STATE_UNAVAILABLE` at `store.tsx:446-447`) means **whether initial account hydration succeeded**; the new `DeletionStatus` means **whether this account is being deleted**
     - They are **orthogonal in both directions and all combinations are reachable**: a perfectly `live` workspace can coexist with `pending` (the flag was set moments ago); `unavailable` does **not** imply `unknown` (a local marker yields `pending` while sync is down); `unknown` does **not** imply `unavailable` (a `getUser()` failure alongside healthy Postgres reads)
     - Therefore: **reuse no existing field, widen no existing union.** `FULL_STATE_UNAVAILABLE` (`src/lib/sync.ts:9`) keeps its current meaning of a **retryable sync outage** and is not overloaded to mean "deletion status unknown"; the `setSharedSyncStatus` calls (`store.tsx:376`, `:604`, `:637`, `:724`) are untouched
@@ -353,7 +353,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 12, clauses 3.7, 3.8 — `SharedSyncStatus`, `authSyncUnavailable`, `FULL_STATE_UNAVAILABLE` and every `setSharedSyncStatus` call behave exactly as at `7d82e3e`_
     - _Requirements: 2.43_
 
-  - [ ] 3.19 Implement the five-test Tri-State Verification Suite (clause 2.48, gate 2.29(l))
+  - [x] 3.19 Implement the five-test Tri-State Verification Suite (clause 2.48, gate 2.29(l))
     - These five tests validate design Property 15 and are the tests gate 2.29(l) refers to. Tests 1 and 2 run against the **pure resolver** of task 3.14 and need no network; tests 3-5 run against the store and the route gate
     - **1 — Classification is total and exclusive**: table-drive **all nine** combinations of marker state (absent / valid positive / malformed) × authoritative answer (`pending` / not pending / cannot complete) through `readRecoveryMarker` into `classifyDeletionStatus`. Assert each maps to **exactly one** of `pending`, `clear`, `unknown` — none unclassified, none mapping to two — that the **(marker present, server not pending)** pair resolves to **`pending`, not `clear`**, that a **malformed marker → `pending` in all three answer columns**, and that **the key is not removed in any of the nine cases** (clauses 2.39, 2.41)
     - **2 — A `getUser()` timeout is not `clear`**: drive (a) a call that never settles past `AUTH_SYNC_TIMEOUT_MS` through `withTimeout`, (b) a rejection, (c) a failure with the network offline. Every case yields **`unknown`, never `clear`**. Assert the persisted, cached, serialized and logged forms of `unknown` are each **distinct** from those of `clear` and are never `false`, `null` or an omitted field — asserted on the **actual log line** and on the **absence of any deletion field in `STORE_KEY`**. **INCLUDING a type-level assertion**: an `@ts-expect-error` (or `expect-type`-style) check that a **collapsing representation fails to type-check** — `boolean`, `boolean | null`, `deletionPending?: boolean` — and that a `switch` missing the `unknown` arm fails the `assertNever` check (clause 2.43). The value-only version of this test would pass against a `boolean | null` implementation that happens to branch correctly today, which is exactly why the type-level assertion is required
@@ -369,9 +369,9 @@ default branch. These are human release gates; task 12 records them as unperform
     - Commit C1 as one reviewable change once 3.11, 3.12, 3.13 and 3.19 all hold
     - _Requirements: 2.29, 2.47, 2.48_
 
-- [ ] 4. C2 — Fix for the `delete-account` Edge Function accepting any browser origin
+- [x] 4. C2 — Fix for the `delete-account` Edge Function accepting any browser origin
 
-  - [ ] 4.1 Add the new shared module `supabase/functions/_shared/cors.ts`
+  - [x] 4.1 Add the new shared module `supabase/functions/_shared/cors.ts`
     - `parseAllowedOrigins(raw)` → trimmed, non-empty, de-duplicated exact origins
     - `resolveCors(method, origin, allowlist)` → `{ configured, allowed, headers }`, where `headers` always includes `Vary: Origin` and `configured` is false when the allowlist is empty
     - Exact string equality on the `Origin` value: no wildcards, no suffix matching, and no code path that can emit `Access-Control-Allow-Origin: '*'`
@@ -382,7 +382,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 4 — allowlisted and absent-`Origin` callers keep working_
     - _Requirements: 2.11, 2.12_
 
-  - [ ] 4.2 Implement the decision table in `supabase/functions/delete-account/index.ts`
+  - [x] 4.2 Implement the decision table in `supabase/functions/delete-account/index.ts`
     - Delete the wildcard `corsHeaders` constant at lines 18-22 and make `jsonResponse` take the resolved headers as a parameter, so a wildcard cannot be reintroduced by forgetting to pass them
     - Apply clause 2.13 rows in this order: read `ALLOWED_ORIGINS`; if unconfigured return `500` for every method (row g, fail closed, no wildcard fallback); then `OPTIONS` → `200` with the exact reflected origin (a), `403` (b), or `200` with no reflection when `Origin` is absent (c); then `POST` → `403` before any auth or admin-client work when the origin is disallowed (e), else fall through (d, f)
     - An allowed preflight advertises methods `POST, OPTIONS` and headers `authorization, apikey, content-type, x-client-info`
@@ -393,7 +393,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 4, clause 3.17 — bearer verification still required (`401`), and the deletion sequence is preserved **once entered** with every step and constant unchanged. Not byte-for-byte: clause 2.32 precedes it with the pending-flag write of task 3.6 and gates entry on that write succeeding. C2 reorders, removes and re-semanticises nothing_
     - _Requirements: 2.11, 2.12, 2.13_
 
-  - [ ] 4.3 Add `src/lib/cors.test.ts` asserting every row (a)-(g)
+  - [x] 4.3 Add `src/lib/cors.test.ts` asserting every row (a)-(g)
     - Cover all seven rows of the clause 2.13 table explicitly
     - Cover `parseAllowedOrigins` over empty, whitespace-only, single, multiple, duplicate and trailing-comma inputs
     - Assert no code path can emit `'*'`, and assert `Vary: Origin` on `403`, `401`, `405` and `500` responses
@@ -404,7 +404,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 4_
     - _Requirements: 2.15_
 
-  - [ ] 4.4 Document `ALLOWED_ORIGINS` in the deployment checklist
+  - [x] 4.4 Document `ALLOWED_ORIGINS` in the deployment checklist
     - In `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` section 5 (line 299), next to `SUPABASE_SERVICE_ROLE_KEY` (line 324), record the exact comma-separated format, the fail-closed `500` behaviour of row (g), and the absent-`Origin` allowance of rows (c) and (f) as an explicit accepted risk with its compensating control — bearer-token verification remains mandatory
     - Do NOT set `ALLOWED_ORIGINS` in any remote environment; that is an operator gate (clause 3.23)
     - _Bug_Condition: isBugCondition C2 — clause 1.10, no allowlist exists to configure_
@@ -412,21 +412,21 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 14 — deployment and remote configuration stay unperformed_
     - _Requirements: 2.14_
 
-  - [ ] 4.5 Verify the C2 bug condition exploration tests now pass
+  - [x] 4.5 Verify the C2 bug condition exploration tests now pass
     - **Property 1: Expected Behavior** - Disallowed origins are refused, never reflected
     - **IMPORTANT**: Re-run the SAME C2 tests from task 1 - do NOT write new tests
     - **EXPECTED OUTCOME**: Tests PASS (confirms C2 is fixed)
     - _Requirements: Expected Behavior Properties from design (Property 3) — 2.11, 2.12, 2.13, 2.15_
 
-  - [ ] 4.6 Verify the C2 preservation tests still pass
+  - [x] 4.6 Verify the C2 preservation tests still pass
     - **Property 2: Preservation** - Allowlisted and non-browser callers keep working unchanged
     - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - Commit C2 as one reviewable change once 4.5 and 4.6 both hold
 
-- [ ] 5. C3 — Fix for the build shipping no CSP and silently accepting missing Supabase config
+- [x] 5. C3 — Fix for the build shipping no CSP and silently accepting missing Supabase config
 
-  - [ ] 5.1 Add CSP marker tokens to `public/_headers`
+  - [x] 5.1 Add CSP marker tokens to `public/_headers`
     - Add a `Content-Security-Policy` line containing `__SUPABASE_HTTP_SRC__` and `__SUPABASE_CONNECT_SRC__`, leaving the five existing headers byte-identical
     - Rewrite the header comment to record that **this supersedes the earlier deliberate decision to delegate CSP to the hosting platform**: why that decision was made (the project URL is known only at build time), why the reversal is safe now (the build validates and injects that URL), and that platforms ignoring `_headers` still require equivalent configuration
     - Commit markers, never real or placeholder project URLs
@@ -435,7 +435,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 7, clause 3.10 — the five non-CSP headers are byte-identical_
     - _Requirements: 2.16_
 
-  - [ ] 5.2 Add build-environment validation to `vite.config.ts`
+  - [x] 5.2 Add build-environment validation to `vite.config.ts`
     - Add a `validateBuildEnvironment()` plugin scoped to `apply: 'build'` and production mode only, so `vite dev` is unaffected (and `npm test`, which loads the separate `vitest.config.ts`, cannot be affected)
     - Require `VITE_SUPABASE_URL` and either `VITE_SUPABASE_PUBLISHABLE_KEY` **or** the existing `VITE_SUPABASE_ANON_KEY` fallback; fail with a non-zero exit and a message naming the missing variable
     - Validate the URL with `new URL(...)`: reject unparseable values, require `https:` except when the hostname is `localhost` or `127.0.0.1`
@@ -444,7 +444,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 7, clause 3.9 — the `VITE_SUPABASE_ANON_KEY` fallback satisfies the key requirement_
     - _Requirements: 2.17, 2.18_
 
-  - [ ] 5.3 Inject the validated origins into `dist/_headers`
+  - [x] 5.3 Inject the validated origins into `dist/_headers`
     - Add an `emitCspHeaders()` plugin that, in `closeBundle`, reads `dist/_headers`, replaces `__SUPABASE_HTTP_SRC__` with the validated `https://` origin and `__SUPABASE_CONNECT_SRC__` with the `https://` origin plus its `wss://` equivalent, then asserts zero markers remain
     - **Plugin order matters**: register `emitCspHeaders()` **before** `injectServiceWorkerManifest()` so its `closeBundle` runs first — that plugin hashes every file in `dist` except `sw.js` to derive `SERVICE_WORKER_BUILD_ID`, and `_headers` is one of them; registering it after would make the build id reflect pre-substitution content
     - _Bug_Condition: isBugCondition C3 (negated branch) — a valid build must emit a marker-free CSP_
@@ -452,22 +452,22 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 7, clause 3.14 — the service-worker manifest still enumerates every asset and its marker guard still throws when markers are missing_
     - _Requirements: 2.19, 2.30_
 
-  - [ ] 5.4 Verify the C3 bug condition exploration tests now pass
+  - [x] 5.4 Verify the C3 bug condition exploration tests now pass
     - **Property 1: Expected Behavior** - Misconfigured builds fail; valid builds emit a marker-free CSP
     - **IMPORTANT**: Re-run the SAME C3 tests from task 1 - do NOT write new tests
     - Cover each missing-variable combination and each URL form: `https`, `http`, `http://localhost`, `http://127.0.0.1`, unparseable, empty
     - **EXPECTED OUTCOME**: Tests PASS (confirms C3 is fixed)
     - _Requirements: Expected Behavior Properties from design (Properties 5, 6) — 2.16, 2.17, 2.18, 2.19, 2.30_
 
-  - [ ] 5.5 Verify the C3 preservation tests still pass
+  - [x] 5.5 Verify the C3 preservation tests still pass
     - **Property 2: Preservation** - Existing headers, the key fallback, and the SW manifest are unchanged
     - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - Commit C3 as one reviewable change once 5.4 and 5.5 both hold — clause 2.16 and clauses 2.18/2.19 must land together, since shipping markers without injection would emit them to production
 
-- [ ] 6. C4 — Fix for light-only hard-coded surfaces breaking the dark theme
+- [x] 6. C4 — Fix for light-only hard-coded surfaces breaking the dark theme
 
-  - [ ] 6.1 Convert palette literals to existing theme tokens in the four guarded files
+  - [x] 6.1 Convert palette literals to existing theme tokens in the four guarded files
     - `src/components/InstallPromptBanner.tsx` (18 matches), `src/components/CycleSupportSection.tsx` (2), `src/pages/RecordPage.tsx` (16), `src/pages/TripsPage.tsx` (24)
     - Mapping, using only tokens already defined in `src/styles/index.css`: `bg-white`/`bg-gray-50` → `bg-card` or `bg-muted`; `bg-gray-100` → `bg-muted`; `border-gray-100`/`border-gray-200` → `border-border`; `text-gray-900`/`text-gray-800` → `text-foreground` or `text-card-foreground`; `text-gray-700`/`text-gray-600`/`text-gray-500`/`text-gray-400` → `text-muted-foreground`
     - Translucent surfaces become opacity variants of tokens: `bg-white/80` → `bg-card/80`, `bg-white/60` → `bg-card/60`, `bg-white/40` → `bg-card/40` (`RecordPage.tsx:385,390,396`; `CycleSupportSection.tsx:363`) — eliminated, not overridden
@@ -478,7 +478,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 9, clauses 3.12, 3.13 — token definitions and the light-theme appearance are untouched_
     - _Requirements: 2.20, 2.21, 2.23_
 
-  - [ ] 6.2 Resolve the three additional matching files explicitly
+  - [x] 6.2 Resolve the three additional matching files explicitly
     - `src/pages/ServicePage.tsx:145,149` — `bg-white/20`, `bg-white/10` over the `from-navy to-navy/80` gradient at `:141`, plus `text-white/10` (`:142`), `text-white/80` (`:159`), `bg-black/25` (`:163`), `text-white/60` (`:169`), `bg-black/50` (`:241`): verify against the dark theme, then either convert or record as theme-invariant accent overlays on a fixed-hue navy surface
     - `src/pages/SchedulePage.tsx:464` — `bg-slate-500` (private-event dot) and `bg-white` (today marker on `bg-coral`): verify and resolve; `bg-black/50` at `:505` is a modal scrim, conventionally theme-invariant
     - `src/pages/OnboardingPage.tsx:624` — `border-white` on a spinner inside a `bg-coral text-white` button, plus `bg-black text-white` at `:402` for the brand-mandated Apple sign-in button: verify and resolve
@@ -488,7 +488,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 9 — light-theme appearance unchanged wherever a conversion is made_
     - _Requirements: 2.22_
 
-  - [ ] 6.3 Add the guard test `src/lib/themeTokens.test.ts`
+  - [x] 6.3 Add the guard test `src/lib/themeTokens.test.ts`
     - Read the four guarded files from disk, apply the `isBugConditionC4` regex **including opacity variants**, and assert zero matches after subtracting theme-invariant accent foregrounds
     - Make `guardedFiles` an explicit list, carrying the documented reason for every exclusion from task 6.2
     - Assert the exception rule accepts `bg-coral text-coral-foreground` and still rejects `bg-white/60`
@@ -499,23 +499,23 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 9_
     - _Requirements: 2.22, 2.23_
 
-  - [ ] 6.4 Verify the C4 bug condition exploration tests now pass
+  - [x] 6.4 Verify the C4 bug condition exploration tests now pass
     - **Property 1: Expected Behavior** - No palette literal survives in a guarded file
     - **IMPORTANT**: Re-run the SAME C4 tests from task 1 - do NOT write new tests
     - Also mount each of the four components under light and dark and assert readable foreground-on-surface pairings in both
     - **EXPECTED OUTCOME**: Tests PASS (confirms C4 is fixed)
     - _Requirements: Expected Behavior Properties from design (Property 8) — 2.20, 2.21, 2.22, 2.23_
 
-  - [ ] 6.5 Verify the C4 preservation tests still pass
+  - [x] 6.5 Verify the C4 preservation tests still pass
     - **Property 2: Preservation** - The light theme and the token definitions are untouched
     - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
     - Confirm the light-theme snapshots are identical and `src/styles/index.css`, `LIGHT_THEME_COLOR` and `DARK_THEME_COLOR` are unchanged
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - Commit C4 as one reviewable change once 6.4 and 6.5 both hold
 
-- [ ] 7. C5 — Fix for unresolved and unrecorded build and dependency hygiene
+- [x] 7. C5 — Fix for unresolved and unrecorded build and dependency hygiene
 
-  - [ ] 7.1 Remove the duplicate dynamic `@/lib/events` imports in `src/lib/store.tsx`
+  - [x] 7.1 Remove the duplicate dynamic `@/lib/events` imports in `src/lib/store.tsx`
     - Extend the existing static import at line 19 to name `saveEventToDB`, `updateEventInDB` and `deleteEventFromDB`, and remove the `await import('@/lib/events')` calls at lines 1397, 1438 and 1479
     - Keep each call site's surrounding `try`/`catch`, its `isCurrentLinkedCouple` / `isCurrentScope` guard and its return values exactly
     - _Bug_Condition: isBugCondition C5 — `warnings CONTAINS mixedStaticDynamicImport`_
@@ -523,7 +523,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 12, clause 2.24 — each call site behaves identically_
     - _Requirements: 2.24_
 
-  - [ ] 7.2 Make the `@capacitor/browser` import static in `src/lib/supabase.ts`
+  - [x] 7.2 Make the `@capacitor/browser` import static in `src/lib/supabase.ts`
     - Replace the dynamic `await import('@capacitor/browser')` at line 450 with a static `import { Browser } from '@capacitor/browser'`, matching `src/lib/deepLinks.ts:2`
     - No bundle-size regression: `src/main.tsx:9` already statically imports `@/lib/deepLinks`, which statically imports `@capacitor/browser`, so the module is already in the eager graph
     - Leave the `isNativePlatform()` guard that keeps `Browser.open` off the web path untouched
@@ -532,7 +532,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: clause 2.25 — the native-platform guard is unchanged_
     - _Requirements: 2.25_
 
-  - [ ] 7.3 Add `manualChunks` vendor splitting in `vite.config.ts`
+  - [x] 7.3 Add `manualChunks` vendor splitting in `vite.config.ts`
     - Configure `build.rollupOptions.output.manualChunks` splitting by import identity — react/react-dom/react-router, `@supabase/supabase-js`, `@dnd-kit/*`, `date-fns`, `lucide-react` — sufficient to clear the large-chunk warning
     - Do not change module evaluation order in any observable way
     - **Verify, do not assume**, that `injectServiceWorkerManifest` still enumerates every emitted asset under `dist/assets` recursively so an offline activation finds all new chunks
@@ -541,7 +541,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: design Property 7, clause 3.14 — offline activation still resolves every hashed asset_
     - _Requirements: 2.26_
 
-  - [ ] 7.4 Pin `brace-expansion` to 1.1.18 via `overrides`
+  - [x] 7.4 Pin `brace-expansion` to 1.1.18 via `overrides`
     - **DECISION 3 — the registry-verification precondition in clause 2.27 is satisfied in the affirmative, and the pin is applied.** npm publishes **1.1.18** on the 1.x line (and 5.0.9 on 5.x), superseding audit section 7-3's "no patched 1.x release exists" conclusion. Clause 2.27's acceptance-recording fallback therefore does not apply; the fix is applied. bugfix.md clause 2.27 and design.md Property 11 record this resolution, while bugfix.md defect clause 1.22 intentionally still describes the pre-fix baseline, because defect clauses describe the code as it stands at `7d82e3e`
     - Add an `overrides` entry pinning `brace-expansion` to **1.1.18**, deliberately staying on the **1.x line** so `minimatch@3`'s CJS `require` shape is preserved. Do not move the `eslint` → `minimatch@3` path onto 5.x, whose changed exports are exactly the lint-breaking risk audit 7-3 identified
     - Run `npm install` to update `package-lock.json` from `1.1.16` to `1.1.18`, and commit the lockfile
@@ -553,7 +553,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: clauses 3.15, 3.16 — lint stays at 0/0 and `react-router` stays pinned at `7.18.2`_
     - _Requirements: 2.27, 3.16_
 
-  - [ ] 7.5 Record the react-router conditional acceptance in the deployment checklist
+  - [x] 7.5 Record the react-router conditional acceptance in the deployment checklist
     - In `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`, record GHSA-qwww-vcr4-c8h2 against `react-router` 7.18.2 as a documented conditional acceptance, stating the preconditions that make it inapplicable — a static Vite SPA using `BrowserRouter` only, with no Framework Mode, no RSC, no `loader`, no `action`, no `useFetcher`, no react-router `<Form>` and no server routes
     - State the **invalidation trigger**: adopting any one of those features voids the acceptance and forces re-evaluation
     - Both a blind downgrade to 7.11.0 and a major-version upgrade are forbidden
@@ -562,34 +562,34 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Preservation: clause 3.15 — the pin at `7.18.2` and declarative `BrowserRouter` usage are unchanged_
     - _Requirements: 2.28_
 
-  - [ ] 7.6 Verify the C5 bug condition exploration tests now pass
+  - [x] 7.6 Verify the C5 bug condition exploration tests now pass
     - **Property 1: Expected Behavior** - Build warnings are removed without behavioural change
     - **IMPORTANT**: Re-run the SAME C5 tests from task 1 - do NOT write new tests
     - Assert no remaining `await import('@/lib/events')` or `await import('@capacitor/browser')` in the source, and a build log free of mixed-import and large-chunk warnings
     - **EXPECTED OUTCOME**: Tests PASS (confirms C5 is fixed)
     - _Requirements: Expected Behavior Properties from design (Property 10) — 2.24, 2.25, 2.26_
 
-  - [ ] 7.7 Verify the C5 preservation tests still pass
+  - [x] 7.7 Verify the C5 preservation tests still pass
     - **Property 2: Preservation** - Dependency and lint posture is verified, not assumed
     - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
     - Confirm the converted call sites behave identically, `Browser.open` still fires only under `isNativePlatform()`, the service-worker manifest lists every emitted chunk, and lint is 0/0
     - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
     - Commit C5 as one reviewable change once 7.6 and 7.7 both hold
 
-- [ ] 8. Gate 2.29(a)-(c) — install, typecheck, lint
+- [x] 8. Gate 2.29(a)-(c) — install, typecheck, lint
   - Run `npm ci`; it must complete from the committed lockfile, including the `overrides` entry from task 7.4
   - Run `npm run typecheck`; 0 errors
   - Run `npm run lint`; **0 errors and 0 warnings** — this is also the proof required by task 7.4 that the `brace-expansion` pin did not break `minimatch@3`'s CJS `require`
   - Record the exact output of each command
   - _Requirements: 2.29_
 
-- [ ] 9. Gate 2.29(d) — full test suite against the measured baseline
+- [x] 9. Gate 2.29(d) — full test suite against the measured baseline
   - Run `npm test`
   - **BASELINE**: **206 tests across 23 files** must continue to pass, plus the new suites from clauses 2.15 (`src/lib/cors.test.ts`) and 2.22 (`src/lib/themeTokens.test.ts`), the tests added in tasks 1 and 2, the marker helper and fail-closed totality tests from task 3.5, the nine-test Deletion-Recovery Suite from task 3.13, and the five-test Tri-State Verification Suite from task 3.19
   - Confirm the final count equals the recorded 206/23 baseline plus the new tests, with zero pre-existing tests removed or skipped
   - _Requirements: 2.29_
 
-- [ ] 10. Gate 2.29(e)-(g) — positive build, negative build, marker assertion
+- [x] 10. Gate 2.29(e)-(g) — positive build, negative build, marker assertion
   - Positive build: run `npm run build` with non-secret placeholders supplied **for that invocation only** — `VITE_SUPABASE_URL=https://example.supabase.co` and `VITE_SUPABASE_PUBLISHABLE_KEY=test-public-key-not-a-secret`. These must never be written into any tracked file, so clause 2.19's prohibition is not circumvented by the verification itself
   - Assert the positive build succeeds with **no mixed static/dynamic import warning and no large-chunk warning**
   - **Negative build test**: run a production build with the required variables **absent** and assert a non-zero exit code with a message naming the missing variable, proving clause 2.17
@@ -597,7 +597,7 @@ default branch. These are human release gates; task 12 records them as unperform
   - Assert `dist/_headers` contains a `Content-Security-Policy` naming the injected `https://` origin and both the `https://` and `wss://` origins in `connect-src`, and that the five non-CSP headers are byte-identical to `7d82e3e`
   - _Requirements: 2.29, 2.30_
 
-- [ ] 11. Gate 2.29(h)-(l) — audit, secret scan, whitespace check, Deletion-Recovery Suite, Tri-State Verification Suite
+- [x] 11. Gate 2.29(h)-(l) — audit, secret scan, whitespace check, Deletion-Recovery Suite, Tri-State Verification Suite
   - Run `npm audit` and report the output; every remaining advisory must be covered by a recorded decision from task 7.4 (`brace-expansion`, now resolved at 1.1.18) or task 7.5 (react-router conditional acceptance)
   - **Secret scan**: confirm no JWT-shaped strings, no `service_role` values, no real Supabase project URL, no keystore or certificate files, and no tracked `.env`. The build placeholders from task 10 must appear in no tracked file
   - Run `git diff --check`: no whitespace errors and no conflict markers
@@ -605,7 +605,7 @@ default branch. These are human release gates; task 12 records them as unperform
   - **Gate (l) — Tri-State Verification Suite**: run the five tests from task 3.19 and record the result of each: classification is total and mutually exclusive across all **nine** marker × answer combinations, with malformed ⇒ `pending` in all three answer columns and the key never removed; a `getUser()` timeout yields **`unknown` and is never represented, stored, cached, serialized or logged as `clear`**, including the type-level `@ts-expect-error` assertion that a collapsing representation fails to type-check; an offline **initiating** device stays blocked by its local marker alone before first render with no round-trip; an offline **secondary** device retries authoritative verification **before** synchronization or mutation, asserted on **request ordering**; and a retry that discovers `pending` aborts the synchronization with **none of its writes applied**, purges local account content and enters recovery, asserted on ordering so a sync-then-reconcile implementation fails
   - _Requirements: 2.29, 2.30, 2.38, 2.48_
 
-- [ ] 12. Checkpoint - Ensure all tests pass
+- [x] 12. Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise
   - Record the results of all **twelve** gates 2.29(a)-(l) for this branch, since no verification result exists for this baseline (clause 1.24)
   - Confirm scope discipline: the branch descends from `7d82e3efd1b17283b0e8f086e94cf97cf268b625` alone, the older divergent 19-commit local branch is neither merged nor cherry-picked, and `capacitor.config.ts`, the `cap:*` scripts and the Android shell are unmodified

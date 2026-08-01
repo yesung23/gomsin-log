@@ -5,6 +5,10 @@ import { parseAllowedOrigins, resolveCors } from '../_shared/cors.ts';
  *
  * 0. Resolve CORS against an explicit allowlist and refuse any origin that is
  *    not on it, before any authentication or admin-client work.
+ * 0b. Verify the bearer token, then write the admin-only Auth flag
+ *    `app_metadata.account_deletion_pending = true`. This is the PRIMARY
+ *    authority for deletion recovery and it gates everything below: if the
+ *    write fails, nothing is deleted.
  * 1. Enumerate the caller's daily records and completely remove their Storage
  *    objects. A listing/removal failure aborts before relational/auth changes.
  * 2. Call the service-role-only prepare_account_deletion RPC. It verifies that
@@ -37,6 +41,9 @@ const MAX_STORAGE_ROUNDS = 20;
 const MAX_STORAGE_DEPTH = 8;
 /** Attempts for the Auth deletion, which is the only step with no rollback. */
 const AUTH_DELETE_ATTEMPTS = 3;
+
+/** Admin-only Auth flag. NEVER `user_metadata`, which a browser can rewrite. */
+const ACCOUNT_DELETION_PENDING_FIELD = 'account_deletion_pending';
 
 function jsonResponse(
   body: Record<string, unknown>,
@@ -197,6 +204,45 @@ export async function handleDeleteAccountRequest(
 
   const userId = user.id;
 
+  // ---- PRIMARY AUTHORITY: the server-side pending flag. ----
+  //
+  // Placement is load-bearing. It is written BEFORE the read-only
+  // `daily_records` preflight and before `begin_account_deletion`, because the
+  // flag is a hard gate on anything that touches the account.
+  //
+  // It sits OUTSIDE the `try` below on purpose: that block's `catch` runs
+  // `cancel_account_deletion` and reports `dataRemoved: databasePreparationCompleted`,
+  // neither of which is the right response to a flag-write failure.
+  //
+  // The existing `app_metadata` is spread FIRST. The Auth API replaces
+  // `app_metadata` wholesale rather than merging, and the client derives the
+  // rendered sign-in provider from `app_metadata.provider`, so dropping
+  // `provider`/`providers` would silently change it.
+  try {
+    const { error: flagError } = await admin.auth.admin.updateUserById(userId, {
+      app_metadata: {
+        ...(user.app_metadata ?? {}),
+        [ACCOUNT_DELETION_PENDING_FIELD]: true,
+      },
+    });
+    if (flagError) throw flagError;
+  } catch (flagError) {
+    // Delete NOTHING. An ambiguous write (e.g. a timeout) counts as a failure
+    // of this step, so the worst outcome is a flag set on an account whose data
+    // is fully intact -- resolved by the next retry, which re-writes the same
+    // `true` value idempotently.
+    console.error('[delete-account] Could not record pending deletion; nothing was deleted', flagError);
+    return jsonResponse(
+      {
+        error: 'Account deletion could not be started. Please try again.',
+        dataRemoved: false,
+        warnings: [],
+      },
+      500,
+      cors.headers,
+    );
+  }
+
   let deletionMarkerStarted = false;
   let databasePreparationCompleted = false;
 
@@ -279,6 +325,9 @@ export async function handleDeleteAccountRequest(
     }
     if (deleteUserError) throw deleteUserError;
 
+    // Auth deletion clears the pending flag IMPLICITLY: the user and its
+    // `app_metadata` cease to exist. No separate clearing call is made -- that
+    // would open a window in which the flag is false while the user still lives.
     console.log('[delete-account] Completed', {
       records: records.length,
       preparation,

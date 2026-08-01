@@ -761,7 +761,16 @@ export function SettingsPage() {
                     setIsDeletingAccount(true);
                     try {
                       const result = await deleteAccount();
-                      if (!result.ok) {
+                      if (result.status === 'partially_deleted') {
+                        // Tell the truth: the generic message claims nothing was
+                        // deleted, which is the opposite of what happened.
+                        toast.error(
+                          '기록과 프로필 데이터는 삭제되었지만 로그인 계정은 삭제되지 못했습니다. 탈퇴를 완료해 주세요.',
+                          { duration: 12000 },
+                        );
+                        return;
+                      }
+                      if (result.status === 'failed') {
                         toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
                         return;
                       }

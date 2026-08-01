@@ -11,7 +11,7 @@ branch `integration/kimi-web-stabilization` at `7d82e3efd1b17283b0e8f086e94cf97c
 | C2 | `delete-account` Edge Function accepts any browser origin | Replace the wildcard with a fail-closed `ALLOWED_ORIGINS` allowlist in a new shared module, always sending `Vary: Origin` |
 | C3 | Build ships no CSP and silently accepts missing Supabase config | Add build-time environment validation and marker-token CSP injection into `dist/_headers` |
 | C4 | Light-only hard-coded surfaces break dark theme | Convert palette literals (including opacity variants) to existing theme tokens in four files, guarded by a new test |
-| C5 | Build and dependency hygiene unresolved and unrecorded | Remove duplicate dynamic imports, add `manualChunks`, verify the `brace-expansion` claim against the registry, and record dependency decisions |
+| C5 | Build and dependency hygiene unresolved and unrecorded | Remove duplicate dynamic imports, add `manualChunks`, pin `brace-expansion` to the registry-verified `1.1.18` on the 1.x line, and record dependency decisions |
 
 Every fix is a defect repair, not a redesign. C4 changes consumers only and never touches token
 definitions. C2 adds a gate in front of the deletion sequence and changes nothing inside it. C5
@@ -203,9 +203,10 @@ END FUNCTION
   *Expected:* one static import. *Actual:* the same warning.
 - `npm run build` chunk size. *Expected:* no large-chunk warning. *Actual:* 520 KB / 151 KB gzip
   in one chunk.
-- Edge case: `brace-expansion@1.1.16` under `eslint → minimatch@3`. *Expected:* registry
-  verification, then either a safe `overrides` bump or a recorded acceptance. *Actual:* an
-  unverified handoff claim of 1.1.18 conflicting with audit section 7-3.
+- Edge case: `brace-expansion@1.1.16` under `eslint → minimatch@3`. *Expected:* an `overrides`
+  pin to the patched `1.1.18` on the 1.x line. *Actual:* the lockfile sits at `1.1.16`. Registry
+  verification is now complete and affirmative — npm publishes `1.1.18` on 1.x (and `5.0.9` on
+  5.x) — so audit section 7-3's "no patched 1.x exists" conclusion is stale.
 
 ---
 
@@ -320,17 +321,20 @@ Properties. This section states only what must not change.
 4. **No guard.** `src/lib/themeTokens.test.ts` does not exist, so any change reintroduces the
    defect silently.
 
-### C5 — Duplicate import styles and an unverified upstream claim
+### C5 — Duplicate import styles and a stale audit conclusion on `brace-expansion`
 
 1. **Redundant dynamic imports.** `store.tsx` already imports `@/lib/events` statically at line
    19, so the three `await import('@/lib/events')` calls add a warning and no benefit. Same for
    `@capacitor/browser`, static at `deepLinks.ts:2` and dynamic at `supabase.ts:450`.
 2. **No chunk strategy.** `vite.config.ts` declares no `build.rollupOptions.output.manualChunks`,
    so React, Supabase, dnd-kit, date-fns and lucide-react all land in one chunk.
-3. **Unverified registry claim.** The handoff demands `brace-expansion@1.1.18`; audit section 7-3
+3. **Stale audit conclusion, now superseded by registry verification.** Audit section 7-3
    concluded no patched 1.x exists and rejected an `overrides` bump because `minimatch@3` uses CJS
-   `require` while 5.x changed its exports. The lockfile resolves to 1.1.16. The claim must be
-   checked before any change.
+   `require` while 5.x changed its exports. Registry verification has since been performed and is
+   affirmative: npm publishes `brace-expansion` **1.1.18** on the 1.x line and `5.0.9` on 5.x. So
+   7-3's premise — not its export-shape reasoning — is stale; the lockfile resolves to `1.1.16`
+   only because no pin was ever applied. The residual root cause is therefore a missing
+   `overrides` entry, not an unverifiable claim.
 4. **Decisions recorded in the wrong document.** The react-router acceptance lives only in
    `docs/kiro/RELEASE_AUDIT_2026-07-31.md`, which a maintainer changing dependencies has no
    reason to open.
@@ -344,11 +348,14 @@ Property 1: Bug Condition - Partial deletion is classified truthfully and contai
 _For any_ deletion response where `isBugConditionC1` holds (non-2xx status carrying
 `dataRemoved: true`), the fixed `deleteAccount` SHALL return an outcome whose status is
 `partially_deleted` with `dataRemoved: true`, SHALL purge all in-memory and on-disk personal,
-couple, content and cache data while retaining only the authenticated identity and the three
-device preferences (`widgetLayout`, `hasSeenInstallPrompt`, `theme`), SHALL set
-`accountDeletionRecovery`, and SHALL block every authenticated route in favour of a recovery
-screen offering exactly retry and logout. A response body that cannot be read or parsed SHALL
-instead be classified `failed` with `dataRemoved: false`.
+couple, content and cache data while retaining only the authenticated identity, the three
+device preferences (`widgetLayout`, `hasSeenInstallPrompt`, `theme`) and the persisted
+`accountDeletionRecovery` boolean, SHALL set `accountDeletionRecovery`, and SHALL block every
+authenticated route in favour of a recovery screen offering exactly retry and logout. That route
+blocking SHALL hold **across a page reload**, not merely within a single session: the boolean is
+rehydrated from `STORE_KEY` before any route renders, and it is cleared on both exits — retry
+success (2.7) and logout (2.8). A response body that cannot be read or parsed SHALL instead be
+classified `failed` with `dataRemoved: false`.
 
 **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9**
 
@@ -461,9 +468,11 @@ Property 11: Preservation - Dependency and lint posture is verified, not assumed
 
 _For any_ dependency-resolution input, the fixed repository SHALL keep `react-router` and
 `react-router-dom` pinned at `7.18.2` with `BrowserRouter` in declarative mode, SHALL keep
-`npm run lint` at 0 errors and 0 warnings, SHALL apply a `brace-expansion` `overrides` change
-only if npm-registry verification confirms a patched release that `minimatch@3` can consume via
-CJS `require` — otherwise recording the acceptance and leaving the lockfile at `1.1.16` — SHALL
+`npm run lint` at 0 errors and 0 warnings, and SHALL pin `brace-expansion` via `overrides` to
+`1.1.18` — the npm-registry verification precondition is satisfied in the affirmative, so the
+acceptance-recording fallback no longer applies and the lockfile SHALL NOT remain at `1.1.16`.
+The pin SHALL stay on the 1.x line so `minimatch@3`'s CJS `require` shape is preserved, and
+`npm run lint` at 0 errors and 0 warnings is the empirical proof that it is. The repository SHALL
 NOT run `npm audit fix --force`, and SHALL record the react-router GHSA-qwww-vcr4-c8h2
 conditional acceptance with its invalidation trigger in the deployment checklist.
 
@@ -554,7 +563,8 @@ FUNCTION coerceWarnings(body)                 -> string[] (defensive, mirrors su
 4. **New partial purge**, alongside and not replacing `purgeLocalAccountData`:
    `purgeLocalContentRetainingIdentity(expected)`. It applies exactly the 2.4 key-level split:
    - `localStorage.removeItem(STORE_KEY_V1)`; rewrite `STORE_KEY` through the existing
-     `saveState` path so only `carryOverDevicePrefs` persists.
+     `saveState` path so only `carryOverDevicePrefs` persists — now including the
+     `accountDeletionRecovery` boolean (see item 5).
    - Retain `authenticatedUser` (identity is required to retry) and the `sb-*` session keys — no
      sign-out is performed.
    - Replace in-memory state with `{ ...DEFAULT_STATE, isDemoMode: false,
@@ -566,10 +576,23 @@ FUNCTION coerceWarnings(body)                 -> string[] (defensive, mirrors su
      retained user id so the save effect cannot resurrect the cache and the hydration effect
      cannot re-fetch data that no longer exists. Do **not** bump `sessionGenerationRef` — the
      session is deliberately kept.
-5. **Recovery state.** Add `accountDeletionRecovery: { warnings: string[] } | null` to
-   `StoreContextType` (`src/lib/storeContext.ts`) and to the provider value, plus
-   `retryAccountDeletion()` and reuse of the existing `signOut()` for the logout action. One
-   authoritative flag; no consumer infers recovery from route or toast state.
+5. **Recovery state, persisted as a boolean.** Add
+   `accountDeletionRecovery: { warnings: string[] } | null` to `StoreContextType`
+   (`src/lib/storeContext.ts`) and to the provider value, plus `retryAccountDeletion()` and reuse
+   of the existing `signOut()` for the logout action. One authoritative flag; no consumer infers
+   recovery from route or toast state. The flag survives a reload:
+   - Extend `carryOverDevicePrefs` (`store.tsx:197-203`) with a minimal
+     `accountDeletionRecovery` **boolean**, so it is written by the existing `saveState`
+     (`:128`) and read by the existing `loadState` (`:103-113`) inside the already-allowlisted
+     `STORE_KEY`. No new key is introduced.
+   - **Only the boolean persists.** The `warnings` array stays in memory, because warning strings
+     can name storage paths and must not be written to disk.
+   - Rehydrate the boolean **before any route renders**, so the `App.tsx` gate in item 8 is
+     already authoritative on first paint after a reload.
+   - Clear it on both exits: retry success (2.7, where `purgeLocalAccountData` removes
+     `STORE_KEY` outright) and logout (2.8).
+   - An unparseable `STORE_KEY` still clears the key, which **fails safe** by dropping the flag
+     rather than fabricating a recovery state.
 6. **`deleteAccount` rewrite.** Return `AccountDeletionOutcome`. Keep the demo-mode short-circuit
    and the `isCurrentIdentity(identity)` guard at line 1683 exactly as they are, then branch:
    `deleted` → existing `purgeLocalAccountData` + `signOut` (unchanged path, per 3.7);
@@ -728,11 +751,13 @@ wildcards, no suffix matching, no `Access-Control-Allow-Origin: '*'` anywhere in
 
 **Dependencies**
 
-4. `brace-expansion`: query the npm registry for the actual published versions before touching
-   anything. Apply an `overrides` entry **only if** a patched release exists on a line that
-   `minimatch@3` can consume via CJS `require`, and only if `npm run lint` still reports 0
-   errors and 0 warnings afterwards. Otherwise record the acceptance with audit section 7-3's
-   reasoning and leave the lockfile at `1.1.16`. Never run `npm audit fix --force`.
+4. `brace-expansion`: **registry verification is done and affirmative** — npm publishes `1.1.18`
+   on the 1.x line and `5.0.9` on 5.x — so audit section 7-3's "no patched 1.x exists" conclusion
+   is stale and the fix is applied rather than deferred. Add an `overrides` entry pinning
+   `brace-expansion` to `1.1.18`, deliberately staying on the **1.x line** so `minimatch@3`'s CJS
+   `require` shape is preserved and the 5.x export-shape risk that audit 7-3 identified is
+   avoided. Require `npm run lint` at 0 errors and 0 warnings afterwards as the empirical proof
+   that the resolution is consumable. Never run `npm audit fix --force`.
 5. `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`: record the react-router 7.18.2 /
    GHSA-qwww-vcr4-c8h2 conditional acceptance — static Vite SPA, `BrowserRouter` only, no
    Framework Mode, no RSC, no `loader`, no `action`, no `useFetcher`, no react-router `<Form>`,
@@ -743,12 +768,19 @@ wildcards, no suffix matching, no `Access-Control-Allow-Origin: '*'` anywhere in
 
 These are recorded rather than papered over, in the style the requirements set.
 
-1. **Recovery state is in-memory only, and a page refresh escapes it.** Requirement 2.4 fixes the
-   persisted key set exactly, and no key is allocated for a recovery flag; the Edge Function has
-   already cleared its server-side deletion marker. So after a refresh the user lands in a
-   signed-in app with empty data and no recovery screen. Persisting a new key would contradict
-   2.4's table, so this design keeps recovery in memory and flags the gap for a decision rather
-   than silently inventing storage.
+1. **Recovery survives a reload, via a documented extension of 2.4's key table — resolved, not
+   an open risk.** The Edge Function has already cleared its server-side deletion marker, so an
+   in-memory-only flag would let a refresh drop the user into a signed-in app with empty data and
+   no recovery screen. That is not acceptable: clause 2.5's route blocking cannot hold across a
+   reload without persistence. The approved decision is therefore to persist a minimal
+   `accountDeletionRecovery` **boolean** inside the **existing** `STORE_KEY` allowlist by
+   extending `carryOverDevicePrefs` (`store.tsx:197-203`), written by `saveState` (`:128`) and
+   read by `loadState` (`:103-113`). No new storage key is created — this is a deliberate,
+   documented extension of requirement clause 2.4's key table, recorded here so the divergence is
+   auditable. Only the boolean persists; the `warnings` array stays in memory because warning
+   strings can name storage paths. The flag is rehydrated before any route renders and cleared on
+   both exits (retry success 2.7, logout 2.8). An unparseable `STORE_KEY` still clears the key,
+   which fails safe by dropping the flag rather than fabricating recovery.
 2. **Retaining the session while purging content inverts an existing invariant.** Every current
    purge path clears `authenticatedUser` and bumps the session generation. Keeping the identity
    means the hydration and sync effects must be prevented from re-fetching — handled by pinning
@@ -781,7 +813,7 @@ refute each root-cause hypothesis — if a hypothesis is refuted, re-hypothesize
 fix. Then verify the fix holds for all buggy inputs (fix checking) and that behaviour is unchanged
 for all non-buggy inputs (preservation checking).
 
-Baseline to preserve: **152 tests across 21 files**, plus the new suites from 2.15 and 2.22.
+Baseline to preserve: **206 tests across 23 files**, plus the new suites from 2.15 and 2.22.
 
 ### Exploratory Bug Condition Checking
 
@@ -939,7 +971,7 @@ against the fix.
 13. **Service worker manifest**: assert the injected manifest enumerates every file under
     `dist/assets` after `manualChunks` splitting, and that the marker guard still throws when
     markers are removed.
-14. **Existing suite**: all 152 baseline tests across 21 files continue to pass.
+14. **Existing suite**: all 206 baseline tests across 23 files continue to pass.
 
 ### Unit Tests
 
@@ -1002,7 +1034,7 @@ against the fix.
 - **C5 offline activation**: build with `manualChunks`, confirm the service worker manifest lists
   every emitted chunk, and confirm an offline activation resolves them all.
 - **Release gates 2.29(a)-(j)**: `npm ci`; `npm run typecheck` (0 errors); `npm run lint`
-  (0 errors, 0 warnings); `npm test` (152 baseline plus new suites); `npm run build` with
+  (0 errors, 0 warnings); `npm test` (206 baseline plus new suites); `npm run build` with
   placeholders and no warnings; negative build exits non-zero; zero marker tokens in `dist/`;
   `npm audit` reported with every remaining advisory covered by a recorded decision under 2.27 or
   2.28; secret scan finding no JWT-shaped strings, no `service_role` values, no real project URL,

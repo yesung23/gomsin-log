@@ -110,3 +110,149 @@ Reported as **not done**, not as work completed:
    deletion is pending before it syncs. No existing test was removed, skipped or
    weakened. `verifyDeletionStatus` also treats a throwing `getUser()` as
    `unavailable` rather than letting it escape as an unhandled rejection.
+
+---
+
+# Pre-publish audit
+
+Three checks were run against the five implementation commits. **Two found real
+issues**, both now fixed; the third was completed with real Deno rather than
+being deferred.
+
+## 1. Server-mutation gate inventory — BYPASS FOUND AND FIXED
+
+The plan's gate inventory covered `refreshSlice`, `reconcileSharedAccess` and
+every server-mutating method on `StoreContextType`. It did **not** cover the
+data-layer modules whose mutations pages issue directly. A full sweep of the
+client found **22 server mutations with no tri-state pre-flight**.
+
+Requirement 2.45 says the authoritative check is retried "before the next server
+synchronization **or any server mutation**", so this was a genuine bypass: while
+status was `unknown`, these writes could recreate server rows for an account
+whose data `prepare_account_deletion` had already removed. The route gate
+mitigated it *after* recovery was entered — those pages cannot mount — but not
+during the `unknown` window, which is precisely the window clause 2.45 exists for.
+
+### Fix
+
+One centralized mechanism, no redesign. `accountDeletion.ts` gained a gate
+registry; `StoreProvider` registers its existing
+`ensureNotPendingBeforeServerCall` on mount and clears it on unmount; each
+data-layer mutation calls `serverCallBlockedByPendingDeletion()` first and
+returns **its own existing failure value**. With no provider mounted the helper
+is a no-op, so unit tests and demo mode behave exactly as before. Only `pending`
+blocks; `clear` and `unknown` pass through, and because the gate is consulted on
+every call, an `unknown` device re-verifies before every mutation.
+
+### Inventory
+
+| File / function | Verified before? | Pending aborts? | `unknown` re-verified | Note |
+| --- | --- | --- | --- | --- |
+| `store.tsx` `refreshSlice` (records/events/trips) | yes | yes, returns before the fetch | per call | already gated |
+| `store.tsx` `reconcileSharedAccess` | yes | yes, before `get_my_active_couple_id` | per call | already gated; `online` handler funnels here |
+| `store.tsx` `updateProfile` (`profiles`, `contact_preferences`, `saveCoupleAnniversary`) | yes | yes | per call | already gated |
+| `store.tsx` `addRecord` / `addRecordWithMedia` (`saveRecordToDB`, `uploadRecordMedia`) | yes | yes, at phase zero | per call | already gated; no orphan row or object |
+| `store.tsx` `updateRecord`, `deleteRecord` | yes | yes | per call | already gated |
+| `store.tsx` `addEvent`, `updateEvent`, `deleteEvent`, `reloadEvents` | yes | yes | per call | already gated |
+| `store.tsx` `cancelPendingLink`, `disconnect` (`disconnect_couple`) | yes | yes | per call | already gated |
+| `trips.ts` `saveTripToDB`, `updateTripInDB`, `deleteTripFromDB`, `saveTripItemToDB`, `updateTripItemInDB`, `reorderTripItemsInDB`, `deleteTripItemFromDB`, `saveTripChecklistToDB`, `toggleTripChecklistInDB`, `deleteTripChecklistFromDB` | **was NO — now yes** | yes | per call | **10 fixed** |
+| `cycle.ts` `saveCycleSettingsToDB`, `saveCycleEntryToDB`, `updateCycleEntryInDB`, `deleteCycleEntryFromDB`, `createCycleSupportSignalInDB`, `revokeCycleSupportSignalFromDB` | **was NO — now yes** | yes | per call | **6 fixed** |
+| `supabase.ts` `createCoupleInvitation`, `consumeCoupleInvitation`, `regenerateCoupleInvitation` | **was NO — now yes** | yes | per call | **3 fixed**; in `createCoupleInvitation` the gate sits ahead of the caller-verification read too, so nothing at all is issued |
+| `OnboardingPage.tsx` `profiles` + `contact_preferences` upserts | **was NO — now yes** | yes | per call | **1 fixed**, guarding both writes |
+| `records.ts`, `events.ts`, `trips.ts` fetch/read helpers | via their gated caller | n/a (reads) | per call | reached only through gated store methods or gated sync |
+| `supabase.ts` `deleteAccountFromDB` (`delete-account` invoke) | **exempt** | n/a | n/a | intentional: the path OUT of recovery |
+| `store.tsx` `deleteAccount`, `retryAccountDeletion` | **exempt** | n/a | n/a | intentional: gating would trap the user |
+| `store.tsx` `signOut`, `supabase.ts` `signOut` | **exempt** | n/a | n/a | intentional: logout must always work |
+| `store.tsx` `verifyDeletionStatus` → `auth.getUser()` | **exempt** | n/a | n/a | intentional: it IS the verification |
+| `signInWithOAuth`, `signInWithOtp`, `exchangeCodeForSession`, `setSession`, `getSession` | **exempt** | n/a | n/a | intentional: authentication needed to reach and complete recovery |
+| `get_partner_profile` (`sync.ts`, partner poll, `SettingsPage`, `OnboardingPage`) | via gated hydration / poll | n/a (read) | per call | read-only; discloses nothing new and writes nothing |
+
+Regression tests added: `src/lib/serverCallGate.test.ts` (registry semantics plus
+all sixteen trips/cycle mutations aborting with **zero** requests issued) and
+`src/lib/invitationGate.test.ts` (the three invitation RPCs, driven with a
+configured client and a `fetch` spy, since an unconfigured client never reaches
+the guard). Both include preservation cases proving `clear` and `unknown` still
+let every call through.
+
+## 2. `brace-expansion` topology — RANGE VIOLATION FOUND AND FIXED
+
+`npm ls brace-expansion --all` showed the global override was forcing 1.1.18 into
+consumers that require the 5.x line:
+
+| Consumer | Declares | Resolved (before) | Verdict |
+| --- | --- | --- | --- |
+| `minimatch@3.1.5` (eslint) | `^1.1.7` | 1.1.18 | correct |
+| `minimatch@10.2.5` (typescript-eslint) | `^5.0.5` | **1.1.18** | **VIOLATION** |
+| `minimatch@10.2.6` (@capacitor/cli → rimraf → glob) | `^5.0.8` | **1.1.18** | **VIOLATION** |
+
+Latent rather than visible: 1.x is a single CommonJS export while 5.x uses named
+exports, and neither `minimatch@10` path is exercised by our lint config or by
+any script we run, so no gate caught it.
+
+Replaced with a scoped override:
+
+```json
+"overrides": { "minimatch@3": { "brace-expansion": "1.1.18" } }
+```
+
+After (proved with npm's own semver, every range satisfied):
+
+| Consumer | Declares | Resolved | Verdict |
+| --- | --- | --- | --- |
+| `minimatch@3.1.5` | `^1.1.7` | **1.1.18** | patched 1.x |
+| `minimatch@10.2.5` | `^5.0.5` | **5.0.9** | patched 5.x |
+| `minimatch@10.2.6` | `^5.0.8` | **5.0.9** | patched 5.x |
+
+5.x is outside the advisory's affected ranges, so it needs no pin. The lockfile
+was **not** regenerated from scratch — a full regeneration touched 241/217 lines,
+so the committed lockfile was restored and `npm install` applied the override
+incrementally (46/36 lines). `npm audit fix --force` was never run, and
+`brace-expansion` no longer appears in `npm audit` at all.
+
+`src/lib/bundleHygiene.test.ts` now asserts the override is scoped **and** checks
+the structural invariant: every consumer resolves within its own declared major.
+
+## 3. Deno Edge Function validation — COMPLETED, NOT DEFERRED
+
+Deno was not installed; it was installed (2.9.4) and both available validations
+were run for real.
+
+- `npm run check:edge` → `deno check` passes on `_shared/cors.ts`,
+  `delete-account/handler.ts` and `delete-account/index.ts`, the last with the
+  real `npm:@supabase/supabase-js@2` specifier and the real `Deno` globals.
+- `npm run test:edge` → three integration tests, **stubbing no Deno API at all**.
+  `index.ts` is spawned as a genuine subprocess, so the real `Deno.serve`,
+  `Deno.env` and npm resolution are all in play, and a local HTTP server stands
+  in for the Supabase Auth endpoint. They prove:
+  1. the entrypoint's responses match `handleDeleteAccountRequest` called
+     directly with the same env — status, compared headers and body, across six
+     method/origin combinations;
+  2. an unset `ALLOWED_ORIGINS` fails closed with `500` and `Vary: Origin` for
+     every method, reflecting nothing;
+  3. the entrypoint constructs a working admin client from the injected
+     `(url, serviceRoleKey)`: the real client calls `/auth/v1/user` with the
+     service-role key as `apikey`, and the function answers `401`.
+
+**Still a staging gate, and not claimed as proven here:** behaviour against the
+actual Supabase Edge runtime and a real project — the RPCs
+`begin_account_deletion` / `prepare_account_deletion` / `cancel_account_deletion`,
+real Storage listing and removal, and real `auth.admin.updateUserById` /
+`deleteUser`. A local stub is not Supabase. Mocked Vitest coverage does **not**
+prove runtime compatibility, and this record does not assert that it does.
+
+## 4. Final integrity after the fixes
+
+| Check | Result |
+| --- | --- |
+| `npm ci` | exit 0 |
+| `npm run typecheck` | exit 0, 0 errors |
+| `npm run lint` | exit 0, **0 errors / 0 warnings** |
+| `npm test` | **318 passed / 318**, **32 files / 32** (was 303/30; +15 tests, +2 files) |
+| positive build | exit 0, **0** mixed-import warnings, **0** large-chunk warnings, entry chunk 341.80 kB / 105.22 kB gzip |
+| negative build | exit **1**, naming `VITE_SUPABASE_URL` |
+| CSP marker scan | **0** markers in `dist/`; `connect-src 'self' https://example.supabase.co wss://example.supabase.co` |
+| `npm audit` | **2** advisories, both `react-router` GHSA-qwww-vcr4-c8h2 under the recorded conditional acceptance. `brace-expansion` gone |
+| secret scan | 0 JWTs, 0 `service_role` values, 0 real project URLs, 0 keystores, no tracked `.env` beyond `.env.example`, 0 placeholder leaks outside the spec documents |
+| `git diff --check` | clean for `HEAD` and for the whole `7d82e3e..HEAD` range |
+| `npm run check:edge` | exit 0 |
+| `npm run test:edge` | 3 passed / 3 |

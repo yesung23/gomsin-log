@@ -226,3 +226,55 @@ export function serverAnswerFromUser(user: unknown): ServerAnswer {
     ? { kind: 'pending' }
     : { kind: 'not_pending' };
 }
+
+/* ------------------------------------------------------------------ *
+ * 4. The pre-flight gate, reachable from outside the store
+ * ------------------------------------------------------------------ */
+
+/**
+ * Re-issues the authoritative deletion check and, on `pending`, aborts.
+ *
+ * The store owns the only implementation, because aborting has to mark the
+ * marker, purge local content and enter recovery -- all of which need store
+ * state. Data-layer modules cannot do that, so they consult the store's gate
+ * through this registry instead of growing their own half-version of it.
+ */
+export type ServerCallGate = () => Promise<DeletionStatus>;
+
+let activeServerCallGate: ServerCallGate | null = null;
+
+/**
+ * Registered by `StoreProvider` on mount and cleared on unmount.
+ *
+ * Module-global on purpose: there is exactly one provider in the app, and the
+ * data-layer functions that need the gate are plain module functions with no
+ * access to React context.
+ */
+export function registerServerCallGate(gate: ServerCallGate | null): void {
+  activeServerCallGate = gate;
+}
+
+/**
+ * `true` when the caller must abort before issuing its request.
+ *
+ * Mirrors the store's own decision exactly: only `pending` blocks. `unknown`
+ * does NOT block -- it is the deliberate availability tradeoff -- but because
+ * this calls the gate on every entry rather than reading a cached verdict, an
+ * `unknown` device re-verifies before every server mutation, which is the point.
+ *
+ * With no gate registered (a data-layer unit test, or demo mode with no
+ * provider) this is a no-op and behaviour is exactly as before.
+ */
+export async function serverCallBlockedByPendingDeletion(): Promise<boolean> {
+  const gate = activeServerCallGate;
+  if (!gate) return false;
+  try {
+    return (await gate()).kind === 'pending';
+  } catch (error) {
+    // A broken gate must not silently open the door, but it also must not brick
+    // every write. Log loudly and let the caller proceed: the route gate and the
+    // store's own pre-flight remain in force.
+    console.error('[gomsinlog] deletion pre-flight gate failed', error);
+    return false;
+  }
+}

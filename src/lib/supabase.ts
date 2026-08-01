@@ -1,5 +1,10 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { authRedirectUrl, isNativePlatform } from '@/lib/platform';
+import {
+  classifyDeletionErrorBody,
+  classifyDeletionSuccess,
+  type AccountDeletionOutcome,
+} from '@/lib/accountDeletion';
 import type { AuthUser, IAuthRepository, ILogRepository, AppState, Role } from '@/types';
 
 /**
@@ -336,12 +341,13 @@ export async function disconnectCoupleFromDB(): Promise<boolean> {
 /**
  * Ask the server to delete this account.
  *
- * Returns the warnings the function reported so the UI can tell the user when
- * something (e.g. stored media) could not be fully removed, instead of claiming
- * an unqualified success.
+ * Returns a three-valued outcome rather than a boolean, because "the request
+ * failed" and "your data is gone but your login is not" require completely
+ * different handling. The error response BODY carries that distinction and used
+ * to be discarded entirely.
  */
-export async function deleteAccountFromDB(): Promise<{ ok: boolean; warnings: string[] }> {
-  if (!supabase) return { ok: false, warnings: [] };
+export async function deleteAccountFromDB(): Promise<AccountDeletionOutcome> {
+  if (!supabase) return { status: 'failed', dataRemoved: false, warnings: [] };
 
   try {
     const { data, error } = await supabase.functions.invoke('delete-account', {
@@ -349,20 +355,37 @@ export async function deleteAccountFromDB(): Promise<{ ok: boolean; warnings: st
     });
     if (error) {
       console.error('[gomsinlog] Failed to delete account:', error);
-      return { ok: false, warnings: [] };
+      // `FunctionsHttpError.context` is a `Response`. Its body may be consumed
+      // only once, so it is read exactly once here and the parsed value is
+      // passed on. A relay/fetch error with no `context`, or a parse failure,
+      // classifies `failed` -- never a fabricated partial deletion.
+      const context = (error as { context?: unknown }).context;
+      if (context && typeof (context as Response).json === 'function') {
+        try {
+          const body: unknown = await (context as Response).json();
+          const outcome = classifyDeletionErrorBody(body);
+          if (outcome.status === 'partially_deleted') {
+            console.error('[gomsinlog] Account data was removed but the login was not:', body);
+          }
+          return outcome;
+        } catch (parseError) {
+          console.error('[gomsinlog] Account deletion error body was unreadable', parseError);
+          return { status: 'failed', dataRemoved: false, warnings: [] };
+        }
+      }
+      return { status: 'failed', dataRemoved: false, warnings: [] };
     }
-    const warnings = Array.isArray(data?.warnings) ? (data.warnings as string[]) : [];
     // Require the explicit acknowledgement rather than inferring success from
     // the absence of a transport error, so a partial server-side outcome can
     // never be reported to the user as a completed deletion.
-    if (data?.success !== true) {
+    const outcome = classifyDeletionSuccess(data);
+    if (outcome.status !== 'deleted') {
       console.error('[gomsinlog] Account deletion did not confirm success:', data);
-      return { ok: false, warnings };
     }
-    return { ok: true, warnings };
+    return outcome;
   } catch (error) {
     console.error('[gomsinlog] Failed to invoke account deletion:', error);
-    return { ok: false, warnings: [] };
+    return { status: 'failed', dataRemoved: false, warnings: [] };
   }
 }
 

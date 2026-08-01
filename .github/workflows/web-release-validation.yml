@@ -94,6 +94,66 @@ jobs:
           grep -F 'https://ci-placeholder.supabase.co' dist/_headers
           grep -F 'wss://ci-placeholder.supabase.co' dist/_headers
 
+      - name: Negative build check - build MUST fail without env vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm run build 2>/dev/null; then
+            echo 'Build succeeded without VITE_SUPABASE_URL - the guard is broken.' >&2
+            exit 1
+          fi
+          echo 'Confirmed: build correctly fails without required env vars.'
+
+      - name: No tracked .env or credential files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '^\\.env(\\.local|\\.production)?$'; then
+            echo 'Tracked .env file detected.' >&2
+            exit 1
+          fi
+          echo 'No tracked .env files found.'
+
+      - name: No JWT-shaped values in tracked files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -El 'eyJ[A-Za-z0-9_-]{20,}\.' -- ':!*.md' ':!*.test.*'; then
+            echo 'JWT-shaped value found in tracked files.' >&2
+            exit 1
+          fi
+          echo 'No JWT-shaped values found.'
+
+      - name: No service-role values in application code
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -iEl 'service.role' -- ':!*.md' ':!supabase/functions/' ':!*.test.*' ':!docs/' ':!build/'; then
+            echo 'Service-role reference found in application code.' >&2
+            exit 1
+          fi
+          echo 'No service-role values in application code.'
+
+      - name: No real Supabase project URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -El 'https://[a-z0-9-]+\.supabase\.co' -- ':!*.md' ':!*.test.*' ':!docs/' ':!supabase/migrations/'; then
+            echo 'Real Supabase project URL found in tracked files.' >&2
+            exit 1
+          fi
+          echo 'No real Supabase project URLs found.'
+
+      - name: No .jks or .keystore files tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '\.(jks|keystore)$'; then
+            echo 'Tracked keystore file detected.' >&2
+            exit 1
+          fi
+          echo 'No tracked keystore files found.'
+
   deno-edge-validation:
     name: Deno Edge Function validation
     runs-on: ubuntu-latest

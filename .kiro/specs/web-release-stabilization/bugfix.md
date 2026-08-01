@@ -3,7 +3,7 @@
 ## Introduction
 
 This bugfix produces a **safe, reviewable web release candidate** for 곰신로그 on the
-working branch `integration/kimi-web-stabilization`, created from
+working branch `kimi/web-release-stabilization`, created from
 `7d82e3efd1b17283b0e8f086e94cf97cf268b625` (`origin/kiro/release-hardening-2026-07-31`,
 30 commits ahead of `master`).
 
@@ -119,7 +119,11 @@ Audit item 21 records that opacity variants such as `bg-white/60` defeated the e
 
 1.24 WHEN release readiness is assessed for this branch THEN no verification result exists for this baseline, because the four commits of prior work were never pushed and their gate runs are unrecoverable.
 
-1.25 WHEN the page is refreshed after a partial deletion THEN nothing persists any recovery state — even if recovery state existed in memory, `saveState` writes only the `carryOverDevicePrefs` whitelist (`store.tsx:128`, `197-203`) — so the reload would escape any recovery screen straight into a signed-in app with empty data. There is also no server-side way to re-detect the condition, because the Edge Function has already cleared its server-side deletion marker on final Auth-deletion failure (audit section 7-2), leaving neither a client nor a server record that the account is mid-deletion.
+1.25 WHEN the page is refreshed after a partial deletion THEN nothing persists any recovery state — recovery state exists only in memory, and `saveState` writes only the `carryOverDevicePrefs` whitelist (`store.tsx:128`, `197-203`) — so the reload escapes any recovery screen straight into a signed-in app with empty data. There is also no server-side way to re-detect the condition, because the Edge Function has already cleared its server-side deletion marker on final Auth-deletion failure (audit section 7-2), leaving neither a client nor a server record that the account is mid-deletion. This clause states the defect only; it does **not** imply that widening the `STORE_KEY` whitelist by one boolean is the remedy. That approach is rejected as fail-open (see 2.4, 2.31-2.36): a value living inside `STORE_KEY` is lost whenever `STORE_KEY` is corrupt or cleared, and no client-side value survives a different browser or a different device.
+
+1.26 WHEN a deletion attempt partially completes and the user then clears browser storage, opens a private window, or signs in from another device THEN the condition is undetectable, because no server-side record of pending deletion exists anywhere at `7d82e3e`: the Auth user's `app_metadata` carries no `account_deletion_pending` flag, `supabase/functions/delete-account/index.ts` never writes one, and the only server-side marker in the flow (`begin_account_deletion` / `prepare_account_deletion`) is cleared again on final Auth-deletion failure (audit section 7-2). Every proposed detection signal is therefore local to one browser profile, and any client-side-only signal is bypassed by clearing storage or by changing device.
+
+1.27 WHEN the Edge Function begins deleting application data THEN it does so **without first recording any durable pending state**: the sequence at `supabase/functions/delete-account/index.ts` runs the read-only record preflight, `begin_account_deletion`, `removeAndConfirmRecordMedia`, `prepare_account_deletion` and `deleteUser` with no prior authoritative write that outlives the request. If any step after data removal fails — including all three `AUTH_DELETE_ATTEMPTS` — the process ends with application data gone, the Auth login still usable, and no authoritative record anywhere that a deletion is outstanding, so nothing can resume or complete it.
 
 ---
 
@@ -159,7 +163,7 @@ END FOR
 | `localStorage['gomsinlog.state.v2']` (`STORE_KEY`) | **Rewritten** to device preferences only | `store.tsx:96`, `saveState` at `store.tsx:128` |
 | `localStorage['gomsinlog.state.v1']` (`STORE_KEY_V1`) | **Removed** | `store.tsx:95`, `105` |
 | `widgetLayout`, `hasSeenInstallPrompt`, `theme` | **Retained** — device preferences | `carryOverDevicePrefs`, `store.tsx:197-203` |
-| `accountDeletionRecovery` (boolean only) | **Retained/written** — non-personal operational flag | added to the `carryOverDevicePrefs` whitelist (`store.tsx:197-203`), written by `saveState` (`:128`), read back by `loadState` (`:103-113`) |
+| `localStorage['gomsinlog.accountDeletionRecovery.v1.<userId>']` | **Written** — dedicated per-user marker, **outside** `STORE_KEY` | new top-level key; see 2.33, 2.34, 2.35 |
 | `authenticatedUser` | **Retained** — identity is required to retry deletion | new behaviour; differs from `purgeLocalAccountData` |
 | Supabase auth session keys (`sb-*`, owned by `supabase-js`) | **Retained** — no sign-out is performed | consequence of retaining identity |
 | `records`, `events`, `trips` | **Cleared** to `[]` | `DEFAULT_STATE`, `store.tsx:154-190` |
@@ -171,15 +175,46 @@ END FOR
   authenticated session, no personal content is on disk to begin with; the purge SHALL
   therefore also clear in-memory `AppState`, which is where the actual exposure lives.
 
-  The `accountDeletionRecovery` row is a **deliberate extension of the persisted key set by
-  exactly one boolean**, and it carries no personal, couple, profile or content data. ONLY
-  the boolean SHALL be persisted: the accompanying `warnings` array SHALL stay in memory,
-  because warning strings can name storage paths and therefore must not be written to disk.
-  No new storage key is introduced — the boolean lives inside the already-allowlisted
-  `STORE_KEY` (`gomsinlog.state.v2`), so the storage surface enumerated by this table is
-  unchanged in extent.
+  The recovery marker SHALL NOT live inside `STORE_KEY`. It is written to a **dedicated,
+  namespaced, per-user top-level key** — `gomsinlog.accountDeletionRecovery.v1.<userId>` —
+  defined by 2.33, with the lifecycle of 2.34 and the fail-closed corruption handling of
+  2.35. Keeping it outside `STORE_KEY` means corrupting, rewriting or discarding `STORE_KEY`
+  cannot affect route blocking, and the device-preference whitelist (`carryOverDevicePrefs`,
+  `store.tsx:197-203`) is **not** extended by this fix. The marker is a boolean only: the
+  accompanying `warnings` array SHALL stay in memory, because warning strings can name
+  storage paths, and no deleted-account content of any kind SHALL be written to the marker.
+  The local marker is a secondary, immediate/offline/reload guard and is **not** the
+  authority — the authority is the server-side flag of 2.31.
 
-2.5 WHEN `accountDeletionRecovery` is active THEN the system SHALL block every normal application route and render a recovery screen offering exactly two actions — retry deletion, and log out — with no navigation to `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` or `/service`. This blocking SHALL hold **across a page reload**, not merely within a single session: the persisted `accountDeletionRecovery` boolean SHALL be rehydrated from `STORE_KEY` before any route renders, so a refresh re-enters the recovery screen rather than the normal app. The flag SHALL be cleared on both exits from recovery — a successful retry (2.7) and a logout (2.8) — and an unparseable or corrupt `STORE_KEY` SHALL fail safe by dropping the flag (consistent with `loadState`'s existing `removeItem` on corrupt state, `store.tsx:103-113`) rather than fabricating a recovery state that the user is not in.
+  **Privacy note.** Writing `<userId>` into a key that outlives the session **is** persisting
+  a pseudonymous identifier, and the fact that the signed-in session already contained that
+  UUID does not make its post-logout retention costless. It is justified narrowly: the
+  Supabase user UUID is the **minimum identifier necessary** to complete the deletion the
+  user themselves requested, it is required to bind the marker to exactly one account (2.34),
+  and it SHALL be removed once deletion is confirmed complete (2.34, 2.37). No
+  "adds no new data category" reasoning is relied on.
+
+2.5 WHEN `accountDeletionRecovery` is active THEN the system SHALL block every normal application route and render a recovery screen offering exactly two actions — retry deletion, and log out — with no navigation to `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` or `/service`. Recovery is active when **either** authority says so, and the two authorities are ranked:
+
+| Authority | Signal | Role |
+| --- | --- | --- |
+| Primary (server) | `app_metadata.account_deletion_pending = true` on the Auth user, read via a server round-trip (2.31, 2.36) | Source of truth. Survives storage clearing, a clean browser and any other device. |
+| Secondary (local) | `gomsinlog.accountDeletionRecovery.v1.<userId>` present (2.33) | Immediate/offline/reload guard only. Never the sole authority, never able to override a `true` server flag. |
+
+  Blocking SHALL therefore hold in all of the following, and each is a distinct guarantee:
+  - **Across a page reload** — the local marker is read before any route renders, so a refresh re-enters the recovery screen rather than the normal app, without waiting on the network.
+  - **Across logout and re-login as the same user** — the marker survives sign-out (2.34), and on the next sign-in the same user resumes recovery.
+  - **On a clean browser, a private window, or a different device** — where no local marker exists, the server flag alone SHALL block routing (2.31, 2.36).
+
+  A malformed, unparseable or otherwise unreadable local marker SHALL **fail closed**: it is
+  treated as recovery ACTIVE and SHALL NOT be deleted (2.35). The earlier behaviour of dropping
+  the flag on corrupt storage is **rejected as fail-open** — it hands the user a normal app over
+  deleted data. `loadState`'s existing `removeItem` on corrupt
+  `STORE_KEY` (`store.tsx:103-113`) SHALL CONTINUE TO apply to `STORE_KEY` and SHALL NOT be
+  applied to the recovery marker. The marker SHALL be cleared **only** after confirmed Auth
+  user deletion (2.34); logout (2.8) ends the session but SHALL NOT clear it, and a successful
+  retry (2.7) clears it precisely because it confirms Auth deletion. Normal routing SHALL NEVER
+  be silently allowed while the server pending flag remains set (2.32).
 
 2.6 WHEN a retry of the deletion also fails THEN the system SHALL remain in `accountDeletionRecovery`, SHALL NOT re-fetch or re-render any purged personal, couple or content data, and SHALL keep offering only retry and logout.
 
@@ -348,8 +383,70 @@ END FOR
 | h | `npm audit` | Run and reported; every remaining advisory is covered by a recorded decision under 2.27 or 2.28 |
 | i | Secret scan | No JWT-shaped strings, no `service_role` values, no real Supabase project URL, no keystore or certificate files, no tracked `.env` |
 | j | `git diff --check` | No whitespace errors and no conflict markers |
+| k | Deletion-recovery suite | All nine recovery tests required by 2.38 pass — partial deletion writes the local marker; logout preserves it; same-user re-login resumes recovery; a second user is neither blocked nor able to clear the first marker; a malformed marker fails closed; a clean browser with no local marker is blocked by server metadata; a failed pending-flag write prevents application-data deletion; a successful retry deletes the Auth user and clears the local marker; normal routes stay inaccessible throughout recovery |
 
 2.30 WHEN gate 2.29(e) is run THEN the placeholder values SHALL be supplied for that invocation only and SHALL NOT be written into any tracked file, so 2.19's prohibition on committing real or placeholder project URLs is not circumvented by the verification itself.
+
+#### C1 (continued) — Durable, server-authoritative deletion recovery
+
+These clauses supersede the earlier client-only recovery-persistence approach, which was
+fail-open: a boolean inside `STORE_KEY`, cleared on logout, and dropped on corruption could
+be bypassed by clearing storage, by logging out, by corrupting one JSON blob, or by signing
+in from a different device. Recovery now rests on **two authorities**, ranked in 2.5, and
+fails closed at every decision point.
+
+2.31 WHEN application data is to be deleted THEN the system SHALL maintain a **server-side source of truth** for pending deletion: an admin-only flag `account_deletion_pending: true` in the Auth user's `app_metadata`, written with the service-role key inside the Edge Function and never writable by the client. This is the primary authority precisely because a local-only marker is insufficient — clearing browser storage, opening a private window, or signing in on another device would each bypass a local marker, whereas the server flag travels with the account.
+
+2.32 WHEN the `delete-account` Edge Function executes THEN it SHALL follow this **strict order**, and the order SHALL NOT be rearranged:
+
+| Step | Action | Failure behaviour |
+| --- | --- | --- |
+| 1 | Verify the authenticated user (bearer token) | `401`; nothing is written and nothing is deleted |
+| 2 | Set the admin-only `app_metadata.account_deletion_pending = true` | Application-data deletion **SHALL NOT BEGIN**; return an error and leave the account fully intact (`dataRemoved: false`) |
+| 3 | Delete application data (existing sequence, see 3.17) | The pending flag **remains set**; the system SHALL retry safely, or perform a carefully tested compensating update, per 2.32.1 below |
+| 4 | Attempt Auth user deletion (`deleteUser`, `AUTH_DELETE_ATTEMPTS = 3`) | Proceed to step 5 |
+| 5 | On Auth-deletion failure, the pending flag **REMAINS** set | The account is reported as `partially_deleted`; recovery stays active |
+
+  **2.32.1 —** Setting the pending flag is a hard gate: if step 2 fails for any reason, step 3
+  SHALL NOT run. If step 3 fails *after* the flag was set, the system SHALL either retry the
+  data deletion safely (idempotently, so a partial prior pass cannot corrupt state) or perform
+  a **carefully tested compensating update** that clears the flag only when it has verified
+  that no application data was removed. Clearing the flag speculatively, or on any unverified
+  assumption, is forbidden.
+
+  **2.32.2 —** Normal routing SHALL NEVER be silently allowed while the server pending flag
+  remains set. There is no timeout, no attempt counter and no client-side override that
+  re-admits the user to `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` or
+  `/service` while `account_deletion_pending` is `true`.
+
+2.33 WHEN recovery must be detected immediately, offline, or before any network round-trip completes THEN the system SHALL use a **secondary local per-user marker** stored at the dedicated top-level key `gomsinlog.accountDeletionRecovery.v1.<userId>`, where `<userId>` is the Supabase Auth user id. This key SHALL NOT live inside `STORE_KEY` (`gomsinlog.state.v2`) and SHALL NOT be added to the `carryOverDevicePrefs` whitelist. Its value SHALL be a boolean marker only: no warning strings, no storage paths, no profile, couple, record, event or trip content, and no other deleted-account data. It is explicitly **not the sole authority** — it exists to make blocking instant and network-independent, while 2.31 decides the truth.
+
+2.34 WHEN the local marker's lifecycle is implemented THEN it SHALL obey exactly these rules:
+- **Retained through logout.** Logging out ends the session but does **NOT** cancel the deletion. Once application data has been removed, the deletion is irreversible under the current product model, so a logout SHALL leave the marker in place.
+- **Retained when another account signs in.** A different user SHALL ignore a marker whose `<userId>` is not their own, SHALL NOT be blocked by it, and SHALL NOT delete it.
+- **Cleared ONLY after confirmed Auth user deletion.** No other event clears it — not logout, not a failed retry, not an account switch, not corruption, not elapsed time.
+- **A future explicit, server-confirmed cancellation/recovery workflow could also clear it, but NO such workflow currently exists.** Nothing in this fix introduces one, and no code path SHALL behave as though one exists.
+- **Resumption.** When the same user signs in again, deletion recovery SHALL resume: the recovery screen is re-entered and the retry action remains available.
+
+2.35 WHEN the local marker is malformed, unparseable, of an unexpected type, or otherwise unreadable THEN the system SHALL treat it as **RECOVERY ACTIVE** and SHALL NOT clear or overwrite it. Corruption or malformed data SHALL NOT silently bypass recovery. Loss or damage of the marker SHALL NOT be described or reasoned about as "fail-safe" anywhere in this spec, in the design, in code comments or in tests — the only fail-safe direction here is *staying* in recovery.
+
+2.36 WHEN recovery is detected on login or on session restoration THEN detection SHALL use a **server round-trip** — `supabase.auth.getUser()` — and SHALL NOT rely on cached session claims. `app_metadata` changes do not appear in an already-issued JWT, so reading `session.user.app_metadata` from a cached token would miss a flag set moments earlier and would let a stale token bypass recovery on the very reload it must catch. The local marker (2.33) MAY gate the first render while the round-trip is in flight, but a `true` result from `getUser()` SHALL block routing regardless of what any cached claim or local value says.
+
+2.37 WHEN the retained `<userId>` is no longer needed THEN it SHALL be removed. Persisting a Supabase user UUID beyond logout **is** persisting a pseudonymous identifier; the fact that the session previously contained it does not make retaining it free. It SHALL be documented as the **minimum identifier necessary** to complete the user-requested deletion, retained for no other purpose, and deleted once Auth user deletion is confirmed (2.34).
+
+2.38 WHEN this fix is presented for review THEN the following nine deletion-recovery tests SHALL exist and pass, and they SHALL be the tests referenced by gate 2.29(k):
+
+| # | Test | Assertion |
+| --- | --- | --- |
+| 1 | Partial deletion writes the marker | A `partially_deleted` outcome creates `gomsinlog.accountDeletionRecovery.v1.<userId>` with a boolean value and no content data |
+| 2 | Logout preserves the marker | After sign-out from the recovery screen, the marker still exists (2.34) |
+| 3 | Same-user re-login resumes recovery | Signing back in as the same user re-enters the recovery screen with the retry action available |
+| 4 | Another user is unaffected | A different user signing in on the same browser is **not** blocked, and the first user's marker is still present afterwards (not deleted, not overwritten) |
+| 5 | Malformed marker fails closed | A marker containing invalid JSON or an unexpected type is treated as recovery ACTIVE and is not cleared (2.35) |
+| 6 | Clean browser is blocked by the server | With no local marker at all, a login whose `getUser()` returns `app_metadata.account_deletion_pending = true` is blocked from every normal route (2.31, 2.36) |
+| 7 | Pending-flag failure blocks data deletion | When the step-2 `app_metadata` write fails, no application data is deleted and the response reports `dataRemoved: false` (2.32) |
+| 8 | Successful retry completes and cleans up | A retry that succeeds deletes the Auth user and only then removes the local marker (2.34) |
+| 9 | Normal routes stay inaccessible | Throughout recovery — before retry, after a failed retry, after reload, after logout and re-login — `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` and `/service` all remain unreachable (2.32.2) |
 
 ---
 
@@ -388,7 +485,7 @@ END FOR
 
 3.10 WHEN the existing non-CSP security headers are served THEN `_headers` SHALL CONTINUE TO deliver `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=()` and `X-DNS-Prefetch-Control: off` unchanged.
 
-3.11 WHEN a device has never chosen a theme THEN the system SHALL CONTINUE TO honour `prefers-color-scheme`, and `widgetLayout`, `hasSeenInstallPrompt` and `theme` SHALL CONTINUE TO survive sign-out and account switches. Adding the `accountDeletionRecovery` boolean to the persisted whitelist (2.4) SHALL NOT weaken this: the three device preferences remain carried over unchanged, while the recovery boolean is explicitly **cleared, not carried over**, on sign-out and on account switch, so it cannot leak into a fresh session and cannot strand a different account on the recovery screen.
+3.11 WHEN a device has never chosen a theme THEN the system SHALL CONTINUE TO honour `prefers-color-scheme`, and `widgetLayout`, `hasSeenInstallPrompt` and `theme` SHALL CONTINUE TO survive sign-out and account switches. The recovery marker is **no longer part of the `STORE_KEY` whitelist**: `carryOverDevicePrefs` (`store.tsx:197-203`) is left exactly as at `7d82e3e`, so device preferences are unaffected by this fix in both directions — the marker cannot displace them, and clearing or corrupting `STORE_KEY` cannot disturb the marker. The marker instead lives at its own key `gomsinlog.accountDeletionRecovery.v1.<userId>` (2.33), is **retained** through sign-out and through an account switch (2.34) — because logout does not cancel an irreversible deletion — and is bound to exactly one user id, so it cannot leak into another account's session: a different user SHALL ignore it, SHALL NOT be stranded on the recovery screen by it, and SHALL NOT delete it.
 
 3.12 WHEN the theme changes THEN the light and dark token values in `src/styles/index.css` SHALL CONTINUE TO be exactly as at `7d82e3e`; C4 changes consumers only, and SHALL NOT redefine, rename or add tokens, and SHALL NOT alter `LIGHT_THEME_COLOR = '#FAF8F5'` or `DARK_THEME_COLOR = '#16181D'` in `src/lib/store.tsx`.
 
@@ -402,7 +499,18 @@ END FOR
 
 3.16 WHEN `npm run lint` runs after any dependency change THEN it SHALL CONTINUE TO exit with 0 errors and 0 warnings; a `brace-expansion` change that breaks `minimatch@3`'s CJS `require` is a regression, not a fix.
 
-3.17 WHEN the Edge Function receives a valid `POST` from an allowlisted origin with a valid bearer token THEN it SHALL CONTINUE TO execute the existing deletion sequence unchanged: read-only record preflight, `begin_account_deletion`, `removeAndConfirmRecordMedia` with `MAX_STORAGE_ROUNDS = 20` and `MAX_STORAGE_DEPTH = 8`, `prepare_account_deletion`, then `deleteUser` with `AUTH_DELETE_ATTEMPTS = 3` and marker cleanup on failure. C2 adds an origin gate in front of this sequence and changes nothing inside it.
+3.17 WHEN the Edge Function receives a valid `POST` from an allowlisted origin with a valid bearer token THEN the existing deletion sequence — read-only record preflight, `begin_account_deletion`, `removeAndConfirmRecordMedia` with `MAX_STORAGE_ROUNDS = 20` and `MAX_STORAGE_DEPTH = 8`, `prepare_account_deletion`, then `deleteUser` with `AUTH_DELETE_ATTEMPTS = 3` and marker cleanup — SHALL CONTINUE TO run with its **internal order and per-step semantics preserved**, including every constant named above.
+
+  **This is no longer a byte-for-byte guarantee, and this clause does not pretend otherwise.**
+  2.32 amends the sequence in one specific way: the whole sequence is now **PRECEDED** by the
+  admin-only `app_metadata.account_deletion_pending = true` write (step 2 of 2.32), and
+  application-data deletion is **gated** on that write succeeding — if the flag write fails,
+  the preflight-through-`deleteUser` sequence SHALL NOT begin at all. What is preserved is the
+  sequence itself once entered; what has changed is that entry is now conditional and is
+  preceded by a durable server-side write. C2 additionally adds an origin gate in front of
+  everything (2.11-2.13) and changes nothing inside the sequence. No step is reordered,
+  removed, or given different semantics, and the pending flag's own lifecycle after the
+  sequence (it REMAINS on Auth-deletion failure) is governed by 2.32 and 2.34, not here.
 
 3.18 WHEN the working branch is assembled THEN the older divergent 19-commit local branch SHALL NOT be merged or cherry-picked wholesale, and the branch SHALL CONTINUE TO descend from `7d82e3efd1b17283b0e8f086e94cf97cf268b625` alone.
 
@@ -423,4 +531,4 @@ reported as release gates, not silently attempted.
 
 3.24 WHEN this fix is completed THEN real two-account end-to-end deletion testing — and every other item in `docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`, including whether `LOCK TABLE storage.objects IN SHARE MODE` is permitted on Supabase hosting — SHALL CONTINUE TO be unperformed and SHALL remain a human gate.
 
-3.25 WHEN this fix is completed THEN no merge into the default branch SHALL be performed; the work SHALL be delivered on `integration/kimi-web-stabilization` for review.
+3.25 WHEN this fix is completed THEN no merge into the default branch SHALL be performed; the work SHALL be delivered on `kimi/web-release-stabilization` for review.

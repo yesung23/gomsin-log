@@ -3,11 +3,11 @@
 ## Overview
 
 This design fixes the five defect clusters that block the 곰신로그 web release, on the working
-branch `integration/kimi-web-stabilization` at `7d82e3efd1b17283b0e8f086e94cf97cf268b625`.
+branch `kimi/web-release-stabilization` at `7d82e3efd1b17283b0e8f086e94cf97cf268b625`.
 
 | ID | Defect | Fix strategy in one line |
 | --- | --- | --- |
-| C1 | Partial account deletion is misreported and leaves private data on screen | Read the error response body, classify the outcome into a typed union, purge in-memory content while retaining identity, and route to a recovery screen |
+| C1 | Partial account deletion is misreported and leaves private data on screen | Read the error response body, classify the outcome into a typed union, purge in-memory content while retaining identity, route to a recovery screen, and make that recovery **durable and server-authoritative** via an admin-only `app_metadata` flag backed by a dedicated per-user local marker |
 | C2 | `delete-account` Edge Function accepts any browser origin | Replace the wildcard with a fail-closed `ALLOWED_ORIGINS` allowlist in a new shared module, always sending `Vary: Origin` |
 | C3 | Build ships no CSP and silently accepts missing Supabase config | Add build-time environment validation and marker-token CSP injection into `dist/_headers` |
 | C4 | Light-only hard-coded surfaces break dark theme | Convert palette literals (including opacity variants) to existing theme tokens in four files, guarded by a new test |
@@ -15,9 +15,22 @@ branch `integration/kimi-web-stabilization` at `7d82e3efd1b17283b0e8f086e94cf97c
 
 Every fix is a defect repair, not a redesign. C4 changes consumers only and never touches token
 definitions. C2 adds a gate in front of the deletion sequence and changes nothing inside it. C5
-must be behaviour-neutral by construction.
+must be behaviour-neutral by construction. C1 is the one cluster that adds a durable server-side
+write, and it does so because clause 2.31 requires an authority that survives clearing browser
+storage, a private window and a change of device.
 
-**Verified baseline.** `git branch --show-current` reports `integration/kimi-web-stabilization`
+**Deletion recovery rests on two ranked authorities (2.5, 2.31, 2.33).** The **primary** authority
+is the Auth user's admin-only `app_metadata.account_deletion_pending`, written with the
+service-role key inside the Edge Function and never writable by a client. The **secondary**
+authority is a dedicated per-user local marker at
+`gomsinlog.accountDeletionRecovery.v1.<userId>`, which exists only to make blocking instant,
+offline-capable and reload-proof. The secondary authority can never override a `true` primary
+result, is never the sole authority, and every ambiguous state resolves toward *staying* in
+recovery. The earlier design — a boolean inside `STORE_KEY`, cleared on logout, dropped when
+`STORE_KEY` was corrupt — is **rejected as fail-open** and no longer appears anywhere in this
+document.
+
+**Verified baseline.** `git branch --show-current` reports `kimi/web-release-stabilization`
 and `git log --oneline -1` reports `7d82e3e fix: harden offline updates and fail-closed sync`,
 so the branch and baseline named in the requirements are the ones this design targets.
 
@@ -40,6 +53,23 @@ so the branch and baseline named in the requirements are the ones this design ta
   `supabase/functions/delete-account/index.ts:290`. It carries `databasePreparationCompleted`,
   meaning server-side data is gone even though HTTP status is 500.
 - **`accountDeletionRecovery`** — new store state indicating a partial deletion is outstanding.
+  Derived from the two ranked authorities below, never from route or toast state.
+- **`account_deletion_pending`** — the **primary authority** (2.31): an admin-only boolean in the
+  Auth user's `app_metadata`, written with the service-role key inside the Edge Function and
+  never writable by the client. It travels with the account, so it survives cleared storage, a
+  private window and a different device.
+- **Recovery marker** — the **secondary authority** (2.33): a boolean at the dedicated top-level
+  `localStorage` key `gomsinlog.accountDeletionRecovery.v1.<userId>`. It lives **outside**
+  `STORE_KEY` and is **not** part of `carryOverDevicePrefs`. Its only job is immediate, offline,
+  pre-network-round-trip blocking. It is never the sole authority.
+- **`begin_account_deletion` / `cancel_account_deletion`** — the pre-existing, *non-durable*
+  server marker RPCs (`index.ts:181`, `:194`, `:246`). They exist to close migration 015's
+  Storage upload race, and `cancel_account_deletion` clears the marker again in the `catch`, so
+  they are **not** a record of pending deletion. `account_deletion_pending` is a separate,
+  durable flag with a different lifecycle and must not be confused with them.
+- **`getUser()`** — `supabase.auth.getUser()`, a server round-trip that returns freshly read user
+  metadata. Required by 2.36 because `app_metadata` changes do **not** appear in an
+  already-issued JWT, so `session.user.app_metadata` from a cached token can be stale.
 - **Palette literal** — a Tailwind utility naming a fixed hue from the default palette, such as
   `bg-white`, `bg-gray-50`, or the opacity variant `bg-white/60`.
 - **Theme token** — a utility resolving to a CSS custom property defined in
@@ -59,7 +89,7 @@ so the branch and baseline named in the requirements are the ones this design ta
 The bug manifests when the Edge Function returns a non-2xx response whose body carries
 `dataRemoved: true`. `deleteAccountFromDB` (`src/lib/supabase.ts:350-353`) branches on the
 transport `error` object, logs it, and returns `{ ok: false, warnings: [] }`, discarding the body.
-`deleteAccount` (`store.tsx:1687`) then returns at `if (!result.ok) return result;` before
+`deleteAccount` (`store.tsx:1685`) then returns at `if (!result.ok) return result;` before
 reaching `purgeLocalAccountData`, so in-memory `AppState` stays populated and keeps rendering.
 
 **Formal Specification:**
@@ -72,6 +102,34 @@ FUNCTION isBugConditionC1(input)
          AND input.body.dataRemoved = TRUE
 END FUNCTION
 ```
+
+#### C1 durability sub-condition — the outstanding deletion is undetectable
+
+Requirements 1.25-1.27 add a second, independent facet of C1: even once the outcome *is*
+classified correctly, nothing records it durably. `saveState` persists only the
+`carryOverDevicePrefs` whitelist (`store.tsx:128`, `197-203`), so a reload escapes the recovery
+screen into a signed-in app over deleted data; and the only server-side marker in the flow
+(`begin_account_deletion`) is cleared again by `cancel_account_deletion` in the `catch`
+(`index.ts:246`) precisely so uploads are not permanently blocked — so it is not a record of
+pending deletion either. The Auth user carries no `app_metadata.account_deletion_pending` at
+`7d82e3e`, and the Edge Function begins removing application data **before** writing any state
+that outlives the request.
+
+```
+FUNCTION isBugConditionC1Durable(input)
+  INPUT: input of type RecoveryDetectionAttempt
+  OUTPUT: boolean
+
+  // An outstanding deletion exists, but no authority can report it.
+  RETURN applicationDataRemoved(input.userId)
+         AND authUserStillExists(input.userId)
+         AND NOT serverPendingFlagSet(input.userId)      // 1.26, 1.27
+         AND NOT durableLocalMarkerPresent(input.userId)  // 1.25
+END FUNCTION
+```
+
+This sub-condition is what makes a *local-only* remedy insufficient: it is satisfied by clearing
+browser storage, by a private window, and by signing in from a different device.
 
 ### Bug Condition C2 — Any browser origin is accepted
 
@@ -161,7 +219,19 @@ END FUNCTION
 - Response body is unreadable (relay failure, empty body). *Expected:* classified `failed`, no
   purge. *Actual:* `{ ok: false }` — same collapse.
 - Edge case: user switches to account B while A's deletion is in flight. *Expected:*
-  `isCurrentIdentity` guard (`store.tsx:1683`) still prevents clearing B's session.
+  `isCurrentIdentity` guard (`store.tsx:1682`) still prevents clearing B's session.
+- Durability: the user refreshes the page after a partial deletion. *Expected:* the recovery
+  screen is re-entered before any route renders. *Actual:* nothing was persisted, so the reload
+  lands on `/` over empty data (1.25).
+- Durability: the user logs out from the recovery screen and signs back in as the same account.
+  *Expected:* recovery resumes with the retry action available (2.34). *Actual:* a normal
+  signed-in app with no data and no explanation.
+- Durability: the user clears site data, or opens a private window, or signs in on a phone.
+  *Expected:* `getUser()` reports `app_metadata.account_deletion_pending = true` and every normal
+  route stays blocked (2.31, 2.36). *Actual:* no server-side record exists to consult (1.26).
+- Durability edge case: the local marker contains `"true"`, `{}`, or invalid JSON. *Expected:*
+  treated as recovery ACTIVE and left in place (2.35). *Rejected alternative:* deleting it, which
+  hands the user a normal app over deleted data.
 
 **C2**
 - `https://evil.example` fetches `POST /delete-account` with a stolen bearer token in a
@@ -237,10 +307,17 @@ END FUNCTION
   `BrowserRouter` in declarative mode (3.15).
 - `npm run lint` still exits with 0 errors and 0 warnings after any dependency change (3.16).
 - A valid `POST` from an allowlisted origin with a valid bearer token still runs the deletion
-  sequence unchanged: record preflight, `begin_account_deletion`,
-  `removeAndConfirmRecordMedia` with `MAX_STORAGE_ROUNDS = 20` / `MAX_STORAGE_DEPTH = 8`,
-  `prepare_account_deletion`, then `deleteUser` with `AUTH_DELETE_ATTEMPTS = 3` and marker
-  cleanup on failure (3.17).
+  sequence with its **internal order and per-step semantics preserved**: record preflight,
+  `begin_account_deletion`, `removeAndConfirmRecordMedia` with `MAX_STORAGE_ROUNDS = 20` /
+  `MAX_STORAGE_DEPTH = 8`, `prepare_account_deletion`, then `deleteUser` with
+  `AUTH_DELETE_ATTEMPTS = 3` and `cancel_account_deletion` cleanup on failure — every constant
+  and every step unchanged (3.17). **This is no longer a byte-for-byte guarantee, and this design
+  does not pretend otherwise.** Per 2.32 and the amended 3.17, the whole sequence is now
+  **preceded** by the admin-only `app_metadata.account_deletion_pending = true` write, and entry
+  into the sequence is **gated** on that write succeeding: if the flag write fails, the
+  preflight-through-`deleteUser` sequence does not begin at all. What is preserved is the sequence
+  *once entered*; what changed is that entry is conditional and preceded by a durable server-side
+  write. No step is reordered, removed or given different semantics.
 
 **Scope:**
 All inputs where no bug condition holds are completely unaffected. This includes:
@@ -272,7 +349,7 @@ Properties. This section states only what must not change.
 2. **Insufficient return type.** `{ ok: boolean; warnings: string[] }` cannot express three
    outcomes. `deleted`, `partially_deleted` and `failed` all collapse into `ok: false` or
    `ok: true`. `src/lib/accountDeletion.ts` does not exist.
-3. **Purge coupled to total success.** `store.tsx:1687` gates `purgeLocalAccountData` on
+3. **Purge coupled to total success.** `store.tsx:1685` gates `purgeLocalAccountData` on
    `result.ok`, so the one path that clears the exposure is the one path a partial deletion never
    takes.
 4. **No recovery state.** Neither `StoreContextType` (`src/lib/storeContext.ts:12-39`) nor
@@ -281,6 +358,23 @@ Properties. This section states only what must not change.
 5. **Purge is all-or-nothing.** `purgeLocalAccountData` always clears `authenticatedUser`. A
    partial deletion needs the opposite: clear content, keep identity, because the identity is
    what the retry needs.
+6. **No durable record exists on either side, and the write happens too late to help.** On the
+   client, `saveState` persists only the device-preference whitelist for an authenticated session
+   (`store.tsx:128`, `197-203`), so recovery state cannot survive a reload. On the server, the
+   Edge Function's ordering is the real defect: the read-only preflight (`index.ts:167`),
+   `begin_account_deletion` (`:181`), `removeAndConfirmRecordMedia` (`:190`),
+   `prepare_account_deletion` (`:212`) and `deleteUser` (`:232`) all run with **no prior
+   authoritative write that outlives the request**, and the one marker that does get written is
+   deliberately cleared again by `cancel_account_deletion` in the `catch` (`:246`) so that
+   migration 015's Storage INSERT policy cannot permanently block a still-live account. That
+   cleanup is correct for its own purpose and must stay; the missing piece is a *separate*
+   durable flag with the opposite lifecycle (1.26, 1.27).
+7. **A local-only remedy cannot close the hole, and the obvious local remedy is fail-open.**
+   Any client-side signal is bypassed by clearing storage or changing device. Worse, the
+   previously-considered form of that signal — a boolean inside `STORE_KEY` — would be dropped by
+   `loadState`'s existing `removeItem` on corrupt JSON (`store.tsx:103-116`) and cleared on
+   logout, both of which **admit the user to a normal app over deleted data**. The root cause is
+   therefore the absence of a *server* authority, not the absence of a client flag.
 
 ### C2 — Wildcard chosen for convenience, with no configuration surface
 
@@ -348,14 +442,40 @@ Property 1: Bug Condition - Partial deletion is classified truthfully and contai
 _For any_ deletion response where `isBugConditionC1` holds (non-2xx status carrying
 `dataRemoved: true`), the fixed `deleteAccount` SHALL return an outcome whose status is
 `partially_deleted` with `dataRemoved: true`, SHALL purge all in-memory and on-disk personal,
-couple, content and cache data while retaining only the authenticated identity, the three
-device preferences (`widgetLayout`, `hasSeenInstallPrompt`, `theme`) and the persisted
-`accountDeletionRecovery` boolean, SHALL set `accountDeletionRecovery`, and SHALL block every
-authenticated route in favour of a recovery screen offering exactly retry and logout. That route
-blocking SHALL hold **across a page reload**, not merely within a single session: the boolean is
-rehydrated from `STORE_KEY` before any route renders, and it is cleared on both exits — retry
-success (2.7) and logout (2.8). A response body that cannot be read or parsed SHALL instead be
-classified `failed` with `dataRemoved: false`.
+couple, content and cache data while retaining only the authenticated identity, the three device
+preferences (`widgetLayout`, `hasSeenInstallPrompt`, `theme`) and the dedicated per-user recovery
+marker at `gomsinlog.accountDeletionRecovery.v1.<userId>`, SHALL set `accountDeletionRecovery`,
+and SHALL block every authenticated route in favour of a recovery screen offering exactly retry
+and logout. A response body that cannot be read or parsed SHALL instead be classified `failed`
+with `dataRemoved: false`.
+
+Route blocking SHALL hold under **two ranked authorities** (2.5), and each of the following is a
+distinct guarantee that SHALL hold independently:
+
+- **Across a page reload.** The local marker is read from its own top-level key before any route
+  renders, so a refresh re-enters the recovery screen without waiting on the network. It lives
+  **outside** `STORE_KEY` and is **not** in `carryOverDevicePrefs`, so rewriting, clearing or
+  corrupting `STORE_KEY` cannot affect blocking.
+- **Across logout and re-login as the same user.** Logout ends the session but SHALL NOT clear
+  the marker (2.34), and signing back in as the same user SHALL resume recovery with the retry
+  action available.
+- **On a clean browser, a private window, or a different device.** Where no local marker exists,
+  the **server** flag alone SHALL block routing: detection SHALL use a `supabase.auth.getUser()`
+  round-trip rather than cached session claims, because `app_metadata` changes do not appear in
+  an already-issued JWT, and a `true` result SHALL block routing regardless of any cached claim
+  or local value (2.31, 2.36).
+
+Ambiguity SHALL resolve toward *staying* in recovery. A malformed, unparseable or unexpectedly
+typed local marker SHALL be treated as recovery **ACTIVE** and SHALL NOT be cleared or
+overwritten (2.35); dropping it is rejected as fail-open, and neither its loss nor its damage
+SHALL be described as fail-safe. `loadState`'s existing `removeItem` on corrupt `STORE_KEY`
+SHALL continue to apply to `STORE_KEY` only and SHALL NOT be applied to the marker. Normal
+routing SHALL NEVER be silently re-admitted while the server pending flag remains set — no
+timeout, no attempt counter and no client-side override (2.32.2). The marker SHALL be cleared
+**only** after confirmed Auth user deletion: a successful retry (2.7) clears it precisely because
+it confirms that deletion, while logout (2.8), a failed retry (2.6), an account switch, corruption
+and elapsed time SHALL NOT. A different user signing in SHALL ignore a marker bound to another
+`<userId>`, SHALL NOT be blocked by it, and SHALL NOT delete it.
 
 **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9**
 
@@ -366,8 +486,17 @@ success, or a failure with `dataRemoved: false` — the fixed code SHALL produce
 the original: success still runs `purgeLocalAccountData` and signs out with the existing
 media-warning toast, and total failure still leaves the account fully intact, performs no purge,
 does not enter recovery, and shows the existing generic retry message. Sign-out and account
-switching SHALL continue to use `purgeLocalAccountData` unchanged, and demo-mode deletion SHALL
-continue to purge locally and report success.
+switching SHALL continue to use `purgeLocalAccountData` unchanged — including clearing
+`authenticatedUser`, bumping the session generation and setting the cache-purged flag — and
+demo-mode deletion SHALL continue to purge locally and report success.
+
+Two consequences of the recovery architecture are stated explicitly so this preservation claim is
+not overread. First, `purgeLocalAccountData` SHALL NOT delete the recovery marker: it removes
+`STORE_KEY_V1` and `STORE_KEY` and the marker is neither, which is exactly the behaviour 2.34
+requires, since logout must retain it. Second, the server-side deletion sequence is preserved
+**once entered** but is no longer byte-for-byte: per 2.32 and the amended 3.17 it is now preceded
+by the `app_metadata.account_deletion_pending = true` write and its entry is gated on that write
+succeeding. Every step inside the sequence, and every constant governing it, is unchanged.
 
 **Validates: Requirements 2.10, 3.7, 3.8**
 
@@ -388,12 +517,22 @@ Property 4: Preservation - Allowlisted and non-browser callers keep working unch
 _For any_ Edge Function request where `isBugConditionC2` does NOT hold — an allowlisted `Origin`,
 or an absent `Origin` from a non-browser client — the fixed function SHALL produce the same
 outcome as the original: bearer-token verification is still required (`401` for a missing,
-invalid or expired token), and a verified caller still runs the existing deletion sequence
-byte-for-byte, including the read-only record preflight, `begin_account_deletion`,
-`removeAndConfirmRecordMedia` with `MAX_STORAGE_ROUNDS = 20` / `MAX_STORAGE_DEPTH = 8`,
-`prepare_account_deletion`, `deleteUser` with `AUTH_DELETE_ATTEMPTS = 3`, and marker cleanup on
-failure. An allowed preflight SHALL still advertise methods `POST, OPTIONS` and headers
+invalid or expired token), and a verified caller still runs the existing deletion sequence with
+its **internal order and per-step semantics preserved**, including the read-only record preflight,
+`begin_account_deletion`, `removeAndConfirmRecordMedia` with `MAX_STORAGE_ROUNDS = 20` /
+`MAX_STORAGE_DEPTH = 8`, `prepare_account_deletion`, `deleteUser` with
+`AUTH_DELETE_ATTEMPTS = 3`, and `cancel_account_deletion` cleanup on failure. An allowed preflight
+SHALL still advertise methods `POST, OPTIONS` and headers
 `authorization, apikey, content-type, x-client-info`.
+
+**This is deliberately no longer a byte-for-byte guarantee.** C2 changes nothing inside the
+sequence, but C1's clause 2.32 amends it in exactly one way: the sequence is now **preceded** by
+the admin-only `app_metadata.account_deletion_pending = true` write, and entry into it is
+**gated** on that write succeeding — a failed flag write means the preflight-through-`deleteUser`
+sequence SHALL NOT begin, and the response SHALL report `dataRemoved: false` with the account
+fully intact. What is preserved is the sequence once entered; no step is reordered, removed or
+given different semantics, and the pending flag's own lifecycle afterwards (it **REMAINS** set on
+Auth-deletion failure) is governed by 2.32 and 2.34.
 
 **Validates: Requirements 2.13, 3.17**
 
@@ -500,12 +639,13 @@ Property 13: Bug Condition - Operator-facing decisions are recorded and gates ar
 _For any_ deployment or review of this fix, the fixed repository SHALL document `ALLOWED_ORIGINS`
 in `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` section 5 alongside `SUPABASE_SERVICE_ROLE_KEY` —
 its exact comma-separated format, the fail-closed behaviour when unset, and the absent-`Origin`
-allowance as an explicit accepted risk — and SHALL have executed and recorded all ten verification
-gates 2.29(a)-(j) on the working branch: `npm ci`, `npm run typecheck` at 0 errors,
+allowance as an explicit accepted risk — and SHALL have executed and recorded all eleven
+verification gates 2.29(a)-(k) on the working branch: `npm ci`, `npm run typecheck` at 0 errors,
 `npm run lint` at 0 errors and 0 warnings, `npm test` over the full suite, `npm run build` with
 non-secret placeholders and no import or chunk warnings, a negative build exiting non-zero, zero
 marker tokens in `dist/`, a reported `npm audit` with every advisory covered by a recorded
-decision, a clean secret scan, and a clean `git diff --check`.
+decision, a clean secret scan, a clean `git diff --check`, and the Deletion-Recovery Suite of
+gate (k) — all nine tests required by 2.38 — passing.
 
 **Validates: Requirements 2.14, 2.29**
 
@@ -563,8 +703,11 @@ FUNCTION coerceWarnings(body)                 -> string[] (defensive, mirrors su
 4. **New partial purge**, alongside and not replacing `purgeLocalAccountData`:
    `purgeLocalContentRetainingIdentity(expected)`. It applies exactly the 2.4 key-level split:
    - `localStorage.removeItem(STORE_KEY_V1)`; rewrite `STORE_KEY` through the existing
-     `saveState` path so only `carryOverDevicePrefs` persists — now including the
-     `accountDeletionRecovery` boolean (see item 5).
+     `saveState` path so only `carryOverDevicePrefs` persists. `carryOverDevicePrefs`
+     (`store.tsx:197-203`) is left **exactly as at `7d82e3e`** (3.11) — the recovery marker does
+     not go through it.
+   - Write the recovery marker to its own key (item 5), which is a separate `localStorage.setItem`
+     that does not touch `STORE_KEY`.
    - Retain `authenticatedUser` (identity is required to retry) and the `sb-*` session keys — no
      sign-out is performed.
    - Replace in-memory state with `{ ...DEFAULT_STATE, isDemoMode: false,
@@ -576,46 +719,209 @@ FUNCTION coerceWarnings(body)                 -> string[] (defensive, mirrors su
      retained user id so the save effect cannot resurrect the cache and the hydration effect
      cannot re-fetch data that no longer exists. Do **not** bump `sessionGenerationRef` — the
      session is deliberately kept.
-5. **Recovery state, persisted as a boolean.** Add
+5. **Recovery state in the store.** Add
    `accountDeletionRecovery: { warnings: string[] } | null` to `StoreContextType`
    (`src/lib/storeContext.ts`) and to the provider value, plus `retryAccountDeletion()` and reuse
    of the existing `signOut()` for the logout action. One authoritative flag; no consumer infers
-   recovery from route or toast state. The flag survives a reload:
-   - Extend `carryOverDevicePrefs` (`store.tsx:197-203`) with a minimal
-     `accountDeletionRecovery` **boolean**, so it is written by the existing `saveState`
-     (`:128`) and read by the existing `loadState` (`:103-113`) inside the already-allowlisted
-     `STORE_KEY`. No new key is introduced.
-   - **Only the boolean persists.** The `warnings` array stays in memory, because warning strings
-     can name storage paths and must not be written to disk.
-   - Rehydrate the boolean **before any route renders**, so the `App.tsx` gate in item 8 is
-     already authoritative on first paint after a reload.
-   - Clear it on both exits: retry success (2.7, where `purgeLocalAccountData` removes
-     `STORE_KEY` outright) and logout (2.8).
-   - An unparseable `STORE_KEY` still clears the key, which **fails safe** by dropping the flag
-     rather than fabricating a recovery state.
+   recovery from route or toast state. The **`warnings` array stays in memory only**, because
+   warning strings can name storage paths.
 6. **`deleteAccount` rewrite.** Return `AccountDeletionOutcome`. Keep the demo-mode short-circuit
-   and the `isCurrentIdentity(identity)` guard at line 1683 exactly as they are, then branch:
-   `deleted` → existing `purgeLocalAccountData` + `signOut` (unchanged path, per 3.7);
-   `partially_deleted` → `purgeLocalContentRetainingIdentity` + set recovery;
-   `failed` → return unchanged, no purge, no recovery.
-7. **Retry semantics.** `retryAccountDeletion` re-invokes the same path. `deleted` clears
-   recovery, purges identity and signs out (2.7). `partially_deleted` or `failed` stays in
-   recovery and re-fetches nothing (2.6).
+   and the `isCurrentIdentity(identity)` guard at line 1682 exactly as they are, then branch:
+   `deleted` → existing `purgeLocalAccountData` + `signOut` (unchanged path, per 3.7), then clear
+   the recovery marker because Auth deletion is now confirmed;
+   `partially_deleted` → write the recovery marker, then `purgeLocalContentRetainingIdentity`, then
+   set recovery state;
+   `failed` → return unchanged, no purge, no recovery, no marker.
+7. **Retry semantics.** `retryAccountDeletion` re-invokes the same path. `deleted` clears the
+   marker, clears recovery state, purges identity and signs out (2.7) — the marker is removed only
+   in this branch, because only this branch confirms Auth deletion. `partially_deleted` or
+   `failed` stays in recovery, leaves the marker in place, and re-fetches nothing (2.6).
+8. **`purgeLocalAccountData` is left unchanged and MUST NOT delete the marker.** It removes
+   `STORE_KEY_V1` and `STORE_KEY` (`store.tsx:1649-1650`) and the marker is neither, so the
+   existing function already has the right behaviour by construction — but this is recorded
+   explicitly because it looks like an omission. It is not: logout **retains** the marker (2.34),
+   so a purge path that also removed it would reintroduce the fail-open bypass. Marker removal
+   lives in exactly one place, the confirmed-deletion branch of item 6/7, and `signOut`
+   (`store.tsx:1661`) calls `purgeLocalAccountData` without touching it.
+
+**New module boundary**: recovery-marker access
+
+9. **A single, small marker module** — colocated in `src/lib/accountDeletion.ts` so it is pure and
+   unit-testable without a store or a Supabase client:
+
+```
+CONST RECOVERY_KEY_PREFIX = 'gomsinlog.accountDeletionRecovery.v1.'
+
+FUNCTION recoveryKeyFor(userId)        -> RECOVERY_KEY_PREFIX + userId
+FUNCTION markRecoveryPending(userId)   -> localStorage.setItem(recoveryKeyFor(userId), 'true')
+FUNCTION readRecoveryMarker(userId)    -> 'absent' | 'active'
+    raw := localStorage.getItem(recoveryKeyFor(userId))
+    IF raw IS NULL THEN RETURN 'absent'
+    // Anything present but not exactly the expected boolean marker is MALFORMED,
+    // and malformed means ACTIVE. There is no third answer and no removal path.
+    RETURN 'active'
+FUNCTION clearRecoveryMarker(userId)   -> called ONLY after confirmed Auth user deletion
+```
+
+   Design points that are load-bearing rather than stylistic:
+   - **Boolean only.** No warnings, no storage paths, no profile/couple/record/event/trip content
+     is ever written to this key (2.33).
+   - **Per-user key.** The `<userId>` suffix binds the marker to one account, so another user is
+     neither blocked by it nor able to clear it (2.34). A reader only ever consults the key for
+     the currently signed-in `userId`; it never enumerates `localStorage`.
+   - **No parse-and-discard path.** `readRecoveryMarker` deliberately has no branch that returns
+     `'absent'` for an unparseable value and no branch that calls `removeItem`. A present-but-
+     malformed value is **ACTIVE** (2.35). This is the one place where a well-meaning
+     "clean up bad data" reflex would reintroduce the fail-open defect, so it is called out here.
+   - **Never described as fail-safe.** Losing this marker is a *failure*, mitigated only by the
+     server flag. The sole fail-safe direction is staying in recovery.
+
+   **Privacy note (2.37).** Writing `<userId>` into a key that outlives the session **is**
+   persisting a pseudonymous identifier, and the fact that the signed-in session already held that
+   UUID does not make retaining it past logout costless. No "this adds no new data category"
+   reasoning is relied on. The justification is narrow and stated in full: the Supabase user UUID
+   is the **minimum identifier necessary** to complete the deletion the user themselves requested,
+   it is required to bind the marker to exactly one account so a second user is neither blocked
+   nor able to clear it (2.34), it is retained for no other purpose, and it is deleted once Auth
+   user deletion is confirmed (2.34, 2.37). Nothing else about the account is written alongside
+   it.
+
+**File**: `supabase/functions/delete-account/index.ts` — the primary authority (2.31, 2.32)
+
+10. **Write the pending flag with the admin API, before any data deletion.** The service-role
+    client already exists at `index.ts:164-166` (`createClient(supabaseUrl, serviceRoleKey, …)`),
+    and the caller is already verified at `:168-172` via `admin.auth.getUser(token)`. The new
+    write goes **immediately after that verification and immediately before the `try` block that
+    opens the deletion sequence at `:178`** — that is, after `const userId = user.id;` (`:174`)
+    and **before** the read-only `daily_records` preflight (`:180-185`) and before
+    `begin_account_deletion` (`:191-195`). Placing it before the preflight rather than between the
+    preflight and `begin_account_deletion` is deliberate: 2.32 makes the flag a hard gate on
+    *anything* that touches the account, and the preflight also establishes the expected record
+    id set that the transactional RPC is later held to. Being outside the `try` block is also
+    deliberate: the existing `catch` at `:262` runs `cancel_account_deletion` and reports
+    `dataRemoved: databasePreparationCompleted` (`:290`), neither of which is the right response
+    to a flag-write failure, so this step returns its own response directly.
+
+```
+// after: const userId = user.id;   (index.ts:174)
+const { error: pendingFlagError } = await admin.auth.admin.updateUserById(userId, {
+  app_metadata: { ...(user.app_metadata ?? {}), account_deletion_pending: true },
+});
+if (pendingFlagError) {
+  // Step 2 of 2.32 failed -> step 3 MUST NOT BEGIN.
+  console.error('[delete-account] Could not record pending deletion; nothing was deleted',
+                pendingFlagError);
+  return jsonResponse({
+    error: 'Account deletion could not be started. Please try again.',
+    dataRemoved: false,
+    warnings: [],
+  }, 500, corsFor(request));   // headers per C2
+}
+```
+
+    - **`updateUserById` is the admin API**, reachable only through the service-role client, so
+      `app_metadata` remains non-writable by any client (2.31). `user_metadata` is **not** used:
+      it is client-writable and would let a browser clear its own recovery flag.
+    - **`app_metadata` is replaced wholesale, not merged, by the Auth API.** The existing
+      `user.app_metadata` — already in hand from the `getUser(token)` call at `:164` — is spread
+      first so `provider` and `providers` survive. This matters beyond tidiness:
+      `store.tsx:397` reads `sessionUser.app_metadata?.provider` to build `AuthUser`, so dropping
+      it would silently change the rendered sign-in provider.
+    - **Robust to a partially-succeeded update.** The write is a single idempotent `PUT` of one
+      boolean, so the only outcomes are "flag set" and "flag not set" — there is no half-set
+      value. The dangerous case is an ambiguous one: a network timeout where the write may or may
+      not have landed. That is treated as **failure of step 2**, which by 2.32.1 forbids step 3,
+      so the worst outcome is a flag set on an account whose data is fully intact. That state is
+      then resolved by the *next* attempt: the retry re-writes the same `true` value (idempotent),
+      proceeds, and completes the deletion. A flag set with no data removed therefore blocks
+      routing for a user who has asked to be deleted and whose deletion will complete on retry —
+      conservative in the correct direction.
+11. **Failure after the flag was set (step 3 of 2.32).** The flag **remains**. The existing `catch`
+    at `:262-283` already calls `cancel_account_deletion` (`:269`) to release migration 015's
+    upload block;
+    that stays exactly as it is and must **not** be confused with clearing the pending flag — they
+    are different markers with opposite lifecycles, which is why the glossary separates them.
+    - **Preferred resolution: idempotent retry.** The existing sequence is already retry-safe by
+      design (the preflight re-reads the record set and `prepare_account_deletion` fails closed if
+      it changed, and `removeAndConfirmRecordMedia` re-enumerates rather than trusting a removal
+      response), so a retry after a data-deletion failure re-runs cleanly and the flag needs no
+      compensation.
+    - **Compensating update, if one is implemented at all.** It SHALL clear the flag *only* when it
+      has positively verified that no application data was removed — i.e. `daily_records` for the
+      user still matches the preflight set, `databasePreparationCompleted` is `false`, and the
+      media confirmation pass reported nothing removed. Clearing speculatively, on a timeout, on
+      an unknown error, or on any assumption is forbidden (2.32.1). This is flagged in the
+      residual-risk list as the hardest part of the design to get right, and it is **not**
+      required for correctness: the retry path above is sufficient, so a compensating update
+      SHALL NOT be written speculatively just to have one.
+12. **Auth deletion success is what clears the flag — implicitly.** When `deleteUser` succeeds the
+    Auth user no longer exists, so its `app_metadata` is gone with it. There is no separate
+    flag-clearing call on the success path, and there SHALL NOT be one: adding a "clear the flag"
+    step would create a window in which the flag is `false` while the user still exists.
+
+**File**: `src/lib/store.tsx` — detection on login and session restoration (2.36)
+
+13. **Where the check sits.** The auth bootstrap is the `supabase.auth.onAuthStateChange`
+    subscription at `store.tsx:362`, inside the `useEffect` gated on `isHydrated`. Its async body
+    already, for a `session?.user`: builds `authUser` from `sessionUser.app_metadata?.provider`
+    (`:400-405`), short-circuits `TOKEN_REFRESHED` / `USER_UPDATED` for the already-hydrated user
+    (`:407-413`), then awaits `fetchFullStateFromDB` under `withTimeout(…, AUTH_SYNC_TIMEOUT_MS,
+    FULL_STATE_UNAVAILABLE)` (`:423-427`) and finally sets `setIsAuthChecked(true)` in the
+    `finally` (`:516-522`). The recovery check is inserted **in that async body, after `authUser`
+    is built and after the `TOKEN_REFRESHED` / `USER_UPDATED` short-circuit, and before the
+    `fetchFullStateFromDB` await**:
+    - **Synchronously first**, read the local marker for `sessionUser.id`. If it is `'active'`,
+      set `accountDeletionRecovery` immediately. This is the instant/offline/reload guard and
+      costs no network time, so the `App.tsx` gate is authoritative on first paint.
+    - **Then the server round-trip.** Call `supabase.auth.getUser()` and read
+      `data.user?.app_metadata?.account_deletion_pending`. Per 2.36 this SHALL NOT read
+      `session.user.app_metadata`, because the session's JWT was issued before the flag was
+      written and would report the stale value on exactly the reload that must catch it. A `true`
+      result sets recovery **regardless** of the local marker or any cached claim, and also writes
+      the local marker so the next reload is instant.
+    - **`INITIAL_SESSION` is covered by the same path**, because that event also arrives with
+      `session?.user` populated for a restored session and therefore runs the same async body; the
+      separate no-session `INITIAL_SESSION` branch at `:539` needs no change, as there is no user
+      to check.
+14. **The round-trip must not deadlock offline startup.** `getUser()` is wrapped in the existing
+    `withTimeout(…, AUTH_SYNC_TIMEOUT_MS, fallback)` helper from `src/lib/async.ts`, the same
+    mechanism the surrounding code already uses so a hanging fetch cannot keep the app behind the
+    splash spinner. On timeout or network failure the fallback is **"no server answer"**, not
+    "not pending": the local marker's verdict stands, `setIsAuthChecked(true)` still runs in the
+    `finally`, and the check is retried on the next auth event. An offline user with a marker
+    stays in recovery; an offline user without one is not fabricated into recovery, which is the
+    honest limit of an offline device and the reason the local marker exists at all.
+15. **Retry from the recovery screen re-invokes the Edge Function**, which re-writes the same
+    `true` flag idempotently before re-attempting deletion, so nothing special is needed for the
+    retry path.
 
 **File**: `src/App.tsx`
 
-8. **Route gate.** When `accountDeletionRecovery` is non-null, render only the recovery screen for
-   every path except `/auth/callback` and `/legal/:doc`, which must stay reachable. The gate sits
-   beside the existing `authSyncUnavailable` branch (`App.tsx:80-90`), reusing an established
-   pattern rather than inventing routing.
+16. **Route gate.** When `accountDeletionRecovery` is non-null, render only the recovery screen for
+    every path except `/auth/callback` and `/legal/:doc`, which must stay reachable. The gate sits
+    **immediately before the existing `authSyncUnavailable` branch** (`App.tsx:80-90`), reusing an
+    established pattern rather than inventing routing, and taking precedence over it: a sync
+    outage must not replace the recovery screen with a retry-sync screen that offers no path to
+    completing the deletion. Both branches sit after the `!isReady` spinner, so no authenticated
+    route can render before `isReady` is true.
+17. **No override.** There is no timeout, attempt counter, "continue anyway" affordance or query
+    parameter that re-admits a blocked user to `/`, `/record`, `/schedule`, `/us`, `/my`,
+    `/settings`, `/trips` or `/service` (2.32.2).
 
 **File**: `src/pages/SettingsPage.tsx`
 
-9. **Honest messaging.** Replace the generic toast at line 765 **for the `partially_deleted`
-   outcome only**: state that the user's data has been deleted but the login account has not, and
-   that deletion must be completed. `failed` keeps
-   `계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.`; `deleted` keeps its existing
-   `media_not_fully_removed` warning toast.
+18. **Honest messaging.** Replace the generic toast at line 765 **for the `partially_deleted`
+    outcome only**: state that the user's data has been deleted but the login account has not, and
+    that deletion must be completed. `failed` keeps
+    `계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.`; `deleted` keeps its existing
+    `media_not_fully_removed` warning toast.
+
+**File**: `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`
+
+19. **Operator note.** Record that `app_metadata.account_deletion_pending` is now written by the
+    Edge Function, that it is intentionally left set on Auth-deletion failure, and that an
+    operator who clears it by hand is re-admitting a user to an app whose data is gone. There is
+    **no server-confirmed cancellation workflow** today (2.34), and this fix does not add one.
 
 ### Changes Required — C2
 
@@ -647,7 +953,10 @@ wildcards, no suffix matching, no `Access-Control-Allow-Origin: '*'` anywhere in
 3. **`Vary: Origin` on every response** — allowed, disallowed, absent-Origin, preflight, `405`,
    `401` and `500` alike. Threading it through `jsonResponse` guarantees this structurally.
 4. **Nothing inside the deletion sequence changes.** The origin gate is strictly in front of the
-   existing bearer check at `:152-157` and the sequence below it.
+   existing bearer check at `:152-157` and the sequence below it. C1's pending-flag write (C1 item
+   10) sits between that bearer check and the sequence, so the final order is: origin gate →
+   bearer verification → pending-flag write → deletion sequence. C2 contributes nothing to the
+   sequence itself.
 
 **File**: `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`, section 5 (line 299)
 
@@ -768,19 +1077,53 @@ wildcards, no suffix matching, no `Access-Control-Allow-Origin: '*'` anywhere in
 
 These are recorded rather than papered over, in the style the requirements set.
 
-1. **Recovery survives a reload, via a documented extension of 2.4's key table — resolved, not
-   an open risk.** The Edge Function has already cleared its server-side deletion marker, so an
-   in-memory-only flag would let a refresh drop the user into a signed-in app with empty data and
-   no recovery screen. That is not acceptable: clause 2.5's route blocking cannot hold across a
-   reload without persistence. The approved decision is therefore to persist a minimal
-   `accountDeletionRecovery` **boolean** inside the **existing** `STORE_KEY` allowlist by
-   extending `carryOverDevicePrefs` (`store.tsx:197-203`), written by `saveState` (`:128`) and
-   read by `loadState` (`:103-113`). No new storage key is created — this is a deliberate,
-   documented extension of requirement clause 2.4's key table, recorded here so the divergence is
-   auditable. Only the boolean persists; the `warnings` array stays in memory because warning
-   strings can name storage paths. The flag is rehydrated before any route renders and cleared on
-   both exits (retry success 2.7, logout 2.8). An unparseable `STORE_KEY` still clears the key,
-   which fails safe by dropping the flag rather than fabricating recovery.
+1. **Deletion recovery uses two ranked authorities, and the costs of that are real.** The previous
+   approach — a boolean inside `STORE_KEY`, reached by extending `carryOverDevicePrefs`, cleared on
+   logout and dropped when `STORE_KEY` was corrupt — is **rejected as fail-open** and has been
+   removed from this design. Each of its exits handed the user a normal app over deleted data:
+   corrupt JSON hit `loadState`'s existing `removeItem` (`store.tsx:103-116`), logout cleared it,
+   and clearing site data or switching device bypassed it entirely. The replacement is the
+   server-authoritative `app_metadata.account_deletion_pending` flag (2.31) with the dedicated
+   per-user local marker `gomsinlog.accountDeletionRecovery.v1.<userId>` (2.33) as a secondary,
+   never-sole guard. `carryOverDevicePrefs` is left exactly as at `7d82e3e` (3.11), so `STORE_KEY`
+   and the marker cannot disturb each other in either direction. **This is the right architecture
+   and it is still not free.** The honest residual risks:
+   - **(a) A new failure mode appears before any deletion begins.** Requiring an `app_metadata`
+     write as step 2 of 2.32 means a deletion that would previously have started can now fail
+     earlier, at a step that did not exist. Deliberately accepted: the failure is
+     `dataRemoved: false` with the account fully intact, which is strictly better than the current
+     defect of removing data with no durable record. The visible cost is that a transient Auth API
+     problem now blocks an operation the user asked for, and an ambiguous write (timeout) can leave
+     the flag set on an intact account — blocking routing for a user whose deletion will complete
+     on retry. Conservative in the correct direction, but it *is* a new way to be stuck.
+   - **(b) The compensating update is the hardest part of this design to get right.** Clearing a
+     flag after a data-deletion failure requires *verified* knowledge that nothing was removed
+     (2.32.1), and "verified" is genuinely difficult across Storage, Postgres and Auth, which share
+     no transaction. This design therefore **prefers the idempotent retry path and does not treat a
+     compensating update as required**. If one is written, it must be tested against the specific
+     partial-failure shapes, not reasoned about; a speculative implementation is worse than none,
+     because the failure mode is silently clearing the flag on an account whose data is gone.
+   - **(c) `getUser()` puts a network round-trip on the auth path.** It must not deadlock offline
+     startup. Mitigated by reusing the existing `withTimeout(…, AUTH_SYNC_TIMEOUT_MS, …)` helper
+     and by keeping `setIsAuthChecked(true)` in the `finally`, so the splash screen always
+     releases. The residual cost is real: on a slow network the first paint is decided by the local
+     marker alone, so a clean browser on a slow connection may briefly render a normal route before
+     the server answer arrives and blocks it. That window is why the marker exists, and it is why
+     the marker is not merely an optimisation.
+   - **(d) The retained UUID is a pseudonymous identifier, and persisting it past logout is a real
+     cost, not a free one.** No "adds no new data category" reasoning is used. It is justified only
+     as the **minimum identifier necessary** to complete the user-requested deletion, it is bound
+     to one account so it cannot affect another user, and it is removed on confirmed completion
+     (2.34, 2.37).
+   - **(e) Marker loss is a failure, not a fail-safe.** If the marker is lost or damaged, the server
+     flag is the only remaining authority; if both are unavailable, recovery is not detected. That
+     is named as a limitation rather than dressed up. A malformed marker is treated as ACTIVE and
+     never cleared (2.35), and the only fail-safe direction anywhere in this design is *staying* in
+     recovery.
+   - **(f) There is no cancellation workflow, and nothing may behave as though there were.** No
+     event other than confirmed Auth user deletion clears the marker (2.34). An operator clearing
+     the server flag by hand is re-admitting a user to an app whose data is gone, which is why it is
+     documented in the deployment checklist rather than left as folklore.
 2. **Retaining the session while purging content inverts an existing invariant.** Every current
    purge path clears `authenticatedUser` and bumps the session generation. Keeping the identity
    means the hydration and sync effects must be prevented from re-fetching — handled by pinning
@@ -833,7 +1176,7 @@ build log for C5. Run them on the UNFIXED code to observe failures and understan
    (will fail on unfixed code — returns `{ ok: false, warnings: [] }`).
 2. **C1 exposure containment**: render the store with populated `records`, `events`, `trips` and
    `profile.couple`, run `deleteAccount` against the same mock, and assert state is cleared while
-   `authenticatedUser` survives (will fail on unfixed code — `store.tsx:1687` returns early).
+   `authenticatedUser` survives (will fail on unfixed code — `store.tsx:1685` returns early).
 3. **C1 route blocking**: assert that with recovery active, `/`, `/record`, `/schedule`, `/us`,
    `/my`, `/settings`, `/trips`, `/service` all render the recovery screen (will fail on unfixed
    code — no recovery state exists to set).
@@ -854,12 +1197,26 @@ build log for C5. Run them on the UNFIXED code to observe failures and understan
     assert `failed` with `dataRemoved: false`, proving 2.2 in both directions (may fail on
     unfixed code for the wrong reason — the unfixed code returns `ok: false` without ever reading
     a body, so this case must be distinguished from case 1, which is precisely the defect).
+11. **C1 durability — reload escapes recovery**: drive a `partially_deleted` response, then
+    remount the provider as a reload would, and assert the recovery screen is re-entered (will
+    fail on unfixed code — `saveState` persists only `carryOverDevicePrefs`, so nothing survives
+    and the remount lands on `/`, confirming 1.25).
+12. **C1 durability — no server record exists**: assert that after a failed Auth deletion the Auth
+    user carries `app_metadata.account_deletion_pending = true` (will fail on unfixed code — the
+    function never writes it, and the one marker it does write is cleared again by
+    `cancel_account_deletion` in the `catch` at `index.ts:246`, confirming 1.26 and 1.27).
 
 **Expected Counterexamples**:
 - C1: `deleteAccountFromDB` returns `{ ok: false, warnings: [] }` for a `dataRemoved: true`
   response, and `AppState` remains fully populated afterwards.
   Possible causes: `error.context` never read; two-valued return type; purge gated on
   `result.ok`; no recovery state in `StoreContextType`.
+- C1 durability: a remount after a partial deletion renders a normal route, and no
+  `account_deletion_pending` flag exists on the Auth user.
+  Possible causes: `saveState` persists only the device-preference whitelist; no dedicated
+  recovery key exists; the Edge Function writes no durable flag and clears the one non-durable
+  marker it does write; detection would read stale `app_metadata` from a cached JWT even if a flag
+  existed.
 - C2: wildcard reflected, no `Vary`, preflight approved unconditionally.
   Possible causes: module-level `corsHeaders` constant; preflight short-circuit before any origin
   check; no `ALLOWED_ORIGINS` plumbing.
@@ -972,6 +1329,39 @@ against the fix.
     `dist/assets` after `manualChunks` splitting, and that the marker guard still throws when
     markers are removed.
 14. **Existing suite**: all 206 baseline tests across 23 files continue to pass.
+15. **Marker is not collateral damage**: observe that `purgeLocalAccountData` removes only
+    `STORE_KEY_V1` and `STORE_KEY` on unfixed code, then verify after the fix that a sign-out from
+    the recovery screen still removes exactly those two keys and leaves
+    `gomsinlog.accountDeletionRecovery.v1.<userId>` in place (2.34).
+16. **Provider survives the metadata write**: observe that `AuthUser.provider` is derived from
+    `sessionUser.app_metadata?.provider` (`store.tsx:397`), then verify that after the Edge
+    Function's `updateUserById` call the provider is unchanged — the existing `app_metadata` is
+    spread before adding the flag, so `provider` and `providers` are not dropped.
+
+### Deletion-Recovery Suite (2.38, gate 2.29(k))
+
+These nine tests are required by 2.38 and are the tests gate 2.29(k) refers to. They are listed as
+one suite because they only make sense together: each closes a bypass the others leave open.
+
+| # | Test | Setup | Assertion |
+| --- | --- | --- | --- |
+| 1 | **Marker created on partial deletion** | `deleteAccount` against a `500 { dataRemoved: true }` response | `gomsinlog.accountDeletionRecovery.v1.<userId>` exists with a boolean value; it contains no warnings, no storage paths and no profile/couple/record/event/trip content; `STORE_KEY` holds only `carryOverDevicePrefs`; `authenticatedUser` is retained |
+| 2 | **Logout preserves the marker** | From the recovery screen, invoke the logout action | `purgeLocalAccountData` + `signOut` run, `STORE_KEY_V1` and `STORE_KEY` are gone, and the marker **still exists**; the account is not presented as deleted (2.8, 2.34) |
+| 3 | **Same-user re-login resumes recovery** | Sign back in as the same `<userId>` after test 2 | The recovery screen is re-entered with the retry action available, before any `fetchFullStateFromDB` result is applied (2.34) |
+| 4 | **Other user unblocked, marker intact** | Sign in as a different `<userId>` on the same browser | The second user reaches normal routes, is **not** blocked, and after their session the first user's marker is still present — not deleted, not overwritten (2.34) |
+| 5 | **Malformed marker fails closed** | Seed the key with invalid JSON, then with `{}`, then with an unexpected type | Each case is treated as recovery **ACTIVE**, and the key is **not** cleared or overwritten in any of them. Includes a negative assertion that no code path calls `removeItem` on this key outside confirmed-deletion cleanup (2.35) |
+| 6 | **Clean browser blocked by server metadata** | No local marker at all; mock `getUser()` to return `app_metadata.account_deletion_pending = true` while the cached session's claims omit it | Every normal route is blocked. Asserts specifically that the verdict comes from the `getUser()` round-trip and **not** from `session.user.app_metadata`, so a stale JWT cannot bypass recovery (2.31, 2.36) |
+| 7 | **Pending-flag write failure blocks data deletion** | Edge Function with `updateUserById` mocked to fail | No `daily_records` preflight, no `begin_account_deletion`, no `removeAndConfirmRecordMedia`, no `prepare_account_deletion`, no `deleteUser`; the response reports `dataRemoved: false`; the account is fully intact (2.32, 2.32.1) |
+| 8 | **Retry success deletes Auth, then clears the marker** | Retry from the recovery screen with `deleteUser` succeeding | Ordering is asserted, not just the end state: `deleteUser` resolves **before** `clearRecoveryMarker` is called. The marker is gone afterwards; on a retry where `deleteUser` fails it is still present (2.34, 2.7) |
+| 9 | **Normal routes inaccessible throughout** | Recovery active, driven through: before retry → after a failed retry → after a reload/remount → after logout and re-login as the same user | In every one of those states, `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` and `/service` all render the recovery screen; `/auth/callback` and `/legal/:doc` remain reachable; no timeout, attempt counter or override re-admits the user (2.32.2) |
+
+Two properties of this suite are worth stating explicitly, because they are what make it a real
+gate rather than a checklist. Test 5 asserts a **negative** — the absence of a cleanup path — which
+is the assertion most likely to be deleted by a future well-meaning refactor, so it carries a
+comment saying so. Test 6 asserts **provenance**, not just outcome: it must fail if the
+implementation reads cached claims, even though cached claims would give the right answer in most
+scenarios. A test that only checked the outcome would pass against a stale-JWT implementation and
+miss 2.36 entirely.
 
 ### Unit Tests
 
@@ -982,6 +1372,12 @@ against the fix.
   key by key, including that `authenticatedUser` and the three device preferences survive;
   `deleteAccount` branch selection for all three outcomes; retry success, retry failure and
   logout from recovery; the `isCurrentIdentity` guard under an account switch mid-flight.
+  Also `recoveryKeyFor` / `markRecoveryPending` / `readRecoveryMarker` / `clearRecoveryMarker`:
+  key naming per user, boolean-only payload, `'absent'` for a missing key, `'active'` for every
+  present value including malformed ones, no `removeItem` on any read path, and `clearRecoveryMarker`
+  reachable only from the confirmed-Auth-deletion branch. Plus the Edge Function's ordering:
+  `updateUserById` is called with the existing `app_metadata` spread in, before the record
+  preflight, and a failed call returns `dataRemoved: false` without invoking any deletion step.
 - **C2** (`src/lib/cors.test.ts`, 2.15): every row (a)-(g) of the decision table, plus
   `parseAllowedOrigins` over empty, whitespace-only, single, multiple, duplicate and
   trailing-comma inputs; an assertion that no code path can emit `'*'`; and `Vary: Origin` on
@@ -1009,7 +1405,19 @@ against the fix.
   ever yields `deleted` or `partially_deleted`.
 - **C1 purge completeness**: generate arbitrary populated `AppState` values and assert that after
   the partial purge, every personal/couple/content field equals its `DEFAULT_STATE` value while
-  `authenticatedUser`, `widgetLayout`, `hasSeenInstallPrompt` and `theme` are preserved.
+  `authenticatedUser`, `widgetLayout`, `hasSeenInstallPrompt` and `theme` are preserved, and the
+  recovery marker key is untouched by the purge.
+- **C1 marker fail-closed totality**: generate arbitrary strings, JSON fragments and non-boolean
+  values as the marker's stored value and assert that `readRecoveryMarker` returns `'active'` for
+  **every** present value and `'absent'` only for a genuinely missing key, and that no input
+  causes the key to be removed. This is the property that forbids a fail-open branch from being
+  reintroduced.
+- **C1 authority ranking**: generate the cross product of local marker state (absent, active,
+  malformed) × `getUser()` result (`true`, `false`/absent, unavailable) and assert that recovery is
+  active whenever either authority says so, that a `true` server result always blocks regardless of
+  the local value, that a local `active` is never overridden by an unavailable server answer, and
+  that the only combination admitting normal routing is "no marker, and a server answer that
+  positively reports not pending".
 - **C3 URL validation**: generate URL strings and assert acceptance exactly when the value is a
   parseable absolute URL that is `https:` or a `localhost`/`127.0.0.1` origin.
 - **C4 guard soundness**: generate synthetic class strings and assert the guard regex flags
@@ -1021,7 +1429,15 @@ against the fix.
   recovery with nothing re-fetched → successful retry clears recovery, purges identity and signs
   out; and the alternative logout path, which must not present the account as deleted.
 - **C1 routing**: with recovery active, all eight authenticated routes render the recovery screen
-  while `/auth/callback` and `/legal/:doc` remain reachable.
+  while `/auth/callback` and `/legal/:doc` remain reachable, and the recovery gate takes precedence
+  over the `authSyncUnavailable` branch.
+- **C1 durable recovery end-to-end**: the full nine-test Deletion-Recovery Suite above, run as one
+  flow where the state is carried forward — partial deletion → reload → logout → same-user
+  re-login → other-user session → back to the first user — so the suite proves the marker's
+  lifecycle rather than nine isolated snapshots.
+- **C1 offline auth path**: with the network unavailable, assert that `getUser()` times out through
+  `withTimeout`, that `setIsAuthChecked(true)` still runs so the splash screen releases, that a
+  local marker still blocks routing, and that the absence of a marker does not fabricate recovery.
 - **C2 end-to-end**: preflight then `POST` from an allowlisted origin completes the deletion
   sequence; from a disallowed origin both are refused with `403` and no mutation; with
   `ALLOWED_ORIGINS` unset every request gets `500` and no mutation.
@@ -1033,9 +1449,15 @@ against the fix.
   readable foreground-on-surface pairings in both, plus an unchanged light-theme appearance.
 - **C5 offline activation**: build with `manualChunks`, confirm the service worker manifest lists
   every emitted chunk, and confirm an offline activation resolves them all.
-- **Release gates 2.29(a)-(j)**: `npm ci`; `npm run typecheck` (0 errors); `npm run lint`
+- **Release gates 2.29(a)-(k)**: `npm ci`; `npm run typecheck` (0 errors); `npm run lint`
   (0 errors, 0 warnings); `npm test` (206 baseline plus new suites); `npm run build` with
   placeholders and no warnings; negative build exits non-zero; zero marker tokens in `dist/`;
   `npm audit` reported with every remaining advisory covered by a recorded decision under 2.27 or
   2.28; secret scan finding no JWT-shaped strings, no `service_role` values, no real project URL,
-  no keystore or certificate files and no tracked `.env`; `git diff --check` clean.
+  no keystore or certificate files and no tracked `.env`; `git diff --check` clean; and **gate (k),
+  the Deletion-Recovery Suite** — all nine tests of 2.38 passing: marker created on partial
+  deletion, logout preserves it, same-user re-login resumes recovery, another user is unblocked
+  with the first marker intact, a malformed marker fails closed, a clean browser is blocked by
+  server metadata, a failed pending-flag write prevents application-data deletion, a successful
+  retry deletes the Auth user before clearing the marker, and normal routes stay inaccessible
+  throughout.

@@ -4,27 +4,27 @@ Working branch `integration/kimi-web-stabilization` at `7d82e3efd1b17283b0e8f086
 Tasks are ordered C1 → C5 so each cluster is independently verifiable and committable, with the
 verification gates last.
 
-**Three corrections this plan applies to design.md** (design.md is stale on these points; this plan
-is authoritative):
+**Three resolved decisions, now consistent across bugfix.md, design.md and this plan** (each is a
+settled decision recorded in all three documents, not an open question this plan resolves alone):
 
-1. **Test baseline is 206 tests across 23 files** (measured on this branch). design.md's
-   "152 tests / 21 files" is a stale figure copied from an older audit document. Every task below
-   uses 206/23 as the number that must not regress.
-2. **The refresh-escape gap (design.md residual risk #1) is RESOLVED, not left open.** Recovery
-   state held only in memory means a page refresh escapes the recovery screen, violating clause
-   2.5's route blocking. Decision: **persist a minimal `accountDeletionRecovery` boolean inside the
-   existing `STORE_KEY` allowlist**, alongside the three device preferences, treated as a
-   non-personal operational flag — it carries no personal, couple, profile or content data. This is
-   a **deliberate, documented extension of clause 2.4's key table**, recorded in code comments and
-   in the checklist, not a silent deviation. Task 3.5 implements it; task 3.5 also proves recovery
-   survives a reload.
-3. **`brace-expansion` is RESOLVED.** npm publishes **1.1.18** (and 5.0.9), so audit section 7-3's
-   "no patched 1.x release exists" conclusion — repeated in bugfix.md 1.22/2.27 and design.md C5 —
-   is stale. Clause 2.27's "verify against the registry first" precondition is therefore satisfied
-   in the affirmative, and the acceptance-recording fallback does not apply. Pin via `overrides` to
-   **1.1.18**, staying on the 1.x line so `minimatch@3`'s CJS `require` shape is preserved, and
-   require `npm run lint` at 0 errors / 0 warnings afterwards as the proof. **`npm audit fix
-   --force` is never run.**
+1. **Test baseline is 206 tests across 23 files** (measured on this branch). Recorded in bugfix.md
+   clause 2.29(d) and in design.md's Testing Strategy. Every task below uses 206/23 as the number
+   that must not regress.
+2. **Recovery survives a page reload, via a persisted flag.** Recovery state held only in memory
+   means a page refresh escapes the recovery screen, violating clause 2.5's route blocking.
+   Decision: **persist a minimal `accountDeletionRecovery` boolean inside the existing `STORE_KEY`
+   allowlist**, alongside the three device preferences, treated as a non-personal operational flag
+   — it carries no personal, couple, profile or content data. This is a **deliberate, documented
+   extension of clause 2.4's key table**, recorded in code comments and in the checklist, not a
+   silent deviation. It is recorded in bugfix.md clauses 2.4, 2.5 and 3.11 and in defect clause
+   1.25, and in design.md's Property 1, its "Changes Required — C1" section and decision item 1.
+   Task 3.5 implements it; task 3.5 also proves recovery survives a reload.
+3. **`brace-expansion` is pinned via `overrides` to 1.1.18 on the 1.x line, registry-verified.**
+   npm publishes **1.1.18** on the 1.x line (and 5.0.9 on 5.x), so clause 2.27's "verify against
+   the registry first" precondition is satisfied in the affirmative and the acceptance-recording
+   fallback does not apply. Recorded in bugfix.md clause 2.27 and design.md Property 11. Stay on
+   the 1.x line so `minimatch@3`'s CJS `require` shape is preserved, and require `npm run lint` at
+   0 errors / 0 warnings afterwards as the proof. **`npm audit fix --force` is never run.**
 
 Out of scope by requirement (3.20-3.25) and absent from this plan: staging deployment, production
 deployment, remote application of migrations `013`/`014`/`015`, Edge Function deployment, setting
@@ -60,7 +60,7 @@ default branch. These are human release gates; task 12 records them as unperform
 - [ ] 2. Write preservation property tests (BEFORE implementing any fix)
   - **Property 2: Preservation** - Non-buggy inputs behave exactly as at `7d82e3e`
   - **IMPORTANT**: Follow observation-first methodology - observe the UNFIXED code, then assert what you observed. Never assert assumed behavior
-  - **Baseline (CORRECTED)**: the suite on this branch is **206 tests across 23 files** — measured, not the stale "152 tests / 21 files" in design.md. Record the exact `npm test` summary line before any source change; this number plus the new suites from clauses 2.15 and 2.22 is what task 9 must confirm
+  - **Baseline**: the measured suite on this branch is **206 tests across 23 files**. Record the exact `npm test` summary line before any source change; this number plus the new suites from clauses 2.15 and 2.22 is what task 9 must confirm
   - Property-based testing is used where the preservation claim is genuinely universal (the C2 method × origin × allowlist cross product, C1 purge completeness over arbitrary populated `AppState`, C3 URL-form acceptance), since it generates many cases automatically and catches edge cases manual tests miss
   - Observe: a `200 { success: true }` deletion runs `purgeLocalAccountData`, signs out, and raises the `media_not_fully_removed` toast when applicable — record the exact observed sequence (design Property 2, clause 3.7)
   - Observe: a failure with `dataRemoved: false` leaves the account fully intact with the generic `계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.` toast, no purge, no recovery (clause 2.10)
@@ -125,7 +125,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Requirements: 2.3, 2.6, 2.7, 2.8, 2.10_
 
   - [ ] 3.5 Persist the recovery flag so a page refresh cannot escape recovery
-    - **CORRECTION 2 — this task closes design.md residual risk #1**, which left the refresh escape open. In-memory-only recovery state means a reload lands the user in a signed-in app with empty data and no recovery screen, which violates clause 2.5's route-blocking requirement. That is a real hole, so it is closed here rather than flagged
+    - **DECISION 2 — persist the recovery flag so a refresh cannot escape recovery.** In-memory-only recovery state means a reload lands the user in a signed-in app with empty data and no recovery screen, which violates clause 2.5's route-blocking requirement. That is a real hole, so it is closed here rather than flagged
     - Extend the persisted allowlist: add a minimal boolean `accountDeletionRecovery` to the object returned by `carryOverDevicePrefs` (`src/lib/store.tsx:197-203`), which `saveState` writes to `STORE_KEY` at line 128 and `loadState` reads back at lines 103-113
     - **Persist the boolean only.** The `warnings` array stays in memory, because warning strings can name storage paths; the persisted flag must hold no personal, couple, profile or content data
     - Rehydrate the flag on load so recovery is re-entered before any route renders, and clear it on the two exits from recovery — successful retry (clause 2.7) and logout (clause 2.8) — so a stale flag can never trap a fresh session
@@ -344,7 +344,7 @@ default branch. These are human release gates; task 12 records them as unperform
     - _Requirements: 2.26_
 
   - [ ] 7.4 Pin `brace-expansion` to 1.1.18 via `overrides`
-    - **CORRECTION 3 — the registry-verification precondition in clause 2.27 is satisfied in the affirmative.** npm publishes **1.1.18** on the 1.x line (and 5.0.9 on 5.x), so audit section 7-3's "no patched 1.x release exists" conclusion — carried into bugfix.md 1.22/2.27 and design.md C5 — is **stale**. Clause 2.27's acceptance-recording fallback therefore does not apply; the fix is applied
+    - **DECISION 3 — the registry-verification precondition in clause 2.27 is satisfied in the affirmative, and the pin is applied.** npm publishes **1.1.18** on the 1.x line (and 5.0.9 on 5.x), superseding audit section 7-3's "no patched 1.x release exists" conclusion. Clause 2.27's acceptance-recording fallback therefore does not apply; the fix is applied. bugfix.md clause 2.27 and design.md Property 11 record this resolution, while bugfix.md defect clause 1.22 intentionally still describes the pre-fix baseline, because defect clauses describe the code as it stands at `7d82e3e`
     - Add an `overrides` entry pinning `brace-expansion` to **1.1.18**, deliberately staying on the **1.x line** so `minimatch@3`'s CJS `require` shape is preserved. Do not move the `eslint` → `minimatch@3` path onto 5.x, whose changed exports are exactly the lint-breaking risk audit 7-3 identified
     - Run `npm install` to update `package-lock.json` from `1.1.16` to `1.1.18`, and commit the lockfile
     - **Proof of safety: `npm run lint` must report 0 errors and 0 warnings afterwards.** A `brace-expansion` change that breaks `minimatch@3`'s CJS `require` is a regression, not a fix, and must be reverted rather than worked around
@@ -385,9 +385,9 @@ default branch. These are human release gates; task 12 records them as unperform
   - Record the exact output of each command
   - _Requirements: 2.29_
 
-- [ ] 9. Gate 2.29(d) — full test suite against the corrected baseline
+- [ ] 9. Gate 2.29(d) — full test suite against the measured baseline
   - Run `npm test`
-  - **CORRECTED BASELINE**: **206 tests across 23 files** must continue to pass, plus the new suites from clauses 2.15 (`src/lib/cors.test.ts`) and 2.22 (`src/lib/themeTokens.test.ts`) and the tests added in tasks 1, 2 and 3.5. design.md's "152 tests / 21 files" is stale and must not be used as the pass criterion
+  - **BASELINE**: **206 tests across 23 files** must continue to pass, plus the new suites from clauses 2.15 (`src/lib/cors.test.ts`) and 2.22 (`src/lib/themeTokens.test.ts`) and the tests added in tasks 1, 2 and 3.5
   - Confirm the final count equals the recorded 206/23 baseline plus the new tests, with zero pre-existing tests removed or skipped
   - _Requirements: 2.29_
 
@@ -410,5 +410,5 @@ default branch. These are human release gates; task 12 records them as unperform
   - Record the results of gates 2.29(a)-(j) for this branch, since no verification result exists for this baseline (clause 1.24)
   - Confirm scope discipline: the branch descends from `7d82e3efd1b17283b0e8f086e94cf97cf268b625` alone, the older divergent 19-commit local branch is neither merged nor cherry-picked, and `capacitor.config.ts`, the `cap:*` scripts and the Android shell are unmodified
   - Report the following as **unperformed human release gates**, not as work done: staging deployment, production deployment, remote application of migrations `013_invitation_hardening.sql` / `014_feature_privacy_and_collaboration.sql` / `015_security_followup.sql` (with the `013 → 014 → 015` order and the ambiguous duplicate `002_*` ordering still flagged), Edge Function deployment, setting `ALLOWED_ORIGINS` in any remote environment, the two-account end-to-end deletion test, and any merge into the default branch
-  - Report the one deliberate specification extension for reviewer sign-off: clause 2.4's key table is extended by the persisted `accountDeletionRecovery` boolean (task 3.5), which closes design.md's residual risk #1
+  - Report the one deliberate specification extension for reviewer sign-off: clause 2.4's key table is extended by the persisted `accountDeletionRecovery` boolean (task 3.5), recorded across bugfix.md clauses 2.4/2.5 and design.md decision item 1
   - _Requirements: 2.29, 3.18, 3.19, 3.20, 3.21, 3.22, 3.23, 3.24, 3.25_

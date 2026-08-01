@@ -43,7 +43,7 @@ Reality wins in every row below; the discrepancy is recorded rather than papered
 | `docs/NEW_WINDOW_KIMI_GITHUB_AUDIT_PROMPT.md` should be read | Does not exist on any branch. Its contents are unknown and are **not** invented here. |
 | `src/lib/accountDeletion.ts`, `supabase/functions/_shared/cors.ts`, `src/lib/cors.test.ts`, `src/lib/themeTokens.test.ts`, `src/App.test.tsx` exist | All five are absent. Each is a new file. |
 | `public/_headers` contains CSP markers | Contains zero occurrences of `__SUPABASE_HTTP_SRC__` / `__SUPABASE_CONNECT_SRC__`. Its header comment states CSP is *deliberately* delegated to the hosting platform, so C3 reverses a prior deliberate decision (see 2.14). |
-| `brace-expansion` should resolve to 1.1.18 | `package-lock.json` resolves the `eslint` → `minimatch@3` path to **1.1.16**. Audit 7-3 concluded no patched 1.x release exists (vulnerable range `<=5.0.7`). The claimed 1.1.18 is unverified; C5 requires registry verification before any change. |
+| `brace-expansion` should resolve to 1.1.18 | `package-lock.json` resolves the `eslint` → `minimatch@3` path to **1.1.16**. Registry verification is now **done and affirmative**: npm publishes **1.1.18 on the 1.x line** and **5.0.9 on the 5.x line**. Audit 7-3's premise that no patched 1.x exists is therefore **stale**, and the handoff's target was **correct**. The fix pins 1.1.18 on the 1.x line, which keeps `minimatch@3`'s CJS `require` shape intact (see 2.27). |
 | Dark-theme breakage is confined to 4 files | `src/pages/OnboardingPage.tsx` (`border-white`), `src/pages/SchedulePage.tsx` (`bg-slate-500`, `bg-white`) and `src/pages/ServicePage.tsx` (`bg-white/20`, `bg-white/10`) also match the pattern. The guard test scope must be stated explicitly (2.20) rather than assumed. |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` is the only key variable | `src/lib/supabase.ts:10` falls back to `VITE_SUPABASE_ANON_KEY`. The fallback is load-bearing and must survive (3.9). |
 
@@ -119,6 +119,8 @@ Audit item 21 records that opacity variants such as `bg-white/60` defeated the e
 
 1.24 WHEN release readiness is assessed for this branch THEN no verification result exists for this baseline, because the four commits of prior work were never pushed and their gate runs are unrecoverable.
 
+1.25 WHEN the page is refreshed after a partial deletion THEN nothing persists any recovery state — even if recovery state existed in memory, `saveState` writes only the `carryOverDevicePrefs` whitelist (`store.tsx:128`, `197-203`) — so the reload would escape any recovery screen straight into a signed-in app with empty data. There is also no server-side way to re-detect the condition, because the Edge Function has already cleared its server-side deletion marker on final Auth-deletion failure (audit section 7-2), leaving neither a client nor a server record that the account is mid-deletion.
+
 ---
 
 ### Expected Behavior (Correct)
@@ -157,6 +159,7 @@ END FOR
 | `localStorage['gomsinlog.state.v2']` (`STORE_KEY`) | **Rewritten** to device preferences only | `store.tsx:96`, `saveState` at `store.tsx:128` |
 | `localStorage['gomsinlog.state.v1']` (`STORE_KEY_V1`) | **Removed** | `store.tsx:95`, `105` |
 | `widgetLayout`, `hasSeenInstallPrompt`, `theme` | **Retained** — device preferences | `carryOverDevicePrefs`, `store.tsx:197-203` |
+| `accountDeletionRecovery` (boolean only) | **Retained/written** — non-personal operational flag | added to the `carryOverDevicePrefs` whitelist (`store.tsx:197-203`), written by `saveState` (`:128`), read back by `loadState` (`:103-113`) |
 | `authenticatedUser` | **Retained** — identity is required to retry deletion | new behaviour; differs from `purgeLocalAccountData` |
 | Supabase auth session keys (`sb-*`, owned by `supabase-js`) | **Retained** — no sign-out is performed | consequence of retaining identity |
 | `records`, `events`, `trips` | **Cleared** to `[]` | `DEFAULT_STATE`, `store.tsx:154-190` |
@@ -168,7 +171,15 @@ END FOR
   authenticated session, no personal content is on disk to begin with; the purge SHALL
   therefore also clear in-memory `AppState`, which is where the actual exposure lives.
 
-2.5 WHEN `accountDeletionRecovery` is active THEN the system SHALL block every normal application route and render a recovery screen offering exactly two actions — retry deletion, and log out — with no navigation to `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` or `/service`.
+  The `accountDeletionRecovery` row is a **deliberate extension of the persisted key set by
+  exactly one boolean**, and it carries no personal, couple, profile or content data. ONLY
+  the boolean SHALL be persisted: the accompanying `warnings` array SHALL stay in memory,
+  because warning strings can name storage paths and therefore must not be written to disk.
+  No new storage key is introduced — the boolean lives inside the already-allowlisted
+  `STORE_KEY` (`gomsinlog.state.v2`), so the storage surface enumerated by this table is
+  unchanged in extent.
+
+2.5 WHEN `accountDeletionRecovery` is active THEN the system SHALL block every normal application route and render a recovery screen offering exactly two actions — retry deletion, and log out — with no navigation to `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` or `/service`. This blocking SHALL hold **across a page reload**, not merely within a single session: the persisted `accountDeletionRecovery` boolean SHALL be rehydrated from `STORE_KEY` before any route renders, so a refresh re-enters the recovery screen rather than the normal app. The flag SHALL be cleared on both exits from recovery — a successful retry (2.7) and a logout (2.8) — and an unparseable or corrupt `STORE_KEY` SHALL fail safe by dropping the flag (consistent with `loadState`'s existing `removeItem` on corrupt state, `store.tsx:103-113`) rather than fabricating a recovery state that the user is not in.
 
 2.6 WHEN a retry of the deletion also fails THEN the system SHALL remain in `accountDeletionRecovery`, SHALL NOT re-fetch or re-render any purged personal, couple or content data, and SHALL keep offering only retry and logout.
 
@@ -317,7 +328,7 @@ END FOR
 
 2.26 WHEN `npm run build` runs THEN `vite.config.ts` SHALL configure `build.rollupOptions.output.manualChunks` vendor splitting sufficient to remove the large-chunk warning, and SHALL NOT change module evaluation order in a way that alters observable behaviour; the existing `injectServiceWorkerManifest` plugin SHALL continue to enumerate every emitted asset under `dist/assets` so an offline activation still finds all chunks.
 
-2.27 WHEN `brace-expansion` is addressed THEN the system SHALL first **verify against the npm registry** whether patched releases matching the handoff's claim (1.1.18 on the 1.x line, 5.0.9 on the 5.x line) actually exist, since audit section 7-3 concluded no patched 1.x exists (vulnerable range `<=5.0.7`). The system SHALL apply an `overrides` change **only if** registry verification confirms a patched release on the line that `minimatch@3` can consume via CJS `require`. `npm run lint` SHALL pass with zero errors and zero warnings afterwards. `npm audit fix --force` SHALL NOT be run. If verification fails, the system SHALL record the acceptance with the same reasoning as audit section 7-3 and leave the lockfile at `1.1.16`.
+2.27 WHEN `brace-expansion` is addressed THEN the registry-verification precondition SHALL be recorded as **satisfied in the affirmative**: npm publishes patched releases on both lines — **1.1.18 on the 1.x line** and **5.0.9 on the 5.x line** — so audit section 7-3's premise that no patched 1.x exists is stale and the handoff's target was correct. The system SHALL therefore apply the `overrides` pin to **1.1.18 on the 1.x line**, which stays within `minimatch@3`'s consumable range and **preserves its CJS `require` shape** — the specific risk that caused 7-3 to reject a bump to 5.x does not apply to a 1.x-line pin. `npm run lint` passing with **0 errors and 0 warnings** SHALL be the empirical proof that the CJS shape survived. The acceptance-recording fallback (leaving the lockfile at `1.1.16` with 7-3's reasoning) **no longer applies** and SHALL NOT be used. `npm audit fix --force` SHALL NOT be run.
 
 2.28 WHEN the react-router 7.18.2 / GHSA-qwww-vcr4-c8h2 advisory is addressed THEN the system SHALL record it as a **documented conditional acceptance** in `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`, stating the preconditions that make it inapplicable — a static Vite SPA using `BrowserRouter` only, with no Framework Mode, no RSC, no `loader`, no `action`, no `useFetcher`, no react-router `<Form>` and no server routes — together with its **invalidation trigger**: adopting any one of those features invalidates the acceptance and forces re-evaluation. A blind downgrade to 7.11.0 and a major-version upgrade are both forbidden by this requirement.
 
@@ -330,7 +341,7 @@ END FOR
 | a | `npm ci` | Completes from the committed lockfile |
 | b | `npm run typecheck` | 0 errors |
 | c | `npm run lint` | 0 errors, 0 warnings |
-| d | `npm test` | Full suite passes (baseline: 152 tests / 21 files, plus the new tests from 2.15 and 2.22) |
+| d | `npm test` | Full suite passes (measured baseline: **206 tests / 23 files**, plus the new tests from 2.15 and 2.22) |
 | e | `npm run build` | Succeeds using **only** temporary non-secret placeholders `VITE_SUPABASE_URL=https://example.supabase.co` and `VITE_SUPABASE_PUBLISHABLE_KEY=test-public-key-not-a-secret`; no mixed-import warning, no large-chunk warning |
 | f | Negative build test | A production build with the required variables **absent** exits non-zero, proving 2.17 |
 | g | Marker assertion | `dist/` contains zero occurrences of `__SUPABASE_HTTP_SRC__` and `__SUPABASE_CONNECT_SRC__`, proving 2.19 |
@@ -377,7 +388,7 @@ END FOR
 
 3.10 WHEN the existing non-CSP security headers are served THEN `_headers` SHALL CONTINUE TO deliver `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=()` and `X-DNS-Prefetch-Control: off` unchanged.
 
-3.11 WHEN a device has never chosen a theme THEN the system SHALL CONTINUE TO honour `prefers-color-scheme`, and `widgetLayout`, `hasSeenInstallPrompt` and `theme` SHALL CONTINUE TO survive sign-out and account switches.
+3.11 WHEN a device has never chosen a theme THEN the system SHALL CONTINUE TO honour `prefers-color-scheme`, and `widgetLayout`, `hasSeenInstallPrompt` and `theme` SHALL CONTINUE TO survive sign-out and account switches. Adding the `accountDeletionRecovery` boolean to the persisted whitelist (2.4) SHALL NOT weaken this: the three device preferences remain carried over unchanged, while the recovery boolean is explicitly **cleared, not carried over**, on sign-out and on account switch, so it cannot leak into a fresh session and cannot strand a different account on the recovery screen.
 
 3.12 WHEN the theme changes THEN the light and dark token values in `src/styles/index.css` SHALL CONTINUE TO be exactly as at `7d82e3e`; C4 changes consumers only, and SHALL NOT redefine, rename or add tokens, and SHALL NOT alter `LIGHT_THEME_COLOR = '#FAF8F5'` or `DARK_THEME_COLOR = '#16181D'` in `src/lib/store.tsx`.
 

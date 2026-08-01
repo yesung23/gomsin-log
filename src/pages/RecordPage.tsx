@@ -4,10 +4,11 @@ import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
 import { useEscapeKey } from '@/lib/hooks';
-import { visibleRecordsForViewer } from '@/lib/privacy';
+import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
-  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar
+  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar,
+  Pencil, Trash2,
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
 import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
@@ -66,7 +67,7 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 export function RecordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { state, setHighlightedRecordId } = useStore();
+  const { state, setHighlightedRecordId, updateRecord, deleteRecord } = useStore();
   const { records, profile } = state;
   const today = localToday();
   const todayStr = toLocalDateString(today);
@@ -83,9 +84,18 @@ export function RecordPage() {
   const [selectedDate, setSelectedDate] = useState(tripPeriod?.from || todayStr);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  const closeSelectedRecord = useCallback(() => setSelectedRecord(null), []);
+  const closeSelectedRecord = useCallback(() => {
+    setSelectedRecord(null);
+    setIsEditing(false);
+    setEditText('');
+    setShowDeleteConfirm(false);
+  }, []);
   useEscapeKey(closeSelectedRecord, selectedRecord !== null);
 
   // Own records + the partner's shared ones, with author-only fragments removed.
@@ -593,13 +603,50 @@ export function RecordPage() {
                 {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
               </h3>
               <button
-                onClick={() => setSelectedRecord(null)}
+                onClick={closeSelectedRecord}
                 className="w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"
                 aria-label="닫기"
               >
                 ✕
               </button>
             </div>
+
+            {/* Delete confirmation */}
+            {showDeleteConfirm && (
+              <div className="mb-4 p-4 rounded-xl bg-destructive/10 border border-destructive/30 space-y-3">
+                <p className="text-sm font-bold text-destructive">이 기록을 삭제할까요?</p>
+                <p className="text-xs text-muted-foreground">삭제하면 되돌릴 수 없어요.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setIsSaving(true);
+                      try {
+                        const ok = await deleteRecord(selectedRecord.id);
+                        if (ok) {
+                          toast.success('기록이 삭제되었어요.');
+                          closeSelectedRecord();
+                        } else {
+                          toast.error('삭제하지 못했어요. 다시 시도해 주세요.');
+                        }
+                      } finally {
+                        setIsSaving(false);
+                        setShowDeleteConfirm(false);
+                      }
+                    }}
+                    disabled={isSaving}
+                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-xs"
+                  >
+                    {isSaving ? '삭제 중...' : '삭제'}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               {selectedRecord.reaction && (
@@ -608,11 +655,67 @@ export function RecordPage() {
                 </div>
               )}
 
-              <div className="bg-muted p-4 rounded-xl">
-                <p className="text-foreground whitespace-pre-wrap text-sm leading-relaxed">
-                  {selectedRecord.log || '(내용 없음)'}
-                </p>
-              </div>
+              {isEditing ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="w-full h-32 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
+                    placeholder="기록 내용을 입력하세요"
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => {
+                        setIsEditing(false);
+                        setEditText('');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!editText.trim()) {
+                          toast.error('빈 내용은 저장할 수 없어요.');
+                          return;
+                        }
+                        setIsSaving(true);
+                        try {
+                          const textChanged = editText.trim() !== (selectedRecord.log || '').trim();
+                          const updates: Partial<DailyRecord> = { log: editText.trim() };
+                          // If text content changed, clear emotion analysis since
+                          // it was derived from the previous text.
+                          if (textChanged) {
+                            updates.emotionFlow = [];
+                            updates.emotionUpdatedAt = null;
+                          }
+                          const ok = await updateRecord(selectedRecord.id, updates);
+                          if (ok) {
+                            toast.success('기록이 수정되었어요.');
+                            setIsEditing(false);
+                            setEditText('');
+                            setSelectedRecord(null);
+                          } else {
+                            toast.error('수정하지 못했어요. 다시 시도해 주세요.');
+                          }
+                        } finally {
+                          setIsSaving(false);
+                        }
+                      }}
+                      disabled={isSaving || !editText.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-coral text-white font-bold text-xs disabled:opacity-50"
+                    >
+                      {isSaving ? '저장 중...' : '저장'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-muted p-4 rounded-xl">
+                  <p className="text-foreground whitespace-pre-wrap text-sm leading-relaxed">
+                    {selectedRecord.log || '(내용 없음)'}
+                  </p>
+                </div>
+              )}
 
               {selectedRecord.isPrivate && (
                 <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl font-medium">
@@ -637,6 +740,27 @@ export function RecordPage() {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Owner-only edit/delete controls. Partner records NEVER show these. */}
+              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
+                <div className="flex gap-2 pt-2 border-t border-border">
+                  <button
+                    onClick={() => {
+                      setEditText(selectedRecord.log || '');
+                      setIsEditing(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted text-foreground font-bold text-xs active:scale-95 transition"
+                  >
+                    <Pencil size={13} /> 수정
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-destructive/10 text-destructive font-bold text-xs active:scale-95 transition"
+                  >
+                    <Trash2 size={13} /> 삭제
+                  </button>
                 </div>
               )}
             </div>

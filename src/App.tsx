@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { HomePage } from '@/pages/HomePage';
@@ -46,6 +46,71 @@ function PageLoader() {
   );
 }
 
+/**
+ * The only screen an account in deletion recovery may see.
+ *
+ * Exactly two actions: retry the deletion, or log out. There is NO override of
+ * any kind -- no timeout, no attempt counter, no "continue anyway" affordance
+ * and no query parameter re-admits a blocked user to an authenticated route.
+ */
+function AccountDeletionRecovery() {
+  const { retryAccountDeletion, signOut } = useStore();
+  const [busy, setBusy] = useState<'retry' | 'logout' | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const onRetry = async () => {
+    if (busy) return;
+    setBusy('retry');
+    setMessage(null);
+    const outcome = await retryAccountDeletion();
+    if (outcome.status !== 'deleted') {
+      setMessage('아직 탈퇴를 완료하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    }
+    setBusy(null);
+  };
+
+  const onLogout = async () => {
+    if (busy) return;
+    setBusy('logout');
+    await signOut();
+    setBusy(null);
+  };
+
+  return (
+    <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
+      <section
+        role="alert"
+        className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm space-y-3"
+      >
+        <h1 className="text-base font-bold text-foreground">탈퇴가 완료되지 않았어요</h1>
+        <p className="text-xs leading-5 text-muted-foreground">
+          기록과 프로필 데이터는 이미 삭제되었지만 로그인 계정이 아직 남아 있어요.
+          탈퇴를 끝내려면 아래에서 다시 시도해 주세요.
+        </p>
+        {message && (
+          <p className="text-xs leading-5 text-destructive">{message}</p>
+        )}
+        <button
+          type="button"
+          onClick={() => void onRetry()}
+          disabled={busy !== null}
+          className="w-full min-h-[44px] rounded-xl bg-coral px-4 py-3 text-xs font-bold text-coral-foreground disabled:opacity-60"
+        >
+          {busy === 'retry' ? '처리 중...' : '탈퇴 다시 시도'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void onLogout()}
+          disabled={busy !== null}
+          className="w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-xs font-bold text-foreground disabled:opacity-60"
+        >
+          로그아웃
+        </button>
+      </section>
+    </main>
+  );
+}
+
 function AuthSyncUnavailable() {
   return (
     <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
@@ -67,13 +132,28 @@ function AuthSyncUnavailable() {
 }
 
 export function App() {
-  const { state, isReady, authSyncUnavailable } = useStore();
+  const { state, isReady, authSyncUnavailable, accountDeletionRecovery } = useStore();
 
   if (!isReady) {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <div className="w-10 h-10 border-4 border-coral border-t-transparent rounded-full animate-spin" />
       </div>
+    );
+  }
+
+  // Placed BEFORE the `authSyncUnavailable` branch so it TAKES PRECEDENCE over
+  // it: a sync outage must not replace the recovery screen with a retry-sync
+  // screen that offers no way to complete the deletion.
+  if (accountDeletionRecovery) {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/legal/:doc" element={<LegalPage />} />
+          <Route path="*" element={<AccountDeletionRecovery />} />
+        </Routes>
+      </Suspense>
     );
   }
 

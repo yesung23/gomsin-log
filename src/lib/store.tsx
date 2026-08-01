@@ -16,7 +16,12 @@ import {
   saveCoupleAnniversary,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
-import { fetchEventsResultFromDB } from '@/lib/events';
+import {
+  deleteEventFromDB,
+  fetchEventsResultFromDB,
+  saveEventToDB,
+  updateEventInDB,
+} from '@/lib/events';
 import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
@@ -30,6 +35,19 @@ import {
 } from '@/lib/records';
 import { StoreContext } from '@/lib/storeContext';
 import type { SharedSyncStatus } from '@/lib/storeContext';
+import {
+  assertNever,
+  classifyDeletionStatus,
+  clearRecoveryMarker,
+  deletionStatusLogToken,
+  markRecoveryPending,
+  readRecoveryMarker,
+  registerServerCallGate,
+  serverAnswerFromUser,
+  type AccountDeletionOutcome,
+  type DeletionStatus,
+  type ServerAnswer,
+} from '@/lib/accountDeletion';
 
 /** Which slice of shared state a realtime notification affects. */
 type SyncSlice = 'records' | 'events' | 'trips';
@@ -204,6 +222,30 @@ function carryOverDevicePrefs(prev: AppState): Pick<AppState, 'widgetLayout' | '
 
 const localRepository = new LocalStorageRepository();
 
+/**
+ * Whether a resolved deletion status must stop a server call.
+ *
+ * Exhaustive at compile time: a fourth variant, or an unhandled `unknown`, is a
+ * TYPE ERROR rather than a silent fall-through into permissive behaviour.
+ */
+function blocksServerCall(status: DeletionStatus): boolean {
+  switch (status.kind) {
+    case 'pending':
+      return true;
+    case 'clear':
+      return false;
+    case 'unknown':
+      // A DELIBERATE AVAILABILITY TRADEOFF, and explicitly NOT fail-closed: an
+      // offline user with no deletion outstanding must not be stranded. It is
+      // not safe, not verified and not fail-safe -- it confers no settled
+      // status at all, which is why the authoritative check is re-issued before
+      // the next server call rather than cached.
+      return false;
+    default:
+      return assertNever(status);
+  }
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(DEFAULT_STATE);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -249,6 +291,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const retrySharedAccessRef = useRef<(() => Promise<boolean>) | null>(null);
   /** False once the couple channel reports a terminal transport failure. */
   const realtimeHealthyRef = useRef(true);
+  /**
+   * Non-null while this account is in account-deletion recovery: its data has
+   * been removed but its login has not. `warnings` is kept IN MEMORY ONLY --
+   * warning strings can name storage paths, and the durable marker is a boolean
+   * carrying no deleted-account content of any kind.
+   */
+  const [accountDeletionRecovery, setAccountDeletionRecovery] =
+    useState<{ warnings: string[] } | null>(null);
+  /**
+   * Tri-state deletion status. Deliberately NOT part of `AppState`, so it can
+   * never reach `localStorage`: `saveState` persists only the
+   * `carryOverDevicePrefs` whitelist, which has no deletion field.
+   */
+  const [deletionStatus, setDeletionStatus] = useState<DeletionStatus>({ kind: 'unknown' });
+  /**
+   * Last observed status, for rendering and logging ONLY. Never a decision
+   * input: the pre-flight gate re-issues the authoritative check every time.
+   */
+  const deletionStatusRef = useRef<DeletionStatus>({ kind: 'unknown' });
+  /** Cancels every deferred sync timer owned by the realtime effect. */
+  const cancelDeferredSyncRef = useRef<(() => void) | null>(null);
 
   const replaceStateImmediately = useCallback((nextState: AppState) => {
     stateRef.current = nextState;
@@ -315,6 +378,155 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     && stateMatchesLinkedCouple(stateRef.current, workspace),
   [isCurrentIdentity]);
 
+  /**
+   * Record a resolved status.
+   *
+   * There is no promotion path anywhere: the only writers are this function and
+   * the resolver it is fed from. No attempt counter, no expiry, no elapsed-time
+   * promotion, no `??` default and no `||` fallback can turn `unknown` into
+   * `clear`.
+   */
+  const applyDeletionStatus = useCallback((status: DeletionStatus): DeletionStatus => {
+    deletionStatusRef.current = status;
+    setDeletionStatus(status);
+    if (status.kind === 'unknown') {
+      // `withTimeout`'s own warning does not say WHICH question went
+      // unanswered, so the distinct token is logged here as well. Never `false`,
+      // never `null`, never an omitted field.
+      console.warn(
+        `[gomsinlog] ${deletionStatusLogToken(status)} - the authoritative deletion check could not complete`,
+      );
+    }
+    return status;
+  }, []);
+
+  /**
+   * Purge local account CONTENT while retaining the authenticated identity.
+   *
+   * Deliberately separate from `purgeLocalAccountData`, which stays exactly as
+   * it was for sign-out, account switch and fully successful deletion. Here the
+   * session is kept on purpose, because the user still has to be able to finish
+   * the deletion.
+   */
+  const purgeLocalContentRetainingIdentity = useCallback((
+    expected: ActiveIdentity,
+  ): boolean => {
+    if (!isCurrentIdentity(expected)) return false;
+    const current = stateRef.current;
+    membershipReconciliationRef.current += 1;
+    quarantinedWorkspaceRef.current = null;
+    pendingDisconnectRef.current = null;
+    retrySharedAccessRef.current = null;
+    // Deliberately NOT bumping `sessionGenerationRef`: the session is kept.
+    localStorage.removeItem(STORE_KEY_V1);
+    const nextState: AppState = {
+      ...DEFAULT_STATE,
+      isDemoMode: false,
+      ...carryOverDevicePrefs(current),
+      authenticatedUser: current.authenticatedUser,
+    };
+    // Rewrite `STORE_KEY` through the existing save path, then block the save
+    // effect so it cannot resurrect the cache on the next render. The recovery
+    // marker lives at its own top-level key and is untouched by either.
+    void localRepository.saveState(nextState, sessionUserIdRef.current !== null);
+    cachePurgedRef.current = true;
+    // Pin hydration to the retained user so the hydration effect cannot
+    // re-fetch the data that was just removed.
+    hydratedUserIdRef.current = expected.userId;
+    replaceStateImmediately(nextState);
+    return true;
+  }, [isCurrentIdentity, replaceStateImmediately]);
+
+  /**
+   * Resolve the tri-state deletion status for `userId`.
+   *
+   * The local marker is read FIRST and synchronously. A positive marker
+   * outranks any server answer -- it is cleared only after confirmed Auth
+   * deletion, and a `not_pending` answer is not that confirmation -- so it
+   * resolves the status with NO round-trip at all. That is what blocks an
+   * offline initiating device before first paint.
+   */
+  const verifyDeletionStatus = useCallback(async (
+    userId: string,
+  ): Promise<DeletionStatus> => {
+    const marker = readRecoveryMarker(userId);
+    if (marker === 'active') {
+      return applyDeletionStatus(classifyDeletionStatus(marker, { kind: 'unavailable' }));
+    }
+
+    const client = supabase;
+    if (!client) return applyDeletionStatus(classifyDeletionStatus(marker, { kind: 'unavailable' }));
+
+    // `supabase.auth.getUser()` is a SERVER round-trip. `session.user.app_metadata`
+    // is deliberately not used: that JWT was issued before the flag was written
+    // and reports the stale value on exactly the reload that must catch it.
+    //
+    // `withTimeout` resolves the CALLER'S OWN fallback on both timeout and
+    // rejection, so the fallback's type IS the state. It must be `unavailable`.
+    // Passing `not_pending` (or `false`) here would reintroduce the original
+    // defect exactly: an unanswered question becoming an authoritative negative.
+    const server = await withTimeout<ServerAnswer>(
+      (async (): Promise<ServerAnswer> => {
+        try {
+          const { data, error } = await client.auth.getUser();
+          return error ? { kind: 'unavailable' } : serverAnswerFromUser(data?.user);
+        } catch {
+          // The question could not be answered. That is NOT an answer, and
+          // specifically not `not_pending`.
+          return { kind: 'unavailable' };
+        }
+      })(),
+      AUTH_SYNC_TIMEOUT_MS,
+      { kind: 'unavailable' } as ServerAnswer,
+    );
+    // A positive server answer also writes the local marker, so the next reload
+    // is instant and does not depend on repeating the round-trip.
+    if (server.kind === 'pending') markRecoveryPending(userId);
+    return applyDeletionStatus(classifyDeletionStatus(marker, server));
+  }, [applyDeletionStatus]);
+
+  /**
+   * Abort with NO WRITES APPLIED, then purge local content and enter recovery.
+   *
+   * Runs synchronously with respect to the caller's first request: the caller
+   * returns on the gate's `pending` result and never reaches its request.
+   *
+   * FORWARD CONSTRAINT: the "no queued mutation delivered" claim holds because
+   * there is no outbox in this codebase -- every mutation is issued directly by
+   * the store methods, and the only deferred work is two read-only timer-based
+   * schedulers, both cancelled in step 4. IF A PERSISTENT MUTATION QUEUE IS EVER
+   * ADDED, a drain-blocking gate must be added at its drain point too.
+   */
+  const abortForPendingDeletion = useCallback((identity: ActiveIdentity): void => {
+    // (1) Make the verdict durable first, so it survives a reload without
+    //     needing the round-trip again.
+    markRecoveryPending(identity.userId);
+    // (2) Content goes, identity and session stay, device prefs untouched.
+    purgeLocalContentRetainingIdentity(identity);
+    // (3) Close the route gate on the next render.
+    setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
+    applyDeletionStatus({ kind: 'pending' });
+    // (4) Nothing deferred may fire afterwards.
+    cancelDeferredSyncRef.current?.();
+  }, [applyDeletionStatus, purgeLocalContentRetainingIdentity]);
+
+  /**
+   * Pre-flight gate for every server synchronization and every server mutation.
+   *
+   * Re-issues the authoritative check on EVERY entry; it never reads a cached
+   * verdict. A `pending` result aborts the attempt before its first request is
+   * sent, so no server state is modified and no write is applied.
+   */
+  const ensureNotPendingBeforeServerCall = useCallback(async (): Promise<DeletionStatus> => {
+    const identity = captureActiveIdentity();
+    if (!identity) return { kind: 'unknown' };
+    const status = await verifyDeletionStatus(identity.userId);
+    if (status.kind === 'pending' && isCurrentIdentity(identity)) {
+      abortForPendingDeletion(identity);
+    }
+    return status;
+  }, [abortForPendingDeletion, captureActiveIdentity, isCurrentIdentity, verifyDeletionStatus]);
+
   useEffect(() => {
     localRepository.loadState().then((stored) => {
       if (stored) {
@@ -354,6 +566,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setIsHydrated(true);
     });
   }, []);
+
+  /**
+   * Publish the pre-flight gate to the data-layer modules whose mutations are
+   * issued directly by pages rather than through `StoreContextType` (trips,
+   * cycle, invitations). Without this they would issue writes for an account
+   * whose deletion is pending, which is exactly what clause 2.46 forbids.
+   */
+  useEffect(() => {
+    registerServerCallGate(ensureNotPendingBeforeServerCall);
+    return () => registerServerCallGate(null);
+  }, [ensureNotPendingBeforeServerCall]);
 
   useEffect(() => {
     if (!supabase || !isHydrated) return;
@@ -413,11 +636,57 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             return;
           }
 
+          // Deletion recovery, resolved BEFORE any account data is fetched.
+          //
+          // The local marker is read synchronously, before the first await, so
+          // an initiating device is blocked on first paint with no network time
+          // spent and no round-trip required. A positive marker outranks any
+          // server answer, so this branch needs no `getUser()` call at all.
+          if (readRecoveryMarker(sessionUser.id) === 'active') {
+            applyDeletionStatus({ kind: 'pending' });
+            setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
+            hydratedUserIdRef.current = null;
+            cachePurgedRef.current = true;
+            replaceStateImmediately({
+              ...DEFAULT_STATE,
+              isDemoMode: false,
+              ...carryOverDevicePrefs(stateRef.current),
+              authenticatedUser: authUser,
+            });
+            setIsAuthChecked(true);
+            return;
+          }
+
           const isAccountSwitch =
             previousHydratedUserId !== null && previousHydratedUserId !== sessionUser.id;
 
           try {
             cachePurgedRef.current = false;
+
+            // No local marker. The authoritative question still has to be asked
+            // over the network, because clearing browser storage, a private
+            // window and a different device all bypass a local signal. The
+            // session's own JWT claims are NOT consulted: they predate the flag.
+            const deletion = await verifyDeletionStatus(sessionUser.id);
+            if (
+              disposed
+              || sessionGenerationRef.current !== authGeneration
+              || sessionUserIdRef.current !== sessionUser.id
+            ) return;
+            if (deletion.kind === 'pending') {
+              setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
+              hydratedUserIdRef.current = null;
+              cachePurgedRef.current = true;
+              replaceStateImmediately({
+                ...DEFAULT_STATE,
+                isDemoMode: false,
+                ...carryOverDevicePrefs(stateRef.current),
+                authenticatedUser: authUser,
+              });
+              return;
+            }
+            setAccountDeletionRecovery(null);
+
             const authReconciliationRevision = membershipReconciliationRef.current;
             // A hanging fetch must never keep the app behind the splash spinner.
             const dbState = await withTimeout(
@@ -553,7 +822,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       disposed = true;
       subscription.unsubscribe();
     };
-  }, [isHydrated, replaceStateImmediately]);
+  }, [applyDeletionStatus, isHydrated, replaceStateImmediately, verifyDeletionStatus]);
 
   useEffect(() => {
     if (!isHydrated || (supabase && !isAuthChecked)) return;
@@ -670,6 +939,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       && !workspaceRefMatches(pendingDisconnectRef.current, workspace);
     if (!client || !canReconcile()) return false;
 
+    // Re-verify before the FIRST request. `reconcileSharedAccess` is the single
+    // funnel for the recovery poll, the visibilitychange/online handler and the
+    // UI retry, so the `online` listener is the concrete path by which an
+    // offline secondary device learns about a deletion started elsewhere.
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!canReconcile()) return false;
+
     const reconciliation = ++membershipReconciliationRef.current;
     const isLatestCurrentWorkspace = () =>
       membershipReconciliationRef.current === reconciliation
@@ -731,6 +1007,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
   }, [
+    ensureNotPendingBeforeServerCall,
     matchesCurrentWorkspace,
     purgeSharedAccess,
     quarantineSharedAccess,
@@ -769,6 +1046,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
 
     const refreshSlice = async (slice: SyncSlice) => {
+      if (!isCurrentActiveCouple()) return;
+      // Re-verify before the first request, and before the quarantine branch, so
+      // that branch's own reconciliation is covered by the same decision.
+      if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return;
       if (!isCurrentActiveCouple()) return;
       // Once authorization is uncertain, a single-slice refresh cannot reveal
       // content. Recovery requires membership plus a full RLS-backed refetch.
@@ -890,6 +1171,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         })();
       }, delay);
     };
+    // Lets an abort cancel everything deferred, so nothing fires after the purge.
+    cancelDeferredSyncRef.current = () => {
+      clearRecovery();
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+    };
     retrySharedAccessRef.current = async () => {
       clearRecovery();
       recoveryAttempt = 0;
@@ -972,6 +1259,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => {
       disposed = true;
       retrySharedAccessRef.current = null;
+      cancelDeferredSyncRef.current = null;
       clearRecovery();
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('online', handleVisibility);
@@ -984,6 +1272,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     coupleConnected,
     coupleId,
     coupleStatus,
+    ensureNotPendingBeforeServerCall,
     isAuthChecked,
     quarantineSharedAccess,
     reconcileSharedAccess,
@@ -1092,6 +1381,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // request twice.
     const prev = stateRef.current;
     const newProfile: UserProfile = { ...prev.profile, ...profileUpdates };
+    // The optimistic local update stays SYNCHRONOUS and unchanged. Only the
+    // issuing of the three writes moves behind the gate. If the gate aborts, the
+    // optimistic update is discarded anyway, because the purge replaces state
+    // wholesale.
     updateStateImmediately((current) => ({
       ...current,
       profile: { ...current.profile, ...profileUpdates },
@@ -1099,6 +1392,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     if (!supabase || !prev.authenticatedUser || prev.isDemoMode) return;
     const userId = prev.authenticatedUser.id;
+
+    void (async () => {
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return;
 
     if (profileUpdates.myName || profileUpdates.military || profileUpdates.role) {
       void supabase
@@ -1137,6 +1433,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (coupleId && nextAnniversary && nextAnniversary !== prev.profile.couple.anniversaryDate) {
       void saveCoupleAnniversary(coupleId, nextAnniversary);
     }
+    })();
   };
 
   const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {
@@ -1200,6 +1497,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       failedFiles: files.map((file) => file.name),
       error: '계정 또는 커플 공간이 변경되어 작업을 중단했어요.',
     };
+
+    // Aborted at phase zero, so there is no orphaned `daily_records` row and no
+    // orphaned storage object.
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return staleResult;
 
     try {
       const saved = await saveRecordToDB(
@@ -1307,6 +1608,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const workspace = captureLinkedCouple();
     if (!workspace || existing.userId !== workspace.userId) return false;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
     try {
       const saved = await saveRecordToDB(updated, workspace.coupleId, workspace.userId);
       if (!isCurrentLinkedCouple(workspace) || !saved) return false;
@@ -1357,6 +1659,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const workspace = captureLinkedCouple();
     if (!workspace || existing.userId !== workspace.userId) return false;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
     try {
       const deleted = await deleteRecordFromDB(
         id,
@@ -1387,6 +1690,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       || event.coupleId !== workspace.coupleId
     ) return false;
 
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+
     const newEvent: CoupleEvent = {
       ...event,
       id: crypto.randomUUID(),
@@ -1394,9 +1699,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const saved = await import('@/lib/events').then((module) =>
-        module.saveEventToDB(newEvent),
-      );
+      const saved = await saveEventToDB(newEvent);
       if (!isCurrentLinkedCouple(workspace) || !saved) return false;
       updateStateImmediately((prev) => isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(prev, workspace)
         ? { ...prev, events: [...prev.events, saved] }
@@ -1429,15 +1732,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const isCurrentScope = () => isCurrentIdentity(identity)
       && (remainsPrivate || (!!workspace && isCurrentWorkspace(workspace)));
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!isCurrentScope()) return false;
     const updated = { ...existing, ...updates };
     updateStateImmediately((prev) => isCurrentScope()
       ? { ...prev, events: prev.events.map((event) => (event.id === id ? updated : event)) }
       : prev);
 
     try {
-      const saved = await import('@/lib/events').then((module) =>
-        module.updateEventInDB(updated),
-      );
+      const saved = await updateEventInDB(updated);
       if (!isCurrentScope()) return false;
       if (!saved) {
         updateStateImmediately((prev) => isCurrentScope()
@@ -1475,10 +1778,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const isCurrentScope = () => isCurrentIdentity(identity)
       && (existing.isPrivate || (!!workspace && isCurrentWorkspace(workspace)));
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!isCurrentScope()) return false;
     try {
-      const deleted = await import('@/lib/events').then((module) =>
-        module.deleteEventFromDB(id),
-      );
+      const deleted = await deleteEventFromDB(id);
       if (!isCurrentScope() || !deleted) return false;
     } catch (error) {
       if (isCurrentScope()) console.error('Failed to delete event:', error);
@@ -1508,6 +1811,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       && current.profile.couple.connected
       && current.profile.couple.status === 'active'
     ) return { ok: false, reason: 'forbidden' };
+
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
+      return { ok: false, reason: 'forbidden' };
+    }
 
     try {
       // Without a couple space the query returns only owner-private rows; with
@@ -1574,6 +1881,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const cancelPendingLink = async (): Promise<boolean> => {
     const pending = captureLinkedCouple();
     if (!pending || workspaceRefMatches(pendingDisconnectRef.current, pending)) return false;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!isCurrentLinkedCouple(pending)) return false;
     pendingDisconnectRef.current = pending;
     const clearPendingDisconnect = () => {
       if (workspaceRefMatches(pendingDisconnectRef.current, pending)) {
@@ -1602,6 +1911,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const workspace = captureActiveWorkspace();
     if (!workspace) return cancelPendingLink();
     if (workspaceRefMatches(pendingDisconnectRef.current, workspace)) return false;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!matchesCurrentWorkspace(workspace)) return false;
     // Hide all shared content before the RPC leaves this turn. The couple id is
     // retained so a failed request can be recovered authoritatively.
     pendingDisconnectRef.current = workspace;
@@ -1637,6 +1948,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /**
    * Drop every trace of the signed-in account from this device.
    * Only device-level preferences (theme, widget layout) are kept.
+   *
+   * It removes exactly `STORE_KEY_V1` and `STORE_KEY`. It deliberately does NOT
+   * remove the deletion-recovery marker, which lives at its own top-level key.
+   * That looks like an omission and is not: LOGOUT RETAINS THE MARKER, because
+   * logging out does not cancel an irreversible deletion, so a purge path that
+   * also removed it would reintroduce the fail-open bypass. `signOut` calls this
+   * function and must likewise never touch that key.
    */
   const purgeLocalAccountData = (expected?: ActiveIdentity): boolean => {
     if (expected && !isCurrentIdentity(expected)) return false;
@@ -1669,29 +1987,64 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const deleteAccount = async (): Promise<{ ok: boolean; warnings: string[] }> => {
+  /**
+   * DELIBERATELY NOT GATED by `ensureNotPendingBeforeServerCall`.
+   *
+   * This and `retryAccountDeletion` / `signOut` are the paths OUT of recovery.
+   * Gating them on "is a deletion pending" would trap the user with no way to
+   * either finish or leave the deletion.
+   */
+  const deleteAccount = async (): Promise<AccountDeletionOutcome> => {
     if (stateRef.current.isDemoMode) {
       purgeLocalAccountData();
-      return { ok: true, warnings: [] };
+      return { status: 'deleted', dataRemoved: true, warnings: [] };
     }
 
     const identity = captureActiveIdentity();
-    if (!identity) return { ok: false, warnings: [] };
-    const result = await deleteAccountFromDB();
+    if (!identity) return { status: 'failed', dataRemoved: false, warnings: [] };
+    const outcome = await deleteAccountFromDB();
     // Account A's completion must never clear a session that has switched to B.
     if (!isCurrentIdentity(identity)) {
-      return { ok: false, warnings: result.warnings };
+      return { status: 'failed', dataRemoved: false, warnings: outcome.warnings };
     }
-    if (!result.ok) return result;
 
-    if (!purgeLocalAccountData(identity)) return result;
+    // No purge, no recovery and NO MARKER: the account is fully intact.
+    if (outcome.status === 'failed') return outcome;
+
+    if (outcome.status === 'partially_deleted') {
+      // Marker FIRST, so a reload cannot escape recovery, then contain the
+      // exposure while keeping the session so the deletion can be finished.
+      markRecoveryPending(identity.userId);
+      if (!purgeLocalContentRetainingIdentity(identity)) return outcome;
+      setAccountDeletionRecovery({ warnings: outcome.warnings });
+      applyDeletionStatus({ kind: 'pending' });
+      cancelDeferredSyncRef.current?.();
+      return outcome;
+    }
+
+    // `deleted`: the Auth user is gone, which is the ONLY confirmation that
+    // permits clearing the marker.
+    if (!purgeLocalAccountData(identity)) return outcome;
+    setAccountDeletionRecovery(null);
+    applyDeletionStatus({ kind: 'clear' });
     try {
       await authRepository.signOut();
     } catch (error) {
       console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared', error);
     }
-    return result;
+    clearRecoveryMarker(identity.userId);
+    return outcome;
   };
+
+  /**
+   * Retry from the recovery screen. Re-invokes the Edge Function, which
+   * re-writes the same `true` pending flag idempotently.
+   *
+   * A `partially_deleted` or `failed` retry stays in recovery, LEAVES THE MARKER
+   * IN PLACE and re-fetches nothing.
+   */
+  const retryAccountDeletion = async (): Promise<AccountDeletionOutcome> =>
+    deleteAccount();
 
   const setSetupComplete = (complete: boolean) => {
     updateStateImmediately((prev) => ({ ...prev, setupComplete: complete }));
@@ -1909,6 +2262,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         isReady: isHydrated && isAuthChecked,
         authSyncUnavailable,
         sharedSyncStatus,
+        accountDeletionRecovery,
+        deletionStatus,
+        retryAccountDeletion,
         retrySharedAccess,
         updateProfile,
         addRecord,

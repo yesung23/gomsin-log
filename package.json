@@ -11,6 +11,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --force",
     "test": "vitest run --config vitest.config.ts --configLoader runner",
+    "check:edge": "deno check supabase/functions/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts",
+    "test:edge": "deno test --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
     "cap:add:android": "cap add android",
     "cap:sync": "npm run build && cap sync android",
@@ -56,5 +58,10 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^6.3.5",
     "vitest": "3.2.6"
+  },
+  "overrides": {
+    "minimatch@3": {
+      "brace-expansion": "1.1.18"
+    }
   }
 }

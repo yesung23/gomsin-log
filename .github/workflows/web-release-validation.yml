@@ -1,0 +1,226 @@
+name: Web release stabilization validation
+
+on:
+  pull_request:
+    branches:
+      - kiro/release-hardening-2026-07-31
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-release-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  diff-integrity:
+    name: Diff and transferred-history integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify the release-hardening review boundary
+        shell: bash
+        env:
+          EXPECTED_BASE_REF: kiro/release-hardening-2026-07-31
+          EXPECTED_BASE: 7d82e3efd1b17283b0e8f086e94cf97cf268b625
+          EXPECTED_TRANSFER: 0eb48b5a7137764793c72bdd1d32a4359e95b415
+          EXPECTED_TRANSFER_TREE: 1579a0ddd0d9d1b596a7530200810a1572af0015
+        run: |
+          set -euo pipefail
+          test "${GITHUB_BASE_REF}" = "${EXPECTED_BASE_REF}"
+          test "${{ github.event.pull_request.base.sha }}" = "${EXPECTED_BASE}"
+          test "$(git rev-parse "${EXPECTED_TRANSFER}")" = "${EXPECTED_TRANSFER}"
+          test "$(git rev-parse "${EXPECTED_TRANSFER}^{tree}")" = "${EXPECTED_TRANSFER_TREE}"
+          test "$(git merge-base "${EXPECTED_BASE}" "${EXPECTED_TRANSFER}")" = "${EXPECTED_BASE}"
+          git merge-base --is-ancestor "${EXPECTED_BASE}" "${EXPECTED_TRANSFER}"
+          git merge-base --is-ancestor "${EXPECTED_TRANSFER}" HEAD
+          test "$(git rev-list --count "${EXPECTED_BASE}..${EXPECTED_TRANSFER}")" -eq 11
+          test "$(git rev-list --count --merges "${EXPECTED_BASE}..${EXPECTED_TRANSFER}")" -eq 0
+          test "$(git diff --name-only "${EXPECTED_BASE}..${EXPECTED_TRANSFER}" | wc -l | tr -d ' ')" -eq 39
+          git diff --check "${EXPECTED_BASE}..HEAD"
+          git fsck --no-dangling --no-reflogs --connectivity-only
+
+  node-validation:
+    name: Node, tests, build, CSP, and dependency topology
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run all tests
+        run: npm run test
+
+      - name: Verify brace-expansion dependency topology
+        run: npm run test -- src/lib/bundleHygiene.test.ts
+
+      - name: Build the production artifact with non-secret placeholders
+        env:
+          VITE_SUPABASE_URL: https://ci-placeholder.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: ci-public-placeholder-not-a-secret
+        run: npm run build
+
+      - name: Verify generated CSP and marker removal
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -E '__SUPABASE_(HTTP|CONNECT)_SRC__' dist; then
+            echo 'A CSP marker survived in dist.' >&2
+            exit 1
+          fi
+          grep -F 'Content-Security-Policy:' dist/_headers
+          grep -F 'https://ci-placeholder.supabase.co' dist/_headers
+          grep -F 'wss://ci-placeholder.supabase.co' dist/_headers
+
+      - name: Negative build check - build MUST fail without env vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm run build 2>/dev/null; then
+            echo 'Build succeeded without VITE_SUPABASE_URL - the guard is broken.' >&2
+            exit 1
+          fi
+          echo 'Confirmed: build correctly fails without required env vars.'
+
+      - name: No tracked .env or credential files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '^\\.env(\\.local|\\.production)?$'; then
+            echo 'Tracked .env file detected.' >&2
+            exit 1
+          fi
+          echo 'No tracked .env files found.'
+
+      - name: No JWT-shaped values in tracked files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -El 'eyJ[A-Za-z0-9_-]{20,}\.' -- ':!*.md' ':!*.test.*'; then
+            echo 'JWT-shaped value found in tracked files.' >&2
+            exit 1
+          fi
+          echo 'No JWT-shaped values found.'
+
+      - name: No service-role values in application code
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Verify no actual service-role secret VALUE is present.
+          # A real Supabase service-role key is a 100+ char JWT.
+          if git grep -El 'service_role_key\s*[:=]\s*["'"'"'][A-Za-z0-9+/=_-]{40,}' -- 'src/' ':!*.test.*'; then
+            echo 'Actual service-role key value found in src/.' >&2
+            exit 1
+          fi
+          echo 'No service-role credential values in application code.'
+
+      - name: No real Supabase project URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -El 'https://[a-z0-9-]+\.supabase\.co' -- ':!*.md' ':!*.test.*' ':!docs/' ':!supabase/migrations/' ':!.env.example' ':!.github/' ':!build/'; then
+            echo 'Real Supabase project URL found in tracked files.' >&2
+            exit 1
+          fi
+          echo 'No real Supabase project URLs found.'
+
+      - name: No .jks or .keystore files tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '\.(jks|keystore)$'; then
+            echo 'Tracked keystore file detected.' >&2
+            exit 1
+          fi
+          echo 'No tracked keystore files found.'
+
+  deno-edge-validation:
+    name: Deno Edge Function validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.5.6
+
+      - name: Cache Deno npm dependencies
+        run: deno cache --node-modules-dir supabase/functions/delete-account/index.ts supabase/functions/delete-account/handler.ts supabase/functions/_shared/cors.ts supabase/functions/delete-account/entrypoint_test.ts
+
+      - name: Typecheck Edge Function modules
+        run: deno check --node-modules-dir supabase/functions/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts
+
+      - name: Run the real-Deno Edge Function tests
+        run: deno test --node-modules-dir --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts
+
+  dependency-audit:
+    name: Dependency audit allowlist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Allow only the two documented React Router findings
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "${RUNNER_TEMP}/npm-audit.json"
+          audit_status=$?
+          set -e
+          if [ "${audit_status}" -gt 1 ]; then
+            echo "npm audit failed operationally with status ${audit_status}" >&2
+            exit "${audit_status}"
+          fi
+          node scripts/ci/validate-npm-audit.mjs "${RUNNER_TEMP}/npm-audit.json"
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out complete history without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan the PR history for secrets
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

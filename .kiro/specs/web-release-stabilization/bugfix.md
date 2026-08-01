@@ -125,6 +125,8 @@ Audit item 21 records that opacity variants such as `bg-white/60` defeated the e
 
 1.27 WHEN the Edge Function begins deleting application data THEN it does so **without first recording any durable pending state**: the sequence at `supabase/functions/delete-account/index.ts` runs the read-only record preflight, `begin_account_deletion`, `removeAndConfirmRecordMedia`, `prepare_account_deletion` and `deleteUser` with no prior authoritative write that outlives the request. If any step after data removal fails — including all three `AUTH_DELETE_ATTEMPTS` — the process ends with application data gone, the Auth login still usable, and no authoritative record anywhere that a deletion is outstanding, so nothing can resume or complete it.
 
+1.28 WHEN an authoritative deletion-status check cannot complete — the auth call fails, times out, or the device is offline — THEN nothing at `7d82e3e` distinguishes that outcome from a successful negative answer, because **no tri-state representation of deletion status exists at all**. `src/lib/accountDeletion.ts` is absent; `StoreContextType` (`src/lib/storeContext.ts`) exposes no deletion-status value of any kind; `deleteAccountFromDB` and `deleteAccount` return only `{ ok: boolean; warnings: string[] }` (`src/lib/supabase.ts:350-353`); and `src/App.tsx` routes on the truthiness of the restored session alone. Every failure path therefore collapses into the same falsy/absent value as "the server answered, and the answer was *not pending*". The consequence is that a failed, timed-out or unreachable auth/sync call is **silently treated as permission to proceed**: startup and synchronization continue into `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` and `/service` exactly as if the server had affirmatively confirmed no deletion is pending, and neither logs nor persisted state retain any trace that the question went unanswered.
+
 ---
 
 ### Expected Behavior (Correct)
@@ -384,6 +386,7 @@ END FOR
 | i | Secret scan | No JWT-shaped strings, no `service_role` values, no real Supabase project URL, no keystore or certificate files, no tracked `.env` |
 | j | `git diff --check` | No whitespace errors and no conflict markers |
 | k | Deletion-recovery suite | All nine recovery tests required by 2.38 pass — partial deletion writes the local marker; logout preserves it; same-user re-login resumes recovery; a second user is neither blocked nor able to clear the first marker; a malformed marker fails closed; a clean browser with no local marker is blocked by server metadata; a failed pending-flag write prevents application-data deletion; a successful retry deletes the Auth user and clears the local marker; normal routes stay inaccessible throughout recovery |
+| l | Tri-state verification suite | All five tri-state tests required by 2.48 pass — classification is total and mutually exclusive across all nine marker × answer combinations; a `getUser()` timeout yields `unknown` and is never represented, stored, cached, serialized or logged as `clear`; an offline initiating device stays blocked by its local marker; an offline secondary device retries authoritative verification **before** synchronization rather than syncing first; a retry that discovers `pending` aborts the synchronization with none of its writes applied, purges local account content and enters recovery |
 
 2.30 WHEN gate 2.29(e) is run THEN the placeholder values SHALL be supplied for that invocation only and SHALL NOT be written into any tracked file, so 2.19's prohibition on committing real or placeholder project URLs is not circumvented by the verification itself.
 
@@ -447,6 +450,59 @@ fails closed at every decision point.
 | 7 | Pending-flag failure blocks data deletion | When the step-2 `app_metadata` write fails, no application data is deleted and the response reports `dataRemoved: false` (2.32) |
 | 8 | Successful retry completes and cleans up | A retry that succeeds deletes the Auth user and only then removes the local marker (2.34) |
 | 9 | Normal routes stay inaccessible | Throughout recovery — before retry, after a failed retry, after reload, after logout and re-login — `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips` and `/service` all remain unreachable (2.32.2) |
+
+#### C1 (continued) — Tri-state deletion status for server verification
+
+These clauses define how the results of 2.36 (the `getUser()` server round-trip) and 2.35 (a
+malformed local marker) are **combined** into a single decision value. They **supersede any
+implication anywhere else in this document that "not pending" and "no answer" are the same
+thing.** They are not the same thing: one is an answer, the other is the absence of one, and
+the difference is load-bearing for both privacy and availability.
+
+2.39 WHEN deletion status is evaluated THEN the system SHALL represent it as **exactly one of three values** — `pending`, `clear`, `unknown` — determined by this table, evaluated in the order shown so that the classification is **total** (every input maps to some state) and **mutually exclusive** (no input maps to two):
+
+| Order | State | Determined by |
+| --- | --- | --- |
+| 1 | `pending` | A local marker exists at `gomsinlog.accountDeletionRecovery.v1.<userId>` (2.33) — **including a malformed, unparseable or wrongly-typed one, per 2.35** — **OR** an authoritative `getUser()` response (2.36) reports `app_metadata.account_deletion_pending = true` |
+| 2 | `clear` | An authoritative `getUser()` response (2.36) reports the flag as **NOT** pending, and no positive local marker exists |
+| 3 | `unknown` | `getUser()` **cannot complete** — network failure, timeout, offline, or any non-authoritative result — **AND** no positive local marker exists |
+
+  Because the table is ordered, a positive local marker **outranks** a `clear` server answer:
+  the pair (marker present, server says not pending) classifies as `pending`, not `clear`. This
+  is deliberate and consistent with 2.34, under which the marker is cleared **only** after
+  confirmed Auth user deletion — a `clear` server answer is not that confirmation. Cached
+  session claims are never an authoritative answer (2.36); reading `session.user.app_metadata`
+  from an already-issued JWT SHALL NOT produce `clear`.
+
+2.40 WHEN status is `pending` THEN the system SHALL block every normal application route — `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips`, `/service` — and render the recovery screen of 2.5, **always and unconditionally, including during offline startup** where no server round-trip is possible. `pending` derived from the local marker alone SHALL block before the first render and SHALL NOT wait on the network, so there is no window in which a `pending` device shows the normal app.
+
+2.41 WHEN the local marker is malformed, unparseable, of an unexpected type or otherwise unreadable THEN it SHALL classify as `pending` (2.35), and **no read path SHALL EVER remove, overwrite, normalise or repair it** — not the status evaluator, not `loadState`, not a migration, not a startup sanity check, not an error handler. Reading is strictly non-destructive. `loadState`'s existing `removeItem` on corrupt `STORE_KEY` (`store.tsx:103-113`) SHALL CONTINUE TO apply to `STORE_KEY` only. The marker SHALL be removed solely by the write path of 2.34, after confirmed Auth user deletion.
+
+2.42 WHEN status is `clear` THEN the system SHALL permit normal routing and normal application behaviour, exactly as at `7d82e3e` for a signed-in account with no deletion outstanding.
+
+2.43 WHEN `unknown` is represented in any form THEN it SHALL NOT be represented, stored, cached, serialized or logged as `clear`, and the distinction SHALL survive **in the type**, not merely in prose:
+- `src/lib/accountDeletion.ts` SHALL declare deletion status as a **three-variant discriminated union** (for example `{ kind: 'pending' } | { kind: 'clear' } | { kind: 'unknown' }`), and `StoreContextType` SHALL expose that union.
+- A representation that collapses the two is **forbidden**: `boolean`, `boolean | null`, `boolean | undefined`, an optional field such as `deletionPending?: boolean`, a nullable flag defaulted to `false`, and any "absent means fine" convention are all rejected. There SHALL be no default-value substitution that turns a missing answer into a negative one.
+- Any cache, persisted value, telemetry event or log line that records deletion status SHALL emit a **distinct token** for `unknown`; it SHALL NOT serialize `unknown` as `false`, as `"clear"`, as `null`, or by omitting the field.
+- Exhaustiveness SHALL be enforced at compile time (a `never`-checked switch or equivalent), so a future fourth state or an unhandled `unknown` is a type error rather than a silent fall-through into permissive behaviour.
+
+2.44 WHEN status is `unknown` and there is **no positive recovery evidence** THEN the system MAY continue through the **existing offline path**, preserving the offline-first behaviour of `7d82e3e` (Section 3) rather than stranding an offline user who has no deletion outstanding. This is a **deliberate availability tradeoff and is explicitly NOT a fail-closed guarantee.** It is bounded by 2.45 and 2.46: continuing is permitted only until the next server contact, and it confers no settled status. It SHALL NOT be described anywhere — spec, design, code comment or test name — as safe, fail-safe or verified.
+
+2.45 WHEN the next server synchronization is about to run, **or** any server mutation is about to be issued, while status is `unknown` THEN the authoritative pending check of 2.36 SHALL be **retried first**, before the synchronization or mutation request is sent. `unknown` SHALL NOT be treated as settled: it SHALL NOT be cached as a resolved answer, SHALL NOT be promoted to `clear` by elapsed time, retry-count exhaustion or a successful unrelated request, and SHALL NOT be skipped on subsequent attempts. Every transition out of `unknown` SHALL come from an authoritative answer or from a positive local marker, and from nothing else.
+
+2.46 WHEN the retry required by 2.45 returns `pending` THEN the system SHALL, **before the synchronization or mutation is allowed to proceed**, stop that synchronization, enter recovery per 2.5, and purge local account content immediately per 2.4. The synchronization or mutation SHALL NOT be permitted to run first and be reconciled afterwards: none of its writes SHALL be applied, no queued mutation SHALL be delivered, and no server state SHALL be modified by the aborted attempt. Aborting is not deferrable to the next cycle.
+
+2.47 WHEN the limits of this rule are documented THEN the following limitation SHALL be stated plainly and SHALL NOT be softened: **an offline secondary device that holds no local marker CANNOT learn about a deletion started on another device until connectivity returns.** Its status is `unknown`, it continues through the offline path under 2.44, and it will keep showing local data it already holds until a server answer becomes obtainable. This spec therefore makes **no claim of absolute cross-device fail-closed behaviour while offline.** Cross-device fail-closed holds **only once a server answer is obtainable** — at which point 2.45 forces the check and 2.46 forces the abort-and-purge. Nothing in this document, the design, code comments or test names SHALL claim or imply stronger cross-device coverage than that.
+
+2.48 WHEN this fix is presented for review THEN the following five tri-state tests SHALL exist and pass, and they SHALL be the tests referenced by gate 2.29(l):
+
+| # | Test | Assertion |
+| --- | --- | --- |
+| 1 | Classification is total and exclusive | All nine combinations of local-marker state (absent / valid positive / malformed) × authoritative answer (`pending` / not pending / cannot complete) each map to **exactly one** of `pending`, `clear`, `unknown` — no combination is unclassified, none maps to two states, and the marker-present + server-not-pending pair resolves to `pending` (2.39) |
+| 2 | A `getUser()` timeout is not `clear` | A `getUser()` call that times out, rejects, or fails while offline yields `unknown` and never `clear`; the persisted, cached, serialized and logged forms of `unknown` are each distinct from those of `clear` and are never `false`, `null` or an omitted field; a representation collapsing the two fails to type-check (2.43) |
+| 3 | Initiating device stays blocked offline | On the device that started the deletion, with the network unavailable at startup, the local marker alone yields `pending`, every normal route is blocked before first render, and no server round-trip is required to block (2.40, 2.41) |
+| 4 | Secondary offline device retries before syncing | A device with no local marker and an unreachable server classifies as `unknown`, continues through the existing offline path (2.44), and when synchronization or any server mutation is next attempted the authoritative pending check is issued **first** — the assertion is on request ordering: verification precedes the sync/mutation request, and the status is not reused as if settled (2.45) |
+| 5 | Synchronization is aborted when the retry finds `pending` | When the 2.45 retry returns `pending`, the synchronization is aborted, **none of its writes are applied** (no server state changed, no queued mutation delivered), local account content is purged immediately, recovery is entered, and all normal routes are blocked — with the abort observably happening before any sync write is attempted (2.46) |
 
 ---
 

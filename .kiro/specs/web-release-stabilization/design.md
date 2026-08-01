@@ -131,6 +131,54 @@ END FUNCTION
 This sub-condition is what makes a *local-only* remedy insufficient: it is satisfied by clearing
 browser storage, by a private window, and by signing in from a different device.
 
+#### C1 tri-state sub-condition — a check that could not complete reads as a negative answer
+
+Requirement 1.28 names a third facet, independent of both the misclassification above and the
+durability gap: at `7d82e3e` **no tri-state representation of deletion status exists at all**, so an
+authoritative check that fails, times out or cannot be attempted offline is indistinguishable from
+one that completed and answered "not pending". The verified facts behind that claim:
+
+- `src/lib/accountDeletion.ts` does not exist — `src/lib/` contains no deletion module of any kind.
+- `StoreContextType` (`src/lib/storeContext.ts:12-47`) exposes no deletion-status value. Its only
+  availability-shaped fields are `authSyncUnavailable: boolean` (`storeContext.ts:16`) and
+  `sharedSyncStatus: SharedSyncStatus` (`storeContext.ts:17`, the union `'live' | 'delayed' |
+  'unavailable'` at `storeContext.ts:10`) — both of which describe *sync* health, not whether a
+  deletion is outstanding.
+- `deleteAccountFromDB` returns `Promise<{ ok: boolean; warnings: string[] }>`
+  (`src/lib/supabase.ts:343`) and `deleteAccount` returns the same shape (`store.tsx:1672`). A
+  two-valued `ok` has no room for "could not determine".
+- `src/App.tsx` routes on the restored session alone (`App.tsx:94-118`), admitting `/`, `/home`,
+  `/record`, `/schedule`, `/service`, `/us`, `/my`, `/settings`, `/trips`
+  (`App.tsx:105-114`) with no deletion-status input at all.
+- The only fallback vocabulary on the auth path is
+  `withTimeout(fetchFullStateFromDB(sessionUser.id), AUTH_SYNC_TIMEOUT_MS, FULL_STATE_UNAVAILABLE)`
+  (`store.tsx:423-427`), and `withTimeout` (`src/lib/async.ts:7-32`) resolves the *caller's own
+  fallback value* on both timeout and rejection. There is no channel through which "no answer" can
+  travel separately from "a negative answer", so every failure path collapses into the same
+  falsy/absent value and is silently treated as permission to proceed.
+
+```
+FUNCTION isBugConditionC1TriState(input)
+  INPUT: input of type DeletionStatusEvaluation
+  OUTPUT: boolean
+
+  // The authoritative question was asked and went unanswered ...
+  RETURN input.authoritativeCheckAttempted
+         AND NOT input.authoritativeAnswerReceived        // failed, timed out, or offline
+         AND NOT positiveLocalMarkerPresent(input.userId)
+         // ... yet its outcome is indistinguishable from an authoritative negative, because
+         // no representation exists anywhere that could hold the difference (1.28).
+         AND representationOf(input.outcome) = representationOf(AUTHORITATIVE_NOT_PENDING)
+         AND permitsNormalRouting(input.outcome)
+END FUNCTION
+```
+
+Note the shape of that predicate. The defect is **not** that a check failed — checks fail, and
+`withTimeout` exists precisely because they do. The defect is that the failure and the negative
+answer **share one representation**, so no downstream code *can* tell them apart even if it wanted
+to, and neither logs nor persisted state retain any trace that the question went unanswered. That is
+why the remedy in 2.39-2.43 is a change of **type**, not an added `if`.
+
 ### Bug Condition C2 — Any browser origin is accepted
 
 `supabase/functions/delete-account/index.ts:18-22` declares a wildcard `corsHeaders` constant,
@@ -639,13 +687,14 @@ Property 13: Bug Condition - Operator-facing decisions are recorded and gates ar
 _For any_ deployment or review of this fix, the fixed repository SHALL document `ALLOWED_ORIGINS`
 in `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` section 5 alongside `SUPABASE_SERVICE_ROLE_KEY` —
 its exact comma-separated format, the fail-closed behaviour when unset, and the absent-`Origin`
-allowance as an explicit accepted risk — and SHALL have executed and recorded all eleven
-verification gates 2.29(a)-(k) on the working branch: `npm ci`, `npm run typecheck` at 0 errors,
+allowance as an explicit accepted risk — and SHALL have executed and recorded all twelve
+verification gates 2.29(a)-(l) on the working branch: `npm ci`, `npm run typecheck` at 0 errors,
 `npm run lint` at 0 errors and 0 warnings, `npm test` over the full suite, `npm run build` with
 non-secret placeholders and no import or chunk warnings, a negative build exiting non-zero, zero
 marker tokens in `dist/`, a reported `npm audit` with every advisory covered by a recorded
-decision, a clean secret scan, a clean `git diff --check`, and the Deletion-Recovery Suite of
-gate (k) — all nine tests required by 2.38 — passing.
+decision, a clean secret scan, a clean `git diff --check`, the Deletion-Recovery Suite of
+gate (k) — all nine tests required by 2.38 — passing, and the Tri-State Verification Suite of
+gate (l) — all five tests required by 2.48 — passing.
 
 **Validates: Requirements 2.14, 2.29**
 
@@ -663,6 +712,60 @@ remote environment, the two-account end-to-end deletion test, and any merge into
 all remain unperformed and reported as human gates.
 
 **Validates: Requirements 3.18, 3.19, 3.20, 3.21, 3.22, 3.23, 3.24, 3.25**
+
+Property 15: Bug Condition - Deletion status is tri-state, and `unknown` is never `clear`
+
+_For any_ evaluation of deletion status from the pair (local-marker state, authoritative `getUser()`
+outcome), the fixed `classifyDeletionStatus` resolver SHALL return **exactly one** of `pending`,
+`clear` or `unknown`: the classification is **total** — each of the nine combinations of marker state
+(absent, valid positive, malformed) × authoritative outcome (`pending`, not pending, cannot complete)
+maps to some state — and **mutually exclusive** — none maps to two. Evaluation SHALL be ordered so
+that a positive local marker, **including a malformed, unparseable or wrongly-typed one**, outranks a
+`clear` server answer: the pair (marker present, server reports not pending) resolves to `pending`,
+because the marker is cleared only after confirmed Auth user deletion and a `clear` answer is not
+that confirmation. Cached session claims SHALL never produce `clear`.
+
+_For any_ input classified `pending`, the fixed code SHALL block every normal application route —
+`/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips`, `/service` — and render the
+recovery screen **always and unconditionally, including during offline startup** where no server
+round-trip is possible; `pending` derived from the local marker alone SHALL block **before the first
+render** and SHALL NOT wait on the network, so no window exists in which a `pending` device shows the
+normal app. _For any_ malformed marker, classification SHALL be `pending` and **no read path** — the
+status evaluator, `loadState`, a migration, a startup sanity check or an error handler — SHALL
+remove, overwrite, normalise or repair it; reading is strictly non-destructive, `loadState`'s
+existing `removeItem` (`store.tsx:103-116`) continuing to apply to `STORE_KEY` alone, and removal
+occurring solely on the confirmed-Auth-deletion write path.
+
+_For any_ input classified `clear`, the fixed code SHALL permit normal routing and normal application
+behaviour exactly as at `7d82e3e` for a signed-in account with no deletion outstanding.
+
+_For any_ input classified `unknown`, the value SHALL NOT be represented, stored, cached, serialized
+or logged as `clear`, as `false`, as `null`, or by omitting the field, and the distinction SHALL
+survive **in the type** rather than in prose: a three-variant discriminated union declared in
+`src/lib/accountDeletion.ts` and exposed through `StoreContextType`, with exhaustiveness enforced at
+compile time by a `never`-checked switch, and with `boolean`, `boolean | null`, `boolean | undefined`,
+optional fields and nullable flags defaulted to `false` all rejected — a representation that collapses
+`unknown` into `clear` SHALL fail to type-check. Every cache, persisted value, telemetry event and log
+line recording deletion status SHALL emit a **distinct token** for `unknown`.
+
+_For any_ `unknown` with no positive recovery evidence, the fixed code MAY continue through the
+existing offline path, preserving the offline-first behaviour of `7d82e3e`. This is a **deliberate
+availability tradeoff and explicitly NOT a fail-closed guarantee**, and it SHALL NOT be named or
+described as safe, fail-safe or verified in this spec, the design, code comments or test names. It
+SHALL NOT be treated as settled: `unknown` SHALL NOT be cached as a resolved answer, SHALL NOT be
+promoted to `clear` by elapsed time, retry-count exhaustion or an unrelated successful request, and
+SHALL NOT be skipped on later attempts — every transition out of `unknown` SHALL come from an
+authoritative answer or a positive local marker and from nothing else.
+
+_For any_ server synchronization or server mutation about to be issued while status is `unknown`, the
+authoritative check SHALL be **retried first, before the request is sent**. _For any_ such retry that
+returns `pending`, the fixed code SHALL abort that synchronization or mutation with **none of its
+writes applied** — no server state modified and no queued mutation delivered — purge local account
+content immediately, and enter recovery, all **before** the attempt is allowed to proceed; the attempt
+SHALL NOT be permitted to run first and be reconciled afterwards, and aborting SHALL NOT be deferred
+to the next cycle.
+
+**Validates: Requirements 2.39, 2.40, 2.41, 2.42, 2.43, 2.44, 2.45, 2.46, 2.47, 2.48**
 
 ---
 
@@ -923,6 +1026,239 @@ if (pendingFlagError) {
     operator who clears it by hand is re-admitting a user to an app whose data is gone. There is
     **no server-confirmed cancellation workflow** today (2.34), and this fix does not add one.
 
+**Tri-state deletion status (2.39-2.48)**
+
+Items 13-14 above describe *where* the authoritative check runs. Items 20-25 describe the **type**
+that carries its outcome, because 1.28's defect is representational: at `7d82e3e` a check that could
+not complete and a check that answered "not pending" are the same value.
+
+20. **The union and the resolver, in `src/lib/accountDeletion.ts`** (the same new pure module as
+    items 1 and 9, so the resolver is exhaustively unit-testable with no network, no store and no
+    Supabase client):
+
+```
+// Three variants. Not two, and not two-plus-a-null.
+export type DeletionStatus =
+  | { kind: 'pending' }
+  | { kind: 'clear' }
+  | { kind: 'unknown' }
+
+// Inputs are the two independent authorities, each already three-valued.
+export type MarkerState  = 'absent' | 'active'                    // 'active' includes MALFORMED (2.35, 2.41)
+export type ServerAnswer =
+  | { kind: 'pending' }        // getUser() answered: app_metadata.account_deletion_pending = true
+  | { kind: 'not_pending' }    // getUser() answered: flag absent or false
+  | { kind: 'unavailable' }    // getUser() could NOT complete: reject, timeout, offline (NOT an answer)
+
+// Pure. Total. Ordered exactly as the 2.39 table.
+export function classifyDeletionStatus(
+  marker: MarkerState,
+  server: ServerAnswer,
+): DeletionStatus {
+  // Order 1 — a positive marker OUTRANKS a clear server answer (2.39).
+  if (marker === 'active') return { kind: 'pending' }
+  if (server.kind === 'pending') return { kind: 'pending' }
+  // Order 2 — an authoritative negative, with no positive marker.
+  if (server.kind === 'not_pending') return { kind: 'clear' }
+  // Order 3 — no answer, no marker. This is NOT 'clear'.
+  if (server.kind === 'unavailable') return { kind: 'unknown' }
+  return assertNever(server)   // compile-time totality over ServerAnswer
+}
+
+export function assertNever(value: never): never {
+  throw new Error(`Unhandled deletion-status variant: ${JSON.stringify(value)}`)
+}
+```
+
+    - **`MarkerState` has no `'malformed'` variant on purpose.** `readRecoveryMarker` (item 9)
+      already collapses every present value to `'active'`, so there is no branch in which a
+      malformed value could be routed anywhere except `pending`, and no branch that could call
+      `removeItem`. The nine combinations required by 2.48 test 1 are exercised by feeding the
+      resolver the three *observable* marker states (absent / valid positive / malformed) through
+      `readRecoveryMarker`, so the mapping malformed → `'active'` → `pending` is asserted end to
+      end rather than assumed. 2.41's prohibition is enforced structurally: `classifyDeletionStatus`
+      takes a `MarkerState` **value**, not the key or the storage object, so it is physically unable
+      to remove, overwrite, normalise or repair anything.
+    - **Forbidden representations, named so a reviewer can reject them on sight** (2.43):
+      `boolean`, `boolean | null`, `boolean | undefined`, `deletionPending?: boolean`, a nullable
+      flag defaulted to `false`, an enum-like bare string union that a caller can `!`-negate, and any
+      "absent means fine" convention. `StoreContextType` (`src/lib/storeContext.ts:12-47`) exposes
+      `deletionStatus: DeletionStatus` — **required, not optional** — so there is no default-value
+      substitution that can turn a missing answer into a negative one.
+    - **Compile-time exhaustiveness** is the `assertNever` above plus a `never`-checked `switch` at
+      each consumer (the `App.tsx` gate of item 16 and the pre-flight gate of item 21). A fourth
+      state, or an unhandled `unknown`, is then a type error rather than a silent fall-through into
+      permissive behaviour.
+    - **`withTimeout` is where the old code collapsed the states, and where the fix lands.**
+      `withTimeout` (`src/lib/async.ts:7-32`) resolves the *caller's own fallback* on **both**
+      timeout (`async.ts:10-16`) and rejection (`async.ts:26-31`), so the fallback's **type is the
+      representation**. The `getUser()` call of item 13 is therefore wrapped as
+      `withTimeout(getUser(), AUTH_SYNC_TIMEOUT_MS, { kind: 'unavailable' } as ServerAnswer)` — the
+      fallback is `unavailable`, never `not_pending`. This single argument is the load-bearing line
+      of the tri-state fix; passing `false` there would reintroduce 1.28 exactly.
+
+21. **Where the pre-sync / pre-mutation re-verification gate lives (2.45).** One new
+    `StoreProvider`-internal helper, `ensureNotPendingBeforeServerCall()`, returning
+    `Promise<DeletionStatus>`. It re-issues the authoritative check of item 13 and, on `pending`,
+    performs the abort of item 22. It is placed at the top of the **existing** entry points named
+    below — in the same position as the guards those functions already have — so it always runs
+    **before the first `await` that issues a request**:
+
+    **Synchronization entry points** (verified in `src/lib/store.tsx`):
+    - `refreshSlice(slice)` — `store.tsx:771`. The realtime slice refresher, reached from
+      `scheduleRefresh` (`store.tsx:839-850`), which the three channel handlers call at
+      `store.tsx:918`, `:924` and `:934`. The gate goes immediately after the existing
+      `if (!isCurrentActiveCouple()) return;` at `store.tsx:772` and **before** the
+      `isWorkspaceQuarantined()` branch at `:775-778`, so the quarantine branch's call into
+      `reconcileSharedAccess` is also covered by the same decision.
+    - `reconcileSharedAccess(workspace)` — `store.tsx:665`. The authoritative membership check plus
+      full RLS-backed re-read of every shared slice. It is the single funnel for
+      `reconcileOwnMembership` (`store.tsx:852-855`), the `scheduleRecovery` poll
+      (`store.tsx:869-891`), the `visibilitychange` / `online` handler (`store.tsx:965-970`) and
+      `retrySharedAccessRef.current` (`store.tsx:893-899`) — which is what the context-exposed
+      `retrySharedAccess` (`store.tsx:1899`) invokes. The gate goes immediately after the existing
+      `if (!client || !canReconcile()) return false;` at `store.tsx:670`, before
+      `++membershipReconciliationRef.current` at `:672` and before the first request,
+      `client.rpc('get_my_active_couple_id')` at `store.tsx:679`.
+      **`window.addEventListener('online', handleVisibility)` (`store.tsx:970`) is the concrete path
+      by which the offline secondary device of 2.47 comes back and is caught**: connectivity returns,
+      `handleVisibility` calls `reconcileOwnMembership`, the gate runs first, and the deletion is
+      discovered before any read or write.
+    - The initial hydration sync in the `supabase.auth.onAuthStateChange` async body
+      (`store.tsx:362`), whose read is
+      `withTimeout(fetchFullStateFromDB(sessionUser.id), AUTH_SYNC_TIMEOUT_MS, FULL_STATE_UNAVAILABLE)`
+      at `store.tsx:423-427`. **No second gate is added here.** The check of item 13 already sits in
+      that body before this `await`; item 20 changes only the type of its outcome, from a boolean to
+      `DeletionStatus`.
+
+    **Mutation entry points** — every server-mutating method on `StoreContextType`
+    (`src/lib/storeContext.ts:20-38`). In each, the gate goes into the synchronous preamble the
+    function already has, immediately after the existing identity capture and **before the first
+    awaited network call**:
+    | Method | Existing capture | First request the gate precedes |
+    | --- | --- | --- |
+    | `addRecordWithMedia` (`store.tsx:1155`), and `addRecord` (`:1142`) through it | `captureLinkedCouple()` `:1189` | `saveRecordToDB` `:1205` |
+    | `updateRecord` (`:1284`) | `captureLinkedCouple()` `:1308` | `saveRecordToDB` `:1311` |
+    | `deleteRecord` (`:1346`) | `captureLinkedCouple()` `:1358` | `deleteRecordFromDB` `:1361` |
+    | `addEvent` (`:1380`) | `captureLinkedCouple()` `:1383` | `saveEventToDB` (`src/lib/events.ts:60`) |
+    | `updateEvent` (`:1411`) | `captureActiveIdentity()` `:1415` | `updateEventInDB` (`events.ts:100`) |
+    | `deleteEvent` (`:1462`) | `captureActiveIdentity()` `:1463` | `deleteEventFromDB` (`events.ts:134`) |
+    | `reloadEvents` (`:1494`) | `captureActiveIdentity()` `:1498`, `captureLinkedCouple()` `:1502` | `fetchEventsResultFromDB` `:1515` |
+    | `cancelPendingLink` (`:1574`) | `captureLinkedCouple()` `:1575` | `disconnectCoupleFromDB` `:1584` |
+    | `disconnect` (`:1595`) | — | `disconnectCoupleFromDB` `:1616` |
+
+    - **`updateProfile` (`store.tsx:1089`) needs a shape change, and this is called out rather than
+      glossed.** It is synchronous and issues three fire-and-forget writes —
+      `supabase.from('profiles').update(...)` at `store.tsx:1104`,
+      `supabase.from('contact_preferences').upsert(...)` at `:1119`, and `saveCoupleAnniversary` at
+      `:1138`. To gate them the network portion moves behind
+      `await ensureNotPendingBeforeServerCall()`, which makes the *issuing* asynchronous. The
+      synchronous `updateStateImmediately` at `:1094-1097` and the deliberate pre-computation of
+      `newProfile` outside the updater at `:1092-1093` (kept for the React StrictMode
+      double-invocation reason documented in the comment at `:1090-1092`) are both left exactly as
+      they are. If the gate aborts, the optimistic local update is discarded anyway, because the
+      purge of item 22 replaces state wholesale.
+    - **Deliberate exemptions.** `deleteAccount` (`store.tsx:1672`), `retryAccountDeletion` (item 7)
+      and `signOut` (`store.tsx:1661`) are **not** gated. They are the paths *out* of a pending
+      deletion; gating them on "is a deletion pending" would trap the user in recovery with no way
+      to complete or leave. `deleteAccount`'s existing demo short-circuit and
+      `isCurrentIdentity(identity)` guard (`store.tsx:1678-1685`) are unchanged.
+
+22. **Abort-and-purge when the retry returns `pending` (2.46).** `ensureNotPendingBeforeServerCall`
+    calls one new helper, `abortForPendingDeletion(identity)`, which runs **synchronously with
+    respect to the caller's first request** — the caller `return`s on the gate's non-`clear` result
+    and never reaches its request:
+    1. `markRecoveryPending(userId)` (item 9) — write the local marker first, so the verdict is
+       durable across a reload and does not depend on repeating the round-trip.
+    2. `purgeLocalContentRetainingIdentity(identity)` — the **existing partial-purge path of item 4**,
+       reused unchanged. Content goes, identity and session stay, `carryOverDevicePrefs`
+       (`store.tsx:197-203`) is untouched.
+    3. Set `accountDeletionRecovery` (item 5), which makes the `App.tsx` gate of item 16 block every
+       normal route on the next render.
+    4. Bump `membershipReconciliationRef.current` and `clearRecovery()` (`store.tsx:867-870`), and
+       clear the `timers` debounce map (`store.tsx:842-849`, the same clearing the teardown already
+       does at `:978-979`), so nothing deferred can fire afterwards.
+    5. Return `{ kind: 'pending' }`, on which every gated caller returns its existing failure value
+       (`false`, or the `staleResult` shape at `store.tsx:1200-1204`) without issuing anything.
+
+    **How "none of its writes applied" is actually achieved, given the real code structure** — this
+    is the claim most worth being concrete about:
+    - **The shared-sync paths are read-only.** `refreshSlice` and `reconcileSharedAccess` issue only
+      `rpc('get_my_active_couple_id')` (`store.tsx:679`) and the three `fetch*ResultFromDB` SELECTs
+      (`store.tsx:698-702`, `:788`, `:808`, `:820`; `records.ts:93`, `events.ts:8`, `trips.ts:144`).
+      They modify **no server state at all**, so for these paths "none of its writes applied" is a
+      statement about their *local* writes — `updateStateImmediately` at `store.tsx:800-804` and
+      `:812-814`, and `replaceStateImmediately` at `:719` — every one of which is **downstream of the
+      awaited fetch**. Returning at the gate, before that first `await`, means none of them runs, so
+      no fetched row can be applied to state after the purge.
+    - **The mutation paths issue exactly one request chain each**, and the gate precedes the first
+      `await` in every one (table above), so the request is never sent and the server is never
+      touched. `addRecordWithMedia`'s two-phase upload — row insert at `:1205`, media upload at
+      `:1225`, metadata patch at `:1239`, a sequence required by the storage RLS policy — is aborted
+      at phase zero, so there is no orphaned `daily_records` row and no orphaned storage object.
+    - **"No queued mutation delivered" is achievable because there is no outbox at `7d82e3e`.**
+      Verified: `src/lib/` contains no queue, outbox or pending-write module; every mutation is
+      issued directly by the store methods above. The only deferred work in the store is two
+      `window.setTimeout` schedulers, **both read-only**: the per-slice debounce map `timers`
+      (`store.tsx:842-849`) and `recoveryTimer` (`store.tsx:869-891`). Step 4 cancels both. Anything
+      already in flight when the abort happens is discarded rather than applied, because the
+      revision bump makes its own existing guards fail — `isCurrentRefresh()` (`store.tsx:779-782`)
+      and `isLatestCurrentWorkspace()` (`store.tsx:673-676`) both compare
+      `membershipReconciliationRef.current` against the value captured at entry. So the race is
+      handled by machinery that already exists, not by a new lock.
+    - **Forward constraint.** This argument depends on there being no outbox. If a persistent
+      mutation queue is ever added, 2.46 requires a drain-blocking gate at its drain point too, and
+      this design note is where that obligation is recorded.
+
+23. **How `unknown` is prevented from being cached as settled (2.45).**
+    - **It cannot reach `localStorage` by construction.** `saveState` persists only the
+      `carryOverDevicePrefs` whitelist (`store.tsx:128`, `:197-203`), which is left exactly as at
+      `7d82e3e` (3.11) and contains no deletion field. `DeletionStatus` lives in React state and a
+      ref, and is never added to `AppState`.
+    - **The gate never reads a cached verdict.** `ensureNotPendingBeforeServerCall` re-issues
+      `getUser()` on **every** entry. The ref holding the last observed status is used for rendering
+      and logging only, never as a decision input, so there is no code path in which elapsed time,
+      an exhausted retry counter or an unrelated successful request can stand in for an answer.
+    - **There is no promotion path.** The only writers of `DeletionStatus` are `classifyDeletionStatus`
+      (item 20) and the marker read of item 9. No `if (attempts > n) status = clear`, no expiry, no
+      `??` default, no `||` fallback — every transition out of `unknown` comes from an authoritative
+      answer or a positive marker, and there is nowhere else it could come from.
+    - **Serialization and logging use a distinct token.** Anything that records status emits
+      `deletion_status=pending` / `=clear` / `=unknown`; never `false`, `null`, `"clear"`, or an
+      omitted field. `withTimeout`'s existing generic
+      `[gomsinlog] operation timed out after ${ms}ms, continuing with fallback` warning
+      (`src/lib/async.ts:13`) is **not** an acceptable sole trace, because it does not say which
+      question went unanswered — the gate logs its own `unknown` line as well.
+
+24. **Tri-state status and sync status are different axes, and are never conflated.** Stated
+    explicitly because the codebase already has two availability-shaped values and reusing either
+    would recreate 1.28:
+    | Value | Where | What it means |
+    | --- | --- | --- |
+    | `SharedSyncStatus` = `'live' \| 'delayed' \| 'unavailable'` | `src/lib/storeContext.ts:10`, `:17` | How fresh the **shared couple workspace** on screen is |
+    | `authSyncUnavailable: boolean` | `src/lib/storeContext.ts:16`, set from `FULL_STATE_UNAVAILABLE` at `store.tsx:446-447` | Whether **initial account hydration** succeeded |
+    | `DeletionStatus` = `pending \| clear \| unknown` | new, `src/lib/accountDeletion.ts` | Whether **this account is being deleted** |
+
+    They are orthogonal in both directions, and the combinations are all reachable: a perfectly
+    `live` workspace can coexist with `pending` (the flag was set moments ago); `unavailable` does
+    **not** imply `unknown` (a local marker yields `pending` while sync is down); and `unknown` does
+    **not** imply `unavailable` (a `getUser()` failure alongside healthy Postgres reads). Therefore no
+    existing field is reused, no existing union is widened, `FULL_STATE_UNAVAILABLE` (`src/lib/sync.ts:9`)
+    keeps its current meaning of a retryable sync outage, and `setSharedSyncStatus` calls
+    (`store.tsx:376`, `:604`, `:637`, `:724`) are untouched. Where the two axes meet is precedence
+    only: per item 16 the recovery gate takes priority over the `authSyncUnavailable` branch
+    (`App.tsx:80-90`), so a sync-outage screen never hides recovery.
+
+25. **`unknown` continues offline, and that is an availability tradeoff — not a safety property
+    (2.44).** When status is `unknown` and there is no positive marker, the existing offline path of
+    `7d82e3e` continues: `setIsAuthChecked(true)` still runs in the `finally` at `store.tsx:516-522`,
+    the splash releases, and locally held data stays visible. This is chosen so an offline user with
+    no deletion outstanding is not stranded. It is **not** fail-closed, it is **not** verified, and it
+    SHALL NOT be named or commented as safe, fail-safe or verified anywhere — identifiers and test
+    names use `unknown` / `unverified`, never `safe` or `ok`. It is bounded on both sides: item 21
+    forces the authoritative retry before the next server contact, and item 22 forces the
+    abort-and-purge if that retry says `pending`. The residual exposure is recorded as risk item 7.
+
 ### Changes Required — C2
 
 **New file**: `supabase/functions/_shared/cors.ts`
@@ -1144,6 +1480,34 @@ These are recorded rather than papered over, in the style the requirements set.
 6. **Guard-test scope is a judgement call.** Three files outside the four named in 2.20 match the
    regex. The guard covers only the four, and every exclusion carries a written reason, so the
    scope is auditable instead of implicit.
+7. **An offline secondary device cannot learn about a deletion started elsewhere, and this design
+   does not claim otherwise (2.44, 2.47).** Stated plainly and not softened:
+   - **An offline secondary device that holds no local marker CANNOT learn about a deletion started
+     on another device until connectivity returns.** Its status is `unknown`. It continues through
+     the offline path, and **it will keep showing the local data it already holds** until a server
+     answer becomes obtainable. There is no client-side signal that could tell it otherwise: the
+     marker is per-device by construction (item 9), and the only authority that crosses devices is
+     `app_metadata.account_deletion_pending`, which requires a round-trip to read.
+   - **This design therefore makes no claim of absolute cross-device fail-closed behaviour while
+     offline.** Cross-device fail-closed holds **only once a server answer is obtainable** — at which
+     point item 21's gate forces the authoritative check before the next synchronization or mutation
+     (in practice via `reconcileSharedAccess`, `store.tsx:665`, reached from the
+     `window.addEventListener('online', …)` handler at `store.tsx:970`), and item 22 forces the
+     abort-and-purge. Nothing in this design, in code comments or in test names may claim or imply
+     stronger cross-device coverage than that, and no wording anywhere should suggest the offline
+     window is closed. It is not closed; it is bounded at its far end only.
+   - **`unknown` continuing offline is an availability tradeoff, not a safety property.** It is
+     chosen so an offline user with no deletion outstanding is not stranded — that is the whole
+     benefit, and it is a product decision, not a security argument. It confers no settled status
+     (item 23) and it SHALL NEVER be named or described as safe, verified or fail-safe in the spec,
+     the design, code comments, identifiers or test names. The one and only fail-safe direction
+     anywhere in this design remains *staying* in recovery.
+   - **What is actually mitigated, and what is not.** Mitigated: the initiating device (local
+     marker, blocks before first render, no network needed); any device that can reach the server
+     (authoritative flag); and any `unknown` device the moment it next tries to sync or mutate.
+     **Not** mitigated: an indefinitely offline secondary device, which stays readable for as long
+     as it stays offline. That gap is inherent to an offline-first client and is accepted knowingly
+     rather than engineered away.
 
 ---
 
@@ -1363,6 +1727,28 @@ implementation reads cached claims, even though cached claims would give the rig
 scenarios. A test that only checked the outcome would pass against a stale-JWT implementation and
 miss 2.36 entirely.
 
+### Tri-State Verification Suite (2.48, gate 2.29(l))
+
+These five tests are required by 2.48 and are the tests gate 2.29(l) refers to. They validate
+Property 15. Tests 1 and 2 run against the pure resolver of Changes Required — C1 item 20 and need
+no network; tests 3-5 run against the store and the route gate.
+
+| # | Test | Setup | Assertion |
+| --- | --- | --- | --- |
+| 1 | **Classification is total and exclusive** | Table-drive all nine combinations of marker state (absent / valid positive / malformed) × authoritative answer (`pending` / not pending / cannot complete) through `readRecoveryMarker` into `classifyDeletionStatus` | Each combination maps to **exactly one** of `pending`, `clear`, `unknown`: no combination is unclassified, none maps to two, and the (marker present, server not pending) pair resolves to **`pending`**, not `clear`. Malformed marker → `pending` in all three answer columns, and the key is not removed in any of the nine cases (2.39, 2.41) |
+| 2 | **A `getUser()` timeout is not `clear`** | `getUser()` that (a) never settles past `AUTH_SYNC_TIMEOUT_MS` through `withTimeout`, (b) rejects, (c) fails with the network offline | Every case yields `unknown`, never `clear`. The persisted, cached, serialized and logged forms of `unknown` are each distinct from those of `clear` and are never `false`, `null` or an omitted field — asserted on the actual log line and on the absence of any deletion field in `STORE_KEY`. Plus a **type-level** assertion (`@ts-expect-error`, or an `expect-type`-style check) that a representation collapsing the two — `boolean`, `boolean \| null`, `deletionPending?: boolean` — fails to type-check, and that a `switch` missing the `unknown` arm fails the `assertNever` check (2.43) |
+| 3 | **Initiating device stays blocked offline** | The device that started the deletion: local marker present, network unavailable at startup | The marker **alone** yields `pending`; all of `/`, `/record`, `/schedule`, `/us`, `/my`, `/settings`, `/trips`, `/service` render the recovery screen; the block happens **before first render** and **no `getUser()` round-trip is required** for it — asserted by spying on the auth call and confirming the route gate was already closed when it was still unresolved (2.40, 2.41) |
+| 4 | **Secondary offline device retries before syncing** | No local marker, unreachable server → `unknown`; then trigger the next sync (`refreshSlice` / `reconcileSharedAccess`, including via the `online` event) and separately a mutation (`addRecord`, `updateRecord`, `deleteEvent`) | The device continues through the existing offline path (2.44), and on the next attempt the authoritative check is issued **first**. The assertion is on **request ordering**, not just on the presence of a check: the `getUser()` call is observed before `rpc('get_my_active_couple_id')` / `fetch*ResultFromDB` / `saveRecordToDB` in the call log. Also asserts the status is **not reused as if settled** — a second attempt re-issues the check rather than reading a cached verdict, and no elapsed time or retry count promotes `unknown` to `clear` (2.45) |
+| 5 | **Synchronization is aborted when the retry finds `pending`** | From `unknown`, the gated retry returns `app_metadata.account_deletion_pending = true` | The synchronization is aborted with **none of its writes applied**: the call log contains **no** `rpc`, no `fetch*ResultFromDB`, no `saveRecordToDB` / `deleteRecordFromDB` / `saveEventToDB` / `disconnectCoupleFromDB` after the check, no server state is modified, and no deferred timer later delivers one. Local account content is purged immediately through the existing partial-purge path, recovery is entered, and all normal routes are blocked. The abort is asserted to happen **before any sync write is attempted** — an ordering assertion, so an implementation that syncs first and reconciles afterwards fails (2.46) |
+
+Three things make this a real gate rather than a restatement of the type. Test 1 asserts **totality
+by enumeration**, which is what catches an ordering regression that swaps rows 1 and 2 and quietly
+turns "marker present, server clear" into `clear`. Test 2 asserts at the **type level** as well as
+the value level, because 1.28's defect was representational: a value-only test would pass against a
+`boolean | null` implementation that happens to branch correctly today. Tests 4 and 5 assert
+**ordering**, not end state — an implementation that syncs and then reconciles reaches the same final
+screen and must still fail.
+
 ### Unit Tests
 
 - **C1**: `classifyDeletionSuccess` / `classifyDeletionErrorBody` / `coerceWarnings` over success,
@@ -1449,7 +1835,7 @@ miss 2.36 entirely.
   readable foreground-on-surface pairings in both, plus an unchanged light-theme appearance.
 - **C5 offline activation**: build with `manualChunks`, confirm the service worker manifest lists
   every emitted chunk, and confirm an offline activation resolves them all.
-- **Release gates 2.29(a)-(k)**: `npm ci`; `npm run typecheck` (0 errors); `npm run lint`
+- **Release gates 2.29(a)-(l)**: `npm ci`; `npm run typecheck` (0 errors); `npm run lint`
   (0 errors, 0 warnings); `npm test` (206 baseline plus new suites); `npm run build` with
   placeholders and no warnings; negative build exits non-zero; zero marker tokens in `dist/`;
   `npm audit` reported with every remaining advisory covered by a recorded decision under 2.27 or
@@ -1460,4 +1846,10 @@ miss 2.36 entirely.
   with the first marker intact, a malformed marker fails closed, a clean browser is blocked by
   server metadata, a failed pending-flag write prevents application-data deletion, a successful
   retry deletes the Auth user before clearing the marker, and normal routes stay inaccessible
-  throughout.
+  throughout; and **gate (l), the Tri-State Verification Suite** — all five tests of 2.48 passing:
+  classification is total and mutually exclusive across all nine marker × answer combinations, a
+  `getUser()` timeout yields `unknown` and is never represented, stored, cached, serialized or logged
+  as `clear`, an offline initiating device stays blocked by its local marker, an offline secondary
+  device retries authoritative verification **before** synchronization rather than syncing first, and
+  a retry that discovers `pending` aborts the synchronization with none of its writes applied, purges
+  local account content and enters recovery.

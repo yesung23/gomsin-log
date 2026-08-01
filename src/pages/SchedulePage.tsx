@@ -461,7 +461,7 @@ export function SchedulePage() {
                       {dayEvents.length > 0 && (
                         <span className="flex gap-0.5 mt-1" aria-hidden="true">
                           {dayEvents.slice(0, 3).map((event) => (
-                            <span key={event.id} className={`w-1.5 h-1.5 rounded-full ${event.isPrivate ? 'bg-slate-500' : isToday && !isSelected ? 'bg-white' : 'bg-coral'}`} />
+                            <span key={event.id} className={`w-1.5 h-1.5 rounded-full ${event.isPrivate ? 'bg-muted-foreground' : isToday && !isSelected ? 'bg-coral-foreground' : 'bg-coral'}`} />
                           ))}
                         </span>
                       )}

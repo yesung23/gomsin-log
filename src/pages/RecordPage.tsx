@@ -703,7 +703,7 @@ export function RecordPage() {
                         }
                       }}
                       disabled={isSaving || !editText.trim()}
-                      className="px-3 py-1.5 rounded-lg bg-coral text-white font-bold text-xs disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-lg bg-coral text-coral-foreground font-bold text-xs disabled:opacity-50"
                     >
                       {isSaving ? '저장 중...' : '저장'}
                     </button>

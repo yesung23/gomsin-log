@@ -84,27 +84,74 @@ describe('C5 - vendor chunk splitting', () => {
 
 describe('C5 - dependency posture is verified, not assumed', () => {
   const pkg = JSON.parse(read('package.json')) as {
-    overrides?: Record<string, string>;
+    overrides?: Record<string, unknown>;
     dependencies: Record<string, string>;
   };
   const lock = JSON.parse(read('package-lock.json')) as {
-    packages: Record<string, { version?: string }>;
+    packages: Record<string, {
+      version?: string;
+      dependencies?: Record<string, string>;
+    }>;
   };
 
-  it('pins brace-expansion to 1.1.18 on the 1.x line', () => {
+  it('pins brace-expansion with a SCOPED override, not a global one', () => {
     // Registry-verified: 1.1.18 exists on the 1.x line (5.0.9 on 5.x), which
     // supersedes the earlier audit conclusion that no patched 1.x release
-    // existed. The 1.x line is kept so `minimatch@3`'s CJS `require` shape is
-    // preserved; `npm run lint` at 0/0 is the proof, and it is a release gate.
-    expect(pkg.overrides?.['brace-expansion']).toBe('1.1.18');
-    const resolved = Object.entries(lock.packages)
-      .filter(([name]) => name.endsWith('node_modules/brace-expansion'))
-      .map(([, entry]) => entry.version);
-    expect(resolved.length).toBeGreaterThan(0);
-    for (const version of resolved) {
-      expect(version).toBe('1.1.18');
-      expect(version?.startsWith('1.')).toBe(true);
+    // existed.
+    //
+    // The override MUST stay scoped to `minimatch@3`. A global
+    // `{"brace-expansion": "1.1.18"}` also forced 1.1.18 into the `minimatch@10`
+    // consumers, which declare `^5.0.5` / `^5.0.8` -- a dependency-range
+    // violation, and a latent break because 1.x is a single CommonJS export
+    // while 5.x uses named exports.
+    expect(pkg.overrides).toEqual({ 'minimatch@3': { 'brace-expansion': '1.1.18' } });
+    expect(pkg.overrides?.['brace-expansion']).toBeUndefined();
+  });
+
+  it('resolves every brace-expansion consumer inside its declared range', () => {
+    // The invariant that actually matters, asserted structurally rather than by
+    // pinning version numbers: nearest-ancestor resolution must satisfy the range
+    // each consumer declares.
+    const resolveFor = (consumer: string): string | undefined => {
+      let parts = consumer.split('/');
+      for (;;) {
+        const candidate = [...parts, 'node_modules', 'brace-expansion'].join('/');
+        if (lock.packages[candidate]) return lock.packages[candidate].version;
+        const index = parts.lastIndexOf('node_modules');
+        if (index < 0) return lock.packages['node_modules/brace-expansion']?.version;
+        parts = parts.slice(0, index);
+      }
+    };
+
+    const consumers = Object.entries(lock.packages)
+      .filter(([, entry]) => entry.dependencies?.['brace-expansion']);
+    expect(consumers.length).toBeGreaterThanOrEqual(3);
+
+    let sawOneX = false;
+    let sawFiveX = false;
+    for (const [name, entry] of consumers) {
+      const range = entry.dependencies!['brace-expansion'];
+      const resolved = resolveFor(name);
+      expect(resolved, `${name} requires ${range}`).toBeDefined();
+      const major = Number(resolved!.split('.')[0]);
+      const rangeMajor = Number(range.replace(/^[^0-9]*/, '').split('.')[0]);
+      // Same major line as the declared range: this is what a global override
+      // broke.
+      expect(major, `${name} requires ${range} but resolved ${resolved}`).toBe(rangeMajor);
+      if (major === 1) {
+        sawOneX = true;
+        // Patched on the 1.x line.
+        expect(resolved).toBe('1.1.18');
+      }
+      if (major === 5) {
+        sawFiveX = true;
+        // 5.x is outside the advisory's affected ranges; 5.0.8+ satisfies both
+        // declared ranges.
+        expect(Number(resolved!.split('.')[2])).toBeGreaterThanOrEqual(8);
+      }
     }
+    expect(sawOneX, 'the vulnerable 1.x consumer must still be pinned').toBe(true);
+    expect(sawFiveX, 'the 5.x consumers must keep their own major').toBe(true);
   });
 
   it('PRESERVATION: react-router stays pinned at 7.18.2 and declarative', () => {
@@ -124,6 +171,9 @@ describe('C5 - dependency posture is verified, not assumed', () => {
     expect(checklist).toContain('GHSA-mh99-v99m-4gvg');
     expect(checklist).toContain('GHSA-qwww-vcr4-c8h2');
     expect(checklist).toContain('1.1.18');
+    // The scoped-override reasoning must be recorded, not just the version.
+    expect(checklist).toContain('minimatch@3');
+    expect(checklist).toContain('minimatch@10');
     expect(checklist).toContain('invalidation trigger');
     expect(checklist).toContain('npm audit fix --force');
   });

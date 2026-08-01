@@ -4,6 +4,7 @@ import { authRedirectUrl, isNativePlatform } from '@/lib/platform';
 import {
   classifyDeletionErrorBody,
   classifyDeletionSuccess,
+  serverCallBlockedByPendingDeletion,
   type AccountDeletionOutcome,
 } from '@/lib/accountDeletion';
 import type { AuthUser, IAuthRepository, ILogRepository, AppState, Role } from '@/types';
@@ -103,6 +104,12 @@ export async function createCoupleInvitation(role: Role): Promise<{ coupleId: st
   }
 
   try {
+    // Pre-flight: placed ahead of the caller-verification read as well, so that
+    // a pending deletion aborts before ANY request is issued, not merely before
+    // the mutation.
+    if (await serverCallBlockedByPendingDeletion()) {
+      return { coupleId: '', code: '', error: '탈퇴 처리가 진행 중이어서 커플 공간을 만들 수 없어요.' };
+    }
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) {
       return { coupleId: '', code: '', error: '인증되지 않은 사용자입니다. 로그인 후 다시 시도해주세요.' };
@@ -240,6 +247,10 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
 
   try {
     const codeHash = await hashInvitationCode(normalized);
+    // Pre-flight: a pending deletion aborts this write before it is issued.
+    if (await serverCallBlockedByPendingDeletion()) {
+      return { error: '탈퇴 처리가 진행 중이어서 초대 코드를 사용할 수 없어요.' };
+    }
     const { data, error } = await supabase.rpc('redeem_invitation', { p_code_hash: codeHash });
 
     if (error) {
@@ -287,6 +298,10 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
  */
 export async function regenerateCoupleInvitation(): Promise<{ code?: string; error?: string }> {
   if (!supabase) return { code: generateInvitationCode() };
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) {
+    return { error: '탈퇴 처리가 진행 중이어서 초대 코드를 새로 만들 수 없어요.' };
+  }
 
   try {
     for (let attempt = 1; attempt <= INVITATION_CODE_ATTEMPTS; attempt += 1) {

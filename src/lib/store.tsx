@@ -42,6 +42,7 @@ import {
   deletionStatusLogToken,
   markRecoveryPending,
   readRecoveryMarker,
+  registerServerCallGate,
   serverAnswerFromUser,
   type AccountDeletionOutcome,
   type DeletionStatus,
@@ -565,6 +566,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setIsHydrated(true);
     });
   }, []);
+
+  /**
+   * Publish the pre-flight gate to the data-layer modules whose mutations are
+   * issued directly by pages rather than through `StoreContextType` (trips,
+   * cycle, invitations). Without this they would issue writes for an account
+   * whose deletion is pending, which is exactly what clause 2.46 forbids.
+   */
+  useEffect(() => {
+    registerServerCallGate(ensureNotPendingBeforeServerCall);
+    return () => registerServerCallGate(null);
+  }, [ensureNotPendingBeforeServerCall]);
 
   useEffect(() => {
     if (!supabase || !isHydrated) return;

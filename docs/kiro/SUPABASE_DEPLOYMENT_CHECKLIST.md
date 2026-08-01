@@ -391,13 +391,34 @@ Auth `app_metadata` 에 `account_deletion_pending: true` 를 기록합니다.
 
 - 개발 도구 전용 경로(`eslint` → `minimatch@3` → `brace-expansion`)에서만 나타났던
   5건의 권고입니다. 런타임 번들에는 포함되지 않습니다.
-- `package.json` 의 `overrides` 로 **1.1.18** 에 고정해 해결했습니다.
+- `package.json` 의 **범위 한정(scoped) `overrides`** 로 해결했습니다.
+
+  ```json
+  "overrides": {
+    "minimatch@3": { "brace-expansion": "1.1.18" }
+  }
+  ```
+
+  **전역 override 는 쓰지 않습니다.** 전역 `{"brace-expansion": "1.1.18"}` 는
+  `brace-expansion@^5.0.5` / `^5.0.8` 을 요구하는 `minimatch@10`(typescript-eslint,
+  @capacitor/cli→rimraf→glob 경로)에도 1.1.18 을 강제해 **의존성 범위를 위반**했습니다.
+  1.x 는 CommonJS 단일 export, 5.x 는 named export 이므로 이 조합은 언젠가 깨집니다.
+  범위를 `minimatch@3` 으로 한정해, 실제 해석 결과는 다음과 같습니다.
+
+  | 소비자 | 요구 범위 | 해석된 버전 |
+  | --- | --- | --- |
+  | `minimatch@3.1.5` (eslint) | `^1.1.7` | **1.1.18** |
+  | `minimatch@10.2.5` (typescript-eslint) | `^5.0.5` | **5.0.9** |
+  | `minimatch@10.2.6` (@capacitor/cli→rimraf→glob) | `^5.0.8` | **5.0.9** |
+
+  5.x 라인은 이 권고의 영향 범위가 아니므로 고정할 필요가 없습니다.
 - 이전 감사 문서(7-3절)는 "1.x 라인에 패치된 릴리스가 없다"고 결론했지만,
   **레지스트리를 직접 확인한 결과 1.x 라인에 1.1.18 이 존재합니다**(5.x 라인은 5.0.9).
   레지스트리 확인이 감사 문서의 결론을 대체합니다.
-- **5.x 가 아니라 1.x 를 선택한 이유**: `minimatch@3` 은 CommonJS `require` 형태로
-  이 패키지를 불러옵니다. 5.x 는 export 형태가 바뀌어 lint 가 깨질 위험이 있고,
-  그것이 감사 7-3절이 지적한 바로 그 위험입니다.
+- **`minimatch@3` 경로에서 5.x 가 아니라 1.x 를 선택한 이유**: `minimatch@3` 은
+  CommonJS `require` 형태로 이 패키지를 불러옵니다. 5.x 는 export 형태가 바뀌어
+  lint 가 깨질 위험이 있고, 그것이 감사 7-3절이 지적한 바로 그 위험입니다.
+  반대로 `minimatch@10` 은 5.x 를 요구하므로 그 경로는 건드리지 않습니다.
 - **안전성 증거**: 고정 후 `npm run lint` 가 **에러 0건 / 경고 0건**입니다.
   `brace-expansion` 변경이 `minimatch@3` 의 CJS `require` 를 깨뜨린다면 그것은
   수정이 아니라 회귀이므로, 우회하지 말고 되돌려야 합니다.
@@ -414,6 +435,31 @@ Auth `app_metadata` 에 `account_deletion_pending: true` 를 기록합니다.
   이 수용은 무효가 되며 즉시 재평가해야 합니다.
 - 7.11.0 으로의 무조건 다운그레이드와 메이저 업그레이드는 **모두 금지**합니다.
   전자는 이 저장소가 검증한 동작을 되돌리고, 후자는 검증되지 않은 변경입니다.
+
+---
+
+## 5-4. Edge Function 검증 (배포 전)
+
+Vitest 는 `handler.ts` 를 대역(double)으로 검증하므로 **Supabase 런타임 호환성을
+증명하지 못합니다.** 실제 Deno 로 다음 두 가지를 실행할 수 있습니다.
+
+```bash
+npm run check:edge   # deno check — 실제 npm: 지정자와 Deno 전역 타입 검사
+npm run test:edge    # 실제 index.ts 를 하위 프로세스로 띄워 HTTP 로 검증
+```
+
+`npm run test:edge` 는 Deno API 를 하나도 가로채지 않습니다. 진짜 `Deno.serve` /
+`Deno.env` / `npm:@supabase/supabase-js@2` 를 그대로 사용하는 하위 프로세스를 띄우고,
+로컬 스텁 서버를 Supabase Auth 엔드포인트 대신 세워서 다음을 확인합니다.
+
+- 엔트리포인트 응답이 테스트된 핸들러 응답과 상태·헤더·본문 모두 일치;
+- `ALLOWED_ORIGINS` 미설정 시 모든 메서드가 `500` 으로 fail closed;
+- 주입된 `(url, serviceRoleKey)` 로 실제 admin 클라이언트가 만들어져
+  `/auth/v1/user` 를 `apikey` 헤더와 함께 호출.
+
+> Deno 가 설치되지 않은 환경에서는 이 두 명령을 실행할 수 없습니다. 그때는
+> **스테이징 게이트로 남겨두고**, mocked Vitest 커버리지가 런타임 호환성을
+> 증명한다고 주장하지 마세요.
 
 ---
 

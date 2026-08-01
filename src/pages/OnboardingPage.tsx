@@ -1,6 +1,7 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { useStore } from '@/lib/useStore';
 import {
   authRepository,
@@ -289,6 +290,11 @@ export function OnboardingPage() {
       // straight back through onboarding.
       if (supabase && state.authenticatedUser && !state.isDemoMode) {
         const userId = state.authenticatedUser.id;
+        // Pre-flight: a pending deletion aborts every write below before the
+        // first one is issued, so onboarding cannot recreate a `profiles` row
+        // for an account whose data the server has already removed.
+        if (await serverCallBlockedByPendingDeletion()) return;
+        if (!isCurrentIdentity(identity)) return;
         const { error: profileError } = await supabase.from('profiles').upsert({
           id: userId,
           display_name: finalNickname,

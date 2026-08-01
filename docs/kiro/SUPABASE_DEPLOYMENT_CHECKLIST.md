@@ -327,6 +327,37 @@ supabase functions deploy delete-account
 > 🔐 `service_role` 키는 절대 앱 코드나 GitHub에 넣지 마세요. 이 키는 모든 보안
 > 규칙을 무시할 수 있습니다.
 
+### 5-1. `ALLOWED_ORIGINS` (필수, CORS 허용 목록)
+
+**Edge Functions → delete-account → Secrets** 에 `ALLOWED_ORIGINS` 를 추가하세요.
+
+형식은 **쉼표로 구분한 정확한 origin 목록**입니다. 와일드카드(`*`), 하위 도메인
+패턴, 뒤에 붙는 슬래시는 지원하지 않습니다. 비교는 문자열 완전 일치입니다.
+
+```
+ALLOWED_ORIGINS=https://gomsinlog.app,https://www.gomsinlog.app
+```
+
+| 상황 | 함수 응답 |
+| --- | --- |
+| 목록에 있는 origin | 그 origin 을 그대로 반사 (`Access-Control-Allow-Origin`) |
+| 목록에 없는 origin | `403`, `Access-Control-Allow-Origin` 없음 |
+| `Origin` 헤더가 아예 없음 | 허용 (아래 설명 참고) |
+| `ALLOWED_ORIGINS` 미설정 | **모든 요청에 `500`** (fail closed) |
+
+- **미설정이면 함수가 완전히 멈춥니다.** 이것은 의도된 동작입니다. 예전처럼
+  `*` 로 되돌아가는 fallback 은 존재하지 않습니다. 배포 후 반드시 설정하세요.
+- **`Origin` 헤더가 없는 요청은 허용합니다 — 이것은 명시적으로 받아들인 위험입니다.**
+  브라우저가 아닌 클라이언트(curl, 서버 간 호출)는 `Origin` 을 보내지 않으므로
+  CORS 로 막을 수 없습니다. 보완 통제는 **Bearer 토큰 검증이 여전히 필수**라는
+  점입니다. 토큰 없이는 `401` 이고, 어떤 계정도 삭제되지 않습니다.
+- 모든 응답(성공·`403`·`401`·`405`·`500`·preflight)에 `Vary: Origin` 이 붙습니다.
+  공용 캐시가 한 origin 의 응답을 다른 origin 에 재생하지 못하게 하기 위한 것이며,
+  선택 사항이 아닙니다.
+
+> 이 저장소는 `ALLOWED_ORIGINS` 를 어떤 원격 환경에도 설정하지 않았습니다.
+> 값을 넣는 것은 운영자가 직접 해야 하는 단계입니다.
+
 ---
 
 ## 6. 앱 환경변수

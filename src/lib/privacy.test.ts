@@ -4,6 +4,7 @@ import {
   isOwnRecord,
   splitEmotionFlow,
   emotionFlowForStorage,
+  stripTransientFields,
   isVisibleToViewer,
   sanitizeRecordForViewer,
   visibleRecordsForViewer,
@@ -121,6 +122,53 @@ describe('emotionFlowForStorage', () => {
       emotionFlow: [item({ id: 'b', visibility: 'author_only' })],
     });
     expect(stored.map((i) => i.id)).toEqual(['b']);
+  });
+});
+
+describe('stripTransientFields', () => {
+  it('removes matchedText from items that have it', () => {
+    const items = [item({ id: 'a', matchedText: '보고 싶다' })];
+    const result = stripTransientFields(items);
+    expect(result[0]).not.toHaveProperty('matchedText');
+    expect(result[0].id).toBe('a');
+    expect(result[0].displayLabel).toBe('기쁨');
+  });
+
+  it('passes through items without matchedText unchanged', () => {
+    const items = [item({ id: 'b' })];
+    const result = stripTransientFields(items);
+    expect(result[0]).not.toHaveProperty('matchedText');
+    expect(result[0].id).toBe('b');
+  });
+
+  it('handles nested arrays with mixed items', () => {
+    const items = [
+      item({ id: 'a', matchedText: '슬퍼' }),
+      item({ id: 'b' }),
+      item({ id: 'c', matchedText: '힘들어' }),
+    ];
+    const result = stripTransientFields(items);
+    expect(result).toHaveLength(3);
+    expect(result.every((i) => !('matchedText' in i))).toBe(true);
+    expect(result.map((i) => i.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(stripTransientFields([])).toEqual([]);
+  });
+});
+
+describe('emotionFlowForStorage strips matchedText', () => {
+  it('removes matchedText from the persisted flow', () => {
+    const stored = emotionFlowForStorage({
+      isPrivate: false,
+      emotionFlow: [
+        item({ id: 'a', visibility: 'shared', matchedText: '기뻐' }),
+        item({ id: 'b', visibility: 'shared' }),
+      ],
+    });
+    expect(stored.every((i) => !('matchedText' in i))).toBe(true);
+    expect(stored.map((i) => i.id)).toEqual(['a', 'b']);
   });
 });
 

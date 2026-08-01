@@ -67,13 +67,25 @@ export function splitEmotionFlow(record: Pick<DailyRecord, 'isPrivate' | 'emotio
 }
 
 /**
+ * Remove transient analysis fields that must never be persisted.
+ *
+ * `matchedText` is the substring of user input that triggered an emotion rule.
+ * It is useful for UI highlighting during composition but storing it would leak
+ * the raw input fragment into an otherwise aggregated emotion row.
+ */
+export function stripTransientFields(items: EmotionFlowItem[]): EmotionFlowItem[] {
+  return items.map(({ matchedText: _discarded, ...rest }) => rest);
+}
+
+/**
  * What actually gets written into `daily_records.emotion_flow`.
- * For a shared record this excludes author-only items.
+ * For a shared record this excludes author-only items, and transient analysis
+ * fields (like matchedText) are always stripped regardless of privacy level.
  */
 export function emotionFlowForStorage(
   record: Pick<DailyRecord, 'isPrivate' | 'emotionFlow'>,
 ): EmotionFlowItem[] {
-  return splitEmotionFlow(record).shareable;
+  return stripTransientFields(splitEmotionFlow(record).shareable);
 }
 
 /**

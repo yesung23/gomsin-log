@@ -229,12 +229,17 @@ export function TodayLogWidget() {
     // shared rows (see lib/privacy.ts) without silently discarding a selection.
     const userConfirmedFlow: EmotionFlowItem[] = suggestions
       .filter((s) => confirmedItemIds.includes(s.id || ''))
-      .map((s, idx) => ({
-        ...s,
-        sequence: idx + 1,
-        source: 'user_confirmed',
-        visibility: isPrivate ? 'author_only' : 'shared',
-      }));
+      .map((s, idx) => {
+        // Defense-in-depth: never let matchedText leave the composer, even if
+        // downstream storage stripping were bypassed.
+        const { matchedText: _discard, ...safeFields } = s;
+        return {
+          ...safeFields,
+          sequence: idx + 1,
+          source: 'user_confirmed',
+          visibility: isPrivate ? 'author_only' : 'shared',
+        };
+      });
 
     setIsSaving(true);
     let result: { ok: boolean; failedFiles: string[]; error?: string };

@@ -328,11 +328,11 @@ export async function uploadRecordMedia(
   };
 }
 
-/** Remove uploaded objects, used to clean up after a partially failed post. */
+/** Remove uploaded objects. Throws on error so callers can decide how to handle failure. */
 export async function removeRecordMedia(paths: string[]): Promise<void> {
   if (!isSupabaseConfigured || !supabase || paths.length === 0) return;
   const { error } = await supabase.storage.from(MEDIA_BUCKET).remove(paths);
-  if (error) console.error('[gomsinlog] Failed to clean up media objects:', error);
+  if (error) throw new Error(`Failed to clean up media objects: ${error.message}`);
 }
 
 /**

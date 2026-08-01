@@ -121,6 +121,10 @@ vi.mock('@/lib/records', () => ({
   removeRecordMedia: vi.fn(),
   resolveAttachmentUrls: vi.fn(async (a: unknown) => a),
   classifyMediaFile: vi.fn(() => ({ type: 'photo' })),
+  isCanonicalRecordMediaPath: (path: unknown, coupleId: string, recordId: string) => {
+    if (typeof path !== 'string') return false;
+    return path.startsWith(`${coupleId}/${recordId}/`);
+  },
 }));
 
 vi.mock('@/lib/events', () => ({

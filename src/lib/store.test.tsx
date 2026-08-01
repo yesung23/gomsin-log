@@ -85,6 +85,10 @@ vi.mock('@/lib/records', () => ({
     file.type.startsWith('image/')
       ? { ext: 'png', type: 'photo' }
       : { error: 'unsupported' },
+  isCanonicalRecordMediaPath: (path: unknown, coupleId: string, recordId: string) => {
+    if (typeof path !== 'string') return false;
+    return path.startsWith(`${coupleId}/${recordId}/`);
+  },
 }));
 
 const fetchEventsResultFromDB = vi.fn().mockResolvedValue({ ok: true, events: [] });

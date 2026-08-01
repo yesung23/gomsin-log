@@ -32,6 +32,7 @@ import {
   removeRecordMedia,
   resolveAttachmentUrls,
   classifyMediaFile,
+  isCanonicalRecordMediaPath,
 } from '@/lib/records';
 import { StoreContext } from '@/lib/storeContext';
 import type { SharedSyncStatus } from '@/lib/storeContext';
@@ -1544,7 +1545,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         );
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (!patched) {
-          await removeRecordMedia(uploadedPaths);
+          try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
           if (!isCurrentLinkedCouple(workspace)) return staleResult;
           failedFiles.push(...files.map((file) => file.name));
           finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
@@ -1552,7 +1553,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         console.error('[gomsinlog] Failed to attach media to record:', error);
-        await removeRecordMedia(uploadedPaths);
+        try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         failedFiles.push(...files.map((file) => file.name));
         finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
@@ -1660,6 +1661,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const workspace = captureLinkedCouple();
     if (!workspace || existing.userId !== workspace.userId) return false;
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+
+    // Storage cleanup: remove owned media objects BEFORE deleting the DB row.
+    // Fail closed: if cleanup fails, abort the delete rather than orphaning
+    // storage objects that can no longer be traced back to a record.
+    const attachmentPaths = (existing.attachments || [])
+      .map((a) => a.path)
+      .filter((p): p is string =>
+        isCanonicalRecordMediaPath(p, workspace.coupleId, id),
+      );
+
+    if (attachmentPaths.length > 0) {
+      try {
+        await removeRecordMedia(attachmentPaths);
+        if (!isCurrentLinkedCouple(workspace)) return false;
+      } catch (error) {
+        if (isCurrentLinkedCouple(workspace)) {
+          console.error('[gomsinlog] Storage cleanup failed, aborting delete:', error);
+        }
+        return false;
+      }
+    }
+
     try {
       const deleted = await deleteRecordFromDB(
         id,

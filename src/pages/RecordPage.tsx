@@ -245,7 +245,7 @@ export function RecordPage() {
             className={cn(
               'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
               showCalendar
-                ? 'bg-coral text-white shadow-sm'
+                ? 'bg-coral text-coral-foreground shadow-sm'
                 : 'bg-card border border-border text-foreground hover:bg-muted'
             )}
             aria-label="달력 보기"
@@ -360,7 +360,7 @@ export function RecordPage() {
                     'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
                     (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
-                    isSelected && 'bg-coral text-white',
+                    isSelected && 'bg-coral text-coral-foreground',
                     !isSelected && isTodayCell && 'ring-2 ring-coral/50 ring-inset rounded-lg',
                   )}
                 >
@@ -371,7 +371,7 @@ export function RecordPage() {
                       cell.inMonth && !isSelected && isFuture && 'text-muted-foreground/50',
                       cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-red-400',
                       cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-blue-400',
-                      isSelected && 'text-white',
+                      isSelected && 'text-coral-foreground',
                     )}
                   >
                     {cell.date.getDate()}
@@ -382,18 +382,18 @@ export function RecordPage() {
                     <div className="flex items-center gap-[3px] mt-0.5 h-[6px]" aria-hidden="true">
                       <span className={cn(
                         'w-[5px] h-[5px] rounded-full',
-                        isSelected ? 'bg-white/80' : 'bg-coral'
+                        isSelected ? 'bg-coral-foreground/80' : 'bg-coral'
                       )} />
                       {hasMedia && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-white/60' : 'bg-coral/50'
+                          isSelected ? 'bg-coral-foreground/60' : 'bg-coral/50'
                         )} />
                       )}
                       {recordCount >= 4 && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-white/40' : 'bg-coral/30'
+                          isSelected ? 'bg-coral-foreground/40' : 'bg-coral/30'
                         )} />
                       )}
                     </div>
@@ -479,7 +479,7 @@ export function RecordPage() {
                 className={cn(
                   'px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition min-h-[32px]',
                   mediaFilter === f.key
-                    ? 'bg-navy text-white'
+                    ? 'bg-navy text-primary-foreground'
                     : 'bg-muted/60 text-muted-foreground hover:bg-muted'
                 )}
               >
@@ -577,7 +577,7 @@ export function RecordPage() {
       <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
         <button
           onClick={() => navigate('/home')}
-          className="w-full py-3.5 rounded-full bg-coral text-white font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-white/20 backdrop-blur-xs"
+          className="w-full py-3.5 rounded-full bg-coral text-coral-foreground font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-foreground/20 backdrop-blur-xs"
         >
           <span className="text-lg">+</span>
           <span>지금의 마음 남기기</span>
@@ -589,12 +589,12 @@ export function RecordPage() {
         <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
-              <h3 id="record-detail-modal-title" className="text-lg font-bold text-gray-900">
+              <h3 id="record-detail-modal-title" className="text-lg font-bold text-card-foreground">
                 {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
               </h3>
               <button
                 onClick={() => setSelectedRecord(null)}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 min-w-[44px] min-h-[44px]"
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"
                 aria-label="닫기"
               >
                 ✕
@@ -608,8 +608,8 @@ export function RecordPage() {
                 </div>
               )}
 
-              <div className="bg-gray-50 p-4 rounded-xl">
-                <p className="text-gray-800 whitespace-pre-wrap text-sm leading-relaxed">
+              <div className="bg-muted p-4 rounded-xl">
+                <p className="text-foreground whitespace-pre-wrap text-sm leading-relaxed">
                   {selectedRecord.log || '(내용 없음)'}
                 </p>
               </div>
@@ -622,7 +622,7 @@ export function RecordPage() {
 
               {selectedRecord.attachments && selectedRecord.attachments.length > 0 && (
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-gray-500">첨부 파일</h4>
+                  <h4 className="text-xs font-bold text-muted-foreground">첨부 파일</h4>
                   {selectedRecord.attachments.map((att, idx) => (
                     <div key={idx} className="rounded-xl overflow-hidden bg-muted border border-border">
                       {att.type === 'photo' && att.url ? (

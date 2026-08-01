@@ -1,3 +1,4 @@
+import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   CYCLE_SUPPORT_KINDS,
@@ -294,6 +295,8 @@ export async function saveCycleSettingsToDB(
 ): Promise<CycleSettings | null> {
   if (!isSupabaseConfigured || !supabase) return null;
   if (validateCycleSettings(averageCycleLength, averagePeriodLength)) return null;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   const userId = await currentUserId();
   if (!userId) return null;
 
@@ -350,6 +353,8 @@ export async function saveCycleEntryToDB(
 ): Promise<CycleEntry | null> {
   if (!isSupabaseConfigured || !supabase) return null;
   const draft = { startDate, endDate, notes, symptoms };
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   if (validateCycleEntryDraft(draft)) return null;
   const userId = await currentUserId();
   if (!userId) return null;
@@ -380,6 +385,8 @@ export async function updateCycleEntryInDB(
 ): Promise<CycleEntry | null> {
   if (!isSupabaseConfigured || !supabase || !id) return null;
   if (validateCycleEntryDraft(draft)) return null;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   const userId = await currentUserId();
   if (!userId) return null;
 
@@ -406,6 +413,8 @@ export async function updateCycleEntryInDB(
 
 export async function deleteCycleEntryFromDB(id: string): Promise<boolean> {
   if (!isSupabaseConfigured || !supabase || !id) return false;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return false;
   const userId = await currentUserId();
   if (!userId) return false;
   const { data, error } = await supabase
@@ -463,6 +472,8 @@ export async function createCycleSupportSignalInDB(
 ): Promise<CycleSupportSignal | null> {
   if (!isSupabaseConfigured || !supabase) return null;
   const userId = await currentUserId();
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   if (!userId) return null;
   const payload = buildCycleSupportPayload(input, userId);
   if (!payload) return null;
@@ -482,6 +493,8 @@ export async function createCycleSupportSignalInDB(
 
 export async function revokeCycleSupportSignalFromDB(id: string): Promise<boolean> {
   if (!isSupabaseConfigured || !supabase || !id) return false;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return false;
   const userId = await currentUserId();
   if (!userId) return false;
   const revokedAt = new Date().toISOString();

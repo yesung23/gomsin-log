@@ -327,6 +327,140 @@ supabase functions deploy delete-account
 > 🔐 `service_role` 키는 절대 앱 코드나 GitHub에 넣지 마세요. 이 키는 모든 보안
 > 규칙을 무시할 수 있습니다.
 
+### 5-1. `ALLOWED_ORIGINS` (필수, CORS 허용 목록)
+
+**Edge Functions → delete-account → Secrets** 에 `ALLOWED_ORIGINS` 를 추가하세요.
+
+형식은 **쉼표로 구분한 정확한 origin 목록**입니다. 와일드카드(`*`), 하위 도메인
+패턴, 뒤에 붙는 슬래시는 지원하지 않습니다. 비교는 문자열 완전 일치입니다.
+
+```
+ALLOWED_ORIGINS=https://gomsinlog.app,https://www.gomsinlog.app
+```
+
+| 상황 | 함수 응답 |
+| --- | --- |
+| 목록에 있는 origin | 그 origin 을 그대로 반사 (`Access-Control-Allow-Origin`) |
+| 목록에 없는 origin | `403`, `Access-Control-Allow-Origin` 없음 |
+| `Origin` 헤더가 아예 없음 | 허용 (아래 설명 참고) |
+| `ALLOWED_ORIGINS` 미설정 | **모든 요청에 `500`** (fail closed) |
+
+- **미설정이면 함수가 완전히 멈춥니다.** 이것은 의도된 동작입니다. 예전처럼
+  `*` 로 되돌아가는 fallback 은 존재하지 않습니다. 배포 후 반드시 설정하세요.
+- **`Origin` 헤더가 없는 요청은 허용합니다 — 이것은 명시적으로 받아들인 위험입니다.**
+  브라우저가 아닌 클라이언트(curl, 서버 간 호출)는 `Origin` 을 보내지 않으므로
+  CORS 로 막을 수 없습니다. 보완 통제는 **Bearer 토큰 검증이 여전히 필수**라는
+  점입니다. 토큰 없이는 `401` 이고, 어떤 계정도 삭제되지 않습니다.
+- 모든 응답(성공·`403`·`401`·`405`·`500`·preflight)에 `Vary: Origin` 이 붙습니다.
+  공용 캐시가 한 origin 의 응답을 다른 origin 에 재생하지 못하게 하기 위한 것이며,
+  선택 사항이 아닙니다.
+
+> 이 저장소는 `ALLOWED_ORIGINS` 를 어떤 원격 환경에도 설정하지 않았습니다.
+> 값을 넣는 것은 운영자가 직접 해야 하는 단계입니다.
+
+### 5-2. `app_metadata.account_deletion_pending` (운영자가 반드시 알아야 할 것)
+
+`delete-account` 함수는 데이터를 지우기 **전에** service_role 키로 해당 계정의
+Auth `app_metadata` 에 `account_deletion_pending: true` 를 기록합니다.
+
+- 이 플래그는 **탈퇴 복구의 1차 권한(primary authority)** 입니다. 브라우저 저장소를
+  지워도, 시크릿 창을 써도, 다른 기기에서 로그인해도 계정과 함께 따라옵니다.
+  클라이언트는 이 값을 쓸 수 없습니다(`user_metadata` 가 아니라 `app_metadata`).
+- **플래그 기록이 실패하면 아무것도 지우지 않습니다.** 응답은 `dataRemoved: false`
+  이고 계정은 그대로 남습니다. 다시 시도하면 같은 값을 다시 쓰므로 안전합니다.
+- **Auth 사용자 삭제가 실패하면 플래그는 의도적으로 그대로 남습니다.** 이것은
+  정리해야 할 버그가 아닙니다. 데이터가 이미 사라진 계정을 복구 상태로 붙잡아 두는
+  장치입니다.
+- **운영자가 이 값을 손으로 지우면, 데이터가 이미 사라진 앱으로 사용자를 다시
+  들여보내는 것입니다.** 그렇게 하지 마세요.
+- Auth 사용자 삭제가 성공하면 사용자와 `app_metadata` 가 함께 사라지므로 플래그도
+  같이 없어집니다. 성공 경로에서 플래그를 따로 지우는 호출은 없습니다.
+- **서버가 확인해 주는 "탈퇴 취소" 절차는 현재 존재하지 않습니다.** 이 수정도 그런
+  절차를 만들지 않았습니다. 어떤 운영 절차나 코드 경로도 그런 것이 있는 것처럼
+  동작해서는 안 됩니다.
+
+> 이 저장소는 함수를 배포하지 않았고, 원격 환경에 어떤 값도 설정하지 않았습니다.
+> 배포와 설정은 운영자가 직접 해야 하는 단계입니다.
+
+---
+## 5-3. 의존성 보안 권고 처리 기록
+
+`npm audit` 결과에 남는 항목은 아래 두 건뿐이며, 각각 근거가 기록되어 있습니다.
+
+### `brace-expansion` — GHSA-mh99-v99m-4gvg (해결됨)
+
+- 개발 도구 전용 경로(`eslint` → `minimatch@3` → `brace-expansion`)에서만 나타났던
+  5건의 권고입니다. 런타임 번들에는 포함되지 않습니다.
+- `package.json` 의 **범위 한정(scoped) `overrides`** 로 해결했습니다.
+
+  ```json
+  "overrides": {
+    "minimatch@3": { "brace-expansion": "1.1.18" }
+  }
+  ```
+
+  **전역 override 는 쓰지 않습니다.** 전역 `{"brace-expansion": "1.1.18"}` 는
+  `brace-expansion@^5.0.5` / `^5.0.8` 을 요구하는 `minimatch@10`(typescript-eslint,
+  @capacitor/cli→rimraf→glob 경로)에도 1.1.18 을 강제해 **의존성 범위를 위반**했습니다.
+  1.x 는 CommonJS 단일 export, 5.x 는 named export 이므로 이 조합은 언젠가 깨집니다.
+  범위를 `minimatch@3` 으로 한정해, 실제 해석 결과는 다음과 같습니다.
+
+  | 소비자 | 요구 범위 | 해석된 버전 |
+  | --- | --- | --- |
+  | `minimatch@3.1.5` (eslint) | `^1.1.7` | **1.1.18** |
+  | `minimatch@10.2.5` (typescript-eslint) | `^5.0.5` | **5.0.9** |
+  | `minimatch@10.2.6` (@capacitor/cli→rimraf→glob) | `^5.0.8` | **5.0.9** |
+
+  5.x 라인은 이 권고의 영향 범위가 아니므로 고정할 필요가 없습니다.
+- 이전 감사 문서(7-3절)는 "1.x 라인에 패치된 릴리스가 없다"고 결론했지만,
+  **레지스트리를 직접 확인한 결과 1.x 라인에 1.1.18 이 존재합니다**(5.x 라인은 5.0.9).
+  레지스트리 확인이 감사 문서의 결론을 대체합니다.
+- **`minimatch@3` 경로에서 5.x 가 아니라 1.x 를 선택한 이유**: `minimatch@3` 은
+  CommonJS `require` 형태로 이 패키지를 불러옵니다. 5.x 는 export 형태가 바뀌어
+  lint 가 깨질 위험이 있고, 그것이 감사 7-3절이 지적한 바로 그 위험입니다.
+  반대로 `minimatch@10` 은 5.x 를 요구하므로 그 경로는 건드리지 않습니다.
+- **안전성 증거**: 고정 후 `npm run lint` 가 **에러 0건 / 경고 0건**입니다.
+  `brace-expansion` 변경이 `minimatch@3` 의 CJS `require` 를 깨뜨린다면 그것은
+  수정이 아니라 회귀이므로, 우회하지 말고 되돌려야 합니다.
+- **`npm audit fix --force` 는 절대 실행하지 않습니다.**
+
+### `react-router` — GHSA-qwww-vcr4-c8h2 (조건부 수용)
+
+- 대상: `react-router` / `react-router-dom` **7.18.2** (핀 고정).
+- **적용되지 않는 이유(전제 조건)**: 이 앱은 정적 Vite SPA 이고 `BrowserRouter` 만
+  선언적으로 사용합니다. Framework Mode 없음, RSC 없음, `loader` 없음, `action` 없음,
+  `useFetcher` 없음, react-router `<Form>` 없음, 서버 라우트 없음. 권고는 RSC 모드의
+  action 실행 경로에 관한 것이므로 이 구성에서는 도달할 수 없습니다.
+- **수용이 무효화되는 조건(invalidation trigger)**: 위 기능 **중 하나라도** 도입하면
+  이 수용은 무효가 되며 즉시 재평가해야 합니다.
+- 7.11.0 으로의 무조건 다운그레이드와 메이저 업그레이드는 **모두 금지**합니다.
+  전자는 이 저장소가 검증한 동작을 되돌리고, 후자는 검증되지 않은 변경입니다.
+
+---
+
+## 5-4. Edge Function 검증 (배포 전)
+
+Vitest 는 `handler.ts` 를 대역(double)으로 검증하므로 **Supabase 런타임 호환성을
+증명하지 못합니다.** 실제 Deno 로 다음 두 가지를 실행할 수 있습니다.
+
+```bash
+npm run check:edge   # deno check — 실제 npm: 지정자와 Deno 전역 타입 검사
+npm run test:edge    # 실제 index.ts 를 하위 프로세스로 띄워 HTTP 로 검증
+```
+
+`npm run test:edge` 는 Deno API 를 하나도 가로채지 않습니다. 진짜 `Deno.serve` /
+`Deno.env` / `npm:@supabase/supabase-js@2` 를 그대로 사용하는 하위 프로세스를 띄우고,
+로컬 스텁 서버를 Supabase Auth 엔드포인트 대신 세워서 다음을 확인합니다.
+
+- 엔트리포인트 응답이 테스트된 핸들러 응답과 상태·헤더·본문 모두 일치;
+- `ALLOWED_ORIGINS` 미설정 시 모든 메서드가 `500` 으로 fail closed;
+- 주입된 `(url, serviceRoleKey)` 로 실제 admin 클라이언트가 만들어져
+  `/auth/v1/user` 를 `apikey` 헤더와 함께 호출.
+
+> Deno 가 설치되지 않은 환경에서는 이 두 명령을 실행할 수 없습니다. 그때는
+> **스테이징 게이트로 남겨두고**, mocked Vitest 커버리지가 런타임 호환성을
+> 증명한다고 주장하지 마세요.
+
 ---
 
 ## 6. 앱 환경변수

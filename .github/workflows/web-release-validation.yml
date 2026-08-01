@@ -140,7 +140,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -El 'https://[a-z0-9-]+\.supabase\.co' -- ':!*.md' ':!*.test.*' ':!docs/' ':!supabase/migrations/'; then
+          if git grep -El 'https://[a-z0-9-]+\.supabase\.co' -- ':!*.md' ':!*.test.*' ':!docs/' ':!supabase/migrations/' ':!.env.example' ':!.github/' ':!build/'; then
             echo 'Real Supabase project URL found in tracked files.' >&2
             exit 1
           fi

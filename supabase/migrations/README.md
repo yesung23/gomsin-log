@@ -23,9 +23,17 @@
 | `010_revoke_anon_rpc_access.sql` | `anon` 역할의 RPC 실행 권한 회수 | **필수** |
 | `011_create_missing_feature_tables.sql` | events/trips/cycle 테이블 + Realtime publication | **필수** |
 | `012_authenticated_core_table_grants.sql` | `authenticated` 역할 테이블 권한 | **필수** |
-| `013_invitation_hardening.sql` | 초대코드 무차별 대입 방어 + 코드 재발급 | **신규 / 원격 미적용** |
-| `014_feature_privacy_and_collaboration.sql` | 일정/여행/주기 RLS, sanitized support, 협업 Realtime·정합성 | **신규 / 원격 미적용** |
-| `015_security_followup.sql` | 초대 우회·경합 차단, 계정 삭제 트랜잭션, 비공개 일정 알림 차단, 여행 URL/순서 제약 | **신규 / 원격 미적용** |
+| `013_invitation_hardening.sql` | 초대코드 무차별 대입 방어 + 코드 재발급 | **테스트 프로젝트에 적용됨** (아래 주의 참고) |
+| `014_feature_privacy_and_collaboration.sql` | 일정/여행/주기 RLS, sanitized support, 협업 Realtime·정합성 | **테스트 프로젝트에 적용됨** |
+| `015_security_followup.sql` | 초대 우회·경합 차단, 계정 삭제 트랜잭션, 비공개 일정 알림 차단, 여행 URL/순서 제약 | **테스트 프로젝트에 적용됨** |
+| `016_couple_state_visibility.sql` | `get_my_couple_state()` 읽기 전용 RPC (커플 생애주기·초대 유효성) | **신규 / 원격 미적용** |
+
+> 013·014·015 는 테스트 Supabase 프로젝트에 수동으로 적용되었고 PostgREST 스키마
+> 캐시도 리로드되었습니다. 013 적용 중
+> `cannot change return type of existing function redeem_invitation(text)` 오류가
+> 발생해, 해당 함수를 정확한 시그니처로 DROP 한 뒤 013~015 를 다시 실행하여
+> 해결했습니다. 재발 방지 규칙은 아래 "함수 반환형 변경 규칙" 에 있습니다.
+> **016 은 아직 어디에도 적용되지 않았습니다.**
 
 ## 013이 하는 일
 
@@ -231,6 +239,52 @@ WHERE used = false GROUP BY code_hash HAVING count(*) > 1;
 - 순서 정규화와 모호한 초대코드 무효화는 데이터 변경이라 되돌아가지 않습니다.
 - `public.events` 를 publication 에 다시 넣으면 비공개 일정 삭제 타이밍 유출도
   함께 돌아옵니다.
+
+## 016이 하는 일
+
+`016_couple_state_visibility.sql` 은 **추가만 하는(additive) 읽기 전용
+마이그레이션**입니다. 기존 테이블·정책·권한·publication 은 하나도 건드리지
+않습니다.
+
+추가되는 것: `public.get_my_couple_state()` (`RETURNS JSONB`, `STABLE`,
+`SECURITY DEFINER`, `authenticated` 에만 `EXECUTE`).
+
+**왜 필요한가.** 013 §6 이 `invitation_codes` 의 클라이언트 `SELECT` 를 모두
+회수했습니다(그 자체로는 올바른 조치입니다 — 해시 probing 을 막습니다). 그 결과
+클라이언트가 아래 세 가지를 전혀 구분할 수 없게 되었습니다.
+
+- 공간을 만들고 상대를 기다리는 중 (pending, 코드 유효)
+- 초대 코드가 만료됨 (pending, 코드 만료)
+- 커플 공간이 아예 없음 (personal)
+
+그래서 초대 코드를 들고 있는 생성자에게 "초대 코드를 입력하세요" 라는 안내가
+표시되었습니다. `redeem_invitation` 이 `self_invitation` 으로 거부하는 바로 그
+행동입니다.
+
+**반환하지 않는 것.** 초대 코드 평문도, `code_hash` 도 절대 반환하지 않습니다.
+반환값은 `couple_id`, `role`, `member_status`, `partner_present`(불리언),
+`invitation_active`(불리언), `invitation_expires_at` 뿐입니다. 파라미터가 없으므로
+다른 사용자의 상태를 요청할 수단 자체가 없습니다.
+
+**적용 상태: 원격에 아직 적용되지 않았습니다.** 적용 절차는
+`docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` §2-6 을 따르세요. 적용 후
+**PostgREST 스키마 캐시 리로드가 필수**입니다. 리로드하지 않으면 RPC 가
+`PGRST202` 를 반환하고, 클라이언트는 이를 "서버에 기능이 배포되지 않음" 으로
+표시합니다(커플 공간이 없다고 잘못 표시하지 않습니다).
+
+### 함수 반환형 변경 규칙 (013 원격 실패에서 배운 것)
+
+013 을 원격에 적용할 때 다음 오류가 발생했습니다.
+
+```
+cannot change return type of existing function redeem_invitation(text)
+```
+
+`CREATE OR REPLACE FUNCTION` 은 반환형을 바꿀 수 없습니다. 015 는
+`DROP FUNCTION IF EXISTS public.redeem_invitation(TEXT);` 로 이미 이 문제를
+해결했고, **016 이후 모든 마이그레이션은 정의하는 모든 함수에 대해 정확한 시그니처로
+`DROP FUNCTION IF EXISTS` 를 먼저 실행합니다.** 이 규칙은
+`src/lib/migration016.test.ts` 가 자동으로 검사합니다.
 
 ## 정리 작업 (선택)
 

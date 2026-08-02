@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --force",
     "test": "vitest run --config vitest.config.ts --configLoader runner",
-    "check:edge": "deno check supabase/functions/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts",
+    "check:edge": "deno check supabase/functions/delete-account/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts",
     "test:edge": "deno test --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
     "cap:add:android": "cap add android",

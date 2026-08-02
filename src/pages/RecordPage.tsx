@@ -5,6 +5,7 @@ import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
 import { useEscapeKey } from '@/lib/hooks';
 import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
+import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar,
@@ -83,7 +84,9 @@ export function RecordPage() {
   const [viewMonth, setViewMonth] = useState(() => Number((tripPeriod?.from || todayStr).slice(5, 7)) - 1);
   const [selectedDate, setSelectedDate] = useState(tripPeriod?.from || todayStr);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
-  const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
+  // Hold the id, not a snapshot: the modal must re-read the record from the
+  // store after an edit, otherwise it keeps showing pre-save content.
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -91,12 +94,12 @@ export function RecordPage() {
   const timelineRef = useRef<HTMLDivElement>(null);
 
   const closeSelectedRecord = useCallback(() => {
-    setSelectedRecord(null);
+    setSelectedRecordId(null);
     setIsEditing(false);
     setEditText('');
     setShowDeleteConfirm(false);
   }, []);
-  useEscapeKey(closeSelectedRecord, selectedRecord !== null);
+  useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
 
   // Own records + the partner's shared ones, with author-only fragments removed.
   // Uses the shared privacy helper so the rule lives in exactly one place.
@@ -106,6 +109,18 @@ export function RecordPage() {
       ? recordsInInclusiveRange(permitted, tripPeriod.from, tripPeriod.to)
       : permitted;
   }, [records, profile.id, profile.role, tripPeriod]);
+
+  // Always the store's current version of the open record, already sanitised for
+  // this viewer by `visibleRecordsForViewer`.
+  const selectedRecord = useMemo(
+    () => visibleRecords.find((r) => r.id === selectedRecordId) ?? null,
+    [visibleRecords, selectedRecordId],
+  );
+
+  // The record went away (deleted here, or revoked by its author): close up.
+  useEffect(() => {
+    if (selectedRecordId !== null && selectedRecord === null) closeSelectedRecord();
+  }, [selectedRecordId, selectedRecord, closeSelectedRecord]);
 
   useEffect(() => {
     if (!tripPeriod) return;
@@ -524,7 +539,7 @@ export function RecordPage() {
                 <div
                   id={`record-${r.id}`}
                   key={r.id}
-                  onClick={() => setSelectedRecord(r)}
+                  onClick={() => setSelectedRecordId(r.id)}
                   className={cn(
                     'rounded-2xl bg-card border p-4 shadow-sm space-y-2 cursor-pointer active:scale-[0.98] transition-all duration-500',
                     isHighlighted
@@ -663,6 +678,13 @@ export function RecordPage() {
                     className="w-full h-32 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
                     placeholder="기록 내용을 입력하세요"
                   />
+                  {/* Say it before saving, not after: the confirmations were
+                      derived from the previous text, so they get cleared. */}
+                  {editText.trim() !== (selectedRecord.log ?? '').trim() && (
+                    <p className="text-xs text-muted-foreground">
+                      내용을 바꾸면 이전 글에서 고른 마음은 지워져요.
+                    </p>
+                  )}
                   <div className="flex gap-2 justify-end">
                     <button
                       onClick={() => {
@@ -694,7 +716,8 @@ export function RecordPage() {
                             toast.success('기록이 수정되었어요.');
                             setIsEditing(false);
                             setEditText('');
-                            setSelectedRecord(null);
+                            // Deliberately keep the modal open: it now re-reads
+                            // the saved record from the store.
                           } else {
                             toast.error('수정하지 못했어요. 다시 시도해 주세요.');
                           }
@@ -742,6 +765,11 @@ export function RecordPage() {
                   ))}
                 </div>
               )}
+
+              {/* Derived on the fly from the record's confirmed emotions. The
+                  record here is already sanitised for this viewer, so a
+                  partner never sees author-only items in it. */}
+              <EmotionFlowInsightCard items={selectedRecord.emotionFlow} variant="detail" />
 
               {/* Owner-only edit/delete controls. Partner records NEVER show these. */}
               {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (

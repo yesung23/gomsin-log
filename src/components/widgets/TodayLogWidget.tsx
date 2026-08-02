@@ -5,6 +5,7 @@ import {
   Mic, Square, X, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
@@ -23,6 +24,7 @@ export function TodayLogWidget() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showInputCard, setShowInputCard] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const isOffline = !useOnlineStatus();
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
 
@@ -236,6 +238,12 @@ export function TodayLogWidget() {
 
   const handlePost = async () => {
     if (isSaving) return;
+    // Read-only while offline: firing this write would fail and then be explained
+    // with a message that could not name the real cause.
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (isRecording) {
       toast.info('녹음을 먼저 마쳐주세요.');
       return;
@@ -488,7 +496,7 @@ export function TodayLogWidget() {
 
             <button
               onClick={handlePost}
-              disabled={isSaving}
+              disabled={isSaving || isOffline}
               className="px-4 py-1.5 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition"
             >
               {isSaving ? '저장 중...' : '저장'}

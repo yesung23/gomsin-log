@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import type { AppState, Role } from '@/types';
+import type { AppState, EmotionFlowItem, Role } from '@/types';
 
 const addRecordWithMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
 const setWidgetLayout = vi.fn();
@@ -170,5 +170,99 @@ describe('composer attachment handling', () => {
     await user.click(screen.getByText('저장'));
 
     await waitFor(() => expect(addRecordWithMedia).not.toHaveBeenCalled());
+  });
+});
+
+/**
+ * The composer preview must be derived from the very array that gets saved, and
+ * the derivation itself must never be persisted. `LOG_TEXT` is chosen so the
+ * rule engine yields 속상함 (sadness) then 행복 (joy) -- a recovery flow.
+ */
+describe('composer emotion flow preview', () => {
+  const LOG_TEXT = '오늘은 많이 속상했어. 그래도 저녁에는 기분이 좋아졌어.';
+
+  /** Open the composer, type the fixture text and wait for the chips. */
+  async function openWithSuggestions(user: ReturnType<typeof userEvent.setup>) {
+    renderIn(<WidgetDashboard />);
+    await user.click(screen.getByText('한줄'));
+    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    await user.type(textarea, LOG_TEXT);
+    // The suggestion list is debounced by 300ms.
+    return waitFor(() => expect(screen.getByText('1. 속상함')).toBeInTheDocument());
+  }
+
+  beforeEach(() => {
+    addRecordWithMedia.mockClear();
+    currentRole = 'gomsin';
+  });
+
+  it('shows no insight card before any chip is tapped', async () => {
+    const user = userEvent.setup({ delay: null });
+    await openWithSuggestions(user);
+
+    expect(screen.queryByText('마음의 흐름')).not.toBeInTheDocument();
+  });
+
+  it('renders the insight card with both labels and a summary once two chips are tapped', async () => {
+    const user = userEvent.setup({ delay: null });
+    await openWithSuggestions(user);
+
+    await user.click(screen.getByText('1. 속상함'));
+    await user.click(screen.getByText('2. 행복'));
+
+    expect(await screen.findByText('마음의 흐름')).toBeInTheDocument();
+    expect(screen.getByText('속상함 → 행복')).toBeInTheDocument();
+    expect(
+      screen.getByText(/속상함 → 행복 마음이 조금씩 편해지는 쪽으로 움직였어요\./),
+    ).toBeInTheDocument();
+    // The preview is explicitly labelled as not being stored.
+    expect(screen.getByText('미리보기예요. 이 정리는 저장되지 않아요.')).toBeInTheDocument();
+  });
+
+  it('saves only user_confirmed items, with no matchedText and no analysis field', async () => {
+    const user = userEvent.setup({ delay: null });
+    await openWithSuggestions(user);
+
+    await user.click(screen.getByText('1. 속상함'));
+    await user.click(screen.getByText('2. 행복'));
+    await user.click(screen.getByText('저장'));
+
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
+    const [record] = addRecordWithMedia.mock.calls[0] as unknown as [
+      Record<string, unknown> & { emotionFlow: EmotionFlowItem[] },
+    ];
+
+    expect(record.emotionFlow).toHaveLength(2);
+    expect(record.emotionFlow.every((i) => i.source === 'user_confirmed')).toBe(true);
+    expect(record.emotionFlow.every((i) => !('matchedText' in i))).toBe(true);
+    expect(record.emotionFlow.map((i) => i.displayLabel)).toEqual(['속상함', '행복']);
+    expect(record.emotionFlow.map((i) => i.sequence)).toEqual([1, 2]);
+
+    // The derived analysis must not ride along into storage.
+    for (const key of ['emotionFlowAnalysis', 'analysis', 'summary', 'emotionSummary', 'shape']) {
+      expect(record).not.toHaveProperty(key);
+    }
+    // No diary fragment reached the payload's emotion items.
+    expect(JSON.stringify(record.emotionFlow)).not.toContain('속상했어');
+  });
+
+  it('marks every saved item author_only when 나만 보기 is on', async () => {
+    const user = userEvent.setup({ delay: null });
+    await openWithSuggestions(user);
+
+    await user.click(screen.getByText('공유하기'));
+    await waitFor(() => expect(screen.getByText('나만 보기')).toBeInTheDocument());
+
+    await user.click(screen.getByText('1. 속상함'));
+    await user.click(screen.getByText('2. 행복'));
+    await user.click(screen.getByText('저장'));
+
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
+    const [record] = addRecordWithMedia.mock.calls[0] as unknown as [
+      { emotionFlow: EmotionFlowItem[]; isPrivate: boolean },
+    ];
+    expect(record.isPrivate).toBe(true);
+    expect(record.emotionFlow).toHaveLength(2);
+    expect(record.emotionFlow.every((i) => i.visibility === 'author_only')).toBe(true);
   });
 });

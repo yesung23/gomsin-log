@@ -1,5 +1,6 @@
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 import {
   CYCLE_SUPPORT_KINDS,
   CYCLE_SYMPTOMS,
@@ -29,6 +30,22 @@ export type CycleEntriesFetchResult =
 export type CycleSupportSignalsFetchResult =
   | { ok: true; signals: CycleSupportSignal[] }
   | CycleFetchFailure;
+
+/**
+ * Outcome of a cycle write.
+ *
+ * Deliberately not `T | null` / `boolean`. Those shapes discarded the one thing
+ * the user needed: an RLS rejection (`42501`, e.g. the couple was disconnected
+ * from the other device mid-session), an expired session and a dead network all
+ * collapsed into one falsy value, so both cycle surfaces reported "연결을 확인해
+ * 주세요" and invited a retry that could never succeed. The reason is classified
+ * by `serverErrors.ts` and carried to the message the user reads.
+ */
+export type CycleWriteFailure = { ok: false; reason: ServerErrorKind };
+export type CycleEntryWriteResult = { ok: true; entry: CycleEntry } | CycleWriteFailure;
+export type CycleSettingsWriteResult = { ok: true; settings: CycleSettings } | CycleWriteFailure;
+export type CycleSupportWriteResult = { ok: true; signal: CycleSupportSignal } | CycleWriteFailure;
+export type CycleDeleteResult = { ok: true } | CycleWriteFailure;
 
 export interface CycleEntryDraft {
   startDate: string;
@@ -67,6 +84,54 @@ export interface CycleSupportInsertPayload {
 
 function fetchFailure(error?: { code?: string } | null): CycleFetchFailure {
   return { ok: false, reason: error?.code === '42501' ? 'forbidden' : 'error' };
+}
+
+/** Classify a rejected Supabase write into the shared server-error vocabulary. */
+function writeFailure(error: unknown): CycleWriteFailure {
+  return { ok: false, reason: classifyServerError(error).kind };
+}
+
+/**
+ * The client cannot reach a server at all (no Supabase configuration).
+ *
+ * `offline` only when the browser itself reports no network, so a build without
+ * credentials never claims a connection problem it cannot know about.
+ */
+function unconfiguredFailure(): CycleWriteFailure {
+  return {
+    ok: false,
+    reason: classifyServerError(new Error('Cycle database is unavailable')).kind === 'offline'
+      ? 'offline'
+      : 'server',
+  };
+}
+
+/**
+ * The tri-state pre-flight gate blocked this write because the account is being
+ * deleted.
+ *
+ * `forbidden` is the honest classification -- authenticated but not permitted --
+ * and it is correctly non-retryable. The copy is a fallback only: the gate also
+ * triggers the pending-deletion surface, which takes over the screen.
+ */
+function deletionGateFailure(): CycleWriteFailure {
+  return { ok: false, reason: 'forbidden' };
+}
+
+/**
+ * A write that never left the client because the draft was locally invalid.
+ *
+ * Both cycle surfaces run the same validators first and show their specific
+ * Korean copy, so this is a defensive fallback rather than the message a user
+ * normally sees.
+ */
+function invalidDraftFailure(): CycleWriteFailure {
+  return { ok: false, reason: 'unknown' };
+}
+
+/** No usable session, so the request cannot be attributed to a user. */
+function unauthenticatedFailure(): CycleWriteFailure {
+  return { ok: false, reason: 'auth_expired' };
 }
 
 async function currentUserId(): Promise<string | null> {
@@ -292,13 +357,13 @@ export async function fetchCycleSettingsFromDB(): Promise<CycleSettings | null> 
 export async function saveCycleSettingsToDB(
   averageCycleLength: number,
   averagePeriodLength: number,
-): Promise<CycleSettings | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
-  if (validateCycleSettings(averageCycleLength, averagePeriodLength)) return null;
+): Promise<CycleSettingsWriteResult> {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
+  if (validateCycleSettings(averageCycleLength, averagePeriodLength)) return invalidDraftFailure();
   // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
+  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   const userId = await currentUserId();
-  if (!userId) return null;
+  if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
     .from('cycle_settings')
@@ -313,12 +378,15 @@ export async function saveCycleSettingsToDB(
 
   if (error || !data) {
     console.error('Failed to save cycle settings:', error);
-    return null;
+    return writeFailure(error);
   }
   return {
-    userId: data.user_id,
-    averageCycleLength: data.average_cycle_length,
-    averagePeriodLength: data.average_period_length,
+    ok: true,
+    settings: {
+      userId: data.user_id,
+      averageCycleLength: data.average_cycle_length,
+      averagePeriodLength: data.average_period_length,
+    },
   };
 }
 
@@ -350,14 +418,14 @@ export async function saveCycleEntryToDB(
   endDate?: string,
   notes?: string,
   symptoms: CycleSymptom[] = [],
-): Promise<CycleEntry | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
+): Promise<CycleEntryWriteResult> {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   const draft = { startDate, endDate, notes, symptoms };
   // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
-  if (validateCycleEntryDraft(draft)) return null;
+  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
+  if (validateCycleEntryDraft(draft)) return invalidDraftFailure();
   const userId = await currentUserId();
-  if (!userId) return null;
+  if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
     .from('cycle_entries')
@@ -374,21 +442,23 @@ export async function saveCycleEntryToDB(
 
   if (error || !data) {
     console.error('Failed to save cycle entry:', error);
-    return null;
+    return writeFailure(error);
   }
-  return mapCycleEntryRow(data);
+  return { ok: true, entry: mapCycleEntryRow(data) };
 }
 
 export async function updateCycleEntryInDB(
   id: string,
   draft: CycleEntryDraft,
-): Promise<CycleEntry | null> {
-  if (!isSupabaseConfigured || !supabase || !id) return null;
-  if (validateCycleEntryDraft(draft)) return null;
+): Promise<CycleEntryWriteResult> {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
+  // No target id: there is nothing to update, which is not a transport problem.
+  if (!id) return { ok: false, reason: 'not_found' };
+  if (validateCycleEntryDraft(draft)) return invalidDraftFailure();
   // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
+  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   const userId = await currentUserId();
-  if (!userId) return null;
+  if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
     .from('cycle_entries')
@@ -404,19 +474,23 @@ export async function updateCycleEntryInDB(
     .select('id, user_id, start_date, end_date, notes, symptoms')
     .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
     console.error('Failed to update cycle entry:', error);
-    return null;
+    return writeFailure(error);
   }
-  return mapCycleEntryRow(data);
+  // The filters pin id + owner, so an empty answer is an ownership/visibility
+  // verdict rather than a failed request.
+  if (!data) return { ok: false, reason: 'not_found' };
+  return { ok: true, entry: mapCycleEntryRow(data) };
 }
 
-export async function deleteCycleEntryFromDB(id: string): Promise<boolean> {
-  if (!isSupabaseConfigured || !supabase || !id) return false;
+export async function deleteCycleEntryFromDB(id: string): Promise<CycleDeleteResult> {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
+  if (!id) return { ok: false, reason: 'not_found' };
   // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return false;
+  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   const userId = await currentUserId();
-  if (!userId) return false;
+  if (!userId) return unauthenticatedFailure();
   const { data, error } = await supabase
     .from('cycle_entries')
     .delete()
@@ -427,9 +501,11 @@ export async function deleteCycleEntryFromDB(id: string): Promise<boolean> {
 
   if (error) {
     console.error('Failed to delete cycle entry:', error);
-    return false;
+    return writeFailure(error);
   }
-  return !!data;
+  // Nothing was deleted: the row is gone or was never this user's.
+  if (!data) return { ok: false, reason: 'not_found' };
+  return { ok: true };
 }
 
 export async function fetchCycleSupportSignalsResultFromDB(
@@ -469,14 +545,14 @@ export const fetchCycleSupportSignalsFromDB = listCycleSupportSignalsFromDB;
 
 export async function createCycleSupportSignalInDB(
   input: CreateCycleSupportSignalInput,
-): Promise<CycleSupportSignal | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
+): Promise<CycleSupportWriteResult> {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   const userId = await currentUserId();
   // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
-  if (!userId) return null;
+  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
+  if (!userId) return unauthenticatedFailure();
   const payload = buildCycleSupportPayload(input, userId);
-  if (!payload) return null;
+  if (!payload) return invalidDraftFailure();
 
   const { data, error } = await supabase
     .from('cycle_support_signals')
@@ -486,17 +562,18 @@ export async function createCycleSupportSignalInDB(
 
   if (error || !data) {
     console.error('Failed to create cycle support signal:', error);
-    return null;
+    return writeFailure(error);
   }
-  return mapCycleSupportSignalRow(data);
+  return { ok: true, signal: mapCycleSupportSignalRow(data) };
 }
 
-export async function revokeCycleSupportSignalFromDB(id: string): Promise<boolean> {
-  if (!isSupabaseConfigured || !supabase || !id) return false;
+export async function revokeCycleSupportSignalFromDB(id: string): Promise<CycleDeleteResult> {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
+  if (!id) return { ok: false, reason: 'not_found' };
   // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return false;
+  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   const userId = await currentUserId();
-  if (!userId) return false;
+  if (!userId) return unauthenticatedFailure();
   const revokedAt = new Date().toISOString();
   const { data, error } = await supabase
     .from('cycle_support_signals')
@@ -508,7 +585,9 @@ export async function revokeCycleSupportSignalFromDB(id: string): Promise<boolea
 
   if (error) {
     console.error('Failed to revoke cycle support signal:', error);
-    return false;
+    return writeFailure(error);
   }
-  return !!data;
+  // Nothing was revoked: the signal is gone or was never this user's to share.
+  if (!data) return { ok: false, reason: 'not_found' };
+  return { ok: true };
 }

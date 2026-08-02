@@ -486,7 +486,10 @@ export function TodayLogWidget() {
           <div className="pt-2 flex items-center justify-between">
             <button
               onClick={() => setIsPrivate(!isPrivate)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 ${
+              // 44px minimum: measured at 32px in a real browser, which is below
+              // the tap-target floor for the control that decides whether a record
+              // is shared with the partner.
+              className={`min-h-[44px] px-3 rounded-lg text-xs font-bold flex items-center gap-1 ${
                 isPrivate ? 'bg-amber-100 text-amber-800' : 'bg-muted text-muted-foreground'
               }`}
             >
@@ -497,7 +500,9 @@ export function TodayLogWidget() {
             <button
               onClick={handlePost}
               disabled={isSaving || isOffline}
-              className="px-4 py-1.5 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition"
+              // 44px minimum: measured at 32px in a real browser. This is the
+              // primary save action of the whole app.
+              className="min-h-[44px] px-4 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"
             >
               {isSaving ? '저장 중...' : '저장'}
             </button>

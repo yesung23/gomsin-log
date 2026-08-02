@@ -78,12 +78,16 @@ export function deriveCoupleLifecycle(
   if (remote === undefined) return 'unknown';
 
   if (remote === null || !remote.coupleId) {
-    // The server is definite: this account is in no couple space. A local
-    // `disconnected` marker is kept because it carries history the server has
-    // already forgotten, and it reads better than "you never had a space".
-    return local?.status === 'disconnected' && local?.coupleId === undefined
-      ? 'disconnected'
-      : 'personal';
+    /**
+     * The server is definite: this account is in no couple space.
+     *
+     * `disconnected` requires POSITIVE evidence that a space was known -- a local
+     * `coupleId`. `status: 'disconnected'` alone is NOT evidence: `sync.ts` uses it
+     * as the default for an account that has never had a couple at all, so keying
+     * on it told brand-new users "커플 공간 연결이 해제되었어요" about a space they
+     * never had.
+     */
+    return local?.coupleId ? 'disconnected' : 'personal';
   }
 
   if (remote.memberStatus && remote.memberStatus !== 'active') return 'disconnected';

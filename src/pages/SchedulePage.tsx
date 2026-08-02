@@ -42,7 +42,7 @@ const EVENT_BADGES: Record<EventType, { label: string; color: string }> = {
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden';
 
 export function SchedulePage() {
-  const { state, addEvent, updateEvent, deleteEvent, reloadEvents } = useStore();
+  const { state, addEvent, updateEvent, deleteEvent, reloadEvents, sharedSyncStatus } = useStore();
   const { profile, events, authenticatedUser } = state;
   const today = toLocalDateString(localToday());
   /** Both partners present: required before a schedule can be shared. */
@@ -132,6 +132,49 @@ export function SchedulePage() {
       cancelled = true;
     };
   }, [authenticatedUser?.id, scheduleAccessKey]);
+
+  /**
+   * Re-read once the shared workspace becomes authoritative again.
+   *
+   * `reloadEvents` reports `forbidden` while the workspace is QUARANTINED, which is
+   * a transient transport state, not a permissions verdict: when the realtime
+   * channel cannot be established at all (blocked WebSocket, restrictive network),
+   * the store quarantines, then recovers over HTTP a moment later. Without this
+   * effect the page's single load attempt landed inside that window and left
+   * "일정을 볼 권한이 없어요" on screen permanently, even though the events were
+   * available and every other surface showed them.
+   *
+   * Only a transition INTO a healthy state triggers the retry, so a live workspace
+   * does not re-read on every transport flap.
+   */
+  const previousSyncStatusRef = useRef(sharedSyncStatus);
+  /**
+   * Read through a ref, NOT a dependency.
+   *
+   * Depending on `loadState` here would make the effect re-trigger itself: it sets
+   * `loading`, the dependency changes, the effect re-runs and its cleanup cancels
+   * the in-flight retry -- leaving the page spinning forever.
+   */
+  const loadStateRef = useRef(loadState);
+  loadStateRef.current = loadState;
+  useEffect(() => {
+    const previous = previousSyncStatusRef.current;
+    previousSyncStatusRef.current = sharedSyncStatus;
+    if (!authenticatedUser?.id) return;
+    if (previous !== 'unavailable' || sharedSyncStatus === 'unavailable') return;
+    if (loadStateRef.current === 'ready' || loadStateRef.current === 'loading') return;
+
+    let cancelled = false;
+    setLoadState('loading');
+    void reloadEventsRef.current().then((result) => {
+      if (cancelled) return;
+      if (result.ok) setLoadState('ready');
+      else setLoadState(result.reason === 'forbidden' ? 'forbidden' : 'error');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticatedUser?.id, sharedSyncStatus]);
 
   const retryLoad = async () => {
     setLoadState('loading');

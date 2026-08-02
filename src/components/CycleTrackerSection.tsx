@@ -33,6 +33,7 @@ import {
   type CycleEntryDraft,
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
+import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { cn } from '@/lib/utils';
 import { CYCLE_SYMPTOMS, type CycleEntry, type CycleSymptom } from '@/types';
 
@@ -264,14 +265,17 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setFormPending(true);
     setFormError(null);
     try {
-      const saved = editingId
+      const result = editingId
         ? await updateCycleEntryInDB(editingId, draft)
         : await saveCycleEntryToDB(draft.startDate, draft.endDate, draft.notes, draft.symptoms);
       if (!isCurrentIdentity(identity)) return;
-      if (!saved) {
-        setFormError('기록을 저장하지 못했어요. 입력 내용과 연결을 확인해 주세요.');
+      if (!result.ok) {
+        // The cause decides the copy. A `forbidden` result is a permission
+        // problem, so it must never be reported as a connection problem.
+        setFormError(serverErrorMessage(result.reason));
         return;
       }
+      const saved = result.entry;
       setEntries((current) => [
         saved,
         ...current.filter((entry) => entry.id !== saved.id),
@@ -284,7 +288,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     } catch (saveError) {
       if (!isCurrentIdentity(identity)) return;
       console.error('Failed to save private cycle entry:', saveError);
-      setFormError('기록을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      setFormError(classifyServerError(saveError).message);
     } finally {
       if (isCurrentIdentity(identity)) setFormPending(false);
     }
@@ -296,10 +300,10 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setDeletePendingId(entry.id);
     setFormError(null);
     try {
-      const deleted = await deleteCycleEntryFromDB(entry.id);
+      const result = await deleteCycleEntryFromDB(entry.id);
       if (!isCurrentIdentity(identity)) return;
-      if (!deleted) {
-        setFormError('기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+      if (!result.ok) {
+        setFormError(serverErrorMessage(result.reason));
         return;
       }
       setEntries((current) => {
@@ -315,7 +319,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     } catch (deleteError) {
       if (!isCurrentIdentity(identity)) return;
       console.error('Failed to delete private cycle entry:', deleteError);
-      setFormError('기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+      setFormError(classifyServerError(deleteError).message);
     } finally {
       if (isCurrentIdentity(identity)) setDeletePendingId(null);
     }
@@ -332,12 +336,13 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setSettingsPending(true);
     setSettingsError(null);
     try {
-      const saved = await saveCycleSettingsToDB(cycleLengthDraft, periodLengthDraft);
+      const result = await saveCycleSettingsToDB(cycleLengthDraft, periodLengthDraft);
       if (!isCurrentIdentity(identity)) return;
-      if (!saved) {
-        setSettingsError('설정을 저장하지 못했어요. 다시 시도해 주세요.');
+      if (!result.ok) {
+        setSettingsError(serverErrorMessage(result.reason));
         return;
       }
+      const saved = result.settings;
       setCycleLength(saved.averageCycleLength);
       setPeriodLength(saved.averagePeriodLength);
       setCycleLengthDraft(saved.averageCycleLength);
@@ -346,7 +351,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
       console.error('Failed to save private cycle settings:', error);
-      setSettingsError('설정을 저장하지 못했어요. 다시 시도해 주세요.');
+      setSettingsError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setSettingsPending(false);
     }

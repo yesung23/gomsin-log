@@ -3,6 +3,9 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reloadCalls = vi.fn();
+/** Result the mocked `reloadEvents` returns; a test can flip it mid-run. */
+let reloadResult: { ok: true } | { ok: false; reason: 'forbidden' | 'error' } = { ok: true };
+let sharedSyncStatus: 'live' | 'delayed' | 'unavailable' = 'live';
 const addEvent = vi.fn();
 const deleteEvent = vi.fn();
 const toastCalls: { level: string; message: string }[] = [];
@@ -53,9 +56,10 @@ vi.mock('@/lib/useStore', () => ({
     deleteEvent,
     // Deliberately return a new function on every render, matching the current
     // inline StoreProvider action identity.
+    sharedSyncStatus,
     reloadEvents: () => {
       reloadCalls();
-      return Promise.resolve({ ok: true as const });
+      return Promise.resolve(reloadResult);
     },
   }),
 }));
@@ -70,9 +74,12 @@ function addEventButton(): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
-function openCreateModal() {
+async function openCreateModal() {
+  // The entry point is disabled until the first load settles.
+  await waitFor(() => expect(addEventButton()).toBeEnabled());
   fireEvent.click(addEventButton());
-  fireEvent.change(screen.getByLabelText(/일정 제목/), { target: { value: '면회' } });
+  const title = await screen.findByLabelText(/일정 제목/);
+  fireEvent.change(title, { target: { value: '면회' } });
 }
 
 function setOnLine(value: boolean) {
@@ -80,6 +87,11 @@ function setOnLine(value: boolean) {
 }
 
 describe('SchedulePage loading lifecycle', () => {
+  beforeEach(() => {
+    reloadResult = { ok: true };
+    sharedSyncStatus = 'live';
+  });
+
   it('loads once per identity/workspace instead of looping on action identity changes', async () => {
     reloadCalls.mockClear();
     setOnLine(true);
@@ -94,6 +106,8 @@ describe('SchedulePage loading lifecycle', () => {
 
 describe('SchedulePage offline read-only mode', () => {
   beforeEach(() => {
+    reloadResult = { ok: true };
+    sharedSyncStatus = 'live';
     reloadCalls.mockClear();
     addEvent.mockReset().mockResolvedValue(true);
     deleteEvent.mockReset().mockResolvedValue(true);
@@ -133,7 +147,7 @@ describe('SchedulePage offline read-only mode', () => {
     render(<SchedulePage />);
     expect(await screen.findByText('공유·개인 일정')).toBeInTheDocument();
 
-    openCreateModal();
+    await openCreateModal();
 
     await act(async () => {
       setOnLine(false);
@@ -151,6 +165,8 @@ describe('SchedulePage offline read-only mode', () => {
 
 describe('SchedulePage write integrity', () => {
   beforeEach(() => {
+    reloadResult = { ok: true };
+    sharedSyncStatus = 'live';
     reloadCalls.mockClear();
     addEvent.mockReset().mockResolvedValue(true);
     deleteEvent.mockReset().mockResolvedValue(true);
@@ -173,5 +189,59 @@ describe('SchedulePage write integrity', () => {
     // The list is driven by store state, which the refused write never entered.
     expect(screen.queryByText('거절되는 일정')).not.toBeInTheDocument();
     expect(toastCalls.some((call) => call.level === 'error')).toBe(true);
+  });
+});
+
+describe('SchedulePage transient quarantine recovery', () => {
+  beforeEach(() => {
+    reloadCalls.mockClear();
+    reloadResult = { ok: true };
+    sharedSyncStatus = 'live';
+    setOnLine(true);
+  });
+
+  it('re-reads once the shared workspace becomes authoritative again', async () => {
+    // The store reports `forbidden` while the workspace is quarantined, which is a
+    // transient transport state -- not a permissions verdict. A blocked realtime
+    // socket used to leave "일정을 볼 권한이 없어요" on screen forever.
+    reloadResult = { ok: false, reason: 'forbidden' };
+    sharedSyncStatus = 'unavailable';
+    const view = render(<SchedulePage />);
+
+    expect(await screen.findByText('일정을 볼 권한이 없어요')).toBeInTheDocument();
+    await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
+
+    // HTTP reconciliation succeeded: the workspace is trustworthy again.
+    reloadResult = { ok: true };
+    sharedSyncStatus = 'delayed';
+    view.rerender(<SchedulePage />);
+
+    await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByText('일정을 볼 권한이 없어요')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('does not re-read while the workspace stays unavailable', async () => {
+    reloadResult = { ok: false, reason: 'forbidden' };
+    sharedSyncStatus = 'unavailable';
+    const view = render(<SchedulePage />);
+
+    await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
+    view.rerender(<SchedulePage />);
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+    expect(reloadCalls).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-read a healthy workspace on a transport flap', async () => {
+    sharedSyncStatus = 'live';
+    const view = render(<SchedulePage />);
+    await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
+
+    sharedSyncStatus = 'delayed';
+    view.rerender(<SchedulePage />);
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+    // live -> delayed is not a recovery from quarantine, so nothing is re-read.
+    expect(reloadCalls).toHaveBeenCalledTimes(1);
   });
 });

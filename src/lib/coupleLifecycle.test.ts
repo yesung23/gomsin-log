@@ -90,7 +90,28 @@ describe('deriveCoupleLifecycle', () => {
 
   it('reports personal for an authoritative no-membership answer', () => {
     expect(deriveCoupleLifecycle(null, local({ coupleId: undefined }))).toBe('personal');
-    expect(deriveCoupleLifecycle(remote({ coupleId: null }), local())).toBe('personal');
+  });
+
+  it('reports personal, not disconnected, for a never-connected account', () => {
+    // `sync.ts` uses `status: 'disconnected'` as the DEFAULT for an account with no
+    // membership, so it is not evidence of a past connection. Keying on it told
+    // brand-new users their (never-existing) space had been disconnected.
+    expect(
+      deriveCoupleLifecycle(null, {
+        partnerName: '',
+        coupleCode: '',
+        connected: false,
+        status: 'disconnected',
+      }),
+    ).toBe('personal');
+  });
+
+  it('reports disconnected only with positive evidence of a known space', () => {
+    expect(
+      deriveCoupleLifecycle(null, local({ coupleId: 'couple-1', status: 'disconnected' })),
+    ).toBe('disconnected');
+    // The server says this account is in no couple, but local state still names one.
+    expect(deriveCoupleLifecycle(remote({ coupleId: null }), local())).toBe('disconnected');
   });
 
   it('reports disconnected when membership is no longer active', () => {

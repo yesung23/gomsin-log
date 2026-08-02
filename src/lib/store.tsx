@@ -904,7 +904,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             const prev = stateRef.current;
             const syncUnavailable = dbState === FULL_STATE_UNAVAILABLE;
             setAuthSyncUnavailable(syncUnavailable);
-            setAuthSyncReason(hydration.ok ? null : hydration.reason);
+            // A known auth loss is the most specific and most actionable cause, so a
+            // concurrent hydration pass that failed for a vaguer reason must not mask
+            // it: that would replace "다시 로그인해 주세요" with "잠시 후 다시 시도해
+            // 주세요" and strand the user on a retry that cannot succeed. Success
+            // still clears it outright.
+            setAuthSyncReason((previous) => {
+              if (hydration.ok) return null;
+              return previous === 'auth_expired' ? previous : hydration.reason;
+            });
             if (syncUnavailable) {
               // A failed hydration answers nothing about the couple space, so the
               // lifecycle must go to `unknown` -- never to `personal`.

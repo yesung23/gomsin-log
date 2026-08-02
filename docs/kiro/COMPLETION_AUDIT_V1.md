@@ -190,6 +190,41 @@ Fixed by item 15.
 
 Fixed by items 3, 15.
 
+### F17 (defect, CONFIRMED-IN-SOURCE, found while executing item 15) — every cycle write discards its cause
+
+All six writes in `src/lib/cycle.ts` returned `T | null` or `boolean`:
+`saveCycleSettingsToDB:292`, `saveCycleEntryToDB:348`, `updateCycleEntryInDB:382`,
+`deleteCycleEntryFromDB:414`, `createCycleSupportSignalInDB:470`,
+`revokeCycleSupportSignalFromDB:494`. The module already classified `42501` as `forbidden`
+for its READS (`fetchFailure:68`) but threw that information away for its WRITES.
+
+What the user experienced: `CycleTrackerSection.tsx:272` said
+`'기록을 저장하지 못했어요. 입력 내용과 연결을 확인해 주세요.'` and
+`CycleSupportSection.tsx:266` said `'응원 신호를 공유하지 못했어요. 연결을 확인해 주세요.'`
+for *every* cause. So an RLS rejection — the realistic one being that the partner
+disconnected the couple from the other device mid-session — blamed the user's own input and
+their network, and invited a retry that could never succeed.
+
+Local state was already correctly committed only after a confirmed result, so this was
+purely a misattributed-cause defect, not a phantom-success one.
+
+Fixed by item 15: the six writes return classified result unions
+(`CycleEntryWriteResult` / `CycleSettingsWriteResult` / `CycleSupportWriteResult` /
+`CycleDeleteResult`) and both surfaces render `serverErrors.ts` copy, including in their
+`catch` paths.
+
+### F18 (defect, CONFIRMED-IN-BROWSER, found during item 20) — two composer controls below the tap-target floor
+
+Measured in a real Chromium at 390/412/430: the home composer's 저장 button rendered
+32px tall and the 비공개 toggle 32px, both below the 44px floor. These two are called out
+separately from the pre-existing density findings in `AI_HANDOFF.md` §4.1 because of what
+they do: 저장 is the primary write action of the whole app, and the toggle decides whether a
+record is shared with the partner — a mis-tap there is a privacy consequence, not a
+cosmetic one.
+
+Fixed by item 15 (`min-h-[44px]`). The remaining sub-44px controls listed in §4.1 are
+unchanged and still recorded as design decisions.
+
 ---
 
 ## 6. Deployment reproducibility
@@ -268,9 +303,40 @@ Fixed by item 16.
 | F14 | Edge Function layout drift | defect | 7 | fixed |
 | F15 | Migration return-type conflict can recur | defect | 6, 7, 21 | fixed (rule + 016 complies) |
 | F16 | No EmoFlow period summary | incomplete | 16 | fixed |
+| F17 | Every cycle write discards its cause | defect | 15 | fixed |
+| F18 | Composer 저장 / 비공개 toggle below 44px | defect | 15 | fixed |
 
-Intentionally not fixed, with reasons, is recorded in `docs/kiro/AI_HANDOFF.md` §4.1 and in
-the final report: the three pre-existing visual findings (coral contrast below AA, sub-44px
-density in calendar/composer chrome, offline-banner ↔ floating-CTA overlap) are design
-decisions that predate this work, and `master`'s incompatibility with the hardened database
-is out of scope by mandate.
+Every finding above is closed as **fixed**. Nothing was closed as
+"intentionally not fixed" — the items below were never opened as findings, because they are
+pre-existing design decisions or out-of-scope external work rather than defects introduced
+or completed here.
+
+### Intentionally not addressed, and why
+
+| Item | Why not |
+| --- | --- |
+| `--coral` contrast below AA (2.01–2.54:1) as body text / button background | Brand token used in ~100 places. Changing it recolours the whole app, which is a design decision, not a bug fix. Recorded in `AI_HANDOFF.md` §4.1. |
+| Remaining sub-44px controls (calendar cells 42×42, month arrows 34×34, composer chips ×34, close 37×24) | A deliberate density choice spanning many components; enlarging them wholesale is a redesign. The two controls with a real correctness cost were fixed (F18). |
+| Offline banner ↔ floating CTA 18px overlap | Pre-existing, and raising the banner makes the overlap *worse* (36px). Needs a joint decision about the bottom region (banner + CTA + tab bar). The part that was a genuine defect — the banner being hidden *behind* the tab bar — was already fixed with `z-[60]`. |
+| Focus ring invisible on two settings buttons | `outline: solid 2px` is applied but does not paint, and sibling buttons in the same section are fine. Cause not established; not fixed on a guess. |
+| `master` incompatibility with the hardened database | Out of scope by mandate: the implementation source is `kiro/web-app-completion-v2`, and `master` must not be used. Recorded as a known, unaddressed external item. |
+| Applying migration 016 remotely, redeploying the Edge Function | Explicitly forbidden for this work. Steps are written out in `SUPABASE_DEPLOYMENT_CHECKLIST.md` §2-6 / §5-0 and `MANUAL_TWO_ACCOUNT_TEST.md` §9-0. |
+| Payments, chat | Out of scope by mandate (no unrelated features). |
+
+### Verification outcomes for the non-code items
+
+- **PWA / resilience (item 19): no defects found.** The production build emits a service
+  worker with both the asset manifest and the build id substituted
+  (`gomsinlog-app-shell-<hash>`, 22 asset entries), `dist/_headers` carries a real CSP with
+  both `https://` and `wss://` Supabase origins and no unsubstituted `__SUPABASE_*_SRC__`
+  markers, and `offline.html`, `manifest.json`, `favicon.svg` and the icon set are all
+  emitted. Safe-area insets are applied on the shell (`pt-[env(safe-area-inset-top)]`), the
+  tab bar (`pb-[max(env(safe-area-inset-bottom),10px)]`) and the offline banner.
+- **Playwright interaction matrix (item 20): 433 checks, 0 failures, 12 combinations**
+  (gomsin/soldier × light/dark × 390/412/430). **MOCK-ONLY** — see the label in
+  `MANUAL_TWO_ACCOUNT_TEST.md`. Two weaknesses in the harness itself were fixed rather than
+  left to pass vacuously: fixtures were dated from the node (UTC) clock while the browser
+  ran Asia/Seoul, putting every seeded record on "yesterday"; and the EmoFlow check accepted
+  `empty` as a definite state, so it passed before the records had loaded. It now waits for
+  `ready` and asserts that the aggregate spans both partners' shared emotions while the
+  partner's `author_only` item never enters it.

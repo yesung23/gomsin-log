@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
 import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { Heart, Calendar as CalendarIcon, CalendarDays, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn, toLocalDateString, localToday } from '@/lib/utils';
@@ -32,7 +33,7 @@ function buildCalendarGrid(year: number, month: number) {
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 export function UsPage() {
-  const { state } = useStore();
+  const { state, coupleLifecycle } = useStore();
   const navigate = useNavigate();
   const { myName } = state.profile;
   const partnerName = state.profile.couple.partnerName || '상대방';
@@ -112,11 +113,25 @@ export function UsPage() {
               <Heart size={16} className="text-coral fill-coral animate-pulse" />
               <span>{partnerName}</span>
             </h2>
+            {/* Role/lifecycle correct. The previous copy was a single line for
+                every non-connected state -- "초대 코드로 커플 공간을 완성해보세요" --
+                which reads as "enter a code" and is exactly wrong for the creator
+                who is holding one. */}
             <p className="text-xs text-muted-foreground mt-1 font-medium">
-              {connected ? `함께한 지 +${diffDays}일째 💕` : '초대 코드로 커플 공간을 완성해보세요'}
+              {connected
+                ? `함께한 지 +${diffDays}일째 💕`
+                : coupleLifecycle === 'pending'
+                  ? '상대방이 초대 코드를 입력하면 연결돼요'
+                  : coupleLifecycle === 'disconnected'
+                    ? '커플 공간 연결이 해제되었어요'
+                    : coupleLifecycle === 'unknown'
+                      ? '커플 공간 상태를 확인하고 있어요'
+                      : '우리 공간을 만들거나 초대 코드를 입력해 보세요'}
             </p>
           </div>
         </section>
+
+        <CoupleStatusBanner />
 
         {/* Calendar UI */}
         <section className="rounded-3xl bg-card border border-border shadow-sm overflow-hidden p-4">

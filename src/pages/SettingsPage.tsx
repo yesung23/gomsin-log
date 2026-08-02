@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '@/lib/useStore';
+import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { MobileShell } from '@/components/MobileShell';
 import {
   ArrowLeft, Shield, Unlink, Trash2, User, FileText,
@@ -24,6 +25,8 @@ export function SettingsPage() {
     signOut,
     deleteRecord,
     setTheme,
+    invitationExpiresAt,
+    refreshCoupleLifecycle,
   } = useStore();
   const navigate = useNavigate();
   const { profile, isDemoMode, records } = state;
@@ -333,6 +336,13 @@ export function SettingsPage() {
               <h2 className="text-sm font-bold text-foreground">우리 공간 초대 코드</h2>
               <p className="text-xs text-muted-foreground mt-1">
                 상대방이 앱에서 이 코드를 입력하면 두 사람의 공간이 연결됩니다. 코드는 24시간 동안 유효해요.
+                {/* The authoritative deadline from the server, when it is known.
+                    "24시간 동안 유효" alone never told the user when it lapses. */}
+                {invitationExpiryLabel(invitationExpiresAt) && (
+                  <span data-testid="settings-invitation-expiry" className="font-semibold text-foreground">
+                    {' '}({invitationExpiryLabel(invitationExpiresAt)})
+                  </span>
+                )}
               </p>
             </div>
 
@@ -380,6 +390,8 @@ export function SettingsPage() {
                 updateProfile({
                   couple: { ...profile.couple, coupleCode: result.code },
                 });
+                // Re-read the authoritative expiry for the code just minted.
+                void refreshCoupleLifecycle();
                 toast.success('새 초대 코드가 발급되었습니다. 이전 코드는 더 이상 사용할 수 없어요.');
               }}
               disabled={isRegenerating}

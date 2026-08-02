@@ -12,6 +12,7 @@ import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefin
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 import { isOwnRecord } from '@/lib/privacy';
+import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 
 export function SoldierDashboard() {
   const { state, setHighlightedRecordId } = useStore();
@@ -89,6 +90,10 @@ export function SoldierDashboard() {
       </header>
 
       <div className="px-5 space-y-4 min-h-[500px]">
+        {/* Renders nothing once connected; otherwise it is the only place a
+            pending/personal/disconnected state is visible from Home. */}
+        <CoupleStatusBanner />
+
         <section className="rounded-3xl p-5 border border-coral/20 bg-gradient-to-br from-coral/15 via-card to-lilac/70 shadow-sm space-y-4 relative overflow-hidden">
           <div className="absolute -right-5 -bottom-6 opacity-10 text-coral">
             <Heart size={112} fill="currentColor" />

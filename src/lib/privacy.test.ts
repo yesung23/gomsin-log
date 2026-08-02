@@ -4,10 +4,12 @@ import {
   isOwnRecord,
   splitEmotionFlow,
   emotionFlowForStorage,
+  stripTransientFields,
   isVisibleToViewer,
   sanitizeRecordForViewer,
   visibleRecordsForViewer,
 } from '@/lib/privacy';
+import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
 import type { DailyRecord, EmotionFlowItem } from '@/types';
 
 const ME = 'user-me';
@@ -124,6 +126,53 @@ describe('emotionFlowForStorage', () => {
   });
 });
 
+describe('stripTransientFields', () => {
+  it('removes matchedText from items that have it', () => {
+    const items = [item({ id: 'a', matchedText: '보고 싶다' })];
+    const result = stripTransientFields(items);
+    expect(result[0]).not.toHaveProperty('matchedText');
+    expect(result[0].id).toBe('a');
+    expect(result[0].displayLabel).toBe('기쁨');
+  });
+
+  it('passes through items without matchedText unchanged', () => {
+    const items = [item({ id: 'b' })];
+    const result = stripTransientFields(items);
+    expect(result[0]).not.toHaveProperty('matchedText');
+    expect(result[0].id).toBe('b');
+  });
+
+  it('handles nested arrays with mixed items', () => {
+    const items = [
+      item({ id: 'a', matchedText: '슬퍼' }),
+      item({ id: 'b' }),
+      item({ id: 'c', matchedText: '힘들어' }),
+    ];
+    const result = stripTransientFields(items);
+    expect(result).toHaveLength(3);
+    expect(result.every((i) => !('matchedText' in i))).toBe(true);
+    expect(result.map((i) => i.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(stripTransientFields([])).toEqual([]);
+  });
+});
+
+describe('emotionFlowForStorage strips matchedText', () => {
+  it('removes matchedText from the persisted flow', () => {
+    const stored = emotionFlowForStorage({
+      isPrivate: false,
+      emotionFlow: [
+        item({ id: 'a', visibility: 'shared', matchedText: '기뻐' }),
+        item({ id: 'b', visibility: 'shared' }),
+      ],
+    });
+    expect(stored.every((i) => !('matchedText' in i))).toBe(true);
+    expect(stored.map((i) => i.id)).toEqual(['a', 'b']);
+  });
+});
+
 describe('isVisibleToViewer', () => {
   const viewer = { userId: ME, role: 'gomsin' as const };
 
@@ -215,5 +264,72 @@ describe('visibleRecordsForViewer', () => {
     );
     // My own private demo record stays; the partner's private one is filtered out.
     expect(feed.map((r) => r.id)).toEqual(['mine']);
+  });
+});
+
+/**
+ * The EmoFlow analysis is derived, never stored. These cases pin the boundary
+ * between what the analyser may see and what actually reaches the database.
+ */
+describe('EmoFlow persistence boundary', () => {
+  const SECRET = '오늘 사수한테 혼났다';
+
+  it('drops both matchedText and author-only items from a shared record', () => {
+    const stored = emotionFlowForStorage({
+      isPrivate: false,
+      emotionFlow: [
+        item({ id: 'a', group: 'joy', displayLabel: '행복', visibility: 'shared', matchedText: SECRET }),
+        item({ id: 'b', group: 'shame', displayLabel: '부끄러움', visibility: 'author_only', matchedText: SECRET }),
+      ],
+    });
+    expect(stored.map((i) => i.id)).toEqual(['a']);
+    expect(stored.every((i) => !('matchedText' in i))).toBe(true);
+    expect(JSON.stringify(stored)).not.toContain(SECRET);
+  });
+
+  it('keeps author-only items on a private record but still drops matchedText', () => {
+    const stored = emotionFlowForStorage({
+      isPrivate: true,
+      emotionFlow: [
+        item({ id: 'a', group: 'joy', displayLabel: '행복', visibility: 'shared', matchedText: SECRET }),
+        item({ id: 'b', group: 'shame', displayLabel: '부끄러움', visibility: 'author_only', matchedText: SECRET }),
+      ],
+    });
+    expect(stored.map((i) => i.id)).toEqual(['a', 'b']);
+    expect(stored.every((i) => !('matchedText' in i))).toBe(true);
+    expect(JSON.stringify(stored)).not.toContain(SECRET);
+  });
+
+  it('hides author-only items from the analysis a partner viewer can compute', () => {
+    const shared = record({
+      id: 'theirs',
+      userId: PARTNER,
+      isPrivate: false,
+      emotionFlow: [
+        item({ id: 'a', group: 'sadness', displayLabel: '속상함', sequence: 1, visibility: 'shared' }),
+        item({ id: 'b', group: 'shame', displayLabel: '부끄러움', sequence: 2, visibility: 'author_only' }),
+        item({ id: 'c', group: 'joy', displayLabel: '행복', sequence: 3, visibility: 'shared' }),
+      ],
+    });
+
+    const authorView = analyzeEmotionFlow(shared.emotionFlow)!;
+    expect(authorView.points.map((p) => p.label)).toEqual(['속상함', '부끄러움', '행복']);
+
+    const partnerView = analyzeEmotionFlow(
+      sanitizeRecordForViewer(shared, { userId: ME, role: 'gomsin' }).emotionFlow,
+    )!;
+    expect(partnerView.points.map((p) => p.label)).toEqual(['속상함', '행복']);
+    expect(partnerView.summary).not.toContain('부끄러움');
+  });
+
+  it('yields no analysis for a partner when every item is author-only', () => {
+    const shared = record({
+      id: 'theirs',
+      userId: PARTNER,
+      isPrivate: false,
+      emotionFlow: [item({ id: 'a', visibility: 'author_only' })],
+    });
+    const sanitized = sanitizeRecordForViewer(shared, { userId: ME, role: 'gomsin' });
+    expect(analyzeEmotionFlow(sanitized.emotionFlow)).toBeNull();
   });
 });

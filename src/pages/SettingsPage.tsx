@@ -261,7 +261,7 @@ export function SettingsPage() {
         <header className="flex items-center justify-between">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] flex items-center justify-center active:scale-95 transition"
+            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95 transition"
             aria-label="뒤로가기"
           >
             <ArrowLeft size={20} />
@@ -490,7 +490,7 @@ export function SettingsPage() {
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px] disabled:opacity-50"
           >
             <span className="flex items-center gap-3 text-foreground">
-              <Download size={18} className="text-navy" />
+              <Download size={18} className="text-foreground" />
               <span>내 기록 JSON으로 내보내기</span>
             </span>
             <span className="text-[11px] text-muted-foreground font-normal">
@@ -503,7 +503,7 @@ export function SettingsPage() {
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
-              <Trash2 size={18} className="text-navy" />
+              <Trash2 size={18} className="text-foreground" />
               <span>내 작성 기록 전체 삭제</span>
             </span>
             <span className="text-[11px] text-muted-foreground font-normal">{ownRecords.length}개 보유</span>
@@ -761,7 +761,16 @@ export function SettingsPage() {
                     setIsDeletingAccount(true);
                     try {
                       const result = await deleteAccount();
-                      if (!result.ok) {
+                      if (result.status === 'partially_deleted') {
+                        // Tell the truth: the generic message claims nothing was
+                        // deleted, which is the opposite of what happened.
+                        toast.error(
+                          '기록과 프로필 데이터는 삭제되었지만 로그인 계정은 삭제되지 못했습니다. 탈퇴를 완료해 주세요.',
+                          { duration: 12000 },
+                        );
+                        return;
+                      }
+                      if (result.status === 'failed') {
                         toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
                         return;
                       }

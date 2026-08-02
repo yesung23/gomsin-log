@@ -122,7 +122,7 @@ export function ServicePage() {
           <button
             onClick={() => navigate(-1)}
             aria-label="뒤로가기"
-            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] flex items-center"
+            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <ArrowLeft size={20} />
           </button>
@@ -130,7 +130,7 @@ export function ServicePage() {
           <button
             onClick={openEditor}
             aria-label="복무 정보 수정"
-            className="p-2 -mr-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] flex items-center"
+            className="p-2 -mr-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <Edit2 size={18} />
           </button>
@@ -194,7 +194,7 @@ export function ServicePage() {
         {/* Contact window, from the soldier's saved preferences. */}
         <div className="bg-card rounded-2xl p-4 shadow-sm border border-border">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-lilac/30 rounded-full flex items-center justify-center text-navy shrink-0">
+            <div className="w-10 h-10 bg-lilac/30 rounded-full flex items-center justify-center text-foreground shrink-0">
               <Phone className="w-5 h-5" />
             </div>
             <div className="min-w-0">

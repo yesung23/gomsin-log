@@ -1,6 +1,7 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { useStore } from '@/lib/useStore';
 import {
   authRepository,
@@ -289,6 +290,11 @@ export function OnboardingPage() {
       // straight back through onboarding.
       if (supabase && state.authenticatedUser && !state.isDemoMode) {
         const userId = state.authenticatedUser.id;
+        // Pre-flight: a pending deletion aborts every write below before the
+        // first one is issued, so onboarding cannot recreate a `profiles` row
+        // for an account whose data the server has already removed.
+        if (await serverCallBlockedByPendingDeletion()) return;
+        if (!isCurrentIdentity(identity)) return;
         const { error: profileError } = await supabase.from('profiles').upsert({
           id: userId,
           display_name: finalNickname,
@@ -389,7 +395,7 @@ export function OnboardingPage() {
                 <p className="text-muted-foreground text-sm font-medium whitespace-pre-line leading-relaxed">
                   {"답장이 늦어도, 오늘의 순간은 놓치지 않도록."}
                 </p>
-                <p className="text-xs text-navy/70 font-normal">
+                <p className="text-xs text-foreground/70 font-normal">
                   군화와 곰신, 둘만의 하루를 사진과 짧은 기록으로 남겨요.
                 </p>
               </div>
@@ -498,7 +504,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -532,7 +538,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -617,11 +623,11 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={isGeneratingCode || isVerifyingCode}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <div className="w-5 h-5 border-2 border-coral-foreground border-t-transparent rounded-full animate-spin" />
                     <span>처리 중...</span>
                   </>
                 ) : (
@@ -666,7 +672,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 {role === 'gomsin' ? '완료' : '다음'}
               </button>
@@ -758,7 +764,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -818,7 +824,7 @@ export function OnboardingPage() {
               <div className="space-y-2">
                 <button
                   onClick={handleNext}
-                  className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                  className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
                 >
                   완료하기
                 </button>

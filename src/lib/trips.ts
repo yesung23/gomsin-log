@@ -1,3 +1,4 @@
+import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { supabase } from '@/lib/supabase';
 import type { DailyRecord, Trip, TripChecklist, TripItem, TripStatus } from '@/types';
 
@@ -188,6 +189,8 @@ export async function saveTripToDB(
   createdBy: string,
 ): Promise<Trip | null> {
   if (!supabase) return null;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   const { data, error } = await supabase.from('trips').insert([{
     couple_id: coupleId,
     created_by: createdBy,
@@ -208,6 +211,8 @@ export async function updateTripInDB(
   updates: Partial<Pick<Trip, 'title' | 'startDate' | 'endDate' | 'status'>>,
 ): Promise<Trip | null> {
   if (!supabase || !tripId) return null;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   const payload: Record<string, string> = { updated_at: new Date().toISOString() };
   if (updates.title !== undefined) payload.title = updates.title;
   if (updates.startDate !== undefined) payload.start_date = updates.startDate;
@@ -225,6 +230,8 @@ export const updateTrip = updateTripInDB;
 
 export async function deleteTripFromDB(tripId: string): Promise<boolean> {
   if (!supabase) return false;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return false;
   const { data, error } = await supabase.from('trips').delete().eq('id', tripId).select('id').maybeSingle();
   if (error) {
     console.error('Error deleting trip:', error);
@@ -251,6 +258,8 @@ export async function fetchTripItemsFromDB(tripId: string): Promise<TripItem[]> 
 
 export async function saveTripItemToDB(item: Omit<TripItem, 'id'>): Promise<TripItem | null> {
   if (!supabase) return null;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   const { data, error } = await supabase.from('trip_items').insert([{
     trip_id: item.tripId,
     item_date: item.itemDate,
@@ -279,6 +288,8 @@ export async function saveTripItemToDB(item: Omit<TripItem, 'id'>): Promise<Trip
  */
 export async function updateTripItemInDB(item: TripItem): Promise<TripItem | null> {
   if (!supabase) return null;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   const { data, error } = await supabase.from('trip_items').update({
     title: item.title,
     category: item.category,
@@ -298,6 +309,8 @@ export const updateTripItem = updateTripItemInDB;
 export async function reorderTripItemsInDB(items: Array<Pick<TripItem, 'id' | 'sortOrder'>>): Promise<boolean> {
   if (!supabase) return false;
   if (items.length === 0) return true;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return false;
   const { error } = await supabase.rpc('reorder_trip_items', {
     p_item_ids: items.map((item) => item.id),
     p_sort_orders: items.map((item) => item.sortOrder),
@@ -313,6 +326,8 @@ export const reorderTripItems = reorderTripItemsInDB;
 
 export async function deleteTripItemFromDB(itemId: string): Promise<boolean> {
   if (!supabase) return false;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return false;
   const { data, error } = await supabase.from('trip_items').delete().eq('id', itemId).select('id').maybeSingle();
   if (error) {
     console.error('Error deleting trip item:', error);
@@ -339,6 +354,8 @@ export async function fetchTripChecklistsFromDB(tripId: string): Promise<TripChe
 
 export async function saveTripChecklistToDB(tripId: string, itemName: string): Promise<TripChecklist | null> {
   if (!supabase) return null;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return null;
   const { data, error } = await supabase.from('trip_checklists').insert([{
     trip_id: tripId,
     item_name: itemName,
@@ -353,6 +370,8 @@ export async function saveTripChecklistToDB(tripId: string, itemName: string): P
 
 export async function toggleTripChecklistInDB(checklistId: string, completed: boolean): Promise<boolean> {
   if (!supabase) return false;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return false;
   const { data, error } = await supabase.from('trip_checklists').update({
     completed,
     updated_at: new Date().toISOString(),
@@ -366,6 +385,8 @@ export async function toggleTripChecklistInDB(checklistId: string, completed: bo
 
 export async function deleteTripChecklistFromDB(checklistId: string): Promise<boolean> {
   if (!supabase) return false;
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return false;
   const { data, error } = await supabase.from('trip_checklists').delete().eq('id', checklistId)
     .select('id').maybeSingle();
   if (error) {

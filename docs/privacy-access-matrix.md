@@ -12,6 +12,9 @@ GomsinLog는 프라이빗 커플 일기장으로서 철저한 데이터 격리�
 | **`couple_members`**| 상태 및 역할 (active) | **R / U** (본인 상태) | **R** (활성 파트너) | 접근 불가 |
 | **`daily_records`** | `is_private = false` | **CRUD** | **R** | 접근 불가 |
 | **`daily_records`** | `is_private = true` | **CRUD** | 접근 불가 | 접근 불가 |
+| **`daily_records.emotion_flow`** | 확정 감정 항목 JSONB | **R** (전 항목) | **R** (`visibility='shared'` 항목만, 비공개 아닌 레코드만) | 접근 불가 |
+| **`daily_records.emotion_flow`** | `matchedText` (일기 조각) | 저장 자체를 하지 않음 (`emotionFlowForStorage`) | 접근 불가 | 접근 불가 |
+| **감정 흐름 분석 결과** | 흐름 요약·분류·전환 | 클라이언트에서 매번 재계산 (미저장) | 자신에게 보이는 항목으로만 재계산 | 접근 불가 |
 | **`events`** | `is_private = false` | **CRUD** (작성자만 mutation) | **R** (활성 커플) | 접근 불가 |
 | **`events`** | `is_private = true` | **CRUD** (연결 해제 후에도 본인 접근) | 접근 불가 | 접근 불가 |
 | **`trips` / children** | 활성 커플 workspace | **CRUD** | **CRUD** | 접근 불가 |

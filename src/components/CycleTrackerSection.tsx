@@ -365,7 +365,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       </div>
 
       <div className="bg-lilac/30 border border-lilac/60 p-3.5 rounded-2xl text-center">
-        <p className="text-[11px] text-navy/80 leading-relaxed">
+        <p className="text-[11px] text-foreground/80 leading-relaxed">
           시작일·종료일·증상·메모는 파트너에게 공유되지 않아요.
         </p>
       </div>

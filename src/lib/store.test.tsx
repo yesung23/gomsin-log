@@ -85,6 +85,10 @@ vi.mock('@/lib/records', () => ({
     file.type.startsWith('image/')
       ? { ext: 'png', type: 'photo' }
       : { error: 'unsupported' },
+  isCanonicalRecordMediaPath: (path: unknown, coupleId: string, recordId: string) => {
+    if (typeof path !== 'string') return false;
+    return path.startsWith(`${coupleId}/${recordId}/`);
+  },
 }));
 
 const fetchEventsResultFromDB = vi.fn().mockResolvedValue({ ok: true, events: [] });
@@ -203,6 +207,13 @@ describe('StoreProvider auth lifecycle', () => {
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
+    // The shared setup's `vi.restoreAllMocks()` strips implementations, and the
+    // store now asks the server whether a deletion is pending before it syncs.
+    // The default answer is an authoritative "not pending".
+    mockSupabase.auth.getUser.mockReset().mockResolvedValue({
+      data: { user: { id: 'user-a', app_metadata: { provider: 'google' } } },
+      error: null,
+    });
     disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
     fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });

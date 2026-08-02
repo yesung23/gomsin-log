@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
+import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 
 export function TodayLogWidget() {
@@ -47,6 +48,32 @@ export function TodayLogWidget() {
   const suggestions = useMemo(() => {
     return recommendEmotionFlow(debouncedLog, undefined, { isPrivate });
   }, [debouncedLog, isPrivate]);
+
+  // The exact array that will be persisted. The preview card below reads this
+  // same value, so what the user sees can never disagree with what is saved.
+  //
+  // The rule engine marks sensitive emotion groups as `author_only` by default.
+  // That default only applies to *suggestions*: tapping a chip on a record the
+  // author is sharing is explicit consent to share that tag. On a private
+  // record everything stays author-only. This keeps author-only items out of
+  // shared rows (see lib/privacy.ts) without silently discarding a selection.
+  const userConfirmedFlow: EmotionFlowItem[] = useMemo(
+    () =>
+      suggestions
+        .filter((s) => confirmedItemIds.includes(s.id || ''))
+        .map((s, idx) => {
+          // Defense-in-depth: never let matchedText leave the composer, even if
+          // downstream storage stripping were bypassed.
+          const { matchedText: _discard, ...safeFields } = s;
+          return {
+            ...safeFields,
+            sequence: idx + 1,
+            source: 'user_confirmed' as const,
+            visibility: isPrivate ? ('author_only' as const) : ('shared' as const),
+          };
+        }),
+    [suggestions, confirmedItemIds, isPrivate],
+  );
 
   const MAX_ATTACHMENTS = 4;
 
@@ -220,21 +247,6 @@ export function TodayLogWidget() {
 
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-    // Filter confirmed flow items
-    // The rule engine marks sensitive emotion groups as `author_only` by default.
-    // That default only applies to *suggestions*: tapping a chip on a record the
-    // author is sharing is explicit consent to share that tag. On a private
-    // record everything stays author-only. This keeps author-only items out of
-    // shared rows (see lib/privacy.ts) without silently discarding a selection.
-    const userConfirmedFlow: EmotionFlowItem[] = suggestions
-      .filter((s) => confirmedItemIds.includes(s.id || ''))
-      .map((s, idx) => ({
-        ...s,
-        sequence: idx + 1,
-        source: 'user_confirmed',
-        visibility: isPrivate ? 'author_only' : 'shared',
-      }));
 
     setIsSaving(true);
     let result: { ok: boolean; failedFiles: string[]; error?: string };
@@ -454,6 +466,10 @@ export function TodayLogWidget() {
               </div>
             </div>
           )}
+
+          {/* Preview of the flow that is about to be saved. Derived only, never
+              persisted, and computed from the same array as the save payload. */}
+          <EmotionFlowInsightCard items={userConfirmedFlow} variant="composer" />
 
           <div className="pt-2 flex items-center justify-between">
             <button

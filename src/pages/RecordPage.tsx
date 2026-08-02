@@ -4,10 +4,12 @@ import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
 import { useEscapeKey } from '@/lib/hooks';
-import { visibleRecordsForViewer } from '@/lib/privacy';
+import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
+import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
-  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar
+  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar,
+  Pencil, Trash2,
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
 import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
@@ -66,7 +68,7 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 export function RecordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { state, setHighlightedRecordId } = useStore();
+  const { state, setHighlightedRecordId, updateRecord, deleteRecord } = useStore();
   const { records, profile } = state;
   const today = localToday();
   const todayStr = toLocalDateString(today);
@@ -82,11 +84,22 @@ export function RecordPage() {
   const [viewMonth, setViewMonth] = useState(() => Number((tripPeriod?.from || todayStr).slice(5, 7)) - 1);
   const [selectedDate, setSelectedDate] = useState(tripPeriod?.from || todayStr);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
-  const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
+  // Hold the id, not a snapshot: the modal must re-read the record from the
+  // store after an edit, otherwise it keeps showing pre-save content.
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  const closeSelectedRecord = useCallback(() => setSelectedRecord(null), []);
-  useEscapeKey(closeSelectedRecord, selectedRecord !== null);
+  const closeSelectedRecord = useCallback(() => {
+    setSelectedRecordId(null);
+    setIsEditing(false);
+    setEditText('');
+    setShowDeleteConfirm(false);
+  }, []);
+  useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
 
   // Own records + the partner's shared ones, with author-only fragments removed.
   // Uses the shared privacy helper so the rule lives in exactly one place.
@@ -96,6 +109,18 @@ export function RecordPage() {
       ? recordsInInclusiveRange(permitted, tripPeriod.from, tripPeriod.to)
       : permitted;
   }, [records, profile.id, profile.role, tripPeriod]);
+
+  // Always the store's current version of the open record, already sanitised for
+  // this viewer by `visibleRecordsForViewer`.
+  const selectedRecord = useMemo(
+    () => visibleRecords.find((r) => r.id === selectedRecordId) ?? null,
+    [visibleRecords, selectedRecordId],
+  );
+
+  // The record went away (deleted here, or revoked by its author): close up.
+  useEffect(() => {
+    if (selectedRecordId !== null && selectedRecord === null) closeSelectedRecord();
+  }, [selectedRecordId, selectedRecord, closeSelectedRecord]);
 
   useEffect(() => {
     if (!tripPeriod) return;
@@ -245,7 +270,7 @@ export function RecordPage() {
             className={cn(
               'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
               showCalendar
-                ? 'bg-coral text-white shadow-sm'
+                ? 'bg-coral text-coral-foreground shadow-sm'
                 : 'bg-card border border-border text-foreground hover:bg-muted'
             )}
             aria-label="달력 보기"
@@ -360,7 +385,7 @@ export function RecordPage() {
                     'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
                     (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
-                    isSelected && 'bg-coral text-white',
+                    isSelected && 'bg-coral text-coral-foreground',
                     !isSelected && isTodayCell && 'ring-2 ring-coral/50 ring-inset rounded-lg',
                   )}
                 >
@@ -371,7 +396,7 @@ export function RecordPage() {
                       cell.inMonth && !isSelected && isFuture && 'text-muted-foreground/50',
                       cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-red-400',
                       cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-blue-400',
-                      isSelected && 'text-white',
+                      isSelected && 'text-coral-foreground',
                     )}
                   >
                     {cell.date.getDate()}
@@ -382,18 +407,18 @@ export function RecordPage() {
                     <div className="flex items-center gap-[3px] mt-0.5 h-[6px]" aria-hidden="true">
                       <span className={cn(
                         'w-[5px] h-[5px] rounded-full',
-                        isSelected ? 'bg-white/80' : 'bg-coral'
+                        isSelected ? 'bg-coral-foreground/80' : 'bg-coral'
                       )} />
                       {hasMedia && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-white/60' : 'bg-coral/50'
+                          isSelected ? 'bg-coral-foreground/60' : 'bg-coral/50'
                         )} />
                       )}
                       {recordCount >= 4 && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-white/40' : 'bg-coral/30'
+                          isSelected ? 'bg-coral-foreground/40' : 'bg-coral/30'
                         )} />
                       )}
                     </div>
@@ -449,21 +474,21 @@ export function RecordPage() {
         {/* Day Summary Card (only if 2+ shared records) */}
         {selectedDaySummary.items.length > 0 && (
           <div className="mb-4 rounded-2xl bg-lilac/30 border border-lilac/50 p-3 space-y-1.5">
-            <div className="flex items-center justify-between text-xs font-bold text-navy mb-0.5">
+            <div className="flex items-center justify-between text-xs font-bold text-foreground mb-0.5">
               <div className="flex items-center gap-1.5">
                 <Sparkles size={13} className="text-coral" />
                 <span>{isToday ? '오늘의 빠른 정리' : '그날의 빠른 정리'}</span>
               </div>
-              <span className="text-[10px] text-navy/50 font-normal">눌러서 원문 이동</span>
+              <span className="text-[10px] text-foreground/50 font-normal">눌러서 원문 이동</span>
             </div>
             {selectedDaySummary.items.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-xs font-medium text-navy group active:scale-[0.99]"
+                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-xs font-medium text-foreground group active:scale-[0.99]"
               >
                 <span className="leading-snug flex-1 pr-2">• {item.text}</span>
-                <ChevronRight size={13} className="text-navy/30 group-hover:text-navy shrink-0" />
+                <ChevronRight size={13} className="text-foreground/30 group-hover:text-foreground shrink-0" />
               </button>
             ))}
           </div>
@@ -479,7 +504,7 @@ export function RecordPage() {
                 className={cn(
                   'px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition min-h-[32px]',
                   mediaFilter === f.key
-                    ? 'bg-navy text-white'
+                    ? 'bg-navy text-primary-foreground'
                     : 'bg-muted/60 text-muted-foreground hover:bg-muted'
                 )}
               >
@@ -514,7 +539,7 @@ export function RecordPage() {
                 <div
                   id={`record-${r.id}`}
                   key={r.id}
-                  onClick={() => setSelectedRecord(r)}
+                  onClick={() => setSelectedRecordId(r.id)}
                   className={cn(
                     'rounded-2xl bg-card border p-4 shadow-sm space-y-2 cursor-pointer active:scale-[0.98] transition-all duration-500',
                     isHighlighted
@@ -577,29 +602,73 @@ export function RecordPage() {
       <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
         <button
           onClick={() => navigate('/home')}
-          className="w-full py-3.5 rounded-full bg-coral text-white font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-white/20 backdrop-blur-xs"
+          className="w-full py-3.5 rounded-full bg-coral text-coral-foreground font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-foreground/20 backdrop-blur-xs"
         >
           <span className="text-lg">+</span>
           <span>지금의 마음 남기기</span>
         </button>
       </div>
 
-      {/* Detail Modal */}
+      {/*
+        Detail Modal.
+
+        z-[60], not z-50: MobileShell's tab bar is `fixed bottom-0 ... z-50` and
+        comes AFTER <main> in the DOM, so at an equal z-index it paints over a
+        bottom-anchored sheet and swallows the taps aimed at the owner-only
+        수정 / 삭제 buttons. SchedulePage's event modal already sits at z-[60].
+      */}
       {selectedRecord && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
-              <h3 id="record-detail-modal-title" className="text-lg font-bold text-gray-900">
+              <h3 id="record-detail-modal-title" className="text-lg font-bold text-card-foreground">
                 {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
               </h3>
               <button
-                onClick={() => setSelectedRecord(null)}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 min-w-[44px] min-h-[44px]"
+                onClick={closeSelectedRecord}
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"
                 aria-label="닫기"
               >
                 ✕
               </button>
             </div>
+
+            {/* Delete confirmation */}
+            {showDeleteConfirm && (
+              <div className="mb-4 p-4 rounded-xl bg-destructive/10 border border-destructive/30 space-y-3">
+                <p className="text-sm font-bold text-destructive">이 기록을 삭제할까요?</p>
+                <p className="text-xs text-muted-foreground">삭제하면 되돌릴 수 없어요.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setIsSaving(true);
+                      try {
+                        const ok = await deleteRecord(selectedRecord.id);
+                        if (ok) {
+                          toast.success('기록이 삭제되었어요.');
+                          closeSelectedRecord();
+                        } else {
+                          toast.error('삭제하지 못했어요. 다시 시도해 주세요.');
+                        }
+                      } finally {
+                        setIsSaving(false);
+                        setShowDeleteConfirm(false);
+                      }
+                    }}
+                    disabled={isSaving}
+                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-xs"
+                  >
+                    {isSaving ? '삭제 중...' : '삭제'}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               {selectedRecord.reaction && (
@@ -608,11 +677,75 @@ export function RecordPage() {
                 </div>
               )}
 
-              <div className="bg-gray-50 p-4 rounded-xl">
-                <p className="text-gray-800 whitespace-pre-wrap text-sm leading-relaxed">
-                  {selectedRecord.log || '(내용 없음)'}
-                </p>
-              </div>
+              {isEditing ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="w-full h-32 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
+                    placeholder="기록 내용을 입력하세요"
+                  />
+                  {/* Say it before saving, not after: the confirmations were
+                      derived from the previous text, so they get cleared. */}
+                  {editText.trim() !== (selectedRecord.log ?? '').trim() && (
+                    <p className="text-xs text-muted-foreground">
+                      내용을 바꾸면 이전 글에서 고른 마음은 지워져요.
+                    </p>
+                  )}
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => {
+                        setIsEditing(false);
+                        setEditText('');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!editText.trim()) {
+                          toast.error('빈 내용은 저장할 수 없어요.');
+                          return;
+                        }
+                        setIsSaving(true);
+                        try {
+                          const textChanged = editText.trim() !== (selectedRecord.log || '').trim();
+                          const updates: Partial<DailyRecord> = { log: editText.trim() };
+                          // If text content changed, clear emotion analysis since
+                          // it was derived from the previous text.
+                          if (textChanged) {
+                            updates.emotionFlow = [];
+                            updates.emotionUpdatedAt = null;
+                          }
+                          const ok = await updateRecord(selectedRecord.id, updates);
+                          if (ok) {
+                            toast.success('기록이 수정되었어요.');
+                            setIsEditing(false);
+                            setEditText('');
+                            // Deliberately keep the modal open: it now re-reads
+                            // the saved record from the store.
+                          } else {
+                            toast.error('수정하지 못했어요. 다시 시도해 주세요.');
+                          }
+                        } finally {
+                          setIsSaving(false);
+                        }
+                      }}
+                      disabled={isSaving || !editText.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-coral text-coral-foreground font-bold text-xs disabled:opacity-50"
+                    >
+                      {isSaving ? '저장 중...' : '저장'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-muted p-4 rounded-xl">
+                  <p className="text-foreground whitespace-pre-wrap text-sm leading-relaxed">
+                    {selectedRecord.log || '(내용 없음)'}
+                  </p>
+                </div>
+              )}
 
               {selectedRecord.isPrivate && (
                 <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl font-medium">
@@ -622,7 +755,7 @@ export function RecordPage() {
 
               {selectedRecord.attachments && selectedRecord.attachments.length > 0 && (
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-gray-500">첨부 파일</h4>
+                  <h4 className="text-xs font-bold text-muted-foreground">첨부 파일</h4>
                   {selectedRecord.attachments.map((att, idx) => (
                     <div key={idx} className="rounded-xl overflow-hidden bg-muted border border-border">
                       {att.type === 'photo' && att.url ? (
@@ -637,6 +770,32 @@ export function RecordPage() {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Derived on the fly from the record's confirmed emotions. The
+                  record here is already sanitised for this viewer, so a
+                  partner never sees author-only items in it. */}
+              <EmotionFlowInsightCard items={selectedRecord.emotionFlow} variant="detail" />
+
+              {/* Owner-only edit/delete controls. Partner records NEVER show these. */}
+              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
+                <div className="flex gap-2 pt-2 border-t border-border">
+                  <button
+                    onClick={() => {
+                      setEditText(selectedRecord.log || '');
+                      setIsEditing(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted text-foreground font-bold text-xs active:scale-95 transition"
+                  >
+                    <Pencil size={13} /> 수정
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-destructive/10 text-destructive font-bold text-xs active:scale-95 transition"
+                  >
+                    <Trash2 size={13} /> 삭제
+                  </button>
                 </div>
               )}
             </div>

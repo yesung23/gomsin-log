@@ -643,7 +643,7 @@ export function TripDetailPage() {
         ) : activeTab === 'schedule' ? (
           <>
             <div className="bg-card border-b border-border px-2 flex overflow-x-auto no-scrollbar">
-              {dates.map((date, index) => <button key={date} onClick={() => setActiveDayIndex(index)} className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 ${activeDayIndex === index ? 'border-navy text-navy' : 'border-transparent text-muted-foreground'}`}>{index + 1}일차 <span className="font-normal">({date.slice(5)})</span></button>)}
+              {dates.map((date, index) => <button key={date} onClick={() => setActiveDayIndex(index)} className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 ${activeDayIndex === index ? 'border-navy text-foreground' : 'border-transparent text-muted-foreground'}`}>{index + 1}일차 <span className="font-normal">({date.slice(5)})</span></button>)}
             </div>
             <div className="p-5">
               {currentDayItems.length === 0 ? (
@@ -688,14 +688,20 @@ export function TripDetailPage() {
           </div>
         )}
 
-        {showTripModal && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">여행 정보 수정</h2><div className="space-y-3 text-xs">
+        {/*
+          Both sheets below are z-[60], not z-50: MobileShell's tab bar is
+          `fixed bottom-0 ... z-50` and comes after <main> in the DOM, so at an
+          equal z-index it paints over a bottom-anchored sheet and intercepts the
+          taps aimed at its 취소 / 저장 buttons.
+        */}
+        {showTripModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">여행 정보 수정</h2><div className="space-y-3 text-xs">
           <label className="block font-bold">여행 이름<input value={tripDraft.title} onChange={(event) => setTripDraft((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <div className="flex gap-2"><label className="flex-1 font-bold">가는 날<input type="date" value={tripDraft.startDate} onChange={(event) => setTripDraft((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label><label className="flex-1 font-bold">오는 날<input type="date" min={tripDraft.startDate} value={tripDraft.endDate} onChange={(event) => setTripDraft((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label></div>
           <label className="block font-bold">상태<select value={tripDraft.status} onChange={(event) => setTripDraft((current) => ({ ...current, status: event.target.value as TripStatus }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3">{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           {tripError && <p className="text-red-600" role="alert">{tripError}</p>}
         </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
 
-        {showItemModal && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-xs">
+        {showItemModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-xs">
           <label className="block font-bold">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <fieldset><legend className="font-bold mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`py-2 rounded-xl border ${itemDraft.category === option.value ? 'bg-coral text-white border-coral' : 'border-border'}`}>{option.label}</button>)}</div></fieldset>
           <label className="block font-bold">링크 (선택)<input type="url" value={itemDraft.url} onChange={(event) => setItemDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>

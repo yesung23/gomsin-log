@@ -34,7 +34,7 @@ const EVENT_BADGES: Record<EventType, { label: string; color: string }> = {
   vacation: { label: '휴가', color: 'bg-coral/10 text-coral' },
   date: { label: '데이트', color: 'bg-pink-500/10 text-pink-600' },
   trip: { label: '여행', color: 'bg-blue-500/10 text-blue-600' },
-  other: { label: '기타', color: 'bg-navy/10 text-navy' },
+  other: { label: '기타', color: 'bg-navy/10 text-foreground' },
 };
 
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden';
@@ -461,7 +461,7 @@ export function SchedulePage() {
                       {dayEvents.length > 0 && (
                         <span className="flex gap-0.5 mt-1" aria-hidden="true">
                           {dayEvents.slice(0, 3).map((event) => (
-                            <span key={event.id} className={`w-1.5 h-1.5 rounded-full ${event.isPrivate ? 'bg-slate-500' : isToday && !isSelected ? 'bg-white' : 'bg-coral'}`} />
+                            <span key={event.id} className={`w-1.5 h-1.5 rounded-full ${event.isPrivate ? 'bg-muted-foreground' : isToday && !isSelected ? 'bg-coral-foreground' : 'bg-coral'}`} />
                           ))}
                         </span>
                       )}

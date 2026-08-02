@@ -71,6 +71,22 @@ Storage 정책(`007_storage_policies.sql`)이 경로를
 화면에서 `record.authorRole === profile.role` 같은 비교를 새로 쓰지 마세요.
 역할 전환 후에 틀립니다. 반드시 위 헬퍼를 쓰세요.
 
+### 2-3-1. 감정 흐름(EmoFlow) 분석은 순수 파생값입니다
+
+`src/lib/emotionFlowAnalysis.ts` 는 **확정된 감정 항목만** 입력으로 받는 순수 함수입니다.
+
+- 입력은 `EmotionFlowItem[]` 이며 `source === 'user_confirmed'` 인 항목만 사용합니다.
+  일기 본문(`log`)은 인자로 받지도 않고, `matchedText` 는 읽지도 않습니다.
+  → 외부 AI 호출도, 일기 본문 전송도 구조적으로 불가능합니다.
+- 결과는 **어디에도 저장하지 않습니다.** 새 컬럼도 `DailyRecord` 필드도 없고,
+  작성 화면과 상세 모달이 렌더할 때마다 다시 계산합니다.
+- 저장 경로는 여전히 `privacy.ts` 하나뿐입니다. `emotionFlowForStorage()` 가
+  `author_only` 항목과 `matchedText` 를 모두 제거합니다.
+- `EmotionFlowInsightCard` 는 이미 정화된 레코드를 받으므로 파트너 화면에는
+  공유 항목만 나타납니다.
+- 요약문은 고정된 한국어 문장 표에서만 나오며 진단성 어휘를 쓰지 않습니다
+  (`NON_DIAGNOSTIC_BANNED_TERMS` 로 테스트에서 강제).
+
 ### 2-4. 계정 삭제는 상대방을 건드리면 안 됩니다
 
 `supabase/functions/delete-account/index.ts` 상단 주석에 이유가 적혀 있습니다. 요약:
@@ -143,7 +159,7 @@ npm test
 npm run build
 ```
 
-현재 상태: 테스트 **152개 / 21개 파일 통과**, TypeScript 오류 0, ESLint 오류·경고 0,
+현재 상태: 테스트 **416개 / 37개 파일 통과**, TypeScript 오류 0, ESLint 오류·경고 0,
 프로덕션 빌드 성공.
 
 Vite가 정적/동적 import가 섞인 모듈 2개(`events.ts`, `@capacitor/browser`)에 대해

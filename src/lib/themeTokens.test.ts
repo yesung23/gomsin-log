@@ -28,6 +28,7 @@ const PALETTE_LITERAL =
 const GUARDED_FILES = [
   'src/components/InstallPromptBanner.tsx',
   'src/components/CycleSupportSection.tsx',
+  'src/components/EmotionFlowInsightCard.tsx',
   'src/pages/RecordPage.tsx',
   'src/pages/TripsPage.tsx',
 ];

@@ -6,6 +6,7 @@ import { generateDailySummary } from '@/lib/briefing';
 import { useEscapeKey } from '@/lib/hooks';
 import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
+import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar,
@@ -239,6 +240,30 @@ export function RecordPage() {
   }, [recordsByDate, selectedDate, mediaFilter]);
 
   // Stats for selected day
+  /**
+   * Records the period summary aggregates.
+   *
+   * Already viewer-filtered by `visibleRecords`, so the summary can never include
+   * a partner's private record or an author-only emotion item. In trip-period mode
+   * `visibleRecords` is already narrowed to the range; otherwise the visible month
+   * is the natural period.
+   */
+  const periodSummaryRecords = useMemo(
+    () => tripPeriod
+      ? visibleRecords
+      : visibleRecords.filter((record) => {
+          const [year, month] = record.date.split('-');
+          return Number(year) === viewYear && Number(month) === viewMonth + 1;
+        }),
+    [tripPeriod, visibleRecords, viewYear, viewMonth],
+  );
+
+  const periodSummaryLabel = tripPeriod
+    ? periodTrip
+      ? `${periodTrip.title} 여행 기간`
+      : '여행 기간'
+    : `${viewYear}년 ${viewMonth + 1}월`;
+
   const selectedDayAllRecords = useMemo(
     () => recordsByDate[selectedDate] || [],
     [recordsByDate, selectedDate]
@@ -516,6 +541,15 @@ export function RecordPage() {
         )}
           </div>
         )}
+
+        {/* Aggregated emotion flow for the period on screen. Purely derived from
+            the already-loaded, already-sanitised visible records, so a record edit
+            or delete changes it on the next render with nothing to invalidate. */}
+        <EmotionFlowSummarySection
+          records={periodSummaryRecords}
+          periodLabel={periodSummaryLabel}
+          className="mb-3"
+        />
 
         {/* Selected Day Summary Bar */}
         <div ref={timelineRef} className="mb-3">

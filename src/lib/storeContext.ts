@@ -1,6 +1,8 @@
 import { createContext } from 'react';
 import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent } from '@/types';
 import type { AccountDeletionOutcome, DeletionStatus } from '@/lib/accountDeletion';
+import type { ServerErrorKind } from '@/lib/serverErrors';
+import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
 
 /**
  * Trustworthiness of the shared couple workspace currently on screen.
@@ -24,12 +26,64 @@ import type { AccountDeletionOutcome, DeletionStatus } from '@/lib/accountDeleti
  */
 export type SharedSyncStatus = 'live' | 'delayed' | 'unavailable';
 
+/**
+ * Why a record mutation did not happen.
+ *
+ * Server-side causes reuse `ServerErrorKind` verbatim so the classification made
+ * in `serverErrors.ts` is not re-invented; the extra variants are the local
+ * refusals that never reach the network at all.
+ */
+export type RecordMutationReason =
+  | ServerErrorKind
+  /** The identity or couple space changed while the request was in flight. */
+  | 'stale'
+  /** No such record in local state. */
+  | 'missing'
+  /** The record belongs to the partner. */
+  | 'not_owner'
+  /** This account has no couple space (genuinely personal). */
+  | 'no_workspace'
+  /** Membership could not be resolved, so the write was not attempted. */
+  | 'workspace_unresolved'
+  /** A deletion is pending for this account. */
+  | 'deletion_pending';
+
+/**
+ * Result of a record mutation.
+ *
+ * `error` is ALWAYS populated on failure and always matches `reason`. That is
+ * what removes the composer's old "check your internet connection" fallback:
+ * there is no longer a case where the store fails without saying why.
+ */
+export type RecordMutationResult =
+  | { ok: true }
+  | { ok: false; reason: RecordMutationReason; error: string };
+
 export interface StoreContextType {
   state: AppState;
   isReady: boolean;
   /** Initial account hydration failed; account existence must not be inferred. */
   authSyncUnavailable: boolean;
+  /**
+   * Why hydration failed, when it did.
+   *
+   * Lets the outage screen say "your session expired" instead of blaming the
+   * connection for an authorization problem. `null` while hydration is healthy.
+   */
+  authSyncReason: ServerErrorKind | null;
   sharedSyncStatus: SharedSyncStatus;
+  /**
+   * Server-authoritative couple lifecycle.
+   *
+   * `unknown` means the question could not be answered and MUST NOT be rendered
+   * as `personal`: telling a connected user they have no couple space is exactly
+   * the failure this state exists to prevent.
+   */
+  coupleLifecycle: CoupleLifecycle;
+  /** ISO expiry of the outstanding invitation, when one is known to exist. */
+  invitationExpiresAt: string | null;
+  /** Re-read the couple lifecycle from the server. */
+  refreshCoupleLifecycle: () => Promise<CoupleLifecycle>;
   /**
    * Non-null while this account's data has been removed but its login has not.
    * `warnings` is in-memory only and is never persisted.
@@ -51,8 +105,20 @@ export interface StoreContextType {
     record: Omit<DailyRecord, 'id' | 'createdAt'>,
     files: File[],
   ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string }>;
-  updateRecord: (id: string, updates: Partial<DailyRecord>) => Promise<boolean>;
-  deleteRecord: (id: string) => Promise<boolean>;
+  updateRecord: (id: string, updates: Partial<DailyRecord>) => Promise<RecordMutationResult>;
+  deleteRecord: (id: string) => Promise<RecordMutationResult>;
+  /**
+   * Add and/or remove media on an EXISTING record.
+   *
+   * Separate from `updateRecord` on purpose: the strict save -> upload -> patch
+   * ordering that storage RLS requires is pinned by tests against
+   * `addRecordWithMedia`, and widening `updateRecord` would have put a second,
+   * differently-ordered media path behind the same contract.
+   */
+  updateRecordMedia: (
+    id: string,
+    changes: { addFiles?: File[]; removePaths?: string[] },
+  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string }>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
   updateEvent: (
     id: string,

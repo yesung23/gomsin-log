@@ -6,6 +6,7 @@ import {
   MEDIA_ACCEPT,
   isCanonicalRecordMediaPath,
   deleteRecordFromDB,
+  saveRecordToDB,
 } from '@/lib/records';
 
 const { mockFrom, mockSupabase } = vi.hoisted(() => {
@@ -208,7 +209,7 @@ describe('deleteRecordFromDB', () => {
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ ok: true });
     expect(mockFrom).toHaveBeenCalledWith('daily_records');
     expect(eqId).toHaveBeenCalledWith('id', recordId);
     expect(eqUserId).toHaveBeenCalledWith('user_id', userId);
@@ -217,7 +218,7 @@ describe('deleteRecordFromDB', () => {
     expect(maybeSingle).toHaveBeenCalled();
   });
 
-  it('returns false when no row is returned', async () => {
+  it('reports not_found when no row is returned', async () => {
     const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
     const select = vi.fn().mockReturnValue({ maybeSingle });
     const eqCoupleId = vi.fn().mockReturnValue({ select });
@@ -228,6 +229,84 @@ describe('deleteRecordFromDB', () => {
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
-    expect(result).toBe(false);
+    // The filters pin id + owner + couple, so an empty result is an ownership
+    // answer -- not a transport failure, and never a connection message.
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('classifies an RLS rejection as forbidden rather than a connection problem', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { code: '42501', message: 'permission denied for table daily_records' },
+    });
+    const select = vi.fn().mockReturnValue({ maybeSingle });
+    const eqCoupleId = vi.fn().mockReturnValue({ select });
+    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
+    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
+    const del = vi.fn().mockReturnValue({ eq: eqId });
+    mockFrom.mockReturnValue({ delete: del });
+
+    const result = await deleteRecordFromDB(recordId, userId, coupleId);
+
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('classifies an expired session as auth_expired', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { code: 'PGRST301', message: 'JWT expired' },
+    });
+    const select = vi.fn().mockReturnValue({ maybeSingle });
+    const eqCoupleId = vi.fn().mockReturnValue({ select });
+    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
+    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
+    const del = vi.fn().mockReturnValue({ eq: eqId });
+    mockFrom.mockReturnValue({ delete: del });
+
+    const result = await deleteRecordFromDB(recordId, userId, coupleId);
+
+    expect(result).toEqual({ ok: false, reason: 'auth_expired' });
+  });
+});
+
+describe('saveRecordToDB', () => {
+  const record = {
+    id: 'rec-001',
+    date: '2026-02-01',
+    time: '09:00',
+    authorRole: 'gomsin' as const,
+    log: 'hello',
+    isPrivate: false,
+    createdAt: '2026-02-01T09:00:00.000Z',
+  };
+
+  function mockUpsert(error: unknown) {
+    const upsert = vi.fn().mockResolvedValue({ error });
+    mockFrom.mockReturnValue({ upsert });
+    return upsert;
+  }
+
+  it('reports ok on a successful upsert', async () => {
+    mockUpsert(null);
+    expect(await saveRecordToDB(record, 'couple-001', 'user-001')).toEqual({ ok: true });
+  });
+
+  it('reports forbidden for an RLS rejection, never a connection failure', async () => {
+    mockUpsert({ code: '42501', message: 'new row violates row-level security policy' });
+    const result = await saveRecordToDB(record, 'couple-001', 'user-001');
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('reports auth_expired for an expired JWT', async () => {
+    mockUpsert({ code: 'PGRST301', message: 'JWT expired' });
+    const result = await saveRecordToDB(record, 'couple-001', 'user-001');
+    expect(result).toEqual({ ok: false, reason: 'auth_expired' });
+  });
+
+  it('refuses without a couple id or user id and does not issue a request', async () => {
+    const upsert = mockUpsert(null);
+    expect((await saveRecordToDB(record, '', 'user-001')).ok).toBe(false);
+    expect((await saveRecordToDB(record, 'couple-001', '')).ok).toBe(false);
+    expect(upsert).not.toHaveBeenCalled();
   });
 });

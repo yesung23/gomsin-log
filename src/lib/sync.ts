@@ -4,12 +4,78 @@ import { fetchRecordsResultFromDB } from '@/lib/records';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { fetchEventsResultFromDB } from '@/lib/events';
 import { fetchTripsResultFromDB } from '@/lib/trips';
+import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 
 export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
 export type FullStateFetchResult = Partial<AppState> | null | typeof FULL_STATE_UNAVAILABLE;
 
-export async function fetchFullStateFromDB(userId: string): Promise<FullStateFetchResult> {
-  if (!isSupabaseConfigured || !supabase || !userId) return null;
+/**
+ * Same fetch, but carrying WHY it failed.
+ *
+ * `FULL_STATE_UNAVAILABLE` says "retry later" and nothing else, so an expired
+ * session was indistinguishable from a dead network and the user was told to
+ * check their internet connection either way. The reason is classified here once
+ * and consumed by the store's auth-recovery path.
+ */
+export type FullStateResult =
+  | { ok: true; state: Partial<AppState> | null }
+  | { ok: false; reason: ServerErrorKind };
+
+/**
+ * Resume snapshot for an account that owns a couple space but has no profile row.
+ *
+ * `create_couple_and_invitation` inserts the creator's `active` membership before
+ * onboarding ever writes `profiles`, so abandoning onboarding after step 3 left
+ * the couple space real on the server and invisible to the client: the profile
+ * lookup returned "absent", the client called that a brand-new account, and the
+ * next `create_couple_and_invitation` raised `User already in an active couple`
+ * with no way out.
+ *
+ * Every failure here degrades to `null` on purpose. This runs only when we have
+ * ALREADY established that there is no profile row, so the worst case is the
+ * pre-existing "treat as new account" behaviour -- never a thrown error and never
+ * a false membership claim.
+ */
+async function fetchResumableMembership(
+  userId: string,
+): Promise<Partial<AppState> | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('couple_members')
+      .select('couple_id, status, role')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (error || !data?.couple_id) return null;
+
+    // Onboarding is deliberately NOT marked complete: the profile row really is
+    // missing and still has to be written. What changes is that onboarding now
+    // resumes INTO the existing couple space instead of trying to create a
+    // second one.
+    return {
+      profile: {
+        id: userId,
+        myName: '',
+        role: (data.role as Role) || 'gomsin',
+        couple: {
+          coupleId: data.couple_id,
+          partnerName: '',
+          coupleCode: '',
+          connected: false,
+          status: 'pending',
+        },
+      } as UserProfile,
+      setupComplete: false,
+    };
+  } catch (err) {
+    console.error('[gomsinlog] Resumable membership lookup failed:', err);
+    return null;
+  }
+}
+
+export async function fetchFullStateResultFromDB(userId: string): Promise<FullStateResult> {
+  if (!isSupabaseConfigured || !supabase || !userId) return { ok: true, state: null };
 
   try {
     // 1. Fetch Profile
@@ -21,8 +87,10 @@ export async function fetchFullStateFromDB(userId: string): Promise<FullStateFet
 
     // A successful empty lookup is a genuinely new account. Query failures are
     // retryable and must not be confused with onboarding.
-    if (profileError) return FULL_STATE_UNAVAILABLE;
-    if (!profileData) return null;
+    if (profileError) return { ok: false, reason: classifyServerError(profileError).kind };
+    if (!profileData) {
+      return { ok: true, state: await fetchResumableMembership(userId) };
+    }
 
     // 2. Fetch Couple Member Status
     const { data: memberData, error: memberError } = await supabase
@@ -35,7 +103,7 @@ export async function fetchFullStateFromDB(userId: string): Promise<FullStateFet
     // An authorization/network failure is not proof that membership is absent.
     // Returning an empty "disconnected" snapshot would overwrite known-good
     // state and mislead the user; surface a retryable unavailable result instead.
-    if (memberError) return FULL_STATE_UNAVAILABLE;
+    if (memberError) return { ok: false, reason: classifyServerError(memberError).kind };
 
     let couple: CoupleInfo = {
       partnerName: '',
@@ -51,11 +119,13 @@ export async function fetchFullStateFromDB(userId: string): Promise<FullStateFet
         .select('*')
         .eq('id', memberData.couple_id)
         .single();
-      if (coupleError || !coupleData) return FULL_STATE_UNAVAILABLE;
+      if (coupleError || !coupleData) {
+        return { ok: false, reason: classifyServerError(coupleError).kind };
+      }
 
       // Fetch Partner Profile
       const { data: partnerData, error: partnerError } = await supabase.rpc('get_partner_profile');
-      if (partnerError) return FULL_STATE_UNAVAILABLE;
+      if (partnerError) return { ok: false, reason: classifyServerError(partnerError).kind };
       
       const hasPartner = !!(partnerData && partnerData.length > 0);
       let partnerName = '';
@@ -79,7 +149,7 @@ export async function fetchFullStateFromDB(userId: string): Promise<FullStateFet
       .select('*')
       .eq('user_id', userId)
       .maybeSingle();
-    if (contactError) return FULL_STATE_UNAVAILABLE;
+    if (contactError) return { ok: false, reason: classifyServerError(contactError).kind };
 
     const contact: ContactPreferences = {
       weekdayStart: contactData?.weekday_start || '18:00',
@@ -127,7 +197,16 @@ export async function fetchFullStateFromDB(userId: string): Promise<FullStateFet
         : Promise.resolve({ ok: true as const, trips: [] as Trip[] }),
     ]);
     if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
-      return FULL_STATE_UNAVAILABLE;
+      // Prefer a definite cause over a generic one: `forbidden` from a slice read
+      // is a membership answer and must not be reported as a connection failure.
+      const reason: ServerErrorKind = !recordsResult.ok
+        ? classifyServerError(recordsResult.error).kind
+        : !eventsResult.ok && eventsResult.reason === 'forbidden'
+          ? 'forbidden'
+          : !tripsResult.ok && tripsResult.reason === 'forbidden'
+            ? 'forbidden'
+            : 'unknown';
+      return { ok: false, reason };
     }
 
     const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
@@ -145,14 +224,27 @@ export async function fetchFullStateFromDB(userId: string): Promise<FullStateFet
     const trips: Trip[] = tripsResult.trips;
 
     return {
-      profile,
-      records,
-      events,
-      trips,
-      setupComplete: !!profileData.onboarding_completed_at,
+      ok: true,
+      state: {
+        profile,
+        records,
+        events,
+        trips,
+        setupComplete: !!profileData.onboarding_completed_at,
+      },
     };
   } catch (err) {
     console.error('fetchFullStateFromDB error:', err);
-    return FULL_STATE_UNAVAILABLE;
+    return { ok: false, reason: classifyServerError(err).kind };
   }
+}
+
+/**
+ * Reason-free wrapper, kept because the `FULL_STATE_UNAVAILABLE` sentinel is the
+ * shape the availability tests and the splash-screen timeout fallback are pinned
+ * to. New callers should prefer `fetchFullStateResultFromDB`.
+ */
+export async function fetchFullStateFromDB(userId: string): Promise<FullStateFetchResult> {
+  const result = await fetchFullStateResultFromDB(userId);
+  return result.ok ? result.state : FULL_STATE_UNAVAILABLE;
 }

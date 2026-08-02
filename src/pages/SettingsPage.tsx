@@ -695,11 +695,17 @@ export function SettingsPage() {
                       const results = await Promise.all(
                         ownRecords.map((record) => deleteRecord(record.id))
                       );
-                      if (results.every(Boolean)) {
+                      const firstFailure = results.find((result) => !result.ok);
+                      if (!firstFailure) {
                         setShowDeleteRecordsModal(false);
                         toast.success('내 기록이 모두 삭제되었습니다.');
                       } else {
-                        toast.error('일부 기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+                        // Report the actual cause of the first failure rather than
+                        // a generic retry prompt: a permission or session problem
+                        // will not resolve by trying again.
+                        toast.error(
+                          `일부 기록을 삭제하지 못했어요. ${firstFailure.ok ? '' : firstFailure.error}`.trim(),
+                        );
                       }
                     } catch (error) {
                       console.error('[Settings] Record deletion failed:', error);

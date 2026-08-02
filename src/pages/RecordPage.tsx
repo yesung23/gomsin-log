@@ -14,6 +14,8 @@ import {
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
 import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
 import { toast } from 'sonner';
+import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import type { DailyRecord } from '@/types';
 
 type MediaFilter = 'all' | 'photo' | 'video' | 'voice' | 'text';
@@ -68,7 +70,15 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 export function RecordPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { state, setHighlightedRecordId, updateRecord, deleteRecord } = useStore();
+  const {
+    state,
+    setHighlightedRecordId,
+    updateRecord,
+    deleteRecord,
+    updateRecordMedia,
+  } = useStore();
+  const isOnline = useOnlineStatus();
+  const isOffline = !isOnline;
   const { records, profile } = state;
   const today = localToday();
   const todayStr = toLocalDateString(today);
@@ -91,6 +101,8 @@ export function RecordPage() {
   const [editText, setEditText] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isMediaBusy, setIsMediaBusy] = useState(false);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
 
   const closeSelectedRecord = useCallback(() => {
@@ -121,6 +133,69 @@ export function RecordPage() {
   useEffect(() => {
     if (selectedRecordId !== null && selectedRecord === null) closeSelectedRecord();
   }, [selectedRecordId, selectedRecord, closeSelectedRecord]);
+
+  /**
+   * Media may only be edited on a record this viewer owns. The partner's records
+   * are read-only here for the same reason their 수정/삭제 controls are hidden.
+   */
+  const canEditMedia = !!selectedRecord
+    && isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role });
+
+  const handleAddAttachments = useCallback(async (files: File[]) => {
+    if (!selectedRecord || files.length === 0) return;
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+    // Validate against the same allowlist and size ceilings the create path uses,
+    // before anything is uploaded.
+    const rejected: string[] = [];
+    const accepted = files.filter((file) => {
+      const classified = classifyMediaFile(file);
+      if ('error' in classified) {
+        rejected.push(`${file.name}: ${classified.error}`);
+        return false;
+      }
+      return true;
+    });
+    rejected.forEach((message) => toast.error(message));
+    if (accepted.length === 0) return;
+
+    setIsMediaBusy(true);
+    try {
+      const result = await updateRecordMedia(selectedRecord.id, { addFiles: accepted });
+      if (!result.ok) {
+        toast.error(result.error || '첨부를 추가하지 못했어요.');
+        return;
+      }
+      if (result.failedFiles.length > 0) {
+        toast.warning(`첨부 ${result.failedFiles.length}개를 올리지 못했어요.`);
+        return;
+      }
+      toast.success('첨부를 추가했어요.');
+    } finally {
+      setIsMediaBusy(false);
+    }
+  }, [isOffline, selectedRecord, updateRecordMedia]);
+
+  const handleRemoveAttachment = useCallback(async (path: string) => {
+    if (!selectedRecord) return;
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+    setIsMediaBusy(true);
+    try {
+      const result = await updateRecordMedia(selectedRecord.id, { removePaths: [path] });
+      if (!result.ok) {
+        toast.error(result.error || '첨부를 삭제하지 못했어요.');
+        return;
+      }
+      toast.success('첨부를 삭제했어요.');
+    } finally {
+      setIsMediaBusy(false);
+    }
+  }, [isOffline, selectedRecord, updateRecordMedia]);
 
   useEffect(() => {
     if (!tripPeriod) return;
@@ -638,25 +713,30 @@ export function RecordPage() {
               <div className="mb-4 p-4 rounded-xl bg-destructive/10 border border-destructive/30 space-y-3">
                 <p className="text-sm font-bold text-destructive">이 기록을 삭제할까요?</p>
                 <p className="text-xs text-muted-foreground">삭제하면 되돌릴 수 없어요.</p>
+                {isOffline && (
+                  <p className="text-xs text-muted-foreground">{OFFLINE_READONLY_MESSAGE}</p>
+                )}
                 <div className="flex gap-2">
                   <button
                     onClick={async () => {
                       setIsSaving(true);
                       try {
-                        const ok = await deleteRecord(selectedRecord.id);
-                        if (ok) {
+                        const result = await deleteRecord(selectedRecord.id);
+                        if (result.ok) {
                           toast.success('기록이 삭제되었어요.');
                           closeSelectedRecord();
                         } else {
-                          toast.error('삭제하지 못했어요. 다시 시도해 주세요.');
+                          // The store always supplies a cause-specific message,
+                          // so there is no generic fallback to fall back to.
+                          toast.error(result.error);
                         }
                       } finally {
                         setIsSaving(false);
                         setShowDeleteConfirm(false);
                       }
                     }}
-                    disabled={isSaving}
-                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-xs"
+                    disabled={isSaving || isOffline}
+                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-xs disabled:opacity-50"
                   >
                     {isSaving ? '삭제 중...' : '삭제'}
                   </button>
@@ -718,21 +798,21 @@ export function RecordPage() {
                             updates.emotionFlow = [];
                             updates.emotionUpdatedAt = null;
                           }
-                          const ok = await updateRecord(selectedRecord.id, updates);
-                          if (ok) {
+                          const result = await updateRecord(selectedRecord.id, updates);
+                          if (result.ok) {
                             toast.success('기록이 수정되었어요.');
                             setIsEditing(false);
                             setEditText('');
                             // Deliberately keep the modal open: it now re-reads
                             // the saved record from the store.
                           } else {
-                            toast.error('수정하지 못했어요. 다시 시도해 주세요.');
+                            toast.error(result.error);
                           }
                         } finally {
                           setIsSaving(false);
                         }
                       }}
-                      disabled={isSaving || !editText.trim()}
+                      disabled={isSaving || !editText.trim() || isOffline}
                       className="px-3 py-1.5 rounded-lg bg-coral text-coral-foreground font-bold text-xs disabled:opacity-50"
                     >
                       {isSaving ? '저장 중...' : '저장'}
@@ -753,10 +833,10 @@ export function RecordPage() {
                 </div>
               )}
 
-              {selectedRecord.attachments && selectedRecord.attachments.length > 0 && (
+              {((selectedRecord.attachments && selectedRecord.attachments.length > 0) || canEditMedia) && (
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold text-muted-foreground">첨부 파일</h4>
-                  {selectedRecord.attachments.map((att, idx) => (
+                  {(selectedRecord.attachments || []).map((att, idx) => (
                     <div key={idx} className="rounded-xl overflow-hidden bg-muted border border-border">
                       {att.type === 'photo' && att.url ? (
                         <img src={att.url} alt={att.name} loading="lazy" className="w-full h-48 object-cover rounded-xl" />
@@ -768,8 +848,54 @@ export function RecordPage() {
                           <span>{att.name}</span>
                         </div>
                       )}
+                      {/* Removal needs the durable storage path. A legacy
+                          attachment without one cannot be addressed in Storage,
+                          so no delete control is offered for it. */}
+                      {canEditMedia && att.path && (
+                        <div className="flex justify-end px-3 pb-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleRemoveAttachment(att.path!)}
+                            disabled={isMediaBusy || isOffline}
+                            aria-label={`첨부 ${att.name} 삭제`}
+                            className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-xs disabled:opacity-50"
+                          >
+                            <Trash2 size={13} /> 첨부 삭제
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
+
+                  {canEditMedia && (
+                    <div className="pt-1 space-y-2">
+                      <input
+                        ref={mediaInputRef}
+                        type="file"
+                        accept={MEDIA_ACCEPT}
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          const files = Array.from(event.target.files || []);
+                          event.target.value = '';
+                          void handleAddAttachments(files);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => mediaInputRef.current?.click()}
+                        disabled={isMediaBusy || isOffline}
+                        className="w-full min-h-[44px] rounded-xl border border-dashed border-border text-xs font-bold text-muted-foreground disabled:opacity-50"
+                      >
+                        {isMediaBusy ? '첨부 처리 중...' : '+ 사진 · 영상 · 음성 추가'}
+                      </button>
+                      {isOffline && (
+                        <p className="text-[11px] text-muted-foreground text-center">
+                          오프라인이라 지금은 읽기만 가능해요. 연결되면 다시 시도해 주세요.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

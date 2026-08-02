@@ -7,6 +7,8 @@ import {
   serverCallBlockedByPendingDeletion,
   type AccountDeletionOutcome,
 } from '@/lib/accountDeletion';
+import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
+import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
 import type { AuthUser, IAuthRepository, ILogRepository, AppState, Role } from '@/types';
 
 /**
@@ -333,6 +335,44 @@ export async function regenerateCoupleInvitation(): Promise<{ code?: string; err
   } catch (err: any) {
     console.error('[gomsinlog] regenerate_invitation threw:', err);
     return { error: '초대 코드 재발급 중 오류가 발생했습니다.' };
+  }
+}
+
+/**
+ * Read this account's couple lifecycle from the server.
+ *
+ * Migration 013 revoked all client SELECT on `invitation_codes`, so there is no
+ * table the client may read to tell "pending creator with a live code" from
+ * "personal, no space" from "code expired". Migration 016 adds
+ * `public.get_my_couple_state()` as the single SECURITY DEFINER answer to that
+ * question. It returns membership, partner presence and invitation validity --
+ * never a code and never a hash.
+ *
+ * Read-only, so it is deliberately NOT behind the deletion gate: it is also the
+ * call that tells a recovering client what workspace it is looking at.
+ */
+export async function fetchMyCoupleState(): Promise<
+  { ok: true; state: RemoteCoupleState | null } | { ok: false; reason: ServerErrorKind }
+> {
+  if (!supabase) return { ok: true, state: null };
+  try {
+    const { data, error } = await supabase.rpc('get_my_couple_state');
+    if (error) {
+      // PGRST202 means migration 016 is not applied on this project yet. That is
+      // a server-side gap, not an authorization answer, so it must not be allowed
+      // to look like "you have no couple space".
+      console.error('[gomsinlog] get_my_couple_state failed:', error);
+      return { ok: false, reason: classifyServerError(error).kind };
+    }
+    const parsed = parseRemoteCoupleState(data);
+    if (!parsed) {
+      console.error('[gomsinlog] Unexpected get_my_couple_state payload:', data);
+      return { ok: false, reason: 'server' };
+    }
+    return { ok: true, state: parsed.coupleId ? parsed : null };
+  } catch (err) {
+    console.error('[gomsinlog] get_my_couple_state threw:', err);
+    return { ok: false, reason: classifyServerError(err).kind };
   }
 }
 

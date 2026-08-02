@@ -269,7 +269,11 @@ export function TodayLogWidget() {
     }
 
     if (!result.ok) {
-      toast.error(result.error || '기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+      // No fallback copy: the store now ALWAYS supplies a cause-specific message
+      // (see serverErrors.ts). The old fallback blamed the internet connection for
+      // permission and membership failures, which sent users into an endless retry
+      // loop instead of telling them what to fix.
+      toast.error(result.error || '기록을 저장하지 못했어요.');
       return;
     }
 

@@ -100,6 +100,12 @@ vi.mock('@/lib/supabase', () => ({
   disconnectCoupleFromDB: vi.fn(async () => { h.callLog.push('disconnectCoupleFromDB'); return true; }),
   deleteAccountFromDB: () => h.deleteAccountFromDB(),
   saveCoupleAnniversary: vi.fn(async () => { h.callLog.push('saveCoupleAnniversary'); return true; }),
+  // Read-only lifecycle probe; logged so the gate-ordering assertions can prove
+  // it never runs ahead of the deletion check for a MUTATION path.
+  // Read-only lifecycle probe. Deliberately answers "unavailable" so it cannot
+  // alter the couple state these deletion scenarios set up, and is NOT logged:
+  // it is not a mutation and the call-order assertions are about mutations.
+  fetchMyCoupleState: vi.fn(async () => ({ ok: false, reason: 'server' })),
 }));
 
 vi.mock('@/lib/sync', () => ({
@@ -107,12 +113,19 @@ vi.mock('@/lib/sync', () => ({
     h.callLog.push('fetchFullStateFromDB');
     return h.fetchFullStateFromDB(userId);
   },
+  fetchFullStateResultFromDB: async (userId: string) => {
+    h.callLog.push('fetchFullStateFromDB');
+    const result = await h.fetchFullStateFromDB(userId);
+    return result === h.FULL_STATE_UNAVAILABLE
+      ? { ok: false, reason: 'unknown' }
+      : { ok: true, state: result };
+  },
   FULL_STATE_UNAVAILABLE: h.FULL_STATE_UNAVAILABLE,
 }));
 
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: () => h.saveRecordToDB(),
-  deleteRecordFromDB: vi.fn(async () => { h.callLog.push('deleteRecordFromDB'); return true; }),
+  deleteRecordFromDB: vi.fn(async () => { h.callLog.push('deleteRecordFromDB'); return { ok: true }; }),
   fetchRecordsResultFromDB: vi.fn(async () => {
     h.callLog.push('fetchRecordsResultFromDB');
     return { ok: true, records: [] };

@@ -14,8 +14,20 @@ import {
   disconnectCoupleFromDB,
   deleteAccountFromDB,
   saveCoupleAnniversary,
+  fetchMyCoupleState,
 } from '@/lib/supabase';
-import { fetchFullStateFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
+import { fetchFullStateResultFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
+import {
+  classifyServerError,
+  serverErrorMessage,
+  type ServerErrorKind,
+} from '@/lib/serverErrors';
+import {
+  deriveCoupleLifecycle,
+  mergeCoupleState,
+  type CoupleLifecycle,
+  type RemoteCoupleState,
+} from '@/lib/coupleLifecycle';
 import {
   deleteEventFromDB,
   fetchEventsResultFromDB,
@@ -35,7 +47,11 @@ import {
   isCanonicalRecordMediaPath,
 } from '@/lib/records';
 import { StoreContext } from '@/lib/storeContext';
-import type { SharedSyncStatus } from '@/lib/storeContext';
+import type {
+  RecordMutationReason,
+  RecordMutationResult,
+  SharedSyncStatus,
+} from '@/lib/storeContext';
 import {
   assertNever,
   classifyDeletionStatus,
@@ -229,6 +245,36 @@ const localRepository = new LocalStorageRepository();
  * Exhaustive at compile time: a fourth variant, or an unhandled `unknown`, is a
  * TYPE ERROR rather than a silent fall-through into permissive behaviour.
  */
+/**
+ * Korean copy for every way a record mutation can fail.
+ *
+ * Total over the union, so a new reason cannot ship with an empty toast. Server
+ * causes defer to `serverErrors.ts` rather than restating its wording, which is
+ * what keeps the "no internet message unless actually offline" rule in one place.
+ */
+function recordFailureMessage(reason: RecordMutationReason): string {
+  switch (reason) {
+    case 'stale':
+      return '계정 또는 커플 공간이 변경되어 작업을 중단했어요.';
+    case 'missing':
+      return '기록을 찾을 수 없어요. 새로고침한 뒤 다시 시도해 주세요.';
+    case 'not_owner':
+      return '내가 남긴 기록만 수정하거나 삭제할 수 있어요.';
+    case 'no_workspace':
+      return '커플 공간을 만든 뒤에 기록을 남길 수 있어요.';
+    case 'workspace_unresolved':
+      return '지금 커플 공간을 확인할 수 없어요. 잠시 후 다시 시도해 주세요.';
+    case 'deletion_pending':
+      return '탈퇴 처리가 진행 중이어서 기록을 저장할 수 없어요.';
+    default:
+      return serverErrorMessage(reason);
+  }
+}
+
+function recordFailure(reason: RecordMutationReason): RecordMutationResult {
+  return { ok: false, reason, error: recordFailureMessage(reason) };
+}
+
 function blocksServerCall(status: DeletionStatus): boolean {
   switch (status.kind) {
     case 'pending':
@@ -252,6 +298,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [isAuthChecked, setIsAuthChecked] = useState(!supabase);
   const [authSyncUnavailable, setAuthSyncUnavailable] = useState(false);
+  /**
+   * Why hydration failed. Kept outside `AppState` (never persisted) and reset to
+   * `null` on every success, so the outage screen cannot show a stale cause.
+   */
+  const [authSyncReason, setAuthSyncReason] = useState<ServerErrorKind | null>(null);
+  /**
+   * Server-authoritative couple lifecycle, starting at `unknown` because nothing
+   * has been asked yet. It is never initialised to `personal`: that would render
+   * "create a space" to a connected user for one frame.
+   */
+  const [coupleLifecycle, setCoupleLifecycle] = useState<CoupleLifecycle>('unknown');
+  const [invitationExpiresAt, setInvitationExpiresAt] = useState<string | null>(null);
+  /**
+   * In-flight session refresh, so N parallel failures cause ONE refresh attempt
+   * rather than N competing ones.
+   */
+  const authRecoveryRef = useRef<Promise<boolean> | null>(null);
   /**
    * The user id whose server state we have already loaded. Lets us ignore
    * TOKEN_REFRESHED / USER_UPDATED events instead of re-running the full sync,
@@ -328,6 +391,55 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return nextState;
   }, [replaceStateImmediately]);
 
+  /**
+   * The single recovery path for a lost session.
+   *
+   * Exactly ONE `refreshSession()` attempt per burst, then a decision:
+   *
+   *  - refreshed: the caller may retry its operation, and no message is shown at
+   *    all, because from the user's point of view nothing went wrong.
+   *  - not refreshed: sign out and surface the session copy. Signing out routes
+   *    through `onAuthStateChange`'s `SIGNED_OUT` branch, so the local purge and
+   *    the route change are the same ones every other sign-out uses -- there is no
+   *    second, subtly different teardown path to keep in sync.
+   *
+   * Returns whether the session was rescued.
+   */
+  const handleAuthExpired = useCallback(async (): Promise<boolean> => {
+    const client = supabase;
+    if (!client) return false;
+    const existing = authRecoveryRef.current;
+    if (existing) return existing;
+
+    const attempt = (async (): Promise<boolean> => {
+      try {
+        const { data, error } = await client.auth.refreshSession();
+        if (!error && data?.session) {
+          setAuthSyncReason(null);
+          return true;
+        }
+        console.warn('[gomsinlog] Session refresh failed; signing out', error);
+      } catch (error) {
+        console.warn('[gomsinlog] Session refresh threw; signing out', error);
+      }
+      // The session cannot be rescued. Say so in Korean and never let a raw
+      // permission/DB string reach the UI for this cause.
+      setAuthSyncReason('auth_expired');
+      try {
+        await authRepository.signOut();
+      } catch (error) {
+        console.error('[gomsinlog] Sign-out after session expiry failed', error);
+      }
+      return false;
+    })();
+
+    authRecoveryRef.current = attempt;
+    void attempt.finally(() => {
+      if (authRecoveryRef.current === attempt) authRecoveryRef.current = null;
+    });
+    return attempt;
+  }, []);
+
   const captureActiveIdentity = useCallback((): ActiveIdentity | null => {
     const current = stateRef.current;
     const userId = current.authenticatedUser?.id;
@@ -378,6 +490,64 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     isCurrentIdentity(workspace)
     && stateMatchesLinkedCouple(stateRef.current, workspace),
   [isCurrentIdentity]);
+
+  /**
+   * Ask the server what couple space this account is in, and merge the answer.
+   *
+   * This is the ONLY authoritative answer available to the client: migration 013
+   * revoked SELECT on `invitation_codes`, so nothing else can distinguish a
+   * pending creator from a personal user. See `coupleLifecycle.ts` for the merge
+   * contract -- in particular that a failed answer returns local state untouched
+   * and yields `unknown`.
+   */
+  const refreshCoupleLifecycle = useCallback(async (): Promise<CoupleLifecycle> => {
+    const identity = captureActiveIdentity();
+    if (!identity || stateRef.current.isDemoMode) {
+      // Demo mode never contacts the backend; its couple state is authored locally.
+      return stateRef.current.isDemoMode ? 'connected' : 'unknown';
+    }
+
+    // This runs from background timers (the pending-partner poll) as well as from
+    // hydration, so an unexpected throw here must not escape as an unhandled
+    // rejection. An unusable answer is `unknown`, which by contract changes
+    // nothing.
+    let result: Awaited<ReturnType<typeof fetchMyCoupleState>>;
+    try {
+      result = await fetchMyCoupleState();
+    } catch (error) {
+      console.error('[gomsinlog] Couple lifecycle probe threw:', error);
+      result = { ok: false, reason: 'unknown' };
+    }
+    if (!isCurrentIdentity(identity)) return 'unknown';
+    if (!result || typeof result !== 'object' || !('ok' in result)) {
+      console.error('[gomsinlog] Couple lifecycle probe returned an unusable value.');
+      setCoupleLifecycle('unknown');
+      return 'unknown';
+    }
+
+    if (!result.ok) {
+      if (result.reason === 'auth_expired') void handleAuthExpired();
+      // `undefined` (not `null`) is the "could not ask" signal, so the merge
+      // leaves local state exactly as it was.
+      setCoupleLifecycle(deriveCoupleLifecycle(undefined, stateRef.current.profile.couple));
+      return 'unknown';
+    }
+
+    const remote: RemoteCoupleState | null = result.state;
+    const lifecycle = deriveCoupleLifecycle(remote, stateRef.current.profile.couple);
+    updateStateImmediately((current) => {
+      if (!isCurrentIdentity(identity)) return current;
+      const merged = mergeCoupleState(current.profile.couple, remote);
+      return merged === current.profile.couple
+        ? current
+        : { ...current, profile: { ...current.profile, couple: merged } };
+    });
+    setCoupleLifecycle(lifecycle);
+    setInvitationExpiresAt(
+      remote?.invitationActive ? remote.invitationExpiresAt : null,
+    );
+    return lifecycle;
+  }, [captureActiveIdentity, handleAuthExpired, isCurrentIdentity, updateStateImmediately]);
 
   /**
    * Record a resolved status.
@@ -690,11 +860,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
             const authReconciliationRevision = membershipReconciliationRef.current;
             // A hanging fetch must never keep the app behind the splash spinner.
-            const dbState = await withTimeout(
-              fetchFullStateFromDB(sessionUser.id),
+            let hydration = await withTimeout(
+              fetchFullStateResultFromDB(sessionUser.id),
               AUTH_SYNC_TIMEOUT_MS,
-              FULL_STATE_UNAVAILABLE,
+              { ok: false as const, reason: 'unknown' as ServerErrorKind },
             );
+            // One refresh, then one retry of the SAME read. An expired JWT is the
+            // single most common cause of a first-load failure after the app has
+            // been backgrounded overnight, and it is fully recoverable.
+            if (!hydration.ok && hydration.reason === 'auth_expired') {
+              const refreshed = await handleAuthExpired();
+              if (
+                disposed
+                || sessionGenerationRef.current !== authGeneration
+                || sessionUserIdRef.current !== sessionUser.id
+              ) return;
+              if (refreshed) {
+                hydration = await withTimeout(
+                  fetchFullStateResultFromDB(sessionUser.id),
+                  AUTH_SYNC_TIMEOUT_MS,
+                  { ok: false as const, reason: 'unknown' as ServerErrorKind },
+                );
+              }
+            }
+            const dbState = hydration.ok ? hydration.state : FULL_STATE_UNAVAILABLE;
             if (
               disposed
               || sessionGenerationRef.current !== authGeneration
@@ -715,6 +904,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             const prev = stateRef.current;
             const syncUnavailable = dbState === FULL_STATE_UNAVAILABLE;
             setAuthSyncUnavailable(syncUnavailable);
+            setAuthSyncReason(hydration.ok ? null : hydration.reason);
+            if (syncUnavailable) {
+              // A failed hydration answers nothing about the couple space, so the
+              // lifecycle must go to `unknown` -- never to `personal`.
+              setCoupleLifecycle('unknown');
+              setInvitationExpiresAt(null);
+            }
             const nextState = (() => {
               // On an account switch, start from a clean slate so none of the
               // previous account's records/profile can survive.
@@ -783,6 +979,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             hydratedUserIdRef.current = dbState && dbState !== FULL_STATE_UNAVAILABLE
               ? sessionUser.id
               : null;
+
+            // Ask the server for the lifecycle only once the local snapshot is in
+            // place, so the merge has something coherent to merge into. A failure
+            // here leaves that snapshot untouched by contract.
+            if (!syncUnavailable) void refreshCoupleLifecycle();
           } finally {
             // Always release the splash screen, even when the sync failed.
             if (
@@ -823,7 +1024,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       disposed = true;
       subscription.unsubscribe();
     };
-  }, [applyDeletionStatus, isHydrated, replaceStateImmediately, verifyDeletionStatus]);
+  }, [
+    applyDeletionStatus,
+    handleAuthExpired,
+    isHydrated,
+    refreshCoupleLifecycle,
+    replaceStateImmediately,
+    verifyDeletionStatus,
+  ]);
 
   useEffect(() => {
     if (!isHydrated || (supabase && !isAuthChecked)) return;
@@ -957,6 +1165,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isLatestCurrentWorkspace()) return false;
       if (error) {
         console.error('[gomsinlog] Failed to verify active membership:', error);
+        // An expired session is not evidence that membership was revoked, so it
+        // must not look like one. Recover the session centrally and let the retry
+        // path re-ask; the workspace is quarantined meanwhile, not purged.
+        if (classifyServerError(error).kind === 'auth_expired') void handleAuthExpired();
         quarantineSharedAccess(workspace);
         return false;
       }
@@ -1009,6 +1221,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [
     ensureNotPendingBeforeServerCall,
+    handleAuthExpired,
     matchesCurrentWorkspace,
     purgeSharedAccess,
     quarantineSharedAccess,
@@ -1312,6 +1525,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       attempts += 1;
+      // The lifecycle RPC is what keeps the invitation's validity and expiry
+      // current while we wait; `get_partner_profile` is still the only source of
+      // the partner's display name.
+      void refreshCoupleLifecycle();
       const { data, error } = await client.rpc('get_partner_profile');
       const current = stateRef.current;
       if (
@@ -1337,10 +1554,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             },
           },
         }));
+        setCoupleLifecycle('connected');
+        setInvitationExpiresAt(null);
         return; // Connected: stop polling.
       }
 
-      if (error) console.error('[gomsinlog] Partner lookup failed:', error);
+      if (error) {
+        console.error('[gomsinlog] Partner lookup failed:', error);
+        if (error.code === 'PGRST301') void handleAuthExpired();
+      }
       if (attempts >= PARTNER_POLL_MAX_ATTEMPTS) return; // Give up quietly.
       schedule();
     };
@@ -1372,7 +1594,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     coupleConnected,
     coupleId,
     coupleStatus,
+    handleAuthExpired,
     isAuthChecked,
+    refreshCoupleLifecycle,
     updateStateImmediately,
   ]);
 
@@ -1443,6 +1667,69 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
+   * Resolve the caller's couple space when local state does not have it.
+   *
+   * Three outcomes, and the difference between them is the whole point:
+   *
+   *  - a definite couple id: adopt it into state and let the write proceed;
+   *  - a definite "no couple space": the personal-mode message is CORRECT;
+   *  - no answer: a retryable message. Never the create-a-space message (which
+   *    would be a lie), and never a connection message when the cause was
+   *    authorization.
+   */
+  const resolveWorkspaceOnDemand = async (): Promise<
+    ActiveWorkspace | { reason: RecordMutationReason; error: string }
+  > => {
+    const identity = captureActiveIdentity();
+    if (!identity) return { reason: 'stale', error: recordFailureMessage('stale') };
+
+    const result = await fetchMyCoupleState();
+    if (!isCurrentIdentity(identity)) {
+      return { reason: 'stale', error: recordFailureMessage('stale') };
+    }
+
+    if (!result.ok) {
+      if (result.reason === 'auth_expired') {
+        void handleAuthExpired();
+        return { reason: 'auth_expired', error: recordFailureMessage('auth_expired') };
+      }
+      if (result.reason === 'offline') {
+        return { reason: 'offline', error: recordFailureMessage('offline') };
+      }
+      return {
+        reason: 'workspace_unresolved',
+        error: recordFailureMessage('workspace_unresolved'),
+      };
+    }
+
+    const remote = result.state;
+    if (!remote?.coupleId) {
+      // Authoritative negative: there really is no couple space.
+      setCoupleLifecycle('personal');
+      return { reason: 'no_workspace', error: recordFailureMessage('no_workspace') };
+    }
+
+    const coupleId = remote.coupleId;
+    updateStateImmediately((current) => {
+      if (!isCurrentIdentity(identity)) return current;
+      return {
+        ...current,
+        profile: {
+          ...current.profile,
+          couple: mergeCoupleState(current.profile.couple, remote),
+        },
+      };
+    });
+    setCoupleLifecycle(deriveCoupleLifecycle(remote, stateRef.current.profile.couple));
+    setInvitationExpiresAt(remote.invitationActive ? remote.invitationExpiresAt : null);
+
+    const workspace: ActiveWorkspace = { ...identity, coupleId };
+    return isCurrentLinkedCouple(workspace)
+      ? workspace
+      : { reason: 'stale', error: recordFailureMessage('stale') };
+  };
+
+  /**
    * Create a record and attach media files to it.
    *
    * Two phases are required by the storage RLS policy (migration 007): the
@@ -1484,12 +1771,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         : { ok: false, failedFiles: files.map((file) => file.name) };
     }
 
-    const workspace = captureLinkedCouple();
-    if (!workspace) {
+    // A missing LOCAL couple id is not proof that the account has no couple
+    // space: the creator's membership is `active` on the server from the moment
+    // they create it, and a failed hydration (or an abandoned onboarding) leaves
+    // that membership real but locally invisible. Resolving it on demand is the
+    // difference between "you already own a space" and telling the user to create
+    // one they cannot create.
+    const workspace = captureLinkedCouple() ?? await resolveWorkspaceOnDemand();
+    if (!('coupleId' in workspace)) {
       return {
         ok: false,
         failedFiles: files.map((file) => file.name),
-        error: '커플 공간을 만든 뒤에 기록을 남길 수 있어요.',
+        error: workspace.error,
       };
     }
     const newRecord: DailyRecord = { ...baseRecord, userId: workspace.userId };
@@ -1510,13 +1803,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         workspace.userId,
       );
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      if (!saved) {
-        return { ok: false, failedFiles: files.map((file) => file.name), error: '기록을 저장하지 못했어요.' };
+      if (!saved.ok) {
+        // The cause travels all the way from PostgREST to the toast, so a `42501`
+        // membership rejection can no longer be reported as a network problem.
+        if (saved.reason === 'auth_expired') void handleAuthExpired();
+        return {
+          ok: false,
+          failedFiles: files.map((file) => file.name),
+          error: recordFailureMessage(saved.reason),
+        };
       }
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
       console.error('[gomsinlog] Failed to save record:', error);
-      return { ok: false, failedFiles: files.map((file) => file.name), error: '기록을 저장하지 못했어요.' };
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return {
+        ok: false,
+        failedFiles: files.map((file) => file.name),
+        error: recordFailureMessage(reason),
+      };
     }
 
     const attachments: Attachment[] = [...(newRecord.attachments || [])];
@@ -1544,7 +1850,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           workspace.userId,
         );
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        if (!patched) {
+        if (!patched.ok) {
           try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
           if (!isCurrentLinkedCouple(workspace)) return staleResult;
           failedFiles.push(...files.map((file) => file.name));
@@ -1583,10 +1889,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       : staleResult;
   };
 
-  const updateRecord = async (id: string, updates: Partial<DailyRecord>): Promise<boolean> => {
+  const updateRecord = async (
+    id: string,
+    updates: Partial<DailyRecord>,
+  ): Promise<RecordMutationResult> => {
     const initial = stateRef.current;
     const existing = initial.records.find((record) => record.id === id);
-    if (!existing) return false;
+    if (!existing) return recordFailure('missing');
     // Identity-bearing fields are immutable even if an older caller still
     // passes the broad Partial<DailyRecord> API.
     const updated: DailyRecord = {
@@ -1604,20 +1913,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             records: current.records.map((record) => record.id === id ? updated : record),
           }
         : current);
-      return stateRef.current.isDemoMode;
+      return stateRef.current.isDemoMode ? { ok: true } : recordFailure('stale');
     }
 
     const workspace = captureLinkedCouple();
-    if (!workspace || existing.userId !== workspace.userId) return false;
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!workspace) return recordFailure('workspace_unresolved');
+    if (existing.userId !== workspace.userId) return recordFailure('not_owner');
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
+      return recordFailure('deletion_pending');
+    }
     try {
       const saved = await saveRecordToDB(updated, workspace.coupleId, workspace.userId);
-      if (!isCurrentLinkedCouple(workspace) || !saved) return false;
-    } catch (error) {
-      if (isCurrentLinkedCouple(workspace)) {
-        console.error('[gomsinlog] Failed to update record:', error);
+      if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
+      if (!saved.ok) {
+        if (saved.reason === 'auth_expired') void handleAuthExpired();
+        return recordFailure(saved.reason);
       }
-      return false;
+    } catch (error) {
+      if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
+      console.error('[gomsinlog] Failed to update record:', error);
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return recordFailure(reason);
     }
 
     let recordToCommit = updated;
@@ -1630,7 +1947,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           updated.id,
         ),
       };
-      if (!isCurrentLinkedCouple(workspace)) return false;
+      if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
     }
 
     updateStateImmediately((current) =>
@@ -1643,24 +1960,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
         : current,
     );
-    return isCurrentLinkedCouple(workspace);
+    return isCurrentLinkedCouple(workspace) ? { ok: true } : recordFailure('stale');
   };
 
-  const deleteRecord = async (id: string): Promise<boolean> => {
+  const deleteRecord = async (id: string): Promise<RecordMutationResult> => {
     const initial = stateRef.current;
     const existing = initial.records.find((record) => record.id === id);
-    if (!existing) return false;
+    if (!existing) return recordFailure('missing');
 
     if (initial.isDemoMode) {
       updateStateImmediately((current) => current.isDemoMode
         ? { ...current, records: current.records.filter((record) => record.id !== id) }
         : current);
-      return stateRef.current.isDemoMode;
+      return stateRef.current.isDemoMode ? { ok: true } : recordFailure('stale');
     }
 
     const workspace = captureLinkedCouple();
-    if (!workspace || existing.userId !== workspace.userId) return false;
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!workspace) return recordFailure('workspace_unresolved');
+    if (existing.userId !== workspace.userId) return recordFailure('not_owner');
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
+      return recordFailure('deletion_pending');
+    }
 
     // Storage cleanup: remove owned media objects BEFORE deleting the DB row.
     // Fail closed: if cleanup fails, abort the delete rather than orphaning
@@ -1674,12 +1994,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (attachmentPaths.length > 0) {
       try {
         await removeRecordMedia(attachmentPaths);
-        if (!isCurrentLinkedCouple(workspace)) return false;
+        if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       } catch (error) {
-        if (isCurrentLinkedCouple(workspace)) {
-          console.error('[gomsinlog] Storage cleanup failed, aborting delete:', error);
-        }
-        return false;
+        if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
+        console.error('[gomsinlog] Storage cleanup failed, aborting delete:', error);
+        return recordFailure(classifyServerError(error).kind);
       }
     }
 
@@ -1689,10 +2008,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         workspace.userId,
         workspace.coupleId,
       );
-      if (!isCurrentLinkedCouple(workspace) || !deleted) return false;
+      if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
+      if (!deleted.ok) {
+        if (deleted.reason === 'auth_expired') void handleAuthExpired();
+        return recordFailure(deleted.reason);
+      }
     } catch (error) {
-      if (isCurrentLinkedCouple(workspace)) console.error('Failed to delete record:', error);
-      return false;
+      if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
+      console.error('Failed to delete record:', error);
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return recordFailure(reason);
     }
 
     updateStateImmediately((current) =>
@@ -1700,7 +2026,183 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? { ...current, records: current.records.filter((record) => record.id !== id) }
         : current,
     );
-    return isCurrentLinkedCouple(workspace);
+    return isCurrentLinkedCouple(workspace) ? { ok: true } : recordFailure('stale');
+  };
+
+  /**
+   * Add and/or remove media on an existing record.
+   *
+   * Ordering is forced by storage RLS and by the no-orphans rule, and is the same
+   * shape `addRecordWithMedia` uses:
+   *
+   *   gate -> verify ownership -> upload new objects -> patch the row -> ONLY THEN
+   *   delete the removed objects.
+   *
+   * If the patch fails, the freshly uploaded objects are deleted again and the row
+   * is left exactly as it was: no orphaned storage, no phantom success. Deleting
+   * the removed objects last is deliberate -- doing it first would destroy files
+   * that are still referenced by the row if the patch then failed.
+   */
+  const updateRecordMedia = async (
+    id: string,
+    changes: { addFiles?: File[]; removePaths?: string[] },
+  ): Promise<{ ok: boolean; failedFiles: string[]; error?: string }> => {
+    const addFiles = changes.addFiles || [];
+    const removePaths = changes.removePaths || [];
+    const allFileNames = addFiles.map((file) => file.name);
+    const initial = stateRef.current;
+    const existing = initial.records.find((record) => record.id === id);
+    if (!existing) {
+      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage('missing') };
+    }
+    if (addFiles.length === 0 && removePaths.length === 0) return { ok: true, failedFiles: [] };
+
+    if (initial.isDemoMode) {
+      const previews: Attachment[] = addFiles.map((file) => {
+        const classified = classifyMediaFile(file);
+        return {
+          type: 'error' in classified ? 'photo' : classified.type,
+          name: file.name,
+          url: URL.createObjectURL(file),
+        };
+      });
+      updateStateImmediately((current) => current.isDemoMode
+        ? {
+            ...current,
+            records: current.records.map((record) => record.id === id
+              ? {
+                  ...record,
+                  attachments: [
+                    ...(record.attachments || []).filter(
+                      (attachment) => !attachment.path || !removePaths.includes(attachment.path),
+                    ),
+                    ...previews,
+                  ],
+                }
+              : record),
+          }
+        : current);
+      return { ok: true, failedFiles: [] };
+    }
+
+    const workspace = captureLinkedCouple() ?? await resolveWorkspaceOnDemand();
+    if (!('coupleId' in workspace)) {
+      return { ok: false, failedFiles: allFileNames, error: workspace.error };
+    }
+    if (existing.userId !== workspace.userId) {
+      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage('not_owner') };
+    }
+
+    // Never accept a path from outside this record's own namespace, even though
+    // it can only have come from local state: it is the same validation storage
+    // RLS applies, and applying it here keeps a corrupted cache from asking us to
+    // delete another record's (or another couple's) files.
+    const invalidPath = removePaths.find(
+      (path) => !isCanonicalRecordMediaPath(path, workspace.coupleId, id),
+    );
+    if (invalidPath) {
+      console.error('[gomsinlog] Refusing to remove a non-canonical media path:', invalidPath);
+      return {
+        ok: false,
+        failedFiles: allFileNames,
+        error: '첨부 파일 경로가 올바르지 않아 삭제하지 않았어요.',
+      };
+    }
+
+    const staleResult = {
+      ok: false,
+      failedFiles: allFileNames,
+      error: recordFailureMessage('stale'),
+    };
+
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
+      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage('deletion_pending') };
+    }
+    if (!isCurrentLinkedCouple(workspace)) return staleResult;
+
+    const kept = (existing.attachments || []).filter(
+      (attachment) => !attachment.path || !removePaths.includes(attachment.path),
+    );
+    const uploadedPaths: string[] = [];
+    const failedFiles: string[] = [];
+    const added: Attachment[] = [];
+
+    for (const file of addFiles) {
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      const result = await uploadRecordMedia(file, workspace.coupleId, id);
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      if ('error' in result) {
+        failedFiles.push(file.name);
+        console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
+        continue;
+      }
+      added.push(result.attachment);
+      if (result.attachment.path) uploadedPaths.push(result.attachment.path);
+    }
+
+    const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
+    const rollbackUploads = async () => {
+      if (uploadedPaths.length === 0) return;
+      try {
+        await removeRecordMedia(uploadedPaths);
+      } catch (error) {
+        console.error('[gomsinlog] Failed to roll back uploaded media:', error);
+      }
+    };
+
+    try {
+      const patched = await saveRecordToDB(patchedRecord, workspace.coupleId, workspace.userId);
+      if (!patched.ok) {
+        await rollbackUploads();
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
+        if (patched.reason === 'auth_expired') void handleAuthExpired();
+        return {
+          ok: false,
+          failedFiles: allFileNames,
+          error: recordFailureMessage(patched.reason),
+        };
+      }
+    } catch (error) {
+      console.error('[gomsinlog] Failed to patch record media:', error);
+      await rollbackUploads();
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage(reason) };
+    }
+
+    // The row no longer references these objects, so removing them now cannot
+    // orphan a live attachment. A failure here leaves unreferenced bytes behind,
+    // which is logged but must NOT fail the operation the user asked for.
+    if (removePaths.length > 0) {
+      try {
+        await removeRecordMedia(removePaths);
+      } catch (error) {
+        console.error('[gomsinlog] Failed to clean up removed media objects:', error);
+      }
+    }
+    if (!isCurrentLinkedCouple(workspace)) return staleResult;
+
+    let committed = patchedRecord;
+    if (committed.attachments?.length) {
+      committed = {
+        ...committed,
+        attachments: await resolveAttachmentUrls(committed.attachments, workspace.coupleId, id),
+      };
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+    }
+
+    updateStateImmediately((current) =>
+      isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
+        ? {
+            ...current,
+            records: current.records.map((record) => record.id === id ? committed : record),
+          }
+        : current,
+    );
+    return isCurrentLinkedCouple(workspace)
+      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
+      : staleResult;
   };
 
   const addEvent = async (
@@ -2284,7 +2786,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         state,
         isReady: isHydrated && isAuthChecked,
         authSyncUnavailable,
+        authSyncReason,
         sharedSyncStatus,
+        coupleLifecycle,
+        invitationExpiresAt,
+        refreshCoupleLifecycle,
         accountDeletionRecovery,
         deletionStatus,
         retryAccountDeletion,
@@ -2294,6 +2800,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         addRecordWithMedia,
         updateRecord,
         deleteRecord,
+        updateRecordMedia,
         addEvent,
         updateEvent,
         deleteEvent,

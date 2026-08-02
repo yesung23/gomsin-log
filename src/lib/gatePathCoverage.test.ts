@@ -80,6 +80,7 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     signOut: 'Auth operation: must work during any state',
     getCurrentUser: 'Auth operation: read-only session check',
     // Read-only
+    fetchMyCoupleState: 'Read-only: reads couple lifecycle state, no mutation',
     isConfigured: 'Read-only: returns boolean configuration check',
     loadState: 'Read-only: loads app state',
     saveState: 'Read-only: placeholder (logs only)',

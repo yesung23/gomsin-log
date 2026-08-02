@@ -234,8 +234,9 @@ export function TripsPage() {
       </div>
       <div className="p-5 pb-24">{statePanel}</div>
 
+      {/* z-[60] so the tab bar cannot intercept 취소 / 만들기 -- see RecordPage. */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
           <div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-in slide-in-from-bottom-4">
             <h2 className="text-xl font-bold text-card-foreground mb-6">새 여행 만들기</h2>
             <div className="space-y-4">

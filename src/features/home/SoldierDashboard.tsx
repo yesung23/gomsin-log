@@ -203,7 +203,7 @@ export function SoldierDashboard() {
           <button
             type="button"
             onClick={() => navigate('/service')}
-            className="text-xs font-bold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition"
+            className="text-xs font-bold text-coral bg-coral/10 px-4 rounded-xl active:scale-95 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             보기
           </button>

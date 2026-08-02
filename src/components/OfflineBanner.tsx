@@ -23,7 +23,7 @@ export function OfflineBanner() {
   return (
     <div
       role="alert"
-      className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] left-1/2 -translate-x-1/2 w-full max-w-[430px] z-50 px-3"
+      className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] left-1/2 -translate-x-1/2 w-full max-w-[430px] z-[60] px-3"
     >
       <div className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-center text-xs font-medium text-red-900 shadow-sm">
         인터넷 연결이 끊겼어요

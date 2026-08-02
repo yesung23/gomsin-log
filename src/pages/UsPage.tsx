@@ -88,7 +88,7 @@ export function UsPage() {
             {/* /schedule had no entry point anywhere in the UI before this. */}
             <button
               onClick={() => navigate('/schedule')}
-              className="text-xs font-bold text-navy bg-navy/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+              className="text-xs font-bold text-foreground bg-navy/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
             >
               <CalendarDays size={14} />
               <span>일정</span>

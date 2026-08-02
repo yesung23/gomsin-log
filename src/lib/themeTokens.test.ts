@@ -194,3 +194,123 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
     expect(css).toContain('--coral-foreground: oklch(1 0 0);');
   });
 });
+
+
+/**
+ * C5 bug condition:
+ *   isBugConditionC5(file) = occurrenceCount(`text-navy` utility, INCLUDING
+ *                           opacity variants) > 0
+ *
+ * `--navy` is a DARK ink in both themes -- oklch(0.28 0.06 265) light,
+ * oklch(0.29 0.055 265) dark -- because it doubles as a surface and border
+ * colour (`bg-navy/10`, `border-navy`, `from-navy`). That makes it correct as a
+ * FILL and wrong as a FOREGROUND: in dark mode `text-navy` paints dark ink on a
+ * dark background.
+ *
+ * The C4 guard above could not catch this: `navy` is a theme token, not a
+ * palette literal, so it was on C4's allow-list. Measured in headless Chromium
+ * at 390x844 with dark theme active, before the fix:
+ *
+ *   OnboardingPage tagline        1.22:1  (needs 4.5)  -- effectively invisible
+ *   CycleTrackerSection note      1.12:1
+ *   MyPage soldier benefits box   1.16:1 / 1.13:1
+ *   UsPage 일정 chip              1.34:1
+ *   ServicePage lilac badge icon  1.15:1
+ *
+ * The fix is `text-foreground`, which is `var(--navy)` in the light theme, so
+ * every light-mode ratio is unchanged (re-measured: 5.47 / 7.40 / 13.53 / 11.61,
+ * identical to the pre-fix values) while dark mode flips to the light ink
+ * (8.48 / 9.46 / 14.31 / 16.44).
+ */
+const NAVY_AS_TEXT = /\btext-navy(?:\/\d{1,3})?\b/g;
+
+/** Everything that renders app UI. Surfaces and borders are deliberately excluded. */
+const ALL_UI_SOURCES = [
+  'src/components/CycleTrackerSection.tsx',
+  'src/components/SharedSyncBanner.tsx',
+  'src/components/widgets/DDayWidget.tsx',
+  'src/components/widgets/UpcomingScheduleWidget.tsx',
+  'src/features/home/SoldierDashboard.tsx',
+  'src/pages/MyPage.tsx',
+  'src/pages/OnboardingPage.tsx',
+  'src/pages/RecordPage.tsx',
+  'src/pages/SchedulePage.tsx',
+  'src/pages/ServicePage.tsx',
+  'src/pages/SettingsPage.tsx',
+  'src/pages/TripDetailPage.tsx',
+  'src/pages/TripsPage.tsx',
+  'src/pages/UsPage.tsx',
+];
+
+describe('C5 - --navy is never used as a foreground colour', () => {
+  for (const file of ALL_UI_SOURCES) {
+    it(`${file} uses no text-navy utility`, () => {
+      const source = readFileSync(resolve(process.cwd(), file), 'utf8');
+      expect(source.match(NAVY_AS_TEXT) ?? []).toEqual([]);
+    });
+  }
+
+  it('keeps --navy dark in BOTH themes, which is why it cannot be a foreground', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/index.css'), 'utf8');
+    expect(css).toContain('--navy: oklch(0.28 0.06 265);');
+    expect(css).toContain('--navy: oklch(0.29 0.055 265);');
+  });
+
+  it('the replacement token is identical to --navy in the light theme', () => {
+    // This is what makes the swap a pure dark-mode fix with no light-mode delta.
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/index.css'), 'utf8');
+    expect(css).toContain('--foreground: var(--navy);');
+    // ...and genuinely different in dark, otherwise the fix would be a no-op.
+    expect(css).toContain('--foreground: oklch(0.95 0.012 85);');
+  });
+
+  it('still permits --navy as a surface, border or gradient stop', () => {
+    for (const allowed of ['bg-navy', 'bg-navy/10', 'border-navy', 'from-navy', 'to-navy/80', 'ring-navy']) {
+      expect(allowed.match(NAVY_AS_TEXT), allowed).toBeNull();
+    }
+    for (const flagged of ['text-navy', 'text-navy/70', 'text-navy/80', 'text-navy/50', 'text-navy/30']) {
+      expect(flagged.match(NAVY_AS_TEXT), flagged).toEqual([flagged]);
+    }
+  });
+});
+
+/**
+ * C6 bug condition:
+ *   isBugConditionC6(control) = renderedWidth < 44 || renderedHeight < 44
+ *
+ * Measured in headless Chromium at 390x844:
+ *
+ *   SharedSyncBanner retry            22x22  -- the ONLY way to recover a frozen
+ *                                                shared workspace
+ *   UpcomingScheduleWidget 일정 추가   58x16
+ *   SoldierDashboard 보기              45x32
+ *   SettingsPage 뒤로가기              36x44  -- declared min-h but not min-w
+ *   ServicePage 뒤로가기 / 복무 정보 수정  36x44 / 34x44  -- same omission
+ *
+ * Only these are guarded. The app has other sub-44px controls (calendar day
+ * cells at 42x42, month arrows at 34x34, the compact composer row) which are a
+ * deliberate density choice spanning many components; changing them is a design
+ * decision and is recorded in the report rather than forced by this guard.
+ */
+describe('C6 - repaired controls keep a 44px minimum tap target', () => {
+  const GUARDED_CONTROLS: Array<{ file: string; anchor: string; label: string }> = [
+    { file: 'src/components/SharedSyncBanner.tsx', anchor: '공유 정보 다시 확인', label: 'shared-sync retry' },
+    { file: 'src/components/widgets/UpcomingScheduleWidget.tsx', anchor: "navigate('/schedule')", label: '일정 추가' },
+    { file: 'src/features/home/SoldierDashboard.tsx', anchor: "navigate('/service')", label: '보기' },
+    { file: 'src/pages/SettingsPage.tsx', anchor: '뒤로가기', label: 'settings back' },
+    { file: 'src/pages/ServicePage.tsx', anchor: '뒤로가기', label: 'service back' },
+    { file: 'src/pages/ServicePage.tsx', anchor: '복무 정보 수정', label: 'service edit' },
+  ];
+
+  for (const control of GUARDED_CONTROLS) {
+    it(`${control.label} declares both a 44px min-height and min-width`, () => {
+      const source = readFileSync(resolve(process.cwd(), control.file), 'utf8');
+      const at = source.indexOf(control.anchor);
+      expect(at, `${control.file} should still contain ${control.anchor}`).toBeGreaterThan(-1);
+      // The className sits within the same JSX element as the anchor.
+      const window_ = source.slice(Math.max(0, at - 400), at + 400);
+      expect(window_, `${control.label} min-height`).toContain('min-h-[44px]');
+      expect(window_, `${control.label} min-width`).toContain('min-w-[44px]');
+    });
+  }
+});

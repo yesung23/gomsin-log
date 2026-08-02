@@ -395,7 +395,7 @@ export function OnboardingPage() {
                 <p className="text-muted-foreground text-sm font-medium whitespace-pre-line leading-relaxed">
                   {"답장이 늦어도, 오늘의 순간은 놓치지 않도록."}
                 </p>
-                <p className="text-xs text-navy/70 font-normal">
+                <p className="text-xs text-foreground/70 font-normal">
                   군화와 곰신, 둘만의 하루를 사진과 짧은 기록으로 남겨요.
                 </p>
               </div>

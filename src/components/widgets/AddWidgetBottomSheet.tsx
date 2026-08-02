@@ -29,13 +29,18 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
 
   return (
     <>
-      {/* Backdrop */}
+      {/*
+        Backdrop and sheet are z-[60], not z-50: MobileShell's tab bar is
+        `fixed bottom-0 ... z-50` and comes after <main> in the DOM, so at an
+        equal z-index it paints over this bottom-anchored sheet and swallows the
+        taps on whichever widget row happens to land behind it.
+      */}
       <div
-        className="fixed inset-0 bg-black/40 z-50 transition-opacity animate-in fade-in"
+        className="fixed inset-0 bg-black/40 z-[60] transition-opacity animate-in fade-in"
         onClick={onClose}
       />
       {/* Bottom Sheet */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl p-5 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col">
+      <div className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-3xl p-5 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-foreground">홈 위젯 추가</h2>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-muted text-muted-foreground">

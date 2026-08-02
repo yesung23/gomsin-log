@@ -41,11 +41,15 @@ export function SharedSyncBanner() {
       role="status"
     >
       <span>{message}</span>
+      {/*
+        This is the only affordance for recovering a frozen shared workspace, so
+        it has to be reachable by thumb: `p-1` alone rendered a 22x22 target.
+      */}
       <button
         type="button"
         onClick={() => void retry()}
         disabled={retrying}
-        className="p-1 shrink-0 disabled:opacity-50"
+        className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg disabled:opacity-50"
         aria-label="공유 정보 다시 확인"
       >
         {retrying

@@ -110,11 +110,11 @@ export function MyPage() {
             </div>
 
             <div className="bg-mint/40 border border-mint-foreground/20 p-4 rounded-2xl space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-navy">
-                <Sparkles className="w-4 h-4 text-navy" />
+              <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                <Sparkles className="w-4 h-4 text-foreground" />
                 <span>군 복무자 혜택 및 긴급 연락처</span>
               </div>
-              <p className="text-[11px] text-navy/80 leading-relaxed pt-1">
+              <p className="text-[11px] text-foreground/80 leading-relaxed pt-1">
                 • 병사 적금(장병내일준비적금) 연 6% 이상 우대 금리 안내<br />
                 • 국방 헬프콜 24시간 상담: 1303<br />
                 • 군 장병 전용 할인 혜택 모음

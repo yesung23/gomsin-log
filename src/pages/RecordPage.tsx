@@ -474,21 +474,21 @@ export function RecordPage() {
         {/* Day Summary Card (only if 2+ shared records) */}
         {selectedDaySummary.items.length > 0 && (
           <div className="mb-4 rounded-2xl bg-lilac/30 border border-lilac/50 p-3 space-y-1.5">
-            <div className="flex items-center justify-between text-xs font-bold text-navy mb-0.5">
+            <div className="flex items-center justify-between text-xs font-bold text-foreground mb-0.5">
               <div className="flex items-center gap-1.5">
                 <Sparkles size={13} className="text-coral" />
                 <span>{isToday ? '오늘의 빠른 정리' : '그날의 빠른 정리'}</span>
               </div>
-              <span className="text-[10px] text-navy/50 font-normal">눌러서 원문 이동</span>
+              <span className="text-[10px] text-foreground/50 font-normal">눌러서 원문 이동</span>
             </div>
             {selectedDaySummary.items.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-xs font-medium text-navy group active:scale-[0.99]"
+                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-xs font-medium text-foreground group active:scale-[0.99]"
               >
                 <span className="leading-snug flex-1 pr-2">• {item.text}</span>
-                <ChevronRight size={13} className="text-navy/30 group-hover:text-navy shrink-0" />
+                <ChevronRight size={13} className="text-foreground/30 group-hover:text-foreground shrink-0" />
               </button>
             ))}
           </div>
@@ -609,9 +609,16 @@ export function RecordPage() {
         </button>
       </div>
 
-      {/* Detail Modal */}
+      {/*
+        Detail Modal.
+
+        z-[60], not z-50: MobileShell's tab bar is `fixed bottom-0 ... z-50` and
+        comes AFTER <main> in the DOM, so at an equal z-index it paints over a
+        bottom-anchored sheet and swallows the taps aimed at the owner-only
+        수정 / 삭제 buttons. SchedulePage's event modal already sits at z-[60].
+      */}
       {selectedRecord && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
               <h3 id="record-detail-modal-title" className="text-lg font-bold text-card-foreground">

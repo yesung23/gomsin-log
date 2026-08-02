@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 
 /**
  * Gate path coverage regression test.
@@ -97,6 +97,70 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     __resetInviteAttemptsForTest: 'Test helper: resets in-memory array for tests',
   },
 };
+
+/**
+ * Mutations that are gated at their `store.tsx` CALL SITE rather than inside
+ * themselves.
+ *
+ * `records.ts` and `events.ts` are pure data-access modules: every one of their
+ * writes is issued from a store action that has already run
+ * `ensureNotPendingBeforeServerCall()`. Gating them internally as well would
+ * double the authoritative round-trip on every write.
+ *
+ * That reason is only TRUE while nothing else imports them. The import-boundary
+ * assertion below enforces exactly that, so this category cannot quietly become a
+ * false claim: a new importer fails the test and must either move behind the store
+ * or gate itself.
+ */
+const STORE_GATED: Record<string, { functions: string[]; reason: string }> = {
+  'records.ts': {
+    functions: [
+      'saveRecordToDB',
+      'deleteRecordFromDB',
+      'uploadRecordMedia',
+      'removeRecordMedia',
+    ],
+    reason:
+      'Gated at the store.tsx call site: addRecordWithMedia / updateRecord / '
+      + 'deleteRecord / updateRecordMedia all call '
+      + 'ensureNotPendingBeforeServerCall() before the first request. Enforced by '
+      + 'the import-boundary assertion.',
+  },
+  'events.ts': {
+    functions: ['saveEventToDB', 'updateEventInDB', 'deleteEventFromDB'],
+    reason:
+      'Gated at the store.tsx call site: addEvent / updateEvent / deleteEvent all '
+      + 'call ensureNotPendingBeforeServerCall() before the first request. Enforced '
+      + 'by the import-boundary assertion.',
+  },
+};
+
+/**
+ * Read-only or pure exports of the store-gated modules. Listed so that a NEW
+ * export cannot slip through unclassified.
+ */
+const STORE_GATED_EXEMPTIONS: Record<string, Record<string, string>> = {
+  'records.ts': {
+    fetchRecordsResultFromDB: 'Read-only: fetches records without mutation',
+    fetchRecordsFromDB: 'Read-only: wrapper around fetchRecordsResultFromDB',
+    resolveAttachmentUrls: 'Read-only: signs existing paths, creates nothing',
+    isCanonicalRecordMediaPath: 'Pure utility: validates a storage path locally',
+    classifyMediaFile: 'Pure utility: validates MIME type and size locally',
+    buildMediaPath: 'Pure utility: builds a path string',
+  },
+  'events.ts': {
+    fetchEventsResultFromDB: 'Read-only: fetches events without mutation',
+    fetchEventsFromDB: 'Read-only: wrapper around fetchEventsResultFromDB',
+  },
+};
+
+/**
+ * The ONLY modules permitted to import the store-gated data modules.
+ *
+ * `sync.ts` is included because it performs read-only hydration. Test files are
+ * excluded from the check: they mock these modules by design.
+ */
+const STORE_GATED_ALLOWED_IMPORTERS = ['src/lib/store.tsx', 'src/lib/sync.ts'];
 
 /**
  * Gated mutation functions: these MUST contain the gate call.
@@ -252,6 +316,185 @@ describe('Gate path coverage: every mutation calls serverCallBlockedByPendingDel
       it(`all exemptions in ${file} have non-empty reasons`, () => {
         const exemptions = EXEMPTIONS[file] || {};
         for (const [fn, reason] of Object.entries(exemptions)) {
+          expect(reason, `Exemption for ${fn} in ${file} must have a reason`).toBeTruthy();
+        }
+      });
+    }
+  });
+});
+
+/**
+ * Store-gated modules.
+ *
+ * These writes are NOT self-gating, and that is deliberate. What this suite
+ * enforces is the precondition that makes it safe: they are reachable only through
+ * `store.tsx` (plus read-only `sync.ts`), where the gate has already run.
+ */
+describe('Store-gated data modules: reachable only through the gated store', () => {
+  const storeGatedFiles = Object.keys(STORE_GATED);
+  const sources: Record<string, string> = {};
+  for (const file of storeGatedFiles) {
+    sources[file] = readFileSync(resolve(process.cwd(), 'src', 'lib', file), 'utf8');
+  }
+
+  describe('every documented store-gated mutation exists and is not self-gated', () => {
+    for (const [file, { functions }] of Object.entries(STORE_GATED)) {
+      describe(file, () => {
+        for (const fn of functions) {
+          it(`${fn} exists`, () => {
+            const body = extractFunctionBody(sources[file], fn);
+            expect(body, `Function ${fn} not found in ${file}`).not.toBeNull();
+          });
+        }
+      });
+    }
+  });
+
+  describe('the gate really does run at the store call site', () => {
+    const storeSource = readFileSync(
+      resolve(process.cwd(), 'src', 'lib', 'store.tsx'),
+      'utf8',
+    );
+
+    // The store's own gate helper, which wraps `serverCallBlockedByPendingDeletion`.
+    const STORE_GATE = /ensureNotPendingBeforeServerCall\s*\(/;
+
+    for (const action of [
+      'addRecordWithMedia',
+      'updateRecord',
+      'deleteRecord',
+      'updateRecordMedia',
+      'addEvent',
+      'updateEvent',
+      'deleteEvent',
+    ]) {
+      it(`store action ${action} calls the pre-flight gate`, () => {
+        // These are `const x = async (...) => {}` arrow functions, so the
+        // declaration form differs from the module-level `export function` form.
+        const start = storeSource.indexOf(`const ${action} = async (`);
+        expect(start, `store action ${action} not found`).toBeGreaterThanOrEqual(0);
+        const openBrace = storeSource.indexOf('{', storeSource.indexOf('=>', start));
+        let depth = 0;
+        let end = openBrace;
+        for (; end < storeSource.length; end += 1) {
+          if (storeSource[end] === '{') depth += 1;
+          else if (storeSource[end] === '}') {
+            depth -= 1;
+            if (depth === 0) break;
+          }
+        }
+        const body = storeSource.slice(openBrace, end + 1);
+        expect(
+          STORE_GATE.test(body),
+          `${action} must call ensureNotPendingBeforeServerCall() before writing`,
+        ).toBe(true);
+      });
+    }
+  });
+
+  describe('import boundary: the documented reason cannot silently become false', () => {
+    /** Every non-test source file in `src/`. */
+    function sourceFiles(dir: string): string[] {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          out.push(...sourceFiles(full));
+          continue;
+        }
+        if (!/\.tsx?$/.test(entry.name)) continue;
+        // Tests mock these modules by design.
+        if (/\.test\.tsx?$/.test(entry.name)) continue;
+        out.push(full);
+      }
+      return out;
+    }
+
+    /**
+     * Named bindings imported from `module` by `source`.
+     *
+     * Only the import list is parsed, deliberately: a file may legitimately import
+     * a PURE helper (`classifyMediaFile`, `MEDIA_ACCEPT`) from a store-gated module
+     * — the composer and the record page both do. What must never happen is a
+     * non-store file importing a WRITE function, because that write would bypass
+     * the gate entirely.
+     */
+    function importedBindings(source: string, moduleName: string): string[] {
+      const pattern = new RegExp(
+        `import\\s*(?:type\\s*)?\\{([^}]*)\\}\\s*from\\s*['"]`
+        + `(?:@/lib/${moduleName}|\\./${moduleName}|\\.\\./lib/${moduleName})['"]`,
+        'g',
+      );
+      const bindings: string[] = [];
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(source)) !== null) {
+        match[1]
+          .split(',')
+          .map((entry) => entry.trim().split(/\s+as\s+/)[0].replace(/^type\s+/, '').trim())
+          .filter(Boolean)
+          .forEach((name) => bindings.push(name));
+      }
+      return bindings;
+    }
+
+    for (const file of storeGatedFiles) {
+      it(`no file outside the store imports a write function from ${file}`, () => {
+        const moduleName = file.replace(/\.ts$/, '');
+        const writeFunctions = new Set(STORE_GATED[file].functions);
+        const root = resolve(process.cwd(), 'src');
+
+        const offenders: string[] = [];
+        for (const absolute of sourceFiles(root)) {
+          const relativePath = relative(process.cwd(), absolute).split(sep).join('/');
+          if (STORE_GATED_ALLOWED_IMPORTERS.includes(relativePath)) continue;
+          const source = readFileSync(absolute, 'utf8');
+          const leaked = importedBindings(source, moduleName)
+            .filter((binding) => writeFunctions.has(binding));
+          if (leaked.length > 0) {
+            offenders.push(`${relativePath} imports ${leaked.join(', ')}`);
+          }
+        }
+
+        expect(
+          offenders,
+          `${file} is store-gated (see STORE_GATED). Its WRITE functions `
+          + `(${[...writeFunctions].join(', ')}) may only be called from `
+          + `${STORE_GATED_ALLOWED_IMPORTERS.join(', ')}, where the pre-flight gate has `
+          + `already run. Offenders: ${offenders.join('; ')}. Either route the call `
+          + 'through a store action, or make the function self-gating and move it into '
+          + 'GATED_MUTATIONS.',
+        ).toEqual([]);
+      });
+    }
+  });
+
+  describe('no export of a store-gated module is unaccounted for', () => {
+    for (const file of storeGatedFiles) {
+      it(`every export in ${file} is either store-gated or explicitly exempted`, () => {
+        const allExports = extractExportedFunctionNames(sources[file]);
+        const gated = new Set(STORE_GATED[file].functions);
+        const exempted = new Set(Object.keys(STORE_GATED_EXEMPTIONS[file] || {}));
+        const unaccounted = allExports.filter(
+          (name) => !gated.has(name) && !exempted.has(name),
+        );
+        expect(
+          unaccounted,
+          `Unaccounted exports in ${file}: ${unaccounted.join(', ')}. `
+          + 'Add them to STORE_GATED (if they are write operations reached through '
+          + 'store.tsx) or STORE_GATED_EXEMPTIONS (with a reason).',
+        ).toEqual([]);
+      });
+    }
+  });
+
+  describe('every store-gated category and exemption carries a reason', () => {
+    for (const file of storeGatedFiles) {
+      it(`${file} documents why it is gated at the call site`, () => {
+        expect(STORE_GATED[file].reason.length).toBeGreaterThan(20);
+      });
+
+      it(`${file} exemptions all have reasons`, () => {
+        for (const [fn, reason] of Object.entries(STORE_GATED_EXEMPTIONS[file] || {})) {
           expect(reason, `Exemption for ${fn} in ${file} must have a reason`).toBeTruthy();
         }
       });

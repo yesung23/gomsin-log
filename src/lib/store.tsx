@@ -2374,7 +2374,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
     if (!isCurrentScope()) return false;
     try {
-      const deleted = await deleteEventFromDB(id);
+      // The author is already verified above; passing it makes the predicate part
+      // of the request rather than an assumption about RLS.
+      const deleted = await deleteEventFromDB(id, identity.userId);
       if (!isCurrentScope() || !deleted) return false;
     } catch (error) {
       if (isCurrentScope()) console.error('Failed to delete event:', error);

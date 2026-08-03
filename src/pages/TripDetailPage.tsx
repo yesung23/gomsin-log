@@ -374,7 +374,7 @@ export function TripDetailPage() {
     const operationScope = captureTripScope();
     setIsDeletingTrip(true);
     try {
-      const deleted = await deleteTripFromDB(trip.id);
+      const deleted = await deleteTripFromDB(trip.id, trip.coupleId);
       if (!isCurrentTripScope(operationScope)) return;
       if (!deleted) {
         toast.error('여행을 삭제하지 못했어요. 다시 시도해 주세요.');
@@ -464,11 +464,13 @@ export function TripDetailPage() {
       toast.error(OFFLINE_READONLY_MESSAGE);
       return;
     }
-    if (pendingItemIds.has(itemId)) return;
+    // The parent trip is the scope the delete is issued against, so it has to be
+    // loaded and identified before anything is deleted.
+    if (!trip || pendingItemIds.has(itemId)) return;
     const operationScope = captureTripScope();
     setItemPending(itemId, true);
     try {
-      const deleted = await deleteTripItemFromDB(itemId);
+      const deleted = await deleteTripItemFromDB(itemId, trip.id);
       if (!isCurrentTripScope(operationScope)) return;
       if (!deleted) {
         toast.error('일정을 삭제하지 못했어요.');
@@ -604,12 +606,12 @@ export function TripDetailPage() {
       toast.error(OFFLINE_READONLY_MESSAGE);
       return;
     }
-    if (pendingChecklistIds.has(checklistId)) return;
+    if (!trip || pendingChecklistIds.has(checklistId)) return;
     const operationScope = captureTripScope();
     setChecklistPending(checklistId, true);
     setChildActionError(null);
     try {
-      const deleted = await deleteTripChecklistFromDB(checklistId);
+      const deleted = await deleteTripChecklistFromDB(checklistId, trip.id);
       if (!isCurrentTripScope(operationScope)) return;
       if (!deleted) {
         setChildActionError('준비물을 삭제하지 못했어요.');

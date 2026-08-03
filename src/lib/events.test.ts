@@ -246,31 +246,58 @@ describe('deleteEventFromDB', () => {
     mockFrom.mockReset();
   });
 
-  it('returns true when a row is deleted', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'evt-1' }, error: null });
+  /**
+   * The `eq` chain is now chainable, because the delete carries an ownership
+   * predicate as well as the id (DEF-09). Every previous assertion is kept.
+   */
+  function mockDeleteChain(result: { data: unknown; error: unknown }) {
+    const maybeSingle = vi.fn().mockResolvedValue(result);
     const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eq = vi.fn().mockReturnValue({ select });
-    const del = vi.fn().mockReturnValue({ eq });
+    const chain: { eq: ReturnType<typeof vi.fn>; select: typeof select } = {
+      eq: vi.fn(),
+      select,
+    };
+    chain.eq.mockReturnValue(chain);
+    const del = vi.fn().mockReturnValue(chain);
     mockFrom.mockReturnValue({ delete: del });
+    return { eq: chain.eq, select, maybeSingle };
+  }
 
-    const result = await deleteEventFromDB('evt-1');
+  it('returns true when a row is deleted', async () => {
+    const { eq, select, maybeSingle } = mockDeleteChain({ data: { id: 'evt-1' }, error: null });
+
+    const result = await deleteEventFromDB('evt-1', 'user-1');
 
     expect(result).toBe(true);
     expect(mockFrom).toHaveBeenCalledWith('events');
     expect(eq).toHaveBeenCalledWith('id', 'evt-1');
+    // Ownership is part of the REQUEST, not an assumption about the RLS policy.
+    expect(eq).toHaveBeenCalledWith('created_by', 'user-1');
     expect(select).toHaveBeenCalledWith('id');
     expect(maybeSingle).toHaveBeenCalled();
   });
 
   it('returns false on error', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: { message: 'delete failed' } });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eq = vi.fn().mockReturnValue({ select });
-    const del = vi.fn().mockReturnValue({ eq });
-    mockFrom.mockReturnValue({ delete: del });
+    mockDeleteChain({ data: null, error: { message: 'delete failed' } });
 
-    const result = await deleteEventFromDB('evt-1');
+    const result = await deleteEventFromDB('evt-1', 'user-1');
 
     expect(result).toBe(false);
+  });
+
+  it('issues no request at all without an owner to scope the delete to', async () => {
+    const { eq } = mockDeleteChain({ data: { id: 'evt-1' }, error: null });
+
+    expect(await deleteEventFromDB('evt-1', '')).toBe(false);
+
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(eq).not.toHaveBeenCalled();
+  });
+
+  it('treats a 0-row delete as a failure, not a success', async () => {
+    // A row that RLS refused, or an id that is not this author's, returns no row.
+    mockDeleteChain({ data: null, error: null });
+
+    expect(await deleteEventFromDB('evt-1', 'user-1')).toBe(false);
   });
 });

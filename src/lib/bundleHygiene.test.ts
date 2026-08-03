@@ -43,7 +43,10 @@ describe('C5 - no module is both statically and dynamically imported', () => {
     expect(store).toContain('const saved = await saveEventToDB(newEvent);');
     expect(store).toContain('if (!isCurrentLinkedCouple(workspace) || !saved) return false;');
     expect(store).toContain('const saved = await updateEventInDB(updated);');
-    expect(store).toContain('const deleted = await deleteEventFromDB(id);');
+    // The delete now carries the author as an ownership predicate (DEF-09); the
+    // property this guard exists for -- a static call, awaited, result checked --
+    // is unchanged.
+    expect(store).toContain('const deleted = await deleteEventFromDB(id, identity.userId);');
     expect(store).toContain('if (!isCurrentScope() || !deleted) return false;');
   });
 

@@ -130,14 +130,14 @@ describe('REGRESSION: no server mutation outside the store bypasses the gate', (
 
     expect(await trips.saveTripToDB(trip as never, 'couple-1', 'user-a')).toBeNull();
     expect(await trips.updateTripInDB('trip-1', { title: 'y' })).toBeNull();
-    expect(await trips.deleteTripFromDB('trip-1')).toBe(false);
+    expect(await trips.deleteTripFromDB('trip-1', 'couple-1')).toBe(false);
     expect(await trips.saveTripItemToDB(item as never)).toBeNull();
     expect(await trips.updateTripItemInDB(item as never)).toBeNull();
     expect(await trips.reorderTripItemsInDB([{ id: 'item-1', sortOrder: 1 }])).toBe(false);
-    expect(await trips.deleteTripItemFromDB('item-1')).toBe(false);
+    expect(await trips.deleteTripItemFromDB('item-1', 'trip-1')).toBe(false);
     expect(await trips.saveTripChecklistToDB('trip-1', 'passport')).toBeNull();
     expect(await trips.toggleTripChecklistInDB('check-1', true)).toBe(false);
-    expect(await trips.deleteTripChecklistFromDB('check-1')).toBe(false);
+    expect(await trips.deleteTripChecklistFromDB('check-1', 'trip-1')).toBe(false);
 
     expect(requestsIssued()).toEqual([]);
   });
@@ -173,7 +173,7 @@ describe('REGRESSION: no server mutation outside the store bypasses the gate', (
     const trips = await import('@/lib/trips');
     const cycle = await import('@/lib/cycle');
 
-    await trips.deleteTripFromDB('trip-1');
+    await trips.deleteTripFromDB('trip-1', 'couple-1');
     await trips.reorderTripItemsInDB([{ id: 'item-1', sortOrder: 1 }]);
     await cycle.deleteCycleEntryFromDB('entry-1');
 
@@ -186,7 +186,7 @@ describe('REGRESSION: no server mutation outside the store bypasses the gate', (
     registerServerCallGate(async () => ({ kind: 'unknown' }));
     calls.length = 0;
     const trips = await import('@/lib/trips');
-    await trips.deleteTripFromDB('trip-1');
+    await trips.deleteTripFromDB('trip-1', 'couple-1');
     expect(calls).toContain('from:trips');
   });
 });

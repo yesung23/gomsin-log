@@ -1,0 +1,570 @@
+name: Native release validation
+
+# Android + iOS release-candidate gate for the v1 overnight branch.
+#
+# This is a SEPARATE workflow from web-release-validation.yml on purpose. That one
+# triggers only on base `kiro/release-hardening-2026-07-31`, hard-asserts
+# GITHUB_BASE_REF and a pinned SHA/tree/file-count, and encodes a security review
+# boundary for a specific transferred history. It must not be edited to widen its
+# trigger; this file carries the native work instead.
+#
+# Everything here is read-only. No secret is referenced, no token with write
+# scope is requested, and there is no deploy, merge, migration or store-upload
+# step. Third-party actions are pinned by full commit SHA.
+
+on:
+  pull_request:
+    branches:
+      - kiro/complete-v1-overnight
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-release-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Non-secret placeholders. The build only needs a syntactically valid URL and a
+  # publishable (anon) key shape; neither points at a real project.
+  VITE_SUPABASE_URL: https://example.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY: test-public-key-not-a-secret
+
+jobs:
+  web-validation:
+    name: Typecheck, lint, tests, and both build directions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run every Vitest suite
+        run: npm run test
+
+      - name: Verify the native configuration invariants on their own
+        run: npm run verify:native
+
+      - name: Build with non-secret placeholders
+        run: npm run build
+
+      - name: A build with no Supabase environment MUST fail, naming the variable
+        shell: bash
+        env:
+          VITE_SUPABASE_URL: ''
+          VITE_SUPABASE_PUBLISHABLE_KEY: ''
+        run: |
+          set -uo pipefail
+          if npm run build > "${RUNNER_TEMP}/bare-build.log" 2>&1; then
+            echo 'A build with no Supabase environment succeeded; the guard is gone.' >&2
+            exit 1
+          fi
+          grep -F 'VITE_SUPABASE_URL' "${RUNNER_TEMP}/bare-build.log"
+          echo 'The bare build failed and named VITE_SUPABASE_URL, as required.'
+
+      - name: Rebuild with placeholders and scan the generated CSP
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          if grep -R -E '__SUPABASE_(HTTP|CONNECT)_SRC__' dist; then
+            echo 'A CSP marker survived in dist.' >&2
+            exit 1
+          fi
+          grep -F 'Content-Security-Policy:' dist/_headers
+          grep -F 'https://example.supabase.co' dist/_headers
+          grep -F 'wss://example.supabase.co' dist/_headers
+
+      - name: Verify the generated app assets are byte-identical to the committed ones
+        run: npm run verify:assets
+
+  deno-edge-validation:
+    name: Deno Edge Function validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.5.6
+
+      - name: Set up Node.js for npm imports
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph for Deno npm imports
+        run: npm ci
+
+      - name: Typecheck Edge Function modules
+        run: npm run check:edge
+
+      - name: Run the real-Deno Edge Function tests
+        run: npm run test:edge
+
+  dependency-policy:
+    name: Audit allowlist and brace-expansion topology
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Accept only the documented React Router advisory
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "${RUNNER_TEMP}/npm-audit.json"
+          audit_status=$?
+          set -e
+          if [ "${audit_status}" -gt 1 ]; then
+            echo "npm audit failed operationally with status ${audit_status}" >&2
+            exit "${audit_status}"
+          fi
+          node scripts/ci/validate-npm-audit.mjs "${RUNNER_TEMP}/npm-audit.json"
+
+      - name: Assert the brace-expansion major lines
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ls brace-expansion --all | tee "${RUNNER_TEMP}/brace.txt"
+
+          # The scoped override pins only the vulnerable 1.x line (reached through
+          # minimatch@3 under eslint). The 5.x consumers keep their own major, so
+          # the override cannot silently downgrade them.
+          grep -F 'brace-expansion@1.1.18 overridden' "${RUNNER_TEMP}/brace.txt"
+          grep -E 'brace-expansion@5\.' "${RUNNER_TEMP}/brace.txt"
+          grep -F 'minimatch@3.1.5' "${RUNNER_TEMP}/brace.txt"
+
+          majors="$(grep -o -E 'brace-expansion@[0-9]+' "${RUNNER_TEMP}/brace.txt" \
+            | sed 's/.*@//' | sort -u | tr '\n' ' ')"
+          if [ "${majors}" != "1 5 " ]; then
+            echo "Unexpected brace-expansion major lines: ${majors}" >&2
+            exit 1
+          fi
+
+          # A 2.x/3.x/4.x line would mean a new consumer appeared unreviewed.
+          if grep -E 'brace-expansion@[234]\.' "${RUNNER_TEMP}/brace.txt"; then
+            echo 'An unreviewed brace-expansion major appeared.' >&2
+            exit 1
+          fi
+
+  capacitor-reproducibility:
+    name: Capacitor sync reproducibility and generated-file cleanliness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head with enough history to diff against the base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Build the web bundle the shells wrap
+        run: npm run build
+
+      - name: Sync both native projects
+        run: |
+          npx cap sync android
+          npx cap sync ios
+
+      - name: Regenerate every raster asset from the single SVG source
+        run: npm run assets:generate
+
+      - name: The tracked tree must be unchanged by sync or by regeneration
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This is the whole tracked-vs-generated claim: `android/` and `ios/` are
+          # committed configuration, everything cap sync writes is ignored, and the
+          # asset generator is deterministic. If any of those stops being true this
+          # line fails.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo 'A clean checkout plus build + cap sync + assets:generate changed tracked files:' >&2
+            git status --porcelain >&2
+            git diff >&2
+            exit 1
+          fi
+          echo 'Clean: sync and asset regeneration reproduce the committed configuration exactly.'
+
+      - name: No whitespace corruption in the diff this branch adds
+        shell: bash
+        run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
+
+      - name: No build output, dependency cache or machine-local file is tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden="$(git ls-files | grep -E \
+            -e '^android/(build|\.gradle|local\.properties)' \
+            -e '^android/app/build/' \
+            -e '^android/app/src/main/assets/public/' \
+            -e '^android/app/src/main/assets/capacitor\.(config|plugins)\.json$' \
+            -e '^android/capacitor-cordova-android-plugins/(build|src/main/libs)' \
+            -e '^ios/App/(Pods|build|output)/' \
+            -e '^ios/App/App/public/' \
+            -e '^ios/App/App/(capacitor\.config\.json|config\.xml)$' \
+            -e 'xcuserdata' \
+            -e '\.(jks|keystore|p12|p8|cer|certSigningRequest|mobileprovision|provisionprofile|xcarchive|ipa)$' \
+            -e '(^|/)(keystore\.properties|google-services\.json|ExportOptions\.plist)$' \
+            || true)"
+          if [ -n "${forbidden}" ]; then
+            echo 'These must never be tracked:' >&2
+            echo "${forbidden}" >&2
+            exit 1
+          fi
+          echo 'No build output, dependency cache, machine-local file or signing material is tracked.'
+
+  android-build:
+    name: Android unit tests, lint, and debug compile/bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Build and sync the web bundle into android/
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Require a real Android SDK rather than skipping quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The runner image ships the SDK. If that ever changes, fail loudly:
+          # a silently skipped Android build is worse than a red job.
+          test -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -d "${ANDROID_HOME:-${ANDROID_SDK_ROOT}}/platforms"
+          test -n "${JAVA_HOME_21_X64:-}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+
+      - name: JVM configuration tests over the shipped manifest and Gradle config
+        shell: bash
+        working-directory: android
+        run: |
+          export JAVA_HOME="${JAVA_HOME_21_X64}"
+          ./gradlew --no-daemon :app:testDebugUnitTest
+
+      - name: Android lint (abortOnError is on for this module)
+        shell: bash
+        working-directory: android
+        run: |
+          export JAVA_HOME="${JAVA_HOME_21_X64}"
+          ./gradlew --no-daemon :app:lintDebug
+
+      - name: Debug compile and bundle
+        shell: bash
+        working-directory: android
+        run: |
+          export JAVA_HOME="${JAVA_HOME_21_X64}"
+          ./gradlew --no-daemon :app:assembleDebug :app:bundleDebug
+
+      - name: Merge the release manifest and assert what the OS will actually see
+        shell: bash
+        working-directory: android
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="${JAVA_HOME_21_X64}"
+          # The source manifest is asserted by the unit tests, but a library
+          # manifest can inject a permission or an exported component at merge
+          # time. This checks the merged output, which is what ships.
+          ./gradlew --no-daemon :app:processReleaseMainManifest
+          merged="$(find app/build/intermediates/merged_manifest/release -name AndroidManifest.xml | head -1)"
+          test -n "${merged}"
+          echo "Merged manifest: ${merged}"
+
+          strip_comments() { python3 -c "import re,sys;print(re.sub(r'<!--.*?-->','',open(sys.argv[1],encoding='utf-8').read(),flags=re.S))" "$1"; }
+          body="$(strip_comments "${merged}")"
+
+          for forbidden in \
+            android.permission.CAMERA \
+            android.permission.ACCESS_FINE_LOCATION \
+            android.permission.ACCESS_COARSE_LOCATION \
+            android.permission.READ_CONTACTS \
+            android.permission.GET_ACCOUNTS \
+            android.permission.READ_PHONE_STATE \
+            android.permission.READ_MEDIA_IMAGES \
+            android.permission.READ_MEDIA_VIDEO \
+            android.permission.READ_EXTERNAL_STORAGE \
+            android.permission.WRITE_EXTERNAL_STORAGE \
+            com.google.android.gms.permission.AD_ID
+          do
+            if printf '%s' "${body}" | grep -F "\"${forbidden}\"" > /dev/null; then
+              echo "The merged manifest declares ${forbidden}." >&2
+              exit 1
+            fi
+          done
+
+          printf '%s' "${body}" | grep -F 'android:allowBackup="false"'
+          printf '%s' "${body}" | grep -F 'android:usesCleartextTraffic="false"'
+          printf '%s' "${body}" | grep -F 'android:name="android.permission.RECORD_AUDIO"'
+          printf '%s' "${body}" | grep -F 'android:scheme="gomsinlog"'
+          printf '%s' "${body}" | grep -F 'android:host="auth"'
+          printf '%s' "${body}" | grep -F 'android:path="/callback"'
+
+          # Every component the merge produced must be explicit about exported.
+          python3 - "${merged}" <<'PY'
+          import re, sys
+          xml = re.sub(r'<!--.*?-->', '', open(sys.argv[1], encoding='utf-8').read(), flags=re.S)
+          bad = []
+          for tag in ('activity', 'activity-alias', 'service', 'receiver', 'provider'):
+              for match in re.finditer(r'<%s\b(.*?)(?:/?>)' % tag, xml, flags=re.S):
+                  if 'android:exported' not in match.group(1):
+                      bad.append(tag + ':' + match.group(1)[:120])
+          if bad:
+              print('Components without an explicit android:exported:', *bad, sep='\n')
+              sys.exit(1)
+          print('Every merged component declares android:exported explicitly.')
+          PY
+
+      - name: The debug artifacts exist and no release signing happened
+        shell: bash
+        working-directory: android
+        run: |
+          set -euo pipefail
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          test -f app/build/outputs/bundle/debug/app-debug.aab
+          # There is no keystore in this repository, so a release artifact cannot
+          # be produced here and must not appear.
+          test ! -d app/build/outputs/bundle/release
+          echo 'Debug APK and AAB built; no release signing occurred.'
+
+  ios-build:
+    name: iOS unsigned simulator build and configuration validation
+    runs-on: macos-latest
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Build and sync the web bundle into ios/
+        run: |
+          npm run build
+          npx cap sync ios
+
+      - name: Resolve pods from the committed lockfile only
+        shell: bash
+        working-directory: ios/App
+        run: |
+          set -euo pipefail
+          # --deployment fails if Podfile.lock would have to change, which is what
+          # makes the tracked lockfile meaningful.
+          pod install --deployment
+          git diff --exit-code -- Podfile.lock
+
+      - name: Lint every plist and the privacy manifest before building
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint ios/App/App/Info.plist
+          plutil -lint ios/App/App/App.entitlements
+          plutil -lint ios/App/App/PrivacyInfo.xcprivacy
+          plutil -lint ios/App/App/Assets.xcassets/AppIcon.appiconset/Contents.json
+
+      - name: Unsigned iPhone Simulator build
+        shell: bash
+        working-directory: ios/App
+        run: |
+          set -euo pipefail
+          # The only iOS compilation proof that exists for this repository: the
+          # development environment is Linux. No signing material is available or
+          # wanted, so signing is switched off entirely rather than stubbed.
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
+
+      - name: Validate the built bundle's Info.plist, privacy manifest and icons
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(find "${RUNNER_TEMP}/DerivedData/Build/Products" -maxdepth 3 -name 'App.app' -type d | head -1)"
+          test -n "${app}"
+          echo "Built bundle: ${app}"
+          plist="${app}/Info.plist"
+
+          read_key() { /usr/libexec/PlistBuddy -c "Print :$1" "${plist}" 2>/dev/null; }
+          missing() { /usr/libexec/PlistBuddy -c "Print :$1" "${plist}" > /dev/null 2>&1 && return 1 || return 0; }
+
+          # Non-ASCII display name must survive compilation as real UTF-8.
+          test "$(read_key CFBundleDisplayName)" = '곰신로그'
+          test "$(read_key CFBundleIdentifier)" = 'app.gomsinlog'
+          test "$(read_key CFBundleDevelopmentRegion)" = 'ko'
+          test -n "$(read_key CFBundleShortVersionString)"
+          test -n "$(read_key CFBundleVersion)"
+
+          # URL routing: exactly one scheme, and it is ours.
+          test "$(read_key 'CFBundleURLTypes:0:CFBundleURLSchemes:0')" = 'gomsinlog'
+          if /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:1' "${plist}" > /dev/null 2>&1; then
+            echo 'More than one URL scheme is registered.' >&2
+            exit 1
+          fi
+          if /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:1' "${plist}" > /dev/null 2>&1; then
+            echo 'More than one CFBundleURLTypes entry is registered.' >&2
+            exit 1
+          fi
+
+          # Usage descriptions: microphone yes, photo library no, tracking no.
+          test -n "$(read_key NSMicrophoneUsageDescription)"
+          missing NSPhotoLibraryUsageDescription
+          missing NSPhotoLibraryAddUsageDescription
+          missing NSUserTrackingUsageDescription
+          missing NSLocationWhenInUseUsageDescription
+          missing NSContactsUsageDescription
+
+          # App Transport Security stays at its secure defaults.
+          missing NSAppTransportSecurity
+
+          # The privacy manifest and the compiled asset catalog must be inside the
+          # bundle, not merely present in the source tree.
+          test -f "${app}/PrivacyInfo.xcprivacy"
+          plutil -lint "${app}/PrivacyInfo.xcprivacy"
+          /usr/libexec/PlistBuddy -c 'Print :NSPrivacyTracking' "${app}/PrivacyInfo.xcprivacy" | grep -F false
+          test -f "${app}/Assets.car"
+
+          echo 'Built bundle validated: display name, URL routing, usage descriptions, ATS, privacy manifest and asset catalog.'
+
+      - name: Validate the entitlements source and confirm nothing was signed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Simulator builds with CODE_SIGNING_ALLOWED=NO do not embed
+          # entitlements, so the source file is what gets asserted here. On-device
+          # enforcement of NSFileProtectionComplete stays a DEVICE GATE.
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.default-data-protection' ios/App/App/App.entitlements)" = 'NSFileProtectionComplete'
+          for forbidden in keychain-access-groups com.apple.developer.applesignin com.apple.developer.associated-domains aps-environment; do
+            if /usr/libexec/PlistBuddy -c "Print :${forbidden}" ios/App/App/App.entitlements > /dev/null 2>&1; then
+              echo "Unexpected entitlement: ${forbidden}" >&2
+              exit 1
+            fi
+          done
+
+          app="$(find "${RUNNER_TEMP}/DerivedData/Build/Products" -maxdepth 3 -name 'App.app' -type d | head -1)"
+          # Xcode may ad-hoc sign a simulator bundle; what must not exist is a
+          # real signing authority or an embedded provisioning profile.
+          if codesign -dvv "${app}" 2>&1 | grep -F 'Authority='; then
+            echo 'The simulator build carries a real signing identity; it must not.' >&2
+            exit 1
+          fi
+          test ! -f "${app}/embedded.mobileprovision"
+          echo 'Unsigned, as intended: no signing identity and no provisioning profile.'
+
+  secret-scan:
+    name: Secret and signing-material scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out complete history without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan the PR history for secrets
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Scan every commit this branch adds for signing material
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # gitleaks looks for credential shapes. This looks for the store-specific
+          # material that a mobile release is most likely to leak, in every tree
+          # this branch introduces -- not just the tip.
+          fail=0
+          while read -r sha; do
+            paths="$(git ls-tree -r --name-only "${sha}" | grep -E \
+              -e '\.(jks|keystore|p12|p8|cer|certSigningRequest|mobileprovision|provisionprofile)$' \
+              -e '(^|/)(keystore\.properties|google-services\.json|GoogleService-Info\.plist|ExportOptions\.plist)$' \
+              -e '(^|/)AuthKey_.*\.p8$' \
+              || true)"
+            if [ -n "${paths}" ]; then
+              echo "Commit ${sha} contains signing material:" >&2
+              echo "${paths}" >&2
+              fail=1
+            fi
+          done < <(git rev-list "${BASE_SHA}..HEAD")
+          test "${fail}" -eq 0
+
+          # And no file may carry a private-key blob or an actual signing password
+          # assignment. The tests and this workflow mention the property NAMES on
+          # purpose, so only an assignment form counts.
+          if git grep -nIE \
+            -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+            -e 'store(Password|File)[[:space:]]*[=:]' \
+            -e 'keyPassword[[:space:]]*[=:]' \
+            -e 'MIIE[A-Za-z0-9+/]{40,}' \
+            HEAD -- ':!package-lock.json' ':!.github/workflows/*'; then
+            echo 'A private key or a signing password appears in the tree.' >&2
+            exit 1
+          fi
+          echo 'No keystore, certificate, provisioning profile, store key or signing password in any commit on this branch.'

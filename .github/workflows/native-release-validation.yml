@@ -423,7 +423,21 @@ jobs:
           plutil -lint ios/App/App/Info.plist
           plutil -lint ios/App/App/App.entitlements
           plutil -lint ios/App/App/PrivacyInfo.xcprivacy
-          plutil -lint ios/App/App/Assets.xcassets/AppIcon.appiconset/Contents.json
+
+          # Asset-catalog metadata is JSON, not a plist, so `plutil -lint` rejects
+          # it on the leading `{`. Every Contents.json in the catalog is checked
+          # with a JSON parser, not just the AppIcon one, so a malformed catalog
+          # anywhere fails here instead of midway through the build.
+          manifests=0
+          while IFS= read -r manifest; do
+            python3 -m json.tool "${manifest}" > /dev/null
+            echo "${manifest}: OK"
+            manifests=$((manifests + 1))
+          done < <(find ios/App/App/Assets.xcassets -type f -name Contents.json)
+          # Asserted rather than assumed: without this, a find that matched nothing
+          # would report success while having validated no catalog at all.
+          test "${manifests}" -gt 0
+          echo "Linted 3 plists and ${manifests} asset-catalog manifest(s)."
 
       - name: Unsigned iPhone Simulator build
         shell: bash

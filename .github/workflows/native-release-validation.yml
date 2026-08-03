@@ -234,8 +234,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Anchored with a trailing slash or end-of-string: `^android/build`
+          # alone also matches android/build.gradle, which is tracked on purpose.
           forbidden="$(git ls-files | grep -E \
-            -e '^android/(build|\.gradle|local\.properties)' \
+            -e '^android/build/' \
+            -e '^android/\.gradle/' \
+            -e '^android/local\.properties$' \
             -e '^android/app/build/' \
             -e '^android/app/src/main/assets/public/' \
             -e '^android/app/src/main/assets/capacitor\.(config|plugins)\.json$' \
@@ -540,6 +544,15 @@ jobs:
           # gitleaks looks for credential shapes. This looks for the store-specific
           # material that a mobile release is most likely to leak, in every tree
           # this branch introduces -- not just the tip.
+          #
+          # Asserted rather than assumed: if BASE_SHA were empty or the range
+          # resolved to nothing, the loop below would read no commits and the job
+          # would pass while scanning nothing at all.
+          test -n "${BASE_SHA}"
+          commits="$(git rev-list "${BASE_SHA}..HEAD" | wc -l | tr -d ' ')"
+          test "${commits}" -gt 0
+          echo "Scanning ${commits} commit(s) in ${BASE_SHA}..HEAD"
+
           fail=0
           while read -r sha; do
             paths="$(git ls-tree -r --name-only "${sha}" | grep -E \

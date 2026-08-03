@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { MobileShell } from '@/components/MobileShell';
 import { supabase } from '@/lib/supabase';
+import { classifyServerError } from '@/lib/serverErrors';
 import {
   deleteTripChecklistFromDB,
   deleteTripFromDB,
@@ -358,7 +359,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('Failed to update trip:', error);
-      setTripError('여행 정보를 수정하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
+      setTripError(`여행 정보를 수정하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsSavingTrip(false);
     }
@@ -384,7 +385,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('Failed to delete trip:', error);
-      toast.error('여행을 삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
+      toast.error(`여행을 삭제하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsDeletingTrip(false);
     }
@@ -452,7 +453,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('Failed to save trip item:', error);
-      setItemError('일정을 저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
+      setItemError(`일정을 저장하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsSavingItem(false);
     }
@@ -478,7 +479,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('Failed to delete trip item:', error);
-      toast.error('일정을 삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
+      toast.error(`일정을 삭제하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setItemPending(itemId, false);
     }
@@ -558,7 +559,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('Failed to add trip checklist item:', error);
-      setChildActionError('준비물을 추가하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
+      setChildActionError(`준비물을 추가하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsAddingChecklist(false);
     }
@@ -618,7 +619,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('Failed to delete trip checklist item:', error);
-      setChildActionError('준비물을 삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
+      setChildActionError(`준비물을 삭제하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setChecklistPending(checklistId, false);
     }

@@ -17,9 +17,22 @@ import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
 import { toast } from 'sonner';
 import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
-import type { DailyRecord } from '@/types';
+import { serverErrorMessage } from '@/lib/serverErrors';
+import type { DailyRecord, ServerErrorKind } from '@/types';
 
 type MediaFilter = 'all' | 'photo' | 'video' | 'voice' | 'text';
+
+/**
+ * Why an attachment will not open.
+ *
+ * The record itself loaded, so this is deliberately scoped to the file rather
+ * than presented as a failure of the entry. The cause comes from the classifier,
+ * so an RLS refusal, an expired session and a dead network read differently
+ * instead of all showing an unexplained filename.
+ */
+function attachmentUnavailableCopy(reason: ServerErrorKind): string {
+  return `이 파일을 열 수 없어요. ${serverErrorMessage(reason)}`;
+}
 
 // Build calendar grid for a given year/month
 function buildCalendarGrid(year: number, month: number) {
@@ -697,6 +710,14 @@ export function RecordPage() {
                               <span>{att.name}</span>
                             </div>
                           )}
+                          {/* A file that could not be signed used to render as a
+                              plain chip, indistinguishable from a video or voice
+                              note that simply has no thumbnail. Say so instead. */}
+                          {att.urlUnavailable && (
+                            <p className="px-3 pb-2 text-[11px] text-destructive font-medium break-keep">
+                              {attachmentUnavailableCopy(att.urlUnavailable)}
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -881,6 +902,11 @@ export function RecordPage() {
                           {att.type === 'voice' && <Mic size={16} className="text-purple-500" />}
                           <span>{att.name}</span>
                         </div>
+                      )}
+                      {att.urlUnavailable && (
+                        <p className="px-3 pb-2 text-[11px] text-destructive font-medium break-keep">
+                          {attachmentUnavailableCopy(att.urlUnavailable)}
+                        </p>
                       )}
                       {/* Removal needs the durable storage path. A legacy
                           attachment without one cannot be addressed in Storage,

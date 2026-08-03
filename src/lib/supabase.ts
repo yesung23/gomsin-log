@@ -103,9 +103,41 @@ function isInvitationCodeCollision(error: { code?: string; message?: string }): 
 }
 
 /**
+ * Why couple creation failed, when the reason is one the caller can act on.
+ *
+ * `already_in_couple` is the recoverable one: the account owns a space already,
+ * which happens whenever onboarding was abandoned after step 3, because
+ * `create_couple_and_invitation` writes the membership before onboarding writes
+ * the `profiles` row.
+ */
+export type CoupleCreationReason = 'already_in_couple';
+
+/**
+ * Does this RPC error mean "you already own a couple space"?
+ *
+ * Still a text match, because `create_couple_and_invitation` reports it with a
+ * bare `RAISE` and no `error_code` -- there is nothing else to key on. What the
+ * move buys is that the match now lives ONCE, next to the RPC call it describes,
+ * instead of in a page that had no way to know which migration produced which
+ * wording (009, 013 and 015 all differ, and all mean the same recoverable thing).
+ */
+function isAlreadyInCoupleMessage(message?: string): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return normalized.includes('already in an active couple')
+    || normalized.includes('already in a couple')
+    || normalized.includes('active couple');
+}
+
+/**
  * Create a new couple in Supabase and generate invitation code via RPC.
  */
-export async function createCoupleInvitation(role: Role): Promise<{ coupleId: string; code: string; error?: string }> {
+export async function createCoupleInvitation(role: Role): Promise<{
+  coupleId: string;
+  code: string;
+  error?: string;
+  reason?: CoupleCreationReason;
+}> {
   if (!supabase) {
     // Offline/Demo Fallback
     return { coupleId: crypto.randomUUID(), code: generateInvitationCode() };
@@ -150,11 +182,21 @@ export async function createCoupleInvitation(role: Role): Promise<{ coupleId: st
         coupleId: '',
         code: '',
         error: rpcError.message || '커플 공간 생성에 실패했습니다.',
+        ...(isAlreadyInCoupleMessage(rpcError.message)
+          ? { reason: 'already_in_couple' as const }
+          : {}),
       };
     }
     return { coupleId: '', code: '', error: '커플 공간 생성에 실패했습니다.' };
   } catch (err: any) {
-    return { coupleId: '', code: '', error: err?.message || '초대 코드 생성 중 오류가 발생했습니다.' };
+    return {
+      coupleId: '',
+      code: '',
+      error: err?.message || '초대 코드 생성 중 오류가 발생했습니다.',
+      ...(isAlreadyInCoupleMessage(err?.message)
+        ? { reason: 'already_in_couple' as const }
+        : {}),
+    };
   }
 }
 

@@ -72,6 +72,7 @@ const storeState = {
 };
 
 const recoverExpiredSession = vi.fn();
+const setOnboardingStep = vi.fn();
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
@@ -79,6 +80,7 @@ vi.mock('@/lib/useStore', () => ({
     updateProfile: vi.fn(),
     setSetupComplete: vi.fn(),
     startDemo: vi.fn(),
+    setOnboardingStep: (...args: unknown[]) => setOnboardingStep(...(args as [])),
     recoverExpiredSession: (...args: unknown[]) => recoverExpiredSession(...(args as [])),
   }),
 }));
@@ -106,6 +108,7 @@ describe('OnboardingPage step 3 - couple space', () => {
     createCoupleInvitation.mockReset();
     consumeCoupleInvitation.mockReset();
     recoverExpiredSession.mockReset().mockResolvedValue(true);
+    setOnboardingStep.mockReset();
     fetchMyCoupleState.mockReset();
     regenerateCoupleInvitation.mockReset();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
@@ -161,6 +164,8 @@ describe('OnboardingPage step 3 - couple space', () => {
       coupleId: '',
       code: '',
       error: 'User already in an active couple',
+      // The data layer now classifies this once, next to the RPC that raises it.
+      reason: 'already_in_couple',
     });
     const expiresAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
     fetchMyCoupleState
@@ -203,6 +208,7 @@ describe('OnboardingPage step 3 - couple space', () => {
   it('renders the invitation expiry next to a recovered code', async () => {
     createCoupleInvitation.mockResolvedValue({
       coupleId: '', code: '', error: 'User already in an active couple',
+      reason: 'already_in_couple',
     });
     const expiresAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
     fetchMyCoupleState.mockResolvedValue({
@@ -220,6 +226,12 @@ describe('OnboardingPage step 3 - couple space', () => {
 
     await mountStep3();
     await act(async () => { clickNext(); });
+    // This fixture has a LIVE invitation, so regenerating now requires the user's
+    // explicit consent (DEF-06) -- the code it invalidates may already have been
+    // sent. The assertions below are unchanged.
+    await waitFor(() =>
+      expect(screen.getByTestId('space-recovery-confirm')).toBeInTheDocument());
+    await act(async () => { screen.getByText('새 코드 발급하기').click(); });
 
     await waitFor(() => expect(screen.getByText('654321')).toBeInTheDocument());
     await waitFor(() =>
@@ -230,6 +242,7 @@ describe('OnboardingPage step 3 - couple space', () => {
   it('continues without a code when recovery finds an already connected space', async () => {
     createCoupleInvitation.mockResolvedValue({
       coupleId: '', code: '', error: 'User already in an active couple',
+      reason: 'already_in_couple',
     });
     fetchMyCoupleState.mockResolvedValue({
       ok: true,
@@ -256,6 +269,7 @@ describe('OnboardingPage step 3 - couple space', () => {
   it('reports a retryable message when the existing space cannot be read', async () => {
     createCoupleInvitation.mockResolvedValue({
       coupleId: '', code: '', error: 'User already in an active couple',
+      reason: 'already_in_couple',
     });
     fetchMyCoupleState.mockResolvedValue({ ok: false, reason: 'server' });
 
@@ -286,6 +300,123 @@ describe('OnboardingPage step 3 - couple space', () => {
     // Not an already-in-couple error, so no recovery is attempted.
     expect(fetchMyCoupleState).not.toHaveBeenCalled();
     expect(regenerateCoupleInvitation).not.toHaveBeenCalled();
+  });
+
+  /**
+   * DEF-06. Recovery regenerated unconditionally, with only a success toast. If
+   * the creator had already sent the code, that silently broke it: migration 015
+   * keeps at most one unused hash, so minting a new one invalidates the old.
+   */
+  describe('an existing space whose invitation is still live', () => {
+    const expiresAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+
+    function seedLiveInvitation() {
+      createCoupleInvitation.mockResolvedValue({
+        coupleId: '', code: '', error: 'User already in an active couple',
+        reason: 'already_in_couple',
+      });
+      fetchMyCoupleState.mockResolvedValue({
+        ok: true,
+        state: {
+          coupleId: 'couple-existing',
+          role: 'gomsin',
+          memberStatus: 'active',
+          partnerPresent: false,
+          invitationActive: true,
+          invitationExpiresAt: expiresAt,
+        },
+      });
+    }
+
+    it('asks before invalidating a code that may already be with the partner', async () => {
+      seedLiveInvitation();
+      await mountStep3();
+      await act(async () => { clickNext(); });
+
+      await waitFor(() =>
+        expect(screen.getByTestId('space-recovery-confirm')).toBeInTheDocument());
+      // The decisive assertion: nothing was invalidated.
+      expect(regenerateCoupleInvitation).not.toHaveBeenCalled();
+      expect(screen.getByText('이미 만든 우리 공간이 있어요')).toBeInTheDocument();
+      // And it says what the consequence is, in the same terms the banner uses.
+      expect(screen.getByTestId('space-recovery-confirm').textContent)
+        .toContain('이전에 보낸 코드는 사용할 수 없게 돼요');
+      expect(screen.getByText('새 코드 발급하기')).toBeInTheDocument();
+      expect(screen.getByText('이전에 보낸 코드 그대로 쓰기')).toBeInTheDocument();
+    });
+
+    it('regenerates only after the user accepts the consequence', async () => {
+      seedLiveInvitation();
+      regenerateCoupleInvitation.mockResolvedValue({ code: '654321' });
+      await mountStep3();
+      await act(async () => { clickNext(); });
+      await waitFor(() =>
+        expect(screen.getByTestId('space-recovery-confirm')).toBeInTheDocument());
+
+      await act(async () => { screen.getByText('새 코드 발급하기').click(); });
+
+      await waitFor(() => expect(screen.getByText('654321')).toBeInTheDocument());
+      expect(regenerateCoupleInvitation).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('space-recovery-confirm')).toBeNull();
+    });
+
+    it('keeps the sent code and adopts the space when the user declines', async () => {
+      seedLiveInvitation();
+      await mountStep3();
+      await act(async () => { clickNext(); });
+      await waitFor(() =>
+        expect(screen.getByTestId('space-recovery-confirm')).toBeInTheDocument());
+
+      await act(async () => { screen.getByText('이전에 보낸 코드 그대로 쓰기').click(); });
+
+      expect(regenerateCoupleInvitation).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('space-recovery-confirm')).toBeNull();
+      // No code is displayed, because this device does not have one -- and the
+      // page must not pretend otherwise.
+      expect(screen.queryByLabelText('초대 코드 복사')).toBeNull();
+    });
+
+    it('does not re-create the space after the user declined, and advances', async () => {
+      seedLiveInvitation();
+      await mountStep3();
+      await act(async () => { clickNext(); });
+      await waitFor(() =>
+        expect(screen.getByTestId('space-recovery-confirm')).toBeInTheDocument());
+      await act(async () => { screen.getByText('이전에 보낸 코드 그대로 쓰기').click(); });
+      createCoupleInvitation.mockClear();
+
+      await act(async () => { clickNext(); });
+
+      // The space already exists; asking the server to create it again would only
+      // raise "already in an active couple" a second time.
+      expect(createCoupleInvitation).not.toHaveBeenCalled();
+      expect(screen.queryByText('우리 둘만의 로그를 시작해볼까요?')).toBeNull();
+    });
+
+    it('refuses to advance while the decision is outstanding', async () => {
+      seedLiveInvitation();
+      await mountStep3();
+      await act(async () => { clickNext(); });
+      await waitFor(() =>
+        expect(screen.getByTestId('space-recovery-confirm')).toBeInTheDocument());
+
+      await act(async () => { clickNext(); });
+
+      expect(screen.getByText('우리 둘만의 로그를 시작해볼까요?')).toBeInTheDocument();
+      expect(regenerateCoupleInvitation).not.toHaveBeenCalled();
+      expect(toastCalls.some((call) =>
+        call.message.includes('어떻게 할지 먼저 선택해 주세요'))).toBe(true);
+    });
+  });
+
+  /**
+   * DEF-06. `setOnboardingStep` was defined, exposed on the store context and
+   * read back at mount, but no product code ever called it -- so it was a dead
+   * write path and leaving onboarding always restarted at step 0.
+   */
+  it('mirrors the current step into the store', async () => {
+    await mountStep3();
+    expect(setOnboardingStep).toHaveBeenCalledWith(3);
   });
 
   /**

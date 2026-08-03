@@ -125,7 +125,17 @@ export function mergeCoupleState(
   }
 
   const sameCouple = local.coupleId === remote.coupleId;
-  const keepCode = sameCouple && !remote.partnerPresent;
+  /**
+   * The cached plaintext is only worth keeping while it can still be redeemed.
+   *
+   * `invitationActive` is the server's own verdict, computed in
+   * `get_my_couple_state()` as "an invitation row exists that is unused AND
+   * unexpired" (016). Consulting it -- rather than only `partnerPresent` -- is
+   * what stops a lapsed or already-consumed code from being displayed as if a
+   * partner could still type it in. It is also why this does not compare the
+   * expiry against the local clock: the authoritative answer is already here.
+   */
+  const keepCode = sameCouple && !remote.partnerPresent && remote.invitationActive;
 
   return {
     ...local,

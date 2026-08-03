@@ -201,12 +201,13 @@ const DEFAULT_STATE: AppState = {
       connected: false,
       status: 'pending',
     },
+    // No invented service period. This block used to carry the same fabricated
+    // enlistment/discharge pair as the sync fallback, which seeded a fake D-Day
+    // for any state that predates the field. Unknown until the user states it.
     military: {
       branch: 'army',
-      militaryStatus: 'serving',
-      enlistmentDate: '2025-03-10',
-      expectedDischargeDate: '2026-09-09',
-      dischargeDateSource: 'calculated',
+      militaryStatus: 'unknown',
+      dischargeDateSource: 'unknown',
       memo: '',
     },
     contact: {

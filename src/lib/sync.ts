@@ -181,12 +181,19 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       enabled: true,
     };
 
+    /**
+     * A profile row with no `military_info` means the user has not told us
+     * anything about a service period. It used to be filled in with a fixed
+     * 2025-03-10 / 2026-09-09 pair marked `dischargeDateSource: 'calculated'`,
+     * which produced a confident D-Day and a service percentage out of nothing
+     * and asserted a provenance the value did not have. Absent stays absent:
+     * `militaryStatus: 'unknown'` and no dates, so `computeServiceProgress`
+     * returns null and every dependent surface renders its empty state.
+     */
     const military: MilitaryInfo = profileData.military_info || {
       branch: 'army',
-      militaryStatus: 'serving',
-      enlistmentDate: '2025-03-10',
-      expectedDischargeDate: '2026-09-09',
-      dischargeDateSource: 'calculated',
+      militaryStatus: 'unknown',
+      dischargeDateSource: 'unknown',
     };
 
     const profile: UserProfile = {

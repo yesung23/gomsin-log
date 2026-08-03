@@ -38,6 +38,29 @@ const STATUS_LABELS: Record<MilitaryStatus, string> = {
   unknown: '미입력',
 };
 
+/**
+ * Status the EDITOR opens on.
+ *
+ * A stored `unknown` means "nothing stated yet", which is the honest state to
+ * read but a dead end to edit: the date fields are hidden, so the user who just
+ * tapped 복무 정보 입력하기 would see nothing to fill in. The editor therefore
+ * opens on `serving` — exactly the form this page showed before absent service
+ * info stopped being back-filled with invented dates. Nothing is persisted until
+ * 저장하기, which still validates the dates.
+ */
+function editableStatus(status: MilitaryStatus | undefined): MilitaryStatus {
+  return !status || status === 'unknown' ? 'serving' : status;
+}
+
+/**
+ * Provenance the EDITOR starts from. `unknown` is not an option the form can
+ * express, and the discharge date is auto-derived from branch + enlistment until
+ * the user overrides it, so `calculated` is the truthful starting point.
+ */
+function editableSource(source: DischargeDateSource | undefined): DischargeDateSource {
+  return !source || source === 'unknown' ? 'calculated' : source;
+}
+
 export function ServicePage() {
   const { state, updateProfile } = useStore();
   const navigate = useNavigate();
@@ -47,14 +70,16 @@ export function ServicePage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [editBranch, setEditBranch] = useState<Branch>(military?.branch || 'army');
-  const [editStatus, setEditStatus] = useState<MilitaryStatus>(military?.militaryStatus || 'serving');
+  const [editStatus, setEditStatus] = useState<MilitaryStatus>(
+    editableStatus(military?.militaryStatus),
+  );
   // No invented defaults: an empty field stays empty until the user fills it in.
   const [editEnlistDate, setEditEnlistDate] = useState(military?.enlistmentDate || '');
   const [editExpectedDischarge, setEditExpectedDischarge] = useState(
     military?.expectedDischargeDate || '',
   );
   const [editDischargeSource, setEditDischargeSource] = useState<DischargeDateSource>(
-    military?.dischargeDateSource || 'calculated',
+    editableSource(military?.dischargeDateSource),
   );
 
   useEscapeKey(() => setIsEditing(false), isEditing);
@@ -68,10 +93,10 @@ export function ServicePage() {
 
   const openEditor = () => {
     setEditBranch(military?.branch || 'army');
-    setEditStatus(military?.militaryStatus || 'serving');
+    setEditStatus(editableStatus(military?.militaryStatus));
     setEditEnlistDate(military?.enlistmentDate || '');
     setEditExpectedDischarge(military?.expectedDischargeDate || '');
-    setEditDischargeSource(military?.dischargeDateSource || 'calculated');
+    setEditDischargeSource(editableSource(military?.dischargeDateSource));
     setIsEditing(true);
   };
 
@@ -146,9 +171,14 @@ export function ServicePage() {
                   {BRANCH_LABELS[military?.branch || 'army']} ·{' '}
                   {STATUS_LABELS[military?.militaryStatus || 'serving']}
                 </span>
-                <span className="bg-white/10 px-2.5 py-1 rounded-full text-[10px] font-semibold">
-                  {military?.dischargeDateSource === 'manual' ? '직접 입력' : '자동 계산'}
-                </span>
+                {/* Provenance is only claimed when it is actually known.
+                    `unknown` used to fall through to 자동 계산, which asserted
+                    the date had been derived when nobody had said so. */}
+                {military?.dischargeDateSource !== 'unknown' && (
+                  <span className="bg-white/10 px-2.5 py-1 rounded-full text-[10px] font-semibold">
+                    {military?.dischargeDateSource === 'manual' ? '직접 입력' : '자동 계산'}
+                  </span>
+                )}
               </div>
 
               <div className="text-5xl font-black mb-4 tracking-tight">

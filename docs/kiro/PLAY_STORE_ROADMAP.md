@@ -23,13 +23,15 @@
 
 ```bash
 npm install
-npm run cap:add:android   # android/ 폴더 생성
 npm run cap:sync          # 웹 빌드 후 android/ 로 복사
 npm run cap:open          # Android Studio 열기
 ```
 
-`android/` 는 Git에 넣지 않습니다(생성물). 대신 **손으로 고쳐야 하는 부분**을
-아래에 적어 두었으니, 프로젝트를 다시 만들 때 그대로 다시 적용하세요.
+> **변경됨**: `android/` 는 이제 Git에 **포함**되어 있습니다. `cap add android` 를
+> 다시 실행하면 아래의 딥링크·권한·백업 설정이 템플릿으로 되돌아갑니다. 실행하지
+> 마세요. 결정 배경과 트레이드오프, 그리고 iOS 쪽 대응은
+> [`NATIVE_RELEASE_GUIDE.md`](NATIVE_RELEASE_GUIDE.md) 에 있습니다. 아래 절들은
+> 이제 "다시 적용해야 하는 수정"이 아니라 **이미 적용되어 있는 설정의 근거**입니다.
 
 ### 1-1. 딥링크 등록 (구글 로그인에 필수)
 

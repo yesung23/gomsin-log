@@ -5,6 +5,7 @@ import {
   Mic, Square, X, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
@@ -23,6 +24,7 @@ export function TodayLogWidget() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showInputCard, setShowInputCard] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const isOffline = !useOnlineStatus();
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
 
@@ -236,6 +238,12 @@ export function TodayLogWidget() {
 
   const handlePost = async () => {
     if (isSaving) return;
+    // Read-only while offline: firing this write would fail and then be explained
+    // with a message that could not name the real cause.
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (isRecording) {
       toast.info('녹음을 먼저 마쳐주세요.');
       return;
@@ -269,7 +277,11 @@ export function TodayLogWidget() {
     }
 
     if (!result.ok) {
-      toast.error(result.error || '기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+      // No fallback copy: the store now ALWAYS supplies a cause-specific message
+      // (see serverErrors.ts). The old fallback blamed the internet connection for
+      // permission and membership failures, which sent users into an endless retry
+      // loop instead of telling them what to fix.
+      toast.error(result.error || '기록을 저장하지 못했어요.');
       return;
     }
 
@@ -474,7 +486,10 @@ export function TodayLogWidget() {
           <div className="pt-2 flex items-center justify-between">
             <button
               onClick={() => setIsPrivate(!isPrivate)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 ${
+              // 44px minimum: measured at 32px in a real browser, which is below
+              // the tap-target floor for the control that decides whether a record
+              // is shared with the partner.
+              className={`min-h-[44px] px-3 rounded-lg text-xs font-bold flex items-center gap-1 ${
                 isPrivate ? 'bg-amber-100 text-amber-800' : 'bg-muted text-muted-foreground'
               }`}
             >
@@ -484,8 +499,10 @@ export function TodayLogWidget() {
 
             <button
               onClick={handlePost}
-              disabled={isSaving}
-              className="px-4 py-1.5 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition"
+              disabled={isSaving || isOffline}
+              // 44px minimum: measured at 32px in a real browser. This is the
+              // primary save action of the whole app.
+              className="min-h-[44px] px-4 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"
             >
               {isSaving ? '저장 중...' : '저장'}
             </button>

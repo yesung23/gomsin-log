@@ -7,9 +7,28 @@ import {
   authRepository,
   createCoupleInvitation,
   consumeCoupleInvitation,
+  fetchMyCoupleState,
+  regenerateCoupleInvitation,
   saveCoupleAnniversary,
   supabase,
 } from '@/lib/supabase';
+import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { classifyServerError } from '@/lib/serverErrors';
+
+/**
+ * Does this RPC error mean "you already own a couple space"?
+ *
+ * `create_couple_and_invitation` raises a bare message, so it has to be matched
+ * textually. Matched loosely on purpose: the exact wording differs between
+ * migrations 009/013/015 and all of them mean the same recoverable thing.
+ */
+function isAlreadyInCoupleError(message?: string): boolean {
+  if (!message) return false;
+  const normalized = message.toLowerCase();
+  return normalized.includes('already in an active couple')
+    || normalized.includes('already in a couple')
+    || normalized.includes('active couple');
+}
 import { toast } from 'sonner';
 import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { addMonths } from '@/lib/utils';
@@ -57,6 +76,8 @@ export function OnboardingPage() {
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  /** ISO expiry of the code on screen, when the server told us one. */
+  const [inviteExpiresAt, setInviteExpiresAt] = useState<string | null>(null);
   const [joinedPartnerName, setJoinedPartnerName] = useState('');
   const [isFinishing, setIsFinishing] = useState(false);
   const [anniversary, setAnniversary] = useState('');
@@ -116,6 +137,62 @@ export function OnboardingPage() {
     runStartDemo();
   };
 
+  /**
+   * Recover into a couple space this account already owns.
+   *
+   * Reached when `create_couple_and_invitation` reports the caller is already in
+   * an active couple. Before this existed the screen dead-ended on that error
+   * message with no affordance of any kind, and the user could neither reach the
+   * space they owned nor create a new one.
+   *
+   * Regenerating is mandatory rather than optional: the server holds only a hash
+   * of the original code, so there is no way to display the old one.
+   */
+  const recoverExistingCoupleSpace = useCallback(async (
+    identity: { key: string; generation: number },
+  ): Promise<{ ok: boolean; mintedCode: boolean }> => {
+    const lifecycleResult = await fetchMyCoupleState();
+    if (!isCurrentIdentity(identity)) return { ok: false, mintedCode: false };
+
+    if (!lifecycleResult.ok || !lifecycleResult.state?.coupleId) {
+      toast.error(
+        '이미 만들어진 커플 공간이 있는데 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',
+      );
+      return { ok: false, mintedCode: false };
+    }
+
+    const existing = lifecycleResult.state;
+    if (existing.partnerPresent) {
+      // Already connected: there is nothing to invite anyone to.
+      setCreatedCoupleId(existing.coupleId!);
+      setCreatedInviteCode('');
+      setInviteExpiresAt(null);
+      toast.success('이미 연결된 커플 공간을 찾았어요. 이어서 진행할게요.');
+      return { ok: true, mintedCode: false };
+    }
+
+    const regenerated = await regenerateCoupleInvitation();
+    if (!isCurrentIdentity(identity)) return { ok: false, mintedCode: false };
+    if (regenerated.error || !regenerated.code) {
+      toast.error(regenerated.error || '초대 코드를 새로 발급하지 못했어요.');
+      return { ok: false, mintedCode: false };
+    }
+
+    setCreatedCoupleId(existing.coupleId!);
+    setCreatedInviteCode(regenerated.code);
+    // A freshly minted code is valid for 24h. Re-read the authoritative expiry
+    // rather than computing one locally.
+    const refreshed = await fetchMyCoupleState();
+    if (!isCurrentIdentity(identity)) return { ok: true, mintedCode: true };
+    setInviteExpiresAt(
+      refreshed.ok && refreshed.state?.invitationActive
+        ? refreshed.state.invitationExpiresAt
+        : null,
+    );
+    toast.success('이미 만든 공간을 찾아 새 초대 코드를 발급했어요.');
+    return { ok: true, mintedCode: true };
+  }, [isCurrentIdentity]);
+
   const handleNext = async () => {
     // Auth Gate: Cannot advance from Step 0 without login or demo mode
     if (step === 0 && !state.authenticatedUser && !state.isDemoMode) {
@@ -132,6 +209,16 @@ export function OnboardingPage() {
     if (step === 3) {
       if (isGeneratingCode || isVerifyingCode) return;
       const identity = captureIdentity();
+      /**
+       * Did this invocation produce a code the user has not seen yet?
+       *
+       * If so we STAY on step 3. Previously the first tap generated the code and
+       * advanced in the same handler, so the code block, its copy button and the
+       * "give this to your partner" explanation were rendered and left behind
+       * within one frame -- the creator never actually saw the code they now had
+       * to deliver. A second tap continues.
+       */
+      let mintedCodeToShow = false;
 
       if (spaceMode === 'create' && !createdInviteCode) {
         setIsGeneratingCode(true);
@@ -139,12 +226,28 @@ export function OnboardingPage() {
           const res = await createCoupleInvitation(role);
           if (!isCurrentIdentity(identity)) return;
           if (res.error || !res.coupleId || !res.code) {
-            toast.error(res.error || '초대 코드를 생성하지 못했습니다.');
-            return;
+            // `User already in an active couple` is not a dead end: the couple
+            // space exists and this account owns it. That happens whenever
+            // onboarding was abandoned after step 3, because the membership is
+            // written before the `profiles` row. Recover into the existing space
+            // and mint a fresh code -- the server stores only a hash, so the old
+            // plaintext is unrecoverable by any other means.
+            if (isAlreadyInCoupleError(res.error)) {
+              const recovery = await recoverExistingCoupleSpace(identity);
+              if (!isCurrentIdentity(identity)) return;
+              if (!recovery.ok) return;
+              mintedCodeToShow = recovery.mintedCode;
+            } else {
+              toast.error(res.error || '초대 코드를 생성하지 못했습니다.');
+              return;
+            }
+          } else {
+            setCreatedCoupleId(res.coupleId);
+            setCreatedInviteCode(res.code);
+            setInviteExpiresAt(null);
+            mintedCodeToShow = true;
+            toast.success('초대 코드가 생성되었습니다!');
           }
-          setCreatedCoupleId(res.coupleId);
-          setCreatedInviteCode(res.code);
-          toast.success('초대 코드가 생성되었습니다!');
         } catch (error) {
           if (!isCurrentIdentity(identity)) return;
           console.error('[Onboarding] Invitation creation failed:', error);
@@ -196,6 +299,8 @@ export function OnboardingPage() {
       }
 
       if (!isCurrentIdentity(identity)) return;
+      // Let the creator read and copy the code before moving on.
+      if (mintedCodeToShow) return;
     }
 
     // If Gomshin reaches Step 4 (Anniversary), skip Steps 5 & 6 and jump directly to Step 7 (Completion)!
@@ -307,7 +412,9 @@ export function OnboardingPage() {
 
         if (profileError) {
           console.error('[Onboarding] Profile save failed:', profileError);
-          toast.error('프로필을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+          // Classified from the real error: an RLS or session failure must not be
+          // reported as a connectivity problem.
+          toast.error(`프로필을 저장하지 못했어요. ${classifyServerError(profileError).message}`);
           return;
         }
 
@@ -359,7 +466,7 @@ export function OnboardingPage() {
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
       console.error('[Onboarding] Final setup failed:', error);
-      toast.error('설정을 완료하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+      toast.error(`설정을 완료하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentIdentity(identity)) setIsFinishing(false);
     }
@@ -571,12 +678,25 @@ export function OnboardingPage() {
 
                   {spaceMode === 'create' && createdInviteCode && (
                     <div className="p-4 bg-coral/10 border border-coral/30 rounded-2xl space-y-2">
-                      <div className="text-xs text-coral font-semibold">내 초대 코드 (24시간 유효)</div>
+                      <div className="text-xs text-coral font-semibold">
+                        내 초대 코드 (24시간 유효)
+                        {/* The authoritative expiry, when the server supplied one.
+                            "24시간 유효" alone told the user nothing about the
+                            actual deadline. */}
+                        {inviteExpiresAt && invitationExpiryLabel(inviteExpiresAt) && (
+                          <span className="ml-1 font-normal text-muted-foreground">
+                            · {invitationExpiryLabel(inviteExpiresAt)}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center justify-between bg-card px-4 py-3 rounded-xl border border-coral/20">
                         <span className="font-mono text-2xl font-bold tracking-widest text-foreground">{createdInviteCode}</span>
                         <button
                           onClick={handleCopyCode}
-                          className="p-2 text-coral hover:bg-coral/10 rounded-lg transition"
+                          // Icon-only control: `title` alone is not an accessible
+                          // name on touch devices, where it never surfaces.
+                          aria-label="초대 코드 복사"
+                          className="min-h-[44px] min-w-[44px] flex items-center justify-center text-coral hover:bg-coral/10 rounded-lg transition"
                           title="코드 복사"
                         >
                           {copiedCode ? <Check size={20} /> : <Copy size={20} />}
@@ -602,6 +722,10 @@ export function OnboardingPage() {
                     </div>
                   </button>
 
+                  {/* The code-entry field is rendered ONLY in join mode. A creator
+                      must never be offered it: `redeem_invitation` rejects their
+                      own code as `self_invitation`, so showing the field can only
+                      produce a confusing failure. */}
                   {spaceMode === 'join' && (
                     <div className="pt-2 space-y-2">
                       <input

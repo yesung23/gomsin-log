@@ -11,6 +11,7 @@ import {
   revokeCycleSupportSignalFromDB,
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
+import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { supabase } from '@/lib/supabase';
 import type { CycleSupportKind, CycleSupportSignal, Role } from '@/types';
 
@@ -255,17 +256,21 @@ export function CycleSupportSection({
     setMutationPending('share');
     setMutationError(null);
     try {
-      const saved = await createCycleSupportSignalInDB({
+      const result = await createCycleSupportSignalInDB({
         coupleId,
         kind,
         message: message.trim() || undefined,
         sharedForDate: today,
       });
       if (!isCurrentIdentity(identity)) return;
-      if (!saved) {
-        setMutationError('응원 신호를 공유하지 못했어요. 연결을 확인해 주세요.');
+      if (!result.ok) {
+        // The cause decides the copy. A `forbidden` result means the couple link
+        // is not usable -- reporting it as a connection problem sent users to
+        // retry forever instead of checking the connection state.
+        setMutationError(serverErrorMessage(result.reason));
         return;
       }
+      const saved = result.signal;
       setSignals((current) => [saved, ...current]);
       setLoadState('ready');
       setKind('');
@@ -274,7 +279,7 @@ export function CycleSupportSection({
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
       console.error('Failed to create sanitized support signal:', error);
-      setMutationError('응원 신호를 공유하지 못했어요. 다시 시도해 주세요.');
+      setMutationError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setMutationPending(null);
     }
@@ -286,10 +291,10 @@ export function CycleSupportSection({
     setMutationPending('revoke');
     setMutationError(null);
     try {
-      const revoked = await revokeCycleSupportSignalFromDB(activeSignal.id);
+      const result = await revokeCycleSupportSignalFromDB(activeSignal.id);
       if (!isCurrentIdentity(identity)) return;
-      if (!revoked) {
-        setMutationError('공유를 취소하지 못했어요. 다시 시도해 주세요.');
+      if (!result.ok) {
+        setMutationError(serverErrorMessage(result.reason));
         return;
       }
       const revokedAt = new Date().toISOString();
@@ -301,7 +306,7 @@ export function CycleSupportSection({
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
       console.error('Failed to revoke sanitized support signal:', error);
-      setMutationError('공유를 취소하지 못했어요. 다시 시도해 주세요.');
+      setMutationError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setMutationPending(null);
     }

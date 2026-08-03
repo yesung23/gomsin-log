@@ -50,7 +50,7 @@ npm run verify      # 타입검사 + 린트 + 테스트 + 빌드 (한 번에)
 
 npm run typecheck   # tsc -b --force
 npm run lint        # eslint
-npm test            # vitest (104개)
+npm test            # vitest (625개 / 47개 파일)
 npm run build       # 프로덕션 빌드
 
 # Capacitor (Android)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseAllowedOrigins, resolveCors } from '../../supabase/functions/_shared/cors.ts';
+import { parseAllowedOrigins, resolveCors } from '../../supabase/functions/delete-account/_shared/cors.ts';
 import { handleDeleteAccountRequest } from '../../supabase/functions/delete-account/handler.ts';
 
 /**

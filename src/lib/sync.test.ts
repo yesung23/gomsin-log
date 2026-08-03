@@ -33,7 +33,7 @@ vi.mock('@/lib/privacy', () => ({
   visibleRecordsForViewer: mockVisibleRecordsForViewer,
 }));
 
-import { fetchFullStateFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
+import { fetchFullStateFromDB, fetchFullStateResultFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
 import type { AppState } from '@/types';
 
 function requireState(
@@ -120,16 +120,104 @@ describe('fetchFullStateFromDB', () => {
     expect(result).toBe(FULL_STATE_UNAVAILABLE);
   });
 
+  /**
+   * Absent profile + membership lookup outcomes.
+   *
+   * The original version of the first test here mocked `couple_members` as
+   * `{ select: vi.fn() }`, so `select()` returned `undefined` and the chain threw
+   * `Cannot read properties of undefined (reading 'eq')`. The exception was
+   * swallowed and the assertion still saw `null`, so the test passed without ever
+   * exercising a verified-empty lookup. Each case below now supplies a complete
+   * chain and pins one distinct outcome.
+   */
   it('returns null only when the profile is verified absent', async () => {
     const profileChain = setupProfileMock(null);
+    // Complete chain, resolving to a genuinely empty membership result.
+    const memberChain = setupMemberMock(null);
     mockFrom.mockImplementation((table: string) => {
       if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
       return { select: vi.fn() };
     });
 
     const result = await fetchFullStateFromDB(userId);
 
     expect(result).toBeNull();
+    // Proof the lookup really ran instead of throwing on an incomplete mock.
+    expect(memberChain.maybeSingle).toHaveBeenCalled();
+  });
+
+  it('resumes into the existing couple space when the profile is absent but an active membership exists', async () => {
+    const coupleId = 'couple-resume-1';
+    const profileChain = setupProfileMock(null);
+    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'soldier' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile!.couple.coupleId).toBe(coupleId);
+    expect(result.profile!.couple.status).toBe('pending');
+    expect(result.profile!.couple.connected).toBe(false);
+    expect(result.profile!.role).toBe('soldier');
+    // The profile row genuinely is missing, so onboarding must still finish.
+    expect(result.setupComplete).toBe(false);
+  });
+
+  it('returns unavailable, not a new account, when the membership query errors', async () => {
+    const profileChain = setupProfileMock(null);
+    // `42501` is an RLS rejection: authoritative proof that we were NOT told
+    // membership is absent.
+    const memberChain = setupMemberMock(null, { code: '42501', message: 'permission denied' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = await fetchFullStateFromDB(userId);
+
+    expect(result).toBe(FULL_STATE_UNAVAILABLE);
+    expect(result).not.toBeNull();
+  });
+
+  it('classifies the membership query failure reason instead of guessing', async () => {
+    const profileChain = setupProfileMock(null);
+    const memberChain = setupMemberMock(null, { code: '42501', message: 'permission denied' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = await fetchFullStateResultFromDB(userId);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected an unavailable result');
+    expect(result.reason).toBe('forbidden');
+  });
+
+  it('returns unavailable when the membership lookup throws', async () => {
+    const profileChain = setupProfileMock(null);
+    const maybeSingle = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const eqStatus = vi.fn().mockReturnValue({ maybeSingle });
+    const eqUserId = vi.fn().mockReturnValue({ eq: eqStatus });
+    const memberSelect = vi.fn().mockReturnValue({ eq: eqUserId });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberSelect };
+      return { select: vi.fn() };
+    });
+
+    const result = await fetchFullStateFromDB(userId);
+
+    // The critical assertion: a thrown lookup must never be reported as the
+    // verified new-account `null` state.
+    expect(result).toBe(FULL_STATE_UNAVAILABLE);
+    expect(result).not.toBeNull();
   });
 
   it('returns a pending couple when no partner exists', async () => {

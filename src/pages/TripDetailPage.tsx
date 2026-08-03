@@ -5,6 +5,7 @@ import {
   MapPin, PenTool, Pencil, Plus, RefreshCw, ShieldAlert, Square, Trash2, Unlink,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { MobileShell } from '@/components/MobileShell';
 import { supabase } from '@/lib/supabase';
 import {
@@ -91,6 +92,7 @@ export function TripDetailPage() {
   const [tripError, setTripError] = useState<string | null>(null);
   const [isSavingTrip, setIsSavingTrip] = useState(false);
   const [isDeletingTrip, setIsDeletingTrip] = useState(false);
+  const isOffline = !useOnlineStatus();
   const [showItemModal, setShowItemModal] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [itemDraft, setItemDraft] = useState<ItemDraft>(EMPTY_ITEM);
@@ -324,6 +326,10 @@ export function TripDetailPage() {
   };
 
   const handleSaveTrip = async () => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (!trip || isSavingTrip) return;
     const validationError = validateTripDraft(tripDraft)
       || validateTripRangeAgainstItems(tripDraft, items);
@@ -359,6 +365,10 @@ export function TripDetailPage() {
   };
 
   const handleDeleteTrip = async () => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (!trip || isDeletingTrip || !confirm('이 여행과 모든 일정, 준비물을 삭제하시겠습니까?')) return;
     const operationScope = captureTripScope();
     setIsDeletingTrip(true);
@@ -394,6 +404,10 @@ export function TripDetailPage() {
   };
 
   const handleSaveItem = async () => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (!trip || !activeDate || isSavingItem) return;
     if (!itemDraft.title.trim()) {
       setItemError('장소 또는 제목을 입력해 주세요.');
@@ -445,6 +459,10 @@ export function TripDetailPage() {
   };
 
   const handleDeleteItem = async (itemId: string) => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (pendingItemIds.has(itemId)) return;
     const operationScope = captureTripScope();
     setItemPending(itemId, true);
@@ -467,6 +485,10 @@ export function TripDetailPage() {
   };
 
   const handleMoveItem = async (index: number, direction: -1 | 1) => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     const targetIndex = index + direction;
     const moving = currentDayItems[index];
     const target = currentDayItems[targetIndex];
@@ -516,6 +538,10 @@ export function TripDetailPage() {
   };
 
   const handleAddChecklist = async () => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (!trip || !newChecklistName.trim() || isAddingChecklist) return;
     const operationScope = captureTripScope();
     setIsAddingChecklist(true);
@@ -539,6 +565,10 @@ export function TripDetailPage() {
   };
 
   const handleToggleChecklist = async (item: TripChecklist) => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (pendingChecklistIds.has(item.id)) return;
     const operationScope = captureTripScope();
     const nextCompleted = !item.completed;
@@ -569,6 +599,10 @@ export function TripDetailPage() {
   };
 
   const handleDeleteChecklist = async (checklistId: string) => {
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     if (pendingChecklistIds.has(checklistId)) return;
     const operationScope = captureTripScope();
     setChecklistPending(checklistId, true);
@@ -618,8 +652,8 @@ export function TripDetailPage() {
             <h1 className="font-bold text-foreground text-lg truncate">{trip.title}</h1>
           </div>
           <div className="flex items-center">
-            <button onClick={openTripEdit} disabled={isDeletingTrip} className="p-2 text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil className="w-4 h-4" /></button>
-            <button onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip} className="p-2 -mr-2 text-red-500 disabled:opacity-40" aria-label="여행 삭제"><Trash2 className="w-5 h-5" /></button>
+            <button onClick={openTripEdit} disabled={isDeletingTrip || isOffline} className="p-2 text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil className="w-4 h-4" /></button>
+            <button onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip || isOffline} className="p-2 -mr-2 text-red-500 disabled:opacity-40" aria-label="여행 삭제"><Trash2 className="w-5 h-5" /></button>
           </div>
         </header>
 
@@ -658,10 +692,10 @@ export function TripDetailPage() {
                         <div className="flex items-center gap-2"><h3 className="font-bold text-sm truncate">{item.title}</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
                         {item.memo && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{item.memo}</p>}
                         <div className="flex gap-1 mt-2">
-                          <button onClick={() => void handleMoveItem(index, -1)} disabled={index === 0 || pending} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="위로 이동"><ArrowUp className="w-4 h-4" /></button>
-                          <button onClick={() => void handleMoveItem(index, 1)} disabled={index === currentDayItems.length - 1 || pending} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="아래로 이동"><ArrowDown className="w-4 h-4" /></button>
-                          <button onClick={() => openEditItem(item)} disabled={pending} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="일정 수정"><Pencil className="w-4 h-4" /></button>
-                          <button onClick={() => void handleDeleteItem(item.id)} disabled={pending} className="p-1.5 text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 className="w-4 h-4" /></button>
+                          <button onClick={() => void handleMoveItem(index, -1)} disabled={index === 0 || pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="위로 이동"><ArrowUp className="w-4 h-4" /></button>
+                          <button onClick={() => void handleMoveItem(index, 1)} disabled={index === currentDayItems.length - 1 || pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="아래로 이동"><ArrowDown className="w-4 h-4" /></button>
+                          <button onClick={() => openEditItem(item)} disabled={pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="일정 수정"><Pencil className="w-4 h-4" /></button>
+                          <button onClick={() => void handleDeleteItem(item.id)} disabled={pending || isOffline} className="p-1.5 text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 className="w-4 h-4" /></button>
                         </div>
                       </div>
                     </div>;
@@ -673,14 +707,14 @@ export function TripDetailPage() {
           </>
         ) : (
           <div className="p-5 space-y-4">
-            <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-xs outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim()} className="px-4 bg-coral text-white font-bold text-xs rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
+            <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-xs outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim() || isOffline} className="px-4 bg-coral text-white font-bold text-xs rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
             {childActionError && <p className="text-xs text-red-600" role="alert">{childActionError}</p>}
             <div className="space-y-2">
               {checklists.map((item) => {
                 const pending = pendingChecklistIds.has(item.id);
                 return <div key={item.id} className="bg-card border border-border p-3.5 rounded-2xl flex items-center justify-between text-xs font-semibold">
-                  <button onClick={() => void handleToggleChecklist(item)} disabled={pending} className="flex items-center gap-2 text-left disabled:opacity-50">{item.completed ? <CheckSquare className="w-5 h-5 text-coral" /> : <Square className="w-5 h-5 text-muted-foreground" />}<span className={item.completed ? 'line-through text-muted-foreground' : ''}>{item.itemName}</span></button>
-                  <button onClick={() => void handleDeleteChecklist(item.id)} disabled={pending} className="text-muted-foreground hover:text-destructive p-1 disabled:opacity-40" aria-label="준비물 삭제"><Trash2 className="w-4 h-4" /></button>
+                  <button onClick={() => void handleToggleChecklist(item)} disabled={pending || isOffline} className="flex items-center gap-2 text-left disabled:opacity-50">{item.completed ? <CheckSquare className="w-5 h-5 text-coral" /> : <Square className="w-5 h-5 text-muted-foreground" />}<span className={item.completed ? 'line-through text-muted-foreground' : ''}>{item.itemName}</span></button>
+                  <button onClick={() => void handleDeleteChecklist(item.id)} disabled={pending || isOffline} className="text-muted-foreground hover:text-destructive p-1 disabled:opacity-40" aria-label="준비물 삭제"><Trash2 className="w-4 h-4" /></button>
                 </div>;
               })}
               {checklists.length === 0 && <div className="bg-card border border-dashed border-border rounded-2xl p-6 text-center text-xs text-muted-foreground">함께 준비할 짐이나 할 일을 작성해 보세요.</div>}
@@ -699,7 +733,7 @@ export function TripDetailPage() {
           <div className="flex gap-2"><label className="flex-1 font-bold">가는 날<input type="date" value={tripDraft.startDate} onChange={(event) => setTripDraft((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label><label className="flex-1 font-bold">오는 날<input type="date" min={tripDraft.startDate} value={tripDraft.endDate} onChange={(event) => setTripDraft((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label></div>
           <label className="block font-bold">상태<select value={tripDraft.status} onChange={(event) => setTripDraft((current) => ({ ...current, status: event.target.value as TripStatus }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3">{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           {tripError && <p className="text-red-600" role="alert">{tripError}</p>}
-        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
+        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip || isOffline} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
 
         {showItemModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-xs">
           <label className="block font-bold">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
@@ -707,7 +741,7 @@ export function TripDetailPage() {
           <label className="block font-bold">링크 (선택)<input type="url" value={itemDraft.url} onChange={(event) => setItemDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <label className="block font-bold">메모 (선택)<textarea value={itemDraft.memo} onChange={(event) => setItemDraft((current) => ({ ...current, memo: event.target.value }))} rows={3} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
           {itemError && <p className="text-red-600" role="alert">{itemError}</p>}
-        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
+        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem || isOffline} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
       </div>
     </MobileShell>
   );

@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { emotionFlowForStorage } from '@/lib/privacy';
+import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 import { DailyRecord, Role, Attachment } from '@/types';
 
 // ==========================================
@@ -155,8 +156,34 @@ export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[
   return result.ok ? result.records : [];
 }
 
-export async function saveRecordToDB(record: DailyRecord, coupleId: string, userId: string): Promise<boolean> {
-  if (!isSupabaseConfigured || !supabase || !coupleId || !userId) return false;
+/**
+ * Outcome of a record write or delete.
+ *
+ * Deliberately not a boolean. `false` threw away the only information the user
+ * actually needed: an RLS rejection, an expired session and a dead network all
+ * collapsed into one value, so every call site had to guess -- and guessed
+ * "check your internet connection". The reason is classified once, here, and
+ * carried all the way to the toast.
+ */
+export type RecordWriteResult =
+  | { ok: true }
+  | { ok: false; reason: ServerErrorKind };
+
+/** Reason to use when the client is not configured to reach a server at all. */
+function unconfiguredReason(): ServerErrorKind {
+  return classifyServerError(new Error('Records database is unavailable')).kind === 'offline'
+    ? 'offline'
+    : 'server';
+}
+
+export async function saveRecordToDB(
+  record: DailyRecord,
+  coupleId: string,
+  userId: string,
+): Promise<RecordWriteResult> {
+  if (!isSupabaseConfigured || !supabase || !coupleId || !userId) {
+    return { ok: false, reason: unconfiguredReason() };
+  }
 
   const { error } = await supabase
     .from('daily_records')
@@ -186,23 +213,23 @@ export async function saveRecordToDB(record: DailyRecord, coupleId: string, user
 
   if (error) {
     console.error('Failed to save record:', error);
-    return false;
+    return { ok: false, reason: classifyServerError(error).kind };
   }
-  return true;
+  return { ok: true };
 }
 
 export async function deleteRecordFromDB(
   recordId: string,
   expectedUserId: string,
   expectedCoupleId: string,
-): Promise<boolean> {
+): Promise<RecordWriteResult> {
   if (
     !isSupabaseConfigured
     || !supabase
     || !recordId
     || !expectedUserId
     || !expectedCoupleId
-  ) return false;
+  ) return { ok: false, reason: unconfiguredReason() };
 
   const { data, error } = await supabase
     .from('daily_records')
@@ -215,9 +242,12 @@ export async function deleteRecordFromDB(
 
   if (error) {
     console.error('Failed to delete record:', error);
-    return false;
+    return { ok: false, reason: classifyServerError(error).kind };
   }
-  return data?.id === recordId;
+  // No matching row came back. The filters pin id + owner + couple, so this is
+  // an ownership/visibility answer, not a transport failure.
+  if (data?.id !== recordId) return { ok: false, reason: 'not_found' };
+  return { ok: true };
 }
 
 // ==========================================

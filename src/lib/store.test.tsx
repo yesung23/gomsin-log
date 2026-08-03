@@ -38,6 +38,10 @@ const mockSupabase = {
 };
 
 const disconnectCoupleFromDB = vi.fn().mockResolvedValue(true);
+// Default: the lifecycle RPC could NOT answer. By contract that leaves local
+// couple state untouched, so every pre-existing scenario keeps its fixture
+// workspace. Tests that care about a definite answer set it explicitly.
+const fetchMyCoupleState = vi.fn().mockResolvedValue({ ok: false, reason: 'server' });
 
 vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
@@ -46,12 +50,22 @@ vi.mock('@/lib/supabase', () => ({
   disconnectCoupleFromDB,
   deleteAccountFromDB: vi.fn().mockResolvedValue(true),
   saveCoupleAnniversary: vi.fn().mockResolvedValue(true),
+  // Read-only lifecycle probe.
+  fetchMyCoupleState: (...args: unknown[]) => fetchMyCoupleState(...(args as [])),
 }));
 
 const fetchFullStateFromDB = vi.fn();
 const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
 vi.mock('@/lib/sync', () => ({
   fetchFullStateFromDB: (userId: string) => fetchFullStateFromDB(userId),
+  // The store reads the reason-carrying variant. Deriving it from the same mock
+  // keeps every existing scenario byte-identical while exercising the new shape.
+  fetchFullStateResultFromDB: async (userId: string) => {
+    const result = await fetchFullStateFromDB(userId);
+    return result === FULL_STATE_UNAVAILABLE
+      ? { ok: false, reason: 'unknown' }
+      : { ok: true, state: result };
+  },
   FULL_STATE_UNAVAILABLE,
 }));
 
@@ -59,7 +73,7 @@ vi.mock('@/lib/sync', () => ({
 const callOrder: string[] = [];
 const saveRecordToDB = vi.fn(async () => {
   callOrder.push('saveRecord');
-  return true;
+  return { ok: true as const };
 });
 const uploadRecordMedia = vi.fn(async (file: File) => {
   callOrder.push(`upload:${file.name}`);
@@ -75,7 +89,7 @@ const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
 
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
-  deleteRecordFromDB: vi.fn().mockResolvedValue(true),
+  deleteRecordFromDB: vi.fn().mockResolvedValue({ ok: true }),
   fetchRecordsFromDB: (...args: unknown[]) => fetchRecordsFromDB(...(args as [])),
   fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
   uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(...(args as [File])),
@@ -214,6 +228,9 @@ describe('StoreProvider auth lifecycle', () => {
       data: { user: { id: 'user-a', app_metadata: { provider: 'google' } } },
       error: null,
     });
+    // `vi.restoreAllMocks()` strips this too. Default: the lifecycle RPC could
+    // not answer, which by contract must leave local couple state untouched.
+    fetchMyCoupleState.mockReset().mockResolvedValue({ ok: false, reason: 'server' });
     disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
     fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });
@@ -806,6 +823,9 @@ describe('StoreProvider auth lifecycle', () => {
 
   it('refuses to create a record when no couple space is connected', async () => {
     lastMediaResult = null;
+    // An AUTHORITATIVE negative: the server confirms there is no couple space, so
+    // the create-a-space message is the correct one to show.
+    fetchMyCoupleState.mockResolvedValue({ ok: true, state: null });
     fetchFullStateFromDB.mockResolvedValue(
       serverState({
         profile: {
@@ -836,7 +856,9 @@ describe('StoreProvider auth lifecycle', () => {
 
     await waitFor(() => expect(lastMediaResult).not.toBeNull());
     expect(lastMediaResult?.ok).toBe(false);
-    expect(lastMediaResult?.error).toBeTruthy();
+    expect(lastMediaResult?.error).toBe('커플 공간을 만든 뒤에 기록을 남길 수 있어요.');
+    // Never a connection message for an authorization/membership cause.
+    expect(lastMediaResult?.error).not.toContain('인터넷');
     expect(screen.getByTestId('records')).toHaveTextContent('');
   });
 

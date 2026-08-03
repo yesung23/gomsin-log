@@ -1,4 +1,4 @@
-import { parseAllowedOrigins, resolveCors } from '../_shared/cors.ts';
+import { parseAllowedOrigins, resolveCors } from './_shared/cors.ts';
 
 /**
  * Account deletion is deliberately split across service boundaries:

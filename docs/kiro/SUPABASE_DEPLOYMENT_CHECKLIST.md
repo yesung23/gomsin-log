@@ -246,6 +246,95 @@ WHERE used = false GROUP BY code_hash HAVING count(*) > 1;
 
 ---
 
+### 2-6. 마이그레이션 016 적용 (반드시 015 다음)
+
+**현재 상태: 016은 아직 어디에도 적용되지 않았습니다.** (013·014·015는 테스트
+프로젝트에 이미 적용 완료.)
+
+016(`016_couple_state_visibility.sql`)은 **추가만 하는 읽기 전용** 마이그레이션입니다.
+기존 테이블·정책·권한·Realtime publication을 하나도 바꾸지 않으므로, 되돌릴 때도
+함수만 삭제하면 원래 상태로 정확히 돌아갑니다.
+
+무엇을 추가하나요? `public.get_my_couple_state()` 하나입니다. 013이
+`invitation_codes` 읽기 권한을 (올바르게) 회수한 뒤, 앱이 아래 세 가지를 구분할 수
+없게 되었습니다.
+
+- 공간을 만들고 상대를 기다리는 중 (초대 코드 유효)
+- 초대 코드가 만료됨
+- 커플 공간이 아예 없음
+
+그 결과 초대 코드를 가진 사람에게 "초대 코드를 입력하세요"라고 안내되는 문제가
+있었습니다. 016이 그 질문에 답하는 유일한 안전한 통로입니다. **초대 코드 평문과
+해시는 절대 반환하지 않습니다.**
+
+#### 적용 순서
+
+1. 왼쪽 메뉴 **SQL Editor** → **New query**
+2. `supabase/migrations/016_couple_state_visibility.sql` 내용을 **전체 복사**해서 붙여넣기
+3. **Run** 을 누릅니다. `Success. No rows returned` 가 나오면 성공입니다.
+4. **PostgREST 스키마 캐시를 반드시 리로드하세요.**
+   **Settings → API → Reload schema** 를 누르거나, SQL Editor 에서:
+
+   ```sql
+   NOTIFY pgrst, 'reload schema';
+   ```
+
+   > ⚠️ 이 리로드를 빼먹으면 앱이 `PGRST202` 를 받습니다. 앱은 이것을
+   > "서버에 기능이 배포되지 않았습니다" 로 표시하며, **커플 공간이 없다고 잘못
+   > 표시하지는 않습니다.** 즉 안전하게 실패하지만 기능은 동작하지 않습니다.
+
+#### 016 검증 (SQL Editor에서)
+
+```sql
+-- 1) 함수가 있고, 읽기 전용(STABLE)이며 SECURITY DEFINER 인지
+SELECT proname, provolatile, prosecdef
+FROM pg_proc
+WHERE proname = 'get_my_couple_state';
+-- 기대: provolatile = 's' (STABLE), prosecdef = true
+
+-- 2) 실행 권한이 authenticated 에만 있는지 (anon/PUBLIC 은 없어야 함)
+SELECT grantee, privilege_type
+FROM information_schema.routine_privileges
+WHERE routine_name = 'get_my_couple_state';
+-- 기대: authenticated 만 EXECUTE. anon 또는 PUBLIC 이 보이면 즉시 중단하고 롤백.
+```
+
+#### 함수 반환형 변경 규칙 (013 원격 실패 재발 방지)
+
+013을 적용할 때 실제로 아래 오류가 발생했습니다.
+
+```
+cannot change return type of existing function redeem_invitation(text)
+```
+
+원인은 `CREATE OR REPLACE FUNCTION` 이 **반환형을 바꿀 수 없다**는 점입니다.
+당시 해결 방법(그리고 다시 발생했을 때의 해결 방법)은 정확히 이것입니다.
+
+```sql
+DROP FUNCTION IF EXISTS public.redeem_invitation(TEXT);
+-- 그 다음 013 → 014 → 015 를 순서대로 다시 실행
+```
+
+**규칙: 016 이후 모든 마이그레이션은 자신이 정의하는 모든 함수를 정확한 시그니처로
+`DROP FUNCTION IF EXISTS` 한 뒤 `CREATE FUNCTION` 합니다.** 016은 이 규칙을 지키며,
+`src/lib/migration016.test.ts` 가 이를 자동 검사하므로 규칙이 깨지면 테스트가
+실패합니다.
+
+#### 016 롤백 원칙
+
+추가만 하는 마이그레이션이라 롤백이 안전합니다.
+
+```sql
+BEGIN;
+  DROP FUNCTION IF EXISTS public.get_my_couple_state();
+COMMIT;
+```
+
+그 뒤 스키마 캐시를 다시 리로드하세요. 앱은 커플 생애주기를 `unknown` 으로
+표시하며, **이 값은 기기에 저장된 정상 상태를 절대 덮어쓰지 않습니다.**
+
+---
+
 ## 3. Storage(사진·영상·음성 저장소) 확인
 
 사진 업로드가 동작하려면 아래가 맞아야 합니다.
@@ -303,6 +392,34 @@ gomsinlog://auth/callback
 > ⚠️ **마이그레이션 015보다 먼저 배포하지 마세요.** 이 함수는 015가 만드는
 > `begin/prepare/cancel_account_deletion` 을 호출합니다. 순서가 뒤바뀌면 삭제가
 > 실패합니다(데이터는 지워지지 않습니다).
+
+#### 5-0. 배포 구조 (저장소 = 배포본, 이제 완전히 동일)
+
+이전에는 저장소와 배포본의 구조가 달라서 서로 비교할 수 없었습니다. 저장소는
+`supabase/functions/_shared/cors.ts` 였고, 대시보드 배포본은
+`source/_shared/cors.ts` 였기 때문에 `handler.ts` 의 import 한 줄이 항상 어긋났습니다.
+
+**이제 저장소 구조가 배포본 구조와 바이트 단위로 같습니다.**
+
+```
+supabase/functions/delete-account/
+├── _shared/
+│   └── cors.ts        <- handler.ts 가 './_shared/cors.ts' 로 import
+├── entrypoint_test.ts
+├── handler.ts
+└── index.ts
+```
+
+이 구조는 두 배포 방식 **모두**에서 그대로 재현됩니다.
+
+- **CLI**: `supabase functions deploy delete-account` — 함수 폴더를 그대로 올립니다.
+- **대시보드 붙여넣기**: 함수 편집기에서 `_shared/cors.ts` 파일을 만들고
+  저장소의 같은 파일 내용을 그대로 붙여넣습니다. `handler.ts` 의 import 경로를
+  **수정할 필요가 없습니다.**
+
+검증: `npm run check:edge` 가 이 경로들을 그대로 타입체크하고,
+`src/lib/cors.test.ts` 도 같은 경로를 import 합니다. 즉 경로가 다시 어긋나면
+로컬 게이트가 즉시 실패합니다.
 
 이 단계만은 컴퓨터에서 명령어를 입력해야 합니다. 개발자에게 아래를 전달하세요.
 

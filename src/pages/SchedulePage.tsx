@@ -15,6 +15,8 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import {
   dDayLabel,
@@ -40,7 +42,7 @@ const EVENT_BADGES: Record<EventType, { label: string; color: string }> = {
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden';
 
 export function SchedulePage() {
-  const { state, addEvent, updateEvent, deleteEvent, reloadEvents } = useStore();
+  const { state, addEvent, updateEvent, deleteEvent, reloadEvents, sharedSyncStatus } = useStore();
   const { profile, events, authenticatedUser } = state;
   const today = toLocalDateString(localToday());
   /** Both partners present: required before a schedule can be shared. */
@@ -93,6 +95,7 @@ export function SchedulePage() {
   const [isPrivate, setIsPrivate] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const isOffline = !useOnlineStatus();
   const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
@@ -129,6 +132,49 @@ export function SchedulePage() {
       cancelled = true;
     };
   }, [authenticatedUser?.id, scheduleAccessKey]);
+
+  /**
+   * Re-read once the shared workspace becomes authoritative again.
+   *
+   * `reloadEvents` reports `forbidden` while the workspace is QUARANTINED, which is
+   * a transient transport state, not a permissions verdict: when the realtime
+   * channel cannot be established at all (blocked WebSocket, restrictive network),
+   * the store quarantines, then recovers over HTTP a moment later. Without this
+   * effect the page's single load attempt landed inside that window and left
+   * "일정을 볼 권한이 없어요" on screen permanently, even though the events were
+   * available and every other surface showed them.
+   *
+   * Only a transition INTO a healthy state triggers the retry, so a live workspace
+   * does not re-read on every transport flap.
+   */
+  const previousSyncStatusRef = useRef(sharedSyncStatus);
+  /**
+   * Read through a ref, NOT a dependency.
+   *
+   * Depending on `loadState` here would make the effect re-trigger itself: it sets
+   * `loading`, the dependency changes, the effect re-runs and its cleanup cancels
+   * the in-flight retry -- leaving the page spinning forever.
+   */
+  const loadStateRef = useRef(loadState);
+  loadStateRef.current = loadState;
+  useEffect(() => {
+    const previous = previousSyncStatusRef.current;
+    previousSyncStatusRef.current = sharedSyncStatus;
+    if (!authenticatedUser?.id) return;
+    if (previous !== 'unavailable' || sharedSyncStatus === 'unavailable') return;
+    if (loadStateRef.current === 'ready' || loadStateRef.current === 'loading') return;
+
+    let cancelled = false;
+    setLoadState('loading');
+    void reloadEventsRef.current().then((result) => {
+      if (cancelled) return;
+      if (result.ok) setLoadState('ready');
+      else setLoadState(result.reason === 'forbidden' ? 'forbidden' : 'error');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticatedUser?.id, sharedSyncStatus]);
 
   const retryLoad = async () => {
     setLoadState('loading');
@@ -170,6 +216,13 @@ export function SchedulePage() {
 
   const handleSaveEvent = async () => {
     if (isSaving) return;
+    // Pre-emptive: refuse before building a request that can only fail, instead of
+    // firing it and then explaining the failure with a cause-blind message.
+    if (isOffline) {
+      setFormError(OFFLINE_READONLY_MESSAGE);
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     const validationError = validateEventDraft({
       title,
       startDate: eventStartDate,
@@ -251,16 +304,22 @@ export function SchedulePage() {
 
   const handleDeleteEvent = async (event: CoupleEvent) => {
     if (deletingEventId || event.createdBy !== authenticatedUser?.id) return;
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     const access = captureAccess();
     setDeletingEventId(event.id);
     try {
       const deleted = await deleteEvent(event.id);
       if (!isCurrentAccess(access)) return;
       if (deleted) toast.success('일정이 삭제되었습니다.');
-      else toast.error('일정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    } catch {
+      // A refused delete is an authorization/ownership answer far more often than a
+      // transport failure, so the copy must not promise that retrying will help.
+      else toast.error(`일정을 삭제하지 못했습니다. ${serverErrorMessage('forbidden')}`);
+    } catch (error) {
       if (!isCurrentAccess(access)) return;
-      toast.error('일정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      toast.error(`일정을 삭제하지 못했습니다. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentAccess(access)) setDeletingEventId(null);
     }
@@ -312,7 +371,7 @@ export function SchedulePage() {
               <button
                 type="button"
                 onClick={() => openEditModal(event)}
-                disabled={isSaving || deletingEventId !== null}
+                disabled={isSaving || deletingEventId !== null || isOffline}
                 aria-label={`${event.title} 일정 수정`}
                 className="p-1.5 text-muted-foreground hover:text-coral rounded-lg disabled:opacity-40"
               >
@@ -321,7 +380,7 @@ export function SchedulePage() {
               <button
                 type="button"
                 onClick={() => void handleDeleteEvent(event)}
-                disabled={deletingEventId !== null || isSaving}
+                disabled={deletingEventId !== null || isSaving || isOffline}
                 aria-label={`${event.title} 일정 삭제`}
                 className="p-1.5 text-muted-foreground hover:text-destructive rounded-lg disabled:opacity-40"
               >
@@ -345,7 +404,7 @@ export function SchedulePage() {
           <button
             type="button"
             onClick={openCreateModal}
-            disabled={!hasCoupleSpace || loadState !== 'ready'}
+            disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
             className="p-2.5 rounded-xl bg-coral text-white font-bold text-xs flex items-center gap-1 shadow-sm active:scale-95 transition min-h-[44px] disabled:opacity-40 disabled:active:scale-100"
           >
             <Plus size={16} />
@@ -474,7 +533,7 @@ export function SchedulePage() {
             <section className="space-y-3">
               <div className="flex items-center justify-between px-1">
                 <h2 className="text-sm font-bold text-foreground">{selectedDate} 일정</h2>
-                <button type="button" onClick={openCreateModal} disabled={!hasCoupleSpace} className="text-[11px] font-bold text-coral disabled:opacity-40">이 날짜에 추가</button>
+                <button type="button" onClick={openCreateModal} disabled={!hasCoupleSpace || isOffline} className="text-[11px] font-bold text-coral disabled:opacity-40">이 날짜에 추가</button>
               </div>
               <div className="space-y-2">
                 {selectedEvents.length > 0 ? selectedEvents.map((event) => renderEventCard(event, true)) : (
@@ -546,7 +605,7 @@ export function SchedulePage() {
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs disabled:opacity-50">취소</button>
-                <button type="button" onClick={() => void handleSaveEvent()} disabled={isSaving} className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs shadow-sm active:scale-95 disabled:opacity-50">
+                <button type="button" onClick={() => void handleSaveEvent()} disabled={isSaving || isOffline} className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs shadow-sm active:scale-95 disabled:opacity-50">
                   {isSaving ? '저장 중...' : editingEventId ? '수정하기' : '등록하기'}
                 </button>
               </div>

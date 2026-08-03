@@ -173,4 +173,51 @@ describe('consumeCoupleInvitation with supabase configured', () => {
     expect(result.error).toContain('2명');
     expect(result.coupleId).toBeUndefined();
   });
+
+  /**
+   * The catch used to return a fixed "인터넷 연결을 확인해 주세요", so an RLS
+   * rejection or an expired session was reported as a connectivity problem and
+   * the user retried instead of fixing the real cause. The cause IS in hand here,
+   * so it is classified.
+   */
+  it('does not blame the internet when a thrown redemption was really a permission failure', async () => {
+    mockRpc.mockRejectedValueOnce(Object.assign(new Error('permission denied'), { code: '42501' }));
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).toBeTruthy();
+    expect(result.error).not.toContain('인터넷 연결');
+    expect(result.error).toContain('권한이 없어요');
+  });
+
+  it('does not blame the internet when a thrown redemption was really an expired session', async () => {
+    mockRpc.mockRejectedValueOnce(Object.assign(new Error('JWT expired'), { code: 'PGRST301' }));
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).not.toContain('인터넷 연결');
+    expect(result.error).toContain('세션이 만료되었어요');
+  });
+
+  it('does not invent a cause for an unclassifiable thrown redemption', async () => {
+    mockRpc.mockRejectedValueOnce(new Error('something entirely unexpected'));
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).not.toContain('인터넷 연결');
+    expect(result.error).toContain('잠시 후 다시 시도해 주세요');
+  });
+
+  it('still reports a genuine network failure as a connection problem', async () => {
+    // A true offline classification is allowed to mention the connection.
+    mockRpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).toContain('인터넷 연결');
+  });
 });

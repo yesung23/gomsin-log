@@ -37,6 +37,10 @@ const mockSupabase = {
 };
 
 const disconnectCoupleFromDB = vi.fn().mockResolvedValue(true);
+// Default: the lifecycle RPC could NOT answer. By contract that leaves local
+// couple state untouched, so every pre-existing scenario keeps its fixture
+// workspace. Tests that care about a definite answer set it explicitly.
+const fetchMyCoupleState = vi.fn().mockResolvedValue({ ok: false, reason: 'server' });
 
 vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
@@ -45,23 +49,31 @@ vi.mock('@/lib/supabase', () => ({
   disconnectCoupleFromDB,
   deleteAccountFromDB: vi.fn().mockResolvedValue(true),
   saveCoupleAnniversary: vi.fn().mockResolvedValue(true),
+  // Read-only lifecycle probe.
+  fetchMyCoupleState: (...args: unknown[]) => fetchMyCoupleState(...(args as [])),
 }));
 
 const fetchFullStateFromDB = vi.fn();
 const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
 vi.mock('@/lib/sync', () => ({
   fetchFullStateFromDB: (userId: string) => fetchFullStateFromDB(userId),
+  fetchFullStateResultFromDB: async (userId: string) => {
+    const result = await fetchFullStateFromDB(userId);
+    return result === FULL_STATE_UNAVAILABLE
+      ? { ok: false, reason: 'unknown' }
+      : { ok: true, state: result };
+  },
   FULL_STATE_UNAVAILABLE,
 }));
 
 const callOrder: string[] = [];
 const saveRecordToDB = vi.fn(async () => {
   callOrder.push('saveRecord');
-  return true;
+  return { ok: true as const };
 });
 const deleteRecordFromDB = vi.fn(async () => {
   callOrder.push('deleteRecordFromDB');
-  return true;
+  return { ok: true as const };
 });
 const removeRecordMedia = vi.fn(async () => {
   callOrder.push('removeRecordMedia');
@@ -105,11 +117,20 @@ const { StoreProvider } = await import('@/lib/store');
 const { useStore } = await import('@/lib/useStore');
 const STORE_KEY = 'gomsinlog.state.v2';
 
+// The store now returns a classified result, so these hold `ok` plus the
+// reason: a failure must be attributable, not merely false.
 let lastDeleteResult: boolean | null = null;
 let lastUpdateResult: boolean | null = null;
+let lastDeleteReason: string | null = null;
+let lastUpdateReason: string | null = null;
 
 function Probe() {
   const { state, isReady, deleteRecord, updateRecord } = useStore();
+  const updateRecordOk = async (id: string, updates: Parameters<typeof updateRecord>[1]) => {
+    const result = await updateRecord(id, updates);
+    lastUpdateReason = result.ok ? null : result.reason;
+    return result.ok;
+  };
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
@@ -119,12 +140,16 @@ function Probe() {
       <span data-testid="log">{state.records.find((r) => r.id === 'rec-1')?.log ?? ''}</span>
       <button
         data-testid="delete-rec1"
-        onClick={async () => { lastDeleteResult = await deleteRecord('rec-1'); }}
+        onClick={async () => {
+          const result = await deleteRecord('rec-1');
+          lastDeleteResult = result.ok;
+          lastDeleteReason = result.ok ? null : result.reason;
+        }}
       />
       <button
         data-testid="update-text-changed"
         onClick={async () => {
-          lastUpdateResult = await updateRecord('rec-1', {
+          lastUpdateResult = await updateRecordOk('rec-1', {
             log: 'changed text',
             emotionFlow: [],
             emotionUpdatedAt: null,
@@ -134,7 +159,7 @@ function Probe() {
       <button
         data-testid="update-text-same"
         onClick={async () => {
-          lastUpdateResult = await updateRecord('rec-1', {
+          lastUpdateResult = await updateRecordOk('rec-1', {
             log: 'hello',
           });
         }}
@@ -192,12 +217,19 @@ describe('deleteRecord with storage cleanup', () => {
     callOrder.length = 0;
     lastDeleteResult = null;
     lastUpdateResult = null;
+    lastDeleteReason = null;
+    lastUpdateReason = null;
     removeRecordMedia.mockReset();
     removeRecordMedia.mockImplementation(async () => { callOrder.push('removeRecordMedia'); });
+    // The shared setup's `vi.restoreAllMocks()` strips implementations, so the
+    // read-only lifecycle probe is re-armed here. Default: no couple space known,
+    // so no test silently gains a server-supplied workspace.
+    fetchMyCoupleState.mockReset();
+    fetchMyCoupleState.mockResolvedValue({ ok: false, reason: 'server' });
     deleteRecordFromDB.mockReset();
-    deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return true; });
+    deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return { ok: true as const }; });
     saveRecordToDB.mockReset();
-    saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return true; });
+    saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return { ok: true as const }; });
     localStorage.clear();
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1', app_metadata: {} } } });
   });
@@ -343,12 +375,14 @@ describe('updateRecord emotion clearing on text change', () => {
     callOrder.length = 0;
     lastDeleteResult = null;
     lastUpdateResult = null;
+    lastDeleteReason = null;
+    lastUpdateReason = null;
     removeRecordMedia.mockReset();
     removeRecordMedia.mockImplementation(async () => { callOrder.push('removeRecordMedia'); });
     deleteRecordFromDB.mockReset();
-    deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return true; });
+    deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return { ok: true as const }; });
     saveRecordToDB.mockReset();
-    saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return true; });
+    saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return { ok: true as const }; });
     localStorage.clear();
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1', app_metadata: {} } } });
   });

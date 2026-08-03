@@ -145,16 +145,20 @@ describe('REGRESSION: no server mutation outside the store bypasses the gate', (
   it('aborts all six cycle mutations with no request issued', async () => {
     const cycle = await import('@/lib/cycle');
 
-    expect(await cycle.saveCycleSettingsToDB(28, 5)).toBeNull();
-    expect(await cycle.saveCycleEntryToDB('2026-08-01', '2026-08-05', 'n', [])).toBeNull();
+    // The gate now reports WHY it refused instead of a bare falsy value, so each
+    // assertion pins both the refusal and its non-retryable `forbidden` reason.
+    const blocked = { ok: false, reason: 'forbidden' };
+
+    expect(await cycle.saveCycleSettingsToDB(28, 5)).toEqual(blocked);
+    expect(await cycle.saveCycleEntryToDB('2026-08-01', '2026-08-05', 'n', [])).toEqual(blocked);
     expect(await cycle.updateCycleEntryInDB('entry-1', {
       startDate: '2026-08-01', endDate: '2026-08-05', notes: 'n', symptoms: [],
-    })).toBeNull();
-    expect(await cycle.deleteCycleEntryFromDB('entry-1')).toBe(false);
+    })).toEqual(blocked);
+    expect(await cycle.deleteCycleEntryFromDB('entry-1')).toEqual(blocked);
     expect(await cycle.createCycleSupportSignalInDB({
       coupleId: 'couple-1', kind: 'need_rest', sharedForDate: '2026-08-01',
-    } as never)).toBeNull();
-    expect(await cycle.revokeCycleSupportSignalFromDB('signal-1')).toBe(false);
+    } as never)).toEqual(blocked);
+    expect(await cycle.revokeCycleSupportSignalFromDB('signal-1')).toEqual(blocked);
 
     expect(requestsIssued()).toEqual([]);
   });

@@ -9,8 +9,9 @@ const ME = 'user-me';
 const PARTNER = 'user-partner';
 const TODAY = '2026-07-31';
 
-const updateRecord = vi.fn(async () => true);
-const deleteRecord = vi.fn(async () => true);
+const updateRecord = vi.fn(async () => ({ ok: true as const }));
+const deleteRecord = vi.fn(async () => ({ ok: true as const }));
+const updateRecordMedia = vi.fn(async () => ({ ok: true as const, failedFiles: [] as string[] }));
 const setHighlightedRecordId = vi.fn();
 
 function flowItem(overrides: Partial<EmotionFlowItem> = {}): EmotionFlowItem {
@@ -71,6 +72,20 @@ function makeState(records: DailyRecord[]): AppState {
 
 let currentState = makeState([]);
 
+/** Captured toast messages, so failure copy can be asserted verbatim. */
+const toastLog: { level: string; message: string }[] = [];
+function toastErrors(): string[] {
+  return toastLog.filter((entry) => entry.level === 'error').map((entry) => entry.message);
+}
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: (message: string) => { toastLog.push({ level: 'success', message }); },
+    error: (message: string) => { toastLog.push({ level: 'error', message }); },
+    warning: (message: string) => { toastLog.push({ level: 'warning', message }); },
+  },
+}));
+
 vi.mock('@/components/MobileShell', () => ({
   MobileShell: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
@@ -80,6 +95,7 @@ vi.mock('@/lib/useStore', () => ({
     isReady: true,
     updateRecord,
     deleteRecord,
+    updateRecordMedia,
     setHighlightedRecordId,
   }),
 }));
@@ -157,9 +173,16 @@ describe('RecordPage partner privacy sanitisation', () => {
     await openRecord(user, '11:00');
 
     expect(await screen.findByText('마음의 흐름')).toBeInTheDocument();
-    // Only the shared label survives `visibleRecordsForViewer`.
-    expect(screen.getByText('행복')).toBeInTheDocument();
+    // Only the shared label survives `visibleRecordsForViewer`. It now appears in
+    // more than one place (the record's insight card AND the derived period
+    // summary), so assert presence by count rather than uniqueness.
+    expect(screen.getAllByText('행복').length).toBeGreaterThan(0);
     expect(screen.queryByText(/부끄러움/)).not.toBeInTheDocument();
+    // The author-only item must not leak through the aggregated period summary
+    // either -- it reads the same viewer-filtered records.
+    const summary = screen.getByTestId('emotion-flow-summary');
+    expect(summary.textContent).not.toContain('부끄러움');
+    expect(summary.getAttribute('aria-label')).not.toContain('부끄러움');
   });
 
   it('does not surface the partner\'s private record in the timeline at all', () => {
@@ -275,5 +298,140 @@ describe('RecordPage detail insight card', () => {
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(screen.queryByText('마음의 흐름')).not.toBeInTheDocument();
+  });
+});
+
+function setOnLine(value: boolean) {
+  Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => value });
+}
+
+describe('RecordPage media editing', () => {
+  beforeEach(() => {
+    updateRecordMedia.mockClear();
+    updateRecordMedia.mockResolvedValue({ ok: true as const, failedFiles: [] as string[] });
+    toastLog.length = 0;
+    setOnLine(true);
+  });
+
+  it('offers per-attachment removal for an own record', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([
+      record({
+        attachments: [
+          { type: 'photo', name: 'img.jpg', path: 'couple-1/rec-mine/img.jpg' },
+        ],
+      }),
+    ]);
+    await openRecord(user, '10:00');
+
+    const remove = await screen.findByLabelText('첨부 img.jpg 삭제');
+    await user.click(remove);
+
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalledWith('rec-mine', {
+      removePaths: ['couple-1/rec-mine/img.jpg'],
+    }));
+  });
+
+  it('offers an add-media control for an own record', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByText('+ 사진 · 영상 · 음성 추가')).toBeInTheDocument();
+  });
+
+  it('never offers media controls on the partner\'s record', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([
+      record({
+        id: 'rec-partner',
+        userId: PARTNER,
+        authorRole: 'soldier',
+        time: '11:00',
+        attachments: [
+          { type: 'photo', name: 'theirs.jpg', path: 'couple-1/rec-partner/theirs.jpg' },
+        ],
+      }),
+    ]);
+    await openRecord(user, '11:00');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByLabelText('첨부 theirs.jpg 삭제')).toBeNull();
+    expect(screen.queryByText('+ 사진 · 영상 · 음성 추가')).toBeNull();
+  });
+
+  it('offers no removal control for a legacy attachment with no storage path', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([
+      record({
+        // No `path`: it cannot be addressed in Storage, so it cannot be removed.
+        attachments: [{ type: 'photo', name: 'legacy.jpg', url: 'https://example.test/x.jpg' }],
+      }),
+    ]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByLabelText('첨부 legacy.jpg 삭제')).toBeNull();
+  });
+
+  it('disables media controls and the edit/delete actions while offline', async () => {
+    const user = userEvent.setup({ delay: null });
+    setOnLine(false);
+    renderPage([
+      record({
+        attachments: [
+          { type: 'photo', name: 'img.jpg', path: 'couple-1/rec-mine/img.jpg' },
+        ],
+      }),
+    ]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByLabelText('첨부 img.jpg 삭제')).toBeDisabled();
+    expect(screen.getByText('+ 사진 · 영상 · 음성 추가')).toBeDisabled();
+  });
+
+  it('reports the store\'s cause-specific message verbatim on failure', async () => {
+    const user = userEvent.setup({ delay: null });
+    updateRecordMedia.mockResolvedValue({
+      ok: false as never,
+      failedFiles: [],
+      error: '권한이 없어요. 커플 공간 연결 상태를 확인해 주세요.',
+    } as never);
+    renderPage([
+      record({
+        attachments: [
+          { type: 'photo', name: 'img.jpg', path: 'couple-1/rec-mine/img.jpg' },
+        ],
+      }),
+    ]);
+    await openRecord(user, '10:00');
+    await user.click(await screen.findByLabelText('첨부 img.jpg 삭제'));
+
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalled());
+    // The message must not be replaced by a connection-shaped fallback.
+    const errors = toastErrors();
+    expect(errors.some((message) => message.includes('권한이 없어요'))).toBe(true);
+    expect(errors.every((message) => !message.includes('인터넷'))).toBe(true);
+  });
+});
+
+describe('RecordPage period summary', () => {
+  it('renders the aggregated summary for the visible month', async () => {
+    renderPage([
+      record({
+        emotionFlow: [flowItem({ id: 'a', group: 'joy', displayLabel: '행복', sequence: 1 })],
+      }),
+    ]);
+
+    const summary = await screen.findByTestId('emotion-flow-summary');
+    expect(summary).toHaveAttribute('data-state', 'ready');
+    expect(summary.textContent).toContain('2026년 7월');
+  });
+
+  it('renders the empty state when no record in the month has confirmed emotions', async () => {
+    renderPage([record()]);
+    const summary = await screen.findByTestId('emotion-flow-summary');
+    expect(summary).toHaveAttribute('data-state', 'empty');
+    expect(summary.textContent).toContain('아직 오늘의 마음이 없어요');
   });
 });

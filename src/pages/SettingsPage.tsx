@@ -1,5 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '@/lib/useStore';
+import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import {
   ArrowLeft, Shield, Unlink, Trash2, User, FileText,
@@ -24,6 +26,8 @@ export function SettingsPage() {
     signOut,
     deleteRecord,
     setTheme,
+    invitationExpiresAt,
+    refreshCoupleLifecycle,
   } = useStore();
   const navigate = useNavigate();
   const { profile, isDemoMode, records } = state;
@@ -333,6 +337,13 @@ export function SettingsPage() {
               <h2 className="text-sm font-bold text-foreground">우리 공간 초대 코드</h2>
               <p className="text-xs text-muted-foreground mt-1">
                 상대방이 앱에서 이 코드를 입력하면 두 사람의 공간이 연결됩니다. 코드는 24시간 동안 유효해요.
+                {/* The authoritative deadline from the server, when it is known.
+                    "24시간 동안 유효" alone never told the user when it lapses. */}
+                {invitationExpiryLabel(invitationExpiresAt) && (
+                  <span data-testid="settings-invitation-expiry" className="font-semibold text-foreground">
+                    {' '}({invitationExpiryLabel(invitationExpiresAt)})
+                  </span>
+                )}
               </p>
             </div>
 
@@ -380,6 +391,8 @@ export function SettingsPage() {
                 updateProfile({
                   couple: { ...profile.couple, coupleCode: result.code },
                 });
+                // Re-read the authoritative expiry for the code just minted.
+                void refreshCoupleLifecycle();
                 toast.success('새 초대 코드가 발급되었습니다. 이전 코드는 더 이상 사용할 수 없어요.');
               }}
               disabled={isRegenerating}
@@ -652,11 +665,14 @@ export function SettingsPage() {
                         setShowDisconnectModal(false);
                         toast.success('연결이 해제되었습니다.');
                       } else {
-                        toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                        // `disconnect()` returns a bare boolean, so the cause is
+                        // already gone by the time we get here. Stay honest and
+                        // generic rather than inventing a network diagnosis.
+                        toast.error('연결을 해제하지 못했어요. 잠시 후 다시 시도해 주세요.');
                       }
                     } catch (error) {
                       console.error('[Settings] Couple disconnect failed:', error);
-                      toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                      toast.error(`연결을 해제하지 못했어요. ${classifyServerError(error).message}`);
                     } finally {
                       setIsDisconnecting(false);
                     }
@@ -695,11 +711,17 @@ export function SettingsPage() {
                       const results = await Promise.all(
                         ownRecords.map((record) => deleteRecord(record.id))
                       );
-                      if (results.every(Boolean)) {
+                      const firstFailure = results.find((result) => !result.ok);
+                      if (!firstFailure) {
                         setShowDeleteRecordsModal(false);
                         toast.success('내 기록이 모두 삭제되었습니다.');
                       } else {
-                        toast.error('일부 기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+                        // Report the actual cause of the first failure rather than
+                        // a generic retry prompt: a permission or session problem
+                        // will not resolve by trying again.
+                        toast.error(
+                          `일부 기록을 삭제하지 못했어요. ${firstFailure.ok ? '' : firstFailure.error}`.trim(),
+                        );
                       }
                     } catch (error) {
                       console.error('[Settings] Record deletion failed:', error);

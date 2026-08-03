@@ -20,6 +20,7 @@ import {
 import { WidgetWrapper } from '@/components/widgets/WidgetWrapper';
 import { WIDGET_REGISTRY } from '@/lib/widgets';
 import { AddWidgetBottomSheet } from '@/components/widgets/AddWidgetBottomSheet';
+import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 
 export function WidgetDashboard() {
   const { state, setWidgetLayout } = useStore();
@@ -128,6 +129,13 @@ export function WidgetDashboard() {
           )}
         </div>
       </header>
+
+      {/* Couple lifecycle, above the widgets: a creator waiting for their partner
+          must see their invitation code here, not only in Settings. Renders
+          nothing at all once the couple is connected. */}
+      <div className="px-5 pb-4">
+        <CoupleStatusBanner />
+      </div>
 
       {/* Widget Container */}
       <div 

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useNavigate } from 'react-router-dom';
 import { Calendar, ChevronLeft, LoaderCircle, Map, Plane, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import { fetchTripsResultFromDB, reconcileParentTrips, saveTripToDB, validateTripDraft } from '@/lib/trips';
 import { useStore } from '@/lib/useStore';
@@ -19,6 +21,7 @@ export function TripsPage() {
   const [showModal, setShowModal] = useState(false);
   const [newTrip, setNewTrip] = useState({ title: '', startDate: '', endDate: '' });
   const [isCreating, setIsCreating] = useState(false);
+  const isOffline = !useOnlineStatus();
   const [formError, setFormError] = useState<string | null>(null);
 
   const userId = state.authenticatedUser?.id;
@@ -115,6 +118,11 @@ export function TripsPage() {
 
   const handleSaveTrip = async () => {
     if (isCreating) return;
+    if (isOffline) {
+      setFormError(OFFLINE_READONLY_MESSAGE);
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
     const validationError = validateTripDraft(newTrip);
     if (validationError) {
       setFormError(validationError);
@@ -148,9 +156,11 @@ export function TripsPage() {
       setNewTrip({ title: '', startDate: '', endDate: '' });
       toast.success('여행 계획이 생성되었습니다!');
       navigate(`/trips/${saved.id}`);
-    } catch {
+    } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      const message = '여행을 만들지 못했어요. 인터넷 연결을 확인해 주세요.';
+      // The classified cause, not a blanket connection claim: a `forbidden`
+      // result is a membership problem and retrying cannot fix it.
+      const message = `여행을 만들지 못했어요. ${classifyServerError(error).message}`;
       setFormError(message);
       toast.error(message);
     } finally {
@@ -171,7 +181,7 @@ export function TripsPage() {
       return (
         <div className="text-center py-20 space-y-4">
           <RefreshCw className="w-10 h-10 text-muted-foreground mx-auto" />
-          <div><p className="font-bold">여행을 불러오지 못했어요</p><p className="text-sm text-muted-foreground mt-1">인터넷 연결을 확인하고 다시 시도해 주세요.</p></div>
+          <div><p className="font-bold">여행을 불러오지 못했어요</p><p className="text-sm text-muted-foreground mt-1">{isOffline ? OFFLINE_READONLY_MESSAGE : '잠시 후 다시 시도해 주세요.'}</p></div>
           <button onClick={() => void loadTrips()} className="px-5 py-2.5 rounded-xl bg-indigo-500 text-indigo-50 font-bold text-sm">다시 시도</button>
         </div>
       );
@@ -230,7 +240,7 @@ export function TripsPage() {
           <button onClick={() => navigate('/us')} className="p-1.5 -ml-1.5 rounded-full hover:bg-muted" aria-label="뒤로"><ChevronLeft className="w-5 h-5 text-foreground" /></button>
           <h1 className="font-bold text-card-foreground text-lg flex items-center gap-2"><Plane className="w-5 h-5 text-indigo-500" />여행 플래너</h1>
         </div>
-        <button onClick={openCreate} disabled={visibleLoadState !== 'ready'} className="p-1.5 -mr-1.5 rounded-full hover:bg-indigo-50 text-indigo-600 disabled:opacity-30" aria-label="새 여행"><Plus className="w-5 h-5" /></button>
+        <button onClick={openCreate} disabled={visibleLoadState !== 'ready' || isOffline} className="p-1.5 -mr-1.5 rounded-full hover:bg-indigo-50 text-indigo-600 disabled:opacity-30" aria-label="새 여행"><Plus className="w-5 h-5" /></button>
       </div>
       <div className="p-5 pb-24">{statePanel}</div>
 
@@ -249,7 +259,7 @@ export function TripsPage() {
             </div>
             <div className="flex gap-3 mt-8">
               <button onClick={() => setShowModal(false)} disabled={isCreating} className="flex-1 bg-muted text-foreground font-bold py-3.5 rounded-xl disabled:opacity-50">취소</button>
-              <button onClick={() => void handleSaveTrip()} disabled={isCreating} className="flex-1 bg-indigo-500 text-indigo-50 font-bold py-3.5 rounded-xl disabled:opacity-50">{isCreating ? '만드는 중...' : '만들기'}</button>
+              <button onClick={() => void handleSaveTrip()} disabled={isCreating || isOffline} className="flex-1 bg-indigo-500 text-indigo-50 font-bold py-3.5 rounded-xl disabled:opacity-50">{isCreating ? '만드는 중...' : '만들기'}</button>
             </div>
           </div>
         </div>

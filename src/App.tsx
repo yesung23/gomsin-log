@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { HomePage } from '@/pages/HomePage';
+import type { ServerErrorKind } from '@/lib/serverErrors';
 
 // Eagerly loaded: auth callback must resolve immediately on redirect.
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage';
@@ -111,20 +112,35 @@ function AccountDeletionRecovery() {
   );
 }
 
-function AuthSyncUnavailable() {
+/**
+ * Account hydration failed.
+ *
+ * The copy is chosen from the CLASSIFIED cause. Previously this screen always
+ * blamed the internet connection, so an expired session and an RLS rejection both
+ * told the user to check a connection that was working perfectly.
+ */
+function AuthSyncUnavailable({ reason }: { reason: ServerErrorKind | null }) {
+  const isSessionProblem = reason === 'auth_expired';
+  const title = isSessionProblem ? '세션이 만료되었어요' : '계정 정보를 확인하지 못했어요';
+  const description = isSessionProblem
+    ? '다시 로그인해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
+    : reason === 'forbidden'
+      ? '계정 권한을 확인하지 못했어요. 잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
+      : reason === 'offline'
+        ? '인터넷 연결을 확인한 뒤 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
+        : '잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.';
+
   return (
     <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
       <section role="alert" className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm space-y-3">
-        <h1 className="text-base font-bold text-foreground">계정 정보를 확인하지 못했어요</h1>
-        <p className="text-xs leading-5 text-muted-foreground">
-          인터넷 연결을 확인한 뒤 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.
-        </p>
+        <h1 className="text-base font-bold text-foreground">{title}</h1>
+        <p className="text-xs leading-5 text-muted-foreground">{description}</p>
         <button
           type="button"
           onClick={() => window.location.reload()}
           className="w-full min-h-[44px] rounded-xl bg-coral px-4 py-3 text-xs font-bold text-white"
         >
-          다시 시도
+          {isSessionProblem ? '다시 로그인' : '다시 시도'}
         </button>
       </section>
     </main>
@@ -132,7 +148,13 @@ function AuthSyncUnavailable() {
 }
 
 export function App() {
-  const { state, isReady, authSyncUnavailable, accountDeletionRecovery } = useStore();
+  const {
+    state,
+    isReady,
+    authSyncUnavailable,
+    authSyncReason,
+    accountDeletionRecovery,
+  } = useStore();
 
   if (!isReady) {
     return (
@@ -163,7 +185,7 @@ export function App() {
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/legal/:doc" element={<LegalPage />} />
-          <Route path="*" element={<AuthSyncUnavailable />} />
+          <Route path="*" element={<AuthSyncUnavailable reason={authSyncReason} />} />
         </Routes>
       </Suspense>
     );

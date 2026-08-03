@@ -1,3 +1,7 @@
+import type { ServerErrorKind } from '@/lib/serverErrors';
+
+export type { ServerErrorKind };
+
 export type Role = 'gomsin' | 'soldier';
 
 export type Branch = 
@@ -27,6 +31,17 @@ export interface Attachment {
   name: string;
   url?: string; // Signed URL or Demo URL
   path?: string; // Storage path
+  /**
+   * Why this attachment has no `url`.
+   *
+   * A missing `url` used to be indistinguishable from "not signed yet": when
+   * `createSignedUrls` failed the attachment came back bare and the record still
+   * loaded as a success, so the UI rendered an un-openable filename chip with no
+   * explanation. Set to the classified cause when signing was ATTEMPTED and
+   * failed, so a surface can say so instead of pretending the media is fine.
+   * Never persisted -- writes project attachments down to type/name/path.
+   */
+  urlUnavailable?: ServerErrorKind;
 }
 
 export type EmotionGroup =

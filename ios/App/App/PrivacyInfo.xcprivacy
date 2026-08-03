@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		App-level privacy manifest.
+
+		NSPrivacyAccessedAPITypes IS EMPTY, AND THAT IS A MEASURED RESULT, NOT A
+		PLACEHOLDER.
+
+		The required-reason API categories are UserDefaults (CA92.1), File
+		Timestamp (C617.1), System Boot Time (35F9.1), Disk Space (E174.1) and
+		Active Keyboards (3EC4.1). The complete iOS source that ends up in this
+		binary is:
+
+		  * ios/App/App/AppDelegate.swift  (the only first-party Swift file)
+		  * node_modules/@capacitor/ios    (pods Capacitor + CapacitorCordova)
+		  * node_modules/@capacitor/app/ios      (pod CapacitorApp)
+		  * node_modules/@capacitor/browser/ios  (pod CapacitorBrowser)
+
+		Those are exactly the four `pod` lines in ios/App/Podfile. Grepping that set for
+		every symbol in the five categories (UserDefaults, NSUserDefaults,
+		standardUserDefaults, creationDate, modificationDate,
+		contentModificationDate, getattrlist*, stat/fstat/lstat,
+		fileAttributes, attributesOfItem, systemUptime, mach_absolute_time,
+		ProcessInfo, volumeAvailableCapacity*, systemFreeSize, statfs,
+		activeInputModes) returns nothing. `npm run verify:ios` re-runs that scan
+		against the installed dependency graph, so adding a pod that does use one
+		of these APIs fails the check instead of shipping an undeclared reason.
+
+		AppDelegate.swift uses FileManager.url(for:in:appropriateFor:create:),
+		createDirectory and URL.setResourceValues(isExcludedFromBackup). None of
+		those is a required-reason symbol: they neither read a file timestamp
+		nor query free space.
+
+		@capacitor/ios ships its own PrivacyInfo.xcprivacy inside each pod
+		(Capacitor/Capacitor/PrivacyInfo.xcprivacy and
+		CapacitorCordova/CapacitorCordova/PrivacyInfo.xcprivacy), both with empty
+		NSPrivacyAccessedAPITypes, which agrees with the scan.
+
+		If a plugin is ever added, DO NOT copy a declaration from a blog post:
+		re-run `npm run verify:ios`, read the pod's own manifest, and add only
+		what the code proves.
+	-->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+
+	<!--
+		No tracking. There is no analytics SDK, no advertising id, no attribution
+		network and no third-party domain contacted from the app: the only
+		network peer is the project's own Supabase instance, and EmoFlow emotion
+		analysis is a deterministic local rule engine
+		(src/lib/emotionRuleEngine.ts), not an external service.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!--
+		Data the app collects, linked to the user's account and never used for
+		tracking. This mirrors docs/privacy-access-matrix.md.
+
+		  EmailAddress       sign-in identity (Supabase auth)
+		  OtherUserContent   diary text, one-line records, schedule and trip
+		                     notes, confirmed emotion tags
+		  PhotosorVideos     record attachments in Supabase Storage
+		  AudioData          voice records captured by MediaRecorder
+		  Health             menstrual-cycle entries and settings
+		                     (supabase/migrations/004_create_cycle_tables.sql);
+		                     raw cycle rows are owner-only and are never shared
+		                     with the partner
+
+		All are NSPrivacyCollectedDataTypePurposeAppFunctionality: the app cannot
+		be a shared diary without storing what the user writes.
+	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeAudioData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeHealth</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

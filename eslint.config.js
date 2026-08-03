@@ -5,7 +5,12 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", "_original"] },
+  // `android` and `ios` are tracked native projects, but everything JS inside
+  // them is generated: the copied web bundle under `assets/public` /
+  // `App/App/public`, Capacitor's `native-bridge.js`, and Gradle build
+  // intermediates. Linting a build artifact reports on code this repository does
+  // not author and fails on directives it does not control.
+  { ignores: ["dist", "node_modules", "_original", "android", "ios"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

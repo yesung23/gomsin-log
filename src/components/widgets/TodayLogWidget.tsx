@@ -9,6 +9,12 @@ import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
+import { isNativePlatform } from '@/lib/platform';
+import {
+  MICROPHONE_RATIONALE,
+  microphoneDeniedMessage,
+  microphoneUnsupportedMessage,
+} from '@/lib/nativePermissions';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 
@@ -35,6 +41,19 @@ export function TodayLogWidget() {
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const recordedChunksRef = React.useRef<Blob[]>([]);
   const recordTimerRef = React.useRef<number | null>(null);
+  /**
+   * Live mirror of `pendingFiles`.
+   *
+   * `recorder.onstop` is a closure created when recording STARTS, so it cannot
+   * read `pendingFiles` directly -- the user may have attached a photo while
+   * recording. The overflow decision has to be made against the current count,
+   * and it has to be made outside the state updater so the toast is not a side
+   * effect of a reducer.
+   */
+  const pendingFilesRef = React.useRef<File[]>([]);
+  React.useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
 
   const [debouncedLog, setDebouncedLog] = useState('');
 
@@ -79,20 +98,57 @@ export function TodayLogWidget() {
 
   const MAX_ATTACHMENTS = 4;
 
+  /**
+   * Native builds surface the microphone rationale in-app.
+   *
+   * `RECORD_AUDIO` / `NSMicrophoneUsageDescription` are declared because this
+   * widget records voice notes, and a store reviewer -- and more importantly the
+   * user -- should be able to read why before the OS prompt appears. It hides
+   * once a voice note is attached, so it is a first-use explanation rather than
+   * permanent furniture. On the web the browser's own permission chip already
+   * names the origin, so nothing extra is shown.
+   */
+  const isNative = useMemo(() => isNativePlatform(), []);
+  const hasVoiceAttachment = pendingFiles.some((file) => {
+    const classified = classifyMediaFile(file);
+    return !('error' in classified) && classified.type === 'voice';
+  });
+
   const handleOpenInput = (type: 'text' | 'photo' | 'instant') => {
     setShowInputCard(true);
     if (type === 'text') return;
 
-    setTimeout(() => {
-      const input = fileInputRef.current;
-      if (!input) return;
-      // 'instant' opens the camera directly; 'photo' opens the gallery and also
-      // allows videos.
-      input.accept = type === 'instant' ? 'image/*,video/*' : MEDIA_ACCEPT;
-      if (type === 'instant') input.setAttribute('capture', 'environment');
-      else input.removeAttribute('capture');
-      input.click();
-    }, 50);
+    // `input.click()` MUST run in the same task as the tap that triggered it.
+    //
+    // This used to sit inside `setTimeout(..., 50)`, which moves the click into a
+    // later macrotask and therefore outside the transient user activation the
+    // originating gesture created. Chrome on the desktop tolerates that; Android
+    // WebView and WKWebView are stricter about gesture-gated file choosers, and
+    // there the picker simply never appeared. The delay was never necessary: the
+    // file input is rendered unconditionally, OUTSIDE the `showInputCard` block,
+    // so `fileInputRef.current` is already attached when this runs. React
+    // flushes the `setShowInputCard(true)` above after this handler returns, so
+    // the render-then-open ordering the UI wants is unchanged.
+    const input = fileInputRef.current;
+    if (!input) {
+      // The old code returned silently here, so a missing input looked like a
+      // user who changed their mind. Say something instead.
+      toast.error('첨부 창을 열지 못했어요. 화면을 새로 고친 뒤 다시 시도해 주세요.');
+      return;
+    }
+
+    // 'instant' captures a new photo; 'photo' opens the picker for existing
+    // photos, videos and audio.
+    //
+    // `image/*` only, deliberately. Capacitor's BridgeWebChromeClient reads the
+    // accept list to decide WHICH capture intent to launch: with `video/*` also
+    // present and `capture` set it prefers ACTION_VIDEO_CAPTURE, so the button
+    // labelled 지금찍기 opened a camcorder. See onShowFileChooser in
+    // node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/BridgeWebChromeClient.java.
+    input.accept = type === 'instant' ? 'image/*' : MEDIA_ACCEPT;
+    if (type === 'instant') input.setAttribute('capture', 'environment');
+    else input.removeAttribute('capture');
+    input.click();
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,13 +197,13 @@ export function TodayLogWidget() {
   const handleStartRecording = async () => {
     if (isRecording) return;
     if (typeof navigator.mediaDevices?.getUserMedia !== 'function' || typeof MediaRecorder === 'undefined') {
-      toast.error('이 기기에서는 음성 녹음을 지원하지 않아요.');
+      toast.error(microphoneUnsupportedMessage());
       return;
     }
 
     const mimeType = pickAudioMimeType();
     if (!mimeType) {
-      toast.error('이 브라우저에서는 음성 녹음을 지원하지 않아요.');
+      toast.error(microphoneUnsupportedMessage());
       return;
     }
 
@@ -156,7 +212,9 @@ export function TodayLogWidget() {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
       console.error('[gomsinlog] Microphone permission denied:', error);
-      toast.error('마이크 권한이 필요해요. 브라우저 설정에서 허용해 주세요.');
+      // Native builds have no "browser settings" to open. See
+      // lib/nativePermissions.ts.
+      toast.error(microphoneDeniedMessage());
       return;
     }
 
@@ -188,9 +246,14 @@ export function TodayLogWidget() {
         toast.error(classified.error);
         return;
       }
-      setPendingFiles((prev) =>
-        prev.length >= MAX_ATTACHMENTS ? prev : [...prev, file],
-      );
+      // The success toast used to fire unconditionally, so a recording dropped
+      // for hitting the attachment cap was announced as added. Report what
+      // actually happened, matching the file-select path's overflow behaviour.
+      if (pendingFilesRef.current.length >= MAX_ATTACHMENTS) {
+        toast.info(`첨부는 한 번에 ${MAX_ATTACHMENTS}개까지 가능해요.`);
+        return;
+      }
+      setPendingFiles((prev) => [...prev, file]);
       toast.success('음성 기록이 추가되었어요.');
     };
 
@@ -385,6 +448,13 @@ export function TodayLogWidget() {
             placeholder="지금 이 순간, 어떤 생각을 하고 있나요?"
             className="w-full h-24 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />
+
+          {isNative && !hasVoiceAttachment && (
+            <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-tight break-keep">
+              <Mic size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>{MICROPHONE_RATIONALE}</span>
+            </p>
+          )}
 
           {isRecording && (
             <div className="flex items-center gap-2 text-xs font-bold text-destructive bg-destructive/10 border border-destructive/30 rounded-xl px-3 py-2">

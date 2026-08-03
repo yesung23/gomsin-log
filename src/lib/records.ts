@@ -8,7 +8,15 @@ import { DailyRecord, Role, Attachment } from '@/types';
 // ==========================================
 
 export type RecordsFetchResult =
-  | { ok: true; records: DailyRecord[] }
+  /**
+   * `mediaUnavailable` is set when the records loaded but their media could not
+   * be signed. It is deliberately NOT a failure: the diary text is readable and
+   * throwing it away would be a worse outcome than un-openable media. It exists
+   * so the caller cannot mistake the result for "everything is fine", which is
+   * what a bare `{ ok: true }` used to claim while handing back attachments with
+   * no `url` and no explanation.
+   */
+  | { ok: true; records: DailyRecord[]; mediaUnavailable?: ServerErrorKind }
   | { ok: false; records: []; error: unknown };
 
 const ATTACHMENT_TYPES: ReadonlySet<Attachment['type']> = new Set([
@@ -62,6 +70,15 @@ function mapAuthenticatedAttachment(
   };
 }
 
+/**
+ * Sign a validated attachment list.
+ *
+ * A signing failure used to return the attachments bare and say nothing, so the
+ * caller could not tell "no URL because signing failed" from "no URL yet". Every
+ * attachment whose URL could not be produced now carries the classified reason
+ * in `urlUnavailable`, which is what lets a surface explain itself. The record
+ * itself is still returned: a signing failure must not escalate into data loss.
+ */
 async function signValidatedAttachments(attachments: Attachment[]): Promise<Attachment[]> {
   if (!isSupabaseConfigured || !supabase || attachments.length === 0) return attachments;
 
@@ -76,7 +93,8 @@ async function signValidatedAttachments(attachments: Attachment[]): Promise<Atta
 
   if (error) {
     console.error('[gomsinlog] Failed to sign media URLs:', error);
-    return attachments;
+    const reason = classifyServerError(error).kind;
+    return attachments.map((attachment) => ({ ...attachment, url: undefined, urlUnavailable: reason }));
   }
 
   const byPath = new Map<string, string>();
@@ -84,11 +102,17 @@ async function signValidatedAttachments(attachments: Attachment[]): Promise<Atta
     if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl);
   });
 
-  return attachments.map((attachment) =>
-    attachment.path && byPath.has(attachment.path)
-      ? { ...attachment, url: byPath.get(attachment.path) }
-      : attachment,
-  );
+  return attachments.map((attachment) => {
+    if (attachment.path && byPath.has(attachment.path)) {
+      return { ...attachment, url: byPath.get(attachment.path), urlUnavailable: undefined };
+    }
+    // Signing was attempted for this path and the batch came back without it,
+    // e.g. the storage SELECT policy withheld that single object.
+    if (attachment.path) {
+      return { ...attachment, url: undefined, urlUnavailable: 'forbidden' as ServerErrorKind };
+    }
+    return attachment;
+  });
 }
 
 export async function fetchRecordsResultFromDB(coupleId: string): Promise<RecordsFetchResult> {
@@ -133,22 +157,34 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
   if (allAttachments.length === 0) return { ok: true, records };
 
   const signed = await signValidatedAttachments(allAttachments);
-  const urlByPath = new Map<string, string>();
+  const signedByPath = new Map<string, Attachment>();
   signed.forEach((attachment) => {
-    if (attachment.path && attachment.url) urlByPath.set(attachment.path, attachment.url);
+    if (attachment.path) signedByPath.set(attachment.path, attachment);
   });
 
-  return {
-    ok: true,
-    records: records.map((record) => ({
-      ...record,
-      attachments: record.attachments?.map((attachment) =>
-        attachment.path && urlByPath.has(attachment.path)
-          ? { ...attachment, url: urlByPath.get(attachment.path) }
-          : attachment,
-      ),
-    })),
-  };
+  /**
+   * The records themselves loaded, so this stays `ok: true` -- a media-signing
+   * failure must not be converted into total data loss for a readable diary
+   * entry. What it must NOT do is stay silent: `mediaUnavailable` names the
+   * classified cause so a surface can tell the user why the media will not open,
+   * and each affected attachment carries the same reason.
+   */
+  const withUrls = records.map((record) => ({
+    ...record,
+    attachments: record.attachments?.map((attachment) =>
+      attachment.path && signedByPath.has(attachment.path)
+        ? signedByPath.get(attachment.path)!
+        : attachment,
+    ),
+  }));
+
+  const mediaUnavailable = withUrls
+    .flatMap((record) => record.attachments || [])
+    .find((attachment) => !!attachment.urlUnavailable)?.urlUnavailable;
+
+  return mediaUnavailable
+    ? { ok: true, records: withUrls, mediaUnavailable }
+    : { ok: true, records: withUrls };
 }
 
 export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[]> {
@@ -346,7 +382,10 @@ export async function uploadRecordMedia(
 
   if (error) {
     console.error('[gomsinlog] Media upload failed:', error);
-    return { error: '파일을 올리지 못했어요. 연결 상태를 확인하고 다시 시도해 주세요.' };
+    // Classified from the real Storage error. This used to hard-code
+    // "연결 상태를 확인하고" while holding the actual cause, so an RLS rejection,
+    // a 413 and an expired JWT all told the user to check a working connection.
+    return { error: `파일을 올리지 못했어요. ${classifyServerError(error).message}` };
   }
 
   return {

@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		The app ships Korean copy only, so the development region is ko. Every
+		user-facing string in this file is Korean; the file is UTF-8 (declared
+		above) which is what makes non-ASCII CFBundleDisplayName and usage
+		descriptions render correctly instead of as mojibake.
+	-->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>ko</string>
+	<key>CFBundleDisplayName</key>
+	<string>곰신로그</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!--
+		CFBundleShortVersionString is MARKETING_VERSION and must equal `version`
+		in package.json and android versionName.
+		CFBundleVersion is CURRENT_PROJECT_VERSION, the build number, bumped on
+		every upload to App Store Connect and never reused.
+		Both come from the Xcode build settings; `npm run verify:native`
+		asserts the agreement. See docs/kiro/NATIVE_RELEASE_GUIDE.md.
+	-->
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+
+	<!--
+		OAuth return path. `authRedirectUrl()` in src/lib/platform.ts builds
+		exactly `gomsinlog://auth/callback`, and src/lib/deepLinks.ts is what
+		consumes it after @capacitor/app forwards
+		application(_:open:options:).
+
+		Exactly one scheme is registered, and it is not a scheme any other party
+		could plausibly claim. `CFBundleURLName` is the reverse-DNS owner id;
+		`LSHandlerRank` = Owner states this app is the canonical handler.
+
+		iOS has no per-path filtering for custom schemes, unlike the Android
+		intent-filter, which pins host and path, so deepLinks.ts is the layer
+		that rejects any `gomsinlog://` URL that is not the callback route.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>app.gomsinlog.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>gomsinlog</string>
+			</array>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
+	</array>
+
+	<!--
+		Privacy usage descriptions. Korean, because the consent alert is shown to
+		a Korean-speaking user, and specific about what the data is used for:
+		a vague string is a review rejection.
+
+		NSMicrophoneUsageDescription
+			src/components/widgets/TodayLogWidget.tsx calls
+			navigator.mediaDevices.getUserMedia({ audio: true }). In WKWebView
+			that reaches
+			webView(_:requestMediaCapturePermissionFor:initiatedByFrame:type:decisionHandler:),
+			which @capacitor/ios grants
+			(node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift:50-60);
+			the OS still requires this string or the process is terminated.
+
+		NSCameraUsageDescription
+			The "지금찍기" button sets capture="environment" on the file input.
+			WKWebView offers "사진 촬영" for that input and presents the camera
+			in-process, which requires this string. Removing the capture
+			attribute would remove this requirement; that tradeoff is recorded
+			in docs/kiro/NATIVE_RELEASE_GUIDE.md.
+
+		DELIBERATELY ABSENT: NSPhotoLibraryUsageDescription /
+		NSPhotoLibraryAddUsageDescription
+			The gallery path in WKWebView goes through the out-of-process
+			PHPicker / UIDocumentPicker, which hands back only the chosen file
+			and needs no library authorisation. No code in this app reads the
+			photo library, and nothing writes back to it.
+
+		DELIBERATELY ABSENT: NSUserTrackingUsageDescription,
+		NSLocationWhenInUseUsageDescription, NSContactsUsageDescription,
+		NSSpeechRecognitionUsageDescription, NSFaceIDUsageDescription
+			No corresponding API is called anywhere in the app or in the three
+			iOS pods it links (@capacitor/ios, @capacitor/app,
+			@capacitor/browser).
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>음성으로 오늘의 기록을 남길 때에만 마이크를 사용해요. 녹음한 소리는 내 기록에 첨부되고, 공유하지 않으면 상대방에게 전달되지 않아요.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>‘지금찍기’로 오늘의 순간을 바로 촬영할 때에만 카메라를 사용해요. 찍은 사진은 내가 저장을 눌렀을 때만 기록에 첨부돼요.</string>
+
+	<!--
+		App Transport Security is deliberately NOT configured. Omitting
+		NSAppTransportSecurity leaves ATS at its secure defaults: TLS 1.2+,
+		forward secrecy, no arbitrary loads. Supabase is https/wss only, so no
+		exception is needed, and adding an empty dictionary here would only
+		invite someone to relax it later.
+	-->
+
+	<!--
+		Export compliance: the app uses only the platform's standard TLS through
+		URLSession/WKWebView, which is exempt. Declaring it here removes the
+		manual encryption question on every App Store Connect upload.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<!--
+		arm64, not the template's armv7: IPHONEOS_DEPLOYMENT_TARGET is 14.0, and
+		no 32-bit device can run iOS 11 or later. Leaving armv7 declares a
+		capability no supported device has.
+	-->
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<!--
+		Portrait only on iPhone, matching "orientation": "portrait" in
+		public/manifest.json and the fixed bottom tab bar in
+		src/components/MobileShell.tsx. iPad keeps every orientation because the
+		system requires a resizable universal app to accept them.
+	-->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!--
+		UIUserInterfaceStyle is intentionally absent so the app follows the
+		system appearance. src/index.css drives light/dark from
+		`prefers-color-scheme` and the token set guarded by
+		src/lib/themeTokens.test.ts; pinning a style here would strand dark-mode
+		users on the light palette.
+
+		UIViewControllerBasedStatusBarAppearance stays true so Capacitor's
+		bridge view controller decides the status bar style per appearance
+		instead of a single global value that would be unreadable in one theme.
+	-->
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+</dict>
+</plist>

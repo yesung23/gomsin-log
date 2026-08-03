@@ -50,13 +50,20 @@ npm run verify      # 타입검사 + 린트 + 테스트 + 빌드 (한 번에)
 
 npm run typecheck   # tsc -b --force
 npm run lint        # eslint
-npm test            # vitest (625개 / 47개 파일)
+npm test            # vitest (817개 / 59개 파일)
 npm run build       # 프로덕션 빌드
 
-# Capacitor (Android)
-npm run cap:add:android   # android/ 생성 (최초 1회)
+# Capacitor (Android / iOS)
+# android/ 와 ios/ 는 Git에 포함된 "설정"입니다. cap add 로 다시 만들지 마세요.
+# (결정 배경: docs/kiro/NATIVE_RELEASE_GUIDE.md)
 npm run cap:sync          # 빌드 + android/ 동기화
+npm run cap:sync:ios      # 빌드 + ios/ 동기화 (pod install 은 macOS 필요)
 npm run cap:open          # Android Studio 열기
+npm run cap:open:ios      # Xcode 열기 (macOS)
+
+npm run verify:native     # 네이티브 설정 불변식 검사 (권한/딥링크/백업/개인정보)
+npm run verify:assets     # 아이콘·스플래시가 생성기 출력과 바이트 단위로 동일한지
+npm run assets:generate   # public/favicon.svg 에서 모든 래스터 자산 재생성
 ```
 
 > **참고**: Supabase `.env` 자격증명이 없으면 오프라인 데모 모드로 동작하며, 데모
@@ -73,6 +80,7 @@ npm run cap:open          # Android Studio 열기
 | [`docs/kiro/RELEASE_AUDIT_2026-07-31.md`](docs/kiro/RELEASE_AUDIT_2026-07-31.md) | 수정한 결함과 남은 위험 |
 | [`docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md`](docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md) | 배포 절차 (비개발자용) |
 | [`docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`](docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md) | 2계정 수동 검증 |
+| [`docs/kiro/NATIVE_RELEASE_GUIDE.md`](docs/kiro/NATIVE_RELEASE_GUIDE.md) | Android/iOS 네이티브 설정 결정, 권한·백업·개인정보 근거, 버전 절차 |
 | [`docs/kiro/PLAY_STORE_ROADMAP.md`](docs/kiro/PLAY_STORE_ROADMAP.md) | Google Play 출시 |
 | [`docs/kiro/ROLLBACK_GUIDE.md`](docs/kiro/ROLLBACK_GUIDE.md) | 문제 발생 시 되돌리기 |
 | [`supabase/migrations/README.md`](supabase/migrations/README.md) | 마이그레이션 목록과 적용 순서 |

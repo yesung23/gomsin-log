@@ -1,14 +1,31 @@
 import { useState, useEffect } from 'react';
 import { Share, PlusSquare, X, Smartphone, Download } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
+import { isNativePlatform } from '@/lib/platform';
 
+/**
+ * "Install this app" prompt. WEB ONLY.
+ *
+ * Inside the Capacitor WebView none of the three web signals rules this banner
+ * out: `androidScheme: 'https'` means `display-mode` is not `standalone`,
+ * `beforeinstallprompt` never fires, and the UA still says Android or iOS. So the
+ * UA branch rendered a banner telling the user to add the app to their home
+ * screen while they were already inside the installed native app -- with
+ * instructions naming Chrome's ⋮ menu or Safari's share sheet, neither of which
+ * exists there. `main.tsx` already gates the service worker on
+ * `isNativePlatform()`; this component was the oversight.
+ */
 export function InstallPromptBanner() {
   const { state, setHasSeenInstallPrompt } = useStore();
   const [showPrompt, setShowPrompt] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [platform, setPlatform] = useState<'ios' | 'android' | 'other'>('other');
+  // Read once: the platform cannot change for the lifetime of the process, and
+  // this must be false-y on web before any of the effects below run.
+  const [isNative] = useState(() => isNativePlatform());
 
   useEffect(() => {
+    if (isNative) return;
     // Determine Platform
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isAndroid = /android/i.test(navigator.userAgent);
@@ -24,9 +41,12 @@ export function InstallPromptBanner() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-  }, []);
+  }, [isNative]);
 
   useEffect(() => {
+    // 0. Never prompt to install the app from inside the installed app.
+    if (isNative) return;
+
     // 1. Check if running in Standalone mode
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
     if (isStandalone) return;
@@ -41,7 +61,7 @@ export function InstallPromptBanner() {
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [state.hasSeenInstallPrompt, state.setupComplete, state.records.length]);
+  }, [isNative, state.hasSeenInstallPrompt, state.setupComplete, state.records.length]);
 
   const handleDismiss = () => {
     setShowPrompt(false);
@@ -59,7 +79,9 @@ export function InstallPromptBanner() {
     }
   };
 
-  if (!showPrompt) return null;
+  // Belt and braces: the effects above already refuse to arm the banner on a
+  // native platform, and this makes it unrenderable regardless of how it got set.
+  if (isNative || !showPrompt) return null;
 
   return (
     <div className="fixed bottom-24 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] max-w-[390px] z-50 bg-card/95 backdrop-blur-xl p-5 rounded-3xl shadow-2xl border border-border animate-in slide-in-from-bottom-8">

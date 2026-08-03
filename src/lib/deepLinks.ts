@@ -1,17 +1,22 @@
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { supabase } from '@/lib/supabase';
-import { isNativePlatform, NATIVE_URL_SCHEME } from '@/lib/platform';
+import { isNativeAuthCallbackUrl, isNativePlatform } from '@/lib/platform';
 
 /**
- * Completes an OAuth sign-in inside the Capacitor Android shell.
+ * Completes an OAuth sign-in inside either Capacitor shell.
  *
  * Google refuses to render its sign-in page in an embedded WebView, so the
- * native build opens the provider in a Custom Tab (system browser) and Supabase
- * redirects back to `gomsinlog://auth/callback?code=...`. Android delivers that
- * URL to the app as an `appUrlOpen` event, which is where the PKCE code has to
- * be exchanged -- the browser that performed the redirect is a different
- * context, so `detectSessionInUrl` never sees it.
+ * native build opens the provider in a Custom Tab / SFSafariViewController and
+ * Supabase redirects back to `gomsinlog://auth/callback?code=...`. Android
+ * delivers that URL through the intent-filter and iOS through
+ * `application(_:open:options:)`; both surface as an `appUrlOpen` event, which
+ * is where the PKCE code has to be exchanged -- the browser that performed the
+ * redirect is a different context, so `detectSessionInUrl` never sees it.
+ *
+ * This is also the only path by which `signInWithApple()` can complete: it uses
+ * the same `startOAuth` flow as Google, so without a registered scheme on both
+ * platforms the Apple button is dead.
  *
  * No-op on the web, where the normal redirect flow already works.
  */
@@ -20,7 +25,12 @@ export function registerAuthDeepLinkHandler(): () => void {
   if (!isNativePlatform() || !client) return () => {};
 
   const listenerPromise = App.addListener('appUrlOpen', async ({ url }) => {
-    if (!url?.startsWith(`${NATIVE_URL_SCHEME}://`)) return;
+    // Only the exact callback route, not "anything with our scheme". The Android
+    // intent-filter already pins scheme + host + path, but iOS can only register
+    // the scheme, so without this check a WKWebView build would hand any
+    // `gomsinlog://...` URL -- from any app, or from a tapped link -- to the
+    // token-exchange path below.
+    if (!isNativeAuthCallbackUrl(url)) return;
 
     try {
       // The custom scheme is not a hierarchical URL everywhere, so parse

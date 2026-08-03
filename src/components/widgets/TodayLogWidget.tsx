@@ -35,6 +35,19 @@ export function TodayLogWidget() {
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const recordedChunksRef = React.useRef<Blob[]>([]);
   const recordTimerRef = React.useRef<number | null>(null);
+  /**
+   * Live mirror of `pendingFiles`.
+   *
+   * `recorder.onstop` is a closure created when recording STARTS, so it cannot
+   * read `pendingFiles` directly -- the user may have attached a photo while
+   * recording. The overflow decision has to be made against the current count,
+   * and it has to be made outside the state updater so the toast is not a side
+   * effect of a reducer.
+   */
+  const pendingFilesRef = React.useRef<File[]>([]);
+  React.useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
 
   const [debouncedLog, setDebouncedLog] = useState('');
 
@@ -188,9 +201,14 @@ export function TodayLogWidget() {
         toast.error(classified.error);
         return;
       }
-      setPendingFiles((prev) =>
-        prev.length >= MAX_ATTACHMENTS ? prev : [...prev, file],
-      );
+      // The success toast used to fire unconditionally, so a recording dropped
+      // for hitting the attachment cap was announced as added. Report what
+      // actually happened, matching the file-select path's overflow behaviour.
+      if (pendingFilesRef.current.length >= MAX_ATTACHMENTS) {
+        toast.info(`첨부는 한 번에 ${MAX_ATTACHMENTS}개까지 가능해요.`);
+        return;
+      }
+      setPendingFiles((prev) => [...prev, file]);
       toast.success('음성 기록이 추가되었어요.');
     };
 

@@ -7,7 +7,13 @@ import {
   serverCallBlockedByPendingDeletion,
   type AccountDeletionOutcome,
 } from '@/lib/accountDeletion';
-import { classifyServerError, serverErrorMessage, type ServerErrorKind } from '@/lib/serverErrors';
+import {
+  classifyServerError,
+  isSchemaCacheMiss,
+  schemaCacheMissLog,
+  serverErrorMessage,
+  type ServerErrorKind,
+} from '@/lib/serverErrors';
 import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
 import type { AuthUser, IAuthRepository, Role } from '@/types';
 
@@ -404,9 +410,15 @@ export async function fetchMyCoupleState(): Promise<
   try {
     const { data, error } = await supabase.rpc('get_my_couple_state');
     if (error) {
-      // PGRST202 means migration 016 is not applied on this project yet. That is
-      // a server-side gap, not an authorization answer, so it must not be allowed
-      // to look like "you have no couple space".
+      // PGRST202 means migration 016 is not applied on this project yet, or it is
+      // applied and the schema cache was never reloaded. That is a server-side
+      // gap, not an authorization answer, so it must not be allowed to look like
+      // "you have no couple space" -- and whoever reads the log needs to be told
+      // which deploy step is missing instead of "failed".
+      if (isSchemaCacheMiss(error)) {
+        console.error(schemaCacheMissLog('get_my_couple_state', '016'));
+        return { ok: false, reason: classifyServerError(error).kind };
+      }
       console.error('[gomsinlog] get_my_couple_state failed:', error);
       return { ok: false, reason: classifyServerError(error).kind };
     }
@@ -430,6 +442,12 @@ export async function disconnectCoupleFromDB(): Promise<boolean> {
   try {
     const { error } = await supabase.rpc('disconnect_couple');
     if (error) {
+      // A silent `false` here was indistinguishable from a permission failure or
+      // a dead network, so a missing schema reload looked like an app bug.
+      if (isSchemaCacheMiss(error)) {
+        console.error(schemaCacheMissLog('disconnect_couple', '015'));
+        return false;
+      }
       console.error('Error in disconnect_couple RPC:', error);
       return false;
     }

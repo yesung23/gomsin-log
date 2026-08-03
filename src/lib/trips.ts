@@ -1,4 +1,5 @@
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import { isSchemaCacheMiss, schemaCacheMissLog } from '@/lib/serverErrors';
 import { supabase } from '@/lib/supabase';
 import type { DailyRecord, Trip, TripChecklist, TripItem, TripStatus } from '@/types';
 
@@ -316,6 +317,13 @@ export async function reorderTripItemsInDB(items: Array<Pick<TripItem, 'id' | 's
     p_sort_orders: items.map((item) => item.sortOrder),
   });
   if (error) {
+    // The RPC is the ONLY way to permute ranks (015 blocks direct topology
+    // updates), so a missing schema reload disables reordering entirely. Say
+    // which deploy step is missing instead of returning a bare `false`.
+    if (isSchemaCacheMiss(error)) {
+      console.error(schemaCacheMissLog('reorder_trip_items', '015'));
+      return false;
+    }
     console.error('Error reordering trip items:', error);
     return false;
   }

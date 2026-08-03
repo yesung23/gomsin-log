@@ -182,6 +182,34 @@ export function classifyServerError(
   return { kind: 'unknown', message: MESSAGES.unknown };
 }
 
+/**
+ * Is this PostgREST telling us the function is not in its schema cache?
+ *
+ * `PGRST202` is never the caller's fault and never transient in the useful sense:
+ * it means either the migration has not been applied, or it has been applied and
+ * the PostgREST schema cache was not reloaded. Both are deployment states, and
+ * both look identical to a plain failure unless the call site says so.
+ */
+export function isSchemaCacheMiss(error: unknown): boolean {
+  return errorCode(error) === 'PGRST202';
+}
+
+/**
+ * One actionable operator diagnostic for that deployment gap.
+ *
+ * The point is that the log names the remedy. A bare "Error in disconnect_couple
+ * RPC" told whoever read it nothing about which of the two states they were in.
+ *
+ * @param rpc        The RPC that could not be found, e.g. `get_my_couple_state`.
+ * @param migration  The migration that defines it, e.g. `016`.
+ */
+export function schemaCacheMissLog(rpc: string, migration: string): string {
+  return `[gomsinlog] ${rpc}() is not in the PostgREST schema cache (PGRST202). `
+    + `Apply migration ${migration} and reload the schema cache `
+    + `(migration 017 issues NOTIFY pgrst, 'reload schema'; the dashboard route is `
+    + `Settings -> API -> Reload schema).`;
+}
+
 /** Does this kind mean the session must be refreshed or re-established? */
 export function isAuthExpired(kind: ServerErrorKind): boolean {
   return kind === 'auth_expired';

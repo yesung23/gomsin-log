@@ -1,0 +1,92 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace "app.gomsinlog"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "app.gomsinlog"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        // Version/build-number procedure -- see docs/kiro/NATIVE_RELEASE_GUIDE.md.
+        //
+        // versionName is the human-facing marketing version and must stay equal
+        // to `version` in package.json and to iOS MARKETING_VERSION.
+        // versionCode is a monotonically increasing integer that Play uses for
+        // ordering; it is bumped on EVERY upload, including a re-upload of the
+        // same versionName, and is never reused or lowered.
+        // `npm run verify:native` reads package.json and asserts both.
+        versionCode 1
+        versionName "0.1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        release {
+            // R8/resource shrinking stays OFF for v1. The Capacitor bridge
+            // resolves plugins reflectively from capacitor.plugins.json, so
+            // shrinking needs keep rules that can only be proven correct on a
+            // real device or emulator -- neither is available in this
+            // environment (no /dev/kvm). Turning it on unverified would risk a
+            // release-only "plugin not implemented" failure. Revisit behind the
+            // device gate in docs/kiro/NATIVE_RELEASE_GUIDE.md.
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Explicit rather than inherited: no release build may be
+            // debuggable, and Capacitor derives webContentsDebuggingEnabled
+            // from FLAG_DEBUGGABLE when the config does not pin it.
+            debuggable false
+            // NO release signing is configured here, on purpose, and
+            // NativeConfigTest asserts this file contains no signing token at
+            // all. This repository contains no
+            // keystore, no certificate, no provisioning profile and no store
+            // credential. `bundleRelease` therefore produces an UNSIGNED
+            // bundle; signing happens on a maintainer's machine or in Play App
+            // Signing. See docs/kiro/NATIVE_RELEASE_GUIDE.md.
+        }
+        debug {
+            debuggable true
+        }
+    }
+
+    lint {
+        // The release gate should fail on a lint error, not bury it in a report.
+        abortOnError true
+        warningsAsErrors false
+        checkReleaseBuilds true
+        // Missing translations are expected: the app ships Korean copy only.
+        disable 'MissingTranslation'
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

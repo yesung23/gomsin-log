@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Background layer of the adaptive launcher icon. Must match BRAND_BACKGROUND
+    in scripts/assets/generate-app-assets.mjs and the backing <rect> fill in
+    public/favicon.svg, otherwise the masked icon shows a colour seam where the
+    generated foreground meets this plate.
+-->
+<resources>
+    <color name="ic_launcher_background">#1B2340</color>
+</resources>

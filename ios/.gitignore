@@ -1,0 +1,34 @@
+# This iOS project is TRACKED (see docs/kiro/NATIVE_RELEASE_GUIDE.md).
+# Everything listed here is build output, resolved dependency source, machine
+# local Xcode state, or signing material -- never configuration.
+
+App/build
+App/Pods
+App/output
+App/App/public
+DerivedData
+xcuserdata
+*.xcuserdatad
+
+# Cordova plugins for Capacitor
+capacitor-cordova-ios-plugins
+
+# Generated Config files
+App/App/capacitor.config.json
+App/App/config.xml
+
+# Signing material -- must never be committed. Certificates, private keys,
+# provisioning profiles and App Store Connect API keys stay on the maintainer's
+# machine or in a secret store that CI does not have access to.
+*.p12
+*.p8
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+App/ExportOptions.plist
+
+# Archives and exported apps
+*.xcarchive
+*.ipa
+*.dSYM.zip

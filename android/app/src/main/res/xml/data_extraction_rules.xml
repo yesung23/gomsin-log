@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12 (API 31) and newer.
+
+    `android:allowBackup="false"` stops cloud backup, but the platform still
+    performs device-to-device transfer for an app unless <device-transfer> says
+    otherwise (see the Android 12 backup/restore behaviour changes). Diary text,
+    private records and the Supabase session token all live under the app's root
+    directory (WebView localStorage is `app_webview/Default/Local Storage`),
+    so both channels exclude everything.
+
+    Consequence, accepted deliberately: a user who moves to a new phone signs in
+    again and re-syncs from Supabase. Nothing local survives the move. That is
+    the correct default for a private couple's diary; the alternative is a plain
+    copy of every private entry sitting in a transfer stream.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

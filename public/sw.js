@@ -9,8 +9,9 @@ const STATIC_ASSETS = [
   '/manifest.json',
   '/favicon.svg',
   '/icons/apple-touch-icon.png',
-  '/icons/icon-192.svg',
-  '/icons/icon-512.svg',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png',
   ...BUILD_ASSETS,
 ];
 const CACHEABLE_DESTINATIONS = new Set([

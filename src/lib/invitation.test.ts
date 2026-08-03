@@ -68,10 +68,29 @@ describe('consumeCoupleInvitation input validation', () => {
 
   it('accepts only the demo code when Supabase is not configured', async () => {
     // Without VITE_SUPABASE_URL the module falls back to the offline demo path.
-    await expect(consumeCoupleInvitation('123456')).resolves.toEqual({ coupleId: 'demo-couple-id' });
-    const other = await consumeCoupleInvitation('999999');
-    expect(other.error).toBeTruthy();
-    expect(other.coupleId).toBeUndefined();
+    //
+    // `isSupabaseConfigured` is computed once at module load, so the unconfigured
+    // state is stubbed and the module re-imported in isolation rather than being
+    // inherited from the ambient shell. CI legitimately exports the placeholder
+    // VITE_SUPABASE_* values for its build steps, and an ambient-dependent
+    // version of this test passed only on a laptop that happened to lack them.
+    vi.resetModules();
+    vi.stubEnv('VITE_SUPABASE_URL', '');
+    vi.stubEnv('VITE_SUPABASE_PUBLISHABLE_KEY', '');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
+    try {
+      const offline = await import('@/lib/supabase');
+      expect(offline.isSupabaseConfigured, 'the client must be unconfigured').toBe(false);
+      offline.__resetInviteAttemptsForTest();
+
+      await expect(offline.consumeCoupleInvitation('123456')).resolves.toEqual({ coupleId: 'demo-couple-id' });
+      const other = await offline.consumeCoupleInvitation('999999');
+      expect(other.error).toBeTruthy();
+      expect(other.coupleId).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });
 

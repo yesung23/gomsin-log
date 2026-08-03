@@ -82,8 +82,11 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     // Read-only
     fetchMyCoupleState: 'Read-only: reads couple lifecycle state, no mutation',
     isConfigured: 'Read-only: returns boolean configuration check',
-    loadState: 'Read-only: loads app state',
-    saveState: 'Read-only: placeholder (logs only)',
+    // `loadState` / `saveState` were listed here for `SupabaseLogRepository`, a
+    // dead exported placeholder that was never instantiated (the store uses
+    // `LocalStorageRepository`). It has been deleted, so the entries are gone
+    // too -- an exemption for something that no longer exists is rot, and the
+    // assertion below now proves the class is really absent.
     // Recovery path
     disconnectCoupleFromDB: 'Recovery path: must work during deletion to unlink couple',
     // Deletion operation itself
@@ -320,6 +323,68 @@ describe('Gate path coverage: every mutation calls serverCallBlockedByPendingDel
         }
       });
     }
+  });
+
+  /**
+   * L-2. `SupabaseLogRepository` was an exported `ILogRepository` implementation
+   * whose `loadState()` returned null after logging "placeholder" and whose
+   * `saveState()` only logged. Nothing instantiated it, so it never lost anyone's
+   * data -- but it was importable, and wiring it up as the store's repository
+   * would have silently discarded every write. It is deleted; this keeps it from
+   * coming back, and keeps its now-meaningless gate exemptions from coming back
+   * with it.
+   */
+  describe('L-2: the dead placeholder repository stays deleted', () => {
+    it('supabase.ts exports no SupabaseLogRepository', () => {
+      expect(sources['supabase.ts']).not.toContain('class SupabaseLogRepository');
+      expect(sources['supabase.ts']).not.toMatch(/export\s+class\s+SupabaseLogRepository/);
+    });
+
+    it('no live code in src/ references it any more', () => {
+      // Comments are stripped: the tombstone comment left where the class used to
+      // be is documentation, not a reference that could be wired up.
+      const stripComments = (source: string) =>
+        source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+
+      const offenders: string[] = [];
+      const walk = (dir: string) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+            continue;
+          }
+          if (!/\.tsx?$/.test(entry.name)) continue;
+          // This file names it in prose, which is the documentation.
+          if (entry.name === 'gatePathCoverage.test.ts') continue;
+          if (stripComments(readFileSync(full, 'utf8')).includes('SupabaseLogRepository')) {
+            offenders.push(relative(process.cwd(), full).split(sep).join('/'));
+          }
+        }
+      };
+      walk(resolve(process.cwd(), 'src'));
+      expect(offenders).toEqual([]);
+    });
+
+    it('no stale exemption survives for its methods', () => {
+      const supabaseExemptions = EXEMPTIONS['supabase.ts'];
+      expect(supabaseExemptions).not.toHaveProperty('loadState');
+      expect(supabaseExemptions).not.toHaveProperty('saveState');
+    });
+
+    it('PRESERVATION: the repository the store actually uses is untouched', () => {
+      const store = readFileSync(
+        resolve(process.cwd(), 'src', 'lib', 'store.tsx'),
+        'utf8',
+      );
+      expect(store).toContain('class LocalStorageRepository');
+      expect(store).toContain('new LocalStorageRepository()');
+    });
+
+    it('PRESERVATION: the auth repository selection still works', () => {
+      expect(sources['supabase.ts']).toContain('new SupabaseAuthRepository()');
+      expect(sources['supabase.ts']).toContain('new DemoAuthRepository()');
+    });
   });
 });
 

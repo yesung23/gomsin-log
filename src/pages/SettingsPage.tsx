@@ -7,6 +7,7 @@ import {
   ArrowLeft, Shield, Unlink, Trash2, User, FileText,
   Clock, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
+  CalendarDays, Plane,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -475,6 +476,43 @@ export function SettingsPage() {
             </span>
             <span className="text-[11px] text-muted-foreground font-normal">Safari/Chrome</span>
           </button>
+        </section>
+
+        {/*
+          Durable entry points to the non-tab routes.
+
+          The tab bar only exposes /home, /record, /us and /my. /schedule and
+          /trips were reachable ONLY from UpcomingScheduleWidget, and /service
+          only from DDayWidget -- but the dashboard layout is user-editable, and
+          App.tsx redirects an unknown path to `/` with no address bar in the
+          native shell. Removing the schedule widget therefore stranded /schedule
+          and /trips permanently, with no way back. Settings is always reachable
+          (WidgetDashboard and DDayWidget both link here), so an always-present
+          link list is the minimal durable fix; the tab bar is left alone.
+
+          Unconditional on role on purpose: the pre-existing /service row below
+          is soldier-only, so a 곰신 viewer had no non-widget route to it at all.
+        */}
+        <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
+          <h2 className="px-4 pt-4 pb-2 text-xs font-bold text-muted-foreground">바로가기</h2>
+          {[
+            { to: '/schedule', label: '일정 관리', icon: CalendarDays },
+            { to: '/trips', label: '여행 플래너', icon: Plane },
+            { to: '/service', label: '복무 현황 · D-Day', icon: Shield },
+          ].map(({ to, label, icon: Icon }) => (
+            <button
+              key={to}
+              onClick={() => navigate(to)}
+              aria-label={label}
+              className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[44px] min-w-[44px]"
+            >
+              <span className="flex items-center gap-3 text-foreground">
+                <Icon size={18} className="text-coral" />
+                <span>{label}</span>
+              </span>
+              <ChevronRight size={16} className="text-muted-foreground" />
+            </button>
+          ))}
         </section>
 
         {/* Contact Hours */}

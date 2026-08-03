@@ -9,7 +9,7 @@ import {
 } from '@/lib/accountDeletion';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
-import type { AuthUser, IAuthRepository, ILogRepository, AppState, Role } from '@/types';
+import type { AuthUser, IAuthRepository, Role } from '@/types';
 
 /**
  * Supabase environment variables configuration.
@@ -563,25 +563,14 @@ export class SupabaseAuthRepository implements IAuthRepository {
   }
 }
 
-/**
- * Supabase Log Repository placeholder for future server sync.
+/*
+ * `SupabaseLogRepository` used to sit here: an exported `ILogRepository` whose
+ * `loadState()` logged "placeholder" and returned null and whose `saveState()`
+ * only logged. It was never instantiated anywhere -- the store uses
+ * `LocalStorageRepository` -- so it was a live, importable class that silently
+ * discarded state, one wiring mistake away from losing every write. Deleted
+ * rather than left as a trap; real server sync goes through `sync.ts`.
  */
-export class SupabaseLogRepository implements ILogRepository {
-  isConfigured(): boolean {
-    return isSupabaseConfigured;
-  }
-
-  async loadState(): Promise<AppState | null> {
-    if (!isSupabaseConfigured) return null;
-    console.info('[gomsinlog] Supabase configured repository placeholder.');
-    return null;
-  }
-
-  async saveState(state: AppState): Promise<void> {
-    if (!isSupabaseConfigured) return;
-    console.info('[gomsinlog] Supabase saveState called for', state.profile.myName);
-  }
-}
 
 // Select active repositories based on configuration
 export const authRepository: IAuthRepository = isSupabaseConfigured

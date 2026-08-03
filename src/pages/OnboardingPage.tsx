@@ -34,7 +34,13 @@ import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types'
 import { addMonths } from '@/lib/utils';
 
 export function OnboardingPage() {
-  const { state, updateProfile, setSetupComplete, startDemo: runStartDemo } = useStore();
+  const {
+    state,
+    updateProfile,
+    setSetupComplete,
+    startDemo: runStartDemo,
+    recoverExpiredSession,
+  } = useStore();
   const onboardingIdentityKey = state.isDemoMode
     ? `demo:${state.authenticatedUser?.id || ''}`
     : `user:${state.authenticatedUser?.id || ''}`;
@@ -267,6 +273,10 @@ export function OnboardingPage() {
           const res = await consumeCoupleInvitation(cleanCode);
           if (!isCurrentIdentity(identity)) return;
           if (res.error || !res.coupleId) {
+            // The server can report that the SESSION, not the code, is the
+            // problem. Retrying the code cannot fix that, so hand the session to
+            // the store's recovery instead of only showing copy about it.
+            if (res.reason === 'auth_expired') void recoverExpiredSession();
             toast.error(res.error || '커플 공간에 연결하지 못했습니다.');
             return;
           }

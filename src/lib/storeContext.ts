@@ -85,6 +85,17 @@ export interface StoreContextType {
   /** Re-read the couple lifecycle from the server. */
   refreshCoupleLifecycle: () => Promise<CoupleLifecycle>;
   /**
+   * Try to rescue an unusable session: one refresh attempt, then sign out.
+   *
+   * Exposed because the invitation RPC is the one authenticated action pages
+   * issue directly. When the server answers `not_authenticated` the honest copy
+   * ("세션이 만료되었어요") is not enough on its own -- the session still has to be
+   * refreshed or ended, and duplicating that here would create a second,
+   * subtly different recovery path. Single-flight inside the store: N callers
+   * cause one refresh attempt. Resolves to whether the session was rescued.
+   */
+  recoverExpiredSession: () => Promise<boolean>;
+  /**
    * Non-null while this account's data has been removed but its login has not.
    * `warnings` is in-memory only and is never persisted.
    */

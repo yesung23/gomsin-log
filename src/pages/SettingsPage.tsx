@@ -29,6 +29,7 @@ export function SettingsPage() {
     setTheme,
     invitationExpiresAt,
     refreshCoupleLifecycle,
+    recoverExpiredSession,
   } = useStore();
   const navigate = useNavigate();
   const { profile, isDemoMode, records } = state;
@@ -198,6 +199,9 @@ export function SettingsPage() {
       const result = await consumeCoupleInvitation(code);
       if (!isCurrentIdentity(identity)) return;
       if (result.error || !result.coupleId) {
+        // An unusable session is not a code problem: route it to the store's
+        // single-flight session recovery rather than asking for another attempt.
+        if (result.reason === 'auth_expired') void recoverExpiredSession();
         toast.error(result.error || '커플 공간에 연결하지 못했습니다.');
         return;
       }

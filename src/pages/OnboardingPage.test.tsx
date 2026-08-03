@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 /**
@@ -71,12 +71,15 @@ const storeState = {
   },
 };
 
+const recoverExpiredSession = vi.fn();
+
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: storeState,
     updateProfile: vi.fn(),
     setSetupComplete: vi.fn(),
     startDemo: vi.fn(),
+    recoverExpiredSession: (...args: unknown[]) => recoverExpiredSession(...(args as [])),
   }),
 }));
 
@@ -102,6 +105,7 @@ describe('OnboardingPage step 3 - couple space', () => {
     toastCalls.length = 0;
     createCoupleInvitation.mockReset();
     consumeCoupleInvitation.mockReset();
+    recoverExpiredSession.mockReset().mockResolvedValue(true);
     fetchMyCoupleState.mockReset();
     regenerateCoupleInvitation.mockReset();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
@@ -282,5 +286,48 @@ describe('OnboardingPage step 3 - couple space', () => {
     // Not an already-in-couple error, so no recovery is attempted.
     expect(fetchMyCoupleState).not.toHaveBeenCalled();
     expect(regenerateCoupleInvitation).not.toHaveBeenCalled();
+  });
+
+  /**
+   * DEF-04. `not_authenticated` used to be shown as "잠시 후 다시 시도해 주세요",
+   * so the user retried a code that was never the problem and the dead session
+   * was never refreshed or ended.
+   */
+  it('routes an expired session from redemption to the store recovery', async () => {
+    consumeCoupleInvitation.mockResolvedValue({
+      error: '초대 코드를 확인하지 못했습니다. 세션이 만료되었어요. 다시 로그인해 주세요.',
+      reason: 'auth_expired',
+    });
+
+    await mountStep3();
+    await act(async () => {
+      screen.getByText('초대 코드가 있어요').click();
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('숫자 6자리 초대 코드'), { target: { value: '123456' } });
+    });
+    await act(async () => { clickNext(); });
+
+    await waitFor(() => expect(recoverExpiredSession).toHaveBeenCalledTimes(1));
+    expect(toastCalls.some((call) => call.message.includes('세션이 만료되었어요'))).toBe(true);
+  });
+
+  it('does not touch the session when the code itself was rejected', async () => {
+    consumeCoupleInvitation.mockResolvedValue({
+      error: '유효하지 않거나 만료된 초대 코드입니다. (유효기간: 24시간)',
+    });
+
+    await mountStep3();
+    await act(async () => {
+      screen.getByText('초대 코드가 있어요').click();
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('숫자 6자리 초대 코드'), { target: { value: '123456' } });
+    });
+    await act(async () => { clickNext(); });
+
+    await waitFor(() => expect(toastCalls.some((call) => call.level === 'error')).toBe(true));
+    // Signing the user out over a mistyped code would be a far worse failure.
+    expect(recoverExpiredSession).not.toHaveBeenCalled();
   });
 });

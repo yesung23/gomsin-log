@@ -239,4 +239,75 @@ describe('consumeCoupleInvitation with supabase configured', () => {
     expect(result.coupleId).toBeUndefined();
     expect(result.error).toContain('인터넷 연결');
   });
+
+  /**
+   * DEF-04. `redeem_invitation` raises `not_authenticated` and `internal_error`
+   * as structured verdicts (migration 015), and both fell through to the generic
+   * "잠시 후 다시 시도해 주세요" -- so an unusable session and a server-side bug
+   * were both presented as a transient hiccup worth retrying.
+   */
+  it('tells the truth when the server says the caller is not authenticated', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { ok: false, couple_id: null, error_code: 'not_authenticated' },
+      error: null,
+    });
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).toContain('세션이 만료되었어요');
+    expect(result.error).not.toContain('잠시 후 다시 시도해 주세요');
+    // The caller needs this to route the session recovery, not just to toast.
+    expect(result.reason).toBe('auth_expired');
+  });
+
+  it('distinguishes a server-side failure from an expired session', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { ok: false, couple_id: null, error_code: 'internal_error' },
+      error: null,
+    });
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).toContain('서버');
+    expect(result.error).not.toContain('세션이 만료되었어요');
+    expect(result.error).not.toContain('인터넷 연결');
+    expect(result.reason).toBe('server');
+    // And it must not read like the unclassified default.
+    expect(result.error).not.toBe('초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  });
+
+  /**
+   * DEF-04, secondary: the non-throwing PostgREST `error` branch returned a flat
+   * generic string with no classification, while the `catch` branch classified.
+   * The same 403 therefore read as transient or as a permission problem
+   * depending only on how supabase-js chose to surface it.
+   */
+  it('classifies a returned permission error instead of calling it transient', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: '42501', message: 'permission denied for function redeem_invitation' },
+    });
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).toContain('권한이 없어요');
+    expect(result.error).not.toContain('인터넷 연결');
+    expect(result.reason).toBe('forbidden');
+  });
+
+  it('classifies a returned expired-session error', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: 'PGRST301', message: 'JWT expired' },
+    });
+
+    const result = await consumeOnline('123456');
+
+    expect(result.coupleId).toBeUndefined();
+    expect(result.error).toContain('세션이 만료되었어요');
+    expect(result.reason).toBe('auth_expired');
+  });
 });

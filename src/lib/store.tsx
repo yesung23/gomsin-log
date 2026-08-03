@@ -2859,6 +2859,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         coupleLifecycle,
         invitationExpiresAt,
         refreshCoupleLifecycle,
+        // The same single-flight recovery every store mutation already routes
+        // `auth_expired` to, so a page-issued RPC cannot grow a second one.
+        recoverExpiredSession: handleAuthExpired,
         accountDeletionRecovery,
         deletionStatus,
         retryAccountDeletion,

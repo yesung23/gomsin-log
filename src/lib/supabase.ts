@@ -7,7 +7,7 @@ import {
   serverCallBlockedByPendingDeletion,
   type AccountDeletionOutcome,
 } from '@/lib/accountDeletion';
-import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
+import { classifyServerError, serverErrorMessage, type ServerErrorKind } from '@/lib/serverErrors';
 import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
 import type { AuthUser, IAuthRepository, Role } from '@/types';
 
@@ -207,29 +207,57 @@ function parseInvitationRedemptionResult(value: unknown): InvitationRedemptionRe
   };
 }
 
-function invitationErrorMessage(errorCode: string | null): string {
+/**
+ * One structured verdict per `error_code` migration 015 can return.
+ *
+ * `reason` is present only where the cause is one the rest of the app already
+ * models, so the caller can route recovery (a session refresh) instead of merely
+ * toasting. The two that used to be missing were the two that mattered most:
+ * `not_authenticated` (`015:117-121`) and `internal_error` (`015:250,271`) both
+ * fell through to the transient-retry default, so an unusable session and a
+ * server-side bug were indistinguishable from "try again in a moment".
+ */
+function invitationErrorVerdict(
+  errorCode: string | null,
+): { message: string; reason?: ServerErrorKind } {
   switch (errorCode) {
     case 'rate_limited':
-      return '초대 코드 시도 횟수를 초과했습니다. 잠시 후 다시 시도해 주세요.';
+      return { message: '초대 코드 시도 횟수를 초과했습니다. 잠시 후 다시 시도해 주세요.' };
     case 'invalid_or_expired':
     case 'invalid_request':
-      return '유효하지 않거나 만료된 초대 코드입니다. (유효기간: 24시간)';
+      return { message: '유효하지 않거나 만료된 초대 코드입니다. (유효기간: 24시간)' };
     // Migration 015 no longer returns this: telling the caller the space was
     // full confirmed that their guessed hash matched a live invitation. Kept so
     // a project still on 013 during a deploy window stays readable.
     case 'couple_full':
-      return '이미 2명이 참여한 커플 공간입니다.';
+      return { message: '이미 2명이 참여한 커플 공간입니다.' };
     case 'already_connected':
-      return '이미 다른 커플 공간에 연결되어 있습니다. 먼저 연결을 해제해 주세요.';
+      return { message: '이미 다른 커플 공간에 연결되어 있습니다. 먼저 연결을 해제해 주세요.' };
     case 'self_invitation':
-      return '내가 만든 초대 코드로는 연결할 수 없습니다. 상대방에게 코드를 전달해 주세요.';
+      return { message: '내가 만든 초대 코드로는 연결할 수 없습니다. 상대방에게 코드를 전달해 주세요.' };
+    case 'not_authenticated':
+      // The session, not the code, is the problem. Retrying the same request
+      // cannot help, so the copy must not invite it.
+      return {
+        message: `초대 코드를 확인하지 못했습니다. ${serverErrorMessage('auth_expired')}`,
+        reason: 'auth_expired',
+      };
+    case 'internal_error':
+      // The server admitted its own failure. Reusing the central `server` copy
+      // keeps it distinct from an expired session and from a bad code.
+      return {
+        message: `초대 코드를 확인하지 못했습니다. ${serverErrorMessage('server')}`,
+        reason: 'server',
+      };
     default:
-      return '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+      return { message: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
   }
 }
 
 /** Consume an invitation through migration 015's sole authenticated API. */
-export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?: string; error?: string }> {
+export async function consumeCoupleInvitation(
+  code: string,
+): Promise<{ coupleId?: string; error?: string; reason?: ServerErrorKind }> {
   const normalized = code.trim();
   if (!/^\d{6}$/.test(normalized)) {
     return { error: '초대 코드는 숫자 6자리입니다. 다시 확인해 주세요.' };
@@ -259,10 +287,18 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
       if (error.code === 'PGRST202') {
         return {
           error: '서버에 안전한 초대 코드 확인 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
+          reason: 'server',
         };
       }
       console.error('[gomsinlog] redeem_invitation failed:', error);
-      return { error: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+      // Classified exactly like the `catch` branch below. Left unclassified, the
+      // same 401 or 42501 read as a transient hiccup or as a permission problem
+      // depending only on how supabase-js chose to surface it.
+      const classified = classifyServerError(error);
+      return {
+        error: `초대 코드를 확인하지 못했습니다. ${classified.message}`,
+        reason: classified.kind,
+      };
     }
 
     const result = parseInvitationRedemptionResult(data);
@@ -276,7 +312,8 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
     }
 
     if (!result.ok) {
-      return { error: invitationErrorMessage(result.error_code) };
+      const verdict = invitationErrorVerdict(result.error_code);
+      return { error: verdict.message, reason: verdict.reason };
     }
     if (!result.couple_id || result.error_code !== null) {
       console.error('[gomsinlog] Invalid successful redeem_invitation result:', result);
@@ -290,7 +327,13 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
     // The raw cause is in hand, so classify it. Blaming the internet
     // unconditionally told users with an expired session or an RLS rejection to
     // fix a connection that was already working.
-    return { error: `초대 코드를 확인하지 못했습니다. ${classifyServerError(err).message}` };
+    // Classified twice rather than hoisted into a local: `classifyServerError` is
+    // pure and allocation-cheap, and `serverErrorCopy.test.ts` pins this exact
+    // expression as the proof that the copy shown here comes from the classifier.
+    return {
+      error: `초대 코드를 확인하지 못했습니다. ${classifyServerError(err).message}`,
+      reason: classifyServerError(err).kind,
+    };
   }
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '@/lib/useStore';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import {
   ArrowLeft, Shield, Unlink, Trash2, User, FileText,
@@ -664,11 +665,14 @@ export function SettingsPage() {
                         setShowDisconnectModal(false);
                         toast.success('연결이 해제되었습니다.');
                       } else {
-                        toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                        // `disconnect()` returns a bare boolean, so the cause is
+                        // already gone by the time we get here. Stay honest and
+                        // generic rather than inventing a network diagnosis.
+                        toast.error('연결을 해제하지 못했어요. 잠시 후 다시 시도해 주세요.');
                       }
                     } catch (error) {
                       console.error('[Settings] Couple disconnect failed:', error);
-                      toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                      toast.error(`연결을 해제하지 못했어요. ${classifyServerError(error).message}`);
                     } finally {
                       setIsDisconnecting(false);
                     }

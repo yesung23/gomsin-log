@@ -13,6 +13,7 @@ import {
   supabase,
 } from '@/lib/supabase';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { classifyServerError } from '@/lib/serverErrors';
 
 /**
  * Does this RPC error mean "you already own a couple space"?
@@ -411,7 +412,9 @@ export function OnboardingPage() {
 
         if (profileError) {
           console.error('[Onboarding] Profile save failed:', profileError);
-          toast.error('프로필을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+          // Classified from the real error: an RLS or session failure must not be
+          // reported as a connectivity problem.
+          toast.error(`프로필을 저장하지 못했어요. ${classifyServerError(profileError).message}`);
           return;
         }
 
@@ -463,7 +466,7 @@ export function OnboardingPage() {
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
       console.error('[Onboarding] Final setup failed:', error);
-      toast.error('설정을 완료하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+      toast.error(`설정을 완료하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentIdentity(identity)) setIsFinishing(false);
     }

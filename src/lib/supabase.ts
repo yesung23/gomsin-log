@@ -287,7 +287,10 @@ export async function consumeCoupleInvitation(code: string): Promise<{ coupleId?
     return { coupleId: result.couple_id };
   } catch (err: any) {
     console.error('[gomsinlog] redeem_invitation threw:', err);
-    return { error: '초대 코드 확인 중 오류가 발생했습니다. 인터넷 연결을 확인해 주세요.' };
+    // The raw cause is in hand, so classify it. Blaming the internet
+    // unconditionally told users with an expired session or an RLS rejection to
+    // fix a connection that was already working.
+    return { error: `초대 코드를 확인하지 못했습니다. ${classifyServerError(err).message}` };
   }
 }
 

@@ -31,15 +31,27 @@ export type FullStateResult =
  * next `create_couple_and_invitation` raised `User already in an active couple`
  * with no way out.
  *
- * Every failure here degrades to `null` on purpose. This runs only when we have
- * ALREADY established that there is no profile row, so the worst case is the
- * pre-existing "treat as new account" behaviour -- never a thrown error and never
- * a false membership claim.
+ * The result is explicitly three-valued, because "no membership" and "could not
+ * ask" are different answers with opposite consequences:
+ *
+ *  - `{ ok: true, state: <snapshot> }` -- an active membership exists; resume
+ *    onboarding INTO that couple space.
+ *  - `{ ok: true, state: null }` -- the lookup SUCCEEDED and came back empty, so
+ *    this really is a brand-new account.
+ *  - `{ ok: false, reason }` -- the lookup failed. Collapsing this into `null`
+ *    was the bug: a network blip, an RLS rejection or a malformed response sent
+ *    an existing pending creator or member back through brand-new onboarding,
+ *    where the next space creation then failed permanently. A failure must stay a
+ *    failure and reach the user as a retryable unavailable result.
  */
+type ResumableMembershipResult =
+  | { ok: true; state: Partial<AppState> | null }
+  | { ok: false; reason: ServerErrorKind };
+
 async function fetchResumableMembership(
   userId: string,
-): Promise<Partial<AppState> | null> {
-  if (!supabase) return null;
+): Promise<ResumableMembershipResult> {
+  if (!supabase) return { ok: true, state: null };
   try {
     const { data, error } = await supabase
       .from('couple_members')
@@ -47,30 +59,38 @@ async function fetchResumableMembership(
       .eq('user_id', userId)
       .eq('status', 'active')
       .maybeSingle();
-    if (error || !data?.couple_id) return null;
+    // A query error is not evidence of absent membership.
+    if (error) return { ok: false, reason: classifyServerError(error).kind };
+    // A successful empty lookup is the only verified new-account answer.
+    if (!data?.couple_id) return { ok: true, state: null };
 
     // Onboarding is deliberately NOT marked complete: the profile row really is
     // missing and still has to be written. What changes is that onboarding now
     // resumes INTO the existing couple space instead of trying to create a
     // second one.
     return {
-      profile: {
-        id: userId,
-        myName: '',
-        role: (data.role as Role) || 'gomsin',
-        couple: {
-          coupleId: data.couple_id,
-          partnerName: '',
-          coupleCode: '',
-          connected: false,
-          status: 'pending',
-        },
-      } as UserProfile,
-      setupComplete: false,
+      ok: true,
+      state: {
+        profile: {
+          id: userId,
+          myName: '',
+          role: (data.role as Role) || 'gomsin',
+          couple: {
+            coupleId: data.couple_id,
+            partnerName: '',
+            coupleCode: '',
+            connected: false,
+            status: 'pending',
+          },
+        } as UserProfile,
+        setupComplete: false,
+      },
     };
   } catch (err) {
+    // A thrown lookup (malformed response, transport failure) is also not proof
+    // that the account is new.
     console.error('[gomsinlog] Resumable membership lookup failed:', err);
-    return null;
+    return { ok: false, reason: classifyServerError(err).kind };
   }
 }
 
@@ -89,7 +109,9 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
     // retryable and must not be confused with onboarding.
     if (profileError) return { ok: false, reason: classifyServerError(profileError).kind };
     if (!profileData) {
-      return { ok: true, state: await fetchResumableMembership(userId) };
+      // Propagates the membership lookup's own ok/failure result, so a failed
+      // lookup becomes FULL_STATE_UNAVAILABLE instead of new-account onboarding.
+      return await fetchResumableMembership(userId);
     }
 
     // 2. Fetch Couple Member Status

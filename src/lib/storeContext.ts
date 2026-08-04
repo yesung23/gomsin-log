@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent } from '@/types';
+import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent, Role } from '@/types';
 import type { AccountDeletionOutcome, DeletionStatus } from '@/lib/accountDeletion';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
@@ -152,7 +152,11 @@ export interface StoreContextType {
   setHighlightedRecordId: (id?: string) => void;
   setAuthenticatedUser: (user: AuthUser | null) => void;
   startDemo: () => void;
-  setWidgetLayout: (layout: string[]) => void;
+  /**
+   * `role` selects which of the two per-role layouts is written. It defaults to
+   * `gomsin` so existing call sites keep their meaning.
+   */
+  setWidgetLayout: (layout: string[], role?: Role) => void;
   setHasSeenInstallPrompt: (seen: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
 }

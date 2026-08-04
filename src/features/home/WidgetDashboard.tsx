@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '@/lib/useStore';
 import { Settings, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -18,7 +18,13 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { WidgetWrapper } from '@/components/widgets/WidgetWrapper';
-import { WIDGET_REGISTRY } from '@/lib/widgets';
+import {
+  DEFAULT_LAYOUT_BY_ROLE,
+  WIDGET_REGISTRY,
+  isWidgetAllowedForRole,
+  widgetsForRole,
+} from '@/lib/widgets';
+import type { Role } from '@/types';
 import { AddWidgetBottomSheet } from '@/components/widgets/AddWidgetBottomSheet';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 
@@ -28,10 +34,27 @@ export function WidgetDashboard() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
 
-  // Filter out any invalid widgets that might be in layout but not in registry
-  const activeWidgets = state.widgetLayout?.length > 0 
-    ? state.widgetLayout.filter(id => WIDGET_REGISTRY[id])
-    : ['today_briefing', 'today_word', 'dday'];
+  /**
+   * One dashboard, two roles.
+   *
+   * The 군화 home used to be a separate hardcoded component with no widget system
+   * at all -- it could not be reordered, added to or trimmed, which is exactly what
+   * was asked for. Both roles now run this same engine and differ only in their
+   * default layout and in which widgets they are offered.
+   */
+  const role: Role = state.profile.role;
+  const storedLayout = role === 'soldier' ? state.soldierWidgetLayout : state.widgetLayout;
+
+  // Drop ids that are unknown OR not meant for this role, so a role switch cannot
+  // leave "상대방의 마음 흐름" on the screen of the person it describes.
+  const activeWidgets = useMemo(() => {
+    const filtered = (storedLayout ?? []).filter(
+      (id: string) => WIDGET_REGISTRY[id] && isWidgetAllowedForRole(id, role),
+    );
+    return filtered.length > 0 ? filtered : DEFAULT_LAYOUT_BY_ROLE[role];
+  }, [storedLayout, role]);
+
+  const persist = (layout: string[]) => setWidgetLayout(layout, role);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -51,12 +74,12 @@ export function WidgetDashboard() {
       const oldIndex = activeWidgets.indexOf(active.id as string);
       const newIndex = activeWidgets.indexOf(over.id as string);
       const newLayout = arrayMove(activeWidgets, oldIndex, newIndex);
-      setWidgetLayout(newLayout);
+      persist(newLayout);
     }
   };
 
   const handleRemoveWidget = (id: string) => {
-    setWidgetLayout(activeWidgets.filter((w) => w !== id));
+    persist(activeWidgets.filter((w: string) => w !== id));
   };
 
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
@@ -174,7 +197,7 @@ export function WidgetDashboard() {
           </SortableContext>
         </DndContext>
 
-        {isEditMode && activeWidgets.length < Object.keys(WIDGET_REGISTRY).length && (
+        {isEditMode && activeWidgets.length < widgetsForRole(role).length && (
           <button
             onClick={() => setIsAddWidgetOpen(true)}
             className="w-full py-4 rounded-3xl border-2 border-dashed border-border text-muted-foreground font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral transition-colors"

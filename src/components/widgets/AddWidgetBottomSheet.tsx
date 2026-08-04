@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '@/lib/useStore';
-import { WIDGET_REGISTRY } from '@/lib/widgets';
+import { WIDGET_REGISTRY, isWidgetAllowedForRole, widgetsForRole } from '@/lib/widgets';
 import { X, PlusCircle } from 'lucide-react';
 
 interface AddWidgetBottomSheetProps {
@@ -10,20 +10,28 @@ interface AddWidgetBottomSheetProps {
 
 export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetProps) {
   const { state, setWidgetLayout } = useStore();
-  const { widgetLayout } = state;
+  const role = state.profile.role;
+  const storedLayout = role === 'soldier' ? state.soldierWidgetLayout : state.widgetLayout;
 
   if (!isOpen) return null;
 
-  const allWidgetIds = Object.keys(WIDGET_REGISTRY);
-  const availableWidgets = allWidgetIds.filter((id) => !widgetLayout.includes(id));
+  /**
+   * Only widgets this role may use, and only ones not already placed.
+   *
+   * Filtering against the ROLE-CORRECT stored layout matters: appending to the
+   * wrong list would silently move a widget onto the other person's home screen.
+   * Ids that are unknown or not for this role are dropped on write rather than
+   * carried forward, so a stale layout heals instead of accumulating.
+   */
+  const current = (storedLayout ?? []).filter(
+    (id: string) => WIDGET_REGISTRY[id] && isWidgetAllowedForRole(id, role),
+  );
+  const availableWidgets = widgetsForRole(role)
+    .map((widget) => widget.id)
+    .filter((id) => !current.includes(id));
 
   const handleAddWidget = (id: string) => {
-    // Only allow max 6 by default? The prompt says "기본 상태에서 최대 6개까지만 노출하고, 나머지는 사용자가 직접 추가하도록" 
-    // This implies the default layout has 4, and the user CAN add more. Wait, does it mean they can only have 6 total? 
-    // "최대 6개까지만 노출하고, 나머지는 사용자가 직접 추가하도록" -> Maybe means default layout is max 6, user can add more.
-    // Let's just append it.
-    const newLayout = [...widgetLayout, id];
-    setWidgetLayout(newLayout);
+    setWidgetLayout([...current, id], role);
     onClose();
   };
 

@@ -8,6 +8,7 @@ import {
   CoupleEvent,
   Attachment,
 } from '@/types';
+import { DEFAULT_LAYOUT_BY_ROLE } from '@/lib/widgets';
 import {
   authRepository,
   supabase,
@@ -221,7 +222,8 @@ const DEFAULT_STATE: AppState = {
   records: [],
   events: [],
   trips: [],
-  widgetLayout: ['today_briefing', 'today_word', 'dday'],
+  widgetLayout: DEFAULT_LAYOUT_BY_ROLE.gomsin,
+  soldierWidgetLayout: DEFAULT_LAYOUT_BY_ROLE.soldier,
   hasSeenInstallPrompt: false,
   theme: 'light',
 };
@@ -230,9 +232,15 @@ const DEFAULT_STATE: AppState = {
  * Preferences that belong to the device rather than to the signed-in account.
  * These survive sign-out and account switches; everything else must not.
  */
-function carryOverDevicePrefs(prev: AppState): Pick<AppState, 'widgetLayout' | 'hasSeenInstallPrompt' | 'theme'> {
+function carryOverDevicePrefs(
+  prev: AppState,
+): Pick<AppState, 'widgetLayout' | 'soldierWidgetLayout' | 'hasSeenInstallPrompt' | 'theme'> {
   return {
     widgetLayout: prev.widgetLayout,
+    // Kept per role: the two people use one app on two devices with opposite
+    // home screens, and a single shared list meant whoever edited last
+    // overwrote the other's arrangement on role change.
+    soldierWidgetLayout: prev.soldierWidgetLayout,
     hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
     theme: prev.theme || 'light',
   };
@@ -752,6 +760,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             && stored.widgetLayout.every((item) => typeof item === 'string')
             ? stored.widgetLayout
             : DEFAULT_STATE.widgetLayout,
+          soldierWidgetLayout: Array.isArray(stored.soldierWidgetLayout)
+            && stored.soldierWidgetLayout.every((item: unknown) => typeof item === 'string')
+            ? stored.soldierWidgetLayout
+            : DEFAULT_STATE.soldierWidgetLayout,
           hasSeenInstallPrompt: typeof stored.hasSeenInstallPrompt === 'boolean'
             ? stored.hasSeenInstallPrompt
             : DEFAULT_STATE.hasSeenInstallPrompt,
@@ -2872,8 +2884,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, authenticatedUser: user }));
   };
 
-  const setWidgetLayout = (layout: string[]) => {
-    updateStateImmediately((prev) => ({ ...prev, widgetLayout: layout }));
+  const setWidgetLayout = (layout: string[], role: Role = 'gomsin') => {
+    updateStateImmediately((prev) => (role === 'soldier'
+      ? { ...prev, soldierWidgetLayout: layout }
+      : { ...prev, widgetLayout: layout }));
   };
 
   const setHasSeenInstallPrompt = (seen: boolean) => {

@@ -487,6 +487,9 @@ export function OnboardingPage() {
     const contact = { weekdayStart, weekdayEnd, weekendStart, weekendEnd, enabled: true };
 
     setIsFinishing(true);
+    // Set when the shared anniversary row could not be written, so the success
+    // path can tell the truth instead of implying the partner will see it.
+    let anniversaryNotSaved = false;
     try {
       // Persist to the server FIRST. Previously the client marked onboarding as
       // complete even when the write failed, so the next login sent the user
@@ -534,6 +537,12 @@ export function OnboardingPage() {
           if (!isCurrentIdentity(identity)) return;
           if (!anniversarySaved) {
             console.error('[Onboarding] Anniversary save failed.');
+            // The anniversary lives on the SHARED `couples` row, so a failure here
+            // means the partner will never see it -- while the local mirror below
+            // would still show it to this user. Staying silent made the app report
+            // a success it had not achieved. Onboarding is not aborted (the date is
+            // editable from settings), but the user is told the truth.
+            anniversaryNotSaved = true;
           }
         }
       }
@@ -560,6 +569,11 @@ export function OnboardingPage() {
       });
 
       if (!isCurrentIdentity(identity)) return;
+      if (anniversaryNotSaved) {
+        toast.warning(
+          '기념일을 두 사람의 공간에 저장하지 못했어요. 설정에서 다시 입력해 주세요.',
+        );
+      }
       setSetupComplete(true);
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;

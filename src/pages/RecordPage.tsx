@@ -979,13 +979,13 @@ export function RecordPage() {
                       setEditText(selectedRecord.log || '');
                       setIsEditing(true);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted text-foreground font-bold text-xs active:scale-95 transition"
+                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-xs active:scale-95 transition"
                   >
                     <Pencil size={13} /> 수정
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-destructive/10 text-destructive font-bold text-xs active:scale-95 transition"
+                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-xs active:scale-95 transition"
                   >
                     <Trash2 size={13} /> 삭제
                   </button>

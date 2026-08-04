@@ -231,13 +231,36 @@ describe('consumeCoupleInvitation with supabase configured', () => {
   });
 
   it('still reports a genuine network failure as a connection problem', async () => {
-    // A true offline classification is allowed to mention the connection.
+    // A true offline classification is allowed to mention the connection -- but
+    // only a CONFIRMED one. This used to pass on a `TypeError: Failed to fetch`
+    // alone, with the browser reporting online, which is exactly the false
+    // diagnosis the product owner hit; see serverErrors.test.ts.
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      mockRpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+      const result = await consumeOnline('123456');
+
+      expect(result.coupleId).toBeUndefined();
+      expect(result.error).toContain('인터넷 연결');
+    } finally {
+      onLine.mockRestore();
+    }
+  });
+
+  it('does not blame the connection for a transport failure while nominally online', async () => {
+    // PRIORITY 1. Same thrown error, browser reporting online: a CSP connect-src
+    // refusal, a CORS rejection and a wrong Supabase URL all arrive this way.
+    expect(navigator.onLine).toBe(true);
     mockRpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
     const result = await consumeOnline('123456');
 
     expect(result.coupleId).toBeUndefined();
-    expect(result.error).toContain('인터넷 연결');
+    expect(result.error).not.toContain('인터넷 연결');
+    expect(result.error).not.toContain('오프라인');
+    expect(result.error).toContain('서버에 요청이 닿지 않았어요');
+    expect(result.reason).toBe('unreachable');
   });
 
   /**

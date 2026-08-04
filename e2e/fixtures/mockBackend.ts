@@ -39,6 +39,16 @@ export type Scenario = {
   failures?: Partial<Record<string, { status: number; code: string; message: string }>>;
   invitationActive?: boolean;
   invitationExpiresAt?: string | null;
+  /**
+   * No `profiles` row yet, i.e. a genuinely new account.
+   *
+   * `fetchFullStateResultFromDB` treats a SUCCESSFUL EMPTY profile lookup as the
+   * only proof of a new account (a failed lookup must never become onboarding),
+   * so this is the one switch that puts the app into the onboarding wizard.
+   */
+  newAccount?: boolean;
+  /** Server verdict for `create_couple_and_invitation`. */
+  createCoupleId?: string;
 };
 
 /**
@@ -235,6 +245,13 @@ export async function installMockBackend(
     if (path === '/rest/v1/profiles') {
       const failure = failureFor(scenario, 'profiles');
       if (failure) return json(route, failure, failure.status);
+      // A brand-new account: the row does not exist yet. Writes still succeed, so
+      // the wizard can complete.
+      if (scenario.newAccount && method === 'GET') return rows(route, []);
+      if (method !== 'GET') {
+        const body = request.postDataJSON();
+        return rows(route, Array.isArray(body) ? body : [body]);
+      }
       return rows(route, [
         {
           id: scenario.userId,
@@ -296,7 +313,21 @@ export async function installMockBackend(
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);
     if (path === '/rest/v1/trip_items' || path === '/rest/v1/trip_checklists') {
-      return rows(route, []);
+      const failure = failureFor(scenario, path.replace('/rest/v1/', ''));
+      if (failure) return json(route, failure, failure.status);
+      if (method === 'GET') return rows(route, []);
+      if (method === 'DELETE') return rows(route, [{ id: 'deleted' }]);
+      // Inserts/updates use `.select().single()`, so the row has to come back or
+      // the app correctly reports a failure. Echoing the payload with a
+      // server-assigned id is what PostgREST actually does.
+      const body = request.postDataJSON();
+      const payload = Array.isArray(body) ? body[0] : body;
+      return rows(route, [{
+        id: `srv-${Math.abs(JSON.stringify(payload).length)}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        ...payload,
+      }]);
     }
     if (path === '/rest/v1/cycle_settings' || path === '/rest/v1/cycle_entries') {
       return rows(route, []);
@@ -360,7 +391,17 @@ export async function installMockBackend(
     if (path === '/rest/v1/rpc/create_couple_and_invitation') {
       const failure = failureFor(scenario, 'create_couple_and_invitation');
       if (failure) return json(route, failure, failure.status);
-      return json(route, 'couple-created-by-e2e');
+      return json(route, scenario.createCoupleId ?? 'couple-created-by-e2e');
+    }
+
+    if (path === '/rest/v1/contact_preferences' && method !== 'GET') {
+      const body = request.postDataJSON();
+      return rows(route, Array.isArray(body) ? body : [body]);
+    }
+
+    if (path === '/rest/v1/couples' && method !== 'GET') {
+      const body = request.postDataJSON();
+      return rows(route, Array.isArray(body) ? body : [body]);
     }
 
     if (path === '/rest/v1/rpc/regenerate_invitation') {

@@ -59,7 +59,17 @@ public class NativeConfigTest {
         }
         java.util.Collections.sort(declared);
 
+        // Sorted, and an EXACT set: a new permission must be added here
+        // deliberately, which is the whole point of the assertion.
+        //
+        // ACCESS_NETWORK_STATE was added to the manifest so that
+        // `navigator.onLine` is not permanently false inside the WebView -- without
+        // it the composer disabled saving and told the user their internet was
+        // down. Its TypeScript twin (src/lib/nativeConfig.test.ts) was updated at
+        // the time; this JVM copy was not, and no workflow ran for this branch
+        // family to catch the drift.
         List<String> expected = Arrays.asList(
+            "android.permission.ACCESS_NETWORK_STATE",
             "android.permission.INTERNET",
             "android.permission.MODIFY_AUDIO_SETTINGS",
             "android.permission.RECORD_AUDIO"

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Loader2, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 
 /**
@@ -21,15 +22,27 @@ export function SharedSyncBanner() {
   if (!hasSharedWorkspace || sharedSyncStatus === 'live') return null;
 
   const unavailable = sharedSyncStatus === 'unavailable';
+  /**
+   * The `unavailable` copy is reached on a cold load whenever the realtime socket
+   * cannot connect, and the authoritative re-check settles in about two seconds.
+   * "확인할 수 없어" read as a permanent verdict for a state that is usually
+   * transient and self-healing, so it now says what is actually true: not
+   * confirmed YET, hidden until it is.
+   */
   const message = unavailable
-    ? '공유 정보를 확인할 수 없어 잠시 숨겼어요.'
+    ? '공유 정보를 아직 확인하지 못해 잠시 숨겨 뒀어요. 확인되면 다시 보여드려요.'
     : '실시간 연결이 끊겨 최신 정보가 아닐 수 있어요.';
 
   const retry = async () => {
     if (retrying) return;
     setRetrying(true);
     try {
-      await retrySharedAccess();
+      // This is the only affordance for a frozen workspace, and it used to be
+      // silent whenever the re-check changed nothing -- indistinguishable from a
+      // dead button. Say which of the two happened.
+      const recovered = await retrySharedAccess();
+      if (recovered) toast.success('공유 정보를 다시 확인했어요.');
+      else toast.error('아직 공유 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
       setRetrying(false);
     }

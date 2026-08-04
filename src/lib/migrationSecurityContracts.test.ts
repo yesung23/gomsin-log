@@ -180,6 +180,77 @@ describe('the PostgREST schema cache is reloaded by a migration, not by hand', (
   });
 });
 
+/**
+ * DEF-11. `002_fix_rls_and_rpc.sql` and `002_fix_rls_recursion.sql` share a
+ * prefix, so their relative order is decided by the rest of the filename.
+ *
+ * Neither file can be renamed: both are already applied remotely, and a rename
+ * would desynchronise the migration history from the database. What CAN be done
+ * is to pin the ambiguity so it cannot grow, and to state the consequence for a
+ * FRESH project, which is real -- lexicographic order puts `_and_rpc` first, and
+ * `_recursion` then re-creates policies `_and_rpc` has already created, without
+ * `DROP POLICY IF EXISTS`, so a clean apply of 002 in that order fails.
+ */
+describe('duplicate migration prefixes cannot grow', () => {
+  const prefixes = files.map((file) => /^(\d+)_/.exec(file)?.[1] ?? file);
+
+  /** The one acknowledged collision, with the reason it cannot be renamed. */
+  const ACKNOWLEDGED_DUPLICATE = {
+    prefix: '002',
+    files: ['002_fix_rls_and_rpc.sql', '002_fix_rls_recursion.sql'],
+    reason:
+      'Both are applied remotely, so renaming either would desynchronise the '
+      + 'migration history from the database. The effective order is lexicographic '
+      + '(_and_rpc before _recursion) and the conflict it causes on a FRESH apply is '
+      + 'documented in supabase/migrations/README.md.',
+  };
+
+  it('has exactly one duplicated prefix, and it is the acknowledged one', () => {
+    const seen = new Map<string, string[]>();
+    files.forEach((file, index) => {
+      const prefix = prefixes[index];
+      seen.set(prefix, [...(seen.get(prefix) ?? []), file]);
+    });
+    const duplicates = [...seen.entries()].filter(([, group]) => group.length > 1);
+
+    expect(duplicates.length).toBe(1);
+    expect(duplicates[0][0]).toBe(ACKNOWLEDGED_DUPLICATE.prefix);
+    expect(duplicates[0][1]).toEqual(ACKNOWLEDGED_DUPLICATE.files);
+    expect(ACKNOWLEDGED_DUPLICATE.reason.length).toBeGreaterThan(80);
+  });
+
+  it('the README documents the effective order and the fresh-apply hazard', () => {
+    const readme = readFileSync(resolve(MIGRATIONS_DIR, 'README.md'), 'utf8');
+    expect(readme).toContain('002_fix_rls_and_rpc.sql');
+    expect(readme).toContain('002_fix_rls_recursion.sql');
+    // The specific hazard, not merely the fact that a duplicate exists.
+    expect(readme).toContain('DROP POLICY IF EXISTS');
+    expect(readme).toContain('신규 프로젝트');
+  });
+
+  it('the hazard is real: _recursion creates policies _and_rpc already created', () => {
+    // Asserted rather than assumed, so the README claim above cannot rot.
+    const andRpc = sqlByFile.get('002_fix_rls_and_rpc.sql')!;
+    const recursion = sqlByFile.get('002_fix_rls_recursion.sql')!;
+    const created = (sql: string) =>
+      [...sql.matchAll(/CREATE POLICY\s+"([^"]+)"/g)].map((match) => match[1]);
+    const dropped = (sql: string) =>
+      [...sql.matchAll(/DROP POLICY IF EXISTS\s+"([^"]+)"/g)].map((match) => match[1]);
+
+    const collisions = created(recursion)
+      .filter((policy) => created(andRpc).includes(policy))
+      .filter((policy) => !dropped(recursion).includes(policy));
+
+    expect(collisions).toContain('Users can create couples');
+  });
+
+  it('every migration from 017 onward keeps its prefix unique', () => {
+    const modern = files.filter((file) => (/^(\d+)_/.exec(file)?.[1] ?? '') >= '017');
+    const modernPrefixes = modern.map((file) => /^(\d+)_/.exec(file)![1]);
+    expect(new Set(modernPrefixes).size).toBe(modern.length);
+  });
+});
+
 describe('the RPC return shape matches the hand-written client parser', () => {
   const state = latestDefinition.get('public.get_my_couple_state()');
 

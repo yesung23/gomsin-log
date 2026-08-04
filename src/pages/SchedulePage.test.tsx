@@ -179,8 +179,18 @@ describe('SchedulePage write integrity', () => {
     render(<SchedulePage />);
     expect(await screen.findByText('공유·개인 일정')).toBeInTheDocument();
 
+    // FLAKE FIX. This used to click as soon as the header existed, but the header
+    // renders immediately while the 일정 추가 button stays
+    // `disabled={... || loadState !== 'ready' || ...}` until the first events load
+    // settles. Usually that microtask won landing before the click; roughly 1 run
+    // in 6 it did not, and the modal never opened -- surfacing as the misleading
+    // "Unable to find a label with the text of: /일정 제목/".
+    //
+    // Synchronise on the condition that actually gates the click, exactly as
+    // `openCreateModal()` above already does. The assertions below are unchanged.
+    await waitFor(() => expect(addEventButton()).toBeEnabled());
     fireEvent.click(addEventButton());
-    fireEvent.change(screen.getByLabelText(/일정 제목/), { target: { value: '거절되는 일정' } });
+    fireEvent.change(await screen.findByLabelText(/일정 제목/), { target: { value: '거절되는 일정' } });
     await act(async () => {
       fireEvent.click(screen.getByText('등록하기'));
     });

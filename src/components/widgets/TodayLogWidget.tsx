@@ -358,18 +358,27 @@ export function TodayLogWidget() {
 
     setLog('');
     setReaction(undefined);
-    setPendingFiles([]);
     setConfirmedItemIds([]);
     setIsPrivate(false);
-    setShowInputCard(false);
 
     if (result.failedFiles.length > 0) {
       // Be explicit: the text was saved, the files were not.
+      //
+      // The failed files are KEPT in the composer and it stays open. Clearing
+      // them here used to destroy the only copy of a voice memo: the recording is
+      // synthesised into an in-memory File (see `stopRecording`) and exists
+      // nowhere on disk, so "다시 첨부해 주세요" was an instruction the user could
+      // not follow. Photos were merely annoying to re-pick; audio was gone.
+      const failed = new Set(result.failedFiles);
+      setPendingFiles((current) => current.filter((file) => failed.has(file.name)));
       toast.warning(
-        `기록은 저장했지만 첨부 ${result.failedFiles.length}개를 올리지 못했어요. 잠시 후 다시 첨부해 주세요.`,
+        `기록은 저장했지만 첨부 ${result.failedFiles.length}개를 올리지 못했어요. 아래에 그대로 두었으니 다시 시도해 주세요.`,
       );
       return;
     }
+
+    setPendingFiles([]);
+    setShowInputCard(false);
     toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
   };
 

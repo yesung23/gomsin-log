@@ -173,6 +173,79 @@ describe('composer attachment handling', () => {
   });
 
   /**
+   * The text saves, an attachment does not. The composer used to clear
+   * `pendingFiles` BEFORE showing "잠시 후 다시 첨부해 주세요", so the files the
+   * user was being asked to retry with had already been discarded.
+   *
+   * For a photo that was merely annoying. For a voice memo it was unrecoverable:
+   * the recording is synthesised into an in-memory `File` and exists nowhere on
+   * disk, so there was no "다시 첨부" the user could actually perform.
+   */
+  it('keeps a failed attachment in the composer instead of destroying it', async () => {
+    addRecordWithMedia.mockResolvedValueOnce({ ok: true, failedFiles: ['목소리.webm'] });
+    const user = userEvent.setup();
+    renderIn(<WidgetDashboard />);
+
+    await user.click(screen.getByText('한줄'));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [
+      new File(['x'], '목소리.webm', { type: 'audio/webm' }),
+      new File(['x'], 'sunset.png', { type: 'image/png' }),
+    ]);
+    expect(await screen.findByText('목소리.webm')).toBeInTheDocument();
+
+    await user.click(screen.getByText('저장'));
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
+
+    // The one that failed is still attached and still retryable...
+    expect(await screen.findByText('목소리.webm')).toBeInTheDocument();
+    // ...and the one that succeeded is not offered again, so a retry cannot
+    // silently duplicate it.
+    await waitFor(() => expect(screen.queryByText('sunset.png')).not.toBeInTheDocument());
+  });
+
+  it('clears the composer completely when every attachment succeeded', async () => {
+    addRecordWithMedia.mockResolvedValueOnce({ ok: true, failedFiles: [] });
+    const user = userEvent.setup();
+    renderIn(<WidgetDashboard />);
+
+    await user.click(screen.getByText('한줄'));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'sunset.png', { type: 'image/png' }));
+    expect(await screen.findByText('sunset.png')).toBeInTheDocument();
+
+    await user.click(screen.getByText('저장'));
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText('sunset.png')).not.toBeInTheDocument());
+  });
+
+  /**
+   * A failed save must never clear the draft either -- that is the other half of
+   * the same promise, and it is the path an offline or RLS failure takes.
+   */
+  it('keeps both the text and the attachment when the save itself fails', async () => {
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: false,
+      failedFiles: ['sunset.png'],
+      error: '권한이 없어요. 커플 공간 연결 상태를 확인해 주세요.',
+    } as never);
+    const user = userEvent.setup();
+    renderIn(<WidgetDashboard />);
+
+    await user.click(screen.getByText('한줄'));
+    const textarea = screen.getByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    await user.type(textarea, '오늘도 보고 싶어');
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'sunset.png', { type: 'image/png' }));
+
+    await user.click(screen.getByText('저장'));
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
+
+    expect(screen.getByDisplayValue('오늘도 보고 싶어')).toBeInTheDocument();
+    expect(screen.getByText('sunset.png')).toBeInTheDocument();
+  });
+
+  /**
    * DEF-14. The validation was always correct -- nothing was ever saved and the
    * toast was honest -- but the button stayed enabled for whitespace-only text,
    * so the affordance promised a save that could not happen.

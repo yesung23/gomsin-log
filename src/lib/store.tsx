@@ -265,6 +265,13 @@ function recordFailureMessage(reason: RecordMutationReason): string {
       return '커플 공간을 만든 뒤에 기록을 남길 수 있어요.';
     case 'workspace_unresolved':
       return '지금 커플 공간을 확인할 수 없어요. 잠시 후 다시 시도해 주세요.';
+    case 'workspace_unconfigured':
+      // PRIORITY 1. The membership RPC is not deployed, so no amount of retrying
+      // changes the answer and the couple space is probably fine. Naming the
+      // server setup is the only honest and actionable thing to say -- the
+      // alternatives on this path were a transient-retry message and, worse, a
+      // connection diagnosis for a device that was online.
+      return '서버 설정이 아직 끝나지 않아 커플 공간을 확인할 수 없어요. 관리자에게 문의해 주세요.';
     case 'deletion_pending':
       return '탈퇴 처리가 진행 중이어서 기록을 저장할 수 없어요.';
     default:
@@ -1763,6 +1770,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       if (result.reason === 'offline') {
         return { reason: 'offline', error: recordFailureMessage('offline') };
+      }
+      // An undeployed membership RPC is a server-configuration state, not a
+      // transient one, and definitely not a connection one.
+      if (result.schemaGap) {
+        return {
+          reason: 'workspace_unconfigured',
+          error: recordFailureMessage('workspace_unconfigured'),
+        };
       }
       return {
         reason: 'workspace_unresolved',

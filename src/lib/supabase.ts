@@ -446,7 +446,17 @@ export async function regenerateCoupleInvitation(): Promise<{ code?: string; err
  * call that tells a recovering client what workspace it is looking at.
  */
 export async function fetchMyCoupleState(): Promise<
-  { ok: true; state: RemoteCoupleState | null } | { ok: false; reason: ServerErrorKind }
+  { ok: true; state: RemoteCoupleState | null }
+  /**
+   * `schemaGap` marks the one failure a retry can never fix: the RPC is not in
+   * the PostgREST schema cache, so migration 016 is unapplied (or applied without
+   * a reload). Without this flag it arrives as an ordinary `server` reason and the
+   * user is told to try again shortly, which for an unapplied migration is a lie
+   * about retryability -- and the record-save path resolves membership through
+   * this exact RPC, so it is the difference between "the server needs a deploy"
+   * and an unexplained save failure.
+   */
+  | { ok: false; reason: ServerErrorKind; schemaGap?: boolean }
 > {
   if (!supabase) return { ok: true, state: null };
   try {
@@ -459,7 +469,7 @@ export async function fetchMyCoupleState(): Promise<
       // which deploy step is missing instead of "failed".
       if (isSchemaCacheMiss(error)) {
         console.error(schemaCacheMissLog('get_my_couple_state', '016'));
-        return { ok: false, reason: classifyServerError(error).kind };
+        return { ok: false, reason: classifyServerError(error).kind, schemaGap: true };
       }
       console.error('[gomsinlog] get_my_couple_state failed:', error);
       return { ok: false, reason: classifyServerError(error).kind };

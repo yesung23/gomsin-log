@@ -45,6 +45,12 @@ export type RecordMutationReason =
   | 'no_workspace'
   /** Membership could not be resolved, so the write was not attempted. */
   | 'workspace_unresolved'
+  /**
+   * Membership could not be resolved because the RPC that answers it is not
+   * deployed. Distinct from `workspace_unresolved` because a retry cannot fix it
+   * and the user is not the one who can.
+   */
+  | 'workspace_unconfigured'
   /** A deletion is pending for this account. */
   | 'deletion_pending';
 

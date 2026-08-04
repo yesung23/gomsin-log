@@ -93,7 +93,12 @@ describe('the three call sites that used to swallow PGRST202', () => {
 
     // Fail-closed behaviour is preserved: an unanswered question must never be
     // rendered as "you have no couple space".
-    expect(result).toEqual({ ok: false, reason: 'server' });
+    //
+    // `schemaGap` was added for PRIORITY 1: the record-save path resolves
+    // membership through this RPC, and an unapplied migration was surfaced there
+    // as "잠시 후 다시 시도해 주세요" -- a lie about retryability. The flag lets the
+    // save path say the server needs a deploy instead. `reason` is unchanged.
+    expect(result).toEqual({ ok: false, reason: 'server', schemaGap: true });
     expect(errors.some((line) => line.includes('PGRST202') && line.includes('016'))).toBe(true);
     expect(errors.some((line) => line.includes('reload'))).toBe(true);
   });

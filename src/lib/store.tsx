@@ -1911,10 +1911,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const attachments: Attachment[] = [...(newRecord.attachments || [])];
     const uploadedPaths: string[] = [];
     const failedFiles: string[] = [];
+
+    /**
+     * Abandon the upload loop, reclaiming what it already uploaded.
+     *
+     * Inside the loop the attachment patch has definitively NOT run yet, so no row
+     * references these objects and deleting them cannot break anything. Bailing out
+     * without this left them in Storage forever: the client only learns an object's
+     * path from local state, and the Storage DELETE policy needs an owned
+     * `daily_records` row in the ACTIVE couple, so once the workspace moved on
+     * nothing client-side could ever reach them again.
+     *
+     * Best-effort by necessity -- if the couple genuinely changed, that same policy
+     * will refuse this delete too, and only `delete-account` or an operator can
+     * reclaim them. It still recovers the common case, where "stale" is a local
+     * generation bump rather than a real membership change.
+     */
+    const abandonUploads = async (): Promise<typeof staleResult> => {
+      if (uploadedPaths.length > 0) {
+        try {
+          await removeRecordMedia(uploadedPaths);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+      return staleResult;
+    };
+
     for (const file of files) {
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
       const result = await uploadRecordMedia(file, workspace.coupleId, recordId);
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
       if ('error' in result) {
         failedFiles.push(file.name);
         console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
@@ -1932,6 +1959,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           workspace.coupleId,
           workspace.userId,
         );
+        // Deliberately NOT reclaiming uploads here: the patch has already been
+        // issued, so whether the row now references these objects is unknown.
+        // Deleting them could strip a successfully patched record's attachments,
+        // which is worse than leaving objects an operator can sweep.
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (!patched.ok) {
           try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }

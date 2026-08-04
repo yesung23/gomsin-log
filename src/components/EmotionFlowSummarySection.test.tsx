@@ -56,6 +56,32 @@ describe('EmotionFlowSummarySection states', () => {
     expect(section).toHaveAttribute('aria-busy', 'true');
   });
 
+  /**
+   * PRIORITY 2. The unconfirmed state is the one the user actually meets: on a
+   * cold load the shared workspace is quarantined for ~2s and the records are
+   * hidden, so `records` arrives EMPTY. Rendered as the empty state that reads
+   * "아직 오늘의 마음이 없어요", the section asserted a false negative about the
+   * user's own data -- and contradicted the banner directly above it, which was
+   * correctly saying the shared info was hidden. Observed in a real browser as the
+   * `healthy` arm of `scratch/p2-states.mjs`.
+   */
+  it('does not claim there are no emotions while the period is not yet confirmed', () => {
+    render(<EmotionFlowSummarySection records={[]} periodLabel="2026년 2월" isLoading />);
+    const section = screen.getByTestId('emotion-flow-summary');
+    expect(section).toHaveAttribute('data-state', 'loading');
+    expect(section.textContent).not.toContain('아직 오늘의 마음이 없어요');
+    // It must say the period is still being confirmed, not that it is empty.
+    expect(section.textContent).toContain('확인');
+  });
+
+  it('prefers the not-yet-confirmed state over an empty verdict, even with records', () => {
+    // `isLoading` outranks a records array, because a partial array during
+    // quarantine would produce a summary of the wrong period.
+    const records = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어요')])];
+    render(<EmotionFlowSummarySection records={records} periodLabel="2026년 2월" isLoading />);
+    expect(screen.getByTestId('emotion-flow-summary')).toHaveAttribute('data-state', 'loading');
+  });
+
   it('shows an error state with a retry when one is supplied', () => {
     let retried = 0;
     render(

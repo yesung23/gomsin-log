@@ -31,7 +31,15 @@ interface EmotionFlowSummarySectionProps {
   records: DailyRecord[];
   /** Human-readable period label, e.g. `2026년 2월`. */
   periodLabel: string;
-  /** True while the period's records are still loading. */
+  /**
+   * True while the period's records are not yet confirmed -- still loading, or
+   * hidden because the shared workspace has not been verified.
+   *
+   * It OUTRANKS `records`, because an empty or partial array in that state means
+   * "not known yet", and rendering it as either an empty period or a summary of
+   * whatever happened to arrive would both be false statements about the user's
+   * own data.
+   */
   isLoading?: boolean;
   /** Non-null when the period's records could not be read. */
   error?: string | null;
@@ -90,7 +98,14 @@ export function EmotionFlowSummarySection({
         className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
       >
         <p className="text-xs font-semibold text-muted-foreground">기간 마음 흐름</p>
-        <p className="text-xs text-muted-foreground mt-2">마음 흐름을 불러오고 있어요...</p>
+        {/*
+          Says the period is not confirmed YET. The empty state's
+          "아직 오늘의 마음이 없어요" is a verdict about the user's data, and while
+          the workspace is hidden that verdict is not ours to make.
+        */}
+        <p className="text-xs text-muted-foreground mt-2">
+          기록을 확인하는 중이에요. 확인되면 마음 흐름을 보여드려요.
+        </p>
       </section>
     );
   }

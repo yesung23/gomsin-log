@@ -90,6 +90,7 @@ export function RecordPage() {
     updateRecord,
     deleteRecord,
     updateRecordMedia,
+    sharedSyncStatus,
   } = useStore();
   const isOnline = useOnlineStatus();
   const isOffline = !isOnline;
@@ -561,6 +562,12 @@ export function RecordPage() {
         <EmotionFlowSummarySection
           records={periodSummaryRecords}
           periodLabel={periodSummaryLabel}
+          // `unavailable` means the shared workspace is hidden pending an
+          // authoritative membership re-check, so `periodSummaryRecords` is empty
+          // for a reason that is NOT "no emotions". Reporting an empty period here
+          // contradicted the SharedSyncBanner immediately above. `delayed` is
+          // different: the data on screen is real, only possibly stale.
+          isLoading={sharedSyncStatus === 'unavailable'}
           className="mb-3"
         />
 

@@ -142,24 +142,77 @@ describe('Android: identity, label and store metadata', () => {
  * nothing else would have caught it. Cheap guard, real bug.
  */
 describe('the Android manifests are well-formed XML', () => {
-  const MANIFESTS = [
-    'android/app/src/main/AndroidManifest.xml',
+  /**
+   * Manifests that are COMMITTED, and are therefore the ones a reviewer reads and
+   * the ones this branch can actually break. The `--` bug this guard exists for
+   * was introduced here, in the ACCESS_NETWORK_STATE rationale.
+   */
+  const TRACKED_MANIFESTS = ['android/app/src/main/AndroidManifest.xml'];
+
+  /**
+   * Manifests `cap sync` GENERATES. They are `.gitignore`-d (android/.gitignore
+   * "capacitor-cordova-android-plugins"), so they do not exist in a clean
+   * checkout -- which is exactly the state `npm test` runs in, both locally and
+   * in CI's web-validation job, where `npm run test` precedes `npx cap sync`.
+   *
+   * Asserting on them unconditionally made the suite depend on accidental
+   * environment state: green on a machine that had run `cap sync`, red on a
+   * fresh clone. Their post-sync content is covered by the
+   * `capacitor-reproducibility` CI job, which syncs first.
+   *
+   * They are still checked HERE when present, and their absence is asserted to
+   * be the deliberate ignore rule rather than an unexplained gap -- so this
+   * block always makes a real assertion and can never silently pass.
+   */
+  const GENERATED_MANIFESTS = [
     'android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml',
   ];
 
-  for (const path of MANIFESTS) {
+  function assertWellFormed(path: string): void {
+    const parsed = new DOMParser().parseFromString(read(path), 'application/xml');
+    const failure = parsed.getElementsByTagName('parsererror')[0];
+    expect(failure?.textContent ?? null, path).toBeNull();
+    expect(parsed.documentElement.tagName).toBe('manifest');
+  }
+
+  function assertNoDoubleHyphenInComment(path: string): void {
+    // Asserted directly as well: some parsers are lenient about it.
+    for (const comment of read(path).match(/<!--[\s\S]*?-->/g) ?? []) {
+      expect(comment.slice(4, -3), path).not.toContain('--');
+    }
+  }
+
+  it('the tracked manifest list is not empty (soundness)', () => {
+    // Without this, a refactor that emptied the list would make every assertion
+    // below vacuous while the suite still reported success.
+    expect(TRACKED_MANIFESTS).toContain('android/app/src/main/AndroidManifest.xml');
+    for (const path of TRACKED_MANIFESTS) expect(existsSync(join(repoRoot, path)), path).toBe(true);
+  });
+
+  for (const path of TRACKED_MANIFESTS) {
     it(`${path} parses`, () => {
-      const parsed = new DOMParser().parseFromString(read(path), 'application/xml');
-      const failure = parsed.getElementsByTagName('parsererror')[0];
-      expect(failure?.textContent ?? null, path).toBeNull();
-      expect(parsed.documentElement.tagName).toBe('manifest');
+      assertWellFormed(path);
     });
 
     it(`${path} has no '--' inside a comment`, () => {
-      // Asserted directly as well: some parsers are lenient about it.
-      for (const comment of read(path).match(/<!--[\s\S]*?-->/g) ?? []) {
-        expect(comment.slice(4, -3), path).not.toContain('--');
+      assertNoDoubleHyphenInComment(path);
+    });
+  }
+
+  for (const path of GENERATED_MANIFESTS) {
+    it(`${path} is either absent by ignore rule, or well-formed`, () => {
+      if (!existsSync(join(repoRoot, path))) {
+        // The only acceptable reason to have nothing to check: it is generated
+        // and ignored. Both halves are asserted, so a file that went missing for
+        // any OTHER reason still fails here.
+        expect(read('android/.gitignore')).toContain('capacitor-cordova-android-plugins');
+        // ...and the checkout itself is intact, so "absent" really is specific to
+        // the generated path rather than a broken cwd or a truncated clone.
+        expect(existsSync(join(repoRoot, 'android/app/src/main/AndroidManifest.xml'))).toBe(true);
+        return;
       }
+      assertWellFormed(path);
+      assertNoDoubleHyphenInComment(path);
     });
   }
 

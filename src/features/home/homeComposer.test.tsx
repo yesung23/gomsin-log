@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, EmotionFlowItem, Role } from '@/types';
+import { clearAllComposerDrafts } from '@/lib/composerDraft';
 
 const addRecordWithMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
 const setWidgetLayout = vi.fn();
@@ -71,6 +72,10 @@ function renderIn(ui: React.ReactElement) {
 describe('composer availability by role', () => {
   beforeEach(() => {
     addRecordWithMedia.mockClear();
+    // The composer now keeps an unsent draft in memory across unmounts (by
+    // design), so each test has to start from a clean stash or it inherits the
+    // previous test's text and its 저장 button state.
+    clearAllComposerDrafts();
   });
 
   it('gives 곰신 a composer on the routed home dashboard', () => {
@@ -118,6 +123,10 @@ describe('composer availability by role', () => {
 describe('composer attachment handling', () => {
   beforeEach(() => {
     addRecordWithMedia.mockClear();
+    // The composer now keeps an unsent draft in memory across unmounts (by
+    // design), so each test has to start from a clean stash or it inherits the
+    // previous test's text and its 저장 button state.
+    clearAllComposerDrafts();
     currentRole = 'gomsin';
   });
 
@@ -320,6 +329,10 @@ describe('composer emotion review (opt-out)', () => {
 
   beforeEach(() => {
     addRecordWithMedia.mockClear();
+    // The composer now keeps an unsent draft in memory across unmounts (by
+    // design), so each test has to start from a clean stash or it inherits the
+    // previous test's text and its 저장 button state.
+    clearAllComposerDrafts();
     currentRole = 'gomsin';
   });
 

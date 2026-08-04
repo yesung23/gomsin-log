@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   generateInvitationCode,
   hashInvitationCode,
@@ -174,6 +176,106 @@ describe('consumeCoupleInvitation with supabase configured', () => {
     consumeOnline = mod.consumeCoupleInvitation;
     resetForTest = mod.__resetInviteAttemptsForTest;
     resetForTest();
+  });
+
+  /**
+   * DEF-10 residual. The migration "contract" tests grep `.sql` text, and nothing
+   * asserted the ONE thing that actually breaks the redemption UI: that every
+   * `error_code` migration 015 can emit is handled by the client, rather than
+   * falling through to the generic transient-retry default.
+   *
+   * So the expected set is DERIVED FROM THE SQL and each member is driven through
+   * the real `consumeCoupleInvitation`. A migration that adds a verdict the client
+   * has never heard of now fails here instead of shipping as "잠시 후 다시 시도".
+   */
+  describe('every error_code migration 015 can emit has its own verdict', () => {
+    const GENERIC = '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+
+    /** Error codes the `redeem_invitation` body can actually produce. */
+    function errorCodesFromSql(): string[] {
+      const sql = readFileSync(
+        resolve(process.cwd(), 'supabase/migrations/015_security_followup.sql'),
+        'utf8',
+      );
+      const start = sql.indexOf('CREATE FUNCTION public.redeem_invitation');
+      expect(start).toBeGreaterThan(-1);
+      const end = sql.indexOf('COMMENT ON FUNCTION public.redeem_invitation', start);
+      expect(end).toBeGreaterThan(start);
+      const body = sql.slice(start, end);
+
+      const codes = new Set<string>();
+      // Assigned into the verdict variable...
+      for (const m of body.matchAll(/v_error_code\s*:=\s*'([a-z_]+)'/g)) codes.add(m[1]);
+      // ...returned directly in a payload...
+      for (const m of body.matchAll(/'error_code'\s*,\s*'([a-z_]+)'/g)) codes.add(m[1]);
+      // ...and the COALESCE fallback, which is a real return value.
+      for (const m of body.matchAll(/COALESCE\(v_error_code,\s*'([a-z_]+)'\)/g)) codes.add(m[1]);
+      // NULL is the success path, not an error code.
+      codes.delete('');
+      return [...codes].sort();
+    }
+
+    it('the derivation actually found the codes (the parser is doing work)', () => {
+      const codes = errorCodesFromSql();
+      // Guard soundness: a silently empty set would make the loop below vacuous.
+      expect(codes.length).toBeGreaterThanOrEqual(5);
+      expect(codes).toContain('not_authenticated');
+      expect(codes).toContain('internal_error');
+      expect(codes).toContain('invalid_or_expired');
+    });
+
+    it('no emitted code falls through to the generic retry message', async () => {
+      for (const code of errorCodesFromSql()) {
+        resetForTest();
+        mockRpc.mockResolvedValueOnce({
+          data: { ok: false, couple_id: null, error_code: code },
+          error: null,
+        });
+
+        const result = await consumeOnline('123456');
+
+        expect(result.coupleId, code).toBeUndefined();
+        expect(result.error, code).toBeTruthy();
+        expect(result.error, code).not.toBe(GENERIC);
+        // The raw code must never be shown to the user.
+        expect(result.error, code).not.toContain(code);
+      }
+    });
+
+    it('every emitted code produces a DISTINCT user-facing message', async () => {
+      // Two different server verdicts collapsing into one string is how
+      // not_authenticated and internal_error became indistinguishable (DEF-04).
+      const messages = new Map<string, string>();
+      for (const code of errorCodesFromSql()) {
+        resetForTest();
+        mockRpc.mockResolvedValueOnce({
+          data: { ok: false, couple_id: null, error_code: code },
+          error: null,
+        });
+        const result = await consumeOnline('123456');
+        messages.set(code, result.error!);
+      }
+      // `invalid_request` and `invalid_or_expired` deliberately share one message:
+      // distinguishing them would confirm whether a guessed hash exists.
+      const deliberateAliases = new Set(['invalid_request']);
+      const distinct = [...messages.entries()]
+        .filter(([code]) => !deliberateAliases.has(code))
+        .map(([, message]) => message);
+      expect(new Set(distinct).size).toBe(distinct.length);
+    });
+
+    it('an UNKNOWN code still degrades to the honest generic message', async () => {
+      // PRESERVATION: the default arm must stay, for a server ahead of this client.
+      resetForTest();
+      mockRpc.mockResolvedValueOnce({
+        data: { ok: false, couple_id: null, error_code: 'a_verdict_from_the_future' },
+        error: null,
+      });
+
+      const result = await consumeOnline('123456');
+
+      expect(result.error).toBe(GENERIC);
+    });
   });
 
   it('couple_full is no longer returned as an error code', async () => {

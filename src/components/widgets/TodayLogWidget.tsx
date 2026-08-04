@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
 import {
-  Camera, Image as ImageIcon, Send, Lock, Unlock, Check, Heart,
+  Camera, Image as ImageIcon, Send, Lock, Unlock, Heart,
   Mic, Square, X, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { toLocalDateString, localToday } from '@/lib/utils';
-import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
+import { EmotionChipEditor } from '@/components/EmotionChipEditor';
+import { useEmotionCandidatesForText } from '@/lib/useEmotionCandidates';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
 import { isNativePlatform } from '@/lib/platform';
 import {
@@ -35,7 +36,7 @@ export function TodayLogWidget() {
   const [recordSeconds, setRecordSeconds] = useState(0);
 
   // State for rule-suggested confirmed IDs
-  const [confirmedItemIds, setConfirmedItemIds] = useState<string[]>([]);
+
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
@@ -65,10 +66,15 @@ export function TodayLogWidget() {
     return () => clearTimeout(timer);
   }, [log]);
 
-  // Compute rule-based emotion suggestions dynamically from debounced log text
-  const suggestions = useMemo(() => {
-    return recommendEmotionFlow(debouncedLog, undefined, { isPrivate });
-  }, [debouncedLog, isPrivate]);
+  /**
+   * Feelings read out of the text, included by default and removable.
+   *
+   * Replaces the opt-in chip list. Nothing was recorded before unless the user
+   * tapped a chip, so the ordinary path -- write, save -- stored no feeling and
+   * the partner's flow stayed empty. Now the app commits to a reading, shows the
+   * phrase it came from, and lets the user delete or correct it.
+   */
+  const review = useEmotionCandidatesForText(debouncedLog);
 
   // The exact array that will be persisted. The preview card below reads this
   // same value, so what the user sees can never disagree with what is saved.
@@ -78,22 +84,17 @@ export function TodayLogWidget() {
   // author is sharing is explicit consent to share that tag. On a private
   // record everything stays author-only. This keeps author-only items out of
   // shared rows (see lib/privacy.ts) without silently discarding a selection.
+  /**
+   * The exact array that will be persisted. The preview card below reads this
+   * same value, so what the user sees can never disagree with what is saved.
+   *
+   * `candidatesToFlowItems` drops the `evidence` phrase, which is the single point
+   * where the display-only text taken from the diary body is stopped from reaching
+   * the database -- the same guarantee `matchedText` always had.
+   */
   const userConfirmedFlow: EmotionFlowItem[] = useMemo(
-    () =>
-      suggestions
-        .filter((s) => confirmedItemIds.includes(s.id || ''))
-        .map((s, idx) => {
-          // Defense-in-depth: never let matchedText leave the composer, even if
-          // downstream storage stripping were bypassed.
-          const { matchedText: _discard, ...safeFields } = s;
-          return {
-            ...safeFields,
-            sequence: idx + 1,
-            source: 'user_confirmed' as const,
-            visibility: isPrivate ? ('author_only' as const) : ('shared' as const),
-          };
-        }),
-    [suggestions, confirmedItemIds, isPrivate],
+    () => review.toFlowItems(isPrivate),
+    [review, isPrivate],
   );
 
   const MAX_ATTACHMENTS = 4;
@@ -287,18 +288,6 @@ export function TodayLogWidget() {
     };
   }, []);
 
-  const toggleConfirmSuggestion = (itemId: string) => {
-    if (confirmedItemIds.includes(itemId)) {
-      setConfirmedItemIds(prev => prev.filter(id => id !== itemId));
-    } else {
-      if (confirmedItemIds.length >= 3) {
-        toast.info('오늘의 마음은 세 가지까지 남길 수 있어요.');
-        return;
-      }
-      setConfirmedItemIds(prev => [...prev, itemId]);
-    }
-  };
-
   /**
    * Is there anything a save could actually persist?
    *
@@ -358,7 +347,7 @@ export function TodayLogWidget() {
 
     setLog('');
     setReaction(undefined);
-    setConfirmedItemIds([]);
+    review.reset();
     setIsPrivate(false);
 
     if (result.failedFiles.length > 0) {
@@ -523,48 +512,20 @@ export function TodayLogWidget() {
             </div>
           )}
 
-          {/* Rule-Based Emotion Flow Suggestion Card (Appears when text >= 10 chars) */}
-          {suggestions.length > 0 && (
-            <div className="p-3.5 rounded-2xl bg-coral/5 border border-coral/20 space-y-2 animate-fade-in">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-foreground flex items-center gap-1">
-                  <Heart size={13} className="text-coral fill-coral" /> 기록 속 마음을 골라볼까요?
-                </h4>
-              </div>
-              <p className="text-[11px] text-muted-foreground leading-tight">
-                글의 흐름에 맞춰 제안했어요. 원하지 않으면 누르지 않아도 괜찮아요.
-              </p>
-              {/* Be explicit about who will be able to see the chosen tags. */}
-              <p className="text-[11px] font-semibold leading-tight text-muted-foreground">
-                {isPrivate
-                  ? '🔒 나만 보기 기록이라 선택한 마음도 나만 볼 수 있어요.'
-                  : `선택한 마음은 ${partnerName}에게도 함께 보여요.`}
-              </p>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {suggestions.map((item) => {
-                  const itemId = item.id || `item-${item.sequence}`;
-                  const isSelected = confirmedItemIds.includes(itemId);
-                  return (
-                    <button
-                      key={itemId}
-                      type="button"
-                      onClick={() => toggleConfirmSuggestion(itemId)}
-                      aria-pressed={isSelected}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 active:scale-95 ${
-                        isSelected
-                          ? 'bg-coral text-white border border-coral shadow-sm'
-                          : 'bg-card text-foreground border border-border hover:border-coral/40'
-                      }`}
-                    >
-                      <span>{item.sequence}. {item.displayLabel}</span>
-                      {isSelected && <Check size={14} aria-hidden="true" />}
-                      <span className="sr-only">{isSelected ? '선택됨' : '선택 안 됨'}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          {/* Opt-out review: included by default, ✕ to remove, ▲▼ to correct. */}
+          <EmotionChipEditor
+            candidates={review.candidates}
+            removed={review.removed}
+            onRemove={review.remove}
+            onRestore={review.restore}
+            onChangeEmotion={review.changeEmotion}
+            visibilityNote={
+              isPrivate
+                ? '🔒 나만 보기 기록이라 이 마음도 나만 볼 수 있어요.'
+                : `이 마음은 ${partnerName}에게도 함께 보여요.`
+            }
+            className="animate-fade-in"
+          />
 
           {/* Preview of the flow that is about to be saved. Derived only, never
               persisted, and computed from the same array as the save payload. */}

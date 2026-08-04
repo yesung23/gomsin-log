@@ -125,6 +125,48 @@ describe('CoupleStatusBanner', () => {
     expect(refreshCoupleLifecycle).toHaveBeenCalled();
   });
 
+  /**
+   * DEF-05. `invitation_active` is only re-read on a refresh, so a session left
+   * open across the 24-hour deadline kept displaying a six-digit code that
+   * `redeem_invitation` now rejects -- and the partner looked like the one who
+   * mistyped it.
+   */
+  it('stops showing a cached code once its known deadline has passed', () => {
+    ctx = {
+      coupleLifecycle: 'pending',
+      coupleCode: '123456',
+      invitationExpiresAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    };
+    mount();
+
+    expect(screen.queryByText('123456')).toBeNull();
+    expect(screen.queryByLabelText('초대 코드 복사')).toBeNull();
+    expect(screen.getByTestId('invitation-expiry').textContent).toBe('만료됨');
+    // And it says which situation this is, rather than claiming the device never
+    // had a code.
+    expect(screen.getByText('초대 코드의 유효기간이 지났어요')).toBeInTheDocument();
+    expect(screen.queryByText('이 기기에 저장된 초대 코드가 없습니다')).toBeNull();
+    expect(screen.getByText('새 코드 발급')).toBeInTheDocument();
+  });
+
+  it('shows a freshly minted code even though the old deadline has passed', async () => {
+    ctx = {
+      coupleLifecycle: 'pending',
+      coupleCode: '123456',
+      invitationExpiresAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    };
+    regenerateCoupleInvitation.mockResolvedValue({ code: '654321' });
+    mount();
+
+    await act(async () => {
+      screen.getByText('새 코드 발급').click();
+    });
+
+    // The new code's own expiry has not been re-read yet, so the lapsed one must
+    // not suppress it.
+    await waitFor(() => expect(screen.getByText('654321')).toBeInTheDocument());
+  });
+
   it('surfaces the regeneration failure message verbatim', async () => {
     ctx = { coupleLifecycle: 'pending', coupleCode: '', invitationExpiresAt: null };
     regenerateCoupleInvitation.mockResolvedValue({ error: '이미 두 사람이 연결되어 있어 초대 코드가 필요하지 않습니다.' });

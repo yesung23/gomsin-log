@@ -299,6 +299,14 @@ export function TodayLogWidget() {
     }
   };
 
+  /**
+   * Is there anything a save could actually persist?
+   *
+   * The same three-part condition `handlePost` enforces, so the affordance and
+   * the validation cannot drift apart.
+   */
+  const hasContentToSave = log.trim().length > 0 || pendingFiles.length > 0 || !!reaction;
+
   const handlePost = async () => {
     if (isSaving) return;
     // Read-only while offline: firing this write would fail and then be explained
@@ -569,7 +577,12 @@ export function TodayLogWidget() {
 
             <button
               onClick={handlePost}
-              disabled={isSaving || isOffline}
+              // Whitespace-only text is nothing to save, and `handlePost` already
+              // refuses it -- but the button stayed enabled, so the affordance
+              // promised a save that could not happen. Still enabled while
+              // recording, so tapping it can say "finish the recording first"
+              // instead of doing nothing at all.
+              disabled={isSaving || isOffline || (!isRecording && !hasContentToSave)}
               // 44px minimum: measured at 32px in a real browser. This is the
               // primary save action of the whole app.
               className="min-h-[44px] px-4 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"

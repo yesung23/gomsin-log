@@ -171,6 +171,54 @@ describe('composer attachment handling', () => {
 
     await waitFor(() => expect(addRecordWithMedia).not.toHaveBeenCalled());
   });
+
+  /**
+   * DEF-14. The validation was always correct -- nothing was ever saved and the
+   * toast was honest -- but the button stayed enabled for whitespace-only text,
+   * so the affordance promised a save that could not happen.
+   */
+  it('disables 저장 while there is nothing to save', async () => {
+    const user = userEvent.setup();
+    renderIn(<WidgetDashboard />);
+
+    await user.click(screen.getByText('한줄'));
+    expect(screen.getByText('저장')).toBeDisabled();
+  });
+
+  it('keeps 저장 disabled for whitespace-only text', async () => {
+    const user = userEvent.setup();
+    renderIn(<WidgetDashboard />);
+
+    await user.click(screen.getByText('한줄'));
+    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    await user.type(textarea, '    ');
+
+    expect(screen.getByText('저장')).toBeDisabled();
+    expect(addRecordWithMedia).not.toHaveBeenCalled();
+  });
+
+  it('enables 저장 as soon as there is real text', async () => {
+    const user = userEvent.setup();
+    renderIn(<WidgetDashboard />);
+
+    await user.click(screen.getByText('한줄'));
+    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    await user.type(textarea, '  오늘 하루  ');
+
+    expect(screen.getByText('저장')).not.toBeDisabled();
+  });
+
+  it('enables 저장 for an attachment alone, with no text at all', async () => {
+    const user = userEvent.setup();
+    renderIn(<WidgetDashboard />);
+
+    await user.click(screen.getByText('한줄'));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'sunset.png', { type: 'image/png' }));
+
+    expect(await screen.findByText('sunset.png')).toBeInTheDocument();
+    expect(screen.getByText('저장')).not.toBeDisabled();
+  });
 });
 
 /**

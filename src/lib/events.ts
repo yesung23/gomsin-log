@@ -131,13 +131,24 @@ export async function updateEventInDB(event: CoupleEvent): Promise<CoupleEvent |
   };
 }
 
-export async function deleteEventFromDB(eventId: string): Promise<boolean> {
-  if (!isSupabaseConfigured || !supabase) return false;
+/**
+ * Delete one event the caller authored.
+ *
+ * `ownerId` is REQUIRED and is applied as a predicate, matching `updateEventInDB`
+ * and the records path (`records.ts` filters on `user_id` AND `couple_id`). The
+ * delete used to be `id`-only, leaning entirely on the RLS policy: correct today,
+ * but it meant a future policy widened to couple scope would silently let a
+ * partner delete the author's events with no client-side barrier at all. A 0-row
+ * result is a failure, not a success.
+ */
+export async function deleteEventFromDB(eventId: string, ownerId: string): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase || !ownerId) return false;
 
   const { data, error } = await supabase
     .from('events')
     .delete()
     .eq('id', eventId)
+    .eq('created_by', ownerId)
     .select('id')
     .maybeSingle();
 

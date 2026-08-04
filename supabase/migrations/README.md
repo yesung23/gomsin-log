@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `001_initial_schema.sql` | 최초 스키마 (profiles, couples, couple_members, invitation_codes, daily_records, briefings, events, trips, trip_items, trip_checklists, contact_preferences) | 적용됨으로 가정 |
 | `002_fix_rls_and_rpc.sql` | 초기 RLS/RPC 수정 | 적용됨으로 가정 |
-| `002_fix_rls_recursion.sql` | RLS 무한 재귀 수정 (002 중복 번호) | 적용됨으로 가정 |
+| `002_fix_rls_recursion.sql` | RLS 무한 재귀 수정 (002 중복 번호 — 아래 "002 번호 중복" 참고) | 적용됨으로 가정 |
 | `003_add_emotion_flow.sql` | `daily_records.emotion_flow` 추가 | 적용됨으로 가정 |
 | `004_create_cycle_tables.sql` | 주기 기록 테이블 | 적용됨으로 가정 |
 | `005_secure_rls_policies.sql` | RLS 정책 강화, `events.visibility` → `is_private` | 적용됨으로 가정 |
@@ -27,6 +27,42 @@
 | `014_feature_privacy_and_collaboration.sql` | 일정/여행/주기 RLS, sanitized support, 협업 Realtime·정합성 | **테스트 프로젝트에 적용됨** |
 | `015_security_followup.sql` | 초대 우회·경합 차단, 계정 삭제 트랜잭션, 비공개 일정 알림 차단, 여행 URL/순서 제약 | **테스트 프로젝트에 적용됨** |
 | `016_couple_state_visibility.sql` | `get_my_couple_state()` 읽기 전용 RPC (커플 생애주기·초대 유효성) | **신규 / 원격 미적용** |
+| `017_partner_profile_hardening_and_schema_reload.sql` | `get_partner_profile()` 의 `search_path` 를 `public, pg_temp` 로 고정 + `NOTIFY pgrst, 'reload schema'` | **신규 / 원격 미적용** |
+
+## 002 번호 중복 (이름을 바꾸지 않는 이유)
+
+`002_fix_rls_and_rpc.sql` 와 `002_fix_rls_recursion.sql` 는 번호가 같습니다.
+**둘 다 이미 원격에 적용되었으므로 파일 이름을 바꾸지 않습니다** — 이름을 바꾸면
+마이그레이션 이력과 실제 DB 상태가 어긋납니다.
+
+- 적용 순서는 파일 이름 전체의 사전순입니다. 즉 `_and_rpc` → `_recursion`.
+- **신규 프로젝트에서 위 순서로 그대로 실행하면 002 단계에서 실패합니다.**
+  `_recursion` 이 `Users can create couples` 등의 정책을 `DROP POLICY IF EXISTS`
+  없이 다시 만들기 때문에 `policy already exists` 오류가 납니다.
+  → 신규 프로젝트에서는 `_recursion` 의 `CREATE POLICY` 앞에 해당 정책을 먼저
+  `DROP POLICY IF EXISTS` 로 지운 뒤 실행하세요. 두 파일이 만든 정책은 이후
+  `005_secure_rls_policies.sql` 와 `009_remote_core_security_hotfix.sql` 가 다시
+  정의하므로, 최종 상태는 순서와 무관하게 같습니다.
+- 새 마이그레이션은 반드시 새 번호를 쓰세요. 이 규칙은
+  `src/lib/migrationSecurityContracts.test.ts` 가 검사합니다 (017 이후 번호 중복 금지).
+
+## 017이 하는 일
+
+1. **`get_partner_profile()` 하드닝.** 트리 안에서 유일하게 `search_path` 에
+   `pg_temp` 가 없던 SECURITY DEFINER 함수입니다(`001:278-282` 에서 한 번 만들어진 뒤
+   재정의된 적이 없고, 009·010 은 권한만 바꿨습니다). 시그니처와 반환 컬럼은 001과
+   **완전히 동일**하며 동작도 그대로입니다. 권한은 `authenticated` 만
+   `EXECUTE` 합니다.
+2. **PostgREST 스키마 캐시 리로드.** 이 저장소의 어떤 마이그레이션도
+   `NOTIFY pgrst, 'reload schema'` 를 실행하지 않았습니다(016:52 는 주석입니다).
+   013~016 이 만든/바꾼 함수 시그니처는 모두 사람이 대시보드에서 리로드해 주기를
+   기다렸고, 그 사이 클라이언트는 `PGRST202` 를 받습니다. 017 은 트랜잭션 안에서
+   `NOTIFY` 를 실행하므로(알림은 COMMIT 시 전달됩니다) 롤백된 적용이 캐시를
+   리로드시키는 일은 없습니다. 리로드 한 번이 캐시 전체를 갱신합니다.
+
+017 은 재실행해도 no-op 입니다(정확한 시그니처로 `DROP FUNCTION IF EXISTS` → 동일한
+정의로 재생성 → 동일한 권한 재적용). 롤백 블록은 파일 하단에 주석으로 있습니다.
+**아직 원격에 적용되지 않았습니다.**
 
 > 013·014·015 는 테스트 Supabase 프로젝트에 수동으로 적용되었고 PostgREST 스키마
 > 캐시도 리로드되었습니다. 013 적용 중

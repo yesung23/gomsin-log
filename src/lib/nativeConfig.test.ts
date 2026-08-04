@@ -134,6 +134,41 @@ describe('Android: identity, label and store metadata', () => {
   });
 });
 
+/**
+ * The manifest is heavily commented on purpose -- every permission carries its
+ * justification -- and `--` is ILLEGAL inside an XML comment. Adding the
+ * ACCESS_NETWORK_STATE rationale above introduced exactly that and would have
+ * failed the Android build, which is not runnable in this sandbox (no SDK), so
+ * nothing else would have caught it. Cheap guard, real bug.
+ */
+describe('the Android manifests are well-formed XML', () => {
+  const MANIFESTS = [
+    'android/app/src/main/AndroidManifest.xml',
+    'android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml',
+  ];
+
+  for (const path of MANIFESTS) {
+    it(`${path} parses`, () => {
+      const parsed = new DOMParser().parseFromString(read(path), 'application/xml');
+      const failure = parsed.getElementsByTagName('parsererror')[0];
+      expect(failure?.textContent ?? null, path).toBeNull();
+      expect(parsed.documentElement.tagName).toBe('manifest');
+    });
+
+    it(`${path} has no '--' inside a comment`, () => {
+      // Asserted directly as well: some parsers are lenient about it.
+      for (const comment of read(path).match(/<!--[\s\S]*?-->/g) ?? []) {
+        expect(comment.slice(4, -3), path).not.toContain('--');
+      }
+    });
+  }
+
+  it('the guard would catch a double hyphen (soundness)', () => {
+    const broken = '<!-- a -- b -->';
+    expect(broken.slice(4, -3)).toContain('--');
+  });
+});
+
 describe('Android: the permission set is exactly what the code proves', () => {
   const declared = [...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(
     (m) => m[1],
@@ -141,10 +176,45 @@ describe('Android: the permission set is exactly what the code proves', () => {
 
   it('declares INTERNET plus the two the WebView needs for RECORD_AUDIO', () => {
     expect([...declared].sort()).toEqual([
+      'android.permission.ACCESS_NETWORK_STATE',
       'android.permission.INTERNET',
       'android.permission.MODIFY_AUDIO_SETTINGS',
       'android.permission.RECORD_AUDIO',
     ]);
+  });
+
+  /**
+   * PRIORITY 1, the native half.
+   *
+   * `navigator.onLine` in an Android WebView is Chromium's network-change
+   * notifier, and that notifier can only read connectivity through
+   * `ConnectivityManager`, which requires ACCESS_NETWORK_STATE. Undeclared, the
+   * query is refused and Chromium reports CONNECTION_NONE -- so `navigator.onLine`
+   * is permanently `false` on a perfectly connected device.
+   *
+   * That flag is not cosmetic here. `useOnlineStatus` TRUSTS `false`, and offline
+   * is a PRE-EMPTIVE read-only mode: `TodayLogWidget.handlePost` refuses the write
+   * and toasts OFFLINE_READONLY_MESSAGE, 저장 is disabled, and `OfflineBanner`
+   * renders "인터넷 연결이 끊겼어요". Reproduced in a real browser as arm D of
+   * `scratch/p1-offline.mjs` by forcing the flag: 저장 disabled, zero POSTs, and
+   * connection copy on screen -- which is the reported symptom exactly.
+   */
+  it('declares ACCESS_NETWORK_STATE, without which navigator.onLine is always false', () => {
+    expect(declared).toContain('android.permission.ACCESS_NETWORK_STATE');
+  });
+
+  it('records why ACCESS_NETWORK_STATE is required, next to the declaration', () => {
+    // The manifest's permission block justifies every entry from code in this
+    // repo; a connectivity permission with no rationale is how it got missed.
+    expect(manifest).toContain('ACCESS_NETWORK_STATE');
+    expect(manifest).toContain('navigator.onLine');
+    expect(manifest).toContain('useOnlineStatus');
+  });
+
+  it('ACCESS_NETWORK_STATE is install-time only, so it needs no runtime rationale', () => {
+    // Unlike RECORD_AUDIO it is a normal permission: granted at install, never
+    // prompted. So there must be NO in-app prompt copy pretending otherwise.
+    expect(read('src/lib/nativePermissions.ts')).not.toContain('ACCESS_NETWORK_STATE');
   });
 
   it('declares no contacts, location, tracking, advertising or media permission', () => {

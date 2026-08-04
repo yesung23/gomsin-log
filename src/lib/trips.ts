@@ -1,4 +1,5 @@
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import { isSchemaCacheMiss, schemaCacheMissLog } from '@/lib/serverErrors';
 import { supabase } from '@/lib/supabase';
 import type { DailyRecord, Trip, TripChecklist, TripItem, TripStatus } from '@/types';
 
@@ -228,11 +229,19 @@ export async function updateTripInDB(
 
 export const updateTrip = updateTripInDB;
 
-export async function deleteTripFromDB(tripId: string): Promise<boolean> {
-  if (!supabase) return false;
+/**
+ * Delete one trip belonging to the caller's couple.
+ *
+ * `coupleId` is REQUIRED and is applied as a predicate. The delete used to be
+ * `id`-only, leaning entirely on RLS; scoping it here means a widened policy
+ * cannot turn a stale id into a cross-couple delete. A 0-row result is a failure.
+ */
+export async function deleteTripFromDB(tripId: string, coupleId: string): Promise<boolean> {
+  if (!supabase || !coupleId) return false;
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return false;
-  const { data, error } = await supabase.from('trips').delete().eq('id', tripId).select('id').maybeSingle();
+  const { data, error } = await supabase.from('trips').delete().eq('id', tripId)
+    .eq('couple_id', coupleId).select('id').maybeSingle();
   if (error) {
     console.error('Error deleting trip:', error);
     return false;
@@ -316,6 +325,13 @@ export async function reorderTripItemsInDB(items: Array<Pick<TripItem, 'id' | 's
     p_sort_orders: items.map((item) => item.sortOrder),
   });
   if (error) {
+    // The RPC is the ONLY way to permute ranks (015 blocks direct topology
+    // updates), so a missing schema reload disables reordering entirely. Say
+    // which deploy step is missing instead of returning a bare `false`.
+    if (isSchemaCacheMiss(error)) {
+      console.error(schemaCacheMissLog('reorder_trip_items', '015'));
+      return false;
+    }
     console.error('Error reordering trip items:', error);
     return false;
   }
@@ -324,11 +340,20 @@ export async function reorderTripItemsInDB(items: Array<Pick<TripItem, 'id' | 's
 
 export const reorderTripItems = reorderTripItemsInDB;
 
-export async function deleteTripItemFromDB(itemId: string): Promise<boolean> {
-  if (!supabase) return false;
+/**
+ * Delete one item of a specific trip.
+ *
+ * `tripId` is REQUIRED and is applied as a predicate: trip items are couple-shared
+ * by design, so ownership is not the boundary here -- the parent trip is. An
+ * `id`-only delete would let a stale id from another trip through if the policy
+ * were ever widened.
+ */
+export async function deleteTripItemFromDB(itemId: string, tripId: string): Promise<boolean> {
+  if (!supabase || !tripId) return false;
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return false;
-  const { data, error } = await supabase.from('trip_items').delete().eq('id', itemId).select('id').maybeSingle();
+  const { data, error } = await supabase.from('trip_items').delete().eq('id', itemId)
+    .eq('trip_id', tripId).select('id').maybeSingle();
   if (error) {
     console.error('Error deleting trip item:', error);
     return false;
@@ -383,12 +408,16 @@ export async function toggleTripChecklistInDB(checklistId: string, completed: bo
   return !!data;
 }
 
-export async function deleteTripChecklistFromDB(checklistId: string): Promise<boolean> {
-  if (!supabase) return false;
+/** Delete one checklist entry of a specific trip. Scoped like the items above. */
+export async function deleteTripChecklistFromDB(
+  checklistId: string,
+  tripId: string,
+): Promise<boolean> {
+  if (!supabase || !tripId) return false;
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return false;
   const { data, error } = await supabase.from('trip_checklists').delete().eq('id', checklistId)
-    .select('id').maybeSingle();
+    .eq('trip_id', tripId).select('id').maybeSingle();
   if (error) {
     console.error('Error deleting trip checklist:', error);
     return false;

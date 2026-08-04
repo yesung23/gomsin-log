@@ -71,6 +71,11 @@ function makeState(records: DailyRecord[]): AppState {
 }
 
 let currentState = makeState([]);
+/**
+ * How fresh the shared workspace on screen is. `live` for every pre-existing
+ * scenario; the quarantine window is exercised explicitly below.
+ */
+let currentSyncStatus: 'live' | 'delayed' | 'unavailable' = 'live';
 
 /** Captured toast messages, so failure copy can be asserted verbatim. */
 const toastLog: { level: string; message: string }[] = [];
@@ -93,6 +98,7 @@ vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: currentState,
     isReady: true,
+    sharedSyncStatus: currentSyncStatus,
     updateRecord,
     deleteRecord,
     updateRecordMedia,
@@ -123,6 +129,48 @@ beforeEach(() => {
   updateRecord.mockClear();
   deleteRecord.mockClear();
   setHighlightedRecordId.mockClear();
+  currentSyncStatus = 'live';
+});
+
+/**
+ * PRIORITY 2. The period summary is derived from the records ON SCREEN, and the
+ * shared workspace is deliberately hidden while membership is unconfirmed (a ~2s
+ * window on every cold load with no realtime socket). During that window
+ * `records` is empty for a reason that is NOT "this user has no emotions", yet the
+ * section rendered its empty state and told the user exactly that -- contradicting
+ * the SharedSyncBanner directly above it. Observed in a real browser as the
+ * `healthy` arm of `scratch/p2-states.mjs`.
+ */
+describe('RecordPage period summary honesty while the workspace is unconfirmed', () => {
+  it('does not report an empty period while the shared workspace is hidden', () => {
+    currentSyncStatus = 'unavailable';
+    renderPage([]);
+
+    const section = screen.getByTestId('emotion-flow-summary');
+    expect(section).not.toHaveAttribute('data-state', 'empty');
+    expect(section.textContent).not.toContain('아직 오늘의 마음이 없어요');
+  });
+
+  it('reports a genuinely empty period once the workspace is live', () => {
+    // PRESERVATION: a confirmed workspace with no confirmed emotions IS empty,
+    // and saying so is correct.
+    currentSyncStatus = 'live';
+    renderPage([]);
+
+    expect(screen.getByTestId('emotion-flow-summary')).toHaveAttribute('data-state', 'empty');
+  });
+
+  it('still summarises normally when the workspace is only delayed', () => {
+    // PRESERVATION: `delayed` means the data on screen is real but possibly
+    // stale, so hiding the summary would lose information the user already has.
+    currentSyncStatus = 'delayed';
+    renderPage([record({ emotionFlow: [
+      flowItem({ id: 's1', group: 'sadness', displayLabel: '서운함', sequence: 1 }),
+      flowItem({ id: 's2', group: 'love', displayLabel: '애정', sequence: 2 }),
+    ] })]);
+
+    expect(screen.getByTestId('emotion-flow-summary')).toHaveAttribute('data-state', 'ready');
+  });
 });
 
 describe('RecordPage ownership controls', () => {

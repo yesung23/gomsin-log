@@ -265,6 +265,13 @@ function recordFailureMessage(reason: RecordMutationReason): string {
       return '커플 공간을 만든 뒤에 기록을 남길 수 있어요.';
     case 'workspace_unresolved':
       return '지금 커플 공간을 확인할 수 없어요. 잠시 후 다시 시도해 주세요.';
+    case 'workspace_unconfigured':
+      // PRIORITY 1. The membership RPC is not deployed, so no amount of retrying
+      // changes the answer and the couple space is probably fine. Naming the
+      // server setup is the only honest and actionable thing to say -- the
+      // alternatives on this path were a transient-retry message and, worse, a
+      // connection diagnosis for a device that was online.
+      return '서버 설정이 아직 끝나지 않아 커플 공간을 확인할 수 없어요. 관리자에게 문의해 주세요.';
     case 'deletion_pending':
       return '탈퇴 처리가 진행 중이어서 기록을 저장할 수 없어요.';
     default:
@@ -311,6 +318,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const [coupleLifecycle, setCoupleLifecycle] = useState<CoupleLifecycle>('unknown');
   const [invitationExpiresAt, setInvitationExpiresAt] = useState<string | null>(null);
+  /**
+   * A couple space this session demonstrably had and lost.
+   *
+   * `deriveCoupleLifecycle` can only answer `disconnected` while a local
+   * `coupleId` survives as evidence, and the purge clears that id first -- so the
+   * next authoritative read said `personal` and offered "create a space" to
+   * someone who had just been disconnected, which for a remotely disconnected
+   * partner is indistinguishable from a brand-new account.
+   *
+   * In memory ONLY, and scoped to one user id: persisting it would put couple
+   * state back into browser storage (which the device-preference whitelist
+   * deliberately excludes) and could carry across an account switch. A reload
+   * therefore still reads `personal`, which is the honest limit of what the
+   * client can know once the server says "no membership".
+   */
+  const revokedCoupleRef = useRef<{ userId: string; coupleId: string } | null>(null);
   /**
    * In-flight session refresh, so N parallel failures cause ONE refresh attempt
    * rather than N competing ones.
@@ -535,7 +558,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
 
     const remote: RemoteCoupleState | null = result.state;
-    const lifecycle = deriveCoupleLifecycle(remote, stateRef.current.profile.couple);
+    const derived = deriveCoupleLifecycle(remote, stateRef.current.profile.couple);
+    /**
+     * A definite "no couple space" for an account whose space was revoked in
+     * this session is `disconnected`, not `personal`. Both are definite negative
+     * answers, so this is not an `unknown`-to-negative promotion: it only picks
+     * the honest wording between two negatives.
+     */
+    if (remote?.coupleId) {
+      // A space exists again, so the revocation is history.
+      revokedCoupleRef.current = null;
+    } else if (derived === 'disconnected') {
+      const revokedCoupleId = stateRef.current.profile.couple.coupleId;
+      revokedCoupleRef.current = revokedCoupleId
+        ? { userId: identity.userId, coupleId: revokedCoupleId }
+        : revokedCoupleRef.current;
+    }
+    const lifecycle: CoupleLifecycle =
+      derived === 'personal' && revokedCoupleRef.current?.userId === identity.userId
+        ? 'disconnected'
+        : derived;
     updateStateImmediately((current) => {
       if (!isCurrentIdentity(identity)) return current;
       const merged = mergeCoupleState(current.profile.couple, remote);
@@ -771,6 +813,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setSharedSyncStatus('live');
         setAuthSyncUnavailable(false);
         hydratedUserIdRef.current = null;
+        // The couple lifecycle and the invitation expiry belong to the account
+        // that is leaving. Nobody has asked the question for the incoming
+        // account yet, so the only truthful value is `unknown` -- keeping the
+        // previous verdict rendered account A's `connected` (which suppresses
+        // the banner entirely) and account A's expiry for account B.
+        revokedCoupleRef.current = null;
+        setCoupleLifecycle('unknown');
+        setInvitationExpiresAt(null);
         // Fail closed before account hydration starts: the previous account's
         // React state must not remain rendered during the network request.
         setIsAuthChecked(false);
@@ -1006,6 +1056,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         if (event === 'SIGNED_OUT') {
           hydratedUserIdRef.current = null;
+          // Same reason as the identity-change reset above: a signed-out device
+          // holds no answer about any account's couple space.
+          revokedCoupleRef.current = null;
+          setCoupleLifecycle('unknown');
+          setInvitationExpiresAt(null);
           const nextState: AppState = {
             ...DEFAULT_STATE,
             isDemoMode: false,
@@ -1122,6 +1177,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     realtimeHealthyRef.current = true;
     // There is no shared workspace left to be out of sync with.
     setSharedSyncStatus('live');
+    // The lifecycle is what every banner reads, and it renders NOTHING for
+    // `connected`. Leaving it stale here is what emptied the timeline with no
+    // explanation and no reconnect route until the app was reloaded.
+    const revokedCoupleId = current.profile.couple.coupleId;
+    const revokedUserId = current.authenticatedUser?.id;
+    revokedCoupleRef.current = revokedCoupleId && revokedUserId
+      ? { userId: revokedUserId, coupleId: revokedCoupleId }
+      : null;
+    setCoupleLifecycle('disconnected');
+    // The expiry described the invitation of the space that just went away.
+    setInvitationExpiresAt(null);
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
     const nextState: AppState = {
@@ -1704,6 +1770,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       if (result.reason === 'offline') {
         return { reason: 'offline', error: recordFailureMessage('offline') };
+      }
+      // An undeployed membership RPC is a server-configuration state, not a
+      // transient one, and definitely not a connection one.
+      if (result.schemaGap) {
+        return {
+          reason: 'workspace_unconfigured',
+          error: recordFailureMessage('workspace_unconfigured'),
+        };
       }
       return {
         reason: 'workspace_unresolved',
@@ -2315,7 +2389,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
     if (!isCurrentScope()) return false;
     try {
-      const deleted = await deleteEventFromDB(id);
+      // The author is already verified above; passing it makes the predicate part
+      // of the request rather than an assumption about RLS.
+      const deleted = await deleteEventFromDB(id, identity.userId);
       if (!isCurrentScope() || !deleted) return false;
     } catch (error) {
       if (isCurrentScope()) console.error('Failed to delete event:', error);
@@ -2800,6 +2876,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         coupleLifecycle,
         invitationExpiresAt,
         refreshCoupleLifecycle,
+        // The same single-flight recovery every store mutation already routes
+        // `auth_expired` to, so a page-issued RPC cannot grow a second one.
+        recoverExpiredSession: handleAuthExpired,
         accountDeletionRecovery,
         deletionStatus,
         retryAccountDeletion,

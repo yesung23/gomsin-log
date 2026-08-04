@@ -22,8 +22,22 @@ export type ServerErrorKind =
   | 'forbidden'
   /** The row or RPC target does not exist for this caller. */
   | 'not_found'
-  /** The device has no network. The ONLY kind allowed to mention 인터넷 연결. */
+  /**
+   * The device has CONFIRMED it has no network. The ONLY kind allowed to mention
+   * 인터넷 연결, and reachable only when `navigator.onLine === false` (or an
+   * explicit `online: false` override).
+   */
   | 'offline'
+  /**
+   * The request never reached the server, and the browser claims to be online.
+   *
+   * Deliberately separate from `offline`, because `TypeError: Failed to fetch` is
+   * indistinguishable between a dead network, a CSP `connect-src` refusal, a CORS
+   * rejection, DNS failure, a proxy or extension block, and a misconfigured
+   * `VITE_SUPABASE_URL`. Only the first is the user's connection, so this kind
+   * states what is actually known and nothing more.
+   */
+  | 'unreachable'
   /** The server answered, but could not serve the request (incl. not-deployed RPCs). */
   | 'server'
   /** Classification failed. Never claim a cause we do not know. */
@@ -45,6 +59,11 @@ const MESSAGES: Record<ServerErrorKind, string> = {
   forbidden: '권한이 없어요. 커플 공간 연결 상태를 확인해 주세요.',
   not_found: '대상을 찾을 수 없어요. 새로고침한 뒤 다시 시도해 주세요.',
   offline: '오프라인이에요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.',
+  /**
+   * Says only what is known: the request did not arrive. It must not name a cause
+   * -- naming the user's network here is the exact defect this kind exists to fix.
+   */
+  unreachable: '서버에 요청이 닿지 않았어요. 잠시 후 다시 시도해 주세요.',
   server: '서버가 요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.',
   unknown: '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.',
 };
@@ -78,9 +97,11 @@ const AUTH_EXPIRED_MESSAGES = [
 ] as const;
 
 /**
- * `fetch` rejects with exactly this for a dead network. It is also what a CORS
- * failure looks like, which is why it is only trusted as `offline` together with
- * the browser's own online flag (see `classifyServerError`).
+ * `fetch` rejects with one of these for a dead network -- and for a CSP
+ * `connect-src` refusal, a CORS rejection, DNS failure, a proxy or extension
+ * block, and a wrong Supabase URL. It is therefore evidence that the request did
+ * not arrive, and evidence of NOTHING about the user's connection, which is why
+ * it yields `unreachable` and never `offline` on its own.
  */
 const NETWORK_MESSAGES = ['failed to fetch', 'network request failed', 'load failed'] as const;
 
@@ -174,12 +195,44 @@ export function classifyServerError(
     return { kind: 'auth_expired', message: MESSAGES.auth_expired };
   }
 
-  // A bare `TypeError: Failed to fetch` with the browser claiming to be online
-  // is still overwhelmingly a connectivity failure from the user's point of
-  // view, so it is reported as such rather than as an unexplained error.
-  if (looksLikeNetworkFailure(error)) return { kind: 'offline', message: MESSAGES.offline };
+  // The request did not arrive, and the browser says it has a network. That is
+  // `unreachable`, not `offline`: reporting it as offline told users on a working
+  // connection to fix their connection, which was the one thing that could not
+  // help. A CSP `connect-src` refusal and a CORS rejection land here too, and
+  // both are deployment problems rather than user problems.
+  if (looksLikeNetworkFailure(error)) {
+    return { kind: 'unreachable', message: MESSAGES.unreachable };
+  }
 
   return { kind: 'unknown', message: MESSAGES.unknown };
+}
+
+/**
+ * Is this PostgREST telling us the function is not in its schema cache?
+ *
+ * `PGRST202` is never the caller's fault and never transient in the useful sense:
+ * it means either the migration has not been applied, or it has been applied and
+ * the PostgREST schema cache was not reloaded. Both are deployment states, and
+ * both look identical to a plain failure unless the call site says so.
+ */
+export function isSchemaCacheMiss(error: unknown): boolean {
+  return errorCode(error) === 'PGRST202';
+}
+
+/**
+ * One actionable operator diagnostic for that deployment gap.
+ *
+ * The point is that the log names the remedy. A bare "Error in disconnect_couple
+ * RPC" told whoever read it nothing about which of the two states they were in.
+ *
+ * @param rpc        The RPC that could not be found, e.g. `get_my_couple_state`.
+ * @param migration  The migration that defines it, e.g. `016`.
+ */
+export function schemaCacheMissLog(rpc: string, migration: string): string {
+  return `[gomsinlog] ${rpc}() is not in the PostgREST schema cache (PGRST202). `
+    + `Apply migration ${migration} and reload the schema cache `
+    + `(migration 017 issues NOTIFY pgrst, 'reload schema'; the dashboard route is `
+    + `Settings -> API -> Reload schema).`;
 }
 
 /** Does this kind mean the session must be refreshed or re-established? */
@@ -196,6 +249,7 @@ export function isAuthExpired(kind: ServerErrorKind): boolean {
 export function isRetryableKind(kind: ServerErrorKind): boolean {
   switch (kind) {
     case 'offline':
+    case 'unreachable':
     case 'server':
     case 'unknown':
       return true;

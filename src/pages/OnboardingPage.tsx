@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
@@ -15,26 +15,19 @@ import {
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { classifyServerError } from '@/lib/serverErrors';
 
-/**
- * Does this RPC error mean "you already own a couple space"?
- *
- * `create_couple_and_invitation` raises a bare message, so it has to be matched
- * textually. Matched loosely on purpose: the exact wording differs between
- * migrations 009/013/015 and all of them mean the same recoverable thing.
- */
-function isAlreadyInCoupleError(message?: string): boolean {
-  if (!message) return false;
-  const normalized = message.toLowerCase();
-  return normalized.includes('already in an active couple')
-    || normalized.includes('already in a couple')
-    || normalized.includes('active couple');
-}
 import { toast } from 'sonner';
 import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { addMonths } from '@/lib/utils';
 
 export function OnboardingPage() {
-  const { state, updateProfile, setSetupComplete, startDemo: runStartDemo } = useStore();
+  const {
+    state,
+    updateProfile,
+    setSetupComplete,
+    startDemo: runStartDemo,
+    setOnboardingStep,
+    recoverExpiredSession,
+  } = useStore();
   const onboardingIdentityKey = state.isDemoMode
     ? `demo:${state.authenticatedUser?.id || ''}`
     : `user:${state.authenticatedUser?.id || ''}`;
@@ -78,6 +71,15 @@ export function OnboardingPage() {
   const [copiedCode, setCopiedCode] = useState(false);
   /** ISO expiry of the code on screen, when the server told us one. */
   const [inviteExpiresAt, setInviteExpiresAt] = useState<string | null>(null);
+  /**
+   * An owned couple space with a LIVE invitation, awaiting the user's decision.
+   *
+   * Non-null only between discovering that space and the user choosing whether to
+   * invalidate the code that may already be with their partner.
+   */
+  const [pendingSpaceRecovery, setPendingSpaceRecovery] = useState<
+    { coupleId: string; expiresAt: string | null } | null
+  >(null);
   const [joinedPartnerName, setJoinedPartnerName] = useState('');
   const [isFinishing, setIsFinishing] = useState(false);
   const [anniversary, setAnniversary] = useState('');
@@ -112,7 +114,22 @@ export function OnboardingPage() {
     setIsGeneratingCode(false);
     setIsVerifyingCode(false);
     setIsFinishing(false);
+    setPendingSpaceRecovery(null);
   }, [onboardingIdentityKey]);
+
+  /**
+   * Mirror the step into the store.
+   *
+   * `setOnboardingStep` existed, was exposed on the context and was read back at
+   * mount (`useState(state.onboardingStep || 0)`) -- but nothing ever CALLED it,
+   * so it was a dead write path and every navigation away from onboarding sent
+   * the user back to step 0, including a creator who had just been shown a code.
+   * Nothing about at-rest persistence changes here: authenticated browser storage
+   * stays a strict device-preference whitelist.
+   */
+  useEffect(() => {
+    setOnboardingStep(step);
+  }, [step, setOnboardingStep]);
 
   // Total steps based on role
   const totalSteps = role === 'gomsin' ? 4 : 6;
@@ -148,6 +165,39 @@ export function OnboardingPage() {
    * Regenerating is mandatory rather than optional: the server holds only a hash
    * of the original code, so there is no way to display the old one.
    */
+  /**
+   * Mint a fresh code for a space this account already owns.
+   *
+   * The server holds only a hash of the previous code, so this is the only
+   * possible way to obtain a usable one -- and it is why the caller has to be
+   * sure the previous code is expendable.
+   */
+  const regenerateForExistingSpace = useCallback(async (
+    identity: { key: string; generation: number },
+    coupleId: string,
+  ): Promise<{ ok: boolean; mintedCode: boolean }> => {
+    const regenerated = await regenerateCoupleInvitation();
+    if (!isCurrentIdentity(identity)) return { ok: false, mintedCode: false };
+    if (regenerated.error || !regenerated.code) {
+      toast.error(regenerated.error || '초대 코드를 새로 발급하지 못했어요.');
+      return { ok: false, mintedCode: false };
+    }
+
+    setCreatedCoupleId(coupleId);
+    setCreatedInviteCode(regenerated.code);
+    // A freshly minted code is valid for 24h. Re-read the authoritative expiry
+    // rather than computing one locally.
+    const refreshed = await fetchMyCoupleState();
+    if (!isCurrentIdentity(identity)) return { ok: true, mintedCode: true };
+    setInviteExpiresAt(
+      refreshed.ok && refreshed.state?.invitationActive
+        ? refreshed.state.invitationExpiresAt
+        : null,
+    );
+    toast.success('이미 만든 공간을 찾아 새 초대 코드를 발급했어요.');
+    return { ok: true, mintedCode: true };
+  }, [isCurrentIdentity]);
+
   const recoverExistingCoupleSpace = useCallback(async (
     identity: { key: string; generation: number },
   ): Promise<{ ok: boolean; mintedCode: boolean }> => {
@@ -171,27 +221,61 @@ export function OnboardingPage() {
       return { ok: true, mintedCode: false };
     }
 
-    const regenerated = await regenerateCoupleInvitation();
-    if (!isCurrentIdentity(identity)) return { ok: false, mintedCode: false };
-    if (regenerated.error || !regenerated.code) {
-      toast.error(regenerated.error || '초대 코드를 새로 발급하지 못했어요.');
+    if (existing.invitationActive) {
+      /**
+       * There is a LIVE invitation, which means a code may already be in the
+       * partner's hands. Regenerating invalidates it (015 keeps at most one
+       * unused hash), and this path used to do that unconditionally with nothing
+       * but a success toast -- silently breaking a code the user had already
+       * sent. The banner path always warned; this one did not.
+       *
+       * So it asks. Not a modal: `modalStacking.test.ts` guards bottom-anchored
+       * overlays, and an inline block inside the step is both simpler and
+       * reachable by the same 다음 button flow.
+       */
+      setPendingSpaceRecovery({
+        coupleId: existing.coupleId!,
+        expiresAt: existing.invitationExpiresAt,
+      });
       return { ok: false, mintedCode: false };
     }
 
-    setCreatedCoupleId(existing.coupleId!);
-    setCreatedInviteCode(regenerated.code);
-    // A freshly minted code is valid for 24h. Re-read the authoritative expiry
-    // rather than computing one locally.
-    const refreshed = await fetchMyCoupleState();
-    if (!isCurrentIdentity(identity)) return { ok: true, mintedCode: true };
-    setInviteExpiresAt(
-      refreshed.ok && refreshed.state?.invitationActive
-        ? refreshed.state.invitationExpiresAt
-        : null,
-    );
-    toast.success('이미 만든 공간을 찾아 새 초대 코드를 발급했어요.');
-    return { ok: true, mintedCode: true };
-  }, [isCurrentIdentity]);
+    // No outstanding invitation, so nothing can be invalidated: mint without
+    // asking, exactly as before.
+    return regenerateForExistingSpace(identity, existing.coupleId!);
+  }, [isCurrentIdentity, regenerateForExistingSpace]);
+
+  /** The user accepted that the previously sent code stops working. */
+  const handleRegenerateExistingSpace = async () => {
+    const pending = pendingSpaceRecovery;
+    if (!pending || isGeneratingCode) return;
+    const identity = captureIdentity();
+    setIsGeneratingCode(true);
+    try {
+      const result = await regenerateForExistingSpace(identity, pending.coupleId);
+      if (!isCurrentIdentity(identity)) return;
+      if (result.ok) setPendingSpaceRecovery(null);
+    } finally {
+      if (isCurrentIdentity(identity)) setIsGeneratingCode(false);
+    }
+  };
+
+  /**
+   * The user keeps the code they already sent.
+   *
+   * The space is adopted so onboarding can finish against it; no code is shown,
+   * because this device does not have one and the server only holds a hash. The
+   * lifecycle banner offers regeneration later if the partner never arrives.
+   */
+  const handleKeepExistingCode = () => {
+    const pending = pendingSpaceRecovery;
+    if (!pending) return;
+    setCreatedCoupleId(pending.coupleId);
+    setCreatedInviteCode('');
+    setInviteExpiresAt(pending.expiresAt);
+    setPendingSpaceRecovery(null);
+    toast.success('이전에 보낸 초대 코드를 그대로 사용해요. 이어서 진행할게요.');
+  };
 
   const handleNext = async () => {
     // Auth Gate: Cannot advance from Step 0 without login or demo mode
@@ -220,7 +304,17 @@ export function OnboardingPage() {
        */
       let mintedCodeToShow = false;
 
-      if (spaceMode === 'create' && !createdInviteCode) {
+      if (spaceMode === 'create' && pendingSpaceRecovery) {
+        // A decision about the existing code is outstanding. Advancing would
+        // either lose the space or silently invalidate the code.
+        toast.error('이미 만든 공간의 초대 코드를 어떻게 할지 먼저 선택해 주세요.');
+        return;
+      }
+
+      // `createdCoupleId` without a code is a real state: the user chose to keep
+      // the code they already sent. Re-running creation there would raise
+      // "already in an active couple" all over again.
+      if (spaceMode === 'create' && !createdInviteCode && !createdCoupleId) {
         setIsGeneratingCode(true);
         try {
           const res = await createCoupleInvitation(role);
@@ -232,7 +326,7 @@ export function OnboardingPage() {
             // written before the `profiles` row. Recover into the existing space
             // and mint a fresh code -- the server stores only a hash, so the old
             // plaintext is unrecoverable by any other means.
-            if (isAlreadyInCoupleError(res.error)) {
+            if (res.reason === 'already_in_couple') {
               const recovery = await recoverExistingCoupleSpace(identity);
               if (!isCurrentIdentity(identity)) return;
               if (!recovery.ok) return;
@@ -267,6 +361,10 @@ export function OnboardingPage() {
           const res = await consumeCoupleInvitation(cleanCode);
           if (!isCurrentIdentity(identity)) return;
           if (res.error || !res.coupleId) {
+            // The server can report that the SESSION, not the code, is the
+            // problem. Retrying the code cannot fix that, so hand the session to
+            // the store's recovery instead of only showing copy about it.
+            if (res.reason === 'auth_expired') void recoverExpiredSession();
             toast.error(res.error || '커플 공간에 연결하지 못했습니다.');
             return;
           }
@@ -675,6 +773,46 @@ export function OnboardingPage() {
                       <div className="text-xs text-muted-foreground mt-1">먼저 시작하고, 상대방을 초대할게요</div>
                     </div>
                   </button>
+
+                  {/* An owned space with a LIVE invitation. Regenerating would
+                      invalidate a code that may already be with the partner, so
+                      the choice belongs to the user, not to the recovery path. */}
+                  {spaceMode === 'create' && pendingSpaceRecovery && (
+                    <div
+                      data-testid="space-recovery-confirm"
+                      className="p-4 bg-card border border-coral/30 rounded-2xl space-y-3"
+                    >
+                      <p className="text-xs font-bold text-foreground">
+                        이미 만든 우리 공간이 있어요
+                      </p>
+                      <p className="text-[11px] leading-4 text-muted-foreground">
+                        아직 사용할 수 있는 초대 코드가 남아 있어요
+                        {pendingSpaceRecovery.expiresAt
+                          && invitationExpiryLabel(pendingSpaceRecovery.expiresAt)
+                          ? ` (${invitationExpiryLabel(pendingSpaceRecovery.expiresAt)})`
+                          : ''}
+                        . 보안을 위해 서버에는 코드가 저장되지 않아서 이 기기에서는 다시
+                        보여줄 수 없어요. 새 코드를 발급하면 이전에 보낸 코드는 사용할 수
+                        없게 돼요.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void handleRegenerateExistingSpace()}
+                        disabled={isGeneratingCode}
+                        className="w-full min-h-[44px] rounded-xl bg-coral px-4 text-xs font-bold text-coral-foreground disabled:opacity-50"
+                      >
+                        {isGeneratingCode ? '발급 중...' : '새 코드 발급하기'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleKeepExistingCode}
+                        disabled={isGeneratingCode}
+                        className="w-full min-h-[44px] rounded-xl border border-border px-4 text-xs font-bold text-foreground disabled:opacity-50"
+                      >
+                        이전에 보낸 코드 그대로 쓰기
+                      </button>
+                    </div>
+                  )}
 
                   {spaceMode === 'create' && createdInviteCode && (
                     <div className="p-4 bg-coral/10 border border-coral/30 rounded-2xl space-y-2">

@@ -69,6 +69,12 @@ keystore.properties
 # TypeScript incremental build cache (build artifact)
 *.tsbuildinfo
 
+# Deno 2 writes this the first time `npm run check:edge` / `npm run test:edge`
+# runs, so the documented validation commands dirtied the working tree. It has
+# never been tracked: the Edge Function pins its dependencies in the import URLs
+# themselves, so the lock adds no reproducibility the repo does not already have.
+deno.lock
+
 # Scratch output from review tooling. Conclusions that matter are written into
 # docs/kiro/RELEASE_AUDIT_2026-07-31.md instead.
 /semantic-review

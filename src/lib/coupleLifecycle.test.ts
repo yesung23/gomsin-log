@@ -167,6 +167,18 @@ describe('mergeCoupleState', () => {
     expect(merged.connected).toBe(false);
   });
 
+  it('drops the cached code once the server reports no outstanding invitation', () => {
+    // `invitation_active` is the server's own "unused AND unexpired" verdict
+    // (016). Keeping the plaintext past it displayed a code that
+    // `redeem_invitation` would reject as `invalid_or_expired`, and the creator
+    // had no way to tell.
+    const merged = mergeCoupleState(local(), remote({ invitationActive: false }));
+    expect(merged.coupleCode).toBe('');
+    // Still the same pending space: only the unusable code is dropped.
+    expect(merged.coupleId).toBe('couple-1');
+    expect(merged.status).toBe('pending');
+  });
+
   it('drops the code once the partner has joined', () => {
     const merged = mergeCoupleState(local(), remote({ partnerPresent: true }));
     expect(merged.coupleCode).toBe('');

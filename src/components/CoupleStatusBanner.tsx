@@ -4,7 +4,7 @@ import { Copy, Check, RefreshCw, Link2Off, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { regenerateCoupleInvitation } from '@/lib/supabase';
-import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { invitationExpiryLabel, isInvitationExpired } from '@/lib/coupleLifecycle';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 
 /**
@@ -46,8 +46,18 @@ export function CoupleStatusBanner() {
   // A healthy, connected couple needs no explanation.
   if (coupleLifecycle === 'connected') return null;
 
-  const code = freshCode || state.profile.couple.coupleCode;
   const expiryLabel = invitationExpiryLabel(invitationExpiresAt);
+  /**
+   * A code whose known deadline has passed is not a code any more.
+   *
+   * The server's verdict (`invitation_active`) is only re-read on a refresh, so a
+   * session left open across the 24-hour expiry would otherwise keep showing a
+   * six-digit number that `redeem_invitation` now rejects as
+   * `invalid_or_expired` -- with the partner blamed for mistyping it. A freshly
+   * minted code is exempt: its expiry has not been re-read yet.
+   */
+  const cachedCodeExpired = !freshCode && isInvitationExpired(invitationExpiresAt);
+  const code = freshCode || (cachedCodeExpired ? '' : state.profile.couple.coupleCode);
 
   const handleCopy = async () => {
     if (!code) return;
@@ -207,6 +217,33 @@ export function CoupleStatusBanner() {
           <p className="text-[11px] leading-4 text-muted-foreground">
             상대방이 코드를 입력하면 자동으로 연결돼요.
           </p>
+        </>
+      ) : cachedCodeExpired ? (
+        <>
+          {/* A lapsed code is a different situation from a missing one, and saying
+              "this device has no code" about a code the user can still remember
+              sending would be false. */}
+          <p className="text-xs font-semibold text-foreground">
+            초대 코드의 유효기간이 지났어요
+          </p>
+          <p className="text-[11px] leading-4 text-muted-foreground">
+            이전 코드는 더 이상 사용할 수 없어요. 새 코드를 발급해 상대방에게 다시
+            전달해 주세요.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleRegenerate()}
+            disabled={busy || !isOnline}
+            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-coral px-4 text-xs font-bold text-coral-foreground disabled:opacity-50"
+          >
+            <RefreshCw size={14} />
+            {busy ? '발급 중...' : '새 코드 발급'}
+          </button>
+          {!isOnline && (
+            <p className="text-[11px] leading-4 text-muted-foreground">
+              {OFFLINE_READONLY_MESSAGE}
+            </p>
+          )}
         </>
       ) : (
         <>

@@ -178,24 +178,40 @@ export async function createCoupleInvitation(role: Role): Promise<{
           error: '초대 코드를 발급하지 못했습니다. 잠시 후 다시 시도해 주세요.',
         };
       }
+      // `already_in_couple` is a recoverable product state, not an error to show:
+      // the caller turns it into the "recover your existing space" flow, so the
+      // raw message is still carried for that branch only.
+      if (isAlreadyInCoupleMessage(rpcError.message)) {
+        return {
+          coupleId: '',
+          code: '',
+          error: '이미 만들어진 커플 공간이 있어요.',
+          reason: 'already_in_couple' as const,
+        };
+      }
+      // Everything else goes through the classifier. Returning `rpcError.message`
+      // verbatim put raw Postgres/PostgREST English into a Korean toast -- the one
+      // invitation path that bypassed `classifyServerError`.
       return {
         coupleId: '',
         code: '',
-        error: rpcError.message || '커플 공간 생성에 실패했습니다.',
-        ...(isAlreadyInCoupleMessage(rpcError.message)
-          ? { reason: 'already_in_couple' as const }
-          : {}),
+        error: `커플 공간을 만들지 못했어요. ${classifyServerError(rpcError).message}`,
       };
     }
     return { coupleId: '', code: '', error: '커플 공간 생성에 실패했습니다.' };
   } catch (err: any) {
+    if (isAlreadyInCoupleMessage(err?.message)) {
+      return {
+        coupleId: '',
+        code: '',
+        error: '이미 만들어진 커플 공간이 있어요.',
+        reason: 'already_in_couple' as const,
+      };
+    }
     return {
       coupleId: '',
       code: '',
-      error: err?.message || '초대 코드 생성 중 오류가 발생했습니다.',
-      ...(isAlreadyInCoupleMessage(err?.message)
-        ? { reason: 'already_in_couple' as const }
-        : {}),
+      error: `커플 공간을 만들지 못했어요. ${classifyServerError(err).message}`,
     };
   }
 }

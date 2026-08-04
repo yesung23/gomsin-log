@@ -148,6 +148,50 @@ describe('createCoupleInvitation retry logic', () => {
     expect(result.error).toBeTruthy();
     expect(mockRpc).toHaveBeenCalledTimes(5);
   });
+
+  /**
+   * This was the one invitation path that bypassed `classifyServerError` and
+   * returned `rpcError.message` verbatim, so a Postgres/PostgREST string went
+   * straight into a Korean toast. Every sibling function already classified.
+   */
+  it('classifies a permission failure instead of surfacing raw server English', async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '42501', message: 'permission denied for function create_couple_and_invitation' },
+    });
+
+    const result = await createCoupleInvitationOnline('gomsin');
+    expect(result.error).toBe('커플 공간을 만들지 못했어요. 권한이 없어요. 커플 공간 연결 상태를 확인해 주세요.');
+    expect(result.error).not.toContain('permission denied');
+    expect(result.error).not.toContain('create_couple_and_invitation');
+    // A permission problem is not a connectivity problem.
+    expect(result.error).not.toContain('인터넷');
+  });
+
+  it('reports an expired session as a session problem, not a connection problem', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: 'PGRST301', message: 'JWT expired' } });
+
+    const result = await createCoupleInvitationOnline('gomsin');
+    expect(result.error).toContain('세션이 만료되었어요');
+    expect(result.error).not.toContain('JWT');
+    expect(result.error).not.toContain('인터넷');
+  });
+
+  /**
+   * `already_in_couple` is a recoverable product state, not an error to display:
+   * the caller turns it into the "recover your existing space" flow. The reason
+   * flag must survive classification, otherwise that recovery becomes unreachable.
+   */
+  it('still flags an existing couple space so recovery stays reachable', async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: 'P0001', message: 'User is already in a couple' },
+    });
+
+    const result = await createCoupleInvitationOnline('gomsin');
+    expect(result.reason).toBe('already_in_couple');
+    expect(result.error).not.toContain('already in a couple');
+  });
 });
 
 describe('consumeCoupleInvitation with supabase configured', () => {

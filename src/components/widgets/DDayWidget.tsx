@@ -47,10 +47,14 @@ export function DDayWidget() {
         )}
       </div>
 
-      {/* Military Service Quick Status */}
-      <div 
+      {/* Military Service Quick Status.
+          A real <button>, not a clickable <div>: as a div it was invisible to the
+          keyboard and to assistive tech, and it declared no tap target at all. */}
+      <button
+        type="button"
         onClick={() => navigate('/service')}
-        className="bg-muted/60 rounded-2xl border border-border p-4 flex items-center justify-between active:bg-muted transition-colors cursor-pointer"
+        aria-label="복무 현황과 전역 D-Day 보기"
+        className="w-full text-left bg-muted/60 rounded-2xl border border-border p-4 min-h-[44px] min-w-[44px] flex items-center justify-between active:bg-muted transition-colors"
       >
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-gradient-to-br from-teal-500 to-navy rounded-full flex items-center justify-center text-white">
@@ -61,7 +65,7 @@ export function DDayWidget() {
             <div className="text-[11px] text-muted-foreground mt-0.5">전역일과 복무율 확인</div>
           </div>
         </div>
-      </div>
+      </button>
     </div>
   );
 }

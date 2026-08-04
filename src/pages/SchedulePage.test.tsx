@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -86,6 +87,20 @@ function setOnLine(value: boolean) {
   Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => value });
 }
 
+
+/**
+ * The page now renders `PlanSectionNav`, which navigates between 일정 and 여행, so
+ * it needs a router in scope exactly as it has in the app. Rendering bare made
+ * `useNavigate()` throw before any assertion ran.
+ */
+function renderSchedulePage() {
+  return render(
+    <MemoryRouter>
+      <SchedulePage />
+    </MemoryRouter>,
+  );
+}
+
 describe('SchedulePage loading lifecycle', () => {
   beforeEach(() => {
     reloadResult = { ok: true };
@@ -95,9 +110,9 @@ describe('SchedulePage loading lifecycle', () => {
   it('loads once per identity/workspace instead of looping on action identity changes', async () => {
     reloadCalls.mockClear();
     setOnLine(true);
-    render(<SchedulePage />);
+    renderSchedulePage();
 
-    expect(await screen.findByText('공유·개인 일정')).toBeInTheDocument();
+    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
     await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => window.setTimeout(resolve, 20));
     expect(reloadCalls).toHaveBeenCalledTimes(1);
@@ -116,8 +131,8 @@ describe('SchedulePage offline read-only mode', () => {
   });
 
   it('disables the create entry point while offline', async () => {
-    render(<SchedulePage />);
-    expect(await screen.findByText('공유·개인 일정')).toBeInTheDocument();
+    renderSchedulePage();
+    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
 
     expect(addEventButton()).toBeEnabled();
 
@@ -131,8 +146,8 @@ describe('SchedulePage offline read-only mode', () => {
 
   it('re-enables the create entry point when the connection returns', async () => {
     setOnLine(false);
-    render(<SchedulePage />);
-    expect(await screen.findByText('공유·개인 일정')).toBeInTheDocument();
+    renderSchedulePage();
+    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
     expect(addEventButton()).toBeDisabled();
 
     await act(async () => {
@@ -144,8 +159,8 @@ describe('SchedulePage offline read-only mode', () => {
   });
 
   it('issues no server write for a save attempted while offline', async () => {
-    render(<SchedulePage />);
-    expect(await screen.findByText('공유·개인 일정')).toBeInTheDocument();
+    renderSchedulePage();
+    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
 
     await openCreateModal();
 
@@ -176,8 +191,8 @@ describe('SchedulePage write integrity', () => {
 
   it('does not add the event locally when the server refuses the write', async () => {
     addEvent.mockResolvedValue(false);
-    render(<SchedulePage />);
-    expect(await screen.findByText('공유·개인 일정')).toBeInTheDocument();
+    renderSchedulePage();
+    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
 
     // FLAKE FIX. This used to click as soon as the header existed, but the header
     // renders immediately while the 일정 추가 button stays
@@ -216,7 +231,7 @@ describe('SchedulePage transient quarantine recovery', () => {
     // socket used to leave "일정을 볼 권한이 없어요" on screen forever.
     reloadResult = { ok: false, reason: 'forbidden' };
     sharedSyncStatus = 'unavailable';
-    const view = render(<SchedulePage />);
+    const view = renderSchedulePage();
 
     expect(await screen.findByText('일정을 볼 권한이 없어요')).toBeInTheDocument();
     await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
@@ -224,7 +239,7 @@ describe('SchedulePage transient quarantine recovery', () => {
     // HTTP reconciliation succeeded: the workspace is trustworthy again.
     reloadResult = { ok: true };
     sharedSyncStatus = 'delayed';
-    view.rerender(<SchedulePage />);
+    view.rerender(<MemoryRouter><SchedulePage /></MemoryRouter>);
 
     await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(2));
     await waitFor(() =>
@@ -235,21 +250,21 @@ describe('SchedulePage transient quarantine recovery', () => {
   it('does not re-read while the workspace stays unavailable', async () => {
     reloadResult = { ok: false, reason: 'forbidden' };
     sharedSyncStatus = 'unavailable';
-    const view = render(<SchedulePage />);
+    const view = renderSchedulePage();
 
     await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
-    view.rerender(<SchedulePage />);
+    view.rerender(<MemoryRouter><SchedulePage /></MemoryRouter>);
     await new Promise((resolve) => window.setTimeout(resolve, 30));
     expect(reloadCalls).toHaveBeenCalledTimes(1);
   });
 
   it('does not re-read a healthy workspace on a transport flap', async () => {
     sharedSyncStatus = 'live';
-    const view = render(<SchedulePage />);
+    const view = renderSchedulePage();
     await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
 
     sharedSyncStatus = 'delayed';
-    view.rerender(<SchedulePage />);
+    view.rerender(<MemoryRouter><SchedulePage /></MemoryRouter>);
     await new Promise((resolve) => window.setTimeout(resolve, 30));
     // live -> delayed is not a recovery from quarantine, so nothing is re-read.
     expect(reloadCalls).toHaveBeenCalledTimes(1);

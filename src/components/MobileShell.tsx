@@ -1,31 +1,54 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, BookOpen, Heart, User } from 'lucide-react';
+import { Home, BookOpen, CalendarDays, Heart, User } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { InstallPromptBanner } from '@/components/InstallPromptBanner';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 
+/**
+ * Five tabs: 홈 · 기록 · 일정 · 우리 · 마이.
+ *
+ * 일정 was added because the planning surface was the least reachable part of the
+ * app and the most asked-for. Before this, `/schedule` and `/trips` had NO tab at
+ * all: the only ways in were a widget the user is free to delete and two buttons
+ * on `/us`. That also meant standing on `/trips` highlighted no tab, so the app
+ * silently told you that you were nowhere.
+ *
+ * `matchPrefixes` exists for the same reason: `/trips/:id` and `/schedule` are both
+ * "일정", so the tab stays lit while you move around inside the section instead of
+ * going dark on a detail screen.
+ */
 const TABS = [
   {
     to: '/home',
     label: '홈',
     icon: Home,
+    matchPrefixes: ['/home', '/'],
   },
   {
     to: '/record',
     label: '기록',
     icon: BookOpen,
+    matchPrefixes: ['/record'],
+  },
+  {
+    to: '/schedule',
+    label: '일정',
+    icon: CalendarDays,
+    matchPrefixes: ['/schedule', '/trips'],
   },
   {
     to: '/us',
     label: '우리',
     icon: Heart,
+    matchPrefixes: ['/us', '/service'],
   },
   {
     to: '/my',
     label: '마이',
     icon: User,
+    matchPrefixes: ['/my', '/settings'],
   },
 ] as const;
 
@@ -48,17 +71,19 @@ export function MobileShell({ children }: { children: ReactNode }) {
         {/* Offline indicator – sits visually above the tab bar */}
         <OfflineBanner />
 
-        {/* Fixed 4-Tab Navigation Bar (홈 | 기록 | 우리 | 마이) */}
+        {/* Fixed 5-Tab Navigation Bar (홈 | 기록 | 일정 | 우리 | 마이) */}
         <nav
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-card/95 backdrop-blur-md border-t border-border/60 z-50 shadow-lg"
           role="tablist"
           aria-label="하단 내비게이션"
         >
-          <ul className="grid grid-cols-4 px-2 pt-2 pb-[max(env(safe-area-inset-bottom,0px),10px)] items-end">
+          <ul className="grid grid-cols-5 px-1 pt-2 pb-[max(env(safe-area-inset-bottom,0px),10px)] items-end">
             {TABS.map((t) => {
-              const active =
-                pathname === t.to ||
-                (t.to === '/home' && (pathname === '/' || pathname === '/home'));
+              // Prefix matching, so a detail screen inside a section keeps its tab
+              // lit. `/` is matched exactly: as a prefix it would light every tab.
+              const active = t.matchPrefixes.some((prefix) =>
+                prefix === '/' ? pathname === '/' : pathname === prefix || pathname.startsWith(`${prefix}/`),
+              );
               const Icon = t.icon;
 
               return (

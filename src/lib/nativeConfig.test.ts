@@ -134,6 +134,41 @@ describe('Android: identity, label and store metadata', () => {
   });
 });
 
+/**
+ * The manifest is heavily commented on purpose -- every permission carries its
+ * justification -- and `--` is ILLEGAL inside an XML comment. Adding the
+ * ACCESS_NETWORK_STATE rationale above introduced exactly that and would have
+ * failed the Android build, which is not runnable in this sandbox (no SDK), so
+ * nothing else would have caught it. Cheap guard, real bug.
+ */
+describe('the Android manifests are well-formed XML', () => {
+  const MANIFESTS = [
+    'android/app/src/main/AndroidManifest.xml',
+    'android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml',
+  ];
+
+  for (const path of MANIFESTS) {
+    it(`${path} parses`, () => {
+      const parsed = new DOMParser().parseFromString(read(path), 'application/xml');
+      const failure = parsed.getElementsByTagName('parsererror')[0];
+      expect(failure?.textContent ?? null, path).toBeNull();
+      expect(parsed.documentElement.tagName).toBe('manifest');
+    });
+
+    it(`${path} has no '--' inside a comment`, () => {
+      // Asserted directly as well: some parsers are lenient about it.
+      for (const comment of read(path).match(/<!--[\s\S]*?-->/g) ?? []) {
+        expect(comment.slice(4, -3), path).not.toContain('--');
+      }
+    });
+  }
+
+  it('the guard would catch a double hyphen (soundness)', () => {
+    const broken = '<!-- a -- b -->';
+    expect(broken.slice(4, -3)).toContain('--');
+  });
+});
+
 describe('Android: the permission set is exactly what the code proves', () => {
   const declared = [...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(
     (m) => m[1],

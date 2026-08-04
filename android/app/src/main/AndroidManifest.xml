@@ -87,7 +87,8 @@
             control disables itself and TodayLogWidget.handlePost refuses to save
             with OFFLINE_READONLY_MESSAGE while OfflineBanner says the connection
             is gone. Writing a diary entry therefore reported "no internet" on a
-            device that was online -- the symptom the product owner reported.
+            device that was online, which is the symptom the product owner
+            reported.
 
             Normal (install-time) permission: no runtime prompt, no user-visible
             dialog, no data leaves the device because of it.

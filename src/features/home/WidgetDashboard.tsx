@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '@/lib/useStore';
-import { Settings, Plus, Bell } from 'lucide-react';
+import { Settings, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
   DndContext,

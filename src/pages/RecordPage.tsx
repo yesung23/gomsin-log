@@ -6,6 +6,7 @@ import { generateDailySummary } from '@/lib/briefing';
 import { useEscapeKey } from '@/lib/hooks';
 import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
+import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
@@ -970,6 +971,26 @@ export function RecordPage() {
                   record here is already sanitised for this viewer, so a
                   partner never sees author-only items in it. */}
               <EmotionFlowInsightCard items={selectedRecord.emotionFlow} variant="detail" />
+
+              {/* Author-only: fix a wrong reading after the fact. Before this, a
+                  saved flow was permanent, which is the defect the product owner
+                  named as the app's biggest problem. */}
+              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
+                <div className="pt-2 border-t border-border">
+                  <RecordEmotionCorrection
+                    record={selectedRecord}
+                    disabled={isOffline}
+                    disabledReason={OFFLINE_READONLY_MESSAGE}
+                    onSave={async (emotionFlow) => {
+                      const result = await updateRecord(selectedRecord.id, {
+                        emotionFlow,
+                        emotionUpdatedAt: new Date().toISOString(),
+                      });
+                      return result.ok ? { ok: true } : { ok: false, error: result.error };
+                    }}
+                  />
+                </div>
+              )}
 
               {/* Owner-only edit/delete controls. Partner records NEVER show these. */}
               {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (

@@ -1,0 +1,300 @@
+name: master validation
+
+# The gate for `master`. Before this file, `master` had NONE.
+#
+# The four existing workflows each trigger on exactly one non-`master` base:
+#
+#   - web-release-validation.yml                       kiro/release-hardening-2026-07-31
+#   - native-release-validation.yml                    kiro/complete-v1-overnight
+#   - two-account-pr-validation.yml                    kiro/two-account-v1-completion
+#   - v1-product-excellence-audit-pr-validation.yml    kiro/v1-product-excellence-audit
+#
+# So a pull request whose base is `master` received zero checks, and no commit on
+# `master` has ever been validated by CI at all. That is the gap this file closes,
+# and it matters most for the one PR that will eventually promote the integration
+# branch onto `master`.
+#
+# None of the four workflows above is modified. `.kiro/steering/merge-policy.md`
+# forbids widening an existing trigger, because each one encodes a review boundary
+# for its own branch family and lending its green tick to history it never
+# examined is a false signal. This is a new, separate workflow for a new boundary.
+#
+# The gates are the same ones proven for the integration branch, in the same
+# order, so a green run here means what the other workflows' green runs mean.
+#
+# Everything is read-only:
+#   - `permissions: contents: read` at workflow scope, inherited by every job.
+#   - No secret is referenced. The Supabase values are public placeholders, shaped
+#     like a URL and an anon key; neither points at a real project.
+#   - No deploy, merge, migration, Supabase configuration, signing or store step.
+#   - No artifact upload, so this workflow publishes nothing whatsoever.
+#   - `persist-credentials: false` on every checkout.
+#   - Third-party actions are pinned by full commit SHA.
+
+on:
+  pull_request:
+    branches:
+      - master
+  # `master` is also validated after the fact. A promotion merge is the one commit
+  # in this repository's history most worth having an independent record for.
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: master-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Non-secret placeholders. The build only needs a syntactically valid URL and a
+  # publishable (anon) key shape; neither points at a real project.
+  VITE_SUPABASE_URL: https://example.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY: test-public-key-not-a-secret
+
+jobs:
+  integrity:
+    name: Boundary and diff integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: This workflow may only validate master
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          EXPECTED_BASE_REF: master
+        run: |
+          set -euo pipefail
+          # Asserted rather than assumed: if the trigger is ever widened, this job
+          # fails instead of silently lending its green tick to another branch.
+          test "${GITHUB_BASE_REF}" = "${EXPECTED_BASE_REF}"
+          echo "Base ref is ${GITHUB_BASE_REF}, as required."
+
+      - name: No whitespace corruption in the diff this branch adds
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test -n "${BASE_SHA}"
+          git diff --check "${BASE_SHA}..HEAD"
+
+      - name: The object graph is intact
+        run: git fsck --no-dangling --no-reflogs --connectivity-only
+
+  web:
+    name: Typecheck, lint, Vitest, both build directions, CSP and assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run every Vitest suite
+        run: npm run test
+
+      - name: Verify the native configuration invariants on their own
+        run: npm run verify:native
+
+      - name: Build with non-secret placeholders
+        run: npm run build
+
+      - name: A build with no Supabase environment MUST fail, naming the variable
+        shell: bash
+        env:
+          VITE_SUPABASE_URL: ''
+          VITE_SUPABASE_PUBLISHABLE_KEY: ''
+        run: |
+          set -uo pipefail
+          if npm run build > "${RUNNER_TEMP}/bare-build.log" 2>&1; then
+            echo 'A build with no Supabase environment succeeded; the guard is gone.' >&2
+            exit 1
+          fi
+          grep -F 'VITE_SUPABASE_URL' "${RUNNER_TEMP}/bare-build.log"
+          echo 'The bare build failed and named VITE_SUPABASE_URL, as required.'
+
+      - name: Rebuild with placeholders and scan the generated CSP
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          if grep -R -E '__SUPABASE_(HTTP|CONNECT)_SRC__' dist; then
+            echo 'A CSP marker survived in dist.' >&2
+            exit 1
+          fi
+          grep -F 'Content-Security-Policy:' dist/_headers
+          grep -F 'https://example.supabase.co' dist/_headers
+          grep -F 'wss://example.supabase.co' dist/_headers
+
+      - name: The shipped documents must request nothing the CSP forbids
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A CDN <link> in index.html is invisible to every other gate: it
+          # typechecks, lints, tests and builds green, and only the browser --
+          # applying the CSP from `_headers` -- rejects it. The unit suite asserts
+          # the source; this asserts the artifact that actually ships.
+          #
+          # The file list is built and asserted non-empty first. Handing grep a
+          # path that does not exist makes it exit 2, and `if grep ...` reads any
+          # non-zero status as "no match", so an absent file would otherwise turn
+          # this gate into a no-op.
+          mapfile -t targets < <(
+            printf '%s\n' dist/index.html dist/offline.html
+            find dist/assets -name '*.css' -type f
+          )
+          for target in "${targets[@]}"; do
+            test -f "${target}" || { echo "Missing expected artifact: ${target}" >&2; exit 1; }
+          done
+          test "${#targets[@]}" -ge 3
+
+          if grep -l -E 'https?://(cdn\.)?jsdelivr|fonts\.(googleapis|gstatic)\.com' \
+              "${targets[@]}"; then
+            echo 'A shipped document or stylesheet loads a font from a CDN the CSP forbids.' >&2
+            exit 1
+          fi
+
+          # The font must actually be present in the artifact, self-hosted.
+          test -n "$(find dist/assets -name '*.woff2' -type f -print -quit)"
+          echo 'Fonts are self-hosted and no forbidden CDN origin is referenced.'
+
+      - name: Verify the generated app assets are byte-identical to the committed ones
+        run: npm run verify:assets
+
+  browser:
+    name: Real-browser creator/partner matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Install Chromium at the version pinned in package.json
+        run: npx playwright install --with-deps chromium
+
+      - name: Creator/partner matrix against the production bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The suite serves the real production build with the public
+          # placeholders above and intercepts every Supabase call per browser
+          # context. No real project is contacted and no credential is needed.
+          #
+          # Failures are diagnosed from this job's own log on purpose: uploading a
+          # report artifact is deliberately NOT done here, so this workflow
+          # publishes nothing at all.
+          npm run test:e2e
+
+  deno-edge:
+    name: Deno Edge Function validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.5.6
+
+      - name: Set up Node.js for npm imports
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph for Deno npm imports
+        run: npm ci
+
+      - name: Typecheck Edge Function modules
+        run: npm run check:edge
+
+      - name: Run the real-Deno Edge Function tests
+        run: npm run test:edge
+
+  dependency-policy:
+    name: Audit allowlist and brace-expansion topology
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Accept only the documented React Router advisory
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "${RUNNER_TEMP}/npm-audit.json"
+          audit_status=$?
+          set -e
+          if [ "${audit_status}" -gt 1 ]; then
+            echo "npm audit failed operationally with status ${audit_status}" >&2
+            exit "${audit_status}"
+          fi
+          node scripts/ci/validate-npm-audit.mjs "${RUNNER_TEMP}/npm-audit.json"
+
+      - name: Assert the brace-expansion major lines
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ls brace-expansion --all | tee "${RUNNER_TEMP}/brace.txt"
+          grep -F 'brace-expansion@1.1.18 overridden' "${RUNNER_TEMP}/brace.txt"
+          grep -E 'brace-expansion@5\.' "${RUNNER_TEMP}/brace.txt"
+          grep -F 'minimatch@3.1.5' "${RUNNER_TEMP}/brace.txt"
+
+          majors="$(grep -o -E 'brace-expansion@[0-9]+' "${RUNNER_TEMP}/brace.txt" \
+            | sed 's/.*@//' | sort -u | tr '\n' ' ')"
+          if [ "${majors}" != "1 5 " ]; then
+            echo "Unexpected brace-expansion major lines: ${majors}" >&2
+            exit 1
+          fi
+          if grep -E 'brace-expansion@[234]\.' "${RUNNER_TEMP}/brace.txt"; then
+            echo 'An unreviewed brace-expansion major appeared.' >&2
+            exit 1
+          fi

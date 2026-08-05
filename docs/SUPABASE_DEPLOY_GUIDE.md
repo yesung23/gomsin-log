@@ -77,9 +77,17 @@ VITE_SUPABASE_PUBLISHABLE_KEY=eyJ...
 
 ---
 
-## 6. Storage (미디어 파일) 아키텍처 설계 (현재 상태: 파일럿 전 필요 / 미구현)
+## 6. Storage (미디어 파일) 아키텍처 (구현 완료 / 원격 실측 미검증)
 
-> **현재 코드 구현 상태**: UI 및 TypeScript 타입(`Attachment`)상으로는 미디어 메타데이터 시뮬레이션을 지원하나, 실제 Storage SDK 업로드 및 Signed URL 발급은 **파일럿 전 필요 (미구현 상태)**입니다.
+> **현재 코드 구현 상태**: 업로드·Signed URL·MIME/용량 제한이 모두 구현되어 있습니다.
+> - 업로드: `src/lib/records.ts:378` — 버킷 `couple-media`
+> - Signed URL: `src/lib/records.ts:92` — TTL 1시간 (`SIGNED_URL_TTL_SECONDS`)
+> - MIME 판별 / 용량 제한: `classifyMediaFile` + `MAX_BYTES` (첨부 타입별), 테스트
+>   `src/lib/records.test.ts`, 실패 경로 테스트 `src/lib/recordMediaFailures.test.ts`
+>
+> 이 절은 한때 "파일럿 전 필요 (미구현)" 이라고 적혀 있었습니다. 남은 것은 실제 프로젝트에
+> 버킷·정책(`007`)을 적용하고 두 계정으로 실측하는 일입니다(`docs/SECURITY_TEST_PLAN.md`
+> STOR-01~04).
 
 ### 1) 버킷 설계 원칙
 - **Public Bucket 사용 금지**: 사진, 동영상, 음성은 1:1 커플 비공개 자산이므로 **Private Bucket**으로 구성합니다.
@@ -105,7 +113,7 @@ couple-media/{couple_id}/{record_id}/{attachment_id}.{extension}
 | **목적** | 상대방과의 1:1 관계 종료 | 서비스 이용 완전 종료 |
 | **영향 범위** | `couple_members.status = 'disconnected'` 전환. 내 아카이브 유지. | Auth User, Profile, Records, Storage 객체 완전 삭제 |
 | **상대방 변경** | 즉시 상대방의 렌더링 타임라인 및 빠른 정리에서 제외. | 상대방 화면에서 가명/연결 해제 표시 |
-| **서버 구현** | RPC `disconnect_couple()` 실행 | **Edge Function 필수 (파일럿 전 필요 / 미구현)** |
+| **서버 구현** | RPC `disconnect_couple()` 실행 | **Edge Function 구현 완료** (`supabase/functions/delete-account/`) — 배포는 사람이 실행: `supabase functions deploy delete-account` |
 
 > **Edge Function 계정 삭제 처리 순서**:
 > 1. Storage `couple-media` 내 작성자 객체 삭제
@@ -118,4 +126,26 @@ couple-media/{couple_id}/{record_id}/{attachment_id}.{extension}
 ## 8. 배포 후 검증 및 빌드 참고
 
 - **빌드 실행**: `npm run build` (`tsc -b && vite build`)
-- **현재 로컬 환경 고지**: 현재 샌드박스 CLI 환경에 Node.js/npm이 설치되어 있지 않으므로 빌드/린트는 **미실행** 상태이며, 프로덕션 CI/CD 환경(Vercel/Netlify)에서 자동 빌드 및 검증을 수행합니다.
+- **환경변수 필수**: `VITE_SUPABASE_URL` 과 `VITE_SUPABASE_PUBLISHABLE_KEY`(또는
+  `VITE_SUPABASE_ANON_KEY`) 없이는 **빌드가 의도적으로 실패**합니다. 설정이 없는 채로
+  영구 데모 모드 산출물이 나가는 것을 막기 위한 가드입니다(`build/buildEnv.ts`).
+  URL 은 파싱 가능해야 하고 `localhost`/`127.0.0.1` 을 제외하면 https 여야 합니다.
+- **검증 명령**: `npm run verify` (typecheck → lint → 전체 Vitest → 빌드). CI 워크플로가
+  매 PR 에서 이 게이트에 Playwright(실브라우저 커플 매트릭스), Deno Edge 테스트, CSP 스캔,
+  에셋 대조, 의존성 감사 allowlist 를 더해 실행합니다.
+
+### ⚠️ 보안 헤더는 호스팅 플랫폼에 따라 적용 방식이 다릅니다
+
+CSP 를 포함한 보안 헤더는 `public/_headers` 에서 나가고, 빌드가 `VITE_SUPABASE_URL` 을
+그 안의 마커에 치환합니다(치환에 실패하면 빌드가 실패합니다).
+
+| 플랫폼 | `_headers` 인식 | 필요한 조치 |
+| :--- | :--- | :--- |
+| **Netlify** | O | 없음 |
+| **Cloudflare Pages** | O | 없음 |
+| **Vercel** | **X** | `vercel.json` 의 `headers` 로 **같은 헤더를 직접 설정해야 합니다.** 하지 않으면 CSP·`X-Frame-Options`·`Permissions-Policy` 가 **전부 적용되지 않습니다.** |
+
+이 문서의 다른 절과 `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` 는 예시로 Vercel 주소를
+쓰고 있으므로, 배포 플랫폼을 확정한 뒤 위 표에 따라 조치하세요. 배포 후에는 브라우저
+DevTools → Network → 문서 응답 헤더에서 `Content-Security-Policy` 가 실제로 존재하는지
+확인하는 것이 유일하게 신뢰할 수 있는 검증입니다.

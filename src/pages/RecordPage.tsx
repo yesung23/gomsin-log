@@ -20,21 +20,10 @@ import { toast } from 'sonner';
 import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { serverErrorMessage } from '@/lib/serverErrors';
+import { AttachmentMedia } from '@/components/AttachmentMedia';
 import type { DailyRecord, ServerErrorKind } from '@/types';
 
 type MediaFilter = 'all' | 'photo' | 'video' | 'voice' | 'text';
-
-/**
- * Why an attachment will not open.
- *
- * The record itself loaded, so this is deliberately scoped to the file rather
- * than presented as a failure of the entry. The cause comes from the classifier,
- * so an RLS refusal, an expired session and a dead network read differently
- * instead of all showing an unexplained filename.
- */
-function attachmentUnavailableCopy(reason: ServerErrorKind): string {
-  return `이 파일을 열 수 없어요. ${serverErrorMessage(reason)}`;
-}
 
 // Build calendar grid for a given year/month
 function buildCalendarGrid(year: number, month: number) {
@@ -708,26 +697,13 @@ export function RecordPage() {
                   {r.attachments && r.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       {r.attachments.map((att, i) => (
-                        <div key={i} className="rounded-xl overflow-hidden bg-muted border border-border">
-                          {att.type === 'photo' && att.url ? (
-                            <img src={att.url} alt={att.name} loading="lazy" className="w-full h-36 object-cover rounded-xl" />
-                          ) : (
-                            <div className="p-3 text-xs flex items-center gap-2 font-medium">
-                              {att.type === 'photo' && <ImageIcon size={16} className="text-coral" />}
-                              {att.type === 'video' && <Film size={16} className="text-blue-500" />}
-                              {att.type === 'voice' && <Mic size={16} className="text-purple-500" />}
-                              <span>{att.name}</span>
-                            </div>
-                          )}
-                          {/* A file that could not be signed used to render as a
-                              plain chip, indistinguishable from a video or voice
-                              note that simply has no thumbnail. Say so instead. */}
-                          {att.urlUnavailable && (
-                            <p className="px-3 pb-2 text-[11px] text-destructive font-medium break-keep">
-                              {attachmentUnavailableCopy(att.urlUnavailable)}
-                            </p>
-                          )}
-                        </div>
+                        <AttachmentMedia
+                          key={i}
+                          attachment={att}
+                          coupleId={state.profile.couple.coupleId}
+                          recordId={r.id}
+                          variant="timeline"
+                        />
                       ))}
                     </div>
                   )}
@@ -902,39 +878,31 @@ export function RecordPage() {
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold text-muted-foreground">첨부 파일</h4>
                   {(selectedRecord.attachments || []).map((att, idx) => (
-                    <div key={idx} className="rounded-xl overflow-hidden bg-muted border border-border">
-                      {att.type === 'photo' && att.url ? (
-                        <img src={att.url} alt={att.name} loading="lazy" className="w-full h-48 object-cover rounded-xl" />
-                      ) : (
-                        <div className="p-3 text-xs flex items-center gap-2 font-medium">
-                          {att.type === 'photo' && <ImageIcon size={16} className="text-coral" />}
-                          {att.type === 'video' && <Film size={16} className="text-blue-500" />}
-                          {att.type === 'voice' && <Mic size={16} className="text-purple-500" />}
-                          <span>{att.name}</span>
-                        </div>
-                      )}
-                      {att.urlUnavailable && (
-                        <p className="px-3 pb-2 text-[11px] text-destructive font-medium break-keep">
-                          {attachmentUnavailableCopy(att.urlUnavailable)}
-                        </p>
-                      )}
-                      {/* Removal needs the durable storage path. A legacy
-                          attachment without one cannot be addressed in Storage,
-                          so no delete control is offered for it. */}
-                      {canEditMedia && att.path && (
-                        <div className="flex justify-end px-3 pb-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => void handleRemoveAttachment(att.path!)}
-                            disabled={isMediaBusy || isOffline}
-                            aria-label={`첨부 ${att.name} 삭제`}
-                            className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-xs disabled:opacity-50"
-                          >
-                            <Trash2 size={13} /> 첨부 삭제
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <AttachmentMedia
+                      key={idx}
+                      attachment={att}
+                      coupleId={state.profile.couple.coupleId}
+                      recordId={selectedRecord.id}
+                      variant="detail"
+                      footer={
+                        /* Removal needs the durable storage path. A legacy
+                           attachment without one cannot be addressed in Storage,
+                           so no delete control is offered for it. */
+                        canEditMedia && att.path ? (
+                          <div className="flex justify-end px-3 pb-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveAttachment(att.path!)}
+                              disabled={isMediaBusy || isOffline}
+                              aria-label={`첨부 ${att.name} 삭제`}
+                              className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-xs disabled:opacity-50"
+                            >
+                              <Trash2 size={13} /> 첨부 삭제
+                            </button>
+                          </div>
+                        ) : undefined
+                      }
+                    />
                   ))}
 
                   {canEditMedia && (

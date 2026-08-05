@@ -4,6 +4,7 @@ import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
 import { useEscapeKey } from '@/lib/hooks';
+import { scrollBehavior } from '@/lib/motion';
 import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
@@ -314,7 +315,7 @@ export function RecordPage() {
     setMediaFilter('all');
     setShowCalendar(false);
     setTimeout(() => {
-      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      timelineRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     }, 100);
   };
 
@@ -324,7 +325,7 @@ export function RecordPage() {
     setHighlightedRecordId(recordId);
     const el = document.getElementById(`record-${recordId}`);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
     }
   };
 
@@ -801,6 +802,7 @@ export function RecordPage() {
                   <textarea
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
+                    aria-label="기록 내용 수정"
                     className="w-full h-32 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
                     placeholder="기록 내용을 입력하세요"
                   />

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '@/lib/useStore';
-import { Settings, Plus } from 'lucide-react';
+import { Settings, Plus, LayoutGrid } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
   DndContext,
@@ -82,6 +82,33 @@ export function WidgetDashboard() {
     persist(activeWidgets.filter((w: string) => w !== id));
   };
 
+  /**
+   * What a screen reader hears while reordering widgets by keyboard.
+   *
+   * dnd-kit ships defaults, but they are English and they name the raw sortable
+   * id, so a Korean user heard "Draggable item partner_emotion_flow was moved
+   * over droppable area today_word". WCAG 2.1 SC 4.1.3.
+   */
+  const widgetName = (id: string | number) => WIDGET_REGISTRY[String(id)]?.label ?? String(id);
+  const positionOf = (id: string | number) => activeWidgets.indexOf(String(id)) + 1;
+  const announcements = useMemo(() => ({
+    onDragStart: ({ active }: { active: { id: string | number } }) =>
+      `${widgetName(active.id)} 위젯을 집었습니다. 방향키로 옮기고, 스페이스나 엔터로 놓으세요.`,
+    onDragOver: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over
+        ? `${widgetName(active.id)} 위젯을 ${positionOf(over.id)}번째 위치로 옮기는 중입니다.`
+        : `${widgetName(active.id)} 위젯이 놓을 수 없는 위치에 있습니다.`,
+    onDragEnd: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over
+        ? `${widgetName(active.id)} 위젯을 ${positionOf(over.id)}번째에 놓았습니다.`
+        : `${widgetName(active.id)} 위젯을 제자리에 두었습니다.`,
+    onDragCancel: ({ active }: { active: { id: string | number } }) =>
+      `${widgetName(active.id)} 위젯 이동을 취소했습니다.`,
+  // `activeWidgets` is read through the closures above, so the announcements must
+  // be rebuilt when the layout changes or they would report stale positions.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [activeWidgets]);
+
   const [pressTimer, setPressTimer] = useState<NodeJS.Timeout | null>(null);
 
   const handleTouchStart = () => {
@@ -132,7 +159,26 @@ export function WidgetDashboard() {
               >
                 <Plus size={22} strokeWidth={1.5} />
               </button>
-              
+
+              {/*
+                Edit mode used to be reachable ONLY by holding a widget for 500ms
+                (`onTouchStart` / `onMouseDown` below). A keyboard user could
+                therefore never reorder or remove a widget at all: the drag handle
+                and the delete button only exist inside edit mode, so dnd-kit's
+                KeyboardSensor -- which IS wired -- was unreachable. WCAG 2.1
+                SC 2.1.1. This button is the keyboard and screen-reader path in,
+                and it also makes the feature discoverable for everyone, which the
+                "위젯을 길게 누르면" hint at the bottom could not do for anyone who
+                cannot long-press.
+              */}
+              <button
+                onClick={() => setIsEditMode(true)}
+                className="w-11 h-11 flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-muted/20 rounded-full active:scale-95 transition-all"
+                aria-label="위젯 편집"
+              >
+                <LayoutGrid size={22} strokeWidth={1.5} />
+              </button>
+
               {/*
                 A notification-centre button used to sit here with no onClick
                 handler and a permanently lit unread dot. There is no
@@ -174,6 +220,7 @@ export function WidgetDashboard() {
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragEnd={handleDragEnd}
+          accessibility={{ announcements }}
         >
           <SortableContext
             items={activeWidgets}
@@ -182,12 +229,13 @@ export function WidgetDashboard() {
             {activeWidgets.map((id) => {
               const WidgetComponent = WIDGET_REGISTRY[id]?.component;
               if (!WidgetComponent) return null;
-              
+
               return (
-                <WidgetWrapper 
-                  key={id} 
-                  id={id} 
-                  isEditMode={isEditMode} 
+                <WidgetWrapper
+                  key={id}
+                  id={id}
+                  label={WIDGET_REGISTRY[id]?.label ?? id}
+                  isEditMode={isEditMode}
                   onRemove={handleRemoveWidget}
                 >
                   <WidgetComponent />

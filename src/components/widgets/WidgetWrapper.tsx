@@ -6,12 +6,21 @@ import { cn } from '@/lib/utils';
 
 interface WidgetWrapperProps {
   id: string;
+  /**
+   * Human name of the widget, for the edit controls.
+   *
+   * Passed in rather than looked up from `WIDGET_REGISTRY` here: the registry
+   * imports every widget component, and this wrapper is rendered by the dashboard
+   * that already has it, so importing it back would couple a presentational
+   * wrapper to the whole widget graph.
+   */
+  label: string;
   isEditMode: boolean;
   onRemove: (id: string) => void;
   children: React.ReactNode;
 }
 
-export function WidgetWrapper({ id, isEditMode, onRemove, children }: WidgetWrapperProps) {
+export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: WidgetWrapperProps) {
   const {
     attributes,
     listeners,
@@ -40,21 +49,31 @@ export function WidgetWrapper({ id, isEditMode, onRemove, children }: WidgetWrap
       {/* Edit Mode Overlay & Controls */}
       {isEditMode && (
         <>
+          {/*
+            Both controls used to be unnamed: a screen reader announced "button"
+            for the remove control, and the drag handle was a bare <div> with no
+            name at all, so neither said WHICH widget it affected. The remove
+            control was also 32x32, under the 44x44 minimum the rest of this app
+            already meets.
+          */}
           <button
             onClick={() => onRemove(id)}
-            className="absolute -top-3 -right-3 z-20 w-8 h-8 bg-muted hover:bg-red-500 hover:text-white text-muted-foreground rounded-full flex items-center justify-center shadow-md transition-colors"
+            aria-label={`${label} 위젯 삭제`}
+            className="absolute -top-3 -right-3 z-20 w-11 h-11 bg-muted hover:bg-red-500 hover:text-white text-muted-foreground rounded-full flex items-center justify-center shadow-md transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
-          <div 
-            {...attributes} 
+          <button
+            type="button"
+            {...attributes}
             {...listeners}
-            className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 w-12 h-8 bg-card border border-border rounded-full flex items-center justify-center shadow-sm cursor-grab active:cursor-grabbing"
+            aria-label={`${label} 위젯 위치 변경`}
+            className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 w-14 h-11 bg-card border border-border rounded-full flex items-center justify-center shadow-sm cursor-grab active:cursor-grabbing"
           >
-            <GripHorizontal className="w-5 h-5 text-muted-foreground" />
-          </div>
+            <GripHorizontal className="w-5 h-5 text-muted-foreground" aria-hidden="true" />
+          </button>
           {/* Prevent clicks on content during edit mode */}
-          <div className="absolute inset-0 bg-card/20 z-10 rounded-3xl cursor-pointer" />
+          <div className="absolute inset-0 bg-card/20 z-10 rounded-3xl cursor-pointer" aria-hidden="true" />
         </>
       )}
       

@@ -501,9 +501,15 @@ export function TodayLogWidget() {
             </button>
           </div>
           
+          {/*
+            A placeholder is not a label: it disappears on the first keystroke and
+            support for reading it varies between screen readers. This is the main
+            composer of the whole app, so it gets a real name. WCAG 2.1 SC 1.3.1.
+          */}
           <textarea
             value={log}
             onChange={(e) => setLog(e.target.value)}
+            aria-label="오늘의 기록"
             placeholder="지금 이 순간, 어떤 생각을 하고 있나요?"
             className="w-full h-24 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />

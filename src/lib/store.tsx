@@ -9,6 +9,7 @@ import {
   Attachment,
 } from '@/types';
 import { DEFAULT_LAYOUT_BY_ROLE } from '@/lib/widgets';
+import { clearAllComposerDrafts } from '@/lib/composerDraft';
 import {
   authRepository,
   supabase,
@@ -2619,6 +2620,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     cachePurgedRef.current = true;
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
+    // Unsent composer text is held in memory, so it is not covered by removing the
+    // storage keys above. It must not outlive the session that produced it.
+    clearAllComposerDrafts();
     const current = stateRef.current;
     const nextState: AppState = {
       ...DEFAULT_STATE,

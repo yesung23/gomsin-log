@@ -13,7 +13,7 @@ import { useStore } from '@/lib/useStore';
 
 export function MyPage() {
   const navigate = useNavigate();
-  const { state, switchRole } = useStore();
+  const { state, switchRole, coupleLifecycle } = useStore();
   const { profile, isDemoMode, authenticatedUser } = state;
 
   const isGomsin = profile.role === 'gomsin';
@@ -23,6 +23,33 @@ export function MyPage() {
       && profile.couple.connected
       && profile.couple.status === 'active',
   );
+
+  /**
+   * Say which state this actually is.
+   *
+   * This line used to be `connected ? "…님과 연결됨" : "연결 대기 중"`, so a user
+   * with no couple space, a user who had just disconnected, and a user whose
+   * membership had not been confirmed yet were all told an invitation was
+   * outstanding. "대기 중" means someone may still join; for three of those four
+   * states that is an invented fact.
+   *
+   * `coupleLifecycle` is the store's authoritative five-state answer and is what
+   * CoupleStatusBanner already renders, so this reuses it rather than re-deriving
+   * a second, disagreeing version from the profile snapshot.
+   */
+  const coupleStatusLabel = connected
+    ? `${profile.couple.partnerName}님과 연결됨`
+    : coupleLifecycle === 'pending'
+      ? '연결 대기 중'
+      : coupleLifecycle === 'disconnected'
+        ? '연결이 해제된 상태예요'
+        : coupleLifecycle === 'personal'
+          ? '아직 우리 공간이 없어요'
+          // Worded as a COUPLE-SPACE check, not a connection check. "연결 상태를
+          // 확인" reads as a network diagnosis, and `serverErrorCopy` guards
+          // against exactly that phrasing outside the classified error paths.
+          // This mirrors CoupleStatusBanner's "커플 공간 상태를 확인하고 있어요".
+          : '우리 공간 상태를 확인하는 중이에요';
 
   return (
     <MobileShell>
@@ -50,9 +77,9 @@ export function MyPage() {
                   {roleLabel}
                 </span>
                 {connected ? (
-                  <span className="text-emerald-600 font-semibold">{profile.couple.partnerName}님과 연결됨</span>
+                  <span className="text-emerald-600 font-semibold">{coupleStatusLabel}</span>
                 ) : (
-                  <span className="text-muted-foreground">연결 대기 중</span>
+                  <span className="text-muted-foreground">{coupleStatusLabel}</span>
                 )}
               </div>
             </div>

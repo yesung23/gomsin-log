@@ -9,6 +9,11 @@ import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { EmotionChipEditor } from '@/components/EmotionChipEditor';
 import { useEmotionCandidatesForText } from '@/lib/useEmotionCandidates';
+import {
+  clearComposerDraft,
+  readComposerDraft,
+  writeComposerDraft,
+} from '@/lib/composerDraft';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
 import { isNativePlatform } from '@/lib/platform';
 import {
@@ -24,12 +29,27 @@ export function TodayLogWidget() {
   const partnerName = state.profile.couple.partnerName || '파트너';
   const todayStr = toLocalDateString(localToday());
 
-  const [log, setLog] = useState('');
-  const [reaction, setReaction] = useState<ReactionType | undefined>(undefined);
-  const [isPrivate, setIsPrivate] = useState(false);
+  /**
+   * Restore an unsent draft.
+   *
+   * Switching tabs unmounts this widget, so the text used to be thrown away
+   * silently -- and a five-tab bar invites exactly that glance at 기록 or 일정.
+   * The stash is in-memory and per-user (see lib/composerDraft.ts): it survives
+   * navigation, never touches storage, and cannot cross accounts.
+   */
+  const draftUserId = state.authenticatedUser?.id || state.profile.id;
+  // Read once per identity: re-reading on every render would fight the user's own
+  // edits, since this component is the thing that writes the stash.
+  const restoredDraft = React.useMemo(() => readComposerDraft(draftUserId), [draftUserId]);
+
+  const [log, setLog] = useState(restoredDraft?.log ?? '');
+  const [reaction, setReaction] = useState<ReactionType | undefined>(restoredDraft?.reaction);
+  const [isPrivate, setIsPrivate] = useState(restoredDraft?.isPrivate ?? false);
   /** Files chosen but not yet uploaded; upload happens on save. */
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [showInputCard, setShowInputCard] = useState(false);
+  // Reopen the card when there is something waiting, so a restored draft is not
+  // invisible behind a collapsed composer.
+  const [showInputCard, setShowInputCard] = useState(!!restoredDraft);
   const [isSaving, setIsSaving] = useState(false);
   const isOffline = !useOnlineStatus();
   const [isRecording, setIsRecording] = useState(false);
@@ -65,6 +85,17 @@ export function TodayLogWidget() {
     }, 300);
     return () => clearTimeout(timer);
   }, [log]);
+
+  /**
+   * Keep the in-memory stash in step with the composer.
+   *
+   * Written on every change rather than on unmount, because an unmount caused by a
+   * route change is not guaranteed to run before the new route tears this tree
+   * down, and losing the draft is the exact failure being fixed.
+   */
+  React.useEffect(() => {
+    writeComposerDraft(draftUserId, { log, isPrivate, reaction });
+  }, [draftUserId, log, isPrivate, reaction]);
 
   /**
    * Feelings read out of the text, included by default and removable.
@@ -349,6 +380,8 @@ export function TodayLogWidget() {
     setReaction(undefined);
     review.reset();
     setIsPrivate(false);
+    // The write succeeded, so the draft is no longer unsent work.
+    clearComposerDraft(draftUserId);
 
     if (result.failedFiles.length > 0) {
       // Be explicit: the text was saved, the files were not.

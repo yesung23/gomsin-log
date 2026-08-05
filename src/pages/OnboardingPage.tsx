@@ -49,7 +49,26 @@ export function OnboardingPage() {
       && identity.generation === identityGenerationRef.current,
     [],
   );
-  const [step, setStep] = useState(state.onboardingStep || 0); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
+  /**
+   * Step 0 is the LANDING/SIGN-IN screen, so it is only correct for a visitor who
+   * has not signed in yet.
+   *
+   * A brand-new account arrives here already authenticated: `/auth/callback`
+   * exchanges the code, hydration finds no `profiles` row, `setupComplete` stays
+   * false and `App` renders this wizard. Opening at step 0 meant the first thing a
+   * user saw after signing in was "Google로 계속하기" again -- and because step 0
+   * has no "다음" and nothing ever wrote a non-zero `onboardingStep`, pressing it
+   * just repeated the same round trip. No new account could reach role selection.
+   *
+   * A stored step is still honoured, so a creator who was already shown an
+   * invitation code is not dropped back to the beginning.
+   */
+  const FIRST_WIZARD_STEP = 1;
+  const hasIdentity = !!state.authenticatedUser || state.isDemoMode;
+  const [step, setStep] = useState(() => {
+    const stored = state.onboardingStep || 0;
+    return stored === 0 && hasIdentity ? FIRST_WIZARD_STEP : stored;
+  }); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
 
   // Detect iOS environment for conditional Apple Login UI
   const isIOS = useMemo(() => {
@@ -130,6 +149,17 @@ export function OnboardingPage() {
   useEffect(() => {
     setOnboardingStep(step);
   }, [step, setOnboardingStep]);
+
+  /**
+   * Leave the landing screen the moment an identity exists.
+   *
+   * The initial state above cannot cover this on its own: the OAuth round trip and
+   * the demo switch both resolve AFTER this component has mounted, so a visitor who
+   * signs in while the landing screen is open would otherwise stay on it.
+   */
+  useEffect(() => {
+    if (hasIdentity) setStep((current) => (current === 0 ? FIRST_WIZARD_STEP : current));
+  }, [hasIdentity]);
 
   // Total steps based on role
   const totalSteps = role === 'gomsin' ? 4 : 6;
@@ -276,6 +306,16 @@ export function OnboardingPage() {
     setPendingSpaceRecovery(null);
     toast.success('이전에 보낸 초대 코드를 그대로 사용해요. 이어서 진행할게요.');
   };
+
+  /**
+   * Whether 다음 can actually do anything from the current step.
+   *
+   * The button was always enabled, so on the nickname step it invited a tap and
+   * then answered with an error toast. `handleNext` keeps every one of its checks
+   * -- this only stops the affordance promising a step it is going to refuse,
+   * which is the same rule already applied to 저장 in the composer.
+   */
+  const canAdvanceFromStep = step === 2 ? nickname.trim().length >= 2 : true;
 
   const handleNext = async () => {
     // Auth Gate: Cannot advance from Step 0 without login or demo mode
@@ -757,7 +797,8 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
+                disabled={!canAdvanceFromStep}
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px] disabled:opacity-50"
               >
                 다음
               </button>

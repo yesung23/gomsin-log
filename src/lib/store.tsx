@@ -198,7 +198,10 @@ const DEFAULT_STATE: AppState = {
     role: 'gomsin',
     couple: {
       partnerName: '',
-      anniversaryDate: '2024-02-14',
+      // No invented anniversary, for the same reason the military block below
+      // carries none: a literal here produces a confident "+N일째" for a couple
+      // that has never stated a date. Unknown until they do.
+      anniversaryDate: undefined,
       coupleCode: '',
       connected: false,
       status: 'pending',

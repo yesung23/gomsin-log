@@ -72,6 +72,8 @@ export function TodayLogWidget() {
    * effect of a reducer.
    */
   const pendingFilesRef = React.useRef<File[]>([]);
+  /** Synchronous save gate. See `handlePost`. */
+  const saveInFlightRef = React.useRef(false);
   React.useEffect(() => {
     pendingFilesRef.current = pendingFiles;
   }, [pendingFiles]);
@@ -328,6 +330,24 @@ export function TodayLogWidget() {
   const hasContentToSave = log.trim().length > 0 || pendingFiles.length > 0 || !!reaction;
 
   const handlePost = async () => {
+    /**
+     * `isSaving` and the button's `disabled` are both React state, so they only
+     * take effect on the next render. Two activations inside one frame -- a
+     * double tap on a full-width primary CTA -- therefore both read `false` and
+     * both reach the server, producing a duplicate record and a duplicate
+     * upload. The gate has to be synchronous to hold.
+     */
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    try {
+      await runPost();
+    } finally {
+      // Released even on failure, so a deliberate retry still works.
+      saveInFlightRef.current = false;
+    }
+  };
+
+  const runPost = async () => {
     if (isSaving) return;
     // Read-only while offline: firing this write would fail and then be explained
     // with a message that could not name the real cause.

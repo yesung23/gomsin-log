@@ -64,15 +64,64 @@ describe('C5 - no module is both statically and dynamically imported', () => {
 
 describe('C5 - vendor chunk splitting', () => {
   const viteConfig = read('vite.config.ts');
+  const pkg = JSON.parse(read('package.json')) as { dependencies: Record<string, string> };
 
   it('splits by import identity so the entry chunk clears the warning threshold', () => {
     expect(viteConfig).toContain('manualChunks');
     for (const entry of [
-      "'vendor-react'", "'vendor-supabase'", "'vendor-dnd'",
-      "'vendor-date-fns'", "'vendor-icons'",
+      "'vendor-react'", "'vendor-supabase'", "'vendor-dnd'", "'vendor-icons'",
     ]) {
       expect(viteConfig, entry).toContain(entry);
     }
+  });
+
+  it('names no package that is no longer installed at all', () => {
+    // `'vendor-date-fns': ['date-fns']` survived here after nothing imported
+    // date-fns any more, and rollup answered with `Generated an empty chunk:
+    // "vendor-date-fns"` -- a 0.00 kB file that the service worker then precached
+    // on every install. The build now fails on that warning (see
+    // `failOnEmptyChunks`), and this is the cheap unit-level half of the guard.
+    //
+    // Resolved against the lockfile rather than `dependencies`, deliberately:
+    // `react-router` is chunked with `react-router-dom` to keep the router in one
+    // vendor chunk, and it is a transitive package, not a declared dependency.
+    const lock = JSON.parse(read('package-lock.json')) as {
+      packages: Record<string, unknown>;
+    };
+    const block = viteConfig.slice(
+      viteConfig.indexOf('manualChunks: {'),
+      viteConfig.indexOf('},', viteConfig.indexOf('manualChunks: {')),
+    );
+    const named = [...block.matchAll(/'([^']+)'/g)]
+      .map((match) => match[1])
+      .filter((name) => !name.startsWith('vendor-'));
+    expect(named.length).toBeGreaterThanOrEqual(6);
+    expect(named).not.toContain('date-fns');
+    for (const name of named) {
+      expect(
+        lock.packages[`node_modules/${name}`],
+        `${name} is chunked but is not in the installed graph`,
+      ).toBeDefined();
+    }
+  });
+
+  it('drops the dependency an empty chunk pointed at, instead of only the chunk', () => {
+    expect(pkg.dependencies['date-fns']).toBeUndefined();
+    expect(read('package-lock.json')).not.toContain('node_modules/date-fns');
+  });
+
+  it('turns an empty chunk into a build failure rather than a printed warning', () => {
+    // Verified against the real build, not assumed: with the entry still present
+    // this guard aborted `npm run build` with
+    // `[gomsinlog] build aborted: Generated an empty chunk: "vendor-date-fns"`.
+    expect(viteConfig).toContain("warning.code === 'EMPTY_BUNDLE'");
+    expect(viteConfig).toContain('/Generated an empty chunk/.test(warning.message');
+    expect(viteConfig).toContain('function failOnEmptyChunks');
+    expect(viteConfig).toContain('failOnEmptyChunks(() => emptyChunkWarnings)');
+    // It must fail AFTER the write, or the only error the user sees is
+    // injectServiceWorkerManifest() failing to scandir a dist that never existed.
+    expect(viteConfig.indexOf('failOnEmptyChunks(() => emptyChunkWarnings)'))
+      .toBeGreaterThan(viteConfig.indexOf('injectServiceWorkerManifest(),'));
   });
 
   it('PRESERVATION: the service worker manifest still enumerates dist/assets recursively', () => {

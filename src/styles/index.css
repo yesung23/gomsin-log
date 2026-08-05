@@ -305,3 +305,56 @@ input[type='range']::-webkit-slider-thumb {
 .animate-wiggle {
   animation: wiggle 0.3s ease-in-out infinite;
 }
+
+/*
+ * Respect the OS-level request for less motion.
+ *
+ * WCAG 2.1 SC 2.3.3. Nothing in this app honoured `prefers-reduced-motion`, and
+ * `.animate-wiggle` is the reason this is not cosmetic: widget edit mode rotates
+ * every card back and forth INFINITELY, which is exactly the pattern that
+ * triggers nausea and dizziness for someone with a vestibular disorder.
+ *
+ * The distinction below is deliberate. Continuous, decorative motion is stopped
+ * outright. Entrances are collapsed to a near-zero duration instead of removed,
+ * because `animation: none` on a keyframe that ends at `opacity: 1` can leave an
+ * element stuck at its `from` state; a 1ms run lands on the final frame.
+ * `animate-spin` is kept, at a slower rate: it is the only signal that a load is
+ * still in progress, and removing it would leave a frozen icon that reads as a
+ * hang.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-wiggle,
+  .animate-pulse {
+    animation: none !important;
+  }
+
+  /*
+   * `record-highlighted` is the 1~2 second emphasis README section 1 promises when
+   * a summary item is tapped. It is a box-shadow pulse, not movement, and it is
+   * the only thing that says "this is the record you asked for" -- so it is kept,
+   * shortened to a single pass rather than removed.
+   */
+  .record-highlighted {
+    animation: highlight-pulse 0.8s ease-out 1 !important;
+  }
+
+  .animate-slide-up,
+  .animate-fade-in,
+  .animate-in {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+  }
+
+  .animate-spin {
+    animation-duration: 2s !important;
+  }
+
+  /*
+   * Covers scrolling this app did not ask a behaviour for. An explicit
+   * `scrollIntoView({ behavior: 'smooth' })` is a JavaScript argument and is NOT
+   * affected by this rule, which is why `src/lib/motion.ts` exists.
+   */
+  html {
+    scroll-behavior: auto !important;
+  }
+}

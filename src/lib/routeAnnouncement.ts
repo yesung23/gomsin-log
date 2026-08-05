@@ -1,0 +1,49 @@
+/**
+ * The name of the screen a path leads to, for announcing a route change.
+ *
+ * A single-page app replaces the document without a page load, so a screen
+ * reader is told nothing: moving between 홈 · 기록 · 일정 · 우리 · 마이 produced no
+ * announcement at all and left focus wherever the previous screen had it. This is
+ * the copy an `aria-live` region reads out, and it is a pure function so the
+ * mapping can be tested without a router.
+ *
+ * Kept deliberately close to the tab labels in `MobileShell`, so what is
+ * announced matches what is on screen. Prefix-matched for the same reason the
+ * tab highlight is: `/trips/:id` is still 일정.
+ */
+const ROUTES: { prefix: string; name: string; exact?: boolean }[] = [
+  { prefix: '/', name: '홈', exact: true },
+  { prefix: '/home', name: '홈' },
+  { prefix: '/record', name: '기록' },
+  { prefix: '/schedule', name: '일정' },
+  { prefix: '/trips', name: '일정' },
+  { prefix: '/us', name: '우리' },
+  { prefix: '/service', name: '군 복무 정보' },
+  { prefix: '/my', name: '마이' },
+  { prefix: '/settings', name: '설정' },
+  { prefix: '/onboarding', name: '시작하기' },
+  { prefix: '/legal', name: '약관 및 정책' },
+  { prefix: '/auth/callback', name: '로그인 처리 중' },
+];
+
+export function routeScreenName(pathname: string): string | null {
+  for (const route of ROUTES) {
+    if (route.exact ? pathname === route.prefix : pathname === route.prefix
+      || pathname.startsWith(`${route.prefix}/`)) {
+      return route.name;
+    }
+  }
+  return null;
+}
+
+/**
+ * What the live region says, or `null` when the path is not a known screen.
+ *
+ * Returning `null` rather than a guess is deliberate: announcing "페이지" for an
+ * unrecognised path would be noise, and a wrong screen name is worse than
+ * silence.
+ */
+export function routeAnnouncement(pathname: string): string | null {
+  const name = routeScreenName(pathname);
+  return name === null ? null : `${name} 화면입니다`;
+}

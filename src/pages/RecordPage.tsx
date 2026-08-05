@@ -329,6 +329,44 @@ export function RecordPage() {
     }
   };
 
+  /**
+   * Arriving with a record already chosen: open ITS date, then scroll to it.
+   *
+   * README section 1 promises that tapping a summary item scrolls to the original
+   * record and emphasises it for 1~2 seconds. Inside this page that worked
+   * (`handleSummaryItemClick`). Arriving from the home screen did not: a widget set
+   * `highlightedRecordId` and navigated, this page opened on TODAY, and the only
+   * thing that read the id was the effect below -- which CLEARS it two seconds
+   * later. `추억 다시보기` was the worst case: it targets a record from a past year,
+   * which is not even rendered on today's timeline, so the tap silently did
+   * nothing.
+   *
+   * Runs twice by design when the date has to change: the first pass switches the
+   * date, the second finds the element now that the timeline for that date is
+   * mounted.
+   */
+  useEffect(() => {
+    const targetId = state.highlightedRecordId;
+    if (!targetId) return;
+    const target = state.records.find((record) => record.id === targetId);
+    // An id with no record on screen: a private record of the partner's, or one
+    // deleted since. Nothing to scroll to, and nothing to invent.
+    if (!target) return;
+    if (target.date !== selectedDate) {
+      setSelectedDate(target.date);
+      setMediaFilter('all');
+      setShowCalendar(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      document.getElementById(`record-${targetId}`)?.scrollIntoView({
+        behavior: scrollBehavior(),
+        block: 'center',
+      });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [state.highlightedRecordId, state.records, selectedDate]);
+
   // Auto-clear highlight
   useEffect(() => {
     if (state.highlightedRecordId) {

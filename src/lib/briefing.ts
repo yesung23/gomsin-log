@@ -115,6 +115,19 @@ export function generateDailySummary(
   };
 }
 
+/**
+ * The record a summary is most about, for jumping to the original.
+ *
+ * README section 1 promises that tapping a summary lands on the original record.
+ * `opener` is the headline these widgets actually display, so it is the first
+ * choice; `items[0]` is what they fall back to when there is no opener, so it is
+ * the fallback here too. Returns `undefined` when the summary describes no
+ * specific record, which is not a failure -- it means navigate without a target.
+ */
+export function summaryTargetRecordId(summary: DailySummary): string | undefined {
+  return summary.opener?.recordIds[0] ?? summary.items[0]?.recordIds[0];
+}
+
 export interface EmotionFlowBriefingResult {
   recordId: string;
   flowText: string;

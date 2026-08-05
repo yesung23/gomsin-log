@@ -6,7 +6,7 @@ import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
 import { BASIC_EMOTION_EMOJI, basicEmotionOf } from '@/lib/basicEmotions';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
-import { generateDailySummary } from '@/lib/briefing';
+import { generateDailySummary, summaryTargetRecordId } from '@/lib/briefing';
 import { localToday, toLocalDateString } from '@/lib/utils';
 import type { DailyRecord } from '@/types';
 
@@ -54,9 +54,10 @@ function usePartnerRecords(): { partnerRecords: DailyRecord[]; partnerName: stri
  */
 export function PartnerEmotionFlowWidget() {
   const navigate = useNavigate();
+  const { setHighlightedRecordId } = useStore();
   const { partnerRecords, partnerName, todayStr } = usePartnerRecords();
 
-  const { analysis, items } = useMemo(() => {
+  const { analysis, items, firstRecordId } = useMemo(() => {
     const todays = partnerRecords
       .filter((record) => record.date === todayStr)
       .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
@@ -64,13 +65,22 @@ export function PartnerEmotionFlowWidget() {
       (record.emotionFlow || []).filter((item) => item.source === 'user_confirmed'),
     );
     const resequenced = flat.map((item, index) => ({ ...item, sequence: index + 1 }));
-    return { analysis: analyzeEmotionFlow(resequenced), items: resequenced };
+    return {
+      analysis: analyzeEmotionFlow(resequenced),
+      items: resequenced,
+      // A flow describes the whole day rather than one entry, so the start of that
+      // day is the honest target: it is where reading it chronologically begins.
+      firstRecordId: todays[0]?.id,
+    };
   }, [partnerRecords, todayStr]);
 
   return (
     <button
       type="button"
-      onClick={() => navigate('/record')}
+      onClick={() => {
+        if (firstRecordId) setHighlightedRecordId(firstRecordId);
+        navigate('/record');
+      }}
       data-testid="widget-partner-emotion-flow"
       className="w-full text-left"
     >
@@ -114,6 +124,7 @@ export function PartnerEmotionFlowWidget() {
  */
 export function PartnerEmotionSummaryWidget() {
   const navigate = useNavigate();
+  const { setHighlightedRecordId } = useStore();
   const { partnerRecords, partnerName, todayStr } = usePartnerRecords();
 
   const todays = useMemo(
@@ -134,7 +145,16 @@ export function PartnerEmotionSummaryWidget() {
     <div data-testid="widget-partner-emotion-summary">
       <h3 className="text-sm font-bold text-foreground mb-2">오늘의 요약</h3>
       {headline ? (
-        <button type="button" onClick={() => navigate('/record')} className="w-full text-left">
+        <button
+          type="button"
+          onClick={() => {
+            // Land on the record this headline is about, not just on the page.
+            const target = summaryTargetRecordId(summary) ?? todays[0]?.id;
+            if (target) setHighlightedRecordId(target);
+            navigate('/record');
+          }}
+          className="w-full text-left"
+        >
           <p className="text-xs text-foreground leading-relaxed">{headline}</p>
           <span className="text-[11px] text-coral font-bold mt-1 inline-block">기록으로 이동 →</span>
         </button>

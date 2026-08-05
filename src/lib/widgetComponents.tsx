@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
-import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
+import { generateDailySummary, generateEmotionFlowBriefing, summaryTargetRecordId } from '@/lib/briefing';
 import { localToday, toLocalDateString, formatLocalDate } from '@/lib/utils';
 import {
   computeServiceProgress,
@@ -65,7 +65,7 @@ const WidgetCard = ({
 
 // 1. 오늘의 브리핑 -- summarises what actually happened today.
 export const TodayBriefingWidget = () => {
-  const { state } = useStore();
+  const { state, setHighlightedRecordId } = useStore();
   const navigate = useNavigate();
   const { profile, records } = state;
   const viewer = { userId: profile.id, role: profile.role };
@@ -82,7 +82,15 @@ export const TodayBriefingWidget = () => {
   const summary = generateDailySummary(partnerShared, partnerName);
 
   return (
-    <WidgetCard title="오늘의 브리핑" onClick={() => navigate('/record')}>
+    <WidgetCard
+      title="오늘의 브리핑"
+      onClick={() => {
+        // Land on the record the briefing is about, not just on the page.
+        const target = summaryTargetRecordId(summary) ?? partnerShared[0]?.id;
+        if (target) setHighlightedRecordId(target);
+        navigate('/record');
+      }}
+    >
       {partnerShared.length > 0 ? (
         <p className="text-xs text-muted-foreground font-medium leading-relaxed break-keep">
           {emotionBriefing?.flowText ||

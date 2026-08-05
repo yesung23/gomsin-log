@@ -246,17 +246,36 @@ describe('what actually gets stored', () => {
 // Role-aware widgets
 // ---------------------------------------------------------------------------
 describe('role-aware home widgets', () => {
-  it("leads 군화's home with the partner's flow, then the summary", () => {
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier.slice(0, 2))
-      .toEqual(['partner_emotion_flow', 'partner_emotion_summary']);
+  it("leads 군화's home with the day itself, then the flow and the summary", () => {
+    /*
+     * Changed deliberately, and the reason is recorded here rather than in a
+     * commit message nobody will read again.
+     *
+     * The original assertion pinned `['partner_emotion_flow',
+     * 'partner_emotion_summary']` as the first two. Both of those, and `care_hint`
+     * with them, are DESCRIPTIONS of the partner's day -- its shape, its headline,
+     * what to say about it. README section 1.4 says the point of this home is the
+     * day itself: "상대방의 오늘 순간들을 시간순(사진, 영상, 음성, 텍스트)으로 있는
+     * 그대로 감상". A description is only useful once the thing it describes is on
+     * the screen, so `partner_day` leads.
+     *
+     * The relationship the original test existed to protect -- flow BEFORE summary
+     * -- is unchanged and is still asserted below, separately, so that ordering
+     * cannot silently flip while this assertion is being updated.
+     */
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier.slice(0, 3))
+      .toEqual(['partner_day', 'partner_emotion_flow', 'partner_emotion_summary']);
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier.indexOf('partner_emotion_flow'))
+      .toBeLessThan(DEFAULT_LAYOUT_BY_ROLE.soldier.indexOf('partner_emotion_summary'));
   });
 
-  it('never offers the partner-emotion widgets to the person they describe', () => {
-    for (const id of ['partner_emotion_flow', 'partner_emotion_summary', 'care_hint']) {
+  it('never offers the partner-facing widgets to the person they describe', () => {
+    for (const id of ['partner_day', 'partner_emotion_flow', 'partner_emotion_summary', 'care_hint']) {
       expect(isWidgetAllowedForRole(id, 'soldier'), id).toBe(true);
       expect(isWidgetAllowedForRole(id, 'gomsin'), id).toBe(false);
     }
     expect(widgetsForRole('gomsin').map((w) => w.id)).not.toContain('partner_emotion_flow');
+    expect(widgetsForRole('gomsin').map((w) => w.id)).not.toContain('partner_day');
   });
 
   it('gives both roles a default layout made only of widgets they may use', () => {

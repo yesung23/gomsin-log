@@ -39,8 +39,14 @@ type Props = {
   /** Needed to re-sign an expired URL; absent before a couple space exists. */
   coupleId?: string;
   recordId: string;
-  /** The detail sheet gives media more room than a timeline card. */
-  variant: 'timeline' | 'detail';
+  /**
+   * How much room the media gets.
+   *
+   * `timeline` is the day view on 기록, `detail` the record sheet, `compact` the
+   * home widget, where several entries share one card and each has to stay
+   * glanceable.
+   */
+  variant: 'timeline' | 'detail' | 'compact';
   /** Owner-only controls, rendered inside the same card as the media. */
   footer?: ReactNode;
 };
@@ -65,7 +71,7 @@ export function AttachmentMedia({ attachment, coupleId, recordId, variant, foote
     recordId,
   );
   const Icon = KIND_ICON[attachment.type];
-  const boxHeight = variant === 'timeline' ? 'h-36' : 'h-48';
+  const boxHeight = variant === 'detail' ? 'h-48' : variant === 'timeline' ? 'h-36' : 'h-24';
   const mediaLabel = `${attachment.name} ${KIND_MEDIA_LABEL[attachment.type]}`;
 
   return (

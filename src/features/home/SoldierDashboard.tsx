@@ -10,7 +10,9 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
+import { computeEnergy } from '@/lib/insights';
 import { toLocalDateString, localToday } from '@/lib/utils';
+import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 
 export function SoldierDashboard() {
   const { state, setHighlightedRecordId } = useStore();
@@ -31,14 +33,9 @@ export function SoldierDashboard() {
   const emotionBriefing = generateEmotionFlowBriefing(sharedRecords);
 
   // Compute energy based on shared records
-  const energyLevel = Math.min(100, Math.max(30, sharedRecords.length * 25));
-  const energyLabel = sharedRecords.length === 0
-    ? '오늘 남긴 순간이 아직 없어요'
-    : sharedRecords.some(r => r.reaction === 'hard')
-    ? '조금 힘든 일이 있었어요 🥹'
-    : sharedRecords.some(r => r.reaction === 'good' || r.reaction === 'thought_of_you')
-    ? '기분 좋은 상태예요 😊'
-    : '평온하게 하루를 보내고 있어요 ✨';
+  const energy = computeEnergy(sharedRecords);
+  const energyLevel = energy.level;
+  const energyLabel = energy.hasData ? energy.label : '오늘 공유된 기록이 아직 없어요';
 
   const careHint = sharedRecords.some(r => r.reaction === 'hard')
     ? '오늘 힘든 순간이 있었으니 수고했다고 다정하게 말해주세요!'
@@ -51,8 +48,10 @@ export function SoldierDashboard() {
   const handleNavigateToRecord = (recordId?: string) => {
     if (recordId) {
       setHighlightedRecordId(recordId);
+      navigate(`/record?date=${todayStr}&record=${recordId}`);
+      return;
     }
-    navigate('/record');
+    navigate(`/record?date=${todayStr}`);
   };
 
   const primaryItem = dailySummary.items[0];
@@ -180,6 +179,11 @@ export function SoldierDashboard() {
             )}
           </p>
         </button>
+
+        {/* 군화도 오늘의 순간을 남길 수 있도록 기록 컴포저를 제공합니다. */}
+        <section className="bg-card rounded-3xl p-5 shadow-sm border border-border">
+          <TodayLogWidget />
+        </section>
       </div>
     </div>
   );

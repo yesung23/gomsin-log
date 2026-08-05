@@ -5,14 +5,14 @@ import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { Sparkles, MessageCircle, Clock, Image as ImageIcon, Mic, Film, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
+import { computeEnergy } from '@/lib/insights';
 import { Heart } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function SoldierHome() {
   const navigate = useNavigate();
   const { state, setHighlightedRecordId } = useStore();
-  const { myName } = state.profile;
-  const partnerName = state.profile.couple.partnerName || '춘향';
+  const partnerName = state.profile.couple.partnerName || '상대방';
   const connected = state.profile.couple.connected;
   const todayStr = toLocalDateString(localToday());
   const headerGreeting = partnerName ? `안녕, ${partnerName} ♡` : '안녕, 우리 ♡';
@@ -41,6 +41,41 @@ export function SoldierHome() {
   const emotionFlowBriefing = useMemo(() => {
     return generateEmotionFlowBriefing(partnerSharedRecords);
   }, [partnerSharedRecords]);
+
+  // 공유된 기록에서 계산한 에너지 (고정값 없음)
+  const energy = useMemo(() => computeEnergy(partnerSharedRecords), [partnerSharedRecords]);
+
+  // 리액션 기반 배려 힌트
+  const careHint = useMemo(() => {
+    if (partnerSharedRecords.some((r) => r.reaction === 'hard')) {
+      return {
+        title: '오늘은 해결책보다\n공감을 먼저 원해요',
+        detail: `${partnerName}이는 지금, 마음을 알아주는 말이 필요해요.`,
+      };
+    }
+    if (partnerSharedRecords.some((r) => r.reaction === 'thought_of_you')) {
+      return {
+        title: '보고 싶다는 마음을\n남겨두었어요',
+        detail: '반갑게 먼저 인사를 건네보세요.',
+      };
+    }
+    if (partnerSharedRecords.some((r) => r.reaction === 'good')) {
+      return {
+        title: '기분 좋은 일을\n나누고 싶어 해요',
+        detail: '어떤 일이었는지 물어봐 주세요.',
+      };
+    }
+    if (partnerSharedRecords.length > 0) {
+      return {
+        title: '오늘의 소소한 일상을\n들려주고 싶어 해요',
+        detail: '타임라인을 먼저 보고 이야기를 시작해보세요.',
+      };
+    }
+    return {
+      title: '아직 오늘 공유된\n기록이 없어요',
+      detail: '통화할 때 따뜻한 첫인사를 건네주세요.',
+    };
+  }, [partnerSharedRecords, partnerName]);
 
   // Handle clicking a summary sentence/item -> Scroll to source record & highlight it
   const handleSummaryItemClick = (recordId?: string) => {
@@ -143,18 +178,21 @@ export function SoldierHome() {
             오늘 통화 전,<br />이것만 알아두세요
           </h2>
 
-          {/* 1. 곰신의 에너지 (Energy Gauge) */}
+          {/* 1. 곰신의 에너지 (Energy Gauge) - 공유된 기록 수/리액션에서 계산 */}
           <div className="space-y-1.5 bg-muted/30 p-3.5 rounded-2xl border border-border/40">
             <div className="flex items-center justify-between text-xs font-bold">
               <span className="text-foreground">{partnerName}의 에너지</span>
-              <span className="text-coral font-extrabold text-sm">60%</span>
+              <span className="text-coral font-extrabold text-sm">
+                {energy.hasData ? `${energy.level}%` : '–'}
+              </span>
             </div>
             <div className="w-full h-3.5 bg-muted rounded-full overflow-hidden p-0.5 border border-border/40">
-              <div className="h-full bg-gradient-to-r from-coral to-pink-400 rounded-full w-[60%] transition-all duration-500" />
+              <div
+                className="h-full bg-gradient-to-r from-coral to-pink-400 rounded-full transition-all duration-500"
+                style={{ width: `${energy.level}%` }}
+              />
             </div>
-            <p className="text-[11px] text-muted-foreground pt-0.5">
-              평소보다 조금 낮은 편이에요.
-            </p>
+            <p className="text-[11px] text-muted-foreground pt-0.5">{energy.label}</p>
           </div>
 
           {/* 2. 오늘의 한 줄 요약 */}
@@ -177,10 +215,10 @@ export function SoldierHome() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-xl">
-                • 일도, 사람도 조금 버겁게 느껴졌대요.<br />
-                • 혼자 해결하려다 지쳤다고 했어요.<br />
-                • 오늘은 따뜻한 말 한마디가 큰 힘이 될 거예요.
+              <p className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-xl leading-relaxed">
+                {hasSharedRecords
+                  ? '공유된 기록이 한 개뿐이라 요약 대신 원문을 그대로 보여드려요. 아래 타임라인을 확인해 주세요.'
+                  : `${partnerName}이가 오늘 공유한 기록이 아직 없어요. 연락 시간 전에 다시 확인해 보세요.`}
               </p>
             )}
           </div>
@@ -191,12 +229,10 @@ export function SoldierHome() {
               <span className="text-[11px] text-navy/70">오늘의 배려 힌트</span>
               <span className="text-[16px]">👥</span>
             </div>
-            <h3 className="text-base font-extrabold text-navy leading-snug">
-              오늘은 해결책보다<br />공감을 먼저 원해요
+            <h3 className="text-base font-extrabold text-navy leading-snug whitespace-pre-line">
+              {careHint.title}
             </h3>
-            <p className="text-xs text-navy/70 leading-relaxed pt-0.5">
-              {partnerName}이는 지금, 마음을 알아주는 말이 필요해요.
-            </p>
+            <p className="text-xs text-navy/70 leading-relaxed pt-0.5">{careHint.detail}</p>
           </div>
 
           {/* 4. 통화 첫마디 보기 CTA Button */}

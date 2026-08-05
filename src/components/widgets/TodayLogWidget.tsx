@@ -1,10 +1,21 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '@/lib/store';
-import { Camera, Image as ImageIcon, Send, Lock, Unlock, Check, Heart } from 'lucide-react';
+import { Camera, Image as ImageIcon, Send, Lock, Unlock, Check, Heart, X, Film, Mic } from 'lucide-react';
 import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
-import type { ReactionType, Attachment, EmotionFlowItem } from '@/types';
+import { MAX_MEDIA_BYTES, attachmentTypeFromFile, isSupportedMedia } from '@/lib/records';
+import type { ReactionType, EmotionFlowItem, Attachment } from '@/types';
+
+/** 저장 전 화면에 미리 보여줄 첨부 후보 */
+interface PendingMedia {
+  id: string;
+  file: File;
+  previewUrl: string;
+  type: Attachment['type'];
+}
+
+const MAX_ATTACHMENTS = 4;
 
 export function TodayLogWidget() {
   const { state, addRecord } = useStore();
@@ -14,9 +25,8 @@ export function TodayLogWidget() {
   const [log, setLog] = useState('');
   const [reaction, setReaction] = useState<ReactionType | undefined>(undefined);
   const [isPrivate, setIsPrivate] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [showInputCard, setShowInputCard] = useState(false);
-  const [inputType, setInputType] = useState<'text' | 'photo' | 'instant'>('text');
   const [isSaving, setIsSaving] = useState(false);
   
   // State for rule-suggested confirmed IDs
@@ -39,38 +49,67 @@ export function TodayLogWidget() {
     return recommendEmotionFlow(debouncedLog, undefined, { isPrivate });
   }, [debouncedLog, isPrivate]);
 
+  // 미리보기용 objectURL 정리 (메모리 누수 방지)
+  useEffect(() => {
+    return () => {
+      pendingMedia.forEach((m) => URL.revokeObjectURL(m.previewUrl));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleOpenInput = (type: 'text' | 'photo' | 'instant') => {
-    setInputType(type);
     setShowInputCard(true);
     if (type !== 'text') {
       setTimeout(() => {
-         if (fileInputRef.current) {
-           fileInputRef.current.accept = 'image/*';
-           if (type === 'instant') {
-             fileInputRef.current.setAttribute('capture', 'environment');
-           } else {
-             fileInputRef.current.removeAttribute('capture');
-           }
-           fileInputRef.current.click();
-         }
+        if (fileInputRef.current) {
+          fileInputRef.current.accept = type === 'instant' ? 'image/*' : 'image/*,video/*';
+          if (type === 'instant') {
+            fileInputRef.current.setAttribute('capture', 'environment');
+          } else {
+            fileInputRef.current.removeAttribute('capture');
+          }
+          fileInputRef.current.click();
+        }
       }, 50);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    if (state.isDemoMode || !state.profile.couple.coupleId) {
-       const url = URL.createObjectURL(file);
-       setAttachments(prev => [...prev, { type: 'photo', name: file.name, url }]);
-       toast.success('사진이 추가되었습니다 (데모).');
-       return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const accepted: PendingMedia[] = [];
+    for (const file of files) {
+      if (pendingMedia.length + accepted.length >= MAX_ATTACHMENTS) {
+        toast.info(`첨부는 한 기록에 최대 ${MAX_ATTACHMENTS}개까지 가능해요.`);
+        break;
+      }
+      if (!isSupportedMedia(file)) {
+        toast.error(`${file.name}은 지원하지 않는 형식이에요. (JPG, PNG, WEBP, MP4 등)`);
+        continue;
+      }
+      if (file.size > MAX_MEDIA_BYTES) {
+        toast.error(`${file.name}은 25MB를 초과해서 첨부할 수 없어요.`);
+        continue;
+      }
+      accepted.push({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        type: attachmentTypeFromFile(file),
+      });
     }
 
-    // Secured storage requires a persisted record ID before file upload.
-    toast.info('사진 첨부는 안전한 저장 방식으로 준비 중이에요. 지금은 글 기록을 이용해 주세요.');
+    if (accepted.length > 0) setPendingMedia((prev) => [...prev, ...accepted]);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removePendingMedia = (id: string) => {
+    setPendingMedia((prev) => {
+      const target = prev.find((m) => m.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((m) => m.id !== id);
+    });
   };
 
   const toggleConfirmSuggestion = (itemId: string) => {
@@ -87,7 +126,7 @@ export function TodayLogWidget() {
 
   const handlePost = async () => {
     if (isSaving) return;
-    if (!log.trim() && attachments.length === 0 && !reaction) {
+    if (!log.trim() && pendingMedia.length === 0 && !reaction) {
       toast.error('내용, 사진, 또는 리액션을 선택해주세요.');
       return;
     }
@@ -106,40 +145,50 @@ export function TodayLogWidget() {
       }));
 
     setIsSaving(true);
-    let saved = false;
+    let result = { ok: false, failedUploads: 0 };
     try {
-      saved = await addRecord({
-        date: todayStr,
-        time: timeStr,
-        authorRole: state.profile.role,
-        log,
-        reaction,
-        attachments: attachments.length > 0 ? attachments : undefined,
-        isPrivate,
-        emotionFlow: userConfirmedFlow,
-        emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
-      });
+      result = await addRecord(
+        {
+          date: todayStr,
+          time: timeStr,
+          authorRole: state.profile.role,
+          log,
+          reaction,
+          isPrivate,
+          emotionFlow: userConfirmedFlow,
+          emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
+        },
+        pendingMedia.map((m) => m.file),
+      );
     } finally {
       setIsSaving(false);
     }
 
-    if (!saved) {
+    if (!result.ok) {
       toast.error('기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
       return;
     }
 
+    pendingMedia.forEach((m) => URL.revokeObjectURL(m.previewUrl));
     setLog('');
     setReaction(undefined);
-    setAttachments([]);
+    setPendingMedia([]);
     setConfirmedItemIds([]);
     setIsPrivate(false);
     setShowInputCard(false);
-    toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
+
+    if (result.failedUploads > 0) {
+      toast.warning(
+        `기록은 저장했지만 첨부 ${result.failedUploads}개를 올리지 못했어요. 잠시 후 다시 첨부해 주세요.`,
+      );
+    } else {
+      toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
+    }
   };
 
-  // Filter today's records
+  // 오늘 타임라인: 내 기록 + 상대의 공유 기록만 (상대의 비공개 기록은 절대 노출하지 않음)
   const todayRecords = state.records
-    .filter((r) => r.date === todayStr)
+    .filter((r) => r.date === todayStr && (r.authorRole === state.profile.role || !r.isPrivate))
     .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
     
   return (
@@ -173,7 +222,13 @@ export function TodayLogWidget() {
         </button>
       </div>
 
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+      <input
+        type="file"
+        ref={fileInputRef}
+        multiple
+        className="hidden"
+        onChange={handleFileSelect}
+      />
 
       {/* Input Composer */}
       {showInputCard && (
@@ -197,11 +252,48 @@ export function TodayLogWidget() {
             className="w-full h-24 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />
 
-          {attachments.length > 0 && (
-            <div className="text-xs text-coral font-bold">
-              📷 {attachments.length}개의 사진 첨부됨
+          {/* 첨부 미리보기 */}
+          {pendingMedia.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {pendingMedia.map((m) => (
+                <div
+                  key={m.id}
+                  className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-border bg-muted"
+                >
+                  {m.type === 'photo' ? (
+                    <img src={m.previewUrl} alt={m.file.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-muted-foreground">
+                      {m.type === 'video' ? <Film size={18} /> : <Mic size={18} />}
+                      <span className="text-[9px] px-1 truncate w-full text-center">{m.file.name}</span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removePendingMedia(m.id)}
+                    aria-label={`${m.file.name} 첨부 제거`}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
+          {pendingMedia.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              {isPrivate
+                ? '나에게만 보이는 기록으로 저장돼요.'
+                : '저장하면 우리 둘만 볼 수 있는 저장소에 업로드돼요.'}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => handleOpenInput('photo')}
+            className="text-[11px] font-bold text-coral flex items-center gap-1"
+          >
+            <ImageIcon size={13} /> 사진 · 영상 추가
+          </button>
 
           {/* Rule-Based Emotion Flow Suggestion Card (Appears when text >= 10 chars) */}
           {suggestions.length > 0 && (
@@ -256,7 +348,11 @@ export function TodayLogWidget() {
               disabled={isSaving}
               className="px-4 py-1.5 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition"
             >
-              {isSaving ? '저장 중...' : '저장'}
+              {isSaving
+                ? pendingMedia.length > 0
+                  ? '업로드 중...'
+                  : '저장 중...'
+                : '저장'}
             </button>
           </div>
         </div>

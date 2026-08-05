@@ -8,6 +8,7 @@ import { SchedulePage } from '@/pages/SchedulePage';
 import { UsPage } from '@/pages/UsPage';
 import { MyPage } from '@/pages/MyPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { ServicePage } from '@/pages/ServicePage';
 import { TripsPage } from '@/pages/TripsPage';
 import { TripDetailPage } from '@/pages/TripDetailPage';
 
@@ -39,6 +40,7 @@ export function App() {
           <Route path="/us" element={<UsPage />} />
           <Route path="/my" element={<MyPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/service" element={<ServicePage />} />
           <Route path="/trips" element={<TripsPage />} />
           <Route path="/trips/:id" element={<TripDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

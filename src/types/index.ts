@@ -218,6 +218,8 @@ export interface AppState {
   widgetLayout: string[];
   hasSeenInstallPrompt: boolean;
   theme: 'light' | 'dark';
+  /** 나만의 메모 위젯 내용. 서버로 전송되지 않고 기기 안에만 보관됩니다. */
+  myMemo: string;
 }
 
 export interface AuthUser {

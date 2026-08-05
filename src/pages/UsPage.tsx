@@ -4,7 +4,9 @@ import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { Heart, Calendar as CalendarIcon, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { cn, toLocalDateString, localToday } from '@/lib/utils';
+import { cn, toLocalDateString, localToday, daysBetweenLocal, formatLocalDate } from '@/lib/utils';
+import { getNextAnniversary } from '@/lib/insights';
+import { toast } from 'sonner';
 
 function buildCalendarGrid(year: number, month: number) {
   const firstDay = new Date(year, month, 1);
@@ -32,25 +34,46 @@ function buildCalendarGrid(year: number, month: number) {
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 export function UsPage() {
-  const { state } = useStore();
+  const { state, updateProfile } = useStore();
   const navigate = useNavigate();
   const { myName } = state.profile;
   const partnerName = state.profile.couple.partnerName || '상대방';
   const connected = state.profile.couple.connected;
-  const startDate = state.profile.couple.anniversaryDate || '2024-12-24';
+  const anniversaryDate = state.profile.couple.anniversaryDate;
   const trips = state.trips || [];
-  const events = state.events || [];
+  const events = useMemo(() => state.events || [], [state.events]);
 
   const today = localToday();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [isEditingAnniversary, setIsEditingAnniversary] = useState(false);
+  const [anniversaryDraft, setAnniversaryDraft] = useState(anniversaryDate || '');
 
   const calendarCells = useMemo(() => buildCalendarGrid(viewYear, viewMonth), [viewYear, viewMonth]);
   const todayStr = toLocalDateString(today);
 
-  const diffDays = Math.floor(
-    (new Date().getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
-  ) + 1;
+  // 사귄 날짜가 없으면 임의 날짜를 만들지 않고 미설정 상태로 둡니다.
+  const diffDays = anniversaryDate ? daysBetweenLocal(anniversaryDate, todayStr) + 1 : null;
+  const nextAnniversary = useMemo(
+    () => getNextAnniversary(anniversaryDate, events, todayStr),
+    [anniversaryDate, events, todayStr],
+  );
+
+  const handleSaveAnniversary = () => {
+    if (!anniversaryDraft) {
+      toast.error('날짜를 선택해 주세요.');
+      return;
+    }
+    if (anniversaryDraft > todayStr) {
+      toast.error('사귄 날짜는 오늘보다 뒤일 수 없어요.');
+      return;
+    }
+    updateProfile({
+      couple: { ...state.profile.couple, anniversaryDate: anniversaryDraft },
+    });
+    setIsEditingAnniversary(false);
+    toast.success('사귄 날짜를 저장했어요.');
+  };
 
   const goToPrevMonth = () => {
     if (viewMonth === 0) {
@@ -103,9 +126,65 @@ export function UsPage() {
               <span>{partnerName}</span>
             </h2>
             <p className="text-xs text-muted-foreground mt-1 font-medium">
-              {connected ? `함께한 지 +${diffDays}일째 💕` : '초대 코드로 커플 공간을 완성해보세요'}
+              {!connected
+                ? '초대 코드로 커플 공간을 완성해보세요'
+                : diffDays !== null
+                ? `함께한 지 +${diffDays}일째 💕`
+                : '사귄 날짜를 등록하면 D-Day를 세어드려요'}
             </p>
           </div>
+
+          {/* 사귄 날짜 설정 / 수정 */}
+          {isEditingAnniversary ? (
+            <div className="w-full space-y-2">
+              <input
+                type="date"
+                value={anniversaryDraft}
+                max={todayStr}
+                onChange={(e) => setAnniversaryDraft(e.target.value)}
+                aria-label="사귄 날짜"
+                className="w-full border border-border rounded-xl px-3 py-2.5 bg-card text-sm text-foreground min-h-[44px]"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setIsEditingAnniversary(false);
+                    setAnniversaryDraft(anniversaryDate || '');
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-muted text-foreground text-xs font-bold min-h-[40px]"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleSaveAnniversary}
+                  className="flex-1 py-2.5 rounded-xl bg-coral text-white text-xs font-bold min-h-[40px]"
+                >
+                  저장
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full space-y-2">
+              {nextAnniversary && (
+                <div className="rounded-2xl bg-coral/10 border border-coral/20 px-3 py-2.5 flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-coral">
+                    다음 기념일 · {nextAnniversary.label}
+                  </span>
+                  <span className="text-[11px] font-extrabold text-foreground">
+                    {nextAnniversary.dDay === 0 ? 'D-Day' : `D-${nextAnniversary.dDay}`}
+                  </span>
+                </div>
+              )}
+              <button
+                onClick={() => setIsEditingAnniversary(true)}
+                className="w-full py-2.5 rounded-xl bg-muted/60 text-foreground text-xs font-bold min-h-[40px] active:scale-95 transition"
+              >
+                {anniversaryDate
+                  ? `사귄 날짜 ${formatLocalDate(anniversaryDate)} · 수정`
+                  : '+ 사귄 날짜 등록하기'}
+              </button>
+            </div>
+          )}
         </section>
 
         {/* Calendar UI */}

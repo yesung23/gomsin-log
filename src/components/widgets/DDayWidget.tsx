@@ -2,6 +2,7 @@ import React from 'react';
 import { useStore } from '@/lib/store';
 import { Heart, Clock, Shield } from 'lucide-react';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
+import { getNextAnniversary, computeServiceProgress } from '@/lib/insights';
 import { useNavigate } from 'react-router-dom';
 
 export function DDayWidget() {
@@ -12,10 +13,10 @@ export function DDayWidget() {
   const todayStr = toLocalDateString(localToday());
   
   const daysConnected = anniversaryDate ? daysBetweenLocal(anniversaryDate, todayStr) + 1 : 0;
-  
-  // Milestone calculation
-  const nextMilestoneDays = Math.ceil((daysConnected + 1) / 100) * 100;
-  const daysToNextMilestone = nextMilestoneDays - daysConnected;
+
+  // 다음 기념일 (100일 단위 · 주년 · 등록한 기념일 일정 중 가장 가까운 것)
+  const nextAnniversary = getNextAnniversary(anniversaryDate, state.events, todayStr);
+  const serviceProgress = computeServiceProgress(profile.military, todayStr);
 
   return (
     <div className="flex flex-col gap-4">
@@ -26,9 +27,7 @@ export function DDayWidget() {
       {/* Connection Days Card */}
       <div 
         className="bg-gradient-to-br from-lilac to-coral/20 p-5 rounded-2xl border border-border relative overflow-hidden flex flex-col justify-center cursor-pointer"
-        onClick={() => {
-          if (!anniversaryDate) navigate('/my');
-        }}
+        onClick={() => navigate('/us')}
       >
         <Heart className="w-24 h-24 text-white/40 absolute -right-4 -bottom-4 rotate-12" />
         <p className="text-foreground font-medium mb-1 text-xs">우리가 함께한 지</p>
@@ -38,10 +37,13 @@ export function DDayWidget() {
         <p className="text-[11px] text-muted-foreground mb-3">
           {anniversaryDate ? `${anniversaryDate}부터 시작된 우리 로그` : '여기를 눌러 사귄 날짜를 추가해보세요'}
         </p>
-        {anniversaryDate && (
+        {nextAnniversary && (
           <div className="pt-3 border-t border-border/60 text-[11px] text-foreground flex items-center gap-1.5 font-bold">
             <Clock className="w-3.5 h-3.5 text-coral" />
-            <span>다음 기념일 {nextMilestoneDays}일까지 D-{daysToNextMilestone}</span>
+            <span>
+              다음 기념일 {nextAnniversary.label}까지{' '}
+              {nextAnniversary.dDay === 0 ? 'D-Day' : `D-${nextAnniversary.dDay}`}
+            </span>
           </div>
         )}
       </div>
@@ -56,8 +58,12 @@ export function DDayWidget() {
             <Shield className="w-4 h-4" />
           </div>
           <div className="text-left">
-            <div className="font-bold text-foreground text-sm">복무 현황 · D-Day</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">전역일과 복무율 확인</div>
+            <div className="font-bold text-foreground text-sm">
+              {serviceProgress.hasData ? `복무 현황 · ${serviceProgress.headline}` : '복무 현황 · D-Day'}
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              {serviceProgress.hasData ? serviceProgress.caption : '입대일을 입력하면 복무율을 계산해요'}
+            </div>
           </div>
         </div>
       </div>

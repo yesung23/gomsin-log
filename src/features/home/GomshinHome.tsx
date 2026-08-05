@@ -2,10 +2,20 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
-import { Camera, Image as ImageIcon, Mic, Send, Lock, Unlock, Film, MoreHorizontal } from 'lucide-react';
+import { Camera, Image as ImageIcon, Mic, Send, Lock, Unlock, Film, MoreHorizontal, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
+import { MAX_MEDIA_BYTES, attachmentTypeFromFile, isSupportedMedia } from '@/lib/records';
 import type { ReactionType, Attachment } from '@/types';
+
+interface PendingMedia {
+  id: string;
+  file: File;
+  previewUrl: string;
+  type: Attachment['type'];
+}
+
+const MAX_ATTACHMENTS = 4;
 
 const REACTIONS: { key: ReactionType; label: string; emoji: string }[] = [
   { key: 'good', label: '좋았어', emoji: '😊' },
@@ -26,57 +36,82 @@ export function GomshinHome() {
   const [log, setLog] = useState('');
   const [reaction, setReaction] = useState<ReactionType | undefined>(undefined);
   const [isPrivate, setIsPrivate] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [showInputCard, setShowInputCard] = useState(false);
-  const [inputType, setInputType] = useState<'text' | 'photo' | 'voice' | 'video'>('text');
   const [isSaving, setIsSaving] = useState(false);
-  
+
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    return () => {
+      pendingMedia.forEach((m) => URL.revokeObjectURL(m.previewUrl));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Filter today's records by gomshin
   const todayRecords = state.records
     .filter((r) => r.date === todayStr && r.authorRole === state.profile.role)
     .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
 
-  const handleOpenInput = (type: 'text' | 'photo' | 'voice' | 'video') => {
-    setInputType(type);
-    setShowInputCard(true);
-    if (type !== 'text') {
-      setTimeout(() => {
-         if (fileInputRef.current) {
-           fileInputRef.current.accept = type === 'photo' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
-           fileInputRef.current.click();
-         }
-      }, 50);
-    }
-  };
-
-  const handleAddAttachment = (type: 'photo' | 'video' | 'voice') => {
+  const openFilePicker = (type: 'photo' | 'video' | 'voice') => {
     if (fileInputRef.current) {
-      fileInputRef.current.accept = type === 'photo' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
+      fileInputRef.current.accept =
+        type === 'photo' ? 'image/*' : type === 'video' ? 'video/*' : 'audio/*';
       fileInputRef.current.click();
     }
   };
 
+  const handleOpenInput = (type: 'text' | 'photo' | 'voice' | 'video') => {
+    setShowInputCard(true);
+    if (type !== 'text') {
+      setTimeout(() => openFilePicker(type), 50);
+    }
+  };
+
+  const handleAddAttachment = (type: 'photo' | 'video' | 'voice') => openFilePicker(type);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    // In demo mode, just push dummy
-    if (state.isDemoMode || !state.profile.couple.coupleId) {
-       const url = URL.createObjectURL(file);
-       setAttachments(prev => [...prev, { type: inputType === 'photo' ? 'photo' : 'video', name: file.name, url }]);
-       toast.success('첨부가 추가되었습니다 (데모).');
-       return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const accepted: PendingMedia[] = [];
+    for (const file of files) {
+      if (pendingMedia.length + accepted.length >= MAX_ATTACHMENTS) {
+        toast.info(`첨부는 한 기록에 최대 ${MAX_ATTACHMENTS}개까지 가능해요.`);
+        break;
+      }
+      if (!isSupportedMedia(file)) {
+        toast.error(`${file.name}은 지원하지 않는 형식이에요.`);
+        continue;
+      }
+      if (file.size > MAX_MEDIA_BYTES) {
+        toast.error(`${file.name}은 25MB를 초과해서 첨부할 수 없어요.`);
+        continue;
+      }
+      accepted.push({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        type: attachmentTypeFromFile(file),
+      });
     }
 
-    toast.info('미디어 첨부는 안전한 저장 방식으로 준비 중이에요. 지금은 글 기록을 이용해 주세요.');
+    if (accepted.length > 0) setPendingMedia((prev) => [...prev, ...accepted]);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removePendingMedia = (id: string) => {
+    setPendingMedia((prev) => {
+      const target = prev.find((m) => m.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((m) => m.id !== id);
+    });
   };
 
   const handlePost = async () => {
     if (isSaving) return;
-    if (!log.trim() && attachments.length === 0 && !reaction) {
+    if (!log.trim() && pendingMedia.length === 0 && !reaction) {
       toast.error('내용, 사진, 음성, 또는 리액션을 선택해주세요.');
       return;
     }
@@ -85,34 +120,43 @@ export function GomshinHome() {
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     setIsSaving(true);
-    let saved = false;
+    let result = { ok: false, failedUploads: 0 };
     try {
-      saved = await addRecord({
-        date: todayStr,
-        time: timeStr,
-        authorRole: state.profile.role,
-        log,
-        reaction,
-        attachments: attachments.length > 0 ? attachments : undefined,
-        isPrivate,
-      });
+      result = await addRecord(
+        {
+          date: todayStr,
+          time: timeStr,
+          authorRole: state.profile.role,
+          log,
+          reaction,
+          isPrivate,
+        },
+        pendingMedia.map((m) => m.file),
+      );
     } finally {
       setIsSaving(false);
     }
 
-    if (!saved) {
+    if (!result.ok) {
       toast.error('기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
       return;
     }
 
     // Reset input
+    pendingMedia.forEach((m) => URL.revokeObjectURL(m.previewUrl));
     setLog('');
     setReaction(undefined);
-    setAttachments([]);
+    setPendingMedia([]);
     setIsPrivate(false);
     setShowInputCard(false);
 
-    toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
+    if (result.failedUploads > 0) {
+      toast.warning(
+        `기록은 저장했지만 첨부 ${result.failedUploads}개를 올리지 못했어요. 잠시 후 다시 첨부해 주세요.`,
+      );
+    } else {
+      toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
+    }
   };
 
   const headerGreeting = partnerName ? `안녕, ${partnerName} ♡` : '안녕, 우리 ♡';
@@ -174,7 +218,7 @@ export function GomshinHome() {
         </button>
       </div>
 
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+      <input type="file" ref={fileInputRef} multiple className="hidden" onChange={handleFileSelect} />
 
       {/* Interactive Quick Composer Card */}
       {showInputCard && (
@@ -190,14 +234,29 @@ export function GomshinHome() {
           </div>
 
           {/* Attachments preview */}
-          {attachments.length > 0 && (
+          {pendingMedia.length > 0 && (
             <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
-              {attachments.map((att, idx) => (
-                <div key={idx} className="relative shrink-0 bg-muted rounded-xl p-2 text-xs flex items-center gap-1.5 border border-border">
-                  {att.type === 'photo' && <ImageIcon size={14} className="text-coral" />}
-                  {att.type === 'video' && <Film size={14} className="text-blue-500" />}
-                  {att.type === 'voice' && <Mic size={14} className="text-purple-500" />}
-                  <span className="font-medium truncate max-w-[100px]">{att.name}</span>
+              {pendingMedia.map((m) => (
+                <div
+                  key={m.id}
+                  className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-border bg-muted"
+                >
+                  {m.type === 'photo' ? (
+                    <img src={m.previewUrl} alt={m.file.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-muted-foreground">
+                      {m.type === 'video' ? <Film size={16} /> : <Mic size={16} />}
+                      <span className="text-[9px] px-1 truncate w-full text-center">{m.file.name}</span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removePendingMedia(m.id)}
+                    aria-label={`${m.file.name} 첨부 제거`}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
               ))}
             </div>

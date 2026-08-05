@@ -52,7 +52,7 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
       couple = {
         coupleId: memberData.couple_id,
         partnerName,
-        anniversaryDate: coupleData?.anniversary_date || '',
+        anniversaryDate: coupleData?.anniversary_date || undefined,
         coupleCode: '',
         connected: hasPartner,
         status: hasPartner ? 'active' : 'pending',
@@ -74,12 +74,11 @@ export async function fetchFullStateFromDB(userId: string): Promise<Partial<AppS
       enabled: true,
     };
 
+    // 저장된 복무 정보가 없으면 예시 날짜를 만들지 않고 미설정 상태로 둡니다.
     const military: MilitaryInfo = profileData.military_info || {
       branch: 'army',
-      militaryStatus: 'serving',
-      enlistmentDate: '2025-03-10',
-      expectedDischargeDate: '2026-09-09',
-      dischargeDateSource: 'calculated',
+      militaryStatus: 'unknown',
+      dischargeDateSource: 'unknown',
     };
 
     const profile: UserProfile = {

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/store';
 import { generateDailySummary } from '@/lib/briefing';
@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar
 } from 'lucide-react';
-import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
+import { cn, formatLocalDate, toLocalDateString, localToday, parseLocalDate } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { DailyRecord } from '@/types';
 
@@ -75,6 +75,35 @@ export function RecordPage() {
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // 위젯/브리핑에서 넘어온 ?date=YYYY-MM-DD&record=<id> 를 처리합니다.
+  const [searchParams] = useSearchParams();
+  const appliedParamsRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const dateParam = searchParams.get('date');
+    const recordParam = searchParams.get('record');
+    const key = `${dateParam ?? ''}|${recordParam ?? ''}`;
+    if (appliedParamsRef.current === key) return;
+    appliedParamsRef.current = key;
+
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      const parsed = parseLocalDate(dateParam);
+      setSelectedDate(dateParam);
+      setViewYear(parsed.getFullYear());
+      setViewMonth(parsed.getMonth());
+      setMediaFilter('all');
+    }
+
+    if (recordParam) {
+      setHighlightedRecordId(recordParam);
+      setTimeout(() => {
+        document
+          .getElementById(`record-${recordParam}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 250);
+    }
+  }, [searchParams, setHighlightedRecordId]);
 
   // Compute visible records (own records + partner's non-private records)
   const visibleRecords = useMemo(() => {

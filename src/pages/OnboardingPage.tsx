@@ -188,7 +188,7 @@ export function OnboardingPage() {
       couple: {
         coupleId: createdCoupleId || undefined,
         partnerName: role === 'gomsin' ? '몽룡' : '춘향',
-        anniversaryDate: skipAnniversary ? undefined : (anniversary || '2024-02-14'),
+        anniversaryDate: skipAnniversary ? undefined : (anniversary || undefined),
         coupleCode: createdInviteCode || inviteCodeInput || '123456',
         connected: spaceMode === 'join',
         status: spaceMode === 'join' ? 'active' : 'pending',

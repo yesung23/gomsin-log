@@ -30,6 +30,12 @@ export function toLocalDateString(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+export function addDays(dateStr: string, days: number): string {
+  const d = parseLocalDate(dateStr);
+  d.setDate(d.getDate() + days);
+  return toLocalDateString(d);
+}
+
 export function addMonths(dateStr: string, months: number): string {
   const d = parseLocalDate(dateStr);
   const targetMonth = d.getMonth() + months;
@@ -41,13 +47,20 @@ export function addMonths(dateStr: string, months: number): string {
   return toLocalDateString(result);
 }
 
+/**
+ * 군종별 의무 복무 기간(개월). 병역법 기준 현역 복무기간.
+ */
+export const BRANCH_SERVICE_MONTHS: Record<string, number> = {
+  army: 18,
+  marine: 18,
+  reserve: 18,
+  navy: 20,
+  airforce: 21,
+  social_service: 21,
+  other: 0,
+};
+
 export function calculateDischargeDate(enlistmentDate: string, branch: string): string {
-  const months: Record<string, number> = {
-    army: 18,
-    marine: 18,
-    navy: 20,
-    airforce: 21,
-  };
-  const m = months[branch] ?? 18;
+  const m = BRANCH_SERVICE_MONTHS[branch] || 18;
   return addMonths(enlistmentDate, m);
 }

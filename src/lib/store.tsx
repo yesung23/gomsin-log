@@ -8,7 +8,20 @@ import {
   deleteAccountFromDB,
 } from '@/lib/supabase';
 import { fetchFullStateFromDB } from '@/lib/sync';
-import { saveRecordToDB, deleteRecordFromDB } from '@/lib/records';
+import {
+  saveRecordToDB,
+  deleteRecordFromDB,
+  uploadRecordAttachment,
+  createLocalAttachment,
+} from '@/lib/records';
+import type { Attachment } from '@/types';
+import {
+  addDays,
+  addMonths,
+  calculateDischargeDate,
+  localToday,
+  toLocalDateString,
+} from '@/lib/utils';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
@@ -61,17 +74,18 @@ const DEFAULT_STATE: AppState = {
     role: 'gomsin',
     couple: {
       partnerName: '',
-      anniversaryDate: '2024-02-14',
+      // 예시 날짜를 넣지 않습니다. 미설정이면 위젯이 입력을 유도합니다.
+      anniversaryDate: undefined,
       coupleCode: '',
       connected: false,
       status: 'pending',
     },
     military: {
       branch: 'army',
-      militaryStatus: 'serving',
-      enlistmentDate: '2025-03-10',
-      expectedDischargeDate: '2026-09-09',
-      dischargeDateSource: 'calculated',
+      militaryStatus: 'unknown',
+      enlistmentDate: undefined,
+      expectedDischargeDate: undefined,
+      dischargeDateSource: 'unknown',
       memo: '',
     },
     contact: {
@@ -88,13 +102,26 @@ const DEFAULT_STATE: AppState = {
   widgetLayout: ['today_briefing', 'today_word', 'dday'],
   hasSeenInstallPrompt: false,
   theme: 'light',
+  myMemo: '',
 };
+
+/**
+ * 기록 저장 결과. 레코드는 저장됐지만 일부 첨부 업로드만 실패할 수 있어
+ * 실패 개수를 따로 알려줍니다.
+ */
+export interface AddRecordResult {
+  ok: boolean;
+  failedUploads: number;
+}
 
 interface StoreContextType {
   state: AppState;
   isReady: boolean;
   updateProfile: (profileUpdates: Partial<UserProfile>) => void;
-  addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
+  addRecord: (
+    record: Omit<DailyRecord, 'id' | 'createdAt'>,
+    files?: File[],
+  ) => Promise<AddRecordResult>;
   updateRecord: (id: string, updates: Partial<DailyRecord>) => void;
   deleteRecord: (id: string) => Promise<boolean>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
@@ -112,6 +139,7 @@ interface StoreContextType {
   setWidgetLayout: (layout: string[]) => void;
   setHasSeenInstallPrompt: (seen: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
+  setMyMemo: (memo: string) => void;
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -183,6 +211,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           widgetLayout: prev.widgetLayout,
           hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
           theme: prev.theme || 'light',
+          myMemo: prev.myMemo || '',
         }));
         setIsAuthChecked(true);
       }
@@ -337,6 +366,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
            });
         }
         
+        // Update couple anniversary (couples 테이블은 active 멤버만 수정 가능)
+        if (profileUpdates.couple && newProfile.couple.coupleId) {
+          supabase?.from('couples').update({
+            anniversary_date: newProfile.couple.anniversaryDate || null,
+            updated_at: new Date().toISOString(),
+          }).eq('id', newProfile.couple.coupleId).then(({ error }) => {
+            if (error) console.error('Failed to update couple:', error);
+          });
+        }
+
         // Update contact preferences
         if (profileUpdates.contact) {
            supabase?.from('contact_preferences').upsert({
@@ -355,34 +394,79 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {
+  const addRecord = async (
+    record: Omit<DailyRecord, 'id' | 'createdAt'>,
+    files: File[] = [],
+  ): Promise<AddRecordResult> => {
     const newRecord: DailyRecord = {
       ...record,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
 
-    if (!state.isDemoMode && state.authenticatedUser) {
-      const coupleId = state.profile.couple.coupleId;
-      if (!coupleId) {
-        console.error('Cannot save record without an active couple.');
-        return false;
-      }
+    // 데모/오프라인 모드: 브라우저 안에서만 유효한 로컬 첨부를 사용합니다.
+    if (state.isDemoMode || !state.authenticatedUser) {
+      const localAttachments = files.map(createLocalAttachment);
+      const merged = [...(newRecord.attachments || []), ...localAttachments];
+      const localRecord: DailyRecord = {
+        ...newRecord,
+        attachments: merged.length > 0 ? merged : undefined,
+      };
+      setState((prev) => ({ ...prev, records: [...prev.records, localRecord] }));
+      return { ok: true, failedUploads: 0 };
+    }
 
+    const coupleId = state.profile.couple.coupleId;
+    if (!coupleId) {
+      console.error('Cannot save record without an active couple.');
+      return { ok: false, failedUploads: files.length };
+    }
+
+    try {
+      // 1) Storage RLS(007)가 daily_records 행 존재를 요구하므로 먼저 레코드를 저장합니다.
+      const saved = await saveRecordToDB(
+        { ...newRecord, attachments: [] },
+        coupleId,
+        state.authenticatedUser.id,
+      );
+      if (!saved) return { ok: false, failedUploads: files.length };
+    } catch (error) {
+      console.error('Failed to save record:', error);
+      return { ok: false, failedUploads: files.length };
+    }
+
+    // 2) 첨부 업로드 → couple-media/{coupleId}/{recordId}/{uuid}.{ext}
+    const uploaded: Attachment[] = [];
+    let failedUploads = 0;
+    for (const file of files) {
       try {
-        const saved = await saveRecordToDB(newRecord, coupleId, state.authenticatedUser.id);
-        if (!saved) return false;
+        const attachment = await uploadRecordAttachment(file, coupleId, newRecord.id);
+        if (attachment) uploaded.push(attachment);
+        else failedUploads += 1;
       } catch (error) {
-        console.error('Failed to save record:', error);
-        return false;
+        console.error('Failed to upload attachment:', error);
+        failedUploads += 1;
       }
     }
 
-    setState((prev) => ({
-      ...prev,
-      records: [...prev.records, newRecord],
-    }));
-    return true;
+    const attachments = [...(newRecord.attachments || []), ...uploaded];
+    const finalRecord: DailyRecord = {
+      ...newRecord,
+      attachments: attachments.length > 0 ? attachments : undefined,
+    };
+
+    // 3) 업로드된 첨부 정보를 레코드에 반영
+    if (uploaded.length > 0) {
+      try {
+        await saveRecordToDB(finalRecord, coupleId, state.authenticatedUser.id);
+      } catch (error) {
+        console.error('Failed to attach media to record:', error);
+        failedUploads += uploaded.length;
+      }
+    }
+
+    setState((prev) => ({ ...prev, records: [...prev.records, finalRecord] }));
+    return { ok: true, failedUploads };
   };
 
   const updateRecord = (id: string, updates: Partial<DailyRecord>) => {
@@ -400,7 +484,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const deleteRecord = async (id: string): Promise<boolean> => {
     if (!state.isDemoMode && state.authenticatedUser) {
       try {
-        const deleted = await deleteRecordFromDB(id);
+        const deleted = await deleteRecordFromDB(id, state.profile.couple.coupleId);
         if (!deleted) return false;
       } catch (error) {
         console.error('Failed to delete record:', error);
@@ -556,13 +640,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const startDemo = () => {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    const daysAgo = (n: number) => {
-      const d = new Date(today);
-      d.setDate(d.getDate() - n);
-      return d.toISOString().split('T')[0];
-    };
+    const todayStr = toLocalDateString(localToday());
+    const daysAgo = (n: number) => addDays(todayStr, -n);
+    const daysLater = (n: number) => addDays(todayStr, n);
+
+    // 데모 데이터는 오늘 날짜를 기준으로 생성해서 위젯 계산이 항상 자연스럽게 보이도록 합니다.
+    const demoAnniversary = daysAgo(430);
+    const demoEnlistment = daysAgo(210);
+    const demoDischarge = calculateDischargeDate(demoEnlistment, 'army');
 
     setState((prev) => ({
       ...prev,
@@ -576,11 +661,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         couple: {
           ...prev.profile.couple,
           partnerName: '몽룡',
+          anniversaryDate: demoAnniversary,
           coupleCode: '123456',
           connected: true,
           status: 'active',
         },
+        military: {
+          ...prev.profile.military,
+          branch: 'army',
+          militaryStatus: 'serving',
+          enlistmentDate: demoEnlistment,
+          expectedDischargeDate: demoDischarge,
+          dischargeDateSource: 'calculated',
+        },
       },
+      events: [
+        {
+          id: 'evt-demo-1',
+          coupleId: 'demo-couple-id',
+          createdBy: 'demo-user',
+          title: '주말 면회',
+          eventType: 'visit',
+          startDate: daysLater(12),
+          isPrivate: false,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'evt-demo-2',
+          coupleId: 'demo-couple-id',
+          createdBy: 'demo-user',
+          title: '정기 휴가',
+          eventType: 'vacation',
+          startDate: daysLater(34),
+          endDate: daysLater(38),
+          isPrivate: false,
+          createdAt: new Date().toISOString(),
+        },
+      ],
       records: [
         // --- Today ---
         {
@@ -719,6 +836,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           isPrivate: false,
           createdAt: `${daysAgo(12)}T10:15:00.000Z`,
         },
+        // --- 1년 전 오늘 (추억 다시보기 위젯용) ---
+        {
+          id: 'rec-demo-13',
+          date: addMonths(todayStr, -12),
+          time: '17:45',
+          authorRole: 'gomsin',
+          log: '작년 이맘때 같이 걸었던 길, 아직 기억나?',
+          attachments: [
+            { type: 'photo', name: '작년_산책.jpg', url: 'https://images.unsplash.com/photo-1476231682828-37e571bc172f?w=500&auto=format&fit=crop' }
+          ],
+          reaction: 'good',
+          isPrivate: false,
+          createdAt: `${addMonths(todayStr, -12)}T17:45:00.000Z`,
+        },
       ],
     }));
   };
@@ -737,6 +868,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = (theme: 'light' | 'dark') => {
     setState((prev) => ({ ...prev, theme }));
+  };
+
+  // 나만의 메모: 서버로 보내지 않고 기기 localStorage에만 저장합니다.
+  const setMyMemo = (memo: string) => {
+    setState((prev) => ({ ...prev, myMemo: memo }));
   };
 
   return (
@@ -763,6 +899,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setWidgetLayout,
         setHasSeenInstallPrompt,
         setTheme,
+        setMyMemo,
       }}
     >
       {children}

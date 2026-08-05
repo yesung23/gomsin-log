@@ -221,21 +221,27 @@ export function MyPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <div className="bg-muted/40 border border-border/60 p-3.5 rounded-2xl space-y-1">
+              <button
+                onClick={() => navigate('/service')}
+                className="bg-muted/40 border border-border/60 p-3.5 rounded-2xl space-y-1 text-left active:scale-95 transition"
+              >
                 <span className="text-lg">🎖️</span>
                 <h4 className="text-xs font-bold text-foreground">전역일 계산기</h4>
                 <p className="text-[10px] text-muted-foreground leading-tight">
                   복무율과 남은 일수를 한눈에 확인해요.
                 </p>
-              </div>
+              </button>
 
-              <div className="bg-muted/40 border border-border/60 p-3.5 rounded-2xl space-y-1">
+              <button
+                onClick={() => navigate('/schedule')}
+                className="bg-muted/40 border border-border/60 p-3.5 rounded-2xl space-y-1 text-left active:scale-95 transition"
+              >
                 <span className="text-lg">🏖️</span>
-                <h4 className="text-xs font-bold text-foreground">휴가 일정 가이드</h4>
+                <h4 className="text-xs font-bold text-foreground">휴가 일정 등록</h4>
                 <p className="text-[10px] text-muted-foreground leading-tight">
-                  정기/포상 휴가 계획을 세워보세요.
+                  정기/포상 휴가를 공유 일정에 추가해요.
                 </p>
-              </div>
+              </button>
             </div>
 
             <div className="bg-mint/40 border border-mint-foreground/20 p-4 rounded-2xl space-y-1">

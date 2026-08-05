@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { MobileShell } from '@/components/MobileShell';
+import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
+import { getNextAnniversary } from '@/lib/insights';
 import { 
   Calendar as CalendarIcon, Heart, ShieldCheck, Clock, Plus, 
   Trash2, X, ChevronLeft, ChevronRight, CheckCircle2, Lock, Sparkles
@@ -9,15 +12,16 @@ import { toast } from 'sonner';
 import { EventType, CoupleEvent } from '@/types';
 
 export function SchedulePage() {
+  const navigate = useNavigate();
   const { state, addEvent, deleteEvent } = useStore();
   const { profile, events } = state;
   const partnerName = profile.couple.partnerName || '상대방';
-  const startDate = profile.couple.anniversaryDate || '2024-12-24';
+  const anniversaryDate = profile.couple.anniversaryDate;
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [title, setTitle] = useState('');
   const [eventType, setEventType] = useState<EventType>('visit');
-  const [eventStartDate, setEventStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [eventStartDate, setEventStartDate] = useState(toLocalDateString(localToday()));
   const [eventEndDate, setEventEndDate] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -27,13 +31,12 @@ export function SchedulePage() {
   const [currMonth, setCurrMonth] = useState(new Date().getMonth());
   const [currYear, setCurrYear] = useState(new Date().getFullYear());
 
-  // D-Day calculations
-  const daysTogether = Math.floor(
-    (new Date().getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
-  ) + 1;
-
-  const next100Days = Math.ceil(daysTogether / 100) * 100;
-  const daysUntilNext100 = next100Days - daysTogether;
+  // D-Day calculations (사귄 날짜가 없으면 계산하지 않습니다)
+  const todayStr = toLocalDateString(localToday());
+  const daysTogether = anniversaryDate
+    ? daysBetweenLocal(anniversaryDate, todayStr) + 1
+    : null;
+  const nextAnniversary = getNextAnniversary(anniversaryDate, events, todayStr);
 
   const handlePrevMonth = () => {
     if (currMonth === 0) {
@@ -147,11 +150,26 @@ export function SchedulePage() {
               <Heart size={14} className="fill-coral animate-pulse" />
               <span>함께한 지</span>
             </span>
-            <span className="text-muted-foreground font-medium">사귄 날 {startDate}</span>
+            {anniversaryDate && (
+              <span className="text-muted-foreground font-medium">사귄 날 {anniversaryDate}</span>
+            )}
           </div>
-          <div className="text-3xl font-extrabold text-foreground">
-            +{daysTogether}일 <span className="text-xs font-normal text-muted-foreground">째 사랑 중 💕</span>
-          </div>
+          {daysTogether !== null ? (
+            <div className="text-3xl font-extrabold text-foreground">
+              +{daysTogether}일{' '}
+              <span className="text-xs font-normal text-muted-foreground">째 사랑 중 💕</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => navigate('/us')}
+              className="w-full text-left space-y-1"
+            >
+              <div className="text-base font-extrabold text-foreground">사귄 날짜 미설정</div>
+              <p className="text-xs text-muted-foreground">
+                '우리' 탭에서 사귄 날짜를 등록하면 기념일을 자동으로 계산해 드려요 →
+              </p>
+            </button>
+          )}
         </section>
 
         {/* Monthly Calendar View */}
@@ -196,7 +214,7 @@ export function SchedulePage() {
               const dayNum = i + 1;
               const dateStr = `${currYear}-${String(currMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
               const dayEvents = events.filter((e) => e.startDate === dateStr);
-              const isToday = new Date().toISOString().split('T')[0] === dateStr;
+              const isToday = todayStr === dateStr;
 
               return (
                 <div
@@ -220,21 +238,27 @@ export function SchedulePage() {
           <h2 className="text-sm font-bold text-foreground px-1">다가오는 공유 일정 목록</h2>
 
           <div className="space-y-2">
-            {/* Automatic 100-Day Anniversary Badge */}
-            <div className="rounded-2xl bg-card border border-border p-4 shadow-sm flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center font-bold text-sm">
-                  <CalendarIcon size={20} />
+            {/* Automatic Anniversary Badge (사귄 날짜가 등록된 경우에만) */}
+            {nextAnniversary && (
+              <div className="rounded-2xl bg-card border border-border p-4 shadow-sm flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 flex items-center justify-center font-bold text-sm">
+                    <CalendarIcon size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-foreground">
+                      다음 {nextAnniversary.label} 기념일
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {nextAnniversary.date} · {nextAnniversary.dDay}일 남음
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-xs font-bold text-foreground">다음 {next100Days}일 기념일</h3>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{daysUntilNext100}일 남음</p>
-                </div>
+                <span className="px-3 py-1 rounded-xl bg-purple-500/15 text-purple-600 font-bold text-xs">
+                  {nextAnniversary.dDay === 0 ? 'D-Day' : `D-${nextAnniversary.dDay}`}
+                </span>
               </div>
-              <span className="px-3 py-1 rounded-xl bg-purple-500/15 text-purple-600 font-bold text-xs">
-                D-{daysUntilNext100}
-              </span>
-            </div>
+            )}
 
             {/* DB Store Events */}
             {events.map((ev) => {

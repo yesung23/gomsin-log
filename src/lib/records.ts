@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { DailyRecord, Role, Attachment } from '@/types';
+import { DailyRecord, Attachment } from '@/types';
 
 // ==========================================
 // Records Synchronization
@@ -82,8 +82,11 @@ export async function saveRecordToDB(record: DailyRecord, coupleId: string, user
   return true;
 }
 
-export async function deleteRecordFromDB(recordId: string): Promise<boolean> {
+export async function deleteRecordFromDB(recordId: string, coupleId?: string): Promise<boolean> {
   if (!isSupabaseConfigured || !supabase) return false;
+
+  // Storage DELETE 정책이 레코드 행 존재를 요구하므로 미디어를 먼저 정리합니다.
+  if (coupleId) await deleteRecordMedia(coupleId, recordId);
 
   const { error } = await supabase
     .from('daily_records')
@@ -97,32 +100,119 @@ export async function deleteRecordFromDB(recordId: string): Promise<boolean> {
   return true;
 }
 
+// ==========================================
+// Media (Supabase Storage: couple-media)
+// ==========================================
+
+/** 허용 MIME 화이트리스트. 확장자와 첨부 종류를 함께 정의합니다. */
+const ALLOWED_MEDIA: Record<string, { ext: string; type: Attachment['type'] }> = {
+  'image/jpeg': { ext: 'jpg', type: 'photo' },
+  'image/png': { ext: 'png', type: 'photo' },
+  'image/webp': { ext: 'webp', type: 'photo' },
+  'image/heic': { ext: 'heic', type: 'photo' },
+  'image/gif': { ext: 'gif', type: 'photo' },
+  'video/mp4': { ext: 'mp4', type: 'video' },
+  'video/quicktime': { ext: 'mov', type: 'video' },
+  'video/webm': { ext: 'webm', type: 'video' },
+  'audio/mp4': { ext: 'm4a', type: 'voice' },
+  'audio/mpeg': { ext: 'mp3', type: 'voice' },
+  'audio/webm': { ext: 'webm', type: 'voice' },
+  'audio/wav': { ext: 'wav', type: 'voice' },
+};
+
+/** 업로드 최대 크기 (25MB) */
+export const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
+
+export function isSupportedMedia(file: File): boolean {
+  return !!ALLOWED_MEDIA[file.type];
+}
+
+export function attachmentTypeFromFile(file: File): Attachment['type'] {
+  return ALLOWED_MEDIA[file.type]?.type
+    || (file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'voice' : 'photo');
+}
+
+/**
+ * 데모/오프라인 모드에서 사용하는 로컬 미리보기 첨부.
+ * 서버에 올라가지 않고 브라우저 세션 안에서만 유효합니다.
+ */
+export function createLocalAttachment(file: File): Attachment {
+  return {
+    type: attachmentTypeFromFile(file),
+    name: file.name,
+    url: URL.createObjectURL(file),
+  };
+}
+
 export async function uploadMedia(file: File, coupleId: string, recordId: string): Promise<string | null> {
   if (!isSupabaseConfigured || !supabase || !coupleId || !recordId) return null;
 
-  const mimeToExt: Record<string, string> = {
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'audio/mp4': 'm4a',
-    'audio/mpeg': 'mp3',
-    'audio/webm': 'webm'
-  };
-  const ext = mimeToExt[file.type];
-  if (!ext) {
+  const meta = ALLOWED_MEDIA[file.type];
+  if (!meta) {
     console.error('Unsupported MIME type:', file.type);
     return null;
   }
-  
+  if (file.size > MAX_MEDIA_BYTES) {
+    console.error('File too large:', file.size);
+    return null;
+  }
+
   const attachmentId = crypto.randomUUID();
-  const path = `${coupleId}/${recordId}/${attachmentId}.${ext}`;
-  
-  const { error } = await supabase.storage.from('couple-media').upload(path, file);
+  const path = `${coupleId}/${recordId}/${attachmentId}.${meta.ext}`;
+
+  const { error } = await supabase.storage.from('couple-media').upload(path, file, {
+    contentType: file.type,
+    upsert: false,
+  });
   if (error) {
     console.error('Upload error:', error);
     return null;
   }
   return path;
+}
+
+/**
+ * 파일 하나를 업로드하고 화면에 바로 렌더링할 수 있는 Attachment를 만듭니다.
+ * Storage RLS(007_storage_policies)가 `daily_records` 행 존재를 요구하므로
+ * 반드시 레코드가 먼저 저장된 뒤에 호출해야 합니다.
+ */
+export async function uploadRecordAttachment(
+  file: File,
+  coupleId: string,
+  recordId: string,
+): Promise<Attachment | null> {
+  const path = await uploadMedia(file, coupleId, recordId);
+  if (!path) return null;
+
+  // 방금 올린 파일은 Signed URL이 준비되기 전에도 로컬 미리보기로 즉시 보여줍니다.
+  const signedUrl = await getMediaUrl(path);
+
+  return {
+    type: attachmentTypeFromFile(file),
+    name: file.name,
+    path,
+    url: signedUrl || URL.createObjectURL(file),
+  };
+}
+
+/**
+ * 레코드에 속한 미디어 전체 삭제. (레코드 행 삭제 전에 호출해야 RLS를 통과합니다)
+ */
+export async function deleteRecordMedia(coupleId: string, recordId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || !coupleId || !recordId) return;
+
+  const folder = `${coupleId}/${recordId}`;
+  const bucket = supabase.storage.from('couple-media');
+  const { data: files, error } = await bucket.list(folder, { limit: 100 });
+  if (error || !files?.length) return;
+
+  const paths = files
+    .filter((f) => f.name && f.name !== '.emptyFolderPlaceholder')
+    .map((f) => `${folder}/${f.name}`);
+  if (paths.length === 0) return;
+
+  const { error: removeError } = await bucket.remove(paths);
+  if (removeError) console.error('Failed to remove media:', removeError);
 }
 
 export async function getMediaUrl(path: string): Promise<string | null> {

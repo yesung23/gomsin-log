@@ -1,0 +1,27 @@
+# SPA history fallback for hosting platforms that respect this file.
+#
+# Netlify is the platform this rule is written for: it honours a 200-status
+# rewrite here. Cloudflare Pages already serves the root `index.html` for a path
+# that matches no asset when no custom 404 page is deployed, so it needs nothing
+# from this file and ignores rules it does not support. Vercel ignores the file
+# entirely -- see `vercel.json`, which carries the same fallback plus the
+# `public/_headers` security headers.
+#
+# Why this file has to exist: the app is a BrowserRouter SPA whose routes are
+# real URLs -- `/auth/callback`, `/legal/:doc`, `/trips/:id`, `/settings` and the
+# rest of the tab routes. None of them exist as files in `dist`, so a static host
+# answers a direct navigation to them with its own 404 and the app never boots.
+#
+# `/auth/callback` is the one that makes this release-blocking rather than
+# cosmetic: `authRedirectUrl()` in `src/lib/platform.ts` hands Supabase
+# `${window.location.origin}/auth/callback`, so EVERY web OAuth and magic-link
+# sign-in lands on that URL as a fresh top-level navigation.
+#
+# The service worker does not cover for it. `public/sw.js` handles navigations
+# network-first and falls back to the cached shell only when `fetch` REJECTS; a
+# 404 is a resolved response, so the host's 404 page is what the user sees.
+
+# Existing files still win: Netlify serves a real asset (`/assets/*`, `/sw.js`,
+# `/offline.html`, `/manifest.json`) before applying this rule, which is why the
+# status is 200 and NOT forced with `!`.
+/*    /index.html    200

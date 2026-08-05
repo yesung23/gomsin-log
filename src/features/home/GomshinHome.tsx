@@ -6,6 +6,7 @@ import { Camera, Image as ImageIcon, Mic, Send, Lock, Unlock, Film, MoreHorizont
 import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { MAX_MEDIA_BYTES, attachmentTypeFromFile, isSupportedMedia } from '@/lib/records';
+import { MAX_ATTACHMENTS_PER_RECORD, type AddRecordResult } from '@/lib/recordPipeline';
 import type { ReactionType, Attachment } from '@/types';
 
 interface PendingMedia {
@@ -15,7 +16,7 @@ interface PendingMedia {
   type: Attachment['type'];
 }
 
-const MAX_ATTACHMENTS = 4;
+const MAX_ATTACHMENTS = MAX_ATTACHMENTS_PER_RECORD;
 
 const REACTIONS: { key: ReactionType; label: string; emoji: string }[] = [
   { key: 'good', label: '좋았어', emoji: '😊' },
@@ -28,7 +29,7 @@ export function GomshinHome() {
   const navigate = useNavigate();
   const { state, addRecord } = useStore();
   const { myName } = state.profile;
-  const partnerName = state.profile.couple.partnerName || '몽룡';
+  const partnerName = state.profile.couple.partnerName || '상대방';
 
   const todayStr = toLocalDateString(localToday());
 
@@ -109,8 +110,20 @@ export function GomshinHome() {
     });
   };
 
+  // 같은 tick 연속 클릭으로 중복 저장되지 않도록 동기 ref로 잠급니다.
+  const isSavingRef = React.useRef(false);
+
   const handlePost = async () => {
-    if (isSaving) return;
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+    try {
+      await runPost();
+    } finally {
+      isSavingRef.current = false;
+    }
+  };
+
+  const runPost = async () => {
     if (!log.trim() && pendingMedia.length === 0 && !reaction) {
       toast.error('내용, 사진, 음성, 또는 리액션을 선택해주세요.');
       return;
@@ -120,7 +133,7 @@ export function GomshinHome() {
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     setIsSaving(true);
-    let result = { ok: false, failedUploads: 0 };
+    let result: AddRecordResult;
     try {
       result = await addRecord(
         {
@@ -137,8 +150,34 @@ export function GomshinHome() {
       setIsSaving(false);
     }
 
+    if (!result.ok && result.reason === 'invalid_media') {
+      const first = result.rejectedFiles[0];
+      toast.error(
+        first?.reason === 'too_large'
+          ? `${first.name}은 25MB를 넘어 첨부할 수 없어요.`
+          : first?.reason === 'too_many'
+          ? `첨부는 최대 ${MAX_ATTACHMENTS_PER_RECORD}개까지 가능해요.`
+          : `${first?.name ?? '선택한 파일'}은 지원하지 않는 형식이에요.`,
+      );
+      return;
+    }
+
     if (!result.ok) {
       toast.error('기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+      return;
+    }
+
+    if (!result.attachmentsPersisted && result.failedFiles.length > 0) {
+      const failed = new Set(result.failedFiles);
+      setPendingMedia((prev) => {
+        prev.filter((m) => !failed.has(m.file.name)).forEach((m) => URL.revokeObjectURL(m.previewUrl));
+        return prev.filter((m) => failed.has(m.file.name));
+      });
+      setLog('');
+      setReaction(undefined);
+      toast.error(
+        `기록은 저장했지만 첨부 ${result.failedFiles.length}개를 올리지 못했어요. 파일은 그대로 남겨두었어요 — '기록 남기기'를 다시 누르면 새 기록으로 올라갑니다.`,
+      );
       return;
     }
 
@@ -149,14 +188,7 @@ export function GomshinHome() {
     setPendingMedia([]);
     setIsPrivate(false);
     setShowInputCard(false);
-
-    if (result.failedUploads > 0) {
-      toast.warning(
-        `기록은 저장했지만 첨부 ${result.failedUploads}개를 올리지 못했어요. 잠시 후 다시 첨부해 주세요.`,
-      );
-    } else {
-      toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
-    }
+    toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
   };
 
   const headerGreeting = partnerName ? `안녕, ${partnerName} ♡` : '안녕, 우리 ♡';

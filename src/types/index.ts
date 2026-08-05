@@ -220,6 +220,8 @@ export interface AppState {
   theme: 'light' | 'dark';
   /** 나만의 메모 위젯 내용. 서버로 전송되지 않고 기기 안에만 보관됩니다. */
   myMemo: string;
+  /** 메모 소유자(로그인 사용자 id). 계정이 바뀌면 메모를 비우기 위한 표식. */
+  myMemoOwnerId?: string | null;
 }
 
 export interface AuthUser {

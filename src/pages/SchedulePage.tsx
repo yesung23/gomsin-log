@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/store';
 import { MobileShell } from '@/components/MobileShell';
-import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
-import { getNextAnniversary } from '@/lib/insights';
+import { localToday, toLocalDateString } from '@/lib/utils';
+import { getNextAnniversary, daysTogether } from '@/lib/insights';
 import { 
   Calendar as CalendarIcon, Heart, ShieldCheck, Clock, Plus, 
   Trash2, X, ChevronLeft, ChevronRight, CheckCircle2, Lock, Sparkles
@@ -33,9 +33,7 @@ export function SchedulePage() {
 
   // D-Day calculations (사귄 날짜가 없으면 계산하지 않습니다)
   const todayStr = toLocalDateString(localToday());
-  const daysTogether = anniversaryDate
-    ? daysBetweenLocal(anniversaryDate, todayStr) + 1
-    : null;
+  const daysTogetherCount = daysTogether(anniversaryDate, todayStr);
   const nextAnniversary = getNextAnniversary(anniversaryDate, events, todayStr);
 
   const handlePrevMonth = () => {
@@ -154,9 +152,9 @@ export function SchedulePage() {
               <span className="text-muted-foreground font-medium">사귄 날 {anniversaryDate}</span>
             )}
           </div>
-          {daysTogether !== null ? (
+          {daysTogetherCount !== null ? (
             <div className="text-3xl font-extrabold text-foreground">
-              +{daysTogether}일{' '}
+              +{daysTogetherCount}일{' '}
               <span className="text-xs font-normal text-muted-foreground">째 사랑 중 💕</span>
             </div>
           ) : (

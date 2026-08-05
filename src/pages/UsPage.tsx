@@ -4,8 +4,8 @@ import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { Heart, Calendar as CalendarIcon, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { cn, toLocalDateString, localToday, daysBetweenLocal, formatLocalDate } from '@/lib/utils';
-import { getNextAnniversary } from '@/lib/insights';
+import { cn, toLocalDateString, localToday, formatLocalDate } from '@/lib/utils';
+import { getNextAnniversary, validateAnniversary, daysTogether } from '@/lib/insights';
 import { toast } from 'sonner';
 
 function buildCalendarGrid(year: number, month: number) {
@@ -53,23 +53,24 @@ export function UsPage() {
   const todayStr = toLocalDateString(today);
 
   // 사귄 날짜가 없으면 임의 날짜를 만들지 않고 미설정 상태로 둡니다.
-  const diffDays = anniversaryDate ? daysBetweenLocal(anniversaryDate, todayStr) + 1 : null;
+  const diffDays = daysTogether(anniversaryDate, todayStr);
   const nextAnniversary = useMemo(
     () => getNextAnniversary(anniversaryDate, events, todayStr),
     [anniversaryDate, events, todayStr],
   );
 
   const handleSaveAnniversary = () => {
-    if (!anniversaryDraft) {
-      toast.error('날짜를 선택해 주세요.');
-      return;
-    }
-    if (anniversaryDraft > todayStr) {
-      toast.error('사귄 날짜는 오늘보다 뒤일 수 없어요.');
+    const validated = validateAnniversary(anniversaryDraft, todayStr);
+    if (!validated.ok) {
+      toast.error(
+        validated.reason === 'future'
+          ? '사귄 날짜는 오늘보다 뒤일 수 없어요.'
+          : '날짜를 선택해 주세요.',
+      );
       return;
     }
     updateProfile({
-      couple: { ...state.profile.couple, anniversaryDate: anniversaryDraft },
+      couple: { ...state.profile.couple, anniversaryDate: validated.value },
     });
     setIsEditingAnniversary(false);
     toast.success('사귄 날짜를 저장했어요.');

@@ -272,7 +272,8 @@ export function getNextAnniversary(
 
     if (daysConnected > 0) {
       // 100일 단위: 연결 N일째가 되는 날 = 사귄 날짜 + (N - 1)일
-      const nextMilestone = Math.ceil((daysConnected + 1) / 100) * 100;
+      // 오늘이 정확히 100일째면 오늘을 D-Day로 보여준다 (지나치지 않음).
+      const nextMilestone = Math.ceil(daysConnected / 100) * 100;
       candidates.push({
         label: `${nextMilestone}일`,
         date: addDays(anniversaryDate, nextMilestone - 1),
@@ -506,4 +507,95 @@ export function computeEnergy(sharedRecords: DailyRecord[]): EnergyResult {
     : '평온하게 하루를 보내고 있어요 ✨';
 
   return { level, label, hasData: true };
+}
+
+
+// ==========================================
+// 화면에서 쓰는 기록 선택자 (프라이버시 경계 포함)
+// ==========================================
+
+/**
+ * "오늘 타임라인"에 보여줄 기록.
+ * 내 기록 전부 + 상대의 공유 기록만. 상대의 비공개 기록은 절대 포함하지 않는다.
+ */
+export function selectTodayTimeline(
+  records: DailyRecord[],
+  role: Role,
+  todayStr: string = today(),
+): DailyRecord[] {
+  return chronological(
+    records.filter(
+      (r) => r.date === todayStr && (r.authorRole === role || !r.isPrivate),
+    ),
+  );
+}
+
+/**
+ * 상대가 오늘 공유한 기록만. (브리핑 · 에너지 · 요약의 유일한 입력)
+ * 내 기록과 상대의 비공개 기록은 제외한다.
+ */
+export function selectPartnerSharedToday(
+  records: DailyRecord[],
+  role: Role,
+  todayStr: string = today(),
+): DailyRecord[] {
+  return chronological(
+    records.filter(
+      (r) => r.date === todayStr && r.authorRole !== role && !r.isPrivate,
+    ),
+  );
+}
+
+// ==========================================
+// 나만의 메모: 사용자별 격리
+// ==========================================
+
+export interface MemoOwnership {
+  myMemo: string;
+  myMemoOwnerId: string | null;
+}
+
+/**
+ * 메모는 기기 localStorage에만 저장되므로, 같은 기기를 다른 계정이 쓰면
+ * 이전 사용자의 메모가 보일 수 있습니다. 소유자가 바뀌면 메모를 비웁니다.
+ *
+ * - 소유자가 같으면 유지
+ * - 소유자가 다르면(로그아웃→다른 계정, 데모→실계정 포함) 비움
+ */
+export function resolveMemoOwnership(
+  prev: { myMemo?: string; myMemoOwnerId?: string | null },
+  currentUserId: string | null,
+): MemoOwnership {
+  const prevOwner = prev.myMemoOwnerId ?? null;
+  if (prevOwner === currentUserId) {
+    return { myMemo: prev.myMemo || '', myMemoOwnerId: currentUserId };
+  }
+  return { myMemo: '', myMemoOwnerId: currentUserId };
+}
+
+// ==========================================
+// 사귄 날짜(기념일) 편집 검증 · 재계산
+// ==========================================
+
+export type AnniversaryRejection = 'empty' | 'malformed' | 'future';
+
+export function validateAnniversary(
+  dateStr: string,
+  todayStr: string = today(),
+): { ok: true; value: string } | { ok: false; reason: AnniversaryRejection } {
+  if (!dateStr) return { ok: false, reason: 'empty' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return { ok: false, reason: 'malformed' };
+  if (dateStr > todayStr) return { ok: false, reason: 'future' };
+  return { ok: true, value: dateStr };
+}
+
+/**
+ * 사귄 날짜 기준 "함께한 지 N일째". 미설정이면 null (예시 날짜를 만들지 않는다).
+ */
+export function daysTogether(
+  anniversaryDate: string | undefined,
+  todayStr: string = today(),
+): number | null {
+  if (!anniversaryDate) return null;
+  return daysBetweenLocal(anniversaryDate, todayStr) + 1;
 }

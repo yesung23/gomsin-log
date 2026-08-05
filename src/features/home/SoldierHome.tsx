@@ -5,7 +5,7 @@ import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { Sparkles, MessageCircle, Clock, Image as ImageIcon, Mic, Film, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
-import { computeEnergy } from '@/lib/insights';
+import { computeEnergy, selectPartnerSharedToday } from '@/lib/insights';
 import { Heart } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,11 +18,10 @@ export function SoldierHome() {
   const headerGreeting = partnerName ? `안녕, ${partnerName} ♡` : '안녕, 우리 ♡';
 
   // Filter partner's shared records for today in chronological order
-  const partnerSharedRecords = useMemo(() => {
-    return state.records
-      .filter((r) => r.date === todayStr && r.authorRole !== state.profile.role && !r.isPrivate)
-      .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
-  }, [state.records, todayStr, state.profile.role]);
+  const partnerSharedRecords = useMemo(
+    () => selectPartnerSharedToday(state.records, state.profile.role, todayStr),
+    [state.records, todayStr, state.profile.role],
+  );
 
   const hasSharedRecords = partnerSharedRecords.length > 0;
 

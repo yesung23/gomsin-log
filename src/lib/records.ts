@@ -203,16 +203,56 @@ export async function deleteRecordMedia(coupleId: string, recordId: string): Pro
 
   const folder = `${coupleId}/${recordId}`;
   const bucket = supabase.storage.from('couple-media');
-  const { data: files, error } = await bucket.list(folder, { limit: 100 });
-  if (error || !files?.length) return;
+  const pageSize = 100;
 
-  const paths = files
-    .filter((f) => f.name && f.name !== '.emptyFolderPlaceholder')
-    .map((f) => `${folder}/${f.name}`);
-  if (paths.length === 0) return;
+  // 페이지네이션: 한 페이지(100개)만 지우면 나머지가 고아 객체로 남습니다.
+  // 삭제 후에는 목록이 줄어들므로 항상 첫 페이지를 다시 조회합니다.
+  for (;;) {
+    const { data: files, error } = await bucket.list(folder, {
+      limit: pageSize,
+      offset: 0,
+    });
+    if (error) {
+      console.error('Failed to list media for deletion:', error);
+      return;
+    }
+    if (!files?.length) return;
 
-  const { error: removeError } = await bucket.remove(paths);
-  if (removeError) console.error('Failed to remove media:', removeError);
+    const paths = files
+      .filter((f) => f.name && f.name !== '.emptyFolderPlaceholder')
+      .map((f) => `${folder}/${f.name}`);
+
+    if (paths.length > 0) {
+      const { error: removeError } = await bucket.remove(paths);
+      if (removeError) {
+        console.error('Failed to remove media:', removeError);
+        return;
+      }
+    }
+
+    if (files.length < pageSize) return;
+    // 삭제했으므로 offset을 증가시키지 않고 같은 위치를 다시 조회합니다.
+  }
+}
+
+/**
+ * 특정 첨부 객체들만 삭제합니다. (첨부 반영 실패 시 롤백용)
+ * 반환값은 삭제 요청에 성공한 객체 수입니다.
+ */
+export async function deleteAttachmentObjects(attachments: Attachment[]): Promise<number> {
+  if (!isSupabaseConfigured || !supabase) return 0;
+
+  const paths = attachments
+    .map((a) => a.path)
+    .filter((p): p is string => typeof p === 'string' && p.length > 0);
+  if (paths.length === 0) return 0;
+
+  const { error } = await supabase.storage.from('couple-media').remove(paths);
+  if (error) {
+    console.error('Failed to roll back uploaded media:', error);
+    return 0;
+  }
+  return paths.length;
 }
 
 export async function getMediaUrl(path: string): Promise<string | null> {

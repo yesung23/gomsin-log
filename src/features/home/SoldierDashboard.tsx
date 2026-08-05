@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { generateDailySummary, generateEmotionFlowBriefing } from '@/lib/briefing';
-import { computeEnergy } from '@/lib/insights';
+import { computeEnergy, selectPartnerSharedToday } from '@/lib/insights';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 
@@ -22,12 +22,8 @@ export function SoldierDashboard() {
 
   // Get today's shared records
   const todayStr = toLocalDateString(localToday());
-  const sharedRecords = records.filter(
-    (record) =>
-      record.date === todayStr &&
-      record.authorRole !== profile.role &&
-      !record.isPrivate,
-  );
+  // 상대의 공유 기록만 (내 기록·상대 비공개 기록 제외) — insights의 단일 선택자 사용
+  const sharedRecords = selectPartnerSharedToday(records, profile.role, todayStr);
 
   const dailySummary = generateDailySummary(sharedRecords, partnerName);
   const emotionBriefing = generateEmotionFlowBriefing(sharedRecords);

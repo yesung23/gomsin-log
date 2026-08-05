@@ -35,8 +35,9 @@ export function OnboardingPage() {
   // Military Info State (Soldier only)
   const [branch, setBranch] = useState<Branch>('army');
   const [militaryStatus, setMilitaryStatus] = useState<MilitaryStatus>('serving');
-  const [enlistmentDate, setEnlistmentDate] = useState('2025-03-10');
-  const [expectedDischargeDate, setExpectedDischargeDate] = useState('2026-09-09');
+  // 예시 날짜를 미리 채우지 않습니다. 비워두면 나중에 복무 현황 화면에서 입력할 수 있습니다.
+  const [enlistmentDate, setEnlistmentDate] = useState('');
+  const [expectedDischargeDate, setExpectedDischargeDate] = useState('');
   const [dischargeDateSource, setDischargeDateSource] = useState<DischargeDateSource>('calculated');
 
   // Contact Hours State (Soldier only)
@@ -159,9 +160,9 @@ export function OnboardingPage() {
 
   const handleEnlistmentChange = (val: string) => {
     setEnlistmentDate(val);
-    if (dischargeDateSource === 'calculated') {
-      setExpectedDischargeDate(calculateDischarge(val, branch));
-    }
+    if (dischargeDateSource !== 'calculated') return;
+    // 입대일을 비우면 전역일도 비웁니다. (빈 값으로 계산하면 잘못된 날짜가 만들어짐)
+    setExpectedDischargeDate(val ? calculateDischarge(val, branch) : '');
   };
 
   const handleBranchChange = (newBranch: Branch) => {
@@ -178,7 +179,8 @@ export function OnboardingPage() {
 
   const finishSetup = async () => {
     const nowIso = new Date().toISOString();
-    const finalNickname = nickname || (role === 'gomsin' ? '춘향' : '몽룡');
+    // 닉네임은 2자 이상 입력해야 다음 단계로 넘어갈 수 있어 별도 예시값을 쓰지 않습니다.
+    const finalNickname = nickname.trim();
 
     // Update Local/Global store state
     updateProfile({
@@ -187,18 +189,25 @@ export function OnboardingPage() {
       onboardingCompletedAt: nowIso,
       couple: {
         coupleId: createdCoupleId || undefined,
-        partnerName: role === 'gomsin' ? '몽룡' : '춘향',
+        // 상대 이름은 연결 후 get_partner_profile로 채워집니다. 예시 이름을 저장하지 않습니다.
+        partnerName: '',
         anniversaryDate: skipAnniversary ? undefined : (anniversary || undefined),
-        coupleCode: createdInviteCode || inviteCodeInput || '123456',
+        coupleCode: createdInviteCode || inviteCodeInput || '',
         connected: spaceMode === 'join',
         status: spaceMode === 'join' ? 'active' : 'pending',
       },
       military: {
         branch,
         militaryStatus,
-        enlistmentDate: role === 'soldier' && militaryStatus !== 'unknown' ? enlistmentDate : undefined,
-        expectedDischargeDate: role === 'soldier' && militaryStatus !== 'unknown' ? expectedDischargeDate : undefined,
-        dischargeDateSource,
+        enlistmentDate:
+          role === 'soldier' && militaryStatus !== 'unknown' && enlistmentDate
+            ? enlistmentDate
+            : undefined,
+        expectedDischargeDate:
+          role === 'soldier' && militaryStatus !== 'unknown' && expectedDischargeDate
+            ? expectedDischargeDate
+            : undefined,
+        dischargeDateSource: enlistmentDate ? dischargeDateSource : 'unknown',
         memo: '',
       },
       contact: {

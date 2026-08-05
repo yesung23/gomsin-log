@@ -13,8 +13,17 @@ import {
   deleteRecordFromDB,
   uploadRecordAttachment,
   createLocalAttachment,
+  deleteAttachmentObjects,
+  isSupportedMedia,
+  MAX_MEDIA_BYTES,
 } from '@/lib/records';
-import type { Attachment } from '@/types';
+import {
+  buildLocalRecord,
+  persistRecordWithMedia,
+  type AddRecordResult,
+} from '@/lib/recordPipeline';
+import { resolveMemoOwnership } from '@/lib/insights';
+export type { AddRecordResult } from '@/lib/recordPipeline';
 import {
   addDays,
   addMonths,
@@ -64,7 +73,12 @@ export class LocalStorageRepository implements ILogRepository {
   }
 }
 
-const DEFAULT_STATE: AppState = {
+/**
+ * 신규 사용자의 초기 상태.
+ * 의도적으로 기념일/입대일 같은 날짜 예시값을 넣지 않습니다.
+ * (예시 날짜가 실제 사용자 데이터처럼 보이는 문제를 막기 위함 — insights 테스트로 고정)
+ */
+export const DEFAULT_STATE: AppState = {
   setupComplete: false,
   onboardingStep: 0,
   isDemoMode: true,
@@ -103,16 +117,8 @@ const DEFAULT_STATE: AppState = {
   hasSeenInstallPrompt: false,
   theme: 'light',
   myMemo: '',
+  myMemoOwnerId: null,
 };
-
-/**
- * 기록 저장 결과. 레코드는 저장됐지만 일부 첨부 업로드만 실패할 수 있어
- * 실패 개수를 따로 알려줍니다.
- */
-export interface AddRecordResult {
-  ok: boolean;
-  failedUploads: number;
-}
 
 interface StoreContextType {
   state: AppState;
@@ -195,12 +201,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               }
             : undefined;
 
+          // 같은 기기를 다른 계정이 사용할 때 이전 사용자의 로컬 메모가
+          // 남아 보이지 않도록 소유자를 확인해 초기화합니다.
+          const memo = resolveMemoOwnership(prev, authUser.id);
+
           return {
             ...prev,
             authenticatedUser: authUser,
             isDemoMode: false,
             ...(dbState || {}),
             ...(remoteProfile ? { profile: remoteProfile } : {}),
+            ...memo,
           };
         });
         setIsAuthChecked(true);
@@ -211,7 +222,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           widgetLayout: prev.widgetLayout,
           hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
           theme: prev.theme || 'light',
-          myMemo: prev.myMemo || '',
+          // 로그아웃 상태에서는 로그인 사용자에게 귀속된 메모를 남기지 않습니다.
+          ...resolveMemoOwnership(prev, null),
         }));
         setIsAuthChecked(true);
       }
@@ -398,75 +410,50 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     record: Omit<DailyRecord, 'id' | 'createdAt'>,
     files: File[] = [],
   ): Promise<AddRecordResult> => {
-    const newRecord: DailyRecord = {
-      ...record,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
+    const mediaOptions = {
+      isSupported: isSupportedMedia,
+      maxBytes: MAX_MEDIA_BYTES,
     };
 
     // 데모/오프라인 모드: 브라우저 안에서만 유효한 로컬 첨부를 사용합니다.
     if (state.isDemoMode || !state.authenticatedUser) {
-      const localAttachments = files.map(createLocalAttachment);
-      const merged = [...(newRecord.attachments || []), ...localAttachments];
-      const localRecord: DailyRecord = {
-        ...newRecord,
-        attachments: merged.length > 0 ? merged : undefined,
-      };
-      setState((prev) => ({ ...prev, records: [...prev.records, localRecord] }));
-      return { ok: true, failedUploads: 0 };
+      const localResult = buildLocalRecord(
+        { draft: record, files, hasCouple: true },
+        {
+          ...mediaOptions,
+          newId: () => crypto.randomUUID(),
+          now: () => new Date().toISOString(),
+          createLocalAttachment,
+        },
+      );
+      if (localResult.ok && localResult.record) {
+        const saved = localResult.record;
+        setState((prev) => ({ ...prev, records: [...prev.records, saved] }));
+      }
+      return localResult;
     }
 
     const coupleId = state.profile.couple.coupleId;
-    if (!coupleId) {
-      console.error('Cannot save record without an active couple.');
-      return { ok: false, failedUploads: files.length };
+    const userId = state.authenticatedUser.id;
+
+    const result = await persistRecordWithMedia(
+      {
+        ...mediaOptions,
+        newId: () => crypto.randomUUID(),
+        now: () => new Date().toISOString(),
+        saveRecord: (r) => saveRecordToDB(r, coupleId as string, userId),
+        uploadAttachment: (file, recordId) =>
+          uploadRecordAttachment(file, coupleId as string, recordId),
+        removeUploaded: (attachments) => deleteAttachmentObjects(attachments),
+      },
+      { draft: record, files, hasCouple: !!coupleId },
+    );
+
+    if (result.ok && result.record) {
+      const saved = result.record;
+      setState((prev) => ({ ...prev, records: [...prev.records, saved] }));
     }
-
-    try {
-      // 1) Storage RLS(007)가 daily_records 행 존재를 요구하므로 먼저 레코드를 저장합니다.
-      const saved = await saveRecordToDB(
-        { ...newRecord, attachments: [] },
-        coupleId,
-        state.authenticatedUser.id,
-      );
-      if (!saved) return { ok: false, failedUploads: files.length };
-    } catch (error) {
-      console.error('Failed to save record:', error);
-      return { ok: false, failedUploads: files.length };
-    }
-
-    // 2) 첨부 업로드 → couple-media/{coupleId}/{recordId}/{uuid}.{ext}
-    const uploaded: Attachment[] = [];
-    let failedUploads = 0;
-    for (const file of files) {
-      try {
-        const attachment = await uploadRecordAttachment(file, coupleId, newRecord.id);
-        if (attachment) uploaded.push(attachment);
-        else failedUploads += 1;
-      } catch (error) {
-        console.error('Failed to upload attachment:', error);
-        failedUploads += 1;
-      }
-    }
-
-    const attachments = [...(newRecord.attachments || []), ...uploaded];
-    const finalRecord: DailyRecord = {
-      ...newRecord,
-      attachments: attachments.length > 0 ? attachments : undefined,
-    };
-
-    // 3) 업로드된 첨부 정보를 레코드에 반영
-    if (uploaded.length > 0) {
-      try {
-        await saveRecordToDB(finalRecord, coupleId, state.authenticatedUser.id);
-      } catch (error) {
-        console.error('Failed to attach media to record:', error);
-        failedUploads += uploaded.length;
-      }
-    }
-
-    setState((prev) => ({ ...prev, records: [...prev.records, finalRecord] }));
-    return { ok: true, failedUploads };
+    return result;
   };
 
   const updateRecord = (id: string, updates: Partial<DailyRecord>) => {
@@ -871,8 +858,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   // 나만의 메모: 서버로 보내지 않고 기기 localStorage에만 저장합니다.
+  // 저장 시 소유자(로그인 사용자 id)를 함께 기록해 계정 간 노출을 막습니다.
   const setMyMemo = (memo: string) => {
-    setState((prev) => ({ ...prev, myMemo: memo }));
+    setState((prev) => ({
+      ...prev,
+      myMemo: memo,
+      myMemoOwnerId: prev.authenticatedUser?.id ?? null,
+    }));
   };
 
   return (

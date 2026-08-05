@@ -1,16 +1,26 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import {
+  MEDIA_BUCKET,
+  SIGNED_URL_TTL_SECONDS,
+  decideMediaAccess,
+  parseMediaPath,
+  pathRejectionStatus,
+} from './authorize.ts';
 
 /**
  * create-media-signed-url
  *
- * couple-media 버킷은 비공개이므로 클라이언트가 직접 Signed URL을 만들지 않고
- * 이 함수가 권한을 검증한 뒤 짧은 만료시간의 URL만 발급합니다.
+ * couple-media 버킷은 비공개(public=false)이므로 클라이언트가 직접 Signed URL을
+ * 만들지 않고, 이 함수가 권한을 검증한 뒤 짧은 만료시간의 URL만 발급합니다.
  *
  * 검증 순서
- *  1. Bearer 토큰으로 사용자 확인
- *  2. 경로 형식 확인: {coupleId}/{recordId}/{filename}
+ *  1. Bearer 토큰으로 사용자 확인 (service-role 키는 절대 응답에 포함하지 않음)
+ *  2. 경로 형식 확인: {coupleId}/{recordId}/{uuid}.{ext} — 임의 경로 서명 차단
  *  3. 요청자가 해당 커플의 active 멤버인지 확인
- *  4. 해당 레코드가 그 커플 소속이고, 공개 기록이거나 본인 기록인지 확인
+ *  4. 레코드가 그 커플 소속이고, 공개 기록이거나 본인 기록인지 확인
+ *
+ * 배포 (이 저장소에서는 실행하지 않음):
+ *   supabase functions deploy create-media-signed-url
  */
 
 const corsHeaders = {
@@ -18,11 +28,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
-
-const SIGNED_URL_TTL_SECONDS = 60 * 10; // 10분
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -50,34 +55,27 @@ Deno.serve(async (request) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!supabaseUrl || !serviceRoleKey) {
+    // 설정 문제는 서버 로그로만 남기고 클라이언트에는 상세를 노출하지 않습니다.
     console.error('[create-media-signed-url] Missing server environment variables');
     return jsonResponse({ error: 'Server configuration error' }, 500);
   }
 
-  let path: string | undefined;
+  let rawPath: unknown;
   try {
     const body = await request.json();
-    path = typeof body?.path === 'string' ? body.path : undefined;
+    rawPath = body?.path;
   } catch {
     return jsonResponse({ error: 'Invalid request body' }, 400);
   }
 
-  if (!path) {
-    return jsonResponse({ error: 'path is required' }, 400);
+  const parsedPath = parseMediaPath(rawPath);
+  if (!parsedPath.ok) {
+    return jsonResponse(
+      { error: parsedPath.reason === 'missing' ? 'path is required' : 'Invalid path' },
+      pathRejectionStatus(parsedPath.reason),
+    );
   }
-  // 경로 조작(상위 디렉터리 접근) 차단
-  if (path.includes('..') || path.startsWith('/')) {
-    return jsonResponse({ error: 'Invalid path' }, 400);
-  }
-
-  const segments = path.split('/');
-  if (segments.length !== 3) {
-    return jsonResponse({ error: 'Invalid path' }, 400);
-  }
-  const [coupleId, recordId] = segments;
-  if (!UUID_PATTERN.test(coupleId) || !UUID_PATTERN.test(recordId)) {
-    return jsonResponse({ error: 'Invalid path' }, 400);
-  }
+  const { coupleId, recordId } = parsedPath.value;
 
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: {
@@ -97,7 +95,6 @@ Deno.serve(async (request) => {
   }
 
   try {
-    // 3. active 멤버십 확인
     const { data: membership, error: membershipError } = await admin
       .from('couple_members')
       .select('couple_id')
@@ -106,11 +103,7 @@ Deno.serve(async (request) => {
       .eq('status', 'active')
       .maybeSingle();
     if (membershipError) throw membershipError;
-    if (!membership) {
-      return jsonResponse({ error: 'Forbidden' }, 403);
-    }
 
-    // 4. 레코드 접근 권한 확인 (비공개 기록은 작성자만)
     const { data: record, error: recordError } = await admin
       .from('daily_records')
       .select('id, user_id, is_private')
@@ -118,16 +111,20 @@ Deno.serve(async (request) => {
       .eq('couple_id', coupleId)
       .maybeSingle();
     if (recordError) throw recordError;
-    if (!record) {
-      return jsonResponse({ error: 'Not found' }, 404);
-    }
-    if (record.is_private && record.user_id !== user.id) {
-      return jsonResponse({ error: 'Forbidden' }, 403);
+
+    const decision = decideMediaAccess({
+      userId: user.id,
+      parsed: parsedPath.value,
+      membership: membership ?? null,
+      record: record ?? null,
+    });
+    if (!decision.allow) {
+      return jsonResponse({ error: decision.error }, decision.status);
     }
 
     const { data, error: signError } = await admin.storage
-      .from('couple-media')
-      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+      .from(MEDIA_BUCKET)
+      .createSignedUrl(parsedPath.value.coupleId + '/' + parsedPath.value.recordId + '/' + parsedPath.value.fileName, SIGNED_URL_TTL_SECONDS);
     if (signError || !data?.signedUrl) throw signError || new Error('Failed to sign URL');
 
     return jsonResponse({

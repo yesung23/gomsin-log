@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
 import { MAX_MEDIA_BYTES, attachmentTypeFromFile, isSupportedMedia } from '@/lib/records';
+import { MAX_ATTACHMENTS_PER_RECORD, type AddRecordResult } from '@/lib/recordPipeline';
+import { selectTodayTimeline } from '@/lib/insights';
 import type { ReactionType, EmotionFlowItem, Attachment } from '@/types';
 
 /** 저장 전 화면에 미리 보여줄 첨부 후보 */
@@ -15,7 +17,7 @@ interface PendingMedia {
   type: Attachment['type'];
 }
 
-const MAX_ATTACHMENTS = 4;
+const MAX_ATTACHMENTS = MAX_ATTACHMENTS_PER_RECORD;
 
 export function TodayLogWidget() {
   const { state, addRecord } = useStore();
@@ -124,8 +126,21 @@ export function TodayLogWidget() {
     }
   };
 
+  // React state(isSaving)는 같은 tick 안의 연속 클릭을 막지 못하므로
+  // 서버 변경 게이트는 동기적으로 갱신되는 ref로 잠급니다.
+  const isSavingRef = React.useRef(false);
+
   const handlePost = async () => {
-    if (isSaving) return;
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+    try {
+      await runPost();
+    } finally {
+      isSavingRef.current = false;
+    }
+  };
+
+  const runPost = async () => {
     if (!log.trim() && pendingMedia.length === 0 && !reaction) {
       toast.error('내용, 사진, 또는 리액션을 선택해주세요.');
       return;
@@ -145,7 +160,7 @@ export function TodayLogWidget() {
       }));
 
     setIsSaving(true);
-    let result = { ok: false, failedUploads: 0 };
+    let result: AddRecordResult;
     try {
       result = await addRecord(
         {
@@ -164,8 +179,38 @@ export function TodayLogWidget() {
       setIsSaving(false);
     }
 
+    // 서버를 건드리기 전에 거부된 파일 → 입력 내용을 그대로 남겨 수정/재시도 가능
+    if (!result.ok && result.reason === 'invalid_media') {
+      const first = result.rejectedFiles[0];
+      toast.error(
+        first?.reason === 'too_large'
+          ? `${first.name}은 25MB를 넘어 첨부할 수 없어요. 파일을 지우고 다시 시도해 주세요.`
+          : first?.reason === 'too_many'
+          ? `첨부는 최대 ${MAX_ATTACHMENTS_PER_RECORD}개까지 가능해요.`
+          : `${first?.name ?? '선택한 파일'}은 지원하지 않는 형식이에요.`,
+      );
+      return;
+    }
+
     if (!result.ok) {
       toast.error('기록을 저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+      return;
+    }
+
+    // 첨부가 반영되지 않았으면 실패한 파일만 남겨 재시도할 수 있게 합니다.
+    if (!result.attachmentsPersisted && result.failedFiles.length > 0) {
+      const failed = new Set(result.failedFiles);
+      setPendingMedia((prev) => {
+        prev.filter((m) => !failed.has(m.file.name)).forEach((m) => URL.revokeObjectURL(m.previewUrl));
+        return prev.filter((m) => failed.has(m.file.name));
+      });
+      setLog('');
+      setReaction(undefined);
+      setConfirmedItemIds([]);
+      // 컴포저를 닫지 않고 열어둔 채로 재시도를 유도합니다.
+      toast.error(
+        `기록은 저장했지만 첨부 ${result.failedFiles.length}개를 올리지 못했어요. 파일은 그대로 남겨두었어요 — '저장'을 다시 누르면 새 기록으로 올라갑니다.`,
+      );
       return;
     }
 
@@ -176,20 +221,11 @@ export function TodayLogWidget() {
     setConfirmedItemIds([]);
     setIsPrivate(false);
     setShowInputCard(false);
-
-    if (result.failedUploads > 0) {
-      toast.warning(
-        `기록은 저장했지만 첨부 ${result.failedUploads}개를 올리지 못했어요. 잠시 후 다시 첨부해 주세요.`,
-      );
-    } else {
-      toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
-    }
+    toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
   };
 
   // 오늘 타임라인: 내 기록 + 상대의 공유 기록만 (상대의 비공개 기록은 절대 노출하지 않음)
-  const todayRecords = state.records
-    .filter((r) => r.date === todayStr && (r.authorRole === state.profile.role || !r.isPrivate))
-    .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
+  const todayRecords = selectTodayTimeline(state.records, state.profile.role, todayStr);
     
   return (
     <div className="flex flex-col">

@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+/**
+ * Pretendard is self-hosted from the pinned `pretendard` package, NOT from a CDN.
+ *
+ * `index.html` used to load this stylesheet from cdn.jsdelivr.net, which the CSP
+ * in `public/_headers` never allowed: `style-src 'self' 'unsafe-inline'` and
+ * `font-src 'self' data:` name no third-party origin, so on any platform that
+ * honours `_headers` the stylesheet AND every font file it references were
+ * blocked and the whole app fell back to a system font. Typecheck, lint, tests
+ * and the build all passed while that was true.
+ *
+ * The dynamic-subset build is deliberate: it carries `unicode-range` per face, so
+ * a browser downloads only the subsets whose glyphs are actually rendered
+ * (a few tens of kB) instead of the 2.9 MB whole family. Vite emits the referenced
+ * `.woff2` files into `dist/assets`; `vite.config.ts` keeps them OUT of the
+ * service-worker precache list and lets the existing runtime `font` cache pick up
+ * the ones a session really used.
+ *
+ * `src/lib/cspExternalResources.test.ts` fails if a third-party origin comes back.
+ */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+
 @theme inline {
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --color-background: var(--background);

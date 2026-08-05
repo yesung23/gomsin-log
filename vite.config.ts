@@ -72,9 +72,10 @@ function emitCspHeaders(getValidated: () => ValidatedBuildEnvironment | null): P
 }
 
 /**
- * Inject the complete hashed Vite asset graph into the generated service worker.
+ * Inject the hashed Vite asset graph into the generated service worker.
  * A waiting worker can then activate while offline without serving an index whose
- * JavaScript or CSS chunks were never cached.
+ * JavaScript or CSS chunks were never cached. Fonts are the one deliberate
+ * exclusion — see the comment on `isPrecachedAsset` below.
  */
 function injectServiceWorkerManifest(): Plugin {
   return {
@@ -83,7 +84,17 @@ function injectServiceWorkerManifest(): Plugin {
     closeBundle() {
       const outputDirectory = resolve(process.cwd(), 'dist');
       const assetsDirectory = resolve(outputDirectory, 'assets');
+      // Fonts are deliberately NOT precached. The self-hosted Pretendard dynamic
+      // subset is 92 files / ~2.9 MB, and `install` in sw.js uses
+      // `cache.addAll()`, which is all-or-nothing: precaching them would turn
+      // every first visit into a multi-megabyte download and make installation
+      // fail outright on a flaky connection. sw.js already runtime-caches any
+      // response whose request destination is 'font', so the handful of subsets a
+      // session actually rendered are available offline from then on, and the
+      // `unicode-range` metadata means a browser never asks for the rest.
+      const isPrecachedAsset = (file: string) => !/\.woff2?$/.test(file);
       const assetUrls = listFiles(assetsDirectory)
+        .filter(isPrecachedAsset)
         .sort()
         .map((file) => `/assets/${file}`);
       const buildHash = createHash('sha256');

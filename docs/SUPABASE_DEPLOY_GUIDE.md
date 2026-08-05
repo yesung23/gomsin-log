@@ -134,6 +134,31 @@ couple-media/{couple_id}/{record_id}/{attachment_id}.{extension}
   매 PR 에서 이 게이트에 Playwright(실브라우저 커플 매트릭스), Deno Edge 테스트, CSP 스캔,
   에셋 대조, 의존성 감사 allowlist 를 더해 실행합니다.
 
+### ⚠️ SPA 히스토리 폴백은 반드시 있어야 합니다 (없으면 웹 로그인이 끊깁니다)
+
+이 앱은 `BrowserRouter` SPA 이고, 라우트가 전부 실제 URL 입니다 —
+`/auth/callback`, `/legal/:doc`, `/trips/:id`, `/settings`, 탭 라우트들.
+`dist` 안에 이런 이름의 파일은 없으므로, **폴백 설정이 없는 정적 호스팅은 직접 접속·새로고침에
+자기 404 를 돌려주고 앱이 아예 부팅하지 않습니다.**
+
+이게 단순 불편이 아니라 **릴리스 차단 결함**인 이유: `src/lib/platform.ts` 의
+`authRedirectUrl()` 이 Supabase 에 `${window.location.origin}/auth/callback` 을 넘기므로
+**모든 웹 OAuth·매직링크 로그인이 그 URL 로 새 탐색(top-level navigation)으로 돌아옵니다.**
+폴백이 없으면 웹 로그인 자체가 완료되지 않습니다.
+
+서비스 워커는 이걸 가려주지 않습니다. `public/sw.js` 는 탐색을 network-first 로 처리하고
+`fetch` 가 **reject 될 때만** 캐시된 셸로 폴백합니다. 404 는 정상 resolve 이므로 그대로
+호스팅의 404 페이지가 보입니다.
+
+| 플랫폼 | 폴백 제공 | 필요한 조치 |
+| :--- | :--- | :--- |
+| **Netlify** | `public/_redirects` (`/* /index.html 200`) | 없음 |
+| **Cloudflare Pages** | 기본 동작 (커스텀 404 를 올리지 않으면 루트 `index.html` 을 돌려줌) | 커스텀 404 페이지를 추가하지 마세요 |
+| **Vercel** | `vercel.json` 의 `rewrites` | 없음 |
+
+`_redirects` 의 200 규칙에 `!` 를 붙이지 마세요. 강제 규칙은 실제 파일보다 우선하므로
+`/assets/*`·`/sw.js`·`/manifest.json` 이 전송되지 않습니다.
+
 ### ⚠️ 보안 헤더는 호스팅 플랫폼에 따라 적용 방식이 다릅니다
 
 CSP 를 포함한 보안 헤더는 `public/_headers` 에서 나가고, 빌드가 `VITE_SUPABASE_URL` 을
@@ -143,9 +168,12 @@ CSP 를 포함한 보안 헤더는 `public/_headers` 에서 나가고, 빌드가
 | :--- | :--- | :--- |
 | **Netlify** | O | 없음 |
 | **Cloudflare Pages** | O | 없음 |
-| **Vercel** | **X** | `vercel.json` 의 `headers` 로 **같은 헤더를 직접 설정해야 합니다.** 하지 않으면 CSP·`X-Frame-Options`·`Permissions-Policy` 가 **전부 적용되지 않습니다.** |
+| **Vercel** | **X** | 없음 — `vercel.json` 이 **같은 헤더를 이미 담고 있습니다.** Vercel 은 빌드 전에 `vercel.json` 을 읽으므로 빌드시 치환을 쓸 수 없어, Supabase 마커 자리에 `https://*.supabase.co` / `wss://*.supabase.co` 가 들어갑니다. 호스트는 Supabase 로 묶여 있지만 **프로젝트 하나로 고정되지는 않는다**는 점이 의도된 트레이드오프입니다 (`_headers` 를 인식하는 플랫폼은 정확한 origin 을 받습니다) |
+
+두 파일이 어긋나는 것은 `src/lib/hostingConfig.test.ts` 가 막습니다. 헤더 이름·순서·값을
+`public/_headers` 에서 파싱해 `vercel.json` 과 대조하므로, 한쪽만 고치면 테스트가 깨집니다.
 
 이 문서의 다른 절과 `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` 는 예시로 Vercel 주소를
-쓰고 있으므로, 배포 플랫폼을 확정한 뒤 위 표에 따라 조치하세요. 배포 후에는 브라우저
-DevTools → Network → 문서 응답 헤더에서 `Content-Security-Policy` 가 실제로 존재하는지
-확인하는 것이 유일하게 신뢰할 수 있는 검증입니다.
+쓰고 있습니다. 배포 후에는 브라우저 DevTools → Network → 문서 응답 헤더에서
+`Content-Security-Policy` 가 실제로 존재하는지, 그리고 `/auth/callback` 에 **직접 접속**해
+앱이 뜨는지 확인하는 것이 유일하게 신뢰할 수 있는 검증입니다.

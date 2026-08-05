@@ -5,7 +5,7 @@ import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { Heart, Calendar as CalendarIcon, CalendarDays, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { cn, toLocalDateString, localToday } from '@/lib/utils';
+import { cn, toLocalDateString, localToday, daysBetweenLocal } from '@/lib/utils';
 
 function buildCalendarGrid(year: number, month: number) {
   const firstDay = new Date(year, month, 1);
@@ -38,7 +38,13 @@ export function UsPage() {
   const { myName } = state.profile;
   const partnerName = state.profile.couple.partnerName || '상대방';
   const connected = state.profile.couple.connected;
-  const startDate = state.profile.couple.anniversaryDate || '2024-12-24';
+  /**
+   * M-1: no invented anniversary. This used to fall back to a fixed literal and
+   * then render a confident `함께한 지 +N일째` for a couple that never entered a
+   * date (`sync.ts` maps a null column to `''`). `DDayWidget` already renders
+   * `기념일 미설정` in that case; this surface now agrees with it.
+   */
+  const anniversaryDate = state.profile.couple.anniversaryDate || undefined;
   const trips = state.trips || [];
   const events = state.events || [];
 
@@ -49,9 +55,9 @@ export function UsPage() {
   const calendarCells = useMemo(() => buildCalendarGrid(viewYear, viewMonth), [viewYear, viewMonth]);
   const todayStr = toLocalDateString(today);
 
-  const diffDays = Math.floor(
-    (new Date().getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
-  ) + 1;
+  const diffDays = anniversaryDate
+    ? daysBetweenLocal(anniversaryDate, todayStr) + 1
+    : null;
 
   const goToPrevMonth = () => {
     if (viewMonth === 0) {
@@ -119,7 +125,9 @@ export function UsPage() {
                 who is holding one. */}
             <p className="text-xs text-muted-foreground mt-1 font-medium">
               {connected
-                ? `함께한 지 +${diffDays}일째 💕`
+                ? diffDays !== null
+                  ? `함께한 지 +${diffDays}일째 💕`
+                  : '기념일 미설정 · 설정에서 사귄 날짜를 추가해 보세요'
                 : coupleLifecycle === 'pending'
                   ? '상대방이 초대 코드를 입력하면 연결돼요'
                   : coupleLifecycle === 'disconnected'

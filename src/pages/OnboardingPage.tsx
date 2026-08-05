@@ -107,8 +107,18 @@ export function OnboardingPage() {
   // Military Info State (Soldier only)
   const [branch, setBranch] = useState<Branch>('army');
   const [militaryStatus, setMilitaryStatus] = useState<MilitaryStatus>('serving');
-  const [enlistmentDate, setEnlistmentDate] = useState('2025-03-10');
-  const [expectedDischargeDate, setExpectedDischargeDate] = useState('2026-09-09');
+  /**
+   * M-1: no invented service period, on this path either.
+   *
+   * These two fields used to open on the same fabricated `2025-03-10` /
+   * `2026-09-09` pair that `sync.ts` and `DEFAULT_STATE` were cleaned of. This
+   * step tells the user it is optional ("나중에 입력 가능"), so touching nothing
+   * is a supported path -- and it silently wrote those literals to
+   * `profiles.military_info` with a `'calculated'` provenance, which is the very
+   * claim M-1 exists to prevent. Empty until the user states a real date.
+   */
+  const [enlistmentDate, setEnlistmentDate] = useState('');
+  const [expectedDischargeDate, setExpectedDischargeDate] = useState('');
   const [dischargeDateSource, setDischargeDateSource] = useState<DischargeDateSource>('calculated');
 
   // Contact Hours State (Soldier only)
@@ -514,14 +524,18 @@ export function OnboardingPage() {
     }
 
     const anniversaryDate = skipAnniversary ? undefined : anniversary || undefined;
+    const statesServicePeriod = role === 'soldier' && militaryStatus !== 'unknown';
+    const statedEnlistment = statesServicePeriod ? enlistmentDate || undefined : undefined;
+    const statedDischarge = statesServicePeriod ? expectedDischargeDate || undefined : undefined;
     const military = {
       branch,
       militaryStatus,
-      enlistmentDate:
-        role === 'soldier' && militaryStatus !== 'unknown' ? enlistmentDate : undefined,
-      expectedDischargeDate:
-        role === 'soldier' && militaryStatus !== 'unknown' ? expectedDischargeDate : undefined,
-      dischargeDateSource,
+      enlistmentDate: statedEnlistment,
+      expectedDischargeDate: statedDischarge,
+      // Provenance describes a derivation that actually happened. With no
+      // enlistment date there is nothing to derive from, so neither
+      // 'calculated' nor 'manual' is true of the absent value.
+      dischargeDateSource: statedEnlistment ? dischargeDateSource : 'unknown',
       memo: '',
     };
     const contact = { weekdayStart, weekdayEnd, weekendStart, weekendEnd, enabled: true };

@@ -328,7 +328,7 @@ test('an RLS denial is reported as a permission problem, not as being offline', 
   await context.close();
 });
 
-test('a genuinely offline device says so, and disables the save it cannot do', async ({ browser }) => {
+test('a genuinely offline device says so, and stores the record it cannot send', async ({ browser }) => {
   const { context, page } = await open(browser, CREATOR);
   await goto(page, '/');
 
@@ -342,13 +342,38 @@ test('a genuinely offline device says so, and disables the save it cannot do', a
   await context.setOffline(true);
   await page.evaluate(() => window.dispatchEvent(new Event('offline')));
 
-  // The app does not merely fail the write and explain afterwards -- it withdraws
-  // the affordance, which is the stronger behaviour. Asserted as such rather than
-  // asserting a toast that this path deliberately never reaches.
-  await expect(save).toBeDisabled();
-  // ...and the reason is stated somewhere the user can see, in Korean, and it is
-  // the one situation where blaming the connection is truthful.
-  await expect(page.getByText('오프라인', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+  /*
+   * CHANGED DELIBERATELY, and the reason is recorded here because the previous
+   * version of this test asserted the opposite.
+   *
+   * It asserted `await expect(save).toBeDisabled()` and called withdrawing the
+   * affordance "the stronger behaviour". It is not. The typed text, and any voice
+   * memo `stopRecording` synthesises into an in-memory File, exist NOWHERE on disk:
+   * disabling the save leaves the user holding a record they cannot store and
+   * cannot send, and closing the app loses it. There was no outbox in the codebase
+   * at the time, so disabling the button really was the best available answer --
+   * that is what changed, not the standard.
+   *
+   * The save now stays enabled and the record goes to the outbox. This is also the
+   * only place the IndexedDB adapter is executed at all: jsdom has no IndexedDB, so
+   * the unit suite exercises the queue's behaviour against an in-memory double and
+   * leaves the adapter to this test.
+   */
+  await expect(save).toBeEnabled();
+  await save.click();
+
+  // Told that it is waiting, not that it failed.
+  await expect(page.getByText('연결되면', { exact: false }).first())
+    .toBeVisible({ timeout: 15_000 });
+  // The composer is cleared, because the text is no longer unsent work.
+  await expect(page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?'))
+    .toBeHidden({ timeout: 15_000 });
+  // And the queue is visible rather than a promise nobody can check.
+  await expect(page.getByTestId('outbox-waiting')).toContainText('보낼 기록 1개');
+
+  // PRESERVATION: the connection is still named, and this is the one situation
+  // where blaming it is truthful.
+  await expect(page.getByTestId('offline-notice')).toBeVisible();
 
   await context.setOffline(false);
   await context.close();

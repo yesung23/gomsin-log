@@ -25,7 +25,7 @@ import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 
 export function TodayLogWidget() {
-  const { state, addRecordWithMedia } = useStore();
+  const { state, addRecordWithMedia, queueRecordForLater } = useStore();
   const partnerName = state.profile.couple.partnerName || '파트너';
   const todayStr = toLocalDateString(localToday());
 
@@ -349,12 +349,6 @@ export function TodayLogWidget() {
 
   const runPost = async () => {
     if (isSaving) return;
-    // Read-only while offline: firing this write would fail and then be explained
-    // with a message that could not name the real cause.
-    if (isOffline) {
-      toast.error(OFFLINE_READONLY_MESSAGE);
-      return;
-    }
     if (isRecording) {
       toast.info('녹음을 먼저 마쳐주세요.');
       return;
@@ -366,25 +360,79 @@ export function TodayLogWidget() {
 
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const draft = {
+      date: todayStr,
+      time: timeStr,
+      authorRole: state.profile.role,
+      log,
+      reaction,
+      isPrivate,
+      emotionFlow: userConfirmedFlow,
+      emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
+    };
+
+    /**
+     * Everything that has to happen once the record is no longer unsent work.
+     *
+     * Shared between a delivered write and a queued one, because from the
+     * composer's point of view they are the same event: the text has left the
+     * composer and must not be offered for editing as if it were still a draft.
+     */
+    const clearComposer = () => {
+      setLog('');
+      setReaction(undefined);
+      review.reset();
+      setIsPrivate(false);
+      clearComposerDraft(draftUserId);
+    };
+
+    /*
+      Offline is the one connectivity fact the OS is trusted about, so the write is
+      not attempted -- it is stored.
+      This REPLACES a pre-emptive refusal that returned `OFFLINE_READONLY_MESSAGE`.
+      That refusal was honest about the network and wrong about the record: the
+      typed text, and any voice memo synthesised into an in-memory File, existed
+      nowhere on disk, so closing the app lost them. Queueing keeps them and
+      delivers them when the connection returns.
+    */
+    if (isOffline) {
+      setIsSaving(true);
+      let queueResult: { queued: boolean; error?: string };
+      try {
+        queueResult = await queueRecordForLater(draft, pendingFiles);
+      } finally {
+        setIsSaving(false);
+      }
+      if (!queueResult.queued) {
+        // Could not even store it. Say so, and keep everything in the composer.
+        toast.error(queueResult.error || OFFLINE_READONLY_MESSAGE);
+        return;
+      }
+      clearComposer();
+      setPendingFiles([]);
+      setShowInputCard(false);
+      toast.success('오프라인이라 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
+      return;
+    }
 
     setIsSaving(true);
-    let result: { ok: boolean; failedFiles: string[]; error?: string };
+    let result: { ok: boolean; failedFiles: string[]; error?: string; queued?: boolean };
     try {
-      result = await addRecordWithMedia(
-        {
-          date: todayStr,
-          time: timeStr,
-          authorRole: state.profile.role,
-          log,
-          reaction,
-          isPrivate,
-          emotionFlow: userConfirmedFlow,
-          emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
-        },
-        pendingFiles,
-      );
+      result = await addRecordWithMedia(draft, pendingFiles);
     } finally {
       setIsSaving(false);
+    }
+
+    if (result.queued) {
+      // The attempt failed on a connection the OS called usable, and the store
+      // stored it rather than discarding it. This is the case the old code lost
+      // silently: `navigator.onLine === true` skipped the offline refusal, the
+      // write failed, and the text went with the toast.
+      clearComposer();
+      setPendingFiles([]);
+      setShowInputCard(false);
+      toast.success('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
+      return;
     }
 
     if (!result.ok) {
@@ -396,12 +444,7 @@ export function TodayLogWidget() {
       return;
     }
 
-    setLog('');
-    setReaction(undefined);
-    review.reset();
-    setIsPrivate(false);
-    // The write succeeded, so the draft is no longer unsent work.
-    clearComposerDraft(draftUserId);
+    clearComposer();
 
     if (result.failedFiles.length > 0) {
       // Be explicit: the text was saved, the files were not.
@@ -611,7 +654,12 @@ export function TodayLogWidget() {
               // promised a save that could not happen. Still enabled while
               // recording, so tapping it can say "finish the recording first"
               // instead of doing nothing at all.
-              disabled={isSaving || isOffline || (!isRecording && !hasContentToSave)}
+              //
+              // `isOffline` is NO LONGER a reason to disable it. It used to be,
+              // because a write offline could only fail; it now goes to the outbox
+              // and is delivered when the connection returns, so disabling the
+              // button here would put the app back to losing the text on app close.
+              disabled={isSaving || (!isRecording && !hasContentToSave)}
               // 44px minimum: measured at 32px in a real browser. This is the
               // primary save action of the whole app.
               className="min-h-[44px] px-4 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"

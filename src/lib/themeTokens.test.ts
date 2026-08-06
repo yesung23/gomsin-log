@@ -31,6 +31,9 @@ const GUARDED_FILES = [
   'src/components/EmotionFlowInsightCard.tsx',
   'src/pages/RecordPage.tsx',
   'src/pages/TripsPage.tsx',
+  // Emits Tailwind classes for the record timeline even though it is a lib file,
+  // so the same rule has to apply to it.
+  'src/lib/recordAuthor.ts',
 ];
 
 /**
@@ -236,6 +239,7 @@ const ALL_UI_SOURCES = [
   'src/components/EmotionChipEditor.tsx',
   'src/components/RecordEmotionCorrection.tsx',
   'src/components/PlanSectionNav.tsx',
+  'src/lib/recordAuthor.ts',
   'src/pages/MyPage.tsx',
   'src/pages/OnboardingPage.tsx',
   'src/pages/RecordPage.tsx',

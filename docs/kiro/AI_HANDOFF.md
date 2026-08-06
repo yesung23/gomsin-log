@@ -87,6 +87,23 @@ Storage 정책(`007_storage_policies.sql`)이 경로를
 - 요약문은 고정된 한국어 문장 표에서만 나오며 진단성 어휘를 쓰지 않습니다
   (`NON_DIAGNOSTIC_BANNED_TERMS` 로 테스트에서 강제).
 
+### 2-3-2. 본문에서 감정을 뽑는 모듈은 **하나**뿐입니다
+
+`src/lib/emotionCandidates.ts` 의 `extractEmotionCandidates` 가 유일한 추출기입니다.
+
+> ⚠️ **과거의 함정:** `src/lib/emotionRuleEngine.ts` 의 `recommendEmotionFlow` 가
+> 두 번째 감정 엔진이었습니다. 19개 어휘 · `rule_suggested` · 최대 3개 · 자체 분절기 ·
+> 자체 부정 규칙을 갖고 있었지만 **화면·훅·스토어 어디서도 호출되지 않았고**,
+> 자기 테스트 8개만 그것을 살아있는 것처럼 보이게 했습니다. 두 규칙집은 서로
+> 어긋난 채 각자 표류했습니다. 지금은 **삭제**했고, 텍스트 정규화기만
+> `src/lib/emotionText.ts` 로 옮겼습니다. 다시 만들지 마세요.
+
+`src/lib/emotionPipelineSingleSource.test.ts` 가 이것을 강제합니다: 두 번째
+`export function (recommend|analyze|extract|detect|infer)*Emotion*` 가 생기면 실패하고,
+`source: 'rule_suggested'` 를 만드는 코드가 생기면 실패합니다. 타입과 필터에는
+`rule_suggested` 가 남아 있는데, 이는 옛 엔진이 이미 써 놓은 행을 계속 걸러내기
+위한 것입니다. 생산자는 없습니다.
+
 ### 2-4. 계정 삭제는 상대방을 건드리면 안 됩니다
 
 `supabase/functions/delete-account/index.ts` 상단 주석에 이유가 적혀 있습니다. 요약:

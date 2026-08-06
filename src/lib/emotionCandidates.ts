@@ -5,7 +5,7 @@ import {
   basicEmotionOf,
   type BasicEmotion,
 } from '@/lib/basicEmotions';
-import { normalizeText } from '@/lib/emotionRuleEngine';
+import { normalizeText } from '@/lib/emotionText';
 
 /**
  * Pull the feelings out of a diary entry as REMOVABLE candidates.

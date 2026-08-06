@@ -15,6 +15,7 @@ import {
   PartnerEmotionFlowWidget,
   PartnerEmotionSummaryWidget,
 } from '@/components/widgets/PartnerEmotionWidgets';
+import { PartnerDayTimelineWidget } from '@/components/widgets/PartnerDayTimelineWidget';
 import { CareHintWidget } from '@/components/widgets/CareHintWidget';
 import type { Role } from '@/types';
 
@@ -41,7 +42,18 @@ export type WidgetDef = {
  * leads with the briefing and the composer, because she is the one writing.
  */
 export const DEFAULT_LAYOUT_BY_ROLE: Record<Role, string[]> = {
-  soldier: ['partner_emotion_flow', 'partner_emotion_summary', 'care_hint', 'today_word', 'dday'],
+  soldier: [
+    // The day itself comes first. The three widgets under it describe that day --
+    // its shape, its headline, what to say about it -- and a description is only
+    // useful once the thing it describes is on the screen. README section 1.4 puts
+    // the chronological moments at the centre of this home, so that is what leads.
+    'partner_day',
+    'partner_emotion_flow',
+    'partner_emotion_summary',
+    'care_hint',
+    'today_word',
+    'dday',
+  ],
   gomsin: ['today_briefing', 'today_word', 'dday'],
 };
 
@@ -59,6 +71,13 @@ export function isWidgetAllowedForRole(id: string, role: Role): boolean {
 }
 
 export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
+  partner_day: {
+    id: 'partner_day',
+    label: '상대방의 오늘',
+    description: '오늘 공유된 순간을 시간순으로, 사진·영상·음성까지 그대로',
+    component: PartnerDayTimelineWidget,
+    roles: ['soldier'],
+  },
   partner_emotion_flow: {
     id: 'partner_emotion_flow',
     label: '상대방의 마음 흐름',

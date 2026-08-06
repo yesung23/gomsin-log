@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { toast } from 'sonner';
-import { AUTH_CALLBACK_TIMEOUT_MS } from '@/lib/async';
+import { AUTH_CALLBACK_DETECT_GRACE_MS, AUTH_CALLBACK_TIMEOUT_MS } from '@/lib/async';
 
 /**
  * Reads a parameter from either the query string or the URL fragment.
@@ -29,15 +29,22 @@ export function AuthCallbackPage() {
     hasHandledCallback.current = true;
 
     let cancelled = false;
+    let signedIn = false;
     let unsubscribe: (() => void) | undefined;
-    let timeoutId: number | undefined;
+    const timers: number[] = [];
+
+    /** Resolved by the auth listener the instant a session exists. */
+    let announceSession: (() => void) | undefined;
+    const sessionAnnounced = new Promise<void>((resolve) => {
+      announceSession = resolve;
+    });
 
     const fail = (message: string) => {
       if (cancelled) return;
       cancelled = true;
       setErrorMsg(message);
       toast.error(message);
-      window.setTimeout(() => navigate('/', { replace: true }), 2500);
+      timers.push(window.setTimeout(() => navigate('/', { replace: true }), 2500));
     };
 
     /**
@@ -50,6 +57,25 @@ export function AuthCallbackPage() {
       if (cancelled) return;
       cancelled = true;
       navigate('/', { replace: true });
+    };
+
+    /**
+     * Resolve `true` as soon as a session exists, or after `ms` if none arrives.
+     *
+     * The wait ends early on the listener's announcement rather than by polling,
+     * so a session that is already in flight costs no extra latency.
+     */
+    const sessionArrivesWithin = async (ms: number): Promise<boolean> => {
+      await Promise.race([
+        sessionAnnounced,
+        new Promise<void>((resolve) => {
+          timers.push(window.setTimeout(resolve, ms));
+        }),
+      ]);
+      if (signedIn) return true;
+      if (cancelled) return false;
+      const { data } = await supabase!.auth.getSession();
+      return !!data.session;
     };
 
     async function handleAuthCallback() {
@@ -71,53 +97,76 @@ export function AuthCallbackPage() {
         return;
       }
 
-      // 2. A session may already exist (e.g. the user re-opened the callback URL).
+      // 2. Read the code BEFORE anything can strip it: a successful
+      //    `detectSessionInUrl` exchange rewrites the URL to remove it.
+      const code = readAuthParam('code');
+
+      // 3. A session may already exist (e.g. the user re-opened the callback URL).
       const { data: existing } = await supabase.auth.getSession();
       if (existing.session) {
         succeed();
         return;
       }
 
-      // 3. Watch for the session arriving. `detectSessionInUrl` performs the code
+      // 4. Watch for the session arriving. `detectSessionInUrl` performs the code
       //    exchange asynchronously, so polling getSession() once (the previous
       //    behaviour) frequently observed `null` and reported a false failure.
       const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session) succeed();
+        if (!session) return;
+        signedIn = true;
+        announceSession?.();
+        succeed();
       });
       unsubscribe = () => sub.subscription.unsubscribe();
 
-      // 4. Explicitly exchange the PKCE code. This is idempotent with
-      //    detectSessionInUrl: whichever completes first wins, and the
-      //    "already used" error is expected when detectSessionInUrl won.
-      const code = readAuthParam('code');
+      // 5. A PKCE authorization code may be redeemed exactly ONCE, and
+      //    `detectSessionInUrl: true` means this client is already redeeming the
+      //    one in the URL. So wait for that to land first and only redeem it here
+      //    if it produced nothing -- this call is a sequential fallback (the
+      //    deep-link shape, or a client that never ran the detection), never a
+      //    competitor. Racing it guaranteed that one of the two exchanges lost
+      //    with an `invalid_grant`-class error.
       if (code) {
+        if (await sessionArrivesWithin(AUTH_CALLBACK_DETECT_GRACE_MS)) {
+          succeed();
+          return;
+        }
+        if (cancelled) return;
+
         const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error && !cancelled) {
-          const { data: after } = await supabase.auth.getSession();
-          if (after.session) {
+        if (cancelled) return;
+
+        if (error) {
+          // NOT terminal, and this is the bug that told successfully signed-in
+          // users their login had failed: a losing exchange still leaves the
+          // winner's session about to land. Only the absence of a session at the
+          // deadline is a real failure, so keep waiting instead of giving up on
+          // the first error.
+          console.error('[AuthCallback] Code exchange failed:', error);
+          if (await sessionArrivesWithin(AUTH_CALLBACK_TIMEOUT_MS)) {
             succeed();
             return;
           }
-          console.error('[AuthCallback] Code exchange failed:', error);
+          if (cancelled) return;
           fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
           return;
         }
       }
 
-      // 5. Give the implicit flow / in-flight exchange a bounded amount of time.
-      timeoutId = window.setTimeout(async () => {
-        if (cancelled) return;
-        const { data: late } = await supabase!.auth.getSession();
-        if (late.session) succeed();
-        else fail('로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
-      }, AUTH_CALLBACK_TIMEOUT_MS);
+      // 6. Give the implicit flow / in-flight exchange a bounded amount of time.
+      if (await sessionArrivesWithin(AUTH_CALLBACK_TIMEOUT_MS)) {
+        succeed();
+        return;
+      }
+      if (cancelled) return;
+      fail('로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
     }
 
     void handleAuthCallback();
 
     return () => {
       cancelled = true;
-      if (timeoutId) window.clearTimeout(timeoutId);
+      for (const timer of timers) window.clearTimeout(timer);
       unsubscribe?.();
     };
   }, [navigate]);

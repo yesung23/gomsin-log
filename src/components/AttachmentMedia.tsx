@@ -11,8 +11,14 @@ import type { Attachment, ServerErrorKind } from '@/types';
  * than presented as a failure of the entry. The cause comes from the classifier,
  * so an RLS refusal, an expired session and a dead network read differently
  * instead of all showing an unexplained filename.
+ *
+ * Not exported: nothing outside this file ever used it, and exporting a
+ * non-component from a component module breaks Fast Refresh for the whole module
+ * (react-refresh/only-export-components). If another screen needs this copy, it
+ * belongs in `lib/serverErrors.ts` with the rest of the failure vocabulary, not
+ * re-exported from here.
  */
-export function attachmentUnavailableCopy(reason: ServerErrorKind): string {
+function attachmentUnavailableCopy(reason: ServerErrorKind): string {
   return `이 파일을 열 수 없어요. ${serverErrorMessage(reason)}`;
 }
 

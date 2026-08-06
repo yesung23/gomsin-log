@@ -73,7 +73,6 @@ export function PartnerDayTimelineWidget() {
         && !isOwnRecord(record, viewer)
         && !record.isPrivate)
       .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.records, profile.id, profile.role, todayStr]);
 
   const visible = todays.slice(0, PARTNER_DAY_VISIBLE_LIMIT);

@@ -717,13 +717,12 @@ export function RecordPage() {
                 <div
                   id={`record-${r.id}`}
                   key={r.id}
-                  onClick={() => setSelectedRecordId(r.id)}
                   data-author-role={author.role ?? 'unknown'}
                   data-author-own={author.isOwn ? 'true' : 'false'}
                   className={cn(
                     // `relative` and `overflow-hidden` carry the author stripe below.
                     // `max-w-[94%]` plus ml-auto/mr-auto is the ownership channel.
-                    'relative overflow-hidden rounded-2xl bg-card border p-4 pl-5 shadow-sm space-y-2 cursor-pointer active:scale-[0.98] transition-all duration-500 max-w-[94%]',
+                    'relative overflow-hidden rounded-2xl bg-card border p-4 pl-5 shadow-sm space-y-2 transition-all duration-500 max-w-[94%]',
                     author.alignClass,
                     isHighlighted
                       ? 'border-coral ring-4 ring-coral/30 scale-[1.01]'
@@ -740,48 +739,70 @@ export function RecordPage() {
                     aria-hidden="true"
                     className={cn('absolute left-0 top-0 bottom-0 w-1.5', author.stripeClass)}
                   />
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-foreground">{r.time}</span>
-                      {/*
-                        The chip is hidden from assistive tech and replaced by a
-                        sentence, not duplicated: read aloud, `🌸 곰신 · 춘향`
-                        becomes "cherry blossom 곰신 middle dot 춘향". The emoji and
-                        the separator are sighted-reader shorthand, so the screen
-                        reader gets the same fact as prose instead.
-                      */}
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          'px-2 py-0.5 rounded-full font-semibold text-[11px] whitespace-nowrap',
-                          author.chipClass,
-                        )}
-                      >
-                        {author.attribution}
-                      </span>
-                      <span className="sr-only">{author.srAttribution}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {r.reaction && (
-                        <span className="px-2 py-0.5 rounded-full bg-coral/10 text-coral font-medium text-[11px]">
-                          {REACTION_LABELS[r.reaction] || r.reaction}
-                        </span>
-                      )}
-                      {r.isPrivate ? (
-                        <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-[11px]">
-                          <Lock size={10} /> 나에게만
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground/50 text-[11px]">
-                          <Unlock size={10} className="inline" />
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  {/*
+                    The opener is a real <button>, and it covers the text of the
+                    card rather than the whole card, for two reasons that point the
+                    same way.
 
-                  {r.log && (
-                    <p className="text-sm text-foreground leading-relaxed">{r.log}</p>
-                  )}
+                    Keyboard: as a `<div onClick>` the card was in no tab order and
+                    answered no key, so the 기록 screen could not be read without a
+                    pointer at all.
+
+                    Nesting: an attachment renders `<video controls>` /
+                    `<audio controls>`. A button may not contain a control, and a
+                    card-level handler also caught every tap aimed at a play button
+                    and opened the modal over the clip the user had just started.
+                    So the words open the record and the media plays in place.
+                  */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRecordId(r.id)}
+                    aria-label={`${author.srAttribution} 자세히 보기`}
+                    className="w-full text-left space-y-2 rounded-xl active:scale-[0.98] transition-transform cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-foreground">{r.time}</span>
+                        {/*
+                          The chip is hidden from assistive tech and replaced by a
+                          sentence, not duplicated: read aloud, `🌸 곰신 · 춘향`
+                          becomes "cherry blossom 곰신 middle dot 춘향". The emoji and
+                          the separator are sighted-reader shorthand, so the screen
+                          reader gets the same fact as prose instead.
+                        */}
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            'px-2 py-0.5 rounded-full font-semibold text-[11px] whitespace-nowrap',
+                            author.chipClass,
+                          )}
+                        >
+                          {author.attribution}
+                        </span>
+                        <span className="sr-only">{author.srAttribution}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {r.reaction && (
+                          <span className="px-2 py-0.5 rounded-full bg-coral/10 text-coral font-medium text-[11px]">
+                            {REACTION_LABELS[r.reaction] || r.reaction}
+                          </span>
+                        )}
+                        {r.isPrivate ? (
+                          <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-[11px]">
+                            <Lock size={10} /> 나에게만
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/50 text-[11px]">
+                            <Unlock size={10} className="inline" />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {r.log && (
+                      <p className="text-sm text-foreground leading-relaxed">{r.log}</p>
+                    )}
+                  </button>
 
                   {r.attachments && r.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-2 pt-1">

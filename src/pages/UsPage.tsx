@@ -211,21 +211,36 @@ export function UsPage() {
           {trips.length > 0 ? (
             <div className="space-y-2">
               {trips.map((trip) => (
-                <div key={trip.id} onClick={() => navigate(`/trips/${trip.id}`)} className="p-4 rounded-2xl bg-card border border-border shadow-sm active:scale-[0.98] transition cursor-pointer flex items-center justify-between">
+                /*
+                  A real <button>, not a clickable <div>: the trip list is the only
+                  way into a trip from 우리, and as a div it was in no tab order and
+                  answered no key, so the whole 여행 section was pointer-only.
+                */
+                <button
+                  key={trip.id}
+                  type="button"
+                  onClick={() => navigate(`/trips/${trip.id}`)}
+                  aria-label={`${trip.title} 여행 상세 보기`}
+                  className="w-full text-left p-4 min-h-[44px] rounded-2xl bg-card border border-border shadow-sm active:scale-[0.98] transition cursor-pointer flex items-center justify-between"
+                >
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-sm font-bold text-foreground">
-                      <MapPin size={14} className="text-blue-500" /> {trip.title}
+                      <MapPin size={14} className="text-blue-500" aria-hidden="true" /> {trip.title}
                     </div>
                     <p className="text-[11px] text-muted-foreground font-medium">{trip.startDate} ~ {trip.endDate}</p>
                   </div>
-                  <ChevronRight size={16} className="text-muted-foreground/50" />
-                </div>
+                  <ChevronRight size={16} className="text-muted-foreground/50" aria-hidden="true" />
+                </button>
               ))}
             </div>
           ) : (
-            <div onClick={() => navigate('/trips')} className="p-4 rounded-2xl bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition">
+            <button
+              type="button"
+              onClick={() => navigate('/trips')}
+              className="w-full p-4 min-h-[44px] rounded-2xl bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition"
+            >
               <p className="text-xs font-bold text-muted-foreground mb-1">+ 새로운 여행 계획하기</p>
-            </div>
+            </button>
           )}
         </section>
 

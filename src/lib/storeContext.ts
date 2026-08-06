@@ -121,7 +121,29 @@ export interface StoreContextType {
   addRecordWithMedia: (
     record: Omit<DailyRecord, 'id' | 'createdAt'>,
     files: File[],
-  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string }>;
+  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string; queued?: boolean }>;
+  /**
+   * Store a record for later without attempting the write.
+   *
+   * Called when the device reports itself offline, which is the one connectivity
+   * fact the OS is trusted about. Resolves `{ queued: false }` with a reason when it
+   * genuinely cannot be stored -- no IndexedDB, or no local couple space to attach
+   * it to -- so a surface never tells the user their record is safe when it is not.
+   */
+  queueRecordForLater: (
+    record: Omit<DailyRecord, 'id' | 'createdAt'>,
+    files: File[],
+  ) => Promise<{ queued: boolean; error?: string }>;
+  /** Deliver everything queued for this account, oldest first. */
+  flushOutbox: () => Promise<{ delivered: number; requeued: number; blocked: number }>;
+  /** Un-block every stopped entry and flush again. Returns how many were unblocked. */
+  retryBlockedRecords: () => Promise<number>;
+  /** Discard the whole queue for this account. The only path to undelivered loss. */
+  discardQueuedRecords: () => Promise<number>;
+  /** Queued and still going to be retried automatically. */
+  outboxWaiting: number;
+  /** Queued but no longer retried automatically, so it needs the user. */
+  outboxBlocked: number;
   updateRecord: (id: string, updates: Partial<DailyRecord>) => Promise<RecordMutationResult>;
   deleteRecord: (id: string) => Promise<RecordMutationResult>;
   /**

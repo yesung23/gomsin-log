@@ -221,10 +221,26 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
+npm run test:e2e   # Playwright, 실제 프로덕션 번들 + 목 백엔드
 ```
 
-현재 상태: 테스트 **625개 / 47개 파일 통과**, TypeScript 오류 0, ESLint 오류·경고 0,
-프로덕션 빌드 성공, Deno 체크·테스트 통과(3/3).
+`npm run verify` 에는 `test:e2e` 가 들어 있지 않습니다. CI는 별도 job으로 돌리므로,
+화면 구조(DOM·레이아웃·히트 테스트)를 건드렸다면 로컬에서도 따로 실행하세요.
+브라우저가 없으면 `npx playwright install chromium` 이 먼저 필요합니다.
+
+현재 상태: TypeScript 오류 0, ESLint 오류·경고 0, 프로덕션 빌드 성공,
+Playwright 실브라우저 매트릭스 통과.
+
+**테스트 총개수는 여기에 적지 않습니다.** 이 자리에 있던 "625개 / 47개 파일" 은
+그 뒤로 병합된 작업들 때문에 오래전에 틀린 값이 되었고, 문서의 숫자는 스스로
+갱신되지 않습니다. 실제 수는 `npm test` 마지막 줄에서 읽으세요. 그리고 그 값은
+반드시 **지금 바꾸고 있는 브랜치에서** 측정하세요 — `master` 의 숫자는 이 계열의
+숫자가 아닙니다.
+
+`lint` 은 `eslint . --max-warnings 0` 입니다. 경고 1개에도 게이트가 실패합니다.
+예전에는 `eslint .` 여서 경고가 있어도 종료 코드가 0이었고, 위의 "경고 0" 이라는
+문장만이 유일한 강제 수단이었으며 실제로 2개까지 새어 들어와 있었습니다
+(`src/lib/lintGateStrictness.test.ts` 참고).
 
 Edge Function 게이트는 별도입니다:
 ```bash

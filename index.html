@@ -21,7 +21,15 @@
     <meta property="og:type" content="website" />
     
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+    <!-- Referrer policy: never leak the full URL to third parties. -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <!--
+      Pretendard is imported by src/styles/index.css from the pinned `pretendard`
+      package and served from this origin. It must NOT come back as a CDN
+      <link>: the CSP in public/_headers names no third-party style-src or
+      font-src, so such a link is blocked in production and the app silently
+      falls back to a system font.
+    -->
     <title>곰신로그 · 답장이 늦어도, 오늘의 순간은 놓치지 않도록</title>
   </head>
   <body>

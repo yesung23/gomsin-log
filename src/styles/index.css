@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+/**
+ * Pretendard is self-hosted from the pinned `pretendard` package, NOT from a CDN.
+ *
+ * `index.html` used to load this stylesheet from cdn.jsdelivr.net, which the CSP
+ * in `public/_headers` never allowed: `style-src 'self' 'unsafe-inline'` and
+ * `font-src 'self' data:` name no third-party origin, so on any platform that
+ * honours `_headers` the stylesheet AND every font file it references were
+ * blocked and the whole app fell back to a system font. Typecheck, lint, tests
+ * and the build all passed while that was true.
+ *
+ * The dynamic-subset build is deliberate: it carries `unicode-range` per face, so
+ * a browser downloads only the subsets whose glyphs are actually rendered
+ * (a few tens of kB) instead of the 2.9 MB whole family. Vite emits the referenced
+ * `.woff2` files into `dist/assets`; `vite.config.ts` keeps them OUT of the
+ * service-worker precache list and lets the existing runtime `font` cache pick up
+ * the ones a session really used.
+ *
+ * `src/lib/cspExternalResources.test.ts` fails if a third-party origin comes back.
+ */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+
 @theme inline {
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --color-background: var(--background);
@@ -21,6 +42,16 @@
   --color-mint-foreground: var(--mint-foreground);
   --color-cream: var(--cream);
   --color-navy: var(--navy);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-surface: var(--warning-surface);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-surface: var(--info-surface);
+  --color-success: var(--success);
+  --color-success-surface: var(--success-surface);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -49,6 +80,16 @@
   --lilac-foreground: var(--navy);
   --mint: oklch(0.93 0.045 155);
   --mint-foreground: var(--navy);
+  --destructive: oklch(0.58 0.19 25);
+  --destructive-foreground: oklch(0.99 0.005 85);
+  --warning: oklch(0.52 0.11 75);
+  --warning-foreground: oklch(0.35 0.09 75);
+  --warning-surface: oklch(0.96 0.035 85);
+  --info: oklch(0.55 0.14 265);
+  --info-foreground: oklch(0.42 0.14 265);
+  --info-surface: oklch(0.96 0.02 265);
+  --success: oklch(0.58 0.13 155);
+  --success-surface: oklch(0.95 0.04 155);
 }
 
 [data-theme='dark'] {
@@ -71,6 +112,16 @@
   --lilac-foreground: var(--foreground);
   --mint: oklch(0.28 0.045 155);
   --mint-foreground: var(--foreground);
+  --destructive: oklch(0.68 0.17 25);
+  --destructive-foreground: oklch(0.16 0.016 265);
+  --warning: oklch(0.82 0.11 80);
+  --warning-foreground: oklch(0.88 0.09 85);
+  --warning-surface: oklch(0.27 0.04 80);
+  --info: oklch(0.76 0.11 265);
+  --info-foreground: oklch(0.84 0.09 265);
+  --info-surface: oklch(0.26 0.04 265);
+  --success: oklch(0.75 0.12 155);
+  --success-surface: oklch(0.25 0.04 155);
 }
 
 @layer base {
@@ -86,33 +137,94 @@
   }
   button { font-family: inherit; cursor: pointer; }
   input, textarea, select { font-family: inherit; }
+
+  /* Visible focus ring for keyboard navigation on all interactive elements. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
-/* Dark-mode compatibility for older components that still use fixed utility colors. */
-[data-theme='dark'] .bg-white,
-[data-theme='dark'] .bg-gray-50 {
-  background-color: var(--card) !important;
-}
-[data-theme='dark'] .bg-gray-100 {
-  background-color: var(--muted) !important;
-}
-[data-theme='dark'] .text-navy,
-[data-theme='dark'] .text-gray-900,
-[data-theme='dark'] .text-gray-800,
-[data-theme='dark'] .text-gray-700 {
-  color: var(--foreground) !important;
-}
-[data-theme='dark'] .text-gray-400,
-[data-theme='dark'] .text-gray-500,
-[data-theme='dark'] .text-gray-600 {
-  color: var(--muted-foreground) !important;
-}
-[data-theme='dark'] .border-white,
-[data-theme='dark'] .border-gray-50,
-[data-theme='dark'] .border-gray-100,
-[data-theme='dark'] .border-gray-200,
-[data-theme='dark'] .border-gray-300 {
-  border-color: var(--border) !important;
+/*
+ * Dark mode for components that still use fixed Tailwind palette utilities.
+ *
+ * Tailwind v4 compiles `bg-white` to `background-color: var(--color-white)` and
+ * `bg-white/60` to `color-mix(in oklab, var(--color-white) 60%, transparent)`.
+ * Remapping the palette variables therefore fixes every utility -- including
+ * every opacity variant -- in one place.
+ *
+ * This replaced a list of `!important` overrides on specific class names, which
+ * could not match opacity variants such as `bg-white/60` (used by the record
+ * timeline) and so left unreadable light-on-light surfaces in dark mode.
+ */
+[data-theme='dark'] {
+  /*
+   * `--color-white` is deliberately NOT remapped: it also drives `text-white`
+   * on coral/navy buttons and the dots on a selected calendar cell, which must
+   * stay white in both themes. The handful of components that used `bg-white`
+   * as a page surface were changed to `bg-card` instead.
+   */
+  /* Neutral surfaces map onto the semantic card/muted/border tokens. */
+  --color-gray-50: var(--muted);
+  --color-gray-100: var(--muted);
+  --color-gray-200: var(--border);
+  --color-gray-300: var(--border);
+  --color-gray-400: var(--muted-foreground);
+  --color-gray-500: var(--muted-foreground);
+  --color-gray-600: var(--muted-foreground);
+  --color-gray-700: var(--foreground);
+  --color-gray-800: var(--foreground);
+  --color-gray-900: var(--foreground);
+  --color-gray-950: var(--foreground);
+
+  /* Accent tints: dark surfaces with light text of the same hue. */
+  --color-amber-50: oklch(0.27 0.04 80);
+  --color-amber-100: oklch(0.31 0.05 80);
+  --color-amber-200: oklch(0.36 0.06 80);
+  --color-amber-600: oklch(0.84 0.1 85);
+  --color-amber-700: oklch(0.86 0.09 85);
+  --color-amber-800: oklch(0.89 0.08 85);
+  --color-amber-900: oklch(0.92 0.06 85);
+  --color-amber-950: oklch(0.95 0.04 85);
+
+  --color-indigo-50: oklch(0.26 0.04 275);
+  --color-indigo-100: oklch(0.3 0.05 275);
+  --color-indigo-400: oklch(0.74 0.11 275);
+  --color-indigo-500: oklch(0.76 0.11 275);
+  --color-indigo-600: oklch(0.8 0.1 275);
+
+  --color-blue-50: oklch(0.26 0.04 255);
+  --color-blue-100: oklch(0.3 0.05 255);
+  --color-blue-400: oklch(0.75 0.11 255);
+  --color-blue-500: oklch(0.78 0.11 255);
+  --color-blue-600: oklch(0.81 0.1 255);
+
+  --color-emerald-50: oklch(0.25 0.04 160);
+  --color-emerald-100: oklch(0.29 0.05 160);
+  --color-emerald-500: oklch(0.75 0.12 160);
+  --color-emerald-600: oklch(0.79 0.11 160);
+
+  --color-teal-50: oklch(0.25 0.04 185);
+  --color-teal-100: oklch(0.29 0.05 185);
+  --color-teal-500: oklch(0.75 0.11 185);
+  --color-teal-600: oklch(0.79 0.1 185);
+
+  --color-pink-50: oklch(0.27 0.04 350);
+  --color-pink-100: oklch(0.31 0.05 350);
+  --color-pink-500: oklch(0.78 0.12 350);
+
+  --color-purple-100: oklch(0.3 0.05 305);
+
+  --color-yellow-50: oklch(0.27 0.04 95);
+  --color-yellow-100: oklch(0.31 0.05 95);
+  --color-yellow-600: oklch(0.85 0.1 95);
+  --color-yellow-800: oklch(0.9 0.07 95);
+
+  --color-red-50: oklch(0.27 0.05 25);
+  --color-red-400: oklch(0.72 0.16 25);
+  --color-red-500: oklch(0.7 0.18 25);
+  --color-red-600: oklch(0.74 0.17 25);
 }
 
 /* Custom range slider */
@@ -132,7 +244,8 @@ input[type='range']::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--coral);
   cursor: pointer;
-  border: 2px solid white;
+  /* Token, not a literal white, so the thumb stays visible in dark mode. */
+  border: 2px solid var(--card);
   box-shadow: 0 1px 4px rgba(0,0,0,0.15);
 }
 
@@ -191,4 +304,57 @@ input[type='range']::-webkit-slider-thumb {
 }
 .animate-wiggle {
   animation: wiggle 0.3s ease-in-out infinite;
+}
+
+/*
+ * Respect the OS-level request for less motion.
+ *
+ * WCAG 2.1 SC 2.3.3. Nothing in this app honoured `prefers-reduced-motion`, and
+ * `.animate-wiggle` is the reason this is not cosmetic: widget edit mode rotates
+ * every card back and forth INFINITELY, which is exactly the pattern that
+ * triggers nausea and dizziness for someone with a vestibular disorder.
+ *
+ * The distinction below is deliberate. Continuous, decorative motion is stopped
+ * outright. Entrances are collapsed to a near-zero duration instead of removed,
+ * because `animation: none` on a keyframe that ends at `opacity: 1` can leave an
+ * element stuck at its `from` state; a 1ms run lands on the final frame.
+ * `animate-spin` is kept, at a slower rate: it is the only signal that a load is
+ * still in progress, and removing it would leave a frozen icon that reads as a
+ * hang.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-wiggle,
+  .animate-pulse {
+    animation: none !important;
+  }
+
+  /*
+   * `record-highlighted` is the 1~2 second emphasis README section 1 promises when
+   * a summary item is tapped. It is a box-shadow pulse, not movement, and it is
+   * the only thing that says "this is the record you asked for" -- so it is kept,
+   * shortened to a single pass rather than removed.
+   */
+  .record-highlighted {
+    animation: highlight-pulse 0.8s ease-out 1 !important;
+  }
+
+  .animate-slide-up,
+  .animate-fade-in,
+  .animate-in {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+  }
+
+  .animate-spin {
+    animation-duration: 2s !important;
+  }
+
+  /*
+   * Covers scrolling this app did not ask a behaviour for. An explicit
+   * `scrollIntoView({ behavior: 'smooth' })` is a JavaScript argument and is NOT
+   * affected by this rule, which is why `src/lib/motion.ts` exists.
+   */
+  html {
+    scroll-behavior: auto !important;
+  }
 }

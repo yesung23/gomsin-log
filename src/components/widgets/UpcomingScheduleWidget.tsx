@@ -1,5 +1,5 @@
 import React from 'react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { MapPin, Briefcase, Gift, CalendarIcon, Info, Plane, Plus } from 'lucide-react';
 import { daysBetweenLocal, localToday, formatLocalDate, toLocalDateString } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -28,9 +28,10 @@ export function UpcomingScheduleWidget() {
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-foreground">다가오는 일정</h2>
-        <button 
-          onClick={() => navigate('/record')}
-          className="text-xs text-coral font-bold flex items-center"
+        {/* min-h/-w: without them this rendered a 58x16 tap target. */}
+        <button
+          onClick={() => navigate('/schedule')}
+          className="text-xs text-coral font-bold flex items-center justify-end min-h-[44px] min-w-[44px] -mr-2 px-2"
         >
           <Plus className="w-3 h-3 mr-0.5" />
           일정 추가

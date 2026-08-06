@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cleartext traffic is disabled for every domain, in every build type.
+
+    Everything this app talks to is https (Supabase REST, Realtime over wss,
+    Storage) and the WebView itself is served from the https `androidScheme`, so
+    there is no host that needs an exception. Leaving cleartext enabled would let
+    a downgrade or a stray http asset URL carry diary content in the clear.
+
+    trust-anchors deliberately lists ONLY the system store. Omitting
+    <certificates src="user" /> means a user- or MDM-installed root cannot be
+    used to terminate TLS for this app, so a local intercepting proxy cannot read
+    private records. The cost is that debugging network traffic with Charles or
+    mitmproxy requires temporarily adding a debug-only override here; that is
+    the intended tradeoff and is recorded in
+    docs/kiro/NATIVE_RELEASE_GUIDE.md.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

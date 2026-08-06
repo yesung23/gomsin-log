@@ -8,17 +8,33 @@
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",
     "preview": "vite preview",
-    "lint": "eslint .",
-    "test": "vitest run --config vitest.config.ts --configLoader runner"
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc -b --force",
+    "test": "vitest run --config vitest.config.ts --configLoader runner",
+    "test:e2e": "playwright test --config playwright.config.ts",
+    "check:edge": "deno check supabase/functions/delete-account/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts",
+    "test:edge": "deno test --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "verify:native": "vitest run --config vitest.config.ts --configLoader runner src/lib/nativeConfig.test.ts src/lib/iosPrivacyManifest.test.ts src/lib/appAssets.test.ts src/lib/nativePermissions.test.ts",
+    "assets:generate": "node scripts/assets/generate-app-assets.mjs",
+    "verify:assets": "node scripts/assets/generate-app-assets.mjs --check",
+    "cap:sync": "npm run build && cap sync android",
+    "cap:sync:ios": "npm run build && cap sync ios",
+    "cap:open": "cap open android",
+    "cap:open:ios": "cap open ios",
+    "cap:assemble": "npm run cap:sync && cd android && ./gradlew bundleRelease"
   },
   "dependencies": {
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/browser": "^7.0.5",
+    "@capacitor/core": "^7.6.8",
     "@dnd-kit/core": "^6.1.0",
     "@dnd-kit/sortable": "^8.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/supabase-js": "^2.111.0",
     "@tailwindcss/vite": "^4.2.1",
-    "date-fns": "^4.1.0",
     "lucide-react": "^0.575.0",
+    "pretendard": "1.3.9",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "7.18.2",
@@ -27,7 +43,15 @@
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/cli": "^7.6.8",
+    "@capacitor/ios": "^7.6.8",
     "@eslint/js": "^9.32.0",
+    "@playwright/test": "1.56.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -37,9 +61,15 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "jsdom": "^26.1.0",
+    "sharp": "^0.35.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^6.3.5",
     "vitest": "3.2.6"
+  },
+  "overrides": {
+    "minimatch@3": {
+      "brace-expansion": "1.1.18"
+    }
   }
 }

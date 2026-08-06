@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+                OAuth return path. Supabase redirects the system browser to
+                exactly `gomsinlog://auth/callback` (see authRedirectUrl() in
+                src/lib/platform.ts), and @capacitor/app hands that URL to
+                src/lib/deepLinks.ts.
+
+                scheme + host + path are all pinned. A filter with only
+                android:scheme would claim EVERY `gomsinlog://...` URL, so any
+                other app (or a web page) could hand this activity an
+                arbitrary path; narrowing it to the single route we actually
+                serve removes that surface. `android:path` is an exact match,
+                not a prefix.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="gomsinlog"
+                    android:host="auth"
+                    android:path="/callback" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+    </application>
+
+    <!--
+        Permissions.
+
+        Every entry below is justified by code in this repository. Nothing is
+        declared "just in case": an unused permission is both a Play review
+        finding and a real widening of what a compromised WebView could reach.
+
+        INTERNET
+            Supabase REST/Realtime/Storage. Required by the bridge itself.
+
+        ACCESS_NETWORK_STATE
+            Required for `navigator.onLine` to mean anything in the WebView.
+            Chromium's network-change notifier can only read connectivity through
+            ConnectivityManager, which is guarded by this permission; undeclared,
+            the query is refused and Chromium reports CONNECTION_NONE, so
+            `navigator.onLine` is permanently FALSE on a perfectly connected
+            device.
+
+            That is not cosmetic in this app. src/lib/useOnlineStatus.ts TRUSTS a
+            `false` and offline is a PRE-EMPTIVE read-only mode, so every write
+            control disables itself and TodayLogWidget.handlePost refuses to save
+            with OFFLINE_READONLY_MESSAGE while OfflineBanner says the connection
+            is gone. Writing a diary entry therefore reported "no internet" on a
+            device that was online, which is the symptom the product owner
+            reported.
+
+            Normal (install-time) permission: no runtime prompt, no user-visible
+            dialog, no data leaves the device because of it.
+
+        RECORD_AUDIO + MODIFY_AUDIO_SETTINGS
+            src/components/widgets/TodayLogWidget.tsx calls
+            navigator.mediaDevices.getUserMedia({ audio: true }) and feeds it to
+            MediaRecorder (the web capture path, not a Capacitor plugin). In a
+            WebView that surfaces as WebChromeClient.onPermissionRequest with
+            RESOURCE_AUDIO_CAPTURE. Capacitor's BridgeWebChromeClient already
+            implements that callback (node_modules/@capacitor/android/capacitor/
+            src/main/java/com/getcapacitor/BridgeWebChromeClient.java:102-124)
+            and requests BOTH RECORD_AUDIO and MODIFY_AUDIO_SETTINGS before it
+            calls request.grant(). An undeclared runtime permission is denied
+            without ever prompting, so both must be declared here or voice
+            recording fails silently.
+
+        NOT declared: android.permission.CAMERA
+            TodayLogWidget's "지금찍기" button sets capture="environment" on the
+            file input. BridgeWebChromeClient.onShowFileChooser handles that by
+            launching MediaStore.ACTION_IMAGE_CAPTURE, so the *system camera app*
+            takes the photo and returns a content:// URI; this process never
+            opens the camera device. And isMediaCaptureSupported()
+            (BridgeWebChromeClient.java:307-313) treats "CAMERA is not declared
+            at all" as permitted, so declaring CAMERA would ADD a runtime
+            prompt while removing nothing. Not declared, deliberately.
+
+        NOT declared: contacts, location, tracking / advertising id,
+        READ_MEDIA_IMAGES / READ_MEDIA_VIDEO / READ_EXTERNAL_STORAGE
+            Attachment picking goes through the system document picker, which
+            returns a URI the app is already granted. No code reads the media
+            store, and no code reads contacts, location or an advertising id.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+</manifest>

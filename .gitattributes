@@ -1,0 +1,13 @@
+# Gradle ships a Windows launcher with CRLF line endings, and it has to keep
+# them: cmd.exe mis-parses a LF-only batch file. `git diff --check` reports the
+# CR before every newline as trailing whitespace, so the whole file looks
+# corrupt in a whitespace gate that is otherwise worth having.
+#
+# `-text` keeps git from normalising the line endings (which would rewrite the
+# blob), and `-whitespace` turns off whitespace error reporting for this path
+# only. Everything else in the repository is still checked.
+android/gradlew.bat -text -whitespace
+
+# The wrapper jar is binary; say so explicitly rather than relying on
+# auto-detection.
+android/gradle/wrapper/gradle-wrapper.jar binary

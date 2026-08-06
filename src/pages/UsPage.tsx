@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
-import { Heart, Calendar as CalendarIcon, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
+import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
+import { Heart, Calendar as CalendarIcon, CalendarDays, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { cn, toLocalDateString, localToday } from '@/lib/utils';
+import { cn, toLocalDateString, localToday, daysBetweenLocal } from '@/lib/utils';
 
 function buildCalendarGrid(year: number, month: number) {
   const firstDay = new Date(year, month, 1);
@@ -32,12 +33,18 @@ function buildCalendarGrid(year: number, month: number) {
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 export function UsPage() {
-  const { state } = useStore();
+  const { state, coupleLifecycle } = useStore();
   const navigate = useNavigate();
   const { myName } = state.profile;
   const partnerName = state.profile.couple.partnerName || '상대방';
   const connected = state.profile.couple.connected;
-  const startDate = state.profile.couple.anniversaryDate || '2024-12-24';
+  /**
+   * M-1: no invented anniversary. This used to fall back to a fixed literal and
+   * then render a confident `함께한 지 +N일째` for a couple that never entered a
+   * date (`sync.ts` maps a null column to `''`). `DDayWidget` already renders
+   * `기념일 미설정` in that case; this surface now agrees with it.
+   */
+  const anniversaryDate = state.profile.couple.anniversaryDate || undefined;
   const trips = state.trips || [];
   const events = state.events || [];
 
@@ -48,9 +55,9 @@ export function UsPage() {
   const calendarCells = useMemo(() => buildCalendarGrid(viewYear, viewMonth), [viewYear, viewMonth]);
   const todayStr = toLocalDateString(today);
 
-  const diffDays = Math.floor(
-    (new Date().getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
-  ) + 1;
+  const diffDays = anniversaryDate
+    ? daysBetweenLocal(anniversaryDate, todayStr) + 1
+    : null;
 
   const goToPrevMonth = () => {
     if (viewMonth === 0) {
@@ -84,13 +91,23 @@ export function UsPage() {
       <div className="pb-28 px-5 pt-8 space-y-5">
         <div className="flex items-center justify-between px-1">
           <h1 className="text-2xl font-extrabold tracking-tight text-foreground">우리</h1>
-          <button
-            onClick={() => navigate('/trips')}
-            className="text-xs font-bold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
-          >
-            <Plane size={14} />
-            <span>여행 플래너</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* /schedule had no entry point anywhere in the UI before this. */}
+            <button
+              onClick={() => navigate('/schedule')}
+              className="text-xs font-bold text-foreground bg-navy/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+            >
+              <CalendarDays size={14} />
+              <span>일정</span>
+            </button>
+            <button
+              onClick={() => navigate('/trips')}
+              className="text-xs font-bold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+            >
+              <Plane size={14} />
+              <span>여행</span>
+            </button>
+          </div>
         </div>
 
         {/* Profile */}
@@ -102,11 +119,27 @@ export function UsPage() {
               <Heart size={16} className="text-coral fill-coral animate-pulse" />
               <span>{partnerName}</span>
             </h2>
+            {/* Role/lifecycle correct. The previous copy was a single line for
+                every non-connected state -- "초대 코드로 커플 공간을 완성해보세요" --
+                which reads as "enter a code" and is exactly wrong for the creator
+                who is holding one. */}
             <p className="text-xs text-muted-foreground mt-1 font-medium">
-              {connected ? `함께한 지 +${diffDays}일째 💕` : '초대 코드로 커플 공간을 완성해보세요'}
+              {connected
+                ? diffDays !== null
+                  ? `함께한 지 +${diffDays}일째 💕`
+                  : '기념일 미설정 · 설정에서 사귄 날짜를 추가해 보세요'
+                : coupleLifecycle === 'pending'
+                  ? '상대방이 초대 코드를 입력하면 연결돼요'
+                  : coupleLifecycle === 'disconnected'
+                    ? '커플 공간 연결이 해제되었어요'
+                    : coupleLifecycle === 'unknown'
+                      ? '커플 공간 상태를 확인하고 있어요'
+                      : '우리 공간을 만들거나 초대 코드를 입력해 보세요'}
             </p>
           </div>
         </section>
+
+        <CoupleStatusBanner />
 
         {/* Calendar UI */}
         <section className="rounded-3xl bg-card border border-border shadow-sm overflow-hidden p-4">
@@ -178,21 +211,36 @@ export function UsPage() {
           {trips.length > 0 ? (
             <div className="space-y-2">
               {trips.map((trip) => (
-                <div key={trip.id} onClick={() => navigate(`/trips/${trip.id}`)} className="p-4 rounded-2xl bg-card border border-border shadow-sm active:scale-[0.98] transition cursor-pointer flex items-center justify-between">
+                /*
+                  A real <button>, not a clickable <div>: the trip list is the only
+                  way into a trip from 우리, and as a div it was in no tab order and
+                  answered no key, so the whole 여행 section was pointer-only.
+                */
+                <button
+                  key={trip.id}
+                  type="button"
+                  onClick={() => navigate(`/trips/${trip.id}`)}
+                  aria-label={`${trip.title} 여행 상세 보기`}
+                  className="w-full text-left p-4 min-h-[44px] rounded-2xl bg-card border border-border shadow-sm active:scale-[0.98] transition cursor-pointer flex items-center justify-between"
+                >
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-sm font-bold text-foreground">
-                      <MapPin size={14} className="text-blue-500" /> {trip.title}
+                      <MapPin size={14} className="text-blue-500" aria-hidden="true" /> {trip.title}
                     </div>
                     <p className="text-[11px] text-muted-foreground font-medium">{trip.startDate} ~ {trip.endDate}</p>
                   </div>
-                  <ChevronRight size={16} className="text-muted-foreground/50" />
-                </div>
+                  <ChevronRight size={16} className="text-muted-foreground/50" aria-hidden="true" />
+                </button>
               ))}
             </div>
           ) : (
-            <div onClick={() => navigate('/trips')} className="p-4 rounded-2xl bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition">
+            <button
+              type="button"
+              onClick={() => navigate('/trips')}
+              className="w-full p-4 min-h-[44px] rounded-2xl bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition"
+            >
               <p className="text-xs font-bold text-muted-foreground mb-1">+ 새로운 여행 계획하기</p>
-            </div>
+            </button>
           )}
         </section>
 

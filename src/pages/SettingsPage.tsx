@@ -1,14 +1,23 @@
-import { useState } from 'react';
-import { useStore } from '@/lib/store';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useStore } from '@/lib/useStore';
+import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
-import { 
-  ArrowLeft, User, Bell, Download, Shield, Unlink, Trash2, 
-  Link, Clock, LogOut, FileText, Smartphone, Lock, AlertTriangle, ChevronRight, Settings,
-  Sun, Moon
+import {
+  ArrowLeft, Shield, Unlink, Trash2, User, FileText,
+  Clock, LogOut, Smartphone, AlertTriangle, ChevronRight,
+  Sun, Moon, Copy, Check, RefreshCw, Download,
+  CalendarDays, Plane,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { consumeCoupleInvitation, supabase } from '@/lib/supabase';
+import {
+  consumeCoupleInvitation,
+  createCoupleInvitation,
+  regenerateCoupleInvitation,
+  supabase,
+} from '@/lib/supabase';
+import { useEscapeKey } from '@/lib/hooks';
 
 export function SettingsPage() {
   const {
@@ -17,12 +26,33 @@ export function SettingsPage() {
     disconnect,
     deleteAccount,
     signOut,
-    reset,
     deleteRecord,
     setTheme,
+    invitationExpiresAt,
+    refreshCoupleLifecycle,
+    recoverExpiredSession,
   } = useStore();
   const navigate = useNavigate();
   const { profile, isDemoMode, records } = state;
+  const settingsIdentityKey = state.authenticatedUser?.id || '';
+  const identityRef = useRef(settingsIdentityKey);
+  const identityGenerationRef = useRef(0);
+  const instanceActiveRef = useRef(true);
+  if (identityRef.current !== settingsIdentityKey) {
+    identityRef.current = settingsIdentityKey;
+    identityGenerationRef.current += 1;
+  }
+  const captureIdentity = useCallback(
+    () => ({ userId: settingsIdentityKey, generation: identityGenerationRef.current }),
+    [settingsIdentityKey],
+  );
+  const isCurrentIdentity = useCallback(
+    (identity: { userId: string; generation: number }) =>
+      instanceActiveRef.current
+      && identity.userId === identityRef.current
+      && identity.generation === identityGenerationRef.current,
+    [],
+  );
   const myName = profile.myName || '나';
   const partnerName = profile.couple.partnerName || '상대방';
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
@@ -37,14 +67,180 @@ export function SettingsPage() {
   const [isDeletingRecords, setIsDeletingRecords] = useState(false);
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [isJoiningCouple, setIsJoiningCouple] = useState(false);
+  const [isCreatingSpace, setIsCreatingSpace] = useState(false);
   const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState('');
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [editName, setEditName] = useState(profile.myName);
+  const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
 
-  const handleToast = (msg: string) => {
-    toast(msg);
+  useEscapeKey(() => {
+    if (showDeleteAccountModal) {
+      if (isDeletingAccount) return;
+      setShowDeleteAccountModal(false);
+      setDeleteAccountConfirmation('');
+    } else if (showDeleteRecordsModal) {
+      if (!isDeletingRecords) setShowDeleteRecordsModal(false);
+    } else if (showDisconnectModal) {
+      if (!isDisconnecting) setShowDisconnectModal(false);
+    } else if (showPWAModal) {
+      setShowPWAModal(false);
+    } else if (showProfileModal) {
+      setShowProfileModal(false);
+    }
+  }, showDeleteAccountModal || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
+
+  useLayoutEffect(() => {
+    instanceActiveRef.current = true;
+    return () => {
+      instanceActiveRef.current = false;
+      identityGenerationRef.current += 1;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    setInviteCodeInput('');
+    setIsJoiningCouple(false);
+  }, [settingsIdentityKey]);
+
+  /**
+   * Export the records this user authored as a JSON file.
+   * Runs entirely on the device so it also works offline and in demo mode.
+   */
+  const handleExportMyData = () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        app: 'gomsinlog',
+        schemaVersion: 1,
+        profile: {
+          myName: profile.myName,
+          role: profile.role,
+          anniversaryDate: profile.couple.anniversaryDate ?? null,
+          military: profile.role === 'soldier' ? profile.military : null,
+        },
+        // Only the caller's own records; the partner's content is not theirs to export.
+        records: ownRecords.map((record) => ({
+          date: record.date,
+          time: record.time,
+          log: record.log,
+          reaction: record.reaction ?? null,
+          isPrivate: record.isPrivate,
+          emotionFlow: record.emotionFlow ?? [],
+          // Storage paths only: signed URLs expire and would be useless in a backup.
+          attachments: (record.attachments ?? []).map((a) => ({
+            type: a.type,
+            name: a.name,
+            path: a.path ?? null,
+          })),
+          createdAt: record.createdAt,
+        })),
+        events: state.events.map((e) => ({
+          title: e.title,
+          eventType: e.eventType,
+          startDate: e.startDate,
+          endDate: e.endDate ?? null,
+          isPrivate: e.isPrivate,
+        })),
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `gomsinlog-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`내 기록 ${ownRecords.length}개를 내보냈어요.`);
+    } catch (error) {
+      console.error('[gomsinlog] Export failed:', error);
+      toast.error('내보내기에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleSaveProfile = () => {
+    const nextName = editName.trim();
+    if (nextName.length < 2 || nextName.length > 12) {
+      toast.error('닉네임은 2~12자로 입력해 주세요.');
+      return;
+    }
+    updateProfile({
+      myName: nextName,
+      couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
+    });
+    setShowProfileModal(false);
+    toast.success('프로필이 저장되었습니다.');
+  };
+
+  /**
+   * Create a fresh couple space from Settings.
+   *
+   * This affordance was missing entirely. `createCoupleInvitation` had exactly one
+   * caller -- the onboarding wizard -- so once onboarding was finished there was no
+   * way back to it. Meanwhile `CoupleStatusBanner` told a `personal` user "우리
+   * 공간을 만들거나 초대 코드를 입력해 보세요" and a `disconnected` user "다시
+   * 연결하려면 새 공간을 만들거나..." and sent both here, where only a join form
+   * existed. A user who disconnected could therefore never create a space again --
+   * they could only join a code someone else minted.
+   */
+  const handleCreateCoupleSpace = async () => {
+    if (isCreatingSpace) return;
+    const identity = captureIdentity();
+    if (!identity.userId) {
+      toast.error('로그인한 계정에서만 커플 공간을 만들 수 있어요.');
+      return;
+    }
+
+    setIsCreatingSpace(true);
+    try {
+      const result = await createCoupleInvitation(profile.role);
+      if (!isCurrentIdentity(identity)) return;
+      if (result.error || !result.coupleId || !result.code) {
+        toast.error(result.error || '커플 공간을 만들지 못했어요.');
+        return;
+      }
+      updateProfile({
+        couple: {
+          ...profile.couple,
+          coupleId: result.coupleId,
+          coupleCode: result.code,
+          connected: false,
+          status: 'pending',
+          partnerName: '',
+        },
+      });
+      if (!isCurrentIdentity(identity)) return;
+      // Pull the authoritative expiry for the code just minted, so the section
+      // above can show a real deadline instead of only "24시간 동안 유효".
+      void refreshCoupleLifecycle();
+      toast.success('우리 공간을 만들었어요. 초대 코드를 상대방에게 전달해 주세요.');
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('[Settings] Couple space creation failed:', error);
+      toast.error(`커플 공간을 만들지 못했어요. ${classifyServerError(error).message}`);
+    } finally {
+      if (isCurrentIdentity(identity)) setIsCreatingSpace(false);
+    }
   };
 
   const handleJoinCouple = async () => {
+    if (isJoiningCouple) return;
+    const identity = captureIdentity();
+    if (!identity.userId) {
+      toast.error('로그인한 계정에서만 커플 공간에 연결할 수 있어요.');
+      return;
+    }
     const code = inviteCodeInput.trim();
     if (!/^\d{6}$/.test(code)) {
       toast.error('6자리 초대 코드를 입력해 주세요.');
@@ -52,42 +248,72 @@ export function SettingsPage() {
     }
 
     setIsJoiningCouple(true);
-    const result = await consumeCoupleInvitation(code);
-    if (result.error || !result.coupleId) {
-      setIsJoiningCouple(false);
-      toast.error(result.error || '커플 공간에 연결하지 못했습니다.');
-      return;
+    try {
+      const result = await consumeCoupleInvitation(code);
+      if (!isCurrentIdentity(identity)) return;
+      if (result.error || !result.coupleId) {
+        // An unusable session is not a code problem: route it to the store's
+        // single-flight session recovery rather than asking for another attempt.
+        if (result.reason === 'auth_expired') void recoverExpiredSession();
+        toast.error(result.error || '커플 공간에 연결하지 못했습니다.');
+        return;
+      }
+
+      let nextRole = profile.role;
+      let partnerName = '파트너';
+      try {
+        const [membershipResult, partnerResult] = await Promise.all([
+          supabase
+            ? supabase
+                .from('couple_members')
+                .select('role')
+                .eq('user_id', identity.userId)
+                .eq('status', 'active')
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+          supabase
+            ? supabase.rpc('get_partner_profile')
+            : Promise.resolve({ data: null, error: null }),
+        ]);
+        if (!isCurrentIdentity(identity)) return;
+        if (membershipResult.error) {
+          console.error('[Settings] Membership lookup failed:', membershipResult.error);
+        } else if (membershipResult.data?.role) {
+          nextRole = membershipResult.data.role;
+        }
+        if (partnerResult.error) {
+          console.error('[Settings] Partner profile lookup failed:', partnerResult.error);
+        } else if (partnerResult.data?.[0]?.display_name) {
+          partnerName = partnerResult.data[0].display_name;
+        }
+      } catch (error) {
+        if (!isCurrentIdentity(identity)) return;
+        // Redemption already succeeded; keep explicit safe fallbacks if enrichment failed.
+        console.error('[Settings] Couple membership enrichment failed:', error);
+      }
+
+      if (!isCurrentIdentity(identity)) return;
+      updateProfile({
+        role: nextRole,
+        couple: {
+          ...profile.couple,
+          coupleId: result.coupleId,
+          coupleCode: '',
+          connected: true,
+          status: 'active',
+          partnerName,
+        },
+      });
+      if (!isCurrentIdentity(identity)) return;
+      setInviteCodeInput('');
+      toast.success('우리 공간에 연결되었습니다.');
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('[Settings] Couple join failed:', error);
+      toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsJoiningCouple(false);
     }
-
-    const userId = state.authenticatedUser?.id;
-    const [{ data: membership }, { data: partnerRows }] = await Promise.all([
-      userId && supabase
-        ? supabase
-            .from('couple_members')
-            .select('role')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      supabase
-        ? supabase.rpc('get_partner_profile')
-        : Promise.resolve({ data: null }),
-    ]);
-
-    updateProfile({
-      role: membership?.role || profile.role,
-      couple: {
-        ...profile.couple,
-        coupleId: result.coupleId,
-        coupleCode: '',
-        connected: true,
-        status: 'active',
-        partnerName: partnerRows?.[0]?.display_name || '파트너',
-      },
-    });
-    setIsJoiningCouple(false);
-    setInviteCodeInput('');
-    toast.success('우리 공간에 연결되었습니다.');
   };
 
   return (
@@ -97,7 +323,7 @@ export function SettingsPage() {
         <header className="flex items-center justify-between">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] flex items-center justify-center active:scale-95 transition"
+            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95 transition"
             aria-label="뒤로가기"
           >
             <ArrowLeft size={20} />
@@ -162,6 +388,80 @@ export function SettingsPage() {
           </div>
         </section>
 
+        {/* Invite code for the space creator, until the partner actually joins. */}
+        {hasCoupleSpace && !profile.couple.connected && !isDemoMode && (
+          <section className="rounded-3xl bg-card border border-coral/30 p-5 shadow-sm space-y-3">
+            <div>
+              <h2 className="text-sm font-bold text-foreground">우리 공간 초대 코드</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                상대방이 앱에서 이 코드를 입력하면 두 사람의 공간이 연결됩니다. 코드는 24시간 동안 유효해요.
+                {/* The authoritative deadline from the server, when it is known.
+                    "24시간 동안 유효" alone never told the user when it lapses. */}
+                {invitationExpiryLabel(invitationExpiresAt) && (
+                  <span data-testid="settings-invitation-expiry" className="font-semibold text-foreground">
+                    {' '}({invitationExpiryLabel(invitationExpiresAt)})
+                  </span>
+                )}
+              </p>
+            </div>
+
+            {profile.couple.coupleCode ? (
+              <div className="flex items-center justify-between bg-muted px-4 py-3 rounded-2xl border border-border">
+                <span className="font-mono text-2xl font-bold tracking-[0.2em] text-foreground">
+                  {profile.couple.coupleCode}
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(profile.couple.coupleCode);
+                      setCopiedInvite(true);
+                      toast.success('초대 코드를 복사했어요.');
+                      setTimeout(() => setCopiedInvite(false), 2000);
+                    } catch {
+                      toast.error('복사에 실패했어요. 코드를 직접 입력해 주세요.');
+                    }
+                  }}
+                  aria-label="초대 코드 복사"
+                  className="p-2 text-coral hover:bg-coral/10 rounded-xl transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                >
+                  {copiedInvite ? <Check size={20} /> : <Copy size={20} />}
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-warning-foreground bg-warning-surface border border-warning/30 rounded-2xl p-3 leading-relaxed">
+                이 기기에 저장된 초대 코드가 없습니다. 보안을 위해 서버에는 코드 원본을 저장하지 않으므로,
+                아래에서 새 코드를 발급해 상대방에게 전달해 주세요.
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={async () => {
+                if (isRegenerating) return;
+                setIsRegenerating(true);
+                const result = await regenerateCoupleInvitation();
+                setIsRegenerating(false);
+                if (result.error || !result.code) {
+                  toast.error(result.error || '초대 코드를 재발급하지 못했습니다.');
+                  return;
+                }
+                updateProfile({
+                  couple: { ...profile.couple, coupleCode: result.code },
+                });
+                // Re-read the authoritative expiry for the code just minted.
+                void refreshCoupleLifecycle();
+                toast.success('새 초대 코드가 발급되었습니다. 이전 코드는 더 이상 사용할 수 없어요.');
+              }}
+              disabled={isRegenerating}
+              className="w-full h-12 rounded-xl border border-coral/40 text-coral text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={isRegenerating ? 'animate-spin' : undefined} />
+              {isRegenerating ? '발급 중...' : '새 초대 코드 발급하기'}
+            </button>
+          </section>
+        )}
+
         {!hasCoupleSpace && !isDemoMode && (
           <section className="rounded-3xl bg-card border border-coral/30 p-5 shadow-sm space-y-3">
             <div>
@@ -190,13 +490,36 @@ export function SettingsPage() {
             >
               {isJoiningCouple ? '연결 중...' : '초대 코드로 연결하기'}
             </button>
+
+            {/* The other half of the choice the banners promise. Without this a
+                disconnected user could only ever join someone else's code. */}
+            <div className="flex items-center gap-3 pt-1">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-[11px] text-muted-foreground">또는</span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              내가 공간을 만들고 상대방을 초대할 수도 있어요.
+            </p>
+            <button
+              type="button"
+              onClick={handleCreateCoupleSpace}
+              disabled={isCreatingSpace || isJoiningCouple}
+              className="w-full h-12 rounded-xl border border-coral/40 text-coral text-sm font-bold disabled:opacity-50"
+            >
+              {isCreatingSpace ? '만드는 중...' : '새 우리 공간 만들기'}
+            </button>
           </section>
         )}
 
         {/* General Settings */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
-          <button 
-            onClick={() => handleToast('프로필 편집 기능 준비 중입니다.')}
+          <button
+            onClick={() => {
+              setEditName(profile.myName);
+              setEditAnniversary(profile.couple.anniversaryDate || '');
+              setShowProfileModal(true);
+            }}
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
@@ -206,31 +529,18 @@ export function SettingsPage() {
             <ChevronRight size={16} className="text-muted-foreground" />
           </button>
 
-          {hasCoupleSpace && !profile.couple.connected && profile.couple.coupleCode && (
+          {profile.role === 'soldier' && (
             <button
-              onClick={() => handleToast(`초대 코드: ${profile.couple.coupleCode}`)}
+              onClick={() => navigate('/service')}
               className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
             >
               <span className="flex items-center gap-3 text-foreground">
-                <Link size={18} className="text-coral" />
-                <span>우리 공간 초대 코드</span>
+                <Shield size={18} className="text-coral" />
+                <span>복무 정보 수정</span>
               </span>
-              <span className="text-xs text-coral font-bold bg-coral/10 px-2.5 py-1 rounded-lg">
-                {profile.couple.coupleCode}
-              </span>
+              <ChevronRight size={16} className="text-muted-foreground" />
             </button>
           )}
-
-          <button 
-            onClick={() => handleToast('알림 설정이 저장되었습니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Bell size={18} className="text-coral" />
-              <span>푸시 알림 설정</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
 
           <button 
             onClick={() => setShowPWAModal(true)}
@@ -242,28 +552,43 @@ export function SettingsPage() {
             </span>
             <span className="text-[11px] text-muted-foreground font-normal">Safari/Chrome</span>
           </button>
+        </section>
 
-          <button 
-            onClick={() => handleToast('곰신로그의 기록은 1:1 연결된 상대에게만 안전하게 공유됩니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Shield size={18} className="text-coral" />
-              <span>1:1 비공개 로그 및 보안 원칙</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
+        {/*
+          Durable entry points to the non-tab routes.
 
-          <button 
-            onClick={() => handleToast('생체인증 잠금 기능 준비 중입니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Lock size={18} className="text-coral" />
-              <span>민감 기록 생체인증 잠금</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
+          The tab bar only exposes /home, /record, /us and /my. /schedule and
+          /trips were reachable ONLY from UpcomingScheduleWidget, and /service
+          only from DDayWidget -- but the dashboard layout is user-editable, and
+          App.tsx redirects an unknown path to `/` with no address bar in the
+          native shell. Removing the schedule widget therefore stranded /schedule
+          and /trips permanently, with no way back. Settings is always reachable
+          (WidgetDashboard and DDayWidget both link here), so an always-present
+          link list is the minimal durable fix; the tab bar is left alone.
+
+          Unconditional on role on purpose: the pre-existing /service row below
+          is soldier-only, so a 곰신 viewer had no non-widget route to it at all.
+        */}
+        <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
+          <h2 className="px-4 pt-4 pb-2 text-xs font-bold text-muted-foreground">바로가기</h2>
+          {[
+            { to: '/schedule', label: '일정 관리', icon: CalendarDays },
+            { to: '/trips', label: '여행 플래너', icon: Plane },
+            { to: '/service', label: '복무 현황 · D-Day', icon: Shield },
+          ].map(({ to, label, icon: Icon }) => (
+            <button
+              key={to}
+              onClick={() => navigate(to)}
+              aria-label={label}
+              className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[44px] min-w-[44px]"
+            >
+              <span className="flex items-center gap-3 text-foreground">
+                <Icon size={18} className="text-coral" />
+                <span>{label}</span>
+              </span>
+              <ChevronRight size={16} className="text-muted-foreground" />
+            </button>
+          ))}
         </section>
 
         {/* Contact Hours */}
@@ -286,15 +611,18 @@ export function SettingsPage() {
 
         {/* Couple & Data Management */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
-          <button 
-            onClick={() => handleToast('내 기록 PDF/JSON 내보내기 기능이 곧 출시됩니다.')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
+          <button
+            onClick={handleExportMyData}
+            disabled={isExporting}
+            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px] disabled:opacity-50"
           >
             <span className="flex items-center gap-3 text-foreground">
-              <Download size={18} className="text-navy" />
-              <span>내 기록 백업 & 내보내기</span>
+              <Download size={18} className="text-foreground" />
+              <span>내 기록 JSON으로 내보내기</span>
             </span>
-            <span className="text-[11px] text-muted-foreground">준비 중</span>
+            <span className="text-[11px] text-muted-foreground font-normal">
+              {isExporting ? '내보내는 중...' : `${ownRecords.length}개`}
+            </span>
           </button>
 
           <button 
@@ -302,7 +630,7 @@ export function SettingsPage() {
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
-              <Trash2 size={18} className="text-navy" />
+              <Trash2 size={18} className="text-foreground" />
               <span>내 작성 기록 전체 삭제</span>
             </span>
             <span className="text-[11px] text-muted-foreground font-normal">{ownRecords.length}개 보유</span>
@@ -322,8 +650,8 @@ export function SettingsPage() {
 
         {/* Account Management & Reset */}
         <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-xs font-semibold">
-          <button 
-            onClick={() => handleToast('서비스 이용약관 준비 중')}
+          <button
+            onClick={() => navigate('/legal/terms')}
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
@@ -333,8 +661,8 @@ export function SettingsPage() {
             <ChevronRight size={16} className="text-muted-foreground" />
           </button>
 
-          <button 
-            onClick={() => handleToast('개인정보 처리방침 준비 중')}
+          <button
+            onClick={() => navigate('/legal/privacy')}
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
           >
             <span className="flex items-center gap-3 text-foreground">
@@ -367,26 +695,77 @@ export function SettingsPage() {
           </button>
         </section>
 
-        {/* Reset App State */}
-        <button 
-          onClick={reset}
-          className="w-full py-4 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground font-medium text-xs min-h-[44px]"
-        >
-          앱 상태 초기화 (처음 온보딩 화면으로 돌아가기)
-        </button>
+        <p className="text-center text-[11px] text-muted-foreground leading-relaxed px-4">
+          곰신로그의 기록은 1:1로 연결된 상대에게만 공유되며, '나만 보기'로 남긴 기록은
+          상대방에게 전송되지 않습니다.
+        </p>
+
+        {/* Profile Edit Modal */}
+        {showProfileModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+              <h3 id="profile-modal-title" className="text-base font-bold text-foreground">내 프로필 수정</h3>
+
+              <div className="space-y-2">
+                <label htmlFor="edit-nickname" className="text-xs font-semibold text-muted-foreground">
+                  내 닉네임 (2~12자)
+                </label>
+                <input
+                  id="edit-nickname"
+                  value={editName}
+                  onChange={(event) => setEditName(event.target.value.slice(0, 12))}
+                  maxLength={12}
+                  className="w-full h-12 px-3 rounded-xl bg-muted border border-border text-sm text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="edit-anniversary" className="text-xs font-semibold text-muted-foreground">
+                  사귄 날짜
+                </label>
+                <input
+                  id="edit-anniversary"
+                  type="date"
+                  value={editAnniversary}
+                  onChange={(event) => setEditAnniversary(event.target.value)}
+                  className="w-full h-12 px-3 rounded-xl bg-muted border border-border text-sm text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  두 사람이 함께 보는 날짜예요. 저장하면 상대방 화면의 디데이에도 반영됩니다.
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowProfileModal(false)}
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs min-h-[44px]"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleSaveProfile}
+                  className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px]"
+                >
+                  저장하기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Disconnect Modal */}
         {showDisconnectModal && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 animate-in fade-in">
-            <div className="bg-card rounded-3xl p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
-              <h3 className="text-base font-bold text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
+            <div role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="bg-card rounded-3xl p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
+              <h3 id="disconnect-modal-title" className="text-base font-bold text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 연결을 해제하면 상대방은 내 공유 기록을 더 이상 볼 수 없게 됩니다.
               </p>
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
                   onClick={() => setShowDisconnectModal(false)}
-                  className="py-2.5 rounded-xl border border-border text-xs font-semibold min-h-[44px]"
+                  disabled={isDisconnecting}
+                  className="py-2.5 rounded-xl border border-border text-xs font-semibold min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -394,14 +773,22 @@ export function SettingsPage() {
                   onClick={async () => {
                     if (isDisconnecting) return;
                     setIsDisconnecting(true);
-                    const disconnected = await disconnect();
-                    setIsDisconnecting(false);
-
-                    if (disconnected) {
-                      setShowDisconnectModal(false);
-                      toast.success('연결이 해제되었습니다.');
-                    } else {
-                      toast.error('연결을 해제하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+                    try {
+                      const disconnected = await disconnect();
+                      if (disconnected) {
+                        setShowDisconnectModal(false);
+                        toast.success('연결이 해제되었습니다.');
+                      } else {
+                        // `disconnect()` returns a bare boolean, so the cause is
+                        // already gone by the time we get here. Stay honest and
+                        // generic rather than inventing a network diagnosis.
+                        toast.error('연결을 해제하지 못했어요. 잠시 후 다시 시도해 주세요.');
+                      }
+                    } catch (error) {
+                      console.error('[Settings] Couple disconnect failed:', error);
+                      toast.error(`연결을 해제하지 못했어요. ${classifyServerError(error).message}`);
+                    } finally {
+                      setIsDisconnecting(false);
                     }
                   }}
                   disabled={isDisconnecting}
@@ -417,15 +804,16 @@ export function SettingsPage() {
         {/* Delete Records Modal */}
         {showDeleteRecordsModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
-              <h3 className="text-base font-bold text-foreground">내 기록 전체 삭제</h3>
+            <div role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+              <h3 id="delete-records-modal-title" className="text-base font-bold text-foreground">내 기록 전체 삭제</h3>
               <p className="text-xs text-muted-foreground leading-relaxed">
                 내가 작성한 총 {ownRecords.length}개의 일상 기록이 삭제됩니다. 정말 삭제하시겠습니까?
               </p>
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => setShowDeleteRecordsModal(false)}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs active:bg-muted/80 min-h-[44px]"
+                  disabled={isDeletingRecords}
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs active:bg-muted/80 min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -433,16 +821,27 @@ export function SettingsPage() {
                   onClick={async () => {
                     if (isDeletingRecords) return;
                     setIsDeletingRecords(true);
-                    const results = await Promise.all(
-                      ownRecords.map((record) => deleteRecord(record.id))
-                    );
-                    setIsDeletingRecords(false);
-
-                    if (results.every(Boolean)) {
-                      setShowDeleteRecordsModal(false);
-                      toast.success('내 기록이 모두 삭제되었습니다.');
-                    } else {
+                    try {
+                      const results = await Promise.all(
+                        ownRecords.map((record) => deleteRecord(record.id))
+                      );
+                      const firstFailure = results.find((result) => !result.ok);
+                      if (!firstFailure) {
+                        setShowDeleteRecordsModal(false);
+                        toast.success('내 기록이 모두 삭제되었습니다.');
+                      } else {
+                        // Report the actual cause of the first failure rather than
+                        // a generic retry prompt: a permission or session problem
+                        // will not resolve by trying again.
+                        toast.error(
+                          `일부 기록을 삭제하지 못했어요. ${firstFailure.ok ? '' : firstFailure.error}`.trim(),
+                        );
+                      }
+                    } catch (error) {
+                      console.error('[Settings] Record deletion failed:', error);
                       toast.error('일부 기록을 삭제하지 못했어요. 다시 시도해 주세요.');
+                    } finally {
+                      setIsDeletingRecords(false);
                     }
                   }}
                   disabled={isDeletingRecords}
@@ -458,10 +857,10 @@ export function SettingsPage() {
         {/* Delete Account Modal */}
         {showDeleteAccountModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-destructive font-bold text-base">
                 <AlertTriangle size={20} />
-                <span>계정 삭제 (회원 탈퇴)</span>
+                <span id="delete-account-modal-title">계정 삭제 (회원 탈퇴)</span>
               </div>
               <div className="text-xs text-destructive bg-destructive/10 p-3.5 rounded-2xl space-y-1.5 leading-relaxed">
                 <p>• 내 프로필, 내가 쓴 기록과 첨부파일, 로그인 계정이 삭제됩니다.</p>
@@ -496,15 +895,47 @@ export function SettingsPage() {
                   onClick={async () => {
                     if (isDeletingAccount || deleteAccountConfirmation !== '탈퇴') return;
                     setIsDeletingAccount(true);
-                    const deleted = await deleteAccount();
-                    setIsDeletingAccount(false);
+                    try {
+                      const result = await deleteAccount();
+                      if (result.status === 'partially_deleted') {
+                        // Tell the truth: the generic message claims nothing was
+                        // deleted, which is the opposite of what happened.
+                        toast.error(
+                          '기록과 프로필 데이터는 삭제되었지만 로그인 계정은 삭제되지 못했습니다. 탈퇴를 완료해 주세요.',
+                          { duration: 12000 },
+                        );
+                        return;
+                      }
+                      if (result.status === 'failed') {
+                        toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                        return;
+                      }
 
-                    if (deleted) {
                       setShowDeleteAccountModal(false);
                       setDeleteAccountConfirmation('');
-                      toast.success('계정과 데이터가 삭제되었습니다.');
-                    } else {
+
+                      // Report a partial cleanup honestly rather than claiming
+                      // everything was removed.
+                      const mediaWarning = result.warnings.some((w) =>
+                        w.startsWith('media_not_fully_removed'),
+                      );
+                      if (mediaWarning) {
+                        toast.warning(
+                          '계정은 삭제되었지만 일부 첨부파일이 남아 있을 수 있습니다. 문의해 주시면 완전히 삭제해 드립니다.',
+                          { duration: 10000 },
+                        );
+                      } else if (result.warnings.length > 0) {
+                        toast.warning('계정은 삭제되었지만 일부 정리 작업이 지연되었습니다.', {
+                          duration: 8000,
+                        });
+                      } else {
+                        toast.success('계정과 데이터가 삭제되었습니다.');
+                      }
+                    } catch (error) {
+                      console.error('[Settings] Account deletion failed:', error);
                       toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                    } finally {
+                      setIsDeletingAccount(false);
                     }
                   }}
                   disabled={isDeletingAccount || deleteAccountConfirmation !== '탈퇴'}
@@ -520,10 +951,10 @@ export function SettingsPage() {
         {/* PWA Modal */}
         {showPWAModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground font-bold text-base">
                 <Smartphone size={20} className="text-coral" />
-                <span>PWA 앱 설치 안내</span>
+                <span id="pwa-modal-title">PWA 앱 설치 안내</span>
               </div>
               <div className="text-xs text-muted-foreground space-y-2 leading-relaxed bg-muted/40 p-3.5 rounded-2xl border border-border">
                 <p>• <b>iPhone Safari:</b> 하단 공유 아이콘 탭 → '홈 화면에 추가'</p>

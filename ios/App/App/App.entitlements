@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Data Protection.
+
+		The whole app container is created with the Complete protection class, so
+		diary text, attachments cached by WebKit and the Supabase session token
+		in WKWebView localStorage are unreadable while the device is locked. This
+		is the iOS counterpart of android:allowBackup="false" plus
+		data_extraction_rules.xml: it closes the "someone has the phone" path
+		rather than the "someone has the backup" path.
+
+		The app does no background work (no background fetch, no background
+		URLSession, no notifications), so nothing needs to read the container
+		while locked.
+
+		REQUIRES the "Data Protection" capability on the App ID in the Apple
+		Developer portal (Complete Protection). Without it, signing fails with a
+		provisioning-profile mismatch. That step is in
+		docs/kiro/NATIVE_RELEASE_GUIDE.md. Simulator builds with
+		CODE_SIGNING_ALLOWED=NO ignore entitlements entirely, so CI does not
+		prove this; on-device behaviour is a DEVICE GATE.
+	-->
+	<key>com.apple.developer.default-data-protection</key>
+	<string>NSFileProtectionComplete</string>
+
+	<!--
+		DELIBERATELY ABSENT ENTITLEMENTS
+
+		com.apple.developer.applesignin
+			`signInWithApple()` (src/lib/supabase.ts) calls
+			`startOAuth('apple')`, the same Supabase web OAuth path as Google:
+			the system browser opens the provider and returns through
+			gomsinlog://auth/callback. Nothing calls
+			ASAuthorizationAppleIDProvider, so the entitlement is not required,
+			and claiming it would make signing fail on any profile that has not
+			enabled the capability. If a future version adopts the native
+			Sign in with Apple sheet, add the capability AND this entitlement
+			together.
+
+		keychain-access-groups
+			The app never touches the Keychain. See the Keychain section of
+			docs/kiro/NATIVE_RELEASE_GUIDE.md. Declaring a shared access group
+			would create a way for another bundle to read whatever ended up
+			there.
+
+		com.apple.developer.associated-domains
+			Deep linking uses the custom `gomsinlog` scheme, not Universal
+			Links, so there is no domain to associate and no
+			apple-app-site-association file to host.
+
+		com.apple.developer.icloud-container-identifiers / ubiquity-*
+			No iCloud storage. Sync is Supabase only.
+
+		aps-environment
+			No push notifications in v1.
+	-->
+</dict>
+</plist>

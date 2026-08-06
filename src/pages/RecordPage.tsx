@@ -1,15 +1,28 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
-import { useStore } from '@/lib/store';
+import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
+import { useEscapeKey } from '@/lib/hooks';
+import { scrollBehavior } from '@/lib/motion';
+import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
+import { recordAuthorPresentation } from '@/lib/recordAuthor';
+import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
+import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
+import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
-  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar
+  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar,
+  Pencil, Trash2,
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
+import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
 import { toast } from 'sonner';
-import type { DailyRecord } from '@/types';
+import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { serverErrorMessage } from '@/lib/serverErrors';
+import { AttachmentMedia } from '@/components/AttachmentMedia';
+import type { DailyRecord, ServerErrorKind } from '@/types';
 
 type MediaFilter = 'all' | 'photo' | 'video' | 'voice' | 'text';
 
@@ -62,28 +75,142 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 
 export function RecordPage() {
   const navigate = useNavigate();
-  const { state, setHighlightedRecordId } = useStore();
+  const [searchParams] = useSearchParams();
+  const {
+    state,
+    setHighlightedRecordId,
+    updateRecord,
+    deleteRecord,
+    updateRecordMedia,
+    sharedSyncStatus,
+  } = useStore();
+  const isOnline = useOnlineStatus();
+  const isOffline = !isOnline;
   const { records, profile } = state;
   const today = localToday();
   const todayStr = toLocalDateString(today);
+  const tripPeriod = useMemo(() => parseTripPeriodParams(searchParams), [searchParams]);
+  const hasTripPeriodQuery = searchParams.has('trip') || searchParams.has('from') || searchParams.has('to');
+  const periodTrip = tripPeriod
+    ? state.trips.find((trip) => trip.id === tripPeriod.tripId) || null
+    : null;
 
   // Calendar state
   const [showCalendar, setShowCalendar] = useState(false);
-  const [viewYear, setViewYear] = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [viewYear, setViewYear] = useState(() => Number((tripPeriod?.from || todayStr).slice(0, 4)));
+  const [viewMonth, setViewMonth] = useState(() => Number((tripPeriod?.from || todayStr).slice(5, 7)) - 1);
+  const [selectedDate, setSelectedDate] = useState(tripPeriod?.from || todayStr);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
-  const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
+  // Hold the id, not a snapshot: the modal must re-read the record from the
+  // store after an edit, otherwise it keeps showing pre-save content.
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isMediaBusy, setIsMediaBusy] = useState(false);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  // Compute visible records (own records + partner's non-private records)
+  const closeSelectedRecord = useCallback(() => {
+    setSelectedRecordId(null);
+    setIsEditing(false);
+    setEditText('');
+    setShowDeleteConfirm(false);
+  }, []);
+  useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
+
+  // Own records + the partner's shared ones, with author-only fragments removed.
+  // Uses the shared privacy helper so the rule lives in exactly one place.
   const visibleRecords = useMemo(() => {
-    return records.filter((r) => {
-      const isOwn = r.authorRole === profile.role;
-      if (!isOwn && r.isPrivate) return false;
+    const permitted = visibleRecordsForViewer(records, { userId: profile.id, role: profile.role });
+    return tripPeriod
+      ? recordsInInclusiveRange(permitted, tripPeriod.from, tripPeriod.to)
+      : permitted;
+  }, [records, profile.id, profile.role, tripPeriod]);
+
+  // Always the store's current version of the open record, already sanitised for
+  // this viewer by `visibleRecordsForViewer`.
+  const selectedRecord = useMemo(
+    () => visibleRecords.find((r) => r.id === selectedRecordId) ?? null,
+    [visibleRecords, selectedRecordId],
+  );
+
+  // The record went away (deleted here, or revoked by its author): close up.
+  useEffect(() => {
+    if (selectedRecordId !== null && selectedRecord === null) closeSelectedRecord();
+  }, [selectedRecordId, selectedRecord, closeSelectedRecord]);
+
+  /**
+   * Media may only be edited on a record this viewer owns. The partner's records
+   * are read-only here for the same reason their 수정/삭제 controls are hidden.
+   */
+  const canEditMedia = !!selectedRecord
+    && isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role });
+
+  const handleAddAttachments = useCallback(async (files: File[]) => {
+    if (!selectedRecord || files.length === 0) return;
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+    // Validate against the same allowlist and size ceilings the create path uses,
+    // before anything is uploaded.
+    const rejected: string[] = [];
+    const accepted = files.filter((file) => {
+      const classified = classifyMediaFile(file);
+      if ('error' in classified) {
+        rejected.push(`${file.name}: ${classified.error}`);
+        return false;
+      }
       return true;
     });
-  }, [records, profile.role]);
+    rejected.forEach((message) => toast.error(message));
+    if (accepted.length === 0) return;
+
+    setIsMediaBusy(true);
+    try {
+      const result = await updateRecordMedia(selectedRecord.id, { addFiles: accepted });
+      if (!result.ok) {
+        toast.error(result.error || '첨부를 추가하지 못했어요.');
+        return;
+      }
+      if (result.failedFiles.length > 0) {
+        toast.warning(`첨부 ${result.failedFiles.length}개를 올리지 못했어요.`);
+        return;
+      }
+      toast.success('첨부를 추가했어요.');
+    } finally {
+      setIsMediaBusy(false);
+    }
+  }, [isOffline, selectedRecord, updateRecordMedia]);
+
+  const handleRemoveAttachment = useCallback(async (path: string) => {
+    if (!selectedRecord) return;
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+    setIsMediaBusy(true);
+    try {
+      const result = await updateRecordMedia(selectedRecord.id, { removePaths: [path] });
+      if (!result.ok) {
+        toast.error(result.error || '첨부를 삭제하지 못했어요.');
+        return;
+      }
+      toast.success('첨부를 삭제했어요.');
+    } finally {
+      setIsMediaBusy(false);
+    }
+  }, [isOffline, selectedRecord, updateRecordMedia]);
+
+  useEffect(() => {
+    if (!tripPeriod) return;
+    setSelectedDate(tripPeriod.from);
+    setViewYear(Number(tripPeriod.from.slice(0, 4)));
+    setViewMonth(Number(tripPeriod.from.slice(5, 7)) - 1);
+    setMediaFilter('all');
+  }, [tripPeriod]);
 
   // Map of dateStr -> visible records for that date
   const recordsByDate = useMemo(() => {
@@ -119,6 +246,30 @@ export function RecordPage() {
   }, [recordsByDate, selectedDate, mediaFilter]);
 
   // Stats for selected day
+  /**
+   * Records the period summary aggregates.
+   *
+   * Already viewer-filtered by `visibleRecords`, so the summary can never include
+   * a partner's private record or an author-only emotion item. In trip-period mode
+   * `visibleRecords` is already narrowed to the range; otherwise the visible month
+   * is the natural period.
+   */
+  const periodSummaryRecords = useMemo(
+    () => tripPeriod
+      ? visibleRecords
+      : visibleRecords.filter((record) => {
+          const [year, month] = record.date.split('-');
+          return Number(year) === viewYear && Number(month) === viewMonth + 1;
+        }),
+    [tripPeriod, visibleRecords, viewYear, viewMonth],
+  );
+
+  const periodSummaryLabel = tripPeriod
+    ? periodTrip
+      ? `${periodTrip.title} 여행 기간`
+      : '여행 기간'
+    : `${viewYear}년 ${viewMonth + 1}월`;
+
   const selectedDayAllRecords = useMemo(
     () => recordsByDate[selectedDate] || [],
     [recordsByDate, selectedDate]
@@ -165,7 +316,7 @@ export function RecordPage() {
     setMediaFilter('all');
     setShowCalendar(false);
     setTimeout(() => {
-      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      timelineRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     }, 100);
   };
 
@@ -175,9 +326,47 @@ export function RecordPage() {
     setHighlightedRecordId(recordId);
     const el = document.getElementById(`record-${recordId}`);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
     }
   };
+
+  /**
+   * Arriving with a record already chosen: open ITS date, then scroll to it.
+   *
+   * README section 1 promises that tapping a summary item scrolls to the original
+   * record and emphasises it for 1~2 seconds. Inside this page that worked
+   * (`handleSummaryItemClick`). Arriving from the home screen did not: a widget set
+   * `highlightedRecordId` and navigated, this page opened on TODAY, and the only
+   * thing that read the id was the effect below -- which CLEARS it two seconds
+   * later. `추억 다시보기` was the worst case: it targets a record from a past year,
+   * which is not even rendered on today's timeline, so the tap silently did
+   * nothing.
+   *
+   * Runs twice by design when the date has to change: the first pass switches the
+   * date, the second finds the element now that the timeline for that date is
+   * mounted.
+   */
+  useEffect(() => {
+    const targetId = state.highlightedRecordId;
+    if (!targetId) return;
+    const target = state.records.find((record) => record.id === targetId);
+    // An id with no record on screen: a private record of the partner's, or one
+    // deleted since. Nothing to scroll to, and nothing to invent.
+    if (!target) return;
+    if (target.date !== selectedDate) {
+      setSelectedDate(target.date);
+      setMediaFilter('all');
+      setShowCalendar(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      document.getElementById(`record-${targetId}`)?.scrollIntoView({
+        behavior: scrollBehavior(),
+        block: 'center',
+      });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [state.highlightedRecordId, state.records, selectedDate]);
 
   // Auto-clear highlight
   useEffect(() => {
@@ -205,6 +394,21 @@ export function RecordPage() {
 
   const partnerDisplayName = profile.couple.partnerName || '상대방';
 
+  /**
+   * Attribution for the open record, so the detail modal names the author with
+   * the same three channels the timeline card uses.
+   */
+  const selectedAuthor = useMemo(
+    () => (selectedRecord
+      ? recordAuthorPresentation(
+        selectedRecord,
+        { userId: profile.id, role: profile.role },
+        partnerDisplayName,
+      )
+      : null),
+    [selectedRecord, profile.id, profile.role, partnerDisplayName],
+  );
+
   // Check if selected month has any records at all
   const monthHasRecords = useMemo(() => {
     return calendarCells.some((cell) => {
@@ -225,7 +429,7 @@ export function RecordPage() {
             className={cn(
               'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
               showCalendar
-                ? 'bg-coral text-white shadow-sm'
+                ? 'bg-coral text-coral-foreground shadow-sm'
                 : 'bg-card border border-border text-foreground hover:bg-muted'
             )}
             aria-label="달력 보기"
@@ -233,6 +437,28 @@ export function RecordPage() {
             <Calendar size={20} />
           </button>
         </div>
+
+        {tripPeriod ? (
+          <div className="mb-4 rounded-2xl border border-coral/30 bg-coral/10 p-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-foreground">
+                {periodTrip ? `${periodTrip.title} 여행 기간` : '여행 기간 기록'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {formatLocalDate(tripPeriod.from)} ~ {formatLocalDate(tripPeriod.to)} · 이 기간의 기록만 표시해요.
+              </p>
+              {!periodTrip && (
+                <p className="text-[11px] text-amber-700 mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
+              )}
+            </div>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-xs font-bold text-coral underline">기간 보기 해제</button>
+          </div>
+        ) : hasTripPeriodQuery ? (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-amber-800">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-xs font-bold text-amber-800 underline">지우기</button>
+          </div>
+        ) : null}
 
         {/* Collapsible Calendar Grid */}
         {showCalendar && (
@@ -304,17 +530,21 @@ export function RecordPage() {
               if (isSelected) ariaLabel += ', 선택됨';
               if (isTodayCell) ariaLabel += ', 오늘';
 
+              const isOutsideTripPeriod = Boolean(
+                tripPeriod && (dateStr < tripPeriod.from || dateStr > tripPeriod.to),
+              );
+
               return (
                 <button
                   key={idx}
-                  onClick={() => cell.inMonth && handleDateSelect(dateStr)}
-                  disabled={!cell.inMonth}
+                  onClick={() => cell.inMonth && !isOutsideTripPeriod && handleDateSelect(dateStr)}
+                  disabled={!cell.inMonth || isOutsideTripPeriod}
                   aria-label={ariaLabel}
                   className={cn(
                     'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
-                    !cell.inMonth && 'opacity-0 pointer-events-none',
+                    (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
-                    isSelected && 'bg-coral text-white',
+                    isSelected && 'bg-coral text-coral-foreground',
                     !isSelected && isTodayCell && 'ring-2 ring-coral/50 ring-inset rounded-lg',
                   )}
                 >
@@ -325,7 +555,7 @@ export function RecordPage() {
                       cell.inMonth && !isSelected && isFuture && 'text-muted-foreground/50',
                       cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-red-400',
                       cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-blue-400',
-                      isSelected && 'text-white',
+                      isSelected && 'text-coral-foreground',
                     )}
                   >
                     {cell.date.getDate()}
@@ -336,18 +566,18 @@ export function RecordPage() {
                     <div className="flex items-center gap-[3px] mt-0.5 h-[6px]" aria-hidden="true">
                       <span className={cn(
                         'w-[5px] h-[5px] rounded-full',
-                        isSelected ? 'bg-white/80' : 'bg-coral'
+                        isSelected ? 'bg-coral-foreground/80' : 'bg-coral'
                       )} />
                       {hasMedia && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-white/60' : 'bg-coral/50'
+                          isSelected ? 'bg-coral-foreground/60' : 'bg-coral/50'
                         )} />
                       )}
                       {recordCount >= 4 && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-white/40' : 'bg-coral/30'
+                          isSelected ? 'bg-coral-foreground/40' : 'bg-coral/30'
                         )} />
                       )}
                     </div>
@@ -370,6 +600,21 @@ export function RecordPage() {
         )}
           </div>
         )}
+
+        {/* Aggregated emotion flow for the period on screen. Purely derived from
+            the already-loaded, already-sanitised visible records, so a record edit
+            or delete changes it on the next render with nothing to invalidate. */}
+        <EmotionFlowSummarySection
+          records={periodSummaryRecords}
+          periodLabel={periodSummaryLabel}
+          // `unavailable` means the shared workspace is hidden pending an
+          // authoritative membership re-check, so `periodSummaryRecords` is empty
+          // for a reason that is NOT "no emotions". Reporting an empty period here
+          // contradicted the SharedSyncBanner immediately above. `delayed` is
+          // different: the data on screen is real, only possibly stale.
+          isLoading={sharedSyncStatus === 'unavailable'}
+          className="mb-3"
+        />
 
         {/* Selected Day Summary Bar */}
         <div ref={timelineRef} className="mb-3">
@@ -403,21 +648,21 @@ export function RecordPage() {
         {/* Day Summary Card (only if 2+ shared records) */}
         {selectedDaySummary.items.length > 0 && (
           <div className="mb-4 rounded-2xl bg-lilac/30 border border-lilac/50 p-3 space-y-1.5">
-            <div className="flex items-center justify-between text-xs font-bold text-navy mb-0.5">
+            <div className="flex items-center justify-between text-xs font-bold text-foreground mb-0.5">
               <div className="flex items-center gap-1.5">
                 <Sparkles size={13} className="text-coral" />
                 <span>{isToday ? '오늘의 빠른 정리' : '그날의 빠른 정리'}</span>
               </div>
-              <span className="text-[10px] text-navy/50 font-normal">눌러서 원문 이동</span>
+              <span className="text-[10px] text-foreground/50 font-normal">눌러서 원문 이동</span>
             </div>
             {selectedDaySummary.items.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                className="w-full text-left p-2 rounded-xl bg-white/60 hover:bg-white transition flex items-center justify-between text-xs font-medium text-navy group active:scale-[0.99]"
+                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-xs font-medium text-foreground group active:scale-[0.99]"
               >
                 <span className="leading-snug flex-1 pr-2">• {item.text}</span>
-                <ChevronRight size={13} className="text-navy/30 group-hover:text-navy shrink-0" />
+                <ChevronRight size={13} className="text-foreground/30 group-hover:text-foreground shrink-0" />
               </button>
             ))}
           </div>
@@ -433,7 +678,7 @@ export function RecordPage() {
                 className={cn(
                   'px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition min-h-[32px]',
                   mediaFilter === f.key
-                    ? 'bg-navy text-white'
+                    ? 'bg-navy text-primary-foreground'
                     : 'bg-muted/60 text-muted-foreground hover:bg-muted'
                 )}
               >
@@ -461,63 +706,114 @@ export function RecordPage() {
             </div>
           ) : (
             selectedDayRecords.map((r) => {
-              const isOwn = r.authorRole === profile.role;
+              const author = recordAuthorPresentation(
+                r,
+                { userId: profile.id, role: profile.role },
+                partnerDisplayName,
+              );
               const isHighlighted = state.highlightedRecordId === r.id;
 
               return (
                 <div
                   id={`record-${r.id}`}
                   key={r.id}
-                  onClick={() => setSelectedRecord(r)}
+                  data-author-role={author.role ?? 'unknown'}
+                  data-author-own={author.isOwn ? 'true' : 'false'}
                   className={cn(
-                    'rounded-2xl bg-card border p-4 shadow-sm space-y-2 cursor-pointer active:scale-[0.98] transition-all duration-500',
+                    // `relative` and `overflow-hidden` carry the author stripe below.
+                    // `max-w-[94%]` plus ml-auto/mr-auto is the ownership channel.
+                    'relative overflow-hidden rounded-2xl bg-card border p-4 pl-5 shadow-sm space-y-2 transition-all duration-500 max-w-[94%]',
+                    author.alignClass,
                     isHighlighted
-                      ? 'border-coral ring-4 ring-coral/30 bg-coral/5 scale-[1.01]'
+                      ? 'border-coral ring-4 ring-coral/30 scale-[1.01]'
                       : 'border-border/60'
                   )}
                 >
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-foreground">{r.time}</span>
-                      <span className="text-muted-foreground/70">{isOwn ? '나' : partnerDisplayName}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {r.reaction && (
-                        <span className="px-2 py-0.5 rounded-full bg-coral/10 text-coral font-medium text-[11px]">
-                          {REACTION_LABELS[r.reaction] || r.reaction}
-                        </span>
-                      )}
-                      {r.isPrivate ? (
-                        <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-[11px]">
-                          <Lock size={10} /> 나에게만
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground/50 text-[11px]">
-                          <Unlock size={10} className="inline" />
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  {/*
+                    Author hue as geometry the highlight cannot collide with.
+                    `isHighlighted` paints a coral ring around the WHOLE card, so
+                    the author accent is a left edge stripe instead: different
+                    shape, so a highlighted 군화 card still reads as 군화.
+                  */}
+                  <span
+                    aria-hidden="true"
+                    className={cn('absolute left-0 top-0 bottom-0 w-1.5', author.stripeClass)}
+                  />
+                  {/*
+                    The opener is a real <button>, and it covers the text of the
+                    card rather than the whole card, for two reasons that point the
+                    same way.
 
-                  {r.log && (
-                    <p className="text-sm text-foreground leading-relaxed">{r.log}</p>
-                  )}
+                    Keyboard: as a `<div onClick>` the card was in no tab order and
+                    answered no key, so the 기록 screen could not be read without a
+                    pointer at all.
+
+                    Nesting: an attachment renders `<video controls>` /
+                    `<audio controls>`. A button may not contain a control, and a
+                    card-level handler also caught every tap aimed at a play button
+                    and opened the modal over the clip the user had just started.
+                    So the words open the record and the media plays in place.
+                  */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRecordId(r.id)}
+                    aria-label={`${author.srAttribution} 자세히 보기`}
+                    className="w-full text-left space-y-2 rounded-xl active:scale-[0.98] transition-transform cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-foreground">{r.time}</span>
+                        {/*
+                          The chip is hidden from assistive tech and replaced by a
+                          sentence, not duplicated: read aloud, `🌸 곰신 · 춘향`
+                          becomes "cherry blossom 곰신 middle dot 춘향". The emoji and
+                          the separator are sighted-reader shorthand, so the screen
+                          reader gets the same fact as prose instead.
+                        */}
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            'px-2 py-0.5 rounded-full font-semibold text-[11px] whitespace-nowrap',
+                            author.chipClass,
+                          )}
+                        >
+                          {author.attribution}
+                        </span>
+                        <span className="sr-only">{author.srAttribution}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {r.reaction && (
+                          <span className="px-2 py-0.5 rounded-full bg-coral/10 text-coral font-medium text-[11px]">
+                            {REACTION_LABELS[r.reaction] || r.reaction}
+                          </span>
+                        )}
+                        {r.isPrivate ? (
+                          <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-[11px]">
+                            <Lock size={10} /> 나에게만
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/50 text-[11px]">
+                            <Unlock size={10} className="inline" />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {r.log && (
+                      <p className="text-sm text-foreground leading-relaxed">{r.log}</p>
+                    )}
+                  </button>
 
                   {r.attachments && r.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       {r.attachments.map((att, i) => (
-                        <div key={i} className="rounded-xl overflow-hidden bg-muted border border-border">
-                          {att.type === 'photo' && att.url ? (
-                            <img src={att.url} alt={att.name} className="w-full h-36 object-cover rounded-xl" />
-                          ) : (
-                            <div className="p-3 text-xs flex items-center gap-2 font-medium">
-                              {att.type === 'photo' && <ImageIcon size={16} className="text-coral" />}
-                              {att.type === 'video' && <Film size={16} className="text-blue-500" />}
-                              {att.type === 'voice' && <Mic size={16} className="text-purple-500" />}
-                              <span>{att.name}</span>
-                            </div>
-                          )}
-                        </div>
+                        <AttachmentMedia
+                          key={i}
+                          attachment={att}
+                          coupleId={state.profile.couple.coupleId}
+                          recordId={r.id}
+                          variant="timeline"
+                        />
                       ))}
                     </div>
                   )}
@@ -531,29 +827,101 @@ export function RecordPage() {
       <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
         <button
           onClick={() => navigate('/home')}
-          className="w-full py-3.5 rounded-full bg-coral text-white font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-white/20 backdrop-blur-xs"
+          className="w-full py-3.5 rounded-full bg-coral text-coral-foreground font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-foreground/20 backdrop-blur-xs"
         >
           <span className="text-lg">+</span>
           <span>지금의 마음 남기기</span>
         </button>
       </div>
 
-      {/* Detail Modal */}
+      {/*
+        Detail Modal.
+
+        z-[60], not z-50: MobileShell's tab bar is `fixed bottom-0 ... z-50` and
+        comes AFTER <main> in the DOM, so at an equal z-index it paints over a
+        bottom-anchored sheet and swallows the taps aimed at the owner-only
+        수정 / 삭제 buttons. SchedulePage's event modal already sits at z-[60].
+      */}
       {selectedRecord && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-gray-900">
-                {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
-              </h3>
+              <div className="min-w-0">
+                <h3 id="record-detail-modal-title" className="text-lg font-bold text-card-foreground">
+                  {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
+                </h3>
+                {/*
+                  The modal used to name only the date and time. Opening a card
+                  from a day both people wrote on therefore lost the one thing the
+                  timeline had just established: whose entry this is.
+                */}
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'mt-1 inline-block px-2 py-0.5 rounded-full font-semibold text-[11px]',
+                    selectedAuthor?.chipClass,
+                  )}
+                >
+                  {selectedAuthor?.attribution}
+                </span>
+                {/*
+                  Same split as the timeline chip: the emoji shorthand is for the
+                  eye, the sentence is for the screen reader. The modal is labelled
+                  by the date heading, so this sits inside it as extra prose rather
+                  than replacing the accessible name.
+                */}
+                <span className="sr-only">{selectedAuthor?.srAttribution}</span>
+              </div>
               <button
-                onClick={() => setSelectedRecord(null)}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 min-w-[44px] min-h-[44px]"
+                onClick={closeSelectedRecord}
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"
                 aria-label="닫기"
               >
                 ✕
               </button>
             </div>
+
+            {/* Delete confirmation */}
+            {showDeleteConfirm && (
+              <div className="mb-4 p-4 rounded-xl bg-destructive/10 border border-destructive/30 space-y-3">
+                <p className="text-sm font-bold text-destructive">이 기록을 삭제할까요?</p>
+                <p className="text-xs text-muted-foreground">삭제하면 되돌릴 수 없어요.</p>
+                {isOffline && (
+                  <p className="text-xs text-muted-foreground">{OFFLINE_READONLY_MESSAGE}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setIsSaving(true);
+                      try {
+                        const result = await deleteRecord(selectedRecord.id);
+                        if (result.ok) {
+                          toast.success('기록이 삭제되었어요.');
+                          closeSelectedRecord();
+                        } else {
+                          // The store always supplies a cause-specific message,
+                          // so there is no generic fallback to fall back to.
+                          toast.error(result.error);
+                        }
+                      } finally {
+                        setIsSaving(false);
+                        setShowDeleteConfirm(false);
+                      }
+                    }}
+                    disabled={isSaving || isOffline}
+                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-xs disabled:opacity-50"
+                  >
+                    {isSaving ? '삭제 중...' : '삭제'}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               {selectedRecord.reaction && (
@@ -562,11 +930,76 @@ export function RecordPage() {
                 </div>
               )}
 
-              <div className="bg-gray-50 p-4 rounded-xl">
-                <p className="text-gray-800 whitespace-pre-wrap text-sm leading-relaxed">
-                  {selectedRecord.log || '(내용 없음)'}
-                </p>
-              </div>
+              {isEditing ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    aria-label="기록 내용 수정"
+                    className="w-full h-32 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
+                    placeholder="기록 내용을 입력하세요"
+                  />
+                  {/* Say it before saving, not after: the confirmations were
+                      derived from the previous text, so they get cleared. */}
+                  {editText.trim() !== (selectedRecord.log ?? '').trim() && (
+                    <p className="text-xs text-muted-foreground">
+                      내용을 바꾸면 이전 글에서 고른 마음은 지워져요.
+                    </p>
+                  )}
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => {
+                        setIsEditing(false);
+                        setEditText('');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!editText.trim()) {
+                          toast.error('빈 내용은 저장할 수 없어요.');
+                          return;
+                        }
+                        setIsSaving(true);
+                        try {
+                          const textChanged = editText.trim() !== (selectedRecord.log || '').trim();
+                          const updates: Partial<DailyRecord> = { log: editText.trim() };
+                          // If text content changed, clear emotion analysis since
+                          // it was derived from the previous text.
+                          if (textChanged) {
+                            updates.emotionFlow = [];
+                            updates.emotionUpdatedAt = null;
+                          }
+                          const result = await updateRecord(selectedRecord.id, updates);
+                          if (result.ok) {
+                            toast.success('기록이 수정되었어요.');
+                            setIsEditing(false);
+                            setEditText('');
+                            // Deliberately keep the modal open: it now re-reads
+                            // the saved record from the store.
+                          } else {
+                            toast.error(result.error);
+                          }
+                        } finally {
+                          setIsSaving(false);
+                        }
+                      }}
+                      disabled={isSaving || !editText.trim() || isOffline}
+                      className="px-3 py-1.5 rounded-lg bg-coral text-coral-foreground font-bold text-xs disabled:opacity-50"
+                    >
+                      {isSaving ? '저장 중...' : '저장'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-muted p-4 rounded-xl">
+                  <p className="text-foreground whitespace-pre-wrap text-sm leading-relaxed">
+                    {selectedRecord.log || '(내용 없음)'}
+                  </p>
+                </div>
+              )}
 
               {selectedRecord.isPrivate && (
                 <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl font-medium">
@@ -574,23 +1007,112 @@ export function RecordPage() {
                 </div>
               )}
 
-              {selectedRecord.attachments && selectedRecord.attachments.length > 0 && (
+              {((selectedRecord.attachments && selectedRecord.attachments.length > 0) || canEditMedia) && (
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-gray-500">첨부 파일</h4>
-                  {selectedRecord.attachments.map((att, idx) => (
-                    <div key={idx} className="rounded-xl overflow-hidden bg-muted border border-border">
-                      {att.type === 'photo' && att.url ? (
-                        <img src={att.url} alt={att.name} className="w-full h-48 object-cover rounded-xl" />
-                      ) : (
-                        <div className="p-3 text-xs flex items-center gap-2 font-medium">
-                          {att.type === 'photo' && <ImageIcon size={16} className="text-coral" />}
-                          {att.type === 'video' && <Film size={16} className="text-blue-500" />}
-                          {att.type === 'voice' && <Mic size={16} className="text-purple-500" />}
-                          <span>{att.name}</span>
-                        </div>
+                  <h4 className="text-xs font-bold text-muted-foreground">첨부 파일</h4>
+                  {(selectedRecord.attachments || []).map((att, idx) => (
+                    <AttachmentMedia
+                      key={idx}
+                      attachment={att}
+                      coupleId={state.profile.couple.coupleId}
+                      recordId={selectedRecord.id}
+                      variant="detail"
+                      footer={
+                        /* Removal needs the durable storage path. A legacy
+                           attachment without one cannot be addressed in Storage,
+                           so no delete control is offered for it. */
+                        canEditMedia && att.path ? (
+                          <div className="flex justify-end px-3 pb-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveAttachment(att.path!)}
+                              disabled={isMediaBusy || isOffline}
+                              aria-label={`첨부 ${att.name} 삭제`}
+                              className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-xs disabled:opacity-50"
+                            >
+                              <Trash2 size={13} /> 첨부 삭제
+                            </button>
+                          </div>
+                        ) : undefined
+                      }
+                    />
+                  ))}
+
+                  {canEditMedia && (
+                    <div className="pt-1 space-y-2">
+                      <input
+                        ref={mediaInputRef}
+                        type="file"
+                        accept={MEDIA_ACCEPT}
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          const files = Array.from(event.target.files || []);
+                          event.target.value = '';
+                          void handleAddAttachments(files);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => mediaInputRef.current?.click()}
+                        disabled={isMediaBusy || isOffline}
+                        className="w-full min-h-[44px] rounded-xl border border-dashed border-border text-xs font-bold text-muted-foreground disabled:opacity-50"
+                      >
+                        {isMediaBusy ? '첨부 처리 중...' : '+ 사진 · 영상 · 음성 추가'}
+                      </button>
+                      {isOffline && (
+                        <p className="text-[11px] text-muted-foreground text-center">
+                          오프라인이라 지금은 읽기만 가능해요. 연결되면 다시 시도해 주세요.
+                        </p>
                       )}
                     </div>
-                  ))}
+                  )}
+                </div>
+              )}
+
+              {/* Derived on the fly from the record's confirmed emotions. The
+                  record here is already sanitised for this viewer, so a
+                  partner never sees author-only items in it. */}
+              <EmotionFlowInsightCard items={selectedRecord.emotionFlow} variant="detail" />
+
+              {/* Author-only: fix a wrong reading after the fact. Before this, a
+                  saved flow was permanent, which is the defect the product owner
+                  named as the app's biggest problem. */}
+              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
+                <div className="pt-2 border-t border-border">
+                  <RecordEmotionCorrection
+                    record={selectedRecord}
+                    disabled={isOffline}
+                    disabledReason={OFFLINE_READONLY_MESSAGE}
+                    onSave={async (emotionFlow) => {
+                      const result = await updateRecord(selectedRecord.id, {
+                        emotionFlow,
+                        emotionUpdatedAt: new Date().toISOString(),
+                      });
+                      return result.ok ? { ok: true } : { ok: false, error: result.error };
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Owner-only edit/delete controls. Partner records NEVER show these. */}
+              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
+                <div className="flex gap-2 pt-2 border-t border-border">
+                  <button
+                    onClick={() => {
+                      setEditText(selectedRecord.log || '');
+                      setIsEditing(true);
+                    }}
+                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-xs active:scale-95 transition"
+                  >
+                    <Pencil size={13} /> 수정
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-xs active:scale-95 transition"
+                  >
+                    <Trash2 size={13} /> 삭제
+                  </button>
                 </div>
               )}
             </div>

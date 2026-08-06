@@ -1,15 +1,74 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
-import { useStore } from '@/lib/store';
-import { authRepository, createCoupleInvitation, consumeCoupleInvitation, supabase } from '@/lib/supabase';
+import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import { useStore } from '@/lib/useStore';
+import {
+  authRepository,
+  createCoupleInvitation,
+  consumeCoupleInvitation,
+  fetchMyCoupleState,
+  regenerateCoupleInvitation,
+  saveCoupleAnniversary,
+  supabase,
+} from '@/lib/supabase';
+import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { classifyServerError } from '@/lib/serverErrors';
+
 import { toast } from 'sonner';
 import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { addMonths } from '@/lib/utils';
 
 export function OnboardingPage() {
-  const { state, updateProfile, setSetupComplete, startDemo: runStartDemo } = useStore();
-  const [step, setStep] = useState(state.onboardingStep || 0); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
+  const {
+    state,
+    updateProfile,
+    setSetupComplete,
+    startDemo: runStartDemo,
+    setOnboardingStep,
+    recoverExpiredSession,
+  } = useStore();
+  const onboardingIdentityKey = state.isDemoMode
+    ? `demo:${state.authenticatedUser?.id || ''}`
+    : `user:${state.authenticatedUser?.id || ''}`;
+  const identityRef = useRef(onboardingIdentityKey);
+  const identityGenerationRef = useRef(0);
+  const instanceActiveRef = useRef(true);
+  if (identityRef.current !== onboardingIdentityKey) {
+    identityRef.current = onboardingIdentityKey;
+    identityGenerationRef.current += 1;
+  }
+  const captureIdentity = useCallback(
+    () => ({ key: onboardingIdentityKey, generation: identityGenerationRef.current }),
+    [onboardingIdentityKey],
+  );
+  const isCurrentIdentity = useCallback(
+    (identity: { key: string; generation: number }) =>
+      instanceActiveRef.current
+      && identity.key === identityRef.current
+      && identity.generation === identityGenerationRef.current,
+    [],
+  );
+  /**
+   * Step 0 is the LANDING/SIGN-IN screen, so it is only correct for a visitor who
+   * has not signed in yet.
+   *
+   * A brand-new account arrives here already authenticated: `/auth/callback`
+   * exchanges the code, hydration finds no `profiles` row, `setupComplete` stays
+   * false and `App` renders this wizard. Opening at step 0 meant the first thing a
+   * user saw after signing in was "Google로 계속하기" again -- and because step 0
+   * has no "다음" and nothing ever wrote a non-zero `onboardingStep`, pressing it
+   * just repeated the same round trip. No new account could reach role selection.
+   *
+   * A stored step is still honoured, so a creator who was already shown an
+   * invitation code is not dropped back to the beginning.
+   */
+  const FIRST_WIZARD_STEP = 1;
+  const hasIdentity = !!state.authenticatedUser || state.isDemoMode;
+  const [step, setStep] = useState(() => {
+    const stored = state.onboardingStep || 0;
+    return stored === 0 && hasIdentity ? FIRST_WIZARD_STEP : stored;
+  }); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
 
   // Detect iOS environment for conditional Apple Login UI
   const isIOS = useMemo(() => {
@@ -29,14 +88,37 @@ export function OnboardingPage() {
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  /** ISO expiry of the code on screen, when the server told us one. */
+  const [inviteExpiresAt, setInviteExpiresAt] = useState<string | null>(null);
+  /**
+   * An owned couple space with a LIVE invitation, awaiting the user's decision.
+   *
+   * Non-null only between discovering that space and the user choosing whether to
+   * invalidate the code that may already be with their partner.
+   */
+  const [pendingSpaceRecovery, setPendingSpaceRecovery] = useState<
+    { coupleId: string; expiresAt: string | null } | null
+  >(null);
+  const [joinedPartnerName, setJoinedPartnerName] = useState('');
+  const [isFinishing, setIsFinishing] = useState(false);
   const [anniversary, setAnniversary] = useState('');
   const [skipAnniversary, setSkipAnniversary] = useState(false);
 
   // Military Info State (Soldier only)
   const [branch, setBranch] = useState<Branch>('army');
   const [militaryStatus, setMilitaryStatus] = useState<MilitaryStatus>('serving');
-  const [enlistmentDate, setEnlistmentDate] = useState('2025-03-10');
-  const [expectedDischargeDate, setExpectedDischargeDate] = useState('2026-09-09');
+  /**
+   * M-1: no invented service period, on this path either.
+   *
+   * These two fields used to open on the same fabricated `2025-03-10` /
+   * `2026-09-09` pair that `sync.ts` and `DEFAULT_STATE` were cleaned of. This
+   * step tells the user it is optional ("나중에 입력 가능"), so touching nothing
+   * is a supported path -- and it silently wrote those literals to
+   * `profiles.military_info` with a `'calculated'` provenance, which is the very
+   * claim M-1 exists to prevent. Empty until the user states a real date.
+   */
+  const [enlistmentDate, setEnlistmentDate] = useState('');
+  const [expectedDischargeDate, setExpectedDischargeDate] = useState('');
   const [dischargeDateSource, setDischargeDateSource] = useState<DischargeDateSource>('calculated');
 
   // Contact Hours State (Soldier only)
@@ -44,6 +126,50 @@ export function OnboardingPage() {
   const [weekdayEnd, setWeekdayEnd] = useState('21:00');
   const [weekendStart, setWeekendStart] = useState('12:00');
   const [weekendEnd, setWeekendEnd] = useState('21:00');
+
+  useLayoutEffect(() => {
+    instanceActiveRef.current = true;
+    return () => {
+      instanceActiveRef.current = false;
+      identityGenerationRef.current += 1;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    setCreatedCoupleId('');
+    setCreatedInviteCode('');
+    setJoinedPartnerName('');
+    setCopiedCode(false);
+    setIsGeneratingCode(false);
+    setIsVerifyingCode(false);
+    setIsFinishing(false);
+    setPendingSpaceRecovery(null);
+  }, [onboardingIdentityKey]);
+
+  /**
+   * Mirror the step into the store.
+   *
+   * `setOnboardingStep` existed, was exposed on the context and was read back at
+   * mount (`useState(state.onboardingStep || 0)`) -- but nothing ever CALLED it,
+   * so it was a dead write path and every navigation away from onboarding sent
+   * the user back to step 0, including a creator who had just been shown a code.
+   * Nothing about at-rest persistence changes here: authenticated browser storage
+   * stays a strict device-preference whitelist.
+   */
+  useEffect(() => {
+    setOnboardingStep(step);
+  }, [step, setOnboardingStep]);
+
+  /**
+   * Leave the landing screen the moment an identity exists.
+   *
+   * The initial state above cannot cover this on its own: the OAuth round trip and
+   * the demo switch both resolve AFTER this component has mounted, so a visitor who
+   * signs in while the landing screen is open would otherwise stay on it.
+   */
+  useEffect(() => {
+    if (hasIdentity) setStep((current) => (current === 0 ? FIRST_WIZARD_STEP : current));
+  }, [hasIdentity]);
 
   // Total steps based on role
   const totalSteps = role === 'gomsin' ? 4 : 6;
@@ -68,6 +194,139 @@ export function OnboardingPage() {
     runStartDemo();
   };
 
+  /**
+   * Recover into a couple space this account already owns.
+   *
+   * Reached when `create_couple_and_invitation` reports the caller is already in
+   * an active couple. Before this existed the screen dead-ended on that error
+   * message with no affordance of any kind, and the user could neither reach the
+   * space they owned nor create a new one.
+   *
+   * Regenerating is mandatory rather than optional: the server holds only a hash
+   * of the original code, so there is no way to display the old one.
+   */
+  /**
+   * Mint a fresh code for a space this account already owns.
+   *
+   * The server holds only a hash of the previous code, so this is the only
+   * possible way to obtain a usable one -- and it is why the caller has to be
+   * sure the previous code is expendable.
+   */
+  const regenerateForExistingSpace = useCallback(async (
+    identity: { key: string; generation: number },
+    coupleId: string,
+  ): Promise<{ ok: boolean; mintedCode: boolean }> => {
+    const regenerated = await regenerateCoupleInvitation();
+    if (!isCurrentIdentity(identity)) return { ok: false, mintedCode: false };
+    if (regenerated.error || !regenerated.code) {
+      toast.error(regenerated.error || '초대 코드를 새로 발급하지 못했어요.');
+      return { ok: false, mintedCode: false };
+    }
+
+    setCreatedCoupleId(coupleId);
+    setCreatedInviteCode(regenerated.code);
+    // A freshly minted code is valid for 24h. Re-read the authoritative expiry
+    // rather than computing one locally.
+    const refreshed = await fetchMyCoupleState();
+    if (!isCurrentIdentity(identity)) return { ok: true, mintedCode: true };
+    setInviteExpiresAt(
+      refreshed.ok && refreshed.state?.invitationActive
+        ? refreshed.state.invitationExpiresAt
+        : null,
+    );
+    toast.success('이미 만든 공간을 찾아 새 초대 코드를 발급했어요.');
+    return { ok: true, mintedCode: true };
+  }, [isCurrentIdentity]);
+
+  const recoverExistingCoupleSpace = useCallback(async (
+    identity: { key: string; generation: number },
+  ): Promise<{ ok: boolean; mintedCode: boolean }> => {
+    const lifecycleResult = await fetchMyCoupleState();
+    if (!isCurrentIdentity(identity)) return { ok: false, mintedCode: false };
+
+    if (!lifecycleResult.ok || !lifecycleResult.state?.coupleId) {
+      toast.error(
+        '이미 만들어진 커플 공간이 있는데 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',
+      );
+      return { ok: false, mintedCode: false };
+    }
+
+    const existing = lifecycleResult.state;
+    if (existing.partnerPresent) {
+      // Already connected: there is nothing to invite anyone to.
+      setCreatedCoupleId(existing.coupleId!);
+      setCreatedInviteCode('');
+      setInviteExpiresAt(null);
+      toast.success('이미 연결된 커플 공간을 찾았어요. 이어서 진행할게요.');
+      return { ok: true, mintedCode: false };
+    }
+
+    if (existing.invitationActive) {
+      /**
+       * There is a LIVE invitation, which means a code may already be in the
+       * partner's hands. Regenerating invalidates it (015 keeps at most one
+       * unused hash), and this path used to do that unconditionally with nothing
+       * but a success toast -- silently breaking a code the user had already
+       * sent. The banner path always warned; this one did not.
+       *
+       * So it asks. Not a modal: `modalStacking.test.ts` guards bottom-anchored
+       * overlays, and an inline block inside the step is both simpler and
+       * reachable by the same 다음 button flow.
+       */
+      setPendingSpaceRecovery({
+        coupleId: existing.coupleId!,
+        expiresAt: existing.invitationExpiresAt,
+      });
+      return { ok: false, mintedCode: false };
+    }
+
+    // No outstanding invitation, so nothing can be invalidated: mint without
+    // asking, exactly as before.
+    return regenerateForExistingSpace(identity, existing.coupleId!);
+  }, [isCurrentIdentity, regenerateForExistingSpace]);
+
+  /** The user accepted that the previously sent code stops working. */
+  const handleRegenerateExistingSpace = async () => {
+    const pending = pendingSpaceRecovery;
+    if (!pending || isGeneratingCode) return;
+    const identity = captureIdentity();
+    setIsGeneratingCode(true);
+    try {
+      const result = await regenerateForExistingSpace(identity, pending.coupleId);
+      if (!isCurrentIdentity(identity)) return;
+      if (result.ok) setPendingSpaceRecovery(null);
+    } finally {
+      if (isCurrentIdentity(identity)) setIsGeneratingCode(false);
+    }
+  };
+
+  /**
+   * The user keeps the code they already sent.
+   *
+   * The space is adopted so onboarding can finish against it; no code is shown,
+   * because this device does not have one and the server only holds a hash. The
+   * lifecycle banner offers regeneration later if the partner never arrives.
+   */
+  const handleKeepExistingCode = () => {
+    const pending = pendingSpaceRecovery;
+    if (!pending) return;
+    setCreatedCoupleId(pending.coupleId);
+    setCreatedInviteCode('');
+    setInviteExpiresAt(pending.expiresAt);
+    setPendingSpaceRecovery(null);
+    toast.success('이전에 보낸 초대 코드를 그대로 사용해요. 이어서 진행할게요.');
+  };
+
+  /**
+   * Whether 다음 can actually do anything from the current step.
+   *
+   * The button was always enabled, so on the nickname step it invited a tap and
+   * then answered with an error toast. `handleNext` keeps every one of its checks
+   * -- this only stops the affordance promising a step it is going to refuse,
+   * which is the same rule already applied to 저장 in the composer.
+   */
+  const canAdvanceFromStep = step === 2 ? nickname.trim().length >= 2 : true;
+
   const handleNext = async () => {
     // Auth Gate: Cannot advance from Step 0 without login or demo mode
     if (step === 0 && !state.authenticatedUser && !state.isDemoMode) {
@@ -82,37 +341,114 @@ export function OnboardingPage() {
 
     // Step 3: Couple Space Invitation Generation / Consumption
     if (step === 3) {
-      if (spaceMode === 'create') {
-        if (!createdInviteCode) {
-          setIsGeneratingCode(true);
+      if (isGeneratingCode || isVerifyingCode) return;
+      const identity = captureIdentity();
+      /**
+       * Did this invocation produce a code the user has not seen yet?
+       *
+       * If so we STAY on step 3. Previously the first tap generated the code and
+       * advanced in the same handler, so the code block, its copy button and the
+       * "give this to your partner" explanation were rendered and left behind
+       * within one frame -- the creator never actually saw the code they now had
+       * to deliver. A second tap continues.
+       */
+      let mintedCodeToShow = false;
+
+      if (spaceMode === 'create' && pendingSpaceRecovery) {
+        // A decision about the existing code is outstanding. Advancing would
+        // either lose the space or silently invalidate the code.
+        toast.error('이미 만든 공간의 초대 코드를 어떻게 할지 먼저 선택해 주세요.');
+        return;
+      }
+
+      // `createdCoupleId` without a code is a real state: the user chose to keep
+      // the code they already sent. Re-running creation there would raise
+      // "already in an active couple" all over again.
+      if (spaceMode === 'create' && !createdInviteCode && !createdCoupleId) {
+        setIsGeneratingCode(true);
+        try {
           const res = await createCoupleInvitation(role);
-          setIsGeneratingCode(false);
-          if (res.error) {
-            toast.error(res.error);
-            return;
+          if (!isCurrentIdentity(identity)) return;
+          if (res.error || !res.coupleId || !res.code) {
+            // `User already in an active couple` is not a dead end: the couple
+            // space exists and this account owns it. That happens whenever
+            // onboarding was abandoned after step 3, because the membership is
+            // written before the `profiles` row. Recover into the existing space
+            // and mint a fresh code -- the server stores only a hash, so the old
+            // plaintext is unrecoverable by any other means.
+            if (res.reason === 'already_in_couple') {
+              const recovery = await recoverExistingCoupleSpace(identity);
+              if (!isCurrentIdentity(identity)) return;
+              if (!recovery.ok) return;
+              mintedCodeToShow = recovery.mintedCode;
+            } else {
+              toast.error(res.error || '초대 코드를 생성하지 못했습니다.');
+              return;
+            }
+          } else {
+            setCreatedCoupleId(res.coupleId);
+            setCreatedInviteCode(res.code);
+            setInviteExpiresAt(null);
+            mintedCodeToShow = true;
+            toast.success('초대 코드가 생성되었습니다!');
           }
-          setCreatedCoupleId(res.coupleId);
-          setCreatedInviteCode(res.code);
-          toast.success('초대 코드가 생성되었습니다!');
+        } catch (error) {
+          if (!isCurrentIdentity(identity)) return;
+          console.error('[Onboarding] Invitation creation failed:', error);
+          toast.error('초대 코드를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          return;
+        } finally {
+          if (isCurrentIdentity(identity)) setIsGeneratingCode(false);
         }
       } else if (spaceMode === 'join') {
         const cleanCode = inviteCodeInput.trim();
-        if (cleanCode.length !== 6) {
-          toast.error('6자리 초대 코드를 입력해 주세요.');
+        if (!/^\d{6}$/.test(cleanCode)) {
+          toast.error('숫자 6자리 초대 코드를 입력해 주세요.');
           return;
         }
         setIsVerifyingCode(true);
-        const res = await consumeCoupleInvitation(cleanCode);
-        setIsVerifyingCode(false);
-        if (res.error) {
-          toast.error(res.error);
-          return;
-        }
-        if (res.coupleId) {
+        try {
+          const res = await consumeCoupleInvitation(cleanCode);
+          if (!isCurrentIdentity(identity)) return;
+          if (res.error || !res.coupleId) {
+            // The server can report that the SESSION, not the code, is the
+            // problem. Retrying the code cannot fix that, so hand the session to
+            // the store's recovery instead of only showing copy about it.
+            if (res.reason === 'auth_expired') void recoverExpiredSession();
+            toast.error(res.error || '커플 공간에 연결하지 못했습니다.');
+            return;
+          }
+
           setCreatedCoupleId(res.coupleId);
+          if (supabase) {
+            try {
+              const { data: partnerRows, error: partnerError } = await supabase.rpc('get_partner_profile');
+              if (!isCurrentIdentity(identity)) return;
+              if (partnerError) {
+                console.error('[Onboarding] Partner profile lookup failed:', partnerError);
+              } else if (partnerRows?.[0]?.display_name) {
+                setJoinedPartnerName(partnerRows[0].display_name);
+              }
+            } catch (error) {
+              if (!isCurrentIdentity(identity)) return;
+              console.error('[Onboarding] Partner profile lookup failed:', error);
+            }
+          }
+          if (!isCurrentIdentity(identity)) return;
           toast.success('커플 공간 연결 성공!');
+        } catch (error) {
+          if (!isCurrentIdentity(identity)) return;
+          console.error('[Onboarding] Invitation verification failed:', error);
+          toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          return;
+        } finally {
+          if (isCurrentIdentity(identity)) setIsVerifyingCode(false);
         }
       }
+
+      if (!isCurrentIdentity(identity)) return;
+      // Let the creator read and copy the code before moving on.
+      if (mintedCodeToShow) return;
     }
 
     // If Gomshin reaches Step 4 (Anniversary), skip Steps 5 & 6 and jump directly to Step 7 (Completion)!
@@ -177,59 +513,133 @@ export function OnboardingPage() {
   };
 
   const finishSetup = async () => {
+    if (isFinishing) return;
+    const identity = captureIdentity();
     const nowIso = new Date().toISOString();
-    const finalNickname = nickname || (role === 'gomsin' ? '춘향' : '몽룡');
+    const finalNickname = nickname.trim();
+    if (finalNickname.length < 2) {
+      toast.error('닉네임을 2자 이상 입력해 주세요.');
+      setStep(2);
+      return;
+    }
 
-    // Update Local/Global store state
-    updateProfile({
-      myName: finalNickname,
-      role,
-      onboardingCompletedAt: nowIso,
-      couple: {
-        coupleId: createdCoupleId || undefined,
-        partnerName: role === 'gomsin' ? '몽룡' : '춘향',
-        anniversaryDate: skipAnniversary ? undefined : (anniversary || '2024-02-14'),
-        coupleCode: createdInviteCode || inviteCodeInput || '123456',
-        connected: spaceMode === 'join',
-        status: spaceMode === 'join' ? 'active' : 'pending',
-      },
-      military: {
-        branch,
-        militaryStatus,
-        enlistmentDate: role === 'soldier' && militaryStatus !== 'unknown' ? enlistmentDate : undefined,
-        expectedDischargeDate: role === 'soldier' && militaryStatus !== 'unknown' ? expectedDischargeDate : undefined,
-        dischargeDateSource,
-        memo: '',
-      },
-      contact: {
-        weekdayStart,
-        weekdayEnd,
-        weekendStart,
-        weekendEnd,
-        enabled: true,
-      },
-    });
+    const anniversaryDate = skipAnniversary ? undefined : anniversary || undefined;
+    const statesServicePeriod = role === 'soldier' && militaryStatus !== 'unknown';
+    const statedEnlistment = statesServicePeriod ? enlistmentDate || undefined : undefined;
+    const statedDischarge = statesServicePeriod ? expectedDischargeDate || undefined : undefined;
+    const military = {
+      branch,
+      militaryStatus,
+      enlistmentDate: statedEnlistment,
+      expectedDischargeDate: statedDischarge,
+      // Provenance describes a derivation that actually happened. With no
+      // enlistment date there is nothing to derive from, so neither
+      // 'calculated' nor 'manual' is true of the absent value.
+      dischargeDateSource: statedEnlistment ? dischargeDateSource : 'unknown',
+      memo: '',
+    };
+    const contact = { weekdayStart, weekdayEnd, weekendStart, weekendEnd, enabled: true };
 
-    // If Supabase client & authenticated user present, upsert user profile to DB
-    if (supabase && state.authenticatedUser) {
-      try {
-        await supabase.from('profiles').upsert({
-          id: state.authenticatedUser.id,
+    setIsFinishing(true);
+    // Set when the shared anniversary row could not be written, so the success
+    // path can tell the truth instead of implying the partner will see it.
+    let anniversaryNotSaved = false;
+    try {
+      // Persist to the server FIRST. Previously the client marked onboarding as
+      // complete even when the write failed, so the next login sent the user
+      // straight back through onboarding.
+      if (supabase && state.authenticatedUser && !state.isDemoMode) {
+        const userId = state.authenticatedUser.id;
+        // Pre-flight: a pending deletion aborts every write below before the
+        // first one is issued, so onboarding cannot recreate a `profiles` row
+        // for an account whose data the server has already removed.
+        if (await serverCallBlockedByPendingDeletion()) return;
+        if (!isCurrentIdentity(identity)) return;
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: userId,
           display_name: finalNickname,
           role,
+          military_info: military,
           onboarding_completed_at: nowIso,
           updated_at: nowIso,
         });
-      } catch (e) {
-        console.error('[Onboarding] Profile DB save error:', e);
-      }
-    }
+        if (!isCurrentIdentity(identity)) return;
 
-    setSetupComplete(true);
+        if (profileError) {
+          console.error('[Onboarding] Profile save failed:', profileError);
+          // Classified from the real error: an RLS or session failure must not be
+          // reported as a connectivity problem.
+          toast.error(`프로필을 저장하지 못했어요. ${classifyServerError(profileError).message}`);
+          return;
+        }
+
+        const { error: contactError } = await supabase.from('contact_preferences').upsert({
+          user_id: userId,
+          weekday_start: weekdayStart,
+          weekday_end: weekdayEnd,
+          weekend_start: weekendStart,
+          weekend_end: weekendEnd,
+        });
+        if (!isCurrentIdentity(identity)) return;
+        if (contactError) {
+          // Non-blocking: contact hours are editable later from settings.
+          console.error('[Onboarding] Contact preferences save failed:', contactError);
+        }
+
+        if (createdCoupleId && anniversaryDate) {
+          const anniversarySaved = await saveCoupleAnniversary(createdCoupleId, anniversaryDate);
+          if (!isCurrentIdentity(identity)) return;
+          if (!anniversarySaved) {
+            console.error('[Onboarding] Anniversary save failed.');
+            // The anniversary lives on the SHARED `couples` row, so a failure here
+            // means the partner will never see it -- while the local mirror below
+            // would still show it to this user. Staying silent made the app report
+            // a success it had not achieved. Onboarding is not aborted (the date is
+            // editable from settings), but the user is told the truth.
+            anniversaryNotSaved = true;
+          }
+        }
+      }
+
+      if (!isCurrentIdentity(identity)) return;
+      // Only now mirror it into local state.
+      updateProfile({
+        myName: finalNickname,
+        role,
+        onboardingCompletedAt: nowIso,
+        couple: {
+          ...state.profile.couple,
+          coupleId: createdCoupleId || undefined,
+          // No invented partner name: it is filled in for real once the partner joins.
+          partnerName: joinedPartnerName || '',
+          anniversaryDate,
+          // Only the space creator holds a shareable code.
+          coupleCode: spaceMode === 'create' ? createdInviteCode : '',
+          connected: spaceMode === 'join',
+          status: spaceMode === 'join' ? 'active' : 'pending',
+        },
+        military,
+        contact,
+      });
+
+      if (!isCurrentIdentity(identity)) return;
+      if (anniversaryNotSaved) {
+        toast.warning(
+          '기념일을 두 사람의 공간에 저장하지 못했어요. 설정에서 다시 입력해 주세요.',
+        );
+      }
+      setSetupComplete(true);
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('[Onboarding] Final setup failed:', error);
+      toast.error(`설정을 완료하지 못했어요. ${classifyServerError(error).message}`);
+    } finally {
+      if (isCurrentIdentity(identity)) setIsFinishing(false);
+    }
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-[oklch(0.95_0.008_85)]">
+    <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
       <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
         
         {/* Step Header (Steps 1~6) */}
@@ -258,7 +668,7 @@ export function OnboardingPage() {
                 <p className="text-muted-foreground text-sm font-medium whitespace-pre-line leading-relaxed">
                   {"답장이 늦어도, 오늘의 순간은 놓치지 않도록."}
                 </p>
-                <p className="text-xs text-navy/70 font-normal">
+                <p className="text-xs text-foreground/70 font-normal">
                   군화와 곰신, 둘만의 하루를 사진과 짧은 기록으로 남겨요.
                 </p>
               </div>
@@ -276,7 +686,7 @@ export function OnboardingPage() {
 
                 <button
                   onClick={handleGoogleLogin}
-                  className="w-full h-13 py-3.5 rounded-2xl bg-white border border-border text-foreground font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
+                  className="w-full h-13 py-3.5 rounded-2xl bg-card border border-border text-foreground font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
                 >
                   <span>Google로 계속하기</span>
                 </button>
@@ -367,7 +777,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -401,7 +811,8 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                disabled={!canAdvanceFromStep}
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px] disabled:opacity-50"
               >
                 다음
               </button>
@@ -432,14 +843,67 @@ export function OnboardingPage() {
                     </div>
                   </button>
 
+                  {/* An owned space with a LIVE invitation. Regenerating would
+                      invalidate a code that may already be with the partner, so
+                      the choice belongs to the user, not to the recovery path. */}
+                  {spaceMode === 'create' && pendingSpaceRecovery && (
+                    <div
+                      data-testid="space-recovery-confirm"
+                      className="p-4 bg-card border border-coral/30 rounded-2xl space-y-3"
+                    >
+                      <p className="text-xs font-bold text-foreground">
+                        이미 만든 우리 공간이 있어요
+                      </p>
+                      <p className="text-[11px] leading-4 text-muted-foreground">
+                        아직 사용할 수 있는 초대 코드가 남아 있어요
+                        {pendingSpaceRecovery.expiresAt
+                          && invitationExpiryLabel(pendingSpaceRecovery.expiresAt)
+                          ? ` (${invitationExpiryLabel(pendingSpaceRecovery.expiresAt)})`
+                          : ''}
+                        . 보안을 위해 서버에는 코드가 저장되지 않아서 이 기기에서는 다시
+                        보여줄 수 없어요. 새 코드를 발급하면 이전에 보낸 코드는 사용할 수
+                        없게 돼요.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void handleRegenerateExistingSpace()}
+                        disabled={isGeneratingCode}
+                        className="w-full min-h-[44px] rounded-xl bg-coral px-4 text-xs font-bold text-coral-foreground disabled:opacity-50"
+                      >
+                        {isGeneratingCode ? '발급 중...' : '새 코드 발급하기'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleKeepExistingCode}
+                        disabled={isGeneratingCode}
+                        className="w-full min-h-[44px] rounded-xl border border-border px-4 text-xs font-bold text-foreground disabled:opacity-50"
+                      >
+                        이전에 보낸 코드 그대로 쓰기
+                      </button>
+                    </div>
+                  )}
+
                   {spaceMode === 'create' && createdInviteCode && (
                     <div className="p-4 bg-coral/10 border border-coral/30 rounded-2xl space-y-2">
-                      <div className="text-xs text-coral font-semibold">내 초대 코드 (24시간 유효)</div>
-                      <div className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-coral/20">
+                      <div className="text-xs text-coral font-semibold">
+                        내 초대 코드 (24시간 유효)
+                        {/* The authoritative expiry, when the server supplied one.
+                            "24시간 유효" alone told the user nothing about the
+                            actual deadline. */}
+                        {inviteExpiresAt && invitationExpiryLabel(inviteExpiresAt) && (
+                          <span className="ml-1 font-normal text-muted-foreground">
+                            · {invitationExpiryLabel(inviteExpiresAt)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between bg-card px-4 py-3 rounded-xl border border-coral/20">
                         <span className="font-mono text-2xl font-bold tracking-widest text-foreground">{createdInviteCode}</span>
                         <button
                           onClick={handleCopyCode}
-                          className="p-2 text-coral hover:bg-coral/10 rounded-lg transition"
+                          // Icon-only control: `title` alone is not an accessible
+                          // name on touch devices, where it never surfaces.
+                          aria-label="초대 코드 복사"
+                          className="min-h-[44px] min-w-[44px] flex items-center justify-center text-coral hover:bg-coral/10 rounded-lg transition"
                           title="코드 복사"
                         >
                           {copiedCode ? <Check size={20} /> : <Copy size={20} />}
@@ -465,15 +929,22 @@ export function OnboardingPage() {
                     </div>
                   </button>
 
+                  {/* The code-entry field is rendered ONLY in join mode. A creator
+                      must never be offered it: `redeem_invitation` rejects their
+                      own code as `self_invitation`, so showing the field can only
+                      produce a confusing failure. */}
                   {spaceMode === 'join' && (
                     <div className="pt-2 space-y-2">
                       <input
                         type="text"
                         value={inviteCodeInput}
-                        onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
+                        onChange={(e) => setInviteCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
                         maxLength={6}
-                        placeholder="6자리 초대 코드 입력 (예: 123456)"
-                        className="w-full h-12 px-4 rounded-xl bg-card border border-border font-mono text-center text-lg tracking-widest outline-none uppercase"
+                        placeholder="숫자 6자리 초대 코드"
+                        aria-label="숫자 6자리 초대 코드"
+                        className="w-full h-12 px-4 rounded-xl bg-card border border-border text-foreground font-mono text-center text-lg tracking-widest outline-none focus:ring-2 focus:ring-coral/40"
                       />
                     </div>
                   )}
@@ -483,11 +954,11 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={isGeneratingCode || isVerifyingCode}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <div className="w-5 h-5 border-2 border-coral-foreground border-t-transparent rounded-full animate-spin" />
                     <span>처리 중...</span>
                   </>
                 ) : (
@@ -532,7 +1003,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 {role === 'gomsin' ? '완료' : '다음'}
               </button>
@@ -624,7 +1095,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
               >
                 다음
               </button>
@@ -684,7 +1155,7 @@ export function OnboardingPage() {
               <div className="space-y-2">
                 <button
                   onClick={handleNext}
-                  className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[48px]"
+                  className="w-full py-4 rounded-2xl bg-coral text-coral-foreground font-bold text-base min-h-[48px]"
                 >
                   완료하기
                 </button>
@@ -717,9 +1188,14 @@ export function OnboardingPage() {
 
               <button
                 onClick={finishSetup}
-                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[52px] shadow-md"
+                disabled={isFinishing}
+                className="w-full py-4 rounded-2xl bg-coral text-white font-bold text-base min-h-[52px] shadow-md disabled:opacity-60"
               >
-                {role === 'gomsin' ? '오늘의 첫 순간 남기기' : '오늘의 로그 기다리기'}
+                {isFinishing
+                  ? '저장 중...'
+                  : role === 'gomsin'
+                    ? '오늘의 첫 순간 남기기'
+                    : '오늘의 로그 기다리기'}
               </button>
             </div>
           )}

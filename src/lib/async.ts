@@ -36,3 +36,15 @@ export const AUTH_SYNC_TIMEOUT_MS = 12_000;
 
 /** Milliseconds we are willing to wait for an OAuth code exchange to complete. */
 export const AUTH_CALLBACK_TIMEOUT_MS = 15_000;
+
+/**
+ * Milliseconds the callback page waits for the client's own `detectSessionInUrl`
+ * exchange before attempting one itself.
+ *
+ * A PKCE authorization code may be redeemed exactly once. `detectSessionInUrl:
+ * true` means the client is already redeeming the code in the callback URL, so a
+ * second, concurrent `exchangeCodeForSession` for the same code is guaranteed to
+ * lose with an `invalid_grant`-class error. Waiting here keeps the explicit
+ * exchange a strictly sequential fallback instead of a competitor.
+ */
+export const AUTH_CALLBACK_DETECT_GRACE_MS = 2_000;

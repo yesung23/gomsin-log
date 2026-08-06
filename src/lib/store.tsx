@@ -8,6 +8,8 @@ import {
   CoupleEvent,
   Attachment,
 } from '@/types';
+import { DEFAULT_LAYOUT_BY_ROLE } from '@/lib/widgets';
+import { clearAllComposerDrafts } from '@/lib/composerDraft';
 import {
   authRepository,
   supabase,
@@ -36,6 +38,19 @@ import {
 } from '@/lib/events';
 import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
 import { visibleRecordsForViewer } from '@/lib/privacy';
+import {
+  applyDeliveryOutcome,
+  countForAccount as countOutbox,
+  deliverableForAccount,
+  discardEntry as discardOutboxEntry,
+  enqueueRecord,
+  isRetryableReason,
+  pendingForAccount,
+  purgeAccount as purgeOutboxAccount,
+  unblockEntry,
+  type OutboxPersistence,
+} from '@/lib/outbox';
+import { createIndexedDbOutbox } from '@/lib/outboxStorage';
 import {
   saveRecordToDB,
   deleteRecordFromDB,
@@ -196,7 +211,10 @@ const DEFAULT_STATE: AppState = {
     role: 'gomsin',
     couple: {
       partnerName: '',
-      anniversaryDate: '2024-02-14',
+      // No invented anniversary, for the same reason the military block below
+      // carries none: a literal here produces a confident "+N일째" for a couple
+      // that has never stated a date. Unknown until they do.
+      anniversaryDate: undefined,
       coupleCode: '',
       connected: false,
       status: 'pending',
@@ -221,7 +239,8 @@ const DEFAULT_STATE: AppState = {
   records: [],
   events: [],
   trips: [],
-  widgetLayout: ['today_briefing', 'today_word', 'dday'],
+  widgetLayout: DEFAULT_LAYOUT_BY_ROLE.gomsin,
+  soldierWidgetLayout: DEFAULT_LAYOUT_BY_ROLE.soldier,
   hasSeenInstallPrompt: false,
   theme: 'light',
 };
@@ -230,9 +249,15 @@ const DEFAULT_STATE: AppState = {
  * Preferences that belong to the device rather than to the signed-in account.
  * These survive sign-out and account switches; everything else must not.
  */
-function carryOverDevicePrefs(prev: AppState): Pick<AppState, 'widgetLayout' | 'hasSeenInstallPrompt' | 'theme'> {
+function carryOverDevicePrefs(
+  prev: AppState,
+): Pick<AppState, 'widgetLayout' | 'soldierWidgetLayout' | 'hasSeenInstallPrompt' | 'theme'> {
   return {
     widgetLayout: prev.widgetLayout,
+    // Kept per role: the two people use one app on two devices with opposite
+    // home screens, and a single shared list meant whoever edited last
+    // overwrote the other's arrangement on role change.
+    soldierWidgetLayout: prev.soldierWidgetLayout,
     hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
     theme: prev.theme || 'light',
   };
@@ -400,6 +425,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const deletionStatusRef = useRef<DeletionStatus>({ kind: 'unknown' });
   /** Cancels every deferred sync timer owned by the realtime effect. */
   const cancelDeferredSyncRef = useRef<(() => void) | null>(null);
+
+  /**
+   * Persistence for writes the network refused. Null where IndexedDB does not
+   * exist, in which case nothing is ever reported as queued -- see `queueOrFail`.
+   */
+  const outboxRef = useRef<OutboxPersistence | null>(null);
+  if (outboxRef.current === null) outboxRef.current = createIndexedDbOutbox();
+  const [outboxCounts, setOutboxCounts] = useState<{ waiting: number; blocked: number }>(
+    { waiting: 0, blocked: 0 },
+  );
+  /** Single-flight: a flush triggered by `online` must not race one from visibility. */
+  const flushInFlightRef = useRef(false);
+  /**
+   * The flush, reachable from the realtime effect.
+   *
+   * A ref rather than a dependency: `flushOutbox` closes over `addRecordWithMedia`
+   * and is redefined on every render, so listing it would tear down and rebuild the
+   * realtime channel constantly.
+   */
+  const flushOutboxRef = useRef<(() => Promise<unknown>) | null>(null);
 
   const replaceStateImmediately = useCallback((nextState: AppState) => {
     stateRef.current = nextState;
@@ -752,6 +797,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             && stored.widgetLayout.every((item) => typeof item === 'string')
             ? stored.widgetLayout
             : DEFAULT_STATE.widgetLayout,
+          soldierWidgetLayout: Array.isArray(stored.soldierWidgetLayout)
+            && stored.soldierWidgetLayout.every((item: unknown) => typeof item === 'string')
+            ? stored.soldierWidgetLayout
+            : DEFAULT_STATE.soldierWidgetLayout,
           hasSeenInstallPrompt: typeof stored.hasSeenInstallPrompt === 'boolean'
             ? stored.hasSeenInstallPrompt
             : DEFAULT_STATE.hasSeenInstallPrompt,
@@ -1541,6 +1590,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
       void reconcileOwnMembership();
+      // A queued write waits for exactly this moment: the tab came back, or the
+      // connection did. Single-flighted inside `flushOutbox`, so the two listeners
+      // firing together cost one pass, not two.
+      void flushOutboxRef.current?.();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('online', handleVisibility);
@@ -1823,9 +1876,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addRecordWithMedia = async (
     record: Omit<DailyRecord, 'id' | 'createdAt'>,
     files: File[],
-  ): Promise<{ ok: boolean; failedFiles: string[]; error?: string }> => {
+    /**
+     * Internal, and deliberately absent from `StoreContextValue`.
+     *
+     * `recordId` lets a replay reuse the id the entry was queued under, so a write
+     * that reached the server but whose response was lost cannot insert the row a
+     * second time. `allowQueue: false` stops a replay from re-queueing itself into
+     * an endless cycle -- the outbox decides what happens to a failed entry, and it
+     * has the attempt count to do that with.
+     */
+    options?: { recordId?: string; allowQueue?: boolean },
+  ): Promise<{
+    ok: boolean;
+    failedFiles: string[];
+    error?: string;
+    queued?: boolean;
+    /**
+     * The classified cause, for the outbox to decide with. Absent on success and on
+     * the stale/no-workspace paths, which a retry cannot change either way, so the
+     * caller treats a missing reason as definitive.
+     */
+    reason?: RecordMutationReason;
+  }> => {
     const initial = stateRef.current;
-    const recordId = crypto.randomUUID();
+    const recordId = options?.recordId ?? crypto.randomUUID();
+    const allowQueue = options?.allowQueue !== false;
     const baseRecord: DailyRecord = {
       ...record,
       id: recordId,
@@ -1879,6 +1954,47 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // orphaned storage object.
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return staleResult;
 
+    /**
+     * Hand a refused write to the outbox instead of losing it.
+     *
+     * Only reachable before any row is written or any object uploaded, so a queued
+     * entry describes an intent with nothing half-done behind it. Returns
+     * `queued: true` so the composer can say the record is waiting rather than
+     * report a failure -- the difference between "저장 못 했어요" and "연결되면
+     * 보낼게요" is the whole point of this queue existing.
+     */
+    const queueOrFail = async (
+      reason: RecordMutationReason,
+    ): Promise<{
+      ok: boolean;
+      failedFiles: string[];
+      error?: string;
+      queued?: boolean;
+      reason?: RecordMutationReason;
+    }> => {
+      const message = recordFailureMessage(reason);
+      const persistence = outboxRef.current;
+      // Never claim a record is queued when it is not: no storage, a replay that
+      // must not re-queue, or a reason a later attempt cannot change.
+      if (!allowQueue || !persistence || !isRetryableReason(reason)) {
+        return { ok: false, failedFiles: files.map((file) => file.name), error: message, reason };
+      }
+      try {
+        await enqueueRecord(persistence, {
+          id: recordId,
+          userId: workspace.userId,
+          coupleId: workspace.coupleId,
+          record,
+          files,
+        });
+      } catch (error) {
+        console.error('[gomsinlog] Failed to queue record for later delivery:', error);
+        return { ok: false, failedFiles: files.map((file) => file.name), error: message, reason };
+      }
+      setOutboxCounts(await countOutbox(persistence, workspace.userId));
+      return { ok: false, queued: true, failedFiles: [], reason };
+    };
+
     try {
       const saved = await saveRecordToDB(
         newRecord,
@@ -1890,31 +2006,50 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // The cause travels all the way from PostgREST to the toast, so a `42501`
         // membership rejection can no longer be reported as a network problem.
         if (saved.reason === 'auth_expired') void handleAuthExpired();
-        return {
-          ok: false,
-          failedFiles: files.map((file) => file.name),
-          error: recordFailureMessage(saved.reason),
-        };
+        return queueOrFail(saved.reason);
       }
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
       console.error('[gomsinlog] Failed to save record:', error);
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
-      return {
-        ok: false,
-        failedFiles: files.map((file) => file.name),
-        error: recordFailureMessage(reason),
-      };
+      return queueOrFail(reason);
     }
 
     const attachments: Attachment[] = [...(newRecord.attachments || [])];
     const uploadedPaths: string[] = [];
     const failedFiles: string[] = [];
+
+    /**
+     * Abandon the upload loop, reclaiming what it already uploaded.
+     *
+     * Inside the loop the attachment patch has definitively NOT run yet, so no row
+     * references these objects and deleting them cannot break anything. Bailing out
+     * without this left them in Storage forever: the client only learns an object's
+     * path from local state, and the Storage DELETE policy needs an owned
+     * `daily_records` row in the ACTIVE couple, so once the workspace moved on
+     * nothing client-side could ever reach them again.
+     *
+     * Best-effort by necessity -- if the couple genuinely changed, that same policy
+     * will refuse this delete too, and only `delete-account` or an operator can
+     * reclaim them. It still recovers the common case, where "stale" is a local
+     * generation bump rather than a real membership change.
+     */
+    const abandonUploads = async (): Promise<typeof staleResult> => {
+      if (uploadedPaths.length > 0) {
+        try {
+          await removeRecordMedia(uploadedPaths);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+      return staleResult;
+    };
+
     for (const file of files) {
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
       const result = await uploadRecordMedia(file, workspace.coupleId, recordId);
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
       if ('error' in result) {
         failedFiles.push(file.name);
         console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
@@ -1932,6 +2067,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           workspace.coupleId,
           workspace.userId,
         );
+        // Deliberately NOT reclaiming uploads here: the patch has already been
+        // issued, so whether the row now references these objects is unknown.
+        // Deleting them could strip a successfully patched record's attachments,
+        // which is worse than leaving objects an operator can sweep.
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (!patched.ok) {
           try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
@@ -1971,6 +2110,141 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
       : staleResult;
   };
+
+  /**
+   * Queue a record without attempting the write.
+   *
+   * The composer calls this when `navigator.onLine === false`, which the OS is
+   * trusted about. Going through the failure path instead would mean firing a
+   * request that cannot succeed and depending on its error classification to reach
+   * the queue -- and the pre-flight deletion gate is itself a server call, so on a
+   * genuinely dead network the write could fail for a reason that is not
+   * `offline` and never be queued at all. Deterministic beats clever here.
+   */
+  const queueRecordForLater = async (
+    record: Omit<DailyRecord, 'id' | 'createdAt'>,
+    files: File[],
+  ): Promise<{ queued: boolean; error?: string }> => {
+    const persistence = outboxRef.current;
+    if (!persistence) {
+      return { queued: false, error: '이 브라우저에서는 기록을 임시 보관할 수 없어요.' };
+    }
+    const workspace = captureLinkedCouple();
+    // No local couple space means the id this record belongs to is unknown, and
+    // resolving it needs the network that is absent. Refusing is honest.
+    if (!workspace) {
+      return { queued: false, error: recordFailureMessage('workspace_unresolved') };
+    }
+    try {
+      await enqueueRecord(persistence, {
+        id: crypto.randomUUID(),
+        userId: workspace.userId,
+        coupleId: workspace.coupleId,
+        record,
+        files,
+      });
+    } catch (error) {
+      console.error('[gomsinlog] Failed to queue record for later delivery:', error);
+      return { queued: false, error: recordFailureMessage('unknown') };
+    }
+    setOutboxCounts(await countOutbox(persistence, workspace.userId));
+    return { queued: true };
+  };
+
+  /**
+   * Try to deliver everything queued for the signed-in account, oldest first.
+   *
+   * Replays through `addRecordWithMedia`, so every identity and membership guard in
+   * it applies again -- which is the correct behaviour, not a limitation: if the
+   * couple space changed while an entry waited, that write SHOULD be refused rather
+   * than forced through. `allowQueue: false` keeps a replay from re-queueing itself;
+   * the outbox decides what happens to a failure, using the attempt count.
+   *
+   * Sequential on purpose. The entries are one person's day and land in the order
+   * they were written; parallel delivery would reorder them for no gain on a
+   * connection that just came back.
+   */
+  const flushOutbox = async (): Promise<{ delivered: number; requeued: number; blocked: number }> => {
+    const persistence = outboxRef.current;
+    const identity = captureActiveIdentity();
+    const result = { delivered: 0, requeued: 0, blocked: 0 };
+    if (!persistence || !identity || flushInFlightRef.current) return result;
+    flushInFlightRef.current = true;
+    try {
+      const entries = await deliverableForAccount(persistence, identity.userId);
+      for (const entry of entries) {
+        // The account changed mid-flush: stop rather than write one person's queue
+        // into another's session.
+        if (!isCurrentIdentity(identity)) break;
+        const attempt = await addRecordWithMedia(entry.record, entry.files, {
+          recordId: entry.id,
+          allowQueue: false,
+        });
+        const disposition = await applyDeliveryOutcome(
+          persistence,
+          entry,
+          attempt.ok
+            ? { ok: true }
+            : { ok: false, reason: attempt.reason ?? 'unknown', message: attempt.error ?? '' },
+        );
+        if (disposition === 'delivered') result.delivered += 1;
+        else if (disposition === 'requeued') result.requeued += 1;
+        else result.blocked += 1;
+      }
+      setOutboxCounts(await countOutbox(persistence, identity.userId));
+    } catch (error) {
+      console.error('[gomsinlog] Outbox flush failed:', error);
+    } finally {
+      flushInFlightRef.current = false;
+    }
+    return result;
+  };
+
+  /** Clear the block on every stopped entry, so the next flush tries them again. */
+  const retryBlockedRecords = async (): Promise<number> => {
+    const persistence = outboxRef.current;
+    const identity = captureActiveIdentity();
+    if (!persistence || !identity) return 0;
+    const pending = await pendingForAccount(persistence, identity.userId);
+    const blocked = pending.filter((entry) => entry.blocked);
+    for (const entry of blocked) await unblockEntry(persistence, entry);
+    setOutboxCounts(await countOutbox(persistence, identity.userId));
+    await flushOutbox();
+    return blocked.length;
+  };
+
+  /** Throw away everything queued for this account, at the user's explicit request. */
+  const discardQueuedRecords = async (): Promise<number> => {
+    const persistence = outboxRef.current;
+    const identity = captureActiveIdentity();
+    if (!persistence || !identity) return 0;
+    const pending = await pendingForAccount(persistence, identity.userId);
+    for (const entry of pending) await discardOutboxEntry(persistence, entry.id);
+    setOutboxCounts({ waiting: 0, blocked: 0 });
+    return pending.length;
+  };
+
+  flushOutboxRef.current = flushOutbox;
+
+  /**
+   * Read the queue's size for whoever is signed in now.
+   *
+   * Runs on identity change, not once on mount: the counts are per account, and a
+   * sign-in must not inherit the previous account's numbers even for a render.
+   */
+  useEffect(() => {
+    const persistence = outboxRef.current;
+    const userId = state.authenticatedUser?.id;
+    if (!persistence || !userId) {
+      setOutboxCounts({ waiting: 0, blocked: 0 });
+      return;
+    }
+    let cancelled = false;
+    void countOutbox(persistence, userId).then((counts) => {
+      if (!cancelled) setOutboxCounts(counts);
+    }).catch(() => { /* an unreadable queue is reported as empty, never as an error toast */ });
+    return () => { cancelled = true; };
+  }, [state.authenticatedUser?.id]);
 
   const updateRecord = async (
     id: string,
@@ -2576,6 +2850,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     cachePurgedRef.current = true;
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
+    // Unsent composer text is held in memory, so it is not covered by removing the
+    // storage keys above. It must not outlive the session that produced it.
+    clearAllComposerDrafts();
+    // The outbox is NOT cleared here. This runs on sign-out as well as on account
+    // deletion, and the same person signing back in must still find the record they
+    // wrote on a train with no signal. Every read is filtered by `userId`, so
+    // another account on this device can neither see nor replay it. Account
+    // DELETION purges it explicitly -- see `deleteAccount`.
+    setOutboxCounts({ waiting: 0, blocked: 0 });
     const current = stateRef.current;
     const nextState: AppState = {
       ...DEFAULT_STATE,
@@ -2635,6 +2918,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // `deleted`: the Auth user is gone, which is the ONLY confirmation that
     // permits clearing the marker.
     if (!purgeLocalAccountData(identity)) return outcome;
+    // The queue is deliberately kept across sign-out, so deletion is the one place
+    // it must be removed: this account will never sign in again, and leaving its
+    // unsent records on the device would outlive the account they belong to.
+    if (outboxRef.current) {
+      try {
+        await purgeOutboxAccount(outboxRef.current, identity.userId);
+      } catch (error) {
+        console.error('[gomsinlog] Failed to purge the outbox after deletion:', error);
+      }
+    }
     setAccountDeletionRecovery(null);
     applyDeletionStatus({ kind: 'clear' });
     try {
@@ -2841,8 +3134,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, authenticatedUser: user }));
   };
 
-  const setWidgetLayout = (layout: string[]) => {
-    updateStateImmediately((prev) => ({ ...prev, widgetLayout: layout }));
+  const setWidgetLayout = (layout: string[], role: Role = 'gomsin') => {
+    updateStateImmediately((prev) => (role === 'soldier'
+      ? { ...prev, soldierWidgetLayout: layout }
+      : { ...prev, widgetLayout: layout }));
   };
 
   const setHasSeenInstallPrompt = (seen: boolean) => {
@@ -2886,6 +3181,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         updateProfile,
         addRecord,
         addRecordWithMedia,
+        queueRecordForLater,
+        flushOutbox,
+        retryBlockedRecords,
+        discardQueuedRecords,
+        outboxWaiting: outboxCounts.waiting,
+        outboxBlocked: outboxCounts.blocked,
         updateRecord,
         deleteRecord,
         updateRecordMedia,

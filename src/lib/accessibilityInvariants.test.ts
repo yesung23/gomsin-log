@@ -1,0 +1,237 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { routeAnnouncement, routeScreenName } from '@/lib/routeAnnouncement';
+
+/**
+ * Bug condition:
+ *   isBugCondition(app) = a screen change is not announced or does not move focus
+ *                      OR a control that exists only in widget edit mode cannot be
+ *                         reached without a pointer
+ *                      OR an interactive control has no accessible name
+ *                      OR continuous motion ignores `prefers-reduced-motion`.
+ *
+ * Measured on the unfixed tree:
+ *  - `grep -rn "aria-live" src` found three banners and no route announcer;
+ *    `<main>` had no `tabIndex`, and there was no skip link anywhere
+ *    (`grep -rn "skip" src` → matches only in unrelated prose).
+ *  - `WidgetDashboard` entered edit mode ONLY from `handleTouchStart`, a 500 ms
+ *    hold on `onTouchStart`/`onMouseDown`. The drag handle and the delete button
+ *    exist only inside edit mode, so dnd-kit's `KeyboardSensor` -- which IS wired
+ *    -- was unreachable. A keyboard user could never reorder or remove a widget.
+ *  - `AddWidgetBottomSheet` rows were `<div onClick>`: no role, no tabIndex, no
+ *    key handler. Adding a widget was pointer-only.
+ *  - `grep -rn "prefers-reduced-motion" src` → 0 hits, while `.animate-wiggle`
+ *    rotates every widget INFINITELY in edit mode.
+ *
+ * Nothing caught any of it: 1,101 tests, typecheck, lint and both build
+ * directions all pass with the app unusable by keyboard in these places.
+ *
+ * The DOM-level assertions are made against source text rather than a render,
+ * because these are structural attributes on components whose render needs the
+ * whole store; the router mapping below is a pure function and is tested directly.
+ */
+
+function read(file: string): string {
+  return readFileSync(resolve(process.cwd(), file), 'utf8');
+}
+
+describe('a route change is announced and moves focus', () => {
+  it('names every screen the tab bar and the router can reach', () => {
+    expect(routeScreenName('/')).toBe('홈');
+    expect(routeScreenName('/home')).toBe('홈');
+    expect(routeScreenName('/record')).toBe('기록');
+    expect(routeScreenName('/schedule')).toBe('일정');
+    // Prefix-matched for the same reason the tab highlight is.
+    expect(routeScreenName('/trips')).toBe('일정');
+    expect(routeScreenName('/trips/abc-123')).toBe('일정');
+    expect(routeScreenName('/us')).toBe('우리');
+    expect(routeScreenName('/my')).toBe('마이');
+    expect(routeScreenName('/settings')).toBe('설정');
+    expect(routeScreenName('/legal/privacy')).toBe('약관 및 정책');
+  });
+
+  it('stays silent rather than guessing at an unknown path', () => {
+    // A wrong screen name is worse than no announcement.
+    expect(routeScreenName('/nope')).toBeNull();
+    expect(routeAnnouncement('/nope')).toBeNull();
+    // `/` must be matched exactly; as a prefix it would name every path 홈.
+    expect(routeScreenName('/recordx')).toBeNull();
+  });
+
+  it('announces the screen it named', () => {
+    expect(routeAnnouncement('/record')).toBe('기록 화면입니다');
+  });
+
+  it('MobileShell ships the live region, the skip link and a focusable main', () => {
+    const shell = read('src/components/MobileShell.tsx');
+    expect(shell).toContain('aria-live="polite"');
+    expect(shell).toContain('routeAnnouncement(pathname)');
+    // The skip link must target the main region and be the first focusable thing.
+    expect(shell).toContain('href="#main-content"');
+    expect(shell).toContain('id="main-content"');
+    expect(shell).toContain('tabIndex={-1}');
+    expect(shell).toContain('mainRef.current?.focus()');
+    expect(shell.indexOf('href="#main-content"')).toBeLessThan(shell.indexOf('id="main-content"'));
+    // The first render is not a navigation and must not steal focus.
+    expect(shell).toContain('isFirstRender');
+  });
+
+  it('PRESERVATION: the tab bar keeps its label and its prefix matching', () => {
+    const shell = read('src/components/MobileShell.tsx');
+    expect(shell).toContain('aria-label="하단 내비게이션"');
+    expect(shell).toContain('matchPrefixes');
+    expect(shell).toContain('aria-selected={active}');
+  });
+});
+
+describe('widget editing is reachable without a pointer', () => {
+  const dashboard = read('src/features/home/WidgetDashboard.tsx');
+
+  it('offers a real button that enters edit mode', () => {
+    expect(dashboard).toContain('aria-label="위젯 편집"');
+    expect(dashboard).toContain('onClick={() => setIsEditMode(true)}');
+  });
+
+  it('PRESERVATION: long-press still works, and still only outside edit mode', () => {
+    expect(dashboard).toContain('onTouchStart={!isEditMode ? handleTouchStart : undefined}');
+    expect(dashboard).toContain('onMouseDown={!isEditMode ? handleTouchStart : undefined}');
+    expect(dashboard).toContain('}, 500);');
+  });
+
+  it('PRESERVATION: the keyboard sensor that button makes reachable is still wired', () => {
+    expect(dashboard).toContain('useSensor(KeyboardSensor');
+    expect(dashboard).toContain('coordinateGetter: sortableKeyboardCoordinates');
+  });
+
+  it('announces drag and drop in Korean, naming the widget', () => {
+    expect(dashboard).toContain('accessibility={{ announcements }}');
+    for (const hook of ['onDragStart', 'onDragOver', 'onDragEnd', 'onDragCancel']) {
+      expect(dashboard, hook).toContain(`${hook}:`);
+    }
+    // The raw sortable id is what the English defaults read out.
+    expect(dashboard).toContain('WIDGET_REGISTRY[String(id)]?.label');
+    expect(dashboard).toContain('위젯을 집었습니다');
+  });
+});
+
+describe('every edit-mode control has a name and a big enough target', () => {
+  const wrapper = read('src/components/widgets/WidgetWrapper.tsx');
+
+  it('names the remove control and the drag handle after their widget', () => {
+    expect(wrapper).toContain('aria-label={`${label} 위젯 삭제`}');
+    expect(wrapper).toContain('aria-label={`${label} 위젯 위치 변경`}');
+  });
+
+  it('makes the drag handle a real button, not a bare div', () => {
+    // A div with dnd-kit listeners is not focusable, so the keyboard sensor could
+    // never receive a key event even once edit mode was reachable.
+    expect(wrapper).toMatch(/<button\s+type="button"\s+\{\.\.\.attributes\}\s+\{\.\.\.listeners\}/);
+  });
+
+  it('meets the 44px target the rest of the app already meets', () => {
+    // Was `w-8 h-8` (32px) for remove and `w-12 h-8` (32px tall) for the handle.
+    expect(wrapper).toContain('w-11 h-11 bg-muted');
+    expect(wrapper).toContain('w-14 h-11 bg-card');
+    expect(wrapper).not.toContain('w-8 h-8');
+  });
+
+  it('hides the decorative icons from the accessibility tree', () => {
+    expect(wrapper).toContain('<X className="w-5 h-5" aria-hidden="true" />');
+    expect(wrapper).toContain('<GripHorizontal className="w-5 h-5 text-muted-foreground" aria-hidden="true" />');
+  });
+});
+
+describe('the add-widget sheet behaves like every other overlay in the app', () => {
+  const sheet = read('src/components/widgets/AddWidgetBottomSheet.tsx');
+
+  it('is announced as a modal dialog with a name', () => {
+    expect(sheet).toContain('role="dialog"');
+    expect(sheet).toContain('aria-modal="true"');
+    expect(sheet).toContain('aria-labelledby="add-widget-sheet-title"');
+    expect(sheet).toContain('id="add-widget-sheet-title"');
+  });
+
+  it('closes on Escape, like the other overlays do', () => {
+    expect(sheet).toContain('useEscapeKey(onClose, isOpen)');
+    // The hook must sit above the `!isOpen` early return or it is conditional.
+    expect(sheet.indexOf('useEscapeKey(onClose, isOpen)'))
+      .toBeLessThan(sheet.indexOf('if (!isOpen) return null;'));
+  });
+
+  it('names its close button', () => {
+    expect(sheet).toContain('aria-label="위젯 추가 닫기"');
+  });
+
+  it('makes each widget row a keyboard-operable button', () => {
+    // Line-ending tolerant: the working tree may be checked out with CRLF.
+    expect(sheet).toMatch(/<button\s+key=\{id\}\s+type="button"\s+onClick=\{\(\) => handleAddWidget\(id\)\}/);
+    expect(sheet).not.toMatch(/<div\s+key=\{id\}\s+onClick=/);
+  });
+
+  it('PRESERVATION: the z-index that keeps the tab bar off this sheet is unchanged', () => {
+    // Pinned by `modalStacking.test.ts` for a defect measured in a real browser.
+    expect(sheet).toContain('z-[60]');
+  });
+
+  it('PRESERVATION: role filtering still decides what may be added', () => {
+    expect(sheet).toContain('isWidgetAllowedForRole(id, role)');
+    expect(sheet).toContain('widgetsForRole(role)');
+  });
+});
+
+describe('motion respects the operating-system preference', () => {
+  const css = read('src/styles/index.css');
+
+  it('stops the infinite edit-mode wiggle', () => {
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+    const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(block).toContain('.animate-wiggle');
+    expect(block).toContain('animation: none !important');
+  });
+
+  it('collapses entrances instead of removing them', () => {
+    // `animation: none` on a keyframe ending at opacity 1 can leave an element
+    // stuck at its `from` state; a 1ms run lands on the final frame.
+    const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(block).toContain('animation-duration: 1ms !important');
+    expect(block).toContain('.animate-fade-in');
+    expect(block).toContain('.animate-slide-up');
+  });
+
+  it('keeps the loading spinner turning, slower', () => {
+    // A frozen spinner reads as a hang, which is worse than the motion.
+    const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(block).toMatch(/\.animate-spin\s*\{\s*animation-duration: 2s !important;/);
+  });
+
+  it('honours the preference for the scrolls CSS cannot reach', () => {
+    // `scrollIntoView({ behavior: 'smooth' })` is a JS argument; a CSS
+    // `scroll-behavior` declaration does not override it.
+    const motion = read('src/lib/motion.ts');
+    expect(motion).toContain("matchMedia('(prefers-reduced-motion: reduce)')");
+    const recordPage = read('src/pages/RecordPage.tsx');
+    expect(recordPage).toContain("behavior: scrollBehavior(), block: 'start'");
+    expect(recordPage).toContain("behavior: scrollBehavior(), block: 'center'");
+    expect(recordPage).not.toContain("behavior: 'smooth'");
+  });
+
+  it('PRESERVATION: the scroll-to-record emphasis still runs', () => {
+    // README section 1 promises 1~2 seconds of visual emphasis. It is a
+    // box-shadow pulse, not movement, so it is shortened rather than removed.
+    const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(block).toContain('.record-highlighted');
+    expect(block).toContain('highlight-pulse 0.8s ease-out 1 !important');
+  });
+});
+
+describe('the main composer has a name, not just a placeholder', () => {
+  it('labels the home composer textarea', () => {
+    expect(read('src/components/widgets/TodayLogWidget.tsx'))
+      .toContain('aria-label="오늘의 기록"');
+  });
+
+  it('labels the record edit textarea', () => {
+    expect(read('src/pages/RecordPage.tsx')).toContain('aria-label="기록 내용 수정"');
+  });
+});

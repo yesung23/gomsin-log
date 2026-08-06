@@ -31,6 +31,9 @@ const GUARDED_FILES = [
   'src/components/EmotionFlowInsightCard.tsx',
   'src/pages/RecordPage.tsx',
   'src/pages/TripsPage.tsx',
+  // Emits Tailwind classes for the record timeline even though it is a lib file,
+  // so the same rule has to apply to it.
+  'src/lib/recordAuthor.ts',
 ];
 
 /**
@@ -230,7 +233,13 @@ const ALL_UI_SOURCES = [
   'src/components/SharedSyncBanner.tsx',
   'src/components/widgets/DDayWidget.tsx',
   'src/components/widgets/UpcomingScheduleWidget.tsx',
-  'src/features/home/SoldierDashboard.tsx',
+  'src/features/home/WidgetDashboard.tsx',
+  'src/components/widgets/PartnerEmotionWidgets.tsx',
+  'src/components/widgets/CareHintWidget.tsx',
+  'src/components/EmotionChipEditor.tsx',
+  'src/components/RecordEmotionCorrection.tsx',
+  'src/components/PlanSectionNav.tsx',
+  'src/lib/recordAuthor.ts',
   'src/pages/MyPage.tsx',
   'src/pages/OnboardingPage.tsx',
   'src/pages/RecordPage.tsx',
@@ -283,7 +292,7 @@ describe('C5 - --navy is never used as a foreground colour', () => {
  *   SharedSyncBanner retry            22x22  -- the ONLY way to recover a frozen
  *                                                shared workspace
  *   UpcomingScheduleWidget 일정 추가   58x16
- *   SoldierDashboard 보기              45x32
+ *   DDayWidget 복무 현황 보기          45x32
  *   SettingsPage 뒤로가기              36x44  -- declared min-h but not min-w
  *   ServicePage 뒤로가기 / 복무 정보 수정  36x44 / 34x44  -- same omission
  *
@@ -296,7 +305,7 @@ describe('C6 - repaired controls keep a 44px minimum tap target', () => {
   const GUARDED_CONTROLS: Array<{ file: string; anchor: string; label: string }> = [
     { file: 'src/components/SharedSyncBanner.tsx', anchor: '공유 정보 다시 확인', label: 'shared-sync retry' },
     { file: 'src/components/widgets/UpcomingScheduleWidget.tsx', anchor: "navigate('/schedule')", label: '일정 추가' },
-    { file: 'src/features/home/SoldierDashboard.tsx', anchor: "navigate('/service')", label: '보기' },
+    { file: 'src/components/widgets/DDayWidget.tsx', anchor: "navigate('/service')", label: '복무 현황 보기' },
     { file: 'src/pages/SettingsPage.tsx', anchor: '뒤로가기', label: 'settings back' },
     { file: 'src/pages/ServicePage.tsx', anchor: '뒤로가기', label: 'service back' },
     { file: 'src/pages/ServicePage.tsx', anchor: '복무 정보 수정', label: 'service edit' },

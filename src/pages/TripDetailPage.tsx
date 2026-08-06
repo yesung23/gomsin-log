@@ -347,7 +347,7 @@ export function TripDetailPage() {
         startDate: tripDraft.startDate,
         endDate: tripDraft.endDate,
         status: tripDraft.status,
-      });
+      }, trip.coupleId);
       if (!isCurrentTripScope(operationScope)) return;
       if (!saved) {
         setTripError('여행 정보를 수정하지 못했어요. 다시 시도해 주세요.');
@@ -579,7 +579,7 @@ export function TripDetailPage() {
     setChecklistPending(item.id, true);
     setChecklists((current) => current.map((entry) => entry.id === item.id ? { ...entry, completed: nextCompleted } : entry));
     try {
-      const saved = await toggleTripChecklistInDB(item.id, nextCompleted);
+      const saved = await toggleTripChecklistInDB(item.id, nextCompleted, item.tripId);
       if (!isCurrentTripScope(operationScope)) return;
       if (!saved) {
         await loadChildren();

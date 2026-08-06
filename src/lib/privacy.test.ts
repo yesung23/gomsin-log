@@ -124,6 +124,48 @@ describe('emotionFlowForStorage', () => {
     });
     expect(stored.map((i) => i.id)).toEqual(['b']);
   });
+
+  /**
+   * A rule *suggestion* is a machine guess about how a person felt. Persisting one
+   * turns that guess into a stored fact about them, and `analyzeEmotionFlow`
+   * already refuses to read anything but `user_confirmed`, so a stored suggestion
+   * would be invisible-but-permanent.
+   *
+   * This used to hold only because `TodayLogWidget` happened to stamp every item
+   * it emitted as `user_confirmed` -- a convention in one component, not a property
+   * of the write path. Any other writer would have persisted suggestions silently.
+   */
+  it('never persists a rule suggestion, only what the user confirmed', () => {
+    const stored = emotionFlowForStorage({
+      isPrivate: false,
+      emotionFlow: [
+        item({ id: 'confirmed', source: 'user_confirmed' }),
+        item({ id: 'suggested', source: 'rule_suggested' }),
+      ],
+    });
+    expect(stored.map((i) => i.id)).toEqual(['confirmed']);
+  });
+
+  it('applies the confirmed-only rule to a private row as well', () => {
+    // A private row is unreadable by the partner, but it is still the user's own
+    // stored history -- a guess must not silently become part of it.
+    const stored = emotionFlowForStorage({
+      isPrivate: true,
+      emotionFlow: [
+        item({ id: 'confirmed', source: 'user_confirmed', visibility: 'author_only' }),
+        item({ id: 'suggested', source: 'rule_suggested', visibility: 'author_only' }),
+      ],
+    });
+    expect(stored.map((i) => i.id)).toEqual(['confirmed']);
+  });
+
+  it('drops an item with no source at all rather than trusting it', () => {
+    const stored = emotionFlowForStorage({
+      isPrivate: false,
+      emotionFlow: [{ ...item({ id: 'sourceless' }), source: undefined } as EmotionFlowItem],
+    });
+    expect(stored).toEqual([]);
+  });
 });
 
 describe('stripTransientFields', () => {

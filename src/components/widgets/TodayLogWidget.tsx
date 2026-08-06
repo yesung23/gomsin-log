@@ -1,13 +1,19 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
 import {
-  Camera, Image as ImageIcon, Send, Lock, Unlock, Check, Heart,
+  Camera, Image as ImageIcon, Send, Lock, Unlock, Heart,
   Mic, Square, X, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { toLocalDateString, localToday } from '@/lib/utils';
-import { recommendEmotionFlow } from '@/lib/emotionRuleEngine';
+import { EmotionChipEditor } from '@/components/EmotionChipEditor';
+import { useEmotionCandidatesForText } from '@/lib/useEmotionCandidates';
+import {
+  clearComposerDraft,
+  readComposerDraft,
+  writeComposerDraft,
+} from '@/lib/composerDraft';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
 import { isNativePlatform } from '@/lib/platform';
 import {
@@ -19,23 +25,38 @@ import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 
 export function TodayLogWidget() {
-  const { state, addRecordWithMedia } = useStore();
+  const { state, addRecordWithMedia, queueRecordForLater } = useStore();
   const partnerName = state.profile.couple.partnerName || '파트너';
   const todayStr = toLocalDateString(localToday());
 
-  const [log, setLog] = useState('');
-  const [reaction, setReaction] = useState<ReactionType | undefined>(undefined);
-  const [isPrivate, setIsPrivate] = useState(false);
+  /**
+   * Restore an unsent draft.
+   *
+   * Switching tabs unmounts this widget, so the text used to be thrown away
+   * silently -- and a five-tab bar invites exactly that glance at 기록 or 일정.
+   * The stash is in-memory and per-user (see lib/composerDraft.ts): it survives
+   * navigation, never touches storage, and cannot cross accounts.
+   */
+  const draftUserId = state.authenticatedUser?.id || state.profile.id;
+  // Read once per identity: re-reading on every render would fight the user's own
+  // edits, since this component is the thing that writes the stash.
+  const restoredDraft = React.useMemo(() => readComposerDraft(draftUserId), [draftUserId]);
+
+  const [log, setLog] = useState(restoredDraft?.log ?? '');
+  const [reaction, setReaction] = useState<ReactionType | undefined>(restoredDraft?.reaction);
+  const [isPrivate, setIsPrivate] = useState(restoredDraft?.isPrivate ?? false);
   /** Files chosen but not yet uploaded; upload happens on save. */
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [showInputCard, setShowInputCard] = useState(false);
+  // Reopen the card when there is something waiting, so a restored draft is not
+  // invisible behind a collapsed composer.
+  const [showInputCard, setShowInputCard] = useState(!!restoredDraft);
   const [isSaving, setIsSaving] = useState(false);
   const isOffline = !useOnlineStatus();
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
 
   // State for rule-suggested confirmed IDs
-  const [confirmedItemIds, setConfirmedItemIds] = useState<string[]>([]);
+
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
@@ -51,6 +72,8 @@ export function TodayLogWidget() {
    * effect of a reducer.
    */
   const pendingFilesRef = React.useRef<File[]>([]);
+  /** Synchronous save gate. See `handlePost`. */
+  const saveInFlightRef = React.useRef(false);
   React.useEffect(() => {
     pendingFilesRef.current = pendingFiles;
   }, [pendingFiles]);
@@ -65,10 +88,26 @@ export function TodayLogWidget() {
     return () => clearTimeout(timer);
   }, [log]);
 
-  // Compute rule-based emotion suggestions dynamically from debounced log text
-  const suggestions = useMemo(() => {
-    return recommendEmotionFlow(debouncedLog, undefined, { isPrivate });
-  }, [debouncedLog, isPrivate]);
+  /**
+   * Keep the in-memory stash in step with the composer.
+   *
+   * Written on every change rather than on unmount, because an unmount caused by a
+   * route change is not guaranteed to run before the new route tears this tree
+   * down, and losing the draft is the exact failure being fixed.
+   */
+  React.useEffect(() => {
+    writeComposerDraft(draftUserId, { log, isPrivate, reaction });
+  }, [draftUserId, log, isPrivate, reaction]);
+
+  /**
+   * Feelings read out of the text, included by default and removable.
+   *
+   * Replaces the opt-in chip list. Nothing was recorded before unless the user
+   * tapped a chip, so the ordinary path -- write, save -- stored no feeling and
+   * the partner's flow stayed empty. Now the app commits to a reading, shows the
+   * phrase it came from, and lets the user delete or correct it.
+   */
+  const review = useEmotionCandidatesForText(debouncedLog);
 
   // The exact array that will be persisted. The preview card below reads this
   // same value, so what the user sees can never disagree with what is saved.
@@ -78,22 +117,17 @@ export function TodayLogWidget() {
   // author is sharing is explicit consent to share that tag. On a private
   // record everything stays author-only. This keeps author-only items out of
   // shared rows (see lib/privacy.ts) without silently discarding a selection.
+  /**
+   * The exact array that will be persisted. The preview card below reads this
+   * same value, so what the user sees can never disagree with what is saved.
+   *
+   * `candidatesToFlowItems` drops the `evidence` phrase, which is the single point
+   * where the display-only text taken from the diary body is stopped from reaching
+   * the database -- the same guarantee `matchedText` always had.
+   */
   const userConfirmedFlow: EmotionFlowItem[] = useMemo(
-    () =>
-      suggestions
-        .filter((s) => confirmedItemIds.includes(s.id || ''))
-        .map((s, idx) => {
-          // Defense-in-depth: never let matchedText leave the composer, even if
-          // downstream storage stripping were bypassed.
-          const { matchedText: _discard, ...safeFields } = s;
-          return {
-            ...safeFields,
-            sequence: idx + 1,
-            source: 'user_confirmed' as const,
-            visibility: isPrivate ? ('author_only' as const) : ('shared' as const),
-          };
-        }),
-    [suggestions, confirmedItemIds, isPrivate],
+    () => review.toFlowItems(isPrivate),
+    [review, isPrivate],
   );
 
   const MAX_ATTACHMENTS = 4;
@@ -287,18 +321,6 @@ export function TodayLogWidget() {
     };
   }, []);
 
-  const toggleConfirmSuggestion = (itemId: string) => {
-    if (confirmedItemIds.includes(itemId)) {
-      setConfirmedItemIds(prev => prev.filter(id => id !== itemId));
-    } else {
-      if (confirmedItemIds.length >= 3) {
-        toast.info('오늘의 마음은 세 가지까지 남길 수 있어요.');
-        return;
-      }
-      setConfirmedItemIds(prev => [...prev, itemId]);
-    }
-  };
-
   /**
    * Is there anything a save could actually persist?
    *
@@ -308,13 +330,25 @@ export function TodayLogWidget() {
   const hasContentToSave = log.trim().length > 0 || pendingFiles.length > 0 || !!reaction;
 
   const handlePost = async () => {
-    if (isSaving) return;
-    // Read-only while offline: firing this write would fail and then be explained
-    // with a message that could not name the real cause.
-    if (isOffline) {
-      toast.error(OFFLINE_READONLY_MESSAGE);
-      return;
+    /**
+     * `isSaving` and the button's `disabled` are both React state, so they only
+     * take effect on the next render. Two activations inside one frame -- a
+     * double tap on a full-width primary CTA -- therefore both read `false` and
+     * both reach the server, producing a duplicate record and a duplicate
+     * upload. The gate has to be synchronous to hold.
+     */
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    try {
+      await runPost();
+    } finally {
+      // Released even on failure, so a deliberate retry still works.
+      saveInFlightRef.current = false;
     }
+  };
+
+  const runPost = async () => {
+    if (isSaving) return;
     if (isRecording) {
       toast.info('녹음을 먼저 마쳐주세요.');
       return;
@@ -326,25 +360,79 @@ export function TodayLogWidget() {
 
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const draft = {
+      date: todayStr,
+      time: timeStr,
+      authorRole: state.profile.role,
+      log,
+      reaction,
+      isPrivate,
+      emotionFlow: userConfirmedFlow,
+      emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
+    };
+
+    /**
+     * Everything that has to happen once the record is no longer unsent work.
+     *
+     * Shared between a delivered write and a queued one, because from the
+     * composer's point of view they are the same event: the text has left the
+     * composer and must not be offered for editing as if it were still a draft.
+     */
+    const clearComposer = () => {
+      setLog('');
+      setReaction(undefined);
+      review.reset();
+      setIsPrivate(false);
+      clearComposerDraft(draftUserId);
+    };
+
+    /*
+      Offline is the one connectivity fact the OS is trusted about, so the write is
+      not attempted -- it is stored.
+      This REPLACES a pre-emptive refusal that returned `OFFLINE_READONLY_MESSAGE`.
+      That refusal was honest about the network and wrong about the record: the
+      typed text, and any voice memo synthesised into an in-memory File, existed
+      nowhere on disk, so closing the app lost them. Queueing keeps them and
+      delivers them when the connection returns.
+    */
+    if (isOffline) {
+      setIsSaving(true);
+      let queueResult: { queued: boolean; error?: string };
+      try {
+        queueResult = await queueRecordForLater(draft, pendingFiles);
+      } finally {
+        setIsSaving(false);
+      }
+      if (!queueResult.queued) {
+        // Could not even store it. Say so, and keep everything in the composer.
+        toast.error(queueResult.error || OFFLINE_READONLY_MESSAGE);
+        return;
+      }
+      clearComposer();
+      setPendingFiles([]);
+      setShowInputCard(false);
+      toast.success('오프라인이라 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
+      return;
+    }
 
     setIsSaving(true);
-    let result: { ok: boolean; failedFiles: string[]; error?: string };
+    let result: { ok: boolean; failedFiles: string[]; error?: string; queued?: boolean };
     try {
-      result = await addRecordWithMedia(
-        {
-          date: todayStr,
-          time: timeStr,
-          authorRole: state.profile.role,
-          log,
-          reaction,
-          isPrivate,
-          emotionFlow: userConfirmedFlow,
-          emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
-        },
-        pendingFiles,
-      );
+      result = await addRecordWithMedia(draft, pendingFiles);
     } finally {
       setIsSaving(false);
+    }
+
+    if (result.queued) {
+      // The attempt failed on a connection the OS called usable, and the store
+      // stored it rather than discarding it. This is the case the old code lost
+      // silently: `navigator.onLine === true` skipped the offline refusal, the
+      // write failed, and the text went with the toast.
+      clearComposer();
+      setPendingFiles([]);
+      setShowInputCard(false);
+      toast.success('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
+      return;
     }
 
     if (!result.ok) {
@@ -356,20 +444,26 @@ export function TodayLogWidget() {
       return;
     }
 
-    setLog('');
-    setReaction(undefined);
-    setPendingFiles([]);
-    setConfirmedItemIds([]);
-    setIsPrivate(false);
-    setShowInputCard(false);
+    clearComposer();
 
     if (result.failedFiles.length > 0) {
       // Be explicit: the text was saved, the files were not.
+      //
+      // The failed files are KEPT in the composer and it stays open. Clearing
+      // them here used to destroy the only copy of a voice memo: the recording is
+      // synthesised into an in-memory File (see `stopRecording`) and exists
+      // nowhere on disk, so "다시 첨부해 주세요" was an instruction the user could
+      // not follow. Photos were merely annoying to re-pick; audio was gone.
+      const failed = new Set(result.failedFiles);
+      setPendingFiles((current) => current.filter((file) => failed.has(file.name)));
       toast.warning(
-        `기록은 저장했지만 첨부 ${result.failedFiles.length}개를 올리지 못했어요. 잠시 후 다시 첨부해 주세요.`,
+        `기록은 저장했지만 첨부 ${result.failedFiles.length}개를 올리지 못했어요. 아래에 그대로 두었으니 다시 시도해 주세요.`,
       );
       return;
     }
+
+    setPendingFiles([]);
+    setShowInputCard(false);
     toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
   };
 
@@ -450,9 +544,15 @@ export function TodayLogWidget() {
             </button>
           </div>
           
+          {/*
+            A placeholder is not a label: it disappears on the first keystroke and
+            support for reading it varies between screen readers. This is the main
+            composer of the whole app, so it gets a real name. WCAG 2.1 SC 1.3.1.
+          */}
           <textarea
             value={log}
             onChange={(e) => setLog(e.target.value)}
+            aria-label="오늘의 기록"
             placeholder="지금 이 순간, 어떤 생각을 하고 있나요?"
             className="w-full h-24 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />
@@ -514,48 +614,20 @@ export function TodayLogWidget() {
             </div>
           )}
 
-          {/* Rule-Based Emotion Flow Suggestion Card (Appears when text >= 10 chars) */}
-          {suggestions.length > 0 && (
-            <div className="p-3.5 rounded-2xl bg-coral/5 border border-coral/20 space-y-2 animate-fade-in">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-foreground flex items-center gap-1">
-                  <Heart size={13} className="text-coral fill-coral" /> 기록 속 마음을 골라볼까요?
-                </h4>
-              </div>
-              <p className="text-[11px] text-muted-foreground leading-tight">
-                글의 흐름에 맞춰 제안했어요. 원하지 않으면 누르지 않아도 괜찮아요.
-              </p>
-              {/* Be explicit about who will be able to see the chosen tags. */}
-              <p className="text-[11px] font-semibold leading-tight text-muted-foreground">
-                {isPrivate
-                  ? '🔒 나만 보기 기록이라 선택한 마음도 나만 볼 수 있어요.'
-                  : `선택한 마음은 ${partnerName}에게도 함께 보여요.`}
-              </p>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {suggestions.map((item) => {
-                  const itemId = item.id || `item-${item.sequence}`;
-                  const isSelected = confirmedItemIds.includes(itemId);
-                  return (
-                    <button
-                      key={itemId}
-                      type="button"
-                      onClick={() => toggleConfirmSuggestion(itemId)}
-                      aria-pressed={isSelected}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 active:scale-95 ${
-                        isSelected
-                          ? 'bg-coral text-white border border-coral shadow-sm'
-                          : 'bg-card text-foreground border border-border hover:border-coral/40'
-                      }`}
-                    >
-                      <span>{item.sequence}. {item.displayLabel}</span>
-                      {isSelected && <Check size={14} aria-hidden="true" />}
-                      <span className="sr-only">{isSelected ? '선택됨' : '선택 안 됨'}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          {/* Opt-out review: included by default, ✕ to remove, ▲▼ to correct. */}
+          <EmotionChipEditor
+            candidates={review.candidates}
+            removed={review.removed}
+            onRemove={review.remove}
+            onRestore={review.restore}
+            onChangeEmotion={review.changeEmotion}
+            visibilityNote={
+              isPrivate
+                ? '🔒 나만 보기 기록이라 이 마음도 나만 볼 수 있어요.'
+                : `이 마음은 ${partnerName}에게도 함께 보여요.`
+            }
+            className="animate-fade-in"
+          />
 
           {/* Preview of the flow that is about to be saved. Derived only, never
               persisted, and computed from the same array as the save payload. */}
@@ -582,7 +654,12 @@ export function TodayLogWidget() {
               // promised a save that could not happen. Still enabled while
               // recording, so tapping it can say "finish the recording first"
               // instead of doing nothing at all.
-              disabled={isSaving || isOffline || (!isRecording && !hasContentToSave)}
+              //
+              // `isOffline` is NO LONGER a reason to disable it. It used to be,
+              // because a write offline could only fail; it now goes to the outbox
+              // and is delivered when the connection returns, so disabling the
+              // button here would put the app back to losing the text on app close.
+              disabled={isSaving || (!isRecording && !hasContentToSave)}
               // 44px minimum: measured at 32px in a real browser. This is the
               // primary save action of the whole app.
               className="min-h-[44px] px-4 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"

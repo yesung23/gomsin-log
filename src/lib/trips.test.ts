@@ -9,27 +9,37 @@ import {
   validateTripRangeAgainstItems,
 } from '@/lib/trips';
 
-const { mockUpdatePayload, mockSupabase } = vi.hoisted(() => {
+const { mockUpdatePayload, mockEq, mockSupabase } = vi.hoisted(() => {
   const mockUpdatePayload = vi.fn();
+  /**
+   * Records every `.eq()` predicate. The builder has to be chainable because the
+   * scoped mutations apply two of them -- the row id AND its parent -- so that a
+   * widened RLS policy cannot turn a stale id into a cross-couple write. A
+   * single-`eq` fixture could not observe the second predicate at all.
+   */
+  const mockEq = vi.fn();
   const mockSupabase = {
     from: vi.fn(() => ({
       update: (payload: Record<string, unknown>) => {
         mockUpdatePayload(payload);
-        return {
-          eq: () => ({
-            select: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: { id: 'item-1', trip_id: 'trip-1', item_date: '2026-08-10', title: 'updated', category: 'food', memo: null, url: null, sort_order: 1, updated_at: '2026-08-01T00:00:00Z', created_at: '2026-08-01T00:00:00Z' },
-                  error: null,
-                }),
-            }),
+        const builder: Record<string, unknown> = {
+          eq: (column: string, value: unknown) => {
+            mockEq(column, value);
+            return builder;
+          },
+          select: () => ({
+            maybeSingle: () =>
+              Promise.resolve({
+                data: { id: 'item-1', trip_id: 'trip-1', item_date: '2026-08-10', title: 'updated', category: 'food', memo: null, url: null, sort_order: 1, updated_at: '2026-08-01T00:00:00Z', created_at: '2026-08-01T00:00:00Z' },
+                error: null,
+              }),
           }),
         };
+        return builder;
       },
     })),
   };
-  return { mockUpdatePayload, mockSupabase };
+  return { mockUpdatePayload, mockEq, mockSupabase };
 });
 
 vi.mock('@/lib/supabase', () => ({
@@ -126,6 +136,7 @@ describe('updateTripItemInDB', () => {
   it('does not send topology columns', async () => {
     const { updateTripItemInDB } = await import('@/lib/trips');
     mockUpdatePayload.mockClear();
+    mockEq.mockClear();
 
     await updateTripItemInDB({
       id: 'item-1',
@@ -147,5 +158,97 @@ describe('updateTripItemInDB', () => {
     expect(payload).not.toHaveProperty('trip_id');
     expect(payload).not.toHaveProperty('item_date');
     expect(payload).not.toHaveProperty('sort_order');
+  });
+
+  /**
+   * `trip_id` must not be in the update PAYLOAD (the database rejects a statement
+   * that names it outside `reorder_trip_items`) but it MUST be in the WHERE clause.
+   * Those two requirements pull in opposite directions, which is how the predicate
+   * came to be missing while the test above still passed.
+   */
+  it('scopes the update to the parent trip, not to the item id alone', async () => {
+    const { updateTripItemInDB } = await import('@/lib/trips');
+    mockEq.mockClear();
+
+    await updateTripItemInDB({
+      id: 'item-1',
+      tripId: 'trip-1',
+      itemDate: '2026-08-10',
+      title: '해운대',
+      category: 'activity',
+      sortOrder: 3,
+    });
+
+    expect(mockEq.mock.calls).toEqual([
+      ['id', 'item-1'],
+      ['trip_id', 'trip-1'],
+    ]);
+  });
+
+  it('issues no request at all without a parent trip to scope to', async () => {
+    const { updateTripItemInDB } = await import('@/lib/trips');
+    mockUpdatePayload.mockClear();
+    mockEq.mockClear();
+
+    const result = await updateTripItemInDB({
+      id: 'item-1',
+      tripId: '',
+      itemDate: '2026-08-10',
+      title: '해운대',
+      category: 'activity',
+      sortOrder: 3,
+    });
+
+    expect(result).toBeNull();
+    expect(mockUpdatePayload).not.toHaveBeenCalled();
+    expect(mockEq).not.toHaveBeenCalled();
+  });
+});
+
+describe('updateTripInDB', () => {
+  it('scopes the update to the caller couple, not to the trip id alone', async () => {
+    const { updateTripInDB } = await import('@/lib/trips');
+    mockEq.mockClear();
+
+    await updateTripInDB('trip-1', { title: '부산' }, 'couple-1');
+
+    expect(mockEq.mock.calls).toEqual([
+      ['id', 'trip-1'],
+      ['couple_id', 'couple-1'],
+    ]);
+  });
+
+  it('issues no request at all without a couple to scope to', async () => {
+    const { updateTripInDB } = await import('@/lib/trips');
+    mockUpdatePayload.mockClear();
+    mockEq.mockClear();
+
+    expect(await updateTripInDB('trip-1', { title: '부산' }, '')).toBeNull();
+    expect(mockUpdatePayload).not.toHaveBeenCalled();
+    expect(mockEq).not.toHaveBeenCalled();
+  });
+});
+
+describe('toggleTripChecklistInDB', () => {
+  it('scopes the toggle to the parent trip, not to the checklist id alone', async () => {
+    const { toggleTripChecklistInDB } = await import('@/lib/trips');
+    mockEq.mockClear();
+
+    await toggleTripChecklistInDB('checklist-1', true, 'trip-1');
+
+    expect(mockEq.mock.calls).toEqual([
+      ['id', 'checklist-1'],
+      ['trip_id', 'trip-1'],
+    ]);
+  });
+
+  it('issues no request at all without a parent trip to scope to', async () => {
+    const { toggleTripChecklistInDB } = await import('@/lib/trips');
+    mockUpdatePayload.mockClear();
+    mockEq.mockClear();
+
+    expect(await toggleTripChecklistInDB('checklist-1', true, '')).toBe(false);
+    expect(mockUpdatePayload).not.toHaveBeenCalled();
+    expect(mockEq).not.toHaveBeenCalled();
   });
 });

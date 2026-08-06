@@ -292,8 +292,16 @@ describe('Deletion-Recovery Suite', () => {
 
     // STORE_KEY holds only the device-preference whitelist.
     const persisted = JSON.parse(localStorage.getItem('gomsinlog.state.v2') || '{}');
+    // The POINT of this assertion is that nothing identifying or content-bearing
+    // survives the purge -- no profile, no couple id, no records, no invitation
+    // code. It is an exact list so a new field cannot be added to the persisted
+    // blob without a deliberate decision here.
+    //
+    // `soldierWidgetLayout` joined it when the 군화 home became rearrangeable: the
+    // two roles keep separate layouts, and a layout is a device preference in
+    // exactly the same way `widgetLayout` already was -- an array of widget ids.
     expect(Object.keys(persisted).sort())
-      .toEqual(['hasSeenInstallPrompt', 'theme', 'widgetLayout']);
+      .toEqual(['hasSeenInstallPrompt', 'soldierWidgetLayout', 'theme', 'widgetLayout']);
 
     // The session is deliberately kept so the deletion can be finished.
     expect(screen.getByTestId('user')).toHaveTextContent('user-a');

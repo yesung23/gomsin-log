@@ -67,6 +67,21 @@ export type EmotionGroup =
 
 export type EmotionVisibility = 'shared' | 'author_only' | 'hidden';
 
+/**
+ * The six refined emotions the product speaks in.
+ *
+ * Declared here rather than in `lib/basicEmotions.ts` so that `types` stays a leaf
+ * module: `basicEmotions` already imports `EmotionGroup` from here, and defining
+ * this the other way round would close an import cycle.
+ */
+export type BasicEmotion =
+  | 'happiness'
+  | 'surprise'
+  | 'fear'
+  | 'disgust'
+  | 'anger'
+  | 'sadness';
+
 export interface EmotionFlowItem {
   id?: string;
   sequence: number;
@@ -75,6 +90,18 @@ export interface EmotionFlowItem {
   matchedText?: string;
   source?: 'rule_suggested' | 'user_confirmed';
   visibility?: EmotionVisibility;
+  /**
+   * The refined six-emotion reading (분노 / 혐오 / 공포 / 행복 / 슬픔 / 놀람).
+   *
+   * Optional because records written before this existed have only `group`;
+   * `basicEmotionOf()` maps those forward, so nothing needs migrating.
+   */
+  basic?: BasicEmotion;
+  /**
+   * True when a human overrode the machine's reading. Kept so a correction is
+   * visible as a correction and is never quietly re-analysed away.
+   */
+  userEdited?: boolean;
 }
 
 export interface EmotionAnalysis {
@@ -264,7 +291,15 @@ export interface AppState {
   isDemoMode: boolean;
   highlightedRecordId?: string;
   authenticatedUser: AuthUser | null;
+  /** Home layout for 곰신. Named without a role suffix for backward compatibility. */
   widgetLayout: string[];
+  /**
+   * Home layout for 군화, stored separately.
+   *
+   * The two people have opposite home screens, and a single shared list meant
+   * whoever arranged theirs last overwrote the other's on a role change.
+   */
+  soldierWidgetLayout: string[];
   hasSeenInstallPrompt: boolean;
   theme: 'light' | 'dark';
 }

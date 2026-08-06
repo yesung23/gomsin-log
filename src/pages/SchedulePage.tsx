@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
+import { PlanSectionNav } from '@/components/PlanSectionNav';
 import {
   dDayLabel,
   eventsOnDate,
@@ -398,7 +399,7 @@ export function SchedulePage() {
       <div className="pb-28 px-5 pt-8 space-y-6">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">공유·개인 일정</h1>
+            <h1 className="text-2xl font-bold tracking-tight">우리의 계획</h1>
             <p className="mt-1 text-xs text-muted-foreground">둘이 볼 일정과 나만의 일정을 한곳에서 관리해요.</p>
           </div>
           <button
@@ -411,6 +412,10 @@ export function SchedulePage() {
             <span>일정 추가</span>
           </button>
         </header>
+
+        {/* 여행 is one tap away from here now, instead of hidden behind a
+            deletable home widget. */}
+        <PlanSectionNav active="schedule" />
 
         {!authenticatedUser ? (
           <StatusCard

@@ -185,14 +185,44 @@ describe('H-4: the entry point survives the conditions that caused the stranding
     expect(section.match(/\btext-navy(?:\/\d{1,3})?\b/g) ?? []).toEqual([]);
   });
 
-  it('PRESERVATION: the tab bar is still exactly the four original tabs', () => {
+  /**
+   * The tab bar gained 일정 as a fifth tab.
+   *
+   * This assertion used to pin the bar at exactly four tabs, and that was the
+   * right guard at the time: /schedule and /trips were reachable only from a
+   * deletable widget, and the fix deliberately put the durable entry point in
+   * settings instead of restructuring navigation.
+   *
+   * The planning surface has now been promoted to a real tab, which fixes the
+   * root cause rather than routing around it -- and also fixes standing on
+   * /trips with NO tab highlighted, which told the user they were nowhere.
+   *
+   * The guard is kept, not weakened: the four original destinations must all
+   * still be present, so this still fails if navigation quietly loses one.
+   */
+  it('PRESERVATION: the tab bar keeps all four original tabs, plus 일정', () => {
     const shell = readFileSync(
       resolve(process.cwd(), 'src/components/MobileShell.tsx'),
       'utf8',
     );
     const tabs = [...shell.matchAll(/to: '(\/[a-z]+)'/g)].map((match) => match[1]);
-    expect(tabs).toEqual(['/home', '/record', '/us', '/my']);
-    expect(shell).toContain('grid-cols-4');
+    expect(tabs).toEqual(['/home', '/record', '/schedule', '/us', '/my']);
+    for (const original of ['/home', '/record', '/us', '/my']) {
+      expect(tabs, `original tab ${original} must survive`).toContain(original);
+    }
+    // The grid must actually fit the tabs it renders.
+    expect(shell).toContain(`grid-cols-${tabs.length}`);
+  });
+
+  it('every tab keeps its section lit on detail screens', () => {
+    const shell = readFileSync(
+      resolve(process.cwd(), 'src/components/MobileShell.tsx'),
+      'utf8',
+    );
+    // /trips/:id must light 일정, and /settings must light 마이 -- otherwise a
+    // detail screen looks like it belongs to no section at all.
+    expect(shell).toContain("matchPrefixes: ['/schedule', '/trips']");
+    expect(shell).toContain("matchPrefixes: ['/my', '/settings']");
   });
 
   it('PRESERVATION: the widget entry points still exist for users who kept them', () => {

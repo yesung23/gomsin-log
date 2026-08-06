@@ -5,9 +5,17 @@ import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
+import { PlanSectionNav } from '@/components/PlanSectionNav';
+import {
+  TRIP_PHASE_LABEL,
+  TRIP_PHASE_ORDER,
+  TRIP_PHASE_PILL,
+  daysUntilTrip,
+  groupTripsByPhase,
+} from '@/lib/tripPhase';
 import { fetchTripsResultFromDB, reconcileParentTrips, saveTripToDB, validateTripDraft } from '@/lib/trips';
 import { useStore } from '@/lib/useStore';
-import { formatLocalDate } from '@/lib/utils';
+import { formatLocalDate, localToday, toLocalDateString } from '@/lib/utils';
 import type { Trip } from '@/types';
 
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden' | 'disconnected';
@@ -168,7 +176,17 @@ export function TripsPage() {
     }
   };
 
-  const sortedTrips = [...trips].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  /**
+   * Grouped by where each trip sits in time, not by its stored `status`.
+   *
+   * `Trip.status` only ever changed when a human edited it, so a trip whose dates
+   * passed months ago still read 계획중 forever. Deriving the phase keeps the list
+   * honest with no upkeep, and it is what makes "과거 · 현재 · 미래를 한 번에" real
+   * rather than a flat pile sorted by date.
+   */
+  const todayStr = toLocalDateString(localToday());
+  const grouped = groupTripsByPhase(trips, todayStr);
+  const totalTrips = trips.length;
   const visibleLoadState: LoadState = !userId
     ? 'forbidden'
     : !activeCouple ? 'disconnected' : loadState;
@@ -206,7 +224,7 @@ export function TripsPage() {
         </div>
       );
     }
-    if (sortedTrips.length === 0) {
+    if (totalTrips === 0) {
       return (
         <div className="text-center py-20">
           <div className="bg-indigo-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"><Map className="w-8 h-8 text-indigo-400" /></div>
@@ -217,18 +235,68 @@ export function TripsPage() {
       );
     }
     return (
-      <div className="space-y-4">
-        {sortedTrips.map((trip) => (
-          <button key={trip.id} type="button" onClick={() => navigate(`/trips/${trip.id}`)} className="w-full text-left bg-card border border-border rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow active:scale-[0.98]">
-            <div className="flex items-center justify-between mb-3 gap-3">
-              <h3 className="font-bold text-card-foreground text-lg truncate">{trip.title}</h3>
-              <div className="shrink-0 bg-indigo-50 text-indigo-600 text-xs font-bold px-2.5 py-1 rounded-full">
-                {trip.status === 'completed' ? '다녀옴' : trip.status === 'ongoing' ? '여행중' : '계획중'}
+      <div className="space-y-6">
+        {TRIP_PHASE_ORDER.map((phase) => {
+          const phaseTrips = grouped[phase];
+          if (phaseTrips.length === 0) return null;
+          return (
+            <section key={phase} data-testid={`trip-phase-${phase}`} aria-label={TRIP_PHASE_LABEL[phase]}>
+              <div className="flex items-center justify-between mb-2 px-1">
+                <h2 className="text-sm font-bold text-foreground">{TRIP_PHASE_LABEL[phase]}</h2>
+                <span className="text-[11px] font-bold text-muted-foreground">{phaseTrips.length}개</span>
               </div>
-            </div>
-            <div className="flex items-center gap-2 text-muted-foreground text-sm"><Calendar className="w-4 h-4" /><span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span></div>
-          </button>
-        ))}
+              <div className="space-y-3">
+                {phaseTrips.map((trip) => {
+                  const untilStart = daysUntilTrip(trip.startDate, todayStr);
+                  return (
+                    <button
+                      key={trip.id}
+                      type="button"
+                      onClick={() => navigate(`/trips/${trip.id}`)}
+                      data-testid={`trip-card-${trip.id}`}
+                      className={`w-full text-left bg-card border rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow active:scale-[0.98] ${
+                        phase === 'current' ? 'border-coral/50' : 'border-border'
+                      } ${phase === 'past' ? 'opacity-80' : ''}`}
+                    >
+                      <div className="flex items-center justify-between mb-3 gap-3">
+                        <h3 className="font-bold text-card-foreground text-lg truncate">{trip.title}</h3>
+                        <div
+                          className={`shrink-0 text-xs font-bold px-2.5 py-1 rounded-full ${
+                            phase === 'current'
+                              ? 'bg-coral/10 text-coral'
+                              : phase === 'upcoming'
+                                ? 'bg-indigo-50 text-indigo-600'
+                                : 'bg-muted text-muted-foreground'
+                          }`}
+                        >
+                          {TRIP_PHASE_PILL[phase]}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                        <Calendar className="w-4 h-4" />
+                        <span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span>
+                        {untilStart !== null && untilStart > 0 && (
+                          <span className="ml-auto font-bold text-coral shrink-0">D-{untilStart}</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+
+        {/* Planning a past trip is legitimate -- couples log the trip they already
+            took. The affordance says so instead of leaving them to guess. */}
+        <button
+          type="button"
+          onClick={openCreate}
+          disabled={visibleLoadState !== 'ready' || isOffline}
+          className="w-full min-h-[44px] rounded-2xl border border-dashed border-border text-xs font-bold text-muted-foreground disabled:opacity-40"
+        >
+          + 여행 추가하기 (지난 여행도 기록할 수 있어요)
+        </button>
       </div>
     );
   })();
@@ -237,12 +305,16 @@ export function TripsPage() {
     <MobileShell>
       <div className="sticky top-0 z-30 bg-card/80 backdrop-blur-xl border-b border-border flex items-center justify-between px-5 h-14">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/us')} className="p-1.5 -ml-1.5 rounded-full hover:bg-muted" aria-label="뒤로"><ChevronLeft className="w-5 h-5 text-foreground" /></button>
-          <h1 className="font-bold text-card-foreground text-lg flex items-center gap-2"><Plane className="w-5 h-5 text-indigo-500" />여행 플래너</h1>
+          {/* No back button: 여행 is a first-class destination under the 일정 tab
+              now, so there is nothing to go "back" out of. */}
+          <h1 className="font-bold text-card-foreground text-lg flex items-center gap-2"><Plane className="w-5 h-5 text-indigo-500" />우리의 여행</h1>
         </div>
         <button onClick={openCreate} disabled={visibleLoadState !== 'ready' || isOffline} className="p-1.5 -mr-1.5 rounded-full hover:bg-indigo-50 text-indigo-600 disabled:opacity-30" aria-label="새 여행"><Plus className="w-5 h-5" /></button>
       </div>
-      <div className="p-5 pb-24">{statePanel}</div>
+      <div className="p-5 pb-24 space-y-5">
+        <PlanSectionNav active="trips" />
+        {statePanel}
+      </div>
 
       {/* z-[60] so the tab bar cannot intercept 취소 / 만들기 -- see RecordPage. */}
       {showModal && (

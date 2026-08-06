@@ -8,11 +8,10 @@ import type { DailyRecord, EmotionFlowItem, Role } from '@/types';
  * 1. Record level -- `isPrivate`. Enforced server-side by RLS: the partner's
  *    "read shared records" policy requires `is_private = false`.
  *
- * 2. Emotion-item level -- `EmotionFlowItem.visibility`. The rule engine marks
- *    sensitive emotion groups (shame, guilt, ...) as `author_only` EVEN FOR A
- *    SHARED RECORD (emotionRuleEngine.ts). Nothing enforced this, so such items
- *    were written into the shared row's `emotion_flow` JSON and downloaded by
- *    the partner's client.
+ * 2. Emotion-item level -- `EmotionFlowItem.visibility`. The retired rule engine
+ *    marked sensitive emotion groups (shame, guilt, ...) as `author_only` EVEN FOR
+ *    A SHARED RECORD. Nothing enforced this, so such items were written into the
+ *    shared row's `emotion_flow` JSON and downloaded by the partner's client.
  *
  * The helpers below keep author-only items out of shared rows on write, and
  * defensively drop them on read for records the viewer did not author.
@@ -81,11 +80,22 @@ export function stripTransientFields(items: EmotionFlowItem[]): EmotionFlowItem[
  * What actually gets written into `daily_records.emotion_flow`.
  * For a shared record this excludes author-only items, and transient analysis
  * fields (like matchedText) are always stripped regardless of privacy level.
+ *
+ * `source !== 'user_confirmed'` is dropped here rather than only in the composer.
+ * Rule *suggestions* are a machine guess about the user's feelings; persisting one
+ * would turn a guess into a stored fact about a person. That was previously
+ * prevented only because `TodayLogWidget` happened to stamp every item it emitted
+ * as `user_confirmed` -- a convention, not an invariant. Any other writer (a new
+ * screen, an import, a future edit path) would have persisted suggestions
+ * silently. `analyzeEmotionFlow` already applies the same filter on the read side,
+ * so this makes the write side agree with it structurally.
  */
 export function emotionFlowForStorage(
   record: Pick<DailyRecord, 'isPrivate' | 'emotionFlow'>,
 ): EmotionFlowItem[] {
-  return stripTransientFields(splitEmotionFlow(record).shareable);
+  return stripTransientFields(
+    splitEmotionFlow(record).shareable.filter((item) => item.source === 'user_confirmed'),
+  );
 }
 
 /**

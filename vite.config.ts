@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin, type Rollup } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'url';
@@ -72,9 +72,10 @@ function emitCspHeaders(getValidated: () => ValidatedBuildEnvironment | null): P
 }
 
 /**
- * Inject the complete hashed Vite asset graph into the generated service worker.
+ * Inject the hashed Vite asset graph into the generated service worker.
  * A waiting worker can then activate while offline without serving an index whose
- * JavaScript or CSS chunks were never cached.
+ * JavaScript or CSS chunks were never cached. Fonts are the one deliberate
+ * exclusion — see the comment on `isPrecachedAsset` below.
  */
 function injectServiceWorkerManifest(): Plugin {
   return {
@@ -83,7 +84,17 @@ function injectServiceWorkerManifest(): Plugin {
     closeBundle() {
       const outputDirectory = resolve(process.cwd(), 'dist');
       const assetsDirectory = resolve(outputDirectory, 'assets');
+      // Fonts are deliberately NOT precached. The self-hosted Pretendard dynamic
+      // subset is 92 files / ~2.9 MB, and `install` in sw.js uses
+      // `cache.addAll()`, which is all-or-nothing: precaching them would turn
+      // every first visit into a multi-megabyte download and make installation
+      // fail outright on a flaky connection. sw.js already runtime-caches any
+      // response whose request destination is 'font', so the handful of subsets a
+      // session actually rendered are available offline from then on, and the
+      // `unicode-range` metadata means a browser never asks for the rest.
+      const isPrecachedAsset = (file: string) => !/\.woff2?$/.test(file);
       const assetUrls = listFiles(assetsDirectory)
+        .filter(isPrecachedAsset)
         .sort()
         .map((file) => `/assets/${file}`);
       const buildHash = createHash('sha256');
@@ -112,7 +123,38 @@ function injectServiceWorkerManifest(): Plugin {
   };
 }
 
+/**
+ * Turn `Generated an empty chunk: "..."` into a build failure.
+ *
+ * An empty chunk means a `manualChunks` entry names a package that nothing in
+ * the eager graph imports. It is dead weight in the service-worker precache
+ * manifest and a signal that the dependency is unused or no longer reachable,
+ * and `npm run build` used to print it and exit 0.
+ *
+ * Registered LAST so the other `closeBundle` hooks -- which rollup runs in
+ * parallel -- have already done their work against a fully written `dist`. The
+ * write itself is allowed to complete for the same reason: this failure must
+ * report the empty chunk, not a downstream scandir error.
+ */
+function failOnEmptyChunks(getWarnings: () => string[]): Plugin {
+  return {
+    name: 'fail-on-empty-chunks',
+    apply: 'build',
+    closeBundle() {
+      const warnings = getWarnings();
+      if (warnings.length === 0) return;
+      const listed = warnings.map((message) => message.replace(/\.$/, '')).join('; ');
+      throw new Error(
+        `[gomsinlog] build aborted: ${listed}. A manualChunks entry names a `
+        + 'package that nothing in the eager graph imports. Remove the entry, and the '
+        + 'dependency too if it is unused.',
+      );
+    },
+  };
+}
+
 let validatedBuildEnvironment: ValidatedBuildEnvironment | null = null;
+const emptyChunkWarnings: string[] = [];
 
 export default defineConfig({
   plugins: [
@@ -123,9 +165,30 @@ export default defineConfig({
     // build id is derived from the contents of `dist`.
     emitCspHeaders(() => validatedBuildEnvironment),
     injectServiceWorkerManifest(),
+    failOnEmptyChunks(() => emptyChunkWarnings),
   ],
   build: {
     rollupOptions: {
+      /**
+       * An entry in `manualChunks` that no module in the eager graph actually
+       * imports produces `Generated an empty chunk: "..."`, which every gate in
+       * this repository was happy to print and pass.
+       *
+       * Recorded here and turned into a failure by `failOnEmptyChunks()` rather
+       * than thrown on the spot: throwing from `onwarn` aborts the write, and the
+       * only error the user then sees is `injectServiceWorkerManifest()` failing
+       * to scandir a `dist/assets` that was never written -- the real reason
+       * disappears.
+       */
+      onwarn(warning: Rollup.RollupLog, defaultHandler: (log: Rollup.RollupLog) => void) {
+        if (
+          warning.code === 'EMPTY_BUNDLE'
+          || /Generated an empty chunk/.test(warning.message ?? '')
+        ) {
+          emptyChunkWarnings.push(warning.message ?? String(warning.code));
+        }
+        defaultHandler(warning);
+      },
       output: {
         /**
          * Split by import identity so the entry chunk stops crossing the 500 kB
@@ -137,7 +200,6 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom', 'react-router', 'react-router-dom'],
           'vendor-supabase': ['@supabase/supabase-js'],
           'vendor-dnd': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
-          'vendor-date-fns': ['date-fns'],
           'vendor-icons': ['lucide-react'],
         },
       },

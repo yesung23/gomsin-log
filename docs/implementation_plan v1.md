@@ -1,5 +1,21 @@
 # 곰신로그 전체 서비스 청사진
 
+> ⚠️ **이 문서는 v1 시점의 기록 스냅샷입니다. 현재 상태의 근거로 쓰지 마세요.**
+>
+> 아래 "현재 상태 진단" 표는 작성 당시의 상태이며 지금과 다릅니다. 예를 들어 인증 콜백,
+> 공유 일정, 여행 플래너, 서버 계정 삭제는 이 표에서 "미구현" 으로 적혀 있지만 모두
+> 구현되어 있습니다(`src/pages/AuthCallbackPage.tsx`, `src/pages/SchedulePage.tsx`,
+> `src/pages/TripsPage.tsx`, `supabase/functions/delete-account/`). 표 안의 파일 경로도
+> 작성자 한 사람의 로컬 절대경로(`C:/Users/.../scratch/...`)라 다른 환경에서는 열리지 않습니다.
+>
+> 현재 상태의 단일 출처:
+> - 기능/정책 구현 상태 → `docs/PILOT_GUIDE.md` §4
+> - 보안 항목 상태 → `docs/SECURITY_TEST_PLAN.md`
+> - 마이그레이션 원격 적용 상태 → `supabase/migrations/README.md`
+>
+> 이 문서는 **당시의 판단 근거를 보존하기 위해** 그대로 둡니다. 내용을 갱신하지 말고,
+> 갱신이 필요하면 위 세 문서를 고치세요.
+
 > **"답장이 늦어도, 오늘의 순간은 놓치지 않도록."**
 
 ---

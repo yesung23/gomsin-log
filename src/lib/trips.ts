@@ -207,11 +207,22 @@ export async function saveTripToDB(
   return mapTrip(data);
 }
 
+/**
+ * Edit one trip belonging to the caller's couple.
+ *
+ * `coupleId` is REQUIRED and applied as a predicate, matching
+ * `deleteTripFromDB`. The three deletes in this module were already scoped with
+ * the reasoning that "a widened policy cannot turn a stale id into a cross-couple
+ * write" -- but the three mutations were still `id`-only, so the rule was stated
+ * and then not followed. RLS covers this today; the predicate is what keeps it
+ * covered if a policy is ever loosened.
+ */
 export async function updateTripInDB(
   tripId: string,
   updates: Partial<Pick<Trip, 'title' | 'startDate' | 'endDate' | 'status'>>,
+  coupleId: string,
 ): Promise<Trip | null> {
-  if (!supabase || !tripId) return null;
+  if (!supabase || !tripId || !coupleId) return null;
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return null;
   const payload: Record<string, string> = { updated_at: new Date().toISOString() };
@@ -219,7 +230,8 @@ export async function updateTripInDB(
   if (updates.startDate !== undefined) payload.start_date = updates.startDate;
   if (updates.endDate !== undefined) payload.end_date = updates.endDate;
   if (updates.status !== undefined) payload.status = updates.status;
-  const { data, error } = await supabase.from('trips').update(payload).eq('id', tripId).select().maybeSingle();
+  const { data, error } = await supabase.from('trips').update(payload)
+    .eq('id', tripId).eq('couple_id', coupleId).select().maybeSingle();
   if (error || !data) {
     console.error('Error updating trip:', error);
     return null;
@@ -296,7 +308,10 @@ export async function saveTripItemToDB(item: Omit<TripItem, 'id'>): Promise<Trip
  * optimistic reorder was rolled back). Placement is owned by the reorder RPC.
  */
 export async function updateTripItemInDB(item: TripItem): Promise<TripItem | null> {
-  if (!supabase) return null;
+  // `tripId` is required so the update can be scoped to its parent trip, exactly
+  // like `deleteTripItemFromDB`. Without it a stale item id was the only thing
+  // standing between this statement and another couple's row.
+  if (!supabase || !item.tripId) return null;
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return null;
   const { data, error } = await supabase.from('trip_items').update({
@@ -305,7 +320,7 @@ export async function updateTripItemInDB(item: TripItem): Promise<TripItem | nul
     memo: item.memo || null,
     url: item.url || null,
     updated_at: new Date().toISOString(),
-  }).eq('id', item.id).select().maybeSingle();
+  }).eq('id', item.id).eq('trip_id', item.tripId).select().maybeSingle();
   if (error || !data) {
     console.error('Error updating trip item:', error);
     return null;
@@ -393,14 +408,19 @@ export async function saveTripChecklistToDB(tripId: string, itemName: string): P
   return mapTripChecklist(data);
 }
 
-export async function toggleTripChecklistInDB(checklistId: string, completed: boolean): Promise<boolean> {
-  if (!supabase) return false;
+/** Toggle one checklist entry of a specific trip. Scoped like the delete below. */
+export async function toggleTripChecklistInDB(
+  checklistId: string,
+  completed: boolean,
+  tripId: string,
+): Promise<boolean> {
+  if (!supabase || !tripId) return false;
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return false;
   const { data, error } = await supabase.from('trip_checklists').update({
     completed,
     updated_at: new Date().toISOString(),
-  }).eq('id', checklistId).select('id').maybeSingle();
+  }).eq('id', checklistId).eq('trip_id', tripId).select('id').maybeSingle();
   if (error) {
     console.error('Error toggling trip checklist:', error);
     return false;

@@ -3,10 +3,25 @@
 본 문서는 **`곰신로그` (군화와 곰신을 위한 1:1 비공개 데일리 로그 서비스)**의 DB REST API, Storage API, 각 테스터 JWT 및 RLS 정책을 기준으로 검증하는 종합 보안 테스트 계획서입니다.
 
 > ⚠️ **구현 및 검증 상태 고지**:
-> 1. **데모 UI 필터링 vs DB/Storage RLS 보안 분리**: 현재 오프라인 데모 모드(`LocalStorageRepository`)의 `is_private` 차단 및 접근 제한은 **클라이언트 UI/데모 데이터 차원의 모의 격리**입니다. 서버/DB 수준의 엄격한 보안 강제는 Supabase Auth & RLS 배포 후에 적용되며, "100% 완전 보안" 및 "코드 수준 확증" 표현은 실제 서버 RLS 검증 전까지 사용하지 않습니다.
-> 2. **미검증 항목**: 이메일 Magic Link, Google OAuth, Apple OAuth는 자격증명(.env) 설정 전으로 **미검증** 상태입니다.
-> 3. **파일럿 전 필요 (미구현) 항목**: Storage Private Bucket SDK, Signed URL 발급, MIME/용량 제한, 계정 완전 삭제 Edge Function은 **파일럿 전 필요 (미구현)** 상태입니다.
-> 4. **빌드/린트 검증**: 현재 실행 환경 내 Node.js/npm 패키지 매니저 부재로 인해 `npm run build` 및 `npm run lint`는 **미실행 (환경 미지원)** 상태입니다.
+> 1. **구현 여부와 실측 검증 여부는 다른 축입니다.** 이 문서에서 "구현 완료" 는 코드가
+>    존재하고 단위/통합 테스트가 그것을 덮는다는 뜻이고, "실측 미검증" 은 실제 Supabase
+>    프로젝트에서 두 계정으로 측정한 기록이 없다는 뜻입니다. 아래 표는 두 축을 분리해
+>    적습니다. **"100% 완전 보안" 및 "코드 수준 확증" 표현은 실제 서버 RLS 실측 전까지
+>    사용하지 않습니다.**
+> 2. **`is_private` 격리**: 서버 RLS(`005`/`009`/`014` 마이그레이션)와 클라이언트 재필터
+>    (`src/lib/privacy.ts`) 양쪽이 **구현 완료**입니다. 로컬 캐시에도 private 기록의 본문·
+>    첨부·감정 메타데이터를 저장하지 않습니다(`src/lib/store.tsx`). 실제 프로젝트에서의
+>    RLS 실측은 아래 API-\*/STOR-\* 행을 참조하세요.
+> 3. **미검증 항목**: 이메일 Magic Link, Google OAuth, Apple OAuth는 자격증명(.env) 설정
+>    전으로 **미검증** 상태입니다.
+> 4. **Storage / 계정 삭제**: Private Bucket 업로드(`src/lib/records.ts:378`), Signed URL
+>    발급(`src/lib/records.ts:92`, TTL 1시간), MIME/용량 제한(`classifyMediaFile` +
+>    `MAX_BYTES`), 계정 완전 삭제 Edge Function(`supabase/functions/delete-account/`)은
+>    모두 **구현 완료**입니다. 이 문서는 한때 이 네 항목을 "파일럿 전 필요 (미구현)" 으로
+>    적어두고 있었고, 그 상태로 파일럿 go/no-go 를 판단하면 틀립니다. 남은 것은 **원격
+>    적용·배포와 실측**입니다.
+> 5. **빌드/린트/테스트**: `npm run verify` 로 실행되며, CI 워크플로가 typecheck·lint·
+>    전체 Vitest·양방향 빌드·CSP 스캔·에셋 대조·Playwright·Deno Edge 테스트를 돌립니다.
 
 ---
 
@@ -49,14 +64,14 @@
 | **INV-03** | 초대 코드 만료/1회 사용 | 만료/사용한 코드 | RPC `consume_invitation(hash)` 재실행 | `Invalid or expired` 예외 | **미실행** (서버 미연동) |
 | **INV-04** | 초대 코드 경쟁 조건 (Race Condition) | 2개 요청 동시 전송 | 2명이 동시 `consume_invitation(hash)` 실행 | 1명만 성공, 1명 거절 (ATOMIC) | **미실행** (서버 미연동) |
 | **STOR-01** | Storage Direct Public Access | Public URL 요청 | `couple-media` 객체 URL 직접 GET | HTTP 403 Forbidden | **미실행** (Storage 미연동) |
-| **STOR-02** | Signed URL 발급 (B shared) | A shared 사진 | B가 Signed URL 발급 요청 | 정상 Signed URL 발급 (1시간) | **파일럿 전 필요** (미구현) |
-| **STOR-03** | Signed URL 차단 (B private) | A private 사진 | B가 A의 private 미디어 Signed URL 요청 | 발급 거부 (HTTP 403 / Error) | **파일럿 전 필요** (미구현) |
-| **STOR-04** | Signed URL 차단 (D 구상대) | status='disconnected' | D가 A의 이전 shared 미디어 Signed URL 요청 | 발급 거부 (HTTP 403 / Error) | **파일럿 전 필요** (미구현) |
-| **DEL-01** | 계정 완전 삭제 Edge Function | 탈퇴 요청 | Edge Function `deleteUser` 실행 | Auth, Profile, Records, Storage 순삭 | **파일럿 전 필요** (미구현) |
+| **STOR-02** | Signed URL 발급 (B shared) | A shared 사진 | B가 Signed URL 발급 요청 | 정상 Signed URL 발급 (1시간) | **구현 완료 / 실측 미검증** (`records.ts:92`, `SIGNED_URL_TTL_SECONDS`) |
+| **STOR-03** | Signed URL 차단 (B private) | A private 사진 | B가 A의 private 미디어 Signed URL 요청 | 발급 거부 (HTTP 403 / Error) | **구현 완료 / 실측 미검증** (Storage 정책 `007`, 경로 제약 `015`) |
+| **STOR-04** | Signed URL 차단 (D 구상대) | status='disconnected' | D가 A의 이전 shared 미디어 Signed URL 요청 | 발급 거부 (HTTP 403 / Error) | **구현 완료 / 실측 미검증** (Storage 정책 `007`, 멤버십 정합성 `008`/`015`) |
+| **DEL-01** | 계정 완전 삭제 Edge Function | 탈퇴 요청 | Edge Function `deleteUser` 실행 | Auth, Profile, Records, Storage 순삭 | **구현 완료 / 배포·실측 미완** (`supabase/functions/delete-account/`, Deno 테스트 `entrypoint_test.ts`) |
 | **UI-01** | 390px / 1280px 반응형 프레임 | 모바일/데스크톱 | 390px 뷰포트 및 1280px 화면 중앙 430px 프레임 확인 | 깨짐 없이 44px 터치 영역 유지 | **통과** (UI 검증 완료) |
 | **UI-02** | localStorage 새로고침 유지 | 데모 모드 | 기록 추가 후 브라우저 F5 새로고침 | 데모 state 유지 확인 | **통과** (UI 검증 완료) |
 | **UI-03** | private 달력 마커 차단 | A가 private 작성 | B 데모 전환 시 달력 dot, 카운트, 타임라인 숨김 | UI 상 모의 격리 확인 | **통과** (UI 모의 격리) |
-| **BLD-01** | npm run build & lint | 개발 CLI | 빌드 및 린트 명령어 실행 | Node/npm 실행 환경 부재 | **미실행** (환경 미지원) |
+| **BLD-01** | npm run build & lint & test | 개발 CLI 또는 CI | `npm run verify` (typecheck → lint → 전체 Vitest → 빌드) | 전 단계 exit 0 | **통과** (CI 워크플로가 매 PR 에서 실행) |
 
 ---
 

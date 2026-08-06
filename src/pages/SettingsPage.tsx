@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   consumeCoupleInvitation,
+  createCoupleInvitation,
   regenerateCoupleInvitation,
   supabase,
 } from '@/lib/supabase';
@@ -66,6 +67,7 @@ export function SettingsPage() {
   const [isDeletingRecords, setIsDeletingRecords] = useState(false);
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [isJoiningCouple, setIsJoiningCouple] = useState(false);
+  const [isCreatingSpace, setIsCreatingSpace] = useState(false);
   const [deleteAccountConfirmation, setDeleteAccountConfirmation] = useState('');
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [copiedInvite, setCopiedInvite] = useState(false);
@@ -179,6 +181,57 @@ export function SettingsPage() {
     });
     setShowProfileModal(false);
     toast.success('프로필이 저장되었습니다.');
+  };
+
+  /**
+   * Create a fresh couple space from Settings.
+   *
+   * This affordance was missing entirely. `createCoupleInvitation` had exactly one
+   * caller -- the onboarding wizard -- so once onboarding was finished there was no
+   * way back to it. Meanwhile `CoupleStatusBanner` told a `personal` user "우리
+   * 공간을 만들거나 초대 코드를 입력해 보세요" and a `disconnected` user "다시
+   * 연결하려면 새 공간을 만들거나..." and sent both here, where only a join form
+   * existed. A user who disconnected could therefore never create a space again --
+   * they could only join a code someone else minted.
+   */
+  const handleCreateCoupleSpace = async () => {
+    if (isCreatingSpace) return;
+    const identity = captureIdentity();
+    if (!identity.userId) {
+      toast.error('로그인한 계정에서만 커플 공간을 만들 수 있어요.');
+      return;
+    }
+
+    setIsCreatingSpace(true);
+    try {
+      const result = await createCoupleInvitation(profile.role);
+      if (!isCurrentIdentity(identity)) return;
+      if (result.error || !result.coupleId || !result.code) {
+        toast.error(result.error || '커플 공간을 만들지 못했어요.');
+        return;
+      }
+      updateProfile({
+        couple: {
+          ...profile.couple,
+          coupleId: result.coupleId,
+          coupleCode: result.code,
+          connected: false,
+          status: 'pending',
+          partnerName: '',
+        },
+      });
+      if (!isCurrentIdentity(identity)) return;
+      // Pull the authoritative expiry for the code just minted, so the section
+      // above can show a real deadline instead of only "24시간 동안 유효".
+      void refreshCoupleLifecycle();
+      toast.success('우리 공간을 만들었어요. 초대 코드를 상대방에게 전달해 주세요.');
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('[Settings] Couple space creation failed:', error);
+      toast.error(`커플 공간을 만들지 못했어요. ${classifyServerError(error).message}`);
+    } finally {
+      if (isCurrentIdentity(identity)) setIsCreatingSpace(false);
+    }
   };
 
   const handleJoinCouple = async () => {
@@ -436,6 +489,25 @@ export function SettingsPage() {
               className="w-full h-12 rounded-xl bg-coral text-white text-sm font-bold disabled:opacity-50"
             >
               {isJoiningCouple ? '연결 중...' : '초대 코드로 연결하기'}
+            </button>
+
+            {/* The other half of the choice the banners promise. Without this a
+                disconnected user could only ever join someone else's code. */}
+            <div className="flex items-center gap-3 pt-1">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-[11px] text-muted-foreground">또는</span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              내가 공간을 만들고 상대방을 초대할 수도 있어요.
+            </p>
+            <button
+              type="button"
+              onClick={handleCreateCoupleSpace}
+              disabled={isCreatingSpace || isJoiningCouple}
+              className="w-full h-12 rounded-xl border border-coral/40 text-coral text-sm font-bold disabled:opacity-50"
+            >
+              {isCreatingSpace ? '만드는 중...' : '새 우리 공간 만들기'}
             </button>
           </section>
         )}

@@ -1,4 +1,5 @@
 import type { EmotionFlowItem, EmotionGroup } from '@/types';
+import { BASIC_EMOTION_VALENCE } from '@/lib/basicEmotions';
 
 /**
  * On-device emotion-flow analysis.
@@ -33,6 +34,20 @@ import type { EmotionFlowItem, EmotionGroup } from '@/types';
  * a downward day. Every group in the `EmotionGroup` union must appear here; the
  * unit test fails if a new group is added to the union without a valence.
  */
+/**
+ * Valence of one item, preferring the six-emotion reading when present.
+ *
+ * A correction rewrites `basic` (and `group` with it), so this makes a corrected
+ * item bend the drawn shape exactly as an originally-detected one would. Without
+ * this the user could fix a label and watch the line stay wrong.
+ */
+export function valenceOfItem(item: Pick<EmotionFlowItem, 'group' | 'basic'>): number {
+  if (item.basic && item.basic in BASIC_EMOTION_VALENCE) {
+    return BASIC_EMOTION_VALENCE[item.basic];
+  }
+  return EMOTION_VALENCE[item.group] ?? 0;
+}
+
 export const EMOTION_VALENCE: Record<EmotionGroup, number> = {
   joy: 1,
   excitement: 0.9,
@@ -126,8 +141,13 @@ const SHAPE_SENTENCE: Record<EmotionFlowShape, string> = {
   mixed: '여러 마음이 섞인 하루예요.',
 };
 
-function hasValence(group: EmotionGroup): boolean {
-  return Object.prototype.hasOwnProperty.call(EMOTION_VALENCE, group);
+function hasValence(item: Pick<EmotionFlowItem, 'group' | 'basic'>): boolean {
+  // A corrected item is always scoreable: `applyBasicEmotion` rewrites `group`
+  // alongside `basic`. Checking `basic` as well means a future basic emotion
+  // cannot be silently dropped from the analysis just because someone forgot to
+  // add its legacy group to EMOTION_VALENCE.
+  if (item.basic && item.basic in BASIC_EMOTION_VALENCE) return true;
+  return Object.prototype.hasOwnProperty.call(EMOTION_VALENCE, item.group);
 }
 
 /**
@@ -143,7 +163,7 @@ export function analyzeEmotionFlow(
   // composer and must never drive a saved record's narrative.
   const confirmed = (items || [])
     .filter((item) => item.source === 'user_confirmed')
-    .filter((item) => hasValence(item.group));
+    .filter((item) => hasValence(item));
 
   if (confirmed.length === 0) return null;
 
@@ -159,7 +179,7 @@ export function analyzeEmotionFlow(
     // Fall back to the group key only -- never to any other user-provided
     // string, so no diary fragment can reach the label.
     label: item.displayLabel?.trim() || item.group,
-    valence: EMOTION_VALENCE[item.group],
+    valence: valenceOfItem(item),
   }));
 
   const valences = points.map((point) => point.valence);

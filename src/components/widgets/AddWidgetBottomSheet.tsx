@@ -1,6 +1,7 @@
 import React from 'react';
 import { useStore } from '@/lib/useStore';
-import { WIDGET_REGISTRY } from '@/lib/widgets';
+import { useEscapeKey } from '@/lib/hooks';
+import { WIDGET_REGISTRY, isWidgetAllowedForRole, widgetsForRole } from '@/lib/widgets';
 import { X, PlusCircle } from 'lucide-react';
 
 interface AddWidgetBottomSheetProps {
@@ -10,20 +11,31 @@ interface AddWidgetBottomSheetProps {
 
 export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetProps) {
   const { state, setWidgetLayout } = useStore();
-  const { widgetLayout } = state;
+  const role = state.profile.role;
+  const storedLayout = role === 'soldier' ? state.soldierWidgetLayout : state.widgetLayout;
+
+  // Before the early return: a hook may not sit behind a conditional.
+  useEscapeKey(onClose, isOpen);
 
   if (!isOpen) return null;
 
-  const allWidgetIds = Object.keys(WIDGET_REGISTRY);
-  const availableWidgets = allWidgetIds.filter((id) => !widgetLayout.includes(id));
+  /**
+   * Only widgets this role may use, and only ones not already placed.
+   *
+   * Filtering against the ROLE-CORRECT stored layout matters: appending to the
+   * wrong list would silently move a widget onto the other person's home screen.
+   * Ids that are unknown or not for this role are dropped on write rather than
+   * carried forward, so a stale layout heals instead of accumulating.
+   */
+  const current = (storedLayout ?? []).filter(
+    (id: string) => WIDGET_REGISTRY[id] && isWidgetAllowedForRole(id, role),
+  );
+  const availableWidgets = widgetsForRole(role)
+    .map((widget) => widget.id)
+    .filter((id) => !current.includes(id));
 
   const handleAddWidget = (id: string) => {
-    // Only allow max 6 by default? The prompt says "기본 상태에서 최대 6개까지만 노출하고, 나머지는 사용자가 직접 추가하도록" 
-    // This implies the default layout has 4, and the user CAN add more. Wait, does it mean they can only have 6 total? 
-    // "최대 6개까지만 노출하고, 나머지는 사용자가 직접 추가하도록" -> Maybe means default layout is max 6, user can add more.
-    // Let's just append it.
-    const newLayout = [...widgetLayout, id];
-    setWidgetLayout(newLayout);
+    setWidgetLayout([...current, id], role);
     onClose();
   };
 
@@ -38,16 +50,33 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
       <div
         className="fixed inset-0 bg-black/40 z-[60] transition-opacity animate-in fade-in"
         onClick={onClose}
+        aria-hidden="true"
       />
-      {/* Bottom Sheet */}
-      <div className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-3xl p-5 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col">
+      {/*
+        Bottom Sheet.
+        It used to be a bare <div>: no `role="dialog"`, no `aria-modal`, no name,
+        and no Escape handler, so a screen reader announced nothing about it and a
+        keyboard user could not dismiss it at all. Every other overlay in this app
+        (RecordPage, SchedulePage, ServicePage, SettingsPage) already carries these
+        three attributes and calls `useEscapeKey`; this one was the exception.
+      */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-widget-sheet-title"
+        className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-3xl p-5 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col"
+      >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-foreground">홈 위젯 추가</h2>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-muted text-muted-foreground">
-            <X size={24} />
+          <h2 id="add-widget-sheet-title" className="text-xl font-bold text-foreground">홈 위젯 추가</h2>
+          <button
+            onClick={onClose}
+            aria-label="위젯 추가 닫기"
+            className="min-w-[44px] min-h-[44px] p-2 rounded-full hover:bg-muted text-muted-foreground flex items-center justify-center"
+          >
+            <X size={24} aria-hidden="true" />
           </button>
         </div>
-        
+
         {availableWidgets.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground">
             <p>모든 위젯이 이미 홈 화면에 추가되어 있습니다.</p>
@@ -57,17 +86,24 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
             {availableWidgets.map((id) => {
               const widget = WIDGET_REGISTRY[id];
               return (
-                <div 
+                /*
+                  A `<div onClick>` here was not reachable by keyboard at all: no
+                  role, no tabIndex, no key handler. Adding a widget was a
+                  pointer-only action. A real <button> is focusable, operable with
+                  Enter and Space, and announced as a button.
+                */
+                <button
                   key={id}
+                  type="button"
                   onClick={() => handleAddWidget(id)}
-                  className="flex items-center justify-between p-4 rounded-2xl border border-border hover:border-coral/50 hover:bg-coral/5 cursor-pointer transition-all active:scale-95"
+                  className="w-full text-left flex items-center justify-between p-4 rounded-2xl border border-border hover:border-coral/50 hover:bg-coral/5 cursor-pointer transition-all active:scale-95"
                 >
                   <div>
                     <div className="font-bold text-foreground text-sm">{widget.label}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">{widget.description}</div>
                   </div>
-                  <PlusCircle className="text-coral" size={24} strokeWidth={1.5} />
-                </div>
+                  <PlusCircle className="text-coral" size={24} strokeWidth={1.5} aria-hidden="true" />
+                </button>
               );
             })}
           </div>

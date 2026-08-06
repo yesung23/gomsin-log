@@ -11,15 +11,94 @@ import {
   MemoriesWidget,
   TodayConditionWidget,
 } from '@/lib/widgetComponents';
+import {
+  PartnerEmotionFlowWidget,
+  PartnerEmotionSummaryWidget,
+} from '@/components/widgets/PartnerEmotionWidgets';
+import { PartnerDayTimelineWidget } from '@/components/widgets/PartnerDayTimelineWidget';
+import { CareHintWidget } from '@/components/widgets/CareHintWidget';
+import type { Role } from '@/types';
 
 export type WidgetDef = {
   id: string;
   label: string;
   description: string;
   component: React.FC;
+  /**
+   * Which roles may use this widget. Omitted means both.
+   *
+   * Needed because the two new partner-emotion widgets only make sense for the
+   * person reading someone else's day: offering "곰신의 마음 흐름" to 곰신 herself
+   * would be a widget about her own records described as someone else's.
+   */
+  roles?: readonly Role[];
 };
 
+/**
+ * Default home composition per role.
+ *
+ * 군화 leads with the partner's emotion flow and then the summary, because a
+ * soldier gets a short window and needs "how is she" before anything else. 곰신
+ * leads with the briefing and the composer, because she is the one writing.
+ */
+export const DEFAULT_LAYOUT_BY_ROLE: Record<Role, string[]> = {
+  soldier: [
+    // The day itself comes first. The three widgets under it describe that day --
+    // its shape, its headline, what to say about it -- and a description is only
+    // useful once the thing it describes is on the screen. README section 1.4 puts
+    // the chronological moments at the centre of this home, so that is what leads.
+    'partner_day',
+    'partner_emotion_flow',
+    'partner_emotion_summary',
+    'care_hint',
+    'today_word',
+    'dday',
+  ],
+  gomsin: ['today_briefing', 'today_word', 'dday'],
+};
+
+/** Widgets this role is allowed to see, used by the add sheet and the renderer. */
+export function widgetsForRole(role: Role): WidgetDef[] {
+  return Object.values(WIDGET_REGISTRY).filter(
+    (widget) => !widget.roles || widget.roles.includes(role),
+  );
+}
+
+export function isWidgetAllowedForRole(id: string, role: Role): boolean {
+  const widget = WIDGET_REGISTRY[id];
+  if (!widget) return false;
+  return !widget.roles || widget.roles.includes(role);
+}
+
 export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
+  partner_day: {
+    id: 'partner_day',
+    label: '상대방의 오늘',
+    description: '오늘 공유된 순간을 시간순으로, 사진·영상·음성까지 그대로',
+    component: PartnerDayTimelineWidget,
+    roles: ['soldier'],
+  },
+  partner_emotion_flow: {
+    id: 'partner_emotion_flow',
+    label: '상대방의 마음 흐름',
+    description: '오늘 공유된 마음이 어떻게 흘렀는지',
+    component: PartnerEmotionFlowWidget,
+    roles: ['soldier'],
+  },
+  partner_emotion_summary: {
+    id: 'partner_emotion_summary',
+    label: '오늘의 요약',
+    description: '오늘 상대방이 공유한 이야기 요약',
+    component: PartnerEmotionSummaryWidget,
+    roles: ['soldier'],
+  },
+  care_hint: {
+    id: 'care_hint',
+    label: '다정한 한마디',
+    description: '통화할 때 건네면 좋은 말 한마디',
+    component: CareHintWidget,
+    roles: ['soldier'],
+  },
   today_briefing: {
     id: 'today_briefing',
     label: '오늘의 브리핑',

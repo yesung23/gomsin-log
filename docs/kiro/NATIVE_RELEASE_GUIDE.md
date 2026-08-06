@@ -274,7 +274,7 @@ account, none used for tracking, all for app functionality.
 `NSPrivacyTracking` is false with no tracking domains: there is no analytics SDK,
 no advertising identifier and no third-party network peer. EmoFlow emotion
 analysis is a deterministic local rule engine
-(`src/lib/emotionRuleEngine.ts`), not an external service.
+(`src/lib/emotionCandidates.ts`), not an external service.
 
 **If a plugin is added, do not copy a declaration from a blog post.** Re-run
 `npm run verify:native`, read the pod's own manifest, and declare only what the

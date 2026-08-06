@@ -50,7 +50,7 @@
 		network and no third-party domain contacted from the app: the only
 		network peer is the project's own Supabase instance, and EmoFlow emotion
 		analysis is a deterministic local rule engine
-		(src/lib/emotionRuleEngine.ts), not an external service.
+		(src/lib/emotionCandidates.ts), not an external service.
 	-->
 	<key>NSPrivacyTracking</key>
 	<false/>

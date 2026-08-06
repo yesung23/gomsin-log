@@ -8,11 +8,10 @@ import type { DailyRecord, EmotionFlowItem, Role } from '@/types';
  * 1. Record level -- `isPrivate`. Enforced server-side by RLS: the partner's
  *    "read shared records" policy requires `is_private = false`.
  *
- * 2. Emotion-item level -- `EmotionFlowItem.visibility`. The rule engine marks
- *    sensitive emotion groups (shame, guilt, ...) as `author_only` EVEN FOR A
- *    SHARED RECORD (emotionRuleEngine.ts). Nothing enforced this, so such items
- *    were written into the shared row's `emotion_flow` JSON and downloaded by
- *    the partner's client.
+ * 2. Emotion-item level -- `EmotionFlowItem.visibility`. The retired rule engine
+ *    marked sensitive emotion groups (shame, guilt, ...) as `author_only` EVEN FOR
+ *    A SHARED RECORD. Nothing enforced this, so such items were written into the
+ *    shared row's `emotion_flow` JSON and downloaded by the partner's client.
  *
  * The helpers below keep author-only items out of shared rows on write, and
  * defensively drop them on read for records the viewer did not author.

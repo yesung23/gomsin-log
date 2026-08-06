@@ -6,6 +6,7 @@ import { generateDailySummary } from '@/lib/briefing';
 import { useEscapeKey } from '@/lib/hooks';
 import { scrollBehavior } from '@/lib/motion';
 import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
+import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
@@ -393,6 +394,21 @@ export function RecordPage() {
 
   const partnerDisplayName = profile.couple.partnerName || '상대방';
 
+  /**
+   * Attribution for the open record, so the detail modal names the author with
+   * the same three channels the timeline card uses.
+   */
+  const selectedAuthor = useMemo(
+    () => (selectedRecord
+      ? recordAuthorPresentation(
+        selectedRecord,
+        { userId: profile.id, role: profile.role },
+        partnerDisplayName,
+      )
+      : null),
+    [selectedRecord, profile.id, profile.role, partnerDisplayName],
+  );
+
   // Check if selected month has any records at all
   const monthHasRecords = useMemo(() => {
     return calendarCells.some((cell) => {
@@ -690,7 +706,11 @@ export function RecordPage() {
             </div>
           ) : (
             selectedDayRecords.map((r) => {
-              const isOwn = r.authorRole === profile.role;
+              const author = recordAuthorPresentation(
+                r,
+                { userId: profile.id, role: profile.role },
+                partnerDisplayName,
+              );
               const isHighlighted = state.highlightedRecordId === r.id;
 
               return (
@@ -698,17 +718,48 @@ export function RecordPage() {
                   id={`record-${r.id}`}
                   key={r.id}
                   onClick={() => setSelectedRecordId(r.id)}
+                  data-author-role={author.role ?? 'unknown'}
+                  data-author-own={author.isOwn ? 'true' : 'false'}
                   className={cn(
-                    'rounded-2xl bg-card border p-4 shadow-sm space-y-2 cursor-pointer active:scale-[0.98] transition-all duration-500',
+                    // `relative` and `overflow-hidden` carry the author stripe below.
+                    // `max-w-[94%]` plus ml-auto/mr-auto is the ownership channel.
+                    'relative overflow-hidden rounded-2xl bg-card border p-4 pl-5 shadow-sm space-y-2 cursor-pointer active:scale-[0.98] transition-all duration-500 max-w-[94%]',
+                    author.alignClass,
                     isHighlighted
-                      ? 'border-coral ring-4 ring-coral/30 bg-coral/5 scale-[1.01]'
+                      ? 'border-coral ring-4 ring-coral/30 scale-[1.01]'
                       : 'border-border/60'
                   )}
                 >
+                  {/*
+                    Author hue as geometry the highlight cannot collide with.
+                    `isHighlighted` paints a coral ring around the WHOLE card, so
+                    the author accent is a left edge stripe instead: different
+                    shape, so a highlighted 군화 card still reads as 군화.
+                  */}
+                  <span
+                    aria-hidden="true"
+                    className={cn('absolute left-0 top-0 bottom-0 w-1.5', author.stripeClass)}
+                  />
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-foreground">{r.time}</span>
-                      <span className="text-muted-foreground/70">{isOwn ? '나' : partnerDisplayName}</span>
+                      {/*
+                        The chip is hidden from assistive tech and replaced by a
+                        sentence, not duplicated: read aloud, `🌸 곰신 · 춘향`
+                        becomes "cherry blossom 곰신 middle dot 춘향". The emoji and
+                        the separator are sighted-reader shorthand, so the screen
+                        reader gets the same fact as prose instead.
+                      */}
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'px-2 py-0.5 rounded-full font-semibold text-[11px] whitespace-nowrap',
+                          author.chipClass,
+                        )}
+                      >
+                        {author.attribution}
+                      </span>
+                      <span className="sr-only">{author.srAttribution}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       {r.reaction && (
@@ -774,9 +825,32 @@ export function RecordPage() {
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
-              <h3 id="record-detail-modal-title" className="text-lg font-bold text-card-foreground">
-                {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
-              </h3>
+              <div className="min-w-0">
+                <h3 id="record-detail-modal-title" className="text-lg font-bold text-card-foreground">
+                  {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
+                </h3>
+                {/*
+                  The modal used to name only the date and time. Opening a card
+                  from a day both people wrote on therefore lost the one thing the
+                  timeline had just established: whose entry this is.
+                */}
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'mt-1 inline-block px-2 py-0.5 rounded-full font-semibold text-[11px]',
+                    selectedAuthor?.chipClass,
+                  )}
+                >
+                  {selectedAuthor?.attribution}
+                </span>
+                {/*
+                  Same split as the timeline chip: the emoji shorthand is for the
+                  eye, the sentence is for the screen reader. The modal is labelled
+                  by the date heading, so this sits inside it as extra prose rather
+                  than replacing the accessible name.
+                */}
+                <span className="sr-only">{selectedAuthor?.srAttribution}</span>
+              </div>
               <button
                 onClick={closeSelectedRecord}
                 className="w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { toast } from 'sonner';
-import { AUTH_CALLBACK_DETECT_GRACE_MS, AUTH_CALLBACK_TIMEOUT_MS } from '@/lib/async';
+import { AUTH_CALLBACK_TIMEOUT_MS, withTimeout } from '@/lib/async';
 
 /**
  * Reads a parameter from either the query string or the URL fragment.
@@ -29,15 +29,8 @@ export function AuthCallbackPage() {
     hasHandledCallback.current = true;
 
     let cancelled = false;
-    let signedIn = false;
     let unsubscribe: (() => void) | undefined;
     const timers: number[] = [];
-
-    /** Resolved by the auth listener the instant a session exists. */
-    let announceSession: (() => void) | undefined;
-    const sessionAnnounced = new Promise<void>((resolve) => {
-      announceSession = resolve;
-    });
 
     const fail = (message: string) => {
       if (cancelled) return;
@@ -59,25 +52,6 @@ export function AuthCallbackPage() {
       navigate('/', { replace: true });
     };
 
-    /**
-     * Resolve `true` as soon as a session exists, or after `ms` if none arrives.
-     *
-     * The wait ends early on the listener's announcement rather than by polling,
-     * so a session that is already in flight costs no extra latency.
-     */
-    const sessionArrivesWithin = async (ms: number): Promise<boolean> => {
-      await Promise.race([
-        sessionAnnounced,
-        new Promise<void>((resolve) => {
-          timers.push(window.setTimeout(resolve, ms));
-        }),
-      ]);
-      if (signedIn) return true;
-      if (cancelled) return false;
-      const { data } = await supabase!.auth.getSession();
-      return !!data.session;
-    };
-
     async function handleAuthCallback() {
       if (!isSupabaseConfigured || !supabase) {
         fail('Supabase 환경설정이 필요합니다.');
@@ -97,8 +71,7 @@ export function AuthCallbackPage() {
         return;
       }
 
-      // 2. Read the code BEFORE anything can strip it: a successful
-      //    `detectSessionInUrl` exchange rewrites the URL to remove it.
+      // 2. Read the PKCE code before replacing the callback URL.
       const code = readAuthParam('code');
 
       // 3. A session may already exist (e.g. the user re-opened the callback URL).
@@ -108,57 +81,56 @@ export function AuthCallbackPage() {
         return;
       }
 
-      // 4. Watch for the session arriving. `detectSessionInUrl` performs the code
-      //    exchange asynchronously, so polling getSession() once (the previous
-      //    behaviour) frequently observed `null` and reported a false failure.
+      // 4. Keep the store informed when the explicit exchange publishes the
+      //    signed-in session. The callback page itself owns the exchange; the
+      //    Supabase client has detectSessionInUrl disabled so this listener can
+      //    never race a second consumer of the same one-time code.
       const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
         if (!session) return;
-        signedIn = true;
-        announceSession?.();
         succeed();
       });
       unsubscribe = () => sub.subscription.unsubscribe();
 
-      // 5. A PKCE authorization code may be redeemed exactly ONCE, and
-      //    `detectSessionInUrl: true` means this client is already redeeming the
-      //    one in the URL. So wait for that to land first and only redeem it here
-      //    if it produced nothing -- this call is a sequential fallback (the
-      //    deep-link shape, or a client that never ran the detection), never a
-      //    competitor. Racing it guaranteed that one of the two exchanges lost
-      //    with an `invalid_grant`-class error.
+      // 5. Exchange a PKCE authorization code exactly once. Bound the request so
+      //    a network failure cannot leave the user on a permanent spinner.
       if (code) {
-        if (await sessionArrivesWithin(AUTH_CALLBACK_DETECT_GRACE_MS)) {
-          succeed();
-          return;
-        }
+        const result = await withTimeout<{ error: unknown }>(
+          supabase.auth.exchangeCodeForSession(code),
+          AUTH_CALLBACK_TIMEOUT_MS,
+          { error: new Error('OAuth code exchange timed out') },
+        );
         if (cancelled) return;
 
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (cancelled) return;
-
-        if (error) {
-          // NOT terminal, and this is the bug that told successfully signed-in
-          // users their login had failed: a losing exchange still leaves the
-          // winner's session about to land. Only the absence of a session at the
-          // deadline is a real failure, so keep waiting instead of giving up on
-          // the first error.
-          console.error('[AuthCallback] Code exchange failed:', error);
-          if (await sessionArrivesWithin(AUTH_CALLBACK_TIMEOUT_MS)) {
-            succeed();
-            return;
-          }
-          if (cancelled) return;
+        if (result.error) {
+          console.error('[AuthCallback] Code exchange failed:', result.error);
           fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
           return;
         }
-      }
 
-      // 6. Give the implicit flow / in-flight exchange a bounded amount of time.
-      if (await sessionArrivesWithin(AUTH_CALLBACK_TIMEOUT_MS)) {
         succeed();
         return;
       }
-      if (cancelled) return;
+
+      // 6. Defensive support for an old implicit-flow link. New Google, Apple
+      //    and email links use PKCE, but accepting a complete legacy token pair
+      //    avoids breaking a link that was issued before this deployment.
+      const accessToken = readAuthParam('access_token');
+      const refreshToken = readAuthParam('refresh_token');
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (cancelled) return;
+        if (error) {
+          console.error('[AuthCallback] Legacy token session failed:', error);
+          fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
+          return;
+        }
+        succeed();
+        return;
+      }
+
       fail('로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
     }
 

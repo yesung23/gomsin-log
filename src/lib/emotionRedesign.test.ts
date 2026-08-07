@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   BASIC_BY_GROUP,
   BASIC_EMOTION_LABEL,
@@ -246,27 +248,88 @@ describe('what actually gets stored', () => {
 // Role-aware widgets
 // ---------------------------------------------------------------------------
 describe('role-aware home widgets', () => {
-  it("leads 군화's home with the day itself, then the flow and the summary", () => {
+  it("leads 군화's home with the day itself and nothing that merely describes it", () => {
     /*
      * Changed deliberately, and the reason is recorded here rather than in a
-     * commit message nobody will read again.
+     * commit message nobody will read again. This is the SECOND time this
+     * assertion has moved; the previous note is kept below it.
      *
-     * The original assertion pinned `['partner_emotion_flow',
+     * `통화 전 60초` is pinned by WidgetDashboard outside this list, so the default
+     * below it is now just the day and the D-Day strip. The four widgets removed
+     * from it -- `partner_emotion_flow`, `partner_emotion_summary`, `care_hint`,
+     * `today_word` -- all described the day the pinned briefing had already
+     * described, so a soldier read the same context in four wrappers. PRODUCT_PRD
+     * §7.3 caps the core screen at three priorities; the default carried seven
+     * surfaces. PRODUCT_REVIEW §2 diagnosed this and recorded it as fixed, but only
+     * the briefing card was consolidated.
+     *
+     * `partner_day` leading is unchanged and is the point: README §1.4 defines this
+     * home as the partner's moments in chronological order, and
+     * `PartnerDayTimelineWidget.test.tsx` guards a home that shows only
+     * descriptions of them. That test still passes untouched.
+     *
+     * PREVIOUS NOTE (kept): the original assertion pinned `['partner_emotion_flow',
      * 'partner_emotion_summary']` as the first two. Both of those, and `care_hint`
-     * with them, are DESCRIPTIONS of the partner's day -- its shape, its headline,
-     * what to say about it. README section 1.4 says the point of this home is the
-     * day itself: "상대방의 오늘 순간들을 시간순(사진, 영상, 음성, 텍스트)으로 있는
-     * 그대로 감상". A description is only useful once the thing it describes is on
-     * the screen, so `partner_day` leads.
-     *
-     * The relationship the original test existed to protect -- flow BEFORE summary
-     * -- is unchanged and is still asserted below, separately, so that ordering
-     * cannot silently flip while this assertion is being updated.
+     * with them, are DESCRIPTIONS of the partner's day, and a description is only
+     * useful once the thing it describes is on the screen -- which is why
+     * `partner_day` was moved in front of them.
      */
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier.slice(0, 3))
-      .toEqual(['partner_day', 'partner_emotion_flow', 'partner_emotion_summary']);
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier.indexOf('partner_emotion_flow'))
-      .toBeLessThan(DEFAULT_LAYOUT_BY_ROLE.soldier.indexOf('partner_emotion_summary'));
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['partner_day', 'dday']);
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier[0]).toBe('partner_day');
+  });
+
+  it('keeps every demoted widget available rather than deleting it', () => {
+    // Removed from the DEFAULT only. Each must still exist and still be offered to
+    // 군화, otherwise this was a feature deletion wearing a layout change's clothes.
+    for (const id of [
+      'partner_emotion_flow',
+      'partner_emotion_summary',
+      'care_hint',
+      'today_word',
+      'upcoming_schedule',
+    ]) {
+      expect(WIDGET_REGISTRY[id], `${id} must still exist`).toBeTruthy();
+      expect(isWidgetAllowedForRole(id, 'soldier'), `${id} must still be offerable`).toBe(true);
+      expect(widgetsForRole('soldier').map((w) => w.id), id).toContain(id);
+    }
+  });
+
+  it('still shows the flow before the summary, now inside the briefing disclosure', () => {
+    /*
+     * The relationship the original test existed to protect -- flow BEFORE summary
+     * -- has not been dropped, it has moved. Both widgets now render inside
+     * `CallBriefingWidget`'s `더 보기`, so the ordering is asserted where it now
+     * lives instead of against a list that no longer contains either id.
+     */
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/widgets/CallBriefingWidget.tsx'),
+      'utf8',
+    );
+    const flow = source.indexOf('<PartnerEmotionFlowWidget');
+    const summary = source.indexOf('<PartnerEmotionSummaryWidget');
+    const care = source.indexOf('<CareHintWidget');
+    expect(flow, 'the briefing must render the flow widget').toBeGreaterThan(-1);
+    expect(summary, 'the briefing must render the summary widget').toBeGreaterThan(-1);
+    expect(care, 'the briefing must render the care hint').toBeGreaterThan(-1);
+    expect(flow).toBeLessThan(summary);
+  });
+
+  it('puts the checkpoint action ahead of everything optional in the briefing', () => {
+    /*
+     * The north-star metric is the time from opening the briefing to pressing
+     * `여기까지 확인`, so anything rendered between the topics and that button is
+     * measured as comprehension time the user did not spend comprehending. At
+     * 320x568 the opener pushed it off the first screen entirely.
+     */
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/widgets/CallBriefingWidget.tsx'),
+      'utf8',
+    );
+    const confirm = source.indexOf('여기까지 확인');
+    const disclosure = source.indexOf('더 보기');
+    expect(confirm).toBeGreaterThan(-1);
+    expect(disclosure).toBeGreaterThan(-1);
+    expect(confirm).toBeLessThan(disclosure);
   });
 
   it('never offers the partner-facing widgets to the person they describe', () => {

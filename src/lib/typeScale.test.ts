@@ -82,6 +82,11 @@ const CONVERTED_FILES = [
   'src/pages/ServicePage.tsx',
   'src/pages/LegalPage.tsx',
   'src/pages/AuthCallbackPage.tsx',
+  // The two longest screens, and the first one a user ever sees. Onboarding is
+  // where `body` earns its place twice: every question's explanatory line is
+  // prose, and every answer is an input the user types into.
+  'src/pages/SettingsPage.tsx',
+  'src/pages/OnboardingPage.tsx',
 ];
 
 function read(file: string): string {

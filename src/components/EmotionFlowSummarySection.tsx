@@ -97,13 +97,13 @@ export function EmotionFlowSummarySection({
         aria-busy="true"
         className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
       >
-        <p className="text-xs font-semibold text-muted-foreground">기간 마음 흐름</p>
+        <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         {/*
           Says the period is not confirmed YET. The empty state's
           "아직 오늘의 마음이 없어요" is a verdict about the user's data, and while
           the workspace is hidden that verdict is not ours to make.
         */}
-        <p className="text-xs text-muted-foreground mt-2">
+        <p className="text-caption text-muted-foreground mt-2">
           기록을 확인하는 중이에요. 확인되면 마음 흐름을 보여드려요.
         </p>
       </section>
@@ -118,13 +118,13 @@ export function EmotionFlowSummarySection({
         role="alert"
         className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
       >
-        <p className="text-xs font-semibold text-muted-foreground">기간 마음 흐름</p>
-        <p className="text-xs text-muted-foreground mt-2">{error}</p>
+        <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
+        <p className="text-caption text-muted-foreground mt-2">{error}</p>
         {onRetry && (
           <button
             type="button"
             onClick={onRetry}
-            className="mt-3 min-h-[44px] w-full rounded-xl border border-border px-4 text-xs font-bold text-foreground"
+            className="mt-3 min-h-[44px] w-full rounded-xl border border-border px-4 text-label font-bold text-foreground"
           >
             다시 시도
           </button>
@@ -140,8 +140,8 @@ export function EmotionFlowSummarySection({
         data-state="empty"
         className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
       >
-        <p className="text-xs font-semibold text-muted-foreground">기간 마음 흐름</p>
-        <p className="text-xs text-muted-foreground mt-2">아직 오늘의 마음이 없어요</p>
+        <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
+        <p className="text-caption text-muted-foreground mt-2">아직 오늘의 마음이 없어요</p>
       </section>
     );
   }
@@ -157,13 +157,13 @@ export function EmotionFlowSummarySection({
       className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
     >
       <div className="flex items-baseline justify-between">
-        <p className="text-xs font-semibold text-muted-foreground">기간 마음 흐름</p>
-        <p className="text-[11px] text-muted-foreground">{periodLabel}</p>
+        <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
+        <p className="text-caption text-muted-foreground">{periodLabel}</p>
       </div>
 
-      <p className="text-sm font-bold text-foreground mt-2 break-keep">{summary}</p>
+      <p className="text-body font-semibold text-foreground mt-2 break-keep">{summary}</p>
 
-      <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-caption">
         <div>
           <dt className="text-muted-foreground">처음</dt>
           <dd data-testid="summary-start" className="font-semibold text-foreground">
@@ -178,7 +178,7 @@ export function EmotionFlowSummarySection({
         </div>
       </dl>
 
-      <p data-testid="summary-counts" className="text-[11px] text-muted-foreground mt-3">
+      <p data-testid="summary-counts" className="text-caption text-muted-foreground mt-3">
         기록 {recordCount}개 · 마음 {points.length}개
       </p>
     </section>

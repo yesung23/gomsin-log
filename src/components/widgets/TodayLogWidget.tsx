@@ -477,13 +477,13 @@ export function TodayLogWidget() {
     
   return (
     <div className="flex flex-col">
-      <h2 className="text-lg font-bold text-foreground mb-4">오늘의 기록</h2>
+      <h2 className="text-heading text-foreground mb-4">오늘의 기록</h2>
       
       {/* Main actions: 지금찍기, 사진·영상, 음성, 한줄남기기 */}
       <div className="grid grid-cols-4 gap-2">
         <button
           onClick={() => handleOpenInput('instant')}
-          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-coral/15 border border-coral/30 text-coral font-bold text-xs active:scale-95 transition min-h-[60px]"
+          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-coral/15 border border-coral/30 text-coral-strong font-bold text-caption active:scale-95 transition min-h-[60px]"
         >
           <Camera size={20} className="mb-1" />
           <span>지금찍기</span>
@@ -491,7 +491,7 @@ export function TodayLogWidget() {
 
         <button
           onClick={() => handleOpenInput('photo')}
-          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-xs active:scale-95 transition min-h-[60px]"
+          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-caption active:scale-95 transition min-h-[60px]"
         >
           <ImageIcon size={20} className="mb-1 text-muted-foreground" />
           <span>사진·영상</span>
@@ -500,7 +500,7 @@ export function TodayLogWidget() {
         <button
           onClick={isRecording ? handleStopRecording : handleStartRecording}
           aria-pressed={isRecording}
-          className={`flex flex-col items-center justify-center py-4 px-1 rounded-2xl border font-semibold text-xs active:scale-95 transition min-h-[60px] ${
+          className={`flex flex-col items-center justify-center py-4 px-1 rounded-2xl border font-semibold text-caption active:scale-95 transition min-h-[60px] ${
             isRecording
               ? 'bg-destructive/15 border-destructive/40 text-destructive'
               : 'bg-muted/60 border-border text-foreground'
@@ -516,7 +516,7 @@ export function TodayLogWidget() {
 
         <button
           onClick={() => handleOpenInput('text')}
-          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-xs active:scale-95 transition min-h-[60px]"
+          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-caption active:scale-95 transition min-h-[60px]"
         >
           <Send size={20} className="mb-1 text-muted-foreground" />
           <span>한줄</span>
@@ -536,12 +536,12 @@ export function TodayLogWidget() {
       {showInputCard && (
         <div className="mt-4 p-4 rounded-2xl bg-card border border-border shadow-sm animate-fade-in space-y-3">
           <div className="flex items-center justify-between pb-3 border-b border-border">
-            <span className="text-xs font-bold text-muted-foreground flex items-center gap-1">
+            <span className="text-caption font-bold text-muted-foreground flex items-center gap-1">
               <Heart size={14} className="text-coral fill-coral" /> 순간 남기기
             </span>
             <button
               onClick={() => setShowInputCard(false)}
-              className="text-xs text-muted-foreground px-2 py-1 bg-muted rounded-md"
+              className="text-caption text-muted-foreground px-2 py-1 bg-muted rounded-md"
             >
               닫기
             </button>
@@ -552,7 +552,7 @@ export function TodayLogWidget() {
             support for reading it varies between screen readers. This is the main
             composer of the whole app, so it gets a real name. WCAG 2.1 SC 1.3.1.
           */}
-          <p className="text-[11px] text-muted-foreground leading-relaxed break-keep">
+          <p className="text-caption text-muted-foreground leading-relaxed break-keep">
             사건을 길게 설명하기보다 <strong className="text-foreground">무슨 일이 있었는지 · 어떤 마음이었는지 · 통화 때 듣고 싶은 말</strong>을 남겨 보세요.
           </p>
           <textarea
@@ -560,18 +560,18 @@ export function TodayLogWidget() {
             onChange={(e) => setLog(e.target.value)}
             aria-label="오늘의 기록"
             placeholder="지금 이 순간, 어떤 생각을 하고 있나요?"
-            className="w-full h-24 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
+            className="w-full h-24 bg-muted rounded-xl p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />
 
           {isNative && !hasVoiceAttachment && (
-            <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-tight break-keep">
+            <p className="flex items-start gap-1.5 text-caption text-muted-foreground leading-tight break-keep">
               <Mic size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
               <span>{MICROPHONE_RATIONALE}</span>
             </p>
           )}
 
           {isRecording && (
-            <div className="flex items-center gap-2 text-xs font-bold text-destructive bg-destructive/10 border border-destructive/30 rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2 text-caption font-bold text-destructive bg-destructive/10 border border-destructive/30 rounded-xl px-3 py-2">
               <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
               <span>
                 녹음 중 {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:
@@ -589,7 +589,7 @@ export function TodayLogWidget() {
 
           {pendingFiles.length > 0 && (
             <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-muted-foreground">
+              <span className="text-caption font-bold text-muted-foreground">
                 첨부 {pendingFiles.length}개 (저장할 때 업로드돼요)
               </span>
               <div className="flex flex-wrap gap-2">
@@ -599,7 +599,7 @@ export function TodayLogWidget() {
                   return (
                     <span
                       key={`${file.name}-${index}`}
-                      className="flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-xl bg-muted border border-border text-[11px] font-semibold text-foreground"
+                      className="flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-xl bg-muted border border-border text-caption font-semibold text-foreground"
                     >
                       {kind === 'photo' && <ImageIcon size={13} className="text-coral shrink-0" />}
                       {kind === 'video' && <Film size={13} className="text-info shrink-0" />}
@@ -645,7 +645,7 @@ export function TodayLogWidget() {
               // 44px minimum: measured at 32px in a real browser, which is below
               // the tap-target floor for the control that decides whether a record
               // is shared with the partner.
-              className={`min-h-[44px] px-3 rounded-lg text-xs font-bold flex items-center gap-1 ${
+              className={`min-h-[44px] px-3 rounded-lg text-label font-bold flex items-center gap-1 ${
                 isPrivate ? 'bg-amber-100 text-amber-800' : 'bg-muted text-muted-foreground'
               }`}
             >
@@ -654,7 +654,7 @@ export function TodayLogWidget() {
             </button>
 
             {!isPrivate && (
-              <label className="min-h-[44px] px-3 rounded-lg bg-coral/10 text-coral text-xs font-bold flex items-center gap-1 cursor-pointer">
+              <label className="min-h-[44px] px-3 rounded-lg bg-coral/10 text-coral-strong text-label font-bold flex items-center gap-1 cursor-pointer">
                 <input type="checkbox" checked={talkAbout} onChange={(event) => setTalkAbout(event.target.checked)} className="accent-coral" />
                 통화 때 꼭 얘기
               </label>
@@ -675,7 +675,7 @@ export function TodayLogWidget() {
               disabled={isSaving || (!isRecording && !hasContentToSave)}
               // 44px minimum: measured at 32px in a real browser. This is the
               // primary save action of the whole app.
-              className="min-h-[44px] px-4 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"
+              className="min-h-[44px] px-4 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-label shadow-sm active:scale-95 transition disabled:opacity-50"
             >
               {isSaving ? '저장 중...' : '저장'}
             </button>
@@ -685,16 +685,16 @@ export function TodayLogWidget() {
 
       {/* Timeline Preview */}
       <div className="mt-6">
-        <h3 className="text-sm font-bold text-foreground mb-3 flex items-center justify-between">
+        <h3 className="text-heading text-foreground mb-3 flex items-center justify-between">
           <span>오늘의 타임라인</span>
-          <span className="text-xs bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
+          <span className="text-caption bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
             {todayRecords.length}
           </span>
         </h3>
         
         {todayRecords.length === 0 ? (
           <div className="text-center py-6 bg-muted/50 rounded-2xl border border-dashed border-border">
-            <p className="text-xs text-muted-foreground">아직 남겨진 기록이 없어요. 소중한 순간을 남겨보세요!</p>
+            <p className="text-caption text-muted-foreground">아직 남겨진 기록이 없어요. 소중한 순간을 남겨보세요!</p>
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -703,10 +703,10 @@ export function TodayLogWidget() {
               const confirmedFlow = r.emotionFlow?.filter(f => f.source === 'user_confirmed') || [];
               return (
                 <div key={r.id} className="bg-muted/60 rounded-xl p-3.5 flex flex-col gap-1.5 border border-border">
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center justify-between text-caption">
                     <span className="font-bold text-foreground">{r.time}</span>
                     {confirmedFlow.length > 0 && (
-                      <div className="flex items-center gap-1 text-[11px] font-bold text-coral bg-coral/10 px-2 py-0.5 rounded-full border border-coral/20">
+                      <div className="flex items-center gap-1 text-caption font-bold text-coral-strong bg-coral/10 px-2 py-0.5 rounded-full border border-coral/20">
                         {confirmedFlow.map((f, i) => (
                           <span key={f.id || i}>
                             {i > 0 && ' → '}{f.displayLabel}
@@ -715,12 +715,12 @@ export function TodayLogWidget() {
                       </div>
                     )}
                   </div>
-                  <div className="text-sm text-foreground">{r.log || (r.attachments ? '📷 사진 기록' : '리액션')}</div>
+                  <div className="text-body text-foreground break-keep">{r.log || (r.attachments ? '📷 사진 기록' : '리액션')}</div>
                 </div>
               );
             })}
             {todayRecords.length > 3 && (
-              <div className="text-center text-xs text-muted-foreground pt-2">
+              <div className="text-center text-caption text-muted-foreground pt-2">
                 ... 외 {todayRecords.length - 3}개의 기록이 더 있습니다.
               </div>
             )}

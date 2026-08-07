@@ -22,7 +22,7 @@ import { PenLine, PartyPopper, Plane, Images, Smile } from 'lucide-react';
 
 /** Shared empty-state body so every widget is visually consistent. */
 const WidgetEmpty = ({ children }: { children: React.ReactNode }) => (
-  <p className="text-xs text-muted-foreground leading-relaxed break-keep">{children}</p>
+  <p className="text-caption text-muted-foreground leading-relaxed break-keep">{children}</p>
 );
 
 const WidgetCard = ({
@@ -40,7 +40,7 @@ const WidgetCard = ({
 }) => {
   const content = (
     <>
-      <h3 className="font-bold text-foreground mb-2 text-sm flex items-center gap-1.5">
+      <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
         {icon}
         {title}
       </h3>
@@ -92,7 +92,7 @@ export const TodayBriefingWidget = () => {
       }}
     >
       {partnerShared.length > 0 ? (
-        <p className="text-xs text-muted-foreground font-medium leading-relaxed break-keep">
+        <p className="text-caption text-muted-foreground font-medium leading-relaxed break-keep">
           {emotionBriefing?.flowText ||
             summary.opener?.text ||
             summary.items[0]?.text ||
@@ -119,7 +119,7 @@ export const RecordShortcutWidget = () => {
       className="w-full bg-coral/10 p-4 rounded-2xl border border-coral/20 flex flex-col items-center justify-center min-h-[100px] gap-1.5 active:scale-[0.99] transition"
     >
       <PenLine size={20} className="text-coral" />
-      <span className="text-coral font-bold text-sm">기록 모아보기</span>
+      <span className="text-coral-strong font-bold text-label">기록 모아보기</span>
     </button>
   );
 };
@@ -141,7 +141,7 @@ export const ServiceProgressWidget = () => {
               style={{ width: `${progress.percent}%` }}
             />
           </div>
-          <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+          <div className="mt-2 flex items-center justify-between text-caption text-muted-foreground">
             <span>
               {progress.elapsedDays}일 / {progress.totalDays}일
             </span>
@@ -172,9 +172,9 @@ export const NextAnniversaryWidget = () => {
     >
       {milestone ? (
         <div className="flex items-baseline gap-2">
-          <span className="text-base font-extrabold text-foreground">{milestone.label}</span>
-          <span className="text-xs font-bold text-coral">D-{milestone.daysRemaining}</span>
-          <span className="text-[10px] text-muted-foreground ml-auto">
+          <span className="text-heading text-foreground">{milestone.label}</span>
+          <span className="text-caption font-bold text-coral-strong">D-{milestone.daysRemaining}</span>
+          <span className="text-caption text-muted-foreground ml-auto">
             {formatLocalDate(milestone.date)}
           </span>
         </div>
@@ -203,11 +203,11 @@ export const NextVacationWidget = () => {
     >
       {event ? (
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-extrabold text-foreground truncate">{event.title}</span>
-          <span className="text-xs font-bold text-info shrink-0">
+          <span className="text-label font-bold text-foreground truncate">{event.title}</span>
+          <span className="text-caption font-bold text-info shrink-0">
             {daysRemaining === 0 ? '오늘' : `D-${daysRemaining}`}
           </span>
-          <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+          <span className="text-caption text-muted-foreground ml-auto shrink-0">
             {formatLocalDate(event.startDate)}
           </span>
         </div>
@@ -244,7 +244,7 @@ export const MemoriesWidget = () => {
       }
     >
       {first ? (
-        <p className="text-xs text-muted-foreground leading-relaxed break-keep line-clamp-2">
+        <p className="text-caption text-muted-foreground leading-relaxed break-keep line-clamp-2">
           {first.log?.trim() || '사진으로 남긴 기록이 있어요.'}
         </p>
       ) : (
@@ -284,8 +284,8 @@ export const TodayConditionWidget = () => {
     >
       {face ? (
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground font-medium">{face.label}</span>
-          <span className="text-2xl">{face.emoji}</span>
+          <span className="text-caption text-muted-foreground font-medium">{face.label}</span>
+          <span className="text-display">{face.emoji}</span>
         </div>
       ) : (
         <WidgetEmpty>오늘 기록에 기분을 함께 남기면 여기에 표시돼요.</WidgetEmpty>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 /**
@@ -52,61 +52,30 @@ const FONT_SIZE_UTILITY =
 const ALLOWED = new Set(Object.keys(SCALE).map((name) => `text-${name}`));
 
 /**
- * Files converted to the scale. Each entry is a promise that the file contains no
- * size outside the six steps.
+ * Every file under src/ that can emit a class name, tests excluded.
+ *
+ * This started as a hand-written list of converted files, grown one PR at a time
+ * while 550 off-scale sizes were migrated. It is a whole-tree walk now because
+ * the count reached zero: a list would let the next new file opt out of the scale
+ * silently, and a walk cannot.
  */
-const CONVERTED_FILES = [
-  'src/components/ui/Button.tsx',
-  'src/components/ui/Card.tsx',
-  'src/components/ui/Badge.tsx',
-  'src/components/ui/EmptyState.tsx',
-  'src/components/ui/Skeleton.tsx',
-  'src/components/widgets/CallBriefingWidget.tsx',
-  'src/components/widgets/PartnerDayTimelineWidget.tsx',
-  'src/components/widgets/DDayWidget.tsx',
-  // The record screen. It is the destination every briefing summary points at,
-  // so the partner's own sentence had to stop being 14px while the app's own
-  // chrome around it was the same size or larger.
-  'src/pages/RecordPage.tsx',
-  // The planning surfaces. A schedule is read at a glance, so the time and the
-  // title were the two things that had to stop being the same size as the legend
-  // underneath them.
-  'src/pages/SchedulePage.tsx',
-  'src/pages/TripsPage.tsx',
-  'src/pages/TripDetailPage.tsx',
-  // The relationship and account screens. LegalPage is the reason `body` matters
-  // outside the record: the privacy policy and the terms were 12px, which is the
-  // one document in this app a user is most likely to actually have to read.
-  'src/pages/UsPage.tsx',
-  'src/pages/MyPage.tsx',
-  'src/pages/ServicePage.tsx',
-  'src/pages/LegalPage.tsx',
-  'src/pages/AuthCallbackPage.tsx',
-  // The two longest screens, and the first one a user ever sees. Onboarding is
-  // where `body` earns its place twice: every question's explanatory line is
-  // prose, and every answer is an input the user types into.
-  'src/pages/SettingsPage.tsx',
-  'src/pages/OnboardingPage.tsx',
-  // Shared components and the smaller widgets. MobileShell and the banners are
-  // here because they render on top of every screen: a 11px tab label or a 11px
-  // offline notice undoes the scale everywhere at once.
-  'src/App.tsx',
-  'src/components/MobileShell.tsx',
-  'src/components/OfflineBanner.tsx',
-  'src/components/SharedSyncBanner.tsx',
-  'src/components/InstallPromptBanner.tsx',
-  'src/components/AttachmentMedia.tsx',
-  'src/components/ErrorBoundary.tsx',
-  'src/components/PlanSectionNav.tsx',
-  'src/components/EmotionChipEditor.tsx',
-  'src/components/EmotionFlowInsightCard.tsx',
-  'src/components/RecordEmotionCorrection.tsx',
-  'src/components/widgets/PartnerEmotionWidgets.tsx',
-  'src/components/widgets/CareHintWidget.tsx',
-  'src/components/widgets/UpcomingScheduleWidget.tsx',
-  'src/components/widgets/AddWidgetBottomSheet.tsx',
-  'src/features/home/WidgetDashboard.tsx',
-];
+function uiSources(dir = 'src'): string[] {
+  const absolute = resolve(process.cwd(), dir);
+  const found: string[] = [];
+  for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+    const relative = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      found.push(...uiSources(relative));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry.name)) continue;
+    if (/\.test\.tsx?$/.test(entry.name)) continue;
+    found.push(relative);
+  }
+  return found;
+}
+
+const CONVERTED_FILES = uiSources();
 
 function read(file: string): string {
   return readFileSync(resolve(process.cwd(), file.split('/').join(sep)), 'utf8');
@@ -116,18 +85,31 @@ function offScaleSizesIn(file: string): string[] {
   return (read(file).match(FONT_SIZE_UTILITY) ?? []).filter((match) => !ALLOWED.has(match));
 }
 
-describe('C8 - the type scale is the only font-size vocabulary in converted files', () => {
-  for (const file of CONVERTED_FILES) {
-    it(`${file} uses no size outside the six named steps`, () => {
-      expect(offScaleSizesIn(file)).toEqual([]);
-    });
-  }
+describe('C8 - the type scale is the only font-size vocabulary in src/', () => {
+  it('scans a non-empty set of sources, so a silent glob failure cannot pass', () => {
+    expect(CONVERTED_FILES.length).toBeGreaterThan(40);
+    expect(CONVERTED_FILES).toContain('src/pages/RecordPage.tsx');
+    expect(CONVERTED_FILES).toContain('src/components/MobileShell.tsx');
+    expect(CONVERTED_FILES).toContain('src/components/ui/Button.tsx');
+  });
 
-  it('each converted file actually uses the scale, so an empty file cannot pass', () => {
+  it('no file uses a size outside the six named steps', () => {
+    const offenders: string[] = [];
     for (const file of CONVERTED_FILES) {
-      const used = (read(file).match(FONT_SIZE_UTILITY) ?? []).filter((match) => ALLOWED.has(match));
-      expect(used.length, file).toBeGreaterThan(0);
+      const found = offScaleSizesIn(file);
+      if (found.length > 0) offenders.push(`${file}: ${[...new Set(found)].join(' ')}`);
     }
+    expect(offenders).toEqual([]);
+  });
+
+  it('the scale is actually in use, so deleting every size would not pass', () => {
+    // 550 off-scale sizes were migrated to get here. If this total collapses,
+    // the utilities have been removed rather than converted.
+    const used = CONVERTED_FILES.reduce(
+      (total, file) => total + (read(file).match(FONT_SIZE_UTILITY) ?? []).filter((m) => ALLOWED.has(m)).length,
+      0,
+    );
+    expect(used).toBeGreaterThan(400);
   });
 
   /** Guard soundness: it must flag every off-scale size and no colour utility. */

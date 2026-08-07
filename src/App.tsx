@@ -83,19 +83,19 @@ function AccountDeletionRecovery() {
         role="alert"
         className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm space-y-3"
       >
-        <h1 className="text-base font-bold text-foreground">탈퇴가 완료되지 않았어요</h1>
-        <p className="text-xs leading-5 text-muted-foreground">
+        <h1 className="text-heading text-foreground">탈퇴가 완료되지 않았어요</h1>
+        <p className="text-body text-muted-foreground">
           기록과 프로필 데이터는 이미 삭제되었지만 로그인 계정이 아직 남아 있어요.
           탈퇴를 끝내려면 아래에서 다시 시도해 주세요.
         </p>
         {message && (
-          <p className="text-xs leading-5 text-destructive">{message}</p>
+          <p className="text-body text-destructive">{message}</p>
         )}
         <button
           type="button"
           onClick={() => void onRetry()}
           disabled={busy !== null}
-          className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 py-3 text-xs font-bold text-coral-strong-foreground disabled:opacity-60"
+          className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 py-3 text-label font-bold text-coral-strong-foreground disabled:opacity-60"
         >
           {busy === 'retry' ? '처리 중...' : '탈퇴 다시 시도'}
         </button>
@@ -103,7 +103,7 @@ function AccountDeletionRecovery() {
           type="button"
           onClick={() => void onLogout()}
           disabled={busy !== null}
-          className="w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-xs font-bold text-foreground disabled:opacity-60"
+          className="w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-label font-bold text-foreground disabled:opacity-60"
         >
           로그아웃
         </button>
@@ -133,12 +133,12 @@ function AuthSyncUnavailable({ reason }: { reason: ServerErrorKind | null }) {
   return (
     <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
       <section role="alert" className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm space-y-3">
-        <h1 className="text-base font-bold text-foreground">{title}</h1>
-        <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+        <h1 className="text-heading text-foreground">{title}</h1>
+        <p className="text-body text-muted-foreground">{description}</p>
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 py-3 text-xs font-bold text-coral-strong-foreground"
+          className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 py-3 text-label font-bold text-coral-strong-foreground"
         >
           {isSessionProblem ? '다시 로그인' : '다시 시도'}
         </button>

@@ -45,7 +45,7 @@ export function PlanSectionNav({ active }: { active: 'schedule' | 'trips' }) {
             aria-selected={isActive}
             aria-label={item.ariaLabel}
             onClick={() => !isActive && navigate(item.to)}
-            className={`flex-1 min-h-[44px] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 min-h-[44px] rounded-xl text-label font-bold flex items-center justify-center gap-1.5 transition ${
               isActive
                 ? 'bg-card text-foreground shadow-sm'
                 : 'text-muted-foreground active:scale-95'

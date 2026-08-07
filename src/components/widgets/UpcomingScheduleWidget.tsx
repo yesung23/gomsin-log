@@ -27,11 +27,11 @@ export function UpcomingScheduleWidget() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-foreground">다가오는 일정</h2>
+        <h2 className="text-heading text-foreground">다가오는 일정</h2>
         {/* min-h/-w: without them this rendered a 58x16 tap target. */}
         <button
           onClick={() => navigate('/schedule')}
-          className="text-xs text-coral font-bold flex items-center justify-end min-h-[44px] min-w-[44px] -mr-2 px-2"
+          className="text-label text-coral-strong font-bold flex items-center justify-end min-h-[44px] min-w-[44px] -mr-2 px-2"
         >
           <Plus className="w-3 h-3 mr-0.5" />
           일정 추가
@@ -40,7 +40,7 @@ export function UpcomingScheduleWidget() {
 
       <div className="bg-card rounded-2xl border border-border divide-y divide-border/50 shadow-sm">
         {upcomingEvents.length === 0 ? (
-          <div className="p-5 text-center text-xs text-muted-foreground">
+          <div className="p-5 text-center text-caption text-muted-foreground">
             예정된 일정이 없습니다.
           </div>
         ) : (
@@ -53,11 +53,11 @@ export function UpcomingScheduleWidget() {
                     {getEventIcon(e.eventType)}
                   </div>
                   <div>
-                    <div className="font-bold text-foreground text-sm">{e.title}</div>
-                    <div className="text-[11px] text-muted-foreground">{formatLocalDate(e.startDate)}</div>
+                    <div className="text-label font-bold text-foreground">{e.title}</div>
+                    <div className="text-caption text-muted-foreground">{formatLocalDate(e.startDate)}</div>
                   </div>
                 </div>
-                <span className="text-indigo-500 font-bold text-xs bg-indigo-50 px-2 py-1 rounded-md">
+                <span className="text-indigo-500 font-bold text-caption bg-indigo-50 px-2 py-1 rounded-md">
                   {dDay === 0 ? 'D-Day' : `D-${dDay}`}
                 </span>
               </div>
@@ -68,7 +68,7 @@ export function UpcomingScheduleWidget() {
 
       <button 
         onClick={() => navigate('/trips')}
-        className="mt-1 w-full bg-indigo-50 text-indigo-600 font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-transform text-sm flex items-center justify-center gap-2"
+        className="mt-1 w-full bg-indigo-50 text-indigo-600 font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-transform text-label flex items-center justify-center gap-2"
       >
         <Plane className="w-4 h-4" />
         여행 플래너

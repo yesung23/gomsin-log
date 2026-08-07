@@ -132,11 +132,11 @@ export function WidgetDashboard() {
       <header className="px-5 pt-10 pb-6 flex items-start justify-between sticky top-0 bg-background/90 backdrop-blur-xl z-40">
         {/* Left: Titles */}
         <div className="flex flex-col">
-          <span className="text-xs font-semibold tracking-wide text-coral mb-1">
+          <span className="text-caption font-semibold tracking-wide text-coral-strong mb-1">
             ♡ 곰신로그
           </span>
-          <h1 className="text-[26px] font-bold tracking-tight text-foreground flex items-center gap-1">
-            안녕 {state.profile.myName} <span className="text-coral text-2xl">♡</span>
+          <h1 className="text-display tracking-tight text-foreground flex items-center gap-1">
+            안녕 {state.profile.myName} <span className="text-coral-strong text-display">♡</span>
           </h1>
         </div>
 
@@ -145,7 +145,7 @@ export function WidgetDashboard() {
           {isEditMode ? (
             <button
               onClick={() => setIsEditMode(false)}
-              className="bg-primary text-primary-foreground text-xs font-bold px-4 py-2 rounded-full active:scale-95 transition-all shadow-sm"
+              className="bg-primary text-primary-foreground text-label font-bold px-4 py-2 rounded-full active:scale-95 transition-all shadow-sm"
               aria-label="편집 완료"
             >
               완료
@@ -267,7 +267,7 @@ export function WidgetDashboard() {
       </div>
       
       {!isEditMode && (
-        <div className="text-center mt-6 text-xs text-muted-foreground">
+        <div className="text-center mt-6 text-caption text-muted-foreground">
           위젯을 길게 누르면 편집할 수 있어요
         </div>
       )}

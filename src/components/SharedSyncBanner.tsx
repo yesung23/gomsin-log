@@ -50,7 +50,7 @@ export function SharedSyncBanner() {
 
   return (
     <div
-      className="mx-4 mt-3 flex items-center justify-between gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900"
+      className="mx-4 mt-3 flex items-center justify-between gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-caption text-amber-900"
       role="status"
     >
       <span>{message}</span>

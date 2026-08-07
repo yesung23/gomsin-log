@@ -84,13 +84,13 @@ export function PartnerEmotionFlowWidget() {
       data-testid="widget-partner-emotion-flow"
       className="w-full text-left"
     >
-      <h3 className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5">
+      <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
         <Sparkles size={14} className="text-coral" aria-hidden="true" />
         {partnerName}의 마음 흐름
       </h3>
 
       {!analysis ? (
-        <p className="text-xs text-muted-foreground leading-relaxed">
+        <p className="text-caption text-muted-foreground leading-relaxed">
           아직 오늘 공유된 마음이 없어요. {partnerName}이 기록을 남기면 여기에 보여드려요.
         </p>
       ) : (
@@ -102,14 +102,14 @@ export function PartnerEmotionFlowWidget() {
             {items.map((item, index) => (
               <span key={item.id || index} className="flex items-center gap-1.5">
                 {index > 0 && <ArrowRight size={12} className="text-muted-foreground" aria-hidden="true" />}
-                <span className="px-2 py-1 rounded-lg bg-muted text-xs font-bold text-foreground">
+                <span className="px-2 py-1 rounded-lg bg-muted text-label font-bold text-foreground">
                   <span aria-hidden="true">{BASIC_EMOTION_EMOJI[basicEmotionOf(item)]}</span>{' '}
                   {item.displayLabel}
                 </span>
               </span>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground leading-relaxed">{analysis.summary}</p>
+          <p className="text-caption text-muted-foreground leading-relaxed">{analysis.summary}</p>
         </div>
       )}
     </button>
@@ -143,7 +143,7 @@ export function PartnerEmotionSummaryWidget() {
 
   return (
     <div data-testid="widget-partner-emotion-summary">
-      <h3 className="text-sm font-bold text-foreground mb-2">오늘의 요약</h3>
+      <h3 className="text-heading text-foreground mb-2">오늘의 요약</h3>
       {headline ? (
         <button
           type="button"
@@ -155,11 +155,11 @@ export function PartnerEmotionSummaryWidget() {
           }}
           className="w-full text-left"
         >
-          <p className="text-xs text-foreground leading-relaxed">{headline}</p>
-          <span className="text-[11px] text-coral font-bold mt-1 inline-block">기록으로 이동 →</span>
+          <p className="text-body text-foreground break-keep">{headline}</p>
+          <span className="text-caption text-coral-strong font-bold mt-1 inline-block">기록으로 이동 →</span>
         </button>
       ) : (
-        <p className="text-xs text-muted-foreground leading-relaxed">
+        <p className="text-caption text-muted-foreground leading-relaxed">
           오늘 공유된 이야기가 아직 없어요.
         </p>
       )}

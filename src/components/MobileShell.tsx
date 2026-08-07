@@ -196,7 +196,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
                       <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
                     </div>
 
-                    <span className={cn('text-[11px] mt-1', active ? 'font-extrabold text-coral' : 'font-medium')}>
+                    <span className={cn('text-caption mt-1', active ? 'font-extrabold text-coral' : 'font-medium')}>
                       {t.label}
                     </span>
 

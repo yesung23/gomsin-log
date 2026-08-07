@@ -5,6 +5,10 @@ import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { localToday, toLocalDateString } from '@/lib/utils';
 import { AttachmentMedia } from '@/components/AttachmentMedia';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import type { Attachment, DailyRecord } from '@/types';
 
 /**
@@ -84,8 +88,8 @@ export function PartnerDayTimelineWidget() {
   };
 
   const header = (
-    <h3 className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5">
-      <Clock size={14} className="text-coral" aria-hidden="true" />
+    <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
+      <Clock size={14} className="text-coral-strong" aria-hidden="true" />
       {partnerName}의 오늘
     </h3>
   );
@@ -99,11 +103,13 @@ export function PartnerDayTimelineWidget() {
   */
   if (sharedSyncStatus === 'unavailable') {
     return (
-      <div data-testid="widget-partner-day" data-state="unconfirmed" aria-busy="true">
+      <div data-testid="widget-partner-day" data-state="unconfirmed">
         {header}
-        <p className="text-xs text-muted-foreground leading-relaxed break-keep">
-          기록을 확인하는 중이에요. 확인되면 {partnerName}의 오늘을 시간순으로 보여드려요.
-        </p>
+        <Skeleton
+          label="기록을 확인하는 중이에요."
+          description={`확인되면 ${partnerName}의 오늘을 시간순으로 보여드려요.`}
+          lines={3}
+        />
       </div>
     );
   }
@@ -112,9 +118,10 @@ export function PartnerDayTimelineWidget() {
     return (
       <div data-testid="widget-partner-day" data-state="empty">
         {header}
-        <p className="text-xs text-muted-foreground leading-relaxed break-keep">
-          오늘 공유된 순간이 아직 없어요.
-        </p>
+        <EmptyState
+          title="오늘 공유된 순간이 아직 없어요."
+          description={`${partnerName}이 남기면 시간순으로 이 자리에 쌓여요.`}
+        />
       </div>
     );
   }
@@ -122,7 +129,7 @@ export function PartnerDayTimelineWidget() {
   return (
     <div data-testid="widget-partner-day" data-state="ready">
       {header}
-      <p className="text-[11px] text-muted-foreground mb-2">
+      <p className="text-caption text-muted-foreground mb-2">
         순간 {todays.length}개 · 시간순
         {sharedSyncStatus === 'delayed' && ' · 방금 것이 아직 안 보일 수 있어요'}
       </p>
@@ -143,19 +150,25 @@ export function PartnerDayTimelineWidget() {
               className="w-full text-left min-h-[44px]"
             >
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs font-bold text-foreground">{record.time}</span>
+                {/* Tabular, so a column of times does not shift character to character. */}
+                <span className="text-caption font-bold text-foreground tabular-nums">{record.time}</span>
                 {mediaKinds(record.attachments).map((kind) => {
                   const Icon = KIND_ICON[kind];
                   return <Icon key={kind} size={12} className="text-muted-foreground" aria-hidden="true" />;
                 })}
                 {record.reaction && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-coral/10 text-coral font-medium text-[10px]">
+                  <Badge tone="neutral">
                     {REACTION_LABELS[record.reaction] || record.reaction}
-                  </span>
+                  </Badge>
                 )}
               </div>
               {record.log && (
-                <p className="text-xs text-foreground leading-relaxed break-keep line-clamp-3 mt-1">
+                /*
+                  The partner's own sentence, at `body`. This is the destination
+                  the briefing points at, so it is never smaller than the summary
+                  that sent the reader here (DESIGN_V2 §3.3).
+                */
+                <p className="text-body text-foreground break-keep line-clamp-3 mt-1">
                   {record.log}
                 </p>
               )}
@@ -184,13 +197,14 @@ export function PartnerDayTimelineWidget() {
       </ol>
 
       {hiddenCount > 0 && (
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          full
           onClick={() => openRecord(todays[PARTNER_DAY_VISIBLE_LIMIT])}
-          className="mt-3 w-full min-h-[44px] rounded-xl border border-border text-xs font-bold text-foreground"
+          className="mt-3"
         >
           나머지 {hiddenCount}개 보기 →
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -359,7 +359,17 @@ describe('the D-Day connection card offers a control only when it has an action'
 
     expect(screen.queryByRole('button', { name: '사귄 날짜 설정하기' })).not.toBeInTheDocument();
     expect(screen.getByText('연결 1일째')).toBeInTheDocument();
-    const card = container.querySelector('.from-lilac');
+    /*
+     * Found by a stable hook rather than by a decorative class.
+     *
+     * This used to query `.from-lilac`, the gradient the card happened to carry.
+     * When the gradient was replaced by a flat token surface the selector
+     * returned null and `card?.className` made the assertion pass an `undefined`
+     * -- so the guard reported an argument-type error instead of the thing it was
+     * written to protect. The explicit null check below is why that cannot repeat.
+     */
+    const card = container.querySelector('[data-testid="dday-connection-card"]');
+    expect(card, 'the connection card should be in the tree').not.toBeNull();
     expect(card?.className).not.toContain('cursor-pointer');
   });
 

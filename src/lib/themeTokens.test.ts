@@ -34,6 +34,19 @@ const GUARDED_FILES = [
   // Emits Tailwind classes for the record timeline even though it is a lib file,
   // so the same rule has to apply to it.
   'src/lib/recordAuthor.ts',
+  // The shared primitives. Every screen will eventually render through these, so
+  // a palette literal here would reintroduce the defect everywhere at once.
+  'src/components/ui/Button.tsx',
+  'src/components/ui/Card.tsx',
+  'src/components/ui/Badge.tsx',
+  'src/components/ui/EmptyState.tsx',
+  'src/components/ui/Skeleton.tsx',
+  // Converted to the primitives and the type scale, so they are held to the rule
+  // from here on. DDayWidget is the reason this matters: its decorative heart was
+  // `text-white/40` and its shield sat on a `teal-500` gradient.
+  'src/components/widgets/CallBriefingWidget.tsx',
+  'src/components/widgets/PartnerDayTimelineWidget.tsx',
+  'src/components/widgets/DDayWidget.tsx',
 ];
 
 /**

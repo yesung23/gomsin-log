@@ -603,7 +603,7 @@ export function OnboardingPage() {
 
       if (!isCurrentIdentity(identity)) return;
       // Only now mirror it into local state.
-      updateProfile({
+      await updateProfile({
         myName: finalNickname,
         role,
         onboardingCompletedAt: nowIso,
@@ -620,7 +620,7 @@ export function OnboardingPage() {
         },
         military,
         contact,
-      });
+      }, { persist: false });
 
       if (!isCurrentIdentity(identity)) return;
       if (anniversaryNotSaved) {

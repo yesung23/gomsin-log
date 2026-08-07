@@ -147,6 +147,7 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
           .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
       : [],
     isPrivate: row.is_private,
+    ...(row.talk_about === true ? { talkAbout: true } : {}),
     emotionFlow: row.emotion_flow || [],
     emotionUpdatedAt: row.emotion_updated_at || null,
     createdAt: row.created_at,
@@ -240,6 +241,7 @@ export async function saveRecordToDB(
         .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
         .map(({ type, name, path }) => ({ type, name, path })),
       is_private: record.isPrivate,
+      talk_about: !record.isPrivate && record.talkAbout === true,
       // Author-only emotion items must not travel inside a shared row, because
       // the partner is allowed to read that row.
       emotion_flow: emotionFlowForStorage(record),

@@ -30,6 +30,7 @@ export type Scenario = {
   anniversaryDate?: string;
   records?: RecordRow[];
   events?: unknown[];
+  coupleTasks?: unknown[];
   trips?: unknown[];
   /** Server verdict for `redeem_invitation`. */
   redeemResult?:
@@ -311,6 +312,7 @@ export async function installMockBackend(
     }
 
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
+    if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);
     if (path === '/rest/v1/trip_items' || path === '/rest/v1/trip_checklists') {
       const failure = failureFor(scenario, path.replace('/rest/v1/', ''));

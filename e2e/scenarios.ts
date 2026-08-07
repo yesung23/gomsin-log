@@ -1,6 +1,14 @@
 import type { RecordRow, Scenario } from './fixtures/mockBackend';
 
-export const TODAY = new Date().toISOString().slice(0, 10);
+// The product's calendar is explicitly Korean-local. UTC crosses midnight nine
+// hours later and made every date-based browser scenario fail between 00:00 and
+// 08:59 KST even though the product was correct.
+export const TODAY = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date());
 
 export const SHARED_LOG = '공개기록입니다';
 export const PRIVATE_LOG = '비공개기록입니다';

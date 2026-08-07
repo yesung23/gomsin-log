@@ -156,7 +156,13 @@ describe('C5 - dependency posture is verified, not assumed', () => {
     // consumers, which declare `^5.0.5` / `^5.0.8` -- a dependency-range
     // violation, and a latent break because 1.x is a single CommonJS export
     // while 5.x uses named exports.
-    expect(pkg.overrides).toEqual({ 'minimatch@3': { 'brace-expansion': '1.1.18' } });
+    expect(pkg.overrides).toEqual({
+      // GHSA-5p4m-2wfm-xmqj / CVE-2026-59870 is fixed in 4.3.1. eslint
+      // reaches it transitively, so keep the safe patch explicit until eslint
+      // itself requires that line.
+      'js-yaml': '4.3.1',
+      'minimatch@3': { 'brace-expansion': '1.1.18' },
+    });
     expect(pkg.overrides?.['brace-expansion']).toBeUndefined();
   });
 

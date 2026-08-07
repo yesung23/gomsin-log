@@ -69,6 +69,7 @@ export function ServicePage() {
   const todayStr = toLocalDateString(localToday());
 
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editBranch, setEditBranch] = useState<Branch>(military?.branch || 'army');
   const [editStatus, setEditStatus] = useState<MilitaryStatus>(
     editableStatus(military?.militaryStatus),
@@ -82,7 +83,9 @@ export function ServicePage() {
     editableSource(military?.dischargeDateSource),
   );
 
-  useEscapeKey(() => setIsEditing(false), isEditing);
+  useEscapeKey(() => {
+    if (!isSaving) setIsEditing(false);
+  }, isEditing);
 
   const isSoldier = profile.role === 'soldier';
   const soldierName = isSoldier ? profile.myName || '나' : profile.couple.partnerName || '군화';
@@ -100,7 +103,8 @@ export function ServicePage() {
     setIsEditing(true);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
+    if (isSaving) return;
     if (editStatus !== 'unknown') {
       if (!editEnlistDate) {
         toast.error('입대일을 입력해 주세요.');
@@ -116,18 +120,27 @@ export function ServicePage() {
       }
     }
 
-    updateProfile({
-      military: {
-        ...military,
-        branch: editBranch,
-        militaryStatus: editStatus,
-        enlistmentDate: editStatus === 'unknown' ? undefined : editEnlistDate,
-        expectedDischargeDate: editStatus === 'unknown' ? undefined : editExpectedDischarge,
-        dischargeDateSource: editDischargeSource,
-      },
-    });
-    setIsEditing(false);
-    toast.success('복무 정보가 저장되었습니다.');
+    setIsSaving(true);
+    try {
+      const saved = await updateProfile({
+        military: {
+          ...military,
+          branch: editBranch,
+          militaryStatus: editStatus,
+          enlistmentDate: editStatus === 'unknown' ? undefined : editEnlistDate,
+          expectedDischargeDate: editStatus === 'unknown' ? undefined : editExpectedDischarge,
+          dischargeDateSource: editDischargeSource,
+        },
+      });
+      if (!saved) {
+        toast.error('복무 정보를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      setIsEditing(false);
+      toast.success('복무 정보가 저장되었습니다.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleBranchOrEnlistChange = (newBranch: Branch, newEnlist: string) => {
@@ -351,15 +364,17 @@ export function ServicePage() {
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setIsEditing(false)}
+                disabled={isSaving}
                 className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs min-h-[44px]"
               >
                 취소
               </button>
               <button
                 onClick={handleSaveEdit}
-                className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px]"
+                disabled={isSaving}
+                className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px] disabled:opacity-50"
               >
-                저장하기
+                {isSaving ? '저장 중…' : '저장하기'}
               </button>
             </div>
           </div>

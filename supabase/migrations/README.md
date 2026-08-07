@@ -28,6 +28,7 @@
 | `015_security_followup.sql` | 초대 우회·경합 차단, 계정 삭제 트랜잭션, 비공개 일정 알림 차단, 여행 URL/순서 제약 | **테스트 프로젝트에 적용됨** |
 | `016_couple_state_visibility.sql` | `get_my_couple_state()` 읽기 전용 RPC (커플 생애주기·초대 유효성) | **신규 / 원격 미적용** |
 | `017_partner_profile_hardening_and_schema_reload.sql` | `get_partner_profile()` 의 `search_path` 를 `public, pg_temp` 로 고정 + `NOTIFY pgrst, 'reload schema'` | **신규 / 원격 미적용** |
+| `018_shared_tasks_and_trip_places.sql` | 커플 공동 할 일 + 여행 장소 주소·영업시간·좌표·입력 출처 | **신규 / 원격 미적용** |
 
 ## 002 번호 중복 (이름을 바꾸지 않는 이유)
 
@@ -343,3 +344,7 @@ supabase functions deploy delete-account
 배포 전에 `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` 를 확인하세요.
 이 함수는 서비스 롤 키를 사용하므로 `SUPABASE_SERVICE_ROLE_KEY` 가 함수 환경변수로
 설정되어 있어야 합니다.
+## 019 — 통화 주제·여행 시간표
+
+`019_call_topics_and_trip_timetable.sql`은 기록·일정·여행 장소에 `통화 때 꼭 얘기` 표시를 추가하고,
+여행 장소에 방문 시간을 저장합니다. 018까지 적용한 뒤 Supabase SQL Editor에서 실행하세요.

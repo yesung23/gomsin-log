@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Calendar as CalendarIcon,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Circle,
   Clock,
   Heart,
   Lock,
+  ListTodo,
   Pencil,
   Plus,
   RefreshCw,
@@ -29,7 +31,9 @@ import { useEscapeKey } from '@/lib/hooks';
 import { nextAnniversaryMilestone } from '@/lib/milestones';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
 import { useStore } from '@/lib/useStore';
-import type { CoupleEvent, EventType } from '@/types';
+import { createTask, deleteTask, fetchTasks, updateTask, validateTaskTitle } from '@/lib/tasks';
+import { supabase } from '@/lib/supabase';
+import type { CoupleEvent, CoupleTask, EventType } from '@/types';
 
 const EVENT_BADGES: Record<EventType, { label: string; color: string }> = {
   anniversary: { label: '기념일', color: 'bg-purple-500/10 text-purple-600' },
@@ -94,10 +98,17 @@ export function SchedulePage() {
   const [eventStartDate, setEventStartDate] = useState(today);
   const [eventEndDate, setEventEndDate] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [talkAbout, setTalkAbout] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const isOffline = !useOnlineStatus();
   const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<CoupleTask[]>([]);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskTime, setTaskTime] = useState('');
+  const [taskForMe, setTaskForMe] = useState(false);
+  const [isSavingTask, setIsSavingTask] = useState(false);
+  const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(new Set());
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
 
@@ -115,6 +126,7 @@ export function SchedulePage() {
     setEventStartDate(today);
     setEventEndDate('');
     setIsPrivate(false);
+    setTalkAbout(false);
     setFormError(null);
     setIsSaving(false);
     setDeletingEventId(null);
@@ -133,6 +145,29 @@ export function SchedulePage() {
       cancelled = true;
     };
   }, [authenticatedUser?.id, scheduleAccessKey]);
+
+  const refreshTasks = useCallback(async () => {
+    const coupleId = profile.couple.coupleId;
+    if (!authenticatedUser?.id || !coupleId || !activeCouple) {
+      setTasks([]);
+      return;
+    }
+    const access = captureAccess();
+    const result = await fetchTasks(coupleId);
+    if (!isCurrentAccess(access)) return;
+    if (result.ok) setTasks(result.tasks);
+  }, [activeCouple, authenticatedUser?.id, captureAccess, isCurrentAccess, profile.couple.coupleId]);
+
+  useEffect(() => {
+    void refreshTasks();
+    const client = supabase;
+    const coupleId = profile.couple.coupleId;
+    if (!client || !activeCouple || !coupleId) return;
+    const channel = client.channel(`couple-tasks:${coupleId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'couple_tasks', filter: `couple_id=eq.${coupleId}` }, () => void refreshTasks())
+      .subscribe();
+    return () => { void client.removeChannel(channel); };
+  }, [activeCouple, profile.couple.coupleId, refreshTasks]);
 
   /**
    * Re-read once the shared workspace becomes authoritative again.
@@ -199,6 +234,7 @@ export function SchedulePage() {
     setEventEndDate('');
     // Without a partner there is nobody to share with, so default to private.
     setIsPrivate(!activeCouple);
+    setTalkAbout(false);
     setFormError(null);
     setShowEventModal(true);
   };
@@ -211,6 +247,7 @@ export function SchedulePage() {
     setEventStartDate(event.startDate);
     setEventEndDate(event.endDate || '');
     setIsPrivate(event.isPrivate);
+    setTalkAbout(event.talkAbout === true);
     setFormError(null);
     setShowEventModal(true);
   };
@@ -273,6 +310,7 @@ export function SchedulePage() {
       startDate: eventStartDate,
       endDate: eventEndDate || undefined,
       isPrivate,
+      talkAbout: !isPrivate && talkAbout,
     };
 
     try {
@@ -326,9 +364,73 @@ export function SchedulePage() {
     }
   };
 
+  const handleCreateTask = async () => {
+    if (isSavingTask || isOffline || !authenticatedUser?.id || !profile.couple.coupleId || !activeCouple) return;
+    const error = validateTaskTitle(taskTitle);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    const access = captureAccess();
+    setIsSavingTask(true);
+    try {
+      const saved = await createTask({
+        coupleId: profile.couple.coupleId,
+        createdBy: authenticatedUser.id,
+        title: taskTitle,
+        dueDate: selectedDate,
+        dueTime: taskTime || undefined,
+        assigneeId: taskForMe ? authenticatedUser.id : undefined,
+        isPrivate: false,
+      });
+      if (!isCurrentAccess(access)) return;
+      if (!saved) {
+        toast.error('할 일을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      setTasks((current) => [...current, saved]);
+      setTaskTitle('');
+      setTaskTime('');
+      toast.success('우리 할 일에 추가했습니다.');
+    } finally {
+      if (isCurrentAccess(access)) setIsSavingTask(false);
+    }
+  };
+
+  const handleToggleTask = async (task: CoupleTask) => {
+    if (pendingTaskIds.has(task.id) || isOffline) return;
+    setPendingTaskIds((current) => new Set(current).add(task.id));
+    const saved = await updateTask(task, { completed: !task.completed });
+    setPendingTaskIds((current) => {
+      const next = new Set(current);
+      next.delete(task.id);
+      return next;
+    });
+    if (!saved) {
+      toast.error('할 일 상태를 저장하지 못했어요.');
+      return;
+    }
+    setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
+  };
+
+  const handleDeleteTask = async (task: CoupleTask) => {
+    if (pendingTaskIds.has(task.id) || task.createdBy !== authenticatedUser?.id || isOffline) return;
+    setPendingTaskIds((current) => new Set(current).add(task.id));
+    const deleted = await deleteTask(task);
+    setPendingTaskIds((current) => {
+      const next = new Set(current);
+      next.delete(task.id);
+      return next;
+    });
+    if (deleted) setTasks((current) => current.filter((entry) => entry.id !== task.id));
+    else toast.error('할 일을 삭제하지 못했어요.');
+  };
+
   const selectedEvents = eventsOnDate(events, selectedDate).sort((a, b) =>
     a.startDate.localeCompare(b.startDate),
   );
+  const selectedTasks = tasks.filter((task) => task.dueDate === selectedDate)
+    .sort((a, b) => (a.completed === b.completed ? (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') : Number(a.completed) - Number(b.completed)));
   const upcoming = upcomingEvents(events, today);
   const daysInMonth = new Date(currYear, currMonth + 1, 0).getDate();
   const firstDayOfWeek = new Date(currYear, currMonth, 1).getDay();
@@ -361,6 +463,7 @@ export function SchedulePage() {
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {event.startDate}{event.endDate ? ` ~ ${event.endDate}` : ''}
             </p>
+            {event.talkAbout && <p className="mt-1 text-[10px] font-bold text-coral">♥ 통화 때 꼭 얘기</p>}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -504,6 +607,7 @@ export function SchedulePage() {
                   const day = index + 1;
                   const date = `${currYear}-${String(currMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const dayEvents = eventsOnDate(events, date);
+                  const dayTasks = tasks.filter((task) => task.dueDate === date && !task.completed);
                   const isToday = date === today;
                   const isSelected = date === selectedDate;
                   return (
@@ -511,7 +615,7 @@ export function SchedulePage() {
                       type="button"
                       key={date}
                       onClick={() => setSelectedDate(date)}
-                      aria-label={`${date}, 일정 ${dayEvents.length}개`}
+                      aria-label={`${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
                       aria-pressed={isSelected}
                       className={`h-11 rounded-xl flex flex-col items-center justify-center text-xs font-semibold transition ${
                         isSelected
@@ -529,6 +633,7 @@ export function SchedulePage() {
                           ))}
                         </span>
                       )}
+                      {dayTasks.length > 0 && <span className="w-1.5 h-1.5 rounded-sm bg-indigo-500 mt-0.5" aria-hidden="true" />}
                     </button>
                   );
                 })}
@@ -537,14 +642,31 @@ export function SchedulePage() {
 
             <section className="space-y-3">
               <div className="flex items-center justify-between px-1">
-                <h2 className="text-sm font-bold text-foreground">{selectedDate} 일정</h2>
+                <h2 className="text-sm font-bold text-foreground">{selectedDate} 한눈에 보기</h2>
                 <button type="button" onClick={openCreateModal} disabled={!hasCoupleSpace || isOffline} className="text-[11px] font-bold text-coral disabled:opacity-40">이 날짜에 추가</button>
               </div>
+              {activeCouple && <div className="rounded-2xl bg-card border border-border p-3 space-y-2">
+                <div className="flex gap-2">
+                  <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value.slice(0, 120))} onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }} placeholder="우리 할 일 빠르게 추가" className="flex-1 min-w-0 bg-muted rounded-xl px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400/40" />
+                  <input type="time" value={taskTime} onChange={(event) => setTaskTime(event.target.value)} aria-label="할 일 시간" className="w-[92px] bg-muted rounded-xl px-2 py-2.5 text-xs" />
+                  <button type="button" onClick={() => void handleCreateTask()} disabled={isSavingTask || !taskTitle.trim() || isOffline} className="px-3 rounded-xl bg-indigo-500 text-white text-xs font-bold disabled:opacity-40">추가</button>
+                </div>
+                <label className="flex items-center gap-2 text-[11px] text-muted-foreground"><input type="checkbox" checked={taskForMe} onChange={(event) => setTaskForMe(event.target.checked)} className="accent-indigo-500" />내 담당으로 표시</label>
+              </div>}
               <div className="space-y-2">
-                {selectedEvents.length > 0 ? selectedEvents.map((event) => renderEventCard(event, true)) : (
+                {selectedTasks.map((task) => {
+                  const pending = pendingTaskIds.has(task.id);
+                  return <div key={task.id} className="rounded-2xl bg-card border border-border px-4 py-3 flex items-center gap-3">
+                    <button type="button" onClick={() => void handleToggleTask(task)} disabled={pending || isOffline} aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`} className="text-indigo-500 disabled:opacity-40">{task.completed ? <CheckCircle2 size={21} /> : <Circle size={21} />}</button>
+                    <div className="flex-1 min-w-0"><p className={`text-xs font-bold truncate ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.title}</p><p className="text-[10px] text-muted-foreground">{task.dueTime || '시간 미정'} · {task.assigneeId === authenticatedUser?.id ? '내 담당' : '함께'}</p></div>
+                    {task.createdBy === authenticatedUser?.id && <button type="button" onClick={() => void handleDeleteTask(task)} disabled={pending || isOffline} aria-label={`${task.title} 할 일 삭제`} className="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-40"><Trash2 size={14} /></button>}
+                  </div>;
+                })}
+                {selectedEvents.map((event) => renderEventCard(event, true))}
+                {selectedEvents.length === 0 && selectedTasks.length === 0 && (
                   <div className="rounded-2xl bg-card border border-dashed border-border/80 p-5 text-center text-muted-foreground">
-                    <CalendarIcon size={22} className="mx-auto mb-1 opacity-60" />
-                    <p className="text-xs font-semibold">선택한 날짜에 일정이 없어요.</p>
+                    <ListTodo size={22} className="mx-auto mb-1 opacity-60" />
+                    <p className="text-xs font-semibold">선택한 날짜에 일정과 할 일이 없어요.</p>
                   </div>
                 )}
               </div>
@@ -606,6 +728,7 @@ export function SchedulePage() {
                     <span><strong className="block text-foreground">나만 보기 (비공개)</strong><span className="text-[10px] text-muted-foreground">작성자 본인만 읽을 수 있어요.</span></span>
                   </label>
                 </fieldset>
+                {!isPrivate && <label className="flex items-center gap-2 rounded-xl bg-coral/5 px-3 py-3 font-bold text-coral"><input type="checkbox" checked={talkAbout} onChange={(event) => setTalkAbout(event.target.checked)} className="accent-coral" />통화 때 꼭 얘기</label>}
                 {formError && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-[11px] font-semibold text-destructive">{formError}</p>}
               </div>
               <div className="flex gap-2 pt-2">

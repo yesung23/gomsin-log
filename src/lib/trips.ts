@@ -40,10 +40,17 @@ function mapTripItem(row: Record<string, unknown>): TripItem {
     id: row.id as string,
     tripId: row.trip_id as string,
     itemDate: row.item_date as string,
+    startTime: typeof row.start_time === 'string' ? row.start_time.slice(0, 5) : undefined,
     title: row.title as string,
     category: row.category as TripItem['category'],
     memo: (row.memo as string | null) || undefined,
+    ...(row.talk_about === true ? { talkAbout: true } : {}),
     url: safeUrl,
+    address: (row.address as string | null) || undefined,
+    businessHours: (row.business_hours as string | null) || undefined,
+    latitude: typeof row.latitude === 'number' ? row.latitude : undefined,
+    longitude: typeof row.longitude === 'number' ? row.longitude : undefined,
+    source: (row.source as TripItem['source']) || 'manual',
     sortOrder: row.sort_order as number,
   };
 }
@@ -284,10 +291,17 @@ export async function saveTripItemToDB(item: Omit<TripItem, 'id'>): Promise<Trip
   const { data, error } = await supabase.from('trip_items').insert([{
     trip_id: item.tripId,
     item_date: item.itemDate,
+    start_time: item.startTime || null,
     title: item.title,
     category: item.category,
     memo: item.memo || null,
+    talk_about: item.talkAbout === true,
     url: item.url || null,
+    address: item.address || null,
+    business_hours: item.businessHours || null,
+    latitude: item.latitude ?? null,
+    longitude: item.longitude ?? null,
+    source: item.source || 'manual',
     sort_order: item.sortOrder,
   }]).select().single();
   if (error || !data) {
@@ -318,7 +332,13 @@ export async function updateTripItemInDB(item: TripItem): Promise<TripItem | nul
     title: item.title,
     category: item.category,
     memo: item.memo || null,
+    talk_about: item.talkAbout === true,
     url: item.url || null,
+    address: item.address || null,
+    business_hours: item.businessHours || null,
+    latitude: item.latitude ?? null,
+    longitude: item.longitude ?? null,
+    source: item.source || 'manual',
     updated_at: new Date().toISOString(),
   }).eq('id', item.id).eq('trip_id', item.tripId).select().maybeSingle();
   if (error || !data) {

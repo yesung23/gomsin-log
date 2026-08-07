@@ -47,6 +47,7 @@ export async function fetchEventsResultFromDB(coupleId?: string): Promise<EventF
       startDate: row.start_date,
       endDate: row.end_date,
       isPrivate: row.is_private,
+      ...(row.talk_about === true ? { talkAbout: true } : {}),
       createdAt: row.created_at,
     })),
   };
@@ -68,6 +69,7 @@ export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'>
     start_date: event.startDate,
     end_date: event.endDate || null,
     is_private: event.isPrivate,
+    talk_about: !event.isPrivate && event.talkAbout === true,
     updated_at: new Date().toISOString(),
   };
 
@@ -93,6 +95,7 @@ export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'>
     startDate: data.start_date,
     endDate: data.end_date,
     isPrivate: data.is_private,
+    ...(data.talk_about === true ? { talkAbout: true } : {}),
     createdAt: data.created_at,
   };
 }
@@ -107,6 +110,7 @@ export async function updateEventInDB(event: CoupleEvent): Promise<CoupleEvent |
       start_date: event.startDate,
       end_date: event.endDate || null,
       is_private: event.isPrivate,
+      talk_about: !event.isPrivate && event.talkAbout === true,
       updated_at: new Date().toISOString(),
     })
     .eq('id', event.id)
@@ -127,6 +131,7 @@ export async function updateEventInDB(event: CoupleEvent): Promise<CoupleEvent |
     startDate: data.start_date,
     endDate: data.end_date,
     isPrivate: data.is_private,
+    ...(data.talk_about === true ? { talkAbout: true } : {}),
     createdAt: data.created_at,
   };
 }

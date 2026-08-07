@@ -2,13 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckSquare, ExternalLink, LoaderCircle,
-  MapPin, PenTool, Pencil, Plus, RefreshCw, ShieldAlert, Square, Trash2, Unlink,
+  ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, Plus, RefreshCw, ShieldAlert, Square, Trash2, Unlink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { MobileShell } from '@/components/MobileShell';
 import { supabase } from '@/lib/supabase';
 import { classifyServerError } from '@/lib/serverErrors';
+import { recognizePlaceScreenshot } from '@/lib/placeOcr';
 import {
   deleteTripChecklistFromDB,
   deleteTripFromDB,
@@ -33,9 +34,19 @@ import type { Trip, TripChecklist, TripItem, TripStatus } from '@/types';
 
 type ParentState = 'loading' | 'ready' | 'not-found' | 'forbidden' | 'error' | 'disconnected';
 type ChildState = 'loading' | 'ready' | 'error' | 'forbidden';
-type ItemDraft = Pick<TripItem, 'title' | 'category'> & { memo: string; url: string };
+type ItemDraft = Pick<TripItem, 'title' | 'category'> & {
+  startTime: string;
+  memo: string;
+  url: string;
+  address: string;
+  businessHours: string;
+  source: NonNullable<TripItem['source']>;
+  talkAbout: boolean;
+};
 
-const EMPTY_ITEM: ItemDraft = { title: '', category: 'activity', memo: '', url: '' };
+const EMPTY_ITEM: ItemDraft = {
+  title: '', category: 'activity', startTime: '', memo: '', url: '', address: '', businessHours: '', source: 'manual', talkAbout: false,
+};
 const CATEGORY_OPTIONS: Array<{ value: TripItem['category']; label: string }> = [
   { value: 'activity', label: '활동' },
   { value: 'food', label: '음식' },
@@ -99,6 +110,9 @@ export function TripDetailPage() {
   const [itemDraft, setItemDraft] = useState<ItemDraft>(EMPTY_ITEM);
   const [itemError, setItemError] = useState<string | null>(null);
   const [isSavingItem, setIsSavingItem] = useState(false);
+  const [isReadingScreenshot, setIsReadingScreenshot] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(new Set());
   const [newChecklistName, setNewChecklistName] = useState('');
   const [isAddingChecklist, setIsAddingChecklist] = useState(false);
@@ -125,6 +139,8 @@ export function TripDetailPage() {
     setIsSavingTrip(false);
     setIsDeletingTrip(false);
     setIsSavingItem(false);
+    setIsReadingScreenshot(false);
+    setOcrProgress(0);
     setIsAddingChecklist(false);
     setPendingItemIds(new Set());
     setPendingChecklistIds(new Set());
@@ -294,7 +310,7 @@ export function TripDetailPage() {
   const activeDate = dates[activeDayIndex] || dates[0];
   const currentDayItems = useMemo(
     () => items.filter((item) => item.itemDate === activeDate)
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title)),
+      .sort((a, b) => (a.startTime || '99:99').localeCompare(b.startTime || '99:99') || a.sortOrder - b.sortOrder || a.title.localeCompare(b.title)),
     [activeDate, items],
   );
 
@@ -399,9 +415,56 @@ export function TripDetailPage() {
   };
   const openEditItem = (item: TripItem) => {
     setEditingItemId(item.id);
-    setItemDraft({ title: item.title, category: item.category, memo: item.memo || '', url: item.url || '' });
+    setItemDraft({
+      title: item.title,
+      category: item.category,
+      startTime: item.startTime || '',
+      memo: item.memo || '',
+      url: item.url || '',
+      address: item.address || '',
+      businessHours: item.businessHours || '',
+      source: item.source || 'manual',
+      talkAbout: item.talkAbout === true,
+    });
     setItemError(null);
     setShowItemModal(true);
+  };
+
+  const handlePlaceScreenshot = async (file?: File) => {
+    if (!file || isReadingScreenshot) return;
+    if (!file.type.startsWith('image/')) {
+      setItemError('이미지 파일만 올릴 수 있어요.');
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      setItemError('지도 캡처는 12MB 이하로 올려 주세요.');
+      return;
+    }
+    setIsReadingScreenshot(true);
+    setOcrProgress(0);
+    setItemError(null);
+    try {
+      const place = await recognizePlaceScreenshot(file, setOcrProgress);
+      setItemDraft((current) => ({
+        ...current,
+        title: place.title || current.title,
+        address: place.address || current.address,
+        businessHours: place.businessHours || current.businessHours,
+        source: 'screenshot',
+      }));
+      if (!place.title && !place.address && !place.businessHours) {
+        setItemError('글자를 충분히 읽지 못했어요. 아래 칸에 직접 입력해 주세요.');
+      } else {
+        toast.success('캡처에서 읽은 내용을 확인해 주세요. 틀린 부분은 바로 고칠 수 있어요.');
+      }
+    } catch (error) {
+      console.error('Failed to read place screenshot:', error);
+      setItemError('캡처를 읽지 못했어요. 직접 입력하거나 더 선명한 이미지로 다시 시도해 주세요.');
+    } finally {
+      setIsReadingScreenshot(false);
+      setOcrProgress(0);
+      if (screenshotInputRef.current) screenshotInputRef.current.value = '';
+    }
   };
 
   const handleSaveItem = async () => {
@@ -431,10 +494,15 @@ export function TripDetailPage() {
       const input = {
         tripId: trip.id,
         itemDate: existing?.itemDate || activeDate,
+        startTime: itemDraft.startTime || undefined,
         title: itemDraft.title.trim(),
         category: itemDraft.category,
         memo: itemDraft.memo.trim() || undefined,
+        talkAbout: itemDraft.talkAbout,
         url: itemDraft.url.trim() || undefined,
+        address: itemDraft.address.trim() || undefined,
+        businessHours: itemDraft.businessHours.trim() || undefined,
+        source: itemDraft.source,
         sortOrder: existing?.sortOrder ?? currentDayItems.length,
       };
       const saved = existing
@@ -687,18 +755,27 @@ export function TripDetailPage() {
                 <div className="bg-card border border-dashed border-border rounded-2xl p-8 text-center"><MapPin className="w-8 h-8 text-muted-foreground mx-auto mb-2" /><p className="text-xs font-bold">직접 장소나 할 일을 추가해 보세요.</p></div>
               ) : (
                 <div className="space-y-3">
+                  <div className="rounded-2xl bg-coral/5 border border-coral/20 px-4 py-3 flex items-center gap-2 text-xs">
+                    <MapPin className="w-4 h-4 text-coral shrink-0" />
+                    <span><strong>{currentDayItems.length}개 장소 시간표</strong> · 시간을 넣으면 자동으로 시간순으로 정리돼요. 시간 없는 장소는 화살표로 순서를 정해요.</span>
+                  </div>
                   {currentDayItems.map((item, index) => {
                     const pending = pendingItemIds.has(item.id);
-                    return <div key={item.id} className="bg-card border border-border rounded-2xl p-4 shadow-sm flex gap-3">
+                    const mapQuery = [item.title, item.address].filter(Boolean).join(' ');
+                    return <div key={item.id} className="relative bg-card border border-border rounded-2xl p-4 shadow-sm flex gap-3">
                       <div className="w-6 h-6 rounded-full bg-coral text-white text-[10px] font-bold flex items-center justify-center shrink-0">{index + 1}</div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2"><h3 className="font-bold text-sm truncate">{item.title}</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
-                        {item.memo && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{item.memo}</p>}
+                        <div className="flex items-center gap-2"><h3 className="font-bold text-sm truncate">{item.title}</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{item.startTime || '시간 미정'} · {CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
+                        {item.address && <p className="text-xs text-foreground/80 mt-1 flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-coral" />{item.address}</p>}
+                        {item.businessHours && <p className="text-[11px] text-muted-foreground mt-1 whitespace-pre-wrap">영업시간 · {item.businessHours}</p>}
+                        {item.memo && <p className="mt-2 rounded-xl bg-indigo-500/5 px-2.5 py-2 text-xs text-foreground whitespace-pre-wrap"><strong className="text-[10px] text-indigo-600">함께 볼 메모</strong><br />{item.memo}</p>}
+                        {item.talkAbout && <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-coral/10 px-2 py-1 text-[10px] font-bold text-coral"><MessageCircleHeart className="w-3 h-3" />통화 때 꼭 얘기</p>}
                         <div className="flex gap-1 mt-2">
-                          <button onClick={() => void handleMoveItem(index, -1)} disabled={index === 0 || pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="위로 이동"><ArrowUp className="w-4 h-4" /></button>
-                          <button onClick={() => void handleMoveItem(index, 1)} disabled={index === currentDayItems.length - 1 || pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="아래로 이동"><ArrowDown className="w-4 h-4" /></button>
+                          <button onClick={() => void handleMoveItem(index, -1)} disabled={Boolean(item.startTime) || index === 0 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="위로 이동"><ArrowUp className="w-4 h-4" /></button>
+                          <button onClick={() => void handleMoveItem(index, 1)} disabled={Boolean(item.startTime) || index === currentDayItems.length - 1 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="아래로 이동"><ArrowDown className="w-4 h-4" /></button>
                           <button onClick={() => openEditItem(item)} disabled={pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="일정 수정"><Pencil className="w-4 h-4" /></button>
                           <button onClick={() => void handleDeleteItem(item.id)} disabled={pending || isOffline} className="p-1.5 text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 className="w-4 h-4" /></button>
+                          {mapQuery && <a href={`https://map.naver.com/p/search/${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer" className="ml-auto px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-700 text-[10px] font-bold">네이버 지도</a>}
                         </div>
                       </div>
                     </div>;
@@ -739,12 +816,24 @@ export function TripDetailPage() {
         </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip || isOffline} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
 
         {showItemModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-xs">
+          {!editingItemId && <div className="rounded-2xl border border-dashed border-coral/40 bg-coral/5 p-3">
+            <input ref={screenshotInputRef} type="file" accept="image/*" className="sr-only" onChange={(event) => void handlePlaceScreenshot(event.target.files?.[0])} />
+            <button type="button" onClick={() => screenshotInputRef.current?.click()} disabled={isReadingScreenshot || isSavingItem} className="w-full min-h-[44px] flex items-center justify-center gap-2 font-bold text-coral disabled:opacity-50">
+              <ImagePlus className="w-4 h-4" />
+              {isReadingScreenshot ? `캡처 읽는 중 ${Math.round(ocrProgress * 100)}%` : '네이버 지도 캡처에서 불러오기'}
+            </button>
+            <p className="text-[10px] text-muted-foreground text-center">이미지는 서버에 올리지 않고 이 기기에서만 글자를 읽어요.</p>
+          </div>}
           <label className="block font-bold">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
+          <label className="block font-bold">방문 시간 (선택)<input type="time" value={itemDraft.startTime} onChange={(event) => setItemDraft((current) => ({ ...current, startTime: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <fieldset><legend className="font-bold mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`py-2 rounded-xl border ${itemDraft.category === option.value ? 'bg-coral text-white border-coral' : 'border-border'}`}>{option.label}</button>)}</div></fieldset>
           <label className="block font-bold">링크 (선택)<input type="url" value={itemDraft.url} onChange={(event) => setItemDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
-          <label className="block font-bold">메모 (선택)<textarea value={itemDraft.memo} onChange={(event) => setItemDraft((current) => ({ ...current, memo: event.target.value }))} rows={3} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
+          <label className="block font-bold">주소 (선택)<input value={itemDraft.address} onChange={(event) => setItemDraft((current) => ({ ...current, address: event.target.value, source: current.source === 'screenshot' ? 'screenshot' : 'manual' }))} placeholder="예: 서울 마포구 연남로 1" maxLength={300} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
+          <label className="block font-bold">영업시간 (선택)<textarea value={itemDraft.businessHours} onChange={(event) => setItemDraft((current) => ({ ...current, businessHours: event.target.value }))} rows={2} maxLength={500} placeholder="예: 매일 11:00~21:00" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
+          <label className="block font-bold">함께 볼 메모 (선택)<textarea value={itemDraft.memo} onChange={(event) => setItemDraft((current) => ({ ...current, memo: event.target.value }))} rows={3} placeholder="예: 예약 필요 · 비 오면 다른 곳으로 · 여기서 사진 찍기" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
+          <label className="flex items-center gap-2 rounded-xl bg-coral/5 px-3 py-3 font-bold text-coral"><input type="checkbox" checked={itemDraft.talkAbout} onChange={(event) => setItemDraft((current) => ({ ...current, talkAbout: event.target.checked }))} className="accent-coral" />통화 때 꼭 얘기</label>
           {itemError && <p className="text-red-600" role="alert">{itemError}</p>}
-        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem || isOffline} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
+        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
       </div>
     </MobileShell>
   );

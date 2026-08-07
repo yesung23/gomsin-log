@@ -41,14 +41,27 @@ function transact<T>(
   return openDatabase().then((database) => new Promise<T>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, mode);
     const request = run(transaction.objectStore(STORE_NAME));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    let result: T;
+    let requestError: DOMException | null = null;
+
+    // An IDBRequest can succeed before its containing transaction commits. Keep
+    // the result, but do not tell callers that a queued record is durable until
+    // the transaction itself completes.
+    request.onsuccess = () => {
+      result = request.result;
+    };
+    request.onerror = () => {
+      requestError = request.error;
+    };
     // Closing on completion rather than leaving the handle open: a held connection
     // blocks a later version upgrade in another tab.
-    transaction.oncomplete = () => database.close();
+    transaction.oncomplete = () => {
+      database.close();
+      resolve(result);
+    };
     transaction.onabort = () => {
       database.close();
-      reject(transaction.error);
+      reject(transaction.error || requestError || new Error('IndexedDB transaction aborted.'));
     };
   }));
 }

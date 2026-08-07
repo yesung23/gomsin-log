@@ -140,7 +140,7 @@ export function CallBriefingWidget() {
           {/*
             The confirm action comes IMMEDIATELY after the three topics, before
             anything optional.
-        
+
             The north-star metric is the time from opening this card to pressing
             this button, so anything between the two is measured as comprehension
             time that the user did not spend comprehending. At 320x568 the opener
@@ -167,13 +167,13 @@ export function CallBriefingWidget() {
 
           {/*
             Everything that DESCRIBES the day rather than being it.
-        
+
             The 군화 home used to carry 상대방 마음 흐름, 오늘의 요약 and 다정한 한마디
             as separate default widgets alongside this card, so the same context was
             read four times in four wrappers. They are not deleted -- they are the
             same components, one tap away here, and still addable back to the home
             from 위젯 추가.
-        
+
             Collapsed by default: a soldier with three minutes opens it, and a
             soldier with forty seconds never scrolls past it to reach the button
             above.

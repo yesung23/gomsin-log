@@ -824,7 +824,14 @@ export function RecordPage() {
         </div>
 
       {/* Floating CTA Button: + 지금의 마음 남기기 */}
-      <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
+      {/*
+        Floating CTA, positioned off the MEASURED bottom chrome rather than a
+        constant. `bottom-20` (80px) collided with the offline banner by 18px, and
+        AI_HANDOFF §4.1 recorded that raising the banner to clear the tab bar would
+        widen that to 36px -- which it did. The stack is now: tab bar, banner, CTA,
+        each clearing the measured height of the ones below it.
+      */}
+      <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+20px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
         <button
           onClick={() => navigate('/home')}
           className="w-full py-3.5 rounded-full bg-coral text-coral-foreground font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-foreground/20 backdrop-blur-xs"

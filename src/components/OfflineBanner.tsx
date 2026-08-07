@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useStore } from '@/lib/useStore';
 import { useOnlineStatus } from '@/lib/useOnlineStatus';
 
@@ -21,14 +22,75 @@ import { useOnlineStatus } from '@/lib/useOnlineStatus';
 export function OfflineBanner() {
   const online = useOnlineStatus();
   const { outboxWaiting, outboxBlocked, retryBlockedRecords } = useStore();
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const hasQueue = outboxWaiting > 0 || outboxBlocked > 0;
-  if (online && !hasQueue) return null;
+  const visible = !online || hasQueue;
+
+  /**
+   * Publish this layer's height as `--gomsin-bottom-banner-height`.
+   *
+   * The bottom of the screen holds three independently pinned layers -- tab bar,
+   * this banner, and the record screen's floating CTA -- and each one used a
+   * constant to guess where the ones below it ended. The guesses disagreed: the CTA
+   * at `bottom-20` (80px) and this banner overlapped by 18px, and AI_HANDOFF §4.1
+   * recorded that moving the banner up to clear the tab bar would widen that to
+   * 36px. It did, exactly, the moment the tab bar fix landed.
+   *
+   * So the stack now measures itself, bottom upwards:
+   *   tab bar   -> `--gomsin-tabbar-height`        (MobileShell)
+   *   banner    -> `--gomsin-bottom-banner-height` (here)
+   *   CTA       -> positioned off both             (RecordPage)
+   *
+   * Set on `documentElement` because the consumer is a page inside `<main>`, a
+   * sibling subtree from this banner.
+   */
+  useEffect(() => {
+    const root = document.documentElement;
+    const node = rootRef.current;
+    if (!visible || !node) {
+      root.style.setProperty('--gomsin-bottom-banner-height', '0px');
+      return;
+    }
+    const apply = () => {
+      root.style.setProperty(
+        '--gomsin-bottom-banner-height',
+        `${Math.round(node.getBoundingClientRect().height)}px`,
+      );
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') {
+      return () => root.style.setProperty('--gomsin-bottom-banner-height', '0px');
+    }
+    const observer = new ResizeObserver(apply);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      root.style.setProperty('--gomsin-bottom-banner-height', '0px');
+    };
+  }, [visible, outboxWaiting, outboxBlocked, online]);
+
+  if (!visible) return null;
 
   return (
     <div
+      ref={rootRef}
       role="status"
-      className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] left-1/2 -translate-x-1/2 w-full max-w-[430px] z-[60] px-3"
+      /*
+       * Cleared off the tab bar's MEASURED height (`--gomsin-tabbar-height`,
+       * published by MobileShell) rather than a constant.
+       *
+       * This used to be `calc(env(safe-area-inset-bottom,0px)+60px)`. The bar is
+       * `8px + 48px + max(env(safe-area-inset-bottom,0px),10px)` tall, so 60px only
+       * cleared it on a device WITH a home indicator; at inset 0 -- every Android
+       * phone, every older iPhone, and the 320x568 and 390x844 test viewports --
+       * the banner sat 10px inside `nav[role=tablist]`.
+       *
+       * `fixed` and `z-[60]` are load-bearing and must stay: `modalStacking.test.ts`
+       * requires this layer to declare a z-index above the tab bar's, because the
+       * bar is painted after it in the DOM.
+       */
+      className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+8px)] left-1/2 -translate-x-1/2 w-full max-w-[430px] z-[60] px-3"
     >
       {!online && (
         <div

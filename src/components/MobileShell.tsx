@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, BookOpen, CalendarDays, Heart, User } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { routeAnnouncement } from '@/lib/routeAnnouncement';
 import { InstallPromptBanner } from '@/components/InstallPromptBanner';
@@ -56,9 +56,37 @@ const TABS = [
 export function MobileShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   const [announcement, setAnnouncement] = useState('');
+  /** The measured height of the tab bar, published to the bottom-pinned layers. */
+  const [tabBarHeight, setTabBarHeight] = useState(0);
   /** The first render is not a navigation, so it must not steal focus. */
   const isFirstRender = useRef(true);
+
+  /**
+   * Publish the tab bar's real height as `--gomsin-tabbar-height`.
+   *
+   * The offline banner used to clear the bar with a hardcoded
+   * `calc(env(safe-area-inset-bottom,0px)+60px)`. The bar's height is
+   * `8px + 48px + max(env(safe-area-inset-bottom,0px),10px)`, so that constant was
+   * only ever correct on a device WITH a home indicator: at inset 0 the banner sat
+   * 10px inside the bar. Measured in headless Chromium at 320x568 and 390x844 with
+   * the browser offline, the banner overlapped `nav[role=tablist]` by 320x10px and
+   * 390x10px respectively.
+   *
+   * Measuring instead of guessing means the next change to the bar's padding cannot
+   * silently reintroduce the overlap.
+   */
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const apply = () => setTabBarHeight(nav.getBoundingClientRect().height);
+    apply();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, []);
 
   /**
    * Tell a screen reader the screen changed, and put focus at the top of it.
@@ -91,7 +119,14 @@ export function MobileShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
-      <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
+      <div
+        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        style={
+          tabBarHeight > 0
+            ? ({ '--gomsin-tabbar-height': `${tabBarHeight}px` } as CSSProperties)
+            : undefined
+        }
+      >
         {/*
           First focusable element on every screen. The tab bar is the LAST thing
           in the DOM, so without this a keyboard user had no way past the content
@@ -129,6 +164,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
 
         {/* Fixed 5-Tab Navigation Bar (홈 | 기록 | 일정 | 우리 | 마이) */}
         <nav
+          ref={navRef}
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-card/95 backdrop-blur-md border-t border-border/60 z-50 shadow-lg"
           role="tablist"
           aria-label="하단 내비게이션"

@@ -74,14 +74,23 @@ export function generateInvitationCode(): string {
 /**
  * Persist the couple anniversary on the shared `couples` row.
  */
-export async function saveCoupleAnniversary(coupleId: string, anniversaryDate: string): Promise<boolean> {
-  if (!supabase || !coupleId || !anniversaryDate) return false;
-  const { error } = await supabase
+export async function saveCoupleAnniversary(
+  coupleId: string,
+  anniversaryDate: string | null,
+): Promise<boolean> {
+  if (!supabase || !coupleId) return false;
+  const { data, error } = await supabase
     .from('couples')
     .update({ anniversary_date: anniversaryDate, updated_at: new Date().toISOString() })
-    .eq('id', coupleId);
+    .eq('id', coupleId)
+    .select('id')
+    .maybeSingle();
   if (error) {
     console.error('[gomsinlog] Failed to save anniversary date:', error);
+    return false;
+  }
+  if (data?.id !== coupleId) {
+    console.error('[gomsinlog] Anniversary update matched no accessible couple row.');
     return false;
   }
   return true;

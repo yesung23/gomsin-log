@@ -73,6 +73,7 @@ export function SettingsPage() {
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editName, setEditName] = useState(profile.myName);
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
@@ -89,7 +90,7 @@ export function SettingsPage() {
     } else if (showPWAModal) {
       setShowPWAModal(false);
     } else if (showProfileModal) {
-      setShowProfileModal(false);
+      if (!isSavingProfile) setShowProfileModal(false);
     }
   }, showDeleteAccountModal || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
 
@@ -169,18 +170,30 @@ export function SettingsPage() {
     }
   };
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
+    if (isSavingProfile) return;
     const nextName = editName.trim();
     if (nextName.length < 2 || nextName.length > 12) {
       toast.error('닉네임은 2~12자로 입력해 주세요.');
       return;
     }
-    updateProfile({
-      myName: nextName,
-      couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
-    });
-    setShowProfileModal(false);
-    toast.success('프로필이 저장되었습니다.');
+    const identity = captureIdentity();
+    setIsSavingProfile(true);
+    try {
+      const saved = await updateProfile({
+        myName: nextName,
+        couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
+      });
+      if (!isCurrentIdentity(identity)) return;
+      if (!saved) {
+        toast.error('프로필을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      setShowProfileModal(false);
+      toast.success('프로필이 저장되었습니다.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsSavingProfile(false);
+    }
   };
 
   /**
@@ -210,7 +223,7 @@ export function SettingsPage() {
         toast.error(result.error || '커플 공간을 만들지 못했어요.');
         return;
       }
-      updateProfile({
+      await updateProfile({
         couple: {
           ...profile.couple,
           coupleId: result.coupleId,
@@ -293,7 +306,7 @@ export function SettingsPage() {
       }
 
       if (!isCurrentIdentity(identity)) return;
-      updateProfile({
+      const profileMirrored = await updateProfile({
         role: nextRole,
         couple: {
           ...profile.couple,
@@ -304,6 +317,10 @@ export function SettingsPage() {
           partnerName,
         },
       });
+      if (!profileMirrored) {
+        toast.error('연결은 완료됐지만 프로필 동기화에 실패했어요. 화면을 새로고침해 주세요.');
+        return;
+      }
       if (!isCurrentIdentity(identity)) return;
       setInviteCodeInput('');
       toast.success('우리 공간에 연결되었습니다.');
@@ -446,7 +463,7 @@ export function SettingsPage() {
                   toast.error(result.error || '초대 코드를 재발급하지 못했습니다.');
                   return;
                 }
-                updateProfile({
+                await updateProfile({
                   couple: { ...profile.couple, coupleCode: result.code },
                 });
                 // Re-read the authoritative expiry for the code just minted.
@@ -738,15 +755,17 @@ export function SettingsPage() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => setShowProfileModal(false)}
+                  disabled={isSavingProfile}
                   className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs min-h-[44px]"
                 >
                   취소
                 </button>
                 <button
                   onClick={handleSaveProfile}
-                  className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px]"
+                  disabled={isSavingProfile}
+                  className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px] disabled:opacity-50"
                 >
-                  저장하기
+                  {isSavingProfile ? '저장 중…' : '저장하기'}
                 </button>
               </div>
             </div>

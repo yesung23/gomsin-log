@@ -130,6 +130,8 @@ export interface DailyRecord {
   reaction?: ReactionType;
   attachments?: Attachment[];
   isPrivate: boolean; // false = 우리 둘에게 공유, true = 나에게만
+  /** Explicitly saved by the author as a topic for the next call. */
+  talkAbout?: boolean;
   emotionFlow?: EmotionFlowItem[];
   emotionAnalysis?: EmotionAnalysis;
   emotionUpdatedAt?: string | null;
@@ -146,6 +148,20 @@ export interface CoupleEvent {
   eventType: EventType;
   startDate: string; // YYYY-MM-DD
   endDate?: string;  // YYYY-MM-DD
+  isPrivate: boolean;
+  talkAbout?: boolean;
+  createdAt: string;
+}
+
+export interface CoupleTask {
+  id: string;
+  coupleId: string;
+  createdBy: string;
+  title: string;
+  dueDate: string; // YYYY-MM-DD
+  dueTime?: string; // HH:mm
+  assigneeId?: string;
+  completed: boolean;
   isPrivate: boolean;
   createdAt: string;
 }
@@ -174,10 +190,18 @@ export interface TripItem {
   id: string;
   tripId: string;
   itemDate: string;
+  startTime?: string;
   title: string;
   category: 'activity' | 'food' | 'lodging' | 'transport';
   memo?: string;
+  /** A shared note is intentionally part of the place, not a private draft. */
+  talkAbout?: boolean;
   url?: string;
+  address?: string;
+  businessHours?: string;
+  latitude?: number;
+  longitude?: number;
+  source?: 'manual' | 'screenshot' | 'kakao';
   sortOrder: number;
 }
 

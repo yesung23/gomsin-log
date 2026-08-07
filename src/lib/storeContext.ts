@@ -116,7 +116,10 @@ export interface StoreContextType {
   retryAccountDeletion: () => Promise<AccountDeletionOutcome>;
   /** Re-verify membership and re-read every shared slice through RLS. */
   retrySharedAccess: () => Promise<boolean>;
-  updateProfile: (profileUpdates: Partial<UserProfile>) => void;
+  updateProfile: (
+    profileUpdates: Partial<UserProfile>,
+    options?: { persist?: boolean },
+  ) => Promise<boolean>;
   addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
   addRecordWithMedia: (
     record: Omit<DailyRecord, 'id' | 'createdAt'>,

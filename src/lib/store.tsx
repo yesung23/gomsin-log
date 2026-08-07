@@ -1728,29 +1728,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately,
   ]);
 
-  const updateProfile = (profileUpdates: Partial<UserProfile>) => {
+  const updateProfile = async (
+    profileUpdates: Partial<UserProfile>,
+    options: { persist?: boolean } = {},
+  ): Promise<boolean> => {
     // Compute the next profile outside the updater. React StrictMode invokes
     // updaters twice, so performing network writes inside one would fire every
     // request twice.
     const prev = stateRef.current;
     const newProfile: UserProfile = { ...prev.profile, ...profileUpdates };
-    // The optimistic local update stays SYNCHRONOUS and unchanged. Only the
-    // issuing of the three writes moves behind the gate. If the gate aborts, the
-    // optimistic update is discarded anyway, because the purge replaces state
-    // wholesale.
-    updateStateImmediately((current) => ({
+    const commitLocally = () => updateStateImmediately((current) => ({
       ...current,
       profile: { ...current.profile, ...profileUpdates },
     }));
 
-    if (!supabase || !prev.authenticatedUser || prev.isDemoMode) return;
+    if (options.persist === false || !supabase || !prev.authenticatedUser || prev.isDemoMode) {
+      commitLocally();
+      return true;
+    }
     const userId = prev.authenticatedUser.id;
+    const identity = captureActiveIdentity();
+    if (!identity) return false;
 
-    void (async () => {
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!isCurrentIdentity(identity)) return false;
 
-    if (profileUpdates.myName || profileUpdates.military || profileUpdates.role) {
-      void supabase
+    try {
+      if (
+        profileUpdates.myName !== undefined
+        || profileUpdates.military !== undefined
+        || profileUpdates.role !== undefined
+      ) {
+        const { error } = await supabase
         .from('profiles')
         .update({
           display_name: newProfile.myName,
@@ -1758,35 +1767,42 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           military_info: newProfile.military,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', userId)
-        .then(({ error }) => {
-          if (error) console.error('[gomsinlog] Failed to update profile:', error);
-        });
-    }
+        .eq('id', userId);
+        if (error) {
+          console.error('[gomsinlog] Failed to update profile:', error);
+          return false;
+        }
+      }
 
-    if (profileUpdates.contact) {
-      void supabase
-        .from('contact_preferences')
-        .upsert({
+      if (profileUpdates.contact) {
+        const { error } = await supabase.from('contact_preferences').upsert({
           user_id: userId,
           weekday_start: newProfile.contact.weekdayStart,
           weekday_end: newProfile.contact.weekdayEnd,
           weekend_start: newProfile.contact.weekendStart,
           weekend_end: newProfile.contact.weekendEnd,
-        })
-        .then(({ error }) => {
-          if (error) console.error('[gomsinlog] Failed to update contact preferences:', error);
         });
-    }
+        if (error) {
+          console.error('[gomsinlog] Failed to update contact preferences:', error);
+          return false;
+        }
+      }
 
-    // The anniversary lives on the shared `couples` row. Without this it was only
-    // ever kept locally and silently reset to empty on the next login.
-    const nextAnniversary = profileUpdates.couple?.anniversaryDate;
-    const coupleId = newProfile.couple.coupleId;
-    if (coupleId && nextAnniversary && nextAnniversary !== prev.profile.couple.anniversaryDate) {
-      void saveCoupleAnniversary(coupleId, nextAnniversary);
+      // `undefined` intentionally clears an existing date by writing SQL NULL.
+      const nextAnniversary = profileUpdates.couple?.anniversaryDate;
+      const coupleId = newProfile.couple.coupleId;
+      if (coupleId && nextAnniversary !== prev.profile.couple.anniversaryDate) {
+        const saved = await saveCoupleAnniversary(coupleId, nextAnniversary || null);
+        if (!saved) return false;
+      }
+
+      if (!isCurrentIdentity(identity)) return false;
+      commitLocally();
+      return true;
+    } catch (error) {
+      console.error('[gomsinlog] Failed to update profile settings:', error);
+      return false;
     }
-    })();
   };
 
   const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {

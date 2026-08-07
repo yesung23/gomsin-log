@@ -27,6 +27,7 @@ import {
 import type { Role } from '@/types';
 import { AddWidgetBottomSheet } from '@/components/widgets/AddWidgetBottomSheet';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
+import { CallBriefingWidget } from '@/components/widgets/CallBriefingWidget';
 
 export function WidgetDashboard() {
   const { state, setWidgetLayout } = useStore();
@@ -205,6 +206,15 @@ export function WidgetDashboard() {
       <div className="px-5 pb-4">
         <CoupleStatusBanner />
       </div>
+
+      {/* The soldier's scarce phone window has one non-removable job: regain the
+          shared context before the call. Custom widgets remain below, but this
+          call-prep surface cannot be accidentally deleted or buried. */}
+      {role === 'soldier' && state.profile.couple.connected && (
+        <div className="px-5 pb-4">
+          <CallBriefingWidget key={`${state.authenticatedUser?.id ?? state.profile.id}:${state.profile.couple.coupleId}`} />
+        </div>
+      )}
 
       {/* Widget Container */}
       <div 

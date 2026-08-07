@@ -9,6 +9,7 @@ const unsubscribe = vi.fn();
 const createdChannels: Array<{ name: string; on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn> }> = [];
 
 const mockSupabase = {
+  profileUpdateError: null as null | { message: string },
   auth: {
     onAuthStateChange: (cb: AuthCallback) => {
       authCallbacks.push(cb);
@@ -32,12 +33,13 @@ const mockSupabase = {
   removeChannel: vi.fn(),
   rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   from: () => ({
-    update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+    update: () => ({ eq: () => Promise.resolve({ error: mockSupabase.profileUpdateError }) }),
     upsert: () => Promise.resolve({ error: null }),
   }),
 };
 
 const disconnectCoupleFromDB = vi.fn().mockResolvedValue(true);
+const saveCoupleAnniversary = vi.fn().mockResolvedValue(true);
 // Default: the lifecycle RPC could NOT answer. By contract that leaves local
 // couple state untouched, so every pre-existing scenario keeps its fixture
 // workspace. Tests that care about a definite answer set it explicitly.
@@ -49,7 +51,7 @@ vi.mock('@/lib/supabase', () => ({
   authRepository: { signOut: vi.fn().mockResolvedValue(undefined) },
   disconnectCoupleFromDB,
   deleteAccountFromDB: vi.fn().mockResolvedValue(true),
-  saveCoupleAnniversary: vi.fn().mockResolvedValue(true),
+  saveCoupleAnniversary,
   // Read-only lifecycle probe.
   fetchMyCoupleState: (...args: unknown[]) => fetchMyCoupleState(...(args as [])),
 }));
@@ -132,7 +134,7 @@ const STORE_KEY = 'gomsinlog.state.v2';
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
 
 function Probe({ files = [] as File[] }: { files?: File[] }) {
-  const { state, isReady, authSyncUnavailable, sharedSyncStatus, signOut, disconnect, addRecordWithMedia, addEvent, reloadEvents } = useStore();
+  const { state, isReady, authSyncUnavailable, sharedSyncStatus, signOut, disconnect, updateProfile, addRecordWithMedia, addEvent, reloadEvents } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
@@ -175,6 +177,10 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       </button>
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
+      <button onClick={() => void updateProfile({ myName: 'updated-name' })}>update-profile</button>
+      <button onClick={() => void updateProfile({
+        couple: { ...state.profile.couple, anniversaryDate: undefined },
+      })}>clear-anniversary</button>
       <button onClick={() => {
         const userId = state.authenticatedUser?.id;
         const coupleId = state.profile.couple.coupleId;
@@ -217,6 +223,8 @@ describe('StoreProvider auth lifecycle', () => {
     createdChannels.length = 0;
     localStorage.clear();
     fetchFullStateFromDB.mockReset();
+    mockSupabase.profileUpdateError = null;
+    saveCoupleAnniversary.mockReset().mockResolvedValue(true);
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
@@ -1150,5 +1158,63 @@ describe('StoreProvider auth lifecycle', () => {
 
     // After reconciliation resolves with confirmed membership, records must survive
     await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('rec-a'));
+  });
+});
+
+describe('profile persistence acknowledgement', () => {
+  const profileState = () => serverState({
+    profile: {
+      myName: 'original-name',
+      role: 'gomsin',
+      couple: {
+        coupleId: 'couple-1',
+        partnerName: 'partner',
+        anniversaryDate: '2025-01-01',
+        coupleCode: '',
+        connected: true,
+        status: 'active',
+      },
+      military: {} as never,
+      contact: {} as never,
+    } as never,
+  });
+
+  beforeEach(() => {
+    authCallbacks.length = 0;
+    createdChannels.length = 0;
+    localStorage.clear();
+    fetchFullStateFromDB.mockReset().mockResolvedValue(profileState());
+    fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
+    mockSupabase.profileUpdateError = null;
+    saveCoupleAnniversary.mockReset().mockResolvedValue(true);
+  });
+
+  it('keeps the confirmed local profile when the server update fails', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('name')).toHaveTextContent('original-name'));
+
+    mockSupabase.profileUpdateError = { message: 'permission denied' };
+    await act(async () => {
+      screen.getByText('update-profile').click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('name')).toHaveTextContent('original-name'));
+    expect(screen.getByTestId('name')).not.toHaveTextContent('updated-name');
+  });
+
+  it('persists an anniversary clear as SQL NULL before updating local state', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('anniversary')).toHaveTextContent('2025-01-01'));
+
+    await act(async () => {
+      screen.getByText('clear-anniversary').click();
+    });
+
+    await waitFor(() => expect(saveCoupleAnniversary).toHaveBeenCalledWith('couple-1', null));
+    await waitFor(() => expect(screen.getByTestId('anniversary')).toHaveTextContent('none'));
   });
 });

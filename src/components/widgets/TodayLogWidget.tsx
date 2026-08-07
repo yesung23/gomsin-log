@@ -45,6 +45,7 @@ export function TodayLogWidget() {
   const [log, setLog] = useState(restoredDraft?.log ?? '');
   const [reaction, setReaction] = useState<ReactionType | undefined>(restoredDraft?.reaction);
   const [isPrivate, setIsPrivate] = useState(restoredDraft?.isPrivate ?? false);
+  const [talkAbout, setTalkAbout] = useState(false);
   /** Files chosen but not yet uploaded; upload happens on save. */
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   // Reopen the card when there is something waiting, so a restored draft is not
@@ -367,6 +368,7 @@ export function TodayLogWidget() {
       log,
       reaction,
       isPrivate,
+      talkAbout: !isPrivate && talkAbout,
       emotionFlow: userConfirmedFlow,
       emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
     };
@@ -383,6 +385,7 @@ export function TodayLogWidget() {
       setReaction(undefined);
       review.reset();
       setIsPrivate(false);
+      setTalkAbout(false);
       clearComposerDraft(draftUserId);
     };
 
@@ -549,6 +552,9 @@ export function TodayLogWidget() {
             support for reading it varies between screen readers. This is the main
             composer of the whole app, so it gets a real name. WCAG 2.1 SC 1.3.1.
           */}
+          <p className="text-[11px] text-muted-foreground leading-relaxed break-keep">
+            사건을 길게 설명하기보다 <strong className="text-foreground">무슨 일이 있었는지 · 어떤 마음이었는지 · 통화 때 듣고 싶은 말</strong>을 남겨 보세요.
+          </p>
           <textarea
             value={log}
             onChange={(e) => setLog(e.target.value)}
@@ -646,6 +652,13 @@ export function TodayLogWidget() {
               {isPrivate ? <Lock size={12} /> : <Unlock size={12} />}
               {isPrivate ? '나만 보기' : '공유하기'}
             </button>
+
+            {!isPrivate && (
+              <label className="min-h-[44px] px-3 rounded-lg bg-coral/10 text-coral text-xs font-bold flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={talkAbout} onChange={(event) => setTalkAbout(event.target.checked)} className="accent-coral" />
+                통화 때 꼭 얘기
+              </label>
+            )}
 
             <button
               onClick={handlePost}

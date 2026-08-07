@@ -705,13 +705,13 @@ export function TripDetailPage() {
     const content = visibleParentState === 'loading'
       ? <LoaderCircle className="w-8 h-8 animate-spin text-coral mx-auto" aria-label="여행 불러오는 중" />
       : visibleParentState === 'not-found'
-        ? <><MapPin className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 찾을 수 없어요</p><p className="text-sm text-muted-foreground">삭제되었거나 존재하지 않는 여행이에요.</p></>
+        ? <><MapPin className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 찾을 수 없어요</p><p className="text-caption text-muted-foreground">삭제되었거나 존재하지 않는 여행이에요.</p></>
         : visibleParentState === 'disconnected'
-          ? <><Unlink className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">우리 공간 연결이 필요해요</p><p className="text-sm text-muted-foreground">두 사람이 연결된 뒤 여행을 열 수 있어요.</p></>
+          ? <><Unlink className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">우리 공간 연결이 필요해요</p><p className="text-caption text-muted-foreground">두 사람이 연결된 뒤 여행을 열 수 있어요.</p></>
           : visibleParentState === 'forbidden'
             ? <><ShieldAlert className="w-10 h-10 mx-auto text-amber-500" /><p className="font-bold">이 여행에 접근할 권한이 없어요</p></>
-            : <><RefreshCw className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 불러오지 못했어요</p><button onClick={() => void loadParent()} className="px-5 py-2.5 bg-coral-strong text-coral-strong-foreground rounded-xl font-bold text-sm">다시 시도</button></>;
-    return <MobileShell><div className="p-6 text-center mt-20 space-y-3">{content}<button onClick={() => navigate('/trips')} className="block mx-auto text-sm text-muted-foreground underline">여행 목록으로</button></div></MobileShell>;
+            : <><RefreshCw className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 불러오지 못했어요</p><button onClick={() => void loadParent()} className="px-5 py-2.5 bg-coral-strong text-coral-strong-foreground rounded-xl font-bold text-label">다시 시도</button></>;
+    return <MobileShell><div className="p-6 text-center mt-20 space-y-3">{content}<button onClick={() => navigate('/trips')} className="block mx-auto text-caption text-muted-foreground underline">여행 목록으로</button></div></MobileShell>;
   }
 
   return (
@@ -720,7 +720,7 @@ export function TripDetailPage() {
         <header className="bg-card border-b border-border px-5 py-4 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={() => navigate('/trips')} className="p-1 -ml-1 text-muted-foreground" aria-label="여행 목록"><ArrowLeft className="w-5 h-5" /></button>
-            <h1 className="font-bold text-foreground text-lg truncate">{trip.title}</h1>
+            <h1 className="text-heading text-foreground truncate">{trip.title}</h1>
           </div>
           <div className="flex items-center">
             <button onClick={openTripEdit} disabled={isDeletingTrip || isOffline} className="p-2 text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil className="w-4 h-4" /></button>
@@ -730,32 +730,32 @@ export function TripDetailPage() {
 
         <div className="bg-coral/10 border-b border-coral/20 px-5 py-4 space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-coral font-bold text-sm"><Calendar className="w-4 h-4" /><span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span></div>
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-coral-strong text-coral-strong-foreground shrink-0">{dates.length}일간</span>
+            <div className="flex items-center gap-2 text-coral-strong font-bold text-label"><Calendar className="w-4 h-4" /><span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span></div>
+            <span className="text-caption font-bold px-2.5 py-1 rounded-full bg-coral-strong text-coral-strong-foreground shrink-0">{dates.length}일간</span>
           </div>
-          <button onClick={() => navigate(`/record?from=${trip.startDate}&to=${trip.endDate}&trip=${trip.id}`)} className="w-full py-2.5 px-3 rounded-2xl bg-card border border-coral/30 text-coral font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm"><PenTool size={14} />이 여행 기간의 추억 보기·남기기</button>
+          <button onClick={() => navigate(`/record?from=${trip.startDate}&to=${trip.endDate}&trip=${trip.id}`)} className="w-full py-2.5 px-3 rounded-2xl bg-card border border-coral/30 text-coral-strong font-bold text-label flex items-center justify-center gap-1.5 shadow-sm"><PenTool size={14} />이 여행 기간의 추억 보기·남기기</button>
         </div>
 
         <div className="flex border-b border-border bg-card">
-          <button onClick={() => setActiveTab('schedule')} className={`flex-1 py-3 text-xs font-bold border-b-2 ${activeTab === 'schedule' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'}`}>일정 ({items.length})</button>
-          <button onClick={() => setActiveTab('checklist')} className={`flex-1 py-3 text-xs font-bold border-b-2 ${activeTab === 'checklist' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'}`}>준비물 ({checklists.length})</button>
+          <button onClick={() => setActiveTab('schedule')} className={`flex-1 py-3 text-label font-bold border-b-2 ${activeTab === 'schedule' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'}`}>일정 ({items.length})</button>
+          <button onClick={() => setActiveTab('checklist')} className={`flex-1 py-3 text-label font-bold border-b-2 ${activeTab === 'checklist' ? 'border-coral text-coral' : 'border-transparent text-muted-foreground'}`}>준비물 ({checklists.length})</button>
         </div>
 
         {childState !== 'ready' ? (
           <div className="p-8 text-center space-y-3">
-            {childState === 'loading' ? <LoaderCircle className="w-7 h-7 animate-spin text-coral mx-auto" /> : <><p className="font-bold text-sm">{childState === 'forbidden' ? '일정과 준비물을 볼 권한이 없어요.' : '일정과 준비물을 불러오지 못했어요.'}</p><button onClick={() => void loadChildren()} className="px-4 py-2 bg-coral-strong text-coral-strong-foreground rounded-xl text-xs font-bold">다시 시도</button></>}
+            {childState === 'loading' ? <LoaderCircle className="w-7 h-7 animate-spin text-coral mx-auto" /> : <><p className="font-bold text-body">{childState === 'forbidden' ? '일정과 준비물을 볼 권한이 없어요.' : '일정과 준비물을 불러오지 못했어요.'}</p><button onClick={() => void loadChildren()} className="px-4 py-2 bg-coral-strong text-coral-strong-foreground rounded-xl text-label font-bold">다시 시도</button></>}
           </div>
         ) : activeTab === 'schedule' ? (
           <>
             <div className="bg-card border-b border-border px-2 flex overflow-x-auto no-scrollbar">
-              {dates.map((date, index) => <button key={date} onClick={() => setActiveDayIndex(index)} className={`px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 ${activeDayIndex === index ? 'border-navy text-foreground' : 'border-transparent text-muted-foreground'}`}>{index + 1}일차 <span className="font-normal">({date.slice(5)})</span></button>)}
+              {dates.map((date, index) => <button key={date} onClick={() => setActiveDayIndex(index)} className={`px-4 py-3 text-label font-bold whitespace-nowrap border-b-2 ${activeDayIndex === index ? 'border-navy text-foreground' : 'border-transparent text-muted-foreground'}`}>{index + 1}일차 <span className="font-normal">({date.slice(5)})</span></button>)}
             </div>
             <div className="p-5">
               {currentDayItems.length === 0 ? (
-                <div className="bg-card border border-dashed border-border rounded-2xl p-8 text-center"><MapPin className="w-8 h-8 text-muted-foreground mx-auto mb-2" /><p className="text-xs font-bold">직접 장소나 할 일을 추가해 보세요.</p></div>
+                <div className="bg-card border border-dashed border-border rounded-2xl p-8 text-center"><MapPin className="w-8 h-8 text-muted-foreground mx-auto mb-2" /><p className="text-body font-bold">직접 장소나 할 일을 추가해 보세요.</p></div>
               ) : (
                 <div className="space-y-3">
-                  <div className="rounded-2xl bg-coral/5 border border-coral/20 px-4 py-3 flex items-center gap-2 text-xs">
+                  <div className="rounded-2xl bg-coral/5 border border-coral/20 px-4 py-3 flex items-center gap-2 text-caption">
                     <MapPin className="w-4 h-4 text-coral shrink-0" />
                     <span><strong>{currentDayItems.length}개 장소 시간표</strong> · 시간을 넣으면 자동으로 시간순으로 정리돼요. 시간 없는 장소는 화살표로 순서를 정해요.</span>
                   </div>
@@ -763,19 +763,19 @@ export function TripDetailPage() {
                     const pending = pendingItemIds.has(item.id);
                     const mapQuery = [item.title, item.address].filter(Boolean).join(' ');
                     return <div key={item.id} className="relative bg-card border border-border rounded-2xl p-4 shadow-sm flex gap-3">
-                      <div className="w-6 h-6 rounded-full bg-coral-strong text-coral-strong-foreground text-[10px] font-bold flex items-center justify-center shrink-0">{index + 1}</div>
+                      <div className="w-6 h-6 rounded-full bg-coral-strong text-coral-strong-foreground text-caption font-bold flex items-center justify-center shrink-0">{index + 1}</div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2"><h3 className="font-bold text-sm truncate">{item.title}</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{item.startTime || '시간 미정'} · {CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
-                        {item.address && <p className="text-xs text-foreground/80 mt-1 flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-coral" />{item.address}</p>}
-                        {item.businessHours && <p className="text-[11px] text-muted-foreground mt-1 whitespace-pre-wrap">영업시간 · {item.businessHours}</p>}
-                        {item.memo && <p className="mt-2 rounded-xl bg-indigo-500/5 px-2.5 py-2 text-xs text-foreground whitespace-pre-wrap"><strong className="text-[10px] text-indigo-600">함께 볼 메모</strong><br />{item.memo}</p>}
-                        {item.talkAbout && <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-coral/10 px-2 py-1 text-[10px] font-bold text-coral"><MessageCircleHeart className="w-3 h-3" />통화 때 꼭 얘기</p>}
+                        <div className="flex items-center gap-2"><h3 className="text-label font-bold truncate">{item.title}</h3><span className="text-caption px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{item.startTime || '시간 미정'} · {CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
+                        {item.address && <p className="text-caption text-foreground mt-1 flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-coral" />{item.address}</p>}
+                        {item.businessHours && <p className="text-caption text-muted-foreground mt-1 whitespace-pre-wrap">영업시간 · {item.businessHours}</p>}
+                        {item.memo && <p className="mt-2 rounded-xl bg-indigo-500/5 px-2.5 py-2 text-body text-foreground whitespace-pre-wrap"><strong className="text-caption text-indigo-600">함께 볼 메모</strong><br />{item.memo}</p>}
+                        {item.talkAbout && <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-coral/10 px-2 py-1 text-caption font-bold text-coral-strong"><MessageCircleHeart className="w-3 h-3" />통화 때 꼭 얘기</p>}
                         <div className="flex gap-1 mt-2">
                           <button onClick={() => void handleMoveItem(index, -1)} disabled={Boolean(item.startTime) || index === 0 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="위로 이동"><ArrowUp className="w-4 h-4" /></button>
                           <button onClick={() => void handleMoveItem(index, 1)} disabled={Boolean(item.startTime) || index === currentDayItems.length - 1 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="아래로 이동"><ArrowDown className="w-4 h-4" /></button>
                           <button onClick={() => openEditItem(item)} disabled={pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="일정 수정"><Pencil className="w-4 h-4" /></button>
                           <button onClick={() => void handleDeleteItem(item.id)} disabled={pending || isOffline} className="p-1.5 text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 className="w-4 h-4" /></button>
-                          {mapQuery && <a href={`https://map.naver.com/p/search/${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer" className="ml-auto px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-700 text-[10px] font-bold">네이버 지도</a>}
+                          {mapQuery && <a href={`https://map.naver.com/p/search/${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer" className="ml-auto px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-700 text-caption font-bold">네이버 지도</a>}
                         </div>
                       </div>
                     </div>;
@@ -787,17 +787,17 @@ export function TripDetailPage() {
           </>
         ) : (
           <div className="p-5 space-y-4">
-            <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-xs outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim() || isOffline} className="px-4 bg-coral-strong text-coral-strong-foreground font-bold text-xs rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
-            {childActionError && <p className="text-xs text-red-600" role="alert">{childActionError}</p>}
+            <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-body outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim() || isOffline} className="px-4 bg-coral-strong text-coral-strong-foreground font-bold text-label rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
+            {childActionError && <p className="text-caption text-red-600" role="alert">{childActionError}</p>}
             <div className="space-y-2">
               {checklists.map((item) => {
                 const pending = pendingChecklistIds.has(item.id);
-                return <div key={item.id} className="bg-card border border-border p-3.5 rounded-2xl flex items-center justify-between text-xs font-semibold">
+                return <div key={item.id} className="bg-card border border-border p-3.5 rounded-2xl flex items-center justify-between text-label font-semibold">
                   <button onClick={() => void handleToggleChecklist(item)} disabled={pending || isOffline} className="flex items-center gap-2 text-left disabled:opacity-50">{item.completed ? <CheckSquare className="w-5 h-5 text-coral" /> : <Square className="w-5 h-5 text-muted-foreground" />}<span className={item.completed ? 'line-through text-muted-foreground' : ''}>{item.itemName}</span></button>
                   <button onClick={() => void handleDeleteChecklist(item.id)} disabled={pending || isOffline} className="text-muted-foreground hover:text-destructive p-1 disabled:opacity-40" aria-label="준비물 삭제"><Trash2 className="w-4 h-4" /></button>
                 </div>;
               })}
-              {checklists.length === 0 && <div className="bg-card border border-dashed border-border rounded-2xl p-6 text-center text-xs text-muted-foreground">함께 준비할 짐이나 할 일을 작성해 보세요.</div>}
+              {checklists.length === 0 && <div className="bg-card border border-dashed border-border rounded-2xl p-6 text-center text-caption text-muted-foreground">함께 준비할 짐이나 할 일을 작성해 보세요.</div>}
             </div>
           </div>
         )}
@@ -808,21 +808,21 @@ export function TripDetailPage() {
           equal z-index it paints over a bottom-anchored sheet and intercepts the
           taps aimed at its 취소 / 저장 buttons.
         */}
-        {showTripModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">여행 정보 수정</h2><div className="space-y-3 text-xs">
+        {showTripModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-heading mb-4">여행 정보 수정</h2><div className="space-y-3 text-caption">
           <label className="block font-bold">여행 이름<input value={tripDraft.title} onChange={(event) => setTripDraft((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <div className="flex gap-2"><label className="flex-1 font-bold">가는 날<input type="date" value={tripDraft.startDate} onChange={(event) => setTripDraft((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label><label className="flex-1 font-bold">오는 날<input type="date" min={tripDraft.startDate} value={tripDraft.endDate} onChange={(event) => setTripDraft((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label></div>
           <label className="block font-bold">상태<select value={tripDraft.status} onChange={(event) => setTripDraft((current) => ({ ...current, status: event.target.value as TripStatus }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3">{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           {tripError && <p className="text-red-600" role="alert">{tripError}</p>}
         </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip || isOffline} className="flex-1 bg-coral-strong text-coral-strong-foreground py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
 
-        {showItemModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-xs">
+        {showItemModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-heading mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-caption">
           {!editingItemId && <div className="rounded-2xl border border-dashed border-coral/40 bg-coral/5 p-3">
             <input ref={screenshotInputRef} type="file" accept="image/*" className="sr-only" onChange={(event) => void handlePlaceScreenshot(event.target.files?.[0])} />
             <button type="button" onClick={() => screenshotInputRef.current?.click()} disabled={isReadingScreenshot || isSavingItem} className="w-full min-h-[44px] flex items-center justify-center gap-2 font-bold text-coral disabled:opacity-50">
               <ImagePlus className="w-4 h-4" />
               {isReadingScreenshot ? `캡처 읽는 중 ${Math.round(ocrProgress * 100)}%` : '네이버 지도 캡처에서 불러오기'}
             </button>
-            <p className="text-[10px] text-muted-foreground text-center">이미지는 서버에 올리지 않고 이 기기에서만 글자를 읽어요.</p>
+            <p className="text-caption text-muted-foreground text-center">이미지는 서버에 올리지 않고 이 기기에서만 글자를 읽어요.</p>
           </div>}
           <label className="block font-bold">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <label className="block font-bold">방문 시간 (선택)<input type="time" value={itemDraft.startTime} onChange={(event) => setItemDraft((current) => ({ ...current, startTime: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>

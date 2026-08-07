@@ -448,26 +448,26 @@ export function SchedulePage() {
         className="rounded-2xl bg-card border border-border p-4 shadow-sm flex items-center justify-between gap-3"
       >
         <div className="flex items-center gap-3 min-w-0">
-          <div className={`w-10 h-10 shrink-0 rounded-xl ${badge.color} flex items-center justify-center font-bold text-xs`}>
+          <div className={`w-10 h-10 shrink-0 rounded-xl ${badge.color} flex items-center justify-center font-bold text-caption`}>
             {badge.label}
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h3 className="text-xs font-bold text-foreground truncate">{event.title}</h3>
+              <h3 className="text-label font-bold text-foreground truncate">{event.title}</h3>
               {event.isPrivate ? (
                 <span title="나만 보기"><Lock size={12} className="text-muted-foreground" /></span>
               ) : (
                 <span title="둘이 보기"><Users size={12} className="text-muted-foreground" /></span>
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-caption text-muted-foreground mt-0.5">
               {event.startDate}{event.endDate ? ` ~ ${event.endDate}` : ''}
             </p>
-            {event.talkAbout && <p className="mt-1 text-[10px] font-bold text-coral">♥ 통화 때 꼭 얘기</p>}
+            {event.talkAbout && <p className="mt-1 text-caption font-bold text-coral-strong">♥ 통화 때 꼭 얘기</p>}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <span className={`px-2 py-1 rounded-xl font-bold text-[11px] ${badge.color}`}>
+          <span className={`px-2 py-1 rounded-xl font-bold text-caption ${badge.color}`}>
             {isOngoing && !history ? '진행 중' : dDayLabel(event.startDate, today)}
           </span>
           {isAuthor && (
@@ -502,14 +502,14 @@ export function SchedulePage() {
       <div className="pb-28 px-5 pt-8 space-y-6">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">우리의 계획</h1>
-            <p className="mt-1 text-xs text-muted-foreground">둘이 볼 일정과 나만의 일정을 한곳에서 관리해요.</p>
+            <h1 className="text-title tracking-tight">우리의 계획</h1>
+            <p className="mt-1 text-caption text-muted-foreground">둘이 볼 일정과 나만의 일정을 한곳에서 관리해요.</p>
           </div>
           <button
             type="button"
             onClick={openCreateModal}
             disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
-            className="p-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground font-bold text-xs flex items-center gap-1 shadow-sm active:scale-95 transition min-h-[44px] disabled:opacity-40 disabled:active:scale-100"
+            className="p-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground font-bold text-label flex items-center gap-1 shadow-sm active:scale-95 transition min-h-[44px] disabled:opacity-40 disabled:active:scale-100"
           >
             <Plus size={16} />
             <span>일정 추가</span>
@@ -562,15 +562,15 @@ export function SchedulePage() {
             <section className="rounded-3xl bg-card border border-border p-5 shadow-sm space-y-3">
               {anniversaryDate && daysTogether !== null ? (
                 <>
-                  <div className="flex items-center justify-between text-xs font-bold text-coral">
+                  <div className="flex items-center justify-between text-caption font-bold text-coral-strong">
                     <span className="flex items-center gap-1.5"><Heart size={14} className="fill-coral" />함께한 지</span>
                     <span className="text-muted-foreground font-medium">사귄 날 {anniversaryDate}</span>
                   </div>
-                  <div className="text-3xl font-extrabold text-foreground">
+                  <div className="text-display text-foreground tabular-nums">
                     {daysTogether > 0 ? `+${daysTogether}일` : dDayLabel(anniversaryDate, today)}
                   </div>
                   {nextMilestone && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       다음 {nextMilestone.label}은 {nextMilestone.date}, D-{nextMilestone.daysRemaining}
                     </p>
                   )}
@@ -579,8 +579,8 @@ export function SchedulePage() {
                 <div className="flex items-center gap-3 text-muted-foreground">
                   <Heart size={20} />
                   <div>
-                    <p className="text-xs font-bold text-foreground">등록된 사귄 날이 없어요</p>
-                    <p className="text-[11px] mt-0.5">프로필에 실제 기념일을 등록하면 관계 D-Day를 보여드려요.</p>
+                    <p className="text-label font-bold text-foreground">등록된 사귄 날이 없어요</p>
+                    <p className="text-caption mt-0.5">프로필에 실제 기념일을 등록하면 관계 D-Day를 보여드려요.</p>
                   </div>
                 </div>
               )}
@@ -588,7 +588,7 @@ export function SchedulePage() {
 
             <section className="rounded-3xl bg-card border border-border p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-extrabold text-foreground">{currYear}년 {currMonth + 1}월</h2>
+                <h2 className="text-heading text-foreground">{currYear}년 {currMonth + 1}월</h2>
                 <div className="flex items-center gap-1">
                   <button type="button" onClick={() => moveMonth(-1)} aria-label="이전 달" className="p-2 rounded-lg border border-border text-muted-foreground hover:bg-muted">
                     <ChevronLeft size={16} />
@@ -598,7 +598,7 @@ export function SchedulePage() {
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-muted-foreground pb-1">
+              <div className="grid grid-cols-7 gap-1 text-center text-caption font-bold text-muted-foreground pb-1">
                 <span className="text-red-400">일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span className="text-blue-400">토</span>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center">
@@ -617,7 +617,7 @@ export function SchedulePage() {
                       onClick={() => setSelectedDate(date)}
                       aria-label={`${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
                       aria-pressed={isSelected}
-                      className={`h-11 rounded-xl flex flex-col items-center justify-center text-xs font-semibold transition ${
+                      className={`h-11 rounded-xl flex flex-col items-center justify-center text-label font-semibold transition ${
                         isSelected
                           ? 'ring-2 ring-coral bg-coral/10 text-coral'
                           : isToday
@@ -642,23 +642,23 @@ export function SchedulePage() {
 
             <section className="space-y-3">
               <div className="flex items-center justify-between px-1">
-                <h2 className="text-sm font-bold text-foreground">{selectedDate} 한눈에 보기</h2>
-                <button type="button" onClick={openCreateModal} disabled={!hasCoupleSpace || isOffline} className="text-[11px] font-bold text-coral disabled:opacity-40">이 날짜에 추가</button>
+                <h2 className="text-heading text-foreground">{selectedDate} 한눈에 보기</h2>
+                <button type="button" onClick={openCreateModal} disabled={!hasCoupleSpace || isOffline} className="text-caption font-bold text-coral-strong disabled:opacity-40">이 날짜에 추가</button>
               </div>
               {activeCouple && <div className="rounded-2xl bg-card border border-border p-3 space-y-2">
                 <div className="flex gap-2">
-                  <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value.slice(0, 120))} onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }} placeholder="우리 할 일 빠르게 추가" className="flex-1 min-w-0 bg-muted rounded-xl px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-indigo-400/40" />
-                  <input type="time" value={taskTime} onChange={(event) => setTaskTime(event.target.value)} aria-label="할 일 시간" className="w-[92px] bg-muted rounded-xl px-2 py-2.5 text-xs" />
-                  <button type="button" onClick={() => void handleCreateTask()} disabled={isSavingTask || !taskTitle.trim() || isOffline} className="px-3 rounded-xl bg-indigo-500 text-white text-xs font-bold disabled:opacity-40">추가</button>
+                  <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value.slice(0, 120))} onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }} placeholder="우리 할 일 빠르게 추가" className="flex-1 min-w-0 bg-muted rounded-xl px-3 py-2.5 text-body outline-none focus:ring-2 focus:ring-indigo-400/40" />
+                  <input type="time" value={taskTime} onChange={(event) => setTaskTime(event.target.value)} aria-label="할 일 시간" className="w-[92px] bg-muted rounded-xl px-2 py-2.5 text-body" />
+                  <button type="button" onClick={() => void handleCreateTask()} disabled={isSavingTask || !taskTitle.trim() || isOffline} className="px-3 rounded-xl bg-indigo-500 text-white text-label font-bold disabled:opacity-40">추가</button>
                 </div>
-                <label className="flex items-center gap-2 text-[11px] text-muted-foreground"><input type="checkbox" checked={taskForMe} onChange={(event) => setTaskForMe(event.target.checked)} className="accent-indigo-500" />내 담당으로 표시</label>
+                <label className="flex items-center gap-2 text-caption text-muted-foreground"><input type="checkbox" checked={taskForMe} onChange={(event) => setTaskForMe(event.target.checked)} className="accent-indigo-500" />내 담당으로 표시</label>
               </div>}
               <div className="space-y-2">
                 {selectedTasks.map((task) => {
                   const pending = pendingTaskIds.has(task.id);
                   return <div key={task.id} className="rounded-2xl bg-card border border-border px-4 py-3 flex items-center gap-3">
                     <button type="button" onClick={() => void handleToggleTask(task)} disabled={pending || isOffline} aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`} className="text-indigo-500 disabled:opacity-40">{task.completed ? <CheckCircle2 size={21} /> : <Circle size={21} />}</button>
-                    <div className="flex-1 min-w-0"><p className={`text-xs font-bold truncate ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.title}</p><p className="text-[10px] text-muted-foreground">{task.dueTime || '시간 미정'} · {task.assigneeId === authenticatedUser?.id ? '내 담당' : '함께'}</p></div>
+                    <div className="flex-1 min-w-0"><p className={`text-label font-bold truncate ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.title}</p><p className="text-caption text-muted-foreground">{task.dueTime || '시간 미정'} · {task.assigneeId === authenticatedUser?.id ? '내 담당' : '함께'}</p></div>
                     {task.createdBy === authenticatedUser?.id && <button type="button" onClick={() => void handleDeleteTask(task)} disabled={pending || isOffline} aria-label={`${task.title} 할 일 삭제`} className="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-40"><Trash2 size={14} /></button>}
                   </div>;
                 })}
@@ -666,20 +666,20 @@ export function SchedulePage() {
                 {selectedEvents.length === 0 && selectedTasks.length === 0 && (
                   <div className="rounded-2xl bg-card border border-dashed border-border/80 p-5 text-center text-muted-foreground">
                     <ListTodo size={22} className="mx-auto mb-1 opacity-60" />
-                    <p className="text-xs font-semibold">선택한 날짜에 일정과 할 일이 없어요.</p>
+                    <p className="text-body font-semibold">선택한 날짜에 일정과 할 일이 없어요.</p>
                   </div>
                 )}
               </div>
             </section>
 
             <section className="space-y-3">
-              <h2 className="text-sm font-bold text-foreground px-1">다가오는 일정</h2>
+              <h2 className="text-heading text-foreground px-1">다가오는 일정</h2>
               <div className="space-y-2">
                 {upcoming.length > 0 ? upcoming.map((event) => renderEventCard(event)) : (
                   <div className="rounded-2xl bg-card border border-dashed border-border/80 p-6 text-center text-muted-foreground space-y-1">
                     <Clock size={24} className="mx-auto mb-1 opacity-60" />
-                    <p className="text-xs font-semibold">다가오는 일정이 없어요.</p>
-                    <p className="text-[11px]">지난 일정은 날짜를 선택하면 다시 볼 수 있어요.</p>
+                    <p className="text-body font-semibold">다가오는 일정이 없어요.</p>
+                    <p className="text-caption">지난 일정은 날짜를 선택하면 다시 볼 수 있어요.</p>
                   </div>
                 )}
               </div>
@@ -691,28 +691,28 @@ export function SchedulePage() {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
             <div role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center justify-between">
-                <h3 id="event-modal-title" className="text-base font-bold text-foreground">{editingEventId ? '일정 수정' : '새 일정 추가'}</h3>
+                <h3 id="event-modal-title" className="text-heading text-foreground">{editingEventId ? '일정 수정' : '새 일정 추가'}</h3>
                 <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} aria-label="닫기" className="p-1 text-muted-foreground disabled:opacity-40"><X size={18} /></button>
               </div>
-              <div className="space-y-3 text-xs">
+              <div className="space-y-3 text-caption">
                 <div>
                   <label htmlFor="event-title" className="block text-muted-foreground font-bold mb-1">일정 제목 *</label>
-                  <input id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 첫 휴가 / 주말 데이트" className="w-full p-3 rounded-xl border border-border bg-background text-foreground text-xs focus:outline-none focus:border-coral" />
+                  <input id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 첫 휴가 / 주말 데이트" className="w-full p-3 rounded-xl border border-border bg-background text-foreground text-body focus:outline-none focus:border-coral" />
                 </div>
                 <div>
                   <label htmlFor="event-type" className="block text-muted-foreground font-bold mb-1">일정 유형</label>
-                  <select id="event-type" value={eventType} onChange={(event) => setEventType(event.target.value as EventType)} className="w-full p-3 rounded-xl border border-border bg-background text-foreground text-xs focus:outline-none focus:border-coral">
+                  <select id="event-type" value={eventType} onChange={(event) => setEventType(event.target.value as EventType)} className="w-full p-3 rounded-xl border border-border bg-background text-foreground text-body focus:outline-none focus:border-coral">
                     {(Object.entries(EVENT_BADGES) as [EventType, { label: string; color: string }][]).map(([value, badge]) => <option key={value} value={value}>{badge.label}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label htmlFor="event-start" className="block text-muted-foreground font-bold mb-1">시작일 *</label>
-                    <input id="event-start" type="date" value={eventStartDate} onChange={(event) => setEventStartDate(event.target.value)} className="w-full p-2.5 rounded-xl border border-border bg-background text-foreground text-xs" />
+                    <input id="event-start" type="date" value={eventStartDate} onChange={(event) => setEventStartDate(event.target.value)} className="w-full p-2.5 rounded-xl border border-border bg-background text-foreground text-body" />
                   </div>
                   <div>
                     <label htmlFor="event-end" className="block text-muted-foreground font-bold mb-1">종료일</label>
-                    <input id="event-end" type="date" value={eventEndDate} onChange={(event) => setEventEndDate(event.target.value)} className="w-full p-2.5 rounded-xl border border-border bg-background text-foreground text-xs" />
+                    <input id="event-end" type="date" value={eventEndDate} onChange={(event) => setEventEndDate(event.target.value)} className="w-full p-2.5 rounded-xl border border-border bg-background text-foreground text-body" />
                   </div>
                 </div>
                 <fieldset className="space-y-2">
@@ -720,20 +720,20 @@ export function SchedulePage() {
                   <label className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer ${!isPrivate ? 'border-coral bg-coral/5' : 'border-border'}`}>
                     <input type="radio" name="visibility" checked={!isPrivate} onChange={() => setIsPrivate(false)} disabled={!activeCouple} className="accent-coral" />
                     <Users size={15} className="text-coral" />
-                    <span><strong className="block text-foreground">둘이 보기 (공유)</strong><span className="text-[10px] text-muted-foreground">연결된 파트너도 읽을 수 있어요.</span></span>
+                    <span><strong className="block text-foreground">둘이 보기 (공유)</strong><span className="text-caption text-muted-foreground">연결된 파트너도 읽을 수 있어요.</span></span>
                   </label>
                   <label className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer ${isPrivate ? 'border-coral bg-coral/5' : 'border-border'}`}>
                     <input type="radio" name="visibility" checked={isPrivate} onChange={() => setIsPrivate(true)} className="accent-coral" />
                     <Lock size={15} className="text-muted-foreground" />
-                    <span><strong className="block text-foreground">나만 보기 (비공개)</strong><span className="text-[10px] text-muted-foreground">작성자 본인만 읽을 수 있어요.</span></span>
+                    <span><strong className="block text-foreground">나만 보기 (비공개)</strong><span className="text-caption text-muted-foreground">작성자 본인만 읽을 수 있어요.</span></span>
                   </label>
                 </fieldset>
                 {!isPrivate && <label className="flex items-center gap-2 rounded-xl bg-coral/5 px-3 py-3 font-bold text-coral"><input type="checkbox" checked={talkAbout} onChange={(event) => setTalkAbout(event.target.checked)} className="accent-coral" />통화 때 꼭 얘기</label>}
-                {formError && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-[11px] font-semibold text-destructive">{formError}</p>}
+                {formError && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-caption font-semibold text-destructive">{formError}</p>}
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs disabled:opacity-50">취소</button>
-                <button type="button" onClick={() => void handleSaveEvent()} disabled={isSaving || isOffline} className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-xs shadow-sm active:scale-95 disabled:opacity-50">
+                <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-label disabled:opacity-50">취소</button>
+                <button type="button" onClick={() => void handleSaveEvent()} disabled={isSaving || isOffline} className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-label shadow-sm active:scale-95 disabled:opacity-50">
                   {isSaving ? '저장 중...' : editingEventId ? '수정하기' : '등록하기'}
                 </button>
               </div>
@@ -762,11 +762,11 @@ function StatusCard({
     <section className="rounded-3xl bg-card border border-border p-7 text-center shadow-sm space-y-3">
       <div className="w-12 h-12 mx-auto rounded-2xl bg-muted text-muted-foreground flex items-center justify-center">{icon}</div>
       <div>
-        <h2 className="text-sm font-bold text-foreground">{title}</h2>
-        <p className="text-xs text-muted-foreground mt-1 leading-5">{description}</p>
+        <h2 className="text-heading text-foreground">{title}</h2>
+        <p className="text-caption text-muted-foreground mt-1">{description}</p>
       </div>
       {actionLabel && onAction && (
-        <button type="button" onClick={onAction} className="px-4 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-xs font-bold">{actionLabel}</button>
+        <button type="button" onClick={onAction} className="px-4 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-label font-bold">{actionLabel}</button>
       )}
     </section>
   );

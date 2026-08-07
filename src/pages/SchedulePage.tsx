@@ -509,7 +509,7 @@ export function SchedulePage() {
             type="button"
             onClick={openCreateModal}
             disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
-            className="p-2.5 rounded-xl bg-coral text-white font-bold text-xs flex items-center gap-1 shadow-sm active:scale-95 transition min-h-[44px] disabled:opacity-40 disabled:active:scale-100"
+            className="p-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground font-bold text-xs flex items-center gap-1 shadow-sm active:scale-95 transition min-h-[44px] disabled:opacity-40 disabled:active:scale-100"
           >
             <Plus size={16} />
             <span>일정 추가</span>
@@ -621,7 +621,7 @@ export function SchedulePage() {
                         isSelected
                           ? 'ring-2 ring-coral bg-coral/10 text-coral'
                           : isToday
-                            ? 'bg-coral text-white font-extrabold shadow-sm'
+                            ? 'bg-coral-strong text-coral-strong-foreground font-extrabold shadow-sm'
                             : 'hover:bg-muted/50 text-foreground'
                       }`}
                     >
@@ -629,7 +629,7 @@ export function SchedulePage() {
                       {dayEvents.length > 0 && (
                         <span className="flex gap-0.5 mt-1" aria-hidden="true">
                           {dayEvents.slice(0, 3).map((event) => (
-                            <span key={event.id} className={`w-1.5 h-1.5 rounded-full ${event.isPrivate ? 'bg-muted-foreground' : isToday && !isSelected ? 'bg-coral-foreground' : 'bg-coral'}`} />
+                            <span key={event.id} className={`w-1.5 h-1.5 rounded-full ${event.isPrivate ? 'bg-muted-foreground' : isToday && !isSelected ? 'bg-coral-strong-foreground' : 'bg-coral'}`} />
                           ))}
                         </span>
                       )}
@@ -733,7 +733,7 @@ export function SchedulePage() {
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-xs disabled:opacity-50">취소</button>
-                <button type="button" onClick={() => void handleSaveEvent()} disabled={isSaving || isOffline} className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs shadow-sm active:scale-95 disabled:opacity-50">
+                <button type="button" onClick={() => void handleSaveEvent()} disabled={isSaving || isOffline} className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-xs shadow-sm active:scale-95 disabled:opacity-50">
                   {isSaving ? '저장 중...' : editingEventId ? '수정하기' : '등록하기'}
                 </button>
               </div>
@@ -766,7 +766,7 @@ function StatusCard({
         <p className="text-xs text-muted-foreground mt-1 leading-5">{description}</p>
       </div>
       {actionLabel && onAction && (
-        <button type="button" onClick={onAction} className="px-4 py-2.5 rounded-xl bg-coral text-white text-xs font-bold">{actionLabel}</button>
+        <button type="button" onClick={onAction} className="px-4 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-xs font-bold">{actionLabel}</button>
       )}
     </section>
   );

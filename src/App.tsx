@@ -95,7 +95,7 @@ function AccountDeletionRecovery() {
           type="button"
           onClick={() => void onRetry()}
           disabled={busy !== null}
-          className="w-full min-h-[44px] rounded-xl bg-coral px-4 py-3 text-xs font-bold text-coral-foreground disabled:opacity-60"
+          className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 py-3 text-xs font-bold text-coral-strong-foreground disabled:opacity-60"
         >
           {busy === 'retry' ? '처리 중...' : '탈퇴 다시 시도'}
         </button>
@@ -138,7 +138,7 @@ function AuthSyncUnavailable({ reason }: { reason: ServerErrorKind | null }) {
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="w-full min-h-[44px] rounded-xl bg-coral px-4 py-3 text-xs font-bold text-white"
+          className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 py-3 text-xs font-bold text-coral-strong-foreground"
         >
           {isSessionProblem ? '다시 로그인' : '다시 시도'}
         </button>

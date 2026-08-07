@@ -35,6 +35,25 @@ async function open(browser: import('@playwright/test').Browser, scenario: Scena
     colorScheme: options?.colorScheme ?? 'light',
   });
   const { unrouted } = await installMockBackend(context, scenario);
+  /*
+   * Make `colorScheme: 'dark'` actually reach the app.
+   *
+   * `preferredTheme()` consults `prefers-color-scheme` only when nothing is
+   * stored, and mockBackend seeds `gomsinlog.state.v2` with `theme: 'light'` so
+   * the first paint is stable. The stored value therefore won, and the `dark`
+   * half of the layout matrix below was measuring the LIGHT theme -- 20 of the 40
+   * layout assertions were duplicates of the other 20.
+   *
+   * Setting the store's own persisted preference is how a real user's choice is
+   * expressed, and init scripts run in registration order so this merges over the
+   * seed instead of racing it.
+   */
+  await context.addInitScript((theme) => {
+    const key = 'gomsinlog.state.v2';
+    const raw = window.localStorage.getItem(key);
+    const stored = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    window.localStorage.setItem(key, JSON.stringify({ ...stored, theme }));
+  }, options?.colorScheme ?? 'light');
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('console', (message) => {

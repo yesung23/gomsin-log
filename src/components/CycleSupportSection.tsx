@@ -392,7 +392,7 @@ export function CycleSupportSection({
                 <span className="block text-right text-[9px] text-muted-foreground">{Array.from(message).length}/80</span>
               </label>
               {mutationError && <p className="text-[11px] text-destructive" role="alert">{mutationError}</p>}
-              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-coral text-coral-foreground text-xs font-bold disabled:opacity-50 min-h-[42px]">
+              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-xs font-bold disabled:opacity-50 min-h-[42px]">
                 {mutationPending === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {mutationPending === 'share' ? '공유 중' : '오늘만 공유하기'}
               </button>

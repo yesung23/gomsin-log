@@ -227,7 +227,7 @@ export function ServicePage() {
             </div>
             <button
               onClick={openEditor}
-              className="px-4 py-2.5 rounded-xl bg-coral text-white text-xs font-bold min-h-[44px]"
+              className="px-4 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-xs font-bold min-h-[44px]"
             >
               복무 정보 입력하기
             </button>
@@ -372,7 +372,7 @@ export function ServicePage() {
               <button
                 onClick={handleSaveEdit}
                 disabled={isSaving}
-                className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px] disabled:opacity-50"
+                className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-xs min-h-[44px] disabled:opacity-50"
               >
                 {isSaving ? '저장 중…' : '저장하기'}
               </button>

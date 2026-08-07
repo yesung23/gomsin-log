@@ -675,7 +675,7 @@ export function TodayLogWidget() {
               disabled={isSaving || (!isRecording && !hasContentToSave)}
               // 44px minimum: measured at 32px in a real browser. This is the
               // primary save action of the whole app.
-              className="min-h-[44px] px-4 rounded-lg bg-coral text-white font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"
+              className="min-h-[44px] px-4 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-sm shadow-sm active:scale-95 transition disabled:opacity-50"
             >
               {isSaving ? '저장 중...' : '저장'}
             </button>

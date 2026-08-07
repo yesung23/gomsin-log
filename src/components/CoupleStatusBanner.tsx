@@ -146,7 +146,7 @@ export function CoupleStatusBanner() {
         <button
           type="button"
           onClick={() => navigate('/settings')}
-          className="min-h-[44px] w-full rounded-xl bg-coral px-4 text-xs font-bold text-coral-foreground"
+          className="min-h-[44px] w-full rounded-xl bg-coral-strong px-4 text-xs font-bold text-coral-strong-foreground"
         >
           커플 공간 설정으로 가기
         </button>
@@ -172,7 +172,7 @@ export function CoupleStatusBanner() {
         <button
           type="button"
           onClick={() => navigate('/settings')}
-          className="min-h-[44px] w-full rounded-xl bg-coral px-4 text-xs font-bold text-coral-foreground"
+          className="min-h-[44px] w-full rounded-xl bg-coral-strong px-4 text-xs font-bold text-coral-strong-foreground"
         >
           다시 연결하기
         </button>
@@ -234,7 +234,7 @@ export function CoupleStatusBanner() {
             type="button"
             onClick={() => void handleRegenerate()}
             disabled={busy || !isOnline}
-            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-coral px-4 text-xs font-bold text-coral-foreground disabled:opacity-50"
+            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-coral-strong px-4 text-xs font-bold text-coral-strong-foreground disabled:opacity-50"
           >
             <RefreshCw size={14} />
             {busy ? '발급 중...' : '새 코드 발급'}
@@ -261,7 +261,7 @@ export function CoupleStatusBanner() {
             type="button"
             onClick={() => void handleRegenerate()}
             disabled={busy || !isOnline}
-            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-coral px-4 text-xs font-bold text-coral-foreground disabled:opacity-50"
+            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-coral-strong px-4 text-xs font-bold text-coral-strong-foreground disabled:opacity-50"
           >
             <RefreshCw size={14} />
             {busy ? '발급 중...' : '새 코드 발급'}

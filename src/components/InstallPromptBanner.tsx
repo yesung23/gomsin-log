@@ -106,11 +106,11 @@ export function InstallPromptBanner() {
       {platform === 'ios' && (
         <div className="bg-muted p-3.5 rounded-2xl text-[11px] text-foreground font-medium space-y-2 border border-border">
           <div className="flex items-center gap-2.5">
-            <span className="w-5 h-5 rounded-full bg-coral text-coral-foreground font-bold flex items-center justify-center shrink-0">1</span>
+            <span className="w-5 h-5 rounded-full bg-coral-strong text-coral-strong-foreground font-bold flex items-center justify-center shrink-0">1</span>
             <span>하단 사파리 메뉴에서 공유 <Share size={14} className="inline text-blue-500 mx-0.5" /> 버튼을 누르세요.</span>
           </div>
           <div className="flex items-center gap-2.5">
-            <span className="w-5 h-5 rounded-full bg-coral text-coral-foreground font-bold flex items-center justify-center shrink-0">2</span>
+            <span className="w-5 h-5 rounded-full bg-coral-strong text-coral-strong-foreground font-bold flex items-center justify-center shrink-0">2</span>
             <span>목록에서 <b>'홈 화면에 추가'</b> <PlusSquare size={14} className="inline text-muted-foreground mx-0.5" /> 를 누르면 끝!</span>
           </div>
         </div>
@@ -119,7 +119,7 @@ export function InstallPromptBanner() {
       {platform === 'android' && deferredPrompt && (
         <button 
           onClick={handleInstallClick}
-          className="w-full mt-2 bg-coral text-coral-foreground font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
+          className="w-full mt-2 bg-coral-strong text-coral-strong-foreground font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
         >
           <Download size={18} />
           앱 설치하기
@@ -129,11 +129,11 @@ export function InstallPromptBanner() {
       {platform === 'android' && !deferredPrompt && (
         <div className="bg-muted p-3.5 rounded-2xl text-[11px] text-foreground font-medium space-y-2 border border-border">
           <div className="flex items-center gap-2.5">
-            <span className="w-5 h-5 rounded-full bg-coral text-coral-foreground font-bold flex items-center justify-center shrink-0">1</span>
+            <span className="w-5 h-5 rounded-full bg-coral-strong text-coral-strong-foreground font-bold flex items-center justify-center shrink-0">1</span>
             <span>크롬 또는 삼성인터넷 메뉴(⋮)를 누르세요.</span>
           </div>
           <div className="flex items-center gap-2.5">
-            <span className="w-5 h-5 rounded-full bg-coral text-coral-foreground font-bold flex items-center justify-center shrink-0">2</span>
+            <span className="w-5 h-5 rounded-full bg-coral-strong text-coral-strong-foreground font-bold flex items-center justify-center shrink-0">2</span>
             <span><b>'홈 화면에 추가'</b> 또는 <b>'앱 설치'</b>를 누르면 끝!</span>
           </div>
         </div>

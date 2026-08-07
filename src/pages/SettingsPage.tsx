@@ -503,7 +503,7 @@ export function SettingsPage() {
               type="button"
               onClick={handleJoinCouple}
               disabled={isJoiningCouple || inviteCodeInput.length !== 6}
-              className="w-full h-12 rounded-xl bg-coral text-white text-sm font-bold disabled:opacity-50"
+              className="w-full h-12 rounded-xl bg-coral-strong text-coral-strong-foreground text-sm font-bold disabled:opacity-50"
             >
               {isJoiningCouple ? '연결 중...' : '초대 코드로 연결하기'}
             </button>
@@ -763,7 +763,7 @@ export function SettingsPage() {
                 <button
                   onClick={handleSaveProfile}
                   disabled={isSavingProfile}
-                  className="flex-1 py-3 bg-coral text-white font-bold rounded-xl text-xs min-h-[44px] disabled:opacity-50"
+                  className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-xs min-h-[44px] disabled:opacity-50"
                 >
                   {isSavingProfile ? '저장 중…' : '저장하기'}
                 </button>
@@ -981,7 +981,7 @@ export function SettingsPage() {
               </div>
               <button
                 onClick={() => setShowPWAModal(false)}
-                className="w-full py-3 bg-coral text-white font-bold rounded-xl text-xs active:scale-[0.99] min-h-[44px]"
+                className="w-full py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-xs active:scale-[0.99] min-h-[44px]"
               >
                 확인
               </button>

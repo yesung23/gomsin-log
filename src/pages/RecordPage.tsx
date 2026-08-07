@@ -429,7 +429,7 @@ export function RecordPage() {
             className={cn(
               'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
               showCalendar
-                ? 'bg-coral text-coral-foreground shadow-sm'
+                ? 'bg-coral-strong text-coral-strong-foreground shadow-sm'
                 : 'bg-card border border-border text-foreground hover:bg-muted'
             )}
             aria-label="달력 보기"
@@ -544,7 +544,7 @@ export function RecordPage() {
                     'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
                     (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
-                    isSelected && 'bg-coral text-coral-foreground',
+                    isSelected && 'bg-coral-strong text-coral-strong-foreground',
                     !isSelected && isTodayCell && 'ring-2 ring-coral/50 ring-inset rounded-lg',
                   )}
                 >
@@ -555,7 +555,7 @@ export function RecordPage() {
                       cell.inMonth && !isSelected && isFuture && 'text-muted-foreground/50',
                       cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-red-400',
                       cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-blue-400',
-                      isSelected && 'text-coral-foreground',
+                      isSelected && 'text-coral-strong-foreground',
                     )}
                   >
                     {cell.date.getDate()}
@@ -566,18 +566,18 @@ export function RecordPage() {
                     <div className="flex items-center gap-[3px] mt-0.5 h-[6px]" aria-hidden="true">
                       <span className={cn(
                         'w-[5px] h-[5px] rounded-full',
-                        isSelected ? 'bg-coral-foreground/80' : 'bg-coral'
+                        isSelected ? 'bg-coral-strong-foreground/80' : 'bg-coral'
                       )} />
                       {hasMedia && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-coral-foreground/60' : 'bg-coral/50'
+                          isSelected ? 'bg-coral-strong-foreground/60' : 'bg-coral/50'
                         )} />
                       )}
                       {recordCount >= 4 && (
                         <span className={cn(
                           'w-[5px] h-[5px] rounded-full',
-                          isSelected ? 'bg-coral-foreground/40' : 'bg-coral/30'
+                          isSelected ? 'bg-coral-strong-foreground/40' : 'bg-coral/30'
                         )} />
                       )}
                     </div>
@@ -834,7 +834,7 @@ export function RecordPage() {
       <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+20px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
         <button
           onClick={() => navigate('/home')}
-          className="w-full py-3.5 rounded-full bg-coral text-coral-foreground font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-foreground/20 backdrop-blur-xs"
+          className="w-full py-3.5 rounded-full bg-coral-strong text-coral-strong-foreground font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-strong-foreground/20 backdrop-blur-xs"
         >
           <span className="text-lg">+</span>
           <span>지금의 마음 남기기</span>
@@ -994,7 +994,7 @@ export function RecordPage() {
                         }
                       }}
                       disabled={isSaving || !editText.trim() || isOffline}
-                      className="px-3 py-1.5 rounded-lg bg-coral text-coral-foreground font-bold text-xs disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-xs disabled:opacity-50"
                     >
                       {isSaving ? '저장 중...' : '저장'}
                     </button>

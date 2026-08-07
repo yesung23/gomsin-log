@@ -114,7 +114,7 @@ export function AttachmentMedia({ attachment, coupleId, recordId, variant, foote
 
       {url && attachment.type === 'voice' && (
         <div className="p-3 space-y-2">
-          <div className="flex items-center gap-2 text-xs font-medium">
+          <div className="flex items-center gap-2 text-label font-medium">
             <Icon size={16} className={KIND_ICON_CLASS.voice} />
             <span className="truncate">{attachment.name}</span>
           </div>
@@ -130,20 +130,20 @@ export function AttachmentMedia({ attachment, coupleId, recordId, variant, foote
       )}
 
       {!url && (
-        <div className="p-3 text-xs flex items-center gap-2 font-medium">
+        <div className="p-3 text-label flex items-center gap-2 font-medium">
           <Icon size={16} className={KIND_ICON_CLASS[attachment.type]} />
           <span>{attachment.name}</span>
         </div>
       )}
 
       {refreshing && (
-        <p className="px-3 pb-2 text-[11px] text-muted-foreground font-medium break-keep">
+        <p className="px-3 pb-2 text-caption text-muted-foreground font-medium break-keep">
           파일을 다시 불러오는 중이에요…
         </p>
       )}
 
       {!refreshing && unavailable && (
-        <p className="px-3 pb-2 text-[11px] text-destructive font-medium break-keep">
+        <p className="px-3 pb-2 text-caption text-destructive font-medium break-keep">
           {attachmentUnavailableCopy(unavailable)}
         </p>
       )}

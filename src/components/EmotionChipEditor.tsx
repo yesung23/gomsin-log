@@ -59,22 +59,22 @@ export function EmotionChipEditor({
     >
       {showHeading && (
         <>
-          <h4 className="text-xs font-bold text-foreground flex items-center gap-1">
+          <h4 className="text-label font-bold text-foreground flex items-center gap-1">
             <Heart size={13} className="text-coral fill-coral" /> 기록 속 마음을 골라볼까요?
           </h4>
-          <p className="text-[11px] text-muted-foreground leading-tight">
+          <p className="text-caption text-muted-foreground leading-tight">
             글에서 읽은 마음이에요. 아닌 건 ✕로 빼고, 다르면 ▲▼로 바꿔 주세요.
           </p>
         </>
       )}
-      <p className="text-[11px] font-semibold leading-tight text-muted-foreground">
+      <p className="text-caption font-semibold leading-tight text-muted-foreground">
         {visibilityNote}
       </p>
 
       {candidates.length === 0 ? (
         <p
           data-testid="emotion-chip-editor-empty"
-          className="text-[11px] text-muted-foreground leading-tight pt-1"
+          className="text-caption text-muted-foreground leading-tight pt-1"
         >
           마음을 모두 뺐어요. 이 기록에는 마음 흐름이 저장되지 않아요.
         </p>
@@ -91,19 +91,19 @@ export function EmotionChipEditor({
                 data-basic={candidate.basic}
                 className="flex items-center gap-2 bg-card border border-border rounded-xl p-2"
               >
-                <span className="text-[11px] font-bold text-muted-foreground w-4 text-center shrink-0">
+                <span className="text-caption font-bold text-muted-foreground w-4 text-center shrink-0">
                   {index + 1}
                 </span>
 
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-foreground flex items-center gap-1">
+                  <p className="text-label font-bold text-foreground flex items-center gap-1">
                     <span aria-hidden="true">{BASIC_EMOTION_EMOJI[candidate.basic]}</span>
                     <span data-testid={`emotion-chip-label-${candidate.id}`}>{label}</span>
                   </p>
                   {/* WHY the app said this. Display-only: the phrase comes from the
                       diary text and is never persisted. */}
                   {candidate.evidence && (
-                    <p className="text-[11px] text-muted-foreground truncate">
+                    <p className="text-caption text-muted-foreground truncate">
                       “{candidate.evidence}”에서 읽었어요
                     </p>
                   )}
@@ -149,7 +149,7 @@ export function EmotionChipEditor({
 
       {removed.length > 0 && (
         <div className="pt-1 space-y-1.5" data-testid="emotion-chip-removed">
-          <p className="text-[11px] text-muted-foreground">뺀 마음 — 다시 넣을 수 있어요</p>
+          <p className="text-caption text-muted-foreground">뺀 마음 — 다시 넣을 수 있어요</p>
           <div className="flex flex-wrap gap-1.5">
             {removed.map((candidate) => (
               <button
@@ -157,7 +157,7 @@ export function EmotionChipEditor({
                 type="button"
                 onClick={() => onRestore(candidate.id)}
                 aria-label={`${BASIC_EMOTION_LABEL[candidate.basic]} 다시 넣기`}
-                className="min-h-[44px] px-3 rounded-xl bg-muted text-muted-foreground border border-border text-[11px] font-bold flex items-center gap-1 active:scale-95 transition"
+                className="min-h-[44px] px-3 rounded-xl bg-muted text-muted-foreground border border-border text-caption font-bold flex items-center gap-1 active:scale-95 transition"
               >
                 <RotateCcw size={12} aria-hidden="true" />
                 {BASIC_EMOTION_LABEL[candidate.basic]}

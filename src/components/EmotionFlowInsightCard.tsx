@@ -46,9 +46,9 @@ export function EmotionFlowInsightCard({
       aria-label={summary}
       className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
     >
-      <p className="text-xs font-semibold text-muted-foreground mb-2">마음의 흐름</p>
+      <p className="text-caption font-semibold text-muted-foreground mb-2">마음의 흐름</p>
 
-      <p className="text-sm font-medium text-foreground">
+      <p className="text-body font-medium text-foreground">
         {points.map((point) => point.label).join(' → ')}
       </p>
 
@@ -70,16 +70,16 @@ export function EmotionFlowInsightCard({
         ))}
       </svg>
 
-      <p className="text-sm text-muted-foreground">{summary}</p>
+      <p className="text-body text-muted-foreground">{summary}</p>
 
       {largestTransition && (
-        <p className="text-xs text-muted-foreground mt-1">
+        <p className="text-caption text-muted-foreground mt-1">
           가장 큰 변화: {largestTransition.from.label} → {largestTransition.to.label}
         </p>
       )}
 
       {variant === 'composer' && (
-        <p className="text-xs text-muted-foreground mt-2">
+        <p className="text-caption text-muted-foreground mt-2">
           미리보기예요. 이 정리는 저장되지 않아요.
         </p>
       )}

@@ -87,6 +87,25 @@ const CONVERTED_FILES = [
   // prose, and every answer is an input the user types into.
   'src/pages/SettingsPage.tsx',
   'src/pages/OnboardingPage.tsx',
+  // Shared components and the smaller widgets. MobileShell and the banners are
+  // here because they render on top of every screen: a 11px tab label or a 11px
+  // offline notice undoes the scale everywhere at once.
+  'src/App.tsx',
+  'src/components/MobileShell.tsx',
+  'src/components/OfflineBanner.tsx',
+  'src/components/SharedSyncBanner.tsx',
+  'src/components/InstallPromptBanner.tsx',
+  'src/components/AttachmentMedia.tsx',
+  'src/components/ErrorBoundary.tsx',
+  'src/components/PlanSectionNav.tsx',
+  'src/components/EmotionChipEditor.tsx',
+  'src/components/EmotionFlowInsightCard.tsx',
+  'src/components/RecordEmotionCorrection.tsx',
+  'src/components/widgets/PartnerEmotionWidgets.tsx',
+  'src/components/widgets/CareHintWidget.tsx',
+  'src/components/widgets/UpcomingScheduleWidget.tsx',
+  'src/components/widgets/AddWidgetBottomSheet.tsx',
+  'src/features/home/WidgetDashboard.tsx',
 ];
 
 function read(file: string): string {

@@ -51,14 +51,14 @@ export function CareHintWidget() {
 
   return (
     <div data-testid="widget-care-hint">
-      <h3 className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5">
+      <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
         <MessageCircleHeart size={14} className="text-coral" aria-hidden="true" />
         다정한 한마디
       </h3>
-      <p className="text-[11px] text-muted-foreground mb-1.5">
+      <p className="text-caption text-muted-foreground mb-1.5">
         {partnerName}의 하루 · {moodLabel}
       </p>
-      <p className="text-xs text-foreground leading-relaxed">{careHint}</p>
+      <p className="text-body text-foreground break-keep">{careHint}</p>
     </div>
   );
 }

@@ -73,16 +73,22 @@ const RESOLVED_UNGUARDED_FILES: Array<{ file: string; decision: string }> = [
     decision: 'PARTIALLY CONVERTED. `bg-slate-500` (private-event dot) became '
       + '`bg-muted-foreground`, because the dark palette remap covers `gray-*` only '
       + 'and left slate untouched; the today marker `bg-white` on a coral cell became '
-      + '`bg-coral-foreground`. Remaining `text-white` sits on coral/navy accents and '
-      + '`bg-black/50` is a modal scrim.',
+      + '`bg-coral-foreground`. The four `bg-coral text-white` controls later moved to '
+      + '`bg-coral-strong text-coral-strong-foreground` for WCAG AA (see '
+      + 'coralContrast.test.ts). What remains is `bg-indigo-500 text-white` on the '
+      + '할 일 button, which belongs to the raw-palette migration, and a `bg-black/50` '
+      + 'modal scrim.',
   },
   {
     file: 'src/pages/OnboardingPage.tsx',
     decision: 'PARTIALLY CONVERTED. The six `bg-coral text-white` buttons became '
       + '`text-coral-foreground` and the spinner `border-white` became '
-      + '`border-coral-foreground`. `bg-black text-white` on the Apple sign-in button '
-      + 'is KEPT: it is mandated by Apple\'s Human Interface Guidelines and must not '
-      + 'be themed.',
+      + '`border-coral-foreground`; all ten coral fills later moved again to '
+      + '`bg-coral-strong text-coral-strong-foreground`, because coral with a light '
+      + 'label measured 2.09:1 against AA 4.5:1. `bg-black text-white` on the Apple '
+      + 'sign-in button is KEPT: it is mandated by Apple\'s Human Interface '
+      + 'Guidelines and must not be themed. `bg-navy text-white` is kept for the same '
+      + 'reason as ServicePage -- navy is dark in both themes.',
   },
 ];
 
@@ -143,7 +149,9 @@ describe('C4 - no palette literal survives in a guarded file', () => {
       'bg-card', 'bg-card/60', 'bg-card/80', 'bg-muted', 'bg-muted/30', 'border-border',
       'text-foreground', 'text-card-foreground', 'text-muted-foreground',
       'text-muted-foreground/80', 'bg-coral', 'bg-coral/10', 'text-coral-foreground',
-      'bg-coral-foreground/40', 'text-primary-foreground', 'bg-navy', 'text-mint-foreground',
+      'bg-coral-foreground/40', 'bg-coral-strong', 'text-coral-strong-foreground',
+      'bg-coral-strong-foreground/80', 'border-coral-strong',
+      'text-primary-foreground', 'bg-navy', 'text-mint-foreground',
       'border-mint-foreground/20', 'bg-indigo-50', 'text-indigo-600', 'text-indigo-50',
       'bg-amber-50', 'text-destructive', 'bg-background',
     ]) {
@@ -155,7 +163,10 @@ describe('C4 - no palette literal survives in a guarded file', () => {
 describe('C4 - PRESERVATION: token definitions and the light theme are untouched', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/styles/index.css'), 'utf8');
 
-  it('src/styles/index.css defines no new token and keeps the light values', () => {
+  it('src/styles/index.css keeps every light value this cluster relied on', () => {
+    // `--coral-strong` was added later as a deliberate accessibility fix and is
+    // asserted by coralContrast.test.ts. Everything below must still be byte
+    // identical, because the C4 conversions were chosen to be no-ops in light mode.
     for (const declaration of [
       '--card: oklch(1 0 0);',
       '--card-foreground: var(--navy);',

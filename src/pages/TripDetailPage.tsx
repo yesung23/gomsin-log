@@ -710,7 +710,7 @@ export function TripDetailPage() {
           ? <><Unlink className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">우리 공간 연결이 필요해요</p><p className="text-sm text-muted-foreground">두 사람이 연결된 뒤 여행을 열 수 있어요.</p></>
           : visibleParentState === 'forbidden'
             ? <><ShieldAlert className="w-10 h-10 mx-auto text-amber-500" /><p className="font-bold">이 여행에 접근할 권한이 없어요</p></>
-            : <><RefreshCw className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 불러오지 못했어요</p><button onClick={() => void loadParent()} className="px-5 py-2.5 bg-coral text-white rounded-xl font-bold text-sm">다시 시도</button></>;
+            : <><RefreshCw className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 불러오지 못했어요</p><button onClick={() => void loadParent()} className="px-5 py-2.5 bg-coral-strong text-coral-strong-foreground rounded-xl font-bold text-sm">다시 시도</button></>;
     return <MobileShell><div className="p-6 text-center mt-20 space-y-3">{content}<button onClick={() => navigate('/trips')} className="block mx-auto text-sm text-muted-foreground underline">여행 목록으로</button></div></MobileShell>;
   }
 
@@ -731,7 +731,7 @@ export function TripDetailPage() {
         <div className="bg-coral/10 border-b border-coral/20 px-5 py-4 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-coral font-bold text-sm"><Calendar className="w-4 h-4" /><span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span></div>
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-coral text-white shrink-0">{dates.length}일간</span>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-coral-strong text-coral-strong-foreground shrink-0">{dates.length}일간</span>
           </div>
           <button onClick={() => navigate(`/record?from=${trip.startDate}&to=${trip.endDate}&trip=${trip.id}`)} className="w-full py-2.5 px-3 rounded-2xl bg-card border border-coral/30 text-coral font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm"><PenTool size={14} />이 여행 기간의 추억 보기·남기기</button>
         </div>
@@ -743,7 +743,7 @@ export function TripDetailPage() {
 
         {childState !== 'ready' ? (
           <div className="p-8 text-center space-y-3">
-            {childState === 'loading' ? <LoaderCircle className="w-7 h-7 animate-spin text-coral mx-auto" /> : <><p className="font-bold text-sm">{childState === 'forbidden' ? '일정과 준비물을 볼 권한이 없어요.' : '일정과 준비물을 불러오지 못했어요.'}</p><button onClick={() => void loadChildren()} className="px-4 py-2 bg-coral text-white rounded-xl text-xs font-bold">다시 시도</button></>}
+            {childState === 'loading' ? <LoaderCircle className="w-7 h-7 animate-spin text-coral mx-auto" /> : <><p className="font-bold text-sm">{childState === 'forbidden' ? '일정과 준비물을 볼 권한이 없어요.' : '일정과 준비물을 불러오지 못했어요.'}</p><button onClick={() => void loadChildren()} className="px-4 py-2 bg-coral-strong text-coral-strong-foreground rounded-xl text-xs font-bold">다시 시도</button></>}
           </div>
         ) : activeTab === 'schedule' ? (
           <>
@@ -763,7 +763,7 @@ export function TripDetailPage() {
                     const pending = pendingItemIds.has(item.id);
                     const mapQuery = [item.title, item.address].filter(Boolean).join(' ');
                     return <div key={item.id} className="relative bg-card border border-border rounded-2xl p-4 shadow-sm flex gap-3">
-                      <div className="w-6 h-6 rounded-full bg-coral text-white text-[10px] font-bold flex items-center justify-center shrink-0">{index + 1}</div>
+                      <div className="w-6 h-6 rounded-full bg-coral-strong text-coral-strong-foreground text-[10px] font-bold flex items-center justify-center shrink-0">{index + 1}</div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2"><h3 className="font-bold text-sm truncate">{item.title}</h3><span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{item.startTime || '시간 미정'} · {CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
                         {item.address && <p className="text-xs text-foreground/80 mt-1 flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-coral" />{item.address}</p>}
@@ -783,11 +783,11 @@ export function TripDetailPage() {
                 </div>
               )}
             </div>
-            <button onClick={openNewItem} className="fixed bottom-6 right-5 w-14 h-14 bg-coral rounded-full flex items-center justify-center text-white shadow-lg z-40" aria-label="일정 추가"><Plus className="w-7 h-7" /></button>
+            <button onClick={openNewItem} className="fixed bottom-6 right-5 w-14 h-14 bg-coral-strong rounded-full flex items-center justify-center text-coral-strong-foreground shadow-lg z-40" aria-label="일정 추가"><Plus className="w-7 h-7" /></button>
           </>
         ) : (
           <div className="p-5 space-y-4">
-            <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-xs outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim() || isOffline} className="px-4 bg-coral text-white font-bold text-xs rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
+            <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-xs outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim() || isOffline} className="px-4 bg-coral-strong text-coral-strong-foreground font-bold text-xs rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
             {childActionError && <p className="text-xs text-red-600" role="alert">{childActionError}</p>}
             <div className="space-y-2">
               {checklists.map((item) => {
@@ -813,7 +813,7 @@ export function TripDetailPage() {
           <div className="flex gap-2"><label className="flex-1 font-bold">가는 날<input type="date" value={tripDraft.startDate} onChange={(event) => setTripDraft((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label><label className="flex-1 font-bold">오는 날<input type="date" min={tripDraft.startDate} value={tripDraft.endDate} onChange={(event) => setTripDraft((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label></div>
           <label className="block font-bold">상태<select value={tripDraft.status} onChange={(event) => setTripDraft((current) => ({ ...current, status: event.target.value as TripStatus }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3">{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           {tripError && <p className="text-red-600" role="alert">{tripError}</p>}
-        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip || isOffline} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
+        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip || isOffline} className="flex-1 bg-coral-strong text-coral-strong-foreground py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
 
         {showItemModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-lg font-bold mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-xs">
           {!editingItemId && <div className="rounded-2xl border border-dashed border-coral/40 bg-coral/5 p-3">
@@ -826,14 +826,14 @@ export function TripDetailPage() {
           </div>}
           <label className="block font-bold">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <label className="block font-bold">방문 시간 (선택)<input type="time" value={itemDraft.startTime} onChange={(event) => setItemDraft((current) => ({ ...current, startTime: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
-          <fieldset><legend className="font-bold mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`py-2 rounded-xl border ${itemDraft.category === option.value ? 'bg-coral text-white border-coral' : 'border-border'}`}>{option.label}</button>)}</div></fieldset>
+          <fieldset><legend className="font-bold mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`py-2 rounded-xl border ${itemDraft.category === option.value ? 'bg-coral-strong text-coral-strong-foreground border-coral-strong' : 'border-border'}`}>{option.label}</button>)}</div></fieldset>
           <label className="block font-bold">링크 (선택)<input type="url" value={itemDraft.url} onChange={(event) => setItemDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <label className="block font-bold">주소 (선택)<input value={itemDraft.address} onChange={(event) => setItemDraft((current) => ({ ...current, address: event.target.value, source: current.source === 'screenshot' ? 'screenshot' : 'manual' }))} placeholder="예: 서울 마포구 연남로 1" maxLength={300} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <label className="block font-bold">영업시간 (선택)<textarea value={itemDraft.businessHours} onChange={(event) => setItemDraft((current) => ({ ...current, businessHours: event.target.value }))} rows={2} maxLength={500} placeholder="예: 매일 11:00~21:00" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
           <label className="block font-bold">함께 볼 메모 (선택)<textarea value={itemDraft.memo} onChange={(event) => setItemDraft((current) => ({ ...current, memo: event.target.value }))} rows={3} placeholder="예: 예약 필요 · 비 오면 다른 곳으로 · 여기서 사진 찍기" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
           <label className="flex items-center gap-2 rounded-xl bg-coral/5 px-3 py-3 font-bold text-coral"><input type="checkbox" checked={itemDraft.talkAbout} onChange={(event) => setItemDraft((current) => ({ ...current, talkAbout: event.target.checked }))} className="accent-coral" />통화 때 꼭 얘기</label>
           {itemError && <p className="text-red-600" role="alert">{itemError}</p>}
-        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-coral text-white py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
+        </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-coral-strong text-coral-strong-foreground py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
       </div>
     </MobileShell>
   );

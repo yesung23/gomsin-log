@@ -174,7 +174,7 @@ export function UsPage() {
                 <div key={idx} className={cn('relative flex flex-col items-center justify-start h-10', !cell.inMonth && 'opacity-30')}>
                   <span className={cn(
                     'text-xs font-semibold leading-none w-6 h-6 flex items-center justify-center rounded-full',
-                    isToday ? 'bg-coral text-white' : '',
+                    isToday ? 'bg-coral-strong text-coral-strong-foreground' : '',
                     !isToday && dow === 0 ? 'text-red-400' : '',
                     !isToday && dow === 6 ? 'text-blue-400' : '',
                     !isToday && cell.inMonth && dow !== 0 && dow !== 6 ? 'text-foreground' : ''

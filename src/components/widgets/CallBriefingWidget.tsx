@@ -125,7 +125,7 @@ export function CallBriefingWidget() {
                   onClick={() => openRecord(topic.recordId)}
                   className="w-full min-h-[52px] flex items-start gap-3 text-left rounded-2xl px-2 py-2 hover:bg-card/70 active:scale-[0.99] transition"
                 >
-                  <span className="mt-0.5 w-6 h-6 rounded-full bg-coral text-white text-[11px] font-bold grid place-items-center shrink-0">{index + 1}</span>
+                  <span className="mt-0.5 w-6 h-6 rounded-full bg-coral-strong text-coral-strong-foreground text-[11px] font-bold grid place-items-center shrink-0">{index + 1}</span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-[10px] text-muted-foreground mb-0.5">{shortDate(topic.date)} {topic.time || '시간 미정'}</span>
                     <span className="block text-xs text-foreground leading-relaxed break-keep">{topic.text}</span>

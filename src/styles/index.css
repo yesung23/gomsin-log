@@ -36,6 +36,8 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-coral: var(--coral);
   --color-coral-foreground: var(--coral-foreground);
+  --color-coral-strong: var(--coral-strong);
+  --color-coral-strong-foreground: var(--coral-strong-foreground);
   --color-lilac: var(--lilac);
   --color-lilac-foreground: var(--lilac-foreground);
   --color-mint: var(--mint);
@@ -76,6 +78,34 @@
   --primary-foreground: oklch(0.99 0.005 85);
   --coral: oklch(0.78 0.12 22);
   --coral-foreground: oklch(1 0 0);
+  /*
+   * The coral you are allowed to write on.
+   *
+   * `--coral` filled with white text measures 2.09:1 here and 2.29:1 in dark --
+   * less than half of WCAG AA's 4.5:1 (docs/kiro/AI_HANDOFF.md §4.1, reproduced
+   * in e2e/tokenContrast.spec.ts). It is used in ~100 places, but nearly all of
+   * them are tints, borders, progress fills and selection dots where nothing is
+   * written on top and the ratio does not apply. So the brand colour is NOT
+   * replaced: only the "something is written on this" use is split out.
+   *
+   * Measured in a real Chromium paint -- the colour is assigned to a live
+   * element, read back with getComputedStyle, rasterised on a 2D canvas and
+   * sampled byte-for-byte. Parsing the `oklch()` string instead yields wrong
+   * ratios, which is the trap AI_HANDOFF §4.1 warns about.
+   *
+   *   light  fill oklch(0.52 0.16 25) + label oklch(0.99 0.005 85) -> 5.82:1
+   *          same fill against --background                        -> 5.73:1
+   *   dark   fill oklch(0.8 0.13 25)  + label oklch(0.18 0.018 265) -> 9.25:1
+   *          same fill against --background                        -> 9.59:1
+   *
+   * Dark inverts rather than darkens: a dark fill on a dark background reads as
+   * disabled, so the fill lightens and the label goes near-black. The rejected
+   * alternative was "coral fill + navy text" -- it passes the ratio, but two
+   * brand colours then compete inside one button and navy sinks into the dark
+   * surface.
+   */
+  --coral-strong: oklch(0.52 0.16 25);
+  --coral-strong-foreground: oklch(0.99 0.005 85);
   --lilac: oklch(0.93 0.04 300);
   --lilac-foreground: var(--navy);
   --mint: oklch(0.93 0.045 155);
@@ -108,6 +138,8 @@
   --primary-foreground: oklch(0.18 0.018 265);
   --coral: oklch(0.75 0.13 22);
   --coral-foreground: oklch(0.99 0.005 85);
+  --coral-strong: oklch(0.8 0.13 25);
+  --coral-strong-foreground: oklch(0.18 0.018 265);
   --lilac: oklch(0.32 0.055 305);
   --lilac-foreground: var(--foreground);
   --mint: oklch(0.28 0.045 155);

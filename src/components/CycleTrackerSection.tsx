@@ -457,7 +457,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                 <p className="text-xs font-extrabold text-foreground">{selectedDate}</p>
                 <p className="text-[10px] text-muted-foreground">선택한 날의 개인 기록</p>
               </div>
-              <button type="button" onClick={() => openCreate()} className="flex items-center gap-1 px-3 py-2 rounded-xl bg-coral text-white text-[11px] font-bold min-h-[40px]">
+              <button type="button" onClick={() => openCreate()} className="flex items-center gap-1 px-3 py-2 rounded-xl bg-coral-strong text-coral-strong-foreground text-[11px] font-bold min-h-[40px]">
                 <Plus className="w-3.5 h-3.5" /> 기록 추가
               </button>
             </div>
@@ -530,7 +530,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                     {deletePendingId === editingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   </button>
                 )}
-                <button type="button" onClick={() => void saveEntry()} disabled={formPending || deletePendingId !== null} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-coral text-white text-xs font-bold disabled:opacity-50 min-h-[42px]">
+                <button type="button" onClick={() => void saveEntry()} disabled={formPending || deletePendingId !== null} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-xs font-bold disabled:opacity-50 min-h-[42px]">
                   {formPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   {formPending ? '저장 중' : '저장'}
                 </button>

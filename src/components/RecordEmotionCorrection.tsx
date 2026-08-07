@@ -124,7 +124,7 @@ export function RecordEmotionCorrection({
             }
           }}
           disabled={isSaving || disabled}
-          className="flex-1 min-h-[44px] rounded-lg bg-coral text-coral-foreground font-bold text-xs disabled:opacity-50"
+          className="flex-1 min-h-[44px] rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-xs disabled:opacity-50"
         >
           {isSaving ? '저장 중...' : '이대로 저장'}
         </button>

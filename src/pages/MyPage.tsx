@@ -55,7 +55,7 @@ export function MyPage() {
     <MobileShell>
       <div className="p-4 pb-28 space-y-5">
         <div className="flex items-center justify-between px-1 pt-4 pb-1">
-          <h1 className="text-2xl font-extrabold text-foreground">마이</h1>
+          <h1 className="text-title text-foreground">마이</h1>
           <button
             onClick={() => navigate('/settings')}
             className="p-2.5 rounded-2xl bg-card border border-border text-foreground hover:bg-muted active:scale-95 transition flex items-center justify-center min-h-[44px] min-w-[44px]"
@@ -67,13 +67,13 @@ export function MyPage() {
 
         <div className="bg-card rounded-3xl p-5 shadow-sm border border-border flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-full bg-coral/15 text-coral font-extrabold flex items-center justify-center text-xl border border-coral/30">
+            <div className="w-14 h-14 rounded-full bg-coral/15 text-coral-strong font-extrabold flex items-center justify-center text-title border border-coral/30">
               {isGomsin ? '🌸' : '🪖'}
             </div>
             <div>
-              <h2 className="text-lg font-bold text-foreground">{profile.myName || '나'}</h2>
-              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                <span className="bg-coral/10 text-coral px-2 py-0.5 rounded-md font-bold text-[11px]">
+              <h2 className="text-heading text-foreground">{profile.myName || '나'}</h2>
+              <div className="flex items-center gap-2 mt-0.5 text-caption text-muted-foreground">
+                <span className="bg-coral/10 text-coral-strong px-2 py-0.5 rounded-md font-bold text-caption">
                   {roleLabel}
                 </span>
                 {connected ? (
@@ -87,7 +87,7 @@ export function MyPage() {
 
           <button
             onClick={() => navigate('/settings')}
-            className="text-xs font-semibold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition"
+            className="text-label font-semibold text-coral-strong bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition"
           >
             설정
           </button>
@@ -113,35 +113,35 @@ export function MyPage() {
             <div className="flex items-center justify-between border-b border-border/40 pb-3">
               <div className="flex items-center gap-2">
                 <ShieldAlert className="w-5 h-5 text-coral" />
-                <h3 className="text-base font-extrabold text-foreground">병역 관련 도움 정보</h3>
+                <h3 className="text-heading text-foreground">병역 관련 도움 정보</h3>
               </div>
-              <span className="text-[10px] text-muted-foreground font-medium">군 생활가이드</span>
+              <span className="text-caption text-muted-foreground font-medium">군 생활가이드</span>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <div className="bg-muted/40 border border-border/60 p-3.5 rounded-2xl space-y-1">
-                <span className="text-lg">🎖️</span>
-                <h4 className="text-xs font-bold text-foreground">전역일 계산기</h4>
-                <p className="text-[10px] text-muted-foreground leading-tight">
+                <span className="text-title">🎖️</span>
+                <h4 className="text-label font-bold text-foreground">전역일 계산기</h4>
+                <p className="text-caption text-muted-foreground leading-tight">
                   복무율과 남은 일수를 한눈에 확인해요.
                 </p>
               </div>
 
               <div className="bg-muted/40 border border-border/60 p-3.5 rounded-2xl space-y-1">
-                <span className="text-lg">🏖️</span>
-                <h4 className="text-xs font-bold text-foreground">휴가 일정 가이드</h4>
-                <p className="text-[10px] text-muted-foreground leading-tight">
+                <span className="text-title">🏖️</span>
+                <h4 className="text-label font-bold text-foreground">휴가 일정 가이드</h4>
+                <p className="text-caption text-muted-foreground leading-tight">
                   정기/포상 휴가 계획을 세워보세요.
                 </p>
               </div>
             </div>
 
             <div className="bg-mint/40 border border-mint-foreground/20 p-4 rounded-2xl space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+              <div className="flex items-center gap-1.5 text-label font-bold text-foreground">
                 <Sparkles className="w-4 h-4 text-foreground" />
                 <span>군 복무자 혜택 및 긴급 연락처</span>
               </div>
-              <p className="text-[11px] text-foreground/80 leading-relaxed pt-1">
+              <p className="text-caption text-foreground leading-relaxed pt-1">
                 • 병사 적금(장병내일준비적금) 연 6% 이상 우대 금리 안내<br />
                 • 국방 헬프콜 24시간 상담: 1303<br />
                 • 군 장병 전용 할인 혜택 모음
@@ -151,15 +151,15 @@ export function MyPage() {
         )}
 
         {isDemoMode && (
-          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-xs space-y-2">
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-caption space-y-2">
             <div className="flex items-center justify-between font-bold text-amber-900">
               <span className="flex items-center gap-1.5">
                 <AlertTriangle className="w-4 h-4 text-amber-700" />
                 <span>데모 역할 전환</span>
               </span>
-              <span className="text-[10px] bg-amber-200 px-2 py-0.5 rounded-md">로컬 데모</span>
+              <span className="text-caption bg-amber-200 px-2 py-0.5 rounded-md">로컬 데모</span>
             </div>
-            <p className="text-amber-800 text-[11px]">
+            <p className="text-amber-800 text-caption">
               곰신/군화 각 역할별 전용 홈과 마이페이지를 바로 전환하여 체험해보세요.
             </p>
             <button
@@ -174,7 +174,7 @@ export function MyPage() {
         <section className="bg-card rounded-3xl border border-border p-4 shadow-sm">
           <button
             onClick={() => navigate('/settings')}
-            className="w-full py-3 px-2 flex items-center justify-between text-xs font-bold text-foreground hover:text-coral transition"
+            className="w-full py-3 px-2 flex items-center justify-between text-label font-bold text-foreground hover:text-coral transition"
           >
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4 text-coral" />

@@ -90,19 +90,19 @@ export function UsPage() {
     <MobileShell>
       <div className="pb-28 px-5 pt-8 space-y-5">
         <div className="flex items-center justify-between px-1">
-          <h1 className="text-2xl font-extrabold tracking-tight text-foreground">우리</h1>
+          <h1 className="text-title tracking-tight text-foreground">우리</h1>
           <div className="flex items-center gap-2">
             {/* /schedule had no entry point anywhere in the UI before this. */}
             <button
               onClick={() => navigate('/schedule')}
-              className="text-xs font-bold text-foreground bg-navy/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+              className="text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
             >
               <CalendarDays size={14} />
               <span>일정</span>
             </button>
             <button
               onClick={() => navigate('/trips')}
-              className="text-xs font-bold text-coral bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+              className="text-label font-bold text-coral-strong bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
             >
               <Plane size={14} />
               <span>여행</span>
@@ -114,7 +114,7 @@ export function UsPage() {
         <section className="rounded-3xl bg-card border border-border p-5 shadow-sm flex flex-col items-center text-center space-y-4">
           <CoupleAvatar size={64} />
           <div>
-            <h2 className="text-lg font-extrabold text-foreground flex items-center justify-center gap-1.5">
+            <h2 className="text-heading text-foreground flex items-center justify-center gap-1.5">
               <span>{myName || '나'}</span>
               <Heart size={16} className="text-coral fill-coral animate-pulse" />
               <span>{partnerName}</span>
@@ -123,7 +123,7 @@ export function UsPage() {
                 every non-connected state -- "초대 코드로 커플 공간을 완성해보세요" --
                 which reads as "enter a code" and is exactly wrong for the creator
                 who is holding one. */}
-            <p className="text-xs text-muted-foreground mt-1 font-medium">
+            <p className="text-caption text-muted-foreground mt-1 font-medium">
               {connected
                 ? diffDays !== null
                   ? `함께한 지 +${diffDays}일째 💕`
@@ -147,7 +147,7 @@ export function UsPage() {
             <button onClick={goToPrevMonth} className="p-2 rounded-xl hover:bg-muted active:scale-95 transition" aria-label="이전 달">
               <ChevronLeft size={18} />
             </button>
-            <h2 className="text-base font-bold text-foreground">
+            <h2 className="text-heading text-foreground">
               {viewYear}년 {viewMonth + 1}월
             </h2>
             <button onClick={goToNextMonth} className="p-2 rounded-xl hover:bg-muted active:scale-95 transition" aria-label="다음 달">
@@ -157,7 +157,7 @@ export function UsPage() {
 
           <div className="grid grid-cols-7 border-b border-border/40 pb-2 mb-2">
             {WEEKDAYS.map((day, i) => (
-              <div key={day} className={cn("text-center text-[10px] font-bold", i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-muted-foreground')}>
+              <div key={day} className={cn("text-center text-caption font-bold", i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-muted-foreground')}>
                 {day}
               </div>
             ))}
@@ -173,7 +173,7 @@ export function UsPage() {
               return (
                 <div key={idx} className={cn('relative flex flex-col items-center justify-start h-10', !cell.inMonth && 'opacity-30')}>
                   <span className={cn(
-                    'text-xs font-semibold leading-none w-6 h-6 flex items-center justify-center rounded-full',
+                    'text-label font-semibold leading-none w-6 h-6 flex items-center justify-center rounded-full',
                     isToday ? 'bg-coral-strong text-coral-strong-foreground' : '',
                     !isToday && dow === 0 ? 'text-red-400' : '',
                     !isToday && dow === 6 ? 'text-blue-400' : '',
@@ -191,7 +191,7 @@ export function UsPage() {
             })}
           </div>
           
-          <div className="flex justify-end gap-3 mt-4 text-[10px] font-bold text-muted-foreground px-2">
+          <div className="flex justify-end gap-3 mt-4 text-caption font-bold text-muted-foreground px-2">
             <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-400" />여행</div>
             <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-coral" />일정</div>
           </div>
@@ -200,10 +200,10 @@ export function UsPage() {
         {/* Travel Planner & Events */}
         <section className="space-y-3">
           <div className="flex items-center justify-between px-1">
-            <h3 className="text-sm font-extrabold text-foreground flex items-center gap-2">
+            <h3 className="text-heading text-foreground flex items-center gap-2">
               <Plane className="w-4 h-4 text-blue-500" /> 다가오는 여행
             </h3>
-            <button onClick={() => navigate('/trips')} className="text-xs font-bold text-muted-foreground hover:text-foreground">
+            <button onClick={() => navigate('/trips')} className="text-label font-bold text-muted-foreground hover:text-foreground">
               전체보기
             </button>
           </div>
@@ -224,10 +224,10 @@ export function UsPage() {
                   className="w-full text-left p-4 min-h-[44px] rounded-2xl bg-card border border-border shadow-sm active:scale-[0.98] transition cursor-pointer flex items-center justify-between"
                 >
                   <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+                    <div className="flex items-center gap-1.5 text-label font-bold text-foreground">
                       <MapPin size={14} className="text-blue-500" aria-hidden="true" /> {trip.title}
                     </div>
-                    <p className="text-[11px] text-muted-foreground font-medium">{trip.startDate} ~ {trip.endDate}</p>
+                    <p className="text-caption text-muted-foreground font-medium">{trip.startDate} ~ {trip.endDate}</p>
                   </div>
                   <ChevronRight size={16} className="text-muted-foreground/50" aria-hidden="true" />
                 </button>
@@ -239,7 +239,7 @@ export function UsPage() {
               onClick={() => navigate('/trips')}
               className="w-full p-4 min-h-[44px] rounded-2xl bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition"
             >
-              <p className="text-xs font-bold text-muted-foreground mb-1">+ 새로운 여행 계획하기</p>
+              <p className="text-label font-bold text-muted-foreground mb-1">+ 새로운 여행 계획하기</p>
             </button>
           )}
         </section>

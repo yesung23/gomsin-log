@@ -142,21 +142,21 @@ export function LegalPage() {
           >
             <ArrowLeft size={20} />
           </button>
-          <h1 className="text-lg font-bold text-foreground">{title}</h1>
+          <h1 className="text-heading text-foreground">{title}</h1>
           <div className="w-8" />
         </header>
 
-        <p className="text-[11px] text-muted-foreground">최종 개정일: {LAST_UPDATED}</p>
+        <p className="text-caption text-muted-foreground">최종 개정일: {LAST_UPDATED}</p>
 
         <div className="space-y-5">
           {sections.map((section) => (
             <section key={section.heading} className="space-y-2">
-              <h2 className="text-sm font-bold text-foreground">{section.heading}</h2>
+              <h2 className="text-heading text-foreground">{section.heading}</h2>
               <ul className="space-y-1.5">
                 {section.body.map((line) => (
                   <li
                     key={line}
-                    className="text-xs text-muted-foreground leading-relaxed break-keep"
+                    className="text-body text-muted-foreground leading-relaxed break-keep"
                   >
                     {line}
                   </li>
@@ -166,7 +166,7 @@ export function LegalPage() {
           ))}
         </div>
 
-        <div className="rounded-2xl bg-muted/60 border border-border p-4 text-[11px] text-muted-foreground leading-relaxed">
+        <div className="rounded-2xl bg-muted/60 border border-border p-4 text-caption text-muted-foreground leading-relaxed">
           문의: 앱 스토어 등록 페이지에 표기된 개발자 연락처로 문의해 주세요.
         </div>
       </div>

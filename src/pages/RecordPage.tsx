@@ -423,7 +423,7 @@ export function RecordPage() {
       <div className="p-4 pb-28 relative min-h-screen">
         {/* Top Header with Title and Calendar Toggle Button */}
         <div className="flex items-center justify-between px-1 pt-4 pb-3">
-          <h1 className="text-2xl font-extrabold tracking-tight text-foreground">기록</h1>
+          <h1 className="text-title tracking-tight text-foreground">기록</h1>
           <button
             onClick={() => setShowCalendar(!showCalendar)}
             className={cn(
@@ -441,22 +441,22 @@ export function RecordPage() {
         {tripPeriod ? (
           <div className="mb-4 rounded-2xl border border-coral/30 bg-coral/10 p-4 flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-bold text-foreground">
+              <p className="text-label font-bold text-foreground">
                 {periodTrip ? `${periodTrip.title} 여행 기간` : '여행 기간 기록'}
               </p>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-caption text-muted-foreground mt-1">
                 {formatLocalDate(tripPeriod.from)} ~ {formatLocalDate(tripPeriod.to)} · 이 기간의 기록만 표시해요.
               </p>
               {!periodTrip && (
-                <p className="text-[11px] text-amber-700 mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
+                <p className="text-caption text-amber-700 mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
               )}
             </div>
-            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-xs font-bold text-coral underline">기간 보기 해제</button>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-coral-strong underline">기간 보기 해제</button>
           </div>
         ) : hasTripPeriodQuery ? (
           <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-3">
-            <p className="text-xs text-amber-800">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
-            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-xs font-bold text-amber-800 underline">지우기</button>
+            <p className="text-caption text-amber-800">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-amber-800 underline">지우기</button>
           </div>
         ) : null}
 
@@ -473,13 +473,13 @@ export function RecordPage() {
                 <ChevronLeft size={20} />
               </button>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-foreground">
+                <h2 className="text-heading text-foreground">
                   {viewYear}년 {viewMonth + 1}월
                 </h2>
                 {!(viewYear === today.getFullYear() && viewMonth === today.getMonth()) && (
                   <button
                     onClick={goToToday}
-                    className="text-[11px] font-bold text-coral bg-coral/10 px-3 py-1.5 rounded-lg active:scale-95 transition min-h-[36px] flex items-center justify-center"
+                    className="text-caption font-bold text-coral-strong bg-coral/10 px-3 py-1.5 rounded-lg active:scale-95 transition min-h-[36px] flex items-center justify-center"
                   >
                     오늘
                   </button>
@@ -502,7 +502,7 @@ export function RecordPage() {
               <div
                 key={day}
                 className={cn(
-                  'text-center text-[11px] font-bold py-2',
+                  'text-center text-caption font-bold py-2',
                   i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-muted-foreground'
                 )}
               >
@@ -550,7 +550,7 @@ export function RecordPage() {
                 >
                   <span
                     className={cn(
-                      'text-sm font-semibold leading-none',
+                      'text-label font-semibold leading-none',
                       !cell.inMonth && 'text-muted-foreground/30',
                       cell.inMonth && !isSelected && isFuture && 'text-muted-foreground/50',
                       cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-red-400',
@@ -594,7 +594,7 @@ export function RecordPage() {
 
         {/* Empty month message */}
         {!monthHasRecords && (
-          <div className="text-center py-4 text-muted-foreground text-xs">
+          <div className="text-center py-4 text-muted-foreground text-caption">
             이번 달의 첫 순간을 남겨보세요 ✨
           </div>
         )}
@@ -619,7 +619,7 @@ export function RecordPage() {
         {/* Selected Day Summary Bar */}
         <div ref={timelineRef} className="mb-3">
           <div className="flex items-center justify-between px-1 mb-1">
-            <h3 className="text-sm font-bold text-foreground">
+            <h3 className="text-heading text-foreground">
               {selectedDateLabel}
               {isToday && <span className="text-coral ml-1">오늘</span>}
               {selectedDayAllRecords.length > 0 && (
@@ -631,7 +631,7 @@ export function RecordPage() {
           </div>
           {/* Stats chips */}
           {selectedDayAllRecords.length > 0 && (
-            <div className="flex items-center gap-1.5 px-1 mb-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-1.5 px-1 mb-2 text-caption text-muted-foreground">
               <Clock size={11} className="text-coral" />
               <span>
                 {[
@@ -648,18 +648,18 @@ export function RecordPage() {
         {/* Day Summary Card (only if 2+ shared records) */}
         {selectedDaySummary.items.length > 0 && (
           <div className="mb-4 rounded-2xl bg-lilac/30 border border-lilac/50 p-3 space-y-1.5">
-            <div className="flex items-center justify-between text-xs font-bold text-foreground mb-0.5">
+            <div className="flex items-center justify-between text-label font-bold text-foreground mb-0.5">
               <div className="flex items-center gap-1.5">
                 <Sparkles size={13} className="text-coral" />
                 <span>{isToday ? '오늘의 빠른 정리' : '그날의 빠른 정리'}</span>
               </div>
-              <span className="text-[10px] text-foreground/50 font-normal">눌러서 원문 이동</span>
+              <span className="text-caption text-muted-foreground font-normal">눌러서 원문 이동</span>
             </div>
             {selectedDaySummary.items.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-xs font-medium text-foreground group active:scale-[0.99]"
+                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-label font-medium text-foreground group active:scale-[0.99]"
               >
                 <span className="leading-snug flex-1 pr-2">• {item.text}</span>
                 <ChevronRight size={13} className="text-foreground/30 group-hover:text-foreground shrink-0" />
@@ -676,7 +676,7 @@ export function RecordPage() {
                 key={f.key}
                 onClick={() => setMediaFilter(f.key)}
                 className={cn(
-                  'px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition min-h-[32px]',
+                  'px-3 py-1.5 rounded-full text-label font-semibold whitespace-nowrap transition min-h-[32px]',
                   mediaFilter === f.key
                     ? 'bg-navy text-primary-foreground'
                     : 'bg-muted/60 text-muted-foreground hover:bg-muted'
@@ -692,13 +692,13 @@ export function RecordPage() {
         <div className="space-y-3">
           {selectedDayRecords.length === 0 ? (
             <div className="rounded-2xl bg-card border border-border/60 p-8 text-center text-muted-foreground">
-              <div className="text-3xl mb-2">📖</div>
-              <p className="text-sm font-semibold">
+              <div className="text-display mb-2">📖</div>
+              <p className="text-body font-semibold">
                 {selectedDayAllRecords.length === 0
                   ? '이 날은 남긴 순간이 없어요'
                   : '선택한 유형의 기록이 없어요'}
               </p>
-              <p className="text-xs mt-1 text-muted-foreground/70">
+              <p className="text-caption mt-1 text-muted-foreground">
                 {selectedDayAllRecords.length === 0
                   ? '달력에서 점이 있는 날짜를 눌러보세요'
                   : '다른 필터를 선택해보세요'}
@@ -760,7 +760,7 @@ export function RecordPage() {
                     aria-label={`${author.srAttribution} 자세히 보기`}
                     className="w-full text-left space-y-2 rounded-xl active:scale-[0.98] transition-transform cursor-pointer"
                   >
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between text-caption text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-foreground">{r.time}</span>
                         {/*
@@ -773,7 +773,7 @@ export function RecordPage() {
                         <span
                           aria-hidden="true"
                           className={cn(
-                            'px-2 py-0.5 rounded-full font-semibold text-[11px] whitespace-nowrap',
+                            'px-2 py-0.5 rounded-full font-semibold text-caption whitespace-nowrap',
                             author.chipClass,
                           )}
                         >
@@ -783,16 +783,16 @@ export function RecordPage() {
                       </div>
                       <div className="flex items-center gap-1.5">
                         {r.reaction && (
-                          <span className="px-2 py-0.5 rounded-full bg-coral/10 text-coral font-medium text-[11px]">
+                          <span className="px-2 py-0.5 rounded-full bg-coral/10 text-coral-strong font-medium text-caption">
                             {REACTION_LABELS[r.reaction] || r.reaction}
                           </span>
                         )}
                         {r.isPrivate ? (
-                          <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-[11px]">
+                          <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-caption">
                             <Lock size={10} /> 나에게만
                           </span>
                         ) : (
-                          <span className="text-muted-foreground/50 text-[11px]">
+                          <span className="text-muted-foreground text-caption">
                             <Unlock size={10} className="inline" />
                           </span>
                         )}
@@ -800,7 +800,7 @@ export function RecordPage() {
                     </div>
 
                     {r.log && (
-                      <p className="text-sm text-foreground leading-relaxed">{r.log}</p>
+                      <p data-testid="record-log" className="text-body text-foreground break-keep">{r.log}</p>
                     )}
                   </button>
 
@@ -834,9 +834,9 @@ export function RecordPage() {
       <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+20px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
         <button
           onClick={() => navigate('/home')}
-          className="w-full py-3.5 rounded-full bg-coral-strong text-coral-strong-foreground font-extrabold text-sm shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-strong-foreground/20 backdrop-blur-xs"
+          className="w-full py-3.5 rounded-full bg-coral-strong text-coral-strong-foreground text-body font-bold shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-strong-foreground/20 backdrop-blur-xs"
         >
-          <span className="text-lg">+</span>
+          <span className="text-title">+</span>
           <span>지금의 마음 남기기</span>
         </button>
       </div>
@@ -854,7 +854,7 @@ export function RecordPage() {
           <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
               <div className="min-w-0">
-                <h3 id="record-detail-modal-title" className="text-lg font-bold text-card-foreground">
+                <h3 id="record-detail-modal-title" className="text-heading text-card-foreground">
                   {formatLocalDate(selectedRecord.date)} {selectedRecord.time}
                 </h3>
                 {/*
@@ -865,7 +865,7 @@ export function RecordPage() {
                 <span
                   aria-hidden="true"
                   className={cn(
-                    'mt-1 inline-block px-2 py-0.5 rounded-full font-semibold text-[11px]',
+                    'mt-1 inline-block px-2 py-0.5 rounded-full font-semibold text-caption',
                     selectedAuthor?.chipClass,
                   )}
                 >
@@ -891,10 +891,10 @@ export function RecordPage() {
             {/* Delete confirmation */}
             {showDeleteConfirm && (
               <div className="mb-4 p-4 rounded-xl bg-destructive/10 border border-destructive/30 space-y-3">
-                <p className="text-sm font-bold text-destructive">이 기록을 삭제할까요?</p>
-                <p className="text-xs text-muted-foreground">삭제하면 되돌릴 수 없어요.</p>
+                <p className="text-label font-bold text-destructive">이 기록을 삭제할까요?</p>
+                <p className="text-caption text-muted-foreground">삭제하면 되돌릴 수 없어요.</p>
                 {isOffline && (
-                  <p className="text-xs text-muted-foreground">{OFFLINE_READONLY_MESSAGE}</p>
+                  <p className="text-caption text-muted-foreground">{OFFLINE_READONLY_MESSAGE}</p>
                 )}
                 <div className="flex gap-2">
                   <button
@@ -916,13 +916,13 @@ export function RecordPage() {
                       }
                     }}
                     disabled={isSaving || isOffline}
-                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-xs disabled:opacity-50"
+                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-label disabled:opacity-50"
                   >
                     {isSaving ? '삭제 중...' : '삭제'}
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                    className="px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-label"
                   >
                     취소
                   </button>
@@ -932,7 +932,7 @@ export function RecordPage() {
 
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               {selectedRecord.reaction && (
-                <div className="px-3 py-1.5 rounded-full bg-coral/10 text-coral text-xs font-semibold inline-block">
+                <div className="px-3 py-1.5 rounded-full bg-coral/10 text-coral-strong text-caption font-semibold inline-block">
                   {REACTION_LABELS[selectedRecord.reaction]}
                 </div>
               )}
@@ -943,13 +943,13 @@ export function RecordPage() {
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
                     aria-label="기록 내용 수정"
-                    className="w-full h-32 bg-muted rounded-xl p-3 text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground"
+                    className="w-full h-32 bg-muted rounded-xl p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
                     placeholder="기록 내용을 입력하세요"
                   />
                   {/* Say it before saving, not after: the confirmations were
                       derived from the previous text, so they get cleared. */}
                   {editText.trim() !== (selectedRecord.log ?? '').trim() && (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       내용을 바꾸면 이전 글에서 고른 마음은 지워져요.
                     </p>
                   )}
@@ -959,7 +959,7 @@ export function RecordPage() {
                         setIsEditing(false);
                         setEditText('');
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-xs"
+                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-label"
                     >
                       취소
                     </button>
@@ -994,7 +994,7 @@ export function RecordPage() {
                         }
                       }}
                       disabled={isSaving || !editText.trim() || isOffline}
-                      className="px-3 py-1.5 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-xs disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
                     >
                       {isSaving ? '저장 중...' : '저장'}
                     </button>
@@ -1002,21 +1002,21 @@ export function RecordPage() {
                 </div>
               ) : (
                 <div className="bg-muted p-4 rounded-xl">
-                  <p className="text-foreground whitespace-pre-wrap text-sm leading-relaxed">
+                  <p className="text-foreground whitespace-pre-wrap text-body break-keep">
                     {selectedRecord.log || '(내용 없음)'}
                   </p>
                 </div>
               )}
 
               {selectedRecord.isPrivate && (
-                <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl font-medium">
+                <div className="flex items-center gap-1.5 text-caption text-amber-700 bg-amber-50 px-3 py-2 rounded-xl font-medium">
                   <Lock size={13} /> 나에게만 남긴 기록
                 </div>
               )}
 
               {((selectedRecord.attachments && selectedRecord.attachments.length > 0) || canEditMedia) && (
                 <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-muted-foreground">첨부 파일</h4>
+                  <h4 className="text-caption font-bold text-muted-foreground">첨부 파일</h4>
                   {(selectedRecord.attachments || []).map((att, idx) => (
                     <AttachmentMedia
                       key={idx}
@@ -1035,7 +1035,7 @@ export function RecordPage() {
                               onClick={() => void handleRemoveAttachment(att.path!)}
                               disabled={isMediaBusy || isOffline}
                               aria-label={`첨부 ${att.name} 삭제`}
-                              className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-xs disabled:opacity-50"
+                              className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-label disabled:opacity-50"
                             >
                               <Trash2 size={13} /> 첨부 삭제
                             </button>
@@ -1063,12 +1063,12 @@ export function RecordPage() {
                         type="button"
                         onClick={() => mediaInputRef.current?.click()}
                         disabled={isMediaBusy || isOffline}
-                        className="w-full min-h-[44px] rounded-xl border border-dashed border-border text-xs font-bold text-muted-foreground disabled:opacity-50"
+                        className="w-full min-h-[44px] rounded-xl border border-dashed border-border text-label font-bold text-muted-foreground disabled:opacity-50"
                       >
                         {isMediaBusy ? '첨부 처리 중...' : '+ 사진 · 영상 · 음성 추가'}
                       </button>
                       {isOffline && (
-                        <p className="text-[11px] text-muted-foreground text-center">
+                        <p className="text-caption text-muted-foreground text-center">
                           오프라인이라 지금은 읽기만 가능해요. 연결되면 다시 시도해 주세요.
                         </p>
                       )}
@@ -1110,13 +1110,13 @@ export function RecordPage() {
                       setEditText(selectedRecord.log || '');
                       setIsEditing(true);
                     }}
-                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-xs active:scale-95 transition"
+                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-label active:scale-95 transition"
                   >
                     <Pencil size={13} /> 수정
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
-                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-xs active:scale-95 transition"
+                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-label active:scale-95 transition"
                   >
                     <Trash2 size={13} /> 삭제
                   </button>

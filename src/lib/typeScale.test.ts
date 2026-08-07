@@ -64,6 +64,10 @@ const CONVERTED_FILES = [
   'src/components/widgets/CallBriefingWidget.tsx',
   'src/components/widgets/PartnerDayTimelineWidget.tsx',
   'src/components/widgets/DDayWidget.tsx',
+  // The record screen. It is the destination every briefing summary points at,
+  // so the partner's own sentence had to stop being 14px while the app's own
+  // chrome around it was the same size or larger.
+  'src/pages/RecordPage.tsx',
 ];
 
 function read(file: string): string {

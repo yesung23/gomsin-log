@@ -157,7 +157,7 @@ export function UsPage() {
 
           <div className="grid grid-cols-7 border-b border-border/40 pb-2 mb-2">
             {WEEKDAYS.map((day, i) => (
-              <div key={day} className={cn("text-center text-caption font-bold", i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-muted-foreground')}>
+              <div key={day} className={cn("text-center text-caption font-bold", i === 0 ? 'text-destructive' : i === 6 ? 'text-info' : 'text-muted-foreground')}>
                 {day}
               </div>
             ))}
@@ -175,15 +175,15 @@ export function UsPage() {
                   <span className={cn(
                     'text-label font-semibold leading-none w-6 h-6 flex items-center justify-center rounded-full',
                     isToday ? 'bg-coral-strong text-coral-strong-foreground' : '',
-                    !isToday && dow === 0 ? 'text-red-400' : '',
-                    !isToday && dow === 6 ? 'text-blue-400' : '',
+                    !isToday && dow === 0 ? 'text-destructive' : '',
+                    !isToday && dow === 6 ? 'text-info' : '',
                     !isToday && cell.inMonth && dow !== 0 && dow !== 6 ? 'text-foreground' : ''
                   )}>
                     {cell.date.getDate()}
                   </span>
                   
                   <div className="flex gap-1 mt-1">
-                    {hasTrip && <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />}
+                    {hasTrip && <span className="w-1.5 h-1.5 rounded-full bg-info" />}
                     {hasEvent && <span className="w-1.5 h-1.5 rounded-full bg-coral" />}
                   </div>
                 </div>
@@ -192,7 +192,7 @@ export function UsPage() {
           </div>
           
           <div className="flex justify-end gap-3 mt-4 text-caption font-bold text-muted-foreground px-2">
-            <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-400" />여행</div>
+            <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-info" />여행</div>
             <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-coral" />일정</div>
           </div>
         </section>
@@ -201,7 +201,7 @@ export function UsPage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between px-1">
             <h3 className="text-heading text-foreground flex items-center gap-2">
-              <Plane className="w-4 h-4 text-blue-500" /> 다가오는 여행
+              <Plane className="w-4 h-4 text-info" /> 다가오는 여행
             </h3>
             <button onClick={() => navigate('/trips')} className="text-label font-bold text-muted-foreground hover:text-foreground">
               전체보기
@@ -225,7 +225,7 @@ export function UsPage() {
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-label font-bold text-foreground">
-                      <MapPin size={14} className="text-blue-500" aria-hidden="true" /> {trip.title}
+                      <MapPin size={14} className="text-info" aria-hidden="true" /> {trip.title}
                     </div>
                     <p className="text-caption text-muted-foreground font-medium">{trip.startDate} ~ {trip.endDate}</p>
                   </div>

@@ -349,7 +349,7 @@ export function CycleSupportSection({
       {(loadState === 'ready' || loadState === 'empty') && (
         <>
           {realtimeDisconnected && (
-            <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-caption text-amber-900" role="status">
+            <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-warning-surface border border-warning/30 text-caption text-warning-foreground" role="status">
               <span>실시간 확인이 중단됐어요. 최신 상태를 다시 확인해 주세요.</span>
               <button type="button" onClick={() => void load(true)} className="p-1" aria-label="응원 신호 다시 확인"><RotateCcw className="w-3.5 h-3.5" /></button>
             </div>

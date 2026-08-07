@@ -811,7 +811,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDisconnecting}
-                  className="py-2.5 rounded-xl bg-destructive text-white text-label font-semibold min-h-[44px]"
+                  className="py-2.5 rounded-xl bg-destructive text-destructive-foreground text-label font-semibold min-h-[44px]"
                 >
                   {isDisconnecting ? '해제 중...' : '해제하기'}
                 </button>
@@ -864,7 +864,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDeletingRecords}
-                  className="flex-1 py-3 bg-destructive text-white font-bold rounded-xl text-label active:scale-98 min-h-[44px]"
+                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-xl text-label active:scale-98 min-h-[44px]"
                 >
                   {isDeletingRecords ? '삭제 중...' : '전체 삭제'}
                 </button>
@@ -958,7 +958,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDeletingAccount || deleteAccountConfirmation !== '탈퇴'}
-                  className="flex-1 py-3 bg-destructive text-white font-bold rounded-xl text-label active:scale-98 min-h-[44px] disabled:opacity-50"
+                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-xl text-label active:scale-98 min-h-[44px] disabled:opacity-50"
                 >
                   {isDeletingAccount ? '삭제 중...' : '영구 삭제'}
                 </button>

@@ -216,86 +216,28 @@
 }
 
 /*
- * Dark mode for components that still use fixed Tailwind palette utilities.
+ * The dark-mode palette remap that used to live here is GONE.
  *
- * Tailwind v4 compiles `bg-white` to `background-color: var(--color-white)` and
- * `bg-white/60` to `color-mix(in oklab, var(--color-white) 60%, transparent)`.
- * Remapping the palette variables therefore fixes every utility -- including
- * every opacity variant -- in one place.
+ * It existed because components reached past the semantic tokens for raw
+ * Tailwind palette utilities -- `bg-amber-50`, `text-indigo-600`, `bg-blue-400`,
+ * `bg-emerald-500/10`, `bg-purple-500/10`, `bg-pink-500/10`, `bg-rose-100`,
+ * `bg-red-50` and the whole `gray-*` family. None of those have a dark value, so
+ * dark mode was rescued by remapping the PALETTE variables themselves:
+ * `--color-amber-50: oklch(0.27 0.04 80)` and forty more lines like it.
  *
- * This replaced a list of `!important` overrides on specific class names, which
- * could not match opacity variants such as `bg-white/60` (used by the record
- * timeline) and so left unreadable light-on-light surfaces in dark mode.
+ * That worked, and it was the wrong shape. The block's existence was the
+ * measurement of the problem: every line in it was a component that had opted out
+ * of the token system, and the remap made opting out invisible.
+ *
+ * All 102 of those utilities are now semantic tokens -- warning / info / success /
+ * destructive / lilac / coral -- each of which already carries a light AND a dark
+ * value in the two blocks above. src/lib/paletteMigration.test.ts fails if a raw
+ * accent utility comes back anywhere under src/, and fails if this block returns.
+ *
+ * `--color-white` was never remapped and still is not: it drives the label on the
+ * Apple sign-in button, the text on the navy service hero and the modal scrims,
+ * all of which are deliberately theme-invariant.
  */
-[data-theme='dark'] {
-  /*
-   * `--color-white` is deliberately NOT remapped: it also drives `text-white`
-   * on coral/navy buttons and the dots on a selected calendar cell, which must
-   * stay white in both themes. The handful of components that used `bg-white`
-   * as a page surface were changed to `bg-card` instead.
-   */
-  /* Neutral surfaces map onto the semantic card/muted/border tokens. */
-  --color-gray-50: var(--muted);
-  --color-gray-100: var(--muted);
-  --color-gray-200: var(--border);
-  --color-gray-300: var(--border);
-  --color-gray-400: var(--muted-foreground);
-  --color-gray-500: var(--muted-foreground);
-  --color-gray-600: var(--muted-foreground);
-  --color-gray-700: var(--foreground);
-  --color-gray-800: var(--foreground);
-  --color-gray-900: var(--foreground);
-  --color-gray-950: var(--foreground);
-
-  /* Accent tints: dark surfaces with light text of the same hue. */
-  --color-amber-50: oklch(0.27 0.04 80);
-  --color-amber-100: oklch(0.31 0.05 80);
-  --color-amber-200: oklch(0.36 0.06 80);
-  --color-amber-600: oklch(0.84 0.1 85);
-  --color-amber-700: oklch(0.86 0.09 85);
-  --color-amber-800: oklch(0.89 0.08 85);
-  --color-amber-900: oklch(0.92 0.06 85);
-  --color-amber-950: oklch(0.95 0.04 85);
-
-  --color-indigo-50: oklch(0.26 0.04 275);
-  --color-indigo-100: oklch(0.3 0.05 275);
-  --color-indigo-400: oklch(0.74 0.11 275);
-  --color-indigo-500: oklch(0.76 0.11 275);
-  --color-indigo-600: oklch(0.8 0.1 275);
-
-  --color-blue-50: oklch(0.26 0.04 255);
-  --color-blue-100: oklch(0.3 0.05 255);
-  --color-blue-400: oklch(0.75 0.11 255);
-  --color-blue-500: oklch(0.78 0.11 255);
-  --color-blue-600: oklch(0.81 0.1 255);
-
-  --color-emerald-50: oklch(0.25 0.04 160);
-  --color-emerald-100: oklch(0.29 0.05 160);
-  --color-emerald-500: oklch(0.75 0.12 160);
-  --color-emerald-600: oklch(0.79 0.11 160);
-
-  --color-teal-50: oklch(0.25 0.04 185);
-  --color-teal-100: oklch(0.29 0.05 185);
-  --color-teal-500: oklch(0.75 0.11 185);
-  --color-teal-600: oklch(0.79 0.1 185);
-
-  --color-pink-50: oklch(0.27 0.04 350);
-  --color-pink-100: oklch(0.31 0.05 350);
-  --color-pink-500: oklch(0.78 0.12 350);
-
-  --color-purple-100: oklch(0.3 0.05 305);
-
-  --color-yellow-50: oklch(0.27 0.04 95);
-  --color-yellow-100: oklch(0.31 0.05 95);
-  --color-yellow-600: oklch(0.85 0.1 95);
-  --color-yellow-800: oklch(0.9 0.07 95);
-
-  --color-red-50: oklch(0.27 0.05 25);
-  --color-red-400: oklch(0.72 0.16 25);
-  --color-red-500: oklch(0.7 0.18 25);
-  --color-red-600: oklch(0.74 0.17 25);
-}
-
 /* Custom range slider */
 input[type='range'] {
   -webkit-appearance: none;

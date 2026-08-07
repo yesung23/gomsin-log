@@ -804,7 +804,7 @@ export function OnboardingPage() {
                     className="w-full h-13 px-4 rounded-2xl bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
                   {nickname.trim().length > 0 && nickname.trim().length < 2 && (
-                    <p className="text-caption text-red-500 font-medium">닉네임은 2자 이상 입력해주세요.</p>
+                    <p className="text-caption text-destructive font-medium">닉네임은 2자 이상 입력해주세요.</p>
                   )}
                 </div>
               </div>

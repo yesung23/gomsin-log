@@ -36,11 +36,11 @@ import { supabase } from '@/lib/supabase';
 import type { CoupleEvent, CoupleTask, EventType } from '@/types';
 
 const EVENT_BADGES: Record<EventType, { label: string; color: string }> = {
-  anniversary: { label: '기념일', color: 'bg-purple-500/10 text-purple-600' },
-  visit: { label: '면회', color: 'bg-emerald-500/10 text-emerald-600' },
+  anniversary: { label: '기념일', color: 'bg-lilac text-lilac-foreground' },
+  visit: { label: '면회', color: 'bg-success-surface text-foreground' },
   vacation: { label: '휴가', color: 'bg-coral/10 text-coral' },
-  date: { label: '데이트', color: 'bg-pink-500/10 text-pink-600' },
-  trip: { label: '여행', color: 'bg-blue-500/10 text-blue-600' },
+  date: { label: '데이트', color: 'bg-coral/10 text-coral-strong' },
+  trip: { label: '여행', color: 'bg-info/10 text-info' },
   other: { label: '기타', color: 'bg-navy/10 text-foreground' },
 };
 
@@ -599,7 +599,7 @@ export function SchedulePage() {
                 </div>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center text-caption font-bold text-muted-foreground pb-1">
-                <span className="text-red-400">일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span className="text-blue-400">토</span>
+                <span className="text-destructive">일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span className="text-info">토</span>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center">
                 {Array.from({ length: firstDayOfWeek }).map((_, index) => <div key={`empty-${index}`} className="h-11" />)}
@@ -633,7 +633,7 @@ export function SchedulePage() {
                           ))}
                         </span>
                       )}
-                      {dayTasks.length > 0 && <span className="w-1.5 h-1.5 rounded-sm bg-indigo-500 mt-0.5" aria-hidden="true" />}
+                      {dayTasks.length > 0 && <span className="w-1.5 h-1.5 rounded-sm bg-info mt-0.5" aria-hidden="true" />}
                     </button>
                   );
                 })}
@@ -647,17 +647,17 @@ export function SchedulePage() {
               </div>
               {activeCouple && <div className="rounded-2xl bg-card border border-border p-3 space-y-2">
                 <div className="flex gap-2">
-                  <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value.slice(0, 120))} onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }} placeholder="우리 할 일 빠르게 추가" className="flex-1 min-w-0 bg-muted rounded-xl px-3 py-2.5 text-body outline-none focus:ring-2 focus:ring-indigo-400/40" />
+                  <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value.slice(0, 120))} onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }} placeholder="우리 할 일 빠르게 추가" className="flex-1 min-w-0 bg-muted rounded-xl px-3 py-2.5 text-body outline-none focus:ring-2 focus:ring-info/40" />
                   <input type="time" value={taskTime} onChange={(event) => setTaskTime(event.target.value)} aria-label="할 일 시간" className="w-[92px] bg-muted rounded-xl px-2 py-2.5 text-body" />
-                  <button type="button" onClick={() => void handleCreateTask()} disabled={isSavingTask || !taskTitle.trim() || isOffline} className="px-3 rounded-xl bg-indigo-500 text-white text-label font-bold disabled:opacity-40">추가</button>
+                  <button type="button" onClick={() => void handleCreateTask()} disabled={isSavingTask || !taskTitle.trim() || isOffline} className="px-3 rounded-xl bg-info text-primary-foreground text-label font-bold disabled:opacity-40">추가</button>
                 </div>
-                <label className="flex items-center gap-2 text-caption text-muted-foreground"><input type="checkbox" checked={taskForMe} onChange={(event) => setTaskForMe(event.target.checked)} className="accent-indigo-500" />내 담당으로 표시</label>
+                <label className="flex items-center gap-2 text-caption text-muted-foreground"><input type="checkbox" checked={taskForMe} onChange={(event) => setTaskForMe(event.target.checked)} className="accent-info" />내 담당으로 표시</label>
               </div>}
               <div className="space-y-2">
                 {selectedTasks.map((task) => {
                   const pending = pendingTaskIds.has(task.id);
                   return <div key={task.id} className="rounded-2xl bg-card border border-border px-4 py-3 flex items-center gap-3">
-                    <button type="button" onClick={() => void handleToggleTask(task)} disabled={pending || isOffline} aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`} className="text-indigo-500 disabled:opacity-40">{task.completed ? <CheckCircle2 size={21} /> : <Circle size={21} />}</button>
+                    <button type="button" onClick={() => void handleToggleTask(task)} disabled={pending || isOffline} aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`} className="text-info disabled:opacity-40">{task.completed ? <CheckCircle2 size={21} /> : <Circle size={21} />}</button>
                     <div className="flex-1 min-w-0"><p className={`text-label font-bold truncate ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.title}</p><p className="text-caption text-muted-foreground">{task.dueTime || '시간 미정'} · {task.assigneeId === authenticatedUser?.id ? '내 담당' : '함께'}</p></div>
                     {task.createdBy === authenticatedUser?.id && <button type="button" onClick={() => void handleDeleteTask(task)} disabled={pending || isOffline} aria-label={`${task.title} 할 일 삭제`} className="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-40"><Trash2 size={14} /></button>}
                   </div>;

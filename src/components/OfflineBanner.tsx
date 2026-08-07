@@ -95,7 +95,7 @@ export function OfflineBanner() {
       {!online && (
         <div
           data-testid="offline-notice"
-          className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-center text-caption font-medium text-red-900 shadow-sm"
+          className="w-full rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-center text-caption font-medium text-destructive shadow-sm"
         >
           인터넷 연결이 끊겼어요 · 남긴 기록은 저장해 두고 연결되면 보낼게요
         </div>
@@ -117,14 +117,14 @@ export function OfflineBanner() {
           // do something, and announcing the reassuring counts that way would be
           // noise on every reconnection.
           role="alert"
-          className="mt-1.5 w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-caption font-medium text-amber-900 shadow-sm"
+          className="mt-1.5 w-full rounded-xl border border-warning/40 bg-warning-surface px-4 py-2.5 text-caption font-medium text-warning-foreground shadow-sm"
         >
           <p className="text-center">보내지 못한 기록 {outboxBlocked}개가 있어요</p>
           <button
             type="button"
             onClick={() => { void retryBlockedRecords(); }}
             disabled={!online}
-            className="mt-1.5 w-full min-h-[44px] rounded-lg border border-amber-400 font-bold disabled:opacity-50"
+            className="mt-1.5 w-full min-h-[44px] rounded-lg border border-warning/50 font-bold disabled:opacity-50"
           >
             다시 시도
           </button>

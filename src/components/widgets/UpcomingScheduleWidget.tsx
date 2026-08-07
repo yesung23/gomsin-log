@@ -49,7 +49,7 @@ export function UpcomingScheduleWidget() {
             return (
               <div key={e.id} className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-full bg-info-surface text-info flex items-center justify-center">
                     {getEventIcon(e.eventType)}
                   </div>
                   <div>
@@ -57,7 +57,7 @@ export function UpcomingScheduleWidget() {
                     <div className="text-caption text-muted-foreground">{formatLocalDate(e.startDate)}</div>
                   </div>
                 </div>
-                <span className="text-indigo-500 font-bold text-caption bg-indigo-50 px-2 py-1 rounded-md">
+                <span className="text-info font-bold text-caption bg-info-surface px-2 py-1 rounded-md">
                   {dDay === 0 ? 'D-Day' : `D-${dDay}`}
                 </span>
               </div>
@@ -68,7 +68,7 @@ export function UpcomingScheduleWidget() {
 
       <button 
         onClick={() => navigate('/trips')}
-        className="mt-1 w-full bg-indigo-50 text-indigo-600 font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-transform text-label flex items-center justify-center gap-2"
+        className="mt-1 w-full bg-info-surface text-info font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-transform text-label flex items-center justify-center gap-2"
       >
         <Plane className="w-4 h-4" />
         여행 플래너

@@ -77,7 +77,7 @@ export function MyPage() {
                   {roleLabel}
                 </span>
                 {connected ? (
-                  <span className="text-emerald-600 font-semibold">{coupleStatusLabel}</span>
+                  <span className="text-foreground font-semibold">{coupleStatusLabel}</span>
                 ) : (
                   <span className="text-muted-foreground">{coupleStatusLabel}</span>
                 )}
@@ -151,20 +151,20 @@ export function MyPage() {
         )}
 
         {isDemoMode && (
-          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-caption space-y-2">
-            <div className="flex items-center justify-between font-bold text-amber-900">
+          <div className="bg-warning-surface border border-warning/30 p-4 rounded-2xl text-caption space-y-2">
+            <div className="flex items-center justify-between font-bold text-warning-foreground">
               <span className="flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-amber-700" />
+                <AlertTriangle className="w-4 h-4 text-warning-foreground" />
                 <span>데모 역할 전환</span>
               </span>
-              <span className="text-caption bg-amber-200 px-2 py-0.5 rounded-md">로컬 데모</span>
+              <span className="text-caption bg-warning-surface px-2 py-0.5 rounded-md">로컬 데모</span>
             </div>
-            <p className="text-amber-800 text-caption">
+            <p className="text-warning-foreground text-caption">
               곰신/군화 각 역할별 전용 홈과 마이페이지를 바로 전환하여 체험해보세요.
             </p>
             <button
               onClick={switchRole}
-              className="w-full py-2.5 rounded-xl bg-amber-200 text-amber-950 font-bold active:scale-98 transition min-h-[40px]"
+              className="w-full py-2.5 rounded-xl bg-warning-surface text-warning-foreground font-bold active:scale-98 transition min-h-[40px]"
             >
               현재 {roleLabel} 모드 → {isGomsin ? '군화' : '곰신'} 모드로 전환하기
             </button>

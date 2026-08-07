@@ -709,7 +709,7 @@ export function TripDetailPage() {
         : visibleParentState === 'disconnected'
           ? <><Unlink className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">우리 공간 연결이 필요해요</p><p className="text-caption text-muted-foreground">두 사람이 연결된 뒤 여행을 열 수 있어요.</p></>
           : visibleParentState === 'forbidden'
-            ? <><ShieldAlert className="w-10 h-10 mx-auto text-amber-500" /><p className="font-bold">이 여행에 접근할 권한이 없어요</p></>
+            ? <><ShieldAlert className="w-10 h-10 mx-auto text-warning" /><p className="font-bold">이 여행에 접근할 권한이 없어요</p></>
             : <><RefreshCw className="w-10 h-10 mx-auto text-muted-foreground" /><p className="font-bold">여행을 불러오지 못했어요</p><button onClick={() => void loadParent()} className="px-5 py-2.5 bg-coral-strong text-coral-strong-foreground rounded-xl font-bold text-label">다시 시도</button></>;
     return <MobileShell><div className="p-6 text-center mt-20 space-y-3">{content}<button onClick={() => navigate('/trips')} className="block mx-auto text-caption text-muted-foreground underline">여행 목록으로</button></div></MobileShell>;
   }
@@ -724,7 +724,7 @@ export function TripDetailPage() {
           </div>
           <div className="flex items-center">
             <button onClick={openTripEdit} disabled={isDeletingTrip || isOffline} className="p-2 text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil className="w-4 h-4" /></button>
-            <button onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip || isOffline} className="p-2 -mr-2 text-red-500 disabled:opacity-40" aria-label="여행 삭제"><Trash2 className="w-5 h-5" /></button>
+            <button onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip || isOffline} className="p-2 -mr-2 text-destructive disabled:opacity-40" aria-label="여행 삭제"><Trash2 className="w-5 h-5" /></button>
           </div>
         </header>
 
@@ -768,14 +768,14 @@ export function TripDetailPage() {
                         <div className="flex items-center gap-2"><h3 className="text-label font-bold truncate">{item.title}</h3><span className="text-caption px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{item.startTime || '시간 미정'} · {CATEGORY_OPTIONS.find((option) => option.value === item.category)?.label}</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기"><ExternalLink className="w-3.5 h-3.5 text-coral" /></a>}</div>
                         {item.address && <p className="text-caption text-foreground mt-1 flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-coral" />{item.address}</p>}
                         {item.businessHours && <p className="text-caption text-muted-foreground mt-1 whitespace-pre-wrap">영업시간 · {item.businessHours}</p>}
-                        {item.memo && <p className="mt-2 rounded-xl bg-indigo-500/5 px-2.5 py-2 text-body text-foreground whitespace-pre-wrap"><strong className="text-caption text-indigo-600">함께 볼 메모</strong><br />{item.memo}</p>}
+                        {item.memo && <p className="mt-2 rounded-xl bg-info/5 px-2.5 py-2 text-body text-foreground whitespace-pre-wrap"><strong className="text-caption text-info">함께 볼 메모</strong><br />{item.memo}</p>}
                         {item.talkAbout && <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-coral/10 px-2 py-1 text-caption font-bold text-coral-strong"><MessageCircleHeart className="w-3 h-3" />통화 때 꼭 얘기</p>}
                         <div className="flex gap-1 mt-2">
                           <button onClick={() => void handleMoveItem(index, -1)} disabled={Boolean(item.startTime) || index === 0 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="위로 이동"><ArrowUp className="w-4 h-4" /></button>
                           <button onClick={() => void handleMoveItem(index, 1)} disabled={Boolean(item.startTime) || index === currentDayItems.length - 1 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="아래로 이동"><ArrowDown className="w-4 h-4" /></button>
                           <button onClick={() => openEditItem(item)} disabled={pending || isOffline} className="p-1.5 text-muted-foreground disabled:opacity-25" aria-label="일정 수정"><Pencil className="w-4 h-4" /></button>
                           <button onClick={() => void handleDeleteItem(item.id)} disabled={pending || isOffline} className="p-1.5 text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 className="w-4 h-4" /></button>
-                          {mapQuery && <a href={`https://map.naver.com/p/search/${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer" className="ml-auto px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-700 text-caption font-bold">네이버 지도</a>}
+                          {mapQuery && <a href={`https://map.naver.com/p/search/${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer" className="ml-auto px-2.5 py-1.5 rounded-lg bg-success-surface text-foreground text-caption font-bold">네이버 지도</a>}
                         </div>
                       </div>
                     </div>;
@@ -788,7 +788,7 @@ export function TripDetailPage() {
         ) : (
           <div className="p-5 space-y-4">
             <div className="flex gap-2"><input value={newChecklistName} onChange={(event) => setNewChecklistName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleAddChecklist(); }} placeholder="새 준비물 추가" disabled={isAddingChecklist} className="flex-1 bg-card border border-border rounded-xl px-4 py-3 text-body outline-none focus:border-coral disabled:opacity-50" /><button onClick={() => void handleAddChecklist()} disabled={isAddingChecklist || !newChecklistName.trim() || isOffline} className="px-4 bg-coral-strong text-coral-strong-foreground font-bold text-label rounded-xl disabled:opacity-40">{isAddingChecklist ? '추가 중' : '추가'}</button></div>
-            {childActionError && <p className="text-caption text-red-600" role="alert">{childActionError}</p>}
+            {childActionError && <p className="text-caption text-destructive" role="alert">{childActionError}</p>}
             <div className="space-y-2">
               {checklists.map((item) => {
                 const pending = pendingChecklistIds.has(item.id);
@@ -812,7 +812,7 @@ export function TripDetailPage() {
           <label className="block font-bold">여행 이름<input value={tripDraft.title} onChange={(event) => setTripDraft((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3" /></label>
           <div className="flex gap-2"><label className="flex-1 font-bold">가는 날<input type="date" value={tripDraft.startDate} onChange={(event) => setTripDraft((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label><label className="flex-1 font-bold">오는 날<input type="date" min={tripDraft.startDate} value={tripDraft.endDate} onChange={(event) => setTripDraft((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-xl px-2 py-3" /></label></div>
           <label className="block font-bold">상태<select value={tripDraft.status} onChange={(event) => setTripDraft((current) => ({ ...current, status: event.target.value as TripStatus }))} className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3">{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-          {tripError && <p className="text-red-600" role="alert">{tripError}</p>}
+          {tripError && <p className="text-destructive" role="alert">{tripError}</p>}
         </div><div className="flex gap-3 mt-6"><button onClick={() => setShowTripModal(false)} disabled={isSavingTrip || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveTrip()} disabled={isSavingTrip || isOffline} className="flex-1 bg-coral-strong text-coral-strong-foreground py-3 rounded-xl font-bold disabled:opacity-50">{isSavingTrip ? '저장 중' : '저장'}</button></div></div></div>}
 
         {showItemModal && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5"><div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6"><h2 className="text-heading mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2><div className="space-y-3 text-caption">
@@ -832,7 +832,7 @@ export function TripDetailPage() {
           <label className="block font-bold">영업시간 (선택)<textarea value={itemDraft.businessHours} onChange={(event) => setItemDraft((current) => ({ ...current, businessHours: event.target.value }))} rows={2} maxLength={500} placeholder="예: 매일 11:00~21:00" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
           <label className="block font-bold">함께 볼 메모 (선택)<textarea value={itemDraft.memo} onChange={(event) => setItemDraft((current) => ({ ...current, memo: event.target.value }))} rows={3} placeholder="예: 예약 필요 · 비 오면 다른 곳으로 · 여기서 사진 찍기" className="mt-1 w-full bg-background border border-border rounded-xl px-4 py-3 resize-none" /></label>
           <label className="flex items-center gap-2 rounded-xl bg-coral/5 px-3 py-3 font-bold text-coral"><input type="checkbox" checked={itemDraft.talkAbout} onChange={(event) => setItemDraft((current) => ({ ...current, talkAbout: event.target.checked }))} className="accent-coral" />통화 때 꼭 얘기</label>
-          {itemError && <p className="text-red-600" role="alert">{itemError}</p>}
+          {itemError && <p className="text-destructive" role="alert">{itemError}</p>}
         </div><div className="flex gap-3 mt-6"><button onClick={() => setShowItemModal(false)} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-muted py-3 rounded-xl font-bold">취소</button><button onClick={() => void handleSaveItem()} disabled={isSavingItem || isReadingScreenshot || isOffline} className="flex-1 bg-coral-strong text-coral-strong-foreground py-3 rounded-xl font-bold disabled:opacity-50">{isSavingItem ? '저장 중' : '저장'}</button></div></div></div>}
       </div>
     </MobileShell>

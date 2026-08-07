@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
  *
  * `rail` is the one accent: a 4px coral edge marks a card the user is expected to
  * ACT on rather than read (§5.3). It replaced the briefing's
- * `from-coral/15 via-card to-indigo-500/10` gradient, which put two accent
+ * three-stop coral-to-indigo gradient, which put two accent
  * colours in one card -- the exact thing §3.2 rule 2 forbids -- and reached for a
  * raw `indigo-500` to do it.
  */

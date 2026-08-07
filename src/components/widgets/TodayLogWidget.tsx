@@ -646,7 +646,7 @@ export function TodayLogWidget() {
               // the tap-target floor for the control that decides whether a record
               // is shared with the partner.
               className={`min-h-[44px] px-3 rounded-lg text-label font-bold flex items-center gap-1 ${
-                isPrivate ? 'bg-amber-100 text-amber-800' : 'bg-muted text-muted-foreground'
+                isPrivate ? 'bg-warning-surface text-warning-foreground' : 'bg-muted text-muted-foreground'
               }`}
             >
               {isPrivate ? <Lock size={12} /> : <Unlock size={12} />}

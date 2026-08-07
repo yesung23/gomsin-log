@@ -59,7 +59,7 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
           <button
             onClick={() => onRemove(id)}
             aria-label={`${label} 위젯 삭제`}
-            className="absolute -top-3 -right-3 z-20 w-11 h-11 bg-muted hover:bg-red-500 hover:text-white text-muted-foreground rounded-full flex items-center justify-center shadow-md transition-colors"
+            className="absolute -top-3 -right-3 z-20 w-11 h-11 bg-muted hover:bg-destructive hover:text-destructive-foreground text-muted-foreground rounded-full flex items-center justify-center shadow-md transition-colors"
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>

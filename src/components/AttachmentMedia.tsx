@@ -30,8 +30,8 @@ const KIND_ICON = {
 
 const KIND_ICON_CLASS = {
   photo: 'text-coral',
-  video: 'text-blue-500',
-  voice: 'text-purple-500',
+  video: 'text-info',
+  voice: 'text-info',
 } as const;
 
 const KIND_MEDIA_LABEL = {

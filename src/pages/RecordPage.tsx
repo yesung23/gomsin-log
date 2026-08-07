@@ -448,15 +448,15 @@ export function RecordPage() {
                 {formatLocalDate(tripPeriod.from)} ~ {formatLocalDate(tripPeriod.to)} · 이 기간의 기록만 표시해요.
               </p>
               {!periodTrip && (
-                <p className="text-caption text-amber-700 mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
+                <p className="text-caption text-warning-foreground mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
               )}
             </div>
             <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-coral-strong underline">기간 보기 해제</button>
           </div>
         ) : hasTripPeriodQuery ? (
-          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-3">
-            <p className="text-caption text-amber-800">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
-            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-amber-800 underline">지우기</button>
+          <div className="mb-4 rounded-2xl border border-warning/30 bg-warning-surface p-4 flex items-center justify-between gap-3">
+            <p className="text-caption text-warning-foreground">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-warning-foreground underline">지우기</button>
           </div>
         ) : null}
 
@@ -503,7 +503,7 @@ export function RecordPage() {
                 key={day}
                 className={cn(
                   'text-center text-caption font-bold py-2',
-                  i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-muted-foreground'
+                  i === 0 ? 'text-destructive' : i === 6 ? 'text-info' : 'text-muted-foreground'
                 )}
               >
                 {day}
@@ -553,8 +553,8 @@ export function RecordPage() {
                       'text-label font-semibold leading-none',
                       !cell.inMonth && 'text-muted-foreground/30',
                       cell.inMonth && !isSelected && isFuture && 'text-muted-foreground/50',
-                      cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-red-400',
-                      cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-blue-400',
+                      cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-destructive',
+                      cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-info',
                       isSelected && 'text-coral-strong-foreground',
                     )}
                   >
@@ -788,7 +788,7 @@ export function RecordPage() {
                           </span>
                         )}
                         {r.isPrivate ? (
-                          <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-caption">
+                          <span className="flex items-center gap-1 text-warning-foreground bg-warning-surface px-2 py-0.5 rounded-md font-medium text-caption">
                             <Lock size={10} /> 나에게만
                           </span>
                         ) : (
@@ -1009,7 +1009,7 @@ export function RecordPage() {
               )}
 
               {selectedRecord.isPrivate && (
-                <div className="flex items-center gap-1.5 text-caption text-amber-700 bg-amber-50 px-3 py-2 rounded-xl font-medium">
+                <div className="flex items-center gap-1.5 text-caption text-warning-foreground bg-warning-surface px-3 py-2 rounded-xl font-medium">
                   <Lock size={13} /> 나에게만 남긴 기록
                 </div>
               )}

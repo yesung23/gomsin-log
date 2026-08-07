@@ -201,12 +201,17 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
     expect(store).toContain("const DARK_THEME_COLOR = '#16181D'");
   });
 
-  it('keeps the dark palette remap that already covered the gray utilities', () => {
-    // Recorded honestly: the `gray-*` conversions in this cluster are a
-    // maintainability fix, not a dark-mode bug fix -- these remaps already made
-    // the gray utilities render correctly in dark mode.
-    expect(css).toContain('--color-gray-50: var(--muted);');
-    expect(css).toContain('--color-gray-900: var(--foreground);');
+  it('the dark palette remap has been deleted, and white is still not remapped', () => {
+    // Recorded honestly: the `gray-*` conversions in this cluster were a
+    // maintainability fix, not a dark-mode bug fix -- the remaps that used to sit
+    // in index.css already made the gray utilities render correctly in dark mode.
+    //
+    // Those remaps are gone now. Every raw palette utility in this app became a
+    // semantic token, so nothing is left for them to compensate for, and
+    // src/lib/paletteMigration.test.ts fails if either the utilities or the block
+    // come back.
+    expect(css).not.toContain('--color-gray-50: var(--muted);');
+    expect(css).not.toContain('--color-gray-900: var(--foreground);');
     // `--color-white` is deliberately NOT remapped, which is why `bg-white`
     // surfaces were the genuine defect.
     expect(css).not.toMatch(/^\s*--color-white:/m);

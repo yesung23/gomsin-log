@@ -107,7 +107,7 @@ export function InstallPromptBanner() {
         <div className="bg-muted p-3.5 rounded-2xl text-caption text-foreground font-medium space-y-2 border border-border">
           <div className="flex items-center gap-2.5">
             <span className="w-5 h-5 rounded-full bg-coral-strong text-coral-strong-foreground font-bold flex items-center justify-center shrink-0">1</span>
-            <span>하단 사파리 메뉴에서 공유 <Share size={14} className="inline text-blue-500 mx-0.5" /> 버튼을 누르세요.</span>
+            <span>하단 사파리 메뉴에서 공유 <Share size={14} className="inline text-info mx-0.5" /> 버튼을 누르세요.</span>
           </div>
           <div className="flex items-center gap-2.5">
             <span className="w-5 h-5 rounded-full bg-coral-strong text-coral-strong-foreground font-bold flex items-center justify-center shrink-0">2</span>

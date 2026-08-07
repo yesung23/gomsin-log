@@ -437,7 +437,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                     onClick={() => setSelectedDate(cell.date as string)}
                     className={cn(
                       'py-1.5 rounded-xl transition flex flex-col items-center justify-center min-h-[42px] border',
-                      hasRange ? 'bg-rose-100 border-rose-200 text-rose-800 font-bold' : 'border-transparent text-foreground hover:bg-muted',
+                      hasRange ? 'bg-coral/15 border-coral/30 text-coral-strong font-bold' : 'border-transparent text-foreground hover:bg-muted',
                       cell.date === today && !hasRange && 'ring-1 ring-coral text-coral font-bold',
                       selected && 'ring-2 ring-navy ring-offset-1',
                     )}

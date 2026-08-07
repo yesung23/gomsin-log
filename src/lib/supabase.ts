@@ -31,9 +31,14 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
       auth: {
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: true,
-        // Pinned explicitly so the callback page's `exchangeCodeForSession` path
-        // always matches the flow the provider redirect actually uses.
+        // AuthCallbackPage owns the web code exchange. Letting the client also
+        // auto-detect the same single-use PKCE code creates two consumers: the
+        // automatic exchange removes the verifier while the page's fallback is
+        // still waiting, which can strand a valid Google callback with
+        // `AuthPKCECodeVerifierMissingError`.
+        detectSessionInUrl: false,
+        // Pinned explicitly so every OAuth callback carries an authorization
+        // code that AuthCallbackPage can exchange exactly once.
         flowType: 'pkce',
       },
     })

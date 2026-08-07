@@ -648,7 +648,7 @@ export function OnboardingPage() {
             <button onClick={handleBack} className="p-2 -ml-2 text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="이전 단계">
               <ChevronLeft size={24} />
             </button>
-            <div className="text-xs font-bold text-muted-foreground">
+            <div className="text-caption font-bold text-muted-foreground">
               {Math.min(step, totalSteps)} / {totalSteps}
             </div>
             <div className="w-10" />
@@ -664,11 +664,11 @@ export function OnboardingPage() {
                 <div className="flex justify-center mb-3">
                   <CoupleAvatar size={84} />
                 </div>
-                <h1 className="text-4xl font-black tracking-tight text-foreground">곰신로그</h1>
-                <p className="text-muted-foreground text-sm font-medium whitespace-pre-line leading-relaxed">
+                <h1 className="text-display tracking-tight text-foreground">곰신로그</h1>
+                <p className="text-muted-foreground text-body font-medium whitespace-pre-line leading-relaxed">
                   {"답장이 늦어도, 오늘의 순간은 놓치지 않도록."}
                 </p>
-                <p className="text-xs text-foreground/70 font-normal">
+                <p className="text-caption text-muted-foreground font-normal">
                   군화와 곰신, 둘만의 하루를 사진과 짧은 기록으로 남겨요.
                 </p>
               </div>
@@ -678,7 +678,7 @@ export function OnboardingPage() {
                 {isIOS && (
                   <button
                     onClick={handleAppleLogin}
-                    className="w-full h-13 py-3.5 rounded-2xl bg-black text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
+                    className="w-full h-13 py-3.5 rounded-2xl bg-black text-white font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
                   >
                     <span>Apple로 계속하기</span>
                   </button>
@@ -686,7 +686,7 @@ export function OnboardingPage() {
 
                 <button
                   onClick={handleGoogleLogin}
-                  className="w-full h-13 py-3.5 rounded-2xl bg-card border border-border text-foreground font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
+                  className="w-full h-13 py-3.5 rounded-2xl bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
                 >
                   <span>Google로 계속하기</span>
                 </button>
@@ -694,7 +694,7 @@ export function OnboardingPage() {
                 {/* Secondary Demo Start CTA */}
                 <button
                   onClick={handleStartDemo}
-                  className="w-full py-3 rounded-2xl bg-coral/15 border border-coral/30 text-coral font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.99] transition min-h-[44px] mt-2"
+                  className="w-full py-3 rounded-2xl bg-coral/15 border border-coral/30 text-coral-strong font-bold text-label flex items-center justify-center gap-1.5 active:scale-[0.99] transition min-h-[44px] mt-2"
                 >
                   <span>데모 공간 먼저 둘러보기</span>
                   <ArrowRight size={16} />
@@ -702,13 +702,13 @@ export function OnboardingPage() {
 
                 {/* Temporary Email Login */}
                 <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-border">
-                  <p className="text-[11px] text-muted-foreground text-center font-bold">임시 이메일 로그인 (테스트용)</p>
+                  <p className="text-caption text-muted-foreground text-center font-bold">임시 이메일 로그인 (테스트용)</p>
                   <input
                     type="email"
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
                     placeholder="이메일 주소 입력"
-                    className="w-full h-12 px-4 rounded-xl bg-card border border-border text-sm outline-none focus:ring-2 focus:ring-coral/40"
+                    className="w-full h-12 px-4 rounded-xl bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
                   <button
                     onClick={async () => {
@@ -720,13 +720,13 @@ export function OnboardingPage() {
                       else toast.success('이메일로 매직링크가 전송되었습니다! 메일함을 확인해주세요.');
                     }}
                     disabled={isSendingEmail}
-                    className="w-full h-12 rounded-xl bg-navy text-white font-bold text-sm disabled:opacity-50"
+                    className="w-full h-12 rounded-xl bg-navy text-white font-bold text-label disabled:opacity-50"
                   >
                     {isSendingEmail ? '전송 중...' : '이메일로 계속하기 (매직링크)'}
                   </button>
                 </div>
 
-                <p className="text-[11px] text-muted-foreground text-center pt-2">
+                <p className="text-caption text-muted-foreground text-center pt-2">
                   계속하면 서비스 이용약관 및 개인정보 처리방침에 동의하는 것으로 봅니다.
                 </p>
               </div>
@@ -738,8 +738,8 @@ export function OnboardingPage() {
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold">곰신로그를 어떻게 사용할까요?</h2>
-                  <p className="text-sm text-muted-foreground mt-1">역할에 따라 맞춤 기능이 제공돼요.</p>
+                  <h2 className="text-title">곰신로그를 어떻게 사용할까요?</h2>
+                  <p className="text-body text-muted-foreground mt-1">역할에 따라 맞춤 기능이 제공돼요.</p>
                 </div>
 
                 <div className="space-y-3">
@@ -751,10 +751,10 @@ export function OnboardingPage() {
                         : 'border-border bg-card'
                     }`}
                   >
-                    <span className="text-3xl">🌸</span>
+                    <span className="text-display">🌸</span>
                     <div className="flex-1">
-                      <div className="font-bold text-base text-foreground">나는 곰신이에요</div>
-                      <div className="text-xs text-muted-foreground mt-1">하루의 순간을 편하게 남길게요</div>
+                      <div className="text-heading text-foreground">나는 곰신이에요</div>
+                      <div className="text-caption text-muted-foreground mt-1">하루의 순간을 편하게 남길게요</div>
                     </div>
                   </button>
 
@@ -766,10 +766,10 @@ export function OnboardingPage() {
                         : 'border-border bg-card'
                     }`}
                   >
-                    <span className="text-3xl">🪖</span>
+                    <span className="text-display">🪖</span>
                     <div className="flex-1">
-                      <div className="font-bold text-base text-foreground">나는 군화예요</div>
-                      <div className="text-xs text-muted-foreground mt-1">연인의 오늘을 놓치지 않고 볼게요</div>
+                      <div className="text-heading text-foreground">나는 군화예요</div>
+                      <div className="text-caption text-muted-foreground mt-1">연인의 오늘을 놓치지 않고 볼게요</div>
                     </div>
                   </button>
                 </div>
@@ -777,7 +777,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -789,22 +789,22 @@ export function OnboardingPage() {
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold">어떻게 불러드리면 될까요?</h2>
-                  <p className="text-sm text-muted-foreground mt-1">상대에게 보이는 이름이에요. 실명이 아니어도 괜찮아요.</p>
+                  <h2 className="text-title">어떻게 불러드리면 될까요?</h2>
+                  <p className="text-body text-muted-foreground mt-1">상대에게 보이는 이름이에요. 실명이 아니어도 괜찮아요.</p>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-muted-foreground">내 닉네임 (2~12자)</label>
+                  <label className="text-label font-semibold text-muted-foreground">내 닉네임 (2~12자)</label>
                   <input
                     type="text"
                     value={nickname}
                     onChange={(e) => setNickname(e.target.value)}
                     placeholder={role === 'gomsin' ? '예) 춘향' : '예) 몽룡'}
                     maxLength={12}
-                    className="w-full h-13 px-4 rounded-2xl bg-card border border-border text-base outline-none focus:ring-2 focus:ring-coral/40"
+                    className="w-full h-13 px-4 rounded-2xl bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
                   {nickname.trim().length > 0 && nickname.trim().length < 2 && (
-                    <p className="text-xs text-red-500 font-medium">닉네임은 2자 이상 입력해주세요.</p>
+                    <p className="text-caption text-red-500 font-medium">닉네임은 2자 이상 입력해주세요.</p>
                   )}
                 </div>
               </div>
@@ -812,7 +812,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={!canAdvanceFromStep}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-base min-h-[48px] disabled:opacity-50"
+                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
               >
                 다음
               </button>
@@ -824,8 +824,8 @@ export function OnboardingPage() {
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold">우리 둘만의 로그를 시작해볼까요?</h2>
-                  <p className="text-sm text-muted-foreground mt-1">커플 공간을 만들거나 이미 있는 공간에 참여하세요.</p>
+                  <h2 className="text-title">우리 둘만의 로그를 시작해볼까요?</h2>
+                  <p className="text-body text-muted-foreground mt-1">커플 공간을 만들거나 이미 있는 공간에 참여하세요.</p>
                 </div>
 
                 <div className="space-y-3">
@@ -838,8 +838,8 @@ export function OnboardingPage() {
                     }`}
                   >
                     <div className="flex-1">
-                      <div className="font-bold text-base text-foreground">새로운 우리 공간 만들기</div>
-                      <div className="text-xs text-muted-foreground mt-1">먼저 시작하고, 상대방을 초대할게요</div>
+                      <div className="text-heading text-foreground">새로운 우리 공간 만들기</div>
+                      <div className="text-caption text-muted-foreground mt-1">먼저 시작하고, 상대방을 초대할게요</div>
                     </div>
                   </button>
 
@@ -851,10 +851,10 @@ export function OnboardingPage() {
                       data-testid="space-recovery-confirm"
                       className="p-4 bg-card border border-coral/30 rounded-2xl space-y-3"
                     >
-                      <p className="text-xs font-bold text-foreground">
+                      <p className="text-label font-bold text-foreground">
                         이미 만든 우리 공간이 있어요
                       </p>
-                      <p className="text-[11px] leading-4 text-muted-foreground">
+                      <p className="text-caption text-muted-foreground">
                         아직 사용할 수 있는 초대 코드가 남아 있어요
                         {pendingSpaceRecovery.expiresAt
                           && invitationExpiryLabel(pendingSpaceRecovery.expiresAt)
@@ -868,7 +868,7 @@ export function OnboardingPage() {
                         type="button"
                         onClick={() => void handleRegenerateExistingSpace()}
                         disabled={isGeneratingCode}
-                        className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 text-xs font-bold text-coral-strong-foreground disabled:opacity-50"
+                        className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 text-label font-bold text-coral-strong-foreground disabled:opacity-50"
                       >
                         {isGeneratingCode ? '발급 중...' : '새 코드 발급하기'}
                       </button>
@@ -876,7 +876,7 @@ export function OnboardingPage() {
                         type="button"
                         onClick={handleKeepExistingCode}
                         disabled={isGeneratingCode}
-                        className="w-full min-h-[44px] rounded-xl border border-border px-4 text-xs font-bold text-foreground disabled:opacity-50"
+                        className="w-full min-h-[44px] rounded-xl border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
                       >
                         이전에 보낸 코드 그대로 쓰기
                       </button>
@@ -885,7 +885,7 @@ export function OnboardingPage() {
 
                   {spaceMode === 'create' && createdInviteCode && (
                     <div className="p-4 bg-coral/10 border border-coral/30 rounded-2xl space-y-2">
-                      <div className="text-xs text-coral font-semibold">
+                      <div className="text-caption text-coral-strong font-semibold">
                         내 초대 코드 (24시간 유효)
                         {/* The authoritative expiry, when the server supplied one.
                             "24시간 유효" alone told the user nothing about the
@@ -897,7 +897,7 @@ export function OnboardingPage() {
                         )}
                       </div>
                       <div className="flex items-center justify-between bg-card px-4 py-3 rounded-xl border border-coral/20">
-                        <span className="font-mono text-2xl font-bold tracking-widest text-foreground">{createdInviteCode}</span>
+                        <span className="font-mono text-display tracking-widest text-foreground">{createdInviteCode}</span>
                         <button
                           onClick={handleCopyCode}
                           // Icon-only control: `title` alone is not an accessible
@@ -909,7 +909,7 @@ export function OnboardingPage() {
                           {copiedCode ? <Check size={20} /> : <Copy size={20} />}
                         </button>
                       </div>
-                      <p className="text-[11px] text-muted-foreground text-center">
+                      <p className="text-caption text-muted-foreground text-center">
                         상대방이 앱을 설치하고 [초대 코드가 있어요] 메뉴에 위 코드를 입력하면 1:1 커플 공간이 연결됩니다.
                       </p>
                     </div>
@@ -924,8 +924,8 @@ export function OnboardingPage() {
                     }`}
                   >
                     <div className="flex-1">
-                      <div className="font-bold text-base text-foreground">초대 코드가 있어요</div>
-                      <div className="text-xs text-muted-foreground mt-1">상대가 만든 우리 공간에 들어갈게요</div>
+                      <div className="text-heading text-foreground">초대 코드가 있어요</div>
+                      <div className="text-caption text-muted-foreground mt-1">상대가 만든 우리 공간에 들어갈게요</div>
                     </div>
                   </button>
 
@@ -944,7 +944,7 @@ export function OnboardingPage() {
                         maxLength={6}
                         placeholder="숫자 6자리 초대 코드"
                         aria-label="숫자 6자리 초대 코드"
-                        className="w-full h-12 px-4 rounded-xl bg-card border border-border text-foreground font-mono text-center text-lg tracking-widest outline-none focus:ring-2 focus:ring-coral/40"
+                        className="w-full h-12 px-4 rounded-xl bg-card border border-border text-foreground font-mono text-center text-title tracking-widest outline-none focus:ring-2 focus:ring-coral/40"
                       />
                     </div>
                   )}
@@ -954,7 +954,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={isGeneratingCode || isVerifyingCode}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-base min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
@@ -973,29 +973,29 @@ export function OnboardingPage() {
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold">둘은 언제부터 함께였나요?</h2>
-                  <p className="text-sm text-muted-foreground mt-1">정확하지 않아도 괜찮아요. 나중에 우리 탭에서 바꿀 수 있어요.</p>
+                  <h2 className="text-title">둘은 언제부터 함께였나요?</h2>
+                  <p className="text-body text-muted-foreground mt-1">정확하지 않아도 괜찮아요. 나중에 우리 탭에서 바꿀 수 있어요.</p>
                 </div>
 
                 {!skipAnniversary ? (
                   <div className="space-y-2">
-                    <label className="text-xs font-semibold text-muted-foreground">사귄 날짜</label>
+                    <label className="text-label font-semibold text-muted-foreground">사귄 날짜</label>
                     <input
                       type="date"
                       value={anniversary}
                       onChange={(e) => setAnniversary(e.target.value)}
-                      className="w-full h-13 px-4 rounded-2xl bg-card border border-border text-base outline-none"
+                      className="w-full h-13 px-4 rounded-2xl bg-card border border-border text-body outline-none"
                     />
                   </div>
                 ) : (
-                  <div className="p-4 bg-muted/40 rounded-2xl text-xs text-muted-foreground text-center">
+                  <div className="p-4 bg-muted/40 rounded-2xl text-caption text-muted-foreground text-center">
                     사귄 날짜는 나중에 언제든지 설정할 수 있습니다.
                   </div>
                 )}
 
                 <button
                   onClick={() => setSkipAnniversary(!skipAnniversary)}
-                  className="text-xs text-coral font-semibold underline min-h-[36px]"
+                  className="text-label text-coral-strong font-semibold underline min-h-[36px]"
                 >
                   {skipAnniversary ? '사귄 날짜 입력하기' : '아직 정확히 기억나지 않아요'}
                 </button>
@@ -1003,7 +1003,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
               >
                 {role === 'gomsin' ? '완료' : '다음'}
               </button>
@@ -1015,14 +1015,14 @@ export function OnboardingPage() {
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold">복무 정보를 알려주세요.</h2>
-                  <p className="text-sm text-muted-foreground mt-1">전역 D-Day 및 복무 진행률에 사용돼요. (나중에 입력 가능)</p>
+                  <h2 className="text-title">복무 정보를 알려주세요.</h2>
+                  <p className="text-body text-muted-foreground mt-1">전역 D-Day 및 복무 진행률에 사용돼요. (나중에 입력 가능)</p>
                 </div>
 
                 <div className="space-y-4">
                   {/* Status */}
                   <div>
-                    <label className="text-xs font-semibold text-muted-foreground">현재 복무 상태</label>
+                    <label className="text-label font-semibold text-muted-foreground">현재 복무 상태</label>
                     <div className="grid grid-cols-2 gap-1.5 mt-1">
                       {[
                         { key: 'planned', label: '입대 예정' },
@@ -1033,7 +1033,7 @@ export function OnboardingPage() {
                         <button
                           key={st.key}
                           onClick={() => setMilitaryStatus(st.key as MilitaryStatus)}
-                          className={`py-2 px-2 rounded-xl text-xs font-semibold border transition min-h-[40px] ${
+                          className={`py-2 px-2 rounded-xl text-label font-semibold border transition min-h-[40px] ${
                             militaryStatus === st.key ? 'bg-coral-strong text-coral-strong-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
@@ -1045,7 +1045,7 @@ export function OnboardingPage() {
 
                   {/* Branch */}
                   <div>
-                    <label className="text-xs font-semibold text-muted-foreground">군종 선택</label>
+                    <label className="text-label font-semibold text-muted-foreground">군종 선택</label>
                     <div className="grid grid-cols-3 gap-1.5 mt-1">
                       {[
                         { key: 'army', label: '육군' },
@@ -1059,7 +1059,7 @@ export function OnboardingPage() {
                         <button
                           key={b.key}
                           onClick={() => handleBranchChange(b.key as Branch)}
-                          className={`py-2 px-1 rounded-xl text-xs font-semibold border transition min-h-[40px] ${
+                          className={`py-2 px-1 rounded-xl text-label font-semibold border transition min-h-[40px] ${
                             branch === b.key ? 'bg-coral-strong text-coral-strong-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
@@ -1071,23 +1071,23 @@ export function OnboardingPage() {
 
                   {/* Enlistment date */}
                   <div>
-                    <label className="text-xs font-semibold text-muted-foreground">입대일 / 입대 예정일</label>
+                    <label className="text-label font-semibold text-muted-foreground">입대일 / 입대 예정일</label>
                     <input
                       type="date"
                       value={enlistmentDate}
                       onChange={(e) => handleEnlistmentChange(e.target.value)}
-                      className="w-full h-11 px-3 mt-1 rounded-xl bg-card border border-border text-sm outline-none"
+                      className="w-full h-11 px-3 mt-1 rounded-xl bg-card border border-border text-body outline-none"
                     />
                   </div>
 
                   {/* Expected Discharge */}
                   <div>
-                    <label className="text-xs font-semibold text-muted-foreground">예상 전역일 (자동 계산 / 수동 수정 가능)</label>
+                    <label className="text-label font-semibold text-muted-foreground">예상 전역일 (자동 계산 / 수동 수정 가능)</label>
                     <input
                       type="date"
                       value={expectedDischargeDate}
                       onChange={(e) => handleManualDischargeChange(e.target.value)}
-                      className="w-full h-11 px-3 mt-1 rounded-xl bg-card border border-border text-sm outline-none"
+                      className="w-full h-11 px-3 mt-1 rounded-xl bg-card border border-border text-body outline-none"
                     />
                   </div>
                 </div>
@@ -1095,7 +1095,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-base min-h-[48px]"
+                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -1107,45 +1107,45 @@ export function OnboardingPage() {
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold">주로 언제 오늘의 로그를 확인할 수 있나요?</h2>
-                  <p className="text-sm text-muted-foreground mt-1">상대의 로그 표시 및 부드러운 확인 안내용입니다.</p>
+                  <h2 className="text-title">주로 언제 오늘의 로그를 확인할 수 있나요?</h2>
+                  <p className="text-body text-muted-foreground mt-1">상대의 로그 표시 및 부드러운 확인 안내용입니다.</p>
                 </div>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="text-xs font-semibold text-muted-foreground">평일 확인 가능 시간</label>
+                    <label className="text-label font-semibold text-muted-foreground">평일 확인 가능 시간</label>
                     <div className="flex items-center gap-2 mt-1">
                       <input
                         type="time"
                         value={weekdayStart}
                         onChange={(e) => setWeekdayStart(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-sm outline-none"
+                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
                       />
                       <span>~</span>
                       <input
                         type="time"
                         value={weekdayEnd}
                         onChange={(e) => setWeekdayEnd(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-sm outline-none"
+                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-muted-foreground">주말·휴일 확인 가능 시간</label>
+                    <label className="text-label font-semibold text-muted-foreground">주말·휴일 확인 가능 시간</label>
                     <div className="flex items-center gap-2 mt-1">
                       <input
                         type="time"
                         value={weekendStart}
                         onChange={(e) => setWeekendStart(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-sm outline-none"
+                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
                       />
                       <span>~</span>
                       <input
                         type="time"
                         value={weekendEnd}
                         onChange={(e) => setWeekendEnd(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-sm outline-none"
+                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
                       />
                     </div>
                   </div>
@@ -1155,13 +1155,13 @@ export function OnboardingPage() {
               <div className="space-y-2">
                 <button
                   onClick={handleNext}
-                  className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-base min-h-[48px]"
+                  className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
                 >
                   완료하기
                 </button>
                 <button
                   onClick={handleNext}
-                  className="w-full py-3 text-xs text-muted-foreground font-medium text-center min-h-[36px]"
+                  className="w-full py-3 text-label text-muted-foreground font-medium text-center min-h-[36px]"
                 >
                   지금은 설정하지 않을래요
                 </button>
@@ -1173,13 +1173,13 @@ export function OnboardingPage() {
           {step === 7 && (
             <div className="flex-1 flex flex-col justify-between py-8 text-center">
               <div className="pt-12 space-y-4">
-                <div className="w-20 h-20 bg-coral/15 rounded-full flex items-center justify-center mx-auto text-4xl">
+                <div className="w-20 h-20 bg-coral/15 rounded-full flex items-center justify-center mx-auto text-display">
                   {role === 'gomsin' ? '🌸' : '🪖'}
                 </div>
-                <h2 className="text-2xl font-bold text-foreground">
+                <h2 className="text-title text-foreground">
                   우리 둘만의 곰신로그가 준비됐어요.
                 </h2>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   {role === 'gomsin'
                     ? '오늘부터 편하게 하루의 순간을 남겨보세요.'
                     : '곰신이 남긴 오늘 하루를 놓치지 않고 따라잡아볼까요?'}
@@ -1189,7 +1189,7 @@ export function OnboardingPage() {
               <button
                 onClick={finishSetup}
                 disabled={isFinishing}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-base min-h-[52px] shadow-md disabled:opacity-60"
+                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[52px] shadow-md disabled:opacity-60"
               >
                 {isFinishing
                   ? '저장 중...'

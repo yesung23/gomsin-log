@@ -383,12 +383,74 @@ test('a genuinely offline device says so, and stores the record it cannot send',
 // 11 + 12. Viewport / theme matrix, overflow and console hygiene
 // ---------------------------------------------------------------------------
 const VIEWPORTS = [
+  // The narrowest and shortest screen the product promises to support.
+  //
+  // `FEATURE_SPEC.md` §11 and `PRODUCT_PRD.md` §9 both guarantee "모바일 320px
+  // 이상", and until this entry existed that sentence had no gate behind it: the
+  // matrix started at 390, so the one width most likely to break was the one width
+  // never rendered. 568 is paired with it deliberately -- an iPhone SE class device
+  // is short as well as narrow, and vertical clipping of a primary action is the
+  // failure this catches that a tall 320 viewport would not.
+  { name: '320x568', width: 320, height: 568 },
   { name: '390x844', width: 390, height: 844 },
   { name: '412x915', width: 412, height: 915 },
   { name: '430x932', width: 430, height: 932 },
   // iPhone 14 Pro logical viewport (notch class).
   { name: 'iphone-393x852', width: 393, height: 852 },
 ];
+/**
+ * Every pair of visible pinned (`fixed` / `sticky`) elements that occupy the same
+ * pixels.
+ *
+ * Horizontal overflow was the only layout property this file asserted, and it
+ * cannot see the failure that actually shipped: the offline banner and the record
+ * screen's floating CTA overlapped by 18px, so one of them sat on top of a control
+ * the user had to press. That was measured by hand, written into
+ * `docs/kiro/AI_HANDOFF.md` §4.1, and then left with nothing executable behind it.
+ *
+ * Only pinned elements are compared. Content that scrolls under a pinned bar is not
+ * a defect -- it can be scrolled back out -- whereas two pinned bars occupying the
+ * same pixels never resolve. Dialogs are skipped: covering the page is their job.
+ */
+async function pinnedCollisions(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const pinned: { el: Element; rect: DOMRect; label: string }[] = [];
+    document.querySelectorAll('*').forEach((element) => {
+      const style = getComputedStyle(element);
+      if (style.position !== 'fixed' && style.position !== 'sticky') return;
+      if (style.visibility === 'hidden' || style.display === 'none') return;
+      if (Number(style.opacity) === 0) return;
+      if (element.closest('[role="dialog"], dialog')) return;
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 8 || rect.height < 8) return;
+      const el = element as HTMLElement;
+      pinned.push({
+        el: element,
+        rect,
+        label: `${el.tagName}.${el.className?.toString().slice(0, 32)}`,
+      });
+    });
+
+    const out: string[] = [];
+    for (let i = 0; i < pinned.length; i += 1) {
+      for (let j = i + 1; j < pinned.length; j += 1) {
+        const a = pinned[i];
+        const b = pinned[j];
+        if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+        const overlapX = Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left);
+        const overlapY = Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top);
+        // 1px of shared border is rounding, not a collision.
+        if (overlapX > 1 && overlapY > 1) {
+          out.push(
+            `${a.label} overlaps ${b.label} by ${Math.round(overlapX)}x${Math.round(overlapY)}px`,
+          );
+        }
+      }
+    }
+    return out.slice(0, 5);
+  });
+}
+
 const ROUTES = ['/', '/record', '/us', '/my', '/settings', '/schedule', '/trips', '/service'];
 
 for (const viewport of VIEWPORTS) {
@@ -427,6 +489,11 @@ for (const viewport of VIEWPORTS) {
             overflow.scrollWidth,
             `${route} scrolls horizontally: ${JSON.stringify(overflow.offenders)}`,
           ).toBeLessThanOrEqual(overflow.clientWidth + 1);
+
+          // ---------------------------------------------------------------
+          // Pinned chrome must not cover pinned chrome. See `pinnedCollisions`.
+          const collisions = await pinnedCollisions(page);
+          expect(collisions, `${route} has overlapping pinned elements`).toEqual([]);
         }
 
         expect(errors, `console errors on ${who}/${colorScheme}/${viewport.name}`).toEqual([]);
@@ -435,4 +502,44 @@ for (const viewport of VIEWPORTS) {
       });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// 23. Offline chrome
+//
+// The offline banner renders only while `navigator.onLine === false`, which is why
+// the 18px banner/CTA collision recorded in AI_HANDOFF §4.1 survived a fully green
+// matrix: no test had ever put the browser offline, so the banner was never on the
+// screen when overlap was measured. `context.setOffline` emulates it for real.
+//
+// 320x568 leads because the bottom stack has the least room there.
+// ---------------------------------------------------------------------------
+for (const viewport of [
+  { name: '320x568', width: 320, height: 568 },
+  { name: '390x844', width: 390, height: 844 },
+]) {
+  test(`offline chrome stays clear of the pinned actions ${viewport.name}`, async ({ browser }) => {
+    const { context, page } = await open(browser, CREATOR, { viewport });
+
+    for (const route of ['/', '/record', '/schedule']) {
+      await goto(page, route);
+
+      await context.setOffline(true);
+      await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+      await page.waitForFunction(() => navigator.onLine === false);
+      // The banner mounts on the state change, not on the event.
+      await page.waitForTimeout(250);
+
+      const collisions = await pinnedCollisions(page);
+      expect(collisions, `${route} offline: overlapping pinned elements`).toEqual([]);
+
+      // Restore before the next navigation; an offline navigation is a different
+      // test and would fail for an unrelated reason.
+      await context.setOffline(false);
+      await page.evaluate(() => window.dispatchEvent(new Event('online')));
+      await page.waitForFunction(() => navigator.onLine === true);
+    }
+
+    await context.close();
+  });
 }

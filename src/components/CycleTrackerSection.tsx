@@ -358,7 +358,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   };
 
   return (
-    <section className="bg-card rounded-3xl p-5 border border-border shadow-sm space-y-4">
+    <section className="bg-card rounded-surface p-5 border border-border shadow-sm space-y-4">
       <div className="flex items-center justify-between border-b border-border/40 pb-3 gap-2">
         <div className="flex items-center gap-2">
           <HeartPulse className="w-5 h-5 text-coral" />

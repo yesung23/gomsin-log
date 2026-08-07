@@ -176,7 +176,7 @@ export function ServicePage() {
 
         {/* D-Day / progress. Shown only when real dates exist. */}
         {progress ? (
-          <div className="bg-gradient-to-br from-navy to-navy/80 rounded-3xl p-6 text-white shadow-sm relative overflow-hidden">
+          <div className="bg-gradient-to-br from-navy to-navy/80 rounded-surface p-6 text-white shadow-sm relative overflow-hidden">
             <Shield className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10 rotate-12" />
             <div className="relative z-10">
               <div className="flex justify-between items-start mb-2">
@@ -217,7 +217,7 @@ export function ServicePage() {
             </div>
           </div>
         ) : (
-          <div className="rounded-3xl border border-dashed border-border bg-muted/40 p-6 text-center space-y-3">
+          <div className="rounded-surface border border-dashed border-border bg-muted/40 p-6 text-center space-y-3">
             <Shield className="w-8 h-8 text-muted-foreground/60 mx-auto" />
             <div>
               <h2 className="text-heading text-foreground">복무 정보가 아직 없어요</h2>
@@ -282,7 +282,7 @@ export function ServicePage() {
       {/* Edit Modal */}
       {isEditing && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="service-edit-modal-title" className="bg-card border border-border w-full max-w-md rounded-3xl p-6 shadow-xl space-y-4 max-h-[90dvh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" aria-labelledby="service-edit-modal-title" className="bg-card border border-border w-full max-w-md rounded-surface p-6 shadow-xl space-y-4 max-h-[90dvh] overflow-y-auto">
             <h3 id="service-edit-modal-title" className="text-heading text-foreground">복무 정보 수정</h3>
 
             <div className="space-y-4">

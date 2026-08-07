@@ -559,7 +559,7 @@ export function SchedulePage() {
                   : '기존 비공개 일정만 본인이 계속 확인·수정할 수 있어요. 새 일정과 공유 일정은 연결 후 이용할 수 있어요.'}
               />
             )}
-            <section className="rounded-3xl bg-card border border-border p-5 shadow-sm space-y-3">
+            <section className="rounded-surface bg-card border border-border p-5 shadow-sm space-y-3">
               {anniversaryDate && daysTogether !== null ? (
                 <>
                   <div className="flex items-center justify-between text-caption font-bold text-coral-strong">
@@ -586,7 +586,7 @@ export function SchedulePage() {
               )}
             </section>
 
-            <section className="rounded-3xl bg-card border border-border p-5 shadow-sm space-y-4">
+            <section className="rounded-surface bg-card border border-border p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-heading text-foreground">{currYear}년 {currMonth + 1}월</h2>
                 <div className="flex items-center gap-1">
@@ -689,7 +689,7 @@ export function SchedulePage() {
 
         {showEventModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center justify-between">
                 <h3 id="event-modal-title" className="text-heading text-foreground">{editingEventId ? '일정 수정' : '새 일정 추가'}</h3>
                 <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} aria-label="닫기" className="p-1 text-muted-foreground disabled:opacity-40"><X size={18} /></button>
@@ -759,7 +759,7 @@ function StatusCard({
   onAction?: () => void;
 }) {
   return (
-    <section className="rounded-3xl bg-card border border-border p-7 text-center shadow-sm space-y-3">
+    <section className="rounded-surface bg-card border border-border p-7 text-center shadow-sm space-y-3">
       <div className="w-12 h-12 mx-auto rounded-2xl bg-muted text-muted-foreground flex items-center justify-center">{icon}</div>
       <div>
         <h2 className="text-heading text-foreground">{title}</h2>

@@ -55,42 +55,75 @@
   --color-success: var(--success);
   --color-success-surface: var(--success-surface);
   /*
-   * Type scale (DESIGN_V2 §3.3).
+   * Type scale (DESIGN_V2 "확정된 시각 개정 (2026-08-08) — 최우선", 개정 타이포그래피).
    *
-   * Korean needs a larger body than Latin at the same optical size, so the floor
-   * is deliberately high: `caption` at 13px is the smallest size this app is
-   * allowed to use, and the partner's own words are never smaller than `body`.
+   * Seven steps. The previous six were a correction of a real defect -- this app
+   * was built almost entirely out of `text-xs` (12px) and `text-[10px]` /
+   * `text-[11px]` arbitrary values, so a record excerpt, a timestamp and a legend
+   * were all the same size and the hierarchy the briefing depends on did not
+   * exist in the type at all. Naming the steps fixed that.
    *
-   * This app was built almost entirely out of `text-xs` (12px) and
-   * `text-[10px]`/`text-[11px]` arbitrary values -- a record excerpt, a timestamp
-   * and a legend were all the same size, so the hierarchy that the briefing
-   * depends on did not exist. Naming the six steps makes "which level is this"
-   * answerable, and src/lib/typeScale.test.ts holds converted files to the
-   * vocabulary so the arbitrary values cannot creep back in one file at a time.
+   * It over-corrected. Raising the FLOOR to 13px also raised every ceiling with
+   * it -- 28px figures, a 20px screen title, 16px for all prose and 14px for
+   * every label -- and the result reads as senior mode: three or four cards fill
+   * a 390x844 viewport and the partner's actual day is below the fold. The
+   * revision keeps the vocabulary and re-tunes the values, so density is
+   * recovered by shrinking chrome and leading rather than by shrinking content.
    *
-   *   display  28/34 700   D-Day figure, days-together figure
-   *   title    20/28 600   screen title
-   *   heading  17/24 600   card and section title
-   *   body     16/24 400   record excerpts, prose, input values
-   *   label    14/20 500   author, type, button text
-   *   caption  13/18 400   times and metadata -- the floor
+   *   display   26/32 700   D-Day figure, days-together figure -- max 1 per screen
+   *   title     22/30 700   screen title
+   *   heading   17/24 600   section and card title
+   *   emphasis  16/24 600   the briefing's point, important user prose
+   *   body      15/22 400   record prose, descriptions, input values
+   *   label     13/18 500   filters, assignee, status, button text
+   *   caption   12/16 400   times and metadata
+   *
+   * Body is deliberately NOT forced to 16px everywhere. The couple's own words
+   * are protected at 15-16px (`body` / `emphasis`); times and status are allowed
+   * 12-13px, which is what buys back the vertical space. Text enlargement is
+   * answered by reflow, never by clipping.
+   *
+   * src/lib/typeScale.test.ts holds every file under src/ to this vocabulary so
+   * arbitrary values cannot creep back one file at a time, and
+   * e2e/renderedTypeScale.spec.ts measures what the browser actually paints.
    */
-  --text-display: 1.75rem;
-  --text-display--line-height: 2.125rem;
+  --text-display: 1.625rem;
+  --text-display--line-height: 2rem;
   --text-display--font-weight: 700;
-  --text-title: 1.25rem;
-  --text-title--line-height: 1.75rem;
-  --text-title--font-weight: 600;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.875rem;
+  --text-title--font-weight: 700;
   --text-heading: 1.0625rem;
   --text-heading--line-height: 1.5rem;
   --text-heading--font-weight: 600;
-  --text-body: 1rem;
-  --text-body--line-height: 1.5rem;
-  --text-label: 0.875rem;
-  --text-label--line-height: 1.25rem;
+  --text-emphasis: 1rem;
+  --text-emphasis--line-height: 1.5rem;
+  --text-emphasis--font-weight: 600;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.375rem;
+  --text-body--font-weight: 400;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.125rem;
   --text-label--font-weight: 500;
-  --text-caption: 0.8125rem;
-  --text-caption--line-height: 1.125rem;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-caption--font-weight: 400;
+  /*
+   * Radius (DESIGN_V2 정보 밀도와 레이아웃 토큰).
+   *
+   * Two meanings, named: `control` for anything you press or type into, `surface`
+   * for a card or sheet that groups one subject. The numbered ladder is kept and
+   * re-based on a 0.5rem root so the two utilities the app already reaches for
+   * land exactly on those numbers -- `rounded-xl` is 12px and `rounded-2xl` is
+   * 16px -- instead of the previous 18px / 22px.
+   *
+   * `rounded-3xl` is NOT part of this ladder (Tailwind's own 24px) and is the
+   * single biggest source of the "everything is a soft blob" reading. It is
+   * replaced by `rounded-surface` app-wide; src/lib/themeTokens.test.ts fails if
+   * it comes back.
+   */
+  --radius-control: 0.75rem;
+  --radius-surface: 1rem;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -99,7 +132,7 @@
 }
 
 :root {
-  --radius: 0.875rem;
+  --radius: 0.5rem;
   --cream: oklch(0.985 0.008 85);
   --navy: oklch(0.28 0.06 265);
   --background: var(--cream);

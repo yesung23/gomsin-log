@@ -41,7 +41,7 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
       ref={setNodeRef}
       style={style}
       className={cn(
-        "relative rounded-3xl bg-card shadow-sm border border-border p-5",
+        "relative rounded-surface bg-card shadow-sm border border-border p-5",
         isEditMode && "animate-wiggle",
         isDragging && "opacity-80 scale-105 shadow-xl rotate-2"
       )}
@@ -73,7 +73,7 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
             <GripHorizontal className="w-5 h-5 text-muted-foreground" aria-hidden="true" />
           </button>
           {/* Prevent clicks on content during edit mode */}
-          <div className="absolute inset-0 bg-card/20 z-10 rounded-3xl cursor-pointer" aria-hidden="true" />
+          <div className="absolute inset-0 bg-card/20 z-10 rounded-surface cursor-pointer" aria-hidden="true" />
         </>
       )}
       

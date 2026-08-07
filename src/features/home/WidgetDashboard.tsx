@@ -258,7 +258,7 @@ export function WidgetDashboard() {
         {isEditMode && activeWidgets.length < widgetsForRole(role).length && (
           <button
             onClick={() => setIsAddWidgetOpen(true)}
-            className="w-full py-4 rounded-3xl border-2 border-dashed border-border text-muted-foreground font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral transition-colors"
+            className="w-full py-4 rounded-surface border-2 border-dashed border-border text-muted-foreground font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral transition-colors"
           >
             <Plus size={24} />
             위젯 추가

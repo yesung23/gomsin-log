@@ -84,7 +84,7 @@ export function InstallPromptBanner() {
   if (isNative || !showPrompt) return null;
 
   return (
-    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] max-w-[390px] z-50 bg-card/95 backdrop-blur-xl p-5 rounded-3xl shadow-2xl border border-border animate-in slide-in-from-bottom-8">
+    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] max-w-[390px] z-50 bg-card/95 backdrop-blur-xl p-5 rounded-surface shadow-2xl border border-border animate-in slide-in-from-bottom-8">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="w-12 h-12 bg-coral/10 rounded-2xl flex items-center justify-center shrink-0">
           <Smartphone size={24} className="text-coral" />

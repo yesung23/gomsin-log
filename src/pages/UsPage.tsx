@@ -111,7 +111,7 @@ export function UsPage() {
         </div>
 
         {/* Profile */}
-        <section className="rounded-3xl bg-card border border-border p-5 shadow-sm flex flex-col items-center text-center space-y-4">
+        <section className="rounded-surface bg-card border border-border p-5 shadow-sm flex flex-col items-center text-center space-y-4">
           <CoupleAvatar size={64} />
           <div>
             <h2 className="text-heading text-foreground flex items-center justify-center gap-1.5">
@@ -142,7 +142,7 @@ export function UsPage() {
         <CoupleStatusBanner />
 
         {/* Calendar UI */}
-        <section className="rounded-3xl bg-card border border-border shadow-sm overflow-hidden p-4">
+        <section className="rounded-surface bg-card border border-border shadow-sm overflow-hidden p-4">
           <div className="flex items-center justify-between mb-4 px-1">
             <button onClick={goToPrevMonth} className="p-2 rounded-xl hover:bg-muted active:scale-95 transition" aria-label="이전 달">
               <ChevronLeft size={18} />

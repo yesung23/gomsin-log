@@ -81,7 +81,7 @@ function AccountDeletionRecovery() {
     <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
       <section
         role="alert"
-        className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm space-y-3"
+        className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3"
       >
         <h1 className="text-heading text-foreground">탈퇴가 완료되지 않았어요</h1>
         <p className="text-body text-muted-foreground">
@@ -132,7 +132,7 @@ function AuthSyncUnavailable({ reason }: { reason: ServerErrorKind | null }) {
 
   return (
     <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
-      <section role="alert" className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 text-center shadow-sm space-y-3">
+      <section role="alert" className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3">
         <h1 className="text-heading text-foreground">{title}</h1>
         <p className="text-body text-muted-foreground">{description}</p>
         <button

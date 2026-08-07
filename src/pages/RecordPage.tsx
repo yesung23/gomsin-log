@@ -851,7 +851,7 @@ export function RecordPage() {
       */}
       {selectedRecord && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
+          <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
               <div className="min-w-0">
                 <h3 id="record-detail-modal-title" className="text-heading text-card-foreground">

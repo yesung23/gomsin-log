@@ -26,6 +26,11 @@ import { join, resolve, sep } from 'node:path';
  * This guard is the reason the split cannot silently rot back: any new
  * `bg-coral` that carries a light label fails here, and any new bare `bg-coral`
  * at all has to be added to the decoration inventory below with a reason.
+ *
+ * The inventory shrinks as well as grows. The active-tab indicator bar was removed
+ * outright by the 2026-08-08 visual revision -- a 20x3px coral rule under a label
+ * that is already coral is duplicated signal, and Low-chrome interface asks for the
+ * decoration to go rather than for a third cue.
  */
 
 const BARE_CORAL_FILL = /\bbg-coral(?![\w/-])/g;
@@ -40,20 +45,20 @@ const LIGHT_LABEL = /\btext-(?:white|coral-foreground)(?![\w/-])/;
  */
 const DECORATIVE_CORAL_FILLS: Array<{ file: string; anchor: string; occurrences: number; reason: string }> = [
   {
-    file: 'src/components/MobileShell.tsx',
-    anchor: 'w-5 h-[3px] rounded-full bg-coral',
-    occurrences: 1,
-    reason: 'Active tab indicator: a 20x3px bar with nothing on it. The tab LABEL '
-      + 'above it is text-coral on the page background, which is a foreground '
-      + 'contrast question and not this bar.',
-  },
-  {
     file: 'src/lib/recordAuthor.ts',
     anchor: "stripe: 'bg-coral'",
     occurrences: 1,
     reason: 'Author stripe down the left edge of a 곰신 record. It is a 3px rule, '
       + 'never a text surface, and recordAuthorDistinction.test.ts asserts this '
       + 'exact class because the stripe is one of the three redundant author cues.',
+  },
+  {
+    file: 'src/components/ui/List.tsx',
+    anchor: 'w-1.5 h-1.5 rounded-full bg-coral',
+    occurrences: 1,
+    reason: 'Editorial timeline node: a 6px dot on the connecting rail, marked '
+      + 'aria-hidden and sitting on the page surface. It carries no label, and the '
+      + 'row it belongs to states its time and author in text.',
   },
   {
     file: 'src/pages/RecordPage.tsx',

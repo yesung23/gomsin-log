@@ -65,7 +65,7 @@ export function MyPage() {
           </button>
         </div>
 
-        <div className="bg-card rounded-3xl p-5 shadow-sm border border-border flex items-center justify-between">
+        <div className="bg-card rounded-surface p-5 shadow-sm border border-border flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-14 h-14 rounded-full bg-coral/15 text-coral-strong font-extrabold flex items-center justify-center text-title border border-coral/30">
               {isGomsin ? '🌸' : '🪖'}
@@ -109,7 +109,7 @@ export function MyPage() {
         />
 
         {!isGomsin && (
-          <section className="bg-card rounded-3xl p-5 border border-border shadow-sm space-y-4">
+          <section className="bg-card rounded-surface p-5 border border-border shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-border/40 pb-3">
               <div className="flex items-center gap-2">
                 <ShieldAlert className="w-5 h-5 text-coral" />
@@ -171,7 +171,7 @@ export function MyPage() {
           </div>
         )}
 
-        <section className="bg-card rounded-3xl border border-border p-4 shadow-sm">
+        <section className="bg-card rounded-surface border border-border p-4 shadow-sm">
           <button
             onClick={() => navigate('/settings')}
             className="w-full py-3 px-2 flex items-center justify-between text-label font-bold text-foreground hover:text-coral transition"

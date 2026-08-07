@@ -319,7 +319,7 @@ export function TripsPage() {
       {/* z-[60] so the tab bar cannot intercept 취소 / 만들기 -- see RecordPage. */}
       {showModal && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-          <div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-in slide-in-from-bottom-4">
+          <div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-6 animate-in slide-in-from-bottom-4">
             <h2 className="text-title text-card-foreground mb-6">새 여행 만들기</h2>
             <div className="space-y-4">
               <label className="block text-label font-bold text-foreground">여행 이름<input type="text" value={newTrip.title} onChange={(event) => setNewTrip((prev) => ({ ...prev, title: event.target.value }))} placeholder="예: 제주도 3박 4일 여행" className="mt-1 w-full bg-muted border border-border rounded-xl px-4 py-3 outline-none focus:border-info" /></label>

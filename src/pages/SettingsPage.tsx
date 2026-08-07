@@ -350,7 +350,7 @@ export function SettingsPage() {
         </header>
 
         {/* User Profile Overview */}
-        <section className="rounded-3xl bg-card border border-border p-5 shadow-sm flex items-center justify-between">
+        <section className="rounded-surface bg-card border border-border p-5 shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-coral/20 text-coral-strong font-bold flex items-center justify-center text-title">
               {profile.role === 'gomsin' ? '🌸' : '🪖'}
@@ -368,7 +368,7 @@ export function SettingsPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl bg-card border border-border p-4 shadow-sm space-y-3">
+        <section className="rounded-surface bg-card border border-border p-4 shadow-sm space-y-3">
           <div>
             <h2 className="text-heading text-foreground">화면 테마</h2>
             <p className="text-caption text-muted-foreground mt-1">
@@ -407,7 +407,7 @@ export function SettingsPage() {
 
         {/* Invite code for the space creator, until the partner actually joins. */}
         {hasCoupleSpace && !profile.couple.connected && !isDemoMode && (
-          <section className="rounded-3xl bg-card border border-coral/30 p-5 shadow-sm space-y-3">
+          <section className="rounded-surface bg-card border border-coral/30 p-5 shadow-sm space-y-3">
             <div>
               <h2 className="text-heading text-foreground">우리 공간 초대 코드</h2>
               <p className="text-caption text-muted-foreground mt-1">
@@ -480,7 +480,7 @@ export function SettingsPage() {
         )}
 
         {!hasCoupleSpace && !isDemoMode && (
-          <section className="rounded-3xl bg-card border border-coral/30 p-5 shadow-sm space-y-3">
+          <section className="rounded-surface bg-card border border-coral/30 p-5 shadow-sm space-y-3">
             <div>
               <h2 className="text-heading text-foreground">우리 공간 연결하기</h2>
               <p className="text-caption text-muted-foreground mt-1">
@@ -530,7 +530,7 @@ export function SettingsPage() {
         )}
 
         {/* General Settings */}
-        <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
+        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
           <button
             onClick={() => {
               setEditName(profile.myName);
@@ -586,7 +586,7 @@ export function SettingsPage() {
           Unconditional on role on purpose: the pre-existing /service row below
           is soldier-only, so a 곰신 viewer had no non-widget route to it at all.
         */}
-        <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
+        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
           <h2 className="px-4 pt-4 pb-2 text-caption font-bold text-muted-foreground">바로가기</h2>
           {[
             { to: '/schedule', label: '일정 관리', icon: CalendarDays },
@@ -610,7 +610,7 @@ export function SettingsPage() {
 
         {/* Contact Hours */}
         {profile.role === 'soldier' && (
-          <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm p-4 space-y-2">
+          <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm p-4 space-y-2">
             <div className="flex items-center justify-between text-label font-bold text-foreground">
               <div className="flex items-center gap-2">
                 <Clock size={16} className="text-coral" />
@@ -627,7 +627,7 @@ export function SettingsPage() {
         )}
 
         {/* Couple & Data Management */}
-        <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
+        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
           <button
             onClick={handleExportMyData}
             disabled={isExporting}
@@ -666,7 +666,7 @@ export function SettingsPage() {
         </section>
 
         {/* Account Management & Reset */}
-        <section className="rounded-3xl bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
+        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
           <button
             onClick={() => navigate('/legal/terms')}
             className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
@@ -720,7 +720,7 @@ export function SettingsPage() {
         {/* Profile Edit Modal */}
         {showProfileModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <h3 id="profile-modal-title" className="text-heading text-foreground">내 프로필 수정</h3>
 
               <div className="space-y-2">
@@ -775,7 +775,7 @@ export function SettingsPage() {
         {/* Disconnect Modal */}
         {showDisconnectModal && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 animate-in fade-in">
-            <div role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="bg-card rounded-3xl p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
+            <div role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="bg-card rounded-surface p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
               <h3 id="disconnect-modal-title" className="text-heading text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
               <p className="text-caption text-muted-foreground leading-relaxed">
                 연결을 해제하면 상대방은 내 공유 기록을 더 이상 볼 수 없게 됩니다.
@@ -823,7 +823,7 @@ export function SettingsPage() {
         {/* Delete Records Modal */}
         {showDeleteRecordsModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <h3 id="delete-records-modal-title" className="text-heading text-foreground">내 기록 전체 삭제</h3>
               <p className="text-caption text-muted-foreground leading-relaxed">
                 내가 작성한 총 {ownRecords.length}개의 일상 기록이 삭제됩니다. 정말 삭제하시겠습니까?
@@ -876,7 +876,7 @@ export function SettingsPage() {
         {/* Delete Account Modal */}
         {showDeleteAccountModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-destructive text-heading">
                 <AlertTriangle size={20} />
                 <span id="delete-account-modal-title">계정 삭제 (회원 탈퇴)</span>
@@ -970,7 +970,7 @@ export function SettingsPage() {
         {/* PWA Modal */}
         {showPWAModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="bg-card rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground text-heading">
                 <Smartphone size={20} className="text-coral" />
                 <span id="pwa-modal-title">PWA 앱 설치 안내</span>

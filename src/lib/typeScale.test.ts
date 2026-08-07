@@ -21,20 +21,21 @@ import { resolve, sep } from 'node:path';
  * so the hierarchy the briefing depends on -- the partner's own sentence being
  * the largest thing on the card -- did not exist in the type at all.
  *
- * The scale is six steps and lives in src/styles/index.css. This guard holds
+ * The scale is seven steps and lives in src/styles/index.css. This guard holds
  * converted files to it, file by file, the same way the C4 palette guard grows.
  * A file is added here only once it is fully converted, so the list is a record
  * of progress rather than an aspiration.
  */
 
-/** DESIGN_V2 §3.3. `caption` is the floor: nothing in this app may be smaller. */
+/** DESIGN_V2 개정 타이포그래피 (2026-08-08). Seven steps, weights included. */
 const SCALE = {
-  display: { size: '1.75rem', px: 28 },
-  title: { size: '1.25rem', px: 20 },
-  heading: { size: '1.0625rem', px: 17 },
-  body: { size: '1rem', px: 16 },
-  label: { size: '0.875rem', px: 14 },
-  caption: { size: '0.8125rem', px: 13 },
+  display: { size: '1.625rem', px: 26, lineHeight: '2rem', weight: '700' },
+  title: { size: '1.375rem', px: 22, lineHeight: '1.875rem', weight: '700' },
+  heading: { size: '1.0625rem', px: 17, lineHeight: '1.5rem', weight: '600' },
+  emphasis: { size: '1rem', px: 16, lineHeight: '1.5rem', weight: '600' },
+  body: { size: '0.9375rem', px: 15, lineHeight: '1.375rem', weight: '400' },
+  label: { size: '0.8125rem', px: 13, lineHeight: '1.125rem', weight: '500' },
+  caption: { size: '0.75rem', px: 12, lineHeight: '1rem', weight: '400' },
 } as const;
 
 /**
@@ -47,7 +48,7 @@ const SCALE = {
  * this guard exists to catch.
  */
 const FONT_SIZE_UTILITY =
-  /\btext-\[[^\]]*(?:px|rem|em)\]|\btext-(?:xs|sm|base|lg|xl|[2-9]xl|display|title|heading|body|label|caption)\b/g;
+  /\btext-\[[^\]]*(?:px|rem|em)\]|\btext-(?:xs|sm|base|lg|xl|[2-9]xl|display|title|heading|emphasis|body|label|caption)\b/g;
 
 const ALLOWED = new Set(Object.keys(SCALE).map((name) => `text-${name}`));
 
@@ -91,6 +92,7 @@ describe('C8 - the type scale is the only font-size vocabulary in src/', () => {
     expect(CONVERTED_FILES).toContain('src/pages/RecordPage.tsx');
     expect(CONVERTED_FILES).toContain('src/components/MobileShell.tsx');
     expect(CONVERTED_FILES).toContain('src/components/ui/Button.tsx');
+    expect(CONVERTED_FILES).toContain('src/components/ui/List.tsx');
   });
 
   it('no file uses a size outside the six named steps', () => {
@@ -133,7 +135,7 @@ describe('C8 - the type scale is the only font-size vocabulary in src/', () => {
     }
   });
 
-  it('accepts the six scale names', () => {
+  it('accepts the seven scale names', () => {
     for (const name of Object.keys(SCALE)) {
       const utility = `text-${name}`;
       expect(utility.match(FONT_SIZE_UTILITY), utility).toEqual([utility]);
@@ -151,21 +153,72 @@ describe('C8 - the scale is defined once, in the token file', () => {
     }
   });
 
-  it('gives every step a line height, so leading is not left to the browser', () => {
-    for (const name of Object.keys(SCALE)) {
-      expect(css, name).toContain(`--text-${name}--line-height:`);
+  it('gives every step a line height and a weight, so neither is left to the browser', () => {
+    for (const [name, step] of Object.entries(SCALE)) {
+      expect(css, name).toContain(`--text-${name}--line-height: ${step.lineHeight};`);
+      expect(css, name).toContain(`--text-${name}--font-weight: ${step.weight};`);
     }
   });
 
-  it('keeps caption as the floor and body at 16px', () => {
-    // Korean at 12px is the defect this scale exists to end. `caption` is 13px
-    // and is only for times and metadata; prose starts at `body`.
-    expect(SCALE.caption.px).toBe(13);
-    expect(SCALE.body.px).toBe(16);
+  it('holds the floor at 12px and protects the couple\'s own words at 15-16px', () => {
+    /*
+     * The 2026-08-08 revision moved the floor DOWN, on purpose, and this is the
+     * assertion that says what that is allowed to mean.
+     *
+     * The previous scale put the floor at 13px and, to keep the steps apart, every
+     * ceiling above it too: 28px figures, a 20px title, 16px for all prose. The
+     * result read as senior mode and pushed the partner's real day below the fold.
+     * So metadata is allowed 12px again -- but ONLY metadata. `body` at 15 and
+     * `emphasis` at 16 are the two steps the user's own sentences use, and they are
+     * asserted here so a future "let's tighten it a bit more" cannot reach them.
+     */
+    expect(SCALE.caption.px).toBe(12);
+    expect(SCALE.label.px).toBe(13);
+    expect(SCALE.body.px).toBe(15);
+    expect(SCALE.emphasis.px).toBe(16);
+
     const sizes = Object.values(SCALE).map((step) => step.px);
-    expect(Math.min(...sizes)).toBe(13);
+    expect(Math.min(...sizes)).toBe(12);
     // Strictly descending, so no two steps collide and the hierarchy is legible.
     expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
     expect(new Set(sizes).size).toBe(sizes.length);
+  });
+
+  it('keeps a leading of at least 1.4 on the two prose steps', () => {
+    // Korean crowds below 1.4. Metadata may be tighter; prose may not.
+    for (const name of ['body', 'emphasis'] as const) {
+      const step = SCALE[name];
+      const lineHeightPx = Number.parseFloat(step.lineHeight) * 16;
+      expect(lineHeightPx / step.px, name).toBeGreaterThanOrEqual(1.4);
+    }
+  });
+});
+
+describe('surface radius has two meanings, both named', () => {
+  const css = read('src/styles/index.css');
+
+  it('declares the control and surface radii', () => {
+    // DESIGN_V2 정보 밀도와 레이아웃 토큰: 12px for anything you press, 16px for a
+    // card or sheet that groups one subject.
+    expect(css).toContain('--radius-control: 0.75rem;');
+    expect(css).toContain('--radius-surface: 1rem;');
+  });
+
+  it('does not leave a 24px blob radius anywhere under src/', () => {
+    /*
+     * `rounded-3xl` is Tailwind's own 24px and is not part of this app's ladder.
+     * Forty of them were the single biggest contributor to the "every screen is a
+     * stack of soft rectangles" reading, so they are now `rounded-surface`.
+     *
+     * Block comments are stripped before scanning: several of the files that were
+     * converted explain the conversion, and naming the old utility in prose is not
+     * a regression.
+     */
+    const offenders: string[] = [];
+    for (const file of CONVERTED_FILES) {
+      const withoutComments = read(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+      if (withoutComments.includes('rounded-3xl')) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
   });
 });

@@ -74,6 +74,14 @@ const CONVERTED_FILES = [
   'src/pages/SchedulePage.tsx',
   'src/pages/TripsPage.tsx',
   'src/pages/TripDetailPage.tsx',
+  // The relationship and account screens. LegalPage is the reason `body` matters
+  // outside the record: the privacy policy and the terms were 12px, which is the
+  // one document in this app a user is most likely to actually have to read.
+  'src/pages/UsPage.tsx',
+  'src/pages/MyPage.tsx',
+  'src/pages/ServicePage.tsx',
+  'src/pages/LegalPage.tsx',
+  'src/pages/AuthCallbackPage.tsx',
 ];
 
 function read(file: string): string {

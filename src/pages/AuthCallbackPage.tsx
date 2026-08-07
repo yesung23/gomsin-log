@@ -147,10 +147,10 @@ export function AuthCallbackPage() {
     <div className="min-h-screen min-h-[100dvh] w-full flex items-center justify-center bg-background p-4">
       <div className="text-center space-y-4 max-w-sm">
         <div className="w-12 h-12 border-4 border-coral border-t-transparent rounded-full animate-spin mx-auto" />
-        <h2 className="text-lg font-bold text-foreground">인증 정보를 확인하는 중입니다...</h2>
-        <p className="text-xs text-muted-foreground">잠시만 기다려주세요.</p>
+        <h2 className="text-heading text-foreground">인증 정보를 확인하는 중입니다...</h2>
+        <p className="text-caption text-muted-foreground">잠시만 기다려주세요.</p>
         {errorMsg && (
-          <p className="text-xs text-destructive font-medium pt-2">{errorMsg}</p>
+          <p className="text-caption text-destructive font-medium pt-2">{errorMsg}</p>
         )}
       </div>
     </div>

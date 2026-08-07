@@ -48,6 +48,22 @@ function makeState(): AppState {
     events: [],
     trips: [],
     widgetLayout: ['today_word', 'dday'],
+    /*
+     * Stated explicitly rather than inherited from `DEFAULT_LAYOUT_BY_ROLE`.
+     *
+     * These tests are about the COMPOSER -- that 군화 gets the same one 곰신 does
+     * (this dashboard used to be a read-only tree) and that whoever writes is
+     * recorded as the author. Neither claim is about which widgets 군화 gets by
+     * default, but both silently depended on `today_word` being in that default,
+     * so they broke when the 군화 default was reduced to the briefing, the
+     * partner's day and D-Day.
+     *
+     * `today_word` is still offered to 군화 by `widgetsForRole` and is asserted
+     * there (`emotionRedesign.test.ts`); this fixture is a 군화 who has added it,
+     * which is exactly the state these assertions describe. README §1.3 -- both
+     * roles write with the same composer -- is therefore still under test.
+     */
+    soldierWidgetLayout: ['today_word', 'dday'],
     hasSeenInstallPrompt: true,
     theme: 'light',
   };

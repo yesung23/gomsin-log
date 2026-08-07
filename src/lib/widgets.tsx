@@ -37,23 +37,34 @@ export type WidgetDef = {
 /**
  * Default home composition per role.
  *
- * 군화 leads with the partner's emotion flow and then the summary, because a
- * soldier gets a short window and needs "how is she" before anything else. 곰신
- * leads with the briefing and the composer, because she is the one writing.
+ * 군화's default is deliberately SHORT. `통화 전 60초` is pinned by
+ * `WidgetDashboard` outside this list and cannot be removed or reordered, so the
+ * soldier home is: briefing, then the day it summarises, then D-Day.
+ *
+ * It used to be six widgets on top of the pinned briefing. Four of them --
+ * `partner_emotion_flow`, `partner_emotion_summary`, `care_hint` and `today_word`
+ * -- described the same day the briefing had just described, so the screen built to
+ * save a soldier's minute spent it: PRODUCT_PRD §7.3 caps the core screen at three
+ * priorities and this default carried seven surfaces. PRODUCT_REVIEW §2 diagnosed
+ * exactly this and recorded the fix as done, but only the briefing card was
+ * consolidated; the default was never changed.
+ *
+ * Nothing is deleted. The three description widgets are one tap away inside the
+ * briefing's `더 보기`, `today_word` lives on the 기록 tab, and every one of them --
+ * plus `upcoming_schedule` -- is still offered by `위젯 추가`. Users who already
+ * arranged their own layout keep it: `WidgetDashboard` only falls back to this list
+ * when the stored layout is empty.
+ *
+ * `partner_day` stays, and that is the load-bearing part. README §1.4 defines this
+ * home as the partner's moments in chronological order, and
+ * `PartnerDayTimelineWidget.test.tsx` exists precisely to stop a home that shows
+ * only descriptions of them. The briefing is a judgement surface; `partner_day` is
+ * the evidence it was judged from. They are not substitutes.
+ *
+ * 곰신 leads with the briefing and the composer, because she is the one writing.
  */
 export const DEFAULT_LAYOUT_BY_ROLE: Record<Role, string[]> = {
-  soldier: [
-    // The day itself comes first. The three widgets under it describe that day --
-    // its shape, its headline, what to say about it -- and a description is only
-    // useful once the thing it describes is on the screen. README section 1.4 puts
-    // the chronological moments at the centre of this home, so that is what leads.
-    'partner_day',
-    'partner_emotion_flow',
-    'partner_emotion_summary',
-    'care_hint',
-    'today_word',
-    'dday',
-  ],
+  soldier: ['partner_day', 'dday'],
   gomsin: ['today_briefing', 'today_word', 'dday'],
 };
 

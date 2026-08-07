@@ -114,24 +114,49 @@ test('a saved record can have its emotion flow corrected afterwards', async ({ b
   await context.close();
 });
 
-test("군화's home leads with the partner's flow, then the summary", async ({ browser }) => {
+test("군화's home leads with the briefing, and the descriptions are one tap inside it", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, PARTNER);
   const page = await context.newPage();
   await page.goto('/');
   await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
 
+  /*
+   * Updated with the 군화 home default, and the reason is here rather than in a
+   * commit message.
+   *
+   * 마음 흐름 / 오늘의 요약 / 다정한 한마디 used to be default home widgets sitting
+   * under the pinned briefing, so the same day was described four times in four
+   * wrappers. They are not deleted: they render inside the briefing's disclosure and
+   * are still offered by 위젯 추가.
+   *
+   * What this test now protects is stronger than the old ordering claim: the
+   * confirm action -- the thing the north-star metric times -- must be reachable
+   * WITHOUT opening the descriptions, and the descriptions must still be reachable
+   * in one tap with the flow still ahead of the summary.
+   */
+  const briefing = page.getByTestId('call-briefing');
+  await expect(briefing).toBeVisible();
+
+  // The measured action is available before anything optional is expanded.
+  await expect(briefing.getByRole('button', { name: /여기까지 확인/ })).toBeVisible();
+
+  // Collapsed by default: a soldier with forty seconds never scrolls past them.
   const flow = page.getByTestId('widget-partner-emotion-flow');
+  await expect(flow).toHaveCount(0);
+
+  await briefing.getByRole('button', { name: /더 보기/ }).click();
+
   const summary = page.getByTestId('widget-partner-emotion-summary');
   await expect(flow).toBeVisible();
   await expect(summary).toBeVisible();
 
-  // Order matters: it is the first thing a soldier should see.
+  // The relationship the original test existed to protect, at its new location.
   const flowBox = await flow.boundingBox();
   const summaryBox = await summary.boundingBox();
   expect(flowBox!.y).toBeLessThan(summaryBox!.y);
 
-  // And the 군화 home is now editable, which it never was.
+  // And the 군화 home is still editable, which it never was before the redesign.
   await expect(page.getByRole('button', { name: '새 항목 추가' })).toBeVisible();
   await context.close();
 });

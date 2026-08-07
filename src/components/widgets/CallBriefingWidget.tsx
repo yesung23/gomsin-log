@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, ChevronRight, Clock3, MessageCircleHeart, RotateCcw } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Clock3, MessageCircleHeart, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
@@ -9,6 +9,11 @@ import {
   readCallBriefingCheckpoint,
   writeCallBriefingCheckpoint,
 } from '@/lib/callBriefing';
+import {
+  PartnerEmotionFlowWidget,
+  PartnerEmotionSummaryWidget,
+} from '@/components/widgets/PartnerEmotionWidgets';
+import { CareHintWidget } from '@/components/widgets/CareHintWidget';
 import type { DailyRecord } from '@/types';
 
 function shortDate(date: string): string {
@@ -24,6 +29,8 @@ export function CallBriefingWidget() {
   const todayStr = toLocalDateString(localToday());
   const [checkpoint, setCheckpoint] = useState(() => readCallBriefingCheckpoint(userId, coupleId));
   const [showRecent, setShowRecent] = useState(false);
+  /** The descriptions of the day, collapsed so they cannot delay the button. */
+  const [showMore, setShowMore] = useState(false);
 
   const partnerRecords = useMemo(() => {
     const viewer = { userId: state.profile.id, role: state.profile.role };
@@ -130,13 +137,15 @@ export function CallBriefingWidget() {
             ))}
           </ol>
 
-          {briefing.opener && (
-            <div className="mt-3 flex items-start gap-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 px-3.5 py-3">
-              <MessageCircleHeart size={16} className="mt-0.5 text-indigo-500 shrink-0" aria-hidden="true" />
-              <p className="text-xs text-foreground leading-relaxed"><strong>첫마디</strong><br />{briefing.opener}</p>
-            </div>
-          )}
-
+          {/*
+            The confirm action comes IMMEDIATELY after the three topics, before
+            anything optional.
+        
+            The north-star metric is the time from opening this card to pressing
+            this button, so anything between the two is measured as comprehension
+            time that the user did not spend comprehending. At 320x568 the opener
+            pushed the button below the fold entirely.
+          */}
           {!showRecent && briefing.newestCreatedAt && (
             <button
               type="button"
@@ -155,6 +164,50 @@ export function CallBriefingWidget() {
               새 소식만 보기
             </button>
           )}
+
+          {/*
+            Everything that DESCRIBES the day rather than being it.
+        
+            The 군화 home used to carry 상대방 마음 흐름, 오늘의 요약 and 다정한 한마디
+            as separate default widgets alongside this card, so the same context was
+            read four times in four wrappers. They are not deleted -- they are the
+            same components, one tap away here, and still addable back to the home
+            from 위젯 추가.
+        
+            Collapsed by default: a soldier with three minutes opens it, and a
+            soldier with forty seconds never scrolls past it to reach the button
+            above.
+          */}
+          <div className="mt-3 border-t border-border/60 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowMore((open) => !open)}
+              aria-expanded={showMore}
+              aria-controls="call-briefing-more"
+              className="w-full min-h-[44px] flex items-center justify-center gap-1 text-[11px] font-bold text-muted-foreground"
+            >
+              {showMore ? '접기' : '첫마디와 마음 흐름 더 보기'}
+              <ChevronDown
+                size={14}
+                aria-hidden="true"
+                className={showMore ? 'rotate-180 transition-transform' : 'transition-transform'}
+              />
+            </button>
+
+            {showMore && (
+              <div id="call-briefing-more" className="mt-2 space-y-3">
+                {briefing.opener && (
+                  <div className="flex items-start gap-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 px-3.5 py-3">
+                    <MessageCircleHeart size={16} className="mt-0.5 text-indigo-500 shrink-0" aria-hidden="true" />
+                    <p className="text-xs text-foreground leading-relaxed"><strong>첫마디</strong><br />{briefing.opener}</p>
+                  </div>
+                )}
+                <PartnerEmotionFlowWidget />
+                <PartnerEmotionSummaryWidget />
+                <CareHintWidget />
+              </div>
+            )}
+          </div>
         </>
       )}
     </section>

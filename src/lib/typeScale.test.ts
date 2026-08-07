@@ -68,6 +68,12 @@ const CONVERTED_FILES = [
   // so the partner's own sentence had to stop being 14px while the app's own
   // chrome around it was the same size or larger.
   'src/pages/RecordPage.tsx',
+  // The planning surfaces. A schedule is read at a glance, so the time and the
+  // title were the two things that had to stop being the same size as the legend
+  // underneath them.
+  'src/pages/SchedulePage.tsx',
+  'src/pages/TripsPage.tsx',
+  'src/pages/TripDetailPage.tsx',
 ];
 
 function read(file: string): string {

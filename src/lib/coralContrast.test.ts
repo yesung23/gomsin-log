@@ -195,9 +195,9 @@ describe('C7 - the token pair is defined in both themes and documented with its 
 
   it('defines --coral-strong and its label colour in light and dark', () => {
     for (const declaration of [
-      '--coral-strong: oklch(0.52 0.16 25);',
+      '--coral-strong: oklch(0.52 0.16 14);',
       '--coral-strong-foreground: oklch(0.99 0.005 85);',
-      '--coral-strong: oklch(0.8 0.13 25);',
+      '--coral-strong: oklch(0.8 0.13 14);',
       '--coral-strong-foreground: oklch(0.18 0.018 265);',
     ]) {
       expect(css, declaration).toContain(declaration);
@@ -209,10 +209,25 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     expect(css).toContain('--color-coral-strong-foreground: var(--coral-strong-foreground);');
   });
 
-  it('leaves --coral itself untouched, because ~46 tints still depend on it', () => {
-    expect(css).toContain('--coral: oklch(0.78 0.12 22);');
+  it('keeps --coral as a hue rotation, never a replacement, because ~46 tints depend on it', () => {
+    /*
+     * What this guard is for: `--coral-strong` was added so that "text sits on
+     * this" uses could pass AA WITHOUT swapping the brand colour out from under
+     * ~46 tints, borders, fills and dots. That intent is unchanged.
+     *
+     * The hue moved 22 -> 12 on 2026-08-09 (light) and 22 -> 12 (dark) to make the
+     * brand coral PINK rather than orange-leaning. Lightness and chroma are
+     * asserted here at their original numbers precisely because those two are what
+     * every tint's contrast behaviour depends on -- a hue rotation at fixed L and C
+     * moves no ratio meaningfully, and e2e/tokenContrast.spec.ts re-measures both
+     * themes in a real paint regardless.
+     *
+     * Asserted exactly rather than loosened to a pattern: a future change to L or C
+     * still has to come here and re-measure.
+     */
+    expect(css).toContain('--coral: oklch(0.78 0.12 12);');
     expect(css).toContain('--coral-foreground: oklch(1 0 0);');
-    expect(css).toContain('--coral: oklch(0.75 0.13 22);');
+    expect(css).toContain('--coral: oklch(0.75 0.13 12);');
   });
 
   it('records the measured ratios next to the token, not in a commit message', () => {
@@ -224,8 +239,8 @@ describe('C7 - the token pair is defined in both themes and documented with its 
   });
 
   it('inverts in dark rather than darkening, which is why the two labels differ', () => {
-    const light = css.indexOf('--coral-strong: oklch(0.52 0.16 25);');
-    const dark = css.indexOf('--coral-strong: oklch(0.8 0.13 25);');
+    const light = css.indexOf('--coral-strong: oklch(0.52 0.16 14);');
+    const dark = css.indexOf('--coral-strong: oklch(0.8 0.13 14);');
     expect(light).toBeGreaterThan(-1);
     expect(dark).toBeGreaterThan(light);
   });

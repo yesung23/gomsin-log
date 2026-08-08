@@ -186,7 +186,8 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
      * `--card` equals Tailwind's `white`, and ~46 tints depend on `--coral`.
      *
      * `--muted` and `--border` were re-hued on 2026-08-09, same lightness, hue
-     * 85 -> 30. The C4 conversions replaced `gray-*` utilities with these tokens,
+     * 85 -> 18, following the brand coral into the pink family. The C4 conversions
+     * replaced `gray-*` utilities with these tokens,
      * and that substitution holds at any hue -- what it depended on was the
      * LIGHTNESS being unchanged, which it is. Asserted at the new values rather
      * than loosened, so a future drift still has to come here and say why.
@@ -194,10 +195,10 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
     for (const declaration of [
       '--card: oklch(1 0 0);',
       '--card-foreground: var(--navy);',
-      '--muted: oklch(0.96 0.009 30);',
+      '--muted: oklch(0.96 0.009 18);',
       '--muted-foreground: oklch(0.55 0.03 260);',
-      '--border: oklch(0.92 0.012 30);',
-      '--coral: oklch(0.78 0.12 22);',
+      '--border: oklch(0.92 0.012 18);',
+      '--coral: oklch(0.78 0.12 12);',
       '--coral-foreground: oklch(1 0 0);',
       '--mint-foreground: var(--navy);',
       '--navy: oklch(0.28 0.06 265);',
@@ -208,7 +209,7 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
 
   it('keeps the theme-colour constants in sync with --background', () => {
     const store = readFileSync(resolve(process.cwd(), 'src/lib/store.tsx'), 'utf8');
-    expect(store).toContain("const LIGHT_THEME_COLOR = '#FFF7F5'");
+    expect(store).toContain("const LIGHT_THEME_COLOR = '#FFF7F7'");
     expect(store).toContain("const DARK_THEME_COLOR = '#16181D'");
   });
 

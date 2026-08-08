@@ -154,7 +154,7 @@
    * Deliberately below the threshold where it looks tinted. Next to the old value
    * it is warmer; on its own it still reads as off-white.
    */
-  --cream: oklch(0.985 0.012 30);
+  --cream: oklch(0.985 0.012 18);
   --navy: oklch(0.28 0.06 265);
   --background: var(--cream);
   --foreground: var(--navy);
@@ -167,15 +167,27 @@
    */
   --card: oklch(1 0 0);
   --card-foreground: var(--navy);
-  --muted: oklch(0.96 0.009 30);
+  --muted: oklch(0.96 0.009 18);
   --muted-foreground: oklch(0.55 0.03 260);
   /* Hairlines carry the same hue: a neutral grey rule on a warm page reads dirty. */
-  --border: oklch(0.92 0.012 30);
-  --input: oklch(0.92 0.012 30);
-  --ring: oklch(0.78 0.09 20);
+  --border: oklch(0.92 0.012 18);
+  --input: oklch(0.92 0.012 18);
+  --ring: oklch(0.78 0.09 12);
   --primary: var(--navy);
   --primary-foreground: oklch(0.99 0.005 85);
-  --coral: oklch(0.78 0.12 22);
+  /*
+   * Coral PINK, not the orange-leaning coral this started as.
+   *
+   * Hue moved 22 -> 12 on 2026-08-09 at the same lightness and chroma. Hue 22
+   * carries visible orange, which is why the brand read as terracotta next to the
+   * warm page rather than as the pink this product is for. 12 is pink with coral
+   * warmth still in it; below ~8 it turns rose and stops reading as coral.
+   *
+   * Lightness and chroma are deliberately untouched: ~100 usages are tints,
+   * borders, progress fills and dots whose contrast behaviour depends on those
+   * two, not on hue. Rotating hue alone leaves every one of them where it was.
+   */
+  --coral: oklch(0.78 0.12 12);
   --coral-foreground: oklch(1 0 0);
   /*
    * The coral you are allowed to write on.
@@ -192,9 +204,9 @@
    * sampled byte-for-byte. Parsing the `oklch()` string instead yields wrong
    * ratios, which is the trap AI_HANDOFF §4.1 warns about.
    *
-   *   light  fill oklch(0.52 0.16 25) + label oklch(0.99 0.005 85) -> 5.82:1
+   *   light  fill oklch(0.52 0.16 14) + label oklch(0.99 0.005 85) -> 5.82:1
    *          same fill against --background                        -> 5.73:1
-   *   dark   fill oklch(0.8 0.13 25)  + label oklch(0.18 0.018 265) -> 9.25:1
+   *   dark   fill oklch(0.8 0.13 14)  + label oklch(0.18 0.018 265) -> 9.25:1
    *          same fill against --background                        -> 9.59:1
    *
    * Dark inverts rather than darkens: a dark fill on a dark background reads as
@@ -203,7 +215,7 @@
    * brand colours then compete inside one button and navy sinks into the dark
    * surface.
    */
-  --coral-strong: oklch(0.52 0.16 25);
+  --coral-strong: oklch(0.52 0.16 14);
   --coral-strong-foreground: oklch(0.99 0.005 85);
   --lilac: oklch(0.93 0.04 300);
   --lilac-foreground: var(--navy);
@@ -232,12 +244,12 @@
   --muted-foreground: oklch(0.71 0.018 255);
   --border: oklch(0.31 0.018 265);
   --input: oklch(0.27 0.018 265);
-  --ring: oklch(0.72 0.12 22);
-  --primary: oklch(0.82 0.1 22);
+  --ring: oklch(0.72 0.12 12);
+  --primary: oklch(0.82 0.1 12);
   --primary-foreground: oklch(0.18 0.018 265);
-  --coral: oklch(0.75 0.13 22);
+  --coral: oklch(0.75 0.13 12);
   --coral-foreground: oklch(0.99 0.005 85);
-  --coral-strong: oklch(0.8 0.13 25);
+  --coral-strong: oklch(0.8 0.13 14);
   --coral-strong-foreground: oklch(0.18 0.018 265);
   --lilac: oklch(0.32 0.055 305);
   --lilac-foreground: var(--foreground);

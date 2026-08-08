@@ -222,3 +222,90 @@ describe('surface radius has two meanings, both named', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('spacing stays on the six-step rhythm', () => {
+  /*
+   * DESIGN_V2 정보 밀도와 레이아웃 토큰 fixes the spacing rhythm at
+   * 4 / 8 / 12 / 16 / 20 / 24px -- Tailwind's `1 2 3 4 5 6`. The point is not
+   * tidiness for its own sake: an off-ladder gap is how a screen drifts back
+   * toward "hierarchy made out of large empty space between large cards", which
+   * is the exact reading the 2026-08-08 revision was opened to remove.
+   *
+   * The steps that are NOT on the ladder and are reachable by a plain utility:
+   * `7`=28px, `9`=36px, `10`=40px, `11`=44px, `14`=56px. `11` is deliberately
+   * included: 44px is the hit-target floor and belongs in `min-h-11` / `w-11`,
+   * never in padding or margin, where it silently doubles a section gap.
+   *
+   * Scoped to padding, margin and gap. Sizing utilities (`w-`, `h-`, `min-h-`)
+   * are excluded because the 44px hit target and fixed column widths legitimately
+   * need values off this ladder -- `TimelineRow`'s 44px time column is the whole
+   * grammar of the record screen.
+   *
+   * Block and line comments are stripped first: three of these files explain in
+   * prose which value they replaced, and naming the old one is not a regression.
+   */
+  const OFF_LADDER = /\b(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|gap-x|gap-y|space-x|space-y)-(?:7|9|10|11|14)\b/g;
+
+  it('uses no off-ladder padding, margin or gap anywhere under src/', () => {
+    const offenders: string[] = [];
+    for (const file of CONVERTED_FILES) {
+      const withoutComments = read(file)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+      const found = withoutComments.match(OFF_LADDER);
+      if (found) offenders.push(`${file}: ${[...new Set(found)].join(', ')}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('still allows the ladder itself, so the guard is not vacuous', () => {
+    /*
+     * A regex that matched nothing would pass the test above forever. Prove the
+     * pattern fires on the values it is meant to catch and stays silent on the
+     * six that are allowed, including `min-h-11` -- 44px as a hit target, which
+     * must NOT be reported.
+     */
+    expect('py-10 pb-10'.match(OFF_LADDER)).toHaveLength(2);
+    expect('p-7 gap-9 mt-14'.match(OFF_LADDER)).toHaveLength(3);
+    expect('p-1 p-2 p-3 p-4 p-5 p-6 gap-3 space-y-6'.match(OFF_LADDER)).toBeNull();
+    expect('min-h-11 w-11 h-10 min-w-[44px]'.match(OFF_LADDER)).toBeNull();
+  });
+});
+
+describe('prose leading is not tightened below the reflow floor', () => {
+  /*
+   * `text-body` (15/22 = 1.467) and `text-emphasis` (16/24 = 1.5) carry their own
+   * leading. Tailwind's `leading-snug` is 1.375, so pairing it with either one
+   * silently drops the rendered leading BELOW the 1.4 floor that
+   * `e2e/renderedTypeScale.spec.ts` measures on the real render.
+   *
+   * This is not a style preference. Korean sets no inter-word space the way Latin
+   * does, so a crowded leading costs more legibility here than it would in
+   * English, and the sentence the user wrote is the one thing on the record screen
+   * that must never be the hardest thing to read.
+   *
+   * Caught in the real browser, not in jsdom: jsdom does not resolve
+   * `line-height` from a utility class at all, so only a rendered measurement or
+   * a source guard like this one can see it. This guard is the fast half.
+   */
+  const TIGHTENED = /class(?:Name)?=(?:"|'|\{`)[^"'`]*(?:(?:text-body|text-emphasis)[^"'`]*leading-(?:snug|tight|none)|leading-(?:snug|tight|none)[^"'`]*(?:text-body|text-emphasis))/;
+
+  it('never pairs a prose step with leading-snug, tight or none', () => {
+    const offenders = CONVERTED_FILES.filter((file) => {
+      const withoutComments = read(file)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+      return TIGHTENED.test(withoutComments);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it('fires on the pairing it is meant to catch, in both orders', () => {
+    expect(TIGHTENED.test('className="text-body text-foreground leading-snug"')).toBe(true);
+    expect(TIGHTENED.test('className="leading-tight text-emphasis"')).toBe(true);
+    // Headings and labels legitimately run tight; they are not prose.
+    expect(TIGHTENED.test('className="text-heading leading-tight"')).toBe(false);
+    expect(TIGHTENED.test('className="text-caption leading-none"')).toBe(false);
+    expect(TIGHTENED.test('className="text-body text-foreground break-keep"')).toBe(false);
+  });
+});

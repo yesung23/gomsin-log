@@ -74,38 +74,78 @@ const ENTRIES_LONG: Entry[] = [
  * background tint. Colour alone never carries it, so the timeline still reads
  * correctly in greyscale and for a colour-blind reader.
  */
+/*
+ * Mirrors the shipped row in `src/pages/RecordPage.tsx`, which the 2026-08-08
+ * revision rebuilt as an editorial timeline. This harness row previously still
+ * drew the chat bubble it replaced (`justify-end` + `max-w-[85%]`), so every
+ * captured PNG of the record tab showed a layout the app no longer renders --
+ * a visual review against those captures would have judged the wrong screen.
+ *
+ * Column geometry is copied from the implementation, not re-invented:
+ *   time = w-11 (44px) · gap = 8px · media = 68px (76px @360+)
+ * Author distinction keeps the same two non-colour channels the app uses: a
+ * role stripe on the left edge (hue) and an ownership marker whose SHAPE
+ * differs -- filled dot for mine, hollow ring for the partner's. Colour is
+ * never the only signal (WCAG 1.4.1).
+ */
 function EntryRow({ entry }: { entry: Entry }) {
   const mine = entry.author === 'gomsin';
   return (
-    <li className={`flex ${mine ? 'justify-start' : 'justify-end'} px-3`}>
-      <div
-        className={[
-          'max-w-[85%] rounded-lg border border-border px-3 py-2',
-          mine ? 'bg-card' : 'bg-muted',
-        ].join(' ')}
-      >
-        <p className={`text-[12px] text-muted-foreground ${mine ? '' : 'text-right'}`}>
-          {mine ? `${entry.name} · ${entry.time}` : `${entry.time} · ${entry.name}`}
-        </p>
-        {entry.media === 'photo' ? (
-          <span
-            aria-hidden="true"
-            className="mt-1 mb-1 block rounded-md bg-muted"
-            style={{ width: 96, height: 64 }}
-          />
-        ) : null}
-        <p className="text-[14px] text-foreground">{entry.body}</p>
-        <p className={`mt-0.5 flex flex-wrap items-center gap-1.5 ${mine ? '' : 'justify-end'}`}>
-          {entry.emotion ? (
-            <span className="text-[12px] text-muted-foreground">{entry.emotion}</span>
+    <li className="list-none relative border-b border-border/40 last:border-b-0">
+      <span
+        aria-hidden="true"
+        className={`absolute left-0 top-0 bottom-0 w-1 ${mine ? 'bg-coral' : 'bg-info'}`}
+      />
+      <div className="flex pl-2.5">
+        <div className="flex-1 flex gap-2 py-3 text-left min-w-0">
+          <span className="shrink-0 w-11 text-right text-[12px] text-muted-foreground tabular-nums pt-0.5 font-medium">
+            {entry.time}
+          </span>
+
+          <span className="shrink-0 flex flex-col items-center pt-1.5" aria-hidden="true">
+            <span
+              className={
+                mine
+                  ? 'block w-1.5 h-1.5 rounded-full bg-foreground'
+                  : 'block w-1.5 h-1.5 rounded-full border border-foreground'
+              }
+            />
+            <span className="w-px flex-1 bg-border mt-1" />
+          </span>
+
+          {entry.media === 'photo' ? (
+            <span
+              aria-hidden="true"
+              className="shrink-0 w-[68px] min-[360px]:w-[76px] aspect-square rounded-md bg-muted"
+            />
           ) : null}
-          {entry.mustTalk ? (
-            <span className="rounded-sm bg-coral-strong px-1.5 py-0.5 text-[11px] font-medium text-coral-strong-foreground">
-              꼭 얘기
+
+          <span className="min-w-0 flex-1 flex flex-col gap-1">
+            <span className="flex items-center gap-1.5 flex-wrap">
+              <span
+                className={`px-1.5 py-0.5 rounded-full font-semibold text-[12px] whitespace-nowrap ${
+                  mine ? 'bg-coral/15 text-foreground' : 'bg-info/15 text-foreground'
+                }`}
+              >
+                {mine ? `🌸 곰신 · ${entry.name}` : `🪖 군화 · ${entry.name}`}
+              </span>
+              {entry.privateOnly ? <PrivateBadge /> : null}
             </span>
-          ) : null}
-          {entry.privateOnly ? <PrivateBadge /> : null}
-        </p>
+
+            <span className="text-[15px] text-foreground break-keep leading-snug">{entry.body}</span>
+
+            <span className="flex items-center gap-1.5 flex-wrap">
+              {entry.emotion ? (
+                <span className="text-[12px] text-muted-foreground">{entry.emotion}</span>
+              ) : null}
+              {entry.mustTalk ? (
+                <span className="rounded-sm bg-coral-strong px-1.5 py-0.5 text-[11px] font-medium text-coral-strong-foreground">
+                  꼭 얘기
+                </span>
+              ) : null}
+            </span>
+          </span>
+        </div>
       </div>
     </li>
   );
@@ -193,7 +233,8 @@ export function RecordTimeline({ state, compact }: Props) {
               />
             ) : null}
             <p className="px-3 pb-2 text-[12px] text-muted-foreground">8월 6일 화요일</p>
-            <ul className="space-y-2">
+            {/* Rows are separated by their own bottom divider, not by a gap. */}
+            <ul>
               {entries.map((e, i) => (
                 <EntryRow key={i} entry={e} />
               ))}

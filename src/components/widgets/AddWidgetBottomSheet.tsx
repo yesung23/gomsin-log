@@ -64,7 +64,7 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-widget-sheet-title"
-        className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-2xl p-4 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col"
+        className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-2xl p-4 pb-6 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col"
       >
         <div className="flex items-center justify-between mb-3">
           <h2 id="add-widget-sheet-title" className="text-heading text-foreground">홈 위젯 추가</h2>
@@ -78,7 +78,7 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
         </div>
 
         {availableWidgets.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground">
+          <div className="flex-1 flex flex-col items-center justify-center py-6 text-muted-foreground">
             <p>모든 위젯이 이미 홈 화면에 추가되어 있습니다.</p>
           </div>
         ) : (

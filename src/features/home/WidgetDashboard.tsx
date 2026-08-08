@@ -128,7 +128,29 @@ export function WidgetDashboard() {
     <div className="pb-6">
       {/* Header — compact, low-chrome: app name + edit controls only */}
       <header className="px-4 pt-3 pb-3 flex items-center justify-between sticky top-0 bg-background/90 backdrop-blur-xl z-40">
-        <span className="text-label font-semibold text-coral-strong">곰신로그</span>
+        {/*
+          The header carries the signed-in name next to the app name.
+
+          The rebuild dropped `안녕 {myName} ♡` as an "app-generated sentimental
+          greeting", which DESIGN_V2 does ask to keep off the top of the screen.
+          It removed the name along with it, and the name is not generated copy --
+          it is the user's own, and it is the only thing on the home screen that
+          says which account is signed in. `e2e/smoke.spec.ts` reads it to tell an
+          authenticated home from the onboarding wizard, and with it gone the
+          production bundle had no visible proof of who was logged in.
+
+          So the greeting stays gone and the name comes back, at `label` weight
+          beside the app name rather than as a `display`-sized salutation above
+          the content.
+        */}
+        <span className="flex items-baseline gap-1.5 min-w-0">
+          <span className="text-label font-semibold text-coral-strong">곰신로그</span>
+          {state.profile.myName ? (
+            <span className="text-caption text-muted-foreground truncate">
+              {state.profile.myName}
+            </span>
+          ) : null}
+        </span>
 
         <div className="flex items-center gap-2">
           {isEditMode ? (
@@ -141,9 +163,18 @@ export function WidgetDashboard() {
             </button>
           ) : (
             <>
+              {/*
+                Accessible name is `새 항목 추가`, not `위젯 추가`. The 2026-08-08
+                screen rebuild renamed it and broke the only hook
+                `e2e/emotionRedesign.spec.ts` has for proving the 군화 home is
+                editable at all -- a capability it did not have before the
+                redesign, so the assertion is guarding a real regression, not a
+                string. Nothing visible changes either way: the control is an
+                icon-only `+`, so this name is read by assistive tech only.
+              */}
               <button
                 className="w-11 h-11 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted/40 active:scale-95 transition-all"
-                aria-label="위젯 추가"
+                aria-label="새 항목 추가"
                 onClick={() => setIsAddWidgetOpen(true)}
               >
                 <Plus size={20} strokeWidth={1.5} />

@@ -140,8 +140,28 @@ for (const theme of ['light', 'dark'] as const) {
       skippedTranslucent += result.skipped.length;
     }
 
-    // A selector that matched nothing must not pass as "no violation".
-    expect(measured.length, 'labels on migrated surfaces').toBeGreaterThanOrEqual(3);
+    /*
+     * A selector that matched nothing must not pass as "no violation", so this
+     * floor exists to prove the measurement ran. It was 3, written when every
+     * repeated row still carried a bold tinted pill.
+     *
+     * Measured on this tree across all six routes under the CREATOR fixture:
+     *   /record   bg-warning-surface "나에게만"  + bg-info (4x98 stripe, no label)
+     *   /us       bg-info (6x6 dot, no label)
+     *   /schedule /my /settings /trips  nothing
+     *
+     * One labelled opaque tint, total. That is the 2026-08-08 revision working as
+     * specified -- DESIGN_V2 캡션 2개 이하 / 강조색 최대 2개 and the Badge change
+     * from 700 to 500 weight were adopted precisely because a tinted pill on every
+     * piece of metadata is what made repeated rows read as generated template
+     * cards. Stripes and dots are unlabelled by design: they are the second,
+     * non-textual channel, and the text they pair with sits on the page surface.
+     *
+     * So the floor drops to 1 and the assertion below still measures every label
+     * that does exist against AA. Raising it back would be asking for tints to be
+     * re-added to earn a green test.
+     */
+    expect(measured.length, 'labels on migrated surfaces').toBeGreaterThanOrEqual(1);
 
     // Recorded so the skip is visible rather than silent.
     expect(skippedTranslucent, 'translucent tints seen').toBeGreaterThanOrEqual(0);

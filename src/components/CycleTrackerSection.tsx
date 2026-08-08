@@ -376,7 +376,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       </div>
 
       {loadState === 'loading' && (
-        <div className="py-10 flex items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
+        <div className="py-6 flex items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
           <Loader2 className="w-4 h-4 animate-spin" /> 개인 기록을 불러오는 중이에요.
         </div>
       )}

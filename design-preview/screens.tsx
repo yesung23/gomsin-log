@@ -1,3 +1,4 @@
+import { Camera, Image as ImageIcon, Mic, Pencil } from 'lucide-react';
 import {
   BRIEFING_ITEMS,
   BRIEFING_ITEMS_LONG,
@@ -264,12 +265,34 @@ export function SoldierHome({ state, compact }: Props) {
 /* ------------------------------------------------------------------ */
 /* 곰신 홈                                                             */
 /* ------------------------------------------------------------------ */
+/*
+ * The shipped launcher (`TodayLogWidget`) is ONE row of 36px-tall type controls
+ * with lucide glyphs; DESIGN_V2 §5.3 asked for the four big tiles to be replaced
+ * by exactly that, and the app already was. This harness still drew the tiles
+ * (`min-h-22`, four columns) with Unicode placeholders standing in for icons,
+ * which is why the captured 곰신 홈 looked both taller and cruder than the app:
+ * `▢` for photo and `◉` for voice read as a blank box and a target, not as a
+ * camera and a microphone.
+ *
+ * `지금찍기` carries the coral tint because it is the one primary capture path;
+ * the other three are neutral. Visual height is 36px, hit target stays 44px via
+ * the `before:` overlay, exactly as in the implementation.
+ */
 const CAPTURE = [
-  { label: '글', hint: '✎' },
-  { label: '사진·영상', hint: '▢' },
-  { label: '음성', hint: '◉' },
-  { label: '반응', hint: '♡' },
+  { label: '지금찍기', glyph: 'camera', primary: true },
+  { label: '사진·영상', glyph: 'image' },
+  { label: '음성', glyph: 'mic' },
+  { label: '글', glyph: 'pen' },
 ];
+
+/** Same lucide glyphs at the same 16px the launcher ships with. */
+function CaptureGlyph({ name, primary }: { name: string; primary?: boolean }) {
+  const cls = primary ? undefined : 'text-muted-foreground';
+  if (name === 'camera') return <Camera size={16} aria-hidden="true" />;
+  if (name === 'image') return <ImageIcon size={16} className={cls} aria-hidden="true" />;
+  if (name === 'mic') return <Mic size={16} className={cls} aria-hidden="true" />;
+  return <Pencil size={16} className={cls} aria-hidden="true" />;
+}
 
 export function GomsinHome({ state, compact }: Props) {
   const name = state === 'long' ? LONG_NAME : '민지';
@@ -287,20 +310,23 @@ export function GomsinHome({ state, compact }: Props) {
         </div>
 
         {/* Capture launcher: a choice, not a form. An empty textarea on the home
-            screen reads as an assignment; four tiles do not. */}
-        <div className={`grid gap-2 ${compact ? 'grid-cols-2' : 'grid-cols-4'}`}>
+            screen reads as an assignment; a single row of type controls does not. */}
+        <div className={`flex items-center gap-2 ${compact ? 'flex-wrap' : ''}`}>
           {CAPTURE.map((c) => (
             <button
               key={c.label}
               type="button"
-              className="flex flex-col items-center justify-center gap-1 rounded-lg border border-border bg-card min-h-22 px-1"
+              className={[
+                'relative flex items-center gap-1 px-3 h-9 rounded-control border',
+                'text-[13px] font-semibold',
+                "before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']",
+                c.primary
+                  ? 'bg-coral/10 border-coral/20 text-coral-strong'
+                  : 'bg-muted border-border text-foreground',
+              ].join(' ')}
             >
-              <span aria-hidden="true" className="text-[18px]">
-                {c.hint}
-              </span>
-              <span className="text-[12px] font-medium text-foreground text-center leading-tight">
-                {c.label}
-              </span>
+              <CaptureGlyph name={c.glyph} primary={c.primary} />
+              <span>{c.label}</span>
             </button>
           ))}
         </div>
@@ -335,18 +361,28 @@ export function GomsinHome({ state, compact }: Props) {
             />
           </Card>
         ) : (
-          <Card title="오늘의 브리핑">
+          <Card title="오늘의 타임라인">
+            {/*
+              Mirrors the shipped 오늘의 타임라인 block: time column, then the
+              user's own sentence, then the confirmed emotion as quiet metadata.
+              The row never prints a generated title for a record.
+            */}
             <ul className="border-t border-border">
               {GOMSIN_TODAY.map((t) => (
                 <li
                   key={t.time}
-                  className="flex items-center gap-3 px-4 py-2.5 border-b border-border last:border-b-0"
+                  className="flex items-start gap-3 px-4 py-2.5 border-b border-border last:border-b-0"
                 >
-                  <span className="text-[12px] tabular-nums text-muted-foreground w-10 shrink-0">
+                  <span className="text-[12px] tabular-nums text-muted-foreground w-10 shrink-0 pt-0.5">
                     {t.time}
                   </span>
-                  <span className="text-[14px] text-foreground">
-                    {t.who === '나' ? '내가 남긴 순간' : '현우가 남긴 순간'}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] text-foreground break-keep">{t.log}</span>
+                    {t.emotion ? (
+                      <span className="mt-0.5 block text-[12px] text-muted-foreground">
+                        {t.emotion}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))}

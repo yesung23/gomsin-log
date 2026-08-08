@@ -790,8 +790,17 @@ export function RecordPage() {
                         </span>
 
                         {/* User's original text — the primary content */}
+                        {/*
+                          No `leading-snug` here. `text-body` already carries
+                          15/22 (1.467) from the scale, and Tailwind's snug
+                          (1.375) overrode it -- below the 1.4 floor that
+                          `e2e/renderedTypeScale.spec.ts` measures on the real
+                          render, because Korean prose crowds at that leading.
+                          The record's own sentence is the one thing on this
+                          screen that must stay comfortable to read.
+                        */}
                         {r.log && (
-                          <span data-testid="record-log" className="text-body text-foreground break-keep line-clamp-3 leading-snug">{r.log}</span>
+                          <span data-testid="record-log" className="text-body text-foreground break-keep line-clamp-3">{r.log}</span>
                         )}
 
                         {/* Secondary metadata — compact, never outweighs the prose */}

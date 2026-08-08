@@ -108,10 +108,18 @@ export const MOMENTS_LONG: Moment[] = [
 
 export const SERVICE = { dday: 142, percent: 68, branch: '육군' };
 
+/*
+ * The shipped widget (`TodayLogWidget`, 오늘의 타임라인) renders `r.log` -- the
+ * user's own sentence -- with the confirmed emotion beneath it. This fixture
+ * used to carry only `time` and `who`, so the harness had nothing to print and
+ * printed a generated title (`내가 남긴 순간`) instead. DESIGN_V2 Authentic over
+ * synthetic forbids exactly that, so a reviewer reading the old captures would
+ * have failed the screen for a defect that exists only in the harness.
+ */
 export const GOMSIN_TODAY = [
-  { time: '14:20', who: '나' as const },
-  { time: '18:10', who: '현우' as const },
-  { time: '20:05', who: '나' as const },
+  { time: '14:20', who: '나' as const, log: '팀 과제가 갑자기 바뀌었어', emotion: '힘들었어' },
+  { time: '18:10', who: '현우' as const, log: '오늘 훈련 끝!', emotion: '좋았어' },
+  { time: '20:05', who: '나' as const, log: '자기 전에 목소리 듣고 싶다' },
 ];
 
 export const LONG_NAME = '민지야사랑해영원히';

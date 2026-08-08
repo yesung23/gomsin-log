@@ -737,7 +737,7 @@ export function RecordPage() {
                     - The opener <button> covers: time column + spacer (for media overlay) + content.
                     - Media is a SIBLING positioned absolutely over the spacer area
                       so <video>/<audio> controls are not nested inside the button.
-                    
+
                     Column geometry:
                       time = w-11 (44px), gap = 8px, media = 68px (76px @360+)
                       left offset for media = 44 + 8 = 52px → left-[52px]

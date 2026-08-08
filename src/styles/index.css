@@ -38,6 +38,8 @@
   --color-coral-foreground: var(--coral-foreground);
   --color-coral-strong: var(--coral-strong);
   --color-coral-strong-foreground: var(--coral-strong-foreground);
+  --color-coral-fill: var(--coral-fill);
+  --color-coral-fill-foreground: var(--coral-fill-foreground);
   --color-lilac: var(--lilac);
   --color-lilac-foreground: var(--lilac-foreground);
   --color-mint: var(--mint);
@@ -204,7 +206,24 @@
    * sampled byte-for-byte. Parsing the `oklch()` string instead yields wrong
    * ratios, which is the trap AI_HANDOFF §4.1 warns about.
    *
-   *   light  fill oklch(0.52 0.16 14) + label oklch(0.99 0.005 85) -> 5.82:1
+   * This token does TWO jobs, which is the constraint that decides its value:
+   * `bg-coral-strong` fills 52 controls, and `text-coral-strong` is coral ink on a
+   * card or page in 87 places. Ink needs 4.5:1 against a near-white surface, so it
+   * has to stay dark -- a pink light enough to be a cheerful button fill is
+   * unreadable as text, measured at 2.00:1.
+   *
+   * Tried and reverted on 2026-08-09: making this the light pink
+   * `oklch(0.78 0.12 12)` with a near-black pink label. The button looked right and
+   * every one of those 87 text uses failed, which
+   * `e2e/tokenContrast.spec.ts` caught in a real paint. Splitting a third token for
+   * "filled pink button" is the real fix and is a larger change than a colour
+   * retune, so it is not smuggled in here.
+   *
+   * Hue follows the brand into the pink family (25 -> 14) at the original lightness
+   * and chroma, so a filled CTA is now a deep ROSE rather than a brick red, while
+   * staying dark enough for both jobs.
+   *
+   *   light  fill oklch(0.52 0.16 14) + label oklch(0.99 0.005 85) -> 5.87:1
    *          same fill against --background                        -> 5.73:1
    *   dark   fill oklch(0.8 0.13 14)  + label oklch(0.18 0.018 265) -> 9.25:1
    *          same fill against --background                        -> 9.59:1
@@ -217,6 +236,27 @@
    */
   --coral-strong: oklch(0.52 0.16 14);
   --coral-strong-foreground: oklch(0.99 0.005 85);
+  /*
+   * The filled-pink CTA, split out from `--coral-strong` on 2026-08-09.
+   *
+   * `--coral-strong` cannot be pink because it is also coral INK in 87 places and
+   * ink has to clear 4.5:1 on a near-white card. A primary button has no such
+   * constraint on its own fill -- only its LABEL does -- so the two uses want
+   * opposite lightnesses and needed separating rather than compromising.
+   *
+   * Label is a near-black pink, deliberately not navy: navy passes the ratio but is
+   * the app's other brand colour, and two brand colours inside one button stop it
+   * reading as a single object.
+   *
+   *   light  fill oklch(0.78 0.12 12) + label oklch(0.28 0.09 12) -> 7.19:1
+   *   dark   fill oklch(0.8 0.13 12)  + label oklch(0.22 0.06 12) -> 8.69:1
+   *
+   * A filled control's own edge against the page is 2.00:1 here. That is not a
+   * WCAG failure: 1.4.11 applies to controls identified by their boundary, and this
+   * one is identified by a 48px filled shape carrying a 4.5:1 label.
+   */
+  --coral-fill: oklch(0.78 0.12 12);
+  --coral-fill-foreground: oklch(0.28 0.09 12);
   --lilac: oklch(0.93 0.04 300);
   --lilac-foreground: var(--navy);
   --mint: oklch(0.93 0.045 155);
@@ -249,8 +289,16 @@
   --primary-foreground: oklch(0.18 0.018 265);
   --coral: oklch(0.75 0.13 12);
   --coral-foreground: oklch(0.99 0.005 85);
+  /*
+   * In dark, ink and fill genuinely do want the same value: a dark fill on a dark
+   * background reads as disabled, so `--coral-strong` already lightens here, and
+   * that same light pink is what reads as coral ink against a dark card. The two
+   * tokens therefore converge instead of being forced apart.
+   */
   --coral-strong: oklch(0.8 0.13 14);
   --coral-strong-foreground: oklch(0.18 0.018 265);
+  --coral-fill: oklch(0.8 0.13 12);
+  --coral-fill-foreground: oklch(0.22 0.06 12);
   --lilac: oklch(0.32 0.055 305);
   --lilac-foreground: var(--foreground);
   --mint: oklch(0.28 0.045 155);

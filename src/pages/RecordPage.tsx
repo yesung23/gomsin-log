@@ -430,7 +430,7 @@ export function RecordPage() {
             className={cn(
               'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
               showCalendar
-                ? 'bg-coral-strong text-coral-strong-foreground shadow-sm'
+                ? 'bg-coral-fill text-coral-fill-foreground shadow-sm'
                 : 'bg-card border border-border text-foreground hover:bg-muted'
             )}
             aria-label="달력 보기"
@@ -545,7 +545,7 @@ export function RecordPage() {
                     'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
                     (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
-                    isSelected && 'bg-coral-strong text-coral-strong-foreground',
+                    isSelected && 'bg-coral-fill text-coral-fill-foreground',
                     !isSelected && isTodayCell && 'ring-2 ring-coral/50 ring-inset rounded-lg',
                   )}
                 >
@@ -1009,7 +1009,7 @@ export function RecordPage() {
                         }
                       }}
                       disabled={isSaving || !editText.trim() || isOffline}
-                      className="px-3 py-1.5 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-lg bg-coral-fill text-coral-fill-foreground font-bold text-label disabled:opacity-50"
                     >
                       {isSaving ? '저장 중...' : '저장'}
                     </button>

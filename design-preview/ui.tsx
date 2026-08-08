@@ -83,7 +83,11 @@ export function PrimaryButton({ label, full }: { label: string; full?: boolean }
       type="button"
       className={[
         'inline-flex items-center justify-center rounded-md px-4',
-        'bg-coral-strong text-coral-strong-foreground',
+        // Mirrors the shipped Button primitive: `--coral-fill` is the pink primary
+        // pair, split from `--coral-strong` (which stays dark because it is also
+        // coral ink on cards). Using the ink token here painted every captured CTA
+        // brick-dark while the app rendered it pink.
+        'bg-coral-fill text-coral-fill-foreground',
         'text-[15px] font-semibold min-h-13',
         full ? 'w-full' : '',
       ].join(' ')}

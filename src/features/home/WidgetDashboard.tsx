@@ -156,7 +156,7 @@ export function WidgetDashboard() {
           {isEditMode ? (
             <button
               onClick={() => setIsEditMode(false)}
-              className="bg-coral-strong text-coral-strong-foreground text-label font-bold px-4 py-2 rounded-control active:scale-95 transition-all"
+              className="bg-coral-fill text-coral-fill-foreground text-label font-bold px-4 py-2 rounded-control active:scale-95 transition-all"
               aria-label="편집 완료"
             >
               완료

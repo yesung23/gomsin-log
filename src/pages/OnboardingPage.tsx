@@ -777,7 +777,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -812,7 +812,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={!canAdvanceFromStep}
-                className="w-full py-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
               >
                 다음
               </button>
@@ -868,7 +868,7 @@ export function OnboardingPage() {
                         type="button"
                         onClick={() => void handleRegenerateExistingSpace()}
                         disabled={isGeneratingCode}
-                        className="w-full min-h-[44px] rounded-control bg-coral-strong px-4 text-label font-bold text-coral-strong-foreground disabled:opacity-50"
+                        className="w-full min-h-[44px] rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
                       >
                         {isGeneratingCode ? '발급 중...' : '새 코드 발급하기'}
                       </button>
@@ -954,7 +954,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={isGeneratingCode || isVerifyingCode}
-                className="w-full py-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
@@ -1003,7 +1003,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 {role === 'gomsin' ? '완료' : '다음'}
               </button>
@@ -1034,7 +1034,7 @@ export function OnboardingPage() {
                           key={st.key}
                           onClick={() => setMilitaryStatus(st.key as MilitaryStatus)}
                           className={`py-2 px-2 rounded-control text-label font-semibold border transition min-h-[40px] ${
-                            militaryStatus === st.key ? 'bg-coral-strong text-coral-strong-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
+                            militaryStatus === st.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
                           {st.label}
@@ -1060,7 +1060,7 @@ export function OnboardingPage() {
                           key={b.key}
                           onClick={() => handleBranchChange(b.key as Branch)}
                           className={`py-2 px-1 rounded-control text-label font-semibold border transition min-h-[40px] ${
-                            branch === b.key ? 'bg-coral-strong text-coral-strong-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
+                            branch === b.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
                           {b.label}
@@ -1095,7 +1095,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -1155,7 +1155,7 @@ export function OnboardingPage() {
               <div className="space-y-2">
                 <button
                   onClick={handleNext}
-                  className="w-full py-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                  className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
                 >
                   완료하기
                 </button>
@@ -1189,7 +1189,7 @@ export function OnboardingPage() {
               <button
                 onClick={finishSetup}
                 disabled={isFinishing}
-                className="w-full py-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px] disabled:opacity-60"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-60"
               >
                 {isFinishing
                   ? '저장 중...'

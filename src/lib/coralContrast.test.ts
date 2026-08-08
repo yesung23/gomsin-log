@@ -204,6 +204,42 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     }
   });
 
+  it('defines a separate --coral-fill for the pink primary button', () => {
+    /*
+     * Added 2026-08-09. `--coral-strong` does two jobs: it fills primary controls
+     * AND it is coral ink on a card in 87 places. Ink has to clear 4.5:1 on a
+     * near-white surface, so it must stay dark -- a pink light enough to look
+     * cheerful as a button fill measures 2.00:1 as text.
+     *
+     * Retuning the shared token to pink was tried first and failed exactly there,
+     * caught by `e2e/tokenContrast.spec.ts` measuring a real paint. Splitting the
+     * fill out is what actually lets the CTA be pink, so the two uses no longer
+     * have to compromise on one lightness.
+     *
+     * In dark both jobs genuinely want the same light value -- a dark fill on a
+     * dark background reads as disabled -- so the tokens converge there rather
+     * than being forced apart.
+     */
+    for (const declaration of [
+      '--coral-fill: oklch(0.78 0.12 12);',
+      '--coral-fill-foreground: oklch(0.28 0.09 12);',
+      '--coral-fill: oklch(0.8 0.13 12);',
+      '--coral-fill-foreground: oklch(0.22 0.06 12);',
+      '--color-coral-fill: var(--coral-fill);',
+      '--color-coral-fill-foreground: var(--coral-fill-foreground);',
+    ]) {
+      expect(css, declaration).toContain(declaration);
+    }
+  });
+
+  it('routes the Button primitive at the fill token, not the ink token', () => {
+    // The primitive is the one place a filled primary is defined, so this is the
+    // single assertion that keeps every CTA pink.
+    const button = read('src/components/ui/Button.tsx');
+    expect(button).toContain('primary: \'bg-coral-fill text-coral-fill-foreground\'');
+    expect(button).not.toContain('primary: \'bg-coral-strong');
+  });
+
   it('exposes the pair to Tailwind so bg-/text- utilities exist for it', () => {
     expect(css).toContain('--color-coral-strong: var(--coral-strong);');
     expect(css).toContain('--color-coral-strong-foreground: var(--coral-strong-foreground);');
@@ -233,8 +269,11 @@ describe('C7 - the token pair is defined in both themes and documented with its 
   it('records the measured ratios next to the token, not in a commit message', () => {
     // The numbers are the justification for the values. If someone retunes the
     // token they have to re-measure, and this fails until the comment agrees.
-    expect(css).toContain('5.82:1');
+    expect(css).toContain('5.87:1');
     expect(css).toContain('9.25:1');
+    // The fill pair carries its own measurements.
+    expect(css).toContain('7.19:1');
+    expect(css).toContain('8.69:1');
     expect(css).toMatch(/2\.09:1/);
   });
 
@@ -243,5 +282,23 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     const dark = css.indexOf('--coral-strong: oklch(0.8 0.13 14);');
     expect(light).toBeGreaterThan(-1);
     expect(dark).toBeGreaterThan(light);
+  });
+
+  it('labels the pink fill from its own hue family, never with navy', () => {
+    /*
+     * `--coral-fill-foreground` is a near-black PINK in both themes. Navy passes
+     * the ratio and was rejected for it: navy is the app's other brand colour, and
+     * two brand colours inside one button stop it reading as a single object.
+     *
+     * The hue is the third number in `oklch()`. Asserting it is 12 -- matching the
+     * fill -- is what this test is for; navy would be 265.
+     */
+    for (const label of [
+      '--coral-fill-foreground: oklch(0.28 0.09 12);',
+      '--coral-fill-foreground: oklch(0.22 0.06 12);',
+    ]) {
+      expect(css, label).toContain(label);
+      expect(label, 'label hue must match the fill, not navy').toMatch(/ 12\);$/);
+    }
   });
 });

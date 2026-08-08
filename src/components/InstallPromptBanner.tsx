@@ -119,7 +119,7 @@ export function InstallPromptBanner() {
       {platform === 'android' && deferredPrompt && (
         <button 
           onClick={handleInstallClick}
-          className="w-full mt-2 bg-coral-strong text-coral-strong-foreground font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
+          className="w-full mt-2 bg-coral-fill text-coral-fill-foreground font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
         >
           <Download size={18} />
           앱 설치하기

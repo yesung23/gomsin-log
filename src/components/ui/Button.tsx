@@ -12,8 +12,10 @@ import { cn } from '@/lib/utils';
  *
  * Rules this encodes rather than documents:
  *
- *   - `primary` is the only filled-coral variant and it uses `--coral-strong`,
- *     the measured-readable pair. DESIGN_V2 §3.2 allows ONE primary per screen.
+ *   - `primary` is the only filled-coral variant and it uses `--coral-fill`, the
+ *     measured-readable pink pair. DESIGN_V2 §3.2 allows ONE primary per screen.
+ *     `--coral-strong` is the darker sibling for coral INK on a card; a fill light
+ *     enough to look pink measures 2.00:1 as text, which is why they are separate.
  *   - `lg` paints the 48px primary CTA, `md` the 40-44px ordinary control, and
  *     `sm` a 36px compact control whose hit area is still 44px -- so a tap target
  *     cannot be lost by choosing a size (WCAG 2.5.5, and 표면·컨트롤 규칙).
@@ -26,7 +28,7 @@ type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
 type Size = 'sm' | 'md' | 'lg';
 
 const VARIANT: Record<Variant, string> = {
-  primary: 'bg-coral-strong text-coral-strong-foreground',
+  primary: 'bg-coral-fill text-coral-fill-foreground',
   secondary: 'bg-muted text-foreground',
   outline: 'bg-transparent text-foreground border border-border',
   ghost: 'bg-transparent text-muted-foreground',

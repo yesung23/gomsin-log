@@ -313,7 +313,7 @@ export function CycleSupportSection({
   };
 
   return (
-    <section className="bg-card rounded-surface p-5 border border-border shadow-sm space-y-4">
+    <section className="bg-card rounded-surface p-4 border border-border space-y-4">
       <div className="flex items-center justify-between border-b border-border/40 pb-3 gap-2">
         <div className="flex items-center gap-2">
           <HeartHandshake className="w-5 h-5 text-coral" />
@@ -329,17 +329,17 @@ export function CycleSupportSection({
       )}
 
       {loadState === 'disconnected' && (
-        <div className="p-4 rounded-2xl bg-muted/40 border border-border text-center">
+        <div className="p-4 rounded-surface bg-muted/40 border border-border text-center">
           <p className="text-label font-bold text-foreground">파트너와 연결되어 있지 않아요.</p>
           <p className="text-caption text-muted-foreground mt-1">연결된 뒤 원할 때만 응원 신호를 공유할 수 있어요.</p>
         </div>
       )}
 
       {(loadState === 'unauthenticated' || loadState === 'forbidden' || loadState === 'error') && (
-        <div className="p-4 rounded-2xl bg-muted/40 border border-border text-center space-y-3" role="alert">
+        <div className="p-4 rounded-surface bg-muted/40 border border-border text-center space-y-3" role="alert">
           <p className="text-caption text-muted-foreground">{failureMessage(loadState)}</p>
           {loadState === 'error' && (
-            <button type="button" onClick={() => void load(true)} className="px-4 py-2 rounded-xl bg-foreground text-background text-label font-bold">
+            <button type="button" onClick={() => void load(true)} className="px-4 py-2 rounded-control bg-foreground text-background text-label font-bold">
               다시 시도
             </button>
           )}
@@ -349,14 +349,14 @@ export function CycleSupportSection({
       {(loadState === 'ready' || loadState === 'empty') && (
         <>
           {realtimeDisconnected && (
-            <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-warning-surface border border-warning/30 text-caption text-warning-foreground" role="status">
+            <div className="flex items-center justify-between gap-2 p-3 rounded-control bg-warning-surface border border-warning/30 text-caption text-warning-foreground" role="status">
               <span>실시간 확인이 중단됐어요. 최신 상태를 다시 확인해 주세요.</span>
               <button type="button" onClick={() => void load(true)} className="p-1" aria-label="응원 신호 다시 확인"><RotateCcw className="w-3.5 h-3.5" /></button>
             </div>
           )}
 
           {activeSignal ? (
-            <div className="p-4 rounded-2xl bg-mint/40 border border-mint-foreground/20 space-y-2">
+            <div className="p-4 rounded-surface bg-mint/40 border border-mint-foreground/20 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-caption font-bold text-mint-foreground">오늘 공유된 신호</p>
@@ -365,10 +365,10 @@ export function CycleSupportSection({
                 <Radio className="w-4 h-4 text-mint-foreground shrink-0" />
               </div>
               {activeSignal.message && (
-                <p className="text-body text-mint-foreground bg-card/60 rounded-xl p-3">{activeSignal.message}</p>
+                <p className="text-body text-mint-foreground bg-card/60 rounded-control p-3">{activeSignal.message}</p>
               )}
               {owner && (
-                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-mint-foreground/20 text-mint-foreground text-label font-bold disabled:opacity-50 min-h-[42px]">
+                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control border border-mint-foreground/20 text-mint-foreground text-label font-bold disabled:opacity-50 min-h-[42px]">
                   {mutationPending === 'revoke' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
                   {mutationPending === 'revoke' ? '공유 취소 중' : '공유 취소'}
                 </button>
@@ -376,29 +376,29 @@ export function CycleSupportSection({
             </div>
           ) : owner ? (
             <div className="space-y-3">
-              <div className="p-3 rounded-xl bg-muted/30 text-caption text-muted-foreground leading-relaxed">
+              <div className="p-3 rounded-control bg-muted/30 text-caption text-muted-foreground leading-relaxed">
                 오늘 하루 동안 보일 비의료적 응원 신호만 공유돼요. 선택 메시지는 파트너에게 그대로 보이므로 개인적인 상세 내용은 적지 마세요. 개인 기록은 자동으로 공유되지 않아요.
               </div>
               <label className="text-label font-bold text-foreground space-y-1 block">
                 <span>응원 신호 *</span>
-                <select value={kind} onChange={(event) => setKind(event.target.value as CycleSupportKind | '')} disabled={mutationPending !== null} className="w-full p-3 rounded-xl border border-border bg-card text-body">
+                <select value={kind} onChange={(event) => setKind(event.target.value as CycleSupportKind | '')} disabled={mutationPending !== null} className="w-full p-3 rounded-control border border-border bg-card text-body">
                   <option value="">직접 선택해 주세요</option>
                   {Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
               <label className="text-label font-bold text-foreground space-y-1 block">
                 <span>파트너에게 보낼 짧은 메시지 (선택, 80자 이하)</span>
-                <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={80} disabled={mutationPending !== null} placeholder="예: 오늘 저녁에 짧게 통화하고 싶어요" className="w-full p-3 rounded-xl border border-border bg-card text-body" />
+                <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={80} disabled={mutationPending !== null} placeholder="예: 오늘 저녁에 짧게 통화하고 싶어요" className="w-full p-3 rounded-control border border-border bg-card text-body" />
                 <span className="block text-right text-caption text-muted-foreground">{Array.from(message).length}/80</span>
               </label>
               {mutationError && <p className="text-caption text-destructive" role="alert">{mutationError}</p>}
-              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-[42px]">
+              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-[42px]">
                 {mutationPending === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {mutationPending === 'share' ? '공유 중' : '오늘만 공유하기'}
               </button>
             </div>
           ) : (
-            <div className="p-4 rounded-2xl border border-dashed border-border text-center space-y-1">
+            <div className="p-4 rounded-surface border border-dashed border-border text-center space-y-1">
               <p className="text-label font-bold text-foreground">오늘 공유된 응원 신호가 없어요.</p>
               <p className="text-caption text-muted-foreground">상대가 직접 공유한 경우에만 여기에 표시돼요.</p>
             </div>

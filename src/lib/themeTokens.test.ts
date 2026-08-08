@@ -340,6 +340,22 @@ describe('C6 - repaired controls keep a 44px minimum tap target', () => {
     { file: 'src/pages/ServicePage.tsx', anchor: '복무 정보 수정', label: 'service edit' },
   ];
 
+  /*
+   * Two spellings of the same 44px, both explicit.
+   *
+   * The original repairs wrote `min-h-[44px] min-w-[44px]` on each control. The
+   * 2026-08-08 visual revision converted several of them into full-width list rows,
+   * where the height is stated as `min-h-11` -- Tailwind's 11 is 44px -- and the
+   * width is `w-full`, i.e. the row spans its container and is far wider than 44px.
+   *
+   * So the accepted vocabulary is widened rather than the rule relaxed: each control
+   * must still DECLARE its tap target, and a control that declares neither spelling
+   * still fails. What is no longer required is a literal `min-w-[44px]` on an element
+   * that is already full-width, which was redundant.
+   */
+  const HEIGHT_44 = /min-h-\[44px\]|min-h-11\b/;
+  const WIDTH_44 = /min-w-\[44px\]|w-full\b/;
+
   for (const control of GUARDED_CONTROLS) {
     it(`${control.label} declares both a 44px min-height and min-width`, () => {
       const source = readFileSync(resolve(process.cwd(), control.file), 'utf8');
@@ -347,8 +363,8 @@ describe('C6 - repaired controls keep a 44px minimum tap target', () => {
       expect(at, `${control.file} should still contain ${control.anchor}`).toBeGreaterThan(-1);
       // The className sits within the same JSX element as the anchor.
       const window_ = source.slice(Math.max(0, at - 400), at + 400);
-      expect(window_, `${control.label} min-height`).toContain('min-h-[44px]');
-      expect(window_, `${control.label} min-width`).toContain('min-w-[44px]');
+      expect(window_, `${control.label} min-height`).toMatch(HEIGHT_44);
+      expect(window_, `${control.label} min-width`).toMatch(WIDTH_44);
     });
   }
 });

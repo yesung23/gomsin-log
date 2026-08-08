@@ -160,7 +160,7 @@ export function ServicePage() {
           <button
             onClick={() => navigate(-1)}
             aria-label="뒤로가기"
-            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
+            className="p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <ArrowLeft size={20} />
           </button>
@@ -168,7 +168,7 @@ export function ServicePage() {
           <button
             onClick={openEditor}
             aria-label="복무 정보 수정"
-            className="p-2 -mr-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
+            className="p-2 -mr-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <Edit2 size={18} />
           </button>
@@ -176,7 +176,7 @@ export function ServicePage() {
 
         {/* D-Day / progress. Shown only when real dates exist. */}
         {progress ? (
-          <div className="bg-gradient-to-br from-navy to-navy/80 rounded-surface p-6 text-white shadow-sm relative overflow-hidden">
+          <div className="bg-gradient-to-br from-navy to-navy/80 rounded-surface p-5 text-white relative overflow-hidden">
             <Shield className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10 rotate-12" />
             <div className="relative z-10">
               <div className="flex justify-between items-start mb-2">
@@ -217,7 +217,7 @@ export function ServicePage() {
             </div>
           </div>
         ) : (
-          <div className="rounded-surface border border-dashed border-border bg-muted/40 p-6 text-center space-y-3">
+          <div className="rounded-surface border border-dashed border-border bg-muted/40 p-5 text-center space-y-3">
             <Shield className="w-8 h-8 text-muted-foreground/60 mx-auto" />
             <div>
               <h2 className="text-heading text-foreground">복무 정보가 아직 없어요</h2>
@@ -227,7 +227,7 @@ export function ServicePage() {
             </div>
             <button
               onClick={openEditor}
-              className="px-4 py-2.5 rounded-xl bg-coral-strong text-coral-strong-foreground text-label font-bold min-h-[44px]"
+              className="px-4 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold min-h-[44px]"
             >
               복무 정보 입력하기
             </button>
@@ -235,7 +235,7 @@ export function ServicePage() {
         )}
 
         {/* Contact window, from the soldier's saved preferences. */}
-        <div className="bg-card rounded-2xl p-4 shadow-sm border border-border">
+        <div className="bg-card rounded-surface p-4 border border-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-lilac/30 rounded-full flex items-center justify-center text-foreground shrink-0">
               <Phone className="w-5 h-5" />
@@ -251,7 +251,7 @@ export function ServicePage() {
         </div>
 
         {/* Next leave / visit, read from real events. */}
-        <div className="bg-card rounded-2xl p-4 shadow-sm border border-border space-y-3">
+        <div className="bg-card rounded-surface p-4 border border-border space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-heading text-foreground">다음 휴가·면회</h2>
             <button
@@ -263,7 +263,7 @@ export function ServicePage() {
             </button>
           </div>
           {nextLeave ? (
-            <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3 py-2.5">
+            <div className="flex items-center justify-between rounded-control bg-muted/50 px-3 py-2.5">
               <span className="text-label font-semibold text-foreground truncate">
                 {nextLeave.title}
               </span>
@@ -294,7 +294,7 @@ export function ServicePage() {
                   id="svc-status"
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as MilitaryStatus)}
-                  className="w-full border border-border rounded-xl px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
+                  className="w-full border border-border rounded-control px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
                 >
                   <option value="planned">입대 예정</option>
                   <option value="serving">복무 중</option>
@@ -312,7 +312,7 @@ export function ServicePage() {
                   id="svc-branch"
                   value={editBranch}
                   onChange={(e) => handleBranchOrEnlistChange(e.target.value as Branch, editEnlistDate)}
-                  className="w-full border border-border rounded-xl px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
+                  className="w-full border border-border rounded-control px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
                 >
                   <option value="army">육군 (18개월)</option>
                   <option value="marine">해병대 (18개월)</option>
@@ -335,7 +335,7 @@ export function ServicePage() {
                       type="date"
                       value={editEnlistDate}
                       onChange={(e) => handleBranchOrEnlistChange(editBranch, e.target.value)}
-                      className="w-full border border-border rounded-xl px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
+                      className="w-full border border-border rounded-control px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
                     />
                   </div>
 
@@ -351,7 +351,7 @@ export function ServicePage() {
                         setEditExpectedDischarge(e.target.value);
                         setEditDischargeSource('manual');
                       }}
-                      className="w-full border border-border rounded-xl px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
+                      className="w-full border border-border rounded-control px-3 py-3 bg-muted text-foreground text-body min-h-[44px]"
                     />
                     <p className="text-caption text-muted-foreground mt-1">
                       군종과 입대일로 자동 계산되며, 직접 수정할 수도 있어요.
@@ -365,14 +365,14 @@ export function ServicePage() {
               <button
                 onClick={() => setIsEditing(false)}
                 disabled={isSaving}
-                className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-label min-h-[44px]"
+                className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
               >
                 취소
               </button>
               <button
                 onClick={handleSaveEdit}
                 disabled={isSaving}
-                className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-label min-h-[44px] disabled:opacity-50"
+                className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
               >
                 {isSaving ? '저장 중…' : '저장하기'}
               </button>

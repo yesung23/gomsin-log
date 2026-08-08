@@ -95,14 +95,14 @@ export function UsPage() {
             {/* /schedule had no entry point anywhere in the UI before this. */}
             <button
               onClick={() => navigate('/schedule')}
-              className="text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+              className="text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1"
             >
               <CalendarDays size={14} />
               <span>일정</span>
             </button>
             <button
               onClick={() => navigate('/trips')}
-              className="text-label font-bold text-coral-strong bg-coral/10 px-3 py-2 rounded-xl active:scale-95 transition flex items-center gap-1"
+              className="text-label font-bold text-coral-strong bg-coral/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1"
             >
               <Plane size={14} />
               <span>여행</span>
@@ -111,19 +111,15 @@ export function UsPage() {
         </div>
 
         {/* Profile */}
-        <section className="rounded-surface bg-card border border-border p-5 shadow-sm flex flex-col items-center text-center space-y-4">
-          <CoupleAvatar size={64} />
+        <section className="flex flex-col items-center text-center py-3 space-y-2">
+          <CoupleAvatar size={56} />
           <div>
             <h2 className="text-heading text-foreground flex items-center justify-center gap-1.5">
               <span>{myName || '나'}</span>
-              <Heart size={16} className="text-coral fill-coral animate-pulse" />
+              <Heart size={14} className="text-coral fill-coral" />
               <span>{partnerName}</span>
             </h2>
-            {/* Role/lifecycle correct. The previous copy was a single line for
-                every non-connected state -- "초대 코드로 커플 공간을 완성해보세요" --
-                which reads as "enter a code" and is exactly wrong for the creator
-                who is holding one. */}
-            <p className="text-caption text-muted-foreground mt-1 font-medium">
+            <p className="text-caption text-muted-foreground mt-0.5 font-medium">
               {connected
                 ? diffDays !== null
                   ? `함께한 지 +${diffDays}일째 💕`
@@ -142,15 +138,15 @@ export function UsPage() {
         <CoupleStatusBanner />
 
         {/* Calendar UI */}
-        <section className="rounded-surface bg-card border border-border shadow-sm overflow-hidden p-4">
-          <div className="flex items-center justify-between mb-4 px-1">
-            <button onClick={goToPrevMonth} className="p-2 rounded-xl hover:bg-muted active:scale-95 transition" aria-label="이전 달">
+        <section className="rounded-surface bg-card border border-border overflow-hidden p-4">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <button onClick={goToPrevMonth} className="p-2 rounded-control hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px]" aria-label="이전 달">
               <ChevronLeft size={18} />
             </button>
             <h2 className="text-heading text-foreground">
               {viewYear}년 {viewMonth + 1}월
             </h2>
-            <button onClick={goToNextMonth} className="p-2 rounded-xl hover:bg-muted active:scale-95 transition" aria-label="다음 달">
+            <button onClick={goToNextMonth} className="p-2 rounded-control hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px]" aria-label="다음 달">
               <ChevronRight size={18} />
             </button>
           </div>
@@ -221,7 +217,7 @@ export function UsPage() {
                   type="button"
                   onClick={() => navigate(`/trips/${trip.id}`)}
                   aria-label={`${trip.title} 여행 상세 보기`}
-                  className="w-full text-left p-4 min-h-[44px] rounded-2xl bg-card border border-border shadow-sm active:scale-[0.98] transition cursor-pointer flex items-center justify-between"
+                  className="w-full text-left p-3 min-h-[44px] rounded-surface bg-card border border-border active:scale-[0.98] transition cursor-pointer flex items-center justify-between"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-label font-bold text-foreground">
@@ -237,7 +233,7 @@ export function UsPage() {
             <button
               type="button"
               onClick={() => navigate('/trips')}
-              className="w-full p-4 min-h-[44px] rounded-2xl bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition"
+              className="w-full p-4 min-h-[44px] rounded-surface bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition"
             >
               <p className="text-label font-bold text-muted-foreground mb-1">+ 새로운 여행 계획하기</p>
             </button>

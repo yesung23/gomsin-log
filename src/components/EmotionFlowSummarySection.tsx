@@ -95,7 +95,7 @@ export function EmotionFlowSummarySection({
         data-testid="emotion-flow-summary"
         data-state="loading"
         aria-busy="true"
-        className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
+        className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
       >
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         {/*
@@ -116,7 +116,7 @@ export function EmotionFlowSummarySection({
         data-testid="emotion-flow-summary"
         data-state="error"
         role="alert"
-        className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
+        className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
       >
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         <p className="text-caption text-muted-foreground mt-2">{error}</p>
@@ -138,7 +138,7 @@ export function EmotionFlowSummarySection({
       <section
         data-testid="emotion-flow-summary"
         data-state="empty"
-        className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
+        className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
       >
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         <p className="text-caption text-muted-foreground mt-2">아직 오늘의 마음이 없어요</p>
@@ -154,7 +154,7 @@ export function EmotionFlowSummarySection({
       data-state="ready"
       data-shape={analysis.shape}
       aria-label={`${periodLabel} 마음 흐름: ${summary}`}
-      className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
+      className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
     >
       <div className="flex items-baseline justify-between">
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>

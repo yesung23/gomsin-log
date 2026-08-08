@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import {
   consumeCoupleInvitation,
   createCoupleInvitation,
@@ -340,7 +341,7 @@ export function SettingsPage() {
         <header className="flex items-center justify-between">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95 transition"
+            className="p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95 transition"
             aria-label="뒤로가기"
           >
             <ArrowLeft size={20} />
@@ -350,39 +351,32 @@ export function SettingsPage() {
         </header>
 
         {/* User Profile Overview */}
-        <section className="rounded-surface bg-card border border-border p-5 shadow-sm flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-coral/20 text-coral-strong font-bold flex items-center justify-center text-title">
-              {profile.role === 'gomsin' ? '🌸' : '🪖'}
-            </div>
-            <div>
-              <h2 className="text-heading text-foreground">{myName}님 ({roleLabel})</h2>
-              <p className="text-caption text-muted-foreground mt-0.5">
-                {profile.couple.connected
-                  ? `파트너 ${partnerName}님과 연결됨`
-                  : hasCoupleSpace
-                    ? '상대방 참여 대기 중'
-                    : '개인 모드 이용 중'}
-              </p>
-            </div>
+        <section className="flex items-center gap-3 py-2">
+          <div className="w-11 h-11 rounded-full bg-coral/20 text-coral-strong font-bold flex items-center justify-center text-heading">
+            {profile.role === 'gomsin' ? '🌸' : '🪖'}
+          </div>
+          <div>
+            <h2 className="text-heading text-foreground">{myName}님 ({roleLabel})</h2>
+            <p className="text-caption text-muted-foreground mt-0.5">
+              {profile.couple.connected
+                ? `파트너 ${partnerName}님과 연결됨`
+                : hasCoupleSpace
+                  ? '상대방 참여 대기 중'
+                  : '개인 모드 이용 중'}
+            </p>
           </div>
         </section>
 
-        <section className="rounded-surface bg-card border border-border p-4 shadow-sm space-y-3">
-          <div>
-            <h2 className="text-heading text-foreground">화면 테마</h2>
-            <p className="text-caption text-muted-foreground mt-1">
-              눈과 상황에 편한 화면을 선택하세요. 선택은 이 기기에 저장됩니다.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-muted p-1.5">
+        <section className="space-y-2">
+          <h2 className="text-heading text-foreground">화면 테마</h2>
+          <div className="grid grid-cols-2 gap-2 rounded-surface bg-muted p-1.5">
             <button
               type="button"
               onClick={() => setTheme('light')}
               aria-pressed={(state.theme || 'light') === 'light'}
-              className={`h-11 rounded-xl text-label font-bold flex items-center justify-center gap-2 transition ${
+              className={`h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 transition ${
                 (state.theme || 'light') === 'light'
-                  ? 'bg-card text-coral shadow-sm'
+                  ? 'bg-card text-coral'
                   : 'text-muted-foreground'
               }`}
             >
@@ -393,9 +387,9 @@ export function SettingsPage() {
               type="button"
               onClick={() => setTheme('dark')}
               aria-pressed={state.theme === 'dark'}
-              className={`h-11 rounded-xl text-label font-bold flex items-center justify-center gap-2 transition ${
+              className={`h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 transition ${
                 state.theme === 'dark'
-                  ? 'bg-card text-coral shadow-sm'
+                  ? 'bg-card text-coral'
                   : 'text-muted-foreground'
               }`}
             >
@@ -407,13 +401,11 @@ export function SettingsPage() {
 
         {/* Invite code for the space creator, until the partner actually joins. */}
         {hasCoupleSpace && !profile.couple.connected && !isDemoMode && (
-          <section className="rounded-surface bg-card border border-coral/30 p-5 shadow-sm space-y-3">
+          <section className="rounded-surface bg-card border border-coral/30 p-4 space-y-3">
             <div>
               <h2 className="text-heading text-foreground">우리 공간 초대 코드</h2>
               <p className="text-caption text-muted-foreground mt-1">
                 상대방이 앱에서 이 코드를 입력하면 두 사람의 공간이 연결됩니다. 코드는 24시간 동안 유효해요.
-                {/* The authoritative deadline from the server, when it is known.
-                    "24시간 동안 유효" alone never told the user when it lapses. */}
                 {invitationExpiryLabel(invitationExpiresAt) && (
                   <span data-testid="settings-invitation-expiry" className="font-semibold text-foreground">
                     {' '}({invitationExpiryLabel(invitationExpiresAt)})
@@ -423,7 +415,7 @@ export function SettingsPage() {
             </div>
 
             {profile.couple.coupleCode ? (
-              <div className="flex items-center justify-between bg-muted px-4 py-3 rounded-2xl border border-border">
+              <div className="flex items-center justify-between bg-muted px-4 py-3 rounded-surface border border-border">
                 <span className="font-mono text-display tracking-[0.2em] text-foreground">
                   {profile.couple.coupleCode}
                 </span>
@@ -440,13 +432,13 @@ export function SettingsPage() {
                     }
                   }}
                   aria-label="초대 코드 복사"
-                  className="p-2 text-coral hover:bg-coral/10 rounded-xl transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="p-2 text-coral hover:bg-coral/10 rounded-control transition min-h-[44px] min-w-[44px] flex items-center justify-center"
                 >
                   {copiedInvite ? <Check size={20} /> : <Copy size={20} />}
                 </button>
               </div>
             ) : (
-              <p className="text-caption text-warning-foreground bg-warning-surface border border-warning/30 rounded-2xl p-3 leading-relaxed">
+              <p className="text-caption text-warning-foreground bg-warning-surface border border-warning/30 rounded-surface p-3 leading-relaxed">
                 이 기기에 저장된 초대 코드가 없습니다. 보안을 위해 서버에는 코드 원본을 저장하지 않으므로,
                 아래에서 새 코드를 발급해 상대방에게 전달해 주세요.
               </p>
@@ -466,12 +458,11 @@ export function SettingsPage() {
                 await updateProfile({
                   couple: { ...profile.couple, coupleCode: result.code },
                 });
-                // Re-read the authoritative expiry for the code just minted.
                 void refreshCoupleLifecycle();
                 toast.success('새 초대 코드가 발급되었습니다. 이전 코드는 더 이상 사용할 수 없어요.');
               }}
               disabled={isRegenerating}
-              className="w-full h-12 rounded-xl border border-coral/40 text-coral-strong text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full h-11 rounded-control border border-coral/40 text-coral-strong text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <RefreshCw size={15} className={isRegenerating ? 'animate-spin' : undefined} />
               {isRegenerating ? '발급 중...' : '새 초대 코드 발급하기'}
@@ -480,7 +471,7 @@ export function SettingsPage() {
         )}
 
         {!hasCoupleSpace && !isDemoMode && (
-          <section className="rounded-surface bg-card border border-coral/30 p-5 shadow-sm space-y-3">
+          <section className="rounded-surface bg-card border border-coral/30 p-4 space-y-3">
             <div>
               <h2 className="text-heading text-foreground">우리 공간 연결하기</h2>
               <p className="text-caption text-muted-foreground mt-1">
@@ -497,19 +488,17 @@ export function SettingsPage() {
               }
               placeholder="6자리 초대 코드"
               aria-label="6자리 초대 코드"
-              className="w-full h-12 px-4 rounded-xl bg-background border border-border text-body tracking-[0.3em] outline-none focus:ring-2 focus:ring-coral/40"
+              className="w-full h-11 px-4 rounded-control bg-background border border-border text-body tracking-[0.3em] outline-none focus:ring-2 focus:ring-coral/40"
             />
             <button
               type="button"
               onClick={handleJoinCouple}
               disabled={isJoiningCouple || inviteCodeInput.length !== 6}
-              className="w-full h-12 rounded-xl bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50"
+              className="w-full h-12 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50"
             >
               {isJoiningCouple ? '연결 중...' : '초대 코드로 연결하기'}
             </button>
 
-            {/* The other half of the choice the banners promise. Without this a
-                disconnected user could only ever join someone else's code. */}
             <div className="flex items-center gap-3 pt-1">
               <span className="h-px flex-1 bg-border" />
               <span className="text-caption text-muted-foreground">또는</span>
@@ -522,7 +511,7 @@ export function SettingsPage() {
               type="button"
               onClick={handleCreateCoupleSpace}
               disabled={isCreatingSpace || isJoiningCouple}
-              className="w-full h-12 rounded-xl border border-coral/40 text-coral-strong text-label font-bold disabled:opacity-50"
+              className="w-full h-11 rounded-control border border-coral/40 text-coral-strong text-label font-bold disabled:opacity-50"
             >
               {isCreatingSpace ? '만드는 중...' : '새 우리 공간 만들기'}
             </button>
@@ -530,45 +519,39 @@ export function SettingsPage() {
         )}
 
         {/* General Settings */}
-        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
-          <button
-            onClick={() => {
-              setEditName(profile.myName);
-              setEditAnniversary(profile.couple.anniversaryDate || '');
-              setShowProfileModal(true);
-            }}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <User size={18} className="text-coral" />
-              <span>내 프로필 수정</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
-
-          {profile.role === 'soldier' && (
-            <button
-              onClick={() => navigate('/service')}
-              className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
+        <section className="space-y-2">
+          <SectionHeader title="일반" />
+          <RowGroup boxed>
+            <PressableRow
+              onClick={() => {
+                setEditName(profile.myName);
+                setEditAnniversary(profile.couple.anniversaryDate || '');
+                setShowProfileModal(true);
+              }}
+              leading={<User size={18} className="text-coral" />}
+              trailing={<ChevronRight size={16} className="text-muted-foreground" />}
             >
-              <span className="flex items-center gap-3 text-foreground">
-                <Shield size={18} className="text-coral" />
-                <span>복무 정보 수정</span>
-              </span>
-              <ChevronRight size={16} className="text-muted-foreground" />
-            </button>
-          )}
+              <span className="text-label font-semibold text-foreground">내 프로필 수정</span>
+            </PressableRow>
 
-          <button 
-            onClick={() => setShowPWAModal(true)}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Smartphone size={18} className="text-coral" />
-              <span>PWA 홈 화면 설치 방법</span>
-            </span>
-            <span className="text-caption text-muted-foreground font-normal">Safari/Chrome</span>
-          </button>
+            {profile.role === 'soldier' && (
+              <PressableRow
+                onClick={() => navigate('/service')}
+                leading={<Shield size={18} className="text-coral" />}
+                trailing={<ChevronRight size={16} className="text-muted-foreground" />}
+              >
+                <span className="text-label font-semibold text-foreground">복무 정보 수정</span>
+              </PressableRow>
+            )}
+
+            <PressableRow
+              onClick={() => setShowPWAModal(true)}
+              leading={<Smartphone size={18} className="text-coral" />}
+              trailing={<span className="text-caption text-muted-foreground">Safari/Chrome</span>}
+            >
+              <span className="text-label font-semibold text-foreground">PWA 홈 화면 설치 방법</span>
+            </PressableRow>
+          </RowGroup>
         </section>
 
         {/*
@@ -586,37 +569,36 @@ export function SettingsPage() {
           Unconditional on role on purpose: the pre-existing /service row below
           is soldier-only, so a 곰신 viewer had no non-widget route to it at all.
         */}
-        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
-          <h2 className="px-4 pt-4 pb-2 text-caption font-bold text-muted-foreground">바로가기</h2>
-          {[
-            { to: '/schedule', label: '일정 관리', icon: CalendarDays },
-            { to: '/trips', label: '여행 플래너', icon: Plane },
-            { to: '/service', label: '복무 현황 · D-Day', icon: Shield },
-          ].map(({ to, label, icon: Icon }) => (
-            <button
-              key={to}
-              onClick={() => navigate(to)}
-              aria-label={label}
-              className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[44px] min-w-[44px]"
-            >
-              <span className="flex items-center gap-3 text-foreground">
-                <Icon size={18} className="text-coral" />
-                <span>{label}</span>
-              </span>
-              <ChevronRight size={16} className="text-muted-foreground" />
-            </button>
-          ))}
+        <section className="space-y-2">
+          <SectionHeader title="바로가기" />
+          <RowGroup boxed>
+            {[
+              { to: '/schedule', label: '일정 관리', icon: CalendarDays },
+              { to: '/trips', label: '여행 플래너', icon: Plane },
+              { to: '/service', label: '복무 현황 · D-Day', icon: Shield },
+            ].map(({ to, label, icon: Icon }) => (
+              <PressableRow
+                key={to}
+                onClick={() => navigate(to)}
+                aria-label={label}
+                leading={<Icon size={18} className="text-coral" />}
+                trailing={<ChevronRight size={16} className="text-muted-foreground" />}
+              >
+                <span className="text-label font-semibold text-foreground">{label}</span>
+              </PressableRow>
+            ))}
+          </RowGroup>
         </section>
 
         {/* Contact Hours */}
         {profile.role === 'soldier' && (
-          <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm p-4 space-y-2">
+          <section className="rounded-surface bg-card border border-border p-4 space-y-1">
             <div className="flex items-center justify-between text-label font-bold text-foreground">
               <div className="flex items-center gap-2">
                 <Clock size={16} className="text-coral" />
-                <span>군화 연락 가능 시간 설정</span>
+                <span>연락 가능 시간</span>
               </div>
-              <span className="text-caption text-coral-strong font-bold bg-coral/10 px-2.5 py-0.5 rounded-md">
+              <span className="text-caption text-coral-strong font-bold">
                 {profile.contact.weekdayStart} ~ {profile.contact.weekdayEnd}
               </span>
             </div>
@@ -627,89 +609,78 @@ export function SettingsPage() {
         )}
 
         {/* Couple & Data Management */}
-        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
-          <button
-            onClick={handleExportMyData}
-            disabled={isExporting}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px] disabled:opacity-50"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Download size={18} className="text-foreground" />
-              <span>내 기록 JSON으로 내보내기</span>
-            </span>
-            <span className="text-caption text-muted-foreground font-normal">
-              {isExporting ? '내보내는 중...' : `${ownRecords.length}개`}
-            </span>
-          </button>
+        <section className="space-y-2">
+          <SectionHeader title="데이터 관리" />
+          <RowGroup boxed>
+            <PressableRow
+              onClick={handleExportMyData}
+              disabled={isExporting}
+              leading={<Download size={18} className="text-foreground" />}
+              trailing={<span className="text-caption text-muted-foreground">{isExporting ? '내보내는 중...' : `${ownRecords.length}개`}</span>}
+            >
+              <span className="text-label font-semibold text-foreground">내 기록 JSON으로 내보내기</span>
+            </PressableRow>
 
-          <button 
-            onClick={() => setShowDeleteRecordsModal(true)}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Trash2 size={18} className="text-foreground" />
-              <span>내 작성 기록 전체 삭제</span>
-            </span>
-            <span className="text-caption text-muted-foreground font-normal">{ownRecords.length}개 보유</span>
-          </button>
-
-          <button 
-            onClick={() => setShowDisconnectModal(true)}
-            className="w-full p-4 text-left flex items-center justify-between text-destructive hover:bg-destructive/10 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3">
-              <Unlink size={18} />
-              <span>커플 연결 해제</span>
-            </span>
-            <ChevronRight size={16} className="text-destructive/60" />
-          </button>
+            <PressableRow
+              onClick={() => setShowDeleteRecordsModal(true)}
+              leading={<Trash2 size={18} className="text-foreground" />}
+              trailing={<span className="text-caption text-muted-foreground">{ownRecords.length}개 보유</span>}
+            >
+              <span className="text-label font-semibold text-foreground">내 작성 기록 전체 삭제</span>
+            </PressableRow>
+          </RowGroup>
         </section>
 
-        {/* Account Management & Reset */}
-        <section className="rounded-surface bg-card border border-border overflow-hidden shadow-sm divide-y divide-border/40 text-label font-semibold">
-          <button
-            onClick={() => navigate('/legal/terms')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <FileText size={18} className="text-muted-foreground" />
-              <span>서비스 이용약관</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
+        {/* Destructive actions - visually separated */}
+        <section className="space-y-2">
+          <SectionHeader title="연결 해제" />
+          <RowGroup boxed>
+            <PressableRow
+              onClick={() => setShowDisconnectModal(true)}
+              leading={<Unlink size={18} className="text-destructive" />}
+              trailing={<ChevronRight size={16} className="text-destructive/60" />}
+            >
+              <span className="text-label font-semibold text-destructive">커플 연결 해제</span>
+            </PressableRow>
+          </RowGroup>
+        </section>
 
-          <button
-            onClick={() => navigate('/legal/privacy')}
-            className="w-full p-4 text-left flex items-center justify-between hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3 text-foreground">
-              <Shield size={18} className="text-muted-foreground" />
-              <span>개인정보 처리방침</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground" />
-          </button>
+        {/* Account Management */}
+        <section className="space-y-2">
+          <SectionHeader title="계정" />
+          <RowGroup boxed>
+            <PressableRow
+              onClick={() => navigate('/legal/terms')}
+              leading={<FileText size={18} className="text-muted-foreground" />}
+              trailing={<ChevronRight size={16} className="text-muted-foreground" />}
+            >
+              <span className="text-label font-semibold text-foreground">서비스 이용약관</span>
+            </PressableRow>
 
-          <button 
-            onClick={signOut}
-            className="w-full p-4 text-left flex items-center justify-between text-muted-foreground hover:bg-muted/50 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3">
-              <LogOut size={18} />
-              <span>로그아웃</span>
-            </span>
-            <ChevronRight size={16} className="text-muted-foreground/60" />
-          </button>
+            <PressableRow
+              onClick={() => navigate('/legal/privacy')}
+              leading={<Shield size={18} className="text-muted-foreground" />}
+              trailing={<ChevronRight size={16} className="text-muted-foreground" />}
+            >
+              <span className="text-label font-semibold text-foreground">개인정보 처리방침</span>
+            </PressableRow>
 
-          <button 
-            onClick={() => setShowDeleteAccountModal(true)}
-            className="w-full p-4 text-left flex items-center justify-between text-destructive hover:bg-destructive/10 transition min-h-[48px]"
-          >
-            <span className="flex items-center gap-3">
-              <Trash2 size={18} />
-              <span>계정 삭제 (회원 탈퇴)</span>
-            </span>
-            <ChevronRight size={16} className="text-destructive/60" />
-          </button>
+            <PressableRow
+              onClick={signOut}
+              leading={<LogOut size={18} className="text-muted-foreground" />}
+              trailing={<ChevronRight size={16} className="text-muted-foreground/60" />}
+            >
+              <span className="text-label font-semibold text-muted-foreground">로그아웃</span>
+            </PressableRow>
+
+            <PressableRow
+              onClick={() => setShowDeleteAccountModal(true)}
+              leading={<Trash2 size={18} className="text-destructive" />}
+              trailing={<ChevronRight size={16} className="text-destructive/60" />}
+            >
+              <span className="text-label font-semibold text-destructive">계정 삭제 (회원 탈퇴)</span>
+            </PressableRow>
+          </RowGroup>
         </section>
 
         <p className="text-center text-caption text-muted-foreground leading-relaxed px-4">
@@ -732,7 +703,7 @@ export function SettingsPage() {
                   value={editName}
                   onChange={(event) => setEditName(event.target.value.slice(0, 12))}
                   maxLength={12}
-                  className="w-full h-12 px-3 rounded-xl bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                  className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
                 />
               </div>
 
@@ -745,7 +716,7 @@ export function SettingsPage() {
                   type="date"
                   value={editAnniversary}
                   onChange={(event) => setEditAnniversary(event.target.value)}
-                  className="w-full h-12 px-3 rounded-xl bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                  className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
                 />
                 <p className="text-caption text-muted-foreground">
                   두 사람이 함께 보는 날짜예요. 저장하면 상대방 화면의 디데이에도 반영됩니다.
@@ -756,14 +727,14 @@ export function SettingsPage() {
                 <button
                   onClick={() => setShowProfileModal(false)}
                   disabled={isSavingProfile}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-label min-h-[44px]"
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
                 >
                   취소
                 </button>
                 <button
                   onClick={handleSaveProfile}
                   disabled={isSavingProfile}
-                  className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-label min-h-[44px] disabled:opacity-50"
+                  className="flex-1 py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
                 >
                   {isSavingProfile ? '저장 중…' : '저장하기'}
                 </button>
@@ -784,7 +755,7 @@ export function SettingsPage() {
                 <button
                   onClick={() => setShowDisconnectModal(false)}
                   disabled={isDisconnecting}
-                  className="py-2.5 rounded-xl border border-border text-label font-semibold min-h-[44px] disabled:opacity-50"
+                  className="py-2.5 rounded-control border border-border text-label font-semibold min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -811,7 +782,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDisconnecting}
-                  className="py-2.5 rounded-xl bg-destructive text-destructive-foreground text-label font-semibold min-h-[44px]"
+                  className="py-2.5 rounded-control bg-destructive text-destructive-foreground text-label font-semibold min-h-[44px]"
                 >
                   {isDisconnecting ? '해제 중...' : '해제하기'}
                 </button>
@@ -832,7 +803,7 @@ export function SettingsPage() {
                 <button
                   onClick={() => setShowDeleteRecordsModal(false)}
                   disabled={isDeletingRecords}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-label active:bg-muted/80 min-h-[44px] disabled:opacity-50"
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -864,7 +835,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDeletingRecords}
-                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-xl text-label active:scale-98 min-h-[44px]"
+                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-control text-label active:scale-98 min-h-[44px]"
                 >
                   {isDeletingRecords ? '삭제 중...' : '전체 삭제'}
                 </button>
@@ -881,7 +852,7 @@ export function SettingsPage() {
                 <AlertTriangle size={20} />
                 <span id="delete-account-modal-title">계정 삭제 (회원 탈퇴)</span>
               </div>
-              <div className="text-caption text-destructive bg-destructive/10 p-3.5 rounded-2xl space-y-1.5 leading-relaxed">
+              <div className="text-caption text-destructive bg-destructive/10 p-3.5 rounded-surface space-y-1.5 leading-relaxed">
                 <p>• 내 프로필, 내가 쓴 기록과 첨부파일, 로그인 계정이 삭제됩니다.</p>
                 <p>• 상대방이 직접 작성한 기록은 삭제하지 않고 연결만 해제합니다.</p>
                 <p>• 삭제한 계정과 데이터는 복원할 수 없습니다.</p>
@@ -896,7 +867,7 @@ export function SettingsPage() {
                   onChange={(event) => setDeleteAccountConfirmation(event.target.value)}
                   placeholder="탈퇴"
                   autoComplete="off"
-                  className="w-full h-11 px-3 rounded-xl bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-destructive/30"
+                  className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-destructive/30"
                 />
               </div>
               <div className="flex gap-2 pt-2">
@@ -906,7 +877,7 @@ export function SettingsPage() {
                     setDeleteAccountConfirmation('');
                   }}
                   disabled={isDeletingAccount}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-xl text-label active:bg-muted/80 min-h-[44px]"
+                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px]"
                 >
                   취소
                 </button>
@@ -958,7 +929,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDeletingAccount || deleteAccountConfirmation !== '탈퇴'}
-                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-xl text-label active:scale-98 min-h-[44px] disabled:opacity-50"
+                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-control text-label active:scale-98 min-h-[44px] disabled:opacity-50"
                 >
                   {isDeletingAccount ? '삭제 중...' : '영구 삭제'}
                 </button>
@@ -975,13 +946,13 @@ export function SettingsPage() {
                 <Smartphone size={20} className="text-coral" />
                 <span id="pwa-modal-title">PWA 앱 설치 안내</span>
               </div>
-              <div className="text-caption text-muted-foreground space-y-2 leading-relaxed bg-muted/40 p-3.5 rounded-2xl border border-border">
+              <div className="text-caption text-muted-foreground space-y-2 leading-relaxed bg-muted/40 p-3.5 rounded-surface border border-border">
                 <p>• <b>iPhone Safari:</b> 하단 공유 아이콘 탭 → '홈 화면에 추가'</p>
                 <p>• <b>Android Chrome:</b> 우측 상단 메뉴 탭 → '앱 설치' 또는 '홈 화면에 추가'</p>
               </div>
               <button
                 onClick={() => setShowPWAModal(false)}
-                className="w-full py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-xl text-label active:scale-[0.99] min-h-[44px]"
+                className="w-full py-3 bg-coral-strong text-coral-strong-foreground font-bold rounded-control text-label active:scale-[0.99] min-h-[44px]"
               >
                 확인
               </button>

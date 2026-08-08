@@ -64,10 +64,10 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-widget-sheet-title"
-        className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-3xl p-5 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col"
+        className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-2xl p-4 pb-10 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col"
       >
-        <div className="flex items-center justify-between mb-4">
-          <h2 id="add-widget-sheet-title" className="text-title text-foreground">홈 위젯 추가</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 id="add-widget-sheet-title" className="text-heading text-foreground">홈 위젯 추가</h2>
           <button
             onClick={onClose}
             aria-label="위젯 추가 닫기"
@@ -96,13 +96,13 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
                   key={id}
                   type="button"
                   onClick={() => handleAddWidget(id)}
-                  className="w-full text-left flex items-center justify-between p-4 rounded-2xl border border-border hover:border-coral/50 hover:bg-coral/5 cursor-pointer transition-all active:scale-95"
+                  className="w-full text-left flex items-center justify-between p-3 rounded-control border border-border hover:border-coral/50 hover:bg-coral/5 cursor-pointer transition-all active:scale-95"
                 >
                   <div>
-                    <div className="text-label font-bold text-foreground">{widget.label}</div>
+                    <div className="text-label font-semibold text-foreground">{widget.label}</div>
                     <div className="text-caption text-muted-foreground mt-0.5">{widget.description}</div>
                   </div>
-                  <PlusCircle className="text-coral" size={24} strokeWidth={1.5} aria-hidden="true" />
+                  <PlusCircle className="text-coral" size={20} strokeWidth={1.5} aria-hidden="true" />
                 </button>
               );
             })}

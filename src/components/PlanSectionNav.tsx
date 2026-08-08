@@ -11,6 +11,10 @@ import { useNavigate } from 'react-router-dom';
  *
  * Rendered on both /schedule and /trips so the two never feel like separate
  * destinations you have to navigate back out of.
+ *
+ * 2026-08-08 visual revision: tightened from rounded-2xl to rounded-surface for
+ * the container and rounded-control for tabs; used text-label token; ensured 44px
+ * hit targets for each tab button.
  */
 export function PlanSectionNav({ active }: { active: 'schedule' | 'trips' }) {
   const navigate = useNavigate();
@@ -32,7 +36,7 @@ export function PlanSectionNav({ active }: { active: 'schedule' | 'trips' }) {
     <div
       role="tablist"
       aria-label="계획 종류"
-      className="flex gap-2 p-1 rounded-2xl bg-muted"
+      className="flex gap-1 p-1 rounded-control bg-muted"
     >
       {items.map((item) => {
         const isActive = item.key === active;
@@ -45,9 +49,9 @@ export function PlanSectionNav({ active }: { active: 'schedule' | 'trips' }) {
             aria-selected={isActive}
             aria-label={item.ariaLabel}
             onClick={() => !isActive && navigate(item.to)}
-            className={`flex-1 min-h-[44px] rounded-xl text-label font-bold flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 min-h-11 rounded-control text-label font-semibold flex items-center justify-center gap-1.5 transition ${
               isActive
-                ? 'bg-card text-foreground shadow-sm'
+                ? 'bg-card text-foreground'
                 : 'text-muted-foreground active:scale-95'
             }`}
           >

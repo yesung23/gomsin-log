@@ -44,7 +44,7 @@ export function EmotionFlowInsightCard({
     <div
       role="group"
       aria-label={summary}
-      className={`bg-card border border-border rounded-2xl p-4 ${className ?? ''}`}
+      className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
     >
       <p className="text-caption font-semibold text-muted-foreground mb-2">마음의 흐름</p>
 

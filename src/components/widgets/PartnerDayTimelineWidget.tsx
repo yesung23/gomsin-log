@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, Film, Image as ImageIcon, Mic } from 'lucide-react';
+import { Film, Image as ImageIcon, Mic } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { localToday, toLocalDateString } from '@/lib/utils';
@@ -8,6 +8,7 @@ import { AttachmentMedia } from '@/components/AttachmentMedia';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { SectionHeader, RowGroup, TimelineRow } from '@/components/ui/List';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { Attachment, DailyRecord } from '@/types';
 
@@ -18,26 +19,16 @@ import type { Attachment, DailyRecord } from '@/types';
  * 받거나 접속했을 때 상대방의 오늘 순간들을 시간순(사진, 영상, 음성, 텍스트)으로 있는
  * 그대로 감상합니다."
  *
- * Nothing on that home did it. `partner_emotion_flow` shows emotion labels,
- * `partner_emotion_summary` a one-line headline, `care_hint` a suggested opener,
- * and `today_word` is the composer plus the viewer's OWN entries. Every one of
- * them is a description of the day. The day itself was only reachable by leaving
- * home for the 기록 tab.
- *
- * So this widget shows the moments, not a summary of them: each entry in time
- * order with its text and its media playable in place, through the same
- * `AttachmentMedia` the 기록 screen uses -- which means a voice note can be heard
- * without leaving home, and an expired signed URL re-signs itself here too.
- *
- * Reads ONLY what the viewer is entitled to see. `visibleRecordsForViewer` is
- * applied here as well as in the store, and a private entry cannot reach it.
+ * Renders as an editorial timeline using TimelineRow: time → media → prose.
+ * No wrapper card — surface economy. Structure comes from the time rail and
+ * dividers, not from a border per entry.
  */
 
 const REACTION_LABELS: Record<string, string> = {
-  good: '😊 좋았어',
-  event: '💬 이런 일이 있었어',
-  hard: '🥹 힘들었어',
-  thought_of_you: '💌 네 생각났어',
+  good: '좋았어',
+  event: '이런 일이',
+  hard: '힘들었어',
+  thought_of_you: '네 생각났어',
 };
 
 const KIND_ICON = {
@@ -87,13 +78,6 @@ export function PartnerDayTimelineWidget() {
     navigate('/record');
   };
 
-  const header = (
-    <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
-      <Clock size={14} className="text-coral-strong" aria-hidden="true" />
-      {partnerName}의 오늘
-    </h3>
-  );
-
   /*
     The workspace being unconfirmed OUTRANKS an empty list. During that window --
     a couple of seconds on every cold load with no realtime socket -- `records`
@@ -104,7 +88,7 @@ export function PartnerDayTimelineWidget() {
   if (sharedSyncStatus === 'unavailable') {
     return (
       <div data-testid="widget-partner-day" data-state="unconfirmed">
-        {header}
+        <SectionHeader title={`${partnerName}의 오늘`} />
         <Skeleton
           label="기록을 확인하는 중이에요."
           description={`확인되면 ${partnerName}의 오늘을 시간순으로 보여드려요.`}
@@ -117,7 +101,7 @@ export function PartnerDayTimelineWidget() {
   if (todays.length === 0) {
     return (
       <div data-testid="widget-partner-day" data-state="empty">
-        {header}
+        <SectionHeader title={`${partnerName}의 오늘`} />
         <EmptyState
           title="오늘 공유된 순간이 아직 없어요."
           description={`${partnerName}이 남기면 시간순으로 이 자리에 쌓여요.`}
@@ -128,50 +112,63 @@ export function PartnerDayTimelineWidget() {
 
   return (
     <div data-testid="widget-partner-day" data-state="ready">
-      {header}
-      <p className="text-caption text-muted-foreground mb-2">
-        순간 {todays.length}개 · 시간순
-        {sharedSyncStatus === 'delayed' && ' · 방금 것이 아직 안 보일 수 있어요'}
-      </p>
+      <SectionHeader
+        title={`${partnerName}의 오늘`}
+        caption={`순간 ${todays.length}개${sharedSyncStatus === 'delayed' ? ' · 방금 것이 아직 안 보일 수 있어요' : ''}`}
+        action={
+          hiddenCount > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openRecord(todays[PARTNER_DAY_VISIBLE_LIMIT])}
+            >
+              전체 보기
+            </Button>
+          ) : undefined
+        }
+      />
 
-      <ol className="space-y-3">
+      {/* Editorial timeline: time rail → media → prose. No card per entry. */}
+      <RowGroup>
         {visible.map((record) => (
-          <li key={record.id} data-testid="partner-day-entry" className="border-l-2 border-coral/30 pl-3">
-            {/*
-              The whole entry is the control, so the tap target is the moment
-              rather than a small chevron. It carries the record id, so 기록 opens
-              on THIS moment -- including on another date, though today's entries
-              never are.
-            */}
+          <li key={record.id} data-testid="partner-day-entry" className="list-none">
             <button
               type="button"
               onClick={() => openRecord(record)}
               aria-label={`${record.time || ''} ${partnerName}의 기록 자세히 보기`}
-              className="w-full text-left min-h-[44px]"
+              className="w-full text-left min-h-11 flex items-start gap-2 py-2"
             >
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {/* Tabular, so a column of times does not shift character to character. */}
-                <span className="text-caption font-bold text-foreground tabular-nums">{record.time}</span>
-                {mediaKinds(record.attachments).map((kind) => {
-                  const Icon = KIND_ICON[kind];
-                  return <Icon key={kind} size={12} className="text-muted-foreground" aria-hidden="true" />;
-                })}
+              {/* Time rail */}
+              <span className="shrink-0 w-11 text-caption text-muted-foreground tabular-nums pt-0.5">
+                {record.time}
+              </span>
+
+              {/* Content */}
+              <span className="flex-1 min-w-0">
+                {/* Media type indicators */}
+                {mediaKinds(record.attachments).length > 0 && (
+                  <span className="flex items-center gap-1 mb-0.5">
+                    {mediaKinds(record.attachments).map((kind) => {
+                      const Icon = KIND_ICON[kind];
+                      return <Icon key={kind} size={12} className="text-muted-foreground" aria-hidden="true" />;
+                    })}
+                  </span>
+                )}
+
+                {/* Partner's own words — body size, the destination the briefing points at */}
+                {record.log && (
+                  <span className="block text-body text-foreground break-keep line-clamp-2">
+                    {record.log}
+                  </span>
+                )}
+
+                {/* Reaction as a neutral chip — no fixed colour per emotion */}
                 {record.reaction && (
-                  <Badge tone="neutral">
+                  <Badge tone="neutral" className="mt-1">
                     {REACTION_LABELS[record.reaction] || record.reaction}
                   </Badge>
                 )}
-              </div>
-              {record.log && (
-                /*
-                  The partner's own sentence, at `body`. This is the destination
-                  the briefing points at, so it is never smaller than the summary
-                  that sent the reader here (DESIGN_V2 §3.3).
-                */
-                <p className="text-body text-foreground break-keep line-clamp-3 mt-1">
-                  {record.log}
-                </p>
-              )}
+              </span>
             </button>
 
             {/*
@@ -180,7 +177,7 @@ export function PartnerDayTimelineWidget() {
               away instead.
             */}
             {record.attachments && record.attachments.length > 0 && (
-              <div className="mt-1.5 space-y-1.5">
+              <div className="ml-[52px] pb-2 space-y-1.5">
                 {record.attachments.map((attachment, index) => (
                   <AttachmentMedia
                     key={index}
@@ -194,7 +191,7 @@ export function PartnerDayTimelineWidget() {
             )}
           </li>
         ))}
-      </ol>
+      </RowGroup>
 
       {hiddenCount > 0 && (
         <Button

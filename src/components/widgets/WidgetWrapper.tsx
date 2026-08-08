@@ -20,6 +20,14 @@ interface WidgetWrapperProps {
   children: React.ReactNode;
 }
 
+/**
+ * Widget container. In normal mode, NO elevated surface: surface economy says at
+ * most three elevated surfaces per screen, and wrapping every widget in a card was
+ * the "soft blob" reading. Structure comes from spacing, not from a border per item.
+ *
+ * In edit mode, a subtle border and background appear so the user can see the
+ * drag-reorder boundaries.
+ */
 export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: WidgetWrapperProps) {
   const {
     attributes,
@@ -41,8 +49,8 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
       ref={setNodeRef}
       style={style}
       className={cn(
-        "relative rounded-surface bg-card shadow-sm border border-border p-5",
-        isEditMode && "animate-wiggle",
+        "relative",
+        isEditMode && "rounded-surface bg-card border border-border p-4 animate-wiggle",
         isDragging && "opacity-80 scale-105 shadow-xl rotate-2"
       )}
     >
@@ -76,7 +84,7 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
           <div className="absolute inset-0 bg-card/20 z-10 rounded-surface cursor-pointer" aria-hidden="true" />
         </>
       )}
-      
+
       {/* Widget Content */}
       <div className={cn("relative z-0", isEditMode && "pointer-events-none")}>
         {children}

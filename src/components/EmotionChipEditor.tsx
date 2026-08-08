@@ -55,7 +55,7 @@ export function EmotionChipEditor({
   return (
     <div
       data-testid="emotion-chip-editor"
-      className={`p-3.5 rounded-2xl bg-coral/5 border border-coral/20 space-y-2.5 ${className || ''}`}
+      className={`p-3.5 rounded-surface bg-coral/5 border border-coral/20 space-y-2.5 ${className || ''}`}
     >
       {showHeading && (
         <>
@@ -89,7 +89,7 @@ export function EmotionChipEditor({
                 key={candidate.id}
                 data-testid={`emotion-chip-${candidate.id}`}
                 data-basic={candidate.basic}
-                className="flex items-center gap-2 bg-card border border-border rounded-xl p-2"
+                className="flex items-center gap-2 bg-card border border-border rounded-control p-2"
               >
                 <span className="text-caption font-bold text-muted-foreground w-4 text-center shrink-0">
                   {index + 1}
@@ -157,7 +157,7 @@ export function EmotionChipEditor({
                 type="button"
                 onClick={() => onRestore(candidate.id)}
                 aria-label={`${BASIC_EMOTION_LABEL[candidate.basic]} 다시 넣기`}
-                className="min-h-[44px] px-3 rounded-xl bg-muted text-muted-foreground border border-border text-caption font-bold flex items-center gap-1 active:scale-95 transition"
+                className="min-h-[44px] px-3 rounded-control bg-muted text-muted-foreground border border-border text-caption font-bold flex items-center gap-1 active:scale-95 transition"
               >
                 <RotateCcw size={12} aria-hidden="true" />
                 {BASIC_EMOTION_LABEL[candidate.basic]}

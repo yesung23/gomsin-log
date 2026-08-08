@@ -14,13 +14,18 @@ import { CREATOR } from './scenarios';
  * every briefing summary points here, and the partner's own sentence used to be
  * 14px while the chrome around it was the same size or larger.
  *
- * Measured at 320px, the narrowest supported width -- if a 13px floor is going to
+ * Measured at 320px, the narrowest supported width -- if a 12px floor is going to
  * break a layout, it breaks there first.
+ *
+ * DESIGN_V2 (2026-08-08) revised the scale: `caption` at 12px is the floor for
+ * metadata (times, secondary labels). The couple's own words are protected at
+ * 15-16px (`body` / `body-emphasis`) — this is the range where Korean prose stays
+ * comfortable to read on small screens without requiring zoom.
  */
 
-/** DESIGN_V2 §3.3. `caption` is the floor and prose starts at `body`. */
-const CAPTION_FLOOR_PX = 13;
-const BODY_PX = 16;
+/** DESIGN_V2 §3.3 (revised 2026-08-08). `caption` (12px) is the floor; prose starts at `body` (15px). */
+const CAPTION_FLOOR_PX = 12;
+const BODY_PX = 15;
 
 async function seed(page: Page) {
   // The context fixture already owns a page, so the mocks go on it and take

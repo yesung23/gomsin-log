@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
 import {
-  Camera, Image as ImageIcon, Send, Lock, Unlock, Heart,
+  Camera, Image as ImageIcon, Send, Lock, Unlock,
   Mic, Square, X, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -477,36 +477,41 @@ export function TodayLogWidget() {
     
   return (
     <div className="flex flex-col">
-      <h2 className="text-heading text-foreground mb-4">오늘의 기록</h2>
-      
-      {/* Main actions: 지금찍기, 사진·영상, 음성, 한줄남기기 */}
-      <div className="grid grid-cols-4 gap-2">
+      <h2 className="text-heading text-foreground mb-2">오늘의 기록</h2>
+
+      {/*
+        Compact capture launcher — one row, four type controls.
+        Design v2.1 §5.3: "Replace the four big tiles with one compact row of type
+        controls." Visual footprint is 36px per control, hit target 44px via padding.
+        Progressive disclosure: no text area on first paint.
+      */}
+      <div className="flex items-center gap-2">
         <button
           onClick={() => handleOpenInput('instant')}
-          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-coral/15 border border-coral/30 text-coral-strong font-bold text-caption active:scale-95 transition min-h-[60px]"
+          className="relative flex items-center gap-1 px-3 rounded-control bg-coral/10 border border-coral/20 text-coral-strong text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
-          <Camera size={20} className="mb-1" />
+          <Camera size={16} aria-hidden="true" />
           <span>지금찍기</span>
         </button>
 
         <button
           onClick={() => handleOpenInput('photo')}
-          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-caption active:scale-95 transition min-h-[60px]"
+          className="relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
-          <ImageIcon size={20} className="mb-1 text-muted-foreground" />
+          <ImageIcon size={16} className="text-muted-foreground" aria-hidden="true" />
           <span>사진·영상</span>
         </button>
 
         <button
           onClick={isRecording ? handleStopRecording : handleStartRecording}
           aria-pressed={isRecording}
-          className={`flex flex-col items-center justify-center py-4 px-1 rounded-2xl border font-semibold text-caption active:scale-95 transition min-h-[60px] ${
+          className={`relative flex items-center gap-1 px-3 rounded-control border text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] ${
             isRecording
-              ? 'bg-destructive/15 border-destructive/40 text-destructive'
-              : 'bg-muted/60 border-border text-foreground'
+              ? 'bg-destructive/10 border-destructive/30 text-destructive'
+              : 'bg-muted border-border text-foreground'
           }`}
         >
-          {isRecording ? <Square size={20} className="mb-1" /> : <Mic size={20} className="mb-1 text-muted-foreground" />}
+          {isRecording ? <Square size={16} aria-hidden="true" /> : <Mic size={16} className="text-muted-foreground" aria-hidden="true" />}
           <span>
             {isRecording
               ? `${String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:${String(recordSeconds % 60).padStart(2, '0')}`
@@ -516,9 +521,9 @@ export function TodayLogWidget() {
 
         <button
           onClick={() => handleOpenInput('text')}
-          className="flex flex-col items-center justify-center py-4 px-1 rounded-2xl bg-muted/60 border border-border text-foreground font-semibold text-caption active:scale-95 transition min-h-[60px]"
+          className="relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
-          <Send size={20} className="mb-1 text-muted-foreground" />
+          <Send size={16} className="text-muted-foreground" aria-hidden="true" />
           <span>한줄</span>
         </button>
       </div>
@@ -532,16 +537,25 @@ export function TodayLogWidget() {
         onChange={handleFileSelect}
       />
 
-      {/* Input Composer */}
+      {/* Draft continuation prompt — only when there IS a draft */}
+      {!showInputCard && restoredDraft && restoredDraft.log && (
+        <button
+          type="button"
+          onClick={() => setShowInputCard(true)}
+          className="mt-2 w-full text-left text-caption text-muted-foreground min-h-11 flex items-center"
+        >
+          이어 쓰던 글이 있어요 <span className="ml-auto text-coral-strong font-semibold">이어쓰기 ›</span>
+        </button>
+      )}
+
+      {/* Input Composer — progressive disclosure: only after a type is chosen */}
       {showInputCard && (
-        <div className="mt-4 p-4 rounded-2xl bg-card border border-border shadow-sm animate-fade-in space-y-3">
-          <div className="flex items-center justify-between pb-3 border-b border-border">
-            <span className="text-caption font-bold text-muted-foreground flex items-center gap-1">
-              <Heart size={14} className="text-coral fill-coral" /> 순간 남기기
-            </span>
+        <div className="mt-3 p-3 rounded-surface bg-card border border-border animate-fade-in space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-caption font-semibold text-muted-foreground">순간 남기기</span>
             <button
               onClick={() => setShowInputCard(false)}
-              className="text-caption text-muted-foreground px-2 py-1 bg-muted rounded-md"
+              className="min-h-11 min-w-11 flex items-center justify-center text-caption text-muted-foreground"
             >
               닫기
             </button>
@@ -552,15 +566,12 @@ export function TodayLogWidget() {
             support for reading it varies between screen readers. This is the main
             composer of the whole app, so it gets a real name. WCAG 2.1 SC 1.3.1.
           */}
-          <p className="text-caption text-muted-foreground leading-relaxed break-keep">
-            사건을 길게 설명하기보다 <strong className="text-foreground">무슨 일이 있었는지 · 어떤 마음이었는지 · 통화 때 듣고 싶은 말</strong>을 남겨 보세요.
-          </p>
           <textarea
             value={log}
             onChange={(e) => setLog(e.target.value)}
             aria-label="오늘의 기록"
             placeholder="지금 이 순간, 어떤 생각을 하고 있나요?"
-            className="w-full h-24 bg-muted rounded-xl p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
+            className="w-full h-20 bg-muted rounded-control p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />
 
           {isNative && !hasVoiceAttachment && (
@@ -571,7 +582,7 @@ export function TodayLogWidget() {
           )}
 
           {isRecording && (
-            <div className="flex items-center gap-2 text-caption font-bold text-destructive bg-destructive/10 border border-destructive/30 rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2 text-caption font-bold text-destructive bg-destructive/10 border border-destructive/30 rounded-control px-3 py-2">
               <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
               <span>
                 녹음 중 {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:
@@ -580,7 +591,7 @@ export function TodayLogWidget() {
               <button
                 type="button"
                 onClick={handleStopRecording}
-                className="ml-auto px-2 py-1 rounded-lg bg-destructive text-destructive-foreground font-bold"
+                className="ml-auto px-2 py-1 rounded-control bg-destructive text-destructive-foreground font-bold"
               >
                 녹음 종료
               </button>
@@ -589,8 +600,8 @@ export function TodayLogWidget() {
 
           {pendingFiles.length > 0 && (
             <div className="space-y-1.5">
-              <span className="text-caption font-bold text-muted-foreground">
-                첨부 {pendingFiles.length}개 (저장할 때 업로드돼요)
+              <span className="text-caption font-semibold text-muted-foreground">
+                첨부 {pendingFiles.length}개
               </span>
               <div className="flex flex-wrap gap-2">
                 {pendingFiles.map((file, index) => {
@@ -599,7 +610,7 @@ export function TodayLogWidget() {
                   return (
                     <span
                       key={`${file.name}-${index}`}
-                      className="flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-xl bg-muted border border-border text-caption font-semibold text-foreground"
+                      className="flex items-center gap-1.5 max-w-full px-2 py-1 rounded-control bg-muted border border-border text-caption font-semibold text-foreground"
                     >
                       {kind === 'photo' && <ImageIcon size={13} className="text-coral shrink-0" />}
                       {kind === 'video' && <Film size={13} className="text-info shrink-0" />}
@@ -639,13 +650,10 @@ export function TodayLogWidget() {
               persisted, and computed from the same array as the save payload. */}
           <EmotionFlowInsightCard items={userConfirmedFlow} variant="composer" />
 
-          <div className="pt-2 flex items-center justify-between">
+          <div className="pt-2 flex items-center justify-between gap-2">
             <button
               onClick={() => setIsPrivate(!isPrivate)}
-              // 44px minimum: measured at 32px in a real browser, which is below
-              // the tap-target floor for the control that decides whether a record
-              // is shared with the partner.
-              className={`min-h-[44px] px-3 rounded-lg text-label font-bold flex items-center gap-1 ${
+              className={`min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 ${
                 isPrivate ? 'bg-warning-surface text-warning-foreground' : 'bg-muted text-muted-foreground'
               }`}
             >
@@ -654,7 +662,7 @@ export function TodayLogWidget() {
             </button>
 
             {!isPrivate && (
-              <label className="min-h-[44px] px-3 rounded-lg bg-coral/10 text-coral-strong text-label font-bold flex items-center gap-1 cursor-pointer">
+              <label className="min-h-11 px-3 rounded-control bg-coral/10 text-coral-strong text-label font-semibold flex items-center gap-1 cursor-pointer">
                 <input type="checkbox" checked={talkAbout} onChange={(event) => setTalkAbout(event.target.checked)} className="accent-coral" />
                 통화 때 꼭 얘기
               </label>
@@ -662,20 +670,8 @@ export function TodayLogWidget() {
 
             <button
               onClick={handlePost}
-              // Whitespace-only text is nothing to save, and `handlePost` already
-              // refuses it -- but the button stayed enabled, so the affordance
-              // promised a save that could not happen. Still enabled while
-              // recording, so tapping it can say "finish the recording first"
-              // instead of doing nothing at all.
-              //
-              // `isOffline` is NO LONGER a reason to disable it. It used to be,
-              // because a write offline could only fail; it now goes to the outbox
-              // and is delivered when the connection returns, so disabling the
-              // button here would put the app back to losing the text on app close.
               disabled={isSaving || (!isRecording && !hasContentToSave)}
-              // 44px minimum: measured at 32px in a real browser. This is the
-              // primary save action of the whole app.
-              className="min-h-[44px] px-4 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-label shadow-sm active:scale-95 transition disabled:opacity-50"
+              className="min-h-11 px-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-label active:scale-95 transition disabled:opacity-50"
             >
               {isSaving ? '저장 중...' : '저장'}
             </button>
@@ -683,46 +679,49 @@ export function TodayLogWidget() {
         </div>
       )}
 
-      {/* Timeline Preview */}
-      <div className="mt-6">
-        <h3 className="text-heading text-foreground mb-3 flex items-center justify-between">
-          <span>오늘의 타임라인</span>
-          <span className="text-caption bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
-            {todayRecords.length}
+      {/* Today's real records preview — immediately below the launcher */}
+      <div className="mt-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-label font-semibold text-foreground">
+            오늘의 타임라인
+          </h3>
+          <span className="text-caption text-muted-foreground tabular-nums">
+            {todayRecords.length}개
           </span>
-        </h3>
+        </div>
         
         {todayRecords.length === 0 ? (
-          <div className="text-center py-6 bg-muted/50 rounded-2xl border border-dashed border-border">
-            <p className="text-caption text-muted-foreground">아직 남겨진 기록이 없어요. 소중한 순간을 남겨보세요!</p>
-          </div>
+          <p className="text-caption text-muted-foreground py-3">
+            아직 남겨진 기록이 없어요. 소중한 순간을 남겨보세요.
+          </p>
         ) : (
-          <div className="space-y-2.5">
+          <div className="divide-y divide-border">
             {todayRecords.slice(-3).map(r => {
-              // Only show user_confirmed items
               const confirmedFlow = r.emotionFlow?.filter(f => f.source === 'user_confirmed') || [];
               return (
-                <div key={r.id} className="bg-muted/60 rounded-xl p-3.5 flex flex-col gap-1.5 border border-border">
-                  <div className="flex items-center justify-between text-caption">
-                    <span className="font-bold text-foreground">{r.time}</span>
+                <div key={r.id} className="flex items-start gap-2 py-2 min-h-11">
+                  <span className="shrink-0 text-caption text-muted-foreground tabular-nums w-10 pt-0.5">{r.time}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-body text-foreground break-keep line-clamp-2">
+                      {r.log || (r.attachments ? '사진 기록' : '리액션')}
+                    </p>
                     {confirmedFlow.length > 0 && (
-                      <div className="flex items-center gap-1 text-caption font-bold text-coral-strong bg-coral/10 px-2 py-0.5 rounded-full border border-coral/20">
+                      <span className="text-caption text-muted-foreground mt-0.5 inline-block">
                         {confirmedFlow.map((f, i) => (
                           <span key={f.id || i}>
                             {i > 0 && ' → '}{f.displayLabel}
                           </span>
                         ))}
-                      </div>
+                      </span>
                     )}
                   </div>
-                  <div className="text-body text-foreground break-keep">{r.log || (r.attachments ? '📷 사진 기록' : '리액션')}</div>
                 </div>
               );
             })}
             {todayRecords.length > 3 && (
-              <div className="text-center text-caption text-muted-foreground pt-2">
-                ... 외 {todayRecords.length - 3}개의 기록이 더 있습니다.
-              </div>
+              <p className="text-caption text-muted-foreground pt-2">
+                외 {todayRecords.length - 3}개의 기록
+              </p>
             )}
           </div>
         )}

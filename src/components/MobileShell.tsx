@@ -198,6 +198,26 @@ export function MobileShell({ children }: { children: ReactNode }) {
                     <span className={cn('text-caption', active ? 'font-semibold' : 'font-normal')}>
                       {t.label}
                     </span>
+                    {/*
+                      The coral bar under the active tab.
+
+                      It was removed in the 2026-08-08 density pass as a duplicate
+                      signal -- the tint and the weight already say which tab is
+                      lit. That reasoning was right about redundancy and wrong
+                      about what the redundancy was doing: this bar was the one
+                      piece of saturated brand colour on every screen, and the app
+                      read cold without it.
+
+                      Restored at 16x2px instead of the old 20x3px, and it stays
+                      `aria-hidden`: it is decoration on top of `aria-selected`,
+                      the tint and the weight, never the only signal.
+                    */}
+                    {active ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-coral"
+                      />
+                    ) : null}
                   </Link>
                 </li>
               );

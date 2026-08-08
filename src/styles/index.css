@@ -112,37 +112,66 @@
    * Radius (DESIGN_V2 정보 밀도와 레이아웃 토큰).
    *
    * Two meanings, named: `control` for anything you press or type into, `surface`
-   * for a card or sheet that groups one subject. The numbered ladder is kept and
-   * re-based on a 0.5rem root so the two utilities the app already reaches for
-   * land exactly on those numbers -- `rounded-xl` is 12px and `rounded-2xl` is
-   * 16px -- instead of the previous 18px / 22px.
+   * for a card or sheet that groups one subject: 14px and 20px.
+   *
+   * Retuned 2026-08-09 after the first look at the rendered screens. The 2026-08-08
+   * pass set these to 12px / 16px on a 0.5rem root, which fixed the 24px blobs and
+   * then overshot: at an 8px root every badge, chip and small button went angular,
+   * and the app read hard. This app's first radius was 14px, and that is the shape
+   * people recognise it by.
+   *
+   * The root is 10px, so the numbered ladder lands on 8 / 10 / 12 / 16 / 22px --
+   * `rounded-xl` is 16px and `rounded-2xl` is 22px. Cards are `rounded-surface`
+   * (20px) rather than a numbered step, so the two systems no longer have to agree.
    *
    * `rounded-3xl` is NOT part of this ladder (Tailwind's own 24px) and is the
    * single biggest source of the "everything is a soft blob" reading. It is
    * replaced by `rounded-surface` app-wide; src/lib/themeTokens.test.ts fails if
    * it comes back.
    */
-  --radius-control: 0.75rem;
-  --radius-surface: 1rem;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-control: 0.875rem;
+  --radius-surface: 1.25rem;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 12px);
 }
 
 :root {
-  --radius: 0.5rem;
-  --cream: oklch(0.985 0.008 85);
+  --radius: 0.625rem;
+  /*
+   * The page. Warmed 2026-08-09: same lightness, hue moved from 85 (yellow cream)
+   * toward 30 (the coral family) and chroma nudged 0.008 -> 0.012.
+   *
+   * The brand coral never changed in any of this work -- it is the same
+   * `oklch(0.78 0.12 22)` as the first commit -- but the 2026-08-08 pass cut how
+   * OFTEN it appears: the tab indicator went, badge weight dropped, tinted
+   * surfaces halved. The result read cold, and the honest fix is not a louder
+   * pink but a page that shares its hue, so restraint reads as calm rather than
+   * as grey.
+   *
+   * Deliberately below the threshold where it looks tinted. Next to the old value
+   * it is warmer; on its own it still reads as off-white.
+   */
+  --cream: oklch(0.985 0.012 30);
   --navy: oklch(0.28 0.06 265);
   --background: var(--cream);
   --foreground: var(--navy);
+  /*
+   * Stays exactly `oklch(1 0 0)`. Warming the card was tried on 2026-08-09 and
+   * reverted: this value being byte-identical to Tailwind's `white` is the reason
+   * the `bg-white/NN -> bg-card/NN` migration was a no-op in light mode, and
+   * themeTokens.test.ts asserts it for that reason. The page around it is warm now,
+   * which is enough -- a white card on a warm page reads as paper, not as a panel.
+   */
   --card: oklch(1 0 0);
   --card-foreground: var(--navy);
-  --muted: oklch(0.96 0.006 85);
+  --muted: oklch(0.96 0.009 30);
   --muted-foreground: oklch(0.55 0.03 260);
-  --border: oklch(0.92 0.008 85);
-  --input: oklch(0.92 0.008 85);
+  /* Hairlines carry the same hue: a neutral grey rule on a warm page reads dirty. */
+  --border: oklch(0.92 0.012 30);
+  --input: oklch(0.92 0.012 30);
   --ring: oklch(0.78 0.09 20);
   --primary: var(--navy);
   --primary-foreground: oklch(0.99 0.005 85);

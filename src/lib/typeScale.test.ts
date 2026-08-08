@@ -198,10 +198,22 @@ describe('surface radius has two meanings, both named', () => {
   const css = read('src/styles/index.css');
 
   it('declares the control and surface radii', () => {
-    // DESIGN_V2 정보 밀도와 레이아웃 토큰: 12px for anything you press, 16px for a
-    // card or sheet that groups one subject.
-    expect(css).toContain('--radius-control: 0.75rem;');
-    expect(css).toContain('--radius-surface: 1rem;');
+    /*
+     * 14px for anything you press, 20px for a card or sheet that groups one
+     * subject.
+     *
+     * Retuned 2026-08-09 from 12px / 16px. Those values removed the 24px blobs and
+     * kept going: on an 8px root every badge and chip went angular and the app read
+     * hard, which is the opposite of the warmth this product is for. 14px is also
+     * where this app started.
+     *
+     * Both are still asserted exactly, so a drift back to 24px blobs or forward to
+     * hard corners fails here rather than in a review.
+     */
+    expect(css).toContain('--radius-control: 0.875rem;');
+    expect(css).toContain('--radius-surface: 1.25rem;');
+    // The root the numbered ladder is based on.
+    expect(css).toContain('--radius: 0.625rem;');
   });
 
   it('does not leave a 24px blob radius anywhere under src/', () => {

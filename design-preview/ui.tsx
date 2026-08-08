@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { BookOpen, CalendarDays, Heart, Home, User } from 'lucide-react';
 import type { BriefingReason } from './fixtures';
 import { REASON_LABEL } from './fixtures';
 
@@ -154,31 +155,44 @@ export function ErrorNote({ message, kept, retry }: { message: string; kept?: st
   );
 }
 
-const TABS = ['홈', '기록', '일정', '우리', '마이'];
+/*
+ * Mirrors the shipped tab bar in `src/components/MobileShell.tsx`.
+ *
+ * This harness used to draw a 20x20 grey ROUNDED SQUARE in place of every icon,
+ * which made all five tabs read as identical boxes in every captured PNG. The
+ * app has always rendered real lucide glyphs -- 홈=Home, 기록=BookOpen,
+ * 일정=CalendarDays, 우리=Heart, 마이=User -- at 21px, with the active one
+ * thickened to 2.2 stroke. A visual review against the old captures would have
+ * judged a tab bar the app does not have.
+ *
+ * Geometry copied from the implementation: 58px + safe-area, `caption` labels,
+ * active tint `text-coral-strong`.
+ */
+const TABS = [
+  { label: '홈', Icon: Home },
+  { label: '기록', Icon: BookOpen },
+  { label: '일정', Icon: CalendarDays },
+  { label: '우리', Icon: Heart },
+  { label: '마이', Icon: User },
+];
 
 export function TabBar({ active }: { active: string }) {
   return (
-    <nav className="flex shrink-0 border-t border-border bg-card" style={{ height: 70 }}>
-      {TABS.map((tab) => {
-        const on = tab === active;
+    <nav className="flex shrink-0 border-t border-border bg-card" style={{ height: 58 }}>
+      {TABS.map(({ label, Icon }) => {
+        const on = label === active;
         return (
           <button
-            key={tab}
+            key={label}
             type="button"
             aria-current={on ? 'page' : undefined}
-            className="flex-1 flex flex-col items-center justify-center gap-1 min-w-0"
+            className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 relative ${
+              on ? 'text-coral-strong' : 'text-muted-foreground'
+            }`}
           >
-            <span
-              aria-hidden="true"
-              className={`block rounded-sm ${on ? 'bg-coral' : 'bg-muted-foreground'}`}
-              style={{ width: 20, height: 20, opacity: on ? 1 : 0.45 }}
-            />
-            <span
-              className={`text-[11px] truncate w-full text-center ${
-                on ? 'font-semibold text-foreground' : 'text-muted-foreground'
-              }`}
-            >
-              {tab}
+            <Icon size={21} strokeWidth={on ? 2.2 : 1.8} aria-hidden="true" />
+            <span className={`text-[12px] truncate w-full text-center ${on ? 'font-semibold' : 'font-normal'}`}>
+              {label}
             </span>
           </button>
         );

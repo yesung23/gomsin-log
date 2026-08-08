@@ -177,15 +177,26 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
   const css = readFileSync(resolve(process.cwd(), 'src/styles/index.css'), 'utf8');
 
   it('src/styles/index.css keeps every light value this cluster relied on', () => {
-    // `--coral-strong` was added later as a deliberate accessibility fix and is
-    // asserted by coralContrast.test.ts. Everything below must still be byte
-    // identical, because the C4 conversions were chosen to be no-ops in light mode.
+    /*
+     * `--coral-strong` was added later as a deliberate accessibility fix and is
+     * asserted by coralContrast.test.ts.
+     *
+     * `--card`, `--coral` and `--coral-foreground` must still be byte identical:
+     * the C4 conversions were chosen to be no-ops in light mode precisely because
+     * `--card` equals Tailwind's `white`, and ~46 tints depend on `--coral`.
+     *
+     * `--muted` and `--border` were re-hued on 2026-08-09, same lightness, hue
+     * 85 -> 30. The C4 conversions replaced `gray-*` utilities with these tokens,
+     * and that substitution holds at any hue -- what it depended on was the
+     * LIGHTNESS being unchanged, which it is. Asserted at the new values rather
+     * than loosened, so a future drift still has to come here and say why.
+     */
     for (const declaration of [
       '--card: oklch(1 0 0);',
       '--card-foreground: var(--navy);',
-      '--muted: oklch(0.96 0.006 85);',
+      '--muted: oklch(0.96 0.009 30);',
       '--muted-foreground: oklch(0.55 0.03 260);',
-      '--border: oklch(0.92 0.008 85);',
+      '--border: oklch(0.92 0.012 30);',
       '--coral: oklch(0.78 0.12 22);',
       '--coral-foreground: oklch(1 0 0);',
       '--mint-foreground: var(--navy);',
@@ -197,7 +208,7 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
 
   it('keeps the theme-colour constants in sync with --background', () => {
     const store = readFileSync(resolve(process.cwd(), 'src/lib/store.tsx'), 'utf8');
-    expect(store).toContain("const LIGHT_THEME_COLOR = '#FAF8F5'");
+    expect(store).toContain("const LIGHT_THEME_COLOR = '#FFF7F5'");
     expect(store).toContain("const DARK_THEME_COLOR = '#16181D'");
   });
 

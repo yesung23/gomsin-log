@@ -660,7 +660,13 @@ export function RecordPage() {
               <button
                 key={item.id}
                 onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                className="w-full text-left px-2 py-1.5 rounded-control bg-card/60 hover:bg-card transition flex items-center justify-between text-caption text-foreground group active:scale-[0.99] min-h-[36px]"
+                /*
+                 * Full-width rows in a stacked list, so the minimum goes to 44px
+                 * rather than being faked with an overlay: an overlay on stacked rows
+                 * would make neighbours' hit areas overlap, and the row that receives
+                 * a tap near the boundary would stop being predictable.
+                 */
+                className="w-full text-left px-2 py-1.5 rounded-control bg-card/60 hover:bg-card transition flex items-center justify-between text-caption text-foreground group active:scale-[0.99] min-h-11"
               >
                 <span className="leading-snug flex-1 pr-2 break-keep">• {item.text}</span>
                 <ChevronRight size={12} className="text-foreground/30 group-hover:text-foreground shrink-0" />
@@ -677,7 +683,27 @@ export function RecordPage() {
                 key={f.key}
                 onClick={() => setMediaFilter(f.key)}
                 className={cn(
+                  /*
+                   * The media filter chips paint at 28px tall and 30-41px wide, and
+                   * they stay that size: a row of five has to fit across 390px, and
+                   * growing them to 44px would either wrap the row or push the
+                   * timeline below the fold.
+                   *
+                  * So the tap target comes from a `::before` overlay instead
+                   * (DESIGN_V2 §Visual footprint ≠ hit target).
+                   *
+                   * Written as arbitrary values rather than as `-inset-x-2`: with
+                   * `before:-inset-x-*` and `before:-inset-y-*` both present, the
+                   * generated rules collide and the horizontal one loses -- measured
+                   * `left: 0px` on the rendered chip while the vertical -8px applied.
+                   * Naming the four sides explicitly is unambiguous.
+                   *
+                   * `글` is the narrowest at 30px, so 8px per side takes it to 46;
+                   * 28px tall plus 8px per side is 44.
+                   */
                   'px-2.5 py-1 rounded-full text-caption font-semibold whitespace-nowrap transition min-h-[28px]',
+                  "relative isolate before:absolute before:content-[''] before:-z-10",
+                  'before:top-[-8px] before:bottom-[-8px] before:left-[-8px] before:right-[-8px]',
                   'relative before:absolute before:inset-x-0 before:-inset-y-2 before:content-[""]',
                   mediaFilter === f.key
                     ? 'bg-navy text-primary-foreground'

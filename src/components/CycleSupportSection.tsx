@@ -368,7 +368,7 @@ export function CycleSupportSection({
                 <p className="text-body text-mint-foreground bg-card/60 rounded-control p-3">{activeSignal.message}</p>
               )}
               {owner && (
-                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control border border-mint-foreground/20 text-mint-foreground text-label font-bold disabled:opacity-50 min-h-[42px]">
+                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control border border-mint-foreground/20 text-mint-foreground text-label font-bold disabled:opacity-50 min-h-11">
                   {mutationPending === 'revoke' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
                   {mutationPending === 'revoke' ? '공유 취소 중' : '공유 취소'}
                 </button>
@@ -392,7 +392,7 @@ export function CycleSupportSection({
                 <span className="block text-right text-caption text-muted-foreground">{Array.from(message).length}/80</span>
               </label>
               {mutationError && <p className="text-caption text-destructive" role="alert">{mutationError}</p>}
-              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-[42px]">
+              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-11">
                 {mutationPending === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {mutationPending === 'share' ? '공유 중' : '오늘만 공유하기'}
               </button>

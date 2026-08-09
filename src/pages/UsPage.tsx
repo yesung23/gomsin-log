@@ -94,16 +94,25 @@ export function UsPage() {
           <h1 className="text-title tracking-tight text-foreground">우리</h1>
           <div className="flex items-center gap-2">
             {/* /schedule had no entry point anywhere in the UI before this. */}
+            {/*
+              These two paint at 64x34 and stay that size. DESIGN_V2 §Visual
+              footprint ≠ hit target asks for the compact look AND a 44px target, so
+              the gap is closed by a `::before` overlay rather than by growing the
+              chips -- the same idiom `Button` uses for its `sm` size.
+
+              `-inset-y-1.5` alone would leave the horizontal edges short of 44px,
+              but 64px wide already clears it, so only the vertical axis is extended.
+            */}
             <button
               onClick={() => navigate('/schedule')}
-              className="text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1"
+              className="text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-0 before:right-0 before:top-[-6px] before:bottom-[-6px]"
             >
               <CalendarDays size={14} />
               <span>일정</span>
             </button>
             <button
               onClick={() => navigate('/trips')}
-              className="text-label font-bold text-coral-strong bg-coral/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1"
+              className="text-label font-bold text-coral-strong bg-coral/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-0 before:right-0 before:top-[-6px] before:bottom-[-6px]"
             >
               <Plane size={14} />
               <span>여행</span>
@@ -220,7 +229,12 @@ export function UsPage() {
             <h3 className="text-heading text-foreground flex items-center gap-2">
               <Plane className="w-4 h-4 text-info" /> 다가오는 여행
             </h3>
-            <button onClick={() => navigate('/trips')} className="text-label font-bold text-muted-foreground hover:text-foreground">
+            {/*
+              Paints at 45x18 as a text link. `-inset-y-3.5` takes 18 to 46 and
+              `-inset-x-1` takes 45 to 53, both clearing 44 without changing how the
+              header reads (DESIGN_V2 §Visual footprint ≠ hit target).
+            */}
+            <button onClick={() => navigate('/trips')} className="text-label font-bold text-muted-foreground hover:text-foreground relative isolate before:absolute before:content-[''] before:-z-10 before:left-[-4px] before:right-[-4px] before:top-[-14px] before:bottom-[-14px]">
               전체보기
             </button>
           </div>

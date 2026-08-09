@@ -1033,7 +1033,7 @@ export function OnboardingPage() {
                         <button
                           key={st.key}
                           onClick={() => setMilitaryStatus(st.key as MilitaryStatus)}
-                          className={`py-2 px-2 rounded-control text-label font-semibold border transition min-h-[40px] ${
+                          className={`py-2 px-2 rounded-control text-label font-semibold border transition min-h-11 ${
                             militaryStatus === st.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
@@ -1059,7 +1059,7 @@ export function OnboardingPage() {
                         <button
                           key={b.key}
                           onClick={() => handleBranchChange(b.key as Branch)}
-                          className={`py-2 px-1 rounded-control text-label font-semibold border transition min-h-[40px] ${
+                          className={`py-2 px-1 rounded-control text-label font-semibold border transition min-h-11 ${
                             branch === b.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >

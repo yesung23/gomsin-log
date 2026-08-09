@@ -256,7 +256,12 @@ export function ServicePage() {
             <h2 className="text-heading text-foreground">다음 휴가·면회</h2>
             <button
               onClick={() => navigate('/schedule')}
-              className="text-label font-bold text-coral-strong flex items-center gap-1"
+              // Paints at 66x18 as a text link and stays that way; the 44px target
+              // comes from a `::before` overlay (DESIGN_V2 §Visual footprint ≠ hit
+              // target), not from padding that would break the header rhythm.
+              // `-inset-y-3.5` is 14px per side, taking 18 to 46. `-inset-y-3` was
+              // tried first and left it at 42, two pixels short.
+              className="text-label font-bold text-coral-strong flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-[-8px] before:right-[-8px] before:top-[-14px] before:bottom-[-14px]"
             >
               <CalendarPlus size={14} />
               일정 관리

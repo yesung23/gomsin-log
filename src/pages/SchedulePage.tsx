@@ -598,8 +598,25 @@ export function SchedulePage() {
                 </div>
               )}
               {activeCouple && (
-                <label className="flex items-center gap-2 text-caption text-muted-foreground mb-3 px-1">
-                  <input type="checkbox" checked={taskForMe} onChange={(event) => setTaskForMe(event.target.checked)} className="accent-info" />
+                /*
+                 * The native checkbox paints at 13x13 and cannot be resized reliably
+                 * across browsers, so the tap target is the LABEL: `min-h-11` makes the
+                 * whole row 44px tall, and wrapping the input means a tap anywhere on
+                 * the row toggles it.
+                 *
+                 * `aria-label` is added because the accessible name came from the label
+                 * text alone, which reads as `내 담당으로 표시` with no indication that
+                 * it is about a task -- fine in place, thin when announced out of
+                 * context in a form with two other inputs.
+                 */
+                <label className="flex items-center gap-2 text-caption text-muted-foreground mb-3 px-1 min-h-11 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={taskForMe}
+                    onChange={(event) => setTaskForMe(event.target.checked)}
+                    aria-label="이 할 일을 내 담당으로 표시"
+                    className="accent-info w-4 h-4"
+                  />
                   내 담당으로 표시
                 </label>
               )}

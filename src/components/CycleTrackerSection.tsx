@@ -412,20 +412,30 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
 
           <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between px-1">
-              <button type="button" onClick={() => moveMonth(-1)} className="p-2 rounded-control hover:bg-muted min-h-[40px] min-w-[40px]" aria-label="이전 달">
+              <button type="button" onClick={() => moveMonth(-1)} className="p-2 rounded-control hover:bg-muted min-h-11 min-w-11" aria-label="이전 달">
                 <ChevronLeft className="w-4 h-4 text-muted-foreground" />
               </button>
               <span className="text-label font-bold text-foreground">{viewYear}년 {viewMonth + 1}월</span>
-              <button type="button" onClick={() => moveMonth(1)} className="p-2 rounded-control hover:bg-muted min-h-[40px] min-w-[40px]" aria-label="다음 달">
+              <button type="button" onClick={() => moveMonth(1)} className="p-2 rounded-control hover:bg-muted min-h-11 min-w-11" aria-label="다음 달">
                 <ChevronRight className="w-4 h-4 text-muted-foreground" />
               </button>
             </div>
-            <div className="grid grid-cols-7 text-center text-caption font-bold text-muted-foreground gap-1">
+            <div className="grid grid-cols-7 text-center text-caption font-bold text-muted-foreground gap-0.5">
               <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
             </div>
-            <div className="grid grid-cols-7 text-center text-label gap-1 font-medium">
+            {/*
+              `gap-0.5` (2px), not `gap-1`, and the reason is arithmetic rather than
+              taste: the grid is 324px wide inside this card, so seven cells with a
+              4px gap resolve to 42.9px and miss the 44px tap target by a pixel.
+              At 2px they resolve to 44.6px.
+
+              Widening the card or shrinking the calendar were the alternatives; both
+              cost more than 2px of gutter, and a day cell is the most-tapped control
+              on this screen.
+            */}
+            <div className="grid grid-cols-7 text-center text-label gap-0.5 font-medium">
               {cells.map((cell, index) => {
-                if (!cell.date || !cell.day) return <span key={`blank-${index}`} aria-hidden="true" className="min-h-[42px]" />;
+                if (!cell.date || !cell.day) return <span key={`blank-${index}`} aria-hidden="true" className="min-h-11" />;
                 const ranges = cycleRangesOnDate(entries, cell.date);
                 const hasRange = ranges.length > 0;
                 const hasStart = ranges.some((range) => range.isStart);
@@ -436,7 +446,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                     key={cell.date}
                     onClick={() => setSelectedDate(cell.date as string)}
                     className={cn(
-                      'py-1.5 rounded-control transition flex flex-col items-center justify-center min-h-[42px] border',
+                      'py-1.5 rounded-control transition flex flex-col items-center justify-center min-h-11 border',
                       hasRange ? 'bg-coral/15 border-coral/30 text-coral-strong font-bold' : 'border-transparent text-foreground hover:bg-muted',
                       cell.date === today && !hasRange && 'ring-1 ring-coral text-coral font-bold',
                       selected && 'ring-2 ring-navy ring-offset-1',
@@ -457,7 +467,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                 <p className="text-label font-bold text-foreground">{selectedDate}</p>
                 <p className="text-caption text-muted-foreground">선택한 날의 개인 기록</p>
               </div>
-              <button type="button" onClick={() => openCreate()} className="flex items-center gap-1 px-3 py-2 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold min-h-[40px]">
+              <button type="button" onClick={() => openCreate()} className="flex items-center gap-1 px-3 py-2 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold min-h-11">
                 <Plus className="w-3.5 h-3.5" /> 기록 추가
               </button>
             </div>
@@ -526,11 +536,11 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                   <button type="button" onClick={() => {
                     const entry = entries.find((item) => item.id === editingId);
                     if (entry) void deleteEntry(entry);
-                  }} disabled={formPending || deletePendingId === editingId} className="px-3 py-2.5 rounded-control border border-destructive/30 text-destructive text-label font-bold disabled:opacity-50 min-h-[42px]">
+                  }} disabled={formPending || deletePendingId === editingId} className="px-3 py-2.5 rounded-control border border-destructive/30 text-destructive text-label font-bold disabled:opacity-50 min-h-11">
                     {deletePendingId === editingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                   </button>
                 )}
-                <button type="button" onClick={() => void saveEntry()} disabled={formPending || deletePendingId !== null} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-[42px]">
+                <button type="button" onClick={() => void saveEntry()} disabled={formPending || deletePendingId !== null} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-11">
                   {formPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   {formPending ? '저장 중' : '저장'}
                 </button>
@@ -555,7 +565,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
             </div>
             <p className="text-caption text-muted-foreground">주기 {CYCLE_LENGTH_MIN}~{CYCLE_LENGTH_MAX}일 · 기간 {PERIOD_LENGTH_MIN}~{PERIOD_LENGTH_MAX}일</p>
             {settingsError && <p className="text-caption text-destructive" role="alert">{settingsError}</p>}
-            <button type="button" onClick={() => void saveSettings()} disabled={settingsPending} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-foreground text-background text-label font-bold disabled:opacity-50 min-h-[42px]">
+            <button type="button" onClick={() => void saveSettings()} disabled={settingsPending} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-foreground text-background text-label font-bold disabled:opacity-50 min-h-11">
               {settingsPending && <Loader2 className="w-4 h-4 animate-spin" />}
               {settingsPending ? '설정 저장 중' : '평균 길이 저장'}
             </button>

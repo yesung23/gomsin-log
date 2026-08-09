@@ -162,7 +162,10 @@ export function MyPage() {
             </p>
             <button
               onClick={switchRole}
-              className="w-full py-2.5 rounded-control bg-warning-surface text-warning-foreground font-bold active:scale-98 transition min-h-[40px]"
+              // Full-width, so raising the declared minimum to 44px is the honest fix
+              // rather than an overlay: nothing sits beside it to be crowded, and
+              // 4px of extra height costs no layout anywhere.
+              className="w-full py-2.5 rounded-control bg-warning-surface text-warning-foreground font-bold active:scale-98 transition min-h-11"
             >
               현재 {roleLabel} 모드 → {isGomsin ? '군화' : '곰신'} 모드로 전환하기
             </button>

@@ -190,8 +190,56 @@ test('one map screenshot becomes an editable trip item instead of hanging at zer
   await expect(editButton).toHaveCount(1);
   await editButton.click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
   expect(unrouted).toEqual([]);
+  await context.close();
+});
+
+test('cycle data stays untouched until the user separately consents to sensitive processing', async ({ browser }) => {
+  const context = await browser.newContext();
+  await installMockBackend(context, CREATOR);
+  const page = await context.newPage();
+  let cycleRequests = 0;
+  page.on('request', (request) => {
+    if (/\/rest\/v1\/cycle_(settings|entries)/.test(request.url())) cycleRequests += 1;
+  });
+
+  await bootedInto(page, '/my');
+  await expect(page.getByText('내 몸의 리듬 시작하기')).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(500);
+  expect(cycleRequests).toBe(0);
+
+  const consentButton = page.getByRole('button', { name: '동의하고 시작하기' });
+  await expect(consentButton).toBeDisabled();
+  await page.getByRole('checkbox', { name: /민감정보 수집·이용/ }).check();
+  await consentButton.click();
+  await expect(page.getByText('내 몸의 리듬', { exact: true })).toBeVisible();
+  await expect.poll(() => cycleRequests).toBe(2);
+  await context.close();
+});
+
+test('the trip creation sheet is a named dialog and closes with Escape', async ({ browser }) => {
+  const trip = {
+    id: 'trip-keyboard',
+    couple_id: CREATOR.coupleId,
+    created_by: CREATOR.userId,
+    title: '키보드 여행',
+    start_date: '2026-08-17',
+    end_date: '2026-08-18',
+    status: 'planned',
+    created_at: '2026-08-01T00:00:00Z',
+  };
+  const context = await browser.newContext();
+  await installMockBackend(context, { ...CREATOR, trips: [trip] });
+  const page = await context.newPage();
+
+  await bootedInto(page, '/trips');
+  await page.getByRole('button', { name: /여행.*(만들기|추가)/ }).first().click();
+  await expect(page.getByRole('dialog', { name: '새 여행 만들기' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: '새 여행 만들기' })).toHaveCount(0);
   await context.close();
 });
 

@@ -20,6 +20,7 @@ import {
 import { fetchTripsResultFromDB, reconcileParentTrips, saveTripToDB, validateTripDraft } from '@/lib/trips';
 import { useStore } from '@/lib/useStore';
 import { formatLocalDate, localToday, toLocalDateString } from '@/lib/utils';
+import { useEscapeKey } from '@/lib/hooks';
 import type { Trip } from '@/types';
 
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden' | 'disconnected';
@@ -35,6 +36,10 @@ export function TripsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const isOffline = !useOnlineStatus();
   const [formError, setFormError] = useState<string | null>(null);
+
+  useEscapeKey(() => {
+    if (!isCreating) setShowModal(false);
+  }, showModal);
 
   const userId = state.authenticatedUser?.id;
   const coupleId = state.profile.couple.coupleId;
@@ -294,8 +299,8 @@ export function TripsPage() {
       {/* z-[60] so the tab bar cannot intercept 취소 / 만들기 */}
       {showModal && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-          <div className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 animate-in slide-in-from-bottom-4 border border-border">
-            <h2 className="text-heading text-foreground mb-4">새 여행 만들기</h2>
+          <div role="dialog" aria-modal="true" aria-labelledby="new-trip-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 animate-in slide-in-from-bottom-4 border border-border">
+            <h2 id="new-trip-title" className="text-heading text-foreground mb-4">새 여행 만들기</h2>
             <div className="space-y-3">
               <label className="block text-caption font-medium text-muted-foreground">
                 여행 이름

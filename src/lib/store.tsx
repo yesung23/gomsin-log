@@ -11,6 +11,7 @@ import {
 import { DEFAULT_LAYOUT_BY_ROLE, migrateWidgetLayout } from '@/lib/widgets';
 import { clearAllComposerDrafts } from '@/lib/composerDraft';
 import { clearAllAvatars } from '@/lib/avatarImage';
+import { revokeCycleSensitiveConsent } from '@/lib/sensitiveConsent';
 import {
   authRepository,
   supabase,
@@ -2810,6 +2811,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Marker FIRST, so a reload cannot escape recovery, then contain the
       // exposure while keeping the session so the deletion can be finished.
       markRecoveryPending(identity.userId);
+      revokeCycleSensitiveConsent(identity.userId);
       if (!purgeLocalContentRetainingIdentity(identity)) return outcome;
       setAccountDeletionRecovery({ warnings: outcome.warnings });
       applyDeletionStatus({ kind: 'pending' });
@@ -2820,6 +2822,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // `deleted`: the Auth user is gone, which is the ONLY confirmation that
     // permits clearing the marker.
     if (!purgeLocalAccountData(identity)) return outcome;
+    revokeCycleSensitiveConsent(identity.userId);
     // The queue is deliberately kept across sign-out, so deletion is the one place
     // it must be removed: this account will never sign in again, and leaving its
     // unsent records on the device would outlive the account they belong to.

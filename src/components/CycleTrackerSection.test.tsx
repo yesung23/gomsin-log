@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CycleEntriesFetchResult, CycleSettingsFetchResult } from '@/lib/cycle';
+import { grantCycleSensitiveConsent, revokeCycleSensitiveConsent } from '@/lib/sensitiveConsent';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -39,6 +40,36 @@ const deleteEntry = vi.fn();
 const saveSettings = vi.fn();
 
 const { CycleTrackerSection } = await import('@/components/CycleTrackerSection');
+
+beforeEach(() => {
+  window.localStorage.clear();
+  grantCycleSensitiveConsent('user-a');
+  grantCycleSensitiveConsent('user-b');
+});
+
+describe('CycleTrackerSection sensitive-information gate', () => {
+  it('does not retrieve cycle data before separate explicit consent', async () => {
+    entryLoads.length = 0;
+    settingLoads.length = 0;
+    revokeCycleSensitiveConsent('user-c');
+    render(<CycleTrackerSection userId="user-c" />);
+
+    expect(screen.getByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '동의하고 시작하기' })).toBeDisabled();
+    await act(async () => Promise.resolve());
+    expect(entryLoads).toHaveLength(0);
+    expect(settingLoads).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '동의하고 시작하기' }));
+    await waitFor(() => expect(entryLoads).toHaveLength(1));
+    await act(async () => {
+      entryLoads[0].resolve({ ok: true, entries: [] });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+    expect(await screen.findByText('아직 저장한 기록이 없어요.')).toBeInTheDocument();
+  });
+});
 
 describe('CycleTrackerSection identity isolation', () => {
   it('ignores a previous account load that resolves after an account switch', async () => {

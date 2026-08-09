@@ -34,6 +34,8 @@ import {
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
+import { grantCycleSensitiveConsent, hasCycleSensitiveConsent } from '@/lib/sensitiveConsent';
+import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
 import { CYCLE_SYMPTOMS, type CycleEntry, type CycleSymptom } from '@/types';
 
@@ -81,6 +83,9 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     [],
   );
   const [loadState, setLoadState] = useState<LoadState>(userId ? 'loading' : 'unauthenticated');
+  const [consentGranted, setConsentGranted] = useState(() => hasCycleSensitiveConsent(userId));
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [entries, setEntries] = useState<CycleEntry[]>([]);
   const [cycleLength, setCycleLength] = useState(28);
   const [periodLength, setPeriodLength] = useState(5);
@@ -104,6 +109,9 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   } | null>(null);
 
   useLayoutEffect(() => {
+    setConsentGranted(hasCycleSensitiveConsent(userId));
+    setConsentChecked(false);
+    setConsentError(null);
     setEntries([]);
     setCycleLength(28);
     setPeriodLength(5);
@@ -124,7 +132,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const performLoad = useCallback(async () => {
     const identity = captureIdentity();
     setLoadState(userId ? 'loading' : 'unauthenticated');
-    if (!userId) return;
+    if (!userId || !consentGranted) return;
     try {
       const [entryResult, settingResult] = await Promise.all([
         fetchCycleEntriesResultFromDB(),
@@ -155,7 +163,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       console.error('Failed to load private cycle data:', error);
       setLoadState('error');
     }
-  }, [captureIdentity, isCurrentIdentity, userId]);
+  }, [captureIdentity, consentGranted, isCurrentIdentity, userId]);
 
   const load = useCallback((): Promise<void> => {
     const key = userId || '';
@@ -356,6 +364,49 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       if (isCurrentIdentity(identity)) setSettingsPending(false);
     }
   };
+
+  const acceptSensitiveConsent = () => {
+    if (!userId || !consentChecked) return;
+    if (!grantCycleSensitiveConsent(userId)) {
+      setConsentError('동의 상태를 안전하게 저장하지 못했어요. 브라우저 저장공간을 확인해 주세요.');
+      return;
+    }
+    setConsentError(null);
+    setConsentGranted(true);
+  };
+
+  if (userId && !consentGranted) {
+    return (
+      <section className="bg-card rounded-surface p-4 border border-border space-y-4" aria-labelledby="cycle-consent-title">
+        <div className="flex items-center gap-2 border-b border-border/40 pb-3">
+          <HeartPulse className="w-5 h-5 text-coral" aria-hidden="true" />
+          <h3 id="cycle-consent-title" className="text-heading text-foreground">내 몸의 리듬 시작하기</h3>
+        </div>
+        <div className="rounded-control border border-coral/30 bg-coral/5 p-3 space-y-2 text-caption text-muted-foreground leading-relaxed">
+          <p><strong className="text-foreground">수집 항목:</strong> 주기 시작·종료일, 증상, 메모, 평균 주기·기간</p>
+          <p><strong className="text-foreground">이용 목적:</strong> 본인 전용 주기 기록과 예상일 표시</p>
+          <p><strong className="text-foreground">보유 기간:</strong> 직접 삭제하거나 회원 탈퇴할 때까지</p>
+          <p>건강 관련 민감정보 처리 동의를 거부할 수 있으며, 거부해도 이 기능 외의 곰신로그는 그대로 이용할 수 있어요.</p>
+        </div>
+        <label className="flex items-start gap-3 min-h-11 rounded-control border border-border p-3 text-label text-foreground">
+          <input
+            type="checkbox"
+            checked={consentChecked}
+            onChange={(event) => setConsentChecked(event.target.checked)}
+            className="mt-0.5 accent-coral"
+          />
+          <span>위 민감정보 수집·이용에 별도로 동의합니다. (선택)</span>
+        </label>
+        {consentError && <p role="alert" className="text-caption text-destructive">{consentError}</p>}
+        <Button variant="primary" size="md" full disabled={!consentChecked} onClick={acceptSensitiveConsent}>
+          동의하고 시작하기
+        </Button>
+        <a href="/legal/privacy" className="flex min-h-11 items-center justify-center text-caption font-medium text-info underline underline-offset-2">
+          개인정보 처리방침 보기
+        </a>
+      </section>
+    );
+  }
 
   return (
     <section className="bg-card rounded-surface p-4 border border-border space-y-4">

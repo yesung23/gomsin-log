@@ -19,6 +19,7 @@ import {
   supabase,
 } from '@/lib/supabase';
 import { useEscapeKey } from '@/lib/hooks';
+import { buildPersonalExport } from '@/lib/dataExport';
 
 export function SettingsPage() {
   const {
@@ -57,7 +58,7 @@ export function SettingsPage() {
   const myName = profile.myName || '나';
   const partnerName = profile.couple.partnerName || '상대방';
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
-  const ownRecords = records.filter((r) => r.authorRole === profile.role);
+  const ownRecords = records.filter((record) => record.userId === settingsIdentityKey);
   const hasCoupleSpace = !!profile.couple.coupleId;
 
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
@@ -116,40 +117,8 @@ export function SettingsPage() {
     if (isExporting) return;
     setIsExporting(true);
     try {
-      const payload = {
-        exportedAt: new Date().toISOString(),
-        app: 'gomsinlog',
-        schemaVersion: 1,
-        profile: {
-          myName: profile.myName,
-          role: profile.role,
-          anniversaryDate: profile.couple.anniversaryDate ?? null,
-          military: profile.role === 'soldier' ? profile.military : null,
-        },
-        // Only the caller's own records; the partner's content is not theirs to export.
-        records: ownRecords.map((record) => ({
-          date: record.date,
-          time: record.time,
-          log: record.log,
-          reaction: record.reaction ?? null,
-          isPrivate: record.isPrivate,
-          emotionFlow: record.emotionFlow ?? [],
-          // Storage paths only: signed URLs expire and would be useless in a backup.
-          attachments: (record.attachments ?? []).map((a) => ({
-            type: a.type,
-            name: a.name,
-            path: a.path ?? null,
-          })),
-          createdAt: record.createdAt,
-        })),
-        events: state.events.map((e) => ({
-          title: e.title,
-          eventType: e.eventType,
-          startDate: e.startDate,
-          endDate: e.endDate ?? null,
-          isPrivate: e.isPrivate,
-        })),
-      };
+      if (!settingsIdentityKey) throw new Error('No authenticated account to export.');
+      const payload = buildPersonalExport(state, settingsIdentityKey);
 
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
         type: 'application/json',
@@ -162,7 +131,7 @@ export function SettingsPage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast.success(`내 기록 ${ownRecords.length}개를 내보냈어요.`);
+      toast.success('내 데이터 목록을 JSON 파일로 내보냈어요.');
     } catch (error) {
       console.error('[gomsinlog] Export failed:', error);
       toast.error('내보내기에 실패했어요. 잠시 후 다시 시도해 주세요.');
@@ -618,7 +587,10 @@ export function SettingsPage() {
               leading={<Download size={18} className="text-foreground" />}
               trailing={<span className="text-caption text-muted-foreground">{isExporting ? '내보내는 중...' : `${ownRecords.length}개`}</span>}
             >
-              <span className="text-label font-semibold text-foreground">내 기록 JSON으로 내보내기</span>
+              <span className="block">
+                <span className="block text-label font-semibold text-foreground">내 데이터 목록 JSON으로 내보내기</span>
+                <span className="block text-caption text-muted-foreground mt-0.5">글·내 일정·내 여행 목록 · 미디어 원본 제외</span>
+              </span>
             </PressableRow>
 
             <PressableRow

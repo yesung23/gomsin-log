@@ -310,6 +310,11 @@ describe('Android: the permission set is exactly what the code proves', () => {
 });
 
 describe('Android: private records cannot leave through a backup or in the clear', () => {
+  it('contains no Capacitor template tests with the old application id', () => {
+    expect(existsSync(join(repoRoot, 'android/app/src/test/java/com/getcapacitor/myapp'))).toBe(false);
+    expect(existsSync(join(repoRoot, 'android/app/src/androidTest/java/com/getcapacitor/myapp'))).toBe(false);
+  });
+
   it('turns off backup and points both API generations at exclusion rules', () => {
     expect(manifest).toContain('android:allowBackup="false"');
     expect(manifest).toContain('android:fullBackupContent="@xml/backup_rules"');

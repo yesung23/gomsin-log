@@ -34,6 +34,7 @@ import {
 } from '@/lib/trips';
 import { useStore } from '@/lib/useStore';
 import { formatLocalDate } from '@/lib/utils';
+import { useEscapeKey } from '@/lib/hooks';
 import type { Trip, TripChecklist, TripItem, TripStatus } from '@/types';
 
 type ParentState = 'loading' | 'ready' | 'not-found' | 'forbidden' | 'error' | 'disconnected';
@@ -123,6 +124,14 @@ export function TripDetailPage() {
   const [isAddingChecklist, setIsAddingChecklist] = useState(false);
   const [pendingChecklistIds, setPendingChecklistIds] = useState<Set<string>>(new Set());
   const [childActionError, setChildActionError] = useState<string | null>(null);
+
+  useEscapeKey(() => {
+    if (showItemModal && !isSavingItem && !isReadingScreenshot) {
+      setShowItemModal(false);
+      return;
+    }
+    if (showTripModal && !isSavingTrip) setShowTripModal(false);
+  }, showItemModal || showTripModal);
 
   useLayoutEffect(() => {
     parentGlobalSnapshotRef.current = null;

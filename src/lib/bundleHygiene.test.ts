@@ -161,9 +161,34 @@ describe('C5 - dependency posture is verified, not assumed', () => {
       // reaches it transitively, so keep the safe patch explicit until eslint
       // itself requires that line.
       'js-yaml': '4.3.1',
+      /*
+       * nanoid <3.3.17: custom generators can loop indefinitely when size is zero.
+       * Reached only through `vite -> postcss`, so there is nothing to bump at the
+       * top level, and 3.3.18 is on the same 3.x major postcss declares.
+       *
+       * Global rather than scoped, unlike brace-expansion, and the difference is the
+       * point: this project resolves exactly ONE nanoid (`vite -> postcss ->
+       * nanoid@3`), so a global pin cannot force a version into a consumer whose
+       * range excludes it. brace-expansion had two live majors, which is what made a
+       * global override there a range violation.
+       */
+      nanoid: '3.3.18',
       'minimatch@3': { 'brace-expansion': '1.1.18' },
     });
     expect(pkg.overrides?.['brace-expansion']).toBeUndefined();
+  });
+
+  it('keeps the nanoid override safe by having only one consumer to satisfy', () => {
+    /*
+     * The assertion that makes the global nanoid pin defensible. If a second nanoid
+     * major ever enters the tree, a global override becomes the same range violation
+     * brace-expansion was, and this fails instead of shipping quietly.
+     */
+    const consumers = Object.entries(lock.packages)
+      .filter(([p]) => p.endsWith('node_modules/nanoid'))
+      .map(([p, entry]) => `${p}@${entry.version}`);
+    expect(consumers.length, `nanoid copies: ${consumers.join(', ')}`).toBe(1);
+    for (const c of consumers) expect(c).toMatch(/@3\./);
   });
 
   it('resolves every brace-expansion consumer inside its declared range', () => {

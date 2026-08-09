@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import { clearAuthErrorFromUrl, readAuthErrorFromUrl } from '@/lib/authErrorFromUrl';
 import { useStore } from '@/lib/useStore';
 import {
   authRepository,
@@ -32,6 +33,23 @@ export function OnboardingPage() {
     ? `demo:${state.authenticatedUser?.id || ''}`
     : `user:${state.authenticatedUser?.id || ''}`;
   const identityRef = useRef(onboardingIdentityKey);
+
+  /**
+   * An OAuth failure reported on this url by GoTrue.
+   *
+   * Read once on mount and then stripped from the address bar, so the message does
+   * not survive a reload or ride along in a shared link. Read state is initialised
+   * from the url rather than set in an effect: an effect would paint the login screen
+   * without the message for one frame, which is long enough to look like the app
+   * ignored the attempt -- the exact impression this fixes.
+   */
+  const [authUrlError] = useState(() => readAuthErrorFromUrl());
+  useEffect(() => {
+    if (authUrlError) {
+      console.error('[Onboarding] OAuth failure returned to the app root:', authUrlError.code);
+      clearAuthErrorFromUrl();
+    }
+  }, [authUrlError]);
   const identityGenerationRef = useRef(0);
   const instanceActiveRef = useRef(true);
   if (identityRef.current !== onboardingIdentityKey) {
@@ -674,6 +692,28 @@ export function OnboardingPage() {
               </div>
 
               <div className="space-y-3 my-6">
+                {/*
+                  A failed Google sign-in lands HERE, not on /auth/callback.
+
+                  GoTrue sends a successful exchange to the requested `redirect_to`
+                  and a failed one to the project's Site URL, which is the app root --
+                  measured on the live project as
+                  `?error=invalid_request&error_code=bad_oauth_state`. `AuthCallbackPage`
+                  reads those parameters correctly and never sees them, so before this
+                  the user was dropped back on this screen with no message: the app
+                  looked like it had ignored the attempt.
+                */}
+                {authUrlError ? (
+                  <div
+                    role="alert"
+                    className="rounded-control border border-destructive/30 bg-destructive/10 px-3 py-2.5"
+                  >
+                    <p className="text-label font-semibold text-destructive break-keep">
+                      {authUrlError.message}
+                    </p>
+                  </div>
+                ) : null}
+
                 {/* Primary Auth CTAs */}
                 {isIOS && (
                   <button

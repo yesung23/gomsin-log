@@ -194,18 +194,7 @@ export function ServicePage() {
                 )}
               </div>
 
-              {/*
-                The one number this screen exists for, so it is the one number set in
-                handwriting (see `--font-hand`). `D-142` is digits and a hyphen, all
-                of which the 16 kB latin subset covers; the `전역` case falls through
-                to Pretendard, which is why the face lists it as a fallback.
-
-                `tabular-nums` is dropped here: this is a single figure that does not
-                need to align with anything below it, and fixed-width digits fight the
-                handwriting rhythm. `text-title` keeps the size from growing, since
-                the face reads larger than Pretendard at the same declared size.
-              */}
-              <div className="font-hand text-display mb-4 tracking-tight">
+              <div className="text-display mb-4 tracking-tight tabular-nums">
                 {progress.isDischarged ? '전역 🎉' : `D-${progress.remainingDays}`}
               </div>
 

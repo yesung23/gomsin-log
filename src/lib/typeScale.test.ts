@@ -322,85 +322,51 @@ describe('prose leading is not tightened below the reflow floor', () => {
   });
 });
 
-describe('handwriting is an accent, not a typeface', () => {
+describe('the app has exactly one typeface', () => {
   /*
-   * `font-hand` (Nanum Pen Script, SIL OFL 1.1) is allowed on strings that are
-   * ENTIRELY latin, which in this app means the D-Day figure and nothing else.
+   * Pretendard, and nothing else.
    *
-   * The list started at three -- D-Day, timeline date header, empty-state line --
-   * and shrank after rendering them. Only the latin subset ships, so a Korean date
-   * header comes out as handwritten digits inside Pretendard Korean: two faces in
-   * one short line, which reads as a defect. The class would also be misleading in
-   * source, claiming a face the text never gets.
+   * A handwriting accent (Nanum Pen Script) was added on 2026-08-09 and removed the
+   * same day. Two things were learned and are worth not re-learning:
    *
-   * The prohibition is the durable half: handwriting on a record body, a button
-   * label or metadata is what turns a diary into a sticker pack, and it is the
-   * failure hardest to argue about after the fact -- so it fails here instead.
+   *   1. Rendered beside it, the plain figure read better. That was the deciding
+   *      reason, and it is a judgement someone may reasonably revisit.
+   *   2. It only ever worked on all-latin strings. Shipping the Korean subset costs
+   *      588 kB against 16 kB for latin, so with latin only, `8월 6일 화요일` came
+   *      out as handwritten digits inside Pretendard Korean -- two faces colliding
+   *      in one short line. That is a fact about the font, not a preference.
+   *
+   * So this guard is not "handwriting is banned forever". It fails if a second face
+   * appears WITHOUT the import that would make it work, which is the specific way
+   * this would break: a `font-hand` class surviving a revert, or being added while
+   * only the latin subset is imported.
    */
-  const ALLOWED_FILES = ['src/pages/ServicePage.tsx'];
+  const css = read('src/styles/index.css');
 
-  it('declares the face with Pretendard behind it, so Korean has somewhere to land', () => {
-    const css = read('src/styles/index.css');
-    expect(css).toContain('--font-hand:');
-    expect(css).toMatch(/--font-hand:\s*"Nanum Pen Script"/);
-    // The fallback must be the body face, not a generic cursive.
-    expect(css).toMatch(/--font-hand:[^;]*"Pretendard Variable"/);
-    // Latin subset only. Importing the Korean subset is a 37x cost for text this
-    // app does not set in handwriting.
-    expect(css).toContain('@fontsource/nanum-pen-script/latin-400.css');
-    expect(css).not.toContain('nanum-pen-script/korean');
-    expect(css).not.toContain('nanum-pen-script/index.css');
+  it('declares one font family and no second face', () => {
+    expect(css).toContain('--font-sans:');
+    expect(css).not.toContain('--font-hand:');
   });
 
-  it('appears only in the three files that are allowed to use it', () => {
+  it('imports no font other than the self-hosted Pretendard subset', () => {
+    const imports = [...css.matchAll(/@import\s+"([^"]+)"/g)].map((m) => m[1]);
+    const fontImports = imports.filter((s) => /font|pretendard|fontsource/i.test(s));
+    expect(fontImports).toEqual(['pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css']);
+  });
+
+  it('leaves no orphaned handwriting class behind in the tree', () => {
+    /*
+     * The failure this catches is a partial revert: the token removed but a
+     * `font-hand` class left on an element, which then silently renders in the body
+     * face. Comments are stripped -- index.css and this file both explain the
+     * history in prose, and naming the class there is not a regression.
+     */
     const offenders = CONVERTED_FILES.filter((file) => {
-      if (ALLOWED_FILES.includes(file)) return false;
       const withoutComments = read(file)
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/\/\/[^\n]*/g, '');
       return /\bfont-hand\b/.test(withoutComments);
     });
     expect(offenders).toEqual([]);
-  });
-
-  it('is actually used in each allowed file, so the allowance is not aspirational', () => {
-    for (const file of ALLOWED_FILES) {
-      expect(read(file), file).toMatch(/\bfont-hand\b/);
-    }
-  });
-
-  it('is not applied to Korean-bearing surfaces that were tried and reverted', () => {
-    /*
-     * These two were set in handwriting on 2026-08-09 and changed back the same day.
-     * Recorded as assertions rather than as a comment so the next person does not
-     * repeat the experiment: the reason is the shipped subset, not taste.
-     *
-     * Comments are stripped first: both files now explain in prose why they are NOT
-     * handwritten, and naming the class in that explanation is not a regression.
-     */
-    for (const file of ['src/components/ui/List.tsx', 'src/components/ui/EmptyState.tsx']) {
-      const withoutComments = read(file)
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/\/\/[^\n]*/g, '');
-      expect(withoutComments, file).not.toMatch(/\bfont-hand\b/);
-    }
-  });
-
-  it('never sets the record body, a button label or a metadata line', () => {
-    /*
-     * The three allowances are structural, but the prohibition is what matters, so
-     * it is checked directly: the record log has a test hook, and a handwriting
-     * class landing on it is the specific regression to catch.
-     */
-    const record = read('src/pages/RecordPage.tsx');
-    const logLine = record.split('\n').find((l) => l.includes('data-testid="record-log"'));
-    expect(logLine, 'the record log element').toBeDefined();
-    expect(logLine).not.toMatch(/\bfont-hand\b/);
-
-    const button = read('src/components/ui/Button.tsx');
-    expect(button).not.toMatch(/\bfont-hand\b/);
-
-    const badge = read('src/components/ui/Badge.tsx');
-    expect(badge).not.toMatch(/\bfont-hand\b/);
   });
 });

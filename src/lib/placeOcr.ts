@@ -7,6 +7,30 @@ export interface ExtractedPlace {
 
 export type InferredPlaceCategory = 'activity' | 'food' | 'lodging' | 'transport';
 
+const OCR_TIMEOUT_MS = 45_000;
+
+function progressForStatus(status: string, progress: number): number | null {
+  switch (status) {
+    case 'loading tesseract core': return 0.05 + progress * 0.15;
+    case 'loading language traineddata': return 0.2 + progress * 0.2;
+    case 'initializing tesseract': return 0.4 + progress * 0.15;
+    case 'recognizing text': return 0.55 + progress * 0.45;
+    default: return null;
+  }
+}
+
+async function rejectAfter<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('사진 인식 시간이 초과됐어요.')), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const UI_NOISE = /^(네이버\s*지도|네이버|지도|저장\s*공유|저장|공유|출발|도착|거리뷰|리뷰|사진|메뉴|홈|검색|길찾기)$/;
 const ADDRESS_HINT = /(특별시|광역시|특별자치|[가-힣]+[도시군구읍면동])\s|([가-힣0-9]+(로|길)\s*\d)/;
 const HOURS_HINT = /(영업|운영|매일|휴무|라스트\s*오더|브레이크|\d{1,2}:\d{2}\s*[~-]\s*\d{1,2}:\d{2})/i;
@@ -50,17 +74,23 @@ export async function recognizePlaceScreenshot(
   onProgress?: (progress: number) => void,
 ): Promise<ExtractedPlace> {
   const { createWorker, OEM } = await import('tesseract.js');
-  const worker = await createWorker('kor', OEM.LSTM_ONLY, {
-    workerPath: '/ocr/worker.min.js',
-    corePath: '/ocr/tesseract-core-lstm.wasm.js',
-    langPath: '/ocr',
-    workerBlobURL: false,
-    logger: (message) => {
-      if (message.status === 'recognizing text') onProgress?.(message.progress);
-    },
-  });
+  onProgress?.(0.02);
+  const worker = await rejectAfter(
+    createWorker('kor', OEM.LSTM_ONLY, {
+      workerPath: '/ocr/worker.min.js',
+      corePath: '/ocr/tesseract-core-lstm.wasm.js',
+      langPath: '/ocr',
+      workerBlobURL: false,
+      logger: (message) => {
+        const progress = progressForStatus(message.status, message.progress);
+        if (progress !== null) onProgress?.(progress);
+      },
+    }),
+    OCR_TIMEOUT_MS,
+  );
   try {
-    const result = await worker.recognize(image);
+    const result = await rejectAfter(worker.recognize(image), OCR_TIMEOUT_MS);
+    onProgress?.(1);
     return extractPlaceFromOcr(result.data.text);
   } finally {
     await worker.terminate();

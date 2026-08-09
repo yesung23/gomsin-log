@@ -24,6 +24,7 @@ import { resolve } from 'node:path';
 const CSP_ALLOWED_TOKENS = new Set([
   "'self'",
   "'unsafe-inline'",
+  "'wasm-unsafe-eval'",
   "'none'",
   'data:',
   'blob:',
@@ -82,6 +83,13 @@ describe('the shipped CSP and the resources the app actually loads agree', () =>
         ).toBe(true);
       }
     }
+  });
+
+  it('allows only WebAssembly compilation needed by the local screenshot OCR', () => {
+    const scriptSources = csp.get('script-src');
+    expect(scriptSources).toEqual(["'self'", "'wasm-unsafe-eval'"]);
+    expect(scriptSources).not.toContain("'unsafe-eval'");
+    expect(scriptSources).not.toContain("'unsafe-inline'");
   });
 
   it('style-src and font-src name no third-party origin, so fonts must be self-hosted', () => {

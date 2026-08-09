@@ -132,6 +132,15 @@ describe('every documented hosting platform gets an SPA history fallback', () =>
     expect(serviceWorker).toContain("if (request.mode === 'navigate')");
     expect(serviceWorker).toContain('fetch(request).catch(async () =>');
   });
+
+  it('clones cacheable responses before the browser can consume their bodies', () => {
+    const serviceWorker = read('public/sw.js');
+    const cloneAt = serviceWorker.indexOf('const responseForCache = response.clone();');
+    const asyncCacheAt = serviceWorker.indexOf('caches.open(CACHE_NAME).then((cache) => cache.put(request, responseForCache))');
+    expect(cloneAt).toBeGreaterThan(-1);
+    expect(asyncCacheAt).toBeGreaterThan(cloneAt);
+    expect(serviceWorker).not.toContain('cache.put(request, response.clone())');
+  });
 });
 
 describe('vercel.json carries the same security headers as public/_headers', () => {

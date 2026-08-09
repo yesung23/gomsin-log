@@ -78,8 +78,13 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         const cacheControl = response.headers.get('Cache-Control') || '';
         if (response.ok && response.type === 'basic' && !/\bno-store\b/i.test(cacheControl)) {
+          // Clone synchronously, before returning the original response to the
+          // browser. Cloning inside the later `caches.open().then(...)` callback
+          // races with the browser consuming the body and throws
+          // "Response body is already used" on real Chrome installations.
+          const responseForCache = response.clone();
           event.waitUntil(
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone())),
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, responseForCache)),
           );
         }
         return response;

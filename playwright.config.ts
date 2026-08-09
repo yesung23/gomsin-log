@@ -60,7 +60,7 @@ export default defineConfig({
     timeout: 180_000,
     env: {
       VITE_SUPABASE_URL: 'https://example.supabase.co',
-      VITE_SUPABASE_PUBLISHABLE_KEY: 'test-public-key-not-a-secret',
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_public_key_not_a_secret',
     },
   },
 });

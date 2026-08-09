@@ -8,7 +8,7 @@ import { AttachmentMedia } from '@/components/AttachmentMedia';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { SectionHeader, RowGroup, TimelineRow } from '@/components/ui/List';
+import { SectionHeader, RowGroup } from '@/components/ui/List';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { Attachment, DailyRecord } from '@/types';
 
@@ -19,7 +19,7 @@ import type { Attachment, DailyRecord } from '@/types';
  * 받거나 접속했을 때 상대방의 오늘 순간들을 시간순(사진, 영상, 음성, 텍스트)으로 있는
  * 그대로 감상합니다."
  *
- * Renders as an editorial timeline using TimelineRow: time → media → prose.
+ * Renders as an editorial timeline: time → media → prose.
  * No wrapper card — surface economy. Structure comes from the time rail and
  * dividers, not from a border per entry.
  */

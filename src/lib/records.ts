@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { emotionFlowForStorage } from '@/lib/privacy';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
-import { DailyRecord, Role, Attachment } from '@/types';
+import { DailyRecord, Attachment } from '@/types';
 
 // ==========================================
 // Records Synchronization

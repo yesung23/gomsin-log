@@ -182,6 +182,14 @@ describe('public/manifest.json declares the rasters, not the SVG', () => {
     // content-hashed and the next navigation therefore loads one whole release.
     expect(sw).toContain('.then(() => self.skipWaiting())');
   });
+
+  it('reloads an existing installation when the new worker takes control', () => {
+    const main = readFileSync(resolve(process.cwd(), 'src/main.tsx'), 'utf8');
+    expect(main).toContain('const hadController = !!navigator.serviceWorker.controller');
+    expect(main).toContain("addEventListener('controllerchange'");
+    expect(main).toContain('if (!hadController || reloadingForUpdate) return');
+    expect(main).toContain('window.location.reload()');
+  });
 });
 
 describe('the Android adaptive icon has both layers', () => {

@@ -1,7 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { toast } from 'sonner';
 import { StoreProvider } from '@/lib/store';
 import { App } from '@/App';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -31,43 +30,20 @@ createRoot(document.getElementById('root')!).render(
 // there would only add a second, stale cache layer.
 if (import.meta.env.PROD && !isNativePlatform() && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    // Reload exactly once when an EXISTING installation moves to a new worker.
+    // `sw.js` activates only after the complete hashed app shell is cached, so
+    // this replaces the currently running release atomically. On first install
+    // there is no controller yet and no reload is needed.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloadingForUpdate = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloadingForUpdate) return;
+      reloadingForUpdate = true;
+      window.location.reload();
+    });
+
     navigator.serviceWorker.register('/sw.js').then((registration) => {
       console.info('[PWA] Service Worker registered with scope:', registration.scope);
-
-      let updatePromptOpen = false;
-      const offerUpdate = (candidate: ServiceWorker | null) => {
-        if (!candidate || !navigator.serviceWorker.controller || updatePromptOpen) return;
-        updatePromptOpen = true;
-        toast('새 버전이 있어요', {
-          duration: Infinity,
-          action: {
-            label: '지금 업데이트',
-            onClick: () => {
-              // Listen before posting: activation can be fast enough to emit
-              // controllerchange in the same task on some browsers.
-              navigator.serviceWorker.addEventListener(
-                'controllerchange',
-                () => window.location.reload(),
-                { once: true },
-              );
-              const waiting = registration.waiting ?? candidate;
-              waiting.postMessage({ type: 'SKIP_WAITING' });
-            },
-          },
-        });
-      };
-
-      // The update may have finished installing while the app was closed or
-      // before this listener was attached. `updatefound` will not fire again for
-      // an already-waiting worker, so check it immediately.
-      offerUpdate(registration.waiting);
-      registration.addEventListener('updatefound', () => {
-        const installing = registration.installing;
-        if (!installing) return;
-        installing.addEventListener('statechange', () => {
-          if (installing.state === 'installed') offerUpdate(registration.waiting ?? installing);
-        });
-      });
     }).catch((error) => {
       console.warn('[PWA] Service Worker registration skipped/failed:', error);
     });

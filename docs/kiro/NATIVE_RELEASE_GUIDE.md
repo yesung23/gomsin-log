@@ -75,7 +75,7 @@ references into `node_modules`, so the lock is a pure function of
 git clone <repo> fresh && cd fresh && git checkout <sha>
 npm ci
 VITE_SUPABASE_URL=https://example.supabase.co \
-VITE_SUPABASE_PUBLISHABLE_KEY=test-public-key-not-a-secret npm run build
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_test_public_key_not_a_secret npm run build
 npx cap sync android
 npx cap sync ios
 node scripts/assets/generate-app-assets.mjs

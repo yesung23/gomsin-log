@@ -40,10 +40,6 @@ self.addEventListener('install', (event) => {
 // the current API no longer has, even after the corrected site is deployed.
 // All JavaScript assets are content-hashed, so the next navigation receives a
 // matching index and bundle rather than a mixed release.
-self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
-});
-
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()

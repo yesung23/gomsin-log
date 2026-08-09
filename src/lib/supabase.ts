@@ -613,7 +613,7 @@ export class DemoAuthRepository implements IAuthRepository {
     return { error: '현재 데모 모드에서는 Apple 로그인이 설정되어 있지 않습니다. 데모 둘러보기를 이용해보세요.' };
   }
 
-  async signInWithEmail(email: string): Promise<{ error?: string }> {
+  async signInWithEmail(_email: string): Promise<{ error?: string }> {
     return { error: '현재 데모 모드에서는 이메일 로그인이 지원되지 않습니다.' };
   }
 

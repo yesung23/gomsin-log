@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { HomePage } from '@/pages/HomePage';
 import type { ServerErrorKind } from '@/lib/serverErrors';
+import type { AuthSyncStage } from '@/lib/sync';
 
 // Eagerly loaded: auth callback must resolve immediately on redirect.
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage';
@@ -119,7 +120,28 @@ function AccountDeletionRecovery() {
  * blamed the internet connection, so an expired session and an RLS rejection both
  * told the user to check a connection that was working perfectly.
  */
-function AuthSyncUnavailable({ reason }: { reason: ServerErrorKind | null }) {
+const AUTH_STAGE_CODES: Record<AuthSyncStage, string> = {
+  profile: 'PROFILE',
+  membership: 'MEMBERSHIP',
+  couple: 'COUPLE',
+  partner: 'PARTNER',
+  contact: 'CONTACT',
+  records: 'RECORDS',
+  events: 'EVENTS',
+  trips: 'TRIPS',
+  unexpected: 'UNEXPECTED',
+  timeout: 'TIMEOUT',
+};
+
+function AuthSyncUnavailable({
+  reason,
+  stage,
+}: {
+  reason: ServerErrorKind | null;
+  stage: AuthSyncStage | null;
+}) {
+  const { signOut } = useStore();
+  const [busy, setBusy] = useState(false);
   const isSessionProblem = reason === 'auth_expired';
   const title = isSessionProblem ? '세션이 만료되었어요' : '계정 정보를 확인하지 못했어요';
   const description = isSessionProblem
@@ -128,19 +150,39 @@ function AuthSyncUnavailable({ reason }: { reason: ServerErrorKind | null }) {
       ? '계정 권한을 확인하지 못했어요. 잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
       : reason === 'offline'
         ? '인터넷 연결을 확인한 뒤 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
-        : '잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.';
+        : reason === 'server'
+          ? '서비스 설정을 확인하지 못했어요. 잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
+          : reason === 'unreachable'
+            ? '서버에 요청이 닿지 않았어요. 잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
+            : '잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.';
 
   return (
     <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
       <section role="alert" className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3">
         <h1 className="text-heading text-foreground">{title}</h1>
         <p className="text-body text-muted-foreground">{description}</p>
+        {stage && (
+          <p className="text-caption text-muted-foreground" aria-label="오류 진단 코드">
+            진단 코드: {AUTH_STAGE_CODES[stage]}-{(reason || 'UNKNOWN').toUpperCase()}
+          </p>
+        )}
         <button
           type="button"
           onClick={() => window.location.reload()}
           className="w-full min-h-[44px] rounded-xl bg-coral-fill px-4 py-3 text-label font-bold text-coral-fill-foreground"
         >
           {isSessionProblem ? '다시 로그인' : '다시 시도'}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void signOut().finally(() => setBusy(false));
+          }}
+          className="w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-label font-bold text-foreground disabled:opacity-60"
+        >
+          {busy ? '처리 중...' : '로그아웃'}
         </button>
       </section>
     </main>
@@ -153,6 +195,7 @@ export function App() {
     isReady,
     authSyncUnavailable,
     authSyncReason,
+    authSyncStage,
     accountDeletionRecovery,
   } = useStore();
 
@@ -185,7 +228,10 @@ export function App() {
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/legal/:doc" element={<LegalPage />} />
-          <Route path="*" element={<AuthSyncUnavailable reason={authSyncReason} />} />
+          <Route
+            path="*"
+            element={<AuthSyncUnavailable reason={authSyncReason} stage={authSyncStage} />}
+          />
         </Routes>
       </Suspense>
     );

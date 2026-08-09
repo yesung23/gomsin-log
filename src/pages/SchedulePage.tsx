@@ -25,7 +25,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { ListRow, PressableRow, RowGroup, SectionHeader } from '@/components/ui/List';
+import { ListRow, RowGroup, SectionHeader } from '@/components/ui/List';
 import {
   dDayLabel,
   eventsOnDate,

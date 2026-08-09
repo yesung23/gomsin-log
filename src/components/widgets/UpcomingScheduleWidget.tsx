@@ -1,4 +1,3 @@
-import React from 'react';
 import { useStore } from '@/lib/useStore';
 import { MapPin, Briefcase, Gift, CalendarIcon, Info, Plane, Plus } from 'lucide-react';
 import { daysBetweenLocal, localToday, formatLocalDate, toLocalDateString } from '@/lib/utils';

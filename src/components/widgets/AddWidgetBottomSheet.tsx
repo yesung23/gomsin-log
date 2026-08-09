@@ -1,4 +1,3 @@
-import React from 'react';
 import { useStore } from '@/lib/useStore';
 import { useEscapeKey } from '@/lib/hooks';
 import { WIDGET_REGISTRY, isWidgetAllowedForRole, widgetsForRole } from '@/lib/widgets';

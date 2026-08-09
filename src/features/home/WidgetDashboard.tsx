@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '@/lib/useStore';
 import { Plus, LayoutGrid } from 'lucide-react';
 import {

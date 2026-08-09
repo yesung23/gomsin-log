@@ -9,6 +9,19 @@ import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
 export type FullStateFetchResult = Partial<AppState> | null | typeof FULL_STATE_UNAVAILABLE;
 
+/** The exact read that prevented an authenticated account from hydrating. */
+export type AuthSyncStage =
+  | 'profile'
+  | 'membership'
+  | 'couple'
+  | 'partner'
+  | 'contact'
+  | 'records'
+  | 'events'
+  | 'trips'
+  | 'unexpected'
+  | 'timeout';
+
 /**
  * Same fetch, but carrying WHY it failed.
  *
@@ -19,7 +32,25 @@ export type FullStateFetchResult = Partial<AppState> | null | typeof FULL_STATE_
  */
 export type FullStateResult =
   | { ok: true; state: Partial<AppState> | null }
-  | { ok: false; reason: ServerErrorKind };
+  | { ok: false; reason: ServerErrorKind; stage: AuthSyncStage };
+
+/**
+ * Preserve the failing read without exposing database details to the UI.
+ *
+ * The stage is safe to display as a support code; raw messages remain in the
+ * developer console and may contain schema names, so they never enter state.
+ */
+function syncFailure(stage: AuthSyncStage, error: unknown): FullStateResult {
+  const reason = classifyServerError(error).kind;
+  const record = error && typeof error === 'object'
+    ? error as { code?: unknown; message?: unknown }
+    : null;
+  console.error(`[gomsinlog] Account sync failed at ${stage}:`, {
+    code: typeof record?.code === 'string' ? record.code : undefined,
+    message: typeof record?.message === 'string' ? record.message : undefined,
+  });
+  return { ok: false, reason, stage };
+}
 
 /**
  * Resume snapshot for an account that owns a couple space but has no profile row.
@@ -46,7 +77,7 @@ export type FullStateResult =
  */
 type ResumableMembershipResult =
   | { ok: true; state: Partial<AppState> | null }
-  | { ok: false; reason: ServerErrorKind };
+  | { ok: false; reason: ServerErrorKind; stage: 'membership' };
 
 async function fetchResumableMembership(
   userId: string,
@@ -60,7 +91,7 @@ async function fetchResumableMembership(
       .eq('status', 'active')
       .maybeSingle();
     // A query error is not evidence of absent membership.
-    if (error) return { ok: false, reason: classifyServerError(error).kind };
+    if (error) return syncFailure('membership', error) as ResumableMembershipResult;
     // A successful empty lookup is the only verified new-account answer.
     if (!data?.couple_id) return { ok: true, state: null };
 
@@ -90,7 +121,7 @@ async function fetchResumableMembership(
     // A thrown lookup (malformed response, transport failure) is also not proof
     // that the account is new.
     console.error('[gomsinlog] Resumable membership lookup failed:', err);
-    return { ok: false, reason: classifyServerError(err).kind };
+    return syncFailure('membership', err) as ResumableMembershipResult;
   }
 }
 
@@ -107,7 +138,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
 
     // A successful empty lookup is a genuinely new account. Query failures are
     // retryable and must not be confused with onboarding.
-    if (profileError) return { ok: false, reason: classifyServerError(profileError).kind };
+    if (profileError) return syncFailure('profile', profileError);
     if (!profileData) {
       // Propagates the membership lookup's own ok/failure result, so a failed
       // lookup becomes FULL_STATE_UNAVAILABLE instead of new-account onboarding.
@@ -125,7 +156,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
     // An authorization/network failure is not proof that membership is absent.
     // Returning an empty "disconnected" snapshot would overwrite known-good
     // state and mislead the user; surface a retryable unavailable result instead.
-    if (memberError) return { ok: false, reason: classifyServerError(memberError).kind };
+    if (memberError) return syncFailure('membership', memberError);
 
     let couple: CoupleInfo = {
       partnerName: '',
@@ -142,12 +173,12 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
         .eq('id', memberData.couple_id)
         .single();
       if (coupleError || !coupleData) {
-        return { ok: false, reason: classifyServerError(coupleError).kind };
+        return syncFailure('couple', coupleError);
       }
 
       // Fetch Partner Profile
       const { data: partnerData, error: partnerError } = await supabase.rpc('get_partner_profile');
-      if (partnerError) return { ok: false, reason: classifyServerError(partnerError).kind };
+      if (partnerError) return syncFailure('partner', partnerError);
       
       const hasPartner = !!(partnerData && partnerData.length > 0);
       let partnerName = '';
@@ -171,7 +202,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       .select('*')
       .eq('user_id', userId)
       .maybeSingle();
-    if (contactError) return { ok: false, reason: classifyServerError(contactError).kind };
+    if (contactError) return syncFailure('contact', contactError);
 
     const contact: ContactPreferences = {
       weekdayStart: contactData?.weekday_start || '18:00',
@@ -228,14 +259,21 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
     if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
       // Prefer a definite cause over a generic one: `forbidden` from a slice read
       // is a membership answer and must not be reported as a connection failure.
-      const reason: ServerErrorKind = !recordsResult.ok
-        ? classifyServerError(recordsResult.error).kind
-        : !eventsResult.ok && eventsResult.reason === 'forbidden'
-          ? 'forbidden'
-          : !tripsResult.ok && tripsResult.reason === 'forbidden'
-            ? 'forbidden'
-            : 'unknown';
-      return { ok: false, reason };
+      if (!recordsResult.ok) return syncFailure('records', recordsResult.error);
+      if (!eventsResult.ok) {
+        return {
+          ok: false,
+          reason: eventsResult.reason === 'forbidden' ? 'forbidden' : 'unknown',
+          stage: 'events',
+        };
+      }
+      if (!tripsResult.ok) {
+        return {
+          ok: false,
+          reason: tripsResult.reason === 'forbidden' ? 'forbidden' : 'unknown',
+          stage: 'trips',
+        };
+      }
     }
 
     const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
@@ -264,7 +302,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
     };
   } catch (err) {
     console.error('fetchFullStateFromDB error:', err);
-    return { ok: false, reason: classifyServerError(err).kind };
+    return syncFailure('unexpected', err);
   }
 }
 

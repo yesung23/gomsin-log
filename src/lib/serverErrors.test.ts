@@ -61,6 +61,14 @@ describe('classifyServerError', () => {
     expect(result.message).not.toContain('인터넷');
   });
 
+  it.each(['PGRST204', 'PGRST205', '42703', '42P01'])(
+    'classifies schema contract code %s as a server problem',
+    (code) => {
+      expect(classifyServerError({ code, message: 'schema contract mismatch' }, { online: true }).kind)
+        .toBe('server');
+    },
+  );
+
   it('classifies HTTP 5xx as a server problem', () => {
     expect(classifyServerError({ status: 500 }, { online: true }).kind).toBe('server');
     expect(classifyServerError({ status: 503 }, { online: true }).kind).toBe('server');

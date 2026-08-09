@@ -19,7 +19,11 @@ import {
   saveCoupleAnniversary,
   fetchMyCoupleState,
 } from '@/lib/supabase';
-import { fetchFullStateResultFromDB, FULL_STATE_UNAVAILABLE } from '@/lib/sync';
+import {
+  fetchFullStateResultFromDB,
+  FULL_STATE_UNAVAILABLE,
+  type AuthSyncStage,
+} from '@/lib/sync';
 import {
   classifyServerError,
   serverErrorMessage,
@@ -337,6 +341,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * `null` on every success, so the outage screen cannot show a stale cause.
    */
   const [authSyncReason, setAuthSyncReason] = useState<ServerErrorKind | null>(null);
+  const [authSyncStage, setAuthSyncStage] = useState<AuthSyncStage | null>(null);
   /**
    * Server-authoritative couple lifecycle, starting at `unknown` because nothing
    * has been asked yet. It is never initialised to `personal`: that would render
@@ -862,6 +867,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         realtimeHealthyRef.current = true;
         setSharedSyncStatus('live');
         setAuthSyncUnavailable(false);
+        setAuthSyncReason(null);
+        setAuthSyncStage(null);
         hydratedUserIdRef.current = null;
         // The couple lifecycle and the invitation expiry belong to the account
         // that is leaving. Nobody has asked the question for the incoming
@@ -964,7 +971,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             let hydration = await withTimeout(
               fetchFullStateResultFromDB(sessionUser.id),
               AUTH_SYNC_TIMEOUT_MS,
-              { ok: false as const, reason: 'unknown' as ServerErrorKind },
+              {
+                ok: false as const,
+                reason: 'unknown' as ServerErrorKind,
+                stage: 'timeout' as const,
+              },
             );
             // One refresh, then one retry of the SAME read. An expired JWT is the
             // single most common cause of a first-load failure after the app has
@@ -980,7 +991,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 hydration = await withTimeout(
                   fetchFullStateResultFromDB(sessionUser.id),
                   AUTH_SYNC_TIMEOUT_MS,
-                  { ok: false as const, reason: 'unknown' as ServerErrorKind },
+                  {
+                    ok: false as const,
+                    reason: 'unknown' as ServerErrorKind,
+                    stage: 'timeout' as const,
+                  },
                 );
               }
             }
@@ -1014,6 +1029,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               if (hydration.ok) return null;
               return previous === 'auth_expired' ? previous : hydration.reason;
             });
+            setAuthSyncStage(hydration.ok ? null : hydration.stage);
             if (syncUnavailable) {
               // A failed hydration answers nothing about the couple space, so the
               // lifecycle must go to `unknown` -- never to `personal`.
@@ -3195,6 +3211,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         isReady: isHydrated && isAuthChecked,
         authSyncUnavailable,
         authSyncReason,
+        authSyncStage,
         sharedSyncStatus,
         coupleLifecycle,
         invitationExpiresAt,

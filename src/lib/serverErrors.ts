@@ -83,7 +83,13 @@ const NOT_FOUND_CODES: ReadonlySet<string> = new Set(['PGRST116']);
  * `not_found`: the caller did nothing wrong and retrying the same request cannot
  * help, so the copy must not suggest a refresh.
  */
-const SERVER_CODES: ReadonlySet<string> = new Set(['PGRST202']);
+const SERVER_CODES: ReadonlySet<string> = new Set([
+  'PGRST202', // RPC missing from the PostgREST schema cache
+  'PGRST204', // requested column missing from the schema cache
+  'PGRST205', // requested table missing from the schema cache
+  '42703', // PostgreSQL undefined_column
+  '42P01', // PostgreSQL undefined_table
+]);
 
 /** Substrings that only ever appear in a token/JWT failure. */
 const AUTH_EXPIRED_MESSAGES = [

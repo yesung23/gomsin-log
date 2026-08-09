@@ -1,4 +1,3 @@
-import React from 'react';
 import { useStore } from '@/lib/useStore';
 import { Clock, Shield } from 'lucide-react';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';

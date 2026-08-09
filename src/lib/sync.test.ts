@@ -198,6 +198,25 @@ describe('fetchFullStateFromDB', () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected an unavailable result');
     expect(result.reason).toBe('forbidden');
+    expect(result.stage).toBe('membership');
+  });
+
+  it('preserves the failing slice as a safe support stage', async () => {
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock(null);
+    const contactChain = setupContactMock(null, { code: '42703', message: 'missing column' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = await fetchFullStateResultFromDB(userId);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected an unavailable result');
+    expect(result).toMatchObject({ reason: 'server', stage: 'contact' });
   });
 
   it('returns unavailable when the membership lookup throws', async () => {

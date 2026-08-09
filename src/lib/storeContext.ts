@@ -2,6 +2,7 @@ import { createContext } from 'react';
 import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent, Role } from '@/types';
 import type { AccountDeletionOutcome, DeletionStatus } from '@/lib/accountDeletion';
 import type { ServerErrorKind } from '@/lib/serverErrors';
+import type { AuthSyncStage } from '@/lib/sync';
 import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
 
 /**
@@ -77,6 +78,8 @@ export interface StoreContextType {
    * connection for an authorization problem. `null` while hydration is healthy.
    */
   authSyncReason: ServerErrorKind | null;
+  /** Safe support code identifying which account read failed. */
+  authSyncStage: AuthSyncStage | null;
   sharedSyncStatus: SharedSyncStatus;
   /**
    * Server-authoritative couple lifecycle.

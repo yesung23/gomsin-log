@@ -20,10 +20,9 @@ import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
 import { toast } from 'sonner';
 import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
-import { serverErrorMessage } from '@/lib/serverErrors';
 import { AttachmentMedia } from '@/components/AttachmentMedia';
 import { Button } from '@/components/ui/Button';
-import type { DailyRecord, ServerErrorKind } from '@/types';
+import type { DailyRecord } from '@/types';
 
 type MediaFilter = 'all' | 'photo' | 'video' | 'voice' | 'text';
 

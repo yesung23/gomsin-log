@@ -145,6 +145,56 @@ test('a soldier can save service information and receives server acknowledgement
   await context.close();
 });
 
+test('one map screenshot becomes an editable trip item instead of hanging at zero percent', async ({ browser }) => {
+  const trip = {
+    id: 'trip-ocr',
+    couple_id: CREATOR.coupleId,
+    created_by: CREATOR.userId,
+    title: '인천 여행',
+    start_date: '2026-08-17',
+    end_date: '2026-08-18',
+    status: 'planned',
+    created_at: '2026-08-01T00:00:00Z',
+  };
+  const context = await browser.newContext();
+  const { unrouted } = await installMockBackend(context, { ...CREATOR, trips: [trip] });
+
+  // Generate the kind of high-contrast map capture a user selects, without
+  // committing a binary fixture or involving any external OCR service.
+  const capturePage = await context.newPage();
+  await capturePage.setContent(`
+    <div id="capture" style="box-sizing:border-box;width:1000px;height:650px;padding:80px;background:white;color:black;font-family:Arial,sans-serif">
+      <div style="font-size:72px;font-weight:700">SONGDO CAFE</div>
+      <div style="margin-top:45px;font-size:48px">Incheon Central-ro 123</div>
+      <div style="margin-top:35px;font-size:46px">Every day 10:00 - 20:00</div>
+    </div>
+  `);
+  const screenshot = await capturePage.locator('#capture').screenshot();
+  await capturePage.close();
+
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await bootedInto(page, '/trips/trip-ocr');
+  await expect(page.getByRole('button', { name: '사진으로 바로 추가' })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByLabel('지도 캡처 선택').setInputFiles({
+    name: 'map-capture.png',
+    mimeType: 'image/png',
+    buffer: screenshot,
+  });
+
+  await expect(page.getByText('사진에서 자동 추가 · 눌러서 수정')).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(/사진 읽는 중/)).toHaveCount(0);
+  const editButton = page.locator('button[aria-label$="일정 수정"]');
+  await expect(editButton).toHaveCount(1);
+  await editButton.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(pageErrors).toEqual([]);
+  expect(unrouted).toEqual([]);
+  await context.close();
+});
+
 test('every interactive control clears the 44px tap target, hit area included', async ({ browser }) => {
   /*
    * DESIGN_V2 §Visual footprint ≠ hit target allows a control to LOOK small while

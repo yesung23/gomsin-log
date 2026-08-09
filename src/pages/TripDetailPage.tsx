@@ -848,8 +848,8 @@ export function TripDetailPage() {
         {/* Trip edit modal - z-[60] above tab bar */}
         {showTripModal && (
           <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-            <div className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border">
-              <h2 className="text-heading text-foreground mb-4">여행 정보 수정</h2>
+            <div role="dialog" aria-modal="true" aria-labelledby="trip-edit-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border">
+              <h2 id="trip-edit-title" className="text-heading text-foreground mb-4">여행 정보 수정</h2>
               <div className="space-y-3">
                 <label className="block text-caption font-medium text-muted-foreground">여행 이름<input value={tripDraft.title} onChange={(event) => setTripDraft((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
                 <div className="flex gap-2">
@@ -870,8 +870,8 @@ export function TripDetailPage() {
         {/* Item create/edit modal - z-[60] above tab bar */}
         {showItemModal && (
           <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-            <div className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border max-h-[90dvh] overflow-y-auto">
-              <h2 className="text-heading text-foreground mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2>
+            <div role="dialog" aria-modal="true" aria-labelledby="trip-item-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border max-h-[90dvh] overflow-y-auto">
+              <h2 id="trip-item-title" className="text-heading text-foreground mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2>
               <div className="space-y-3">
                 {!editingItemId && (
                   <div className="rounded-control border border-dashed border-info/40 bg-info-surface p-3">

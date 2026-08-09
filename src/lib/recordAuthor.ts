@@ -22,15 +22,20 @@ import { isOwnRecord, type Viewer } from '@/lib/privacy';
  * vision deficiency:
  *
  *   1. Hue      -- a 6px edge stripe, coral for 곰신 and info-blue for 군화.
- *   2. Position -- the viewer's own cards are indented right, the partner's left,
- *                  the convention every messaging app already taught them.
+ *   2. Geometry -- the timeline dot marker differs in SHAPE by ownership: the
+ *                  viewer's own record gets a filled dot; the partner's gets a
+ *                  hollow ring (border-only, same diameter). This replaced the
+ *                  chat-bubble indentation (ml-auto / mr-auto / max-w-[94%]) which
+ *                  was incompatible with the editorial timeline's fixed column
+ *                  layout. The editorial timeline requires a stable time column at
+ *                  44px, which a 94%-width pushed left or right destroys.
  *   3. Text     -- an explicit attribution chip, `🌸 곰신 · 나`, which carries the
  *                  role as words and as an emoji rather than as colour.
  *
  * Hue is keyed on the ROLE, not on ownership, so the same person is the same
  * colour on both phones; that matters because couples screenshot this screen for
- * each other. Position is keyed on ownership, which is the axis each reader
- * actually scans for.
+ * each other. Geometry (marker) is keyed on OWNERSHIP, which is the axis each
+ * reader actually scans for.
  *
  * Only theme tokens are used. `src/lib/themeTokens.test.ts` guards this file and
  * fails the build if a raw palette literal (a hard-coded white surface, a fixed
@@ -80,6 +85,22 @@ export function isRole(value: unknown): value is Role {
   return value === 'gomsin' || value === 'soldier';
 }
 
+/**
+ * Timeline marker geometry classes, keyed on OWNERSHIP (not role).
+ *
+ * The viewer's own record gets a filled dot (solid background); the partner's
+ * record gets a hollow ring (border-only, same diameter). This is the second
+ * non-colour channel (after the text chip) that distinguishes author identity.
+ *
+ * Both are 6px × 6px (w-1.5 h-1.5) with rounded-full. The filled variant is a
+ * solid ink dot; the hollow variant has a transparent interior with a 1px
+ * `border-foreground` ring. Ink rather than an accent hue on purpose: the hue
+ * channel already belongs to the ROLE stripe, and reusing coral here would make
+ * the two channels co-vary instead of being independent.
+ */
+const MARKER_OWN = 'w-1.5 h-1.5 rounded-full bg-foreground';
+const MARKER_PARTNER = 'w-1.5 h-1.5 rounded-full border border-foreground bg-transparent';
+
 export interface RecordAuthorPresentation {
   /** `null` when the record carries no usable role. */
   role: Role | null;
@@ -93,8 +114,12 @@ export interface RecordAuthorPresentation {
   attribution: string;
   /** Full sentence for assistive tech, e.g. `곰신 나가 남긴 기록`. */
   srAttribution: string;
-  /** `ml-auto` for own records, `mr-auto` for the partner's. */
-  alignClass: string;
+  /**
+   * Timeline dot marker class: filled dot for own records, hollow ring for the
+   * partner's. This is channel 2 (geometry), replacing the chat-bubble indentation
+   * that was incompatible with the editorial timeline's fixed column layout.
+   */
+  markerClass: string;
   stripeClass: string;
   chipClass: string;
 }
@@ -129,10 +154,8 @@ export function recordAuthorPresentation(
     srAttribution: roleLabel
       ? `${roleLabel} ${displayName}가 남긴 기록`
       : `${displayName}가 남긴 기록`,
-    // Indentation, not full-width mirroring: an 6% inset is enough to read the
-    // ownership of a run of cards while still leaving a photo attachment usable
-    // at 390px.
-    alignClass: isOwn ? 'ml-auto' : 'mr-auto',
+    // Geometry channel: filled dot for own, hollow ring for partner.
+    markerClass: isOwn ? MARKER_OWN : MARKER_PARTNER,
     stripeClass: accent.stripe,
     chipClass: accent.chip,
   };

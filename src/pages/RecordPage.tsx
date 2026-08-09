@@ -12,7 +12,7 @@ import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
-  Image as ImageIcon, Mic, Film, Sparkles, Clock, Calendar,
+  Sparkles, Clock, Calendar,
   Pencil, Trash2,
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
@@ -22,6 +22,7 @@ import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { serverErrorMessage } from '@/lib/serverErrors';
 import { AttachmentMedia } from '@/components/AttachmentMedia';
+import { Button } from '@/components/ui/Button';
 import type { DailyRecord, ServerErrorKind } from '@/types';
 
 type MediaFilter = 'all' | 'photo' | 'video' | 'voice' | 'text';
@@ -429,7 +430,7 @@ export function RecordPage() {
             className={cn(
               'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
               showCalendar
-                ? 'bg-coral-strong text-coral-strong-foreground shadow-sm'
+                ? 'bg-coral-fill text-coral-fill-foreground shadow-sm'
                 : 'bg-card border border-border text-foreground hover:bg-muted'
             )}
             aria-label="달력 보기"
@@ -448,15 +449,15 @@ export function RecordPage() {
                 {formatLocalDate(tripPeriod.from)} ~ {formatLocalDate(tripPeriod.to)} · 이 기간의 기록만 표시해요.
               </p>
               {!periodTrip && (
-                <p className="text-caption text-amber-700 mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
+                <p className="text-caption text-warning-foreground mt-1">여행 정보를 찾을 수 없지만, 유효한 기간 필터는 유지했어요.</p>
               )}
             </div>
             <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-coral-strong underline">기간 보기 해제</button>
           </div>
         ) : hasTripPeriodQuery ? (
-          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-3">
-            <p className="text-caption text-amber-800">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
-            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-amber-800 underline">지우기</button>
+          <div className="mb-4 rounded-2xl border border-warning/30 bg-warning-surface p-4 flex items-center justify-between gap-3">
+            <p className="text-caption text-warning-foreground">여행 기간 정보가 올바르지 않아 전체 기록을 표시해요.</p>
+            <button onClick={() => navigate('/record', { replace: true })} className="shrink-0 text-caption font-bold text-warning-foreground underline">지우기</button>
           </div>
         ) : null}
 
@@ -503,7 +504,7 @@ export function RecordPage() {
                 key={day}
                 className={cn(
                   'text-center text-caption font-bold py-2',
-                  i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-muted-foreground'
+                  i === 0 ? 'text-destructive' : i === 6 ? 'text-info' : 'text-muted-foreground'
                 )}
               >
                 {day}
@@ -544,7 +545,7 @@ export function RecordPage() {
                     'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
                     (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
-                    isSelected && 'bg-coral-strong text-coral-strong-foreground',
+                    isSelected && 'bg-coral-fill text-coral-fill-foreground',
                     !isSelected && isTodayCell && 'ring-2 ring-coral/50 ring-inset rounded-lg',
                   )}
                 >
@@ -553,8 +554,8 @@ export function RecordPage() {
                       'text-label font-semibold leading-none',
                       !cell.inMonth && 'text-muted-foreground/30',
                       cell.inMonth && !isSelected && isFuture && 'text-muted-foreground/50',
-                      cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-red-400',
-                      cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-blue-400',
+                      cell.inMonth && !isSelected && !isFuture && dow === 0 && 'text-destructive',
+                      cell.inMonth && !isSelected && !isFuture && dow === 6 && 'text-info',
                       isSelected && 'text-coral-strong-foreground',
                     )}
                   >
@@ -647,22 +648,22 @@ export function RecordPage() {
 
         {/* Day Summary Card (only if 2+ shared records) */}
         {selectedDaySummary.items.length > 0 && (
-          <div className="mb-4 rounded-2xl bg-lilac/30 border border-lilac/50 p-3 space-y-1.5">
-            <div className="flex items-center justify-between text-label font-bold text-foreground mb-0.5">
+          <div className="mb-3 rounded-surface bg-lilac/30 border border-lilac/50 px-3 py-2 space-y-1">
+            <div className="flex items-center justify-between text-caption text-foreground">
               <div className="flex items-center gap-1.5">
-                <Sparkles size={13} className="text-coral" />
-                <span>{isToday ? '오늘의 빠른 정리' : '그날의 빠른 정리'}</span>
+                <Sparkles size={12} className="text-coral" aria-hidden="true" />
+                <span className="font-semibold">{isToday ? '오늘의 빠른 정리' : '그날의 빠른 정리'}</span>
               </div>
-              <span className="text-caption text-muted-foreground font-normal">눌러서 원문 이동</span>
+              <span className="text-caption text-muted-foreground">눌러서 원문 이동</span>
             </div>
             {selectedDaySummary.items.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleSummaryItemClick(item.recordIds[0])}
-                className="w-full text-left p-2 rounded-xl bg-card/60 hover:bg-card transition flex items-center justify-between text-label font-medium text-foreground group active:scale-[0.99]"
+                className="w-full text-left px-2 py-1.5 rounded-control bg-card/60 hover:bg-card transition flex items-center justify-between text-caption text-foreground group active:scale-[0.99] min-h-[36px]"
               >
-                <span className="leading-snug flex-1 pr-2">• {item.text}</span>
-                <ChevronRight size={13} className="text-foreground/30 group-hover:text-foreground shrink-0" />
+                <span className="leading-snug flex-1 pr-2 break-keep">• {item.text}</span>
+                <ChevronRight size={12} className="text-foreground/30 group-hover:text-foreground shrink-0" />
               </button>
             ))}
           </div>
@@ -670,13 +671,14 @@ export function RecordPage() {
 
         {/* Media Filter Chips */}
         {selectedDayAllRecords.length > 0 && (
-          <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-hide pb-1">
+          <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-hide pb-0.5">
             {FILTERS.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setMediaFilter(f.key)}
                 className={cn(
-                  'px-3 py-1.5 rounded-full text-label font-semibold whitespace-nowrap transition min-h-[32px]',
+                  'px-2.5 py-1 rounded-full text-caption font-semibold whitespace-nowrap transition min-h-[28px]',
+                  'relative before:absolute before:inset-x-0 before:-inset-y-2 before:content-[""]',
                   mediaFilter === f.key
                     ? 'bg-navy text-primary-foreground'
                     : 'bg-muted/60 text-muted-foreground hover:bg-muted'
@@ -688,11 +690,10 @@ export function RecordPage() {
           </div>
         )}
 
-        {/* Day Timeline */}
-        <div className="space-y-3">
+        {/* Day Timeline — editorial layout */}
+        <ul className="space-y-0">
           {selectedDayRecords.length === 0 ? (
-            <div className="rounded-2xl bg-card border border-border/60 p-8 text-center text-muted-foreground">
-              <div className="text-display mb-2">📖</div>
+            <li className="list-none rounded-surface bg-card border border-border/60 p-6 text-center text-muted-foreground">
               <p className="text-body font-semibold">
                 {selectedDayAllRecords.length === 0
                   ? '이 날은 남긴 순간이 없어요'
@@ -703,7 +704,7 @@ export function RecordPage() {
                   ? '달력에서 점이 있는 날짜를 눌러보세요'
                   : '다른 필터를 선택해보세요'}
               </p>
-            </div>
+            </li>
           ) : (
             selectedDayRecords.map((r) => {
               const author = recordAuthorPresentation(
@@ -712,133 +713,181 @@ export function RecordPage() {
                 partnerDisplayName,
               );
               const isHighlighted = state.highlightedRecordId === r.id;
+              const hasMedia = r.attachments && r.attachments.length > 0;
 
               return (
-                <div
+                <li
                   id={`record-${r.id}`}
                   key={r.id}
                   data-author-role={author.role ?? 'unknown'}
                   data-author-own={author.isOwn ? 'true' : 'false'}
                   className={cn(
-                    // `relative` and `overflow-hidden` carry the author stripe below.
-                    // `max-w-[94%]` plus ml-auto/mr-auto is the ownership channel.
-                    'relative overflow-hidden rounded-2xl bg-card border p-4 pl-5 shadow-sm space-y-2 transition-all duration-500 max-w-[94%]',
-                    author.alignClass,
-                    isHighlighted
-                      ? 'border-coral ring-4 ring-coral/30 scale-[1.01]'
-                      : 'border-border/60'
+                    'list-none relative border-b border-border/40 last:border-b-0 transition-all duration-500',
+                    isHighlighted && 'record-highlighted ring-2 ring-coral/30 bg-coral/5 rounded-control'
                   )}
                 >
-                  {/*
-                    Author hue as geometry the highlight cannot collide with.
-                    `isHighlighted` paints a coral ring around the WHOLE card, so
-                    the author accent is a left edge stripe instead: different
-                    shape, so a highlighted 군화 card still reads as 군화.
-                  */}
+                  {/* Author hue stripe — left edge */}
                   <span
                     aria-hidden="true"
-                    className={cn('absolute left-0 top-0 bottom-0 w-1.5', author.stripeClass)}
+                    className={cn('absolute left-0 top-0 bottom-0 w-1', author.stripeClass)}
                   />
+
                   {/*
-                    The opener is a real <button>, and it covers the text of the
-                    card rather than the whole card, for two reasons that point the
-                    same way.
+                    Editorial row structure:
+                    - The opener <button> covers: time column + spacer (for media overlay) + content.
+                    - Media is a SIBLING positioned absolutely over the spacer area
+                      so <video>/<audio> controls are not nested inside the button.
 
-                    Keyboard: as a `<div onClick>` the card was in no tab order and
-                    answered no key, so the 기록 screen could not be read without a
-                    pointer at all.
-
-                    Nesting: an attachment renders `<video controls>` /
-                    `<audio controls>`. A button may not contain a control, and a
-                    card-level handler also caught every tap aimed at a play button
-                    and opened the modal over the clip the user had just started.
-                    So the words open the record and the media plays in place.
+                    Column geometry:
+                      time = w-11 (44px), gap = 8px, media = 68px (76px @360+)
+                      left offset for media = 44 + 8 = 52px → left-[52px]
                   */}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRecordId(r.id)}
-                    aria-label={`${author.srAttribution} 자세히 보기`}
-                    className="w-full text-left space-y-2 rounded-xl active:scale-[0.98] transition-transform cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between text-caption text-muted-foreground">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-foreground">{r.time}</span>
-                        {/*
-                          The chip is hidden from assistive tech and replaced by a
-                          sentence, not duplicated: read aloud, `🌸 곰신 · 춘향`
-                          becomes "cherry blossom 곰신 middle dot 춘향". The emoji and
-                          the separator are sighted-reader shorthand, so the screen
-                          reader gets the same fact as prose instead.
-                        */}
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            'px-2 py-0.5 rounded-full font-semibold text-caption whitespace-nowrap',
-                            author.chipClass,
-                          )}
-                        >
-                          {author.attribution}
+                  {/*
+                    Row layout: time and marker are a fixed left rail, then media and
+                    prose stack in the remaining width. Everything is in normal flow,
+                    so the row's height is whatever its content needs -- a text-only
+                    record is short, one with a photo or three lines of prose is taller.
+
+                    Replaces an absolutely-positioned media overlay. That version could
+                    not contribute height, so a photo drew outside its own row and over
+                    the record below it, and a long log was clamped to keep the overlap
+                    from getting worse.
+
+                    The opener button no longer wraps the whole row: `<button>` cannot
+                    contain `<video controls>` / `<audio controls>`, which is why the
+                    overlay existed. Instead the button covers the time rail and the
+                    prose -- everything except the media -- so `<audio>` and `<video>`
+                    stay outside it while a tap on the time still opens the detail
+                    sheet, which `recordAuthorDistinction.test.tsx` clicks.
+                  */}
+                  <div className="flex pl-2.5 gap-2 py-3">
+                    {/*
+                      Time + marker rail, tappable.
+
+                      Splitting the opener into two buttons -- rail and prose -- is what
+                      lets the media sit between them in normal flow. But two buttons
+                      with the same accessible name is one control announced twice, so
+                      only the prose button carries the name; this one is hidden from
+                      assistive tech and exists for the pointer, where tapping the time
+                      has always opened the record.
+                      `keyboardOperableCards.test.tsx` asserts exactly one button per
+                      record, and `recordAuthorDistinction.test.tsx` clicks the time.
+                    */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRecordId(r.id)}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      className="shrink-0 flex gap-2 text-left self-stretch rounded-control active:bg-muted/40 transition-colors cursor-pointer"
+                    >
+                      <span className="shrink-0 w-11 text-right text-caption text-muted-foreground tabular-nums pt-0.5 font-medium">
+                        {r.time}
+                      </span>
+                      <span className="shrink-0 flex flex-col items-center pt-1.5" aria-hidden="true">
+                        <span className={author.markerClass} />
+                        <span className="w-px flex-1 bg-border mt-1" />
+                      </span>
+                    </button>
+
+                    {/* Media + prose share the remaining width and set the row height */}
+                    <div className="min-w-0 flex-1 flex gap-2">
+                      {hasMedia && (
+                        <div className="shrink-0 w-[68px] min-[360px]:w-[76px] space-y-1">
+                          {r.attachments!.map((att, i) => (
+                            <AttachmentMedia
+                              key={i}
+                              attachment={att}
+                              coupleId={state.profile.couple.coupleId}
+                              recordId={r.id}
+                              variant="timeline"
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRecordId(r.id)}
+                        aria-label={`${author.srAttribution} 자세히 보기`}
+                        className="min-w-0 flex-1 flex flex-col gap-1 text-left rounded-control active:bg-muted/40 transition-colors cursor-pointer"
+                      >
+                        {/* Attribution chip */}
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              'px-1.5 py-0.5 rounded-full font-semibold text-caption whitespace-nowrap inline-flex items-center',
+                              author.chipClass,
+                            )}
+                          >
+                            {author.attribution}
+                          </span>
+                          <span className="sr-only">{author.srAttribution}</span>
+                          {r.isPrivate ? (
+                            <span className="flex items-center gap-0.5 text-warning-foreground bg-warning-surface px-1.5 py-0.5 rounded-md font-medium text-caption">
+                              <Lock size={9} /> 나에게만
+                            </span>
+                          ) : null}
                         </span>
-                        <span className="sr-only">{author.srAttribution}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {r.reaction && (
-                          <span className="px-2 py-0.5 rounded-full bg-coral/10 text-coral-strong font-medium text-caption">
-                            {REACTION_LABELS[r.reaction] || r.reaction}
-                          </span>
-                        )}
-                        {r.isPrivate ? (
-                          <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium text-caption">
-                            <Lock size={10} /> 나에게만
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground text-caption">
-                            <Unlock size={10} className="inline" />
-                          </span>
-                        )}
-                      </div>
-                    </div>
 
-                    {r.log && (
-                      <p data-testid="record-log" className="text-body text-foreground break-keep">{r.log}</p>
-                    )}
-                  </button>
+                        {/* User's original text — the primary content */}
+                        {/*
+                          No `leading-snug` here. `text-body` already carries
+                          15/22 (1.467) from the scale, and Tailwind's snug
+                          (1.375) overrode it -- below the 1.4 floor that
+                          `e2e/renderedTypeScale.spec.ts` measures on the real
+                          render, because Korean prose crowds at that leading.
+                          The record's own sentence is the one thing on this
+                          screen that must stay comfortable to read.
+                        */}
+                        {/*
+                          No clamp. The row grows to fit the log now that nothing is
+                          absolutely positioned inside it -- `line-clamp-3` existed to
+                          stop long prose from making the overlap with the floated
+                          media worse, and there is no overlap left to manage. A record
+                          is short because the person wrote a short one, not because the
+                          layout cut it off.
+                        */}
+                        {r.log && (
+                          <span data-testid="record-log" className="text-body text-foreground break-keep whitespace-pre-wrap">{r.log}</span>
+                        )}
 
-                  {r.attachments && r.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {r.attachments.map((att, i) => (
-                        <AttachmentMedia
-                          key={i}
-                          attachment={att}
-                          coupleId={state.profile.couple.coupleId}
-                          recordId={r.id}
-                          variant="timeline"
-                        />
-                      ))}
+                        {/* Secondary metadata — compact, never outweighs the prose */}
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {r.reaction && (
+                            <span className="text-caption text-muted-foreground">
+                              {REACTION_LABELS[r.reaction] || r.reaction}
+                            </span>
+                          )}
+                          {!r.isPrivate && (
+                            <span className="text-muted-foreground/60" aria-hidden="true">
+                              <Unlock size={9} className="inline" />
+                            </span>
+                          )}
+                        </span>
+                      </button>
                     </div>
-                  )}
-                </div>
+                  </div>
+                </li>
               );
             })
           )}
-        </div>
+        </ul>
 
-      {/* Floating CTA Button: + 지금의 마음 남기기 */}
-      {/*
-        Floating CTA, positioned off the MEASURED bottom chrome rather than a
-        constant. `bottom-20` (80px) collided with the offline banner by 18px, and
-        AI_HANDOFF §4.1 recorded that raising the banner to clear the tab bar would
-        widen that to 36px -- which it did. The stack is now: tab bar, banner, CTA,
-        each clearing the measured height of the ones below it.
-      */}
-      <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+20px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-6 z-40">
-        <button
+      {/* Floating CTA — the one primary action. 48px via Button size="lg".
+          Positioned off the measured bottom chrome so it never overlaps the
+          offline banner or the tab bar. */}
+      <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+12px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-5 z-40">
+        <Button
+          variant="primary"
+          size="lg"
+          full
           onClick={() => navigate('/home')}
-          className="w-full py-3.5 rounded-full bg-coral-strong text-coral-strong-foreground text-body font-bold shadow-xl active:scale-[0.98] transition flex items-center justify-center gap-2 border border-coral-strong-foreground/20 backdrop-blur-xs"
+          className="shadow-md"
         >
-          <span className="text-title">+</span>
+          <span aria-hidden="true">+</span>
           <span>지금의 마음 남기기</span>
-        </button>
+        </Button>
       </div>
 
       {/*
@@ -851,7 +900,7 @@ export function RecordPage() {
       */}
       {selectedRecord && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-xl">
+          <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
               <div className="min-w-0">
                 <h3 id="record-detail-modal-title" className="text-heading text-card-foreground">
@@ -994,7 +1043,7 @@ export function RecordPage() {
                         }
                       }}
                       disabled={isSaving || !editText.trim() || isOffline}
-                      className="px-3 py-1.5 rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-lg bg-coral-fill text-coral-fill-foreground font-bold text-label disabled:opacity-50"
                     >
                       {isSaving ? '저장 중...' : '저장'}
                     </button>
@@ -1009,7 +1058,7 @@ export function RecordPage() {
               )}
 
               {selectedRecord.isPrivate && (
-                <div className="flex items-center gap-1.5 text-caption text-amber-700 bg-amber-50 px-3 py-2 rounded-xl font-medium">
+                <div className="flex items-center gap-1.5 text-caption text-warning-foreground bg-warning-surface px-3 py-2 rounded-xl font-medium">
                   <Lock size={13} /> 나에게만 남긴 기록
                 </div>
               )}

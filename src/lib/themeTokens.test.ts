@@ -177,16 +177,28 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
   const css = readFileSync(resolve(process.cwd(), 'src/styles/index.css'), 'utf8');
 
   it('src/styles/index.css keeps every light value this cluster relied on', () => {
-    // `--coral-strong` was added later as a deliberate accessibility fix and is
-    // asserted by coralContrast.test.ts. Everything below must still be byte
-    // identical, because the C4 conversions were chosen to be no-ops in light mode.
+    /*
+     * `--coral-strong` was added later as a deliberate accessibility fix and is
+     * asserted by coralContrast.test.ts.
+     *
+     * `--card`, `--coral` and `--coral-foreground` must still be byte identical:
+     * the C4 conversions were chosen to be no-ops in light mode precisely because
+     * `--card` equals Tailwind's `white`, and ~46 tints depend on `--coral`.
+     *
+     * `--muted` and `--border` were re-hued on 2026-08-09, same lightness, hue
+     * 85 -> 18, following the brand coral into the pink family. The C4 conversions
+     * replaced `gray-*` utilities with these tokens,
+     * and that substitution holds at any hue -- what it depended on was the
+     * LIGHTNESS being unchanged, which it is. Asserted at the new values rather
+     * than loosened, so a future drift still has to come here and say why.
+     */
     for (const declaration of [
       '--card: oklch(1 0 0);',
       '--card-foreground: var(--navy);',
-      '--muted: oklch(0.96 0.006 85);',
+      '--muted: oklch(0.96 0.009 18);',
       '--muted-foreground: oklch(0.55 0.03 260);',
-      '--border: oklch(0.92 0.008 85);',
-      '--coral: oklch(0.78 0.12 22);',
+      '--border: oklch(0.92 0.012 18);',
+      '--coral: oklch(0.78 0.12 12);',
       '--coral-foreground: oklch(1 0 0);',
       '--mint-foreground: var(--navy);',
       '--navy: oklch(0.28 0.06 265);',
@@ -197,16 +209,21 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
 
   it('keeps the theme-colour constants in sync with --background', () => {
     const store = readFileSync(resolve(process.cwd(), 'src/lib/store.tsx'), 'utf8');
-    expect(store).toContain("const LIGHT_THEME_COLOR = '#FAF8F5'");
+    expect(store).toContain("const LIGHT_THEME_COLOR = '#FFF7F7'");
     expect(store).toContain("const DARK_THEME_COLOR = '#16181D'");
   });
 
-  it('keeps the dark palette remap that already covered the gray utilities', () => {
-    // Recorded honestly: the `gray-*` conversions in this cluster are a
-    // maintainability fix, not a dark-mode bug fix -- these remaps already made
-    // the gray utilities render correctly in dark mode.
-    expect(css).toContain('--color-gray-50: var(--muted);');
-    expect(css).toContain('--color-gray-900: var(--foreground);');
+  it('the dark palette remap has been deleted, and white is still not remapped', () => {
+    // Recorded honestly: the `gray-*` conversions in this cluster were a
+    // maintainability fix, not a dark-mode bug fix -- the remaps that used to sit
+    // in index.css already made the gray utilities render correctly in dark mode.
+    //
+    // Those remaps are gone now. Every raw palette utility in this app became a
+    // semantic token, so nothing is left for them to compensate for, and
+    // src/lib/paletteMigration.test.ts fails if either the utilities or the block
+    // come back.
+    expect(css).not.toContain('--color-gray-50: var(--muted);');
+    expect(css).not.toContain('--color-gray-900: var(--foreground);');
     // `--color-white` is deliberately NOT remapped, which is why `bg-white`
     // surfaces were the genuine defect.
     expect(css).not.toMatch(/^\s*--color-white:/m);
@@ -335,6 +352,22 @@ describe('C6 - repaired controls keep a 44px minimum tap target', () => {
     { file: 'src/pages/ServicePage.tsx', anchor: '복무 정보 수정', label: 'service edit' },
   ];
 
+  /*
+   * Two spellings of the same 44px, both explicit.
+   *
+   * The original repairs wrote `min-h-[44px] min-w-[44px]` on each control. The
+   * 2026-08-08 visual revision converted several of them into full-width list rows,
+   * where the height is stated as `min-h-11` -- Tailwind's 11 is 44px -- and the
+   * width is `w-full`, i.e. the row spans its container and is far wider than 44px.
+   *
+   * So the accepted vocabulary is widened rather than the rule relaxed: each control
+   * must still DECLARE its tap target, and a control that declares neither spelling
+   * still fails. What is no longer required is a literal `min-w-[44px]` on an element
+   * that is already full-width, which was redundant.
+   */
+  const HEIGHT_44 = /min-h-\[44px\]|min-h-11\b/;
+  const WIDTH_44 = /min-w-\[44px\]|w-full\b/;
+
   for (const control of GUARDED_CONTROLS) {
     it(`${control.label} declares both a 44px min-height and min-width`, () => {
       const source = readFileSync(resolve(process.cwd(), control.file), 'utf8');
@@ -342,8 +375,8 @@ describe('C6 - repaired controls keep a 44px minimum tap target', () => {
       expect(at, `${control.file} should still contain ${control.anchor}`).toBeGreaterThan(-1);
       // The className sits within the same JSX element as the anchor.
       const window_ = source.slice(Math.max(0, at - 400), at + 400);
-      expect(window_, `${control.label} min-height`).toContain('min-h-[44px]');
-      expect(window_, `${control.label} min-width`).toContain('min-w-[44px]');
+      expect(window_, `${control.label} min-height`).toMatch(HEIGHT_44);
+      expect(window_, `${control.label} min-width`).toMatch(WIDTH_44);
     });
   }
 });

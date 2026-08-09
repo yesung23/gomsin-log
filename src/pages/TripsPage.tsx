@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, ChevronLeft, LoaderCircle, Map, Plane, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
+import { Calendar, ChevronRight, LoaderCircle, Map, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import { PlanSectionNav } from '@/components/PlanSectionNav';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { PressableRow, RowGroup, SectionHeader } from '@/components/ui/List';
 import {
   TRIP_PHASE_LABEL,
   TRIP_PHASE_ORDER,
@@ -57,7 +61,6 @@ export function TripsPage() {
   );
 
   useLayoutEffect(() => {
-    // Clear route-local shared data before paint on disconnect or workspace switch.
     setTrips(activeCouple ? reconcileParentTrips(state.trips) : []);
     setShowModal(false);
     setIsCreating(false);
@@ -158,7 +161,6 @@ export function TripsPage() {
         toast.error(message);
         return;
       }
-      // Do not wait for realtime before exposing the confirmed row locally.
       setTrips((current) => reconcileParentTrips([...current, saved]));
       setShowModal(false);
       setNewTrip({ title: '', startDate: '', endDate: '' });
@@ -166,8 +168,6 @@ export function TripsPage() {
       navigate(`/trips/${saved.id}`);
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      // The classified cause, not a blanket connection claim: a `forbidden`
-      // result is a membership problem and retrying cannot fix it.
       const message = `여행을 만들지 못했어요. ${classifyServerError(error).message}`;
       setFormError(message);
       toast.error(message);
@@ -176,14 +176,6 @@ export function TripsPage() {
     }
   };
 
-  /**
-   * Grouped by where each trip sits in time, not by its stored `status`.
-   *
-   * `Trip.status` only ever changed when a human edited it, so a trip whose dates
-   * passed months ago still read 계획중 forever. Deriving the phase keeps the list
-   * honest with no upkeep, and it is what makes "과거 · 현재 · 미래를 한 번에" real
-   * rather than a flat pile sorted by date.
-   */
   const todayStr = toLocalDateString(localToday());
   const grouped = groupTripsByPhase(trips, todayStr);
   const totalTrips = trips.length;
@@ -191,147 +183,158 @@ export function TripsPage() {
     ? 'forbidden'
     : !activeCouple ? 'disconnected' : loadState;
 
-  const statePanel = (() => {
-    if (visibleLoadState === 'loading') {
-      return <div className="py-24 flex justify-center"><LoaderCircle className="w-7 h-7 animate-spin text-indigo-500" aria-label="여행 불러오는 중" /></div>;
-    }
-    if (visibleLoadState === 'error') {
-      return (
-        <div className="text-center py-20 space-y-4">
-          <RefreshCw className="w-10 h-10 text-muted-foreground mx-auto" />
-          <div><p className="font-bold">여행을 불러오지 못했어요</p><p className="text-caption text-muted-foreground mt-1">{isOffline ? OFFLINE_READONLY_MESSAGE : '잠시 후 다시 시도해 주세요.'}</p></div>
-          <button onClick={() => void loadTrips()} className="px-5 py-2.5 rounded-xl bg-indigo-500 text-indigo-50 font-bold text-label">다시 시도</button>
-        </div>
-      );
-    }
-    if (visibleLoadState === 'forbidden') {
-      return (
-        <div className="text-center py-20 space-y-3">
-          <ShieldAlert className="w-10 h-10 text-amber-500 mx-auto" />
-          <p className="font-bold">여행 플래너에 접근할 수 없어요</p>
-          <p className="text-caption text-muted-foreground">로그인 상태와 우리 공간 권한을 확인해 주세요.</p>
-        </div>
-      );
-    }
-    if (visibleLoadState === 'disconnected') {
-      const pending = state.profile.couple.status === 'pending';
-      return (
-        <div className="text-center py-20 space-y-3">
-          <Unlink className="w-10 h-10 text-muted-foreground mx-auto" />
-          <p className="font-bold">{pending ? '상대방의 연결을 기다리고 있어요' : '우리 공간 연결이 필요해요'}</p>
-          <p className="text-caption text-muted-foreground">두 사람이 연결된 뒤 함께 여행을 계획할 수 있어요.</p>
-          <button onClick={() => navigate('/us')} className="px-5 py-2.5 rounded-xl bg-muted font-bold text-label">우리 공간으로</button>
-        </div>
-      );
-    }
-    if (totalTrips === 0) {
-      return (
-        <div className="text-center py-20">
-          <div className="bg-indigo-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"><Map className="w-8 h-8 text-indigo-400" /></div>
-          <p className="text-muted-foreground font-medium mb-1">등록된 여행이 없어요</p>
-          <p className="text-muted-foreground text-caption mb-6">첫 여행 계획을 세워보세요!</p>
-          <button onClick={openCreate} className="bg-indigo-500 text-indigo-50 px-6 py-2.5 rounded-2xl font-bold shadow-sm">새 여행 만들기</button>
-        </div>
-      );
-    }
-    return (
-      <div className="space-y-6">
-        {TRIP_PHASE_ORDER.map((phase) => {
-          const phaseTrips = grouped[phase];
-          if (phaseTrips.length === 0) return null;
-          return (
-            <section key={phase} data-testid={`trip-phase-${phase}`} aria-label={TRIP_PHASE_LABEL[phase]}>
-              <div className="flex items-center justify-between mb-2 px-1">
-                <h2 className="text-heading text-foreground">{TRIP_PHASE_LABEL[phase]}</h2>
-                <span className="text-caption font-bold text-muted-foreground">{phaseTrips.length}개</span>
-              </div>
-              <div className="space-y-3">
-                {phaseTrips.map((trip) => {
-                  const untilStart = daysUntilTrip(trip.startDate, todayStr);
-                  return (
-                    <button
-                      key={trip.id}
-                      type="button"
-                      onClick={() => navigate(`/trips/${trip.id}`)}
-                      data-testid={`trip-card-${trip.id}`}
-                      className={`w-full text-left bg-card border rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow active:scale-[0.98] ${
-                        phase === 'current' ? 'border-coral/50' : 'border-border'
-                      } ${phase === 'past' ? 'opacity-80' : ''}`}
-                    >
-                      <div className="flex items-center justify-between mb-3 gap-3">
-                        <h3 className="text-heading text-card-foreground truncate">{trip.title}</h3>
-                        <div
-                          className={`shrink-0 text-caption font-bold px-2.5 py-1 rounded-full ${
-                            phase === 'current'
-                              ? 'bg-coral/10 text-coral'
-                              : phase === 'upcoming'
-                                ? 'bg-indigo-50 text-indigo-600'
-                                : 'bg-muted text-muted-foreground'
-                          }`}
-                        >
-                          {TRIP_PHASE_PILL[phase]}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-muted-foreground text-caption">
-                        <Calendar className="w-4 h-4" />
-                        <span>{formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}</span>
-                        {untilStart !== null && untilStart > 0 && (
-                          <span className="ml-auto font-bold text-coral shrink-0">D-{untilStart}</span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
-
-        {/* Planning a past trip is legitimate -- couples log the trip they already
-            took. The affordance says so instead of leaving them to guess. */}
-        <button
-          type="button"
-          onClick={openCreate}
-          disabled={visibleLoadState !== 'ready' || isOffline}
-          className="w-full min-h-[44px] rounded-2xl border border-dashed border-border text-label font-bold text-muted-foreground disabled:opacity-40"
-        >
-          + 여행 추가하기 (지난 여행도 기록할 수 있어요)
-        </button>
-      </div>
-    );
-  })();
 
   return (
     <MobileShell>
-      <div className="sticky top-0 z-30 bg-card/80 backdrop-blur-xl border-b border-border flex items-center justify-between px-5 h-14">
-        <div className="flex items-center gap-3">
-          {/* No back button: 여행 is a first-class destination under the 일정 tab
-              now, so there is nothing to go "back" out of. */}
-          <h1 className="text-title text-card-foreground flex items-center gap-2"><Plane className="w-5 h-5 text-indigo-500" />우리의 여행</h1>
-        </div>
-        <button onClick={openCreate} disabled={visibleLoadState !== 'ready' || isOffline} className="p-1.5 -mr-1.5 rounded-full hover:bg-indigo-50 text-indigo-600 disabled:opacity-30" aria-label="새 여행"><Plus className="w-5 h-5" /></button>
-      </div>
-      <div className="p-5 pb-24 space-y-5">
+      <div className="px-4 pt-5 pb-24 space-y-5">
+        <header className="flex items-center justify-between gap-3">
+          <h1 className="text-title text-foreground">우리의 여행</h1>
+          <button
+            type="button"
+            onClick={openCreate}
+            disabled={visibleLoadState !== 'ready' || isOffline}
+            className="min-w-11 min-h-11 flex items-center justify-center rounded-control hover:bg-info-surface text-info disabled:opacity-30"
+            aria-label="새 여행"
+          >
+            <Plus size={20} />
+          </button>
+        </header>
+
         <PlanSectionNav active="trips" />
-        {statePanel}
+
+        {visibleLoadState === 'loading' ? (
+          <div className="py-16 flex justify-center">
+            <LoaderCircle className="w-6 h-6 animate-spin text-info" aria-label="여행 불러오는 중" />
+          </div>
+        ) : visibleLoadState === 'error' ? (
+          <EmptyState
+            icon={<RefreshCw size={20} className="text-muted-foreground" />}
+            title="여행을 불러오지 못했어요"
+            description={isOffline ? OFFLINE_READONLY_MESSAGE : '잠시 후 다시 시도해 주세요.'}
+            action={<Button size="sm" variant="outline" onClick={() => void loadTrips()}>다시 시도</Button>}
+          />
+        ) : visibleLoadState === 'forbidden' ? (
+          <EmptyState
+            icon={<ShieldAlert size={20} className="text-warning" />}
+            title="여행 플래너에 접근할 수 없어요"
+            description="로그인 상태와 우리 공간 권한을 확인해 주세요."
+          />
+        ) : visibleLoadState === 'disconnected' ? (
+          <EmptyState
+            icon={<Unlink size={20} className="text-muted-foreground" />}
+            title={state.profile.couple.status === 'pending' ? '상대방의 연결을 기다리고 있어요' : '우리 공간 연결이 필요해요'}
+            description="두 사람이 연결된 뒤 함께 여행을 계획할 수 있어요."
+            action={<Button size="sm" variant="secondary" onClick={() => navigate('/us')}>우리 공간으로</Button>}
+          />
+        ) : totalTrips === 0 ? (
+          <EmptyState
+            icon={<Map size={20} className="text-info" />}
+            title="등록된 여행이 없어요"
+            description="첫 여행 계획을 세워보세요!"
+            action={<Button size="sm" variant="outline" onClick={openCreate}>새 여행 만들기</Button>}
+          />
+        ) : (
+          <div className="space-y-5">
+            {TRIP_PHASE_ORDER.map((phase) => {
+              const phaseTrips = grouped[phase];
+              if (phaseTrips.length === 0) return null;
+              return (
+                <section key={phase} data-testid={`trip-phase-${phase}`} aria-label={TRIP_PHASE_LABEL[phase]}>
+                  <SectionHeader
+                    title={TRIP_PHASE_LABEL[phase]}
+                    caption={`${phaseTrips.length}개`}
+                  />
+                  <RowGroup>
+                    {phaseTrips.map((trip) => {
+                      const untilStart = daysUntilTrip(trip.startDate, todayStr);
+                      return (
+                        <PressableRow
+                          key={trip.id}
+                          data-testid={`trip-card-${trip.id}`}
+                          onClick={() => navigate(`/trips/${trip.id}`)}
+                          leading={
+                            <Calendar size={16} className="text-info" aria-hidden="true" />
+                          }
+                          trailing={
+                            <ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" />
+                          }
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-label font-semibold text-foreground break-keep">{trip.title}</span>
+                            <Badge tone={phase === 'current' ? 'accent' : phase === 'upcoming' ? 'info' : 'neutral'}>
+                              {TRIP_PHASE_PILL[phase]}
+                            </Badge>
+                            {untilStart !== null && untilStart > 0 && (
+                              <span className="text-caption font-medium text-coral-strong tabular-nums">D-{untilStart}</span>
+                            )}
+                          </div>
+                          <p className="text-caption text-muted-foreground mt-0.5 tabular-nums">
+                            {formatLocalDate(trip.startDate)} ~ {formatLocalDate(trip.endDate)}
+                          </p>
+                        </PressableRow>
+                      );
+                    })}
+                  </RowGroup>
+                </section>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={openCreate}
+              disabled={visibleLoadState !== 'ready' || isOffline}
+              className="w-full min-h-11 rounded-control border border-dashed border-border text-label font-medium text-muted-foreground disabled:opacity-40"
+            >
+              + 여행 추가하기 (지난 여행도 기록할 수 있어요)
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* z-[60] so the tab bar cannot intercept 취소 / 만들기 -- see RecordPage. */}
+      {/* z-[60] so the tab bar cannot intercept 취소 / 만들기 */}
       {showModal && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-          <div className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-in slide-in-from-bottom-4">
-            <h2 className="text-title text-card-foreground mb-6">새 여행 만들기</h2>
-            <div className="space-y-4">
-              <label className="block text-label font-bold text-foreground">여행 이름<input type="text" value={newTrip.title} onChange={(event) => setNewTrip((prev) => ({ ...prev, title: event.target.value }))} placeholder="예: 제주도 3박 4일 여행" className="mt-1 w-full bg-muted border border-border rounded-xl px-4 py-3 outline-none focus:border-indigo-500" /></label>
+          <div className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 animate-in slide-in-from-bottom-4 border border-border">
+            <h2 className="text-heading text-foreground mb-4">새 여행 만들기</h2>
+            <div className="space-y-3">
+              <label className="block text-caption font-medium text-muted-foreground">
+                여행 이름
+                <input
+                  type="text"
+                  value={newTrip.title}
+                  onChange={(event) => setNewTrip((prev) => ({ ...prev, title: event.target.value }))}
+                  placeholder="예: 제주도 3박 4일 여행"
+                  className="mt-1 w-full bg-muted border border-border rounded-control px-3 py-2 text-body text-foreground outline-none focus:ring-2 focus:ring-info/40 min-h-11"
+                />
+              </label>
               <div className="flex gap-3">
-                <label className="flex-1 text-label font-bold text-foreground">가는 날<input type="date" value={newTrip.startDate} onChange={(event) => setNewTrip((prev) => ({ ...prev, startDate: event.target.value }))} className="mt-1 w-full bg-muted border border-border rounded-xl px-3 py-3 outline-none focus:border-indigo-500" /></label>
-                <label className="flex-1 text-label font-bold text-foreground">오는 날<input type="date" min={newTrip.startDate || undefined} value={newTrip.endDate} onChange={(event) => setNewTrip((prev) => ({ ...prev, endDate: event.target.value }))} className="mt-1 w-full bg-muted border border-border rounded-xl px-3 py-3 outline-none focus:border-indigo-500" /></label>
+                <label className="flex-1 text-caption font-medium text-muted-foreground">
+                  가는 날
+                  <input
+                    type="date"
+                    value={newTrip.startDate}
+                    onChange={(event) => setNewTrip((prev) => ({ ...prev, startDate: event.target.value }))}
+                    className="mt-1 w-full bg-muted border border-border rounded-control px-2 py-2 text-body text-foreground outline-none focus:ring-2 focus:ring-info/40 min-h-11"
+                  />
+                </label>
+                <label className="flex-1 text-caption font-medium text-muted-foreground">
+                  오는 날
+                  <input
+                    type="date"
+                    min={newTrip.startDate || undefined}
+                    value={newTrip.endDate}
+                    onChange={(event) => setNewTrip((prev) => ({ ...prev, endDate: event.target.value }))}
+                    className="mt-1 w-full bg-muted border border-border rounded-control px-2 py-2 text-body text-foreground outline-none focus:ring-2 focus:ring-info/40 min-h-11"
+                  />
+                </label>
               </div>
-              {formError && <p className="text-caption text-red-600" role="alert">{formError}</p>}
+              {formError && <p className="text-caption text-destructive" role="alert">{formError}</p>}
             </div>
-            <div className="flex gap-3 mt-8">
-              <button onClick={() => setShowModal(false)} disabled={isCreating} className="flex-1 bg-muted text-foreground font-bold py-3.5 rounded-xl disabled:opacity-50">취소</button>
-              <button onClick={() => void handleSaveTrip()} disabled={isCreating || isOffline} className="flex-1 bg-indigo-500 text-indigo-50 font-bold py-3.5 rounded-xl disabled:opacity-50">{isCreating ? '만드는 중...' : '만들기'}</button>
+            <div className="flex gap-2 mt-5">
+              <Button variant="secondary" size="md" full onClick={() => setShowModal(false)} disabled={isCreating}>취소</Button>
+              <Button variant="primary" size="md" full onClick={() => void handleSaveTrip()} disabled={isCreating || isOffline}>
+                {isCreating ? '만드는 중...' : '만들기'}
+              </Button>
             </div>
           </div>
         </div>

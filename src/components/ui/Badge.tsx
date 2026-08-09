@@ -13,6 +13,12 @@ import { cn } from '@/lib/utils';
  * cannot invent a meaning: `accent` for the relationship, `info` for planning,
  * `success` for done, `warning` for private / needs-checking / delayed,
  * `destructive` for failure.
+ *
+ * It paints at `caption` weight 500, not `caption` weight 700. The 2026-08-08
+ * revision restricts pills to filters, short statuses and single selection: a bold
+ * badge on every piece of metadata is what made repeated rows read as generated
+ * template cards, and a badge must never out-weigh the user's own sentence next to
+ * it (Content-first hierarchy, Authentic over synthetic).
  */
 type Tone = 'neutral' | 'accent' | 'info' | 'success' | 'warning' | 'destructive';
 
@@ -36,7 +42,7 @@ export function Badge({ tone = 'neutral', icon, className, children, ...rest }: 
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-caption font-bold',
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium',
         TONE[tone],
         className,
       )}

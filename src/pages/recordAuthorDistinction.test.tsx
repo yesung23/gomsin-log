@@ -154,10 +154,27 @@ describe('the timeline tells 군화 and 곰신 apart', () => {
     const { container } = renderPage([MINE, THEIRS]);
     await screen.findByText('08:00');
 
-    const mine = cardOf(container, 'rec-mine');
-    const theirs = cardOf(container, 'rec-theirs');
-    // The bug condition itself, stated as an assertion.
-    expect(mine.className).not.toBe(theirs.className);
+    /*
+     * The bug condition itself, stated as an assertion -- restated for the
+     * editorial timeline.
+     *
+     * It used to be enough to compare the two cards' own `className`, because the
+     * distinction lived on the card element: `ml-auto` / `mr-auto` plus
+     * `max-w-[94%]` was the ownership channel. The 2026-08-08 revision replaced that
+     * chat-bubble indentation with a fixed time column, so the row WRAPPER is now
+     * deliberately identical for both authors and the three channels live on its
+     * descendants (hue stripe, marker dot, attribution chip).
+     *
+     * So the signature is taken across every element in the row. This is strictly
+     * stronger than the original: it fails if the authors differ only by the name
+     * text, which is exactly the defect this file was written for.
+     */
+    const classSignature = (id: string) =>
+      [...cardOf(container, id).querySelectorAll('*')]
+        .map((node) => node.getAttribute('class') ?? '')
+        .join('|');
+
+    expect(classSignature('rec-mine')).not.toBe(classSignature('rec-theirs'));
   });
 
   it('channel 1 -- hue: each role gets its own accent stripe', async () => {
@@ -174,14 +191,45 @@ describe('the timeline tells 군화 and 곰신 apart', () => {
     expect(stripe('rec-mine')).not.toBe(stripe('rec-theirs'));
   });
 
-  it('channel 2 -- position: own records indent right, the partner’s left', async () => {
+  it('channel 2 -- geometry: own records get a filled dot, partner gets a hollow ring', async () => {
+    /**
+     * The editorial timeline replaced the chat-bubble indentation (ml-auto /
+     * mr-auto / max-w-[94%]) with a fixed-column layout where the time column at
+     * 44px is the anchor. Indentation destroyed that column, so the second non-
+     * colour channel is now SHAPE: the viewer’s dot is filled (bg-foreground),
+     * the partner’s is a hollow ring (border-foreground bg-transparent). Both are
+     * the same diameter, so the difference is geometry, not size.
+     */
     const { container } = renderPage([MINE, THEIRS]);
     await screen.findByText('08:00');
 
-    expect(cardOf(container, 'rec-mine').className).toContain('ml-auto');
-    expect(cardOf(container, 'rec-theirs').className).toContain('mr-auto');
-    // Indented, not full width: without a narrower box the alignment cannot show.
-    expect(cardOf(container, 'rec-mine').className).toContain('max-w-[94%]');
+    const mineCard = cardOf(container, 'rec-mine');
+    const theirsCard = cardOf(container, 'rec-theirs');
+
+    const markerOf = (card: HTMLElement) => {
+      const ariaHiddenSpans = [...card.querySelectorAll('span[aria-hidden="true"]')];
+      const markerContainer = ariaHiddenSpans.find((span) =>
+        span.className.includes('flex-col') && span.className.includes('items-center')
+      );
+      return markerContainer?.querySelector('span') ?? null;
+    };
+
+    const myMarker = markerOf(mineCard);
+    const theirMarker = markerOf(theirsCard);
+
+    expect(myMarker).not.toBeNull();
+    expect(theirMarker).not.toBeNull();
+
+    // Own record: filled dot (has bg-foreground, no border class)
+    expect(myMarker!.className).toContain('bg-foreground');
+    expect(myMarker!.className).not.toContain('border');
+
+    // Partner record: hollow ring (has border-foreground, bg-transparent)
+    expect(theirMarker!.className).toContain('border');
+    expect(theirMarker!.className).toContain('bg-transparent');
+
+    // The two marker classes differ
+    expect(myMarker!.className).not.toBe(theirMarker!.className);
   });
 
   it('channel 3 -- text: the role is written out, never colour-only', async () => {
@@ -206,8 +254,22 @@ describe('the timeline tells 군화 and 곰신 apart', () => {
       ['rec-theirs', '곰신 춘향가 남긴 기록'],
     ] as const) {
       const card = cardOf(container, id);
+      /*
+       * The chip is the span that paints the `·` ITSELF, not any ancestor whose
+       * subtree happens to contain it.
+       *
+       * The old finder took the first `<span>` whose textContent included `·`, which
+       * worked while the row's wrappers were `<div>`s. In the editorial row the
+       * opener is a `<button>`, so every wrapper inside it had to become a `<span>` --
+       * a button may not contain a div's block semantics -- and `querySelectorAll`
+       * returns document order, so an ancestor wrapper now matched first and reported
+       * `aria-hidden: null`. Matching on the element's own text node finds the chip
+       * regardless of how the row is wrapped.
+       */
       const chip = [...card.querySelectorAll('span')].find((span) =>
-        span.textContent?.includes('·'),
+        [...span.childNodes].some(
+          (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').includes('·'),
+        ),
       );
       expect(chip?.getAttribute('aria-hidden')).toBe('true');
       expect([...card.querySelectorAll('.sr-only')].map((node) => node.textContent)).toContain(
@@ -365,8 +427,12 @@ describe('recordAuthorPresentation', () => {
       '몽룡',
     );
     expect(asSoldierViewer.stripeClass).toBe(asGomsinHerself.stripeClass);
-    // Ownership, and only ownership, flips the alignment.
-    expect(asSoldierViewer.alignClass).toBe('mr-auto');
-    expect(asGomsinHerself.alignClass).toBe('ml-auto');
+    // Ownership, and only ownership, determines the marker shape.
+    // The editorial timeline replaced position-based indentation with geometry:
+    // filled dot for own, hollow ring for partner.
+    expect(asSoldierViewer.markerClass).toContain('border');
+    expect(asSoldierViewer.markerClass).toContain('bg-transparent');
+    expect(asGomsinHerself.markerClass).toContain('bg-foreground');
+    expect(asGomsinHerself.markerClass).not.toContain('border');
   });
 });

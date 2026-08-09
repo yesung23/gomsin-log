@@ -20,6 +20,14 @@ interface WidgetWrapperProps {
   children: React.ReactNode;
 }
 
+/**
+ * Widget container. In normal mode, NO elevated surface: surface economy says at
+ * most three elevated surfaces per screen, and wrapping every widget in a card was
+ * the "soft blob" reading. Structure comes from spacing, not from a border per item.
+ *
+ * In edit mode, a subtle border and background appear so the user can see the
+ * drag-reorder boundaries.
+ */
 export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: WidgetWrapperProps) {
   const {
     attributes,
@@ -41,8 +49,8 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
       ref={setNodeRef}
       style={style}
       className={cn(
-        "relative rounded-3xl bg-card shadow-sm border border-border p-5",
-        isEditMode && "animate-wiggle",
+        "relative",
+        isEditMode && "rounded-surface bg-card border border-border p-4 animate-wiggle",
         isDragging && "opacity-80 scale-105 shadow-xl rotate-2"
       )}
     >
@@ -59,7 +67,7 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
           <button
             onClick={() => onRemove(id)}
             aria-label={`${label} 위젯 삭제`}
-            className="absolute -top-3 -right-3 z-20 w-11 h-11 bg-muted hover:bg-red-500 hover:text-white text-muted-foreground rounded-full flex items-center justify-center shadow-md transition-colors"
+            className="absolute -top-3 -right-3 z-20 w-11 h-11 bg-muted hover:bg-destructive hover:text-destructive-foreground text-muted-foreground rounded-full flex items-center justify-center shadow-md transition-colors"
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>
@@ -73,10 +81,10 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
             <GripHorizontal className="w-5 h-5 text-muted-foreground" aria-hidden="true" />
           </button>
           {/* Prevent clicks on content during edit mode */}
-          <div className="absolute inset-0 bg-card/20 z-10 rounded-3xl cursor-pointer" aria-hidden="true" />
+          <div className="absolute inset-0 bg-card/20 z-10 rounded-surface cursor-pointer" aria-hidden="true" />
         </>
       )}
-      
+
       {/* Widget Content */}
       <div className={cn("relative z-0", isEditMode && "pointer-events-none")}>
         {children}

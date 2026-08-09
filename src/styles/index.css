@@ -21,6 +21,16 @@
  */
 @import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 
+/*
+ * Pretendard is the only face. A handwriting accent (Nanum Pen Script) was added on
+ * 2026-08-09 and removed the same day: rendered next to the plain figure, the body
+ * face read better, and the handwriting only ever worked on all-latin strings
+ * anyway because shipping the Korean subset costs 588 kB against 16 kB for latin.
+ *
+ * If it is ever revisited, the finding to start from is that finding -- not the
+ * licence, which was fine (SIL OFL 1.1).
+ */
+
 @theme inline {
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --color-background: var(--background);
@@ -38,6 +48,8 @@
   --color-coral-foreground: var(--coral-foreground);
   --color-coral-strong: var(--coral-strong);
   --color-coral-strong-foreground: var(--coral-strong-foreground);
+  --color-coral-fill: var(--coral-fill);
+  --color-coral-fill-foreground: var(--coral-fill-foreground);
   --color-lilac: var(--lilac);
   --color-lilac-foreground: var(--lilac-foreground);
   --color-mint: var(--mint);
@@ -55,65 +67,139 @@
   --color-success: var(--success);
   --color-success-surface: var(--success-surface);
   /*
-   * Type scale (DESIGN_V2 §3.3).
+   * Type scale (DESIGN_V2 "확정된 시각 개정 (2026-08-08) — 최우선", 개정 타이포그래피).
    *
-   * Korean needs a larger body than Latin at the same optical size, so the floor
-   * is deliberately high: `caption` at 13px is the smallest size this app is
-   * allowed to use, and the partner's own words are never smaller than `body`.
+   * Seven steps. The previous six were a correction of a real defect -- this app
+   * was built almost entirely out of `text-xs` (12px) and `text-[10px]` /
+   * `text-[11px]` arbitrary values, so a record excerpt, a timestamp and a legend
+   * were all the same size and the hierarchy the briefing depends on did not
+   * exist in the type at all. Naming the steps fixed that.
    *
-   * This app was built almost entirely out of `text-xs` (12px) and
-   * `text-[10px]`/`text-[11px]` arbitrary values -- a record excerpt, a timestamp
-   * and a legend were all the same size, so the hierarchy that the briefing
-   * depends on did not exist. Naming the six steps makes "which level is this"
-   * answerable, and src/lib/typeScale.test.ts holds converted files to the
-   * vocabulary so the arbitrary values cannot creep back in one file at a time.
+   * It over-corrected. Raising the FLOOR to 13px also raised every ceiling with
+   * it -- 28px figures, a 20px screen title, 16px for all prose and 14px for
+   * every label -- and the result reads as senior mode: three or four cards fill
+   * a 390x844 viewport and the partner's actual day is below the fold. The
+   * revision keeps the vocabulary and re-tunes the values, so density is
+   * recovered by shrinking chrome and leading rather than by shrinking content.
    *
-   *   display  28/34 700   D-Day figure, days-together figure
-   *   title    20/28 600   screen title
-   *   heading  17/24 600   card and section title
-   *   body     16/24 400   record excerpts, prose, input values
-   *   label    14/20 500   author, type, button text
-   *   caption  13/18 400   times and metadata -- the floor
+   *   display   26/32 700   D-Day figure, days-together figure -- max 1 per screen
+   *   title     22/30 700   screen title
+   *   heading   17/24 600   section and card title
+   *   emphasis  16/24 600   the briefing's point, important user prose
+   *   body      15/22 400   record prose, descriptions, input values
+   *   label     13/18 500   filters, assignee, status, button text
+   *   caption   12/16 400   times and metadata
+   *
+   * Body is deliberately NOT forced to 16px everywhere. The couple's own words
+   * are protected at 15-16px (`body` / `emphasis`); times and status are allowed
+   * 12-13px, which is what buys back the vertical space. Text enlargement is
+   * answered by reflow, never by clipping.
+   *
+   * src/lib/typeScale.test.ts holds every file under src/ to this vocabulary so
+   * arbitrary values cannot creep back one file at a time, and
+   * e2e/renderedTypeScale.spec.ts measures what the browser actually paints.
    */
-  --text-display: 1.75rem;
-  --text-display--line-height: 2.125rem;
+  --text-display: 1.625rem;
+  --text-display--line-height: 2rem;
   --text-display--font-weight: 700;
-  --text-title: 1.25rem;
-  --text-title--line-height: 1.75rem;
-  --text-title--font-weight: 600;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.875rem;
+  --text-title--font-weight: 700;
   --text-heading: 1.0625rem;
   --text-heading--line-height: 1.5rem;
   --text-heading--font-weight: 600;
-  --text-body: 1rem;
-  --text-body--line-height: 1.5rem;
-  --text-label: 0.875rem;
-  --text-label--line-height: 1.25rem;
+  --text-emphasis: 1rem;
+  --text-emphasis--line-height: 1.5rem;
+  --text-emphasis--font-weight: 600;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.375rem;
+  --text-body--font-weight: 400;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.125rem;
   --text-label--font-weight: 500;
-  --text-caption: 0.8125rem;
-  --text-caption--line-height: 1.125rem;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-caption--font-weight: 400;
+  /*
+   * Radius (DESIGN_V2 정보 밀도와 레이아웃 토큰).
+   *
+   * Two meanings, named: `control` for anything you press or type into, `surface`
+   * for a card or sheet that groups one subject: 14px and 20px.
+   *
+   * Retuned 2026-08-09 after the first look at the rendered screens. The 2026-08-08
+   * pass set these to 12px / 16px on a 0.5rem root, which fixed the 24px blobs and
+   * then overshot: at an 8px root every badge, chip and small button went angular,
+   * and the app read hard. This app's first radius was 14px, and that is the shape
+   * people recognise it by.
+   *
+   * The root is 10px, so the numbered ladder lands on 8 / 10 / 12 / 16 / 22px --
+   * `rounded-xl` is 16px and `rounded-2xl` is 22px. Cards are `rounded-surface`
+   * (20px) rather than a numbered step, so the two systems no longer have to agree.
+   *
+   * `rounded-3xl` is NOT part of this ladder (Tailwind's own 24px) and is the
+   * single biggest source of the "everything is a soft blob" reading. It is
+   * replaced by `rounded-surface` app-wide; src/lib/themeTokens.test.ts fails if
+   * it comes back.
+   */
+  --radius-control: 0.875rem;
+  --radius-surface: 1.25rem;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 12px);
 }
 
 :root {
-  --radius: 0.875rem;
-  --cream: oklch(0.985 0.008 85);
+  --radius: 0.625rem;
+  /*
+   * The page. Warmed 2026-08-09: same lightness, hue moved from 85 (yellow cream)
+   * toward 30 (the coral family) and chroma nudged 0.008 -> 0.012.
+   *
+   * The brand coral never changed in any of this work -- it is the same
+   * `oklch(0.78 0.12 22)` as the first commit -- but the 2026-08-08 pass cut how
+   * OFTEN it appears: the tab indicator went, badge weight dropped, tinted
+   * surfaces halved. The result read cold, and the honest fix is not a louder
+   * pink but a page that shares its hue, so restraint reads as calm rather than
+   * as grey.
+   *
+   * Deliberately below the threshold where it looks tinted. Next to the old value
+   * it is warmer; on its own it still reads as off-white.
+   */
+  --cream: oklch(0.985 0.012 18);
   --navy: oklch(0.28 0.06 265);
   --background: var(--cream);
   --foreground: var(--navy);
+  /*
+   * Stays exactly `oklch(1 0 0)`. Warming the card was tried on 2026-08-09 and
+   * reverted: this value being byte-identical to Tailwind's `white` is the reason
+   * the `bg-white/NN -> bg-card/NN` migration was a no-op in light mode, and
+   * themeTokens.test.ts asserts it for that reason. The page around it is warm now,
+   * which is enough -- a white card on a warm page reads as paper, not as a panel.
+   */
   --card: oklch(1 0 0);
   --card-foreground: var(--navy);
-  --muted: oklch(0.96 0.006 85);
+  --muted: oklch(0.96 0.009 18);
   --muted-foreground: oklch(0.55 0.03 260);
-  --border: oklch(0.92 0.008 85);
-  --input: oklch(0.92 0.008 85);
-  --ring: oklch(0.78 0.09 20);
+  /* Hairlines carry the same hue: a neutral grey rule on a warm page reads dirty. */
+  --border: oklch(0.92 0.012 18);
+  --input: oklch(0.92 0.012 18);
+  --ring: oklch(0.78 0.09 12);
   --primary: var(--navy);
   --primary-foreground: oklch(0.99 0.005 85);
-  --coral: oklch(0.78 0.12 22);
+  /*
+   * Coral PINK, not the orange-leaning coral this started as.
+   *
+   * Hue moved 22 -> 12 on 2026-08-09 at the same lightness and chroma. Hue 22
+   * carries visible orange, which is why the brand read as terracotta next to the
+   * warm page rather than as the pink this product is for. 12 is pink with coral
+   * warmth still in it; below ~8 it turns rose and stops reading as coral.
+   *
+   * Lightness and chroma are deliberately untouched: ~100 usages are tints,
+   * borders, progress fills and dots whose contrast behaviour depends on those
+   * two, not on hue. Rotating hue alone leaves every one of them where it was.
+   */
+  --coral: oklch(0.78 0.12 12);
   --coral-foreground: oklch(1 0 0);
   /*
    * The coral you are allowed to write on.
@@ -130,9 +216,26 @@
    * sampled byte-for-byte. Parsing the `oklch()` string instead yields wrong
    * ratios, which is the trap AI_HANDOFF §4.1 warns about.
    *
-   *   light  fill oklch(0.52 0.16 25) + label oklch(0.99 0.005 85) -> 5.82:1
+   * This token does TWO jobs, which is the constraint that decides its value:
+   * `bg-coral-strong` fills 52 controls, and `text-coral-strong` is coral ink on a
+   * card or page in 87 places. Ink needs 4.5:1 against a near-white surface, so it
+   * has to stay dark -- a pink light enough to be a cheerful button fill is
+   * unreadable as text, measured at 2.00:1.
+   *
+   * Tried and reverted on 2026-08-09: making this the light pink
+   * `oklch(0.78 0.12 12)` with a near-black pink label. The button looked right and
+   * every one of those 87 text uses failed, which
+   * `e2e/tokenContrast.spec.ts` caught in a real paint. Splitting a third token for
+   * "filled pink button" is the real fix and is a larger change than a colour
+   * retune, so it is not smuggled in here.
+   *
+   * Hue follows the brand into the pink family (25 -> 14) at the original lightness
+   * and chroma, so a filled CTA is now a deep ROSE rather than a brick red, while
+   * staying dark enough for both jobs.
+   *
+   *   light  fill oklch(0.52 0.16 14) + label oklch(0.99 0.005 85) -> 5.87:1
    *          same fill against --background                        -> 5.73:1
-   *   dark   fill oklch(0.8 0.13 25)  + label oklch(0.18 0.018 265) -> 9.25:1
+   *   dark   fill oklch(0.8 0.13 14)  + label oklch(0.18 0.018 265) -> 9.25:1
    *          same fill against --background                        -> 9.59:1
    *
    * Dark inverts rather than darkens: a dark fill on a dark background reads as
@@ -141,8 +244,42 @@
    * brand colours then compete inside one button and navy sinks into the dark
    * surface.
    */
-  --coral-strong: oklch(0.52 0.16 25);
+  --coral-strong: oklch(0.52 0.16 14);
   --coral-strong-foreground: oklch(0.99 0.005 85);
+  /*
+   * The filled-pink CTA, split out from `--coral-strong` on 2026-08-09.
+   *
+   * `--coral-strong` cannot be pink because it is also coral INK in 87 places and
+   * ink has to clear 4.5:1 on a near-white card. A primary button has no such
+   * constraint on its own fill -- only its LABEL does -- so the two uses want
+   * opposite lightnesses and needed separating rather than compromising.
+   *
+   * CORAL PINK, arrived at by rendering the alternatives side by side rather than
+   * by argument. Three earlier attempts and why each was wrong:
+   *
+   *   pale pink  oklch(0.78 0.12 12) + dark label  -- read as a disabled button
+   *   magenta    oklch(0.58 0.22 12) + white       -- passed, but not coral at all
+   *   coral      oklch(0.585 0.15 22) + white      -- desaturated to a dusty brick
+   *
+   * The third is the informative one. A white label needs the fill down around
+   * L0.585, and no colour at that lightness reads as coral PINK -- the hue is right
+   * and the lightness kills it. So the fill goes light enough to actually be coral
+   * pink and the label goes dark, which is the same trade the reference app
+   * (럽다) makes.
+   *
+   * Hue 18 rather than 12: 12 is where the tints and the page sit, but a FILLED
+   * surface at that hue reads magenta, and coral needs the extra warmth. The ink
+   * token stays at 14, so the family holds together.
+   *
+   *   light  fill oklch(0.74 0.14 18) + label oklch(0.3 0.1 18)     -> 5.78:1
+   *   dark   fill oklch(0.72 0.16 18) + label oklch(0.2 0.05 18)    -> 6.87:1
+   *
+   * The label is a very dark coral, not navy and not black: navy is the app's other
+   * brand colour and two of them inside one button stop it reading as one object,
+   * and pure black on a warm fill reads as a warning.
+   */
+  --coral-fill: oklch(0.74 0.14 18);
+  --coral-fill-foreground: oklch(0.3 0.1 18);
   --lilac: oklch(0.93 0.04 300);
   --lilac-foreground: var(--navy);
   --mint: oklch(0.93 0.045 155);
@@ -170,13 +307,29 @@
   --muted-foreground: oklch(0.71 0.018 255);
   --border: oklch(0.31 0.018 265);
   --input: oklch(0.27 0.018 265);
-  --ring: oklch(0.72 0.12 22);
-  --primary: oklch(0.82 0.1 22);
+  --ring: oklch(0.72 0.12 12);
+  --primary: oklch(0.82 0.1 12);
   --primary-foreground: oklch(0.18 0.018 265);
-  --coral: oklch(0.75 0.13 22);
+  --coral: oklch(0.75 0.13 12);
   --coral-foreground: oklch(0.99 0.005 85);
-  --coral-strong: oklch(0.8 0.13 25);
+  /*
+   * In dark, ink and fill genuinely do want the same value: a dark fill on a dark
+   * background reads as disabled, so `--coral-strong` already lightens here, and
+   * that same light pink is what reads as coral ink against a dark card. The two
+   * tokens therefore converge instead of being forced apart.
+   */
+  --coral-strong: oklch(0.8 0.13 14);
   --coral-strong-foreground: oklch(0.18 0.018 265);
+  /*
+   * Same shape as light -- coral pink fill, very dark coral label -- because in
+   * dark the fill was already going to be light. The only change is a slightly
+   * higher chroma than the ink token so a filled control still reads as coral
+   * rather than as a tint of the card behind it.
+   *   fill oklch(0.72 0.16 18) + label oklch(0.2 0.05 18) -> 6.87:1
+   *   same fill against --background                      -> 7.30:1
+   */
+  --coral-fill: oklch(0.72 0.16 18);
+  --coral-fill-foreground: oklch(0.2 0.05 18);
   --lilac: oklch(0.32 0.055 305);
   --lilac-foreground: var(--foreground);
   --mint: oklch(0.28 0.045 155);
@@ -216,86 +369,28 @@
 }
 
 /*
- * Dark mode for components that still use fixed Tailwind palette utilities.
+ * The dark-mode palette remap that used to live here is GONE.
  *
- * Tailwind v4 compiles `bg-white` to `background-color: var(--color-white)` and
- * `bg-white/60` to `color-mix(in oklab, var(--color-white) 60%, transparent)`.
- * Remapping the palette variables therefore fixes every utility -- including
- * every opacity variant -- in one place.
+ * It existed because components reached past the semantic tokens for raw
+ * Tailwind palette utilities -- `bg-amber-50`, `text-indigo-600`, `bg-blue-400`,
+ * `bg-emerald-500/10`, `bg-purple-500/10`, `bg-pink-500/10`, `bg-rose-100`,
+ * `bg-red-50` and the whole `gray-*` family. None of those have a dark value, so
+ * dark mode was rescued by remapping the PALETTE variables themselves:
+ * `--color-amber-50: oklch(0.27 0.04 80)` and forty more lines like it.
  *
- * This replaced a list of `!important` overrides on specific class names, which
- * could not match opacity variants such as `bg-white/60` (used by the record
- * timeline) and so left unreadable light-on-light surfaces in dark mode.
+ * That worked, and it was the wrong shape. The block's existence was the
+ * measurement of the problem: every line in it was a component that had opted out
+ * of the token system, and the remap made opting out invisible.
+ *
+ * All 102 of those utilities are now semantic tokens -- warning / info / success /
+ * destructive / lilac / coral -- each of which already carries a light AND a dark
+ * value in the two blocks above. src/lib/paletteMigration.test.ts fails if a raw
+ * accent utility comes back anywhere under src/, and fails if this block returns.
+ *
+ * `--color-white` was never remapped and still is not: it drives the label on the
+ * Apple sign-in button, the text on the navy service hero and the modal scrims,
+ * all of which are deliberately theme-invariant.
  */
-[data-theme='dark'] {
-  /*
-   * `--color-white` is deliberately NOT remapped: it also drives `text-white`
-   * on coral/navy buttons and the dots on a selected calendar cell, which must
-   * stay white in both themes. The handful of components that used `bg-white`
-   * as a page surface were changed to `bg-card` instead.
-   */
-  /* Neutral surfaces map onto the semantic card/muted/border tokens. */
-  --color-gray-50: var(--muted);
-  --color-gray-100: var(--muted);
-  --color-gray-200: var(--border);
-  --color-gray-300: var(--border);
-  --color-gray-400: var(--muted-foreground);
-  --color-gray-500: var(--muted-foreground);
-  --color-gray-600: var(--muted-foreground);
-  --color-gray-700: var(--foreground);
-  --color-gray-800: var(--foreground);
-  --color-gray-900: var(--foreground);
-  --color-gray-950: var(--foreground);
-
-  /* Accent tints: dark surfaces with light text of the same hue. */
-  --color-amber-50: oklch(0.27 0.04 80);
-  --color-amber-100: oklch(0.31 0.05 80);
-  --color-amber-200: oklch(0.36 0.06 80);
-  --color-amber-600: oklch(0.84 0.1 85);
-  --color-amber-700: oklch(0.86 0.09 85);
-  --color-amber-800: oklch(0.89 0.08 85);
-  --color-amber-900: oklch(0.92 0.06 85);
-  --color-amber-950: oklch(0.95 0.04 85);
-
-  --color-indigo-50: oklch(0.26 0.04 275);
-  --color-indigo-100: oklch(0.3 0.05 275);
-  --color-indigo-400: oklch(0.74 0.11 275);
-  --color-indigo-500: oklch(0.76 0.11 275);
-  --color-indigo-600: oklch(0.8 0.1 275);
-
-  --color-blue-50: oklch(0.26 0.04 255);
-  --color-blue-100: oklch(0.3 0.05 255);
-  --color-blue-400: oklch(0.75 0.11 255);
-  --color-blue-500: oklch(0.78 0.11 255);
-  --color-blue-600: oklch(0.81 0.1 255);
-
-  --color-emerald-50: oklch(0.25 0.04 160);
-  --color-emerald-100: oklch(0.29 0.05 160);
-  --color-emerald-500: oklch(0.75 0.12 160);
-  --color-emerald-600: oklch(0.79 0.11 160);
-
-  --color-teal-50: oklch(0.25 0.04 185);
-  --color-teal-100: oklch(0.29 0.05 185);
-  --color-teal-500: oklch(0.75 0.11 185);
-  --color-teal-600: oklch(0.79 0.1 185);
-
-  --color-pink-50: oklch(0.27 0.04 350);
-  --color-pink-100: oklch(0.31 0.05 350);
-  --color-pink-500: oklch(0.78 0.12 350);
-
-  --color-purple-100: oklch(0.3 0.05 305);
-
-  --color-yellow-50: oklch(0.27 0.04 95);
-  --color-yellow-100: oklch(0.31 0.05 95);
-  --color-yellow-600: oklch(0.85 0.1 95);
-  --color-yellow-800: oklch(0.9 0.07 95);
-
-  --color-red-50: oklch(0.27 0.05 25);
-  --color-red-400: oklch(0.72 0.16 25);
-  --color-red-500: oklch(0.7 0.18 25);
-  --color-red-600: oklch(0.74 0.17 25);
-}
-
 /* Custom range slider */
 input[type='range'] {
   -webkit-appearance: none;

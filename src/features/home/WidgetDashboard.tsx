@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '@/lib/useStore';
-import { Settings, Plus, LayoutGrid } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Plus, LayoutGrid } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -31,7 +30,6 @@ import { CallBriefingWidget } from '@/components/widgets/CallBriefingWidget';
 
 export function WidgetDashboard() {
   const { state, setWidgetLayout } = useStore();
-  const navigate = useNavigate();
   const [isEditMode, setIsEditMode] = useState(false);
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
 
@@ -127,38 +125,59 @@ export function WidgetDashboard() {
   };
 
   return (
-    <div className="pb-8">
-      {/* Header */}
-      <header className="px-5 pt-10 pb-6 flex items-start justify-between sticky top-0 bg-background/90 backdrop-blur-xl z-40">
-        {/* Left: Titles */}
-        <div className="flex flex-col">
-          <span className="text-caption font-semibold tracking-wide text-coral-strong mb-1">
-            ♡ 곰신로그
-          </span>
-          <h1 className="text-display tracking-tight text-foreground flex items-center gap-1">
-            안녕 {state.profile.myName} <span className="text-coral-strong text-display">♡</span>
-          </h1>
-        </div>
+    <div className="pb-6">
+      {/* Header — compact, low-chrome: app name + edit controls only */}
+      <header className="px-4 pt-3 pb-3 flex items-center justify-between sticky top-0 bg-background/90 backdrop-blur-xl z-40">
+        {/*
+          The header carries the signed-in name next to the app name.
 
-        {/* Right: Actions */}
-        <div className="flex items-center gap-5 mt-1">
+          The rebuild dropped `안녕 {myName} ♡` as an "app-generated sentimental
+          greeting", which DESIGN_V2 does ask to keep off the top of the screen.
+          It removed the name along with it, and the name is not generated copy --
+          it is the user's own, and it is the only thing on the home screen that
+          says which account is signed in. `e2e/smoke.spec.ts` reads it to tell an
+          authenticated home from the onboarding wizard, and with it gone the
+          production bundle had no visible proof of who was logged in.
+
+          So the greeting stays gone and the name comes back, at `label` weight
+          beside the app name rather than as a `display`-sized salutation above
+          the content.
+        */}
+        <span className="flex items-baseline gap-1.5 min-w-0">
+          <span className="text-label font-semibold text-coral-strong">곰신로그</span>
+          {state.profile.myName ? (
+            <span className="text-caption text-muted-foreground truncate">
+              {state.profile.myName}
+            </span>
+          ) : null}
+        </span>
+
+        <div className="flex items-center gap-2">
           {isEditMode ? (
             <button
               onClick={() => setIsEditMode(false)}
-              className="bg-primary text-primary-foreground text-label font-bold px-4 py-2 rounded-full active:scale-95 transition-all shadow-sm"
+              className="bg-coral-fill text-coral-fill-foreground text-label font-bold px-4 py-2 rounded-control active:scale-95 transition-all"
               aria-label="편집 완료"
             >
               완료
             </button>
           ) : (
             <>
-              {/* Plus Button (Circle Outline) */}
+              {/*
+                Accessible name is `새 항목 추가`, not `위젯 추가`. The 2026-08-08
+                screen rebuild renamed it and broke the only hook
+                `e2e/emotionRedesign.spec.ts` has for proving the 군화 home is
+                editable at all -- a capability it did not have before the
+                redesign, so the assertion is guarding a real regression, not a
+                string. Nothing visible changes either way: the control is an
+                icon-only `+`, so this name is read by assistive tech only.
+              */}
               <button
-                className="w-11 h-11 rounded-full border-[1.5px] border-muted-foreground/40 flex items-center justify-center text-foreground hover:bg-muted/20 active:scale-95 transition-all"
+                className="w-11 h-11 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted/40 active:scale-95 transition-all"
                 aria-label="새 항목 추가"
                 onClick={() => setIsAddWidgetOpen(true)}
               >
-                <Plus size={22} strokeWidth={1.5} />
+                <Plus size={20} strokeWidth={1.5} />
               </button>
 
               {/*
@@ -174,26 +193,10 @@ export function WidgetDashboard() {
               */}
               <button
                 onClick={() => setIsEditMode(true)}
-                className="w-11 h-11 flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-muted/20 rounded-full active:scale-95 transition-all"
+                className="w-11 h-11 flex items-center justify-center text-muted-foreground hover:bg-muted/40 rounded-full active:scale-95 transition-all"
                 aria-label="위젯 편집"
               >
-                <LayoutGrid size={22} strokeWidth={1.5} />
-              </button>
-
-              {/*
-                A notification-centre button used to sit here with no onClick
-                handler and a permanently lit unread dot. There is no
-                notification system yet, so it has been removed rather than
-                left as a dead control that implies unread activity.
-              */}
-
-              {/* Settings Button */}
-              <button
-                onClick={() => navigate('/settings')}
-                className="w-11 h-11 flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-muted/20 rounded-full active:scale-95 transition-all"
-                aria-label="설정"
-              >
-                <Settings size={22} strokeWidth={1.5} />
+                <LayoutGrid size={20} strokeWidth={1.5} />
               </button>
             </>
           )}
@@ -203,7 +206,7 @@ export function WidgetDashboard() {
       {/* Couple lifecycle, above the widgets: a creator waiting for their partner
           must see their invitation code here, not only in Settings. Renders
           nothing at all once the couple is connected. */}
-      <div className="px-5 pb-4">
+      <div className="px-4">
         <CoupleStatusBanner />
       </div>
 
@@ -211,14 +214,14 @@ export function WidgetDashboard() {
           shared context before the call. Custom widgets remain below, but this
           call-prep surface cannot be accidentally deleted or buried. */}
       {role === 'soldier' && state.profile.couple.connected && (
-        <div className="px-5 pb-4">
+        <div className="px-4 pt-3">
           <CallBriefingWidget key={`${state.authenticatedUser?.id ?? state.profile.id}:${state.profile.couple.coupleId}`} />
         </div>
       )}
 
       {/* Widget Container */}
-      <div 
-        className="px-5 space-y-4 min-h-[500px]"
+      <div
+        className="px-4 pt-4 space-y-5 min-h-[200px]"
         onTouchStart={!isEditMode ? handleTouchStart : undefined}
         onTouchEnd={!isEditMode ? handleTouchEnd : undefined}
         onTouchMove={!isEditMode ? handleTouchEnd : undefined}
@@ -258,24 +261,24 @@ export function WidgetDashboard() {
         {isEditMode && activeWidgets.length < widgetsForRole(role).length && (
           <button
             onClick={() => setIsAddWidgetOpen(true)}
-            className="w-full py-4 rounded-3xl border-2 border-dashed border-border text-muted-foreground font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral transition-colors"
+            className="w-full py-3 rounded-surface border-2 border-dashed border-border text-muted-foreground text-label font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral transition-colors"
           >
-            <Plus size={24} />
+            <Plus size={20} />
             위젯 추가
           </button>
         )}
       </div>
-      
+
       {!isEditMode && (
-        <div className="text-center mt-6 text-caption text-muted-foreground">
+        <div className="text-center mt-4 text-caption text-muted-foreground">
           위젯을 길게 누르면 편집할 수 있어요
         </div>
       )}
 
       {/* Bottom Sheet for Adding Widgets */}
-      <AddWidgetBottomSheet 
-        isOpen={isAddWidgetOpen} 
-        onClose={() => setIsAddWidgetOpen(false)} 
+      <AddWidgetBottomSheet
+        isOpen={isAddWidgetOpen}
+        onClose={() => setIsAddWidgetOpen(false)}
       />
     </div>
   );

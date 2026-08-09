@@ -109,7 +109,7 @@ export function CoupleStatusBanner() {
         aria-live="polite"
         data-testid="couple-status-banner"
         data-lifecycle="unknown"
-        className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-2"
+        className="rounded-surface border border-border bg-card p-4 space-y-2"
       >
         <div className="flex items-center gap-2 text-label font-bold text-foreground">
           <HelpCircle size={14} className="text-muted-foreground" />
@@ -122,7 +122,7 @@ export function CoupleStatusBanner() {
           type="button"
           onClick={() => void handleRetry()}
           disabled={busy}
-          className="min-h-[44px] w-full rounded-xl border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
+          className="min-h-[44px] w-full rounded-control border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
         >
           {busy ? '확인 중...' : '다시 확인'}
         </button>
@@ -135,7 +135,7 @@ export function CoupleStatusBanner() {
       <section
         data-testid="couple-status-banner"
         data-lifecycle="personal"
-        className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-2"
+        className="rounded-surface border border-border bg-card p-4 space-y-2"
       >
         <p className="text-label font-bold text-foreground">
           우리 공간을 만들거나 초대 코드를 입력해 보세요
@@ -146,7 +146,7 @@ export function CoupleStatusBanner() {
         <button
           type="button"
           onClick={() => navigate('/settings')}
-          className="min-h-[44px] w-full rounded-xl bg-coral-strong px-4 text-label font-bold text-coral-strong-foreground"
+          className="min-h-[44px] w-full rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground"
         >
           커플 공간 설정으로 가기
         </button>
@@ -159,7 +159,7 @@ export function CoupleStatusBanner() {
       <section
         data-testid="couple-status-banner"
         data-lifecycle="disconnected"
-        className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-2"
+        className="rounded-surface border border-border bg-card p-4 space-y-2"
       >
         <div className="flex items-center gap-2 text-label font-bold text-foreground">
           <Link2Off size={14} className="text-muted-foreground" />
@@ -172,7 +172,7 @@ export function CoupleStatusBanner() {
         <button
           type="button"
           onClick={() => navigate('/settings')}
-          className="min-h-[44px] w-full rounded-xl bg-coral-strong px-4 text-label font-bold text-coral-strong-foreground"
+          className="min-h-[44px] w-full rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground"
         >
           다시 연결하기
         </button>
@@ -185,7 +185,7 @@ export function CoupleStatusBanner() {
     <section
       data-testid="couple-status-banner"
       data-lifecycle="pending"
-      className="rounded-2xl border border-coral/30 bg-coral/10 p-4 shadow-sm space-y-2"
+      className="rounded-surface border border-coral/30 bg-coral/10 p-4 space-y-2"
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-label font-bold text-coral-strong">상대방을 기다리고 있어요</span>
@@ -201,7 +201,7 @@ export function CoupleStatusBanner() {
 
       {code ? (
         <>
-          <div className="flex items-center justify-between rounded-xl border border-coral/20 bg-card px-4 py-3">
+          <div className="flex items-center justify-between rounded-control border border-coral/20 bg-card px-4 py-3">
             <span className="font-mono text-display tracking-widest text-foreground">
               {code}
             </span>
@@ -234,7 +234,7 @@ export function CoupleStatusBanner() {
             type="button"
             onClick={() => void handleRegenerate()}
             disabled={busy || !isOnline}
-            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-coral-strong px-4 text-label font-bold text-coral-strong-foreground disabled:opacity-50"
+            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
           >
             <RefreshCw size={14} />
             {busy ? '발급 중...' : '새 코드 발급'}
@@ -261,7 +261,7 @@ export function CoupleStatusBanner() {
             type="button"
             onClick={() => void handleRegenerate()}
             disabled={busy || !isOnline}
-            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-coral-strong px-4 text-label font-bold text-coral-strong-foreground disabled:opacity-50"
+            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
           >
             <RefreshCw size={14} />
             {busy ? '발급 중...' : '새 코드 발급'}

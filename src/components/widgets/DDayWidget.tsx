@@ -1,99 +1,80 @@
 import React from 'react';
 import { useStore } from '@/lib/useStore';
-import { Heart, Clock, Shield } from 'lucide-react';
+import { Clock, Shield } from 'lucide-react';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 
+/**
+ * Compact D-Day widget — supporting information, never the largest thing.
+ *
+ * Design v2.1: "D-Day stays as compact supporting information, never the largest
+ * thing on the screen." This is a single inline row showing the connection day
+ * count and a link to the service detail, not a tall card with a decorative heart.
+ */
 export function DDayWidget() {
   const { state } = useStore();
   const navigate = useNavigate();
   const { profile } = state;
   const anniversaryDate = profile.couple.anniversaryDate;
   const todayStr = toLocalDateString(localToday());
-  
+
   const daysConnected = anniversaryDate ? daysBetweenLocal(anniversaryDate, todayStr) + 1 : 0;
-  
+
   // Milestone calculation
   const nextMilestoneDays = Math.ceil((daysConnected + 1) / 100) * 100;
   const daysToNextMilestone = nextMilestoneDays - daysConnected;
 
-  /*
-    The card body, rendered inside a <button> only while there is something to
-    press.
-
-    It used to be a `<div onClick>` that navigated to /settings when the
-    anniversary was unset. Two defects in one element: with no role and no
-    tabIndex the only way to set the anniversary from 우리 was a pointer, and once
-    the date WAS set the div kept `cursor-pointer` and kept swallowing taps while
-    doing nothing at all. So the affordance now exists exactly when the action
-    does.
-  */
-  const connectionCardBody = (
-    <>
-      <Heart className="w-24 h-24 text-coral/15 absolute -right-4 -bottom-4 rotate-12" aria-hidden="true" />
-      <p className="text-caption text-muted-foreground mb-1">우리가 함께한 지</p>
-      {/*
-        `display` and tabular figures: this number changes every day, and a
-        proportional font makes the whole line jump when the digit count changes.
-      */}
-      <div className="text-display text-coral-strong tracking-tight mb-1 tabular-nums">
-        {anniversaryDate ? `연결 ${daysConnected}일째` : '기념일 미설정'}
-      </div>
-      <p className="text-caption text-muted-foreground mb-3">
-        {anniversaryDate ? `${anniversaryDate}부터 시작된 우리 로그` : '여기를 눌러 사귄 날짜를 추가해보세요'}
-      </p>
-      {anniversaryDate && (
-        <div className="pt-3 border-t border-border/60 text-label text-foreground flex items-center gap-1.5">
-          <Clock className="w-3.5 h-3.5 text-coral-strong" aria-hidden="true" />
-          <span className="tabular-nums">다음 기념일 {nextMilestoneDays}일까지 D-{daysToNextMilestone}</span>
-        </div>
-      )}
-    </>
-  );
-
-  const connectionCardClass =
-    'bg-muted/40 p-5 rounded-2xl border border-border relative overflow-hidden flex flex-col justify-center';
-
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-heading text-foreground">우리의 디데이</h2>
-      </div>
-
-      {/* Connection Days Card */}
+    <div className="flex flex-col gap-3">
+      {/* Connection Days — compact inline */}
       {anniversaryDate ? (
-        <div data-testid="dday-connection-card" className={connectionCardClass}>{connectionCardBody}</div>
+        <div data-testid="dday-connection-card" className="flex items-center justify-between py-2">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-coral-strong shrink-0" aria-hidden="true" />
+            <span className="text-label font-semibold text-foreground tabular-nums">
+              연결 {daysConnected}일째
+            </span>
+          </div>
+          <span className="text-caption text-muted-foreground tabular-nums">
+            다음 기념일 {nextMilestoneDays}일까지 D-{daysToNextMilestone}
+          </span>
+        </div>
       ) : (
         <button
           type="button"
-          // The anniversary is edited from the profile section in settings.
           onClick={() => navigate('/settings')}
           aria-label="사귄 날짜 설정하기"
           data-testid="dday-connection-card"
-          className={`${connectionCardClass} w-full text-left min-h-[44px] cursor-pointer active:scale-[0.98] transition`}
+          className="w-full text-left min-h-11 flex items-center gap-2 py-2 active:bg-muted/40 rounded-control transition"
         >
-          {connectionCardBody}
+          <Clock className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden="true" />
+          {/*
+            `기념일 미설정` is the exact wording UsPage uses for the same fact, and
+            both anniversaryProvenance.test.tsx and keyboardOperableCards.test.tsx
+            assert this literal. The two surfaces have to agree: M-1 exists because
+            one of them used to invent a day count from a fabricated date.
+          */}
+          <span className="text-label text-muted-foreground">
+            기념일 미설정
+          </span>
+          <span className="ml-auto text-caption text-muted-foreground">
+            날짜 추가
+          </span>
         </button>
       )}
 
-      {/* Military Service Quick Status.
-          A real <button>, not a clickable <div>: as a div it was invisible to the
-          keyboard and to assistive tech, and it declared no tap target at all. */}
+      {/* Military Service Quick Status — compact row */}
       <button
         type="button"
         onClick={() => navigate('/service')}
         aria-label="복무 현황과 전역 D-Day 보기"
-        className="w-full text-left bg-muted/60 rounded-2xl border border-border p-4 min-h-[44px] min-w-[44px] flex items-center justify-between active:bg-muted transition-colors"
+        className="w-full text-left min-h-11 flex items-center gap-3 py-2 active:bg-muted/40 rounded-control transition"
       >
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-navy rounded-full flex items-center justify-center text-primary-foreground">
-            <Shield className="w-4 h-4" />
-          </div>
-          <div className="text-left">
-            <div className="text-label font-semibold text-foreground">복무 현황 · D-Day</div>
-            <div className="text-caption text-muted-foreground mt-0.5">전역일과 복무율 확인</div>
-          </div>
+        <div className="w-8 h-8 bg-navy rounded-full flex items-center justify-center text-primary-foreground shrink-0">
+          <Shield className="w-4 h-4" />
         </div>
+        <span className="text-label font-semibold text-foreground">복무 현황 · D-Day</span>
+        <span className="ml-auto text-caption text-muted-foreground">전역일 확인 ›</span>
       </button>
     </div>
   );

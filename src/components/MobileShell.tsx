@@ -68,14 +68,16 @@ export function MobileShell({ children }: { children: ReactNode }) {
    *
    * The offline banner used to clear the bar with a hardcoded
    * `calc(env(safe-area-inset-bottom,0px)+60px)`. The bar's height is
-   * `8px + 48px + max(env(safe-area-inset-bottom,0px),10px)`, so that constant was
+   * `6px + 44px + max(env(safe-area-inset-bottom,0px),8px)`, so that constant was
    * only ever correct on a device WITH a home indicator: at inset 0 the banner sat
    * 10px inside the bar. Measured in headless Chromium at 320x568 and 390x844 with
    * the browser offline, the banner overlapped `nav[role=tablist]` by 320x10px and
    * 390x10px respectively.
    *
    * Measuring instead of guessing means the next change to the bar's padding cannot
-   * silently reintroduce the overlap.
+   * silently reintroduce the overlap -- and it is why the 2026-08-08 revision could
+   * take the bar from 70px of chrome down to 58px (표면·컨트롤 규칙 asks for
+   * 56-60px plus the inset) without touching the banner or the floating CTAs.
    */
   useEffect(() => {
     const nav = navRef.current;
@@ -148,7 +150,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
           id="main-content"
           ref={mainRef}
           tabIndex={-1}
-          className="flex-1 pb-24 overflow-y-auto focus:outline-none"
+          className="flex-1 pb-20 overflow-y-auto focus:outline-none"
         >
           {/* Shown above every tab, because a stale or withheld shared workspace
               affects the timeline, the calendar and the trip list alike. */}
@@ -165,11 +167,11 @@ export function MobileShell({ children }: { children: ReactNode }) {
         {/* Fixed 5-Tab Navigation Bar (홈 | 기록 | 일정 | 우리 | 마이) */}
         <nav
           ref={navRef}
-          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-card/95 backdrop-blur-md border-t border-border/60 z-50 shadow-lg"
+          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-card/95 backdrop-blur-md border-t border-border z-50"
           role="tablist"
           aria-label="하단 내비게이션"
         >
-          <ul className="grid grid-cols-5 px-1 pt-2 pb-[max(env(safe-area-inset-bottom,0px),10px)] items-end">
+          <ul className="grid grid-cols-5 px-1 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),8px)] items-end">
             {TABS.map((t) => {
               // Prefix matching, so a detail screen inside a section keeps its tab
               // lit. `/` is matched exactly: as a prefix it would light every tab.
@@ -186,24 +188,36 @@ export function MobileShell({ children }: { children: ReactNode }) {
                     aria-selected={active}
                     aria-label={t.label}
                     className={cn(
-                      'flex flex-col items-center py-1 text-center transition-all duration-200 min-h-[48px] justify-center relative w-full rounded-2xl',
+                      'flex flex-col items-center gap-0.5 py-1 text-center transition-colors duration-200 min-h-11 justify-center relative w-full rounded-control',
                       active
-                        ? 'text-coral'
+                        ? 'text-coral-strong'
                         : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    <div className="relative flex items-center justify-center">
-                      <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
-                    </div>
-
-                    <span className={cn('text-caption mt-1', active ? 'font-extrabold text-coral' : 'font-medium')}>
+                    <Icon size={21} strokeWidth={active ? 2.2 : 1.8} aria-hidden="true" />
+                    <span className={cn('text-caption', active ? 'font-semibold' : 'font-normal')}>
                       {t.label}
                     </span>
+                    {/*
+                      The coral bar under the active tab.
 
-                    {/* Bottom Active Indicator Line */}
-                    {active && (
-                      <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-5 h-[3px] rounded-full bg-coral" />
-                    )}
+                      It was removed in the 2026-08-08 density pass as a duplicate
+                      signal -- the tint and the weight already say which tab is
+                      lit. That reasoning was right about redundancy and wrong
+                      about what the redundancy was doing: this bar was the one
+                      piece of saturated brand colour on every screen, and the app
+                      read cold without it.
+
+                      Restored at 16x2px instead of the old 20x3px, and it stays
+                      `aria-hidden`: it is decoration on top of `aria-selected`,
+                      the tint and the weight, never the only signal.
+                    */}
+                    {active ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-coral"
+                      />
+                    ) : null}
                   </Link>
                 </li>
               );

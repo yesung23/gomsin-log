@@ -678,7 +678,7 @@ export function OnboardingPage() {
                 {isIOS && (
                   <button
                     onClick={handleAppleLogin}
-                    className="w-full h-13 py-3.5 rounded-2xl bg-black text-white font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
+                    className="w-full h-13 py-3.5 rounded-control bg-black text-white font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px]"
                   >
                     <span>Apple로 계속하기</span>
                   </button>
@@ -686,7 +686,7 @@ export function OnboardingPage() {
 
                 <button
                   onClick={handleGoogleLogin}
-                  className="w-full h-13 py-3.5 rounded-2xl bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] shadow-sm"
+                  className="w-full h-13 py-3.5 rounded-control bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px]"
                 >
                   <span>Google로 계속하기</span>
                 </button>
@@ -694,7 +694,7 @@ export function OnboardingPage() {
                 {/* Secondary Demo Start CTA */}
                 <button
                   onClick={handleStartDemo}
-                  className="w-full py-3 rounded-2xl bg-coral/15 border border-coral/30 text-coral-strong font-bold text-label flex items-center justify-center gap-1.5 active:scale-[0.99] transition min-h-[44px] mt-2"
+                  className="w-full py-3 rounded-control bg-coral/15 border border-coral/30 text-coral-strong font-bold text-label flex items-center justify-center gap-1.5 active:scale-[0.99] transition min-h-[44px] mt-2"
                 >
                   <span>데모 공간 먼저 둘러보기</span>
                   <ArrowRight size={16} />
@@ -708,7 +708,7 @@ export function OnboardingPage() {
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
                     placeholder="이메일 주소 입력"
-                    className="w-full h-12 px-4 rounded-xl bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
+                    className="w-full h-12 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
                   <button
                     onClick={async () => {
@@ -720,7 +720,7 @@ export function OnboardingPage() {
                       else toast.success('이메일로 매직링크가 전송되었습니다! 메일함을 확인해주세요.');
                     }}
                     disabled={isSendingEmail}
-                    className="w-full h-12 rounded-xl bg-navy text-white font-bold text-label disabled:opacity-50"
+                    className="w-full h-12 rounded-control bg-navy text-white font-bold text-label disabled:opacity-50"
                   >
                     {isSendingEmail ? '전송 중...' : '이메일로 계속하기 (매직링크)'}
                   </button>
@@ -745,7 +745,7 @@ export function OnboardingPage() {
                 <div className="space-y-3">
                   <button
                     onClick={() => setRole('gomsin')}
-                    className={`w-full p-5 rounded-2xl border text-left flex items-start gap-4 transition min-h-[80px] ${
+                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[80px] ${
                       role === 'gomsin'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -760,7 +760,7 @@ export function OnboardingPage() {
 
                   <button
                     onClick={() => setRole('soldier')}
-                    className={`w-full p-5 rounded-2xl border text-left flex items-start gap-4 transition min-h-[80px] ${
+                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[80px] ${
                       role === 'soldier'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -777,7 +777,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -801,10 +801,10 @@ export function OnboardingPage() {
                     onChange={(e) => setNickname(e.target.value)}
                     placeholder={role === 'gomsin' ? '예) 춘향' : '예) 몽룡'}
                     maxLength={12}
-                    className="w-full h-13 px-4 rounded-2xl bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
+                    className="w-full h-13 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
                   {nickname.trim().length > 0 && nickname.trim().length < 2 && (
-                    <p className="text-caption text-red-500 font-medium">닉네임은 2자 이상 입력해주세요.</p>
+                    <p className="text-caption text-destructive font-medium">닉네임은 2자 이상 입력해주세요.</p>
                   )}
                 </div>
               </div>
@@ -812,7 +812,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={!canAdvanceFromStep}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
               >
                 다음
               </button>
@@ -831,7 +831,7 @@ export function OnboardingPage() {
                 <div className="space-y-3">
                   <button
                     onClick={() => setSpaceMode('create')}
-                    className={`w-full p-5 rounded-2xl border text-left flex items-start gap-4 transition min-h-[72px] ${
+                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[72px] ${
                       spaceMode === 'create'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -849,7 +849,7 @@ export function OnboardingPage() {
                   {spaceMode === 'create' && pendingSpaceRecovery && (
                     <div
                       data-testid="space-recovery-confirm"
-                      className="p-4 bg-card border border-coral/30 rounded-2xl space-y-3"
+                      className="p-4 bg-card border border-coral/30 rounded-surface space-y-3"
                     >
                       <p className="text-label font-bold text-foreground">
                         이미 만든 우리 공간이 있어요
@@ -868,7 +868,7 @@ export function OnboardingPage() {
                         type="button"
                         onClick={() => void handleRegenerateExistingSpace()}
                         disabled={isGeneratingCode}
-                        className="w-full min-h-[44px] rounded-xl bg-coral-strong px-4 text-label font-bold text-coral-strong-foreground disabled:opacity-50"
+                        className="w-full min-h-[44px] rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
                       >
                         {isGeneratingCode ? '발급 중...' : '새 코드 발급하기'}
                       </button>
@@ -876,7 +876,7 @@ export function OnboardingPage() {
                         type="button"
                         onClick={handleKeepExistingCode}
                         disabled={isGeneratingCode}
-                        className="w-full min-h-[44px] rounded-xl border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
+                        className="w-full min-h-[44px] rounded-control border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
                       >
                         이전에 보낸 코드 그대로 쓰기
                       </button>
@@ -884,7 +884,7 @@ export function OnboardingPage() {
                   )}
 
                   {spaceMode === 'create' && createdInviteCode && (
-                    <div className="p-4 bg-coral/10 border border-coral/30 rounded-2xl space-y-2">
+                    <div className="p-4 bg-coral/10 border border-coral/30 rounded-surface space-y-2">
                       <div className="text-caption text-coral-strong font-semibold">
                         내 초대 코드 (24시간 유효)
                         {/* The authoritative expiry, when the server supplied one.
@@ -896,7 +896,7 @@ export function OnboardingPage() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center justify-between bg-card px-4 py-3 rounded-xl border border-coral/20">
+                      <div className="flex items-center justify-between bg-card px-4 py-3 rounded-control border border-coral/20">
                         <span className="font-mono text-display tracking-widest text-foreground">{createdInviteCode}</span>
                         <button
                           onClick={handleCopyCode}
@@ -917,7 +917,7 @@ export function OnboardingPage() {
 
                   <button
                     onClick={() => setSpaceMode('join')}
-                    className={`w-full p-5 rounded-2xl border text-left flex items-start gap-4 transition min-h-[72px] ${
+                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[72px] ${
                       spaceMode === 'join'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -944,7 +944,7 @@ export function OnboardingPage() {
                         maxLength={6}
                         placeholder="숫자 6자리 초대 코드"
                         aria-label="숫자 6자리 초대 코드"
-                        className="w-full h-12 px-4 rounded-xl bg-card border border-border text-foreground font-mono text-center text-title tracking-widest outline-none focus:ring-2 focus:ring-coral/40"
+                        className="w-full h-12 px-4 rounded-control bg-card border border-border text-foreground font-mono text-center text-title tracking-widest outline-none focus:ring-2 focus:ring-coral/40"
                       />
                     </div>
                   )}
@@ -954,7 +954,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={isGeneratingCode || isVerifyingCode}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
@@ -984,11 +984,11 @@ export function OnboardingPage() {
                       type="date"
                       value={anniversary}
                       onChange={(e) => setAnniversary(e.target.value)}
-                      className="w-full h-13 px-4 rounded-2xl bg-card border border-border text-body outline-none"
+                      className="w-full h-13 px-4 rounded-control bg-card border border-border text-body outline-none"
                     />
                   </div>
                 ) : (
-                  <div className="p-4 bg-muted/40 rounded-2xl text-caption text-muted-foreground text-center">
+                  <div className="p-4 bg-muted/40 rounded-surface text-caption text-muted-foreground text-center">
                     사귄 날짜는 나중에 언제든지 설정할 수 있습니다.
                   </div>
                 )}
@@ -1003,7 +1003,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 {role === 'gomsin' ? '완료' : '다음'}
               </button>
@@ -1033,8 +1033,8 @@ export function OnboardingPage() {
                         <button
                           key={st.key}
                           onClick={() => setMilitaryStatus(st.key as MilitaryStatus)}
-                          className={`py-2 px-2 rounded-xl text-label font-semibold border transition min-h-[40px] ${
-                            militaryStatus === st.key ? 'bg-coral-strong text-coral-strong-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
+                          className={`py-2 px-2 rounded-control text-label font-semibold border transition min-h-[40px] ${
+                            militaryStatus === st.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
                           {st.label}
@@ -1059,8 +1059,8 @@ export function OnboardingPage() {
                         <button
                           key={b.key}
                           onClick={() => handleBranchChange(b.key as Branch)}
-                          className={`py-2 px-1 rounded-xl text-label font-semibold border transition min-h-[40px] ${
-                            branch === b.key ? 'bg-coral-strong text-coral-strong-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
+                          className={`py-2 px-1 rounded-control text-label font-semibold border transition min-h-[40px] ${
+                            branch === b.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
                           {b.label}
@@ -1076,7 +1076,7 @@ export function OnboardingPage() {
                       type="date"
                       value={enlistmentDate}
                       onChange={(e) => handleEnlistmentChange(e.target.value)}
-                      className="w-full h-11 px-3 mt-1 rounded-xl bg-card border border-border text-body outline-none"
+                      className="w-full h-11 px-3 mt-1 rounded-control bg-card border border-border text-body outline-none"
                     />
                   </div>
 
@@ -1087,7 +1087,7 @@ export function OnboardingPage() {
                       type="date"
                       value={expectedDischargeDate}
                       onChange={(e) => handleManualDischargeChange(e.target.value)}
-                      className="w-full h-11 px-3 mt-1 rounded-xl bg-card border border-border text-body outline-none"
+                      className="w-full h-11 px-3 mt-1 rounded-control bg-card border border-border text-body outline-none"
                     />
                   </div>
                 </div>
@@ -1095,7 +1095,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -1119,14 +1119,14 @@ export function OnboardingPage() {
                         type="time"
                         value={weekdayStart}
                         onChange={(e) => setWeekdayStart(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
+                        className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                       <span>~</span>
                       <input
                         type="time"
                         value={weekdayEnd}
                         onChange={(e) => setWeekdayEnd(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
+                        className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                     </div>
                   </div>
@@ -1138,14 +1138,14 @@ export function OnboardingPage() {
                         type="time"
                         value={weekendStart}
                         onChange={(e) => setWeekendStart(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
+                        className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                       <span>~</span>
                       <input
                         type="time"
                         value={weekendEnd}
                         onChange={(e) => setWeekendEnd(e.target.value)}
-                        className="flex-1 h-11 px-3 rounded-xl bg-card border border-border text-body outline-none"
+                        className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                     </div>
                   </div>
@@ -1155,7 +1155,7 @@ export function OnboardingPage() {
               <div className="space-y-2">
                 <button
                   onClick={handleNext}
-                  className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[48px]"
+                  className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
                 >
                   완료하기
                 </button>
@@ -1189,7 +1189,7 @@ export function OnboardingPage() {
               <button
                 onClick={finishSetup}
                 disabled={isFinishing}
-                className="w-full py-4 rounded-2xl bg-coral-strong text-coral-strong-foreground font-bold text-body min-h-[52px] shadow-md disabled:opacity-60"
+                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-60"
               >
                 {isFinishing
                   ? '저장 중...'

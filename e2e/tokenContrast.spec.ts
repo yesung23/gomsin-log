@@ -115,6 +115,19 @@ function measureInPage(selector: string) {
       sample(tokenOf('--coral-strong')).rgb,
       sample(tokenOf('--card')).rgb,
     ),
+    /*
+     * `--coral-fill` was split out on 2026-08-09 so the primary CTA could be pink
+     * while `--coral-strong` stays dark enough to be coral INK on a card. The two
+     * therefore have DIFFERENT obligations and both are measured:
+     *   - the fill must carry its label at 4.5:1
+     *   - the ink must clear 4.5:1 on a card, which is asserted above
+     * Retuning the shared token to pink is what this pair prevents; it failed here
+     * first, at 2.00:1 as text.
+     */
+    coralFillWithItsLabel: ratio(
+      sample(tokenOf('--coral-fill')).rgb,
+      sample(tokenOf('--coral-fill-foreground')).rgb,
+    ),
   };
 
   probe.remove();
@@ -171,7 +184,17 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
     for (const route of ROUTES) {
       await goto(page, route);
-      const result = await page.evaluate(measureInPage, '[class*="bg-coral-strong"]');
+      /*
+       * Both filled-coral tokens. `bg-coral-fill` is the pink primary CTA and
+       * `bg-coral-strong` is what remains on small dark-filled elements (selected
+       * calendar cell, numbered step bullets), and a label on either has to clear
+       * AA. Matching only the old class silently stopped measuring every primary
+       * button the moment the fill was split out.
+       */
+      const result = await page.evaluate(
+        measureInPage,
+        '[class*="bg-coral-strong"],[class*="bg-coral-fill"]',
+      );
 
       // If canvas cannot rasterise the computed colour, every number is garbage.
       expect(result.selfCheck.red, 'canvas rasterisation').toEqual([255, 0, 0]);
@@ -203,5 +226,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
     // the same token has to work as coral ink on a card.
     expect(reference!.coralStrongOnBackground).toBeGreaterThanOrEqual(AA_NON_TEXT);
     expect(reference!.coralStrongAsTextOnCard).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+
+    // The pink CTA fill has to carry its own label. This is the assertion that
+    // makes the fill/ink split safe: it fails if someone lightens the label or
+    // points `primary` back at a token whose pairing was never measured.
+    expect(reference!.coralFillWithItsLabel).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
   });
 }

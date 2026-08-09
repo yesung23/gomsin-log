@@ -169,10 +169,27 @@ describe('H-4: the entry point survives the conditions that caused the stranding
   });
 
   it('every shortcut declares a 44px tap target (themeTokens C6 rule)', () => {
+    /*
+     * The guarantee moved, it did not go away.
+     *
+     * These shortcuts used to be hand-rolled buttons that each spelled out
+     * `min-h-[44px] min-w-[44px]`. The 2026-08-08 visual revision converts repeated
+     * menu items to `RowGroup` + `PressableRow`, because a settings menu is repeated
+     * data and Surface economy forbids one card per item. The 44px now comes from
+     * the primitive instead of from a copy of the utility per row.
+     *
+     * So this asserts the same fact one level down: the shortcuts are built from
+     * `PressableRow`, and `PressableRow` is what carries the height. `min-h-11` IS
+     * 44px (11 * 4px). Checking the primitive is strictly stronger than checking a
+     * substring, because it cannot pass while a single row opts out.
+     */
     const at = settings.indexOf('바로가기');
     const section = settings.slice(at, at + 1200);
-    expect(section).toContain('min-h-[44px]');
-    expect(section).toContain('min-w-[44px]');
+    expect(section).toContain('PressableRow');
+
+    const list = readFileSync(resolve(process.cwd(), 'src/components/ui/List.tsx'), 'utf8');
+    const pressable = list.slice(list.indexOf('export function PressableRow'));
+    expect(pressable).toContain('min-h-11');
   });
 
   it('uses semantic tokens only, never a palette literal (themeTokens C4 rule)', () => {

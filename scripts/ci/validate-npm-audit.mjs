@@ -7,18 +7,53 @@ if (!auditPath) {
 
 const report = JSON.parse(await readFile(auditPath, 'utf8'));
 const vulnerabilities = report.vulnerabilities ?? {};
-const expectedPackages = ['react-router', 'react-router-dom'];
+const advisoryUrl = 'https://github.com/advisories/GHSA-qwww-vcr4-c8h2';
+
+/*
+ * This is an allow-list with a CEILING, not an exact expectation.
+ *
+ * It used to demand exactly `react-router` + `react-router-dom` and fail on
+ * anything else -- including on NOTHING else. That is the wrong shape for an audit
+ * gate twice over: a new advisory failed the build with a message about the two
+ * router findings, and FIXING the router advisory also failed the build, reporting
+ * `got none` as if a clean audit were a defect.
+ *
+ * Both happened on 2026-08-09. A new nanoid advisory (GHSA, <3.3.17, reachable via
+ * vite -> postcss) turned the gate red, and pinning `nanoid` to 3.3.18 through
+ * `overrides` cleared it -- at which point the router findings had also been
+ * resolved upstream and the audit came back empty, which the gate then rejected.
+ *
+ * So: zero findings passes, only the documented router advisory is tolerated, and
+ * anything else still fails. The tolerance stays because dropping it would mean
+ * this file has to change again the moment that advisory reappears in a range this
+ * project pins.
+ */
+const ALLOWED_PACKAGES = new Set(['react-router', 'react-router-dom']);
 const actualPackages = Object.keys(vulnerabilities).sort();
 
-if (JSON.stringify(actualPackages) !== JSON.stringify(expectedPackages)) {
+const unexpected = actualPackages.filter((name) => !ALLOWED_PACKAGES.has(name));
+if (unexpected.length > 0) {
   throw new Error(
-    `Unexpected npm audit findings: expected ${expectedPackages.join(', ')}, got ${actualPackages.join(', ') || 'none'}`,
+    `Unexpected npm audit findings: ${unexpected.join(', ')}. `
+    + `Only ${[...ALLOWED_PACKAGES].join(', ')} (${advisoryUrl}) are accepted.`,
   );
+}
+
+if (actualPackages.length === 0) {
+  console.log('npm audit reported no vulnerabilities.');
+  process.exit(0);
 }
 
 const router = vulnerabilities['react-router'];
 const routerDom = vulnerabilities['react-router-dom'];
-const advisoryUrl = 'https://github.com/advisories/GHSA-qwww-vcr4-c8h2';
+
+// The pair is reported together or not at all; one without the other means the
+// dependency shape changed and the assertions below no longer describe reality.
+if (!router || !routerDom) {
+  throw new Error(
+    `The router advisory is reported as a pair; saw only ${actualPackages.join(', ')}.`,
+  );
+}
 
 if (router.severity !== 'high' || routerDom.severity !== 'high') {
   throw new Error('The two accepted React Router findings must remain high severity.');

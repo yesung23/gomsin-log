@@ -29,6 +29,23 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
+    /*
+     * The browser's clock must agree with the fixtures' clock.
+     *
+     * `e2e/scenarios.ts` builds `TODAY` in `Asia/Seoul` on purpose -- the product's
+     * calendar is Korean-local -- but the browser was left on the runner's zone,
+     * which is UTC. Between 00:00 and 08:59 KST those are different DATES, so the
+     * fixtures wrote records dated 8월 9일 while `localToday()` in the app asked
+     * for 8월 8일, the 기록 tab answered `이 날은 남긴 순간이 없어요`, and eight
+     * date-dependent specs failed on a product that was behaving correctly.
+     *
+     * Fixing only the fixture side (which is what the comment in scenarios.ts
+     * describes) moved the mismatch rather than removing it: both ends have to name
+     * the same zone. Pinning it here also makes the suite deterministic on any
+     * machine, instead of passing in Seoul and failing in CI.
+     */
+    timezoneId: 'Asia/Seoul',
+    locale: 'ko-KR',
   },
   projects: [
     {

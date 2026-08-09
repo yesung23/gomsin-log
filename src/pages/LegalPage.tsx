@@ -137,7 +137,7 @@ export function LegalPage() {
         <header className="flex items-center justify-between">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-xl hover:bg-muted text-muted-foreground min-h-[44px] flex items-center justify-center active:scale-95 transition"
+            className="p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] flex items-center justify-center active:scale-95 transition"
             aria-label="뒤로가기"
           >
             <ArrowLeft size={20} />
@@ -166,7 +166,7 @@ export function LegalPage() {
           ))}
         </div>
 
-        <div className="rounded-2xl bg-muted/60 border border-border p-4 text-caption text-muted-foreground leading-relaxed">
+        <div className="rounded-surface bg-muted/60 border border-border p-4 text-caption text-muted-foreground leading-relaxed">
           문의: 앱 스토어 등록 페이지에 표기된 개발자 연락처로 문의해 주세요.
         </div>
       </div>

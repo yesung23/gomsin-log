@@ -1,0 +1,51 @@
+/*
+ * Design preview styles.
+ *
+ * The production token file is imported UNCHANGED so every colour, radius and
+ * dark-mode mapping in this preview is the real one. Nothing here is written back
+ * into `src/`.
+ */
+@import "../src/styles/index.css";
+
+/* Tailwind v4 needs to be told where this preview's class names live, because the
+   imported stylesheet sits in `src/` and its automatic source detection is
+   anchored there. */
+@source "./**/*.{ts,tsx}";
+
+/*
+ * PROPOSAL ONLY — `--coral-strong` (DESIGN_V2 §2.10 #1, §3.2).
+ *
+ * `--coral` measured 2.01~2.09:1 (light) and 2.29~2.54:1 (dark) as a filled
+ * button with white text, against a WCAG AA requirement of 4.5:1
+ * (docs/kiro/AI_HANDOFF.md §4.1). It is used in ~100 places, but almost all of
+ * them are tints, borders and selection marks where no text sits on top and the
+ * ratio does not apply. So the brand colour is NOT replaced: only the
+ * "something is written on this" use is split out.
+ *
+ * Light theme keeps white-ish text on a darker coral. Dark theme inverts instead:
+ * a dark fill on a dark background reads as disabled, so the fill lightens and
+ * the label goes near-black.
+ *
+ * The exact values below still need canvas verification before they enter
+ * `src/styles/index.css` -- AI_HANDOFF §4.1 warns that parsing `oklch()` strings
+ * yields wrong ratios, so the real render must be measured.
+ */
+:root {
+  --coral-strong: oklch(0.52 0.16 25);
+  --coral-strong-foreground: oklch(0.99 0.005 85);
+}
+[data-theme='dark'] {
+  --coral-strong: oklch(0.8 0.13 25);
+  --coral-strong-foreground: oklch(0.18 0.018 265);
+}
+@theme inline {
+  --color-coral-strong: var(--coral-strong);
+  --color-coral-strong-foreground: var(--coral-strong-foreground);
+}
+
+/* The harness chrome itself is intentionally plain so it never competes with the
+   screens it frames. */
+.harness {
+  background: light-dark(oklch(0.93 0.004 260), oklch(0.13 0.01 265));
+  color-scheme: light dark;
+}

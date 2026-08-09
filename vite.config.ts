@@ -49,6 +49,11 @@ function validateBuildEnvironmentPlugin(
           process.env.VITE_SUPABASE_PUBLISHABLE_KEY || fileEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
         VITE_SUPABASE_ANON_KEY:
           process.env.VITE_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY,
+        VITE_LEGAL_OPERATOR_NAME:
+          process.env.VITE_LEGAL_OPERATOR_NAME || fileEnv.VITE_LEGAL_OPERATOR_NAME,
+        VITE_PRIVACY_CONTACT_EMAIL:
+          process.env.VITE_PRIVACY_CONTACT_EMAIL || fileEnv.VITE_PRIVACY_CONTACT_EMAIL,
+        deploymentTarget: process.env.VERCEL_ENV,
       });
       onValidated(validated);
     },

@@ -18,6 +18,10 @@ export type BuildEnvironment = {
   VITE_SUPABASE_URL?: string;
   VITE_SUPABASE_PUBLISHABLE_KEY?: string;
   VITE_SUPABASE_ANON_KEY?: string;
+  VITE_LEGAL_OPERATOR_NAME?: string;
+  VITE_PRIVACY_CONTACT_EMAIL?: string;
+  /** Vercel sets this to `production` only for the public production target. */
+  deploymentTarget?: string;
 };
 
 export type ValidatedBuildEnvironment = {
@@ -38,6 +42,17 @@ function fail(message: string): never {
  * permanently demo-mode artifact. It now fails, naming the missing variable.
  */
 export function validateBuildEnvironment(env: BuildEnvironment): ValidatedBuildEnvironment {
+  if (env.deploymentTarget === 'production') {
+    const operatorName = (env.VITE_LEGAL_OPERATOR_NAME || '').trim();
+    const privacyEmail = (env.VITE_PRIVACY_CONTACT_EMAIL || '').trim();
+    if (!operatorName || /^(?:your-name-or-business-name|곰신로그 운영자)$/i.test(operatorName)) {
+      fail('VITE_LEGAL_OPERATOR_NAME must contain the real person or business operating the production service.');
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(privacyEmail) || privacyEmail === 'privacy@example.com') {
+      fail('VITE_PRIVACY_CONTACT_EMAIL must contain a real monitored privacy-contact email for production.');
+    }
+  }
+
   const rawUrl = (env.VITE_SUPABASE_URL || '').trim();
   if (!rawUrl) fail('VITE_SUPABASE_URL is missing or empty.');
 

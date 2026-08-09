@@ -35,6 +35,33 @@ const VALID = {
 };
 
 describe('C3 - a misconfigured production build cannot produce an artifact', () => {
+  it('refuses a public production deployment with anonymous legal ownership or no monitored contact', () => {
+    expect(() => validateBuildEnvironment({
+      ...VALID,
+      deploymentTarget: 'production',
+    })).toThrow(/VITE_LEGAL_OPERATOR_NAME/);
+    expect(() => validateBuildEnvironment({
+      ...VALID,
+      deploymentTarget: 'production',
+      VITE_LEGAL_OPERATOR_NAME: '곰신로그 운영자',
+      VITE_PRIVACY_CONTACT_EMAIL: 'privacy@example.com',
+    })).toThrow(/VITE_LEGAL_OPERATOR_NAME/);
+    expect(() => validateBuildEnvironment({
+      ...VALID,
+      deploymentTarget: 'production',
+      VITE_LEGAL_OPERATOR_NAME: '테스트 운영자',
+    })).toThrow(/VITE_PRIVACY_CONTACT_EMAIL/);
+  });
+
+  it('accepts real legal ownership details for the public production target', () => {
+    expect(() => validateBuildEnvironment({
+      ...VALID,
+      deploymentTarget: 'production',
+      VITE_LEGAL_OPERATOR_NAME: '테스트 운영자',
+      VITE_PRIVACY_CONTACT_EMAIL: 'privacy@gomsinlog.app',
+    })).not.toThrow();
+  });
+
   it('fails when VITE_SUPABASE_URL is missing or empty, naming the variable', () => {
     for (const url of [undefined, '', '   ']) {
       expect(() => validateBuildEnvironment({ ...VALID, VITE_SUPABASE_URL: url }))

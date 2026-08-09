@@ -135,7 +135,10 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
     // 1. Fetch Profile
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      // Keep this explicit: `select('*')` silently accepted a production schema
+      // that had lost `military_info`, so login succeeded and the failure was
+      // deferred until the user tried to save service information.
+      .select('id, display_name, role, avatar_path, military_info, onboarding_completed_at')
       .eq('id', userId)
       .maybeSingle();
 

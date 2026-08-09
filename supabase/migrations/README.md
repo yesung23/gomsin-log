@@ -31,6 +31,7 @@
 | `018_shared_tasks_and_trip_places.sql` | 커플 공동 할 일 + 여행 장소 주소·영업시간·좌표·입력 출처 | **신규 / 원격 미적용** |
 | `019_call_topics_and_trip_timetable.sql` | 통화 주제 표시 + 여행 장소 방문 시간 | **신규 / 원격 미적용** |
 | `020_fix_uuid_active_couple_lookup.sql` | `min(uuid)` 때문에 발생하는 로그인 후 `42883` 복구 | **운영 적용됨 (2026-08-09)** |
+| `021_restore_profile_military_info.sql` | 운영에서 누락된 `profiles.military_info` 복구 | **운영 적용됨 (2026-08-09)** |
 
 ## 002 번호 중복 (이름을 바꾸지 않는 이유)
 

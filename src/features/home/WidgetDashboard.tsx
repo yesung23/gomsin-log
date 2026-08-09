@@ -271,7 +271,7 @@ export function WidgetDashboard() {
 
       {!isEditMode && (
         <div className="text-center mt-4 text-caption text-muted-foreground">
-          위젯을 길게 누르면 편집할 수 있어요
+          오른쪽 위 편집 버튼에서 홈 순서를 바꿀 수 있어요
         </div>
       )}
 

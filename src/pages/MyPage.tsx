@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ChevronRight,
   Settings,
-  Sparkles,
 } from 'lucide-react';
 import { MobileShell } from '@/components/MobileShell';
 import { AvatarPicker } from '@/components/AvatarPicker';
@@ -116,35 +115,25 @@ export function MyPage() {
 
         {!isGomsin && (
           <section className="space-y-3">
-            <SectionHeader title="병역 관련 도움 정보" caption="군 생활가이드" />
+            <SectionHeader title="복무와 일정" caption="필요할 때 바로 확인" />
             <RowGroup boxed>
               <PressableRow
+                onClick={() => navigate('/service')}
                 leading={<span className="text-body">🎖️</span>}
                 trailing={<ChevronRight size={16} className="text-muted-foreground" />}
               >
-                <span className="text-label font-bold text-foreground">전역일 계산기</span>
-                <p className="text-caption text-muted-foreground">복무율과 남은 일수를 한눈에</p>
+                <span className="text-label font-bold text-foreground">복무 현황 · D-Day</span>
+                <p className="text-caption text-muted-foreground">복무율과 남은 기간 확인</p>
               </PressableRow>
               <PressableRow
+                onClick={() => navigate('/schedule')}
                 leading={<span className="text-body">🏖️</span>}
                 trailing={<ChevronRight size={16} className="text-muted-foreground" />}
               >
-                <span className="text-label font-bold text-foreground">휴가 일정 가이드</span>
-                <p className="text-caption text-muted-foreground">정기/포상 휴가 계획</p>
+                <span className="text-label font-bold text-foreground">휴가·면회 일정</span>
+                <p className="text-caption text-muted-foreground">둘이 함께 볼 일정으로 이동</p>
               </PressableRow>
             </RowGroup>
-
-            <div className="bg-card border border-border p-3 rounded-surface space-y-1">
-              <div className="flex items-center gap-1.5 text-label font-bold text-foreground">
-                <Sparkles className="w-4 h-4 text-foreground" />
-                <span>군 복무자 혜택 및 긴급 연락처</span>
-              </div>
-              <p className="text-caption text-foreground leading-relaxed break-keep">
-                • 병사 적금 연 6% 이상 우대 금리 안내<br />
-                • 국방 헬프콜 24시간 상담: 1303<br />
-                • 군 장병 전용 할인 혜택 모음
-              </p>
-            </div>
           </section>
         )}
 

@@ -65,8 +65,25 @@ export type WidgetDef = {
  */
 export const DEFAULT_LAYOUT_BY_ROLE: Record<Role, string[]> = {
   soldier: ['partner_day', 'dday'],
-  gomsin: ['today_briefing', 'today_word', 'dday'],
+  gomsin: ['today_word', 'today_briefing', 'dday'],
 };
+
+const LEGACY_GOMSIN_DEFAULT = ['today_briefing', 'today_word', 'dday'];
+
+/**
+ * Move only the old untouched default to the new record-first product default.
+ * Any custom order is a user's explicit choice and is preserved byte-for-byte.
+ */
+export function migrateWidgetLayout(layout: string[], role: Role): string[] {
+  if (
+    role === 'gomsin'
+    && layout.length === LEGACY_GOMSIN_DEFAULT.length
+    && layout.every((id, index) => id === LEGACY_GOMSIN_DEFAULT[index])
+  ) {
+    return [...DEFAULT_LAYOUT_BY_ROLE.gomsin];
+  }
+  return layout;
+}
 
 /** Widgets this role is allowed to see, used by the add sheet and the renderer. */
 export function widgetsForRole(role: Role): WidgetDef[] {

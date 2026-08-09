@@ -102,7 +102,11 @@ describe('C1 - per-user recovery marker fails closed', () => {
    * "clean up bad data" change. Removing it reintroduces the fail-open defect.
    */
   it('treats EVERY present value as active and never removes the key', () => {
-    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+    const removeItem = vi.fn();
+    const storage = {
+      getItem: (key: string) => localStorage.getItem(key),
+      removeItem,
+    };
     const values = [
       'true', 'false', '', ' ', '0', '1', 'null', 'undefined', '{}', '[]',
       '{"broken":', 'not json at all', '"true"', '{"accountDeletionRecovery":false}',
@@ -110,11 +114,10 @@ describe('C1 - per-user recovery marker fails closed', () => {
     ];
     for (const value of values) {
       localStorage.setItem(recoveryKeyFor('user-a'), value);
-      expect(readRecoveryMarker('user-a'), `value=${JSON.stringify(value)}`).toBe('active');
+      expect(readRecoveryMarker('user-a', storage), `value=${JSON.stringify(value)}`).toBe('active');
       expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe(value);
     }
     expect(removeItem).not.toHaveBeenCalledWith(recoveryKeyFor('user-a'));
-    removeItem.mockRestore();
   });
 
   it('is per-user: another account is neither blocked by nor able to clear it', () => {
@@ -125,11 +128,10 @@ describe('C1 - per-user recovery marker fails closed', () => {
   });
 
   it('fails closed when storage itself is unreadable', () => {
-    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('storage disabled');
-    });
-    expect(readRecoveryMarker('user-a')).toBe('active');
-    getItem.mockRestore();
+    const unreadableStorage = {
+      getItem: () => { throw new Error('storage disabled'); },
+    };
+    expect(readRecoveryMarker('user-a', unreadableStorage)).toBe('active');
   });
 
   it('clearRecoveryMarker removes exactly the one key', () => {
@@ -163,7 +165,11 @@ describe('Tri-State Verification Suite - 1. classification is total and exclusiv
    * "marker present, server clear" into `clear`.
    */
   it('maps all nine marker x answer combinations to exactly one variant', () => {
-    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+    const removeItem = vi.fn();
+    const storage = {
+      getItem: (key: string) => localStorage.getItem(key),
+      removeItem,
+    };
     const markers: Array<[string, string | null]> = [
       ['absent', null],
       ['valid positive', 'true'],
@@ -174,7 +180,7 @@ describe('Tri-State Verification Suite - 1. classification is total and exclusiv
       for (const [answerLabel, answer] of answers) {
         localStorage.clear();
         if (stored !== null) localStorage.setItem(recoveryKeyFor('user-a'), stored);
-        const marker: MarkerState = readRecoveryMarker('user-a');
+        const marker: MarkerState = readRecoveryMarker('user-a', storage);
         const status = classifyDeletionStatus(marker, answer);
         const label = `${markerLabel} / ${answerLabel}`;
         expect(['pending', 'clear', 'unknown'], label).toContain(status.kind);
@@ -188,7 +194,6 @@ describe('Tri-State Verification Suite - 1. classification is total and exclusiv
     }
     expect(seen).toHaveLength(9);
     expect(removeItem).not.toHaveBeenCalledWith(recoveryKeyFor('user-a'));
-    removeItem.mockRestore();
   });
 
   it('resolves (marker present, server not pending) to PENDING, not clear', () => {

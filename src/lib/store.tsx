@@ -8,7 +8,7 @@ import {
   CoupleEvent,
   Attachment,
 } from '@/types';
-import { DEFAULT_LAYOUT_BY_ROLE } from '@/lib/widgets';
+import { DEFAULT_LAYOUT_BY_ROLE, migrateWidgetLayout } from '@/lib/widgets';
 import { clearAllComposerDrafts } from '@/lib/composerDraft';
 import { clearAllAvatars } from '@/lib/avatarImage';
 import {
@@ -802,7 +802,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const devicePrefs = {
           widgetLayout: Array.isArray(stored.widgetLayout)
             && stored.widgetLayout.every((item) => typeof item === 'string')
-            ? stored.widgetLayout
+            ? migrateWidgetLayout(stored.widgetLayout, 'gomsin')
             : DEFAULT_STATE.widgetLayout,
           soldierWidgetLayout: Array.isArray(stored.soldierWidgetLayout)
             && stored.soldierWidgetLayout.every((item: unknown) => typeof item === 'string')

@@ -90,7 +90,7 @@ export type MarkerState = 'absent' | 'active';
 /** Boolean-only payload: never warnings, storage paths or account content. */
 export function markRecoveryPending(userId: string): void {
   try {
-    localStorage.setItem(recoveryKeyFor(userId), 'true');
+    window.localStorage.setItem(recoveryKeyFor(userId), 'true');
   } catch (error) {
     // Losing the marker is a FAILURE, not a "fail-safe". It is mitigated only
     // by the server-authoritative `app_metadata.account_deletion_pending` flag.
@@ -108,9 +108,12 @@ export function markRecoveryPending(userId: string): void {
  * reintroduces the fail-open defect, so it is called out here explicitly: do
  * not add one.
  */
-export function readRecoveryMarker(userId: string): MarkerState {
+export function readRecoveryMarker(
+  userId: string,
+  storage: Pick<Storage, 'getItem'> = window.localStorage,
+): MarkerState {
   try {
-    return localStorage.getItem(recoveryKeyFor(userId)) === null ? 'absent' : 'active';
+    return storage.getItem(recoveryKeyFor(userId)) === null ? 'absent' : 'active';
   } catch (error) {
     // Storage unreadable. We cannot prove the marker is absent, so we do not
     // claim it is. Fail closed.
@@ -128,7 +131,7 @@ export function readRecoveryMarker(userId: string): MarkerState {
  */
 export function clearRecoveryMarker(userId: string): void {
   try {
-    localStorage.removeItem(recoveryKeyFor(userId));
+    window.localStorage.removeItem(recoveryKeyFor(userId));
   } catch (error) {
     console.error('[gomsinlog] recovery marker could not be cleared', error);
   }

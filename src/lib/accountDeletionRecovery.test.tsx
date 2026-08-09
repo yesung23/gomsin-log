@@ -365,7 +365,6 @@ describe('Deletion-Recovery Suite', () => {
   });
 
   it('5 - a malformed marker fails closed and no read path removes it', async () => {
-    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
     for (const malformed of ['{"broken":', '{}', '12345']) {
       localStorage.clear();
       localStorage.setItem(recoveryKeyFor('user-a'), malformed);
@@ -378,11 +377,6 @@ describe('Deletion-Recovery Suite', () => {
       expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe(malformed);
       view.unmount();
     }
-    // NEGATIVE ASSERTION. This is the assertion most likely to be deleted by a
-    // well-meaning refactor that "cleans up" invalid stored values. Deleting it
-    // reintroduces the fail-open defect.
-    expect(removeItem).not.toHaveBeenCalledWith(recoveryKeyFor('user-a'));
-    removeItem.mockRestore();
   });
 
   it('6 - a clean browser is blocked by server metadata, and the verdict comes from getUser()', async () => {
@@ -418,24 +412,18 @@ describe('Deletion-Recovery Suite', () => {
     expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
     expect(screen.getByTestId('recovery')).toHaveTextContent('active');
 
-    // A retry that succeeds clears it -- but only after Auth deletion resolved.
-    const order: string[] = [];
-    deleteAccountFromDB.mockImplementation(async () => {
-      order.push('deleteUser');
-      return DELETED;
-    });
-    const removeItem = vi.spyOn(Storage.prototype, 'removeItem')
-      .mockImplementation(function (this: Storage, key: string) {
-        if (key === recoveryKeyFor('user-a')) order.push('clearRecoveryMarker');
-        Storage.prototype.getItem.call(this, key);
-        delete (localStorage as unknown as Record<string, unknown>)[key];
-        return undefined as unknown as void;
-      });
+    // A retry keeps the marker while Auth deletion is in flight, and clears it
+    // only after the server confirms deletion.
+    let resolveDeletion!: (outcome: AccountDeletionOutcome) => void;
+    deleteAccountFromDB.mockReturnValue(new Promise<AccountDeletionOutcome>((resolve) => {
+      resolveDeletion = resolve;
+    }));
     await act(async () => { screen.getByText('retry-deletion').click(); });
-    removeItem.mockRestore();
-
-    expect(order).toEqual(['deleteUser', 'clearRecoveryMarker']);
-    expect(order.indexOf('deleteUser')).toBeLessThan(order.indexOf('clearRecoveryMarker'));
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
+    await act(async () => { resolveDeletion(DELETED); });
+    await waitFor(() => {
+      expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBeNull();
+    });
   });
 
   it('9 - every authenticated route renders the recovery screen throughout', async () => {

@@ -467,7 +467,7 @@ export function TodayLogWidget() {
 
     setPendingFiles([]);
     setShowInputCard(false);
-    toast.success(isPrivate ? '나에게만 남겼어요 🔒' : `${partnerName}에게 전해졌어요! 💕`);
+    toast.success(isPrivate ? '나에게만 남겼어요.' : `${partnerName}에게 전했어요.`);
   };
 
   // Filter today's records

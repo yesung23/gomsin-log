@@ -1,6 +1,6 @@
 name: Native release validation
 
-# Android + iOS release-candidate gate for the v1 overnight branch.
+# Android + iOS release-candidate gate for the production branch.
 #
 # This is a SEPARATE workflow from web-release-validation.yml on purpose. That one
 # triggers only on base `kiro/release-hardening-2026-07-31`, hard-asserts
@@ -13,15 +13,19 @@ name: Native release validation
 # step. Third-party actions are pinned by full commit SHA.
 
 on:
+  push:
+    branches:
+      - master
   pull_request:
     branches:
-      - kiro/complete-v1-overnight
+      - master
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: native-release-validation-${{ github.event.pull_request.number }}
+  group: native-release-validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -228,7 +232,12 @@ jobs:
 
       - name: No whitespace corruption in the diff this branch adds
         shell: bash
-        run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
+          else
+            git diff --check
+          fi
 
       - name: No build output, dependency cache or machine-local file is tracked
         shell: bash
@@ -544,25 +553,27 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Scan the PR history for secrets
+      - name: Scan the checked-out history for secrets
         uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Scan every commit this branch adds for signing material
+      - name: Scan every newly introduced commit for signing material
         shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
           # gitleaks looks for credential shapes. This looks for the store-specific
           # material that a mobile release is most likely to leak, in every tree
           # this branch introduces -- not just the tip.
           #
-          # Asserted rather than assumed: if BASE_SHA were empty or the range
-          # resolved to nothing, the loop below would read no commits and the job
-          # would pass while scanning nothing at all.
-          test -n "${BASE_SHA}"
+          # workflow_dispatch has no before/base SHA; inspect at least HEAD in
+          # that case. A branch's first push reports forty zeroes, which is not a
+          # valid object and receives the same safe fallback.
+          if [ -z "${BASE_SHA}" ] || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
           commits="$(git rev-list "${BASE_SHA}..HEAD" | wc -l | tr -d ' ')"
           test "${commits}" -gt 0
           echo "Scanning ${commits} commit(s) in ${BASE_SHA}..HEAD"

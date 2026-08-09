@@ -26,10 +26,20 @@ const CACHEABLE_DESTINATIONS = new Set([
 // accepting a partial cache installs a worker that promises offline support but
 // cannot provide it.
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)));
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then(() => self.skipWaiting()),
+  );
 });
 
-// A new worker activates only after the user accepts the update prompt.
+// Activate a new worker as soon as its app shell is completely cached.
+//
+// Authentication fixes must not wait for a person to notice an update toast:
+// an older installed shell can otherwise keep sending a query for a column that
+// the current API no longer has, even after the corrected site is deployed.
+// All JavaScript assets are content-hashed, so the next navigation receives a
+// matching index and bundle rather than a mixed release.
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });

@@ -174,6 +174,14 @@ describe('public/manifest.json declares the rasters, not the SVG', () => {
     expect(sw).not.toContain('icon-192.svg');
     expect(sw).not.toContain('icon-512.svg');
   });
+
+  it('activates a fully cached update without waiting for a toast interaction', () => {
+    const sw = readFileSync(resolve(process.cwd(), 'public/sw.js'), 'utf8');
+    // A stale PWA shell can keep an old API contract alive after deployment.
+    // Cache completion is the safe activation boundary: every app asset is
+    // content-hashed and the next navigation therefore loads one whole release.
+    expect(sw).toContain('.then(() => self.skipWaiting())');
+  });
 });
 
 describe('the Android adaptive icon has both layers', () => {

@@ -182,7 +182,7 @@ jobs:
           test -n "$(find dist/assets -name '*.woff2' -type f -print -quit)"
           echo 'Fonts are self-hosted and no forbidden CDN origin is referenced.'
 
-      - name: Verify the generated app assets are byte-identical to the committed ones
+      - name: Verify generated app-asset formats and pixels
         run: npm run verify:assets
 
   browser:

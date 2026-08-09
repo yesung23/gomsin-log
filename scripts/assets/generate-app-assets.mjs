@@ -1,5 +1,5 @@
 /**
- * Deterministic app-asset pipeline.
+ * Reproducible app-asset pipeline.
  *
  * ONE source of truth -- `public/favicon.svg` -- is rasterised into every raster
  * asset the two stores and the PWA need. Nothing here is hand-drawn, so the
@@ -69,6 +69,7 @@ const ANDROID_SPLASHES = [
 
 const checkOnly = process.argv.includes('--check');
 const written = [];
+let encodingOnlyDifferences = 0;
 
 /**
  * The mark on its own, with the backing plate removed.
@@ -144,6 +145,23 @@ const FORMAT_RULES = {
 
 const problems = [];
 
+/**
+ * Compare the image users and app stores actually receive, not zlib's byte
+ * stream. sharp uses platform-specific libvips/zlib builds; they can encode the
+ * exact same RGBA pixels into valid PNGs that differ by a handful of bytes.
+ */
+async function samePixelContent(first, second) {
+  const decode = (input) => sharp(input)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const [a, b] = await Promise.all([decode(first), decode(second)]);
+  return a.info.width === b.info.width
+    && a.info.height === b.info.height
+    && a.info.channels === b.info.channels
+    && a.data.equals(b.data);
+}
+
 async function emit(relativePath, buffer) {
   const absolute = resolve(repoRoot, relativePath);
   const digest = createHash('sha256').update(buffer).digest('hex').slice(0, 12);
@@ -164,8 +182,8 @@ async function emit(relativePath, buffer) {
   }
 
   if (checkOnly) {
-    // Compare against what is committed. The generator is deterministic, so any
-    // difference means the checked-in asset is stale or was hand-edited.
+    // Compare against what is committed. PNG compression itself is allowed to
+    // vary across platforms; dimensions, channel rules and decoded pixels are not.
     let onDisk;
     try {
       onDisk = await readFile(absolute);
@@ -174,10 +192,13 @@ async function emit(relativePath, buffer) {
       return;
     }
     if (!onDisk.equals(buffer)) {
-      problems.push(
-        `${relativePath}: stale (${onDisk.length} bytes on disk, ${buffer.length} regenerated);`
-        + ' run `npm run assets:generate`',
-      );
+      if (await samePixelContent(onDisk, buffer)) {
+        encodingOnlyDifferences += 1;
+      } else {
+        problems.push(
+          `${relativePath}: rendered pixels differ from ${SOURCE}; run \`npm run assets:generate\``,
+        );
+      }
     }
     return;
   }
@@ -299,7 +320,10 @@ async function main() {
   }
 
   console.log(
-    `${written.length} assets ${checkOnly ? 'verified byte-for-byte against' : 'generated from'} ${SOURCE}.`,
+    checkOnly
+      ? `${written.length} assets verified for format and pixel content against ${SOURCE}`
+        + ` (${encodingOnlyDifferences} platform encoding difference(s) accepted).`
+      : `${written.length} assets generated from ${SOURCE}.`,
   );
 }
 

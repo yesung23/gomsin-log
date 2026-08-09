@@ -78,12 +78,13 @@ VITE_SUPABASE_URL=https://example.supabase.co \
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_test_public_key_not_a_secret npm run build
 npx cap sync android
 npx cap sync ios
-node scripts/assets/generate-app-assets.mjs
+npm run verify:assets
 git status --porcelain   # must be empty
 ```
 
-`git status` being empty is the whole claim: sync and the asset generator write
-only ignored paths or byte-identical bytes. CI runs exactly this
+`git status` being empty is the native-sync claim. Asset 검증은 PNG 압축 바이트가 아니라
+크기·알파 형식·디코딩된 RGBA 픽셀을 비교합니다. 같은 픽셀도 macOS와 Linux의
+libvips/zlib 조합에 따라 PNG 압축 바이트가 달라질 수 있기 때문입니다. CI runs this
 (`native-release-validation.yml`, jobs `capacitor-sync-reproducibility` and
 `generated-file-cleanliness`).
 
@@ -286,10 +287,10 @@ code proves.
 
 `scripts/assets/generate-app-assets.mjs` rasterises one source —
 `public/favicon.svg` — into every raster asset the PWA and both stores need. It
-is deterministic: PNG encoder settings are fixed, so two runs produce
-byte-identical files (verified). `npm run assets:generate` writes them;
-`npm run verify:assets` re-derives them in memory and fails on any byte or
-format difference.
+uses fixed geometry and encoder settings. `npm run assets:generate` writes them;
+`npm run verify:assets` re-derives them in memory and fails on any dimension,
+alpha-channel or decoded-pixel difference. Platform-specific PNG compression
+differences are accepted because they do not alter the rendered asset.
 
 Format rules it enforces:
 

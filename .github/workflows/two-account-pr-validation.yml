@@ -133,7 +133,7 @@ jobs:
           grep -F 'https://example.supabase.co' dist/_headers
           grep -F 'wss://example.supabase.co' dist/_headers
 
-      - name: Verify the generated app assets are byte-identical to the committed ones
+      - name: Verify generated app-asset formats and pixels
         run: npm run verify:assets
 
   browser:
@@ -277,20 +277,20 @@ jobs:
           npx cap sync android
           npx cap sync ios
 
-      - name: Regenerate every raster asset from the single SVG source
-        run: npm run assets:generate
+      - name: Verify every raster asset against the single SVG source
+        run: npm run verify:assets
 
-      - name: The tracked tree must be unchanged by sync or by regeneration
+      - name: The tracked tree must be unchanged by native sync
         shell: bash
         run: |
           set -euo pipefail
           if [ -n "$(git status --porcelain)" ]; then
-            echo 'A clean checkout plus build + cap sync + assets:generate changed tracked files:' >&2
+            echo 'A clean checkout plus build + cap sync changed tracked files:' >&2
             git status --porcelain >&2
             git diff >&2
             exit 1
           fi
-          echo 'Clean: sync and asset regeneration reproduce the committed configuration exactly.'
+          echo 'Clean: native sync reproduces the committed configuration exactly.'
 
       - name: No build output, dependency cache or machine-local file is tracked
         shell: bash

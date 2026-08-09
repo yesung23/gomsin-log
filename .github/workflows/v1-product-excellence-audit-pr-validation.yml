@@ -139,7 +139,7 @@ jobs:
           grep -F 'https://example.supabase.co' dist/_headers
           grep -F 'wss://example.supabase.co' dist/_headers
 
-      - name: Verify the generated app assets are byte-identical to the committed ones
+      - name: Verify generated app-asset formats and pixels
         run: npm run verify:assets
 
   browser:

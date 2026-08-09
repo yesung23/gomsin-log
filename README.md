@@ -62,7 +62,7 @@ npm run cap:open          # Android Studio 열기
 npm run cap:open:ios      # Xcode 열기 (macOS)
 
 npm run verify:native     # 네이티브 설정 불변식 검사 (권한/딥링크/백업/개인정보)
-npm run verify:assets     # 아이콘·스플래시가 생성기 출력과 바이트 단위로 동일한지
+npm run verify:assets     # 아이콘·스플래시의 형식과 디코딩된 픽셀이 생성기 출력과 동일한지
 npm run assets:generate   # public/favicon.svg 에서 모든 래스터 자산 재생성
 ```
 

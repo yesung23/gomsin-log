@@ -29,7 +29,7 @@
  *
  * Usage:
  *   npm run assets:generate            # write assets
- *   npm run assets:generate -- --check # fail if any asset is missing/stale-sized
+ *   npm run assets:generate -- --check # verify source/generator + committed PNG fingerprints
  */
 
 import { createHash } from 'node:crypto';
@@ -39,6 +39,8 @@ import sharp from 'sharp';
 
 const repoRoot = resolve(import.meta.dirname, '..', '..');
 const SOURCE = 'public/favicon.svg';
+const GENERATOR = 'scripts/assets/generate-app-assets.mjs';
+const MANIFEST = 'scripts/assets/app-assets.manifest.json';
 
 /** Brand background. Must equal the `fill` of the backing <rect> in the source. */
 const BRAND_BACKGROUND = '#1B2340';
@@ -69,7 +71,6 @@ const ANDROID_SPLASHES = [
 
 const checkOnly = process.argv.includes('--check');
 const written = [];
-let encodingOnlyDifferences = 0;
 
 /**
  * The mark on its own, with the backing plate removed.
@@ -132,7 +133,8 @@ function pngHeader(buffer) {
 /**
  * Format rules the stores enforce, checked on the bytes rather than on intent.
  *
- * Keyed by output path; a path with no rule is only checked for byte equality.
+ * Keyed by output path. Every other output is still pinned by the generated
+ * manifest's dimensions, alpha flag and decoded-pixel fingerprint.
  */
 const FORMAT_RULES = {
   'public/icons/icon-192.png': { size: 192, alpha: true },
@@ -145,27 +147,127 @@ const FORMAT_RULES = {
 
 const problems = [];
 
-/**
- * Compare the image users and app stores actually receive, not zlib's byte
- * stream. sharp uses platform-specific libvips/zlib builds; they can encode the
- * exact same RGBA pixels into valid PNGs that differ by a handful of bytes.
- */
-async function samePixelContent(first, second) {
-  const decode = (input) => sharp(input)
+function sha256(input) {
+  return createHash('sha256').update(input).digest('hex');
+}
+
+async function pixelFingerprint(buffer) {
+  const { data, info } = await sharp(buffer)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const [a, b] = await Promise.all([decode(first), decode(second)]);
-  return a.info.width === b.info.width
-    && a.info.height === b.info.height
-    && a.info.channels === b.info.channels
-    && a.data.equals(b.data);
+  const dimensions = Buffer.from(`${info.width}x${info.height}x${info.channels}:`);
+  return sha256(Buffer.concat([dimensions, data]));
+}
+
+function expectedAssetPaths() {
+  return [
+    'public/icons/icon-192.png',
+    'public/icons/icon-512.png',
+    'public/icons/icon-maskable-512.png',
+    'public/icons/apple-touch-icon.png',
+    ...ANDROID_DENSITIES.flatMap((density) => {
+      const base = `android/app/src/main/res/mipmap-${density.dir}`;
+      return [
+        `${base}/ic_launcher.png`,
+        `${base}/ic_launcher_round.png`,
+        `${base}/ic_launcher_foreground.png`,
+      ];
+    }),
+    ...ANDROID_SPLASHES.map(
+      (splash) => `android/app/src/main/res/${splash.dir}/splash.png`,
+    ),
+    'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png',
+    ...['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png']
+      .map((name) => `ios/App/App/Assets.xcassets/Splash.imageset/${name}`),
+  ];
+}
+
+async function validateCommittedAssets(sourceBuffer) {
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(resolve(repoRoot, MANIFEST), 'utf8'));
+  } catch (error) {
+    problems.push(`${MANIFEST}: missing or invalid (${String(error)}); run \`npm run assets:generate\``);
+    return;
+  }
+
+  const generatorBuffer = await readFile(resolve(repoRoot, GENERATOR));
+  if (manifest.version !== 1) problems.push(`${MANIFEST}: unsupported manifest version`);
+  if (manifest.source?.path !== SOURCE || manifest.source?.sha256 !== sha256(sourceBuffer)) {
+    problems.push(`${SOURCE}: changed since the committed assets were generated`);
+  }
+  if (manifest.generator?.path !== GENERATOR || manifest.generator?.sha256 !== sha256(generatorBuffer)) {
+    problems.push(`${GENERATOR}: changed since the committed assets were generated`);
+  }
+
+  const expected = expectedAssetPaths();
+  const recorded = Object.keys(manifest.assets || {});
+  for (const extra of recorded.filter((path) => !expected.includes(path))) {
+    problems.push(`${MANIFEST}: unexpected asset entry ${extra}`);
+  }
+
+  for (const relativePath of expected) {
+    const record = manifest.assets?.[relativePath];
+    if (!record) {
+      problems.push(`${MANIFEST}: missing asset entry ${relativePath}`);
+      continue;
+    }
+
+    let onDisk;
+    try {
+      onDisk = await readFile(resolve(repoRoot, relativePath));
+    } catch {
+      problems.push(`${relativePath}: missing; run \`npm run assets:generate\``);
+      continue;
+    }
+
+    let header;
+    try {
+      header = pngHeader(onDisk);
+    } catch (error) {
+      problems.push(`${relativePath}: ${String(error)}`);
+      continue;
+    }
+    if (
+      header.width !== record.width
+      || header.height !== record.height
+      || header.hasAlpha !== record.hasAlpha
+    ) {
+      problems.push(`${relativePath}: PNG format differs from ${MANIFEST}`);
+    }
+    const rule = FORMAT_RULES[relativePath];
+    if (rule && (
+      header.width !== rule.size
+      || header.height !== rule.size
+      || header.hasAlpha !== rule.alpha
+    )) {
+      problems.push(`${relativePath}: store format rule is not satisfied`);
+    }
+    if (await pixelFingerprint(onDisk) !== record.pixelSha256) {
+      problems.push(`${relativePath}: decoded pixels differ from ${MANIFEST}`);
+    }
+    written.push({
+      path: relativePath,
+      bytes: onDisk.length,
+      sha256: sha256(onDisk).slice(0, 12),
+    });
+  }
 }
 
 async function emit(relativePath, buffer) {
   const absolute = resolve(repoRoot, relativePath);
-  const digest = createHash('sha256').update(buffer).digest('hex').slice(0, 12);
-  written.push({ path: relativePath, bytes: buffer.length, sha256: digest });
+  const digest = sha256(buffer).slice(0, 12);
+  const header = pngHeader(buffer);
+  written.push({
+    path: relativePath,
+    bytes: buffer.length,
+    sha256: digest,
+    width: header.width,
+    height: header.height,
+    hasAlpha: header.hasAlpha,
+    pixelSha256: await pixelFingerprint(buffer),
+  });
 
   const rule = FORMAT_RULES[relativePath];
   if (rule) {
@@ -179,28 +281,6 @@ async function emit(relativePath, buffer) {
         + (rule.alpha ? '' : ' (an alpha channel here is a store rejection)'),
       );
     }
-  }
-
-  if (checkOnly) {
-    // Compare against what is committed. PNG compression itself is allowed to
-    // vary across platforms; dimensions, channel rules and decoded pixels are not.
-    let onDisk;
-    try {
-      onDisk = await readFile(absolute);
-    } catch {
-      problems.push(`${relativePath}: missing; run \`npm run assets:generate\``);
-      return;
-    }
-    if (!onDisk.equals(buffer)) {
-      if (await samePixelContent(onDisk, buffer)) {
-        encodingOnlyDifferences += 1;
-      } else {
-        problems.push(
-          `${relativePath}: rendered pixels differ from ${SOURCE}; run \`npm run assets:generate\``,
-        );
-      }
-    }
-    return;
   }
 
   await mkdir(dirname(absolute), { recursive: true });
@@ -252,7 +332,12 @@ async function circular(source, size) {
 }
 
 async function main() {
-  const source = await readFile(resolve(repoRoot, SOURCE), 'utf8');
+  const sourceBuffer = await readFile(resolve(repoRoot, SOURCE));
+  const source = sourceBuffer.toString('utf8');
+
+  if (checkOnly) {
+    await validateCommittedAssets(sourceBuffer);
+  } else {
   const markSvg = markOnlySvg(source);
 
   // --- Web / PWA ---------------------------------------------------------
@@ -306,6 +391,7 @@ async function main() {
   for (const name of ['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png']) {
     await emit(`ios/App/App/Assets.xcassets/Splash.imageset/${name}`, iosSplash);
   }
+  }
 
   const label = checkOnly ? 'verified' : 'wrote';
   for (const entry of written) {
@@ -319,12 +405,25 @@ async function main() {
     return;
   }
 
-  console.log(
-    checkOnly
-      ? `${written.length} assets verified for format and pixel content against ${SOURCE}`
-        + ` (${encodingOnlyDifferences} platform encoding difference(s) accepted).`
-      : `${written.length} assets generated from ${SOURCE}.`,
-  );
+  if (!checkOnly) {
+    const generatorBuffer = await readFile(resolve(repoRoot, GENERATOR));
+    const assets = Object.fromEntries(written.map((entry) => [entry.path, {
+      width: entry.width,
+      height: entry.height,
+      hasAlpha: entry.hasAlpha,
+      pixelSha256: entry.pixelSha256,
+    }]));
+    await writeFile(resolve(repoRoot, MANIFEST), `${JSON.stringify({
+      version: 1,
+      source: { path: SOURCE, sha256: sha256(sourceBuffer) },
+      generator: { path: GENERATOR, sha256: sha256(generatorBuffer) },
+      assets,
+    }, null, 2)}\n`);
+  }
+
+  console.log(checkOnly
+    ? `${written.length} committed assets verified against ${MANIFEST}.`
+    : `${written.length} assets generated from ${SOURCE}; updated ${MANIFEST}.`);
 }
 
 await main();

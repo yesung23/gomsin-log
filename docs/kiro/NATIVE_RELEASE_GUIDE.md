@@ -82,9 +82,11 @@ npm run verify:assets
 git status --porcelain   # must be empty
 ```
 
-`git status` being empty is the native-sync claim. Asset 검증은 PNG 압축 바이트가 아니라
-크기·알파 형식·디코딩된 RGBA 픽셀을 비교합니다. 같은 픽셀도 macOS와 Linux의
-libvips/zlib 조합에 따라 PNG 압축 바이트가 달라질 수 있기 때문입니다. CI runs this
+`git status` being empty is the native-sync claim. Asset 검증은
+`scripts/assets/app-assets.manifest.json`에 기록된 SVG·생성기 해시와 각 PNG의
+크기·알파 형식·디코딩된 RGBA 픽셀 지문을 비교합니다. CI에서 SVG를 다시 렌더링하지
+않는 이유는 같은 SVG도 macOS와 Linux의 librsvg/libvips 조합에 따라 경계 픽셀이
+달라질 수 있기 때문입니다. CI runs this
 (`native-release-validation.yml`, jobs `capacitor-sync-reproducibility` and
 `generated-file-cleanliness`).
 
@@ -288,9 +290,10 @@ code proves.
 `scripts/assets/generate-app-assets.mjs` rasterises one source —
 `public/favicon.svg` — into every raster asset the PWA and both stores need. It
 uses fixed geometry and encoder settings. `npm run assets:generate` writes them;
-`npm run verify:assets` re-derives them in memory and fails on any dimension,
-alpha-channel or decoded-pixel difference. Platform-specific PNG compression
-differences are accepted because they do not alter the rendered asset.
+`npm run verify:assets` verifies the source SVG and generator revision, then fails
+on any committed PNG dimension, alpha-channel or decoded-pixel fingerprint
+difference. Platform-specific rasterizer and PNG compression differences cannot
+make CI disagree with a reviewed, committed asset.
 
 Format rules it enforces:
 

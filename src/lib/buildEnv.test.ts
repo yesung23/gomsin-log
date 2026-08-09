@@ -22,7 +22,16 @@ import {
 
 const VALID = {
   VITE_SUPABASE_URL: 'https://project.supabase.co',
-  VITE_SUPABASE_PUBLISHABLE_KEY: 'public-key',
+  /*
+   * A realistically-shaped anon JWT, not `'public-key'`.
+   *
+   * The validator now checks the SHAPE of the key, so a placeholder would fail here
+   * for the right reason and make every unrelated assertion in this file confusing.
+   * Payload decodes to `{"role":"anon","ref":"project"}`; the signature is filler
+   * because nothing verifies it.
+   */
+  VITE_SUPABASE_PUBLISHABLE_KEY:
+    'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiIsInJlZiI6InByb2plY3QifQ.sig',
 };
 
 describe('C3 - a misconfigured production build cannot produce an artifact', () => {
@@ -48,7 +57,9 @@ describe('C3 - a misconfigured production build cannot produce an artifact', () 
     // so a build that only sets it must keep working.
     expect(validateBuildEnvironment({
       VITE_SUPABASE_URL: VALID.VITE_SUPABASE_URL,
-      VITE_SUPABASE_ANON_KEY: 'anon-key',
+      // Shaped like a real key: the validator now checks the shape, so `'anon-key'`
+      // would fail here for a reason unrelated to the fallback being tested.
+      VITE_SUPABASE_ANON_KEY: VALID.VITE_SUPABASE_PUBLISHABLE_KEY,
     })).toEqual({
       origin: 'https://project.supabase.co',
       websocketOrigin: 'wss://project.supabase.co',
@@ -131,5 +142,73 @@ describe('C3 - a valid build emits a complete, marker-free CSP', () => {
   it('records why CSP moved back into _headers', () => {
     expect(headers).toMatch(/SUPERSEDES/);
     expect(headers).toMatch(/Still required from the operator/);
+  });
+});
+
+describe('the key is checked for shape, not just for presence', () => {
+  /*
+   * This exists because it already happened. Production shipped with the Postgres
+   * connection string in `VITE_SUPABASE_PUBLISHABLE_KEY`:
+   *
+   *   postgresql://postgres:[YOUR-PASSWORD]@db.<ref>.supabase.co:5432/postgres
+   *
+   * The build passed -- the old check was only `if (!key)` -- and every request then
+   * sent that string as `apikey`. GoTrue answered 401 Invalid API key, which reached
+   * the user as "로그인 처리에 실패했습니다", indistinguishable from a genuine auth
+   * failure. The two values sit next to each other in the Supabase dashboard.
+   */
+  it('rejects a Postgres connection string and says which value was wanted', () => {
+    const run = () => validateBuildEnvironment({
+      ...VALID,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'postgresql://postgres:[YOUR-PASSWORD]@db.project.supabase.co:5432/postgres',
+    });
+    expect(run).toThrow(BuildEnvironmentError);
+    // The message has to name the fix, since the person reading it just pasted the
+    // wrong field and needs to know which one is right.
+    expect(run).toThrow(/anon public/);
+    expect(run).toThrow(/eyJ/);
+  });
+
+  it('rejects a placeholder that is merely non-empty', () => {
+    for (const key of ['eyJ...', 'public-key', 'your-anon-key', 'TODO']) {
+      expect(
+        () => validateBuildEnvironment({ ...VALID, VITE_SUPABASE_PUBLISHABLE_KEY: key }),
+        key,
+      ).toThrow(BuildEnvironmentError);
+    }
+  });
+
+  it('refuses a service_role key outright, because that would be a data breach', () => {
+    /*
+     * Every `VITE_` value is inlined into the browser bundle and service_role bypasses
+     * every RLS policy, so shipping one exposes all user data to anyone who opens the
+     * app. The role claim is readable without verifying the signature, so this is the
+     * cheapest possible place to stop it.
+     */
+    const payload = Buffer.from(JSON.stringify({ role: 'service_role', ref: 'project' })).toString('base64url');
+    const run = () => validateBuildEnvironment({
+      ...VALID,
+      VITE_SUPABASE_PUBLISHABLE_KEY: `eyJhbGciOiJIUzI1NiJ9.${payload}.sig`,
+    });
+    expect(run).toThrow(BuildEnvironmentError);
+    expect(run).toThrow(/service_role/);
+    expect(run).toThrow(/rotate/);
+  });
+
+  it('accepts both key formats Supabase issues', () => {
+    // Legacy anon JWT.
+    expect(() => validateBuildEnvironment(VALID)).not.toThrow();
+    // Newer publishable format, which is not a JWT at all.
+    expect(() => validateBuildEnvironment({
+      ...VALID,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_abc123DEF456',
+    })).not.toThrow();
+  });
+
+  it('still accepts the ANON_KEY variable name, which src/lib/supabase.ts reads too', () => {
+    expect(() => validateBuildEnvironment({
+      VITE_SUPABASE_URL: VALID.VITE_SUPABASE_URL,
+      VITE_SUPABASE_ANON_KEY: VALID.VITE_SUPABASE_PUBLISHABLE_KEY,
+    })).not.toThrow();
   });
 });

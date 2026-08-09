@@ -48,6 +48,80 @@ export function validateBuildEnvironment(env: BuildEnvironment): ValidatedBuildE
     fail('VITE_SUPABASE_PUBLISHABLE_KEY is missing or empty (VITE_SUPABASE_ANON_KEY is also accepted).');
   }
 
+  /*
+   * The key must LOOK like a key. Emptiness was the only thing checked here, and a
+   * production deployment shipped for hours with the Postgres connection string in
+   * this variable instead of the anon JWT:
+   *
+   *   postgresql://postgres:[YOUR-PASSWORD]@db.<ref>.supabase.co:5432/postgres
+   *
+   * The build passed, the bundle was emitted, every request then sent that string as
+   * `apikey`, and GoTrue answered 401 Invalid API key -- surfacing to the user as
+   * "로그인 처리에 실패했습니다" with nothing to distinguish it from a wrong password.
+   * The two values sit next to each other in the Supabase dashboard, so this is a
+   * copy-paste away at any time.
+   *
+   * Rejecting a connection string explicitly, rather than only accepting `eyJ`,
+   * because the failure deserves a message that names what went wrong. Supabase also
+   * issues newer `sb_publishable_...` keys, so both shapes are allowed.
+   */
+  if (key.startsWith('postgres://') || key.startsWith('postgresql://')) {
+    fail(
+      'VITE_SUPABASE_PUBLISHABLE_KEY holds a Postgres connection string, not an API key. '
+      + 'Copy the `anon public` key from Settings -> API (it starts with `eyJ`), not the '
+      + 'database URI. A connection string here makes every request fail with '
+      + '401 Invalid API key.',
+    );
+  }
+  const looksLikeJwt = key.startsWith('eyJ') && key.split('.').length === 3;
+  const looksLikePublishable = key.startsWith('sb_publishable_');
+  if (!looksLikeJwt && !looksLikePublishable) {
+    fail(
+      'VITE_SUPABASE_PUBLISHABLE_KEY does not look like a Supabase API key. Expected a '
+      + 'JWT beginning `eyJ` with three dot-separated parts, or a key beginning '
+      + `\`sb_publishable_\`. Got ${key.length} characters starting "${key.slice(0, 12)}".`,
+    );
+  }
+  /*
+   * A service_role key here would be a data breach, not a misconfiguration: every
+   * `VITE_` value is inlined into the browser bundle, and that key bypasses RLS. The
+   * role claim is readable without verifying the signature, so this is cheap to check
+   * and the only place it can be caught before shipping.
+   */
+  if (looksLikeJwt) {
+    let role: string | undefined;
+    try {
+      /*
+       * `atob` rather than `Buffer`: this module is imported by `vite.config.ts` AND
+       * by a jsdom test, and `Buffer` is not guaranteed in the second. The first
+       * attempt used it and the service_role check silently fell into the catch
+       * below -- the guard looked present and enforced nothing.
+       *
+       * base64url differs from base64 in two characters and drops padding, so both
+       * are normalised before decoding.
+       */
+      const segment = key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = segment.padEnd(Math.ceil(segment.length / 4) * 4, '=');
+      role = (JSON.parse(atob(padded)) as { role?: string }).role;
+    } catch {
+      // An unparseable payload is caught by the shape check above; nothing to add.
+    }
+    /*
+     * The `fail()` call is OUTSIDE the try on purpose. It throws, and the first
+     * version put it inside -- where the catch swallowed it, so a service_role key
+     * passed validation while the guard appeared to be present. Decoding and deciding
+     * are separate steps for exactly that reason.
+     */
+    if (role === 'service_role') {
+      fail(
+        'VITE_SUPABASE_PUBLISHABLE_KEY is a service_role key. It bypasses every RLS '
+        + 'policy and every VITE_ value is inlined into the browser bundle, so shipping '
+        + 'it would expose all user data to anyone who opens the app. Use the `anon '
+        + 'public` key and rotate this one now.',
+      );
+    }
+  }
+
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);

@@ -342,6 +342,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const [authSyncReason, setAuthSyncReason] = useState<ServerErrorKind | null>(null);
   const [authSyncStage, setAuthSyncStage] = useState<AuthSyncStage | null>(null);
+  const [authSyncCode, setAuthSyncCode] = useState<string | null>(null);
   /**
    * Server-authoritative couple lifecycle, starting at `unknown` because nothing
    * has been asked yet. It is never initialised to `personal`: that would render
@@ -869,6 +870,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setAuthSyncUnavailable(false);
         setAuthSyncReason(null);
         setAuthSyncStage(null);
+        setAuthSyncCode(null);
         hydratedUserIdRef.current = null;
         // The couple lifecycle and the invitation expiry belong to the account
         // that is leaving. Nobody has asked the question for the incoming
@@ -1030,6 +1032,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               return previous === 'auth_expired' ? previous : hydration.reason;
             });
             setAuthSyncStage(hydration.ok ? null : hydration.stage);
+            setAuthSyncCode(hydration.ok ? null : hydration.code ?? null);
             if (syncUnavailable) {
               // A failed hydration answers nothing about the couple space, so the
               // lifecycle must go to `unknown` -- never to `personal`.
@@ -3212,6 +3215,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         authSyncUnavailable,
         authSyncReason,
         authSyncStage,
+        authSyncCode,
         sharedSyncStatus,
         coupleLifecycle,
         invitationExpiresAt,

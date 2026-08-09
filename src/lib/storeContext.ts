@@ -80,6 +80,8 @@ export interface StoreContextType {
   authSyncReason: ServerErrorKind | null;
   /** Safe support code identifying which account read failed. */
   authSyncStage: AuthSyncStage | null;
+  /** Sanitized PostgREST/PostgreSQL code; never a raw server message. */
+  authSyncCode: string | null;
   sharedSyncStatus: SharedSyncStatus;
   /**
    * Server-authoritative couple lifecycle.

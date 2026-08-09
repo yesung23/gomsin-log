@@ -136,9 +136,11 @@ const AUTH_STAGE_CODES: Record<AuthSyncStage, string> = {
 function AuthSyncUnavailable({
   reason,
   stage,
+  code,
 }: {
   reason: ServerErrorKind | null;
   stage: AuthSyncStage | null;
+  code: string | null;
 }) {
   const { signOut } = useStore();
   const [busy, setBusy] = useState(false);
@@ -164,6 +166,7 @@ function AuthSyncUnavailable({
         {stage && (
           <p className="text-caption text-muted-foreground" aria-label="오류 진단 코드">
             진단 코드: {AUTH_STAGE_CODES[stage]}-{(reason || 'UNKNOWN').toUpperCase()}
+            {code ? `-${code}` : ''}
           </p>
         )}
         <button
@@ -196,6 +199,7 @@ export function App() {
     authSyncUnavailable,
     authSyncReason,
     authSyncStage,
+    authSyncCode,
     accountDeletionRecovery,
   } = useStore();
 
@@ -230,7 +234,13 @@ export function App() {
           <Route path="/legal/:doc" element={<LegalPage />} />
           <Route
             path="*"
-            element={<AuthSyncUnavailable reason={authSyncReason} stage={authSyncStage} />}
+            element={(
+              <AuthSyncUnavailable
+                reason={authSyncReason}
+                stage={authSyncStage}
+                code={authSyncCode}
+              />
+            )}
           />
         </Routes>
       </Suspense>

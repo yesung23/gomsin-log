@@ -216,7 +216,7 @@ describe('fetchFullStateFromDB', () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('Expected an unavailable result');
-    expect(result).toMatchObject({ reason: 'server', stage: 'contact' });
+    expect(result).toMatchObject({ reason: 'server', stage: 'contact', code: '42703' });
   });
 
   it('returns unavailable when the membership lookup throws', async () => {

@@ -32,7 +32,7 @@ export type AuthSyncStage =
  */
 export type FullStateResult =
   | { ok: true; state: Partial<AppState> | null }
-  | { ok: false; reason: ServerErrorKind; stage: AuthSyncStage };
+  | { ok: false; reason: ServerErrorKind; stage: AuthSyncStage; code?: string };
 
 /**
  * Preserve the failing read without exposing database details to the UI.
@@ -49,7 +49,10 @@ function syncFailure(stage: AuthSyncStage, error: unknown): FullStateResult {
     code: typeof record?.code === 'string' ? record.code : undefined,
     message: typeof record?.message === 'string' ? record.message : undefined,
   });
-  return { ok: false, reason, stage };
+  const code = typeof record?.code === 'string' && /^[A-Z0-9_]{1,24}$/i.test(record.code)
+    ? record.code.toUpperCase()
+    : undefined;
+  return { ok: false, reason, stage, ...(code ? { code } : {}) };
 }
 
 /**
@@ -77,7 +80,7 @@ function syncFailure(stage: AuthSyncStage, error: unknown): FullStateResult {
  */
 type ResumableMembershipResult =
   | { ok: true; state: Partial<AppState> | null }
-  | { ok: false; reason: ServerErrorKind; stage: 'membership' };
+  | { ok: false; reason: ServerErrorKind; stage: 'membership'; code?: string };
 
 async function fetchResumableMembership(
   userId: string,

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +18,8 @@ const parentRequests: Array<{ id: string; request: ReturnType<typeof deferred<Tr
 const itemRequests: Array<{ id: string; request: ReturnType<typeof deferred<TripItemsFetchResult>> }> = [];
 const checklistRequests: Array<{ id: string; request: ReturnType<typeof deferred<TripChecklistsFetchResult>> }> = [];
 const deleteRequests: Array<{ id: string; request: ReturnType<typeof deferred<boolean>> }> = [];
+const saveTripItemMock = vi.fn();
+const recognizePlaceScreenshotMock = vi.fn();
 const storeState = {
   authenticatedUser: { id: 'user-a', provider: 'google' },
   profile: {
@@ -58,6 +60,14 @@ vi.mock('@/lib/trips', async (importOriginal) => {
       deleteRequests.push({ id, request });
       return request.promise;
     },
+    saveTripItemToDB: (...args: unknown[]) => saveTripItemMock(...args),
+  };
+});
+vi.mock('@/lib/placeOcr', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/placeOcr')>();
+  return {
+    ...actual,
+    recognizePlaceScreenshot: (...args: unknown[]) => recognizePlaceScreenshotMock(...args),
   };
 });
 
@@ -91,7 +101,11 @@ function trip(id: string, title: string, date: string) {
 }
 
 describe('TripDetailPage route request isolation', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    saveTripItemMock.mockReset();
+    recognizePlaceScreenshotMock.mockReset();
+  });
   it('ignores late child responses from the previous trip route', async () => {
     parentRequests.length = 0;
     itemRequests.length = 0;
@@ -209,5 +223,60 @@ describe('TripDetailPage route request isolation', () => {
 
     await act(async () => deleteRequests.find((entry) => entry.id === 'trip-a')!.request.resolve(true));
     expect(screen.getByTestId('location')).toHaveTextContent('/trips/trip-b');
+  });
+
+  it('adds a place from one screenshot and opens the saved row for correction', async () => {
+    parentRequests.length = 0;
+    itemRequests.length = 0;
+    checklistRequests.length = 0;
+    deleteRequests.length = 0;
+    recognizePlaceScreenshotMock.mockResolvedValue({
+      title: '연남토마',
+      address: '서울 마포구 연남로 42',
+      businessHours: '매일 11:30 - 21:00',
+      rawText: '연남토마 카페 서울 마포구 연남로 42',
+    });
+    saveTripItemMock.mockResolvedValue({
+      id: 'item-photo',
+      tripId: 'trip-a',
+      itemDate: '2026-08-01',
+      title: '연남토마',
+      address: '서울 마포구 연남로 42',
+      businessHours: '매일 11:30 - 21:00',
+      category: 'food',
+      source: 'screenshot',
+      sortOrder: 0,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/trips/trip-a']}>
+        <Harness />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(parentRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => parentRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({
+      ok: true,
+      trip: trip('trip-a', 'A trip', '2026-08-01'),
+    }));
+    await waitFor(() => expect(itemRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => {
+      itemRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, items: [] });
+      checklistRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, checklists: [] });
+    });
+
+    expect(await screen.findByRole('button', { name: '사진으로 바로 추가' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('지도 캡처 선택'), {
+      target: { files: [new File(['map'], 'map.png', { type: 'image/png' })] },
+    });
+
+    const savedRow = await screen.findByRole('button', { name: '연남토마 일정 수정' });
+    expect(saveTripItemMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: '연남토마',
+      category: 'food',
+      source: 'screenshot',
+    }));
+    fireEvent.click(savedRow);
+    expect(screen.getByRole('heading', { name: '일정 수정' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('연남토마')).toBeInTheDocument();
   });
 });

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckCircle2, Circle, ExternalLink, LoaderCircle,
-  ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, Plus, RefreshCw, ShieldAlert, Trash2, Unlink,
+  ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, RefreshCw, ShieldAlert, Trash2, Unlink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
@@ -13,7 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ListRow, RowGroup } from '@/components/ui/List';
 import { supabase } from '@/lib/supabase';
 import { classifyServerError } from '@/lib/serverErrors';
-import { recognizePlaceScreenshot } from '@/lib/placeOcr';
+import { inferPlaceCategory, recognizePlaceScreenshot } from '@/lib/placeOcr';
 import {
   deleteTripChecklistFromDB,
   deleteTripFromDB,
@@ -117,6 +117,7 @@ export function TripDetailPage() {
   const [isReadingScreenshot, setIsReadingScreenshot] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
+  const quickScreenshotInputRef = useRef<HTMLInputElement>(null);
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(new Set());
   const [newChecklistName, setNewChecklistName] = useState('');
   const [isAddingChecklist, setIsAddingChecklist] = useState(false);
@@ -329,10 +330,94 @@ export function TripDetailPage() {
     setShowItemModal(true);
   };
 
+  const validateScreenshot = (file?: File): string | null => {
+    if (!file) return '사진을 선택해 주세요.';
+    if (!file.type.startsWith('image/')) return '이미지 파일만 선택할 수 있어요.';
+    if (file.size > 12 * 1024 * 1024) return '지도 캡처는 12MB 이하로 선택해 주세요.';
+    return null;
+  };
+
+  const openFallbackEditor = (draft: ItemDraft, message: string) => {
+    setEditingItemId(null);
+    setItemDraft(draft);
+    setItemError(message);
+    setShowItemModal(true);
+  };
+
+  /**
+   * The primary trip-planning path: choose one capture, OCR locally, save the
+   * extracted place immediately. The screenshot itself never leaves the device.
+   * If recognition or the write is incomplete, preserve everything we did read
+   * and fall back to the normal editor instead of making the user start over.
+   */
+  const handleQuickPlaceScreenshot = async (file?: File) => {
+    const validationError = validateScreenshot(file);
+    if (validationError) {
+      if (file) toast.error(validationError);
+      return;
+    }
+    if (!file || !trip || !activeDate || isReadingScreenshot || isSavingItem) return;
+    if (isOffline) { toast.error(OFFLINE_READONLY_MESSAGE); return; }
+
+    const operationScope = captureTripScope();
+    setIsReadingScreenshot(true);
+    setOcrProgress(0);
+    setItemError(null);
+    try {
+      const place = await recognizePlaceScreenshot(file, setOcrProgress);
+      if (!isCurrentTripScope(operationScope)) return;
+      const draft: ItemDraft = {
+        ...EMPTY_ITEM,
+        title: place.title,
+        address: place.address,
+        businessHours: place.businessHours,
+        category: inferPlaceCategory(place.rawText),
+        source: 'screenshot',
+      };
+      if (!place.title) {
+        openFallbackEditor(draft, '장소 이름을 충분히 읽지 못했어요. 이름만 확인해 주세요.');
+        return;
+      }
+
+      setIsSavingItem(true);
+      const saved = await saveTripItemToDB({
+        tripId: trip.id,
+        itemDate: activeDate,
+        title: place.title,
+        category: draft.category,
+        address: place.address || undefined,
+        businessHours: place.businessHours || undefined,
+        source: 'screenshot',
+        sortOrder: currentDayItems.length,
+      });
+      if (!isCurrentTripScope(operationScope)) return;
+      if (!saved) {
+        openFallbackEditor(draft, '자동 저장하지 못했어요. 내용을 확인하고 저장을 눌러 주세요.');
+        return;
+      }
+      setItems((current) => [...current, saved]);
+      toast.success(`${saved.title}을(를) 추가했어요. 틀리면 카드를 눌러 고쳐 주세요.`);
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      console.error('Failed to quick-add place screenshot:', error);
+      openFallbackEditor(
+        { ...EMPTY_ITEM, source: 'screenshot' },
+        '사진을 읽지 못했어요. 장소 이름만 입력하면 바로 추가할 수 있어요.',
+      );
+    } finally {
+      if (isCurrentTripScope(operationScope)) {
+        setIsReadingScreenshot(false);
+        setIsSavingItem(false);
+        setOcrProgress(0);
+      }
+      if (quickScreenshotInputRef.current) quickScreenshotInputRef.current.value = '';
+    }
+  };
+
   const handlePlaceScreenshot = async (file?: File) => {
     if (!file || isReadingScreenshot) return;
-    if (!file.type.startsWith('image/')) { setItemError('이미지 파일만 올릴 수 있어요.'); return; }
-    if (file.size > 12 * 1024 * 1024) { setItemError('지도 캡처는 12MB 이하로 올려 주세요.'); return; }
+    const validationError = validateScreenshot(file);
+    if (validationError) { setItemError(validationError); return; }
     setIsReadingScreenshot(true);
     setOcrProgress(0);
     setItemError(null);
@@ -603,10 +688,35 @@ export function TripDetailPage() {
             </div>
 
             <div className="px-4 pt-4 pb-2">
+              <input
+                ref={quickScreenshotInputRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                aria-label="지도 캡처 선택"
+                onChange={(event) => void handleQuickPlaceScreenshot(event.target.files?.[0])}
+              />
               {currentDayItems.length === 0 ? (
                 <EmptyState
                   icon={<MapPin size={18} className="text-muted-foreground" />}
-                  title="직접 장소나 할 일을 추가해 보세요."
+                  title="캡처 한 장이면 일정이 만들어져요"
+                  description="지도 화면을 선택하면 장소를 읽어 바로 추가해요. 사진은 이 기기에서만 처리합니다."
+                  action={(
+                    <div className="flex flex-col items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => quickScreenshotInputRef.current?.click()}
+                        disabled={isReadingScreenshot || isSavingItem || isOffline}
+                      >
+                        <ImagePlus size={14} />
+                        {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진으로 바로 추가'}
+                      </Button>
+                      <button type="button" onClick={openNewItem} disabled={isOffline} className="min-h-11 px-3 text-caption font-medium text-muted-foreground disabled:opacity-40">
+                        직접 입력하기
+                      </button>
+                    </div>
+                  )}
                 />
               ) : (
                 <>
@@ -633,18 +743,19 @@ export function TripDetailPage() {
                             </div>
                           }
                         >
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-label font-semibold text-foreground break-keep">{item.title}</span>
-                            {categoryLabel && <Badge tone="neutral">{categoryLabel}</Badge>}
-                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="링크 열기" className="min-w-11 min-h-11 inline-flex items-center justify-center -my-2"><ExternalLink size={12} className="text-info" /></a>}
-                          </div>
-                          {item.address && <p className="text-caption text-muted-foreground mt-0.5 break-keep"><MapPin size={10} className="inline mr-0.5" />{item.address}</p>}
-                          {item.businessHours && <p className="text-caption text-muted-foreground mt-0.5 break-keep">영업 {item.businessHours}</p>}
-                          {item.talkAbout && <span className="inline-flex items-center gap-1 text-caption font-medium text-coral-strong mt-0.5"><MessageCircleHeart size={10} />꼭 얘기</span>}
-                          {item.source === 'screenshot' && <Badge tone="warning" className="mt-0.5">OCR · 확인 필요</Badge>}
+                          <button type="button" onClick={() => openEditItem(item)} disabled={pending || isOffline} className="w-full text-left rounded-control min-h-11 disabled:opacity-50" aria-label={`${item.title} 일정 수정`}>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-label font-semibold text-foreground break-keep">{item.title}</span>
+                              {categoryLabel && <Badge tone="neutral">{categoryLabel}</Badge>}
+                            </div>
+                            {item.address && <p className="text-caption text-muted-foreground mt-0.5 break-keep"><MapPin size={10} className="inline mr-0.5" />{item.address}</p>}
+                            {item.businessHours && <p className="text-caption text-muted-foreground mt-0.5 break-keep">영업 {item.businessHours}</p>}
+                            {item.talkAbout && <span className="inline-flex items-center gap-1 text-caption font-medium text-coral-strong mt-0.5"><MessageCircleHeart size={10} />꼭 얘기</span>}
+                            {item.source === 'screenshot' && <Badge tone="warning" className="mt-0.5">사진에서 자동 추가 · 눌러서 수정</Badge>}
+                          </button>
                           <div className="flex items-center gap-1 mt-1">
-                            <button type="button" onClick={() => openEditItem(item)} disabled={pending || isOffline} className="min-w-11 min-h-11 flex items-center justify-center -ml-3 text-muted-foreground disabled:opacity-25" aria-label="일정 수정"><Pencil size={12} /></button>
                             <button type="button" onClick={() => void handleDeleteItem(item.id)} disabled={pending || isOffline} className="min-w-11 min-h-11 flex items-center justify-center text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 size={12} /></button>
+                            {item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="저장된 링크 열기" className="min-w-11 min-h-11 inline-flex items-center justify-center text-info"><ExternalLink size={12} /></a>}
                             {mapQuery && <a href={`https://map.naver.com/p/search/${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer" className="ml-auto text-caption font-medium text-foreground bg-success-surface px-2 py-1 rounded-full min-h-[28px] flex items-center">네이버 지도</a>}
                           </div>
                         </ListRow>
@@ -655,15 +766,24 @@ export function TripDetailPage() {
               )}
             </div>
 
-            {/* FAB for adding a place */}
-            <button
-              type="button"
-              onClick={openNewItem}
-              className="fixed bottom-20 right-4 w-12 h-12 bg-info text-coral-strong-foreground rounded-full flex items-center justify-center z-40"
-              aria-label="일정 추가"
-            >
-              <Plus size={22} />
-            </button>
+            {currentDayItems.length > 0 && (
+              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 w-full max-w-[430px] px-4 flex gap-2 pointer-events-none">
+                <Button
+                  size="md"
+                  variant="primary"
+                  full
+                  className="pointer-events-auto"
+                  onClick={() => quickScreenshotInputRef.current?.click()}
+                  disabled={isReadingScreenshot || isSavingItem || isOffline}
+                >
+                  <ImagePlus size={16} />
+                  {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진으로 일정 추가'}
+                </Button>
+                <button type="button" onClick={openNewItem} disabled={isOffline} className="pointer-events-auto w-12 h-12 shrink-0 bg-card border border-border text-foreground rounded-control flex items-center justify-center disabled:opacity-40" aria-label="직접 일정 입력">
+                  <PenTool size={17} />
+                </button>
+              </div>
+            )}
           </>
         ) : (
           /* Checklist tab */

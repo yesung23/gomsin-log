@@ -113,6 +113,8 @@ export function OnboardingPage() {
 
   // Form State
   const [emailInput, setEmailInput] = useState('');
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [isStartingSocialLogin, setIsStartingSocialLogin] = useState(false);
   const socialLoginInFlightRef = useRef(false);
@@ -164,6 +166,13 @@ export function OnboardingPage() {
   const [weekendStart, setWeekendStart] = useState('12:00');
   const [weekendEnd, setWeekendEnd] = useState('21:00');
 
+  const legalGatePassed = ageConfirmed && legalAccepted;
+  const requireLegalGate = () => {
+    if (legalGatePassed) return true;
+    toast.error(!ageConfirmed ? '만 14세 이상인지 확인해 주세요.' : '이용약관과 개인정보 처리방침에 동의해 주세요.');
+    return false;
+  };
+
   useLayoutEffect(() => {
     instanceActiveRef.current = true;
     return () => {
@@ -213,6 +222,7 @@ export function OnboardingPage() {
 
   // Handle Google OAuth Login
   const handleGoogleLogin = async () => {
+    if (!requireLegalGate()) return;
     if (socialLoginInFlightRef.current) return;
     socialLoginInFlightRef.current = true;
     setIsStartingSocialLogin(true);
@@ -227,6 +237,7 @@ export function OnboardingPage() {
 
   // Handle Apple OAuth Login
   const handleAppleLogin = async () => {
+    if (!requireLegalGate()) return;
     if (socialLoginInFlightRef.current) return;
     socialLoginInFlightRef.current = true;
     setIsStartingSocialLogin(true);
@@ -780,6 +791,7 @@ export function OnboardingPage() {
                     <button
                       onClick={async () => {
                       if (!emailInput.includes('@')) return toast.error('유효한 이메일을 입력하세요.');
+                      if (!requireLegalGate()) return;
                       setIsSendingEmail(true);
                       try {
                         const res = await authRepository.signInWithEmail(emailInput);
@@ -803,9 +815,22 @@ export function OnboardingPage() {
                   </p>
                 )}
 
-                <p className="text-caption text-muted-foreground text-center pt-2">
-                  계속하면 서비스 이용약관 및 개인정보 처리방침에 동의하는 것으로 봅니다.
-                </p>
+                <div className="rounded-control border border-border bg-muted/40 p-3 space-y-2">
+                  <label className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
+                    <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-1 accent-coral" />
+                    <span><strong>[필수]</strong> 만 14세 이상입니다.</span>
+                  </label>
+                  <label className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
+                    <input type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} className="mt-1 accent-coral" />
+                    <span>
+                      <strong>[필수]</strong>{' '}
+                      <a href="/legal/terms" target="_blank" rel="noreferrer" className="underline underline-offset-2">서비스 이용약관</a>
+                      {' 및 '}
+                      <a href="/legal/privacy" target="_blank" rel="noreferrer" className="underline underline-offset-2">개인정보 처리방침</a>
+                      을 확인하고 동의합니다.
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
           )}

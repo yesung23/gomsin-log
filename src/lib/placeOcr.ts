@@ -5,9 +5,30 @@ export interface ExtractedPlace {
   rawText: string;
 }
 
+export type InferredPlaceCategory = 'activity' | 'food' | 'lodging' | 'transport';
+
 const UI_NOISE = /^(네이버\s*지도|네이버|지도|저장\s*공유|저장|공유|출발|도착|거리뷰|리뷰|사진|메뉴|홈|검색|길찾기)$/;
 const ADDRESS_HINT = /(특별시|광역시|특별자치|[가-힣]+[도시군구읍면동])\s|([가-힣0-9]+(로|길)\s*\d)/;
 const HOURS_HINT = /(영업|운영|매일|휴무|라스트\s*오더|브레이크|\d{1,2}:\d{2}\s*[~-]\s*\d{1,2}:\d{2})/i;
+
+/**
+ * Pick a useful default without pretending OCR can make a perfect decision.
+ * The result is deliberately conservative: a wrong guess is harmless because
+ * the newly-created itinerary row opens the ordinary editor when tapped.
+ */
+export function inferPlaceCategory(text: string): InferredPlaceCategory {
+  const normalized = text.replace(/\s+/g, ' ').toLowerCase();
+  if (/(호텔|모텔|펜션|리조트|게스트하우스|호스텔|숙박|숙소|hotel|resort|hostel)/.test(normalized)) {
+    return 'lodging';
+  }
+  if (/(공항|버스터미널|여객터미널|기차역|지하철역|환승센터|주차장|렌터카|렌트카|ktx|srt)/.test(normalized)) {
+    return 'transport';
+  }
+  if (/(음식점|식당|맛집|카페|커피|베이커리|디저트|브런치|레스토랑|메뉴|restaurant|cafe|bakery)/.test(normalized)) {
+    return 'food';
+  }
+  return 'activity';
+}
 
 export function extractPlaceFromOcr(text: string): ExtractedPlace {
   const lines = text.split(/\r?\n/)

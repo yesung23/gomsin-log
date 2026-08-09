@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractPlaceFromOcr } from '@/lib/placeOcr';
+import { extractPlaceFromOcr, inferPlaceCategory } from '@/lib/placeOcr';
 
 describe('extractPlaceFromOcr', () => {
   it('extracts a place name, Korean address and business hours from a map capture', () => {
@@ -21,5 +21,12 @@ describe('extractPlaceFromOcr', () => {
     expect(extractPlaceFromOcr('지도\n저장\n공유')).toEqual({
       title: '', address: '', businessHours: '', rawText: '지도\n저장\n공유',
     });
+  });
+
+  it('infers a useful category while keeping unknown places as activities', () => {
+    expect(inferPlaceCategory('연남동 카페 메뉴')).toBe('food');
+    expect(inferPlaceCategory('인천공항 제1여객터미널')).toBe('transport');
+    expect(inferPlaceCategory('오션뷰 호텔 체크인')).toBe('lodging');
+    expect(inferPlaceCategory('서울숲')).toBe('activity');
   });
 });

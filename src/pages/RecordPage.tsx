@@ -742,34 +742,75 @@ export function RecordPage() {
                       time = w-11 (44px), gap = 8px, media = 68px (76px @360+)
                       left offset for media = 44 + 8 = 52px → left-[52px]
                   */}
-                  <div className="flex pl-2.5">
+                  {/*
+                    Row layout: time and marker are a fixed left rail, then media and
+                    prose stack in the remaining width. Everything is in normal flow,
+                    so the row's height is whatever its content needs -- a text-only
+                    record is short, one with a photo or three lines of prose is taller.
+
+                    Replaces an absolutely-positioned media overlay. That version could
+                    not contribute height, so a photo drew outside its own row and over
+                    the record below it, and a long log was clamped to keep the overlap
+                    from getting worse.
+
+                    The opener button no longer wraps the whole row: `<button>` cannot
+                    contain `<video controls>` / `<audio controls>`, which is why the
+                    overlay existed. Instead the button covers the time rail and the
+                    prose -- everything except the media -- so `<audio>` and `<video>`
+                    stay outside it while a tap on the time still opens the detail
+                    sheet, which `recordAuthorDistinction.test.tsx` clicks.
+                  */}
+                  <div className="flex pl-2.5 gap-2 py-3">
+                    {/*
+                      Time + marker rail, tappable.
+
+                      Splitting the opener into two buttons -- rail and prose -- is what
+                      lets the media sit between them in normal flow. But two buttons
+                      with the same accessible name is one control announced twice, so
+                      only the prose button carries the name; this one is hidden from
+                      assistive tech and exists for the pointer, where tapping the time
+                      has always opened the record.
+                      `keyboardOperableCards.test.tsx` asserts exactly one button per
+                      record, and `recordAuthorDistinction.test.tsx` clicks the time.
+                    */}
                     <button
                       type="button"
                       onClick={() => setSelectedRecordId(r.id)}
-                      aria-label={`${author.srAttribution} 자세히 보기`}
-                      className={cn(
-                        'flex-1 flex gap-2 py-3 text-left min-w-0 rounded-control',
-                        'active:bg-muted/40 transition-colors cursor-pointer'
-                      )}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      className="shrink-0 flex gap-2 text-left self-stretch rounded-control active:bg-muted/40 transition-colors cursor-pointer"
                     >
-                      {/* Time column */}
                       <span className="shrink-0 w-11 text-right text-caption text-muted-foreground tabular-nums pt-0.5 font-medium">
                         {r.time}
                       </span>
-
-                      {/* Marker dot — geometry channel for author distinction */}
                       <span className="shrink-0 flex flex-col items-center pt-1.5" aria-hidden="true">
                         <span className={author.markerClass} />
                         <span className="w-px flex-1 bg-border mt-1" />
                       </span>
+                    </button>
 
-                      {/* Spacer matching media width, if media exists — media overlays this */}
+                    {/* Media + prose share the remaining width and set the row height */}
+                    <div className="min-w-0 flex-1 flex gap-2">
                       {hasMedia && (
-                        <span className="shrink-0 w-[68px] min-[360px]:w-[76px]" aria-hidden="true" />
+                        <div className="shrink-0 w-[68px] min-[360px]:w-[76px] space-y-1">
+                          {r.attachments!.map((att, i) => (
+                            <AttachmentMedia
+                              key={i}
+                              attachment={att}
+                              coupleId={state.profile.couple.coupleId}
+                              recordId={r.id}
+                              variant="timeline"
+                            />
+                          ))}
+                        </div>
                       )}
 
-                      {/* Content column */}
-                      <span className="min-w-0 flex-1 flex flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRecordId(r.id)}
+                        aria-label={`${author.srAttribution} 자세히 보기`}
+                        className="min-w-0 flex-1 flex flex-col gap-1 text-left rounded-control active:bg-muted/40 transition-colors cursor-pointer"
+                      >
                         {/* Attribution chip */}
                         <span className="flex items-center gap-1.5 flex-wrap">
                           <span
@@ -799,8 +840,16 @@ export function RecordPage() {
                           The record's own sentence is the one thing on this
                           screen that must stay comfortable to read.
                         */}
+                        {/*
+                          No clamp. The row grows to fit the log now that nothing is
+                          absolutely positioned inside it -- `line-clamp-3` existed to
+                          stop long prose from making the overlap with the floated
+                          media worse, and there is no overlap left to manage. A record
+                          is short because the person wrote a short one, not because the
+                          layout cut it off.
+                        */}
                         {r.log && (
-                          <span data-testid="record-log" className="text-body text-foreground break-keep line-clamp-3">{r.log}</span>
+                          <span data-testid="record-log" className="text-body text-foreground break-keep whitespace-pre-wrap">{r.log}</span>
                         )}
 
                         {/* Secondary metadata — compact, never outweighs the prose */}
@@ -816,24 +865,9 @@ export function RecordPage() {
                             </span>
                           )}
                         </span>
-                      </span>
-                    </button>
-                  </div>
-
-                  {/* Media — positioned absolutely over the spacer inside the button */}
-                  {hasMedia && (
-                    <div className="absolute left-[52px] top-3 w-[68px] min-[360px]:w-[76px] z-10 space-y-1">
-                      {r.attachments!.map((att, i) => (
-                        <AttachmentMedia
-                          key={i}
-                          attachment={att}
-                          coupleId={state.profile.couple.coupleId}
-                          recordId={r.id}
-                          variant="timeline"
-                        />
-                      ))}
+                      </button>
                     </div>
-                  )}
+                  </div>
                 </li>
               );
             })

@@ -244,29 +244,32 @@
    * constraint on its own fill -- only its LABEL does -- so the two uses want
    * opposite lightnesses and needed separating rather than compromising.
    *
-   * Retuned again the same day. The first attempt was a PALE pink
-   * (`oklch(0.78 0.12 12)`) with a near-black pink label, which passed contrast and
-   * still looked wrong: a primary CTA that light reads as disabled, so the product
-   * owner asked for the old brick red back. The real request underneath was warmth,
-   * not red -- so the answer is a pink with enough saturation to carry a white
-   * label, rather than either a pale pink or a brick.
+   * CORAL PINK, arrived at by rendering the alternatives side by side rather than
+   * by argument. Three earlier attempts and why each was wrong:
    *
-   * The label is white here, unlike the pale version. White on a saturated pink is
-   * the pairing that reads as one confident object; the deep-pink-on-pale-pink
-   * pairing was legible but low-energy, which is the opposite of what a "남기기"
-   * button should feel like.
+   *   pale pink  oklch(0.78 0.12 12) + dark label  -- read as a disabled button
+   *   magenta    oklch(0.58 0.22 12) + white       -- passed, but not coral at all
+   *   coral      oklch(0.585 0.15 22) + white      -- desaturated to a dusty brick
    *
-   *   light  fill oklch(0.58 0.22 12) + label oklch(1 0 0)          -> 4.81:1
-   *          same fill against --background                         -> 4.60:1
-   *   dark   fill oklch(0.72 0.2 12)  + label oklch(0.16 0.016 265) -> 6.60:1
+   * The third is the informative one. A white label needs the fill down around
+   * L0.585, and no colour at that lightness reads as coral PINK -- the hue is right
+   * and the lightness kills it. So the fill goes light enough to actually be coral
+   * pink and the label goes dark, which is the same trade the reference app
+   * (럽다) makes.
    *
-   * Chroma 0.22 is doing the work: at the lightness white needs (0.58), a lower
-   * chroma slides toward the brick red this replaced. Dark lightens for the usual
-   * reason -- a dark fill on a dark page reads as disabled -- and flips to a
-   * near-black label.
+   * Hue 18 rather than 12: 12 is where the tints and the page sit, but a FILLED
+   * surface at that hue reads magenta, and coral needs the extra warmth. The ink
+   * token stays at 14, so the family holds together.
+   *
+   *   light  fill oklch(0.74 0.14 18) + label oklch(0.3 0.1 18)     -> 5.78:1
+   *   dark   fill oklch(0.72 0.16 18) + label oklch(0.2 0.05 18)    -> 6.87:1
+   *
+   * The label is a very dark coral, not navy and not black: navy is the app's other
+   * brand colour and two of them inside one button stop it reading as one object,
+   * and pure black on a warm fill reads as a warning.
    */
-  --coral-fill: oklch(0.58 0.22 12);
-  --coral-fill-foreground: oklch(1 0 0);
+  --coral-fill: oklch(0.74 0.14 18);
+  --coral-fill-foreground: oklch(0.3 0.1 18);
   --lilac: oklch(0.93 0.04 300);
   --lilac-foreground: var(--navy);
   --mint: oklch(0.93 0.045 155);
@@ -308,13 +311,15 @@
   --coral-strong: oklch(0.8 0.13 14);
   --coral-strong-foreground: oklch(0.18 0.018 265);
   /*
-   * The fill carries more chroma than the ink (0.2 vs 0.13) so a filled CTA still
-   * reads as the saturated pink it is in light mode, rather than as a tint. Label
-   * flips to near-black, which is what a light fill needs.
-   *   fill oklch(0.72 0.2 12) + label oklch(0.16 0.016 265) -> 6.82:1
+   * Same shape as light -- coral pink fill, very dark coral label -- because in
+   * dark the fill was already going to be light. The only change is a slightly
+   * higher chroma than the ink token so a filled control still reads as coral
+   * rather than as a tint of the card behind it.
+   *   fill oklch(0.72 0.16 18) + label oklch(0.2 0.05 18) -> 6.87:1
+   *   same fill against --background                      -> 7.30:1
    */
-  --coral-fill: oklch(0.72 0.2 12);
-  --coral-fill-foreground: oklch(0.16 0.016 265);
+  --coral-fill: oklch(0.72 0.16 18);
+  --coral-fill-foreground: oklch(0.2 0.05 18);
   --lilac: oklch(0.32 0.055 305);
   --lilac-foreground: var(--foreground);
   --mint: oklch(0.28 0.045 155);

@@ -77,7 +77,20 @@ export function AttachmentMedia({ attachment, coupleId, recordId, variant, foote
     recordId,
   );
   const Icon = KIND_ICON[attachment.type];
-  const boxHeight = variant === 'detail' ? 'h-48' : variant === 'timeline' ? 'h-36' : 'h-24';
+  /*
+   * `timeline` is a 68px column (76px at >=360px), set by the editorial row in
+   * RecordPage: time 44px, gap 8px, then the media. It used to paint at `h-36`
+   * (144px), which is nearly twice the column width, so a photo or a video
+   * overflowed its own cell and pushed into the prose beside it.
+   *
+   * `aspect-square` instead of a fixed height: the width is what the row controls,
+   * so the height has to follow it rather than be declared independently. That also
+   * keeps the thumbnail square at both 68px and 76px without a second breakpoint.
+   *
+   * `detail` and `compact` are unchanged -- they sit in full-width containers where
+   * a fixed height is the right call.
+   */
+  const boxHeight = variant === 'detail' ? 'h-48' : variant === 'timeline' ? 'aspect-square h-auto' : 'h-24';
   const mediaLabel = `${attachment.name} ${KIND_MEDIA_LABEL[attachment.type]}`;
 
   return (
@@ -113,18 +126,33 @@ export function AttachmentMedia({ attachment, coupleId, recordId, variant, foote
       )}
 
       {url && attachment.type === 'voice' && (
-        <div className="p-3 space-y-2">
-          <div className="flex items-center gap-2 text-label font-medium">
-            <Icon size={16} className={KIND_ICON_CLASS.voice} />
-            <span className="truncate">{attachment.name}</span>
-          </div>
+        /*
+         * On the timeline the cell is 68-76px wide. A native <audio> control needs
+         * roughly 200px before its buttons start clipping, and the file name above
+         * it made the cell taller than the row, so the whole block spilled out.
+         *
+         * So the timeline drops the name -- the row already states the time and the
+         * author, and the icon says it is a voice note -- and lets the control use
+         * the full cell width. `detail` and `compact` keep the name, because they
+         * have the room and the name is the only way to tell two clips apart there.
+         */
+        <div className={variant === 'timeline' ? 'p-1.5' : 'p-3 space-y-2'}>
+          {variant !== 'timeline' && (
+            <div className="flex items-center gap-2 text-label font-medium">
+              <Icon size={16} className={KIND_ICON_CLASS.voice} />
+              <span className="truncate">{attachment.name}</span>
+            </div>
+          )}
+          {variant === 'timeline' && (
+            <Icon size={14} className={`${KIND_ICON_CLASS.voice} mx-auto mb-1`} aria-hidden="true" />
+          )}
           <audio
             src={url}
             controls
             preload="metadata"
             aria-label={mediaLabel}
             onError={reportLoadFailure}
-            className="w-full"
+            className="w-full max-w-full"
           />
         </div>
       )}

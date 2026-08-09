@@ -221,10 +221,10 @@ describe('C7 - the token pair is defined in both themes and documented with its 
      * than being forced apart.
      */
     for (const declaration of [
-      '--coral-fill: oklch(0.58 0.22 12);',
-      '--coral-fill-foreground: oklch(1 0 0);',
-      '--coral-fill: oklch(0.72 0.2 12);',
-      '--coral-fill-foreground: oklch(0.16 0.016 265);',
+      '--coral-fill: oklch(0.74 0.14 18);',
+      '--coral-fill-foreground: oklch(0.3 0.1 18);',
+      '--coral-fill: oklch(0.72 0.16 18);',
+      '--coral-fill-foreground: oklch(0.2 0.05 18);',
       '--color-coral-fill: var(--coral-fill);',
       '--color-coral-fill-foreground: var(--coral-fill-foreground);',
     ]) {
@@ -272,8 +272,8 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     expect(css).toContain('5.87:1');
     expect(css).toContain('9.25:1');
     // The fill pair carries its own measurements.
-    expect(css).toContain("4.81:1");
-    expect(css).toContain("6.82:1");
+    expect(css).toContain("5.78:1");
+    expect(css).toContain("6.87:1");
     expect(css).toMatch(/2\.09:1/);
   });
 
@@ -284,31 +284,39 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     expect(dark).toBeGreaterThan(light);
   });
 
-  it('keeps the fill saturated enough to be pink rather than brick', () => {
+  it('keeps the fill light enough to read as coral pink rather than brick', () => {
     /*
-     * Chroma is the load-bearing number on this token, which is why it is asserted
-     * on its own rather than only as part of the declaration above.
+     * LIGHTNESS is the load-bearing number on this token, and it is load-bearing in
+     * the opposite direction from what a contrast rule would suggest.
      *
-     * The lightness is fixed by the label: white needs the fill at about 0.58 to
-     * clear 4.5:1. At that lightness a modest chroma is indistinguishable from the
-     * brick red this replaced -- `oklch(0.58 0.16 14)` is #B94A5E, which reads red.
-     * Chroma 0.22 is what makes the same lightness read as pink (#DD1B57).
+     * Three attempts landed here. A white label forces the fill down to about
+     * L0.585, and nothing at that lightness reads as coral pink -- rendered side by
+     * side, `oklch(0.585 0.15 22)` is #C55052, a dusty brick, and pushing chroma up
+     * instead gives #DD1B57, a magenta. The only way to get coral pink is to keep
+     * the fill light and make the LABEL dark, which is the trade the reference app
+     * makes too.
      *
-     * The product brief is "따뜻한 느낌", and the failure mode this guards is
-     * someone lowering chroma for a calmer look and silently landing back on red.
+     * So the guard is a floor on lightness, not on chroma: the regression it catches
+     * is someone darkening the fill to fit a white label and silently returning to
+     * the brick red this replaced. Hue is bounded on both sides -- below 14 a filled
+     * surface reads magenta, above 24 it turns orange.
      */
-    const light = css.match(/--coral-fill: oklch\(0\.58 ([0-9.]+) 12\);/);
-    expect(light, 'light fill declaration').not.toBeNull();
-    expect(Number(light![1])).toBeGreaterThanOrEqual(0.2);
+    const fills = [...css.matchAll(/--coral-fill: oklch\(([0-9.]+) ([0-9.]+) ([0-9.]+)\);/g)];
+    expect(fills.length, 'both themes declare a fill').toBe(2);
+    for (const [, L, , H] of fills) {
+      expect(Number(L), 'fill stays light enough to be coral pink').toBeGreaterThanOrEqual(0.7);
+      expect(Number(H), 'fill hue stays in the coral range').toBeGreaterThanOrEqual(14);
+      expect(Number(H), 'fill hue stays in the coral range').toBeLessThanOrEqual(24);
+    }
 
-    const dark = css.match(/--coral-fill: oklch\(0\.72 ([0-9.]+) 12\);/);
-    expect(dark, 'dark fill declaration').not.toBeNull();
-    expect(Number(dark![1])).toBeGreaterThanOrEqual(0.18);
-
-    // Hue stays in the pink range for both. Above ~16 it warms toward coral-orange,
-    // which is the direction the 2026-08-09 hue rotation moved away from.
-    for (const m of css.matchAll(/--coral-fill: oklch\([0-9.]+ [0-9.]+ ([0-9.]+)\);/g)) {
-      expect(Number(m[1]), 'fill hue stays pink').toBeLessThanOrEqual(16);
+    // The label is correspondingly dark, and is a deep coral rather than navy: navy
+    // is the app's other brand colour and two of them inside one button stop it
+    // reading as a single object.
+    const labels = [...css.matchAll(/--coral-fill-foreground: oklch\(([0-9.]+) ([0-9.]+) ([0-9.]+)\);/g)];
+    expect(labels.length, 'both themes declare a label').toBe(2);
+    for (const [, L, , H] of labels) {
+      expect(Number(L), 'label is dark').toBeLessThanOrEqual(0.35);
+      expect(Number(H), 'label shares the fill hue, not navy 265').toBeLessThanOrEqual(24);
     }
   });
 });

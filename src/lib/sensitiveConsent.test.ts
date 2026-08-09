@@ -38,10 +38,11 @@ describe('cycle sensitive-information consent', () => {
   });
 
   it('reports failure instead of pretending consent was saved', () => {
-    vi.spyOn(window.localStorage, 'setItem').mockImplementationOnce(() => {
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage) as Storage, 'setItem').mockImplementationOnce(() => {
       throw new DOMException('quota');
     });
     expect(grantCycleSensitiveConsent('user-a')).toBe(false);
     expect(hasCycleSensitiveConsent('user-a')).toBe(false);
+    setItem.mockRestore();
   });
 });

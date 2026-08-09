@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
 import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { Heart, Calendar as CalendarIcon, CalendarDays, Plane, Plus, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -112,7 +113,20 @@ export function UsPage() {
 
         {/* Profile */}
         <section className="flex flex-col items-center text-center py-3 space-y-2">
-          <CoupleAvatar size={56} />
+          {/*
+            The couple illustration is a placeholder for two specific people, so it
+            can be replaced with their photo. Stored per device (see
+            `src/lib/avatarImage.ts`): the media bucket's policies are scoped to a
+            record id, and widening them for a decoration is not a trade worth making.
+          */}
+          <AvatarPicker
+            userId={state.authenticatedUser?.id || state.profile.id}
+            slot="couple"
+            size={56}
+            label="커플 사진"
+          >
+            <CoupleAvatar size={56} />
+          </AvatarPicker>
           <div>
             <h2 className="text-heading text-foreground flex items-center justify-center gap-1.5">
               <span>{myName || '나'}</span>

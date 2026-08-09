@@ -6,6 +6,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { MobileShell } from '@/components/MobileShell';
+import { AvatarPicker } from '@/components/AvatarPicker';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
@@ -66,9 +67,23 @@ export function MyPage() {
         </div>
 
         <div className="flex items-center gap-3 py-2">
-          <div className="w-11 h-11 rounded-full bg-coral/15 text-coral-strong font-extrabold flex items-center justify-center text-heading border border-coral/30">
-            {isGomsin ? '🌸' : '🪖'}
-          </div>
+          {/*
+            The role glyph doubles as this screen's profile picture, so it can be
+            replaced with a photo. Device-local; see `src/lib/avatarImage.ts` for why
+            it is not uploaded. The emoji stays as the fallback: it is the one place
+            an emoji is fine, because it stands in for a face rather than decorating
+            a sentence.
+          */}
+          <AvatarPicker
+            userId={state.authenticatedUser?.id || profile.id}
+            slot="me"
+            size={44}
+            label="내 사진"
+          >
+            <span className="text-coral-strong font-extrabold text-heading">
+              {isGomsin ? '🌸' : '🪖'}
+            </span>
+          </AvatarPicker>
           <div className="min-w-0 flex-1">
             <h2 className="text-heading text-foreground">{profile.myName || '나'}</h2>
             <div className="flex items-center gap-2 mt-0.5 text-caption text-muted-foreground">

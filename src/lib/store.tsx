@@ -10,6 +10,7 @@ import {
 } from '@/types';
 import { DEFAULT_LAYOUT_BY_ROLE } from '@/lib/widgets';
 import { clearAllComposerDrafts } from '@/lib/composerDraft';
+import { clearAllAvatars } from '@/lib/avatarImage';
 import {
   authRepository,
   supabase,
@@ -2869,6 +2870,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Unsent composer text is held in memory, so it is not covered by removing the
     // storage keys above. It must not outlive the session that produced it.
     clearAllComposerDrafts();
+    /*
+     * Avatar photos live under their own `gomsinlog.avatar.*` keys, deliberately
+     * outside `STORE_KEY`, so the two `removeItem` calls above do not reach them.
+     *
+     * They are outside the store because `saveState` persists a strict
+     * device-preference whitelist for an authenticated user and a test asserts that
+     * list exactly -- image data in there would defeat the guarantee the whitelist
+     * exists for. The cost of that separation is this line: without it, a photo of
+     * a person's face would survive both sign-out and account deletion.
+     */
+    clearAllAvatars();
     // The outbox is NOT cleared here. This runs on sign-out as well as on account
     // deletion, and the same person signing back in must still find the record they
     // wrote on a train with no signal. Every read is filtered by `userId`, so

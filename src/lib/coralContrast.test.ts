@@ -221,10 +221,10 @@ describe('C7 - the token pair is defined in both themes and documented with its 
      * than being forced apart.
      */
     for (const declaration of [
-      '--coral-fill: oklch(0.78 0.12 12);',
-      '--coral-fill-foreground: oklch(0.28 0.09 12);',
-      '--coral-fill: oklch(0.8 0.13 12);',
-      '--coral-fill-foreground: oklch(0.22 0.06 12);',
+      '--coral-fill: oklch(0.58 0.22 12);',
+      '--coral-fill-foreground: oklch(1 0 0);',
+      '--coral-fill: oklch(0.72 0.2 12);',
+      '--coral-fill-foreground: oklch(0.16 0.016 265);',
       '--color-coral-fill: var(--coral-fill);',
       '--color-coral-fill-foreground: var(--coral-fill-foreground);',
     ]) {
@@ -272,8 +272,8 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     expect(css).toContain('5.87:1');
     expect(css).toContain('9.25:1');
     // The fill pair carries its own measurements.
-    expect(css).toContain('7.19:1');
-    expect(css).toContain('8.69:1');
+    expect(css).toContain("4.81:1");
+    expect(css).toContain("6.82:1");
     expect(css).toMatch(/2\.09:1/);
   });
 
@@ -284,21 +284,31 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     expect(dark).toBeGreaterThan(light);
   });
 
-  it('labels the pink fill from its own hue family, never with navy', () => {
+  it('keeps the fill saturated enough to be pink rather than brick', () => {
     /*
-     * `--coral-fill-foreground` is a near-black PINK in both themes. Navy passes
-     * the ratio and was rejected for it: navy is the app's other brand colour, and
-     * two brand colours inside one button stop it reading as a single object.
+     * Chroma is the load-bearing number on this token, which is why it is asserted
+     * on its own rather than only as part of the declaration above.
      *
-     * The hue is the third number in `oklch()`. Asserting it is 12 -- matching the
-     * fill -- is what this test is for; navy would be 265.
+     * The lightness is fixed by the label: white needs the fill at about 0.58 to
+     * clear 4.5:1. At that lightness a modest chroma is indistinguishable from the
+     * brick red this replaced -- `oklch(0.58 0.16 14)` is #B94A5E, which reads red.
+     * Chroma 0.22 is what makes the same lightness read as pink (#DD1B57).
+     *
+     * The product brief is "따뜻한 느낌", and the failure mode this guards is
+     * someone lowering chroma for a calmer look and silently landing back on red.
      */
-    for (const label of [
-      '--coral-fill-foreground: oklch(0.28 0.09 12);',
-      '--coral-fill-foreground: oklch(0.22 0.06 12);',
-    ]) {
-      expect(css, label).toContain(label);
-      expect(label, 'label hue must match the fill, not navy').toMatch(/ 12\);$/);
+    const light = css.match(/--coral-fill: oklch\(0\.58 ([0-9.]+) 12\);/);
+    expect(light, 'light fill declaration').not.toBeNull();
+    expect(Number(light![1])).toBeGreaterThanOrEqual(0.2);
+
+    const dark = css.match(/--coral-fill: oklch\(0\.72 ([0-9.]+) 12\);/);
+    expect(dark, 'dark fill declaration').not.toBeNull();
+    expect(Number(dark![1])).toBeGreaterThanOrEqual(0.18);
+
+    // Hue stays in the pink range for both. Above ~16 it warms toward coral-orange,
+    // which is the direction the 2026-08-09 hue rotation moved away from.
+    for (const m of css.matchAll(/--coral-fill: oklch\([0-9.]+ [0-9.]+ ([0-9.]+)\);/g)) {
+      expect(Number(m[1]), 'fill hue stays pink').toBeLessThanOrEqual(16);
     }
   });
 });

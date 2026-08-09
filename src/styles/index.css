@@ -244,19 +244,29 @@
    * constraint on its own fill -- only its LABEL does -- so the two uses want
    * opposite lightnesses and needed separating rather than compromising.
    *
-   * Label is a near-black pink, deliberately not navy: navy passes the ratio but is
-   * the app's other brand colour, and two brand colours inside one button stop it
-   * reading as a single object.
+   * Retuned again the same day. The first attempt was a PALE pink
+   * (`oklch(0.78 0.12 12)`) with a near-black pink label, which passed contrast and
+   * still looked wrong: a primary CTA that light reads as disabled, so the product
+   * owner asked for the old brick red back. The real request underneath was warmth,
+   * not red -- so the answer is a pink with enough saturation to carry a white
+   * label, rather than either a pale pink or a brick.
    *
-   *   light  fill oklch(0.78 0.12 12) + label oklch(0.28 0.09 12) -> 7.19:1
-   *   dark   fill oklch(0.8 0.13 12)  + label oklch(0.22 0.06 12) -> 8.69:1
+   * The label is white here, unlike the pale version. White on a saturated pink is
+   * the pairing that reads as one confident object; the deep-pink-on-pale-pink
+   * pairing was legible but low-energy, which is the opposite of what a "남기기"
+   * button should feel like.
    *
-   * A filled control's own edge against the page is 2.00:1 here. That is not a
-   * WCAG failure: 1.4.11 applies to controls identified by their boundary, and this
-   * one is identified by a 48px filled shape carrying a 4.5:1 label.
+   *   light  fill oklch(0.58 0.22 12) + label oklch(1 0 0)          -> 4.81:1
+   *          same fill against --background                         -> 4.60:1
+   *   dark   fill oklch(0.72 0.2 12)  + label oklch(0.16 0.016 265) -> 6.60:1
+   *
+   * Chroma 0.22 is doing the work: at the lightness white needs (0.58), a lower
+   * chroma slides toward the brick red this replaced. Dark lightens for the usual
+   * reason -- a dark fill on a dark page reads as disabled -- and flips to a
+   * near-black label.
    */
-  --coral-fill: oklch(0.78 0.12 12);
-  --coral-fill-foreground: oklch(0.28 0.09 12);
+  --coral-fill: oklch(0.58 0.22 12);
+  --coral-fill-foreground: oklch(1 0 0);
   --lilac: oklch(0.93 0.04 300);
   --lilac-foreground: var(--navy);
   --mint: oklch(0.93 0.045 155);
@@ -297,8 +307,14 @@
    */
   --coral-strong: oklch(0.8 0.13 14);
   --coral-strong-foreground: oklch(0.18 0.018 265);
-  --coral-fill: oklch(0.8 0.13 12);
-  --coral-fill-foreground: oklch(0.22 0.06 12);
+  /*
+   * The fill carries more chroma than the ink (0.2 vs 0.13) so a filled CTA still
+   * reads as the saturated pink it is in light mode, rather than as a tint. Label
+   * flips to near-black, which is what a light fill needs.
+   *   fill oklch(0.72 0.2 12) + label oklch(0.16 0.016 265) -> 6.82:1
+   */
+  --coral-fill: oklch(0.72 0.2 12);
+  --coral-fill-foreground: oklch(0.16 0.016 265);
   --lilac: oklch(0.32 0.055 305);
   --lilac-foreground: var(--foreground);
   --mint: oklch(0.28 0.045 155);

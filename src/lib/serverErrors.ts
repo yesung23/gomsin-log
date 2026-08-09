@@ -89,6 +89,7 @@ const SERVER_CODES: ReadonlySet<string> = new Set([
   'PGRST204', // requested column missing from the schema cache
   'PGRST205', // requested table missing from the schema cache
   '42703', // PostgreSQL undefined_column
+  '42883', // PostgreSQL undefined_function/operator
   '42P01', // PostgreSQL undefined_table
   '42P17', // PostgreSQL infinite_recursion (usually a recursive RLS policy)
 ]);

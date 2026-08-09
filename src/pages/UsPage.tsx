@@ -120,9 +120,16 @@ export function UsPage() {
               <span>{partnerName}</span>
             </h2>
             <p className="text-caption text-muted-foreground mt-0.5 font-medium">
+              {/*
+                The trailing 💕 is gone. The heart between the two names above is
+                already a filled `Heart` icon in the brand coral, so the emoji was a
+                second heart in the same breath -- and an emoji renders as whatever
+                the OS ships, which is the one glyph on screen the app cannot art
+                direct. One heart, drawn by us.
+              */}
               {connected
                 ? diffDays !== null
-                  ? `함께한 지 +${diffDays}일째 💕`
+                  ? `함께한 지 +${diffDays}일째`
                   : '기념일 미설정 · 설정에서 사귄 날짜를 추가해 보세요'
                 : coupleLifecycle === 'pending'
                   ? '상대방이 초대 코드를 입력하면 연결돼요'

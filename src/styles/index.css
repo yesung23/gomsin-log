@@ -21,8 +21,48 @@
  */
 @import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 
+/**
+ * Nanum Pen Script — the handwriting accent, self-hosted for the same reason
+ * Pretendard is: `font-src 'self' data:` in `public/_headers` blocks every CDN.
+ *
+ * SIL OFL 1.1 (NHN Corporation, designed by Sandoll), which permits bundling,
+ * subsetting and redistribution inside an application. The licence text ships in
+ * `node_modules/@fontsource/nanum-pen-script/LICENSE`.
+ *
+ * Only the LATIN subset is imported, and that is the whole trick. The Korean
+ * subset is 588 kB, and this face is used for numbers and short date headers --
+ * `D-142`, `412일`, `8/6` -- so the 16 kB latin file covers the digits and the
+ * punctuation while Korean text keeps falling through to Pretendard. Importing
+ * the Korean subset would cost 37x more to style words this app deliberately does
+ * NOT set in handwriting.
+ *
+ * That fallback is the reason `--font-hand` lists Pretendard after it rather than
+ * a generic cursive: a Korean glyph in a handwriting utility must land on the body
+ * face, not on whatever the OS calls cursive.
+ */
+@import "@fontsource/nanum-pen-script/latin-400.css";
+
 @theme inline {
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  /*
+   * The handwriting accent, and its rule is narrower than it first looks:
+   * `font-hand` is only for strings that are ENTIRELY latin.
+   *
+   * Only the latin subset ships (16 kB against 588 kB for Korean), so a mixed
+   * string renders as handwritten digits inside Pretendard Korean -- rendered side
+   * by side, `8월 6일 화요일` in this face reads as two fonts colliding in one short
+   * line, which looks like a bug rather than a flourish. Date headers and
+   * empty-state lines were tried in it for that reason and reverted.
+   *
+   * What is left is the figure a screen is built around: `D-142`, `412`. Never the
+   * user's own words, never a button label, never metadata -- handwriting on body
+   * text is what makes an app read as a sticker pack instead of a diary.
+   *
+   * Pretendard sits behind it so any Korean that does slip through lands on the body
+   * face rather than an OS cursive default. `src/lib/typeScale.test.ts` enforces the
+   * allow-list.
+   */
+  --font-hand: "Nanum Pen Script", "Pretendard Variable", "Pretendard", sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

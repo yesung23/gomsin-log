@@ -238,6 +238,15 @@ export function TimelineRow({ time, media, children, rail = true, className }: T
 export function TimelineDateHeader({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <li className={cn('list-none pt-1 pb-2', className)}>
+      {/*
+        NOT handwriting, and that was measured rather than assumed.
+
+        Only the latin subset of Nanum Pen Script ships, so a rendered
+        `8월 6일 화요일` comes out as handwritten digits sitting inside Pretendard
+        Korean -- two faces inside one short line, which looks like a mistake rather
+        than a flourish. Handwriting is reserved for strings that are ALL latin, and
+        a Korean date header is not one.
+      */}
       <h3 className="text-label font-semibold text-foreground">{children}</h3>
     </li>
   );

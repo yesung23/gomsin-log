@@ -321,3 +321,86 @@ describe('prose leading is not tightened below the reflow floor', () => {
     expect(TIGHTENED.test('className="text-body text-foreground break-keep"')).toBe(false);
   });
 });
+
+describe('handwriting is an accent, not a typeface', () => {
+  /*
+   * `font-hand` (Nanum Pen Script, SIL OFL 1.1) is allowed on strings that are
+   * ENTIRELY latin, which in this app means the D-Day figure and nothing else.
+   *
+   * The list started at three -- D-Day, timeline date header, empty-state line --
+   * and shrank after rendering them. Only the latin subset ships, so a Korean date
+   * header comes out as handwritten digits inside Pretendard Korean: two faces in
+   * one short line, which reads as a defect. The class would also be misleading in
+   * source, claiming a face the text never gets.
+   *
+   * The prohibition is the durable half: handwriting on a record body, a button
+   * label or metadata is what turns a diary into a sticker pack, and it is the
+   * failure hardest to argue about after the fact -- so it fails here instead.
+   */
+  const ALLOWED_FILES = ['src/pages/ServicePage.tsx'];
+
+  it('declares the face with Pretendard behind it, so Korean has somewhere to land', () => {
+    const css = read('src/styles/index.css');
+    expect(css).toContain('--font-hand:');
+    expect(css).toMatch(/--font-hand:\s*"Nanum Pen Script"/);
+    // The fallback must be the body face, not a generic cursive.
+    expect(css).toMatch(/--font-hand:[^;]*"Pretendard Variable"/);
+    // Latin subset only. Importing the Korean subset is a 37x cost for text this
+    // app does not set in handwriting.
+    expect(css).toContain('@fontsource/nanum-pen-script/latin-400.css');
+    expect(css).not.toContain('nanum-pen-script/korean');
+    expect(css).not.toContain('nanum-pen-script/index.css');
+  });
+
+  it('appears only in the three files that are allowed to use it', () => {
+    const offenders = CONVERTED_FILES.filter((file) => {
+      if (ALLOWED_FILES.includes(file)) return false;
+      const withoutComments = read(file)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+      return /\bfont-hand\b/.test(withoutComments);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it('is actually used in each allowed file, so the allowance is not aspirational', () => {
+    for (const file of ALLOWED_FILES) {
+      expect(read(file), file).toMatch(/\bfont-hand\b/);
+    }
+  });
+
+  it('is not applied to Korean-bearing surfaces that were tried and reverted', () => {
+    /*
+     * These two were set in handwriting on 2026-08-09 and changed back the same day.
+     * Recorded as assertions rather than as a comment so the next person does not
+     * repeat the experiment: the reason is the shipped subset, not taste.
+     *
+     * Comments are stripped first: both files now explain in prose why they are NOT
+     * handwritten, and naming the class in that explanation is not a regression.
+     */
+    for (const file of ['src/components/ui/List.tsx', 'src/components/ui/EmptyState.tsx']) {
+      const withoutComments = read(file)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+      expect(withoutComments, file).not.toMatch(/\bfont-hand\b/);
+    }
+  });
+
+  it('never sets the record body, a button label or a metadata line', () => {
+    /*
+     * The three allowances are structural, but the prohibition is what matters, so
+     * it is checked directly: the record log has a test hook, and a handwriting
+     * class landing on it is the specific regression to catch.
+     */
+    const record = read('src/pages/RecordPage.tsx');
+    const logLine = record.split('\n').find((l) => l.includes('data-testid="record-log"'));
+    expect(logLine, 'the record log element').toBeDefined();
+    expect(logLine).not.toMatch(/\bfont-hand\b/);
+
+    const button = read('src/components/ui/Button.tsx');
+    expect(button).not.toMatch(/\bfont-hand\b/);
+
+    const badge = read('src/components/ui/Badge.tsx');
+    expect(badge).not.toMatch(/\bfont-hand\b/);
+  });
+});

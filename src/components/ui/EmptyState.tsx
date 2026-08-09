@@ -33,6 +33,12 @@ export function EmptyState({
   return (
     <div className={cn('py-5 text-center', className)}>
       {icon ? <div className="mb-2 flex justify-center" aria-hidden="true">{icon}</div> : null}
+      {/*
+        Body face, not handwriting. Every empty-state line in this app is Korean, and
+        only the latin subset of Nanum Pen Script ships, so `font-hand` here would
+        render the Korean in Pretendard anyway -- the class would be a lie in the
+        source. Handwriting is limited to all-latin strings; see `--font-hand`.
+      */}
       <p className="text-body font-semibold text-foreground break-keep">{title}</p>
       {description ? (
         <p className="mt-1 text-caption text-muted-foreground leading-relaxed break-keep">{description}</p>

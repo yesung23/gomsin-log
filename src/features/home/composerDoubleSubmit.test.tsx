@@ -32,7 +32,6 @@ function makeState(): AppState {
   return {
     setupComplete: true,
     onboardingStep: 0,
-    isDemoMode: false,
     authenticatedUser: { id: 'user-1', email: 'a@b.c', provider: 'google' },
     profile: {
       id: 'user-1',

@@ -171,7 +171,6 @@ function Probe() {
 function buildConnectedState(records: DailyRecord[] = []): Partial<AppState> {
   return {
     setupComplete: true,
-    isDemoMode: false,
     authenticatedUser: { id: 'user-1', email: 'a@b.com', provider: 'google' },
     profile: {
       id: 'user-1',

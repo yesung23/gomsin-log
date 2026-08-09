@@ -16,8 +16,7 @@ export function SharedSyncBanner() {
   const [retrying, setRetrying] = useState(false);
 
   const { couple } = state.profile;
-  const hasSharedWorkspace = !state.isDemoMode
-    && couple.connected
+  const hasSharedWorkspace = couple.connected
     && couple.status === 'active';
   if (!hasSharedWorkspace || sharedSyncStatus === 'live') return null;
 

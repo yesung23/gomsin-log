@@ -68,9 +68,7 @@ describe('consumeCoupleInvitation input validation', () => {
     }
   });
 
-  it('accepts only the demo code when Supabase is not configured', async () => {
-    // Without VITE_SUPABASE_URL the module falls back to the offline demo path.
-    //
+  it('fails closed without inventing a couple when Supabase is not configured', async () => {
     // `isSupabaseConfigured` is computed once at module load, so the unconfigured
     // state is stubbed and the module re-imported in isolation rather than being
     // inherited from the ambient shell. CI legitimately exports the placeholder
@@ -81,14 +79,21 @@ describe('consumeCoupleInvitation input validation', () => {
     vi.stubEnv('VITE_SUPABASE_PUBLISHABLE_KEY', '');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
     try {
-      const offline = await import('@/lib/supabase');
-      expect(offline.isSupabaseConfigured, 'the client must be unconfigured').toBe(false);
-      offline.__resetInviteAttemptsForTest();
+      const unconfigured = await import('@/lib/supabase');
+      expect(unconfigured.isSupabaseConfigured, 'the client must be unconfigured').toBe(false);
+      unconfigured.__resetInviteAttemptsForTest();
 
-      await expect(offline.consumeCoupleInvitation('123456')).resolves.toEqual({ coupleId: 'demo-couple-id' });
-      const other = await offline.consumeCoupleInvitation('999999');
-      expect(other.error).toBeTruthy();
-      expect(other.coupleId).toBeUndefined();
+      const consumed = await unconfigured.consumeCoupleInvitation('123456');
+      expect(consumed.error).toContain('서비스 연결 설정');
+      expect(consumed.coupleId).toBeUndefined();
+
+      const created = await unconfigured.createCoupleInvitation('gomsin');
+      expect(created).toMatchObject({ coupleId: '', code: '' });
+      expect(created.error).toContain('서비스 연결 설정');
+
+      const regenerated = await unconfigured.regenerateCoupleInvitation();
+      expect(regenerated.code).toBeUndefined();
+      expect(regenerated.error).toContain('서비스 연결 설정');
     } finally {
       vi.unstubAllEnvs();
       vi.resetModules();

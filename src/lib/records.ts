@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { emotionFlowForStorage } from '@/lib/privacy';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
+import { sanitizePhotoForUpload } from '@/lib/imageSanitization';
 import { DailyRecord, Attachment } from '@/types';
 
 // ==========================================
@@ -320,7 +321,10 @@ const MIME_MAP: Record<string, { ext: string; type: Attachment['type'] }> = {
 /** Per-kind size ceilings, chosen to stay friendly to mobile data plans. */
 export const MAX_BYTES: Record<Attachment['type'], number> = {
   photo: 10 * 1024 * 1024,
-  video: 100 * 1024 * 1024,
+  // Supabase Free projects cap a single object at 50 MB. Leave headroom for
+  // proxy/accounting differences instead of accepting a file the server will
+  // deterministically reject after the user waits for an upload.
+  video: 45 * 1024 * 1024,
   voice: 20 * 1024 * 1024,
 };
 
@@ -376,9 +380,21 @@ export async function uploadRecordMedia(
   const classified = classifyMediaFile(file);
   if ('error' in classified) return classified;
 
-  const path = buildMediaPath(coupleId, recordId, classified.ext);
-  const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, file, {
-    contentType: file.type,
+  let uploadFile = file;
+  let uploadExtension = classified.ext;
+  if (classified.type === 'photo') {
+    const sanitized = await sanitizePhotoForUpload(file);
+    if ('error' in sanitized) return sanitized;
+    uploadFile = sanitized.file;
+    uploadExtension = sanitized.ext;
+    if (uploadFile.size > MAX_BYTES.photo) {
+      return { error: '사진을 변환한 뒤에도 파일이 너무 커요. 다른 사진을 선택해 주세요.' };
+    }
+  }
+
+  const path = buildMediaPath(coupleId, recordId, uploadExtension);
+  const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, uploadFile, {
+    contentType: uploadFile.type,
     upsert: false,
   });
 

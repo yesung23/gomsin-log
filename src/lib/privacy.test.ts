@@ -68,7 +68,7 @@ describe('isOwnRecord', () => {
     ).toBe(false);
   });
 
-  it('falls back to authorRole for local/demo records without a userId', () => {
+  it('falls back to authorRole for legacy records without a userId', () => {
     expect(isOwnRecord(record({ userId: undefined, authorRole: 'gomsin' }), { role: 'gomsin' })).toBe(true);
     expect(isOwnRecord(record({ userId: undefined, authorRole: 'soldier' }), { role: 'gomsin' })).toBe(false);
   });
@@ -296,7 +296,7 @@ describe('visibleRecordsForViewer', () => {
     expect(partnerRecord?.emotionFlow).toEqual([]);
   });
 
-  it('works for demo records that have no userId', () => {
+  it('works for queued offline records that do not have a userId yet', () => {
     const feed = visibleRecordsForViewer(
       [
         record({ id: 'mine', userId: undefined, authorRole: 'gomsin', isPrivate: true }),
@@ -304,7 +304,7 @@ describe('visibleRecordsForViewer', () => {
       ],
       { role: 'gomsin' },
     );
-    // My own private demo record stays; the partner's private one is filtered out.
+    // My own private queued record stays; the partner's private one is filtered out.
     expect(feed.map((r) => r.id)).toEqual(['mine']);
   });
 });

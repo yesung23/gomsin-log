@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ArrowRight, Copy, Check } from 'lucide-react';
+import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { clearAuthErrorFromUrl, readAuthErrorFromUrl } from '@/lib/authErrorFromUrl';
@@ -8,6 +8,7 @@ import {
   authRepository,
   createCoupleInvitation,
   consumeCoupleInvitation,
+  fetchAuthProviderAvailability,
   fetchMyCoupleState,
   regenerateCoupleInvitation,
   saveCoupleAnniversary,
@@ -25,13 +26,10 @@ export function OnboardingPage() {
     state,
     updateProfile,
     setSetupComplete,
-    startDemo: runStartDemo,
     setOnboardingStep,
     recoverExpiredSession,
   } = useStore();
-  const onboardingIdentityKey = state.isDemoMode
-    ? `demo:${state.authenticatedUser?.id || ''}`
-    : `user:${state.authenticatedUser?.id || ''}`;
+  const onboardingIdentityKey = `user:${state.authenticatedUser?.id || ''}`;
   const identityRef = useRef(onboardingIdentityKey);
 
   /**
@@ -82,7 +80,7 @@ export function OnboardingPage() {
    * invitation code is not dropped back to the beginning.
    */
   const FIRST_WIZARD_STEP = 1;
-  const hasIdentity = !!state.authenticatedUser || state.isDemoMode;
+  const hasIdentity = !!state.authenticatedUser;
   const [step, setStep] = useState(() => {
     const stored = state.onboardingStep || 0;
     return stored === 0 && hasIdentity ? FIRST_WIZARD_STEP : stored;
@@ -93,10 +91,31 @@ export function OnboardingPage() {
     if (typeof window === 'undefined') return false;
     return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   }, []);
+  // Safe fallbacks for the current production setup. Apple starts hidden and is
+  // revealed only after GoTrue confirms it is enabled, preventing a dead button
+  // on iPhone when the provider has not been configured yet.
+  const [authProviders, setAuthProviders] = useState({
+    google: true,
+    apple: false,
+    email: true,
+  });
+
+  useEffect(() => {
+    if (step !== 0) return;
+    let active = true;
+    void fetchAuthProviderAvailability().then((availability) => {
+      if (active && availability) setAuthProviders(availability);
+    });
+    return () => {
+      active = false;
+    };
+  }, [step]);
 
   // Form State
   const [emailInput, setEmailInput] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [isStartingSocialLogin, setIsStartingSocialLogin] = useState(false);
+  const socialLoginInFlightRef = useRef(false);
   const [role, setRole] = useState<Role>('gomsin');
   const [nickname, setNickname] = useState('');
   const [spaceMode, setSpaceMode] = useState<'create' | 'join'>('create');
@@ -181,9 +200,9 @@ export function OnboardingPage() {
   /**
    * Leave the landing screen the moment an identity exists.
    *
-   * The initial state above cannot cover this on its own: the OAuth round trip and
-   * the demo switch both resolve AFTER this component has mounted, so a visitor who
-   * signs in while the landing screen is open would otherwise stay on it.
+   * The initial state above cannot cover this on its own: the OAuth round trip
+   * resolves AFTER this component has mounted, so a visitor who signs in while the
+   * landing screen is open would otherwise stay on it.
    */
   useEffect(() => {
     if (hasIdentity) setStep((current) => (current === 0 ? FIRST_WIZARD_STEP : current));
@@ -194,22 +213,30 @@ export function OnboardingPage() {
 
   // Handle Google OAuth Login
   const handleGoogleLogin = async () => {
-    const res = await authRepository.signInWithGoogle();
-    if (res.error) {
-      toast.error(res.error);
+    if (socialLoginInFlightRef.current) return;
+    socialLoginInFlightRef.current = true;
+    setIsStartingSocialLogin(true);
+    try {
+      const res = await authRepository.signInWithGoogle();
+      if (res.error) toast.error(res.error);
+    } finally {
+      socialLoginInFlightRef.current = false;
+      setIsStartingSocialLogin(false);
     }
   };
 
   // Handle Apple OAuth Login
   const handleAppleLogin = async () => {
-    const res = await authRepository.signInWithApple();
-    if (res.error) {
-      toast.error(res.error);
+    if (socialLoginInFlightRef.current) return;
+    socialLoginInFlightRef.current = true;
+    setIsStartingSocialLogin(true);
+    try {
+      const res = await authRepository.signInWithApple();
+      if (res.error) toast.error(res.error);
+    } finally {
+      socialLoginInFlightRef.current = false;
+      setIsStartingSocialLogin(false);
     }
-  };
-
-  const handleStartDemo = () => {
-    runStartDemo();
   };
 
   /**
@@ -346,9 +373,9 @@ export function OnboardingPage() {
   const canAdvanceFromStep = step === 2 ? nickname.trim().length >= 2 : true;
 
   const handleNext = async () => {
-    // Auth Gate: Cannot advance from Step 0 without login or demo mode
-    if (step === 0 && !state.authenticatedUser && !state.isDemoMode) {
-      toast.error('로그인이 필요합니다. Google 또는 Apple로 진행해 주세요.');
+    // Auth gate: step 0 cannot advance without a verified account.
+    if (step === 0 && !state.authenticatedUser) {
+      toast.error('Google 또는 이메일로 로그인해 주세요.');
       return;
     }
 
@@ -485,12 +512,16 @@ export function OnboardingPage() {
     setStep((s) => Math.max(0, s - 1));
   };
 
-  const handleCopyCode = () => {
+  const handleCopyCode = async () => {
     if (createdInviteCode) {
-      navigator.clipboard.writeText(createdInviteCode);
-      setCopiedCode(true);
-      toast.success('초대 코드가 클립보드에 복사되었습니다.');
-      setTimeout(() => setCopiedCode(false), 2000);
+      try {
+        await navigator.clipboard.writeText(createdInviteCode);
+        setCopiedCode(true);
+        toast.success('초대 코드가 클립보드에 복사되었습니다.');
+        setTimeout(() => setCopiedCode(false), 2000);
+      } catch {
+        toast.error('코드를 복사하지 못했어요. 직접 입력해 전달해 주세요.');
+      }
     }
   };
 
@@ -566,7 +597,7 @@ export function OnboardingPage() {
       // Persist to the server FIRST. Previously the client marked onboarding as
       // complete even when the write failed, so the next login sent the user
       // straight back through onboarding.
-      if (supabase && state.authenticatedUser && !state.isDemoMode) {
+      if (supabase && state.authenticatedUser) {
         const userId = state.authenticatedUser.id;
         // Pre-flight: a pending deletion aborts every write below before the
         // first one is issued, so onboarding cannot recreate a `profiles` row
@@ -715,56 +746,62 @@ export function OnboardingPage() {
                 ) : null}
 
                 {/* Primary Auth CTAs */}
-                {isIOS && (
+                {isIOS && authProviders.apple && (
                   <button
                     onClick={handleAppleLogin}
-                    className="w-full h-13 py-3.5 rounded-control bg-black text-white font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px]"
+                    disabled={isStartingSocialLogin}
+                    className="w-full h-13 py-3.5 rounded-control bg-black text-white font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] disabled:opacity-60"
                   >
-                    <span>Apple로 계속하기</span>
+                    <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Apple로 계속하기'}</span>
                   </button>
                 )}
 
-                <button
-                  onClick={handleGoogleLogin}
-                  className="w-full h-13 py-3.5 rounded-control bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px]"
-                >
-                  <span>Google로 계속하기</span>
-                </button>
-
-                {/* Secondary Demo Start CTA */}
-                <button
-                  onClick={handleStartDemo}
-                  className="w-full py-3 rounded-control bg-coral/15 border border-coral/30 text-coral-strong font-bold text-label flex items-center justify-center gap-1.5 active:scale-[0.99] transition min-h-[44px] mt-2"
-                >
-                  <span>데모 공간 먼저 둘러보기</span>
-                  <ArrowRight size={16} />
-                </button>
-
-                {/* Temporary Email Login */}
-                <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-border">
-                  <p className="text-caption text-muted-foreground text-center font-bold">임시 이메일 로그인 (테스트용)</p>
-                  <input
-                    type="email"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="이메일 주소 입력"
-                    className="w-full h-12 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
-                  />
+                {authProviders.google && (
                   <button
-                    onClick={async () => {
+                    onClick={handleGoogleLogin}
+                    disabled={isStartingSocialLogin}
+                    className="w-full h-13 py-3.5 rounded-control bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] disabled:opacity-60"
+                  >
+                    <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Google로 계속하기'}</span>
+                  </button>
+                )}
+
+                {/* Passwordless email login */}
+                {authProviders.email && (
+                  <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-border">
+                    <p className="text-caption text-muted-foreground text-center font-bold">이메일로 로그인</p>
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      placeholder="이메일 주소 입력"
+                      className="w-full h-12 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
+                    />
+                    <button
+                      onClick={async () => {
                       if (!emailInput.includes('@')) return toast.error('유효한 이메일을 입력하세요.');
                       setIsSendingEmail(true);
-                      const res = await authRepository.signInWithEmail(emailInput);
-                      setIsSendingEmail(false);
-                      if (res.error) toast.error(res.error);
-                      else toast.success('이메일로 매직링크가 전송되었습니다! 메일함을 확인해주세요.');
-                    }}
-                    disabled={isSendingEmail}
-                    className="w-full h-12 rounded-control bg-navy text-white font-bold text-label disabled:opacity-50"
-                  >
-                    {isSendingEmail ? '전송 중...' : '이메일로 계속하기 (매직링크)'}
-                  </button>
-                </div>
+                      try {
+                        const res = await authRepository.signInWithEmail(emailInput);
+                        if (res.error) toast.error(res.error);
+                        else toast.success('이메일로 매직링크를 보냈어요. 메일함을 확인해 주세요.');
+                      } finally {
+                        setIsSendingEmail(false);
+                      }
+                      }}
+                      disabled={isSendingEmail}
+                      className="w-full h-12 rounded-control bg-navy text-white font-bold text-label disabled:opacity-50"
+                    >
+                      {isSendingEmail ? '전송 중...' : '매직링크 받기'}
+                    </button>
+                  </div>
+                )}
+
+                {!authProviders.google && !authProviders.apple && !authProviders.email && (
+                  <p role="alert" className="text-caption text-destructive text-center font-semibold">
+                    현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.
+                  </p>
+                )}
 
                 <p className="text-caption text-muted-foreground text-center pt-2">
                   계속하면 서비스 이용약관 및 개인정보 처리방침에 동의하는 것으로 봅니다.

@@ -18,10 +18,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * -- while making the attachment state honest.
  */
 
-const { mockFrom, mockUpload, mockCreateSignedUrls, mockSupabase } = vi.hoisted(() => {
+const { mockFrom, mockUpload, mockCreateSignedUrls, mockSupabase, mockSanitizePhoto } = vi.hoisted(() => {
   const mockFrom = vi.fn();
   const mockUpload = vi.fn();
   const mockCreateSignedUrls = vi.fn();
+  const mockSanitizePhoto = vi.fn();
   const mockSupabase = {
     from: mockFrom,
     storage: {
@@ -32,12 +33,16 @@ const { mockFrom, mockUpload, mockCreateSignedUrls, mockSupabase } = vi.hoisted(
       }),
     },
   };
-  return { mockFrom, mockUpload, mockCreateSignedUrls, mockSupabase };
+  return { mockFrom, mockUpload, mockCreateSignedUrls, mockSupabase, mockSanitizePhoto };
 });
 
 vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
   isSupabaseConfigured: true,
+}));
+
+vi.mock('@/lib/imageSanitization', () => ({
+  sanitizePhotoForUpload: mockSanitizePhoto,
 }));
 
 import { uploadRecordMedia, fetchRecordsResultFromDB } from '@/lib/records';
@@ -57,6 +62,10 @@ function pngFile(): File {
 describe('M-2: uploadRecordMedia classifies the Storage error it is holding', () => {
   beforeEach(() => {
     mockUpload.mockReset();
+    mockSanitizePhoto.mockReset().mockImplementation(async (file: File) => ({
+      file: new File([file], 'sanitized.jpg', { type: 'image/jpeg' }),
+      ext: 'jpg',
+    }));
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -114,6 +123,21 @@ describe('M-2: uploadRecordMedia classifies the Storage error it is holding', ()
     expect(attachment.type).toBe('photo');
     expect(attachment.name).toBe('내 사진');
     expect(attachment.path.startsWith(`${COUPLE_ID}/${RECORD_ID}/`)).toBe(true);
+    expect(attachment.path.endsWith('.jpg')).toBe(true);
+    expect(mockUpload).toHaveBeenCalledWith(
+      attachment.path,
+      expect.objectContaining({ type: 'image/jpeg' }),
+      { contentType: 'image/jpeg', upsert: false },
+    );
+  });
+
+  it('never uploads the original when privacy sanitization fails', async () => {
+    mockSanitizePhoto.mockResolvedValueOnce({ error: '사진을 안전하게 처리하지 못했어요.' });
+
+    const result = await uploadRecordMedia(pngFile(), COUPLE_ID, RECORD_ID);
+
+    expect(result).toEqual({ error: '사진을 안전하게 처리하지 못했어요.' });
+    expect(mockUpload).not.toHaveBeenCalled();
   });
 
   it('PRESERVATION: local validation failures keep their own specific copy', async () => {

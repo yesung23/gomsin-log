@@ -29,7 +29,7 @@ export type ReactionType = 'good' | 'event' | 'hard' | 'thought_of_you';
 export interface Attachment {
   type: 'photo' | 'video' | 'voice';
   name: string;
-  url?: string; // Signed URL or Demo URL
+  url?: string; // Signed URL or temporary local preview URL
   path?: string; // Storage path
   /**
    * Why this attachment has no `url`.
@@ -312,7 +312,6 @@ export interface AppState {
   records: DailyRecord[];
   events: CoupleEvent[];
   trips: Trip[];
-  isDemoMode: boolean;
   highlightedRecordId?: string;
   authenticatedUser: AuthUser | null;
   /** Home layout for 곰신. Named without a role suffix for backward compatibility. */

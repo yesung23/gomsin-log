@@ -40,7 +40,6 @@ const state = {
   trips: [],
   setupComplete: true,
   onboardingStep: 0,
-  isDemoMode: false,
   widgetLayout: [],
   hasSeenInstallPrompt: false,
   theme: 'light' as const,

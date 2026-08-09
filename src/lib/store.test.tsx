@@ -10,6 +10,7 @@ const createdChannels: Array<{ name: string; on: ReturnType<typeof vi.fn>; subsc
 
 const mockSupabase = {
   profileUpdateError: null as null | { message: string },
+  profileUpdateMatched: true,
   auth: {
     onAuthStateChange: (cb: AuthCallback) => {
       authCallbacks.push(cb);
@@ -33,7 +34,16 @@ const mockSupabase = {
   removeChannel: vi.fn(),
   rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   from: () => ({
-    update: () => ({ eq: () => Promise.resolve({ error: mockSupabase.profileUpdateError }) }),
+    update: () => ({
+      eq: () => ({
+        select: () => ({
+          maybeSingle: () => Promise.resolve({
+            data: mockSupabase.profileUpdateMatched ? { id: 'user-a' } : null,
+            error: mockSupabase.profileUpdateError,
+          }),
+        }),
+      }),
+    }),
     upsert: () => Promise.resolve({ error: null }),
   }),
 };
@@ -140,7 +150,6 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
       <span data-testid="authSync">{authSyncUnavailable ? 'unavailable' : 'available'}</span>
       <span data-testid="syncStatus">{sharedSyncStatus}</span>
-      <span data-testid="demo">{String(state.isDemoMode)}</span>
       <span data-testid="setup">{String(state.setupComplete)}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
@@ -224,6 +233,7 @@ describe('StoreProvider auth lifecycle', () => {
     localStorage.clear();
     fetchFullStateFromDB.mockReset();
     mockSupabase.profileUpdateError = null;
+    mockSupabase.profileUpdateMatched = true;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     mockSupabase.channel.mockClear();
@@ -271,7 +281,6 @@ describe('StoreProvider auth lifecycle', () => {
 
     await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
     expect(screen.getByTestId('user')).toHaveTextContent('user-a');
-    expect(screen.getByTestId('demo')).toHaveTextContent('false');
   });
 
   it('still becomes ready when the server sync never resolves (no infinite spinner)', async () => {
@@ -364,14 +373,13 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('user')).toHaveTextContent('user-b');
   });
 
-  it('keeps an explicitly started demo session across a reload', async () => {
-    const demoState: Partial<AppState> = {
+  it('discards legacy cached account content on signed-out reload', async () => {
+    const legacyCachedState = {
       setupComplete: true,
-      isDemoMode: true,
       profile: { myName: '춘향', role: 'gomsin', couple: { partnerName: '몽룡', coupleCode: '123456', connected: true, status: 'active' }, military: {} as never, contact: {} as never } as never,
-      records: [{ id: 'demo-1', date: '2026-07-31', time: '09:00', authorRole: 'gomsin', log: 'demo', isPrivate: false, createdAt: 'x' }] as never,
+      records: [{ id: 'cached-1', date: '2026-07-31', time: '09:00', authorRole: 'gomsin', log: 'cached', isPrivate: false, createdAt: 'x' }] as never,
     };
-    localStorage.setItem(STORE_KEY, JSON.stringify(demoState));
+    localStorage.setItem(STORE_KEY, JSON.stringify(legacyCachedState));
 
     render(
       <StoreProvider>
@@ -385,12 +393,11 @@ describe('StoreProvider auth lifecycle', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('demo')).toHaveTextContent('true');
-    expect(screen.getByTestId('setup')).toHaveTextContent('true');
-    expect(screen.getByTestId('records')).toHaveTextContent('demo-1');
+    expect(screen.getByTestId('setup')).toHaveTextContent('false');
+    expect(screen.getByTestId('records')).not.toHaveTextContent('cached-1');
   });
 
-  it('resets to a signed-out state when there is no session and no demo', async () => {
+  it('resets to a signed-out state when there is no session', async () => {
     render(
       <StoreProvider>
         <Probe />
@@ -403,7 +410,6 @@ describe('StoreProvider auth lifecycle', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('demo')).toHaveTextContent('false');
     expect(screen.getByTestId('setup')).toHaveTextContent('false');
   });
 
@@ -895,43 +901,6 @@ describe('StoreProvider auth lifecycle', () => {
     });
   });
 
-  it('does not persist session-only blob URLs to localStorage', async () => {
-    const demoState: Partial<AppState> = {
-      setupComplete: true,
-      isDemoMode: true,
-      profile: { myName: '춘향', role: 'gomsin', couple: { partnerName: '몽룡', coupleCode: '123456', connected: true, status: 'active' }, military: {} as never, contact: {} as never } as never,
-      records: [],
-    };
-    localStorage.setItem(STORE_KEY, JSON.stringify(demoState));
-
-    render(
-      <StoreProvider>
-        <Probe files={[new File(['a'], 'demo.png', { type: 'image/png' })]} />
-      </StoreProvider>,
-    );
-
-    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
-    await act(async () => {
-      emitAuth('INITIAL_SESSION', null);
-    });
-    await waitFor(() => expect(screen.getByTestId('demo')).toHaveTextContent('true'));
-
-    await act(async () => {
-      screen.getByText('post').click();
-    });
-    await waitFor(() => expect(screen.getByTestId('attachments')).toHaveTextContent('demo.png'));
-
-    // Visible in-session, but a persisted blob: URL would render as a broken
-    // image after reload, so the preview-only attachment is dropped from the cache.
-    await waitFor(() => {
-      const cached = localStorage.getItem(STORE_KEY) || '';
-      expect(cached).not.toContain('blob:');
-      expect(cached).not.toContain('demo.png');
-      // The written text itself is still cached.
-      expect(cached).toContain('오늘의 기록');
-    });
-  });
-
   it('ignores a token refresh for the account that is already loaded', async () => {
     fetchFullStateFromDB.mockResolvedValue(
       serverState({ profile: { myName: '춘향', role: 'gomsin', couple: { partnerName: '', coupleCode: '', connected: false, status: 'pending' }, military: {} as never, contact: {} as never } as never }),
@@ -1196,6 +1165,21 @@ describe('profile persistence acknowledgement', () => {
     await waitFor(() => expect(screen.getByTestId('name')).toHaveTextContent('original-name'));
 
     mockSupabase.profileUpdateError = { message: 'permission denied' };
+    await act(async () => {
+      screen.getByText('update-profile').click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('name')).toHaveTextContent('original-name'));
+    expect(screen.getByTestId('name')).not.toHaveTextContent('updated-name');
+  });
+
+  it('does not claim success when the profile update matched zero rows', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('name')).toHaveTextContent('original-name'));
+
+    mockSupabase.profileUpdateMatched = false;
     await act(async () => {
       screen.getByText('update-profile').click();
     });

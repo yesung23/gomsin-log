@@ -71,7 +71,10 @@ async function startEntrypoint(env: Record<string, string>): Promise<{
   const command = new Deno.Command(Deno.execPath(), {
     args: [
       'run', '--allow-net', '--allow-env', '--quiet',
-      new URL('./index.ts', import.meta.url).pathname,
+      // Keep this as a file URL. `.pathname` is still percent-encoded, so Deno
+      // would treat `%EA...` as literal path text and encode it a second time
+      // when the repository directory contains Korean or other non-ASCII text.
+      new URL('./index.ts', import.meta.url).href,
     ],
     // The subprocess inherits HOME/DENO_DIR so the already-warmed npm cache for
     // `npm:@supabase/supabase-js@2` is reused; only the function's own variables

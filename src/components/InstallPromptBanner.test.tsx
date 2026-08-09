@@ -35,7 +35,6 @@ function state(overrides: Partial<AppState> = {}): AppState {
   return {
     setupComplete: true,
     onboardingStep: 0,
-    isDemoMode: false,
     authenticatedUser: { id: 'u1', email: 'a@b.c', provider: 'google' },
     profile: {
       id: 'u1',

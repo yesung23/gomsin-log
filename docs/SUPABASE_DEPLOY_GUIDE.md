@@ -6,13 +6,16 @@
 
 ## 1. 문서 목적 및 전제 조건
 
-### 1) 데모 모드와 실연동 모드의 차이
-* **데모 모드 (`LocalStorageRepository`)**:
-  - Supabase 환경변수(`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`)가 설정되지 않은 경우 자물쇠/안내 바와 함께 즉시 오프라인 로컬 데모 모드로 작동합니다.
-  - 클라이언트 브라우저의 `localStorage` (`gomsinlog.state.v1`)에 데모 데이터가 보관되며, **비공개 필터링은 UI 레벨의 모의 격리**입니다.
-* **실연동 모드 (`SupabaseAuthRepository` / `SupabaseLogRepository`)**:
-  - 실제 Supabase 프로젝트 생성 후 환경변수 설정, SQL 마이그레이션 실행, OAuth Provider 등록, RLS 보안 검증이 모두 완료된 후 활성화됩니다.
-  - **주의**: DB RLS 정책이 배포되어야만 작성자 외 private 기록 SELECT/UPDATE/DELETE 차단이 서버 수준에서 강제됩니다.
+### 1) 실제 서비스 연결 원칙
+* 앱은 인증된 실제 계정과 Supabase 데이터만 사용합니다.
+* Supabase 환경변수(`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`)는 필수이며,
+  설정되지 않은 운영 빌드는 생성 단계에서 차단됩니다.
+* `localStorage`에는 테마·위젯 배치·설치 안내 여부와 사용자가 직접 고른 기기 전용
+  장식 사진만 저장합니다. 프로필 원문, 커플 관계, 복무 정보, 기록, 일정, 여행
+  데이터는 저장하지 않습니다. 장식 사진은 서버나 상대방에게 동기화되지 않고
+  로그아웃·탈퇴 때 삭제됩니다.
+* **주의**: DB RLS 정책이 배포되어야만 작성자 외 private 기록의
+  SELECT/UPDATE/DELETE 차단이 서버 수준에서 강제됩니다.
 
 ---
 
@@ -128,7 +131,7 @@ couple-media/{couple_id}/{record_id}/{attachment_id}.{extension}
 - **빌드 실행**: `npm run build` (`tsc -b && vite build`)
 - **환경변수 필수**: `VITE_SUPABASE_URL` 과 `VITE_SUPABASE_PUBLISHABLE_KEY`(또는
   `VITE_SUPABASE_ANON_KEY`) 없이는 **빌드가 의도적으로 실패**합니다. 설정이 없는 채로
-  영구 데모 모드 산출물이 나가는 것을 막기 위한 가드입니다(`build/buildEnv.ts`).
+  백엔드에 연결되지 않은 산출물이 배포되는 것을 막기 위한 가드입니다(`build/buildEnv.ts`).
   URL 은 파싱 가능해야 하고 `localhost`/`127.0.0.1` 을 제외하면 https 여야 합니다.
 - **검증 명령**: `npm run verify` (typecheck → lint → 전체 Vitest → 빌드). CI 워크플로가
   매 PR 에서 이 게이트에 Playwright(실브라우저 커플 매트릭스), Deno Edge 테스트, CSP 스캔,

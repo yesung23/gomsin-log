@@ -81,10 +81,10 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     getCurrentUser: 'Auth operation: read-only session check',
     // Read-only
     fetchMyCoupleState: 'Read-only: reads couple lifecycle state, no mutation',
+    fetchAuthProviderAvailability: 'Read-only: reads public Auth provider settings',
     isConfigured: 'Read-only: returns boolean configuration check',
     // `loadState` / `saveState` were listed here for `SupabaseLogRepository`, a
-    // dead exported placeholder that was never instantiated (the store uses
-    // `LocalStorageRepository`). It has been deleted, so the entries are gone
+    // dead exported placeholder that was never instantiated. It has been deleted, so the entries are gone
     // too -- an exemption for something that no longer exists is rot, and the
     // assertion below now proves the class is really absent.
     // Recovery path
@@ -96,6 +96,7 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     // Pure utilities
     hashInvitationCode: 'Pure utility: crypto hash function',
     generateInvitationCode: 'Pure utility: generates random code string',
+    parseAuthProviderAvailability: 'Pure utility: validates public Auth settings',
     // Test helper
     __resetInviteAttemptsForTest: 'Test helper: resets in-memory array for tests',
   },
@@ -377,13 +378,13 @@ describe('Gate path coverage: every mutation calls serverCallBlockedByPendingDel
         resolve(process.cwd(), 'src', 'lib', 'store.tsx'),
         'utf8',
       );
-      expect(store).toContain('class LocalStorageRepository');
-      expect(store).toContain('new LocalStorageRepository()');
+      expect(store).toContain('class DevicePreferencesRepository');
+      expect(store).toContain('new DevicePreferencesRepository()');
     });
 
     it('PRESERVATION: the auth repository selection still works', () => {
       expect(sources['supabase.ts']).toContain('new SupabaseAuthRepository()');
-      expect(sources['supabase.ts']).toContain('new DemoAuthRepository()');
+      expect(sources['supabase.ts']).toContain('new UnconfiguredAuthRepository()');
     });
   });
 });

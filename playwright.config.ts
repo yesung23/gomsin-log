@@ -1,6 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Contributors may reuse a locally installed Chrome when Playwright's managed
+ * Chromium is not present. CI keeps the normal bundled browser by leaving this
+ * unset.
+ */
+const localChromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim() || undefined;
+
+/**
  * Real-browser regression suite.
  *
  * Deliberately separate from `vitest.config.ts`: `npm test` stays a fast jsdom
@@ -50,7 +57,13 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium-390',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 390, height: 844 },
+        launchOptions: localChromiumExecutable
+          ? { executablePath: localChromiumExecutable }
+          : undefined,
+      },
     },
   ],
   webServer: {

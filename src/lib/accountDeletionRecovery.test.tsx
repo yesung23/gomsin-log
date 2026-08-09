@@ -65,10 +65,14 @@ const h = vi.hoisted(() => {
     }),
     from: () => ({
       update: () => ({
-        eq: () => {
-          callLog.push('from:profiles.update');
-          return Promise.resolve({ error: null });
-        },
+        eq: () => ({
+          select: () => ({
+            maybeSingle: () => {
+              callLog.push('from:profiles.update');
+              return Promise.resolve({ data: { id: 'user-a' }, error: null });
+            },
+          }),
+        }),
       }),
       upsert: () => {
         callLog.push('from:contact_preferences.upsert');

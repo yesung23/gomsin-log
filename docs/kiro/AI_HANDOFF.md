@@ -64,7 +64,7 @@ Storage 정책(`007_storage_policies.sql`)이 경로를
 
 `src/lib/privacy.ts` 가 유일한 출처입니다.
 
-- `isOwnRecord` — `userId` 우선, 없으면(데모/오프라인) `authorRole` 로 판단
+- `isOwnRecord` — `userId` 우선, 없으면(구버전 레코드) `authorRole` 로 판단
 - `emotionFlowForStorage` — 저장 전 `author_only` 감정 제거
 - `visibleRecordsForViewer` — 필터 + 정화를 한 번에
 

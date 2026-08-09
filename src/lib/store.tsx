@@ -63,7 +63,6 @@ import {
   uploadRecordMedia,
   removeRecordMedia,
   resolveAttachmentUrls,
-  classifyMediaFile,
   isCanonicalRecordMediaPath,
 } from '@/lib/records';
 import { StoreContext } from '@/lib/storeContext';
@@ -150,7 +149,7 @@ import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
 
-class LocalStorageRepository {
+class DevicePreferencesRepository {
   isConfigured(): boolean {
     return true;
   }
@@ -176,30 +175,13 @@ class LocalStorageRepository {
 
   async saveState(state: AppState, hasAuthenticatedSession = false): Promise<void> {
     try {
-      if (hasAuthenticatedSession || !state.isDemoMode) {
-        // Authenticated browser storage is a strict device-preference whitelist.
-        // Auth, profile, couple, invite, military, contact and shared/private
-        // content all remain server/session-owned.
-        localStorage.setItem(STORE_KEY, JSON.stringify(carryOverDevicePrefs(state)));
-        return;
-      }
-
-      const records = state.records.map((record) => {
-        if (!record.attachments?.length) return record;
-        return {
-          ...record,
-          attachments: record.attachments
-            // Blob URLs are session-only; persisting them guarantees a broken
-            // image after reload.
-            .filter((attachment) => !(attachment.url?.startsWith('blob:') && !attachment.path))
-            .map((attachment) =>
-              attachment.url?.startsWith('blob:')
-                ? { ...attachment, url: undefined }
-                : attachment,
-            ),
-        };
-      });
-      localStorage.setItem(STORE_KEY, JSON.stringify({ ...state, records }));
+      // Browser storage is a strict device-preference whitelist. Auth, profile,
+      // couple, invite, military, contact and shared/private content remain
+      // server/session-owned. `hasAuthenticatedSession` stays in the signature
+      // because callers already know it, but both signed-in and signed-out states
+      // now obey the same rule: local storage never becomes an account database.
+      void hasAuthenticatedSession;
+      localStorage.setItem(STORE_KEY, JSON.stringify(carryOverDevicePrefs(state)));
     } catch (e) {
       console.error('[gomsinlog] Failed to save state to localStorage', e);
     }
@@ -209,7 +191,6 @@ class LocalStorageRepository {
 const DEFAULT_STATE: AppState = {
   setupComplete: false,
   onboardingStep: 0,
-  isDemoMode: true,
   authenticatedUser: null,
   profile: {
     myName: '',
@@ -268,7 +249,7 @@ function carryOverDevicePrefs(
   };
 }
 
-const localRepository = new LocalStorageRepository();
+const devicePreferencesRepository = new DevicePreferencesRepository();
 
 /**
  * Whether a resolved deletion status must stop a server call.
@@ -578,10 +559,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const refreshCoupleLifecycle = useCallback(async (): Promise<CoupleLifecycle> => {
     const identity = captureActiveIdentity();
-    if (!identity || stateRef.current.isDemoMode) {
-      // Demo mode never contacts the backend; its couple state is authored locally.
-      return stateRef.current.isDemoMode ? 'connected' : 'unknown';
-    }
+    if (!identity) return 'unknown';
 
     // This runs from background timers (the pending-partner poll) as well as from
     // hydration, so an unexpected throw here must not escape as an unhandled
@@ -687,14 +665,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(STORE_KEY_V1);
     const nextState: AppState = {
       ...DEFAULT_STATE,
-      isDemoMode: false,
       ...carryOverDevicePrefs(current),
       authenticatedUser: current.authenticatedUser,
     };
     // Rewrite `STORE_KEY` through the existing save path, then block the save
     // effect so it cannot resurrect the cache on the next render. The recovery
     // marker lives at its own top-level key and is untouched by either.
-    void localRepository.saveState(nextState, sessionUserIdRef.current !== null);
+    void devicePreferencesRepository.saveState(nextState, sessionUserIdRef.current !== null);
     cachePurgedRef.current = true;
     // Pin hydration to the retained user so the hydration effect cannot
     // re-fetch the data that was just removed.
@@ -794,7 +771,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [abortForPendingDeletion, captureActiveIdentity, isCurrentIdentity, verifyDeletionStatus]);
 
   useEffect(() => {
-    localRepository.loadState().then((stored) => {
+    devicePreferencesRepository.loadState().then((stored) => {
       if (stored) {
         const theme = stored.theme === 'light' || stored.theme === 'dark'
           ? stored.theme
@@ -813,19 +790,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : DEFAULT_STATE.hasSeenInstallPrompt,
           theme,
         };
-        const nextState: AppState = stored.isDemoMode === true
-          ? {
-              ...DEFAULT_STATE,
-              ...stored,
-              ...devicePrefs,
-              isDemoMode: true,
-              authenticatedUser: null,
-            } as AppState
-          : {
-              ...DEFAULT_STATE,
-              ...devicePrefs,
-              isDemoMode: false,
-            };
+        // Older releases could persist complete sample-account content here.
+        // Retain only harmless device preferences and drop all profile,
+        // relationship and record data on first launch.
+        const nextState: AppState = { ...DEFAULT_STATE, ...devicePrefs };
         stateRef.current = nextState;
         setState(nextState);
       } else {
@@ -886,7 +854,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const current = stateRef.current;
         const clearedState: AppState = {
           ...DEFAULT_STATE,
-          isDemoMode: false,
           ...carryOverDevicePrefs(current),
         };
         stateRef.current = clearedState;
@@ -930,7 +897,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             cachePurgedRef.current = true;
             replaceStateImmediately({
               ...DEFAULT_STATE,
-              isDemoMode: false,
               ...carryOverDevicePrefs(stateRef.current),
               authenticatedUser: authUser,
             });
@@ -960,7 +926,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               cachePurgedRef.current = true;
               replaceStateImmediately({
                 ...DEFAULT_STATE,
-                isDemoMode: false,
                 ...carryOverDevicePrefs(stateRef.current),
                 authenticatedUser: authUser,
               });
@@ -1053,7 +1018,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 return {
                   ...base,
                   authenticatedUser: authUser,
-                  isDemoMode: false,
                   records: [],
                   events: [],
                   trips: [],
@@ -1066,7 +1030,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 return {
                   ...base,
                   authenticatedUser: authUser,
-                  isDemoMode: false,
                   setupComplete: false,
                   records: [],
                   events: [],
@@ -1097,7 +1060,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               return {
                 ...base,
                 authenticatedUser: authUser,
-                isDemoMode: false,
                 ...dbState,
                 ...(remoteProfile ? { profile: remoteProfile } : {}),
               };
@@ -1132,7 +1094,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           setInvitationExpiresAt(null);
           const nextState: AppState = {
             ...DEFAULT_STATE,
-            isDemoMode: false,
             ...carryOverDevicePrefs(stateRef.current),
           };
           replaceStateImmediately(nextState);
@@ -1143,10 +1104,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (event === 'INITIAL_SESSION') {
           hydratedUserIdRef.current = null;
           const current = stateRef.current;
-          // A demo session the user explicitly started must survive a reload.
-          const nextState = current.isDemoMode && current.setupComplete
-            ? current
-            : { ...DEFAULT_STATE, isDemoMode: false, ...carryOverDevicePrefs(current) };
+          const nextState = { ...DEFAULT_STATE, ...carryOverDevicePrefs(current) };
           replaceStateImmediately(nextState);
           setIsAuthChecked(true);
         }
@@ -1174,7 +1132,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       cachePurgedRef.current = false;
       return;
     }
-    localRepository.saveState(state, sessionUserIdRef.current !== null);
+    devicePreferencesRepository.saveState(state, sessionUserIdRef.current !== null);
   }, [state, isHydrated, isAuthChecked]);
 
   useEffect(() => {
@@ -1762,7 +1720,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       profile: { ...current.profile, ...profileUpdates },
     }));
 
-    if (options.persist === false || !supabase || !prev.authenticatedUser || prev.isDemoMode) {
+    if (options.persist === false || !supabase || !prev.authenticatedUser) {
       commitLocally();
       return true;
     }
@@ -1779,7 +1737,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         || profileUpdates.military !== undefined
         || profileUpdates.role !== undefined
       ) {
-        const { error } = await supabase
+        const { data, error } = await supabase
         .from('profiles')
         .update({
           display_name: newProfile.myName,
@@ -1787,9 +1745,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           military_info: newProfile.military,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', userId);
+        .eq('id', userId)
+        .select('id')
+        .maybeSingle();
         if (error) {
           console.error('[gomsinlog] Failed to update profile:', error);
+          return false;
+        }
+        // PostgREST can answer an RLS-filtered UPDATE with no error and zero rows.
+        // Only a returned copy of this exact profile proves the write happened.
+        if (data?.id !== userId) {
+          console.error('[gomsinlog] Profile update matched no accessible row.');
           return false;
         }
       }
@@ -1934,7 +1900,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
      */
     reason?: RecordMutationReason;
   }> => {
-    const initial = stateRef.current;
     const recordId = options?.recordId ?? crypto.randomUUID();
     const allowQueue = options?.allowQueue !== false;
     const baseRecord: DailyRecord = {
@@ -1942,28 +1907,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       id: recordId,
       createdAt: new Date().toISOString(),
     };
-
-    // Demo previews are explicitly local, even when Supabase is configured.
-    if (initial.isDemoMode) {
-      const previews: Attachment[] = files.map((file) => {
-        const classified = classifyMediaFile(file);
-        return {
-          type: 'error' in classified ? 'photo' : classified.type,
-          name: file.name,
-          url: URL.createObjectURL(file),
-        };
-      });
-      const demoRecord: DailyRecord = {
-        ...baseRecord,
-        attachments: [...(baseRecord.attachments || []), ...previews],
-      };
-      updateStateImmediately((current) => current.isDemoMode
-        ? { ...current, records: [...current.records, demoRecord] }
-        : current);
-      return stateRef.current.isDemoMode
-        ? { ok: true, failedFiles: [] }
-        : { ok: false, failedFiles: files.map((file) => file.name) };
-    }
 
     // A missing LOCAL couple id is not proof that the account has no couple
     // space: the creator's membership is `active` on the server from the moment
@@ -2299,16 +2242,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       createdAt: existing.createdAt,
     };
 
-    if (initial.isDemoMode) {
-      updateStateImmediately((current) => current.isDemoMode
-        ? {
-            ...current,
-            records: current.records.map((record) => record.id === id ? updated : record),
-          }
-        : current);
-      return stateRef.current.isDemoMode ? { ok: true } : recordFailure('stale');
-    }
-
     const workspace = captureLinkedCouple();
     if (!workspace) return recordFailure('workspace_unresolved');
     if (existing.userId !== workspace.userId) return recordFailure('not_owner');
@@ -2360,13 +2293,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const initial = stateRef.current;
     const existing = initial.records.find((record) => record.id === id);
     if (!existing) return recordFailure('missing');
-
-    if (initial.isDemoMode) {
-      updateStateImmediately((current) => current.isDemoMode
-        ? { ...current, records: current.records.filter((record) => record.id !== id) }
-        : current);
-      return stateRef.current.isDemoMode ? { ok: true } : recordFailure('stale');
-    }
 
     const workspace = captureLinkedCouple();
     if (!workspace) return recordFailure('workspace_unresolved');
@@ -2449,34 +2375,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, failedFiles: allFileNames, error: recordFailureMessage('missing') };
     }
     if (addFiles.length === 0 && removePaths.length === 0) return { ok: true, failedFiles: [] };
-
-    if (initial.isDemoMode) {
-      const previews: Attachment[] = addFiles.map((file) => {
-        const classified = classifyMediaFile(file);
-        return {
-          type: 'error' in classified ? 'photo' : classified.type,
-          name: file.name,
-          url: URL.createObjectURL(file),
-        };
-      });
-      updateStateImmediately((current) => current.isDemoMode
-        ? {
-            ...current,
-            records: current.records.map((record) => record.id === id
-              ? {
-                  ...record,
-                  attachments: [
-                    ...(record.attachments || []).filter(
-                      (attachment) => !attachment.path || !removePaths.includes(attachment.path),
-                    ),
-                    ...previews,
-                  ],
-                }
-              : record),
-          }
-        : current);
-      return { ok: true, failedFiles: [] };
-    }
 
     const workspace = captureLinkedCouple() ?? await resolveWorkspaceOnDemand();
     if (!('coupleId' in workspace)) {
@@ -2762,37 +2660,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
-   * Demo-only role preview: swaps my name with my partner's and flips the role
-   * so both role-specific home screens can be tried without a second account.
-   *
-   * Guarded to demo mode because it is purely local. On a real account the
-   * server would still hold the original role, the next sync would revert it,
-   * and in the meantime `authorRole` on existing records would no longer match
-   * the profile -- which decides which records count as "mine".
-   */
-  const switchRole = () => {
-    updateStateImmediately((prev) => {
-      if (!prev.isDemoMode) {
-        console.warn('[gomsinlog] switchRole is a demo-only preview and was ignored.');
-        return prev;
-      }
-      const { myName, role, couple } = prev.profile;
-      return {
-        ...prev,
-        profile: {
-          ...prev.profile,
-          myName: couple.partnerName,
-          role: (role === 'gomsin' ? 'soldier' : 'gomsin') as Role,
-          couple: {
-            ...couple,
-            partnerName: myName,
-          },
-        },
-      };
-    });
-  };
-
-  /**
    * Cancel a couple link that was never accepted. There is no partner and no
    * shared row to revoke, so nothing has to be quarantined or reconciled: the
    * only requirement is that a confirmed cancellation drops the local pending
@@ -2822,12 +2689,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const disconnect = async (): Promise<boolean> => {
-    const current = stateRef.current;
-    if (current.isDemoMode) {
-      // Demo mode never calls the configured backend.
-      return purgeSharedAccess();
-    }
-
     const workspace = captureActiveWorkspace();
     if (!workspace) return cancelPendingLink();
     if (workspaceRefMatches(pendingDisconnectRef.current, workspace)) return false;
@@ -2909,7 +2770,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const current = stateRef.current;
     const nextState: AppState = {
       ...DEFAULT_STATE,
-      isDemoMode: false,
       ...carryOverDevicePrefs(current),
     };
     replaceStateImmediately(nextState);
@@ -2935,11 +2795,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * either finish or leave the deletion.
    */
   const deleteAccount = async (): Promise<AccountDeletionOutcome> => {
-    if (stateRef.current.isDemoMode) {
-      purgeLocalAccountData();
-      return { status: 'deleted', dataRemoved: true, warnings: [] };
-    }
-
     const identity = captureActiveIdentity();
     if (!identity) return { status: 'failed', dataRemoved: false, warnings: [] };
     const outcome = await deleteAccountFromDB();
@@ -3008,175 +2863,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, highlightedRecordId: id }));
   };
 
-  const startDemo = () => {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    const daysAgo = (n: number) => {
-      const d = new Date(today);
-      d.setDate(d.getDate() - n);
-      return d.toISOString().split('T')[0];
-    };
-
-    updateStateImmediately((prev) => ({
-      ...DEFAULT_STATE,
-      ...carryOverDevicePrefs(prev),
-      setupComplete: true,
-      isDemoMode: true,
-      authenticatedUser: null,
-      profile: {
-        ...DEFAULT_STATE.profile,
-        myName: '춘향',
-        role: 'gomsin',
-        couple: {
-          ...DEFAULT_STATE.profile.couple,
-          partnerName: '몽룡',
-          coupleCode: '123456',
-          connected: true,
-          status: 'active',
-        },
-      },
-      records: [
-        // --- Today ---
-        {
-          id: 'rec-demo-1',
-          date: todayStr,
-          time: '08:30',
-          authorRole: 'gomsin',
-          log: '오늘 출근길 날씨가 너무 좋다 🌸',
-          attachments: [
-            { type: 'photo', name: '출근길_풍경.jpg', url: 'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=500&auto=format&fit=crop' }
-          ],
-          isPrivate: false,
-          createdAt: `${todayStr}T08:30:00.000Z`,
-        },
-        {
-          id: 'rec-demo-2',
-          date: todayStr,
-          time: '11:20',
-          authorRole: 'gomsin',
-          log: '오전 업무가 꼬여서 조금 지쳤어.',
-          reaction: 'hard',
-          isPrivate: false,
-          createdAt: `${todayStr}T11:20:00.000Z`,
-        },
-        {
-          id: 'rec-demo-3',
-          date: todayStr,
-          time: '12:40',
-          authorRole: 'gomsin',
-          log: '오늘 점심 메뉴는 돈까스!',
-          attachments: [
-            { type: 'photo', name: '점심_사진.jpg', url: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop' }
-          ],
-          isPrivate: false,
-          createdAt: `${todayStr}T12:40:00.000Z`,
-        },
-        {
-          id: 'rec-demo-4',
-          date: todayStr,
-          time: '13:10',
-          authorRole: 'gomsin',
-          log: '그래도 밥 먹으니 좀 살겠다 😋',
-          isPrivate: false,
-          createdAt: `${todayStr}T13:10:00.000Z`,
-        },
-        {
-          id: 'rec-demo-5',
-          date: todayStr,
-          time: '19:15',
-          authorRole: 'gomsin',
-          log: '퇴근하고 집 가는 길에 남기는 음성 편지 💌',
-          attachments: [
-            { type: 'voice', name: '저녁_음성한마디.m4a' }
-          ],
-          isPrivate: false,
-          createdAt: `${todayStr}T19:15:00.000Z`,
-        },
-        // --- 1 day ago ---
-        {
-          id: 'rec-demo-6',
-          date: daysAgo(1),
-          time: '09:00',
-          authorRole: 'gomsin',
-          log: '오늘은 재택이라 여유롭게 시작 ☕',
-          isPrivate: false,
-          createdAt: `${daysAgo(1)}T09:00:00.000Z`,
-        },
-        {
-          id: 'rec-demo-7',
-          date: daysAgo(1),
-          time: '15:30',
-          authorRole: 'gomsin',
-          log: '산책하다가 예쁜 꽃 발견!',
-          attachments: [
-            { type: 'photo', name: '꽃사진.jpg', url: 'https://images.unsplash.com/photo-1490750967868-88aa4f44baee?w=500&auto=format&fit=crop' }
-          ],
-          reaction: 'good',
-          isPrivate: false,
-          createdAt: `${daysAgo(1)}T15:30:00.000Z`,
-        },
-        // --- 3 days ago ---
-        {
-          id: 'rec-demo-8',
-          date: daysAgo(3),
-          time: '20:00',
-          authorRole: 'gomsin',
-          log: '오늘 하루 종일 네 생각뿐이었어 💭',
-          reaction: 'thought_of_you',
-          isPrivate: false,
-          createdAt: `${daysAgo(3)}T20:00:00.000Z`,
-        },
-        // --- 5 days ago (private record) ---
-        {
-          id: 'rec-demo-9',
-          date: daysAgo(5),
-          time: '23:00',
-          authorRole: 'gomsin',
-          log: '오늘 좀 울었다. 괜찮아질 거야.',
-          isPrivate: true,
-          createdAt: `${daysAgo(5)}T23:00:00.000Z`,
-        },
-        // --- 7 days ago ---
-        {
-          id: 'rec-demo-10',
-          date: daysAgo(7),
-          time: '12:00',
-          authorRole: 'gomsin',
-          log: '주말 브런치 먹으러 왔어!',
-          attachments: [
-            { type: 'photo', name: '브런치.jpg', url: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=500&auto=format&fit=crop' }
-          ],
-          reaction: 'good',
-          isPrivate: false,
-          createdAt: `${daysAgo(7)}T12:00:00.000Z`,
-        },
-        {
-          id: 'rec-demo-11',
-          date: daysAgo(7),
-          time: '18:30',
-          authorRole: 'gomsin',
-          log: '저녁노을이 진짜 예뻤어',
-          attachments: [
-            { type: 'photo', name: '노을.jpg', url: 'https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=500&auto=format&fit=crop' }
-          ],
-          isPrivate: false,
-          createdAt: `${daysAgo(7)}T18:30:00.000Z`,
-        },
-        // --- 12 days ago ---
-        {
-          id: 'rec-demo-12',
-          date: daysAgo(12),
-          time: '10:15',
-          authorRole: 'gomsin',
-          log: '오늘 면회 다녀왔어. 보고 싶었어 🥹',
-          reaction: 'thought_of_you',
-          isPrivate: false,
-          createdAt: `${daysAgo(12)}T10:15:00.000Z`,
-        },
-      ],
-    }));
-  };
-
   const setAuthenticatedUser = (user: AuthUser | null) => {
     updateStateImmediately((prev) => ({ ...prev, authenticatedUser: user }));
   };
@@ -3243,7 +2929,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         updateEvent,
         deleteEvent,
         reloadEvents,
-        switchRole,
         disconnect,
         deleteAccount,
         signOut,
@@ -3251,7 +2936,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setOnboardingStep,
         setHighlightedRecordId,
         setAuthenticatedUser,
-        startDemo,
         setWidgetLayout,
         setHasSeenInstallPrompt,
         setTheme,

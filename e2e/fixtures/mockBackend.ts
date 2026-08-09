@@ -251,7 +251,8 @@ export async function installMockBackend(
       if (scenario.newAccount && method === 'GET') return rows(route, []);
       if (method !== 'GET') {
         const body = request.postDataJSON();
-        return rows(route, Array.isArray(body) ? body : [body]);
+        const payloads = Array.isArray(body) ? body : [body];
+        return rows(route, payloads.map((payload) => ({ id: scenario.userId, ...payload })));
       }
       return rows(route, [
         {

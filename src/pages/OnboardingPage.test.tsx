@@ -17,12 +17,14 @@ const {
   createCoupleInvitation,
   consumeCoupleInvitation,
   fetchMyCoupleState,
+  fetchAuthProviderAvailability,
   regenerateCoupleInvitation,
   mockSupabase,
 } = vi.hoisted(() => ({
   createCoupleInvitation: vi.fn(),
   consumeCoupleInvitation: vi.fn(),
   fetchMyCoupleState: vi.fn(),
+  fetchAuthProviderAvailability: vi.fn(),
   regenerateCoupleInvitation: vi.fn(),
   mockSupabase: {
     rpc: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock('@/lib/supabase', () => ({
   createCoupleInvitation: (...args: unknown[]) => createCoupleInvitation(...(args as [])),
   consumeCoupleInvitation: (...args: unknown[]) => consumeCoupleInvitation(...(args as [])),
   fetchMyCoupleState: (...args: unknown[]) => fetchMyCoupleState(...(args as [])),
+  fetchAuthProviderAvailability: (...args: unknown[]) => fetchAuthProviderAvailability(...(args as [])),
   regenerateCoupleInvitation: (...args: unknown[]) => regenerateCoupleInvitation(...(args as [])),
   saveCoupleAnniversary: vi.fn().mockResolvedValue(true),
 }));
@@ -59,7 +62,6 @@ vi.mock('sonner', () => ({
 }));
 
 const storeState = {
-  isDemoMode: false,
   authenticatedUser: { id: 'user-a', email: 'a@example.com', provider: 'google' as const },
   onboardingStep: 3,
   profile: {
@@ -79,7 +81,6 @@ vi.mock('@/lib/useStore', () => ({
     state: storeState,
     updateProfile: vi.fn(),
     setSetupComplete: vi.fn(),
-    startDemo: vi.fn(),
     setOnboardingStep: (...args: unknown[]) => setOnboardingStep(...(args as [])),
     recoverExpiredSession: (...args: unknown[]) => recoverExpiredSession(...(args as [])),
   }),
@@ -110,6 +111,11 @@ describe('OnboardingPage step 3 - couple space', () => {
     recoverExpiredSession.mockReset().mockResolvedValue(true);
     setOnboardingStep.mockReset();
     fetchMyCoupleState.mockReset();
+    fetchAuthProviderAvailability.mockReset().mockResolvedValue({
+      google: true,
+      apple: false,
+      email: true,
+    });
     regenerateCoupleInvitation.mockReset();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
     vi.spyOn(console, 'error').mockImplementation(() => {});

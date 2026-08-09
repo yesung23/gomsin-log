@@ -203,7 +203,7 @@ describe('an expired signed URL recovers instead of staying broken', () => {
       .not.toContain('인터넷 연결');
   });
 
-  it('does not try to re-sign what has no storage path (demo-mode blob URL)', () => {
+  it('does not try to re-sign a temporary blob URL that has no storage path', () => {
     const { container } = renderOne(attachment({
       path: undefined,
       url: 'blob:http://localhost/abc',

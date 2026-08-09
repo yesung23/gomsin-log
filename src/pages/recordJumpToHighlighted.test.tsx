@@ -82,7 +82,6 @@ function makeState(records: DailyRecord[], highlightedRecordId?: string): AppSta
   return {
     setupComplete: true,
     onboardingStep: 0,
-    isDemoMode: false,
     authenticatedUser: { id: ME, email: 'me@example.com', provider: 'google' },
     profile: {
       id: ME,

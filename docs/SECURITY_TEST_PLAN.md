@@ -12,8 +12,9 @@
 >    (`src/lib/privacy.ts`) 양쪽이 **구현 완료**입니다. 로컬 캐시에도 private 기록의 본문·
 >    첨부·감정 메타데이터를 저장하지 않습니다(`src/lib/store.tsx`). 실제 프로젝트에서의
 >    RLS 실측은 아래 API-\*/STOR-\* 행을 참조하세요.
-> 3. **미검증 항목**: 이메일 Magic Link, Google OAuth, Apple OAuth는 자격증명(.env) 설정
->    전으로 **미검증** 상태입니다.
+> 3. **인증 상태**: 원격 설정에서 Google·Email provider 활성화와 Auth health 응답은
+>    확인했습니다. Apple provider는 비활성화되어 UI에서도 노출하지 않습니다. 실제 사용자
+>    OAuth·Magic Link 왕복은 사람이 테스트 계정으로 최종 확인해야 합니다.
 > 4. **Storage / 계정 삭제**: Private Bucket 업로드(`src/lib/records.ts:378`), Signed URL
 >    발급(`src/lib/records.ts:92`, TTL 1시간), MIME/용량 제한(`classifyMediaFile` +
 >    `MAX_BYTES`), 계정 완전 삭제 Edge Function(`supabase/functions/delete-account/`)은
@@ -50,8 +51,8 @@
 
 | ID | 영역 / 목적 | 사전 조건 | 수행 절차 및 검증 항목 | 기대 결과 | 상태 (상세) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **AUTH-01** | Magic Link 인증 | 미인증 상태 | `signInWithOtp({ email })` 호출 및 콜백 수신 | JWT 세션상 `auth.uid()` 생성 | **미검증** (자격증명 미설정) |
-| **AUTH-02** | OAuth 인가 가이드 | `.env` 미설정 | Google/Apple OAuth 버튼 클릭 | 성공 팝업 없이 데모 가이드 노출 | **통과** (UI 가이드 동작) |
+| **AUTH-01** | Magic Link 인증 | 미인증 상태 | `signInWithOtp({ email })` 호출 및 콜백 수신 | JWT 세션상 `auth.uid()` 생성 | **코드 검증 / 실제 이메일 왕복 미검증** |
+| **AUTH-02** | OAuth provider 가용성 | 원격 Auth 설정 조회 | 활성 provider만 버튼 노출; Google 콜백 수행 | 미설정 provider 숨김, Google은 실제 OAuth로 이동 | **자동 검증 / 실제 계정 왕복 미검증** |
 | **AUTH-03** | service_role 누출 검사 | 번들/코드 검사 | 프론트엔드 번들, VITE 환경변수, Git 이력 검색 | `service_role` 키 부재 확인 | **통과** (코드베이스 안전) |
 | **API-01** | REST API direct 조회 (A) | A 로그인 | A가 REST API로 자신의 private/shared records SELECT | 정상 HTTP 200 OK | **미실행** (서버 미연동) |
 | **API-02** | REST API direct 조회 (B) | B 로그인 | B가 REST API로 A의 shared records SELECT | 정상 HTTP 200 OK | **미실행** (서버 미연동) |
@@ -69,8 +70,8 @@
 | **STOR-04** | Signed URL 차단 (D 구상대) | status='disconnected' | D가 A의 이전 shared 미디어 Signed URL 요청 | 발급 거부 (HTTP 403 / Error) | **구현 완료 / 실측 미검증** (Storage 정책 `007`, 멤버십 정합성 `008`/`015`) |
 | **DEL-01** | 계정 완전 삭제 Edge Function | 탈퇴 요청 | Edge Function `deleteUser` 실행 | Auth, Profile, Records, Storage 순삭 | **구현 완료 / 배포·실측 미완** (`supabase/functions/delete-account/`, Deno 테스트 `entrypoint_test.ts`) |
 | **UI-01** | 390px / 1280px 반응형 프레임 | 모바일/데스크톱 | 390px 뷰포트 및 1280px 화면 중앙 430px 프레임 확인 | 깨짐 없이 44px 터치 영역 유지 | **통과** (UI 검증 완료) |
-| **UI-02** | localStorage 새로고침 유지 | 데모 모드 | 기록 추가 후 브라우저 F5 새로고침 | 데모 state 유지 확인 | **통과** (UI 검증 완료) |
-| **UI-03** | private 달력 마커 차단 | A가 private 작성 | B 데모 전환 시 달력 dot, 카운트, 타임라인 숨김 | UI 상 모의 격리 확인 | **통과** (UI 모의 격리) |
+| **UI-02** | 서버 데이터 새로고침 복원 | 실제 계정 로그인 | 기록 추가·동기화 후 브라우저 F5 새로고침 | 서버에서 동일 기록 복원 | **자동 검증 / 실제 계정 수동 검증 필요** |
+| **UI-03** | private 달력 마커 차단 | A가 private 작성 | 연결된 실제 B 계정에서 달력 dot, 카운트, 타임라인 확인 | B 화면과 API 모두 비노출 | **코드 검증 / 2계정 실측 필요** |
 | **BLD-01** | npm run build & lint & test | 개발 CLI 또는 CI | `npm run verify` (typecheck → lint → 전체 Vitest → 빌드) | 전 단계 exit 0 | **통과** (CI 워크플로가 매 PR 에서 실행) |
 
 ---

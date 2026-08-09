@@ -26,6 +26,54 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.met
 
 export const isSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_KEY);
 
+export type AuthProviderAvailability = {
+  google: boolean;
+  apple: boolean;
+  email: boolean;
+};
+
+/**
+ * Parse GoTrue's public settings response without trusting its shape.
+ * Missing or malformed flags stay disabled so the UI never advertises a login
+ * method that is guaranteed to fail.
+ */
+export function parseAuthProviderAvailability(body: unknown): AuthProviderAvailability {
+  const external = body && typeof body === 'object'
+    ? (body as { external?: unknown }).external
+    : null;
+  const flags = external && typeof external === 'object'
+    ? external as Record<string, unknown>
+    : {};
+  return {
+    google: flags.google === true,
+    apple: flags.apple === true,
+    email: flags.email === true,
+  };
+}
+
+/**
+ * Ask the configured Auth server which sign-in methods are actually enabled.
+ * The endpoint and publishable key are public by design; no user token or account
+ * data is sent. `null` means the availability check itself could not complete.
+ */
+export async function fetchAuthProviderAvailability(): Promise<AuthProviderAvailability | null> {
+  if (!isSupabaseConfigured) return null;
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/settings`, {
+      headers: { apikey: SUPABASE_KEY },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      console.error('[gomsinlog] Auth provider settings request failed:', response.status);
+      return null;
+    }
+    return parseAuthProviderAvailability(await response.json());
+  } catch (error) {
+    console.error('[gomsinlog] Auth provider settings request failed:', error);
+    return null;
+  }
+}
+
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: {
@@ -153,8 +201,11 @@ export async function createCoupleInvitation(role: Role): Promise<{
   reason?: CoupleCreationReason;
 }> {
   if (!supabase) {
-    // Offline/Demo Fallback
-    return { coupleId: crypto.randomUUID(), code: generateInvitationCode() };
+    return {
+      coupleId: '',
+      code: '',
+      error: '서비스 연결 설정이 완료되지 않아 커플 공간을 만들 수 없어요. 운영자에게 문의해 주세요.',
+    };
   }
 
   try {
@@ -342,9 +393,7 @@ export async function consumeCoupleInvitation(
   }
 
   if (!supabase) {
-    // Offline demo space only accepts the demo code.
-    if (normalized === '123456') return { coupleId: 'demo-couple-id' };
-    return { error: '올바르지 않거나 만료된 초대 코드입니다.' };
+    return { error: '서비스 연결 설정이 완료되지 않아 초대 코드를 확인할 수 없어요. 운영자에게 문의해 주세요.' };
   }
 
   const throttle = registerInviteAttempt();
@@ -423,7 +472,9 @@ export async function consumeCoupleInvitation(
  * gone and the unique-active-couple constraint prevents creating a new space.
  */
 export async function regenerateCoupleInvitation(): Promise<{ code?: string; error?: string }> {
-  if (!supabase) return { code: generateInvitationCode() };
+  if (!supabase) {
+    return { error: '서비스 연결 설정이 완료되지 않아 초대 코드를 발급할 수 없어요. 운영자에게 문의해 주세요.' };
+  }
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) {
     return { error: '탈퇴 처리가 진행 중이어서 초대 코드를 새로 만들 수 없어요.' };
@@ -591,10 +642,8 @@ export async function deleteAccountFromDB(): Promise<AccountDeletionOutcome> {
   }
 }
 
-/**
- * Demo Auth Repository implementation for offline fallback.
- */
-export class DemoAuthRepository implements IAuthRepository {
+/** Auth repository used only to fail closed when service configuration is absent. */
+export class UnconfiguredAuthRepository implements IAuthRepository {
   private currentUser: AuthUser | null = null;
 
   isConfigured(): boolean {
@@ -606,15 +655,15 @@ export class DemoAuthRepository implements IAuthRepository {
   }
 
   async signInWithGoogle(): Promise<{ error?: string }> {
-    return { error: '현재 데모 모드에서는 구글 로그인이 설정되어 있지 않습니다. 데모 둘러보기를 이용해보세요.' };
+    return { error: '서비스 연결 설정이 완료되지 않았어요. 운영자에게 문의해 주세요.' };
   }
 
   async signInWithApple(): Promise<{ error?: string }> {
-    return { error: '현재 데모 모드에서는 Apple 로그인이 설정되어 있지 않습니다. 데모 둘러보기를 이용해보세요.' };
+    return { error: '서비스 연결 설정이 완료되지 않았어요. 운영자에게 문의해 주세요.' };
   }
 
   async signInWithEmail(_email: string): Promise<{ error?: string }> {
-    return { error: '현재 데모 모드에서는 이메일 로그인이 지원되지 않습니다.' };
+    return { error: '서비스 연결 설정이 완료되지 않았어요. 운영자에게 문의해 주세요.' };
   }
 
   async signOut(): Promise<void> {
@@ -661,24 +710,29 @@ export class SupabaseAuthRepository implements IAuthRepository {
       return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
     }
 
-    const redirectTo = authRedirectUrl();
-    const native = isNativePlatform();
+    try {
+      const redirectTo = authRedirectUrl();
+      const native = isNativePlatform();
 
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo, skipBrowserRedirect: native },
-    });
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo, skipBrowserRedirect: native },
+      });
 
-    if (error) return { error: error.message };
+      if (error) return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
 
-    if (native && data?.url) {
-      // Statically imported: `src/main.tsx` already pulls in `@/lib/deepLinks`,
-      // which imports `@capacitor/browser` statically, so the module is already
-      // in the eager graph and there is no bundle-size cost. The
-      // `isNativePlatform()` guard still keeps `Browser.open` off the web path.
-      await Browser.open({ url: data.url, presentationStyle: 'popover' });
+      if (native && data?.url) {
+        // Statically imported: `src/main.tsx` already pulls in `@/lib/deepLinks`,
+        // which imports `@capacitor/browser` statically, so the module is already
+        // in the eager graph and there is no bundle-size cost. The
+        // `isNativePlatform()` guard still keeps `Browser.open` off the web path.
+        await Browser.open({ url: data.url, presentationStyle: 'popover' });
+      }
+      return {};
+    } catch (error) {
+      console.error(`[gomsinlog] ${provider} OAuth start failed:`, error);
+      return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
     }
-    return {};
   }
 
   async signInWithGoogle(): Promise<{ error?: string }> {
@@ -693,11 +747,20 @@ export class SupabaseAuthRepository implements IAuthRepository {
     if (!supabase) {
       return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
     }
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: authRedirectUrl() },
-    });
-    return { error: error?.message };
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: authRedirectUrl() },
+      });
+      return {
+        error: error
+          ? '매직링크를 보내지 못했어요. 이메일 주소를 확인하고 다시 시도해 주세요.'
+          : undefined,
+      };
+    } catch (error) {
+      console.error('[gomsinlog] Magic-link request failed:', error);
+      return { error: '매직링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.' };
+    }
   }
 
   async signOut(): Promise<void> {
@@ -709,8 +772,8 @@ export class SupabaseAuthRepository implements IAuthRepository {
 /*
  * `SupabaseLogRepository` used to sit here: an exported `ILogRepository` whose
  * `loadState()` logged "placeholder" and returned null and whose `saveState()`
- * only logged. It was never instantiated anywhere -- the store uses
- * `LocalStorageRepository` -- so it was a live, importable class that silently
+ * only logged. It was never instantiated anywhere -- the store syncs real data
+ * through dedicated modules -- so it was a live, importable class that silently
  * discarded state, one wiring mistake away from losing every write. Deleted
  * rather than left as a trap; real server sync goes through `sync.ts`.
  */
@@ -718,4 +781,4 @@ export class SupabaseAuthRepository implements IAuthRepository {
 // Select active repositories based on configuration
 export const authRepository: IAuthRepository = isSupabaseConfigured
   ? new SupabaseAuthRepository()
-  : new DemoAuthRepository();
+  : new UnconfiguredAuthRepository();

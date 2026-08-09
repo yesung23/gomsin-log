@@ -20,8 +20,8 @@ import type { DailyRecord, EmotionFlowItem, Role } from '@/types';
 /**
  * Who is looking at a record.
  *
- * `userId` is authoritative when both sides have one. Demo and offline records
- * are created locally and have no `userId`, so `role` acts as the fallback
+ * `userId` is authoritative when both sides have one. A queued offline write or
+ * legacy record can temporarily have no `userId`, so `role` acts as the fallback
  * identity for those.
  */
 export interface Viewer {
@@ -41,7 +41,7 @@ export function isOwnRecord(
   viewer: Viewer,
 ): boolean {
   if (viewer.userId && record.userId) return record.userId === viewer.userId;
-  // No server identity available (demo / offline): fall back to the author role.
+  // No row identity yet (queued offline or legacy): fall back to author role.
   return !!viewer.role && record.authorRole === viewer.role;
 }
 

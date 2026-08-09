@@ -34,7 +34,7 @@ export function SettingsPage() {
     recoverExpiredSession,
   } = useStore();
   const navigate = useNavigate();
-  const { profile, isDemoMode, records } = state;
+  const { profile, records } = state;
   const settingsIdentityKey = state.authenticatedUser?.id || '';
   const identityRef = useRef(settingsIdentityKey);
   const identityGenerationRef = useRef(0);
@@ -110,7 +110,7 @@ export function SettingsPage() {
 
   /**
    * Export the records this user authored as a JSON file.
-   * Runs entirely on the device so it also works offline and in demo mode.
+   * Runs entirely on the device, using the authenticated state already loaded.
    */
   const handleExportMyData = () => {
     if (isExporting) return;
@@ -400,7 +400,7 @@ export function SettingsPage() {
         </section>
 
         {/* Invite code for the space creator, until the partner actually joins. */}
-        {hasCoupleSpace && !profile.couple.connected && !isDemoMode && (
+        {hasCoupleSpace && !profile.couple.connected && (
           <section className="rounded-surface bg-card border border-coral/30 p-4 space-y-3">
             <div>
               <h2 className="text-heading text-foreground">우리 공간 초대 코드</h2>
@@ -470,7 +470,7 @@ export function SettingsPage() {
           </section>
         )}
 
-        {!hasCoupleSpace && !isDemoMode && (
+        {!hasCoupleSpace && (
           <section className="rounded-surface bg-card border border-coral/30 p-4 space-y-3">
             <div>
               <h2 className="text-heading text-foreground">우리 공간 연결하기</h2>

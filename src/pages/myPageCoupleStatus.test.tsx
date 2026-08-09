@@ -40,7 +40,6 @@ vi.mock('@/components/CycleSupportSection', () => ({
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: {
-      isDemoMode: false,
       authenticatedUser: { id: 'u1', email: 'a@b.c', provider: 'google' as const },
       profile: {
         id: 'u1',
@@ -58,7 +57,6 @@ vi.mock('@/lib/useStore', () => ({
         contact: { weekdayStart: '18:00', weekdayEnd: '21:00', weekendStart: '12:00', weekendEnd: '21:00', enabled: true },
       },
     },
-    switchRole: vi.fn(),
     coupleLifecycle: lifecycle,
   }),
 }));

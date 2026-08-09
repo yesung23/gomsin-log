@@ -84,7 +84,6 @@ function makeState(records: DailyRecord[]): AppState {
   return {
     setupComplete: true,
     onboardingStep: 0,
-    isDemoMode: false,
     authenticatedUser: { id: ME, email: 'me@example.com', provider: 'google' },
     profile: {
       id: ME,
@@ -363,8 +362,8 @@ describe('recordAuthorPresentation', () => {
   const viewer = { userId: ME, role: 'soldier' as const };
 
   it('prefers the server identity over the role when both sides have one', () => {
-    // A demo profile can switch role (MyPage offers it). Comparing roles would
-    // then re-attribute records the viewer really did write.
+    // A stale role can disagree with the immutable author id. Comparing roles
+    // would then re-attribute records the viewer really did write.
     const presentation = recordAuthorPresentation(
       { userId: ME, authorRole: 'gomsin' },
       viewer,
@@ -377,7 +376,7 @@ describe('recordAuthorPresentation', () => {
     expect(presentation.attribution).toBe('🌸 곰신 · 나');
   });
 
-  it('falls back to the role when there is no server identity (demo / offline)', () => {
+  it('falls back to the role for a queued offline row without a server identity', () => {
     const presentation = recordAuthorPresentation(
       { authorRole: 'soldier' },
       { role: 'soldier' },

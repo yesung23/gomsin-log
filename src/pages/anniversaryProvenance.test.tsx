@@ -44,7 +44,6 @@ function baseState(anniversaryDate: string | undefined): AppState {
   return {
     setupComplete: true,
     onboardingStep: 0,
-    isDemoMode: false,
     authenticatedUser: { id: 'user-a', email: 'a@example.com', provider: 'google' },
     profile: {
       myName: '춘향',

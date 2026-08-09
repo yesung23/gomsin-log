@@ -36,11 +36,11 @@
 
 ---
 
-## 2. 기술 스택 및 오프라인 데모 모드
+## 2. 기술 스택 및 운영 데이터 구조
 
 - **Core**: React 19 + TypeScript + Vite 6 + Tailwind CSS v4 + React Router v7 + Sonner
 - **백엔드**: Supabase (Postgres + RLS, Auth, 비공개 Storage 버킷, Edge Function)
-- **상태 및 데이터**: Repository 레이어 추상화 (`ILogRepository`), LocalStorage 캐시 (`gomsinlog.state.v2`)
+- **상태 및 데이터**: Supabase를 단일 원본으로 사용. `localStorage`에는 테마·위젯 배치와 사용자가 고른 기기 전용 장식 사진만 저장하고, 전송 대기 기록은 계정별 IndexedDB outbox에 임시 보관
 - **네이티브**: Capacitor 7 (Android / Google Play)
 
 ```bash
@@ -66,9 +66,9 @@ npm run verify:assets     # 아이콘·스플래시가 생성기 출력과 바�
 npm run assets:generate   # public/favicon.svg 에서 모든 래스터 자산 재생성
 ```
 
-> **참고**: Supabase `.env` 자격증명이 없으면 오프라인 데모 모드로 동작하며, 데모
-> 데이터는 브라우저 `localStorage`에만 저장됩니다. 데모 모드에서 첨부한 파일은
-> 세션 동안만 미리보기로 보이고 저장되지 않습니다.
+> **필수 설정**: `VITE_SUPABASE_URL`과 `VITE_SUPABASE_PUBLISHABLE_KEY`가 없거나
+> 올바르지 않으면 운영 빌드를 만들 수 없습니다. 앱은 인증된 실제 계정과 Supabase
+> 데이터만 사용하며, 로그인하지 않은 상태에서 가짜 사용자 데이터로 진입하지 않습니다.
 
 ### 문서
 
@@ -93,7 +93,6 @@ npm run assets:generate   # public/favicon.svg 에서 모든 래스터 자산 �
   - `Google로 계속하기` (Supabase OAuth 연동 필요)
   - `이메일로 시작하기` (Magic Link 연동 필요)
   - `Apple로 계속하기` (iOS 환경 조건부 노출 UI)
-  - `데모로 둘러보기` (안전한 오프라인 데모 진입)
 - **수집하지 않는 개인정보**: 실명, 성별, 생년월일, 부대명, 계급, 군번, 부대 위치.
 - **6단계 온보딩**:
   1. 역할 선택 (`곰신` / `군화`)

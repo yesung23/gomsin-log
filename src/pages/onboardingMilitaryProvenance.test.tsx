@@ -63,6 +63,11 @@ vi.mock('@/lib/supabase', () => ({
   createCoupleInvitation: (...args: unknown[]) => createCoupleInvitation(...(args as [])),
   consumeCoupleInvitation: vi.fn(),
   fetchMyCoupleState: vi.fn(),
+  fetchAuthProviderAvailability: vi.fn().mockResolvedValue({
+    google: true,
+    apple: false,
+    email: true,
+  }),
   regenerateCoupleInvitation: vi.fn(),
   saveCoupleAnniversary: vi.fn().mockResolvedValue(true),
 }));
@@ -81,7 +86,6 @@ vi.mock('sonner', () => ({
 }));
 
 const storeState = {
-  isDemoMode: false,
   authenticatedUser: { id: 'user-soldier', email: 's@example.com', provider: 'google' as const },
   // Role lives in the wizard's own state, so the service step is only reachable
   // by actually choosing 군화 -- which is what a real run does.
@@ -103,7 +107,6 @@ vi.mock('@/lib/useStore', () => ({
     state: storeState,
     updateProfile: (...args: unknown[]) => updateProfile(...(args as [])),
     setSetupComplete: (...args: unknown[]) => setSetupComplete(...(args as [])),
-    startDemo: vi.fn(),
     setOnboardingStep: vi.fn(),
     recoverExpiredSession: vi.fn(),
   }),

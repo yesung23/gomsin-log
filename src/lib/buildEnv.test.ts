@@ -16,7 +16,7 @@ import {
  *                        OR the URL is unparseable / non-HTTPS (non-loopback)
  *
  * Before the fix a production build with none of them set succeeded and emitted
- * a permanently demo-mode artifact, and `public/_headers` shipped no CSP at all
+ * a permanently backend-less artifact, and `public/_headers` shipped no CSP at all
  * (verified zero occurrences of either marker token).
  */
 
@@ -210,5 +210,35 @@ describe('the key is checked for shape, not just for presence', () => {
       VITE_SUPABASE_URL: VALID.VITE_SUPABASE_URL,
       VITE_SUPABASE_ANON_KEY: VALID.VITE_SUPABASE_PUBLISHABLE_KEY,
     })).not.toThrow();
+  });
+
+  it('keeps every non-empty CI publishable-key placeholder buildable', () => {
+    const workflowDirectory = resolve(process.cwd(), '.github', 'workflows');
+    const workflows = [
+      'master-validation.yml',
+      'native-release-validation.yml',
+      'two-account-pr-validation.yml',
+      'v1-product-excellence-audit-pr-validation.yml',
+      'web-release-validation.yml',
+    ];
+
+    for (const workflow of workflows) {
+      const source = readFileSync(resolve(workflowDirectory, workflow), 'utf8');
+      const values = Array.from(
+        source.matchAll(/^\s*VITE_SUPABASE_PUBLISHABLE_KEY:\s*([^\s#]+)\s*$/gm),
+        (match) => match[1].replace(/^['"]|['"]$/g, ''),
+      ).filter((value) => value.length > 0);
+
+      expect(values.length, workflow).toBeGreaterThan(0);
+      for (const value of values) {
+        expect(
+          () => validateBuildEnvironment({
+            VITE_SUPABASE_URL: 'https://ci-placeholder.supabase.co',
+            VITE_SUPABASE_PUBLISHABLE_KEY: value,
+          }),
+          `${workflow}: ${value}`,
+        ).not.toThrow();
+      }
+    }
   });
 });

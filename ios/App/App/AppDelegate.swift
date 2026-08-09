@@ -18,7 +18,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ///
     ///   * `Library/WebKit` -- WKWebView's website data store, which holds the
     ///     `localStorage` the app writes: the Supabase session token and the
-    ///     demo/cached record state.
+    ///     device preferences and any IndexedDB outbox entries awaiting sync.
     ///   * `Library/Cookies` and `Library/HTTPStorages` -- the cookie and
     ///     credential stores backing the same WKWebView.
     ///   * `Library/kvstore` -- Capacitor's own file-backed key/value store

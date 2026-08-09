@@ -31,18 +31,6 @@
 /** Keyed per user so an account switch cannot surface the other person's photo. */
 const KEY_PREFIX = 'gomsinlog.avatar.';
 
-/**
- * Owner id used when there is no signed-in user.
- *
- * Demo mode leaves both `authenticatedUser.id` and `profile.id` empty, and the demo
- * space is precisely where someone tries a feature before creating an account -- so
- * refusing to work there would make this look broken to every first-time visitor.
- *
- * A literal rather than a blank key so it cannot collide with a real account, and it
- * is cleared by `clearAllAvatars` along with everything else under the prefix.
- */
-export const DEMO_OWNER = 'demo';
-
 export type AvatarSlot = 'couple' | 'me';
 
 /**

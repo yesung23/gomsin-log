@@ -129,8 +129,8 @@ export interface RecordAuthorPresentation {
  *
  * Ownership comes from `isOwnRecord`, not from `record.authorRole === viewer.role`.
  * The two agree in the normal case, but the helper prefers the server identity
- * when both sides have one, so a demo profile that switches role -- which
- * `MyPage` offers -- can no longer re-label records the viewer really did write.
+ * when both sides have one, so a stale role value cannot re-label records the
+ * viewer really did write.
  */
 export function recordAuthorPresentation(
   record: Pick<DailyRecord, 'userId' | 'authorRole'>,

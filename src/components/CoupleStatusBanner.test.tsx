@@ -40,7 +40,6 @@ type Ctx = {
   coupleLifecycle: string;
   invitationExpiresAt: string | null;
   coupleCode?: string;
-  isDemoMode?: boolean;
 };
 
 let ctx: Ctx = { coupleLifecycle: 'pending', invitationExpiresAt: null };
@@ -48,7 +47,6 @@ let ctx: Ctx = { coupleLifecycle: 'pending', invitationExpiresAt: null };
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: {
-      isDemoMode: ctx.isDemoMode ?? false,
       profile: { couple: { coupleCode: ctx.coupleCode ?? '' } },
     },
     coupleLifecycle: ctx.coupleLifecycle,
@@ -78,12 +76,6 @@ describe('CoupleStatusBanner', () => {
 
   it('renders nothing at all when the couple is connected', () => {
     ctx = { coupleLifecycle: 'connected', invitationExpiresAt: null };
-    mount();
-    expect(screen.queryByTestId('couple-status-banner')).toBeNull();
-  });
-
-  it('renders nothing in demo mode', () => {
-    ctx = { coupleLifecycle: 'pending', invitationExpiresAt: null, isDemoMode: true };
     mount();
     expect(screen.queryByTestId('couple-status-banner')).toBeNull();
   });

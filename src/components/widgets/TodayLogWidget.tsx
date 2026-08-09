@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
 import {
-  Camera, Image as ImageIcon, Send, Lock, Unlock,
+  Camera, Image as ImageIcon, Send, Lock, Unlock, ShieldCheck,
   Mic, Square, X, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -147,6 +147,11 @@ export function TodayLogWidget() {
   const hasVoiceAttachment = pendingFiles.some((file) => {
     const classified = classifyMediaFile(file);
     return !('error' in classified) && classified.type === 'voice';
+  });
+  const hasVisualAttachment = pendingFiles.some((file) => {
+    const classified = classifyMediaFile(file);
+    return !('error' in classified)
+      && (classified.type === 'photo' || classified.type === 'video');
   });
 
   const handleOpenInput = (type: 'text' | 'photo' | 'instant') => {
@@ -628,6 +633,12 @@ export function TodayLogWidget() {
                   );
                 })}
               </div>
+              {hasVisualAttachment && (
+                <p className="flex items-start gap-1.5 text-caption text-muted-foreground leading-tight break-keep pt-1">
+                  <ShieldCheck size={12} className="mt-0.5 shrink-0 text-coral-strong" aria-hidden="true" />
+                  <span>사진 위치정보는 자동으로 지워요. 영상 메타데이터와 화면 속 정보는 남을 수 있으니 부대 위치·훈련·작전 자료는 첨부하지 마세요.</span>
+                </p>
+              )}
             </div>
           )}
 

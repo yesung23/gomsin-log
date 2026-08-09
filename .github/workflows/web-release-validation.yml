@@ -79,7 +79,7 @@ jobs:
       - name: Build the production artifact with non-secret placeholders
         env:
           VITE_SUPABASE_URL: https://ci-placeholder.supabase.co
-          VITE_SUPABASE_PUBLISHABLE_KEY: ci-public-placeholder-not-a-secret
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_public_placeholder_not_a_secret
         run: npm run build
 
       - name: Verify generated CSP and marker removal

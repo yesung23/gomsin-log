@@ -60,8 +60,8 @@ export function useMediaAttachment(
 
   const reportLoadFailure = useCallback(() => {
     const failedUrl = url;
-    // Without a storage path there is nothing to re-sign: a demo-mode blob URL
-    // or a legacy attachment saved before paths were durable.
+    // Without a storage path there is nothing to re-sign: a temporary local blob
+    // URL or a legacy attachment saved before paths were durable.
     if (!failedUrl || !attachment.path || !coupleId) return;
     if (retried.current.has(failedUrl)) return;
     retried.current.add(failedUrl);

@@ -30,7 +30,6 @@ let sharedSyncStatus = 'unavailable';
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: {
-      isDemoMode: false,
       profile: { couple: { connected: true, status: 'active' } },
     },
     sharedSyncStatus,

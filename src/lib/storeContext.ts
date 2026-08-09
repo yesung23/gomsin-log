@@ -173,7 +173,6 @@ export interface StoreContextType {
   ) => Promise<boolean>;
   deleteEvent: (id: string) => Promise<boolean>;
   reloadEvents: () => Promise<{ ok: boolean; reason?: 'forbidden' | 'error' }>;
-  switchRole: () => void;
   disconnect: () => Promise<boolean>;
   deleteAccount: () => Promise<AccountDeletionOutcome>;
   signOut: () => Promise<void>;
@@ -181,7 +180,6 @@ export interface StoreContextType {
   setOnboardingStep: (step: number) => void;
   setHighlightedRecordId: (id?: string) => void;
   setAuthenticatedUser: (user: AuthUser | null) => void;
-  startDemo: () => void;
   /**
    * `role` selects which of the two per-role layouts is written. It defaults to
    * `gomsin` so existing call sites keep their meaning.

@@ -103,9 +103,8 @@ test('the primary action on each core screen is present and enabled for a real c
 
   /*
    * A control that renders but stays disabled is the subtlest dead end there is, and
-   * the manual sweep found a real one: 일정 추가 is correctly disabled in demo mode,
-   * which meant a demo-only pass reported the schedule feature as broken. For a
-   * signed-in, connected couple these must all be live.
+   * the manual sweep found a real one: 일정 추가 is disabled without a real couple
+   * workspace. For a signed-in, connected couple these must all be live.
    */
   const checks: Array<{ route: string; name: RegExp; what: string }> = [
     // `지금의 마음 남기기`, not `오늘 기록하기`: the floating CTA was renamed, and
@@ -123,6 +122,26 @@ test('the primary action on each core screen is present and enabled for a real c
     await expect(control, `${what}: control missing on ${route}`).toBeVisible();
     await expect(control, `${what}: control disabled for a connected couple`).toBeEnabled();
   }
+  await context.close();
+});
+
+test('a soldier can save service information and receives server acknowledgement', async ({ browser }) => {
+  const context = await browser.newContext();
+  const { unrouted } = await installMockBackend(context, PARTNER);
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await bootedInto(page, '/service');
+  await page.getByRole('button', { name: '복무 정보 수정' }).click();
+  await expect(page.getByRole('dialog', { name: '복무 정보 수정' })).toBeVisible();
+  await page.getByLabel('입대일').fill('2025-04-01');
+  await page.getByRole('button', { name: '저장하기' }).click();
+
+  await expect(page.getByText('복무 정보가 저장되었습니다.')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('복무 정보를 저장하지 못했어요.', { exact: false })).toHaveCount(0);
+  expect(unrouted).toEqual([]);
+  expect(errors).toEqual([]);
   await context.close();
 });
 

@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   clearAvatar,
-  DEMO_OWNER,
   prepareAvatarFile,
   readAvatar,
   writeAvatar,
@@ -40,12 +39,8 @@ export function AvatarPicker({
 }: {
   /**
    * Owner of the photo. Pass the authenticated id when there is one.
-   *
-   * Demo mode has neither `authenticatedUser.id` nor `profile.id` -- both are empty
-   * until a real sign-in -- so callers may pass `undefined` and still expect the
-   * feature to work: the demo space is exactly where someone tries this before
-   * committing to an account. `DEMO_OWNER` covers that case, and because it is a
-   * distinct key it cannot collide with a real account on the same device.
+   * Without an authenticated owner the picker stays disabled and never writes to a
+   * shared fallback key, so one visitor cannot surface another visitor's photo.
    */
   userId: string | undefined;
   slot: AvatarSlot;
@@ -57,7 +52,7 @@ export function AvatarPicker({
   children: ReactNode;
   className?: string;
 }) {
-  const owner = userId || DEMO_OWNER;
+  const owner = userId;
   const [dataUrl, setDataUrl] = useState<string | null>(() => readAvatar(owner, slot));
   const [busy, setBusy] = useState(false);
   /**
@@ -153,7 +148,7 @@ export function AvatarPicker({
         onFocus={() => {
           if (dataUrl) setRevealed(true);
         }}
-        disabled={busy}
+        disabled={busy || !owner}
         aria-label={dataUrl ? `${label} 바꾸기 또는 지우기` : `${label} 고르기`}
         aria-expanded={dataUrl ? revealed : undefined}
         className={cn(

@@ -25,7 +25,7 @@ function activeState(userId = 'user-a', coupleId = 'couple-a'): AppState {
       contact: {} as never,
     },
     trips: [], records: [], events: [], setupComplete: true, onboardingStep: 0,
-    isDemoMode: false, widgetLayout: [], hasSeenInstallPrompt: false, theme: 'light',
+    widgetLayout: [], hasSeenInstallPrompt: false, theme: 'light',
   };
 }
 

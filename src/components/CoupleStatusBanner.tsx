@@ -40,9 +40,6 @@ export function CoupleStatusBanner() {
   const [copied, setCopied] = useState(false);
   const [freshCode, setFreshCode] = useState('');
 
-  // Demo mode authors its own couple state locally; a server-state banner would
-  // be meaningless there.
-  if (state.isDemoMode) return null;
   // A healthy, connected couple needs no explanation.
   if (coupleLifecycle === 'connected') return null;
 

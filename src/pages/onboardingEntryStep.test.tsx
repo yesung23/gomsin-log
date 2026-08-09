@@ -8,7 +8,7 @@ import type { AuthUser } from '@/types';
  * A brand-new account is exactly this state: `/auth/callback` exchanges the code,
  * hydration finds no `profiles` row, `setupComplete` stays false, and `App` renders
  * the onboarding wizard. The wizard opened at step 0 -- the landing screen, whose
- * only controls are "Google로 계속하기" / "Apple로 계속하기" / 매직링크 / 데모.
+ * only controls are Google, Apple (when configured), and email magic-link login.
  *
  * Nothing advanced past it. `onboardingStep` is never written with a non-zero
  * value by anything except the wizard mirroring its own state, and step 0 has no
@@ -18,7 +18,6 @@ import type { AuthUser } from '@/types';
  */
 
 const state = {
-  isDemoMode: false,
   authenticatedUser: null as AuthUser | null,
   onboardingStep: 0,
   setupComplete: false,
@@ -32,6 +31,7 @@ const state = {
 };
 
 const setOnboardingStep = vi.fn();
+const fetchAuthProviderAvailability = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/supabase', () => ({
   supabase: null,
@@ -45,6 +45,7 @@ vi.mock('@/lib/supabase', () => ({
   consumeCoupleInvitation: vi.fn(),
   regenerateCoupleInvitation: vi.fn(),
   fetchMyCoupleState: vi.fn(),
+  fetchAuthProviderAvailability: (...args: unknown[]) => fetchAuthProviderAvailability(...(args as [])),
   saveCoupleAnniversary: vi.fn(),
 }));
 
@@ -61,7 +62,6 @@ vi.mock('@/lib/useStore', () => ({
     state,
     updateProfile: vi.fn(),
     setSetupComplete: vi.fn(),
-    startDemo: vi.fn(),
     setOnboardingStep: (...args: unknown[]) => setOnboardingStep(...(args as [])),
     recoverExpiredSession: vi.fn(),
   }),
@@ -76,14 +76,51 @@ const ROLE_STEP = '곰신로그를 어떻게 사용할까요?';
 describe('onboarding entry step', () => {
   beforeEach(() => {
     setOnboardingStep.mockClear();
-    state.isDemoMode = false;
     state.authenticatedUser = null;
     state.onboardingStep = 0;
+    fetchAuthProviderAvailability.mockReset().mockResolvedValue({
+      google: true,
+      apple: false,
+      email: true,
+    });
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0',
+    });
   });
 
   it('shows the sign-in screen to a visitor who is not signed in', () => {
     render(<OnboardingPage />);
     expect(screen.getByText(SIGN_IN_CTA)).toBeInTheDocument();
+    expect(screen.queryByText(/둘러보기/)).not.toBeInTheDocument();
+  });
+
+  it('does not show a dead Apple button on iPhone when the server disables Apple login', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    });
+
+    render(<OnboardingPage />);
+
+    await waitFor(() => expect(fetchAuthProviderAvailability).toHaveBeenCalledOnce());
+    expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
+  });
+
+  it('shows Apple login on iPhone after the server confirms the provider', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    });
+    fetchAuthProviderAvailability.mockResolvedValue({
+      google: true,
+      apple: true,
+      email: true,
+    });
+
+    render(<OnboardingPage />);
+
+    expect(await screen.findByText('Apple로 계속하기')).toBeInTheDocument();
   });
 
   it('does NOT ask an already-signed-in account to sign in again', async () => {
@@ -92,15 +129,6 @@ describe('onboarding entry step', () => {
     render(<OnboardingPage />);
 
     // The defect: this rendered the landing screen, and there was no way forward.
-    await waitFor(() => expect(screen.queryByText(SIGN_IN_CTA)).not.toBeInTheDocument());
-    expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
-  });
-
-  it('starts a demo visitor in the wizard too, not back at the landing screen', async () => {
-    state.isDemoMode = true;
-
-    render(<OnboardingPage />);
-
     await waitFor(() => expect(screen.queryByText(SIGN_IN_CTA)).not.toBeInTheDocument());
     expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
   });

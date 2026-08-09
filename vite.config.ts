@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { defineConfig, type Plugin, type Rollup } from 'vite';
+import { defineConfig, loadEnv, type Plugin, type Rollup } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'url';
@@ -39,10 +39,16 @@ function validateBuildEnvironmentPlugin(
     apply: 'build',
     config(_config, { mode }) {
       if (mode !== 'production') return;
+      // Vite loads `.env*` after resolving the config, so values from a local
+      // `.env` are not present in `process.env` here. Read them explicitly while
+      // still giving CI/Vercel environment variables precedence.
+      const fileEnv = loadEnv(mode, process.cwd(), 'VITE_');
       const validated = validateBuildEnvironment({
-        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
-        VITE_SUPABASE_PUBLISHABLE_KEY: process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL,
+        VITE_SUPABASE_PUBLISHABLE_KEY:
+          process.env.VITE_SUPABASE_PUBLISHABLE_KEY || fileEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
+        VITE_SUPABASE_ANON_KEY:
+          process.env.VITE_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY,
       });
       onValidated(validated);
     },

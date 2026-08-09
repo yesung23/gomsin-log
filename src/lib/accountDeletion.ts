@@ -265,8 +265,8 @@ export function registerServerCallGate(gate: ServerCallGate | null): void {
  * this calls the gate on every entry rather than reading a cached verdict, an
  * `unknown` device re-verifies before every server mutation, which is the point.
  *
- * With no gate registered (a data-layer unit test, or demo mode with no
- * provider) this is a no-op and behaviour is exactly as before.
+ * With no gate registered (for example, an isolated data-layer unit test) this
+ * is a no-op and behaviour is exactly as before.
  */
 export async function serverCallBlockedByPendingDeletion(): Promise<boolean> {
   const gate = activeServerCallGate;

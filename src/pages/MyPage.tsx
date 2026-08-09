@@ -1,9 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import {
-  AlertTriangle,
-  ChevronRight,
-  Settings,
-} from 'lucide-react';
+import { ChevronRight, Settings } from 'lucide-react';
 import { MobileShell } from '@/components/MobileShell';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
@@ -13,8 +9,8 @@ import { useStore } from '@/lib/useStore';
 
 export function MyPage() {
   const navigate = useNavigate();
-  const { state, switchRole, coupleLifecycle } = useStore();
-  const { profile, isDemoMode, authenticatedUser } = state;
+  const { state, coupleLifecycle } = useStore();
+  const { profile, authenticatedUser } = state;
 
   const isGomsin = profile.role === 'gomsin';
   const roleLabel = isGomsin ? '곰신' : '군화';
@@ -135,30 +131,6 @@ export function MyPage() {
               </PressableRow>
             </RowGroup>
           </section>
-        )}
-
-        {isDemoMode && (
-          <div className="bg-warning-surface border border-warning/30 p-4 rounded-surface text-caption space-y-2">
-            <div className="flex items-center justify-between font-bold text-warning-foreground">
-              <span className="flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-warning-foreground" />
-                <span>데모 역할 전환</span>
-              </span>
-              <span className="text-caption bg-warning-surface px-2 py-0.5 rounded-full">로컬 데모</span>
-            </div>
-            <p className="text-warning-foreground text-caption">
-              곰신/군화 각 역할별 전용 홈과 마이페이지를 바로 전환하여 체험해보세요.
-            </p>
-            <button
-              onClick={switchRole}
-              // Full-width, so raising the declared minimum to 44px is the honest fix
-              // rather than an overlay: nothing sits beside it to be crowded, and
-              // 4px of extra height costs no layout anywhere.
-              className="w-full py-2.5 rounded-control bg-warning-surface text-warning-foreground font-bold active:scale-98 transition min-h-11"
-            >
-              현재 {roleLabel} 모드 → {isGomsin ? '군화' : '곰신'} 모드로 전환하기
-            </button>
-          </div>
         )}
 
         <section className="space-y-2">

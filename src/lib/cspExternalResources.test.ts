@@ -34,8 +34,6 @@ const DOCUMENTED_THIRD_PARTY_ORIGINS = new Map([
   // Substituted at build time from VITE_SUPABASE_URL by vite.config.ts.
   ['__SUPABASE_HTTP_SRC__', 'Supabase origin marker'],
   ['__SUPABASE_CONNECT_SRC__', 'Supabase origin + websocket marker'],
-  // Demo records in src/lib/store.tsx use Unsplash photo URLs.
-  ['https://images.unsplash.com', 'demo record photos'],
 ]);
 
 function read(file: string): string {
@@ -107,6 +105,12 @@ describe('the shipped CSP and the resources the app actually loads agree', () =>
   it('offline.html requests nothing from another origin', () => {
     // It has to render with no network at all, so it may not depend on one.
     expect(externalUrls(read('public/offline.html'))).toEqual([]);
+  });
+
+  it('has no external placeholder media or unauthenticated product shortcut', () => {
+    const store = read('src/lib/store.tsx');
+    expect(externalUrls(store)).toEqual([]);
+    expect(read('src/pages/OnboardingPage.tsx')).not.toMatch(/둘러보기/);
   });
 
   it('the app stylesheet pulls Pretendard from the package, not from a CDN', () => {

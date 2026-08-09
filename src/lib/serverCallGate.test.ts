@@ -164,7 +164,7 @@ describe('REGRESSION: no server mutation outside the store bypasses the gate', (
   });
 
   // The three invitation mutations need a CONFIGURED client to reach their
-  // guard at all (an unconfigured client takes the demo fallback), so they are
+  // guard at all (an unconfigured client fails closed first), so they are
   // covered by `invitationGate.test.ts` instead.
 
   it('PRESERVATION: a clear verdict lets every one of them through unchanged', async () => {

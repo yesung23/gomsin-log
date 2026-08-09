@@ -4,8 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
  * REGRESSION, continued: the three invitation RPCs bypassed the pre-flight gate.
  *
  * These need a CONFIGURED Supabase client to reach the guard at all -- with no
- * URL/key the module takes its demo fallback and never talks to a server, which
- * is why the mocked suite cannot cover them. So the environment is stubbed, a
+ * URL/key the module fails closed before any server call. So the environment is stubbed, a
  * real client is constructed, and `fetch` is spied on: a pending deletion must
  * produce ZERO network requests.
  */

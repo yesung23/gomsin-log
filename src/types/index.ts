@@ -229,6 +229,66 @@ export const CYCLE_SYMPTOMS = [
 
 export type CycleSymptom = (typeof CYCLE_SYMPTOMS)[number];
 
+export const CYCLE_FLOWS = ['spotting', 'light', 'medium', 'heavy'] as const;
+export type CycleFlow = (typeof CYCLE_FLOWS)[number];
+
+export const CYCLE_PAIN_LEVELS = ['none', 'mild', 'moderate', 'severe'] as const;
+export type CyclePainLevel = (typeof CYCLE_PAIN_LEVELS)[number];
+
+export const CYCLE_MOODS = ['calm', 'sensitive', 'sad', 'tired', 'good'] as const;
+export type CycleMood = (typeof CYCLE_MOODS)[number];
+
+export interface CyclePeriod {
+  id: string;
+  userId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate?: string;  // YYYY-MM-DD
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CycleDailyLog {
+  id: string;
+  userId: string;
+  logDate: string; // YYYY-MM-DD
+  flow?: CycleFlow;
+  painLevel?: CyclePainLevel;
+  symptoms: CycleSymptom[];
+  mood?: CycleMood;
+  note?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UserSensitiveConsent {
+  id: string;
+  userId: string;
+  consentType: string;
+  version: string;
+  grantedAt: string;
+  revokedAt?: string;
+}
+
+export interface CycleSharingPreferences {
+  userId: string;
+  shareCurrentPeriod: boolean;
+  sharePredictionWindow: boolean;
+  shareFertilityWindow: boolean;
+}
+
+export interface CyclePartnerProjection {
+  isCurrentPeriodShared: boolean;
+  isPeriodActive: boolean;
+  activePeriodDayNumber?: number;
+  isPredictionShared: boolean;
+  predictedWindowStart?: string;
+  predictedWindowEnd?: string;
+  isFertilityShared: boolean;
+  fertilityWindowStart?: string;
+  fertilityWindowEnd?: string;
+  supportSignal?: CycleSupportSignal;
+}
+
 export interface CycleEntry {
   id: string;
   userId: string;

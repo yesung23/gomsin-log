@@ -1,4 +1,5 @@
 const CYCLE_CONSENT_PREFIX = 'gomsinlog.cycle-sensitive-consent.v1:';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 export const CYCLE_CONSENT_VERSION = '2026-08-09';
 
@@ -45,5 +46,59 @@ export function revokeCycleSensitiveConsent(userId?: string): void {
     window.localStorage.removeItem(storageKey(userId));
   } catch {
     // Failing closed is sufficient: a subsequent read returns false.
+  }
+}
+
+export async function syncConsentWithDB(userId?: string): Promise<boolean> {
+  if (!userId) return false;
+  const localConsent = hasCycleSensitiveConsent(userId);
+
+  if (!isSupabaseConfigured || !supabase) return localConsent;
+
+  try {
+    const { data } = await supabase
+      .from('user_sensitive_consents')
+      .select('version, granted_at, revoked_at')
+      .eq('user_id', userId)
+      .eq('consent_type', 'cycle')
+      .maybeSingle();
+
+    if (data && !data.revoked_at && data.version === CYCLE_CONSENT_VERSION) {
+      grantCycleSensitiveConsent(userId);
+      return true;
+    }
+
+    if (localConsent) {
+      await supabase
+        .from('user_sensitive_consents')
+        .upsert({
+          user_id: userId,
+          consent_type: 'cycle',
+          version: CYCLE_CONSENT_VERSION,
+          granted_at: new Date().toISOString(),
+          revoked_at: null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id, consent_type' });
+      return true;
+    }
+  } catch (err) {
+    console.error('Failed to sync consent with DB:', err);
+  }
+  return localConsent;
+}
+
+export async function revokeConsentInDB(userId?: string): Promise<boolean> {
+  revokeCycleSensitiveConsent(userId);
+  if (!userId || !isSupabaseConfigured || !supabase) return true;
+  try {
+    await supabase
+      .from('user_sensitive_consents')
+      .update({ revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('consent_type', 'cycle');
+    return true;
+  } catch (err) {
+    console.error('Failed to revoke consent in DB:', err);
+    return false;
   }
 }

@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Eye,
   HeartPulse,
   Loader2,
   Lock,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Check, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import { predictCycle } from '@/lib/cyclePrediction';
 import {
   buildMonthCalendarCells,
   calculateExpectedStartDate,
@@ -36,7 +38,7 @@ import {
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
-import { grantCycleSensitiveConsent, hasCycleSensitiveConsent } from '@/lib/sensitiveConsent';
+import { grantCycleSensitiveConsent, hasCycleSensitiveConsent, revokeConsentInDB } from '@/lib/sensitiveConsent';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
 import { CYCLE_SYMPTOMS, type CycleEntry, type CycleSymptom } from '@/types';
@@ -120,12 +122,18 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [settingsPending, setSettingsPending] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(true);
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [showPartnerPreview, setShowPartnerPreview] = useState(false);
+  const [shareCurrentPeriod, setShareCurrentPeriod] = useState(false);
+  const [sharePredictionWindow, setSharePredictionWindow] = useState(false);
+  const [shareFertilityWindow, setShareFertilityWindow] = useState(false);
   const [viewYear, setViewYear] = useState(initialDate.getFullYear());
   const [viewMonth, setViewMonth] = useState(initialDate.getMonth());
   const [selectedDate, setSelectedDate] = useState(today);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<CycleEntryDraft>(emptyDraft(today));
+  const [showMoreForm, setShowMoreForm] = useState(false);
   const [formPending, setFormPending] = useState(false);
   const [quickActionPending, setQuickActionPending] = useState(false);
   const [deletePendingId, setDeletePendingId] = useState<string | null>(null);
@@ -262,6 +270,23 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setFormOpen(true);
   };
 
+  const prediction = useMemo(
+    () => predictCycle({
+      periods: entries.map((e) => ({ startDate: e.startDate, endDate: e.endDate })),
+      configuredCycleLength: cycleLength,
+      configuredPeriodLength: periodLength,
+      today,
+    }),
+    [entries, cycleLength, periodLength, today],
+  );
+
+  const handleRevokeConsent = async () => {
+    if (!userId) return;
+    await revokeConsentInDB(userId);
+    setConsentGranted(false);
+    setConsentChecked(false);
+    toast.info('민감정보 동의를 철회했어요.');
+  };
   // Active ongoing period entry (started on/before today and has no endDate or endDate >= today)
   const activePeriodEntry = useMemo(
     () => entries.find((e) => e.startDate <= today && (!e.endDate || e.endDate >= today)),
@@ -787,6 +812,79 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                   ))}
                 </div>
               </fieldset>
+
+              {/* Detailed Health Fields (+ 더 기록하기) */}
+              <div className="pt-2 border-t border-border/40 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setShowMoreForm((prev) => !prev)}
+                  className="text-caption font-bold text-coral flex items-center gap-1 min-h-11"
+                >
+                  {showMoreForm ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <span>{showMoreForm ? '간단히 보기' : '+ 출혈량/통증/기분 더 기록하기'}</span>
+                </button>
+
+                {showMoreForm && (
+                  <div className="space-y-3 pt-1 animate-in fade-in-50">
+                    <div className="space-y-1">
+                      <span className="text-caption font-bold text-foreground">출혈량 (선택)</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {(['spotting', 'light', 'medium', 'heavy'] as const).map((f) => (
+                          <button
+                            type="button"
+                            key={f}
+                            onClick={() => setDraft((current) => ({ ...current, flow: current.flow === f ? undefined : f }))}
+                            className={cn(
+                              'p-2 text-caption rounded-control border text-center transition min-h-11',
+                              draft.flow === f ? 'bg-coral/20 border-coral font-bold text-coral-strong' : 'bg-card border-border text-foreground hover:bg-muted',
+                            )}
+                          >
+                            {f === 'spotting' ? '점상' : f === 'light' ? '적음' : f === 'medium' ? '보통' : '많음'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-caption font-bold text-foreground">통증 (선택)</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {(['none', 'mild', 'moderate', 'severe'] as const).map((p) => (
+                          <button
+                            type="button"
+                            key={p}
+                            onClick={() => setDraft((current) => ({ ...current, painLevel: current.painLevel === p ? undefined : p }))}
+                            className={cn(
+                              'p-2 text-caption rounded-control border text-center transition min-h-11',
+                              draft.painLevel === p ? 'bg-coral/20 border-coral font-bold text-coral-strong' : 'bg-card border-border text-foreground hover:bg-muted',
+                            )}
+                          >
+                            {p === 'none' ? '없음' : p === 'mild' ? '약함' : p === 'moderate' ? '보통' : '심함'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-caption font-bold text-foreground">기분 (선택)</span>
+                      <div className="grid grid-cols-5 gap-1">
+                        {(['calm', 'sensitive', 'sad', 'tired', 'good'] as const).map((m) => (
+                          <button
+                            type="button"
+                            key={m}
+                            onClick={() => setDraft((current) => ({ ...current, mood: current.mood === m ? undefined : m }))}
+                            className={cn(
+                              'p-1.5 text-caption rounded-control border text-center transition min-h-11',
+                              draft.mood === m ? 'bg-coral/20 border-coral font-bold text-coral-strong' : 'bg-card border-border text-foreground hover:bg-muted',
+                            )}
+                          >
+                            {m === 'calm' ? '편안' : m === 'sensitive' ? '예민' : m === 'sad' ? '울적' : m === 'tired' ? '피곤' : '괜찮'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <label className="text-label font-bold text-foreground space-y-1 block">
                 <span>메모 (선택)</span>
                 <textarea value={draft.notes || ''} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} rows={3} className="w-full p-3 rounded-control border border-border bg-card text-body resize-none" disabled={formPending} />
@@ -809,21 +907,59 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
             </div>
           )}
 
-          {/* Average Length Settings Section (Clean Collapsible) */}
+         {/* Average Length Settings Section (Clean Collapsible) */}
+         <div className="rounded-surface border border-border bg-card overflow-hidden transition">
+           <button
+             type="button"
+             onClick={() => setInsightsOpen((prev) => !prev)}
+             className="w-full p-4 flex items-center justify-between text-left hover:bg-muted/30 min-h-11 transition"
+           >
+             <div>
+               <h4 className="text-heading text-foreground font-bold">최근 주기 경향 보기</h4>
+               <p className="text-caption text-muted-foreground mt-0.5">
+                 {prediction.status === 'personalized'
+                   ? `평균 ${prediction.medianCycleLength || cycleLength}일 주기 · 범위 ±${prediction.variabilityDays || 2}일`
+                   : '기록이 모이면 내 주기 패턴을 분석해드려요.'}
+               </p>
+             </div>
+             <div className="p-1 text-muted-foreground">
+               {insightsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+             </div>
+           </button>
+
+           {insightsOpen && (
+             <div className="p-4 pt-0 border-t border-border/40 space-y-2 text-caption text-muted-foreground leading-relaxed animate-in fade-in-50">
+               <div className="grid grid-cols-2 gap-2 pt-3">
+                 <div className="p-2.5 rounded-control bg-muted/20 border border-border/60">
+                   <span className="block text-caption font-bold text-foreground">평균 주기</span>
+                   <span className="text-label font-bold text-coral-strong">{prediction.medianCycleLength || cycleLength}일</span>
+                 </div>
+                 <div className="p-2.5 rounded-control bg-muted/20 border border-border/60">
+                   <span className="block text-caption font-bold text-foreground">평균 생리 기간</span>
+                   <span className="text-label font-bold text-coral-strong">{periodLength}일</span>
+                 </div>
+               </div>
+               <p className="pt-1 text-caption text-muted-foreground">
+                 최근 {prediction.cyclesUsed}회의 기록을 바탕으로 분석된 통계이며, 의료적 진단이나 결론을 의미하지 않아요.
+               </p>
+             </div>
+           )}
+         </div>
+
           <div className="rounded-surface border border-border bg-card overflow-hidden transition">
-            <button
-              type="button"
-              onClick={() => setSettingsOpen((prev) => !prev)}
-              className="w-full p-4 flex items-center justify-between text-left hover:bg-muted/30 min-h-11 transition"
-            >
-              <div>
-                <h4 className="text-heading text-foreground">평균 주기 설정</h4>
-                <p className="text-caption text-muted-foreground mt-0.5">저장된 평균 기간: {periodLength}일</p>
-              </div>
-              <div className="p-1 text-muted-foreground">
-                {settingsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </div>
-            </button>
+           <button
+             type="button"
+             onClick={() => setSettingsOpen((prev) => !prev)}
+             className="w-full p-4 flex items-center justify-between text-left hover:bg-muted/30 min-h-11 transition"
+           >
+             <div>
+               <h4 className="text-heading text-foreground">평균 주기 설정</h4>
+               <p className="text-caption text-muted-foreground mt-0.5">저장된 평균 기간: {periodLength}일</p>
+             </div>
+             <div className="p-1 text-muted-foreground">
+               {settingsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+             </div>
+           </button>
 
             {settingsOpen && (
               <div className="p-4 pt-0 border-t border-border/40 space-y-3 animate-in fade-in-50">
@@ -843,9 +979,90 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
                   {settingsPending && <Loader2 className="w-4 h-4 animate-spin" />}
                   {settingsPending ? '설정 저장 중' : '평균 길이 저장'}
                 </button>
+
+                {/* Partner Sharing Preferences & Preview */}
+                <div className="pt-3 border-t border-border/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h5 className="text-label font-bold text-foreground">파트너 배려 공유 설정</h5>
+                    <button
+                      type="button"
+                      onClick={() => setShowPartnerPreview(true)}
+                      className="text-caption text-coral font-bold flex items-center gap-1 min-h-11 p-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> 상대에게 어떻게 보이나요?
+                    </button>
+                  </div>
+
+                  <label className="flex items-center justify-between p-2.5 rounded-control bg-muted/20 border border-border/60 text-caption font-bold text-foreground min-h-11">
+                    <span>생리 진행 상태 공유 (기본 OFF)</span>
+                    <input
+                      type="checkbox"
+                      checked={shareCurrentPeriod}
+                      onChange={(e) => setShareCurrentPeriod(e.target.checked)}
+                      className="accent-coral"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-2.5 rounded-control bg-muted/20 border border-border/60 text-caption font-bold text-foreground min-h-11">
+                    <span>다음 예상 기간 공유 (기본 OFF)</span>
+                    <input
+                      type="checkbox"
+                      checked={sharePredictionWindow}
+                      onChange={(e) => setSharePredictionWindow(e.target.checked)}
+                      className="accent-coral"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-2.5 rounded-control bg-muted/20 border border-border/60 text-caption font-bold text-foreground min-h-11">
+                    <span>가임/배란 예상 기간 공유 (기본 OFF)</span>
+                    <input
+                      type="checkbox"
+                      checked={shareFertilityWindow}
+                      onChange={(e) => setShareFertilityWindow(e.target.checked)}
+                      className="accent-coral"
+                    />
+                  </label>
+                </div>
+
+                {/* Sensitive Consent Revoke Option */}
+                <div className="pt-3 border-t border-border/40 flex items-center justify-between">
+                  <span className="text-caption text-muted-foreground">민감정보 동의 관리</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleRevokeConsent()}
+                    className="text-caption text-destructive underline min-h-11 p-1"
+                  >
+                    민감정보 동의 철회
+                  </button>
+                </div>
               </div>
             )}
           </div>
+
+          {/* Partner Preview Modal */}
+          {showPartnerPreview && (
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+              <div className="bg-card w-full max-w-sm rounded-surface border border-border p-4 space-y-3 animate-in fade-in-50">
+                <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                  <h4 className="text-heading text-foreground font-bold">군화에게 이렇게 보여요</h4>
+                  <button type="button" onClick={() => setShowPartnerPreview(false)} className="text-caption text-muted-foreground p-1 min-h-11">
+                    닫기
+                  </button>
+                </div>
+                <div className="p-3.5 rounded-surface bg-mint/40 border border-mint-foreground/20 text-caption text-mint-foreground space-y-1.5 leading-relaxed">
+                  <p className="font-bold">🌷 이번 주 컨디션 참고</p>
+                  <p>생리 예상 기간이 가까워졌다고 공유했어요.</p>
+                  <p className="text-muted-foreground text-caption">정확한 날짜가 아닐 수 있으니 평소처럼 편하게 안부를 물어봐 주세요.</p>
+                </div>
+                <div className="rounded-control bg-coral/5 border border-coral/20 p-2.5 text-caption text-muted-foreground">
+                  🔒 <strong>안심하세요:</strong> 상세 증상, 메모, 통증, 출혈량 등 원본 기록은 파트너에게 절대 노출되지 않아요.
+                </div>
+                <Button variant="secondary" size="md" full onClick={() => setShowPartnerPreview(false)}>
+                  확인
+                </Button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </section>

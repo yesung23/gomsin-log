@@ -184,8 +184,26 @@ test('partner cannot reach the cycle tracker, which is author-only', async ({ br
   const creatorBody = await a.page.locator('body').innerText();
   const partnerBody = await b.page.locator('body').innerText();
   expect(creatorBody).not.toBe(partnerBody);
-  // Raw cycle inputs must not exist in the partner DOM at all.
-  expect(partnerBody).not.toContain('생리 시작일');
+  /*
+   * Raw cycle vocabulary must not exist in the partner DOM at all.
+   *
+   * Checked as rendered text rather than as a network assertion because RLS and
+   * the client are separate layers: even if a query somehow returned a row, it
+   * must not reach the partner's screen. The V3 fields are listed explicitly so
+   * adding a health field to the owner surface cannot silently leak here.
+   */
+  for (const forbidden of [
+    '생리 시작일',
+    '내 몸의 리듬',
+    '오늘 생리 시작했어요',
+    '오늘 컨디션은 어때요?',
+    '출혈량',
+    '통증',
+    '자세히 기록하기',
+    '생리 예상',
+  ]) {
+    expect(partnerBody, `partner must not see "${forbidden}"`).not.toContain(forbidden);
+  }
 
   await a.context.close();
   await b.context.close();

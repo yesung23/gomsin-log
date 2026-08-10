@@ -235,4 +235,53 @@ describe('CycleTrackerSection write integrity', () => {
     expect(await screen.findByText('Confirmed note')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  it('provides a 1-tap quick action button to log period start today', async () => {
+    saveEntry.mockResolvedValue({
+      ok: true,
+      entry: {
+        id: 'entry-today',
+        userId: 'user-a',
+        startDate: '2026-08-01',
+        notes: undefined,
+        symptoms: [],
+      },
+    });
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(entryLoads).toHaveLength(1));
+    await act(async () => {
+      settingLoads[0].resolve({ ok: true, settings: null });
+      entryLoads[0].resolve({ ok: true, entries: [] });
+    });
+
+    const startButton = await screen.findByText(/오늘 생리 시작했어요/);
+    expect(startButton).toBeInTheDocument();
+    fireEvent.click(startButton);
+
+    await waitFor(() => expect(saveEntry).toHaveBeenCalledWith('2026-08-01', undefined, '', []));
+  });
+
+  it('allows 1-tap symptom chip toggling directly from the view', async () => {
+    saveEntry.mockResolvedValue({
+      ok: true,
+      entry: {
+        id: 'entry-symptom',
+        userId: 'user-a',
+        startDate: '2026-08-01',
+        notes: undefined,
+        symptoms: ['cramps'],
+      },
+    });
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(entryLoads).toHaveLength(1));
+    await act(async () => {
+      settingLoads[0].resolve({ ok: true, settings: null });
+      entryLoads[0].resolve({ ok: true, entries: [] });
+    });
+
+    const crampsChip = await screen.findByText('복부 불편감');
+    fireEvent.click(crampsChip);
+
+    await waitFor(() => expect(saveEntry).toHaveBeenCalledWith('2026-08-01', undefined, '', ['cramps']));
+  });
 });

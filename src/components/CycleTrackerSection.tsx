@@ -11,12 +11,14 @@ import {
   Save,
   Trash2,
 } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   buildMonthCalendarCells,
   calculateExpectedStartDate,
   CYCLE_LENGTH_MAX,
   CYCLE_LENGTH_MIN,
+  cycleEntryOccursOnDate,
   cycleRangesOnDate,
   deleteCycleEntryFromDB,
   fetchCycleEntriesResultFromDB,
@@ -50,6 +52,15 @@ const symptomLabels: Record<CycleSymptom, string> = {
   backache: '허리 불편감',
 };
 
+const symptomIcons: Record<CycleSymptom, string> = {
+  cramps: '🩸',
+  headache: '💆‍♀️',
+  fatigue: '😴',
+  bloating: '🎈',
+  mood_changes: '⚡',
+  backache: '💫',
+};
+
 const emptyDraft = (startDate: string): CycleEntryDraft => ({
   startDate,
   endDate: undefined,
@@ -65,6 +76,21 @@ function failureMessage(state: Extract<LoadState, 'unauthenticated' | 'forbidden
 
 function formatRange(entry: CycleEntry): string {
   return entry.endDate ? `${entry.startDate} ~ ${entry.endDate}` : entry.startDate;
+}
+
+function getDaysDifference(fromStr: string, toStr: string): number {
+  const [y1, m1, d1] = fromStr.split('-').map(Number);
+  const [y2, m2, d2] = toStr.split('-').map(Number);
+  const t1 = new Date(y1, m1 - 1, d1).getTime();
+  const t2 = new Date(y2, m2 - 1, d2).getTime();
+  return Math.round((t2 - t1) / (1000 * 60 * 60 * 24));
+}
+
+function formatDDayText(expectedStr: string, todayStr: string): string {
+  const diff = getDaysDifference(todayStr, expectedStr);
+  if (diff === 0) return 'D-Day (오늘)';
+  if (diff > 0) return `D-${diff}`;
+  return `D+${Math.abs(diff)}`;
 }
 
 export function CycleTrackerSection({ userId }: { userId?: string }) {
@@ -93,6 +119,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [periodLengthDraft, setPeriodLengthDraft] = useState(5);
   const [settingsPending, setSettingsPending] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const [viewYear, setViewYear] = useState(initialDate.getFullYear());
   const [viewMonth, setViewMonth] = useState(initialDate.getMonth());
   const [selectedDate, setSelectedDate] = useState(today);
@@ -100,6 +127,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<CycleEntryDraft>(emptyDraft(today));
   const [formPending, setFormPending] = useState(false);
+  const [quickActionPending, setQuickActionPending] = useState(false);
   const [deletePendingId, setDeletePendingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const loadCoordinatorRef = useRef<{
@@ -232,6 +260,111 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setDraft(emptyDraft(date));
     setFormError(null);
     setFormOpen(true);
+  };
+
+  // Active ongoing period entry (started on/before today and has no endDate or endDate >= today)
+  const activePeriodEntry = useMemo(
+    () => entries.find((e) => e.startDate <= today && (!e.endDate || e.endDate >= today)),
+    [entries, today],
+  );
+
+  const activePeriodDayNumber = useMemo(() => {
+    if (!activePeriodEntry) return null;
+    return getDaysDifference(activePeriodEntry.startDate, today) + 1;
+  }, [activePeriodEntry, today]);
+
+  // 1-Tap Quick Action: Start period today or End period today
+  const handleQuickTogglePeriod = async () => {
+    const identity = captureIdentity();
+    if (!identity.userId || quickActionPending) return;
+    setQuickActionPending(true);
+    setFormError(null);
+    try {
+      if (activePeriodEntry) {
+        // End active period today
+        const result = await updateCycleEntryInDB(activePeriodEntry.id, {
+          startDate: activePeriodEntry.startDate,
+          endDate: today,
+          notes: activePeriodEntry.notes,
+          symptoms: activePeriodEntry.symptoms,
+        });
+        if (!isCurrentIdentity(identity)) return;
+        if (!result.ok) {
+          toast.error(serverErrorMessage(result.reason));
+          return;
+        }
+        const saved = result.entry;
+        setEntries((current) => current.map((e) => (e.id === saved.id ? saved : e)));
+        toast.success('오늘 생리 종료일을 기록했어요! ✨');
+      } else {
+        // Start new period today
+        const result = await saveCycleEntryToDB(today, undefined, '', []);
+        if (!isCurrentIdentity(identity)) return;
+        if (!result.ok) {
+          toast.error(serverErrorMessage(result.reason));
+          return;
+        }
+        const saved = result.entry;
+        setEntries((current) => [
+          saved,
+          ...current.filter((item) => item.id !== saved.id),
+        ].sort((a, b) => b.startDate.localeCompare(a.startDate)));
+        setLoadState('ready');
+        toast.success('오늘 생리 시작일을 기록했어요! 🌸');
+      }
+    } catch (err) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('Quick toggle period failed:', err);
+      toast.error(classifyServerError(err).message);
+    } finally {
+      if (isCurrentIdentity(identity)) setQuickActionPending(false);
+    }
+  };
+
+  // 1-Tap Quick Symptom Toggle for selected date or today
+  const handleQuickToggleSymptom = async (symptom: CycleSymptom) => {
+    const identity = captureIdentity();
+    if (!identity.userId || quickActionPending) return;
+    const targetDate = selectedDate || today;
+    const existingEntry = entries.find((e) => cycleEntryOccursOnDate(e, targetDate));
+
+    setQuickActionPending(true);
+    try {
+      if (existingEntry) {
+        const nextSymptoms = existingEntry.symptoms.includes(symptom)
+          ? existingEntry.symptoms.filter((s) => s !== symptom)
+          : [...existingEntry.symptoms, symptom];
+        const result = await updateCycleEntryInDB(existingEntry.id, {
+          startDate: existingEntry.startDate,
+          endDate: existingEntry.endDate,
+          notes: existingEntry.notes,
+          symptoms: nextSymptoms,
+        });
+        if (!isCurrentIdentity(identity)) return;
+        if (!result.ok) {
+          toast.error(serverErrorMessage(result.reason));
+          return;
+        }
+        setEntries((current) => current.map((e) => (e.id === result.entry.id ? result.entry : e)));
+        toast.success('오늘의 컨디션을 업데이트했어요! 💊');
+      } else {
+        const result = await saveCycleEntryToDB(targetDate, undefined, '', [symptom]);
+        if (!isCurrentIdentity(identity)) return;
+        if (!result.ok) {
+          toast.error(serverErrorMessage(result.reason));
+          return;
+        }
+        setEntries((current) => [result.entry, ...current].sort((a, b) => b.startDate.localeCompare(a.startDate)));
+        setLoadState('ready');
+        toast.success('오늘의 컨디션을 기록했어요! 💊');
+      }
+    } catch (err) {
+      if (!isCurrentIdentity(identity)) return;
+      console.error('Quick symptom toggle failed:', err);
+      toast.error(classifyServerError(err).message);
+    } finally {
+      if (isCurrentIdentity(identity)) setQuickActionPending(false);
+    }
   };
 
   const openEdit = (entry: CycleEntry) => {
@@ -443,23 +576,100 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
         </div>
       )}
 
-      {(loadState === 'ready' || loadState === 'empty') && (
-        <>
-          {expectedStartDate ? (
-            <div className="p-4 rounded-surface bg-coral/10 border border-coral/20 space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-caption text-coral-strong font-bold">다음 예상 시작일</span>
-                <span className="text-label font-bold text-foreground">{expectedStartDate}</span>
+     {(loadState === 'ready' || loadState === 'empty') && (
+       <>
+          {/* 1-Tap Hero Card */}
+          <div className="p-4 rounded-surface bg-gradient-to-br from-coral/15 via-coral/5 to-coral/10 border border-coral/30 space-y-3 shadow-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                {activePeriodEntry ? (
+                  <div className="flex items-center gap-1.5 text-coral-strong font-bold text-label">
+                    <span className="animate-pulse">🌸</span>
+                    <span>생리 {activePeriodDayNumber}일째 진행 중</span>
+                  </div>
+                ) : expectedStartDate ? (
+                  <div className="flex items-center gap-1.5 text-coral-strong font-bold text-label">
+                    <Sparkles className="w-4 h-4 text-coral" />
+                    <span>다음 예상: {expectedStartDate} ({formatDDayText(expectedStartDate, today)})</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-coral-strong font-bold text-label">
+                    <span>🌷 생리 주기를 간편하게 관리해요</span>
+                  </div>
+                )}
+                <p className="text-caption text-muted-foreground mt-0.5">
+                  {activePeriodEntry
+                    ? `${activePeriodEntry.startDate}에 시작된 생리가 진행 중이에요.`
+                    : expectedStartDate
+                    ? `평균 주기 ${cycleLength}일 기준으로 계산한 예상일이에요.`
+                    : '버튼 한 번으로 오늘 생리 시작을 기록해 보세요.'}
+                </p>
               </div>
-              <p className="text-caption text-muted-foreground">
-                최근 시작일 + 평균 {cycleLength}일로 계산한 단순 예상이며, 의료 조언이 아니에요.
-              </p>
             </div>
-          ) : (
-            <div className="p-3.5 rounded-surface bg-muted/40 border border-border/60 text-caption text-muted-foreground text-center">
-              시작일 기록이 생기면 다음 예상 시작일을 표시해요.
-            </div>
-          )}
+
+            {/* 1-Tap Quick Action Button */}
+            <button
+              type="button"
+              onClick={() => void handleQuickTogglePeriod()}
+              disabled={quickActionPending}
+              className={cn(
+                'w-full py-3 px-4 rounded-full text-label font-bold transition flex items-center justify-center gap-2 shadow-xs min-h-11 active:scale-98',
+                activePeriodEntry
+                  ? 'bg-card border-2 border-coral text-coral hover:bg-coral/10'
+                  : 'bg-coral-strong text-coral-strong-foreground hover:opacity-95',
+              )}
+            >
+              {quickActionPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : activePeriodEntry ? (
+                <>
+                  <Check className="w-4 h-4" /> 오늘 생리 끝났어요 ✨
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" /> 오늘 생리 시작했어요 🌸
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* 1-Tap Quick Symptom Chips */}
+          {(() => {
+            const selectedDateEntry = entries.find((e) => cycleEntryOccursOnDate(e, selectedDate));
+            const currentSymptoms = selectedDateEntry?.symptoms || [];
+            return (
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-caption font-bold text-foreground">
+                    {selectedDate === today ? '오늘의 컨디션 선택' : `${selectedDate} 컨디션 선택`}
+                  </span>
+                  <span className="text-caption text-muted-foreground">터치해서 쉬운 기록</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {CYCLE_SYMPTOMS.map((symptom) => {
+                    const isChecked = currentSymptoms.includes(symptom);
+                    return (
+                      <button
+                        type="button"
+                        key={symptom}
+                        onClick={() => void handleQuickToggleSymptom(symptom)}
+                        disabled={quickActionPending}
+                        className={cn(
+                          'px-3 py-2 rounded-full text-caption font-medium transition border flex items-center gap-1.5 min-h-11 active:scale-95',
+                          isChecked
+                            ? 'bg-coral/20 border-coral text-coral-strong font-bold'
+                            : 'bg-card border-border text-foreground hover:bg-muted',
+                        )}
+                      >
+                        <span>{symptomIcons[symptom]}</span>
+                        <span>{symptomLabels[symptom]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between px-1">
@@ -599,27 +809,42 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
             </div>
           )}
 
-          <div className="rounded-surface border border-border p-4 space-y-3">
-            <div>
-              <h4 className="text-heading text-foreground">평균 길이 설정</h4>
-              <p className="text-caption text-muted-foreground mt-0.5">저장된 평균 기간: {periodLength}일</p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="text-label font-bold text-foreground space-y-1">
-                <span>평균 주기 길이</span>
-                <input type="number" min={CYCLE_LENGTH_MIN} max={CYCLE_LENGTH_MAX} value={cycleLengthDraft} onChange={(event) => setCycleLengthDraft(Number(event.target.value))} className="w-full p-2.5 rounded-control border border-border bg-card text-body" disabled={settingsPending} />
-              </label>
-              <label className="text-label font-bold text-foreground space-y-1">
-                <span>평균 기간</span>
-                <input type="number" min={PERIOD_LENGTH_MIN} max={PERIOD_LENGTH_MAX} value={periodLengthDraft} onChange={(event) => setPeriodLengthDraft(Number(event.target.value))} className="w-full p-2.5 rounded-control border border-border bg-card text-body" disabled={settingsPending} />
-              </label>
-            </div>
-            <p className="text-caption text-muted-foreground">주기 {CYCLE_LENGTH_MIN}~{CYCLE_LENGTH_MAX}일 · 기간 {PERIOD_LENGTH_MIN}~{PERIOD_LENGTH_MAX}일</p>
-            {settingsError && <p className="text-caption text-destructive" role="alert">{settingsError}</p>}
-            <button type="button" onClick={() => void saveSettings()} disabled={settingsPending} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-foreground text-background text-label font-bold disabled:opacity-50 min-h-11">
-              {settingsPending && <Loader2 className="w-4 h-4 animate-spin" />}
-              {settingsPending ? '설정 저장 중' : '평균 길이 저장'}
+          {/* Average Length Settings Section (Clean Collapsible) */}
+          <div className="rounded-surface border border-border bg-card overflow-hidden transition">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((prev) => !prev)}
+              className="w-full p-4 flex items-center justify-between text-left hover:bg-muted/30 min-h-11 transition"
+            >
+              <div>
+                <h4 className="text-heading text-foreground">평균 주기 설정</h4>
+                <p className="text-caption text-muted-foreground mt-0.5">저장된 평균 기간: {periodLength}일</p>
+              </div>
+              <div className="p-1 text-muted-foreground">
+                {settingsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </div>
             </button>
+
+            {settingsOpen && (
+              <div className="p-4 pt-0 border-t border-border/40 space-y-3 animate-in fade-in-50">
+                <div className="grid grid-cols-2 gap-2 pt-3">
+                  <label className="text-label font-bold text-foreground space-y-1">
+                    <span>평균 주기 길이</span>
+                    <input type="number" min={CYCLE_LENGTH_MIN} max={CYCLE_LENGTH_MAX} value={cycleLengthDraft} onChange={(event) => setCycleLengthDraft(Number(event.target.value))} className="w-full p-2.5 rounded-control border border-border bg-card text-body" disabled={settingsPending} />
+                  </label>
+                  <label className="text-label font-bold text-foreground space-y-1">
+                    <span>평균 기간</span>
+                    <input type="number" min={PERIOD_LENGTH_MIN} max={PERIOD_LENGTH_MAX} value={periodLengthDraft} onChange={(event) => setPeriodLengthDraft(Number(event.target.value))} className="w-full p-2.5 rounded-control border border-border bg-card text-body" disabled={settingsPending} />
+                  </label>
+                </div>
+                <p className="text-caption text-muted-foreground">주기 {CYCLE_LENGTH_MIN}~{CYCLE_LENGTH_MAX}일 · 기간 {PERIOD_LENGTH_MIN}~{PERIOD_LENGTH_MAX}일</p>
+                {settingsError && <p className="text-caption text-destructive" role="alert">{settingsError}</p>}
+                <button type="button" onClick={() => void saveSettings()} disabled={settingsPending} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-foreground text-background text-label font-bold disabled:opacity-50 min-h-11">
+                  {settingsPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {settingsPending ? '설정 저장 중' : '평균 길이 저장'}
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

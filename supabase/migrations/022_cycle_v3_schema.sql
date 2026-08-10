@@ -138,3 +138,15 @@ BEGIN
     SET symptoms = EXCLUDED.symptoms, note = EXCLUDED.note, updated_at = EXCLUDED.updated_at;
   END IF;
 END $$;
+
+-- =============================================================
+-- 6. Reload the PostgREST schema cache
+-- =============================================================
+-- Creating a table is not enough: PostgREST serves from a cached schema, so until
+-- it reloads, every request for these tables answers `PGRST205`
+-- ("Could not find the table ... in the schema cache") and the app reports the
+-- cycle feature as unavailable even though the tables exist.
+--
+-- Migration 017 established this NOTIFY as the convention for exactly that
+-- reason. The dashboard equivalent is Settings -> API -> Reload schema.
+NOTIFY pgrst, 'reload schema';

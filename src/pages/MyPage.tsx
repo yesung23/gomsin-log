@@ -5,6 +5,7 @@ import { AvatarPicker } from '@/components/AvatarPicker';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
+import { CyclePartnerCard } from '@/components/cycle/CyclePartnerCard';
 import { useStore } from '@/lib/useStore';
 
 export function MyPage() {
@@ -98,6 +99,21 @@ export function MyPage() {
           <CycleTrackerSection
             key={authenticatedUser?.id || 'signed-out'}
             userId={authenticatedUser?.id}
+          />
+        )}
+
+        {/*
+          The receiving end of the owner's three sharing toggles. Only the
+          partner sees it, and it renders nothing unless the owner turned
+          something on, so a partner who is shown nothing cannot infer whether
+          the owner considered sharing and declined.
+        */}
+        {!isGomsin && (
+          <CyclePartnerCard
+            key={authenticatedUser?.id || 'signed-out'}
+            authenticated={Boolean(authenticatedUser?.id)}
+            userId={authenticatedUser?.id}
+            connected={connected}
           />
         )}
 

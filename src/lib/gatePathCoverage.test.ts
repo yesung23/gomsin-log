@@ -81,6 +81,9 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     fetchCycleDailyLogsResultFromDB: 'Read-only: fetches cycle daily logs without mutation',
     fetchCycleDailyLogsFromDB: 'Read-only: wrapper around fetchCycleDailyLogsResultFromDB',
     fetchCycleSharingPreferencesFromDB: 'Read-only: fetches cycle sharing preferences',
+    fetchPartnerCycleProjectionFromDB:
+      'Read-only: calls get_partner_cycle_projection(), which is STABLE and mutates nothing',
+    isPartnerProjectionEmpty: 'Pure predicate over an in-memory projection, no server call',
     periodOccursOnDate: 'Pure utility: date range check over a CyclePeriod',
     periodRangesOnDate: 'Pure utility: filters periods by date',
     activePeriodOnDate: 'Pure utility: selects the active period in memory',

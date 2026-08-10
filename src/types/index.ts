@@ -276,17 +276,24 @@ export interface CycleSharingPreferences {
   shareFertilityWindow: boolean;
 }
 
+/**
+ * The ONLY cycle information a partner ever receives.
+ *
+ * Produced by the `get_partner_cycle_projection()` RPC, which reads the owner's
+ * raw tables under SECURITY DEFINER and returns nothing but these booleans and
+ * date ranges. The shape is the enforcement: there is no field here that could
+ * carry a symptom, flow, pain level, mood, note, row id, or actual period date,
+ * so a future change cannot leak one by accident.
+ */
 export interface CyclePartnerProjection {
   isCurrentPeriodShared: boolean;
   isPeriodActive: boolean;
-  activePeriodDayNumber?: number;
   isPredictionShared: boolean;
   predictedWindowStart?: string;
   predictedWindowEnd?: string;
   isFertilityShared: boolean;
   fertilityWindowStart?: string;
   fertilityWindowEnd?: string;
-  supportSignal?: CycleSupportSignal;
 }
 
 export interface CycleEntry {

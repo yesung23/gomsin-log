@@ -10,6 +10,7 @@ import {
   CyclePeriod,
   CycleDailyLog,
   CycleSharingPreferences,
+  CyclePartnerProjection,
   CycleFlow,
   CyclePainLevel,
   CycleMood,
@@ -95,6 +96,18 @@ export type CyclePeriodsFetchResult =
   | CycleFetchFailure;
 export type CycleDailyLogsFetchResult =
   | { ok: true; logs: CycleDailyLog[] }
+  | CycleFetchFailure;
+/**
+ * Outcome of reading the partner-facing projection.
+ *
+ * `{ ok: true, projection: null }` is a real, distinct answer: the couple is not
+ * connected, or the RPC has not been deployed to this project. It is NOT the
+ * same as "nothing is shared", which is a projection with every flag false. The
+ * partner surface renders those two states differently, so they must not
+ * collapse into one value.
+ */
+export type CyclePartnerProjectionFetchResult =
+  | { ok: true; projection: CyclePartnerProjection | null }
   | CycleFetchFailure;
 
 /**
@@ -1067,4 +1080,63 @@ export async function saveCycleSharingPreferencesToDB(
       shareFertilityWindow: !!data.share_fertility_window,
     },
   };
+}
+
+// -------------------------------------------------------------
+// PARTNER-FACING PROJECTION
+// -------------------------------------------------------------
+
+/**
+ * Read the sanitized cycle projection the partner is allowed to see.
+ *
+ * This is the ONLY path by which cycle information reaches a partner. It calls
+ * `get_partner_cycle_projection()`, a SECURITY DEFINER RPC that reads the
+ * owner's raw tables and returns nothing but the booleans and date ranges the
+ * owner explicitly turned on. The partner's own credentials can never read
+ * `cycle_periods`, `cycle_daily_logs`, `cycle_settings`,
+ * `cycle_sharing_preferences`, or `user_sensitive_consents` — those stay
+ * owner-only under RLS.
+ *
+ * Before this existed the three sharing toggles wrote to the database and
+ * changed nothing a partner could see. The promise was recorded and never kept.
+ */
+export async function fetchPartnerCycleProjectionFromDB(): Promise<CyclePartnerProjectionFetchResult> {
+  if (!isSupabaseConfigured || !supabase) return fetchFailure();
+  const userId = await currentUserId();
+  if (!userId) return { ok: false, reason: 'unauthenticated' };
+
+  const { data, error } = await supabase.rpc('get_partner_cycle_projection');
+
+  if (error) {
+    console.error('Failed to fetch partner cycle projection:', error);
+    // `PGRST202` is the missing-function answer, the RPC analogue of a missing
+    // table. Reporting it as a bad connection would invite a pointless retry.
+    if (error.code === 'PGRST202') return { ok: false, reason: 'not_deployed' };
+    return fetchFailure(error);
+  }
+
+  // No row means there is nothing to project: no active couple, or no partner.
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return { ok: true, projection: null };
+
+  return {
+    ok: true,
+    projection: {
+      isCurrentPeriodShared: !!row.has_current_period_status,
+      isPeriodActive: !!row.current_period_active,
+      isPredictionShared: !!row.has_prediction_window,
+      predictedWindowStart: row.prediction_window_start || undefined,
+      predictedWindowEnd: row.prediction_window_end || undefined,
+      isFertilityShared: !!row.has_fertility_window,
+      fertilityWindowStart: row.fertility_window_start || undefined,
+      fertilityWindowEnd: row.fertility_window_end || undefined,
+    },
+  };
+}
+
+/** True when the owner has turned on nothing at all. */
+export function isPartnerProjectionEmpty(projection: CyclePartnerProjection): boolean {
+  return !projection.isCurrentPeriodShared
+    && !projection.isPredictionShared
+    && !projection.isFertilityShared;
 }

@@ -191,6 +191,11 @@ test('partner cannot reach the cycle tracker, which is author-only', async ({ br
    * the client are separate layers: even if a query somehow returned a row, it
    * must not reach the partner's screen. The V3 fields are listed explicitly so
    * adding a health field to the owner surface cannot silently leak here.
+   *
+   * Every sharing toggle defaults to off, and `get_partner_cycle_projection()`
+   * treats a missing preferences row as all-off, so a freshly linked couple
+   * shares nothing. That is what makes the projection strings below absent too:
+   * their presence here would mean sharing turned itself on.
    */
   for (const forbidden of [
     '생리 시작일',
@@ -201,6 +206,10 @@ test('partner cannot reach the cycle tracker, which is author-only', async ({ br
     '통증',
     '자세히 기록하기',
     '생리 예상',
+    // The partner projection card. Absent until the owner opts in.
+    '함께 알아두면 좋은 것',
+    '지금 생리 기간이에요',
+    '가임 예상',
   ]) {
     expect(partnerBody, `partner must not see "${forbidden}"`).not.toContain(forbidden);
   }

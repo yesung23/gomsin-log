@@ -35,6 +35,40 @@
 | `022_cycle_v3_schema.sql` | 주기 V3 테이블 (`cycle_periods`, `cycle_daily_logs`, `user_sensitive_consents`, `cycle_sharing_preferences`) + legacy 안전 이관 | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `023_lock_legacy_cycle_backup.sql` | 022 가 만든 `legacy_cycle_entries_backup` 잠금 (RLS + anon 회수) | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `024_cycle_v3_account_deletion.sql` | `prepare_account_deletion` 이 주기 데이터와 legacy 백업까지 삭제 | **운영 적용됨 (2026-08-11, 확인됨)** |
+| `025_partner_cycle_projection.sql` | `get_partner_cycle_projection()` — 파트너가 볼 수 있는 sanitized 주기 정보만 계산 | **운영 적용됨 (2026-08-11, 확인됨)** |
+
+## 025 가 하는 일 (2026-08-11)
+
+022 가 `cycle_sharing_preferences` 를 만들고 앱에 공유 토글 3개가 있었지만,
+**파트너가 그 정보를 볼 경로가 존재하지 않았습니다.** 토글을 켜면 DB 행은 저장되고
+아무것도 전달되지 않았습니다. 원본 테이블은 소유자 전용 RLS 라서 파트너가 읽을 수
+없고 그것은 옳지만, 그 사이를 잇는 sanitized projection 이 없었습니다.
+
+025 가 두 함수를 추가합니다.
+
+- `cycle_prediction_window(uuid)` — 내부 helper. 소유자 한 명의 다음 예상 범위를
+  서버에서 계산합니다. 임의의 `owner_id` 를 받으므로 **어떤 클라이언트 역할에도
+  EXECUTE 를 주지 않습니다.**
+- `get_partner_cycle_projection()` — 파트너용. `authenticated` 만 실행할 수 있고,
+  요청자의 active couple 과 상대의 active 멤버십을 검증한 뒤, 상대가 직접 켠
+  항목만 불리언과 날짜 범위로 돌려줍니다.
+
+반환하지 않는 것: period/daily log id, 증상, 출혈량, 통증, 기분, 메모,
+실제 생리 시작일·종료일, 평균 주기 설정값.
+
+예측 규칙은 `src/lib/cyclePrediction.ts` 의 `predictCycle()` 과 같습니다
+(최근 12개 간격, 15~60일 밖 제외, 3개 이상이면 중앙값, 폭은 min(변동폭, 3),
+1~2개면 ±2일 고정). 두 구현이 어긋나면 커플이 서로 다른 날짜를 보게 되므로
+`src/lib/partnerCycleProjection.test.ts` 가 일치를 고정합니다.
+
+**적용 후 확인 (2026-08-11).**
+
+- 공유 전부 OFF → 파트너 호출 결과 모든 필드 `false` / `NULL`
+- 공유 전부 ON → `2026-09-20 ~ 2026-09-24`. 소유자 화면의 "9월 20일 ~ 9월 24일"
+  과 정확히 일치
+- 파트너 UUID 로 `cycle_periods`, `cycle_daily_logs`, `cycle_settings`,
+  `cycle_sharing_preferences`, `user_sensitive_consents`,
+  `legacy_cycle_entries_backup` 직접 SELECT → 6개 모두 0행
 
 ## 022~024 원격 적용 기록 (2026-08-11)
 

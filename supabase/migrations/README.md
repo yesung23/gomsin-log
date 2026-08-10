@@ -37,6 +37,48 @@
 | `024_cycle_v3_account_deletion.sql` | `prepare_account_deletion` 이 주기 데이터와 legacy 백업까지 삭제 | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `025_partner_cycle_projection.sql` | `get_partner_cycle_projection()` — 파트너가 볼 수 있는 sanitized 주기 정보만 계산 | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `026_projection_requires_consent.sql` | 동의를 철회하면 파트너 공유도 즉시 멈추도록 projection 재정의 | **운영 적용됨 (2026-08-11, 확인됨)** |
+| `027_fix_account_deletion_column.sql` | 024 가 잘못된 컬럼명으로 계정 삭제를 전면 중단시킨 것 복구 | **운영 적용됨 (2026-08-11, 확인됨)** |
+
+## 027 이 고치는 것 — 계정 삭제 전면 장애 (2026-08-11)
+
+024 는 `cycle_support_signals` 를 `user_id` 로 삭제했습니다. 그 테이블의 소유자
+컬럼은 `owner_id` 입니다.
+
+plpgsql 은 함수를 만들 때 본문의 SQL 을 검증하지 않으므로 024 는 **아무 오류 없이
+적용됐고**, 실제로 호출되는 순간에만 터졌습니다.
+
+```
+ERROR 42703: column "user_id" does not exist
+CONTEXT: PL/pgSQL function prepare_account_deletion(uuid,uuid[])
+```
+
+`prepare_account_deletion` 은 계정 삭제 트랜잭션의 유일한 DB 단계입니다. 즉
+024 가 적용된 동안 **아무도 계정을 삭제할 수 없었습니다.** 원격 DB 에서 직접
+재현해 확인했습니다.
+
+왜 놓쳤는가: 024 의 테스트는 SQL 텍스트에
+`DELETE FROM public.<table> WHERE user_id = p_user_id` 가 있는지만 확인했습니다.
+틀린 컬럼을 옳은 컬럼과 똑같은 확신으로 검사한 것입니다.
+
+`src/lib/migration027.test.ts` 는 이제 삭제문의 컬럼명을 **스키마 기준으로**
+검증합니다 (해당 테이블의 `CREATE TABLE` / `ALTER TABLE ADD COLUMN` 을 읽어
+대조). 컬럼명을 다시 `user_id` 로 되돌리면 3개 테스트가 실패하는 것을 확인했습니다.
+
+전수 검사 결과, 삭제 함수가 참조하는 테이블 중 소유자 컬럼이 `owner_id` 인 것은
+`cycle_support_signals` 하나뿐이고 나머지는 모두 `user_id` 가 맞습니다.
+
+**적용 후 확인 (2026-08-11).** service_role 로 실제 호출한 결과:
+
+```json
+{"ok": true, "records_deleted": 3, "cycle_periods_deleted": 2,
+ "cycle_daily_logs_deleted": 4, "cycle_entries_deleted": 5,
+ "cycle_settings_deleted": 1, "cycle_sharing_preferences_deleted": 1,
+ "cycle_support_signals_deleted": 1, "sensitive_consents_deleted": 1,
+ "legacy_cycle_backup_deleted": 5, "trips_transferred": 1,
+ "shared_events_transferred": 1}
+```
+
+검증은 트랜잭션 안에서 실행하고 롤백했으므로 실제 데이터는 그대로입니다.
 
 ## 025 가 하는 일 (2026-08-11)
 

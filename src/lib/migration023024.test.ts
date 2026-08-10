@@ -56,6 +56,18 @@ describe('023 locks the legacy cycle backup table', () => {
 });
 
 describe('024 extends account deletion to cycle data', () => {
+  /*
+   * NOTE: 024 is superseded by 027. These assertions describe what 024 said, and
+   * one of them is why its bug shipped: asserting that the text contains
+   * `WHERE user_id = p_user_id` checked for the wrong column for
+   * `cycle_support_signals`, whose owner column is `owner_id`, as confidently as
+   * it would have checked for the right one. plpgsql does not validate a
+   * function body at CREATE time, so nothing failed until the first real call.
+   *
+   * The column names are now checked against the schema in
+   * `src/lib/migration027.test.ts`, which is the suite that must be trusted for
+   * the deletion function's current behaviour.
+   */
   it.each([
     'cycle_periods',
     'cycle_daily_logs',
@@ -63,9 +75,14 @@ describe('024 extends account deletion to cycle data', () => {
     'user_sensitive_consents',
     'cycle_entries',
     'cycle_settings',
-    'cycle_support_signals',
   ])('deletes %s for the departing user', (table) => {
     expect(deletion).toContain(`DELETE FROM public.${table} WHERE user_id = p_user_id`);
+  });
+
+  it('is superseded by 027 for cycle_support_signals, which it deleted by the wrong column', () => {
+    // Kept as a record of the defect rather than deleted, so the reason 027
+    // exists stays attached to the file that caused it.
+    expect(deletion).toContain('DELETE FROM public.cycle_support_signals WHERE user_id = p_user_id');
   });
 
   it('deletes the legacy backup, which no cascade would ever reach', () => {

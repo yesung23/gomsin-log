@@ -203,7 +203,9 @@ test('cycle data stays untouched until the user separately consents to sensitive
   const page = await context.newPage();
   let cycleRequests = 0;
   page.on('request', (request) => {
-    if (/\/rest\/v1\/cycle_(settings|entries)/.test(request.url())) cycleRequests += 1;
+    // The V3 health tables. `user_sensitive_consents` is deliberately excluded:
+    // reading the consent row is what decides whether the rest may be read.
+    if (/\/rest\/v1\/cycle_(settings|periods|daily_logs)/.test(request.url())) cycleRequests += 1;
   });
 
   await bootedInto(page, '/my');
@@ -216,7 +218,39 @@ test('cycle data stays untouched until the user separately consents to sensitive
   await page.getByRole('checkbox', { name: /민감정보 수집·이용/ }).check();
   await consentButton.click();
   await expect(page.getByText('내 몸의 리듬', { exact: true })).toBeVisible();
-  await expect.poll(() => cycleRequests).toBe(2);
+  // periods + daily logs + settings, once consent is recorded on the server.
+  await expect.poll(() => cycleRequests).toBe(3);
+  await context.close();
+});
+
+test('the cycle tracker fits a 320px screen and opens its day sheet by keyboard', async ({ browser }) => {
+  /*
+   * 320px is the narrowest phone still in use. The seven-column calendar plus
+   * long Korean labels is the most likely place for a horizontal overflow, and an
+   * overflowing calendar makes the tracker unusable rather than merely ugly.
+   */
+  const context = await browser.newContext({ viewport: { width: 320, height: 720 } });
+  await installMockBackend(context, CREATOR);
+  const page = await context.newPage();
+
+  await bootedInto(page, '/my');
+  await page.getByRole('checkbox', { name: /민감정보 수집·이용/ }).check();
+  await page.getByRole('button', { name: '동의하고 시작하기' }).click();
+  await expect(page.getByTestId('cycle-hero')).toBeVisible({ timeout: 20_000 });
+
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+
+  // A calendar day opens the sheet, and Escape closes it and returns focus.
+  const day = page.getByRole('button', { name: /^\d{4}-\d{2}-\d{2}/ }).first();
+  await day.click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect(day).toBeFocused();
+
   await context.close();
 });
 

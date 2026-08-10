@@ -115,14 +115,21 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.cycle_sharing_preferences T
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'cycle_entries') THEN
-    -- Migrate periods
+    -- 5a. Backup legacy table for zero data loss
+    CREATE TABLE IF NOT EXISTS public.legacy_cycle_entries_backup AS
+    SELECT * FROM public.cycle_entries;
+
+    -- 5b. Migrate genuine period entries:
+    -- Entries with an explicit end_date OR entries without symptoms/notes (unambiguous period starts)
     INSERT INTO public.cycle_periods (user_id, start_date, end_date, created_at, updated_at)
     SELECT user_id, start_date, end_date, created_at, updated_at
     FROM public.cycle_entries
+    WHERE end_date IS NOT NULL
+       OR ((symptoms IS NULL OR array_length(symptoms, 1) IS NULL) AND (notes IS NULL OR notes = ''))
     ON CONFLICT (user_id, start_date) DO UPDATE
     SET end_date = EXCLUDED.end_date, updated_at = EXCLUDED.updated_at;
 
-    -- Migrate symptoms & notes into daily logs for the start_date
+    -- 5c. Migrate all symptoms & notes into daily logs for that date
     INSERT INTO public.cycle_daily_logs (user_id, log_date, symptoms, note, created_at, updated_at)
     SELECT user_id, start_date, symptoms, notes, created_at, updated_at
     FROM public.cycle_entries

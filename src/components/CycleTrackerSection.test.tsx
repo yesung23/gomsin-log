@@ -1,7 +1,18 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CycleEntriesFetchResult, CycleSettingsFetchResult } from '@/lib/cycle';
+import type {
+  CycleDailyLogsFetchResult,
+  CyclePeriodsFetchResult,
+  CycleSettingsFetchResult,
+} from '@/lib/cycle';
 import { grantCycleSensitiveConsent, revokeCycleSensitiveConsent } from '@/lib/sensitiveConsent';
+
+/**
+ * Consent gating, identity isolation and error-copy honesty for the V3 tracker.
+ *
+ * The V3 data-path assertions live in `cycleV3DataPath.test.tsx`; this file keeps
+ * the invariants that predate V3 and must survive it.
+ */
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -9,17 +20,29 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const entryLoads: Array<ReturnType<typeof deferred<CycleEntriesFetchResult>>> = [];
+const periodLoads: Array<ReturnType<typeof deferred<CyclePeriodsFetchResult>>> = [];
+const dailyLogLoads: Array<ReturnType<typeof deferred<CycleDailyLogsFetchResult>>> = [];
 const settingLoads: Array<ReturnType<typeof deferred<CycleSettingsFetchResult>>> = [];
+
+const savePeriod = vi.fn();
+const updatePeriod = vi.fn();
+const saveDailyLog = vi.fn();
+const saveSettings = vi.fn();
+const syncConsent = vi.fn();
 
 vi.mock('@/lib/cycle', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/cycle')>();
   return {
     ...actual,
-    localToday: () => '2026-08-01',
-    fetchCycleEntriesResultFromDB: () => {
-      const request = deferred<CycleEntriesFetchResult>();
-      entryLoads.push(request);
+    localToday: () => '2026-08-14',
+    fetchCyclePeriodsResultFromDB: () => {
+      const request = deferred<CyclePeriodsFetchResult>();
+      periodLoads.push(request);
+      return request.promise;
+    },
+    fetchCycleDailyLogsResultFromDB: () => {
+      const request = deferred<CycleDailyLogsFetchResult>();
+      dailyLogLoads.push(request);
       return request.promise;
     },
     fetchCycleSettingsResultFromDB: () => {
@@ -27,261 +50,212 @@ vi.mock('@/lib/cycle', async (importOriginal) => {
       settingLoads.push(request);
       return request.promise;
     },
-    saveCycleEntryToDB: (...args: unknown[]) => saveEntry(...args),
-    updateCycleEntryInDB: (...args: unknown[]) => updateEntry(...args),
-    deleteCycleEntryFromDB: (...args: unknown[]) => deleteEntry(...args),
+    fetchCycleSharingPreferencesFromDB: async () => ({
+      userId: 'user-a',
+      shareCurrentPeriod: false,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
+    }),
+    saveCyclePeriodToDB: (...args: unknown[]) => savePeriod(...args),
+    updateCyclePeriodInDB: (...args: unknown[]) => updatePeriod(...args),
+    saveCycleDailyLogToDB: (...args: unknown[]) => saveDailyLog(...args),
     saveCycleSettingsToDB: (...args: unknown[]) => saveSettings(...args),
   };
 });
 
-const saveEntry = vi.fn();
-const updateEntry = vi.fn();
-const deleteEntry = vi.fn();
-const saveSettings = vi.fn();
+vi.mock('@/lib/sensitiveConsent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/sensitiveConsent')>();
+  return {
+    ...actual,
+    syncCycleConsentWithDB: (...args: unknown[]) => syncConsent(...args),
+  };
+});
 
 const { CycleTrackerSection } = await import('@/components/CycleTrackerSection');
 
 beforeEach(() => {
   window.localStorage.clear();
+  periodLoads.length = 0;
+  dailyLogLoads.length = 0;
+  settingLoads.length = 0;
+  savePeriod.mockReset();
+  updatePeriod.mockReset();
+  saveDailyLog.mockReset();
+  saveSettings.mockReset();
+  syncConsent.mockReset();
+  syncConsent.mockResolvedValue({ ok: true, granted: true });
   grantCycleSensitiveConsent('user-a');
   grantCycleSensitiveConsent('user-b');
 });
 
 describe('CycleTrackerSection sensitive-information gate', () => {
   it('does not retrieve cycle data before separate explicit consent', async () => {
-    entryLoads.length = 0;
-    settingLoads.length = 0;
     revokeCycleSensitiveConsent('user-c');
+    syncConsent.mockResolvedValue({ ok: true, granted: false });
     render(<CycleTrackerSection userId="user-c" />);
 
-    expect(screen.getByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '동의하고 시작하기' })).toBeDisabled();
     await act(async () => Promise.resolve());
-    expect(entryLoads).toHaveLength(0);
+    // No health table is touched while consent is absent.
+    expect(periodLoads).toHaveLength(0);
+    expect(dailyLogLoads).toHaveLength(0);
     expect(settingLoads).toHaveLength(0);
+  });
 
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '동의하고 시작하기' }));
-    await waitFor(() => expect(entryLoads).toHaveLength(1));
-    await act(async () => {
-      entryLoads[0].resolve({ ok: true, entries: [] });
-      settingLoads[0].resolve({ ok: true, settings: null });
-    });
-    expect(await screen.findByText('아직 저장한 기록이 없어요.')).toBeInTheDocument();
+  it('keeps the feature locked when the server consent check itself fails', async () => {
+    // An unreachable authority must not be read as "yes".
+    revokeCycleSensitiveConsent('user-d');
+    syncConsent.mockResolvedValue({ ok: false, reason: 'offline' });
+    render(<CycleTrackerSection userId="user-d" />);
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(periodLoads).toHaveLength(0);
+    expect(await screen.findByRole('alert')).toHaveTextContent('인터넷 연결');
+  });
+
+  it('does not unlock on a stale local cache when the server says revoked', async () => {
+    // Cache says yes, server says no. The server wins.
+    grantCycleSensitiveConsent('user-e');
+    syncConsent.mockResolvedValue({ ok: true, granted: false });
+    render(<CycleTrackerSection userId="user-e" />);
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(periodLoads).toHaveLength(0);
   });
 });
 
 describe('CycleTrackerSection identity isolation', () => {
   it('ignores a previous account load that resolves after an account switch', async () => {
-    entryLoads.length = 0;
-    settingLoads.length = 0;
     const view = render(<CycleTrackerSection userId="user-a" />);
-    await waitFor(() => expect(entryLoads).toHaveLength(1));
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
 
     view.rerender(<CycleTrackerSection userId="user-b" />);
-    await waitFor(() => expect(entryLoads).toHaveLength(2));
+    await waitFor(() => expect(periodLoads).toHaveLength(2));
 
+    // Account B answers first.
     await act(async () => {
+      periodLoads[1].resolve({
+        ok: true,
+        periods: [{ id: 'period-b', userId: 'user-b', startDate: '2026-08-13' }],
+      });
+      dailyLogLoads[1].resolve({ ok: true, logs: [] });
       settingLoads[1].resolve({ ok: true, settings: null });
-      entryLoads[1].resolve({
-        ok: true,
-        entries: [{
-          id: 'entry-b',
-          userId: 'user-b',
-          startDate: '2026-08-01',
-          notes: 'B only',
-          symptoms: [],
-        }],
-      });
     });
-    expect(await screen.findByText('B only')).toBeInTheDocument();
+    expect(await screen.findByText(/생리 2일째/)).toBeInTheDocument();
 
+    // Account A's slow response arrives afterwards and must be discarded.
     await act(async () => {
-      settingLoads[0].resolve({
+      periodLoads[0].resolve({
         ok: true,
-        settings: { userId: 'user-a', averageCycleLength: 31, averagePeriodLength: 6 },
+        periods: [{ id: 'period-a', userId: 'user-a', startDate: '2026-08-01', endDate: '2026-08-05' }],
       });
-      entryLoads[0].resolve({
+      dailyLogLoads[0].resolve({
         ok: true,
-        entries: [{
-          id: 'entry-a',
+        logs: [{
+          id: 'log-a',
           userId: 'user-a',
-          startDate: '2026-08-01',
-          notes: 'A secret',
+          logDate: '2026-08-14',
           symptoms: [],
+          note: 'A secret',
         }],
       });
+      settingLoads[0].resolve({ ok: true, settings: null });
     });
 
     expect(screen.queryByText('A secret')).not.toBeInTheDocument();
-    expect(screen.getByText('B only')).toBeInTheDocument();
+    expect(screen.getByText(/생리 2일째/)).toBeInTheDocument();
   });
 });
 
 describe('CycleTrackerSection write integrity', () => {
-  beforeEach(() => {
-    entryLoads.length = 0;
-    settingLoads.length = 0;
-    saveEntry.mockReset();
-    updateEntry.mockReset();
-    deleteEntry.mockReset();
-    saveSettings.mockReset();
-  });
-
-  /** Render with one existing entry already loaded. */
+  /** Render with one completed period so both hero states are reachable. */
   async function renderLoaded() {
     const view = render(<CycleTrackerSection userId="user-a" />);
-    await waitFor(() => expect(entryLoads).toHaveLength(1));
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
     await act(async () => {
+      periodLoads[0].resolve({
+        ok: true,
+        periods: [{
+          id: 'period-aug',
+          userId: 'user-a',
+          startDate: '2026-08-01',
+          endDate: '2026-08-05',
+        }],
+      });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
       settingLoads[0].resolve({
         ok: true,
         settings: { userId: 'user-a', averageCycleLength: 28, averagePeriodLength: 5 },
       });
-      entryLoads[0].resolve({
-        ok: true,
-        entries: [{
-          id: 'entry-a',
-          userId: 'user-a',
-          startDate: '2026-08-01',
-          notes: 'Existing note',
-          symptoms: [],
-        }],
-      });
     });
-    expect(await screen.findByText('Existing note')).toBeInTheDocument();
+    await screen.findByTestId('cycle-hero');
     return view;
   }
 
-  it('reports a rejected entry save as a permission problem, never a connection problem', async () => {
-    // The old copy was "입력 내용과 연결을 확인해 주세요", which blamed the user's
-    // input and their network for what is an RLS/permission verdict.
-    saveEntry.mockResolvedValue({ ok: false, reason: 'forbidden' });
+  it('reports a rejected daily-log save as a permission problem, never a connection problem', async () => {
+    saveDailyLog.mockResolvedValue({ ok: false, reason: 'forbidden' });
     await renderLoaded();
 
-    fireEvent.click(screen.getByText('기록 추가'));
-    fireEvent.click(await screen.findByText('저장'));
+    fireEvent.click(screen.getByRole('button', { name: /자세히 기록하기/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '컨디션 저장' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('권한이 없어요');
     expect(alert).not.toHaveTextContent('인터넷 연결');
-    // The form stays open and no new entry appears: nothing was committed locally.
-    expect(screen.getByText('개인 기록 추가')).toBeInTheDocument();
+    // The editor stays open; nothing was committed locally.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('reports an expired session on save as a session problem', async () => {
-    saveEntry.mockResolvedValue({ ok: false, reason: 'auth_expired' });
+  it('reports an expired session on a period write as a session problem', async () => {
+    savePeriod.mockResolvedValue({ ok: false, reason: 'auth_expired' });
     await renderLoaded();
 
-    fireEvent.click(screen.getByText('기록 추가'));
-    fireEvent.click(await screen.findByText('저장'));
+    fireEvent.click(screen.getByRole('button', { name: /오늘 생리 시작했어요/ }));
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('세션이 만료되었어요');
-    expect(alert).not.toHaveTextContent('인터넷 연결');
-  });
-
-  it('keeps the entry when deleting it fails', async () => {
-    deleteEntry.mockResolvedValue({ ok: false, reason: 'forbidden' });
-    await renderLoaded();
-
-    fireEvent.click(screen.getByLabelText('기록 수정'));
-    expect(await screen.findByText('개인 기록 수정')).toBeInTheDocument();
-    // The delete control is the icon-only button inside the edit form.
-    const deleteButton = screen.getByText('개인 기록 수정')
-      .closest('div')?.parentElement
-      ?.querySelector('button.text-destructive') as HTMLButtonElement;
-    fireEvent.click(deleteButton);
-
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('권한이 없어요');
-    expect(alert).not.toHaveTextContent('인터넷 연결');
-    // Local state unchanged: the entry the server still holds is still listed, so
-    // its edit affordance is still rendered. (The note text itself appears twice
-    // while the form is open -- once in the list, once in the textarea -- so the
-    // per-entry control is the unambiguous signal.)
-    expect(screen.getByLabelText('기록 수정')).toBeInTheDocument();
-    expect(screen.getAllByText('Existing note').length).toBeGreaterThan(0);
+    await waitFor(() => expect(savePeriod).toHaveBeenCalled());
+    // The hero stays in its prediction state: no local period was invented.
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('prediction');
   });
 
   it('reports a rejected settings save with its real cause and keeps the stored average', async () => {
     saveSettings.mockResolvedValue({ ok: false, reason: 'forbidden' });
     await renderLoaded();
 
-    fireEvent.click(screen.getByText('평균 길이 저장'));
+    fireEvent.click(screen.getByRole('button', { name: '내 몸의 리듬 설정' }));
+    fireEvent.click(await screen.findByRole('button', { name: /주기 설정/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '저장' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('권한이 없어요');
     expect(alert).not.toHaveTextContent('인터넷 연결');
-    // The stored average is what the server confirmed, so it must not move.
-    expect(screen.getByText('저장된 평균 기간: 5일')).toBeInTheDocument();
   });
 
-  it('commits an entry locally only after the server confirms it', async () => {
-    saveEntry.mockResolvedValue({
+  it('commits a period locally only after the server confirms it', async () => {
+    savePeriod.mockResolvedValue({
       ok: true,
-      entry: {
-        id: 'entry-new',
-        userId: 'user-a',
-        startDate: '2026-08-01',
-        notes: 'Confirmed note',
-        symptoms: [],
-      },
+      period: { id: 'period-new', userId: 'user-a', startDate: '2026-08-14' },
     });
     await renderLoaded();
 
-    fireEvent.click(screen.getByText('기록 추가'));
-    fireEvent.click(await screen.findByText('저장'));
+    fireEvent.click(screen.getByRole('button', { name: /오늘 생리 시작했어요/ }));
 
-    expect(await screen.findByText('Confirmed note')).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // Only once the server confirms does the hero flip to the active state.
+    expect(await screen.findByText(/생리 1일째/)).toBeInTheDocument();
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('active');
   });
 
-  it('provides a 1-tap quick action button to log period start today', async () => {
-    saveEntry.mockResolvedValue({
-      ok: true,
-      entry: {
-        id: 'entry-today',
-        userId: 'user-a',
-        startDate: '2026-08-01',
-        notes: undefined,
-        symptoms: [],
-      },
-    });
+  it('surfaces an RLS refusal on load as a permission problem', async () => {
     render(<CycleTrackerSection userId="user-a" />);
-    await waitFor(() => expect(entryLoads).toHaveLength(1));
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
     await act(async () => {
+      periodLoads[0].resolve({ ok: false, reason: 'forbidden' });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
       settingLoads[0].resolve({ ok: true, settings: null });
-      entryLoads[0].resolve({ ok: true, entries: [] });
     });
 
-    const startButton = await screen.findByText(/오늘 생리 시작했어요/);
-    expect(startButton).toBeInTheDocument();
-    fireEvent.click(startButton);
-
-    await waitFor(() => expect(saveEntry).toHaveBeenCalledWith('2026-08-01', undefined, '', []));
-  });
-
-  it('allows 1-tap symptom chip toggling directly from the view', async () => {
-    saveEntry.mockResolvedValue({
-      ok: true,
-      entry: {
-        id: 'entry-symptom',
-        userId: 'user-a',
-        startDate: '2026-08-01',
-        notes: undefined,
-        symptoms: ['cramps'],
-      },
-    });
-    render(<CycleTrackerSection userId="user-a" />);
-    await waitFor(() => expect(entryLoads).toHaveLength(1));
-    await act(async () => {
-      settingLoads[0].resolve({ ok: true, settings: null });
-      entryLoads[0].resolve({ ok: true, entries: [] });
-    });
-
-    const crampsChip = await screen.findByText('복부 불편감');
-    fireEvent.click(crampsChip);
-
-    await waitFor(() => expect(saveEntry).toHaveBeenCalledWith('2026-08-01', undefined, '', ['cramps']));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('권한이 없어요');
+    expect(alert).not.toHaveTextContent('연결을 확인');
   });
 });

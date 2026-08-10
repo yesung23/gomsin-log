@@ -81,6 +81,13 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     fetchCycleDailyLogsResultFromDB: 'Read-only: fetches cycle daily logs without mutation',
     fetchCycleDailyLogsFromDB: 'Read-only: wrapper around fetchCycleDailyLogsResultFromDB',
     fetchCycleSharingPreferencesFromDB: 'Read-only: fetches cycle sharing preferences',
+    periodOccursOnDate: 'Pure utility: date range check over a CyclePeriod',
+    periodRangesOnDate: 'Pure utility: filters periods by date',
+    activePeriodOnDate: 'Pure utility: selects the active period in memory',
+    isPeriodImplausiblyLong: 'Pure utility: compares an open period against a day limit',
+    periodDayNumber: 'Pure utility: date arithmetic',
+    dailyLogOnDate: 'Pure utility: finds one daily log in memory',
+    dailyLogHasContent: 'Pure utility: checks whether a daily log carries any value',
   },
   'supabase.ts': {
     // Auth operations (sign-in/out must work regardless of deletion state)

@@ -76,6 +76,12 @@ export type CycleEntriesFetchResult =
 export type CycleSupportSignalsFetchResult =
   | { ok: true; signals: CycleSupportSignal[] }
   | CycleFetchFailure;
+export type CyclePeriodsFetchResult =
+  | { ok: true; periods: CyclePeriod[] }
+  | CycleFetchFailure;
+export type CycleDailyLogsFetchResult =
+  | { ok: true; logs: CycleDailyLog[] }
+  | CycleFetchFailure;
 
 /**
  * Outcome of a cycle write.
@@ -92,6 +98,8 @@ export type CycleEntryWriteResult = { ok: true; entry: CycleEntry } | CycleWrite
 export type CycleSettingsWriteResult = { ok: true; settings: CycleSettings } | CycleWriteFailure;
 export type CycleSupportWriteResult = { ok: true; signal: CycleSupportSignal } | CycleWriteFailure;
 export type CycleDeleteResult = { ok: true } | CycleWriteFailure;
+export type CyclePeriodWriteResult = { ok: true; period: CyclePeriod } | CycleWriteFailure;
+export type CycleDailyLogWriteResult = { ok: true; log: CycleDailyLog } | CycleWriteFailure;
 
 export interface CycleEntryDraft {
   startDate: string;
@@ -246,6 +254,97 @@ export function shiftCalendarMonth(
 
 export function cycleEntryOccursOnDate(entry: CycleEntry, date: string): boolean {
   return entry.startDate <= date && date <= (entry.endDate || entry.startDate);
+}
+
+/*
+ * ---------------------------------------------------------------
+ * V3 pure helpers.
+ *
+ * These take `CyclePeriod[]` / `CycleDailyLog[]` and NOTHING else. The whole
+ * point of the V3 split is that a daily log can never be mistaken for a period
+ * start, so the types are the enforcement mechanism: passing a `CycleDailyLog`
+ * to `activePeriodOnDate` does not compile, because a daily log has no
+ * `startDate`.
+ * ---------------------------------------------------------------
+ */
+
+/** Does this period cover `date`? An open period (no end) covers only its start onward. */
+export function periodOccursOnDate(period: CyclePeriod, date: string): boolean {
+  return period.startDate <= date && date <= (period.endDate || period.startDate);
+}
+
+/** Every period covering `date`, with start/end flags for calendar rendering. */
+export function periodRangesOnDate(
+  periods: CyclePeriod[],
+  date: string,
+): Array<{ period: CyclePeriod; isStart: boolean; isEnd: boolean }> {
+  return periods.filter((period) => periodOccursOnDate(period, date)).map((period) => ({
+    period,
+    isStart: period.startDate === date,
+    isEnd: (period.endDate || period.startDate) === date,
+  }));
+}
+
+/**
+ * The period the user is currently in, or null.
+ *
+ * `startDate <= today AND (endDate IS NULL OR endDate >= today)`. Daily logs are
+ * structurally excluded: this reads `CyclePeriod` only.
+ *
+ * Returns the MOST RECENT match rather than the first in array order. An old
+ * period whose end was never recorded stays open forever, so an unordered `find`
+ * could report a period from months ago as "today's" period and hide the current
+ * one.
+ */
+export function activePeriodOnDate(periods: CyclePeriod[], today: string): CyclePeriod | null {
+  const candidates = periods.filter(
+    (period) => period.startDate <= today && (!period.endDate || period.endDate >= today),
+  );
+  if (candidates.length === 0) return null;
+  return candidates.reduce(
+    (latest, period) => (period.startDate > latest.startDate ? period : latest),
+  );
+}
+
+/**
+ * Has an open period been running implausibly long?
+ *
+ * A user who forgets to tap "끝났어요" leaves a period open indefinitely, which
+ * then reads as "생리 40일째". The record is never modified automatically — it is
+ * the user's data and a silent edit would be a lie — so this only tells the UI
+ * when to ask.
+ */
+export function isPeriodImplausiblyLong(
+  period: CyclePeriod,
+  today: string,
+  maxDays = PERIOD_LENGTH_MAX,
+): boolean {
+  if (period.endDate) return false;
+  return periodDayNumber(period, today) > maxDays;
+}
+
+/** 1-based day number inside an active period, for "생리 3일째". */
+export function periodDayNumber(period: CyclePeriod, today: string): number {
+  const [y1, m1, d1] = period.startDate.split('-').map(Number);
+  const [y2, m2, d2] = today.split('-').map(Number);
+  const start = new Date(y1, m1 - 1, d1, 12).getTime();
+  const now = new Date(y2, m2 - 1, d2, 12).getTime();
+  return Math.round((now - start) / (1000 * 60 * 60 * 24)) + 1;
+}
+
+/** The single daily log for `date`, or null. One row per user per date. */
+export function dailyLogOnDate(logs: CycleDailyLog[], date: string): CycleDailyLog | null {
+  return logs.find((log) => log.logDate === date) || null;
+}
+
+/** Does the daily log carry anything worth showing as a calendar marker? */
+export function dailyLogHasContent(log: CycleDailyLog | null): boolean {
+  if (!log) return false;
+  return log.symptoms.length > 0
+    || !!log.flow
+    || !!log.painLevel
+    || !!log.mood
+    || !!(log.note && log.note.trim());
 }
 
 export function cycleRangesOnDate(entries: CycleEntry[], date: string): CycleRangeMatch[] {
@@ -645,9 +744,7 @@ export async function revokeCycleSupportSignalFromDB(id: string): Promise<CycleD
 // V3 CYCLE PERIODS & DAILY LOGS API
 // =============================================================
 
-export async function fetchCyclePeriodsResultFromDB(): Promise<
-  { ok: true; periods: CyclePeriod[] } | CycleFetchFailure
-> {
+export async function fetchCyclePeriodsResultFromDB(): Promise<CyclePeriodsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
   const userId = await currentUserId();
   if (!userId) return { ok: false, reason: 'unauthenticated' };
@@ -673,7 +770,7 @@ export async function fetchCyclePeriodsFromDB(): Promise<CyclePeriod[]> {
 export async function saveCyclePeriodToDB(
   startDate: string,
   endDate?: string,
-): Promise<{ ok: true; period: CyclePeriod } | CycleWriteFailure> {
+): Promise<CyclePeriodWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(startDate)) return invalidDraftFailure();
@@ -703,7 +800,7 @@ export async function updateCyclePeriodInDB(
   id: string,
   startDate: string,
   endDate?: string,
-): Promise<{ ok: true; period: CyclePeriod } | CycleWriteFailure> {
+): Promise<CyclePeriodWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
@@ -759,9 +856,7 @@ export async function deleteCyclePeriodFromDB(id: string): Promise<CycleDeleteRe
 // CYCLE DAILY LOGS API
 // -------------------------------------------------------------
 
-export async function fetchCycleDailyLogsResultFromDB(): Promise<
-  { ok: true; logs: CycleDailyLog[] } | CycleFetchFailure
-> {
+export async function fetchCycleDailyLogsResultFromDB(): Promise<CycleDailyLogsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
   const userId = await currentUserId();
   if (!userId) return { ok: false, reason: 'unauthenticated' };
@@ -793,7 +888,7 @@ export async function saveCycleDailyLogToDB(
     mood?: CycleMood;
     note?: string;
   },
-): Promise<{ ok: true; log: CycleDailyLog } | CycleWriteFailure> {
+): Promise<CycleDailyLogWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(logDate)) return invalidDraftFailure();
@@ -875,13 +970,26 @@ export async function fetchCycleSharingPreferencesFromDB(): Promise<CycleSharing
   };
 }
 
+/**
+ * Sharing-preference write outcome.
+ *
+ * Deliberately a reason-carrying union, matching every other cycle mutation in
+ * this module: a `null` return collapsed "you are offline", "RLS refused this"
+ * and "your session expired" into one falsy value, so the toggle could not tell
+ * the user which of the three actually happened.
+ */
+export type CycleSharingPreferencesWriteResult =
+  | { ok: true; preferences: CycleSharingPreferences }
+  | CycleWriteFailure;
+
 export async function saveCycleSharingPreferencesToDB(
   prefs: Partial<CycleSharingPreferences>,
-): Promise<CycleSharingPreferences | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
-  if (await serverCallBlockedByPendingDeletion()) return null;
+): Promise<CycleSharingPreferencesWriteResult> {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   const userId = await currentUserId();
-  if (!userId) return null;
+  if (!userId) return unauthenticatedFailure();
 
   const current = await fetchCycleSharingPreferencesFromDB();
   const next = {
@@ -900,12 +1008,15 @@ export async function saveCycleSharingPreferencesToDB(
 
   if (error || !data) {
     console.error('Failed to save sharing preferences:', error);
-    return null;
+    return writeFailure(error);
   }
   return {
-    userId: data.user_id,
-    shareCurrentPeriod: !!data.share_current_period,
-    sharePredictionWindow: !!data.share_prediction_window,
-    shareFertilityWindow: !!data.share_fertility_window,
+    ok: true,
+    preferences: {
+      userId: data.user_id,
+      shareCurrentPeriod: !!data.share_current_period,
+      sharePredictionWindow: !!data.share_prediction_window,
+      shareFertilityWindow: !!data.share_fertility_window,
+    },
   };
 }

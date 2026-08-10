@@ -20,16 +20,46 @@ export interface CyclePrediction {
   windowStart?: string;
   windowEnd?: string;
   confidence: CycleConfidence;
-  cyclesUsed: number;
+  /** Distinct valid period start dates that survived filtering. */
+  periodsUsed: number;
+  /** Cycle-to-cycle intervals actually fed into the statistics (max 12). */
+  intervalsUsed: number;
   averageCycleLength?: number;
   medianCycleLength?: number;
+  /**
+   * Half-width of the start-date window, in days.
+   *
+   * This is uncertainty about WHEN the next period starts. It is NOT how long a
+   * period lasts; `configuredPeriodLength` is deliberately never used here,
+   * because a 6-day period does not make the start date 6 days less certain.
+   */
   variabilityDays?: number;
+  /** True when `expectedStartDate` is already in the past relative to `today`. */
+  isOverdue?: boolean;
+  /** Days elapsed since the expected start, when overdue. */
+  overdueDays?: number;
   // Optional estimated fertility window (statistical estimate only)
   estimatedOvulationDate?: string;
   fertilityWindowStart?: string;
   fertilityWindowEnd?: string;
   methodVersion: string;
 }
+
+/**
+ * How many cycle-to-cycle intervals the statistics may use.
+ *
+ * A cycle from three years ago says little about this month, and including it
+ * widens `variabilityDays` for no predictive gain. Twelve intervals is roughly a
+ * year of history.
+ */
+export const MAX_INTERVALS_CONSIDERED = 12;
+
+/**
+ * Start-window half-width when there is not enough history to measure
+ * variability. Two days each side is deliberately conservative: it is wide
+ * enough not to read as a promise, narrow enough to stay useful.
+ */
+const CONFIGURED_ESTIMATE_BUFFER_DAYS = 2;
 
 function isCalendarDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -72,6 +102,14 @@ function calculateMedian(numbers: number[]): number {
   return sorted[middle];
 }
 
+/** Attach overdue framing so the UI never shows a bare past date as "예상". */
+function withOverdue(prediction: CyclePrediction, today: string): CyclePrediction {
+  if (!prediction.expectedStartDate) return prediction;
+  const diff = getDaysDifference(prediction.expectedStartDate, today);
+  if (diff <= 0) return prediction;
+  return { ...prediction, isOverdue: true, overdueDays: diff };
+}
+
 /**
  * Prediction Engine V3
  * Pure function module.
@@ -79,8 +117,8 @@ function calculateMedian(numbers: number[]): number {
  * Daily logs/symptoms are NEVER passed or used here.
  */
 export function predictCycle(input: CyclePredictionInput): CyclePrediction {
-  const { periods, configuredCycleLength = 28, configuredPeriodLength = 5 } = input;
-  const methodVersion = 'v3.0.0-stats';
+  const { periods, configuredCycleLength = 28, today } = input;
+  const methodVersion = 'v3.1.0-stats';
 
   // Filter & sort valid period start dates in chronological ascending order
   const validStarts = Array.from(new Set(
@@ -93,7 +131,8 @@ export function predictCycle(input: CyclePredictionInput): CyclePrediction {
     return {
       status: 'insufficient_data',
       confidence: 'low',
-      cyclesUsed: 0,
+      periodsUsed: 0,
+      intervalsUsed: 0,
       methodVersion,
     };
   }
@@ -105,64 +144,73 @@ export function predictCycle(input: CyclePredictionInput): CyclePrediction {
     const cycleLen = (configuredCycleLength >= 15 && configuredCycleLength <= 60)
       ? configuredCycleLength
       : 28;
-    const periodLen = (configuredPeriodLength >= 1 && configuredPeriodLength <= 15)
-      ? configuredPeriodLength
-      : 5;
 
     const expectedStartDate = addDays(latestStart, cycleLen);
-    const windowStart = addDays(expectedStartDate, -1);
-    const windowEnd = addDays(expectedStartDate, Math.max(1, periodLen - 1));
+    // Symmetric buffer: this is start-date uncertainty, not period duration.
+    const windowStart = addDays(expectedStartDate, -CONFIGURED_ESTIMATE_BUFFER_DAYS);
+    const windowEnd = addDays(expectedStartDate, CONFIGURED_ESTIMATE_BUFFER_DAYS);
 
     const estimatedOvulationDate = addDays(expectedStartDate, -14);
     const fertilityWindowStart = addDays(estimatedOvulationDate, -5);
     const fertilityWindowEnd = addDays(estimatedOvulationDate, 1);
 
-    return {
+    return withOverdue({
       status: 'configured_estimate',
       expectedStartDate,
       windowStart,
       windowEnd,
       confidence: 'low',
-      cyclesUsed: validStarts.length,
+      periodsUsed: validStarts.length,
+      intervalsUsed: 0,
       averageCycleLength: cycleLen,
       medianCycleLength: cycleLen,
-      variabilityDays: 2,
+      variabilityDays: CONFIGURED_ESTIMATE_BUFFER_DAYS,
       estimatedOvulationDate,
       fertilityWindowStart,
       fertilityWindowEnd,
       methodVersion,
-    };
+    }, today);
   }
 
   // 3+ periods: Calculate actual cycle intervals
-  const intervals: number[] = [];
+  const allIntervals: number[] = [];
   for (let i = 1; i < validStarts.length; i += 1) {
     const diff = getDaysDifference(validStarts[i - 1], validStarts[i]);
     // Filter out extreme noise/outliers (less than 15 days or more than 60 days)
     if (diff >= 15 && diff <= 60) {
-      intervals.push(diff);
+      allIntervals.push(diff);
     }
   }
+  // Recency window: only the most recent intervals inform the estimate.
+  const intervals = allIntervals.slice(-MAX_INTERVALS_CONSIDERED);
 
   if (intervals.length === 0) {
     const cycleLen = configuredCycleLength || 28;
     const expectedStartDate = addDays(latestStart, cycleLen);
-    return {
+    return withOverdue({
       status: 'configured_estimate',
       expectedStartDate,
-      windowStart: addDays(expectedStartDate, -1),
-      windowEnd: addDays(expectedStartDate, 3),
+      windowStart: addDays(expectedStartDate, -CONFIGURED_ESTIMATE_BUFFER_DAYS),
+      windowEnd: addDays(expectedStartDate, CONFIGURED_ESTIMATE_BUFFER_DAYS),
       confidence: 'low',
-      cyclesUsed: validStarts.length,
+      periodsUsed: validStarts.length,
+      intervalsUsed: 0,
+      variabilityDays: CONFIGURED_ESTIMATE_BUFFER_DAYS,
       methodVersion,
-    };
+    }, today);
   }
 
   const sum = intervals.reduce((acc, val) => acc + val, 0);
   const averageCycleLength = Math.round(sum / intervals.length);
   const medianCycleLength = calculateMedian(intervals);
 
-  // Calculate variability (range / max deviation from median)
+  /*
+   * Variability = half the observed spread of recent intervals, in days.
+   *
+   * Documented plainly because the UI turns it into a confidence word, not a
+   * percentage: a 27-31 day history has a spread of 4, so ±2 days. This is a
+   * descriptive statistic about the user's own records, not a probability.
+   */
   const maxInterval = Math.max(...intervals);
   const minInterval = Math.min(...intervals);
   const variabilityDays = Math.max(1, Math.round((maxInterval - minInterval) / 2));
@@ -183,13 +231,14 @@ export function predictCycle(input: CyclePredictionInput): CyclePrediction {
   const fertilityWindowStart = addDays(estimatedOvulationDate, -5);
   const fertilityWindowEnd = addDays(estimatedOvulationDate, 1);
 
-  return {
+  return withOverdue({
     status: 'personalized',
     expectedStartDate,
     windowStart,
     windowEnd,
     confidence,
-    cyclesUsed: validStarts.length,
+    periodsUsed: validStarts.length,
+    intervalsUsed: intervals.length,
     averageCycleLength,
     medianCycleLength,
     variabilityDays,
@@ -197,5 +246,11 @@ export function predictCycle(input: CyclePredictionInput): CyclePrediction {
     fertilityWindowStart,
     fertilityWindowEnd,
     methodVersion,
-  };
+  }, today);
+}
+
+/** Is `date` inside the predicted start window? Used by the calendar. */
+export function predictionOccursOnDate(prediction: CyclePrediction, date: string): boolean {
+  if (!prediction.windowStart || !prediction.windowEnd) return false;
+  return prediction.windowStart <= date && date <= prediction.windowEnd;
 }

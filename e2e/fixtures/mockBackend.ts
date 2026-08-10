@@ -332,7 +332,15 @@ export async function installMockBackend(
         ...payload,
       }]);
     }
-    if (path === '/rest/v1/cycle_settings' || path === '/rest/v1/cycle_entries') {
+    if (
+      path === '/rest/v1/cycle_settings'
+      || path === '/rest/v1/cycle_entries'
+      // V3 owner-only tables.
+      || path === '/rest/v1/cycle_periods'
+      || path === '/rest/v1/cycle_daily_logs'
+      || path === '/rest/v1/cycle_sharing_preferences'
+      || path === '/rest/v1/user_sensitive_consents'
+    ) {
       return rows(route, []);
     }
     if (path === '/rest/v1/cycle_support_signals') return rows(route, []);

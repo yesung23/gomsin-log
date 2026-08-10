@@ -1,7 +1,24 @@
-const CYCLE_CONSENT_PREFIX = 'gomsinlog.cycle-sensitive-consent.v1:';
+import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
+
+const CYCLE_CONSENT_PREFIX = 'gomsinlog.cycle-sensitive-consent.v1:';
 
 export const CYCLE_CONSENT_VERSION = '2026-08-09';
+
+/**
+ * Consent write outcome, in the same reason-carrying shape as every cycle
+ * mutation. A boolean could not distinguish "RLS refused" from "you are
+ * offline", and the UI must not unlock a sensitive feature on an ambiguous
+ * result.
+ */
+export type SensitiveConsentWriteResult =
+  | { ok: true; granted: boolean }
+  | { ok: false; reason: ServerErrorKind };
+
+function consentWriteFailure(error: unknown): SensitiveConsentWriteResult {
+  return { ok: false, reason: classifyServerError(error).kind };
+}
 
 interface StoredConsent {
   version: string;
@@ -49,56 +66,139 @@ export function revokeCycleSensitiveConsent(userId?: string): void {
   }
 }
 
-export async function syncConsentWithDB(userId?: string): Promise<boolean> {
-  if (!userId) return false;
-  const localConsent = hasCycleSensitiveConsent(userId);
-
-  if (!isSupabaseConfigured || !supabase) return localConsent;
+/**
+ * Read the authoritative consent state from the server.
+ *
+ * The server row is the source of truth; `localStorage` is a UX cache only. A
+ * cache entry alone must never unlock the feature, because clearing the server
+ * row (or revoking on another device) would otherwise be silently ignored.
+ *
+ * When Supabase is not configured at all there is no authority to consult, so
+ * the cached answer is returned rather than inventing a verdict.
+ */
+export async function syncCycleConsentWithDB(
+  userId?: string,
+): Promise<SensitiveConsentWriteResult> {
+  if (!userId) return { ok: true, granted: false };
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: true, granted: hasCycleSensitiveConsent(userId) };
+  }
 
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('user_sensitive_consents')
       .select('version, granted_at, revoked_at')
       .eq('user_id', userId)
       .eq('consent_type', 'cycle')
       .maybeSingle();
 
-    if (data && !data.revoked_at && data.version === CYCLE_CONSENT_VERSION) {
-      grantCycleSensitiveConsent(userId);
-      return true;
+    if (error) {
+      console.error('[gomsinlog] Failed to read sensitive consent:', error);
+      return consentWriteFailure(error);
     }
 
-    if (localConsent) {
-      await supabase
-        .from('user_sensitive_consents')
-        .upsert({
-          user_id: userId,
-          consent_type: 'cycle',
-          version: CYCLE_CONSENT_VERSION,
-          granted_at: new Date().toISOString(),
-          revoked_at: null,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id, consent_type' });
-      return true;
-    }
+    const granted = !!data
+      && !data.revoked_at
+      && data.version === CYCLE_CONSENT_VERSION;
+
+    // Mirror the server verdict into the cache, in both directions: a consent
+    // revoked elsewhere must not stay unlocked on this device.
+    if (granted) grantCycleSensitiveConsent(userId);
+    else revokeCycleSensitiveConsent(userId);
+
+    return { ok: true, granted };
   } catch (err) {
-    console.error('Failed to sync consent with DB:', err);
+    console.error('[gomsinlog] Failed to read sensitive consent:', err);
+    return consentWriteFailure(err);
   }
-  return localConsent;
 }
 
-export async function revokeConsentInDB(userId?: string): Promise<boolean> {
-  revokeCycleSensitiveConsent(userId);
-  if (!userId || !isSupabaseConfigured || !supabase) return true;
+/**
+ * Record consent on the server, then cache it.
+ *
+ * Order is load-bearing: the local cache is written only after the server
+ * confirms, so a failed write cannot leave the feature unlocked with no
+ * server-side record of the user ever agreeing.
+ */
+export async function grantCycleConsentInDB(
+  userId?: string,
+): Promise<SensitiveConsentWriteResult> {
+  if (!userId) return { ok: false, reason: 'auth_expired' };
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return { ok: false, reason: 'forbidden' };
+
+  if (!isSupabaseConfigured || !supabase) {
+    // No server to record consent on. Sensitive processing must not begin on a
+    // promise we cannot store.
+    return { ok: false, reason: 'server' };
+  }
+
   try {
-    await supabase
+    const now = new Date().toISOString();
+    const { error } = await supabase
       .from('user_sensitive_consents')
-      .update({ revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .upsert({
+        user_id: userId,
+        consent_type: 'cycle',
+        version: CYCLE_CONSENT_VERSION,
+        granted_at: now,
+        revoked_at: null,
+        updated_at: now,
+      }, { onConflict: 'user_id, consent_type' });
+
+    if (error) {
+      console.error('[gomsinlog] Failed to record sensitive consent:', error);
+      return consentWriteFailure(error);
+    }
+
+    if (!grantCycleSensitiveConsent(userId)) {
+      // The server has the consent; the cache simply could not be written.
+      return { ok: true, granted: true };
+    }
+    return { ok: true, granted: true };
+  } catch (err) {
+    console.error('[gomsinlog] Failed to record sensitive consent:', err);
+    return consentWriteFailure(err);
+  }
+}
+
+/**
+ * Revoke consent on the server, then clear the cache.
+ *
+ * `.update()` reports failure through `{ error }` rather than throwing, so the
+ * result is inspected explicitly: a try/catch alone reported success on a
+ * refused revoke.
+ */
+export async function revokeCycleConsentInDB(
+  userId?: string,
+): Promise<SensitiveConsentWriteResult> {
+  if (!userId) return { ok: false, reason: 'auth_expired' };
+  if (!isSupabaseConfigured || !supabase) {
+    revokeCycleSensitiveConsent(userId);
+    return { ok: true, granted: false };
+  }
+  // Pre-flight: a pending deletion aborts this write before it is issued.
+  if (await serverCallBlockedByPendingDeletion()) return { ok: false, reason: 'forbidden' };
+
+  try {
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from('user_sensitive_consents')
+      .update({ revoked_at: now, updated_at: now })
       .eq('user_id', userId)
       .eq('consent_type', 'cycle');
-    return true;
+
+    if (error) {
+      console.error('[gomsinlog] Failed to revoke sensitive consent:', error);
+      return consentWriteFailure(error);
+    }
+
+    // Only clear the cache once the server confirms, so a refused revoke is
+    // never presented as done.
+    revokeCycleSensitiveConsent(userId);
+    return { ok: true, granted: false };
   } catch (err) {
-    console.error('Failed to revoke consent in DB:', err);
-    return false;
+    console.error('[gomsinlog] Failed to revoke sensitive consent:', err);
+    return consentWriteFailure(err);
   }
 }

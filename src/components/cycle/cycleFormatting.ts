@@ -1,0 +1,70 @@
+import type { CycleDailyLog, CycleFlow, CycleMood, CyclePainLevel, CycleSymptom } from '@/types';
+
+/**
+ * Shared copy for the cycle surface.
+ *
+ * Kept in one module so the quick chips, the detail sheet and the day sheet
+ * cannot drift into three different words for the same symptom.
+ */
+
+export const symptomLabels: Record<CycleSymptom, string> = {
+  cramps: '복부 불편감',
+  headache: '두통',
+  fatigue: '피로',
+  bloating: '더부룩함',
+  mood_changes: '기분 변화',
+  backache: '허리 불편감',
+};
+
+/**
+ * The four chips offered on the main screen.
+ *
+ * Not all six: the first screen is for the one-tap case, and the remaining
+ * symptoms are one tap away in the detail sheet. Ordered by how often they are
+ * reported alongside a period.
+ */
+export const QUICK_SYMPTOMS: CycleSymptom[] = ['cramps', 'headache', 'fatigue', 'bloating'];
+
+export const flowLabels: Record<CycleFlow, string> = {
+  spotting: '점상',
+  light: '적음',
+  medium: '보통',
+  heavy: '많음',
+};
+
+export const painLabels: Record<CyclePainLevel, string> = {
+  none: '없음',
+  mild: '약함',
+  moderate: '보통',
+  severe: '심함',
+};
+
+export const moodLabels: Record<CycleMood, string> = {
+  calm: '편안',
+  sensitive: '예민',
+  sad: '울적',
+  tired: '피곤',
+  good: '괜찮음',
+};
+
+/** `2026-08-14` -> `8월 14일`. Parsed by field, never through `new Date(string)`. */
+export function formatKoreanDate(date: string): string {
+  const [, month, day] = date.split('-');
+  if (!month || !day) return date;
+  return `${Number(month)}월 ${Number(day)}일`;
+}
+
+export const confidenceLabels = {
+  low: '낮음',
+  medium: '보통',
+  high: '높음',
+} as const;
+
+/** A short human summary of a day's log, for the day sheet. */
+export function summariseDailyLog(log: CycleDailyLog): string[] {
+  const lines: string[] = [];
+  if (log.symptoms.length > 0) {
+    lines.push(log.symptoms.map((symptom) => symptomLabels[symptom]).join(' · '));
+  }
+  return lines;
+}

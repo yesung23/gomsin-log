@@ -32,6 +32,63 @@
 | `019_call_topics_and_trip_timetable.sql` | 통화 주제 표시 + 여행 장소 방문 시간 | **신규 / 원격 미적용** |
 | `020_fix_uuid_active_couple_lookup.sql` | `min(uuid)` 때문에 발생하는 로그인 후 `42883` 복구 | **운영 적용됨 (2026-08-09)** |
 | `021_restore_profile_military_info.sql` | 운영에서 누락된 `profiles.military_info` 복구 | **운영 적용됨 (2026-08-09)** |
+| `022_cycle_v3_schema.sql` | 주기 V3 테이블 (`cycle_periods`, `cycle_daily_logs`, `user_sensitive_consents`, `cycle_sharing_preferences`) + legacy 안전 이관 | **운영 적용됨 (2026-08-11, 확인됨)** |
+| `023_lock_legacy_cycle_backup.sql` | 022 가 만든 `legacy_cycle_entries_backup` 잠금 (RLS + anon 회수) | **운영 적용됨 (2026-08-11, 확인됨)** |
+| `024_cycle_v3_account_deletion.sql` | `prepare_account_deletion` 이 주기 데이터와 legacy 백업까지 삭제 | **운영 적용됨 (2026-08-11, 확인됨)** |
+
+## 022~024 원격 적용 기록 (2026-08-11)
+
+세 파일 모두 Supabase 대시보드 SQL Editor 에서 실행하고 결과를 직접 확인했습니다.
+
+**적용 전 상태.** `cycle_periods`, `cycle_daily_logs`, `cycle_sharing_preferences`,
+`user_sensitive_consents` 네 테이블이 모두 없었고, PostgREST 는 `404 / PGRST205`
+(`Could not find the table ... in the schema cache`) 를 반환했습니다. 그래서 앱의
+"내 몸의 리듬" 은 기록을 불러오지 못했습니다.
+
+**적용 후 확인.**
+
+- 네 테이블 모두 존재하고, anon 키 요청은 `401 / 42501` (권한 없음) 로 막힙니다.
+  `PGRST205` 는 더 이상 나오지 않습니다.
+- legacy 이관 결과: `legacy_cycle_entries_backup` 5행(원본 전량 보존),
+  `cycle_periods` 2행, `cycle_daily_logs` 4행. 삭제된 데이터는 없습니다.
+- RLS 확인: `request.jwt.claims.sub` 를 소유자로 설정하면 자기 데이터가 보이고,
+  다른 UUID 로 설정하면 세 테이블 모두 0행입니다.
+
+**022 에서 발견한 결함 두 가지 (023·024 가 고칩니다).**
+
+1. 022 의 `CREATE TABLE ... AS SELECT` 는 원본의 RLS 나 GRANT 를 물려받지 않습니다.
+   그 결과 `legacy_cycle_entries_backup` 이 RLS 없이 만들어져, **anon 키로도 전체
+   행을 읽을 수 있었습니다** (적용 직후 `200` + 다른 사용자의 생리 기록 확인).
+   023 이 RLS 를 켜고 anon 권한을 회수합니다.
+2. 같은 이유로 이 백업 테이블에는 `auth.users` 외래 키가 없어 **Auth 삭제
+   cascade 가 닿지 않습니다.** 또한 `prepare_account_deletion` 이 주기 테이블을
+   전혀 지우지 않았습니다. 024 가 두 문제를 함께 고치고, 지운 건수를 반환값에
+   추가합니다.
+
+> 신규 프로젝트에 022 를 적용할 때는 **023 을 반드시 함께 적용**하세요.
+> 022 단독 적용은 위 1번 유출 상태를 만듭니다.
+
+### 원격 상태 감사 결과 (같은 시점)
+
+앱이 실제로 사용하는 테이블·RPC 를 전수 대조한 결과, 아래는 모두 존재합니다.
+
+- 테이블: `profiles`, `couples`, `couple_members`, `couple_tasks`,
+  `invitation_codes`, `daily_records`, `briefings`, `events`, `trips`,
+  `trip_items`, `trip_checklists`, `contact_preferences`,
+  `account_deletion_requests`, `collaboration_invalidations`,
+  `cycle_settings`, `cycle_entries`, `cycle_support_signals`,
+  `cycle_periods`, `cycle_daily_logs`, `cycle_sharing_preferences`,
+  `user_sensitive_consents`
+- RPC: `get_my_active_couple_id`, `get_my_couple_state`, `get_partner_profile`,
+  `create_couple_and_invitation`, `redeem_invitation`, `regenerate_invitation`,
+  `disconnect_couple`, `reorder_trip_items`, `begin_account_deletion`,
+  `cancel_account_deletion`, `prepare_account_deletion`
+
+**018·019 는 여전히 원격 미적용입니다** (`shared_tasks`, `trip_places`,
+`trip_items.opening_hours`, `trip_items.visit_time`, `call_topics`,
+`events.show_in_call_topics` 부재 확인). 다만 이 객체들을 참조하는 클라이언트
+코드가 없어 (`src/` 전체 검색 결과 테스트 파일만 참조) 현재 사용자 기능에는
+영향이 없습니다. 해당 기능을 실제로 구현할 때 함께 적용하세요.
 
 ## 002 번호 중복 (이름을 바꾸지 않는 이유)
 

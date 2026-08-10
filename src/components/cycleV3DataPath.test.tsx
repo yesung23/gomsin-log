@@ -519,6 +519,65 @@ describe('sharing preferences are server state, not local state', () => {
   });
 });
 
+describe('an unapplied migration is reported as a deployment state, not a connection problem', () => {
+  /*
+   * This is what the user actually hit: migration 022 was never applied, so
+   * PostgREST answered `PGRST205` ("could not find the table"), the fetch
+   * classifier collapsed it into a generic error, and the screen said
+   * "연결을 확인하고 다시 시도해 주세요" on a working connection.
+   */
+  it('does not blame the connection when the V3 tables are missing', async () => {
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await act(async () => {
+      periodLoads[0].resolve({ ok: false, reason: 'not_deployed' });
+      dailyLogLoads[0].resolve({ ok: false, reason: 'not_deployed' });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).not.toHaveTextContent('연결을 확인');
+    expect(alert).not.toHaveTextContent('인터넷 연결');
+    expect(alert).toHaveTextContent('준비가 아직 끝나지 않았어요');
+    // Retrying cannot apply a migration, so no retry affordance is offered.
+    expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
+  });
+
+  it('reassures the user that nothing was lost', async () => {
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await act(async () => {
+      periodLoads[0].resolve({ ok: false, reason: 'not_deployed' });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('사라지지 않았어요');
+  });
+
+  it('still prefers an authority verdict over a deployment one', async () => {
+    // A permission problem is more specific and more actionable than "not ready".
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await act(async () => {
+      periodLoads[0].resolve({ ok: false, reason: 'not_deployed' });
+      dailyLogLoads[0].resolve({ ok: false, reason: 'forbidden' });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('권한이 없어요');
+  });
+
+  it('offers a retry for a genuinely transient failure', async () => {
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await act(async () => {
+      periodLoads[0].resolve({ ok: false, reason: 'error' });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+    expect(await screen.findByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+  });
+});
+
 describe('source guard: the V3 surface cannot regress to legacy cycle_entries', () => {
   const source = readFileSync(
     resolve(process.cwd(), 'src/components/CycleTrackerSection.tsx'),

@@ -65,7 +65,21 @@ export const CYCLE_LENGTH_MAX = 60;
 export const PERIOD_LENGTH_MIN = 1;
 export const PERIOD_LENGTH_MAX = 15;
 
-export type CycleFetchFailureReason = 'unauthenticated' | 'forbidden' | 'error';
+/**
+ * Why a cycle read failed.
+ *
+ * `not_deployed` is separate from `error` because the two need opposite copy and
+ * opposite affordances. A missing table (`PGRST205`/`42P01`) means migration 022
+ * has not been applied to this project: the request arrived, the server answered,
+ * and no amount of retrying or reconnecting will change the answer. Collapsing it
+ * into `error` produced "연결을 확인하고 다시 시도해 주세요" on a perfectly good
+ * connection, which sent the user to check their wifi for a deployment gap.
+ */
+export type CycleFetchFailureReason =
+  | 'unauthenticated'
+  | 'forbidden'
+  | 'not_deployed'
+  | 'error';
 export type CycleFetchFailure = { ok: false; reason: CycleFetchFailureReason };
 export type CycleSettingsFetchResult =
   | { ok: true; settings: CycleSettings | null }
@@ -139,8 +153,19 @@ export interface CycleSupportInsertPayload {
   expires_at: string;
 }
 
+/**
+ * PostgREST/Postgres codes that mean "this table is not in the project yet".
+ *
+ * `PGRST205` is the schema-cache miss PostgREST returns for an unknown table, and
+ * `42P01` is Postgres `undefined_table` for the same condition seen deeper down.
+ */
+const MISSING_TABLE_CODES: ReadonlySet<string> = new Set(['PGRST205', '42P01']);
+
 function fetchFailure(error?: { code?: string } | null): CycleFetchFailure {
-  return { ok: false, reason: error?.code === '42501' ? 'forbidden' : 'error' };
+  const code = error?.code;
+  if (code === '42501') return { ok: false, reason: 'forbidden' };
+  if (code && MISSING_TABLE_CODES.has(code)) return { ok: false, reason: 'not_deployed' };
+  return { ok: false, reason: 'error' };
 }
 
 /** Classify a rejected Supabase write into the shared server-error vocabulary. */
@@ -268,21 +293,44 @@ export function cycleEntryOccursOnDate(entry: CycleEntry, date: string): boolean
  * ---------------------------------------------------------------
  */
 
-/** Does this period cover `date`? An open period (no end) covers only its start onward. */
-export function periodOccursOnDate(period: CyclePeriod, date: string): boolean {
-  return period.startDate <= date && date <= (period.endDate || period.startDate);
+/**
+ * Does this period cover `date`?
+ *
+ * A closed period covers its inclusive range. An OPEN period (no end recorded
+ * yet) covers from its start through `today` — not just its start day, and not
+ * indefinitely into the future.
+ *
+ * Both wrong answers are visible on the calendar: falling back to `startDate`
+ * marked only day 1 while the hero said "생리 3일째", and extending without a
+ * bound painted every future day as a recorded period.
+ *
+ * `today` is optional so a caller with no clock context still gets the safe
+ * start-day-only answer rather than an unbounded one.
+ */
+export function periodOccursOnDate(period: CyclePeriod, date: string, today?: string): boolean {
+  if (period.startDate > date) return false;
+  const effectiveEnd = period.endDate || (today && today > period.startDate ? today : period.startDate);
+  return date <= effectiveEnd;
 }
 
-/** Every period covering `date`, with start/end flags for calendar rendering. */
+/**
+ * Every period covering `date`, with start/end flags for calendar rendering.
+ *
+ * `isEnd` is true only for a recorded end date: an ongoing period has no end, so
+ * marking today as its end would misreport the user's own record.
+ */
 export function periodRangesOnDate(
   periods: CyclePeriod[],
   date: string,
+  today?: string,
 ): Array<{ period: CyclePeriod; isStart: boolean; isEnd: boolean }> {
-  return periods.filter((period) => periodOccursOnDate(period, date)).map((period) => ({
-    period,
-    isStart: period.startDate === date,
-    isEnd: (period.endDate || period.startDate) === date,
-  }));
+  return periods
+    .filter((period) => periodOccursOnDate(period, date, today))
+    .map((period) => ({
+      period,
+      isStart: period.startDate === date,
+      isEnd: period.endDate === date,
+    }));
 }
 
 /**

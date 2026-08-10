@@ -85,7 +85,9 @@ export function CycleCalendar({
             return <span key={`blank-${index}`} aria-hidden="true" className="min-h-11" />;
           }
           const date = cell.date;
-          const ranges = periodRangesOnDate(periods, date);
+          // `today` bounds an ongoing period: it is painted from its start through
+          // today, and no further.
+          const ranges = periodRangesOnDate(periods, date, today);
           const isActual = ranges.length > 0;
           const isStart = ranges.some((range) => range.isStart);
           const isPredicted = !isActual && predictionOccursOnDate(prediction, date);

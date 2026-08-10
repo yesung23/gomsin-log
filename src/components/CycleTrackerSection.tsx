@@ -64,9 +64,17 @@ const EMPTY_PREFERENCES: CycleSharingPreferences = {
   shareFertilityWindow: false,
 };
 
-function failureMessage(state: Extract<LoadState, 'unauthenticated' | 'forbidden' | 'error'>) {
+function failureMessage(
+  state: Extract<LoadState, 'unauthenticated' | 'forbidden' | 'not_deployed' | 'error'>,
+) {
   if (state === 'unauthenticated') return '개인 기록을 보려면 로그인해 주세요.';
   if (state === 'forbidden') return '이 개인 기록에 접근할 권한이 없어요.';
+  /*
+   * A missing table is a deployment state, not a user problem. Saying "잠시 후"
+   * would be a lie -- waiting changes nothing until the migration is applied --
+   * so the copy says the feature is not ready yet and stops there.
+   */
+  if (state === 'not_deployed') return '주기 기능 준비가 아직 끝나지 않았어요. 기록은 사라지지 않았어요.';
   return '개인 기록을 불러오지 못했어요. 연결을 확인하고 다시 시도해 주세요.';
 }
 
@@ -257,9 +265,13 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
         ];
         // Authority first: an RLS refusal must never be reported as a network
         // problem, because retrying will never fix it.
+        // `not_deployed` outranks the generic `error` for the same reason: it is
+        // the specific, actionable cause when the migration is not applied yet.
         setLoadState(reasons.includes('unauthenticated')
           ? 'unauthenticated'
-          : reasons.includes('forbidden') ? 'forbidden' : 'error');
+          : reasons.includes('forbidden')
+            ? 'forbidden'
+            : reasons.includes('not_deployed') ? 'not_deployed' : 'error');
         return;
       }
 
@@ -778,7 +790,10 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
         </div>
       )}
 
-      {(loadState === 'unauthenticated' || loadState === 'forbidden' || loadState === 'error') && (
+      {(loadState === 'unauthenticated'
+        || loadState === 'forbidden'
+        || loadState === 'not_deployed'
+        || loadState === 'error') && (
         <div className="p-4 rounded-surface bg-muted/40 text-center space-y-3" role="alert">
           <p className="text-caption text-muted-foreground">{failureMessage(loadState)}</p>
           {loadState === 'error' && (

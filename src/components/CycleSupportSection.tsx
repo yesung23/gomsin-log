@@ -32,9 +32,14 @@ interface CycleSupportSectionProps {
   connected: boolean;
 }
 
-function failureMessage(state: Extract<LoadState, 'unauthenticated' | 'forbidden' | 'error'>) {
+function failureMessage(
+  state: Extract<LoadState, 'unauthenticated' | 'forbidden' | 'not_deployed' | 'error'>,
+) {
   if (state === 'unauthenticated') return '응원 신호를 보려면 로그인해 주세요.';
   if (state === 'forbidden') return '이 응원 신호에 접근할 권한이 없어요.';
+  // Reachable only if the support table itself is missing. Without this branch the
+  // error block rendered nothing at all, leaving a blank section.
+  if (state === 'not_deployed') return '응원 신호 기능 준비가 아직 끝나지 않았어요.';
   return '응원 신호의 최신 상태를 확인하지 못했어요. 안전을 위해 이전 확인 내용은 숨겼어요.';
 }
 
@@ -335,7 +340,10 @@ export function CycleSupportSection({
         </div>
       )}
 
-      {(loadState === 'unauthenticated' || loadState === 'forbidden' || loadState === 'error') && (
+      {(loadState === 'unauthenticated'
+        || loadState === 'forbidden'
+        || loadState === 'not_deployed'
+        || loadState === 'error') && (
         <div className="p-4 rounded-surface bg-muted/40 border border-border text-center space-y-3" role="alert">
           <p className="text-caption text-muted-foreground">{failureMessage(loadState)}</p>
           {loadState === 'error' && (

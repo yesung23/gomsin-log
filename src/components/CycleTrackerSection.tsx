@@ -657,6 +657,33 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setConsentPending(true);
     setConsentError(null);
     try {
+      /*
+       * Turn partner sharing off BEFORE revoking, not after.
+       *
+       * Revoking means "stop using this data this way", and sharing it with a
+       * partner is one of those ways. Doing it in this order means a failure
+       * anywhere leaves the stricter state: if the sharing write fails we stop
+       * and keep consent, so the user is never told sharing ended while it
+       * continued. The server enforces the same rule independently (migration
+       * 026), because this write can fail or the revoke can happen on another
+       * device.
+       */
+      if (preferences.shareCurrentPeriod
+        || preferences.sharePredictionWindow
+        || preferences.shareFertilityWindow) {
+        const stopSharing = await saveCycleSharingPreferencesToDB({
+          shareCurrentPeriod: false,
+          sharePredictionWindow: false,
+          shareFertilityWindow: false,
+        });
+        if (!isCurrentIdentity(identity)) return;
+        if (!stopSharing.ok) {
+          setConsentError(serverErrorMessage(stopSharing.reason));
+          return;
+        }
+        setPreferences(stopSharing.preferences);
+      }
+
       const result = await revokeCycleConsentInDB(identity.userId);
       if (!isCurrentIdentity(identity)) return;
       if (!result.ok) {
@@ -668,6 +695,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setConsentChecked(false);
       setPeriods([]);
       setDailyLogs([]);
+      setPreferences(EMPTY_PREFERENCES);
       setSheet({ kind: 'none' });
       toast.info('민감정보 동의를 철회했어요.');
     } finally {

@@ -15,10 +15,17 @@ import { predictCycle } from '@/lib/cyclePrediction';
  * would matter most. These tests pin both halves: what it must never return, and
  * that its date arithmetic agrees with the owner's own screen.
  */
-const migration = readFileSync(
-  resolve(process.cwd(), 'supabase/migrations/025_partner_cycle_projection.sql'),
-  'utf8',
-);
+const read = (file: string) =>
+  readFileSync(resolve(process.cwd(), 'supabase/migrations', file), 'utf8');
+
+/**
+ * 026 redefines `get_partner_cycle_projection` in full, so it — not 025 — is the
+ * definition that actually runs. Assertions about the partner-facing function
+ * must read the winning file, or they pass while describing dead SQL.
+ */
+const migration = read('026_projection_requires_consent.sql');
+/** 025 still owns the internal prediction helper; 026 does not touch it. */
+const helperMigration = read('025_partner_cycle_projection.sql');
 
 /** The RETURNS TABLE block of the partner-facing function, and nothing else. */
 const projectionSignature = migration.slice(
@@ -95,23 +102,67 @@ describe('the projection is reachable only by a connected partner', () => {
   it('keeps the internal prediction helper unreachable from any client role', () => {
     // It takes an arbitrary owner id, so exposing it would let any signed-in
     // user read any other user's predicted window.
-    expect(migration).toContain('REVOKE ALL ON FUNCTION public.cycle_prediction_window(UUID) FROM authenticated');
-    expect(migration).toContain('REVOKE ALL ON FUNCTION public.cycle_prediction_window(UUID) FROM anon');
-    expect(migration).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.cycle_prediction_window\(UUID\) TO/);
+    expect(helperMigration).toContain('REVOKE ALL ON FUNCTION public.cycle_prediction_window(UUID) FROM authenticated');
+    expect(helperMigration).toContain('REVOKE ALL ON FUNCTION public.cycle_prediction_window(UUID) FROM anon');
+    // Checked across BOTH files: a later migration must not hand it out either.
+    for (const sql of [helperMigration, migration]) {
+      expect(sql).not.toMatch(/GRANT EXECUTE ON FUNCTION public\.cycle_prediction_window\(UUID\) TO/);
+    }
   });
 
-  it('pins search_path on both SECURITY DEFINER functions', () => {
+  it.each([
+    ['025 (prediction helper)', () => helperMigration, 2],
+    ['026 (partner projection)', () => migration, 1],
+  ])('pins search_path on every SECURITY DEFINER function in %s', (_label, sqlOf, count) => {
     // Only definitions, not the prose above them: `^` anchors to the line the
     // clause actually occupies inside a CREATE FUNCTION body.
-    const definers = migration.match(/^SECURITY DEFINER$/gm) ?? [];
-    const pinned = migration.match(/^SET search_path = public, pg_temp$/gm) ?? [];
-    expect(definers).toHaveLength(2);
-    expect(pinned).toHaveLength(2);
+    const sql = sqlOf();
+    expect(sql.match(/^SECURITY DEFINER$/gm) ?? []).toHaveLength(count);
+    expect(sql.match(/^SET search_path = public, pg_temp$/gm) ?? []).toHaveLength(count);
   });
 
-  it('is STABLE, so it cannot write', () => {
-    const stable = migration.match(/^STABLE$/gm) ?? [];
-    expect(stable).toHaveLength(2);
+  it.each([
+    ['025 (prediction helper)', () => helperMigration, 2],
+    ['026 (partner projection)', () => migration, 1],
+  ])('declares every function in %s STABLE, so none can write', (_label, sqlOf, count) => {
+    expect(sqlOf().match(/^STABLE$/gm) ?? []).toHaveLength(count);
+  });
+});
+
+describe('revoking consent stops partner sharing', () => {
+  /**
+   * 025 checked only the toggles, so revoking sensitive consent left any
+   * enabled toggle running: the live project returned
+   * `has_prediction_window = true` and a date after `revoked_at` was set.
+   * Revoking means stop using this data this way, and partner sharing is one of
+   * those ways.
+   */
+  it('reads the partner\'s consent row before anything else', () => {
+    expect(migration).toContain("AND consent_type = 'cycle'");
+    expect(migration).toContain('SELECT (revoked_at IS NOT NULL)');
+    // The consent check must come BEFORE the preferences read, so a revoked
+    // owner's toggles are never even consulted.
+    expect(migration.indexOf('v_consent_revoked'))
+      .toBeLessThan(migration.indexOf('FROM public.cycle_sharing_preferences'));
+  });
+
+  it('returns an all-false row once consent is revoked', () => {
+    expect(migration).toMatch(
+      /IF COALESCE\(v_consent_revoked, false\) THEN\s+RETURN QUERY SELECT false, false, false, NULL::DATE, NULL::DATE, false, NULL::DATE, NULL::DATE;/,
+    );
+  });
+
+  it('treats a missing consent row as not-revoked, because the toggles gate it', () => {
+    // A user who never opened the feature has no consent row and no preferences
+    // row either, so nothing is shared. Defaulting to "revoked" here would be
+    // harmless but would hide a real bug behind a second guard.
+    expect(migration).toContain('COALESCE(v_consent_revoked, false)');
+  });
+
+  it('does not gate on consent VERSION, only on explicit revocation', () => {
+    // Bumping the consent version means asking again; silently switching off
+    // sharing the owner deliberately enabled would be a change they never made.
+    expect(migration).not.toMatch(/v_consent[^\n]*version/i);
   });
 });
 
@@ -124,39 +175,39 @@ describe('the server window agrees with the owner\'s own screen', () => {
    */
   it('uses at most 12 intervals, matching MAX_INTERVALS_CONSIDERED', () => {
     // 13 start dates yield 12 gaps.
-    expect(migration).toContain('LIMIT 13');
+    expect(helperMigration).toContain('LIMIT 13');
   });
 
   it('discards the same outlier range the client discards', () => {
-    expect(migration).toContain('WHERE gap BETWEEN 15 AND 60');
+    expect(helperMigration).toContain('WHERE gap BETWEEN 15 AND 60');
   });
 
   it('switches to real statistics at 3 periods, like the client', () => {
-    expect(migration).toContain('IF v_start_count < 3 THEN');
+    expect(helperMigration).toContain('IF v_start_count < 3 THEN');
   });
 
   it('uses the median interval, not the mean', () => {
     // The client uses `calculateMedian`. A mean would drift apart from it on any
     // history containing one unusual cycle.
-    expect(migration).toContain('v_expected := v_latest + v_median');
-    expect(migration).not.toContain('avg(gap)');
+    expect(helperMigration).toContain('v_expected := v_latest + v_median');
+    expect(helperMigration).not.toContain('avg(gap)');
   });
 
   it('caps the window at 3 days each side, like the client buffer', () => {
-    expect(migration).toContain('v_buffer := LEAST(v_variability, 3)');
+    expect(helperMigration).toContain('v_buffer := LEAST(v_variability, 3)');
   });
 
   it('uses a fixed 2-day buffer for the configured estimate', () => {
-    const configured = migration.match(/v_expected - 2, v_expected \+ 2/g) ?? [];
+    const configured = helperMigration.match(/v_expected - 2, v_expected \+ 2/g) ?? [];
     expect(configured).toHaveLength(2);
   });
 
   it('never widens the start window by period duration', () => {
     // Period length and start-date uncertainty are different quantities. Using
     // one for the other made a 6-day period read as a 6-day-wide prediction.
-    const helper = migration.slice(
-      migration.indexOf('CREATE OR REPLACE FUNCTION public.cycle_prediction_window'),
-      migration.indexOf('CREATE OR REPLACE FUNCTION public.get_partner_cycle_projection'),
+    const helper = helperMigration.slice(
+      helperMigration.indexOf('CREATE OR REPLACE FUNCTION public.cycle_prediction_window'),
+      helperMigration.indexOf('CREATE OR REPLACE FUNCTION public.get_partner_cycle_projection'),
     );
     expect(helper).not.toMatch(/average_period_length\s*\)?\s*(INTO|\+|-)/);
   });

@@ -36,6 +36,7 @@
 | `023_lock_legacy_cycle_backup.sql` | 022 가 만든 `legacy_cycle_entries_backup` 잠금 (RLS + anon 회수) | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `024_cycle_v3_account_deletion.sql` | `prepare_account_deletion` 이 주기 데이터와 legacy 백업까지 삭제 | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `025_partner_cycle_projection.sql` | `get_partner_cycle_projection()` — 파트너가 볼 수 있는 sanitized 주기 정보만 계산 | **운영 적용됨 (2026-08-11, 확인됨)** |
+| `026_projection_requires_consent.sql` | 동의를 철회하면 파트너 공유도 즉시 멈추도록 projection 재정의 | **운영 적용됨 (2026-08-11, 확인됨)** |
 
 ## 025 가 하는 일 (2026-08-11)
 
@@ -69,6 +70,30 @@
 - 파트너 UUID 로 `cycle_periods`, `cycle_daily_logs`, `cycle_settings`,
   `cycle_sharing_preferences`, `user_sensitive_consents`,
   `legacy_cycle_entries_backup` 직접 SELECT → 6개 모두 0행
+
+## 026 이 고치는 것 (2026-08-11)
+
+025 는 공유 토글만 확인했습니다. 그래서 소유자가 **민감정보 동의를 철회한 뒤에도**
+켜져 있던 토글이 남아 파트너에게 계속 정보가 전달됐습니다. 운영 DB 에서 직접
+확인했습니다: `user_sensitive_consents.revoked_at` 을 채운 뒤에도 파트너 호출이
+`has_prediction_window = true` 와 `2026-09-20` 을 반환했습니다.
+
+026 은 projection 이 공유 설정을 읽기 **전에** 상대의 동의 철회 여부를 확인하고,
+철회된 경우 모든 필드가 false 인 행만 돌려줍니다.
+
+동의 *버전*은 검사하지 않습니다. 버전이 올라가 재동의가 필요한 상태는 소유자에게
+다시 묻는 문제이고, 그 사이에 이미 켜 둔 공유를 조용히 끄는 것은 소유자가
+의도하지 않은 변화입니다. 명시적 철회만 공유를 멈춥니다.
+
+클라이언트도 같은 규칙을 지킵니다. 철회 시 공유 토글을 먼저 끄고 그 쓰기가
+성공한 뒤에 철회를 실행하므로, 어디서 실패하든 더 엄격한 상태가 남습니다
+(`src/components/cycleV3DataPath.test.tsx` 의 `revoking consent also stops
+partner sharing`).
+
+**적용 후 확인 (2026-08-11).**
+
+- 동의 유효 + 전부 ON → `true / true / 2026-09-20`
+- 동의 철회 + 전부 ON → `false / false / NULL / false`
 
 ## 022~024 원격 적용 기록 (2026-08-11)
 

@@ -81,12 +81,15 @@ vi.mock('@/lib/cycle', async (importOriginal) => {
   };
 });
 
+const revokeConsent = vi.fn();
+
 vi.mock('@/lib/sensitiveConsent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/sensitiveConsent')>();
   return {
     ...actual,
     // Server consent is asserted separately; here it is already granted.
     syncCycleConsentWithDB: async () => ({ ok: true as const, granted: true }),
+    revokeCycleConsentInDB: (...args: unknown[]) => revokeConsent(...args),
   };
 });
 
@@ -118,6 +121,8 @@ beforeEach(() => {
   legacyFetchEntries.mockReset();
   fetchSharingPreferences.mockReset();
   saveSharingPreferences.mockReset();
+  revokeConsent.mockReset();
+  revokeConsent.mockResolvedValue({ ok: true, granted: false });
   fetchSharingPreferences.mockResolvedValue({
     userId: 'user-a',
     shareCurrentPeriod: false,
@@ -516,6 +521,97 @@ describe('sharing preferences are server state, not local state', () => {
     for (const forbidden of ['두통', '출혈', '통증', '메모']) {
       expect(preview).not.toHaveTextContent(forbidden);
     }
+  });
+});
+
+describe('revoking consent also stops partner sharing', () => {
+  /*
+   * Revoking used to leave any enabled toggle running: the row in
+   * `cycle_sharing_preferences` stayed true, so the projection kept answering a
+   * partner with the shared window. Verified against the live project before the
+   * fix. Revoking means stop using this data this way, and sharing it with a
+   * partner is one of those ways.
+   *
+   * The server enforces the same rule independently (migration 026); this pins
+   * the client half, which is what stops the stale row from existing at all.
+   */
+  async function openPrivacy() {
+    fireEvent.click(screen.getByRole('button', { name: '내 몸의 리듬 설정' }));
+    fireEvent.click(await screen.findByRole('button', { name: /민감정보 동의/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '민감정보 동의 철회' }));
+    return screen.findByRole('button', { name: '철회' });
+  }
+
+  it('turns every sharing toggle off before revoking', async () => {
+    fetchSharingPreferences.mockResolvedValue({
+      userId: 'user-a',
+      shareCurrentPeriod: true,
+      sharePredictionWindow: true,
+      shareFertilityWindow: false,
+    });
+    saveSharingPreferences.mockResolvedValue({
+      ok: true,
+      preferences: {
+        userId: 'user-a',
+        shareCurrentPeriod: false,
+        sharePredictionWindow: false,
+        shareFertilityWindow: false,
+      },
+    });
+    await renderLoaded({ periods: [COMPLETED_PERIOD] });
+
+    fireEvent.click(await openPrivacy());
+
+    await waitFor(() => expect(saveSharingPreferences).toHaveBeenCalledWith({
+      shareCurrentPeriod: false,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
+    }));
+    await waitFor(() => expect(revokeConsent).toHaveBeenCalled());
+
+    // Order is load-bearing: sharing must stop first, so a failure anywhere
+    // leaves the stricter state.
+    expect(saveSharingPreferences.mock.invocationCallOrder[0])
+      .toBeLessThan(revokeConsent.mock.invocationCallOrder[0]);
+  });
+
+  it('does not revoke when sharing could not be turned off', async () => {
+    fetchSharingPreferences.mockResolvedValue({
+      userId: 'user-a',
+      shareCurrentPeriod: true,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
+    });
+    saveSharingPreferences.mockResolvedValue({ ok: false, reason: 'forbidden' });
+    await renderLoaded({ periods: [COMPLETED_PERIOD] });
+
+    fireEvent.click(await openPrivacy());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('권한이 없어요');
+    expect(alert).not.toHaveTextContent('인터넷 연결');
+    // Consent must survive: telling the user sharing ended while it continued
+    // would be worse than refusing the revoke.
+    expect(revokeConsent).not.toHaveBeenCalled();
+  });
+
+  it('skips the extra write when nothing was shared', async () => {
+    await renderLoaded({ periods: [COMPLETED_PERIOD] });
+    fireEvent.click(await openPrivacy());
+
+    await waitFor(() => expect(revokeConsent).toHaveBeenCalled());
+    expect(saveSharingPreferences).not.toHaveBeenCalled();
+  });
+
+  it('keeps consent when the revoke itself is refused', async () => {
+    revokeConsent.mockResolvedValue({ ok: false, reason: 'forbidden' });
+    await renderLoaded({ periods: [COMPLETED_PERIOD] });
+    fireEvent.click(await openPrivacy());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('권한이 없어요');
+    // Still unlocked: a refused revoke must not be presented as done.
+    expect(screen.queryByText('동의하고 시작하기')).not.toBeInTheDocument();
   });
 });
 

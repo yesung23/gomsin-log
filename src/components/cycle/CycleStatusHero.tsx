@@ -38,6 +38,21 @@ export function CycleStatusHero({
     ? 'active'
     : prediction.status === 'insufficient_data' ? 'insufficient_data' : 'prediction';
 
+  /*
+   * Today's period is already recorded as ending today.
+   *
+   * `activePeriodOnDate` treats the end day itself as still inside the period,
+   * which is right: a period that ends today IS today's period. But the action
+   * button read only `activePeriod`, so after tapping "오늘 생리 끝났어요" the
+   * screen kept offering the same button, and tapping it rewrote the identical
+   * end date. The write succeeded every time, which made it look as if nothing
+   * happened at all.
+   *
+   * When the end is already today there is nothing left to end, so the button
+   * has no work to offer and is replaced by a statement of what was recorded.
+   */
+  const endedToday = !!activePeriod && activePeriod.endDate === today;
+
   return (
     <section
       className="space-y-4"
@@ -55,7 +70,11 @@ export function CycleStatusHero({
           <p className="text-caption text-muted-foreground">
             {formatKoreanDate(activePeriod.startDate)} 시작
           </p>
-          {isPeriodImplausiblyLong(activePeriod, today) && (
+          {endedToday ? (
+            <p className="text-caption text-muted-foreground pt-0.5">
+              오늘 종료로 기록했어요. 날짜를 바꾸려면 달력에서 이 기간을 선택해 주세요.
+            </p>
+          ) : isPeriodImplausiblyLong(activePeriod, today) && (
             /* Ask, never auto-correct: the user's record is not ours to edit. */
             <p className="text-caption text-muted-foreground leading-relaxed pt-0.5">
               아직 생리 중으로 기록되어 있어요. 이미 끝났다면 종료일을 기록해 주세요.
@@ -104,27 +123,30 @@ export function CycleStatusHero({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={activePeriod ? onEndPeriod : onStartPeriod}
-        disabled={pending}
-        className={cn(
-          'w-full min-h-11 py-3 px-4 rounded-full text-label font-bold transition',
-          'flex items-center justify-center gap-2 active:scale-98 disabled:opacity-60',
-          activePeriod
-            ? 'bg-card border border-coral text-coral-strong'
-            : 'bg-coral-strong text-coral-strong-foreground',
-        )}
-      >
-        {pending ? (
-          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-        ) : activePeriod ? (
-          <Check className="w-4 h-4" aria-hidden="true" />
-        ) : (
-          <Plus className="w-4 h-4" aria-hidden="true" />
-        )}
-        {activePeriod ? '오늘 생리 끝났어요' : '오늘 생리 시작했어요'}
-      </button>
+      {/* Nothing to act on once the end is already today. */}
+      {!endedToday && (
+        <button
+          type="button"
+          onClick={activePeriod ? onEndPeriod : onStartPeriod}
+          disabled={pending}
+          className={cn(
+            'w-full min-h-11 py-3 px-4 rounded-full text-label font-bold transition',
+            'flex items-center justify-center gap-2 active:scale-98 disabled:opacity-60',
+            activePeriod
+              ? 'bg-card border border-coral text-coral-strong'
+              : 'bg-coral-strong text-coral-strong-foreground',
+          )}
+        >
+          {pending ? (
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          ) : activePeriod ? (
+            <Check className="w-4 h-4" aria-hidden="true" />
+          ) : (
+            <Plus className="w-4 h-4" aria-hidden="true" />
+          )}
+          {activePeriod ? '오늘 생리 끝났어요' : '오늘 생리 시작했어요'}
+        </button>
+      )}
     </section>
   );
 }

@@ -615,6 +615,78 @@ describe('revoking consent also stops partner sharing', () => {
   });
 });
 
+describe('a period already ended today offers no further action', () => {
+  /*
+   * `activePeriodOnDate` counts the end day itself as inside the period, which
+   * is correct: a period that ends today IS today's period. But the Hero's
+   * button read only `activePeriod`, so after tapping "오늘 생리 끝났어요" it kept
+   * offering the same button, and tapping again rewrote the identical end date.
+   * The write succeeded every time, so the screen looked frozen. Found by
+   * tapping through the real app: the DB had the right end date while the Hero
+   * still said "생리 1일째" with an end button.
+   */
+  const ENDED_TODAY: CyclePeriod = {
+    id: 'period-today',
+    userId: 'user-a',
+    startDate: '2026-08-14',
+    endDate: '2026-08-14',
+  };
+
+  it('hides the end button once the end date is today', async () => {
+    await renderLoaded({ periods: [ENDED_TODAY] });
+    // Still today's period, so the Hero keeps the active framing.
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('active');
+    expect(screen.queryByRole('button', { name: '오늘 생리 끝났어요' })).not.toBeInTheDocument();
+    // And must not offer to start a second one either.
+    expect(screen.queryByRole('button', { name: '오늘 생리 시작했어요' })).not.toBeInTheDocument();
+  });
+
+  it('says what was recorded, and where to change it', async () => {
+    await renderLoaded({ periods: [ENDED_TODAY] });
+    expect(screen.getByText(/오늘 종료로 기록했어요/)).toBeInTheDocument();
+  });
+
+  it('still offers the end button while the period is open', async () => {
+    await renderLoaded({
+      periods: [{ ...ENDED_TODAY, startDate: '2026-08-12', endDate: undefined }],
+    });
+    expect(await screen.findByRole('button', { name: '오늘 생리 끝났어요' })).toBeInTheDocument();
+  });
+
+  it('ends an open period exactly once, writing today as the end', async () => {
+    const open: CyclePeriod = { ...ENDED_TODAY, startDate: '2026-08-12', endDate: undefined };
+    updatePeriod.mockResolvedValue({
+      ok: true,
+      period: { ...open, endDate: '2026-08-14' },
+    });
+    await renderLoaded({ periods: [open] });
+
+    fireEvent.click(await screen.findByRole('button', { name: '오늘 생리 끝났어요' }));
+    await waitFor(() => expect(updatePeriod).toHaveBeenCalledWith(
+      'period-today',
+      '2026-08-12',
+      '2026-08-14',
+    ));
+
+    // The button is gone, so it cannot be tapped into a second identical write.
+    await waitFor(() => expect(
+      screen.queryByRole('button', { name: '오늘 생리 끝났어요' }),
+    ).not.toBeInTheDocument());
+    expect(updatePeriod).toHaveBeenCalledTimes(1);
+  });
+
+  it('never creates a period row when ending one', async () => {
+    const open: CyclePeriod = { ...ENDED_TODAY, startDate: '2026-08-12', endDate: undefined };
+    updatePeriod.mockResolvedValue({ ok: true, period: { ...open, endDate: '2026-08-14' } });
+    await renderLoaded({ periods: [open] });
+
+    fireEvent.click(await screen.findByRole('button', { name: '오늘 생리 끝났어요' }));
+    await waitFor(() => expect(updatePeriod).toHaveBeenCalled());
+    expect(savePeriod).not.toHaveBeenCalled();
+    expect(saveDailyLog).not.toHaveBeenCalled();
+  });
+});
+
 describe('an unapplied migration is reported as a deployment state, not a connection problem', () => {
   /*
    * This is what the user actually hit: migration 022 was never applied, so

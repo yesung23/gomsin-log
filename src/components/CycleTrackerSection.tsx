@@ -405,6 +405,11 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const endPeriodToday = async () => {
     const identity = captureIdentity();
     if (!identity.userId || periodPending || !activePeriod) return;
+    // Already ended today: the write would set the identical end date, which
+    // succeeds and changes nothing, so a stale render cannot make it look like
+    // the tap did something. The Hero hides the button in this state; this is
+    // the race-safe backstop.
+    if (activePeriod.endDate === today) return;
     setPeriodPending(true);
     setPeriodError(null);
     try {

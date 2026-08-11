@@ -1,5 +1,9 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { handleApproveDevice, type ApproveDeviceDeps } from '../../supabase/functions/approve-device/handler.ts';
+import {
+  approvalSignedMessage,
+  handleApproveDevice,
+  type ApproveDeviceDeps,
+} from '../../supabase/functions/approve-device/handler.ts';
 import {
   MAX_ATTEMPTS_PER_HOUR,
   buildRecoveryTranscript,
@@ -16,7 +20,7 @@ import {
   encodeTbs,
 } from '@/crypto/deviceCertificate';
 import { ASSURANCE } from '@/crypto/domains';
-import { createTestAccount, signWith, type TestAccount } from '@/crypto/testing/virtualAccount';
+import { addEnrolledDevice, createTestAccount, signWith, type TestAccount } from '@/crypto/testing/virtualAccount';
 
 /**
  * Edge Function negative tests.
@@ -52,6 +56,9 @@ async function buildApprovalFixture(options?: {
   subjectDeviceId?: string;
 }) {
   const approver = account.devices[0];
+  // The approver's own root-issued certificate, rebuilt so its subject device
+  // id is the APPROVER constant the deps below report.
+  const approverCertificate = await buildApproverCertificate(approver);
   const subjectSig = (await createTestAccount()).devices[0].sig;
   const subjectKem = (await createTestAccount()).devices[0].kem;
   const transcriptHash = options?.transcriptHash ?? (await sha256(new Uint8Array([1, 2, 3])));
@@ -83,7 +90,45 @@ async function buildApprovalFixture(options?: {
     await signWith(subjectSig, certificatePopMessage(tbs)),
   );
 
-  return { certificate, transcriptHash, subjectSig, subjectKem, approver };
+  return {
+    certificate,
+    transcriptHash,
+    subjectSig,
+    subjectKem,
+    approver,
+    approverCertificate,
+    // A genuine approval signature from the approver's certified key.
+    approvalSignature: await signWith(approver.sig, approvalSignedMessage(transcriptHash)),
+  };
+}
+
+/** A root-issued certificate whose subject is the approver device id. */
+async function buildApproverCertificate(approver: TestAccount['devices'][number]) {
+  const tbs = encodeTbs({
+    issuerKind: ISSUER_KIND.recoveryIdentity,
+    subjectAssurance: ASSURANCE.secureEnclave,
+    subjectPlatform: 'ios',
+    grantedDomains: ['personal', 'couple', 'health'],
+    userId: account.userId,
+    serverOriginId: account.serverOriginId,
+    recoveryIdentityId: account.recoveryIdentityId,
+    recoveryVersion: account.recoveryVersion,
+    rootRecSigPubFp: account.recSig.fingerprint,
+    issuerId: account.recoveryIdentityId,
+    issuerSigPubFp: account.recSig.fingerprint,
+    subjectDeviceId: uuidToBytes(APPROVER),
+    subjectSigPubFp: approver.sig.fingerprint,
+    subjectKemPubFp: approver.kem.fingerprint,
+    notBeforeMs: 0n,
+    notAfterMs: 0n,
+    ceremonyNonce: randomBytes(32),
+    ceremonyTranscriptHash: new Uint8Array(32),
+  });
+  return assembleCertificate(
+    tbs,
+    await signWith(account.recSig, certificateSignedMessage(tbs)),
+    await signWith(approver.sig, certificatePopMessage(tbs)),
+  );
 }
 
 function approveDeps(overrides: Partial<ApproveDeviceDeps>, fixture: Awaited<ReturnType<typeof buildApprovalFixture>>): ApproveDeviceDeps {
@@ -122,7 +167,7 @@ function approveDeps(overrides: Partial<ApproveDeviceDeps>, fixture: Awaited<Ret
       rec_sig_spki: toBase64(account.recSig.spki),
       recovery_bundle_fp: toBase64(account.recoveryBundleFp),
     }),
-    getCertificateGrants: async () => 0b111,
+    getDeviceCertificate: async () => ({ certificate: toBase64(fixture.approverCertificate) }),
     commitApproval: async () => ({ ok: true }),
     logEvent: (event, detail) => { logged.push({ event, detail }); },
     ...overrides,
@@ -137,7 +182,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({}, fixture),
@@ -152,7 +197,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({
@@ -174,7 +219,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({
@@ -195,7 +240,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({ getEnrollmentByNonce: async () => null }, fixture),
@@ -211,7 +256,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       OTHER_USER,
       approveDeps({}, fixture),
@@ -229,7 +274,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(await sha256(new Uint8Array([9, 9, 9]))),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({}, fixture),
@@ -245,7 +290,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({}, fixture),
@@ -261,7 +306,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({}, fixture),
@@ -278,7 +323,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({
@@ -299,7 +344,11 @@ describe('approve-device', () => {
       }, fixture),
     );
     expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_CERT_ISSUER_FP_MISMATCH');
+    // Caught while verifying the APPROVER's own certificate: the substituted
+    // key does not match the `subject_sig_pub_fp` that certificate committed
+    // to. That is a stronger and earlier refusal than the downstream issuer
+    // check, because it means the key never had certificate backing at all.
+    expect((result.body as { error: string }).error).toBe('E_APPROVER_CERT_CERT_SUBJECT_FP_MISMATCH');
   });
 
   it('rejects a revoked approver', async () => {
@@ -309,7 +358,7 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
       approveDeps({
@@ -329,10 +378,10 @@ describe('approve-device', () => {
         enrollNonce: toBase64(randomBytes(32)),
         certificate: toBase64(fixture.certificate),
         transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(randomBytes(64)),
+        approvalSignature: toBase64(fixture.approvalSignature),
       },
       USER,
-      approveDeps({ getCertificateGrants: async () => null }, fixture),
+      approveDeps({ getDeviceCertificate: async () => null }, fixture),
     );
     expect(result.status).toBe(403);
     expect((result.body as { error: string }).error).toBe('E_APPROVER_UNCERTIFIED');
@@ -346,13 +395,150 @@ describe('approve-device', () => {
           enrollNonce: toBase64(randomBytes(32)),
           certificate: bad,
           transcriptHash: toBase64(fixture.transcriptHash),
-          approvalSignature: toBase64(randomBytes(64)),
+          approvalSignature: toBase64(fixture.approvalSignature),
         },
         USER,
         approveDeps({}, fixture),
       );
       expect(result.status).toBeGreaterThanOrEqual(400);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Attack 22 — the approval signature must come from the certified key
+  //
+  // Before this fix `approvalSignature` was decoded, carried through the
+  // handler, and persisted without ever being verified. Any 64 bytes passed.
+  // -------------------------------------------------------------------------
+  describe('approval signature', () => {
+    async function approve(
+      fixture: Awaited<ReturnType<typeof buildApprovalFixture>>,
+      signature: Uint8Array,
+      overrides: Partial<ApproveDeviceDeps> = {},
+      transcriptHash = fixture.transcriptHash,
+    ) {
+      return handleApproveDevice(
+        {
+          enrollNonce: toBase64(randomBytes(32)),
+          certificate: toBase64(fixture.certificate),
+          transcriptHash: toBase64(transcriptHash),
+          approvalSignature: toBase64(signature),
+        },
+        USER,
+        approveDeps(overrides, fixture),
+      );
+    }
+
+    it('rejects an arbitrary random signature', async () => {
+      const fixture = await buildApprovalFixture();
+      const result = await approve(fixture, randomBytes(64));
+      expect(result.status).toBe(403);
+      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
+    });
+
+    it('rejects a legitimate approver id paired with an attacker key and signature', async () => {
+      // The whole shape of the attack: keep the real device id, swap in a key
+      // the attacker controls, and sign with it.
+      const fixture = await buildApprovalFixture();
+      const attacker = await createTestAccount();
+      const attackerDevice = attacker.devices[0];
+      const forged = await signWith(attackerDevice.sig, approvalSignedMessage(fixture.transcriptHash));
+
+      const result = await approve(fixture, forged, {
+        getDevice: async (id) => (id === NEW_DEVICE
+          ? {
+            id: NEW_DEVICE, user_id: USER, status: 'PENDING',
+            sig_spki: toBase64(fixture.subjectSig.spki), kem_spki: toBase64(fixture.subjectKem.spki),
+          }
+          : {
+            // Real approver id, attacker's key.
+            id: APPROVER, user_id: USER, status: 'ACTIVE',
+            sig_spki: toBase64(attackerDevice.sig.spki), kem_spki: toBase64(attackerDevice.kem.spki),
+          }),
+      });
+
+      expect(result.status).toBe(403);
+      // Refused before the signature is even reached: the attacker key has no
+      // certificate committing to it.
+      expect((result.body as { error: string }).error).toBe('E_APPROVER_CERT_CERT_SUBJECT_FP_MISMATCH');
+    });
+
+    it('rejects a signature from a different certified device of the same account', async () => {
+      const fixture = await buildApprovalFixture();
+      const other = await addEnrolledDevice(account, account.devices[0], { grantedDomains: ['couple'] });
+      const wrongSigner = await signWith(other.sig, approvalSignedMessage(fixture.transcriptHash));
+
+      const result = await approve(fixture, wrongSigner);
+      expect(result.status).toBe(403);
+      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
+    });
+
+    it('accepts a signature from the correct certified approving device', async () => {
+      const fixture = await buildApprovalFixture();
+      const result = await approve(fixture, fixture.approvalSignature);
+      expect(result.status).toBe(200);
+      expect((result.body as { activated: boolean }).activated).toBe(true);
+    });
+
+    it('rejects a signature over a tampered transcript', async () => {
+      const fixture = await buildApprovalFixture();
+      // Genuine key, but signed over a different transcript than the one the
+      // certificate and the ceremony are bound to.
+      const otherTranscript = await sha256(new Uint8Array([4, 5, 6]));
+      const misbound = await signWith(fixture.approver.sig, approvalSignedMessage(otherTranscript));
+
+      const result = await approve(fixture, misbound);
+      expect(result.status).toBe(403);
+      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
+    });
+
+    it('rejects a single flipped bit in an otherwise valid signature', async () => {
+      const fixture = await buildApprovalFixture();
+      const tampered = fixture.approvalSignature.slice();
+      tampered[0] ^= 0x01;
+      const result = await approve(fixture, tampered);
+      expect(result.status).toBe(403);
+      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
+    });
+
+    it('keeps the existing replay protection: a consumed nonce still fails', async () => {
+      // The signature check must not have displaced the nonce guard.
+      const fixture = await buildApprovalFixture();
+      const result = await approve(fixture, fixture.approvalSignature, {
+        getEnrollmentByNonce: async () => ({
+          id: ENROLLMENT, user_id: USER, new_device_id: NEW_DEVICE, approver_device_id: APPROVER,
+          granted_domains: 0b011, expires_at: new Date(NOW + 60_000).toISOString(),
+          approved_at: new Date(NOW - 1000).toISOString(), consumed_at: new Date(NOW - 1000).toISOString(),
+        }),
+      });
+      expect(result.status).toBe(409);
+      expect((result.body as { error: string }).error).toBe('E_NONCE_ALREADY_USED');
+    });
+
+    it('still refuses an expired nonce even with a valid signature', async () => {
+      const fixture = await buildApprovalFixture();
+      const result = await approve(fixture, fixture.approvalSignature, {
+        getEnrollmentByNonce: async () => ({
+          id: ENROLLMENT, user_id: USER, new_device_id: NEW_DEVICE, approver_device_id: APPROVER,
+          granted_domains: 0b011, expires_at: new Date(NOW - 1).toISOString(),
+          approved_at: null, consumed_at: null,
+        }),
+      });
+      expect(result.status).toBe(410);
+    });
+
+    it('derives granted domains from the verified certificate, not a mutable column', async () => {
+      // The approver certificate grants personal+couple+health; the new
+      // certificate asks for personal+couple, which the enrollment also allows.
+      const fixture = await buildApprovalFixture({ grantedDomains: ['personal', 'couple'] });
+      expect((await approve(fixture, fixture.approvalSignature)).status).toBe(200);
+
+      // Escalation beyond the enrollment is still refused.
+      const escalated = await buildApprovalFixture({ grantedDomains: ['personal', 'couple', 'health'] });
+      const result = await approve(escalated, escalated.approvalSignature);
+      expect(result.status).toBe(403);
+      expect((result.body as { error: string }).error).toBe('E_GRANT_EXCEEDS_ENROLLMENT');
+    });
   });
 
   it('logs identifiers and codes only, never key material', () => {

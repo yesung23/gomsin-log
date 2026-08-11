@@ -18,14 +18,30 @@
 
 import {
   type VerifyResult,
+  concat,
   decodeBase64,
   decodeDbBytes,
   equalBytes,
   fail,
   parseCertificate,
+  sha256,
+  utf8,
   uuidToBytes,
   verifyCertificateLink,
+  verifySignature,
 } from '../_shared/e2eeVerify.ts';
+
+/**
+ * The message an approving device signs. Architecture V2.1 section 9, step 5:
+ *
+ *   approval_sig = ECDSA(dev_sig_old, "gomsinlog/enroll-approve/v1" ‖ T_e_hash)
+ *
+ * Binding the transcript hash is what ties the signature to the SAS the two
+ * humans actually compared.
+ */
+export function approvalSignedMessage(transcriptHash: Uint8Array): Uint8Array {
+  return concat(utf8('gomsinlog/enroll-approve/v1'), transcriptHash);
+}
 
 export type DeviceRow = {
   id: string;
@@ -60,7 +76,13 @@ export type ApproveDeviceDeps = {
   getEnrollmentByNonce: (nonceB64: string) => Promise<EnrollmentRow | null>;
   getDevice: (id: string) => Promise<DeviceRow | null>;
   getRecoveryAnchor: (userId: string) => Promise<RecoveryAnchorRow | null>;
-  getCertificateGrants: (deviceId: string) => Promise<number | null>;
+  /**
+   * The approving device's own certificate, as stored.
+   *
+   * The certificate — not a mutable `devices` column — is what says which
+   * signing key that device holds and which domains it may grant.
+   */
+  getDeviceCertificate: (deviceId: string) => Promise<{ certificate: string } | null>;
   /**
    * Must be atomic: consume the nonce, persist the certificate, and only then
    * move the operational status — in one transaction.
@@ -161,20 +183,70 @@ export async function handleApproveDevice(
     return reject(403, 'E_GRANT_EXCEEDS_ENROLLMENT');
   }
 
-  let issuerSigSpki: Uint8Array | undefined;
-  let issuerGrants: number | undefined;
-  if (parsed.value.issuerKind === 2) {
-    if (!enrollment.approver_device_id) return reject(403, 'E_NO_APPROVER');
-    const approver = await deps.getDevice(enrollment.approver_device_id);
-    if (!approver) return reject(403, 'E_UNKNOWN_APPROVER');
-    if (approver.user_id !== callerUserId) return reject(403, 'E_WRONG_ACCOUNT');
-    if (approver.status === 'REVOKED') return reject(403, 'E_APPROVER_REVOKED');
-    const spki = decodeDbBytes(approver.sig_spki);
-    if (!spki) return reject(400, 'E_MALFORMED_STATE');
-    issuerSigSpki = spki;
-    issuerGrants = (await deps.getCertificateGrants(approver.id)) ?? undefined;
-    if (issuerGrants === undefined) return reject(403, 'E_APPROVER_UNCERTIFIED');
+  // This endpoint is device-approval enrollment, so there is always an
+  // approving device. A root-issued certificate comes from bootstrap or
+  // recovery, neither of which routes through here, and neither produces an
+  // approval signature for anyone to verify.
+  if (parsed.value.issuerKind !== 2) return reject(403, 'E_CERT_NOT_DEVICE_ISSUED');
+  if (!enrollment.approver_device_id) return reject(403, 'E_NO_APPROVER');
+
+  const approver = await deps.getDevice(enrollment.approver_device_id);
+  if (!approver) return reject(403, 'E_UNKNOWN_APPROVER');
+  if (approver.user_id !== callerUserId) return reject(403, 'E_WRONG_ACCOUNT');
+  if (approver.status === 'REVOKED') return reject(403, 'E_APPROVER_REVOKED');
+
+  const approverSpki = decodeDbBytes(approver.sig_spki);
+  if (!approverSpki) return reject(400, 'E_MALFORMED_STATE');
+
+  // Resolve the approver from its CERTIFICATE, not from its device row.
+  //
+  // The `devices` table is mutable by anyone holding service_role, so
+  // `approver.sig_spki` on its own is a claim, not evidence. Verifying the
+  // approver's certificate binds that key: `verifyCertificateLink` refuses
+  // unless SHA-256 of the supplied SPKI equals the `subject_sig_pub_fp` the
+  // certificate committed to, and the certificate is immutable.
+  const approverCertificateRow = await deps.getDeviceCertificate(approver.id);
+  if (!approverCertificateRow) return reject(403, 'E_APPROVER_UNCERTIFIED');
+  const approverCertificate = decodeDbBytes(approverCertificateRow.certificate);
+  if (!approverCertificate) return reject(400, 'E_MALFORMED_STATE');
+
+  const approverLink = await verifyCertificateLink(approverCertificate, {
+    userId: userIdBytes,
+    serverOriginId,
+    recoveryIdentityId: recoveryIdBytes,
+    recoveryVersion: anchor.recovery_version,
+    rootRecSigPubFp,
+    rootRecSigSpki: rootSpki,
+    subjectSigSpki: approverSpki,
+  });
+  // Prefix without stuttering the inner code's own `E_`.
+  if (!approverLink.ok) return reject(403, `E_APPROVER_CERT_${approverLink.code.replace(/^E_/, '')}`);
+
+  const approverDeviceIdBytes = uuidToBytes(approver.id);
+  if (!approverDeviceIdBytes) return reject(400, 'E_MALFORMED_STATE');
+  if (!equalBytes(approverLink.value.subjectDeviceId, approverDeviceIdBytes)) {
+    return reject(403, 'E_APPROVER_CERT_WRONG_SUBJECT');
   }
+
+  // The new certificate must name this approver as its issuer.
+  if (!equalBytes(parsed.value.issuerSigPubFp, await sha256(approverSpki))) {
+    return reject(403, 'E_CERT_ISSUER_FP_MISMATCH');
+  }
+
+  // THE FIX. The approval signature must verify under the key the approver's
+  // certificate commits to, over the exact approval transcript. Before this,
+  // `approvalSignature` was decoded, carried through, and stored without ever
+  // being checked — any 64 bytes were accepted.
+  const approvalOk = await verifySignature(
+    approverSpki,
+    approvalSignedMessage(transcriptHash),
+    approvalSignature,
+  );
+  if (!approvalOk) return reject(403, 'E_BAD_APPROVAL_SIGNATURE');
+
+  // Grants come from the verified certificate, never from a mutable column.
+  const issuerSigSpki: Uint8Array = approverSpki;
+  const issuerGrants: number = approverLink.value.grantedDomains;
 
   const link: VerifyResult<unknown> = await verifyCertificateLink(certificate, {
     userId: userIdBytes,

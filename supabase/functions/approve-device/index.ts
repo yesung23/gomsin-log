@@ -63,13 +63,12 @@ Deno.serve(async (request) => {
         .eq('user_id', userId).is('superseded_at', null).maybeSingle();
       return data ?? null;
     },
-    getCertificateGrants: async (deviceId) => {
+    getDeviceCertificate: async (deviceId) => {
+      // The handler verifies these bytes; it never trusts a grant mask read
+      // out of them by this adapter.
       const { data } = await admin.from('device_certificates')
         .select('certificate').eq('subject_device_id', deviceId).maybeSingle();
-      if (!data?.certificate) return null;
-      // Byte 10 of the certificate body is the signed granted-domains mask.
-      const bytes = Uint8Array.from(atob(String(data.certificate)), (c) => c.charCodeAt(0));
-      return bytes.length > 10 ? bytes[10] : null;
+      return data?.certificate ? { certificate: String(data.certificate) } : null;
     },
     commitApproval: async (input) => {
       // One transaction: consume the nonce, persist the certificate, then move

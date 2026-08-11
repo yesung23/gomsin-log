@@ -10,7 +10,11 @@ export default tseslint.config(
   // `App/App/public`, Capacitor's `native-bridge.js`, and Gradle build
   // intermediates. Linting a build artifact reports on code this repository does
   // not author and fails on directives it does not control.
-  { ignores: ["dist", "node_modules", "_original", "android", "ios"] },
+  // `.codex` is another tool's scratch directory: it vendors third-party
+  // plugin sources that this repository neither authors nor controls, and
+  // linting them fails `npm run verify` on rules they were never written for.
+  // Same reasoning as `android`/`ios` above.
+  { ignores: ["dist", "node_modules", "_original", "android", "ios", ".codex", ".kiro"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

@@ -1,0 +1,135 @@
+{
+  "results" : [
+    {
+      "detail" : "macOS Version 26.5.2 (Build 25F84), arch arm64",
+      "name" : "environment",
+      "status" : "INFO"
+    },
+    {
+      "name" : "softwareSecKey.ecdh.normal",
+      "status" : "VERIFIED",
+      "detail" : "len=32 match=true first=0x8c"
+    },
+    {
+      "detail" : "len=32 match=true first=0x00",
+      "name" : "softwareSecKey.ecdh.leadingZero",
+      "status" : "VERIFIED"
+    },
+    {
+      "detail" : "Security.framework returned the full 32 bytes including the leading 0x00; no left-padding needed on this path.",
+      "status" : "VERIFIED",
+      "name" : "softwareSecKey.ecdh.leadingZero.width"
+    },
+    {
+      "name" : "softwareSecKey.publicKeyExport",
+      "detail" : "SecKeyCopyExternalRepresentation returns SEC1 uncompressed 65 bytes (0x04), NOT SPKI. SPKI = 26-byte constant prefix + point => 91 bytes, sha256=aac75ae9d027960a. expectedShapeRef=65B",
+      "status" : "VERIFIED"
+    },
+    {
+      "name" : "spkiPrefixRule",
+      "status" : "VERIFIED",
+      "detail" : "P-256 SPKI == constant 26-byte prefix || SEC1 point. Lets one encoder serve Apple raw keys and Web SPKI."
+    },
+    {
+      "status" : "VERIFIED",
+      "name" : "softwareSecKey.ecdsa.webToApple",
+      "detail" : "WebCrypto P-1363 signature, converted to DER, verified by Security.framework: true"
+    },
+    {
+      "detail" : "Security.framework emits X9.62 DER (70 bytes, first byte 0x30), NOT P-1363. Conversion is mandatory.",
+      "name" : "softwareSecKey.ecdsa.nativeEncoding",
+      "status" : "VERIFIED"
+    },
+    {
+      "name" : "softwareSecKey.ecdsa.appleToWeb.export",
+      "detail" : "publicSpki=3059301306072a8648ce3d020106082a8648ce3d03010703420004e4d5e4dec3db65c58c10ed2521cc970612f5174e05d51ea07893aeff06d766870c03911c36434ac9be1ac6a875741304a5dc30eb59d08ddb48c8c34e1e364544 message=gomsinlog\/1a1\/apple-signs sigP1363=3f3cb080bfa6c6ab0eb7ae6c6d213651771dafc648b343461ccb5445f4e6ca3135fffdaedfd81c16875675a856cf65798da673bdbcd94a1a0a3410dd46de695c",
+      "status" : "INFO"
+    },
+    {
+      "status" : "VERIFIED",
+      "name" : "cryptoKit.aesGcm",
+      "detail" : "CryptoKit exposes ciphertext and tag separately; ciphertext||tag matches the WebCrypto vector: true"
+    },
+    {
+      "status" : "VERIFIED",
+      "detail" : "HKDF-SHA256 matches the WebCrypto vector: true",
+      "name" : "cryptoKit.hkdf"
+    },
+    {
+      "name" : "secureEnclave.signing.create",
+      "status" : "VERIFIED",
+      "detail" : "Secure Enclave P-256 key created"
+    },
+    {
+      "status" : "VERIFIED",
+      "detail" : "refused: Error Domain=NSOSStatusErrorDomain Code=-4 \"export not implemented for key <SecKeyRef:('com.apple.setoken') 0xb1cc31a80>\" (kCFMessagePortTransportError \/ kCSIdentityDeletedErr \/ unimpErr: \/  \/ unimplemented core routine) UserInfo={numberOfErrorsDeep=0, NSDescription=export not implemented for key <SecKeyRef:('com.apple.setoken') 0xb1cc31a80>}",
+      "name" : "secureEnclave.signing.privateKeyExport"
+    },
+    {
+      "status" : "VERIFIED",
+      "name" : "secureEnclave.signing.publicKey",
+      "detail" : "SEC1 uncompressed 65 bytes"
+    },
+    {
+      "name" : "secureEnclave.signing.algorithmSupported",
+      "status" : "VERIFIED",
+      "detail" : "SecKeyIsAlgorithmSupported(.ecdsaSignatureMessageX962SHA256) = true"
+    },
+    {
+      "detail" : "signed and verified; DER 71 bytes, first 0x30",
+      "status" : "VERIFIED",
+      "name" : "secureEnclave.signing.performed"
+    },
+    {
+      "name" : "secureEnclave.agreement.create",
+      "status" : "VERIFIED",
+      "detail" : "Secure Enclave P-256 key created"
+    },
+    {
+      "name" : "secureEnclave.agreement.privateKeyExport",
+      "status" : "VERIFIED",
+      "detail" : "refused: Error Domain=NSOSStatusErrorDomain Code=-4 \"export not implemented for key <SecKeyRef:('com.apple.setoken') 0xb1cc31ba0>\" (kCFMessagePortTransportError \/ kCSIdentityDeletedErr \/ unimpErr: \/  \/ unimplemented core routine) UserInfo={numberOfErrorsDeep=0, NSDescription=export not implemented for key <SecKeyRef:('com.apple.setoken') 0xb1cc31ba0>}"
+    },
+    {
+      "detail" : "SEC1 uncompressed 65 bytes",
+      "name" : "secureEnclave.agreement.publicKey",
+      "status" : "VERIFIED"
+    },
+    {
+      "status" : "VERIFIED",
+      "detail" : "SecKeyIsAlgorithmSupported(.ecdhKeyExchangeStandard) = true",
+      "name" : "secureEnclave.agreement.algorithmSupported"
+    },
+    {
+      "name" : "secureEnclave.agreement.performed",
+      "status" : "VERIFIED",
+      "detail" : "SecKeyCopyKeyExchangeResult returned 32 bytes from a Secure-Enclave-backed key"
+    },
+    {
+      "status" : "INFO",
+      "name" : "secureEnclave.agreement.crossCheckInput",
+      "detail" : "sePublicRaw=04b526d8fc193a7087cc1c942cd7822169a333637965dd285346f70f15247d5a8d3456d0472ed79a9fcd666ff0267e7d04ea5af5d343e19432c206ad3063394e2d sharedSecretSha256=448f7f946eb516b677fce2cdf87b46b2704544fc9dd2d69ac80216891abf52db"
+    },
+    {
+      "detail" : "SecureEnclave.isAvailable = true",
+      "name" : "cryptoKit.secureEnclave.isAvailable",
+      "status" : "VERIFIED"
+    },
+    {
+      "detail" : "rawRepresentation 64 bytes (P-1363), derRepresentation 70 bytes; dataRepresentation handle 284 bytes",
+      "name" : "cryptoKit.secureEnclave.signing",
+      "status" : "VERIFIED"
+    },
+    {
+      "status" : "VERIFIED",
+      "detail" : "SecureEnclave.P256.KeyAgreement produced a 32-byte shared secret; handle 284 bytes",
+      "name" : "cryptoKit.secureEnclave.keyAgreement"
+    },
+    {
+      "name" : "apple.glk2.webToApple",
+      "status" : "VERIFIED",
+      "detail" : "signature=true unwrappedScopeKeyMatches=true (envelope sealed by WebCrypto, opened by Security.framework + CryptoKit)"
+    }
+  ],
+  "probe" : "apple-seckey"
+}

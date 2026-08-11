@@ -1,0 +1,25 @@
+// Android module for the GomsinlogDeviceKeys Capacitor plugin.
+// UNEXECUTED: no Android SDK is available in this environment, so this file has
+// never been built. See docs/E2EE_1A1_SPIKE_REPORT.md.
+ext {
+    junitVersion = '4.13.2'
+}
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace "app.gomsinlog.devicekeys"
+    compileSdk 35
+    defaultConfig {
+        minSdk 26
+        targetSdk 35
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+
+dependencies {
+    implementation project(':capacitor-android')
+}

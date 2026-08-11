@@ -1,3 +1,18 @@
+> # ⚠️ SUPERSEDED — 2026-08-11
+>
+> 이 문서는 **GomsinLog E2EE Phase 1A Architecture V2.1** 로 대체되었다.
+> 역사 보존을 위해 삭제하지 않고 남긴다.
+>
+> 가장 중요한 차이 하나: 이 문서는 커플 공간마다 **단일 콘텐츠 키(CMK)** 를 둔다.
+> 그 구조는 파트너가 Personal 과 Health 원문까지 열 수 있게 하므로 V2.1 의
+> 불변식 4·5 를 위반한다. V2.1 은 PMK / HRK / CSK 를 독립된 난수 키로 분리하고,
+> Health 키는 절대 파트너에게 전달하지 않는다.
+>
+> 구현 시 참조해야 할 문서:
+> - `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md`
+> - `docs/E2EE_1A1_SPIKE_REPORT.md`
+> - Architecture V2.1 (Phase 1A 구현 보고서 참조)
+
 # 곰신로그 종단간 암호화 도입 결정서
 
 최종 검토: 2026-08-09

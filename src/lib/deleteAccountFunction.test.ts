@@ -24,7 +24,9 @@ const EXISTING_APP_METADATA = {
 type AdminOptions = {
   flagError?: unknown;
   deleteUserError?: unknown;
+  e2eePrepareError?: unknown;
   prepareError?: unknown;
+  cleanupCouplesError?: unknown;
 };
 
 function makeAdmin(options: AdminOptions = {}) {
@@ -65,10 +67,22 @@ function makeAdmin(options: AdminOptions = {}) {
     }),
     rpc: vi.fn(async (name: string) => {
       calls.push(`rpc:${name}`);
+      // E2EE key-material cleanup runs before the relational preparation and
+      // can legitimately refuse, so a failure here must abort the deletion.
+      if (name === 'e2ee_prepare_account_deletion') {
+        return options.e2eePrepareError
+          ? { data: null, error: options.e2eePrepareError }
+          : { data: { partner_remains: false, deleted_devices: 1 }, error: null };
+      }
       if (name === 'prepare_account_deletion') {
         return options.prepareError
           ? { data: null, error: options.prepareError }
           : { data: { ok: true }, error: null };
+      }
+      if (name === 'cleanup_account_solo_couples') {
+        return options.cleanupCouplesError
+          ? { data: null, error: options.cleanupCouplesError }
+          : { data: 1, error: null };
       }
       return { data: null, error: null };
     }),
@@ -134,6 +148,33 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(admin.calls).not.toContain('rpc:cancel_account_deletion');
   });
 
+  it('aborts before Auth deletion when E2EE preparation refuses', async () => {
+    // e2ee_prepare_account_deletion raises when removing this account would
+    // leave the surviving partner with no way to decrypt shared history.
+    // Continuing past that would crypto-shred a bystander, so the whole
+    // deletion stops and the Auth user is left intact.
+    const admin = makeAdmin({
+      e2eePrepareError: new Error('E2EE_DELETION_WOULD_ORPHAN_PARTNER: couple epoch 1'),
+    });
+    const response = await post(admin);
+    expect(response.status).toBe(500);
+    expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion');
+    expect(admin.calls).not.toContain('rpc:prepare_account_deletion');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('runs E2EE preparation BEFORE the relational preparation', async () => {
+    const admin = makeAdmin({});
+    await post(admin);
+    const e2eeAt = admin.calls.indexOf('rpc:e2ee_prepare_account_deletion');
+    const relationalAt = admin.calls.indexOf('rpc:prepare_account_deletion');
+    const authAt = admin.calls.indexOf('auth.admin.deleteUser');
+    expect(e2eeAt).toBeGreaterThanOrEqual(0);
+    expect(e2eeAt).toBeLessThan(relationalAt);
+    // Auth deletion stays last.
+    expect(relationalAt).toBeLessThan(authAt);
+  });
+
   it('leaves the flag SET when Auth deletion fails, and reports dataRemoved: true', async () => {
     const admin = makeAdmin({ deleteUserError: { message: 'auth deletion failed' } });
     const response = await post(admin);
@@ -164,7 +205,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
     ))).toBe(true);
   });
 
-  it('PRESERVATION: the deletion sequence once entered is unchanged, step for step', async () => {
+  it('pins the deletion sequence, including sole-couple cleanup before Auth deletion', async () => {
     const admin = makeAdmin();
     await post(admin);
     expect(admin.calls).toEqual([
@@ -172,7 +213,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'auth.admin.updateUserById',
       'from:daily_records.select',
       'rpc:begin_account_deletion',
+      'rpc:e2ee_prepare_account_deletion',
       'rpc:prepare_account_deletion',
+      'rpc:cleanup_account_solo_couples',
       'auth.admin.deleteUser',
     ]);
   });
@@ -183,6 +226,15 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(response.status).toBe(500);
     expect((await response.json()).dataRemoved).toBe(false);
     expect(admin.calls).toContain('rpc:cancel_account_deletion');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('fails closed after DB preparation when sole-couple cleanup cannot be confirmed', async () => {
+    const admin = makeAdmin({ cleanupCouplesError: { message: 'cleanup failed' } });
+    const response = await post(admin);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).toContain('rpc:cleanup_account_solo_couples');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 

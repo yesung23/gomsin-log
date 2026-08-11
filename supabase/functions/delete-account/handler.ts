@@ -11,11 +11,17 @@ import { parseAllowedOrigins, resolveCors } from './_shared/cors.ts';
  *    write fails, nothing is deleted.
  * 1. Enumerate the caller's daily records and completely remove their Storage
  *    objects. A listing/removal failure aborts before relational/auth changes.
- * 2. Call the service-role-only prepare_account_deletion RPC. It verifies that
+ * 2. Call the service-role-only e2ee_prepare_account_deletion RPC, which
+ *    removes this account's device/recovery/envelope material, preserves the
+ *    couple-owned epochs and the surviving partner's envelopes, and REFUSES
+ *    the whole deletion if continuing would strand that partner.
+ * 3. Call the service-role-only prepare_account_deletion RPC. It verifies that
  *    the record set did not change, locks couple rows first, transfers shared
  *    plan ownership, removes private/blocking rows, and deletes records in one
  *    database transaction.
- * 3. Delete the Auth user only after database preparation succeeds.
+ * 3. Remove the couple row only when this account is its sole member. A current
+ *    or former partner membership preserves the shared relationship scope.
+ * 4. Delete the Auth user only after database preparation succeeds.
  *
  * Storage, Postgres, and Auth cannot share one transaction. Every phase is
  * retry-safe, but a failed later phase may follow a completed media cleanup.
@@ -245,6 +251,7 @@ export async function handleDeleteAccountRequest(
 
   let deletionMarkerStarted = false;
   let databasePreparationCompleted = false;
+  let soloCouplesDeleted = 0;
 
   try {
     // Read-only preflight. These exact IDs are passed to the transactional RPC,
@@ -288,6 +295,25 @@ export async function handleDeleteAccountRequest(
       );
     }
 
+    // E2EE key material comes first, and its failure aborts the whole deletion.
+    //
+    // It runs before the relational preparation because it is the step that can
+    // legitimately refuse: if removing this account would leave the surviving
+    // partner with no way to decrypt shared history, the RPC raises
+    // E2EE_DELETION_WOULD_ORPHAN_PARTNER and nothing is destroyed. Aborting a
+    // deletion is recoverable; crypto-shredding a bystander is not.
+    //
+    // It is also where the personal/health write floor is removed, which only
+    // this service-role path is permitted to do.
+    const { data: e2eePreparation, error: e2eePreparationError } = await admin.rpc(
+      'e2ee_prepare_account_deletion',
+      { p_user_id: userId },
+    );
+    if (e2eePreparationError) throw e2eePreparationError;
+    if (!e2eePreparation || typeof e2eePreparation !== 'object') {
+      throw new Error('E2EE deletion preparation did not confirm success');
+    }
+
     // Migration 015 owns all destructive relational work. In particular,
     // ownership transfer is no longer a best-effort direct table update: an
     // RPC error aborts before auth deletion, preventing ON DELETE CASCADE from
@@ -304,6 +330,20 @@ export async function handleDeleteAccountRequest(
       throw new Error('Account deletion database preparation did not confirm success');
     }
     databasePreparationCompleted = true;
+
+    // `couples` has no auth.users foreign key, so Auth deletion alone cannot
+    // remove a sole-member relationship row (including anniversary metadata).
+    // The service-role-only RPC preserves any couple with another membership
+    // row, regardless of whether that member is active, pending or disconnected.
+    const { data: cleanedCouples, error: cleanupCouplesError } = await admin.rpc(
+      'cleanup_account_solo_couples',
+      { p_user_id: userId },
+    );
+    if (cleanupCouplesError) throw cleanupCouplesError;
+    if (!Number.isInteger(cleanedCouples) || cleanedCouples < 0) {
+      throw new Error('Account deletion couple cleanup returned an invalid result');
+    }
+    soloCouplesDeleted = cleanedCouples;
 
     // The last irreversible step, and the only one whose failure leaves a live
     // account with its data already removed, so it gets a few attempts.
@@ -331,6 +371,7 @@ export async function handleDeleteAccountRequest(
     console.log('[delete-account] Completed', {
       records: records.length,
       preparation,
+      soloCouplesDeleted,
     });
 
     return jsonResponse({ success: true, warnings: [] }, 200, cors.headers);

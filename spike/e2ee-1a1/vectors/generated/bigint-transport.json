@@ -1,0 +1,63 @@
+{
+  "_comment": "SPIKE ONLY. Throwaway local cluster. No production database was contacted.",
+  "serverVersion": "PostgreSQL 17.10 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit",
+  "method": "psql renders the same Postgres-side JSON that PostgREST emits; JSON.parse is what supabase-js applies via Response.json().",
+  "results": [
+    {
+      "label": "2^53 - 1",
+      "literal": "9007199254740991",
+      "postgresRowToJson": "{\"v\":9007199254740991}",
+      "postgresJsonAgg": "[{\"v\":9007199254740991}]",
+      "jsonParseType": "number",
+      "jsonParseValue": "9007199254740991",
+      "exactAfterJsonParse": true,
+      "castToTextJson": "{\"v\":\"9007199254740991\"}",
+      "castToTextParsed": "9007199254740991",
+      "castToTextBigInt": "9007199254740991",
+      "exactAfterCastToText": true
+    },
+    {
+      "label": "2^53",
+      "literal": "9007199254740992",
+      "postgresRowToJson": "{\"v\":9007199254740992}",
+      "postgresJsonAgg": "[{\"v\":9007199254740992}]",
+      "jsonParseType": "number",
+      "jsonParseValue": "9007199254740992",
+      "exactAfterJsonParse": true,
+      "castToTextJson": "{\"v\":\"9007199254740992\"}",
+      "castToTextParsed": "9007199254740992",
+      "castToTextBigInt": "9007199254740992",
+      "exactAfterCastToText": true
+    },
+    {
+      "label": "2^53 + 1",
+      "literal": "9007199254740993",
+      "postgresRowToJson": "{\"v\":9007199254740993}",
+      "postgresJsonAgg": "[{\"v\":9007199254740993}]",
+      "jsonParseType": "number",
+      "jsonParseValue": "9007199254740992",
+      "exactAfterJsonParse": false,
+      "castToTextJson": "{\"v\":\"9007199254740993\"}",
+      "castToTextParsed": "9007199254740993",
+      "castToTextBigInt": "9007199254740993",
+      "exactAfterCastToText": true
+    },
+    {
+      "label": "2^63 - 1",
+      "literal": "9223372036854775807",
+      "postgresRowToJson": "{\"v\":9223372036854775807}",
+      "postgresJsonAgg": "[{\"v\":9223372036854775807}]",
+      "jsonParseType": "number",
+      "jsonParseValue": "9223372036854776000",
+      "exactAfterJsonParse": false,
+      "castToTextJson": "{\"v\":\"9223372036854775807\"}",
+      "castToTextParsed": "9223372036854775807",
+      "castToTextBigInt": "9223372036854775807",
+      "exactAfterCastToText": true
+    }
+  ],
+  "conclusion": {
+    "directTransportExact": false,
+    "castToTextExact": true
+  }
+}

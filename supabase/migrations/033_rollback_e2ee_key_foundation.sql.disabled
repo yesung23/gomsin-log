@@ -1,0 +1,72 @@
+-- =============================================================
+-- 033_rollback_e2ee_key_foundation.sql   [DISABLED — NOT A LIVE MIGRATION]
+-- =============================================================
+--
+-- The `.disabled` suffix keeps this out of any migration runner. It exists so
+-- the Phase 1A schema has a written, reviewed abandonment path before anyone
+-- applies 031/032 anywhere. Rename it to `.sql` only when deliberately backing
+-- the work out.
+--
+-- Safe to run only while no content row has ever been written encrypted:
+--
+--   SELECT count(*) FROM public.daily_records WHERE cipher_format <> 0;
+--
+-- must return 0. If it does not, dropping `cipher_format` would strand
+-- ciphertext with no way to interpret it, so this script refuses.
+--
+-- Nothing here touches user content. `daily_records` loses four additive
+-- columns that were never populated with anything but their defaults.
+
+BEGIN;
+
+DO $$
+DECLARE v_encrypted BIGINT;
+BEGIN
+  SELECT count(*) INTO v_encrypted FROM public.daily_records WHERE cipher_format <> 0;
+  IF v_encrypted > 0 THEN
+    RAISE EXCEPTION 'REFUSING ROLLBACK: % encrypted rows exist; dropping cipher_format would strand them', v_encrypted;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.crypto_write_floor WHERE min_cipher_format > 0) THEN
+    RAISE EXCEPTION 'REFUSING ROLLBACK: an E2EE write floor is active for at least one scope';
+  END IF;
+END $$;
+
+-- 032
+DROP TRIGGER IF EXISTS trg_daily_records_write_floor ON public.daily_records;
+DROP FUNCTION IF EXISTS public.enforce_e2ee_write_floor();
+DROP FUNCTION IF EXISTS public.e2ee_floor_for(UUID, UUID);
+
+ALTER TABLE public.daily_records
+  DROP COLUMN IF EXISTS cipher_format,
+  DROP COLUMN IF EXISTS content_revision,
+  DROP COLUMN IF EXISTS key_domain,
+  DROP COLUMN IF EXISTS key_epoch;
+
+-- 031
+DROP TRIGGER IF EXISTS trg_membership_revision ON public.couple_members;
+DROP FUNCTION IF EXISTS public.bump_membership_revision();
+ALTER TABLE public.couples DROP COLUMN IF EXISTS membership_revision;
+
+DROP FUNCTION IF EXISTS public.e2ee_prepare_account_deletion(UUID);
+DROP FUNCTION IF EXISTS public.activate_e2ee_write_floor(TEXT, UUID, UUID);
+DROP FUNCTION IF EXISTS public.get_partner_recovery_anchor();
+
+DROP TABLE IF EXISTS public.migration_ledger;
+DROP TABLE IF EXISTS public.crypto_write_floor;
+DROP FUNCTION IF EXISTS public.enforce_write_floor_monotonic();
+DROP TABLE IF EXISTS public.crypto_pairings;
+DROP TABLE IF EXISTS public.revocation_statements;
+DROP FUNCTION IF EXISTS public.reject_revocation_mutation();
+DROP TABLE IF EXISTS public.recovery_challenges;
+DROP TABLE IF EXISTS public.key_envelopes;
+DROP FUNCTION IF EXISTS public.enforce_envelope_recipient();
+DROP TABLE IF EXISTS public.scope_keys;
+DROP TABLE IF EXISTS public.device_enrollments;
+DROP TABLE IF EXISTS public.device_certificates;
+DROP FUNCTION IF EXISTS public.reject_certificate_mutation();
+DROP TABLE IF EXISTS public.devices;
+DROP TABLE IF EXISTS public.recovery_identities;
+DROP TABLE IF EXISTS public.crypto_deployment;
+
+COMMIT;

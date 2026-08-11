@@ -1,0 +1,20 @@
+{
+  "probe": "jca",
+  "results": [
+    {"name": "environment", "status": "INFO", "detail": "JDK 21.0.8 providers=SunEC version 21/SunJCE version 21 (DESKTOP JDK, NOT AndroidKeyStore)"},
+    {"name": "jca.ecdh.normal", "status": "VERIFIED", "detail": "len=32 match=true first=0x8c"},
+    {"name": "jca.ecdh.leadingZero", "status": "VERIFIED", "detail": "len=32 match=true first=0x00"},
+    {"name": "jca.ecdh.leadingZero.width", "status": "VERIFIED", "detail": "SunEC KeyAgreement.generateSecret() returned the full 32 bytes including the leading 0x00."},
+    {"name": "jca.publicKeyEncoding", "status": "VERIFIED", "detail": "X509EncodedKeySpec(prefix||SEC1 point) re-encodes to the identical 91-byte SPKI: true; getEncoded() is SPKI, so the same prefix rule works on Java."},
+    {"name": "jca.fingerprint", "status": "VERIFIED", "detail": "SHA-256(SPKI) matches the frozen fingerprint."},
+    {"name": "jca.ecdsa.rejectsRawP1363", "status": "VERIFIED", "detail": "SHA256withECDSA rejects a bare P-1363 signature: true (conversion is mandatory)"},
+    {"name": "jca.ecdsa.webToJca", "status": "VERIFIED", "detail": "WebCrypto P-1363 signature, converted to DER, verified by SunEC: true"},
+    {"name": "jca.ecdsa.nativeEncoding", "status": "VERIFIED", "detail": "SunEC emits X9.62 DER (71 bytes, first 0x30), NOT P-1363."},
+    {"name": "jca.ecdsa.jcaToWeb.export", "status": "INFO", "detail": "signerSpki=3059301306072a8648ce3d020106082a8648ce3d030107034200041c2877f4aabca352e999fbafc5825c6d64bcfd40e36de079b0b5686ee79692f778233e168247979f1f850e2befae7caa9cfeeac9bde37112b2bec17ddb9b0414 message=gomsinlog/1a1/jca-signs sigP1363=01362b5ca7d0b6f9e3a744a3d0b8a836173323d9151757c42e8c483e2604b664acf045cd5303b2ef06e44666fdb3751c564c984be524e483b6e529a5a64dd663"},
+    {"name": "jca.aesGcm", "status": "VERIFIED", "detail": "SunJCE returns ciphertext||tag (48 bytes) identical to the WebCrypto vector: true"},
+    {"name": "jca.hkdf", "status": "VERIFIED", "detail": "RFC 5869 HKDF over javax.crypto.Mac matches the WebCrypto vector: true (JDK 21 has no built-in HKDF; a KDF must be supplied)"},
+    {"name": "jca.glk2.webToJca", "status": "VERIFIED", "detail": "signature=true unwrappedScopeKeyMatches=true (envelope sealed by WebCrypto, opened by JCA)"},
+    {"name": "jca.glk2.tamperRejected", "status": "VERIFIED", "detail": "flipping the domain byte makes JCA reject the envelope: true"}
+  ]
+}
+

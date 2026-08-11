@@ -1,0 +1,15 @@
+{
+  "name": "@gomsinlog/capacitor-device-keys",
+  "version": "0.1.0",
+  "description": "Operation-by-handle P-256 device keys backed by Secure Enclave / AndroidKeyStore.",
+  "private": true,
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": { "@capacitor/core": "^7.0.0" },
+  "files": ["dist/", "ios/", "android/", "GomsinlogDeviceKeys.podspec"]
+}

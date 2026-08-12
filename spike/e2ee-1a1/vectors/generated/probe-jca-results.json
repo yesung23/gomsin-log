@@ -17,4 +17,3 @@
     {"name": "jca.glk2.tamperRejected", "status": "VERIFIED", "detail": "flipping the domain byte makes JCA reject the envelope: true"}
   ]
 }
-

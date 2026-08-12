@@ -283,6 +283,39 @@ export interface E2eeRepository {
   getPairing(coupleId: string): Promise<PairingRecord | null>;
   setPairingState(pairingId: string, state: string): Promise<void>;
 
+  /**
+   * Every couple scope this account holds that requires rotation.
+   *
+   * Server-side and authoritative. The recovering client cannot be asked for
+   * this list: a caller that omitted a couple would rotate PMK and HRK, skip the
+   * CSK, and still look like a completed recovery — leaving a shared key in the
+   * hands of a device the recovery was performed to displace.
+   *
+   * Calls `e2ee_owned_couple_scope_ids()`.
+   */
+  listOwnedCoupleScopeIds(): Promise<string[]>;
+
+  /**
+   * ACTIVE epochs a device is granted but holds no self-notarized envelope for.
+   *
+   * Empty means fully provisioned. Calls `e2ee_missing_device_coverage`.
+   */
+  listMissingDeviceCoverage(deviceId: string): Promise<{ domain: KeyDomainName; scopeId: string }[]>;
+
+  /**
+   * PENDING/RECOVERY_AUTHENTICATED → PROVISIONING. Calls
+   * `e2ee_begin_device_provisioning`; never a direct status UPDATE.
+   */
+  beginDeviceProvisioning(deviceId: string): Promise<void>;
+
+  /**
+   * The ONLY path to ACTIVE. The server re-verifies the certificate, the absence
+   * of a revocation, and full envelope coverage before it agrees.
+   *
+   * Calls `e2ee_finalize_device_provisioning`.
+   */
+  finalizeDeviceProvisioning(deviceId: string): Promise<void>;
+
   // --- revocation ----------------------------------------------------------
   listRevocations(userId: string): Promise<RevocationRecord[]>;
   appendRevocation(input: {

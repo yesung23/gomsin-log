@@ -62,7 +62,7 @@ async function bootstrapAccount(account: MemoryAccount) {
   await confirmRecoveryKit(device.deps, {
     userId: account.userId,
     recoveryCode: result.recoveryCode,
-    anchorTag: result.anchorTag,
+    kitAnchor: result.kitAnchor,
   });
   return { device, result };
 }
@@ -127,7 +127,7 @@ describe('Scenario A — first device setup', () => {
     expect(wrongKit).toBeNull();
 
     await confirmRecoveryKit(device.deps, {
-      userId: alice.userId, recoveryCode: result.recoveryCode, anchorTag: result.anchorTag,
+      userId: alice.userId, recoveryCode: result.recoveryCode, kitAnchor: result.kitAnchor,
     });
     expect(alice.localState.bootstraps.get(alice.userId)!.state).toBe('COMPLETE');
     expect(server.devices[0].status).toBe('ACTIVE');
@@ -152,7 +152,9 @@ describe('Scenario A — first device setup', () => {
     expect(server.scopeKeys.filter((k) => k.domain === 'personal')).toHaveLength(personalEpochs);
     expect(server.scopeKeys.filter((k) => k.domain === 'health')).toHaveLength(1);
     // And the kit still opens the account after a resume.
-    await confirmRecoveryKit(device.deps, { userId: alice.userId, recoveryCode: again.recoveryCode });
+    await confirmRecoveryKit(device.deps, {
+      userId: alice.userId, recoveryCode: again.recoveryCode, kitAnchor: again.kitAnchor,
+    });
   });
 
   it('confirms only against reloaded persisted state, and a wrong kit changes nothing', async () => {
@@ -166,24 +168,27 @@ describe('Scenario A — first device setup', () => {
     );
 
     await expect(confirmRecoveryKit(device.deps, {
-      userId: alice.userId, recoveryCode: otherKit.recoveryCode,
+      userId: alice.userId, recoveryCode: otherKit.recoveryCode, kitAnchor: result.kitAnchor,
     })).rejects.toThrow(/E_KIT_MISMATCH/);
     expect(alice.localState.bootstraps.get(alice.userId)!.state)
       .toBe('RECOVERY_KIT_PENDING_VERIFICATION');
     expect(server.devices[0].status).toBe('PENDING');
 
-    // A mismatched anchor tag is refused before the AEAD is even reached.
+    // A kit naming another account's recovery identity is refused before the AEAD
+    // is even reached — and there is no way to omit the anchor to get past this.
     await expect(confirmRecoveryKit(device.deps, {
-      userId: alice.userId, recoveryCode: result.recoveryCode, anchorTag: '000-000-000-000',
-    })).rejects.toThrow(/E_KIT_ANCHOR_MISMATCH/);
+      userId: alice.userId,
+      recoveryCode: result.recoveryCode,
+      kitAnchor: { ...result.kitAnchor, recoveryIdentityId: otherKit.kitAnchor.recoveryIdentityId },
+    })).rejects.toThrow(/E_KIT_IDENTITY_MISMATCH/);
 
     const first = await confirmRecoveryKit(device.deps, {
-      userId: alice.userId, recoveryCode: result.recoveryCode, anchorTag: result.anchorTag,
+      userId: alice.userId, recoveryCode: result.recoveryCode, kitAnchor: result.kitAnchor,
     });
     expect(first.alreadyComplete).toBe(false);
     // Idempotent.
     const second = await confirmRecoveryKit(device.deps, {
-      userId: alice.userId, recoveryCode: result.recoveryCode, anchorTag: result.anchorTag,
+      userId: alice.userId, recoveryCode: result.recoveryCode, kitAnchor: result.kitAnchor,
     });
     expect(second.alreadyComplete).toBe(true);
     expect(server.devices[0].status).toBe('ACTIVE');
@@ -727,7 +732,7 @@ describe('Scenario E — kit recovery onto a new device', () => {
       userId: alice.userId,
       platform: 'ios',
       recoveryCode: bootstrapped.result.recoveryCode,
-      anchorTag: bootstrapped.result.anchorTag,
+      kitAnchor: bootstrapped.result.kitAnchor,
     });
 
     expect(recovered.state).toBe('ACTIVE');
@@ -763,7 +768,7 @@ describe('Scenario E — kit recovery onto a new device', () => {
   });
 
   it('a wrong kit recovers nothing and leaves the device non-ACTIVE', async () => {
-    await bootstrapAccount(alice);
+    const aliceKit = await bootstrapAccount(alice);
     const other = createMemoryAccount(createMemoryServer());
     const otherServer = createMemoryServer();
     const otherAccount = createMemoryAccount(otherServer);
@@ -776,7 +781,13 @@ describe('Scenario E — kit recovery onto a new device', () => {
       server, userId: alice.userId, localState: alice.localState,
     });
     await expect(recoverWithKit(a3.deps, {
-      userId: alice.userId, platform: 'ios', recoveryCode: foreignKit.recoveryCode,
+      userId: alice.userId,
+      platform: 'ios',
+      recoveryCode: foreignKit.recoveryCode,
+      // Alice's own anchor, deliberately: the anchor gate therefore passes and
+      // the AEAD is what rejects the foreign secret. Reaching the AEAD at all is
+      // the point — a foreign SECRET must fail even when the anchor is right.
+      kitAnchor: aliceKit.result.kitAnchor,
     })).rejects.toThrow(/E_KIT_MISMATCH/);
 
     // Nothing was created and nothing was rotated: an authenticated session plus

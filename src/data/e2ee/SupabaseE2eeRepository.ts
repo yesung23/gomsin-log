@@ -770,6 +770,68 @@ export class SupabaseE2eeRepository implements E2eeRepository {
     );
   }
 
+  // --- server-authoritative provisioning and scope discovery ---------------
+
+  /**
+   * Couple scopes this account holds, from the server.
+   *
+   * Deliberately takes no argument. Anything the caller could pass would be a
+   * caller-selected subset, which is the defect this replaces.
+   */
+  async listOwnedCoupleScopeIds(): Promise<string[]> {
+    const data = await unwrap(
+      'rpc.e2ee_owned_couple_scope_ids',
+      this.db.rpc('e2ee_owned_couple_scope_ids'),
+    );
+    const list = Array.isArray(data) ? data : [];
+    return list.map((row, index) => requireString(
+      (row as { couple_id?: unknown } | null)?.couple_id,
+      `e2ee_owned_couple_scope_ids[${index}].couple_id`,
+    ));
+  }
+
+  async listMissingDeviceCoverage(
+    deviceId: string,
+  ): Promise<{ domain: KeyDomainName; scopeId: string }[]> {
+    const data = await unwrap(
+      'rpc.e2ee_missing_device_coverage',
+      this.db.rpc('e2ee_missing_device_coverage', { p_device_id: deviceId }),
+    );
+    const list = Array.isArray(data) ? data : [];
+    return list.map((row, index) => {
+      const record = row as { domain?: unknown; scope_id?: unknown } | null;
+      return {
+        domain: decodeEnum<KeyDomainName>(
+          record?.domain,
+          `e2ee_missing_device_coverage[${index}].domain`,
+          ['personal', 'couple', 'health'],
+        ),
+        scopeId: requireString(record?.scope_id, `e2ee_missing_device_coverage[${index}].scope_id`),
+      };
+    });
+  }
+
+  async beginDeviceProvisioning(deviceId: string): Promise<void> {
+    await unwrap(
+      'rpc.e2ee_begin_device_provisioning',
+      this.db.rpc('e2ee_begin_device_provisioning', { p_device_id: deviceId }),
+    );
+  }
+
+  /**
+   * The only path to ACTIVE.
+   *
+   * There is deliberately no client-side pre-check of coverage here: the server
+   * re-verifies everything, and a client that decided for itself would be able to
+   * disagree with the database about what "provisioned" means.
+   */
+  async finalizeDeviceProvisioning(deviceId: string): Promise<void> {
+    await unwrap(
+      'rpc.e2ee_finalize_device_provisioning',
+      this.db.rpc('e2ee_finalize_device_provisioning', { p_device_id: deviceId }),
+    );
+  }
+
   // --- revocation ----------------------------------------------------------
 
   async listRevocations(userId: string): Promise<RevocationRecord[]> {

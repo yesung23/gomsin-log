@@ -56,7 +56,14 @@ import {
   sec1ToSpki,
   sha256,
 } from '@/crypto/suite';
-import { decodeRecoveryCode, deriveKitAnchorTag, encodeRecoveryCode } from '@/crypto/recoveryCode';
+import {
+  RECOVERY_SECRET_BYTES,
+  decodeRecoveryCode,
+  deriveKitAnchorTagV2,
+  encodeRecoveryCode,
+  verifyKitAnchor,
+  type RecoveryKitAnchor,
+} from '@/crypto/recoveryCode';
 import { deriveSas } from '@/crypto/sas';
 import {
   encodeRecoveryChallengeTranscript,
@@ -74,7 +81,7 @@ import {
   provisionScopeKeyToRecipient,
   sealScopeKeyForRecipient,
 } from '@/crypto/keyring/scopeKeys';
-import { canCreateCoupleKey, epochReadyToActivate, type Confirmation } from '@/crypto/protocol/pairing';
+import { canCreateCoupleKey, type Confirmation } from '@/crypto/protocol/pairing';
 import { classifyLostDevice, type HeldScope } from '@/crypto/protocol/rotation';
 import {
   encodeRevocationTbs,
@@ -341,23 +348,21 @@ async function createEpoch(
     });
   }
 
-  await deps.repository.markEpochReady(scopeKeyId);
-
-  const persisted = await deps.repository.listEnvelopes(scopeKeyId);
-  const required = [
-    ...input.recipients.devices.map((d) => uuidToBytes(d.deviceId)),
-    ...input.recipients.recoveryIdentities.map((r) => uuidToBytes(r.id)),
-  ];
-  const gate = epochReadyToActivate({
-    requiredRecipients: required,
-    envelopedRecipients: persisted.map((envelope) => uuidToBytes(envelope.recipientId)),
-    currentState: 'READY',
-  });
-  if (!gate.ready) {
-    // Abandon rather than leave a half-built epoch that a later pass might
-    // mistake for a legitimate one. ABANDONED is terminal.
-    await deps.repository.abandonEpoch(scopeKeyId);
-    fail('E_EPOCH_INCOMPLETE', `epoch is missing ${gate.missing.length} recipient envelope(s)`);
+  // Completeness is the SERVER's decision, and `markEpochReady` is where it is
+  // made. It cannot be made here: RLS correctly hides the partner's envelope
+  // rows, so a client counting what it can read sees 3 of 5 for a couple epoch
+  // and would abandon an epoch that is in fact complete. That is the defect this
+  // replaces — the previous revision re-read `listEnvelopes` and compared counts,
+  // which passed only because the in-memory double exposed both sides.
+  //
+  // The RPC raises E2EE_EPOCH_INCOMPLETE when a required recipient is missing, so
+  // a genuinely half-built epoch still fails; it is abandoned here so it cannot
+  // be mistaken later for a legitimate one, and ABANDONED is terminal.
+  try {
+    await deps.repository.markEpochReady(scopeKeyId);
+  } catch (error) {
+    await deps.repository.abandonEpoch(scopeKeyId).catch(() => {});
+    throw error;
   }
 
   await deps.repository.activateEpoch(scopeKeyId);
@@ -379,6 +384,14 @@ export type BootstrapResult = {
   recoveryIdentityId: string;
   recoveryCode: string;
   anchorTag: string;
+  /**
+   * The trust anchor the user's artifact must carry, alongside the code.
+   *
+   * Returned as data rather than only as a display tag because recovery requires
+   * it: `recoverWithKit` takes the anchor itself, so whatever persists the kit
+   * has to persist all of it.
+   */
+  kitAnchor: RecoveryKitAnchor;
   resumed: boolean;
 };
 
@@ -604,6 +617,12 @@ export async function bootstrapFirstDevice(
             recoveryIdentities: [{ id: identity.id, kemSpki: identity.recKemSpki }],
           },
           sender,
+          // This device generated the key and wrapped it to itself, so its own
+          // envelope needs nobody else's certificate to be verifiable. Marking it
+          // here is what lets the provisioning gate see the first device as
+          // covered — and the flag is only ever applied to the sender's own
+          // envelope, never to the recovery identity's.
+          selfNotarized: true,
         });
         if (domain === 'personal') pending.personalScopeKeyId = created.id;
         else pending.healthScopeKeyId = created.id;
@@ -617,9 +636,14 @@ export async function bootstrapFirstDevice(
   }
 
   const recoveryCode = pending.recoveryCode ?? (await encodeRecoveryCode(recoverySecret));
-  const anchorTag = await deriveKitAnchorTag(
-    uuidToBytes(identity.id), identity.recoveryVersion, identity.recoveryBundleFp,
-  );
+  const kitAnchor: RecoveryKitAnchor = {
+    recoveryIdentityId: uuidToBytes(identity.id),
+    recoveryVersion: identity.recoveryVersion,
+    recoveryBundleFp: identity.recoveryBundleFp,
+    serverOriginId,
+    userId: userIdBytes,
+  };
+  const anchorTag = await deriveKitAnchorTagV2(kitAnchor);
 
   pending.recoveryCode = recoveryCode;
   pending.anchorTag = anchorTag;
@@ -632,6 +656,7 @@ export async function bootstrapFirstDevice(
     recoveryIdentityId: identity.id,
     recoveryCode,
     anchorTag,
+    kitAnchor,
     resumed,
   };
 }
@@ -795,7 +820,19 @@ async function unsealWithCode(
  */
 export async function confirmRecoveryKit(
   deps: UseCaseDeps,
-  input: { userId: string; recoveryCode: string; anchorTag?: string },
+  input: {
+    userId: string;
+    recoveryCode: string;
+    /**
+     * The anchor from the artifact being confirmed. MANDATORY.
+     *
+     * Confirmation is the step that proves the user kept a USABLE kit, and a kit
+     * without its anchor is not usable for recovery — `recoverWithKit` will
+     * refuse it. Accepting a bare code here would confirm an account into a state
+     * whose recovery path cannot run.
+     */
+    kitAnchor: RecoveryKitAnchor;
+  },
 ): Promise<{ state: 'COMPLETE'; alreadyComplete: boolean }> {
   requireEnabled(deps);
 
@@ -814,6 +851,7 @@ export async function confirmRecoveryKit(
   }
 
   const userIdBytes = uuidToBytes(input.userId);
+  const serverOriginId = await deps.repository.serverOriginId();
 
   // The fingerprint is RECOMPUTED from the stored bundle, then compared to the
   // stored fingerprint. A server that swapped a public key would have to break
@@ -834,12 +872,18 @@ export async function confirmRecoveryKit(
   );
   if (!bundleSigOk) fail('E_BUNDLE_SIG_INVALID', 'the stored recovery bundle signature does not verify');
 
-  const anchorTag = await deriveKitAnchorTag(
-    uuidToBytes(identity.id), identity.recoveryVersion, identity.recoveryBundleFp,
+  // The same total check recovery performs, so an artifact that would fail at
+  // recovery time cannot be confirmed as good now.
+  await verifyKitAnchor(
+    { secret: new Uint8Array(RECOVERY_SECRET_BYTES), anchor: input.kitAnchor },
+    {
+      recoveryIdentityId: uuidToBytes(identity.id),
+      recoveryVersion: identity.recoveryVersion,
+      recoveryBundleFp: identity.recoveryBundleFp,
+      serverOriginId,
+      userId: userIdBytes,
+    },
   );
-  if (input.anchorTag && input.anchorTag !== anchorTag) {
-    fail('E_KIT_ANCHOR_MISMATCH', 'the anchor tag does not match the served recovery bundle');
-  }
 
   // The full code, decoded and checksummed, then actually USED: the AEAD is what
   // proves this kit opens this account, and the key-pair consistency check
@@ -856,10 +900,16 @@ export async function confirmRecoveryKit(
   });
   await deps.localState.clearBootstrapSecret(input.userId);
 
-  // Operational status follows the certificate, never leads it.
+  // Operational status follows the evidence, never leads it — and the server is
+  // what checks the evidence. The first device already holds its recovery-rooted
+  // certificate and a self-notarized envelope for every epoch bootstrap created,
+  // so finalization succeeds here; if it somehow does not, the account stays
+  // confirmed but the device stays visibly unprovisioned rather than claiming a
+  // readiness it cannot back.
   const device = await deps.repository.getDevice(pending.deviceId);
-  if (device && device.status === 'PENDING') {
-    await deps.repository.setDeviceStatus(pending.deviceId, 'ACTIVE');
+  if (device && device.status !== 'ACTIVE') {
+    await deps.repository.beginDeviceProvisioning(pending.deviceId);
+    await deps.repository.finalizeDeviceProvisioning(pending.deviceId);
   }
   return { state: 'COMPLETE', alreadyComplete: false };
 }
@@ -897,10 +947,14 @@ export async function recoverWithKit(
     userId: string;
     platform: PlatformName;
     recoveryCode: string;
-    /** The 12-digit tag printed on the kit. Pinned against the served bundle. */
-    anchorTag?: string;
-    /** Couple scope to rotate as well, when the account has one. */
-    coupleId?: string;
+    /**
+     * The trust anchor from the user's kit. MANDATORY.
+     *
+     * Not optional, and not a tag the caller may omit: with no anchor the only
+     * remaining authority on which recovery generation is current is the server,
+     * which is exactly the rollback V2.1 section 7 requires the kit to detect.
+     */
+    kitAnchor: RecoveryKitAnchor;
     userConfirmedSecureErase?: boolean;
   },
 ): Promise<RecoveryResult> {
@@ -914,14 +968,23 @@ export async function recoverWithKit(
   const identity = await deps.repository.getRecoveryIdentity(input.userId);
   if (!identity) fail('E_RECOVERY_IDENTITY_MISSING', 'this account has no recovery identity');
 
-  // 2. Verify the external kit anchor before anything is trusted. The kit, not
-  // the server, decides which bundle is current.
-  const servedAnchorTag = await deriveKitAnchorTag(
-    uuidToBytes(identity.id), identity.recoveryVersion, identity.recoveryBundleFp,
+  // 2. The kit decides which bundle is current, not the server.
+  //
+  // This runs before the bundle fingerprint is recomputed and before any AEAD is
+  // attempted, so a server offering an older genuine generation is rejected on
+  // the strength of the user's artifact alone. Total function: every field of
+  // the anchor is compared, and there is no path through recovery that skips it.
+  await verifyKitAnchor(
+    { secret: new Uint8Array(RECOVERY_SECRET_BYTES), anchor: input.kitAnchor },
+    {
+      recoveryIdentityId: uuidToBytes(identity.id),
+      recoveryVersion: identity.recoveryVersion,
+      recoveryBundleFp: identity.recoveryBundleFp,
+      serverOriginId,
+      userId: userIdBytes,
+    },
   );
-  if (input.anchorTag && input.anchorTag !== servedAnchorTag) {
-    fail('E_KIT_ANCHOR_MISMATCH', 'the served recovery bundle is not the one the kit names');
-  }
+
   const recomputedFp = await recoveryBundleFingerprint({
     recoveryVersion: identity.recoveryVersion,
     userId: userIdBytes,
@@ -1068,7 +1131,10 @@ export async function recoverWithKit(
     });
 
     // 12. Only now does the device claim to be provisioning.
-    await deps.repository.setDeviceStatus(deviceId, 'PROVISIONING');
+    //
+    // Through the server RPC, which re-checks that a certificate exists. A
+    // direct status write is refused by the database.
+    await deps.repository.beginDeviceProvisioning(deviceId);
 
     await deps.localState.pinTrustAnchor(input.userId, {
       rootRecSigPubFp: rootRecSigFp,
@@ -1153,18 +1219,39 @@ export async function recoverWithKit(
       superseded.push(device.id);
     }
 
-    // 18-21. Rotate every domain this account holds, and read back the result.
+    // 18-21. Rotate every domain this account holds.
+    //
+    // The couple set comes from the SERVER, not from the caller. A caller-supplied
+    // list is a caller-selected subset: omit a couple and the CSK a displaced
+    // device still holds is never rotated, while the recovery reports success.
+    const coupleIds = await deps.repository.listOwnedCoupleScopeIds();
     const rotated = await rotateAllScopes(deps, {
       userId: input.userId,
       anchor,
       sender,
       recoveryIdentity: { id: identity.id, kemSpki: identity.recKemSpki },
-      coupleId: input.coupleId,
+      coupleIds,
       atMs: nowMs,
     });
 
-    // 22. Only now.
-    await deps.repository.setDeviceStatus(deviceId, 'ACTIVE');
+    // Every discovered couple scope must actually have rotated. `rotateAllScopes`
+    // throws on a failed rotation, so this catches the quieter failure: a scope
+    // that was skipped rather than attempted.
+    const rotatedCouples = new Set(
+      rotated.filter((scope) => scope.domain === 'couple').map((scope) => scope.scopeId),
+    );
+    const missed = coupleIds.filter((id) => !rotatedCouples.has(id));
+    if (missed.length > 0) {
+      fail(
+        'E_RECOVERY_ROTATION_INCOMPLETE',
+        `${missed.length} couple scope(s) did not rotate; recovery is not complete`,
+      );
+    }
+
+    // 22. Only now, and only with the server's agreement. It re-verifies the
+    // certificate, the absence of a revocation, and full envelope coverage; a
+    // partial recovery cannot reach ACTIVE by asserting that it did.
+    await deps.repository.finalizeDeviceProvisioning(deviceId);
     return {
       state: 'ACTIVE',
       deviceId,
@@ -1540,7 +1627,6 @@ export async function completeSecondDeviceProvisioning(
     userId: string;
     newDeviceId: string;
     provisioningDeviceId: string;
-    coupleId?: string;
   },
 ): Promise<{ state: 'PROVISIONED'; provisioned: { domain: KeyDomainName; scopeKeyId: string; epoch: bigint }[] }> {
   requireEnabled(deps);
@@ -1569,7 +1655,11 @@ export async function completeSecondDeviceProvisioning(
     { domain: 'personal', scopeId: input.userId },
     { domain: 'health', scopeId: input.userId },
   ];
-  if (input.coupleId) scopes.push({ domain: 'couple', scopeId: input.coupleId });
+  // Server-discovered, so a caller cannot omit the couple scope and leave the new
+  // device unable to read shared content while still reporting PROVISIONED.
+  for (const coupleId of await deps.repository.listOwnedCoupleScopeIds()) {
+    scopes.push({ domain: 'couple', scopeId: coupleId });
+  }
 
   for (const { domain, scopeId } of scopes) {
     if (!target.verified.grantedDomains.includes(domain)) continue;
@@ -2190,7 +2280,8 @@ async function rotateAllScopes(
     anchor: TrustAnchor;
     sender: SenderIdentity;
     recoveryIdentity: { id: string; kemSpki: Uint8Array };
-    coupleId?: string;
+    /** Server-discovered. Never a caller-selected subset. */
+    coupleIds: string[];
     atMs: bigint;
     /** Restrict to these scopes; omit to rotate every live scope. */
     only?: HeldScope[];
@@ -2235,20 +2326,23 @@ async function rotateAllScopes(
     }
   }
 
-  if (input.coupleId && wanted('couple', input.coupleId)) {
-    const keys = await deps.repository.listScopeKeys('couple', input.coupleId);
-    if (keys.some((key) => key.state === 'ACTIVE')) {
-      const rotatedCouple = await rotateCoupleScope(deps, {
-        coupleId: input.coupleId,
-        userId: input.userId,
-        anchor: input.anchor,
-        revocations,
-        sender: input.sender,
-        recoveryIdentity: input.recoveryIdentity,
-        atMs: input.atMs,
-      });
-      rotated.push(rotatedCouple);
-    }
+  // Every discovered couple scope, in order. A failure throws rather than being
+  // collected: a partially rotated account must not read as a success, and the
+  // caller decides whether the device may proceed.
+  for (const coupleId of input.coupleIds) {
+    if (!wanted('couple', coupleId)) continue;
+    const keys = await deps.repository.listScopeKeys('couple', coupleId);
+    if (!keys.some((key) => key.state === 'ACTIVE')) continue;
+    const rotatedCouple = await rotateCoupleScope(deps, {
+      coupleId,
+      userId: input.userId,
+      anchor: input.anchor,
+      revocations,
+      sender: input.sender,
+      recoveryIdentity: input.recoveryIdentity,
+      atMs: input.atMs,
+    });
+    rotated.push(rotatedCouple);
   }
   return rotated;
 }
@@ -2377,7 +2471,6 @@ export async function revokeDeviceAndRotate(
     revokedDeviceId: string;
     revokerDeviceId: string;
     userConfirmedSecureErase: boolean;
-    coupleId?: string;
   },
 ): Promise<RevocationOutcome> {
   requireEnabled(deps);
@@ -2469,7 +2562,10 @@ export async function revokeDeviceAndRotate(
     anchor,
     sender,
     recoveryIdentity: { id: identity.id, kemSpki: identity.recKemSpki },
-    coupleId: input.coupleId,
+    // Server-discovered here too: revoking a device must rotate every couple key
+    // it held, and a caller that named none would leave the revoked device with a
+    // live shared key.
+    coupleIds: await deps.repository.listOwnedCoupleScopeIds(),
     atMs: nowMs,
     only: held.length > 0 ? held : undefined,
   });

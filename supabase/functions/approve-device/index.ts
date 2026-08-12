@@ -152,6 +152,8 @@ Deno.serve(async (request) => {
         p_recovery_version: input.recoveryVersion,
         p_subject_sig_spki: encodePgBytea(input.subjectSigSpki),
         p_subject_kem_spki: encodePgBytea(input.subjectKemSpki),
+        // The verified approver certificate. The RPC re-validates it.
+        p_issuer_certificate_id: input.issuerCertificateId,
       });
       if (error) {
         return {

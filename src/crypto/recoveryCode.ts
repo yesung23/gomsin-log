@@ -14,7 +14,7 @@
  * about 1 - 2^-20 and makes no integrity claim. It is never stored server-side.
  */
 
-import { concat, utf8 } from './bytes';
+import { concat, equalBytes, utf8 } from './bytes';
 import { sha256 } from './suite';
 
 export const RECOVERY_SECRET_BYTES = 32;
@@ -25,10 +25,35 @@ export const TOTAL_SYMBOLS = SECRET_SYMBOLS + CHECKSUM_SYMBOLS;
 export const GROUP_SIZE = 4;
 export const GROUP_COUNT = TOTAL_SYMBOLS / GROUP_SIZE; // 14
 
+/**
+ * The canonical recovery kit: the secret AND the trust anchor it belongs to.
+ *
+ * V2.1 section 7 requires the kit to be the external trust anchor, carrying the
+ * recovery identity, version and bundle fingerprint so that a server serving an
+ * older genuine bundle is detected. An optional side-channel cannot do that job:
+ * anything a caller may omit is something an attacker may omit, and once it is
+ * absent the only remaining authority on which recovery generation is current is
+ * the server — which is precisely the rollback this is supposed to prevent.
+ *
+ * So the anchor is part of the artifact rather than printed beside it. A kit that
+ * decodes at all has an anchor, and `verifyKitAnchor` is a total function over
+ * what the server offers.
+ */
+export const KIT_ANCHOR_BYTES = 16 /* recovery identity */
+  + 1 /* recovery version */
+  + 32 /* recovery bundle fp */
+  + 32 /* server origin id */
+  + 16 /* user id */;
+
+/** Kit format version, so a future layout is distinguishable rather than ambiguous. */
+export const KIT_FORMAT_V1 = 1;
+
 /** Crockford Base32: no I, L, O or U. */
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 const CHECKSUM_LABEL = utf8('gomsinlog/recovery-checksum/v1');
+const KIT_ANCHOR_LABEL = utf8('gomsinlog/kit-anchor/v1');
+const KIT_BINDING_LABEL = utf8('gomsinlog/kit-binding/v1');
 
 export class RecoveryCodeError extends Error {
   readonly code: string;
@@ -143,6 +168,131 @@ export async function decodeRecoveryCode(input: string): Promise<Uint8Array> {
   const expected = await checksumSymbols(secret);
   if (expected !== checksum) fail('E_BAD_CHECKSUM', 'recovery code checksum does not match');
   return secret;
+}
+
+/**
+ * Everything the user's artifact must independently bind.
+ *
+ * All six fields are required. There is no partial form and no optional field,
+ * because each omission is a substitution an attacker gets for free: drop the
+ * origin and a kit works against another deployment; drop the version and a
+ * rollback stops being detectable.
+ */
+export type RecoveryKitAnchor = {
+  recoveryIdentityId: Uint8Array;
+  recoveryVersion: number;
+  recoveryBundleFp: Uint8Array;
+  serverOriginId: Uint8Array;
+  userId: Uint8Array;
+};
+
+export type RecoveryKit = {
+  secret: Uint8Array;
+  anchor: RecoveryKitAnchor;
+};
+
+function assertAnchor(anchor: RecoveryKitAnchor): void {
+  if (anchor.recoveryIdentityId.length !== 16) {
+    fail('E_FIELD_WIDTH', 'recovery identity id must be 16 bytes');
+  }
+  if (!Number.isInteger(anchor.recoveryVersion)
+    || anchor.recoveryVersion < 1 || anchor.recoveryVersion > 255) {
+    fail('E_FIELD_WIDTH', 'recovery version must be a single byte from 1 to 255');
+  }
+  if (anchor.recoveryBundleFp.length !== 32) {
+    fail('E_FIELD_WIDTH', 'recovery bundle fingerprint must be 32 bytes');
+  }
+  if (anchor.serverOriginId.length !== 32) fail('E_FIELD_WIDTH', 'server origin id must be 32 bytes');
+  if (anchor.userId.length !== 16) fail('E_FIELD_WIDTH', 'user id must be 16 bytes');
+}
+
+/** The canonical anchor bytes. Fixed width, fixed order, no JSON. */
+export function encodeKitAnchor(anchor: RecoveryKitAnchor): Uint8Array {
+  assertAnchor(anchor);
+  return concat(
+    anchor.recoveryIdentityId,
+    new Uint8Array([anchor.recoveryVersion]),
+    anchor.recoveryBundleFp,
+    anchor.serverOriginId,
+    anchor.userId,
+  );
+}
+
+/**
+ * The 12-digit tag a human transcribes or compares.
+ *
+ * Derived over the FULL canonical anchor, so it commits to origin and account as
+ * well as to identity, version and bundle. Rejection sampling matches the SAS to
+ * avoid modulo bias.
+ */
+export async function deriveKitAnchorTagV2(anchor: RecoveryKitAnchor): Promise<string> {
+  const encoded = encodeKitAnchor(anchor);
+  for (let counter = 0; counter < 256; counter += 1) {
+    const digest = await sha256(concat(KIT_ANCHOR_LABEL, new Uint8Array([counter]), encoded));
+    let value = 0n;
+    for (let i = 0; i < 8; i += 1) value = (value << 8n) | BigInt(digest[i]);
+    const ceiling = 18_446_744_000_000_000_000n;
+    if (value >= ceiling) continue;
+    const digits = String(value % 1_000_000_000_000n).padStart(12, '0');
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 9)}-${digits.slice(9)}`;
+  }
+  fail('E_SAMPLING', 'anchor tag rejection sampling failed to terminate');
+}
+
+/**
+ * Bind a secret to exactly one anchor.
+ *
+ * This is what makes "valid secret paired with the wrong anchor" detectable. The
+ * binding is a hash, not a MAC under a separate key, and it makes no
+ * confidentiality claim: its job is to ensure the two halves of a kit cannot be
+ * recombined across accounts, deployments or recovery generations.
+ */
+export async function deriveKitBinding(
+  secret: Uint8Array,
+  anchor: RecoveryKitAnchor,
+): Promise<Uint8Array> {
+  if (secret.length !== RECOVERY_SECRET_BYTES) {
+    fail('E_SECRET_WIDTH', `recovery secret must be ${RECOVERY_SECRET_BYTES} bytes`);
+  }
+  return sha256(concat(KIT_BINDING_LABEL, new Uint8Array([KIT_FORMAT_V1]), secret, encodeKitAnchor(anchor)));
+}
+
+/**
+ * What the server offers, checked against what the user holds.
+ *
+ * Every field is compared. `verifyKitAnchor` is the single gate the recovery
+ * path calls, so there is no route through recovery that skips one: an older but
+ * cryptographically valid bundle differs in version and fingerprint and is
+ * rejected here, before any AEAD is attempted.
+ */
+export async function verifyKitAnchor(
+  kit: RecoveryKit,
+  served: RecoveryKitAnchor,
+): Promise<void> {
+  assertAnchor(kit.anchor);
+  assertAnchor(served);
+
+  if (!equalBytes(kit.anchor.userId, served.userId)) {
+    fail('E_KIT_ACCOUNT_MISMATCH', 'this kit belongs to a different account');
+  }
+  if (!equalBytes(kit.anchor.serverOriginId, served.serverOriginId)) {
+    fail('E_KIT_ORIGIN_MISMATCH', 'this kit belongs to a different deployment');
+  }
+  if (!equalBytes(kit.anchor.recoveryIdentityId, served.recoveryIdentityId)) {
+    fail('E_KIT_IDENTITY_MISMATCH', 'the served recovery identity is not the one this kit names');
+  }
+  if (kit.anchor.recoveryVersion !== served.recoveryVersion) {
+    // Strictly a mismatch rather than "older": a server offering a NEWER
+    // generation than the kit is equally unusable, and treating it as an upgrade
+    // would let a server retire a kit the user still holds.
+    fail(
+      'E_KIT_VERSION_MISMATCH',
+      `this kit names recovery generation ${kit.anchor.recoveryVersion}, the server offered ${served.recoveryVersion}`,
+    );
+  }
+  if (!equalBytes(kit.anchor.recoveryBundleFp, served.recoveryBundleFp)) {
+    fail('E_KIT_BUNDLE_MISMATCH', 'the served recovery bundle is not the one this kit names');
+  }
 }
 
 /**

@@ -29,6 +29,8 @@ import { equalBytes, hex, toBase64, unhex } from '@/crypto/bytes';
 import { ASSURANCE, type Assurance, type PlatformName } from '@/crypto/domains';
 import { toP1363 } from '@/crypto/ecdsaFormat';
 import { randomBytes } from '@/crypto/suite';
+import { decodeTbs } from '@/crypto/deviceCertificate';
+import { grantsToMask, type KeyDomainName } from '@/crypto/domains';
 import type { DeviceKeyPort } from '@/crypto/keystore';
 import {
   handleApproveDevice,
@@ -131,6 +133,69 @@ function partnerOf(server: MemoryServer, userId: string): string | null {
 }
 
 /**
+ * The users whose material a scope must reach.
+ *
+ * Mirrors the `scope_users` CTE in `e2ee_required_epoch_recipients`: the owner
+ * for personal/health, both active members for a couple scope.
+ */
+function scopeUsers(server: MemoryServer, scope: ScopeKeyRecord): string[] {
+  if (scope.domain !== 'couple') return scope.ownerUserId ? [scope.ownerUserId] : [];
+  const members = server.couples.get(scope.scopeId);
+  return members ? [members[0], members[1]] : [];
+}
+
+const DOMAIN_BIT: Record<KeyDomainName, number> = { personal: 1, couple: 2, health: 4 };
+
+/**
+ * `e2ee_required_epoch_recipients`, in memory.
+ *
+ * Certificate-driven and status-blind, exactly as the SQL is: a device mid
+ * provisioning still needs the key, and `devices.status` has no cryptographic
+ * authority anywhere (V2.1 section 3).
+ */
+export function requiredRecipients(
+  server: MemoryServer,
+  scope: ScopeKeyRecord,
+): { kind: 'device' | 'recovery_identity'; id: string }[] {
+  const users = scopeUsers(server, scope);
+  const bit = DOMAIN_BIT[scope.domain];
+  const revoked = new Set(server.revocations.map((r) => r.revokedDeviceId));
+
+  const devices = new Set<string>();
+  for (const certificate of server.certificates) {
+    if (!users.includes(certificate.userId)) continue;
+    if (revoked.has(certificate.subjectDeviceId)) continue;
+    const device = server.devices.find((d) => d.id === certificate.subjectDeviceId);
+    if (!device || device.status === 'REVOKED' || device.status === 'PROVISIONING_FAILED') continue;
+    const mask = grantsToMask(decodeTbs(certificate.certificate.subarray(0, 317)).grantedDomains);
+    if ((mask & bit) === 0) continue;
+    devices.add(certificate.subjectDeviceId);
+  }
+
+  const recovery = server.recoveryIdentities
+    .filter((r) => users.includes(r.userId) && r.supersededAt === null)
+    .map((r) => ({ kind: 'recovery_identity' as const, id: r.id }));
+
+  return [...[...devices].map((id) => ({ kind: 'device' as const, id })), ...recovery];
+}
+
+/** `e2ee_can_manage_scope_key`, including its NULL-safe reading. */
+function canManageScope(server: MemoryServer, scope: ScopeKeyRecord, userId: string): boolean {
+  if (scope.domain !== 'couple') return scope.ownerUserId === userId;
+  return scopeUsers(server, scope).includes(userId);
+}
+
+/** The "Recipient reads own envelopes" policy. */
+function envelopeVisibleTo(server: MemoryServer, envelope: EnvelopeRecord, userId: string): boolean {
+  if (envelope.recipientKind === 'device') {
+    return server.devices.some((d) => d.id === envelope.recipientId && d.userId === userId);
+  }
+  return server.recoveryIdentities.some(
+    (r) => r.id === envelope.recipientId && r.userId === userId,
+  );
+}
+
+/**
  * The repository as one authenticated account sees it.
  *
  * Scoped per user on purpose: `get_partner_recovery_anchor()` is defined in
@@ -144,6 +209,49 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
     const scope = server.scopeKeys.find((k) => k.id === scopeKeyId);
     if (!scope) reject('E2EE_UNKNOWN_EPOCH');
     return scope;
+  };
+
+  /**
+   * Shared by the coverage query and the finalization gate, so the two cannot
+   * disagree about what "covered" means — the same reason the SQL factors this
+   * into `e2ee_missing_device_coverage`.
+   */
+  const missingCoverage = (deviceId: string): { domain: KeyDomainName; scopeId: string }[] => {
+    const device = server.devices.find((d) => d.id === deviceId);
+    if (!device) reject('E2EE_UNKNOWN_DEVICE');
+    const certificate = [...server.certificates].reverse()
+      .find((c) => c.subjectDeviceId === deviceId);
+    if (!certificate) reject('E2EE_DEVICE_UNCERTIFIED');
+
+    const mask = grantsToMask(decodeTbs(certificate.certificate.subarray(0, 317)).grantedDomains);
+    const coupleId = [...server.couples.entries()]
+      .find(([, members]) => members.includes(device.userId))?.[0] ?? null;
+
+    const required: { domain: KeyDomainName; scopeId: string }[] = [];
+    if ((mask & DOMAIN_BIT.personal) !== 0) {
+      required.push({ domain: 'personal', scopeId: device.userId });
+    }
+    if ((mask & DOMAIN_BIT.health) !== 0) {
+      required.push({ domain: 'health', scopeId: device.userId });
+    }
+    if ((mask & DOMAIN_BIT.couple) !== 0 && coupleId) {
+      const hasActive = server.scopeKeys.some(
+        (k) => k.domain === 'couple' && k.scopeId === coupleId && k.state === 'ACTIVE',
+      );
+      if (hasActive) required.push({ domain: 'couple', scopeId: coupleId });
+    }
+
+    return required.filter((entry) => !server.scopeKeys.some(
+      (scope) => scope.domain === entry.domain
+        && scope.scopeId === entry.scopeId
+        && scope.state === 'ACTIVE'
+        && server.envelopes.some(
+          (e) => e.scopeKeyId === scope.id
+            && e.recipientKind === 'device'
+            && e.recipientId === deviceId
+            && e.selfNotarized === true,
+        ),
+    ));
   };
 
   return {
@@ -236,12 +344,29 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
     },
     markEpochReady: async (id) => {
       const scope = requireScope(id);
+      // `e2ee_mark_epoch_ready`. The old fake accepted "at least one envelope
+      // exists"; the real function verifies FULL recipient coverage internally,
+      // which is the only way the check can be correct while RLS hides partner
+      // rows from the client.
+      if (!canManageScope(server, scope, userId)) reject('E2EE_EPOCH_FORBIDDEN');
       if (scope.state !== 'PREPARING') reject('E2EE_ILLEGAL_EPOCH_TRANSITION');
-      if (!server.envelopes.some((e) => e.scopeKeyId === id)) reject('E2EE_EPOCH_NO_RECIPIENTS');
+
+      const missing = requiredRecipients(server, scope).filter((req) => !server.envelopes.some(
+        (e) => e.scopeKeyId === id && e.recipientKind === req.kind && e.recipientId === req.id,
+      ));
+      if (missing.length > 0) reject('E2EE_EPOCH_INCOMPLETE');
+
+      const revokedNow = new Set(server.revocations.map((r) => r.revokedDeviceId));
+      if (server.envelopes.some(
+        (e) => e.scopeKeyId === id && e.recipientKind === 'device' && revokedNow.has(e.recipientId),
+      )) {
+        reject('E2EE_EPOCH_HAS_REVOKED_RECIPIENT');
+      }
       scope.state = 'READY';
     },
     activateEpoch: async (id) => {
       const scope = requireScope(id);
+      if (!canManageScope(server, scope, userId)) reject('E2EE_EPOCH_FORBIDDEN');
       // The resurrection guard: RETIRED and ABANDONED are terminal.
       if (scope.state !== 'READY') reject('E2EE_ILLEGAL_EPOCH_TRANSITION');
       const revoked = new Set(server.revocations.map((r) => r.revokedDeviceId));
@@ -263,7 +388,18 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
       scope.state = 'ABANDONED';
     },
 
-    listEnvelopes: async (scopeKeyId) => server.envelopes.filter((e) => e.scopeKeyId === scopeKeyId),
+    /**
+     * Only the envelopes THIS account may read.
+     *
+     * The permissive version returned every row and is the reason P0-3 shipped:
+     * the application counted partner envelopes to decide epoch completeness and
+     * passed here, while the real "Recipient reads own envelopes" policy hides B's
+     * rows from A and the same code abandoned a complete epoch. Enforcing the
+     * policy here makes that class of defect fail a test instead of production.
+     */
+    listEnvelopes: async (scopeKeyId) => server.envelopes.filter(
+      (e) => e.scopeKeyId === scopeKeyId && envelopeVisibleTo(server, e, userId),
+    ),
     listEnvelopesForDevice: async (deviceId) =>
       server.envelopes.filter((e) => e.recipientKind === 'device' && e.recipientId === deviceId),
     listEnvelopesForRecoveryIdentity: async (recoveryIdentityId) =>
@@ -340,6 +476,68 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
     approveDeviceEnrollment: async (input) => runApproveDevice(server, userId, input),
 
     getPairing: async (coupleId) => server.pairings.find((p) => p.coupleId === coupleId) ?? null,
+
+    /**
+     * `e2ee_owned_couple_scope_ids()`.
+     *
+     * Server-side discovery. The fake must not accept a caller-supplied list
+     * either, or the P0-5 defect would survive here.
+     */
+    listOwnedCoupleScopeIds: async () => {
+      const owned: string[] = [];
+      for (const [coupleId, members] of server.couples) {
+        if (!members.includes(userId)) continue;
+        const live = server.scopeKeys.some(
+          (k) => k.domain === 'couple' && k.scopeId === coupleId
+            && (k.state === 'ACTIVE' || k.state === 'PREPARING' || k.state === 'READY'),
+        );
+        if (live) owned.push(coupleId);
+      }
+      return owned;
+    },
+
+    /** `e2ee_missing_device_coverage`. Fails closed on an uncertified device. */
+    listMissingDeviceCoverage: async (deviceId) => missingCoverage(deviceId),
+
+    /** `e2ee_begin_device_provisioning`. Requires a certificate first. */
+    beginDeviceProvisioning: async (deviceId) => {
+      const device = server.devices.find((d) => d.id === deviceId);
+      if (!device) reject('E2EE_UNKNOWN_DEVICE');
+      if (device.userId !== userId) reject('E2EE_DEVICE_WRONG_ACCOUNT');
+      if (device.status === 'PROVISIONING') return;
+      if (device.status !== 'PENDING' && device.status !== 'RECOVERY_AUTHENTICATED') {
+        reject('E2EE_ILLEGAL_DEVICE_TRANSITION');
+      }
+      if (!server.certificates.some((c) => c.subjectDeviceId === deviceId)) {
+        reject('E2EE_DEVICE_UNCERTIFIED');
+      }
+      device.status = 'PROVISIONING';
+    },
+
+    /**
+     * `e2ee_finalize_device_provisioning` — the ONLY path to ACTIVE.
+     *
+     * The old fake let the application assign `status = 'ACTIVE'` directly, which
+     * is what allowed a half-provisioned device to look finished. Every condition
+     * the SQL checks is checked here in the same order.
+     */
+    finalizeDeviceProvisioning: async (deviceId) => {
+      const device = server.devices.find((d) => d.id === deviceId);
+      if (!device) reject('E2EE_UNKNOWN_DEVICE');
+      if (device.userId !== userId) reject('E2EE_DEVICE_WRONG_ACCOUNT');
+      if (server.revocations.some((r) => r.revokedDeviceId === deviceId)) {
+        reject('E2EE_DEVICE_REVOKED');
+      }
+      if (device.status === 'ACTIVE') return;
+      if (device.status !== 'PROVISIONING' && device.status !== 'RECOVERY_AUTHENTICATED') {
+        reject('E2EE_DEVICE_NOT_PROVISIONING');
+      }
+      if (!server.certificates.some((c) => c.subjectDeviceId === deviceId)) {
+        reject('E2EE_DEVICE_UNCERTIFIED');
+      }
+      if (missingCoverage(deviceId).length > 0) reject('E2EE_PROVISIONING_INCOMPLETE');
+      device.status = 'ACTIVE';
+    },
     setPairingState: async (id, state) => {
       const row = server.pairings.find((p) => p.id === id);
       if (!row) reject('E2EE_UNKNOWN_PAIRING');
@@ -507,14 +705,28 @@ async function runApproveDevice(
         enrollment.transcriptHash = commit.transcriptHash;
         enrollment.approvalSignature = commit.approvalSignature;
 
-        const approverCertificate = [...server.certificates].reverse()
-          .find((c) => c.subjectDeviceId === enrollment.approverDeviceId);
+        // `e2ee_commit_device_approval` requires the issuer certificate from the
+        // CALLER and re-validates it. The fake used to look the approver's newest
+        // certificate up itself and fill the column in — which is precisely why
+        // the RPC's missing parameter went unnoticed until a real database
+        // rejected every approval on device_certificates_chain.
+        if (!commit.issuerCertificateId) reject('E2EE_ISSUER_CERTIFICATE_REQUIRED');
+        const issuer = server.certificates.find((c) => c.id === commit.issuerCertificateId);
+        if (!issuer) reject('E2EE_UNKNOWN_ISSUER_CERTIFICATE');
+        if (issuer.userId !== commit.userId) reject('E2EE_ISSUER_WRONG_ACCOUNT');
+        if (issuer.subjectDeviceId !== enrollment.approverDeviceId) {
+          reject('E2EE_ISSUER_NOT_APPROVER');
+        }
+        if (server.revocations.some((r) => r.revokedDeviceId === issuer.subjectDeviceId)) {
+          reject('E2EE_ISSUER_REVOKED');
+        }
+
         server.certificates.push({
           id: crypto.randomUUID(),
           userId: commit.userId,
           subjectDeviceId: commit.newDeviceId,
           issuerDeviceId: enrollment.approverDeviceId,
-          issuerCertificateId: approverCertificate?.id ?? null,
+          issuerCertificateId: commit.issuerCertificateId,
           recoveryPublicAnchorId: null,
           recoveryIdentityId: commit.recoveryIdentityId,
           recoveryVersion: commit.recoveryVersion,
@@ -523,7 +735,9 @@ async function runApproveDevice(
           subjectSigSpki: commit.subjectSigSpki,
           subjectKemSpki: commit.subjectKemSpki,
         });
-        device.status = 'ACTIVE';
+        // Approval is not provisioning. The device holds a verifiable certificate
+        // and not one scope key.
+        device.status = 'PROVISIONING';
         return { ok: true };
       },
       logEvent: noopLog,

@@ -210,12 +210,43 @@ DROP FUNCTION IF EXISTS public.e2ee_prepare_account_deletion(UUID);
 DROP FUNCTION IF EXISTS public.e2ee_commit_device_approval(
   UUID, UUID, BYTEA, BYTEA, BYTEA, BYTEA, UUID, UUID, SMALLINT, BYTEA, BYTEA
 );
+-- BOTH approval signatures, for the same reason as the recovery pair below: 031
+-- created the eleven-argument form and 035 replaced it with a twelve-argument one
+-- that also takes the issuer certificate. A rollback that knew only one shape
+-- would leave the other behind, and on a database that applied 035 the leftover
+-- would be the DEFECTIVE function — reachable, and unable to satisfy
+-- device_certificates_chain.
+DROP FUNCTION IF EXISTS public.e2ee_commit_device_approval(
+  UUID, UUID, BYTEA, BYTEA, BYTEA, BYTEA, UUID, UUID, SMALLINT, BYTEA, BYTEA, UUID
+);
 -- BOTH signatures: 031 created the two-argument form and 034 replaced it with
 -- the four-argument one. A rollback that knew only the current shape would
 -- leave the older function behind on a database that never applied 034.
 DROP FUNCTION IF EXISTS public.e2ee_commit_recovery_authentication(UUID, UUID);
 DROP FUNCTION IF EXISTS public.e2ee_commit_recovery_authentication(UUID, UUID, UUID, SMALLINT);
 DROP FUNCTION IF EXISTS public.e2ee_issue_recovery_challenge(UUID, UUID, BYTEA, INTEGER);
+
+-- -------------------------------------------------------------
+-- 5c. Objects added by 035 (Phase 1A P0 closure)
+-- -------------------------------------------------------------
+-- Dropped before the tables they reference, and unconditionally: the file is one
+-- transaction, and `IF EXISTS` keeps it valid on a database that stopped at 034.
+--
+-- The device-status triggers must go too. Leaving one behind would keep
+-- rejecting status transitions on a restored pre-E2EE `devices` table — except
+-- that table no longer exists after this rollback, so the trigger would be a
+-- dangling reference the inventory diff would catch.
+DROP TRIGGER IF EXISTS trg_devices_status_transition ON public.devices;
+DROP TRIGGER IF EXISTS trg_devices_insert_status ON public.devices;
+DROP FUNCTION IF EXISTS public.enforce_device_status_transition();
+DROP FUNCTION IF EXISTS public.enforce_device_insert_status();
+DROP FUNCTION IF EXISTS public.e2ee_finalize_device_provisioning(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_begin_device_provisioning(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_missing_device_coverage(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_required_epoch_recipients(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_owned_couple_scope_ids();
+DROP FUNCTION IF EXISTS public.e2ee_latest_certificate_id(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_certificate_granted_domains(BYTEA);
 
 -- -------------------------------------------------------------
 -- 6. Columns added to pre-existing tables

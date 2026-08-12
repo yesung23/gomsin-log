@@ -41,6 +41,10 @@ const FORWARD = [
   '031_e2ee_key_foundation.sql',
   '032_e2ee_write_floor.sql',
   '034_e2ee_recovery_challenge_issuance.sql',
+  // 035 adds functions AND two triggers on `devices`. It is included here so the
+  // inventory diff proves the rollback reverses it too: without this the harness
+  // would keep passing while 033 silently left the P0-closure objects behind.
+  '035_e2ee_phase1a_p0_closure.sql',
 ];
 const ROLLBACK = '033_rollback_e2ee_key_foundation.sql.disabled';
 
@@ -199,7 +203,7 @@ try {
   // -------------------------------------------------------------------------
   // Scenario CLEAN
   // -------------------------------------------------------------------------
-  console.log('› CLEAN: baseline → 031 → 032 → 034 → 033');
+  console.log('› CLEAN: baseline → 031 → 032 → 034 → 035 → 033');
   createDatabase('clean_rollback');
   const baselineInventory = inventory('clean_rollback');
 
@@ -221,6 +225,10 @@ try {
     'table:migration_ledger',
     'function:e2ee_issue_recovery_challenge(p_user_id uuid, p_device_id uuid, p_challenge bytea, p_ttl_seconds integer)',
     'function:e2ee_can_manage_scope_key(p_scope_key scope_keys)',
+    'function:e2ee_finalize_device_provisioning(p_device_id uuid)',
+    'function:e2ee_owned_couple_scope_ids()',
+    'function:e2ee_missing_device_coverage(p_device_id uuid)',
+    'trigger:devices.trg_devices_status_transition',
     'index:idx_recovery_challenge_live_device',
     'trigger:daily_records.trg_daily_records_write_floor',
     'trigger:couple_members.trg_membership_revision',
@@ -324,6 +332,6 @@ if (failures.length > 0) {
 }
 
 console.log('\nROLLBACK HARNESS: PASS');
-console.log('  ✓ CLEAN     031→032→034→033 restores the pre-031 inventory exactly');
+console.log('  ✓ CLEAN     031→032→034→035→033 restores the pre-031 inventory exactly');
 console.log('  ✓ ACTIVATED rollback refuses and leaves the schema untouched');
 console.log('  ✓ LEDGER    a migration acknowledgement alone also refuses');

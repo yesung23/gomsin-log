@@ -129,6 +129,16 @@ export type ApproveDeviceDeps = {
     recoveryVersion: number;
     subjectSigSpki: Uint8Array;
     subjectKemSpki: Uint8Array;
+    /**
+     * The approver's certificate row this handler just verified root-first.
+     *
+     * Passed to the commit RPC so the new certificate records its real issuer.
+     * `device_certificates_chain` requires exactly one of an issuer certificate
+     * or a recovery anchor, so omitting this made every honest approval fail
+     * against a real database — and the RPC re-validates it regardless, because
+     * "the server already checked" is not something the next layer should assume.
+     */
+    issuerCertificateId: string;
   }) => Promise<{ ok: true } | { ok: false; code: string }>;
   logEvent: (event: string, detail: Record<string, string | number>) => void;
 };
@@ -374,6 +384,9 @@ export async function handleApproveDevice(
     recoveryVersion: anchor.recovery_version,
     subjectSigSpki,
     subjectKemSpki,
+    // The leaf of the chain verified above, which is the approver's own
+    // certificate. Not a value from the request.
+    issuerCertificateId: approverLeaf.id,
   });
   if (!committed.ok) return reject(409, committed.code);
 
@@ -382,6 +395,8 @@ export async function handleApproveDevice(
 }
 
 type VerifiedLink = {
+  /** The `device_certificates.id` this link came from. */
+  id: string;
   certificate: Uint8Array;
   subjectSigSpki: Uint8Array;
   subjectKemSpki: Uint8Array;
@@ -415,7 +430,7 @@ async function verifyChain(
     if (!certificate || !subjectSigSpki || !subjectKemSpki) return fail('E_MALFORMED_CERT_ROW');
     const parsed = parseCertificate(certificate);
     if (!parsed.ok) return parsed;
-    decoded.push({ certificate, subjectSigSpki, subjectKemSpki, view: parsed.value });
+    decoded.push({ id: row.id, certificate, subjectSigSpki, subjectKemSpki, view: parsed.value });
   }
 
   // Root last, and it must actually be root-issued.

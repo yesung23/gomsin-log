@@ -3,6 +3,9 @@ import { handleIssueRecoveryChallenge, type IssuedChallengeRow } from './handler
 import { encodePgBytea } from '../_shared/e2eeVerify.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
 
+const DB_READ_FAILURE = 'E_DB_READ_FAILED';
+const failClosedRead = (): never => { throw new Error(DB_READ_FAILURE); };
+
 /**
  * Thin Deno entrypoint. All decisions live in `handler.ts` so they are covered
  * by the vitest suite; this file only injects the platform pieces.
@@ -36,26 +39,31 @@ Deno.serve(async (request) => {
   }
 
   const body = await request.json().catch(() => ({}));
-  const outcome = await handleIssueRecoveryChallenge(body, caller.user.id, {
+  let outcome;
+  try {
+    outcome = await handleIssueRecoveryChallenge(body, caller.user.id, {
     now: () => Date.now(),
     // The only randomness on this path, and it is server-side. A client-chosen
     // challenge would make a captured signature replayable forever.
     randomChallenge: () => crypto.getRandomValues(new Uint8Array(32)),
     getDevice: async (id) => {
-      const { data } = await admin.from('devices').select('id,user_id,status').eq('id', id).maybeSingle();
+      const { data, error } = await admin.from('devices').select('id,user_id,status').eq('id', id).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     getCurrentRecoveryIdentity: async (userId) => {
-      const { data } = await admin.from('recovery_identities')
+      const { data, error } = await admin.from('recovery_identities')
         .select('id,user_id,recovery_version,superseded_at')
         .eq('user_id', userId).is('superseded_at', null).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     countIssuedLastHour: async (userId) => {
       const since = new Date(Date.now() - 3_600_000).toISOString();
-      const { count } = await admin.from('recovery_challenges')
+      const { count, error } = await admin.from('recovery_challenges')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', userId).gte('issued_at', since);
+      if (error) failClosedRead();
       return count ?? 0;
     },
     issue: async ({ userId, deviceId, challenge, ttlSeconds }) => {
@@ -85,7 +93,16 @@ Deno.serve(async (request) => {
     // IDs and error codes only. NEVER the challenge bytes: a logged challenge
     // is a live credential sitting in a log aggregator.
     logEvent: (event, detail) => console.log(JSON.stringify({ event, ...detail })),
-  });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === DB_READ_FAILURE) {
+      return new Response(JSON.stringify({ error: DB_READ_FAILURE }), {
+        status: 503,
+        headers: { ...cors.headers, 'Content-Type': 'application/json' },
+      });
+    }
+    throw error;
+  }
 
   return new Response(JSON.stringify(outcome.body), {
     status: outcome.status,

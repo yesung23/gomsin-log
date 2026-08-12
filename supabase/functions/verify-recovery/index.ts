@@ -3,6 +3,9 @@ import { handleVerifyRecovery } from './handler.ts';
 import { decodePgBytea } from '../_shared/e2eeVerify.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
 
+const DB_READ_FAILURE = 'E_DB_READ_FAILED';
+const failClosedRead = (): never => { throw new Error(DB_READ_FAILURE); };
+
 /**
  * Thin Deno entrypoint. All decisions live in `handler.ts` so they are covered
  * by the vitest suite; this file only injects the platform pieces.
@@ -43,10 +46,13 @@ Deno.serve(async (request) => {
   }
 
   const body = await request.json().catch(() => ({}));
-  const outcome = await handleVerifyRecovery(body, caller.user.id, {
+  let outcome;
+  try {
+    outcome = await handleVerifyRecovery(body, caller.user.id, {
     now: () => Date.now(),
     getServerOriginId: async () => {
-      const { data } = await admin.from('crypto_deployment').select('server_origin_id').maybeSingle();
+      const { data, error } = await admin.from('crypto_deployment').select('server_origin_id').maybeSingle();
+      if (error) failClosedRead();
       if (!data?.server_origin_id) return null;
       // `bytea`, so the hex codec. Not base64.
       return decodePgBytea(data.server_origin_id);
@@ -55,26 +61,30 @@ Deno.serve(async (request) => {
     // into the signature; making it the row address would turn a guessed value
     // into a database lookup and force a bytea comparison against caller text.
     getChallenge: async (id) => {
-      const { data } = await admin.from('recovery_challenges')
+      const { data, error } = await admin.from('recovery_challenges')
         .select('id,user_id,recovery_identity_id,challenge_nonce,recovery_version,new_device_id,issued_at,expires_at,consumed_at')
         .eq('id', id).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     getCurrentRecoveryIdentity: async (userId) => {
-      const { data } = await admin.from('recovery_identities')
+      const { data, error } = await admin.from('recovery_identities')
         .select('id,recovery_version,rec_sig_spki,superseded_at')
         .eq('user_id', userId).is('superseded_at', null).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     getDevice: async (id) => {
-      const { data } = await admin.from('devices').select('id,user_id,sig_spki,kem_spki,status').eq('id', id).maybeSingle();
+      const { data, error } = await admin.from('devices').select('id,user_id,sig_spki,kem_spki,status').eq('id', id).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     countRecentAttempts: async (userId) => {
       const since = new Date(Date.now() - 3_600_000).toISOString();
-      const { count } = await admin.from('recovery_challenges')
+      const { count, error } = await admin.from('recovery_challenges')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', userId).gte('issued_at', since);
+      if (error) failClosedRead();
       return count ?? 0;
     },
     commitAuthentication: async ({ challengeId, deviceId, recoveryIdentityId, recoveryVersion }) => {
@@ -103,7 +113,16 @@ Deno.serve(async (request) => {
     },
     // IDs and error codes only. Never key material, never a recovery code.
     logEvent: (event, detail) => console.log(JSON.stringify({ event, ...detail })),
-  });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === DB_READ_FAILURE) {
+      return new Response(JSON.stringify({ error: DB_READ_FAILURE }), {
+        status: 503,
+        headers: { ...cors.headers, 'Content-Type': 'application/json' },
+      });
+    }
+    throw error;
+  }
 
   return new Response(JSON.stringify(outcome.body), {
     status: outcome.status,

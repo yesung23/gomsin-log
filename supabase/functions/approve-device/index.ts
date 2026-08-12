@@ -3,6 +3,19 @@ import { MAX_CHAIN_DEPTH, handleApproveDevice, type CertificateRow } from './han
 import { decodePgBytea, encodePgBytea } from '../_shared/e2eeVerify.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
 
+const DB_READ_FAILURE = 'E_DB_READ_FAILED';
+
+function failClosedRead(): never {
+  throw new Error(DB_READ_FAILURE);
+}
+
+function dbFailureResponse(cors: ReturnType<typeof resolveCors>): Response {
+  return new Response(JSON.stringify({ error: DB_READ_FAILURE }), {
+    status: 503,
+    headers: { ...cors.headers, 'Content-Type': 'application/json' },
+  });
+}
+
 /**
  * Thin Deno entrypoint. All decisions live in `handler.ts` so they are covered
  * by the vitest suite; this file only injects the platform pieces.
@@ -46,10 +59,13 @@ Deno.serve(async (request) => {
   const CERTIFICATE_COLUMNS = 'id,subject_device_id,issuer_certificate_id,certificate,subject_sig_spki,subject_kem_spki';
 
   const body = await request.json().catch(() => ({}));
-  const outcome = await handleApproveDevice(body, caller.user.id, {
+  let outcome;
+  try {
+    outcome = await handleApproveDevice(body, caller.user.id, {
     now: () => Date.now(),
     getServerOriginId: async () => {
-      const { data } = await admin.from('crypto_deployment').select('server_origin_id').maybeSingle();
+      const { data, error } = await admin.from('crypto_deployment').select('server_origin_id').maybeSingle();
+      if (error) failClosedRead();
       if (!data?.server_origin_id) return null;
       // `bytea`, so the hex codec. Not base64.
       return decodePgBytea(data.server_origin_id);
@@ -58,31 +74,35 @@ Deno.serve(async (request) => {
     // row address: comparing a `bytea` column against caller-supplied text made
     // the lookup depend on a transport encoding.
     getEnrollment: async (enrollmentId) => {
-      const { data } = await admin.from('device_enrollments')
+      const { data, error } = await admin.from('device_enrollments')
         .select('id,user_id,new_device_id,approver_device_id,enroll_nonce,granted_domains,created_at,expires_at,approved_at,consumed_at')
         .eq('id', enrollmentId).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     getDevice: async (id) => {
-      const { data } = await admin.from('devices').select('id,user_id,sig_spki,kem_spki,status').eq('id', id).maybeSingle();
+      const { data, error } = await admin.from('devices').select('id,user_id,sig_spki,kem_spki,status').eq('id', id).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     getRecoveryAnchor: async (userId) => {
-      const { data } = await admin.from('recovery_identities')
+      const { data, error } = await admin.from('recovery_identities')
         .select('id,recovery_version,rec_sig_spki,recovery_bundle_fp')
         .eq('user_id', userId).is('superseded_at', null).maybeSingle();
+      if (error) failClosedRead();
       return data ?? null;
     },
     getCertificateChain: async (deviceId) => {
       // Walk `issuer_certificate_id` upward. The handler verifies every link
       // root-first; this adapter only assembles the path and never decides
       // whether any of it is trustworthy.
-      const { data: leaf } = await admin.from('device_certificates')
+      const { data: leaf, error: leafError } = await admin.from('device_certificates')
         .select(CERTIFICATE_COLUMNS)
         .eq('subject_device_id', deviceId)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+      if (leafError) failClosedRead();
       if (!leaf) return [];
 
       const chain: CertificateRow[] = [leaf as CertificateRow];
@@ -91,8 +111,9 @@ Deno.serve(async (request) => {
       while (issuerId && chain.length < MAX_CHAIN_DEPTH) {
         if (seen.has(issuerId)) break;
         seen.add(issuerId);
-        const { data: parent } = await admin.from('device_certificates')
+        const { data: parent, error: parentError } = await admin.from('device_certificates')
           .select(CERTIFICATE_COLUMNS).eq('id', issuerId).maybeSingle();
+        if (parentError) failClosedRead();
         if (!parent) break;
         chain.push(parent as CertificateRow);
         issuerId = parent.issuer_certificate_id as string | null;
@@ -100,18 +121,20 @@ Deno.serve(async (request) => {
       return chain;
     },
     isDeviceRevoked: async (deviceId) => {
-      const { count } = await admin.from('revocation_statements')
+      const { count, error } = await admin.from('revocation_statements')
         .select('id', { count: 'exact', head: true })
         .eq('revoked_device_id', deviceId);
+      if (error) failClosedRead();
       return (count ?? 0) > 0;
     },
     getRevocationLogHead: async (userId) => {
-      const { data } = await admin.from('revocation_statements')
+      const { data, error } = await admin.from('revocation_statements')
         .select('log_head')
         .eq('user_id', userId)
         .order('sequence', { ascending: false })
         .limit(1)
         .maybeSingle();
+      if (error) failClosedRead();
       return data?.log_head ? String(data.log_head) : null;
     },
     commitApproval: async (input) => {
@@ -140,7 +163,16 @@ Deno.serve(async (request) => {
     },
     // IDs and error codes only. Never key material, never user content.
     logEvent: (event, detail) => console.log(JSON.stringify({ event, ...detail })),
-  });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === DB_READ_FAILURE) {
+      return new Response(JSON.stringify({ error: DB_READ_FAILURE }), {
+        status: 503,
+        headers: { ...cors.headers, 'Content-Type': 'application/json' },
+      });
+    }
+    throw error;
+  }
 
   return new Response(JSON.stringify(outcome.body), {
     status: outcome.status,

@@ -1153,6 +1153,55 @@ describe('verify-recovery', () => {
   });
 });
 
+describe('Edge entrypoint security-read failures fail closed', () => {
+  it.each([
+    ['enrollment lookup', 'getEnrollment'],
+    ['device lookup', 'getDevice'],
+    ['recovery anchor lookup', 'getRecoveryAnchor'],
+    ['certificate-chain lookup', 'getCertificateChain'],
+    ['revocation lookup', 'isDeviceRevoked'],
+    ['revocation-head lookup', 'getRevocationLogHead'],
+  ])('approve-device rejects an injected %s failure', async (_name, dependency) => {
+    const fixture = await buildApprovalFixture();
+    const deps = approveDeps({}, fixture);
+    (deps as Record<string, unknown>)[dependency] = async () => {
+      throw new Error('E_DB_READ_FAILED');
+    };
+    await expect(handleApproveDevice(approveRequest(fixture), USER, deps)).rejects
+      .toThrow('E_DB_READ_FAILED');
+  });
+
+  it('verify-recovery rejects an injected challenge lookup failure', async () => {
+    const fixture = await buildRecoveryFixture();
+    const deps = verifyDeps({}, fixture);
+    deps.getChallenge = async () => { throw new Error('E_DB_READ_FAILED'); };
+    await expect(handleVerifyRecovery(verifyRequest(fixture), USER, deps)).rejects
+      .toThrow('E_DB_READ_FAILED');
+  });
+
+  it('verify-recovery rejects an injected recovery identity lookup failure', async () => {
+    const fixture = await buildRecoveryFixture();
+    const deps = verifyDeps({}, fixture);
+    deps.getCurrentRecoveryIdentity = async () => { throw new Error('E_DB_READ_FAILED'); };
+    await expect(handleVerifyRecovery(verifyRequest(fixture), USER, deps)).rejects
+      .toThrow('E_DB_READ_FAILED');
+  });
+
+  it('issue-recovery-challenge rejects an injected device lookup failure', async () => {
+    const deps = issueDeps({ getDevice: async () => { throw new Error('E_DB_READ_FAILED'); } });
+    await expect(handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, deps)).rejects
+      .toThrow('E_DB_READ_FAILED');
+  });
+
+  it('issue-recovery-challenge rejects an injected recovery identity lookup failure', async () => {
+    const deps = issueDeps({
+      getCurrentRecoveryIdentity: async () => { throw new Error('E_DB_READ_FAILED'); },
+    });
+    await expect(handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, deps)).rejects
+      .toThrow('E_DB_READ_FAILED');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The byte boundary
 // ---------------------------------------------------------------------------

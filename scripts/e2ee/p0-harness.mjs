@@ -810,6 +810,51 @@ try {
     'reject: C finalizes A\'s device',
   );
 
+  // Identifier substitution against the privileged transitions that had no
+  // cross-account coverage. Each takes an id straight from the caller, so the
+  // only thing standing between C and A's key material is whether the function
+  // re-derives ownership from the database instead of trusting the argument.
+  // Readiness and finalization were already covered above; these three were
+  // not, and an epoch C can activate or abandon is an epoch C can disrupt.
+  checkRefused(
+    asUser(C, `SELECT public.e2ee_activate_epoch('${coupleEpoch}')`),
+    'E2EE_EPOCH_FORBIDDEN',
+    'reject: C activates A/B\'s couple epoch',
+  );
+
+  checkRefused(
+    asUser(C, `SELECT public.e2ee_abandon_epoch('${coupleEpoch}')`),
+    'E2EE_EPOCH_FORBIDDEN',
+    'reject: C abandons A/B\'s couple epoch',
+  );
+
+  checkRefused(
+    asUser(C, `SELECT public.e2ee_begin_device_provisioning('${a2}')`),
+    'E2EE_DEVICE_WRONG_ACCOUNT',
+    'reject: C begins provisioning on A\'s device',
+  );
+
+  // The two 036 functions take a device id from the caller too.
+  checkRefused(
+    asUser(C, `SELECT public.e2ee_revoke_own_device('${a2}')`),
+    'E2EE_DEVICE_WRONG_ACCOUNT',
+    'reject: C retires A\'s device',
+  );
+
+  checkRefused(
+    asUser(C, `SELECT public.e2ee_mark_device_provisioning_failed('${a2}')`),
+    'E2EE_DEVICE_WRONG_ACCOUNT',
+    'reject: C fails A\'s device',
+  );
+
+  // A's own scope, addressed by C. Discovery already proves C finds no couple
+  // scopes; this proves naming one directly does not help either.
+  checkRefused(
+    asUser(C, `SELECT public.e2ee_mark_epoch_ready('${personalA}')`),
+    'E2EE_EPOCH_FORBIDDEN',
+    'reject: C marks A\'s personal scope ready by naming its id',
+  );
+
   const cSeesA = mustAsUser(C, `
     SELECT count(*) FROM public.key_envelopes WHERE scope_key_id = '${coupleEpoch}'`,
     'C reads couple envelopes');

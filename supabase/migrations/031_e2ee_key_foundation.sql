@@ -1045,9 +1045,19 @@ BEGIN
     -- is being permanently destroyed there is nothing left to downgrade, and an
     -- orphan floor row would just block deletion forever.
     --
-    -- A normal authenticated caller can never set the flag: it is a
-    -- transaction-local GUC written by a SECURITY DEFINER function that only
-    -- service_role may execute.
+    -- This flag is NOT a privilege, and nothing here should be read as one. Any
+    -- session can set any custom GUC — `SELECT set_config('gomsinlog.…', 'on',
+    -- false)` from an ordinary authenticated session works — so a check like the
+    -- one below proves nothing on its own. An earlier revision of this comment
+    -- claimed a client "can never set the flag", which was false, and the same
+    -- reasoning applied to devices.status became a real escalation (see 036).
+    --
+    -- What actually protects this table is the grant: `authenticated` holds
+    -- SELECT and nothing else, so a client cannot issue the DELETE that would
+    -- reach this trigger at all. The flag only distinguishes the destruction
+    -- path from other already-privileged writers. If a future migration grants
+    -- authenticated DELETE or UPDATE here, this line becomes an exploitable
+    -- plaintext downgrade — the p0 harness asserts the grant for that reason.
     IF current_setting('gomsinlog.e2ee_account_destruction', true) = 'on' THEN
       RETURN OLD;
     END IF;

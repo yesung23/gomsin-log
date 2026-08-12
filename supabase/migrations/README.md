@@ -59,6 +59,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `031_e2ee_key_foundation.sql` | E2EE Phase 1A 키 인프라 (devices, recovery_identities, recovery_public_anchors, device_certificates, device_enrollments, scope_keys, key_envelopes, recovery_challenges, revocation_statements, crypto_pairings, crypto_write_floor, migration_ledger + epoch/삭제 RPC) | **신규 / 어디에도 미적용** |
 | `032_e2ee_write_floor.sql` | 되돌릴 수 없는 per-scope write floor + `daily_records` 라우팅 컬럼 (전부 비활성 상태) | **신규 / 어디에도 미적용** |
 | `034_e2ee_recovery_challenge_issuance.sql` | 서버 발급 복구 챌린지 (`e2ee_issue_recovery_challenge`), 챌린지-복구 아이덴티티 결속, `e2ee_commit_recovery_authentication` 4-인자 교체 | **신규 / 어디에도 미적용** |
+| `037_harden_e2ee_account_deletion_survivor_detection.sql` | `e2ee_prepare_account_deletion`이 생존 파트너를 029와 같은 기준(멤버십 row 존재 여부)으로 판정하도록 교체. active만 보던 기존 판정은 disconnected/pending 파트너의 커플 키를 파괴했다 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
 | `033_rollback_e2ee_key_foundation.sql.disabled` | 031 + 032 + 034 전체 롤백. **번호는 순서를 뜻하지 않습니다** — 정방향은 031 → 032 → 034이고 이 파일은 `.disabled`라 실행 순서에 들어가지 않습니다. E2EE가 활성화된 흔적이 하나라도 있으면 트랜잭션 전체를 중단합니다. | **롤백 전용 / 실행되지 않음** |
 
 ## 029 가 보완하는 것 — sole-member couple 개인정보 정리 (2026-08-11)

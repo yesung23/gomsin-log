@@ -94,6 +94,7 @@ const ORDER = [
   '034_e2ee_recovery_challenge_issuance.sql',
   '035_e2ee_phase1a_p0_closure.sql',
   '036_e2ee_device_status_privilege.sql',
+  '037_harden_e2ee_account_deletion_survivor_detection.sql',
 ];
 
 /**
@@ -717,6 +718,141 @@ check(
 // A legitimate member still works.
 const legit = asUser(A, `SELECT public.create_invitation('${COUPLE1}', 'legit-hash') IS NOT NULL`);
 check(legit.ok && legit.stdout.trim() === 't', '030 an active member CAN still create an invitation');
+
+// ---------------------------------------------------------------------------
+// 037 — the real account-deletion ordering, across the survivor matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Drive the sequence the Edge Function actually performs, not the RPC alone:
+ *
+ *   e2ee_prepare_account_deletion(A)   crypto
+ *   -> prepare_account_deletion(A)     relational
+ *   -> cleanup_account_solo_couples(A) couple metadata (029)
+ *
+ * The defect 037 fixes only appears across that ordering: step 1 decided "no
+ * surviving partner" from `status = 'active'` and shredded the couple keys,
+ * then step 3 correctly kept the couple row for a non-active member. Testing
+ * either step alone shows nothing wrong.
+ *
+ * Step 2 is omitted deliberately. `prepare_account_deletion` touches records,
+ * events and trips but never `couple_members.status` and never couple-owned
+ * crypto, so it cannot influence this invariant; including it would add a large
+ * fixture (expected_record_ids, plan ownership transfer) for no extra coverage.
+ * Its own `status = 'active'` partner lookup governs who INHERITS shared plans,
+ * which is a different question from who still needs a key, and 037 leaves it
+ * alone on purpose.
+ *
+ * Each scenario gets its own couple and users so the cases cannot contaminate
+ * one another.
+ */
+function deletionScenario({ label, partnerStatus, expectKeysSurvive }) {
+  const suffix = label.replace(/[^a-z]/gi, '').slice(0, 4).toLowerCase().padEnd(4, 'x');
+  const hex = [...suffix].map((c) => (c.charCodeAt(0) % 16).toString(16)).join('');
+  const owner = `d0000000-0000-4000-8000-0000${hex}0001`;
+  const partner = `d0000000-0000-4000-8000-0000${hex}0002`;
+  const couple = `c0000000-0000-4000-8000-0000${hex}0003`;
+  const device = `d0000000-0000-4000-8000-0000${hex}0004`;
+  const key = `c0000000-0000-4000-8000-0000${hex}0005`;
+
+  const members = partnerStatus === null
+    ? `('${couple}', '${owner}', 'gomsin', 'active')`
+    : `('${couple}', '${owner}', 'gomsin', 'active'),
+       ('${couple}', '${partner}', 'soldier', '${partnerStatus}')`;
+
+  mustSql(`
+    INSERT INTO auth.users (id) VALUES ('${owner}')${partnerStatus === null ? '' : `, ('${partner}')`};
+    INSERT INTO public.profiles (id, display_name, role) VALUES
+      ('${owner}', 'owner', 'gomsin')${partnerStatus === null ? '' : `, ('${partner}', 'partner', 'soldier')`};
+    INSERT INTO public.couples (id) VALUES ('${couple}');
+    INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES ${members};
+    INSERT INTO public.scope_keys (id, domain, scope_id, owner_couple_id, key_epoch, state)
+      VALUES ('${key}', 'couple', '${couple}', '${couple}', 1, 'ACTIVE');
+    INSERT INTO public.crypto_pairings (couple_id, state, pairing_nonce, transcript_hash, proposed_by_user_id)
+      VALUES ('${couple}', 'CRYPTO_ACTIVE', decode(repeat('${hex.slice(0, 2)}', 32), 'hex'),
+              decode(repeat('${hex.slice(2, 4)}', 32), 'hex'), '${owner}');
+    INSERT INTO public.crypto_write_floor (scope_kind, scope_id, min_cipher_format)
+      VALUES ('couple', '${couple}', 1);
+  `, `${label}: fixture`);
+
+  // A device and an envelope for the partner, so "the surviving member can
+  // still open the epoch" is a real row rather than an assumption.
+  if (partnerStatus !== null) {
+    mustSql(`
+      INSERT INTO public.devices (id, user_id, sig_spki, kem_spki, platform, assurance, status)
+      VALUES ('${device}', '${partner}', decode(repeat('ab', 91), 'hex'),
+              decode(repeat('cd', 91), 'hex'), 'ios', 'secure_enclave', 'ACTIVE');
+    `, `${label}: partner device`);
+  }
+
+  // The real ordering.
+  const prepared = sql(`SELECT public.e2ee_prepare_account_deletion('${owner}')`);
+  check(prepared.ok, `037 ${label}: e2ee preparation completes`);
+  mustAsServiceRole(`SELECT public.cleanup_account_solo_couples('${owner}')`, `${label}: 029`);
+
+  const keys = mustSql(
+    `SELECT count(*) FROM public.scope_keys WHERE owner_couple_id = '${couple}'`, 'k',
+  );
+  const pairings = mustSql(
+    `SELECT count(*) FROM public.crypto_pairings WHERE couple_id = '${couple}'`, 'p',
+  );
+  const floor = mustSql(
+    `SELECT count(*) FROM public.crypto_write_floor WHERE scope_kind = 'couple' AND scope_id = '${couple}'`, 'f',
+  );
+  const coupleRow = mustSql(
+    `SELECT count(*) FROM public.couples WHERE id = '${couple}'`, 'c',
+  );
+
+  const want = expectKeysSurvive ? '1' : '0';
+  check(keys === want, `037 ${label}: couple scope key ${expectKeysSurvive ? 'SURVIVES' : 'is cleaned'} (saw ${keys})`);
+  check(pairings === want, `037 ${label}: crypto pairing ${expectKeysSurvive ? 'SURVIVES' : 'is cleaned'} (saw ${pairings})`);
+  check(floor === want, `037 ${label}: couple write floor ${expectKeysSurvive ? 'SURVIVES' : 'is cleaned'} (saw ${floor})`);
+
+  // The invariant that binds the two layers together: the couple row and its
+  // cryptographic state must appear or disappear TOGETHER. Comparing each to
+  // `want` separately would let the split-brain through — that is exactly the
+  // shape of the bug, a surviving row beside destroyed keys — so compare them
+  // to each other as well.
+  check(coupleRow === want, `037 ${label}: couple row is ${want === '1' ? 'kept' : 'removed'} (saw ${coupleRow})`);
+  check(
+    coupleRow === keys,
+    `037 ${label}: couple row and couple keys agree (row=${coupleRow}, keys=${keys})`,
+  );
+}
+
+deletionScenario({ label: 'active survivor', partnerStatus: 'active', expectKeysSurvive: true });
+deletionScenario({ label: 'disconnected survivor', partnerStatus: 'disconnected', expectKeysSurvive: true });
+deletionScenario({ label: 'pending survivor', partnerStatus: 'pending', expectKeysSurvive: true });
+deletionScenario({ label: 'truly solo', partnerStatus: null, expectKeysSurvive: false });
+
+/**
+ * The deleting user's own membership need not be active either.
+ *
+ * A mutual disconnect leaves BOTH rows non-active. The 031 body located the
+ * couple through the deleting user's own ACTIVE row, so this case skipped
+ * couple cleanup entirely and stranded a write floor that no cascade can reach
+ * (`crypto_write_floor` has no foreign key to `couples`).
+ */
+const soloD = 'd0000000-0000-4000-8000-00000000ff01';
+const coupleD = 'c0000000-0000-4000-8000-00000000ff02';
+mustSql(`
+  INSERT INTO auth.users (id) VALUES ('${soloD}');
+  INSERT INTO public.profiles (id, display_name, role) VALUES ('${soloD}', 'solo', 'gomsin');
+  INSERT INTO public.couples (id) VALUES ('${coupleD}');
+  INSERT INTO public.couple_members (couple_id, user_id, role, status)
+    VALUES ('${coupleD}', '${soloD}', 'gomsin', 'disconnected');
+  INSERT INTO public.scope_keys (domain, scope_id, owner_couple_id, key_epoch, state)
+    VALUES ('couple', '${coupleD}', '${coupleD}', 1, 'ACTIVE');
+  INSERT INTO public.crypto_write_floor (scope_kind, scope_id, min_cipher_format)
+    VALUES ('couple', '${coupleD}', 1);
+`, 'disconnected solo fixture');
+mustSql(`SELECT public.e2ee_prepare_account_deletion('${soloD}')`, 'disconnected solo prepare');
+check(
+  mustSql(
+    `SELECT count(*) FROM public.crypto_write_floor WHERE scope_kind = 'couple' AND scope_id = '${coupleD}'`, 'f',
+  ) === '0',
+  '037 a disconnected sole member still gets their couple write floor cleaned (no unreachable orphan)',
+);
 
 // ---------------------------------------------------------------------------
 // Report

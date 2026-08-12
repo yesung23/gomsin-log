@@ -4,6 +4,43 @@
 specification.** V1 and V2 were superseded after independent review; the
 findings that produced each correction are recorded so the reasoning survives.
 
+## Phase 1A development freeze
+
+| | |
+|---|---|
+| Phase 1A | **DEVELOPMENT COMPLETE / FROZEN** |
+| Phase 1B development | **ALLOWED** |
+| Production deployment | **NOT APPROVED** |
+| Phase 1A migrations in production | **NOT APPLIED** |
+
+Development-gate evidence at the freeze, all against PostgreSQL 17.10 with the
+real migrations, grants, RLS and `authenticated` actors:
+
+| Gate | Result |
+|---|---|
+| `npm run test:p0` | PASS — 76 assertions |
+| `npm run test:rollback` | PASS — `031→032→034→035→036→033` restores the pre-031 inventory |
+| typecheck / lint / build | PASS |
+| `npm run test` | PASS — 2088 |
+| CI (PR #45) | PASS — 14/14 |
+| Phase-1B-blocking P0 | **NONE** |
+
+The gate that closed last was G2: `devices.status` had been guarded by a custom
+GUC, which is not a privilege — any session can set one. It is now guarded by a
+column-level `GRANT`, so `status` is unwritable by an authenticated session
+before any trigger runs. See `036_e2ee_device_status_privilege.sql`.
+
+**Frozen means frozen for feature development, not verified for production.**
+Known non-blocking backlog, none of which gates Phase 1B:
+
+- P2 — `app.trip_item_reorder` is a forgeable GUC with no role conjunct, but it
+  gates an ordering column behind RLS, so it authorises nothing.
+- P2 — the four `set_config('gomsinlog.e2ee_status_transition', …)` calls in
+  035 are inert; 036 removed the only reader. Left in place rather than rewrite
+  four security-critical function bodies to delete a no-op.
+- The P1 production blockers in §12 and §13 remain open, and an independent
+  security review is still required before any launch.
+
 Related: `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md` (scope and
 legal framing), `docs/E2EE_1A1_SPIKE_REPORT.md` (measured platform facts),
 `docs/E2EE_IMPLEMENTATION_PLAN.md` (SUPERSEDED — single-couple-key design).

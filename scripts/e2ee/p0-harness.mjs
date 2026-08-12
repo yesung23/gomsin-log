@@ -39,6 +39,7 @@ const FORWARD = [
   '032_e2ee_write_floor.sql',
   '034_e2ee_recovery_challenge_issuance.sql',
   '035_e2ee_phase1a_p0_closure.sql',
+  '036_e2ee_device_status_privilege.sql',
 ];
 
 const keep = process.argv.includes('--keep');
@@ -403,10 +404,15 @@ try {
   // -------------------------------------------------------------------------
   console.log('› Scenario 2: PENDING → PROVISIONING → ACTIVE');
 
-  // A client may not promote a device by direct UPDATE.
+  // A client may not promote a device by direct UPDATE. Since 036 this is
+  // refused by column privilege rather than by the trigger, so the error is
+  // PostgreSQL's own permission denial and never reaches
+  // E2EE_DEVICE_STATUS_FORBIDDEN — the block simply moved earlier. Both codes
+  // are accepted so the assertion states the requirement (refused) rather than
+  // pinning the layer that happens to enforce it.
   checkRefused(
     asUser(A, `UPDATE public.devices SET status = 'ACTIVE' WHERE id = '${a2}'`),
-    'E2EE_DEVICE_STATUS_FORBIDDEN',
+    'E2EE_DEVICE_STATUS_FORBIDDEN|permission denied',
     'reject: authenticated client sets status = ACTIVE directly',
   );
 
@@ -491,6 +497,177 @@ try {
     'E2EE_DEVICE_NOT_PROVISIONING|E2EE_DEVICE_REVOKED',
     'reject: revoked device cannot finalize',
   );
+
+  // -------------------------------------------------------------------------
+  // Scenario 2b — G2: the status gate must not rest on a forgeable signal
+  // -------------------------------------------------------------------------
+  // A custom GUC is NOT a privilege. Any session may set `gomsinlog.*` at will,
+  // so a gate that reads one is asking the attacker whether the attacker is
+  // authorised. These drive the escalation directly as `authenticated`, the way
+  // a stolen anon-key session would, and every one of them must be refused by
+  // the database rather than by application code.
+  console.log('› Scenario 2b: direct devices.status escalation');
+
+  const gucNames = ['gomsinlog.e2ee_status_transition'];
+  const forgedValues = ['on', 'true', '1', 'allowed', 'internal'];
+
+  // Each device burns two seeds (sig and kem) and `UNIQUE (user_id, sig_spki)`
+  // makes a repeat a fixture error rather than a finding, so hand out fresh
+  // ones from a range nothing else in this file touches.
+  let g2Seed = 0xd0;
+  const nextSeed = () => (g2Seed += 2);
+  const victim = (status) => mustSql(device(A, nextSeed(), status), `G2 ${status} victim`);
+  const pendingVictim = () => victim('PENDING');
+  const provisioningVictim = () => victim('PROVISIONING');
+
+  for (const guc of gucNames) {
+    for (const value of forgedValues) {
+      const target = pendingVictim();
+      checkRefused(
+        asUser(A, `
+          DO $g2$ BEGIN PERFORM set_config('${guc}', '${value}', false); END $g2$;
+          UPDATE public.devices SET status = 'ACTIVE' WHERE id = '${target}';`),
+        null,
+        `G2: forged ${guc}='${value}' cannot drive PENDING → ACTIVE`,
+      );
+
+      const midway = provisioningVictim();
+      checkRefused(
+        asUser(A, `
+          DO $g2$ BEGIN PERFORM set_config('${guc}', '${value}', false); END $g2$;
+          UPDATE public.devices SET status = 'ACTIVE' WHERE id = '${midway}';`),
+        null,
+        `G2: forged ${guc}='${value}' cannot drive PROVISIONING → ACTIVE`,
+      );
+    }
+  }
+
+  // Transaction-local (`is_local = true`) is the same forgery with a narrower
+  // lifetime; it must not be treated any differently.
+  const localTarget = pendingVictim();
+  checkRefused(
+    asUser(A, `
+      DO $g2$ BEGIN PERFORM set_config('gomsinlog.e2ee_status_transition', 'on', true); END $g2$;
+      UPDATE public.devices SET status = 'ACTIVE' WHERE id = '${localTarget}';`),
+    null,
+    'G2: transaction-local forged GUC cannot escalate',
+  );
+
+  // Sol drove it exactly this way: set_config as its own statement, then the
+  // UPDATE as a separate command on the same session.
+  const twoStep = pendingVictim();
+  checkRefused(
+    psql([
+      '-At',
+      '-c', 'SET ROLE authenticated',
+      '-c', `DO $h$ BEGIN PERFORM set_config('request.jwt.claim.sub', '${A}', false); END $h$`,
+      '-c', `SELECT set_config('gomsinlog.e2ee_status_transition', 'on', false)`,
+      '-c', `UPDATE public.devices SET status = 'ACTIVE' WHERE id = '${twoStep}'`,
+    ]),
+    null,
+    'G2: set_config and UPDATE as separate session commands cannot escalate',
+  );
+
+  // A set-based UPDATE must not promote anything, and must not partially apply.
+  const bulk1 = pendingVictim();
+  const bulk2 = provisioningVictim();
+  checkRefused(
+    asUser(A, `
+      DO $g2$ BEGIN PERFORM set_config('gomsinlog.e2ee_status_transition', 'on', false); END $g2$;
+      UPDATE public.devices SET status = 'ACTIVE' WHERE user_id = '${A}';`),
+    null,
+    'G2: multi-row escalation of every owned device is refused',
+  );
+  {
+    const promoted = mustSql(
+      `SELECT count(*) FROM public.devices WHERE id IN ('${bulk1}', '${bulk2}') AND status = 'ACTIVE'`,
+      'G2 bulk fallout',
+    );
+    check(promoted === '0', `G2: multi-row escalation left nothing ACTIVE (saw ${promoted})`);
+  }
+
+  // Creating a device already ACTIVE would bypass the transition gate entirely.
+  checkRefused(
+    asUser(A, `
+      INSERT INTO public.devices (user_id, sig_spki, kem_spki, platform, assurance, status)
+      VALUES ('${A}', ${spki(nextSeed())}, ${spki(nextSeed())}, 'web', 'web_nonextractable', 'ACTIVE')`),
+    null,
+    'G2: direct INSERT of an ACTIVE device is refused',
+  );
+
+  // PENDING → PROVISIONING is the approval RPC's conclusion, not the client's.
+  const beginTarget = pendingVictim();
+  checkRefused(
+    asUser(A, `
+      DO $g2$ BEGIN PERFORM set_config('gomsinlog.e2ee_status_transition', 'on', false); END $g2$;
+      UPDATE public.devices SET status = 'PROVISIONING' WHERE id = '${beginTarget}';`),
+    null,
+    'G2: forged GUC cannot drive PENDING → PROVISIONING',
+  );
+
+  // RECOVERY_AUTHENTICATED is likewise a server conclusion.
+  const recTarget = pendingVictim();
+  checkRefused(
+    asUser(A, `
+      DO $g2$ BEGIN PERFORM set_config('gomsinlog.e2ee_status_transition', 'on', false); END $g2$;
+      UPDATE public.devices SET status = 'RECOVERY_AUTHENTICATED' WHERE id = '${recTarget}';`),
+    null,
+    'G2: forged GUC cannot drive PENDING → RECOVERY_AUTHENTICATED',
+  );
+
+  // The boundary has to be narrow, not merely tight: revoking table UPDATE
+  // would be an easy way to pass every attack above and break the app.
+  {
+    const own = pendingVictim();
+    const label = asUser(A, `
+      UPDATE public.devices
+         SET label_ct = decode('00ff', 'hex'), last_seen_at = now()
+       WHERE id = '${own}'`);
+    check(label.ok, 'G2: client still updates its own label_ct and last_seen_at');
+    if (!label.ok) console.error(`    ${label.stderr.trim().split('\n').pop()}`);
+  }
+
+  // Retiring a device is a narrowing, so the owner may ask for it — through the
+  // function, which holds the privilege the caller does not.
+  {
+    const mine = pendingVictim();
+    const revoked = asUser(A, `SELECT public.e2ee_revoke_own_device('${mine}')`);
+    check(revoked.ok && /REVOKED/.test(revoked.stdout),
+      'G2: owner retires its own device through the RPC');
+    if (!revoked.ok) console.error(`    ${revoked.stderr.trim().split('\n').pop()}`);
+
+    check(asUser(A, `SELECT public.e2ee_revoke_own_device('${mine}')`).ok,
+      'G2: retiring an already-revoked device is idempotent');
+
+    checkRefused(
+      asUser(C, `SELECT public.e2ee_revoke_own_device('${mine}')`),
+      'E2EE_DEVICE_WRONG_ACCOUNT',
+      'G2: an unrelated user cannot retire someone else’s device',
+    );
+  }
+
+  // Recording a provisioning failure is likewise a narrowing, but only from a
+  // state that was genuinely mid-provisioning.
+  {
+    const midway = provisioningVictim();
+    const failed = asUser(A, `SELECT public.e2ee_mark_device_provisioning_failed('${midway}')`);
+    check(failed.ok && /PROVISIONING_FAILED/.test(failed.stdout),
+      'G2: owner records a provisioning failure through the RPC');
+    if (!failed.ok) console.error(`    ${failed.stderr.trim().split('\n').pop()}`);
+
+    checkRefused(
+      asUser(C, `SELECT public.e2ee_mark_device_provisioning_failed('${provisioningVictim()}')`),
+      'E2EE_DEVICE_WRONG_ACCOUNT',
+      'G2: an unrelated user cannot fail someone else’s device',
+    );
+
+    // An ACTIVE device must not be walked backwards into a provisioning state.
+    checkRefused(
+      asUser(A, `SELECT public.e2ee_mark_device_provisioning_failed('${a1}')`),
+      'E2EE_DEVICE_NOT_PROVISIONING',
+      'G2: an ACTIVE device cannot be marked provisioning-failed',
+    );
+  }
 
   // -------------------------------------------------------------------------
   // Scenario 3 + 4 — RLS privacy and server-side readiness

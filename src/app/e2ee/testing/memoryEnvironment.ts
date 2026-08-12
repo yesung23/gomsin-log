@@ -263,9 +263,20 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
       if (server.devices.some((d) => d.id === record.id)) reject('23505');
       server.devices.push({ ...record });
     },
+    // Only the two narrowing transitions, matching the real repository.
+    //
+    // This used to move a device to any status by assignment, which is what let
+    // the earlier provisioning bug look correct here while PostgreSQL refused
+    // it. Since 036 an authenticated session has no UPDATE privilege on
+    // devices.status at all, and promotions happen only inside the provisioning
+    // RPCs — so a fake that still accepted 'ACTIVE' would be modelling a
+    // capability the client does not have.
     setDeviceStatus: async (id, status) => {
       const device = server.devices.find((d) => d.id === id);
       if (!device) reject('E2EE_UNKNOWN_DEVICE');
+      if (status !== 'REVOKED' && status !== 'PROVISIONING_FAILED') {
+        reject('E_DEVICE_STATUS_NOT_CLIENT_SETTABLE');
+      }
       device.status = status;
     },
 

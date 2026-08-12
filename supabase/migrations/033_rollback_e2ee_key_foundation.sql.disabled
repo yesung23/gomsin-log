@@ -242,6 +242,12 @@ DROP FUNCTION IF EXISTS public.enforce_device_status_transition();
 DROP FUNCTION IF EXISTS public.enforce_device_insert_status();
 DROP FUNCTION IF EXISTS public.e2ee_finalize_device_provisioning(UUID);
 DROP FUNCTION IF EXISTS public.e2ee_begin_device_provisioning(UUID);
+-- 036. These run SECURITY DEFINER and write devices.status, so leaving either
+-- behind would strand a privileged writer for a table that no longer exists.
+-- The column grants 036 puts on public.devices need no separate statement:
+-- they are dropped with the table itself further down.
+DROP FUNCTION IF EXISTS public.e2ee_revoke_own_device(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_mark_device_provisioning_failed(UUID);
 DROP FUNCTION IF EXISTS public.e2ee_missing_device_coverage(UUID);
 DROP FUNCTION IF EXISTS public.e2ee_required_epoch_recipients(UUID);
 DROP FUNCTION IF EXISTS public.e2ee_owned_couple_scope_ids();

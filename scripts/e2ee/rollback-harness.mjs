@@ -45,8 +45,17 @@ const FORWARD = [
   // inventory diff proves the rollback reverses it too: without this the harness
   // would keep passing while 033 silently left the P0-closure objects behind.
   '035_e2ee_phase1a_p0_closure.sql',
+  // 036 adds two SECURITY DEFINER writers of devices.status and changes the
+  // table's UPDATE grant. Same reasoning as 035: included so the inventory diff
+  // fails if 033 leaves either function behind.
+  '036_e2ee_device_status_privilege.sql',
 ];
 const ROLLBACK = '033_rollback_e2ee_key_foundation.sql.disabled';
+
+// Derived, never hand-written: an earlier revision spelled this chain out in
+// two console strings, and adding 036 to FORWARD left both of them claiming a
+// run that no longer matched what the harness applied.
+const CHAIN = [...FORWARD, ROLLBACK].map((f) => f.slice(0, 3)).join(' → ');
 
 const keep = process.argv.includes('--keep');
 
@@ -203,7 +212,7 @@ try {
   // -------------------------------------------------------------------------
   // Scenario CLEAN
   // -------------------------------------------------------------------------
-  console.log('› CLEAN: baseline → 031 → 032 → 034 → 035 → 033');
+  console.log(`› CLEAN: baseline → ${CHAIN}`);
   createDatabase('clean_rollback');
   const baselineInventory = inventory('clean_rollback');
 
@@ -332,6 +341,6 @@ if (failures.length > 0) {
 }
 
 console.log('\nROLLBACK HARNESS: PASS');
-console.log('  ✓ CLEAN     031→032→034→035→033 restores the pre-031 inventory exactly');
+console.log(`  ✓ CLEAN     ${CHAIN} restores the pre-031 inventory exactly`);
 console.log('  ✓ ACTIVATED rollback refuses and leaves the schema untouched');
 console.log('  ✓ LEDGER    a migration acknowledgement alone also refuses');

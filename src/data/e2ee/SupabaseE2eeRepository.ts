@@ -441,11 +441,37 @@ export class SupabaseE2eeRepository implements E2eeRepository {
     );
   }
 
+  /**
+   * Retire a device, or record that its provisioning did not finish.
+   *
+   * These go through RPCs rather than an UPDATE because 036 revoked the client's
+   * table-level UPDATE on `devices` and re-granted only `label_ct` and
+   * `last_seen_at`. `status` is no longer writable by an authenticated session
+   * at all, which is what stops `UPDATE devices SET status='ACTIVE'` from
+   * promoting an unprovisioned device — so this method cannot reach for the
+   * column even for the two transitions a client is entitled to.
+   *
+   * Only narrowing transitions are accepted here. Promotions (PROVISIONING,
+   * ACTIVE, RECOVERY_AUTHENTICATED) are conclusions the server draws from
+   * evidence it has verified, and they have their own RPCs; asking for one here
+   * is a programming error rather than something to forward to the database.
+   */
   async setDeviceStatus(deviceId: string, status: string): Promise<void> {
-    await requiredRow(
-      'devices.setStatus',
-      this.db.from('devices').update({ status }).eq('id', deviceId).select('id').single(),
-    );
+    if (status === 'REVOKED') {
+      await unwrap(
+        'rpc.e2ee_revoke_own_device',
+        this.db.rpc('e2ee_revoke_own_device', { p_device_id: deviceId }),
+      );
+      return;
+    }
+    if (status === 'PROVISIONING_FAILED') {
+      await unwrap(
+        'rpc.e2ee_mark_device_provisioning_failed',
+        this.db.rpc('e2ee_mark_device_provisioning_failed', { p_device_id: deviceId }),
+      );
+      return;
+    }
+    fail('E_DEVICE_STATUS_NOT_CLIENT_SETTABLE', 'devices.setStatus', `${status} is server-decided`);
   }
 
   // --- certificates --------------------------------------------------------

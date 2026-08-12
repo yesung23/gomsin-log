@@ -748,9 +748,39 @@ describe('every failure propagates', () => {
     await expect(repository.serverOriginId()).rejects.toThrow(/E_NO_DEPLOYMENT_IDENTITY/);
   });
 
-  it('propagates a status update that matched no row', async () => {
-    const { repository } = repositoryWith([ok(null)]);
-    await expect(repository.setDeviceStatus(UUID_A, 'REVOKED')).rejects.toThrow(/E_DB_NO_ROW/);
+  // Since 036 the client has no UPDATE privilege on devices.status, so retiring
+  // a device is an RPC call rather than an UPDATE. "Matched no row" is not a
+  // condition an RPC can report — e2ee_revoke_own_device raises
+  // E2EE_UNKNOWN_DEVICE instead — so what is worth asserting here is that the
+  // call goes to the function and that a transport failure still propagates.
+  it('retires a device through the RPC rather than a direct update', async () => {
+    const { repository, rpcs, queries } = repositoryWith([ok('REVOKED')]);
+    await repository.setDeviceStatus(UUID_A, 'REVOKED');
+    expect(rpcs.map((r) => r.fn)).toContain('e2ee_revoke_own_device');
+    // No table write at all: the privilege to set this column is gone.
+    expect(queries).toHaveLength(0);
+  });
+
+  it('records a provisioning failure through its own RPC', async () => {
+    const { repository, rpcs, queries } = repositoryWith([ok('PROVISIONING_FAILED')]);
+    await repository.setDeviceStatus(UUID_A, 'PROVISIONING_FAILED');
+    expect(rpcs.map((r) => r.fn)).toContain('e2ee_mark_device_provisioning_failed');
+    expect(queries).toHaveLength(0);
+  });
+
+  it('propagates a database failure from the retire RPC', async () => {
+    const { repository } = repositoryWith([{ data: null, error: { message: 'E2EE_UNKNOWN_DEVICE' } }]);
+    await expect(repository.setDeviceStatus(UUID_A, 'REVOKED')).rejects.toThrow(/E2EE_UNKNOWN_DEVICE|E_DB/);
+  });
+
+  // A promotion is the server's conclusion. The repository must not offer it a
+  // route at all, so this fails before any request is made.
+  it('refuses to ask the database for a status the client cannot set', async () => {
+    const { repository, rpcs, queries } = repositoryWith([]);
+    await expect(repository.setDeviceStatus(UUID_A, 'ACTIVE'))
+      .rejects.toThrow(/E_DEVICE_STATUS_NOT_CLIENT_SETTABLE/);
+    expect(rpcs).toHaveLength(0);
+    expect(queries).toHaveLength(0);
   });
 });
 

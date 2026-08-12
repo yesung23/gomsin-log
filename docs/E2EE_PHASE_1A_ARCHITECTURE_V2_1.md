@@ -206,3 +206,29 @@ Phase 1A. A per-scope signed manifest is the Phase 2 fix and is not claimed here
   depth, not a memory-safety guarantee.
 - Losing every device and the recovery kit means the data is unrecoverable. The
   operator cannot help, ever.
+
+## 13. Production operational requirement — issuer-device revocation
+
+Revocation is **chain-wide**. `verifyCertificateChain` refuses any chain
+containing a revoked link, so revoking a device also distrusts every device that
+device certified. That is the conservative reading and it is deliberate: a
+compromised device's issuances are suspect. It is not being changed here.
+
+The consequence is operational, and it must be understood before Phase 1B ships
+a revocation UI:
+
+> **Re-rooting descendants through the recovery kit is required before an issuer
+> device can be revoked, when doing so would strand surviving devices.**
+
+Concretely: if A1 enrolled A2, revoking A1 leaves A2 with no valid chain. A
+rotation performed in that state would build epochs only the recovery kit could
+open — a lockout dressed up as a security action.
+
+`revokeDeviceAndRotate` therefore performs a pre-flight and refuses with
+`E_REVOCATION_WOULD_STRAND_ACCOUNT` **before persisting anything**, leaving the
+account exactly as it was. The way out is a kit recovery, which issues a
+recovery-rooted certificate for the surviving device and supersedes the rest.
+
+This does not block Phase 1B development. It is a flow Phase 1B must present
+honestly rather than a protocol defect, and the guard means the unsafe path
+cannot be taken by accident in the meantime.

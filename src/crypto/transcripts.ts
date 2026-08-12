@@ -236,6 +236,82 @@ export async function recoveryChallengeTranscriptHash(t: RecoveryChallengeTransc
   return sha256(encodeRecoveryChallengeTranscript(t));
 }
 
+// --- partner-assisted couple recovery ---------------------------------------
+
+/**
+ * The ceremony a partner performs to hand the CURRENT couple key to the other
+ * member's replacement device.
+ *
+ * There is deliberately no domain field. This transcript names one couple scope
+ * key and one epoch, so the only thing a confirmation over it can authorize is
+ * that couple key — personal and health are not expressible here at all.
+ *
+ * Every field blocks a specific attack. `targetCertFp` binds the ceremony to the
+ * exact certificate the assisting device verified, so a later certificate for
+ * the same device id cannot reuse the confirmation. `scopeKeyId` + `epoch` bind
+ * it to one epoch, so a captured confirmation cannot be replayed after rotation.
+ * `expiresAtMs` is what "fresh" means, mechanically.
+ */
+export type PartnerAssistTranscript = {
+  coupleId: Uint8Array;
+  serverOriginId: Uint8Array;
+  assistingUserId: Uint8Array;
+  assistingDeviceId: Uint8Array;
+  targetUserId: Uint8Array;
+  targetDeviceId: Uint8Array;
+  targetSigFp: Uint8Array;
+  targetKemFp: Uint8Array;
+  targetCertFp: Uint8Array;
+  scopeKeyId: Uint8Array;
+  epoch: bigint;
+  assistNonce: Uint8Array;
+  issuedAtMs: bigint;
+  expiresAtMs: bigint;
+};
+
+export function encodePartnerAssistTranscript(t: PartnerAssistTranscript): Uint8Array {
+  return concat(
+    utf8('gomsinlog/partner-assist/v1'),
+    new Uint8Array([PROTOCOL_ID, SUITE_ID]),
+    fixed('coupleId', t.coupleId, 16),
+    fixed('serverOriginId', t.serverOriginId, 32),
+    fixed('assistingUserId', t.assistingUserId, 16),
+    fixed('assistingDeviceId', t.assistingDeviceId, 16),
+    fixed('targetUserId', t.targetUserId, 16),
+    fixed('targetDeviceId', t.targetDeviceId, 16),
+    fixed('targetSigFp', t.targetSigFp, 32),
+    fixed('targetKemFp', t.targetKemFp, 32),
+    fixed('targetCertFp', t.targetCertFp, 32),
+    fixed('scopeKeyId', t.scopeKeyId, 16),
+    u64be(t.epoch),
+    fixed('assistNonce', t.assistNonce, 32),
+    u64be(t.issuedAtMs),
+    u64be(t.expiresAtMs),
+  );
+}
+
+export async function partnerAssistTranscriptHash(t: PartnerAssistTranscript): Promise<Uint8Array> {
+  return sha256(encodePartnerAssistTranscript(t));
+}
+
+/**
+ * What the RECOVERING device signs once the two humans agree the SAS matches.
+ *
+ * Signed by the target's certified `dev_sig`, so the assisting device can check
+ * it against a certificate chain it verified itself rather than believing a
+ * boolean somebody handed it.
+ */
+export function partnerAssistConfirmMessage(
+  transcriptHash: Uint8Array,
+  confirmingDeviceId: Uint8Array,
+): Uint8Array {
+  return concat(
+    utf8('gomsinlog/partner-assist-confirm/v1'),
+    fixed('transcriptHash', transcriptHash, 32),
+    fixed('confirmingDeviceId', confirmingDeviceId, 16),
+  );
+}
+
 // --- recovery bundle --------------------------------------------------------
 
 export type RecoveryBundle = {

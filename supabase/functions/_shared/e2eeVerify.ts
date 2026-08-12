@@ -39,44 +39,82 @@ export function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
+// ---------------------------------------------------------------------------
+// THE BYTE BOUNDARY
+// ---------------------------------------------------------------------------
+//
+// Three representations exist in this system and they are NOT interchangeable.
+// Every binary value crossing a boundary must state which one it is, and every
+// conversion must go through this section — nothing in an Edge Function may
+// reach for `atob`/`btoa` directly.
+//
+//   bytea            What PostgREST returns for a `bytea` column and accepts
+//                    for a `bytea` RPC parameter: PostgreSQL hex output,
+//                    `\x0123abcd`. Never base64.
+//
+//   base64 transport What an HTTP request/response body carries, because JSON
+//                    has no binary type.
+//
+//   raw JSON text    Everything else: uuids, timestamps, enums. Not binary at
+//                    all, and never fed to either decoder.
+//
+// An earlier revision had ONE decoder that tried hex and silently fell back to
+// base64. That ambiguity is the bug it looks like: `\x4142` and `Q0Q=` are both
+// "valid" to such a function, so a column read with the wrong expectation
+// produced plausible garbage which then failed a signature check for a reason
+// nobody could trace. The two decoders below are strict and separate, and the
+// caller has to know what it is holding.
+
 /**
- * Decode a binary column as PostgREST actually returns it.
+ * A `bytea` column or RPC value. STRICT: `\x…` hex only.
  *
- * PostgreSQL renders `bytea` in hex output format — `\x0123abcd` — and
- * PostgREST passes that string through as JSON. It is NOT base64, and treating
- * it as base64 silently produces garbage that then fails a signature check for
- * the wrong reason. Base64 is still accepted because request bodies carry it,
- * so this is the single boundary codec for both directions.
+ * Returns null rather than throwing, so a malformed row is a rejected request
+ * with a code rather than a 500.
  */
-export function decodeDbBytes(value: unknown): Uint8Array | null {
+export function decodePgBytea(value: unknown): Uint8Array | null {
   if (typeof value !== 'string') return null;
-  if (value.startsWith('\\x') || value.startsWith('\\\\x')) {
-    const hex = value.replace(/^\\+x/, '');
-    if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) return null;
-    const out = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < out.length; i += 1) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    return out;
-  }
-  return decodeBase64(value);
+  if (!(value.startsWith('\\x') || value.startsWith('\\\\x'))) return null;
+  const hex = value.replace(/^\\+x/, '');
+  if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) return null;
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i += 1) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
 }
 
-/** Encode for an RPC `bytea` parameter. PostgREST accepts the hex literal. */
-export function encodeDbBytes(bytes: Uint8Array): string {
+/** Encode for a `bytea` column or RPC parameter. PostgREST accepts the literal. */
+export function encodePgBytea(bytes: Uint8Array): string {
   let out = '\\x';
   for (const b of bytes) out += b.toString(16).padStart(2, '0');
   return out;
 }
 
-export function decodeBase64(text: string): Uint8Array | null {
-  if (typeof text !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(text.replace(/\s/g, ''))) return null;
+/** A binary value from an HTTP body. STRICT: base64 only, never hex. */
+export function decodeBase64(text: unknown): Uint8Array | null {
+  if (typeof text !== 'string') return null;
+  const clean = text.replace(/\s/g, '');
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) return null;
   try {
-    const binary = atob(text.replace(/\s/g, ''));
+    const binary = atob(clean);
     const out = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
     return out;
   } catch {
     return null;
   }
+}
+
+/** A binary value for an HTTP response body. */
+export function encodeBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+/** Decode a `bytea` value that must be an exact width, or fail. */
+export function decodePgByteaExact(value: unknown, width: number): Uint8Array | null {
+  const bytes = decodePgBytea(value);
+  if (!bytes || bytes.length !== width) return null;
+  return bytes;
 }
 
 export function assertSpki(spki: Uint8Array): boolean {

@@ -1,8 +1,9 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import {
   approvalSignedMessage,
   handleApproveDevice,
   type ApproveDeviceDeps,
+  type CertificateRow,
 } from '../../supabase/functions/approve-device/handler.ts';
 import {
   MAX_ATTEMPTS_PER_HOUR,
@@ -10,7 +11,18 @@ import {
   handleVerifyRecovery,
   type VerifyRecoveryDeps,
 } from '../../supabase/functions/verify-recovery/handler.ts';
-import { toBase64, uuidToBytes } from '@/crypto/bytes';
+import {
+  MAX_ISSUED_PER_HOUR,
+  handleIssueRecoveryChallenge,
+  type IssueRecoveryChallengeDeps,
+} from '../../supabase/functions/issue-recovery-challenge/handler.ts';
+import {
+  decodeBase64,
+  decodePgBytea,
+  encodeBase64,
+  encodePgBytea,
+} from '../../supabase/functions/_shared/e2eeVerify.ts';
+import { bytesToUuid, hex, toBase64, uuidToBytes } from '@/crypto/bytes';
 import { publicKeyFingerprint, randomBytes, sha256 } from '@/crypto/suite';
 import {
   ISSUER_KIND,
@@ -19,15 +31,30 @@ import {
   certificateSignedMessage,
   encodeTbs,
 } from '@/crypto/deviceCertificate';
-import { ASSURANCE } from '@/crypto/domains';
-import { addEnrolledDevice, createTestAccount, signWith, type TestAccount } from '@/crypto/testing/virtualAccount';
+import { enrollmentTranscriptHash } from '@/crypto/transcripts';
+import { revocationLogGenesis } from '@/crypto/revocation';
+import { ASSURANCE, grantsToMask } from '@/crypto/domains';
+import { createTestAccount, signWith, type TestAccount } from '@/crypto/testing/virtualAccount';
 
 /**
- * Edge Function negative tests.
+ * Edge Function security tests.
  *
  * Everything is driven by real signatures from `virtualAccount`, because an
  * attack test that passes against a stubbed verifier proves nothing. The
  * handlers are pure, so the database is a set of injected functions.
+ *
+ * Two properties these tests exist to pin, beyond the individual attacks:
+ *
+ *   1. Every injected row is rendered the way PostgREST actually renders it —
+ *      `bytea` as `\x…` hex. The previous revision handed the handlers base64
+ *      and passed, because the codec accepted either. It would have failed
+ *      against a real database.
+ *
+ *   2. The canonical enrollment transcript is built on the CLIENT side, with
+ *      `src/crypto/transcripts.ts`, and verified by the server's own
+ *      independent reconstruction in `_shared/e2eeTranscript.ts`. That is the
+ *      only thing keeping those two encoders byte-identical, and a drift
+ *      between them would otherwise surface as a failed enrollment in the field.
  */
 
 const NOW = 1_800_000_000_000;
@@ -35,7 +62,9 @@ const USER = 'aaaaaaaa-0000-4000-8000-000000000001';
 const OTHER_USER = 'bbbbbbbb-0000-4000-8000-000000000002';
 const NEW_DEVICE = 'd0000000-0000-4000-8000-00000000000a';
 const APPROVER = 'd0000000-0000-4000-8000-00000000000b';
+const OTHER_DEVICE = 'd0000000-0000-4000-8000-00000000000c';
 const ENROLLMENT = 'e0000000-0000-4000-8000-00000000000a';
+const APPROVER_CERT = 'f0000000-0000-4000-8000-00000000000a';
 const CHALLENGE = 'c0000000-0000-4000-8000-00000000000a';
 
 let account: TestAccount;
@@ -46,58 +75,103 @@ beforeEach(async () => {
   logged = [];
 });
 
+const recoveryIdentityUuid = () => bytesToUuid(account.recoveryIdentityId);
+
 // ---------------------------------------------------------------------------
 // approve-device
 // ---------------------------------------------------------------------------
 
-async function buildApprovalFixture(options?: {
-  grantedDomains?: ('personal' | 'couple' | 'health')[];
-  transcriptHash?: Uint8Array;
-  subjectDeviceId?: string;
-}) {
+const ENROLL_NONCE = new Uint8Array(32).fill(0x5a);
+const REQUESTED_MASK = grantsToMask(['personal', 'couple']);
+const CREATED_AT = new Date(NOW - 60_000).toISOString();
+const EXPIRES_AT = new Date(NOW + 60_000).toISOString();
+
+type EnrollmentOverrides = {
+  grantedDomainsMask?: number;
+  enrollNonce?: Uint8Array;
+  issuedAtMs?: bigint;
+  expiresAtMs?: bigint;
+  revocationLogHead?: Uint8Array;
+  /** Changes only the transcript, leaving the stored row alone. */
+  transcriptEnrollNonce?: Uint8Array;
+  issuerCertFp?: Uint8Array;
+  newSigFp?: Uint8Array;
+  serverOriginId?: Uint8Array;
+};
+
+/**
+ * Build the fixture the way an honest CLIENT would.
+ *
+ * The transcript hash comes from the client encoder. The server rebuilds it
+ * from the rows below and must arrive at the same 32 bytes; every negative test
+ * works by making exactly one of those inputs disagree.
+ */
+async function buildApprovalFixture(overrides: EnrollmentOverrides = {}) {
   const approver = account.devices[0];
-  // The approver's own root-issued certificate, rebuilt so its subject device
-  // id is the APPROVER constant the deps below report.
   const approverCertificate = await buildApproverCertificate(approver);
-  const subjectSig = (await createTestAccount()).devices[0].sig;
-  const subjectKem = (await createTestAccount()).devices[0].kem;
-  const transcriptHash = options?.transcriptHash ?? (await sha256(new Uint8Array([1, 2, 3])));
+  const subject = (await createTestAccount()).devices[0];
+
+  const grantedDomainsMask = overrides.grantedDomainsMask ?? REQUESTED_MASK;
+  const enrollNonce = overrides.enrollNonce ?? ENROLL_NONCE;
+
+  const transcriptHash = await enrollmentTranscriptHash({
+    userId: account.userId,
+    serverOriginId: overrides.serverOriginId ?? account.serverOriginId,
+    oldDeviceId: uuidToBytes(APPROVER),
+    oldSigFp: approver.sig.fingerprint,
+    oldKemFp: approver.kem.fingerprint,
+    newDeviceId: uuidToBytes(NEW_DEVICE),
+    newSigFp: overrides.newSigFp ?? subject.sig.fingerprint,
+    newKemFp: subject.kem.fingerprint,
+    recoveryIdentityId: account.recoveryIdentityId,
+    recoveryVersion: account.recoveryVersion,
+    rootRecSigPubFp: account.recSig.fingerprint,
+    recoveryBundleFp: account.recoveryBundleFp,
+    revocationLogHead: overrides.revocationLogHead
+      ?? await revocationLogGenesis(account.userId, account.recoveryIdentityId),
+    issuerCertFp: overrides.issuerCertFp ?? await sha256(approverCertificate),
+    grantedDomainsMask,
+    enrollNonce: overrides.transcriptEnrollNonce ?? enrollNonce,
+    issuedAtMs: overrides.issuedAtMs ?? BigInt(Date.parse(CREATED_AT)),
+    expiresAtMs: overrides.expiresAtMs ?? BigInt(Date.parse(EXPIRES_AT)),
+  });
 
   const tbs = encodeTbs({
     issuerKind: ISSUER_KIND.device,
     subjectAssurance: ASSURANCE.webNonExtractable,
     subjectPlatform: 'web',
-    grantedDomains: options?.grantedDomains ?? ['personal', 'couple'],
+    grantedDomains: ['personal', 'couple'],
     userId: account.userId,
     serverOriginId: account.serverOriginId,
     recoveryIdentityId: account.recoveryIdentityId,
     recoveryVersion: account.recoveryVersion,
     rootRecSigPubFp: account.recSig.fingerprint,
-    issuerId: approver.deviceId,
+    issuerId: uuidToBytes(APPROVER),
     issuerSigPubFp: approver.sig.fingerprint,
-    subjectDeviceId: uuidToBytes(options?.subjectDeviceId ?? NEW_DEVICE),
-    subjectSigPubFp: subjectSig.fingerprint,
-    subjectKemPubFp: subjectKem.fingerprint,
+    subjectDeviceId: uuidToBytes(NEW_DEVICE),
+    subjectSigPubFp: subject.sig.fingerprint,
+    subjectKemPubFp: subject.kem.fingerprint,
     notBeforeMs: 0n,
     notAfterMs: 0n,
-    ceremonyNonce: randomBytes(32),
+    // The ceremony nonce IS the enrollment nonce, so a certificate minted for
+    // one enrollment cannot be presented against another.
+    ceremonyNonce: enrollNonce,
     ceremonyTranscriptHash: transcriptHash,
   });
 
   const certificate = assembleCertificate(
     tbs,
     await signWith(approver.sig, certificateSignedMessage(tbs)),
-    await signWith(subjectSig, certificatePopMessage(tbs)),
+    await signWith(subject.sig, certificatePopMessage(tbs)),
   );
 
   return {
     certificate,
     transcriptHash,
-    subjectSig,
-    subjectKem,
+    subject,
     approver,
     approverCertificate,
-    // A genuine approval signature from the approver's certified key.
+    enrollNonce,
     approvalSignature: await signWith(approver.sig, approvalSignedMessage(transcriptHash)),
   };
 }
@@ -131,421 +205,637 @@ async function buildApproverCertificate(approver: TestAccount['devices'][number]
   );
 }
 
-function approveDeps(overrides: Partial<ApproveDeviceDeps>, fixture: Awaited<ReturnType<typeof buildApprovalFixture>>): ApproveDeviceDeps {
+type Fixture = Awaited<ReturnType<typeof buildApprovalFixture>>;
+
+function approveDeps(overrides: Partial<ApproveDeviceDeps>, fixture: Fixture): ApproveDeviceDeps {
+  const approverChain: CertificateRow[] = [{
+    id: APPROVER_CERT,
+    subject_device_id: APPROVER,
+    issuer_certificate_id: null,
+    // Rendered exactly as PostgREST renders a `bytea`.
+    certificate: encodePgBytea(fixture.approverCertificate),
+    subject_sig_spki: encodePgBytea(fixture.approver.sig.spki),
+    subject_kem_spki: encodePgBytea(fixture.approver.kem.spki),
+  }];
+
   return {
     now: () => NOW,
     getServerOriginId: async () => account.serverOriginId,
-    getEnrollmentByNonce: async () => ({
+    getEnrollment: async (id) => (id === ENROLLMENT ? {
       id: ENROLLMENT,
       user_id: USER,
       new_device_id: NEW_DEVICE,
       approver_device_id: APPROVER,
-      granted_domains: 0b011,
-      expires_at: new Date(NOW + 60_000).toISOString(),
+      enroll_nonce: encodePgBytea(fixture.enrollNonce),
+      granted_domains: REQUESTED_MASK,
+      created_at: CREATED_AT,
+      expires_at: EXPIRES_AT,
       approved_at: null,
       consumed_at: null,
-    }),
+    } : null),
     getDevice: async (id) => {
       if (id === NEW_DEVICE) {
         return {
           id: NEW_DEVICE, user_id: USER, status: 'PENDING',
-          sig_spki: toBase64(fixture.subjectSig.spki), kem_spki: toBase64(fixture.subjectKem.spki),
+          sig_spki: encodePgBytea(fixture.subject.sig.spki),
+          kem_spki: encodePgBytea(fixture.subject.kem.spki),
         };
       }
       if (id === APPROVER) {
         return {
           id: APPROVER, user_id: USER, status: 'ACTIVE',
-          sig_spki: toBase64(fixture.approver.sig.spki), kem_spki: toBase64(fixture.approver.kem.spki),
+          sig_spki: encodePgBytea(fixture.approver.sig.spki),
+          kem_spki: encodePgBytea(fixture.approver.kem.spki),
         };
       }
       return null;
     },
     getRecoveryAnchor: async () => ({
-      id: [...account.recoveryIdentityId].map((b) => b.toString(16).padStart(2, '0')).join('')
-        .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5'),
+      id: recoveryIdentityUuid(),
       recovery_version: account.recoveryVersion,
-      rec_sig_spki: toBase64(account.recSig.spki),
-      recovery_bundle_fp: toBase64(account.recoveryBundleFp),
+      rec_sig_spki: encodePgBytea(account.recSig.spki),
+      recovery_bundle_fp: encodePgBytea(account.recoveryBundleFp),
     }),
-    getDeviceCertificate: async () => ({ certificate: toBase64(fixture.approverCertificate) }),
+    getCertificateChain: async (deviceId) => (deviceId === APPROVER ? approverChain : []),
+    isDeviceRevoked: async () => false,
+    getRevocationLogHead: async () => null,
     commitApproval: async () => ({ ok: true }),
     logEvent: (event, detail) => { logged.push({ event, detail }); },
     ...overrides,
   };
 }
 
-describe('approve-device', () => {
-  it('activates a device with a genuine certificate and transcript', async () => {
+function approveRequest(fixture: Fixture, overrides: Record<string, unknown> = {}) {
+  return {
+    enrollmentId: ENROLLMENT,
+    certificate: toBase64(fixture.certificate),
+    approvalSignature: toBase64(fixture.approvalSignature),
+    ...overrides,
+  };
+}
+
+describe('approve-device — canonical transcript reconstruction', () => {
+  it('activates a device when the client and the server build the same transcript', async () => {
     const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ activated: true, deviceId: NEW_DEVICE });
+  });
+
+  it('commits the SERVER transcript hash, not one the caller supplied', async () => {
+    const fixture = await buildApprovalFixture();
+    let committed: Uint8Array | null = null;
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      commitApproval: async (input) => { committed = input.transcriptHash; return { ok: true }; },
+    }, fixture));
+    expect(result.status).toBe(200);
+    expect(hex(committed!)).toBe(hex(fixture.transcriptHash));
+  });
+
+  it('accepts no transcript field at all: extra body keys change nothing', async () => {
+    const fixture = await buildApprovalFixture();
+    // A caller that tries to dictate the transcript is simply ignored — the
+    // parameter does not exist any more.
     const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
+      approveRequest(fixture, { transcriptHash: toBase64(new Uint8Array(32).fill(9)) }),
       USER,
       approveDeps({}, fixture),
     );
     expect(result.status).toBe(200);
   });
 
-  it('rejects a replayed nonce', async () => {
-    const fixture = await buildApprovalFixture();
-    const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
-      USER,
-      approveDeps({
-        getEnrollmentByNonce: async () => ({
-          id: ENROLLMENT, user_id: USER, new_device_id: NEW_DEVICE, approver_device_id: APPROVER,
-          granted_domains: 0b011, expires_at: new Date(NOW + 60_000).toISOString(),
-          approved_at: new Date(NOW - 1000).toISOString(), consumed_at: new Date(NOW - 1000).toISOString(),
-        }),
-      }, fixture),
-    );
-    expect(result.status).toBe(409);
-    expect((result.body as { error: string }).error).toBe('E_NONCE_ALREADY_USED');
-  });
+  // --- one changed transcript field at a time ------------------------------
 
-  it('rejects an expired nonce', async () => {
-    const fixture = await buildApprovalFixture();
-    const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
-      USER,
-      approveDeps({
-        getEnrollmentByNonce: async () => ({
-          id: ENROLLMENT, user_id: USER, new_device_id: NEW_DEVICE, approver_device_id: APPROVER,
-          granted_domains: 0b011, expires_at: new Date(NOW - 1).toISOString(),
-          approved_at: null, consumed_at: null,
-        }),
-      }, fixture),
-    );
-    expect(result.status).toBe(410);
-  });
-
-  it('rejects an unknown nonce', async () => {
-    const fixture = await buildApprovalFixture();
-    const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
-      USER,
-      approveDeps({ getEnrollmentByNonce: async () => null }, fixture),
-    );
+  it('rejects a changed granted-domain mask', async () => {
+    // The client signed a transcript claiming health as well; the server derives
+    // the mask from the enrollment row and the approver certificate instead.
+    const fixture = await buildApprovalFixture({ grantedDomainsMask: grantsToMask(['personal', 'couple', 'health']) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
     expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_UNKNOWN_NONCE');
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
   });
 
-  it('rejects an enrollment belonging to a different account', async () => {
-    const fixture = await buildApprovalFixture();
-    const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
-      OTHER_USER,
-      approveDeps({}, fixture),
-    );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_WRONG_ACCOUNT');
+  it('rejects a changed issuedAt', async () => {
+    const fixture = await buildApprovalFixture({ issuedAtMs: BigInt(NOW - 999_999) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
   });
 
-  it('rejects a certificate whose transcript hash is not the one presented', async () => {
-    // The SAS the humans compared is bound to the transcript. A certificate
-    // naming a different ceremony did not go through that comparison.
+  it('rejects a changed expiry', async () => {
+    const fixture = await buildApprovalFixture({ expiresAtMs: BigInt(NOW + 999_999) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
+  });
+
+  it('rejects a stale revocation log head', async () => {
+    // A client that enrolled against an older view of who is still trusted.
+    const fixture = await buildApprovalFixture({ revocationLogHead: new Uint8Array(32).fill(0x11) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
+  });
+
+  it('rejects a transcript naming a different approving certificate', async () => {
+    const fixture = await buildApprovalFixture({ issuerCertFp: new Uint8Array(32).fill(0x22) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
+  });
+
+  it('rejects a transcript naming a nonce other than the stored one', async () => {
+    // The stored row keeps the real nonce; only the signed transcript claims a
+    // different one. The server reads the row, so the hashes diverge.
+    const fixture = await buildApprovalFixture({ transcriptEnrollNonce: new Uint8Array(32).fill(0x77) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
+  });
+
+  it('rejects a transcript naming another deployment', async () => {
+    const fixture = await buildApprovalFixture({ serverOriginId: new Uint8Array(32).fill(0x33) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
+  });
+
+  it('rejects a transcript naming a subject key the device row does not hold', async () => {
+    const fixture = await buildApprovalFixture({ newSigFp: new Uint8Array(32).fill(0x44) });
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_CERT_WRONG_TRANSCRIPT' });
+  });
+});
+
+describe('approve-device — approver trust', () => {
+  it('rejects an arbitrary approval signature', async () => {
     const fixture = await buildApprovalFixture();
     const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(await sha256(new Uint8Array([9, 9, 9]))),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
+      approveRequest(fixture, { approvalSignature: toBase64(randomBytes(64)) }),
       USER,
       approveDeps({}, fixture),
     );
     expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_CERT_WRONG_TRANSCRIPT');
+    expect(result.body).toEqual({ error: 'E_BAD_APPROVAL_SIGNATURE' });
   });
 
-  it('rejects a certificate for a different device', async () => {
-    const fixture = await buildApprovalFixture({ subjectDeviceId: '99999999-0000-4000-8000-000000000099' });
-    const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
-      USER,
-      approveDeps({}, fixture),
-    );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_CERT_WRONG_SUBJECT');
-  });
-
-  it('rejects a health grant the enrollment never asked for', async () => {
-    const fixture = await buildApprovalFixture({ grantedDomains: ['personal', 'couple', 'health'] });
-    const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
-      USER,
-      approveDeps({}, fixture),
-    );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_GRANT_EXCEEDS_ENROLLMENT');
-  });
-
-  it('rejects a certificate signed by a key that is not the approver', async () => {
+  it('rejects a legitimate approver id paired with an attacker key and signature', async () => {
     const fixture = await buildApprovalFixture();
-    const impostor = await createTestAccount();
+    const attacker = (await createTestAccount()).devices[0];
+    // The device row claims the attacker's key. The certificate does not, and
+    // the certificate is what decides.
     const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
+      approveRequest(fixture, { approvalSignature: toBase64(
+        await signWith(attacker.sig, approvalSignedMessage(fixture.transcriptHash)),
+      ) }),
       USER,
       approveDeps({
         getDevice: async (id) => {
-          if (id === NEW_DEVICE) {
+          if (id === APPROVER) {
             return {
-              id: NEW_DEVICE, user_id: USER, status: 'PENDING',
-              sig_spki: toBase64(fixture.subjectSig.spki), kem_spki: toBase64(fixture.subjectKem.spki),
+              id: APPROVER, user_id: USER, status: 'ACTIVE',
+              sig_spki: encodePgBytea(attacker.sig.spki),
+              kem_spki: encodePgBytea(attacker.kem.spki),
             };
           }
-          // The server substitutes a different approver key.
           return {
-            id: APPROVER, user_id: USER, status: 'ACTIVE',
-            sig_spki: toBase64(impostor.devices[0].sig.spki),
-            kem_spki: toBase64(impostor.devices[0].kem.spki),
+            id: NEW_DEVICE, user_id: USER, status: 'PENDING',
+            sig_spki: encodePgBytea(fixture.subject.sig.spki),
+            kem_spki: encodePgBytea(fixture.subject.kem.spki),
           };
         },
       }, fixture),
     );
     expect(result.status).toBe(403);
-    // Caught while verifying the APPROVER's own certificate: the substituted
-    // key does not match the `subject_sig_pub_fp` that certificate committed
-    // to. That is a stronger and earlier refusal than the downstream issuer
-    // check, because it means the key never had certificate backing at all.
-    expect((result.body as { error: string }).error).toBe('E_APPROVER_CERT_CERT_SUBJECT_FP_MISMATCH');
+    expect(result.body).toEqual({ error: 'E_BAD_APPROVAL_SIGNATURE' });
   });
 
-  it('rejects a revoked approver', async () => {
+  it('rejects a signature from a different certified device of the same account', async () => {
     const fixture = await buildApprovalFixture();
+    const other = (await createTestAccount()).devices[0];
     const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
+      approveRequest(fixture, { approvalSignature: toBase64(
+        await signWith(other.sig, approvalSignedMessage(fixture.transcriptHash)),
+      ) }),
       USER,
-      approveDeps({
-        getDevice: async (id) => (id === NEW_DEVICE
-          ? { id: NEW_DEVICE, user_id: USER, status: 'PENDING', sig_spki: toBase64(fixture.subjectSig.spki), kem_spki: toBase64(fixture.subjectKem.spki) }
-          : { id: APPROVER, user_id: USER, status: 'REVOKED', sig_spki: toBase64(fixture.approver.sig.spki), kem_spki: toBase64(fixture.approver.kem.spki) }),
-      }, fixture),
+      approveDeps({}, fixture),
     );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_APPROVER_REVOKED');
+    expect(result.body).toEqual({ error: 'E_BAD_APPROVAL_SIGNATURE' });
+  });
+
+  it('rejects a single flipped bit in an otherwise valid signature', async () => {
+    const fixture = await buildApprovalFixture();
+    const tampered = new Uint8Array(fixture.approvalSignature);
+    tampered[0] ^= 0x01;
+    const result = await handleApproveDevice(
+      approveRequest(fixture, { approvalSignature: toBase64(tampered) }),
+      USER,
+      approveDeps({}, fixture),
+    );
+    expect(result.body).toEqual({ error: 'E_BAD_APPROVAL_SIGNATURE' });
   });
 
   it('rejects an uncertified approver', async () => {
     const fixture = await buildApprovalFixture();
-    const result = await handleApproveDevice(
-      {
-        enrollNonce: toBase64(randomBytes(32)),
-        certificate: toBase64(fixture.certificate),
-        transcriptHash: toBase64(fixture.transcriptHash),
-        approvalSignature: toBase64(fixture.approvalSignature),
-      },
-      USER,
-      approveDeps({ getDeviceCertificate: async () => null }, fixture),
-    );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_APPROVER_UNCERTIFIED');
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getCertificateChain: async () => [],
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_APPROVER_UNCERTIFIED' });
   });
 
-  it('rejects malformed protocol bytes without throwing', async () => {
+  it('rejects an approver with a signed revocation, whatever its status column says', async () => {
     const fixture = await buildApprovalFixture();
-    for (const bad of ['', 'not base64!!', toBase64(new Uint8Array(10))]) {
-      const result = await handleApproveDevice(
-        {
-          enrollNonce: toBase64(randomBytes(32)),
-          certificate: bad,
-          transcriptHash: toBase64(fixture.transcriptHash),
-          approvalSignature: toBase64(fixture.approvalSignature),
-        },
-        USER,
-        approveDeps({}, fixture),
-      );
-      expect(result.status).toBeGreaterThanOrEqual(400);
-    }
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      isDeviceRevoked: async (id) => id === APPROVER,
+    }, fixture));
+    expect(result.status).toBe(403);
+    expect(result.body).toEqual({ error: 'E_APPROVER_REVOKED' });
   });
 
-  // -------------------------------------------------------------------------
-  // Attack 22 — the approval signature must come from the certified key
-  //
-  // Before this fix `approvalSignature` was decoded, carried through the
-  // handler, and persisted without ever being verified. Any 64 bytes passed.
-  // -------------------------------------------------------------------------
-  describe('approval signature', () => {
-    async function approve(
-      fixture: Awaited<ReturnType<typeof buildApprovalFixture>>,
-      signature: Uint8Array,
-      overrides: Partial<ApproveDeviceDeps> = {},
-      transcriptHash = fixture.transcriptHash,
-    ) {
-      return handleApproveDevice(
+  it('rejects an approver whose own issuer was revoked', async () => {
+    const fixture = await buildApprovalFixture();
+    // A depth-2 approver chain: leaf issued by OTHER_DEVICE, which is revoked.
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      isDeviceRevoked: async (id) => id === OTHER_DEVICE,
+      getCertificateChain: async () => [
         {
-          enrollNonce: toBase64(randomBytes(32)),
-          certificate: toBase64(fixture.certificate),
-          transcriptHash: toBase64(transcriptHash),
-          approvalSignature: toBase64(signature),
+          id: APPROVER_CERT,
+          subject_device_id: APPROVER,
+          issuer_certificate_id: null,
+          certificate: encodePgBytea(fixture.approverCertificate),
+          subject_sig_spki: encodePgBytea(fixture.approver.sig.spki),
+          subject_kem_spki: encodePgBytea(fixture.approver.kem.spki),
         },
-        USER,
-        approveDeps(overrides, fixture),
-      );
-    }
-
-    it('rejects an arbitrary random signature', async () => {
-      const fixture = await buildApprovalFixture();
-      const result = await approve(fixture, randomBytes(64));
-      expect(result.status).toBe(403);
-      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
-    });
-
-    it('rejects a legitimate approver id paired with an attacker key and signature', async () => {
-      // The whole shape of the attack: keep the real device id, swap in a key
-      // the attacker controls, and sign with it.
-      const fixture = await buildApprovalFixture();
-      const attacker = await createTestAccount();
-      const attackerDevice = attacker.devices[0];
-      const forged = await signWith(attackerDevice.sig, approvalSignedMessage(fixture.transcriptHash));
-
-      const result = await approve(fixture, forged, {
-        getDevice: async (id) => (id === NEW_DEVICE
-          ? {
-            id: NEW_DEVICE, user_id: USER, status: 'PENDING',
-            sig_spki: toBase64(fixture.subjectSig.spki), kem_spki: toBase64(fixture.subjectKem.spki),
-          }
-          : {
-            // Real approver id, attacker's key.
-            id: APPROVER, user_id: USER, status: 'ACTIVE',
-            sig_spki: toBase64(attackerDevice.sig.spki), kem_spki: toBase64(attackerDevice.kem.spki),
-          }),
-      });
-
-      expect(result.status).toBe(403);
-      // Refused before the signature is even reached: the attacker key has no
-      // certificate committing to it.
-      expect((result.body as { error: string }).error).toBe('E_APPROVER_CERT_CERT_SUBJECT_FP_MISMATCH');
-    });
-
-    it('rejects a signature from a different certified device of the same account', async () => {
-      const fixture = await buildApprovalFixture();
-      const other = await addEnrolledDevice(account, account.devices[0], { grantedDomains: ['couple'] });
-      const wrongSigner = await signWith(other.sig, approvalSignedMessage(fixture.transcriptHash));
-
-      const result = await approve(fixture, wrongSigner);
-      expect(result.status).toBe(403);
-      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
-    });
-
-    it('accepts a signature from the correct certified approving device', async () => {
-      const fixture = await buildApprovalFixture();
-      const result = await approve(fixture, fixture.approvalSignature);
-      expect(result.status).toBe(200);
-      expect((result.body as { activated: boolean }).activated).toBe(true);
-    });
-
-    it('rejects a signature over a tampered transcript', async () => {
-      const fixture = await buildApprovalFixture();
-      // Genuine key, but signed over a different transcript than the one the
-      // certificate and the ceremony are bound to.
-      const otherTranscript = await sha256(new Uint8Array([4, 5, 6]));
-      const misbound = await signWith(fixture.approver.sig, approvalSignedMessage(otherTranscript));
-
-      const result = await approve(fixture, misbound);
-      expect(result.status).toBe(403);
-      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
-    });
-
-    it('rejects a single flipped bit in an otherwise valid signature', async () => {
-      const fixture = await buildApprovalFixture();
-      const tampered = fixture.approvalSignature.slice();
-      tampered[0] ^= 0x01;
-      const result = await approve(fixture, tampered);
-      expect(result.status).toBe(403);
-      expect((result.body as { error: string }).error).toBe('E_BAD_APPROVAL_SIGNATURE');
-    });
-
-    it('keeps the existing replay protection: a consumed nonce still fails', async () => {
-      // The signature check must not have displaced the nonce guard.
-      const fixture = await buildApprovalFixture();
-      const result = await approve(fixture, fixture.approvalSignature, {
-        getEnrollmentByNonce: async () => ({
-          id: ENROLLMENT, user_id: USER, new_device_id: NEW_DEVICE, approver_device_id: APPROVER,
-          granted_domains: 0b011, expires_at: new Date(NOW + 60_000).toISOString(),
-          approved_at: new Date(NOW - 1000).toISOString(), consumed_at: new Date(NOW - 1000).toISOString(),
-        }),
-      });
-      expect(result.status).toBe(409);
-      expect((result.body as { error: string }).error).toBe('E_NONCE_ALREADY_USED');
-    });
-
-    it('still refuses an expired nonce even with a valid signature', async () => {
-      const fixture = await buildApprovalFixture();
-      const result = await approve(fixture, fixture.approvalSignature, {
-        getEnrollmentByNonce: async () => ({
-          id: ENROLLMENT, user_id: USER, new_device_id: NEW_DEVICE, approver_device_id: APPROVER,
-          granted_domains: 0b011, expires_at: new Date(NOW - 1).toISOString(),
-          approved_at: null, consumed_at: null,
-        }),
-      });
-      expect(result.status).toBe(410);
-    });
-
-    it('derives granted domains from the verified certificate, not a mutable column', async () => {
-      // The approver certificate grants personal+couple+health; the new
-      // certificate asks for personal+couple, which the enrollment also allows.
-      const fixture = await buildApprovalFixture({ grantedDomains: ['personal', 'couple'] });
-      expect((await approve(fixture, fixture.approvalSignature)).status).toBe(200);
-
-      // Escalation beyond the enrollment is still refused.
-      const escalated = await buildApprovalFixture({ grantedDomains: ['personal', 'couple', 'health'] });
-      const result = await approve(escalated, escalated.approvalSignature);
-      expect(result.status).toBe(403);
-      expect((result.body as { error: string }).error).toBe('E_GRANT_EXCEEDS_ENROLLMENT');
-    });
+        {
+          id: 'f0000000-0000-4000-8000-00000000000b',
+          subject_device_id: OTHER_DEVICE,
+          issuer_certificate_id: null,
+          certificate: encodePgBytea(fixture.approverCertificate),
+          subject_sig_spki: encodePgBytea(fixture.approver.sig.spki),
+          subject_kem_spki: encodePgBytea(fixture.approver.kem.spki),
+        },
+      ],
+    }, fixture));
+    expect(result.status).toBe(403);
+    expect(result.body.error).toMatch(/E_APPROVER/);
   });
 
-  it('logs identifiers and codes only, never key material', () => {
-    for (const entry of logged) {
-      const serialized = JSON.stringify(entry);
-      expect(serialized).not.toMatch(/[A-Za-z0-9+/]{80,}/);
-    }
+  it('rejects a chain that does not terminate at the recovery root', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getCertificateChain: async () => [{
+        // The new device's own certificate is device-issued, so a chain of just
+        // it never reaches the root.
+        id: APPROVER_CERT,
+        subject_device_id: APPROVER,
+        issuer_certificate_id: null,
+        certificate: encodePgBytea(fixture.certificate),
+        subject_sig_spki: encodePgBytea(fixture.subject.sig.spki),
+        subject_kem_spki: encodePgBytea(fixture.subject.kem.spki),
+      }],
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_APPROVER_CERT_CHAIN_NO_ROOT' });
+  });
+
+  it('rejects a certificate chain deeper than the protocol allows', async () => {
+    const fixture = await buildApprovalFixture();
+    const link: CertificateRow = {
+      id: APPROVER_CERT,
+      subject_device_id: APPROVER,
+      issuer_certificate_id: null,
+      certificate: encodePgBytea(fixture.approverCertificate),
+      subject_sig_spki: encodePgBytea(fixture.approver.sig.spki),
+      subject_kem_spki: encodePgBytea(fixture.approver.kem.spki),
+    };
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getCertificateChain: async () => Array.from({ length: 9 }, () => link),
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_APPROVER_CHAIN_TOO_DEEP' });
+  });
+});
+
+describe('approve-device — enrollment lifecycle', () => {
+  it('rejects a replayed enrollment', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getEnrollment: async () => ({
+        id: ENROLLMENT,
+        user_id: USER,
+        new_device_id: NEW_DEVICE,
+        approver_device_id: APPROVER,
+        enroll_nonce: encodePgBytea(fixture.enrollNonce),
+        granted_domains: REQUESTED_MASK,
+        created_at: CREATED_AT,
+        expires_at: EXPIRES_AT,
+        approved_at: new Date(NOW - 1000).toISOString(),
+        consumed_at: new Date(NOW - 1000).toISOString(),
+      }),
+    }, fixture));
+    expect(result.status).toBe(409);
+    expect(result.body).toEqual({ error: 'E_NONCE_ALREADY_USED' });
+  });
+
+  it('rejects an expired enrollment', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      now: () => Date.parse(EXPIRES_AT) + 1,
+    }, fixture));
+    expect(result.status).toBe(410);
+    expect(result.body).toEqual({ error: 'E_NONCE_EXPIRED' });
+  });
+
+  it('rejects an unknown enrollment id', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(
+      approveRequest(fixture, { enrollmentId: 'e0000000-0000-4000-8000-0000000000ff' }),
+      USER,
+      approveDeps({}, fixture),
+    );
+    expect(result.body).toEqual({ error: 'E_UNKNOWN_ENROLLMENT' });
+  });
+
+  it('rejects an enrollment id that is not a uuid, without a lookup', async () => {
+    const fixture = await buildApprovalFixture();
+    let looked = false;
+    const result = await handleApproveDevice(
+      approveRequest(fixture, { enrollmentId: 'not-a-uuid' }),
+      USER,
+      approveDeps({ getEnrollment: async () => { looked = true; return null; } }, fixture),
+    );
+    expect(result.status).toBe(400);
+    expect(looked).toBe(false);
+  });
+
+  it('rejects an enrollment belonging to a different account', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), OTHER_USER, approveDeps({
+      getRecoveryAnchor: async () => null,
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_WRONG_ACCOUNT' });
+  });
+
+  it('rejects an unauthenticated caller', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), '', approveDeps({}, fixture));
+    expect(result.status).toBe(403);
+    expect(result.body).toEqual({ error: 'E_UNAUTHENTICATED' });
+  });
+
+  it('rejects an already-provisioned target device', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getDevice: async (id) => (id === NEW_DEVICE
+        ? {
+          id: NEW_DEVICE, user_id: USER, status: 'ACTIVE',
+          sig_spki: encodePgBytea(fixture.subject.sig.spki),
+          kem_spki: encodePgBytea(fixture.subject.kem.spki),
+        }
+        : {
+          id: APPROVER, user_id: USER, status: 'ACTIVE',
+          sig_spki: encodePgBytea(fixture.approver.sig.spki),
+          kem_spki: encodePgBytea(fixture.approver.kem.spki),
+        }),
+    }, fixture));
+    expect(result.status).toBe(409);
+    expect(result.body).toEqual({ error: 'E_DEVICE_NOT_PENDING' });
+  });
+});
+
+describe('approve-device — malformed input', () => {
+  it('rejects malformed bytea in a device row without throwing', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getDevice: async (id) => (id === NEW_DEVICE
+        ? { id: NEW_DEVICE, user_id: USER, status: 'PENDING', sig_spki: 'not-hex', kem_spki: 'not-hex' }
+        : {
+          id: APPROVER, user_id: USER, status: 'ACTIVE',
+          sig_spki: encodePgBytea(fixture.approver.sig.spki),
+          kem_spki: encodePgBytea(fixture.approver.kem.spki),
+        }),
+    }, fixture));
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ error: 'E_MALFORMED_STATE' });
+  });
+
+  it('rejects a base64 bytea column, which is the wrong representation', async () => {
+    // Exactly the bug the split codec exists to make impossible: a row rendered
+    // as base64 rather than `\x` hex is refused instead of silently decoded.
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getRecoveryAnchor: async () => ({
+        id: recoveryIdentityUuid(),
+        recovery_version: account.recoveryVersion,
+        rec_sig_spki: toBase64(account.recSig.spki),
+        recovery_bundle_fp: toBase64(account.recoveryBundleFp),
+      }),
+    }, fixture));
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ error: 'E_MALFORMED_STATE' });
+  });
+
+  it('rejects a malformed certificate without throwing', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(
+      approveRequest(fixture, { certificate: toBase64(new Uint8Array(10)) }),
+      USER,
+      approveDeps({}, fixture),
+    );
+    expect(result.status).toBe(400);
+  });
+
+  it('rejects an enrollment nonce of the wrong width', async () => {
+    const fixture = await buildApprovalFixture();
+    const result = await handleApproveDevice(approveRequest(fixture), USER, approveDeps({
+      getEnrollment: async () => ({
+        id: ENROLLMENT,
+        user_id: USER,
+        new_device_id: NEW_DEVICE,
+        approver_device_id: APPROVER,
+        enroll_nonce: encodePgBytea(new Uint8Array(8)),
+        granted_domains: REQUESTED_MASK,
+        created_at: CREATED_AT,
+        expires_at: EXPIRES_AT,
+        approved_at: null,
+        consumed_at: null,
+      }),
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_MALFORMED_STATE' });
+  });
+
+  it('logs identifiers and codes only, never key material', async () => {
+    const fixture = await buildApprovalFixture();
+    await handleApproveDevice(approveRequest(fixture), USER, approveDeps({}, fixture));
+    const serialized = JSON.stringify(logged);
+    expect(serialized).toContain(NEW_DEVICE);
+    expect(serialized).not.toContain(hex(fixture.approver.sig.spki));
+    expect(serialized).not.toContain(hex(fixture.transcriptHash));
+    expect(serialized).not.toContain(hex(fixture.enrollNonce));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// issue-recovery-challenge
+// ---------------------------------------------------------------------------
+
+const ISSUED_CHALLENGE = new Uint8Array(32).fill(0x2b);
+
+function issueDeps(overrides: Partial<IssueRecoveryChallengeDeps> = {}): IssueRecoveryChallengeDeps {
+  return {
+    now: () => NOW,
+    randomChallenge: () => ISSUED_CHALLENGE,
+    getDevice: async (id) => (id === NEW_DEVICE
+      ? { id: NEW_DEVICE, user_id: USER, status: 'PENDING' }
+      : null),
+    getCurrentRecoveryIdentity: async (userId) => (userId === USER ? {
+      id: recoveryIdentityUuid(),
+      user_id: USER,
+      recovery_version: account.recoveryVersion,
+      superseded_at: null,
+    } : null),
+    countIssuedLastHour: async () => 0,
+    issue: async ({ userId, deviceId, challenge, ttlSeconds }) => ({
+      ok: true,
+      row: {
+        id: CHALLENGE,
+        user_id: userId,
+        recovery_identity_id: recoveryIdentityUuid(),
+        recovery_version: account.recoveryVersion,
+        new_device_id: deviceId,
+        challenge_nonce: encodePgBytea(challenge),
+        issued_at: new Date(NOW).toISOString(),
+        expires_at: new Date(NOW + ttlSeconds * 1000).toISOString(),
+      },
+    }),
+    logEvent: (event, detail) => { logged.push({ event, detail }); },
+    ...overrides,
+  };
+}
+
+describe('issue-recovery-challenge', () => {
+  it('rejects an unauthenticated caller', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, '', issueDeps());
+    expect(result.status).toBe(403);
+    expect(result.body).toEqual({ error: 'E_UNAUTHENTICATED' });
+  });
+
+  it('rejects a device belonging to another account', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, OTHER_USER, issueDeps());
+    expect(result.status).toBe(403);
+    expect(result.body).toEqual({ error: 'E_WRONG_ACCOUNT' });
+  });
+
+  it('rejects a device that is not PENDING', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps({
+      getDevice: async () => ({ id: NEW_DEVICE, user_id: USER, status: 'ACTIVE' }),
+    }));
+    expect(result.status).toBe(409);
+    expect(result.body).toEqual({ error: 'E_DEVICE_NOT_PENDING' });
+  });
+
+  it('rejects a revoked device', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps({
+      getDevice: async () => ({ id: NEW_DEVICE, user_id: USER, status: 'REVOKED' }),
+    }));
+    expect(result.body).toEqual({ error: 'E_DEVICE_NOT_PENDING' });
+  });
+
+  it('rejects an account with no recovery identity', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps({
+      getCurrentRecoveryIdentity: async () => null,
+    }));
+    expect(result.body).toEqual({ error: 'E_NO_RECOVERY_IDENTITY' });
+  });
+
+  it('rejects a superseded recovery identity', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps({
+      getCurrentRecoveryIdentity: async () => ({
+        id: recoveryIdentityUuid(),
+        user_id: USER,
+        recovery_version: account.recoveryVersion,
+        superseded_at: new Date(NOW - 1000).toISOString(),
+      }),
+    }));
+    expect(result.body).toEqual({ error: 'E_RECOVERY_IDENTITY_SUPERSEDED' });
+  });
+
+  it('rejects a malformed device id without touching the database', async () => {
+    let touched = false;
+    const result = await handleIssueRecoveryChallenge({ deviceId: 'nope' }, USER, issueDeps({
+      getDevice: async () => { touched = true; return null; },
+    }));
+    expect(result.status).toBe(400);
+    expect(touched).toBe(false);
+  });
+
+  it('rate limits issuance', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps({
+      countIssuedLastHour: async () => MAX_ISSUED_PER_HOUR,
+    }));
+    expect(result.status).toBe(429);
+    expect(result.body).toEqual({ error: 'E_TOO_MANY_CHALLENGES' });
+  });
+
+  it('issues a challenge whose id is NOT the challenge bytes', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps());
+    expect(result.status).toBe(200);
+    const body = result.body as Extract<typeof result, { status: 200 }>['body'];
+    expect(body.challengeId).toBe(CHALLENGE);
+    // Separate values, and the id is not derived from the secret.
+    expect(body.challengeId).not.toBe(body.challenge);
+    expect(hex(decodeBase64(body.challenge)!)).toBe(hex(ISSUED_CHALLENGE));
+    expect(decodeBase64(body.challenge)).toHaveLength(32);
+  });
+
+  it('returns the persisted expiry, so the signed transcript can be reproduced', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps());
+    const body = result.body as Extract<typeof result, { status: 200 }>['body'];
+    expect(Date.parse(body.expiresAt) - Date.parse(body.issuedAt)).toBe(120_000);
+    expect(body.recoveryIdentityId).toBe(recoveryIdentityUuid());
+    expect(body.deviceId).toBe(NEW_DEVICE);
+  });
+
+  it('returns no secret material of any kind', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps());
+    const body = result.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual([
+      'challenge', 'challengeId', 'deviceId', 'expiresAt', 'issuedAt', 'recoveryIdentityId', 'recoveryVersion',
+    ]);
+    const serialized = JSON.stringify(body);
+    // No salt, no encrypted private half, no bundle fingerprint, no scope key.
+    expect(serialized).not.toContain(hex(account.recoverySalt));
+    expect(serialized).not.toContain(hex(account.recoveryBundleFp));
+    expect(serialized).not.toContain(hex(account.recSig.spki));
+    expect(serialized).not.toContain(hex(account.recKem.spki));
+  });
+
+  it('never logs the challenge bytes', async () => {
+    await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps());
+    const serialized = JSON.stringify(logged);
+    expect(serialized).toContain(CHALLENGE);
+    expect(serialized).not.toContain(hex(ISSUED_CHALLENGE));
+    expect(serialized).not.toContain(encodeBase64(ISSUED_CHALLENGE));
+  });
+
+  it('refuses a row that does not match the request it answered', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps({
+      issue: async () => ({
+        ok: true,
+        row: {
+          id: CHALLENGE,
+          user_id: USER,
+          recovery_identity_id: recoveryIdentityUuid(),
+          recovery_version: account.recoveryVersion,
+          new_device_id: OTHER_DEVICE,
+          challenge_nonce: encodePgBytea(ISSUED_CHALLENGE),
+          issued_at: new Date(NOW).toISOString(),
+          expires_at: new Date(NOW + 120_000).toISOString(),
+        },
+      }),
+    }));
+    expect(result.status).toBe(409);
+    expect(result.body).toEqual({ error: 'E_CHALLENGE_MISMATCH' });
+  });
+
+  it('propagates a refusal from the issuing RPC', async () => {
+    const result = await handleIssueRecoveryChallenge({ deviceId: NEW_DEVICE }, USER, issueDeps({
+      issue: async () => ({ ok: false, code: 'E_DEVICE_NOT_PENDING' }),
+    }));
+    expect(result.status).toBe(409);
+    expect(result.body).toEqual({ error: 'E_DEVICE_NOT_PENDING' });
   });
 });
 
@@ -553,60 +843,67 @@ describe('approve-device', () => {
 // verify-recovery
 // ---------------------------------------------------------------------------
 
-async function recoveryFixture(options?: { recoveryVersion?: number }) {
-  const deviceSig = (await createTestAccount()).devices[0].sig;
-  const deviceKem = (await createTestAccount()).devices[0].kem;
+async function buildRecoveryFixture(options?: { deviceId?: string }) {
+  const device = (await createTestAccount()).devices[0];
   const nonce = randomBytes(32);
-  const issuedAt = NOW - 1_000;
-  const expiresAt = NOW + 60_000;
+  const issuedAt = new Date(NOW - 30_000).toISOString();
+  const expiresAt = new Date(NOW + 90_000).toISOString();
+  const deviceId = options?.deviceId ?? NEW_DEVICE;
 
   const transcript = buildRecoveryTranscript({
     serverOriginId: account.serverOriginId,
-    userId: account.userId,
+    userId: uuidToBytes(USER),
     challengeId: uuidToBytes(CHALLENGE),
     challengeNonce: nonce,
-    issuedAtMs: BigInt(issuedAt),
-    expiresAtMs: BigInt(expiresAt),
-    recoveryVersion: options?.recoveryVersion ?? account.recoveryVersion,
-    recSigPubFp: await publicKeyFingerprint(account.recSig.spki),
-    newDeviceId: uuidToBytes(NEW_DEVICE),
-    newSigFp: await publicKeyFingerprint(deviceSig.spki),
-    newKemFp: await publicKeyFingerprint(deviceKem.spki),
+    issuedAtMs: BigInt(Date.parse(issuedAt)),
+    expiresAtMs: BigInt(Date.parse(expiresAt)),
+    recoveryVersion: account.recoveryVersion,
+    recSigPubFp: account.recSig.fingerprint,
+    newDeviceId: uuidToBytes(deviceId),
+    newSigFp: await publicKeyFingerprint(device.sig.spki),
+    newKemFp: await publicKeyFingerprint(device.kem.spki),
   });
 
   return {
-    nonce, issuedAt, expiresAt, deviceSig, deviceKem,
+    device,
+    nonce,
+    issuedAt,
+    expiresAt,
+    deviceId,
     signature: await signWith(account.recSig, transcript),
   };
 }
 
-function recoveryDeps(
-  overrides: Partial<VerifyRecoveryDeps>,
-  fixture: Awaited<ReturnType<typeof recoveryFixture>>,
-): VerifyRecoveryDeps {
+type RecoveryFixture = Awaited<ReturnType<typeof buildRecoveryFixture>>;
+
+function verifyDeps(overrides: Partial<VerifyRecoveryDeps>, fixture: RecoveryFixture): VerifyRecoveryDeps {
   return {
     now: () => NOW,
     getServerOriginId: async () => account.serverOriginId,
     getChallenge: async () => ({
       id: CHALLENGE,
       user_id: USER,
-      challenge_nonce: toBase64(fixture.nonce),
+      recovery_identity_id: recoveryIdentityUuid(),
+      challenge_nonce: encodePgBytea(fixture.nonce),
       recovery_version: account.recoveryVersion,
-      new_device_id: NEW_DEVICE,
-      issued_at: new Date(fixture.issuedAt).toISOString(),
-      expires_at: new Date(fixture.expiresAt).toISOString(),
+      new_device_id: fixture.deviceId,
+      issued_at: fixture.issuedAt,
+      expires_at: fixture.expiresAt,
       consumed_at: null,
     }),
     getCurrentRecoveryIdentity: async () => ({
-      id: 'ffffffff-0000-4000-8000-00000000000f',
+      id: recoveryIdentityUuid(),
       recovery_version: account.recoveryVersion,
-      rec_sig_spki: toBase64(account.recSig.spki),
+      rec_sig_spki: encodePgBytea(account.recSig.spki),
       superseded_at: null,
     }),
-    getDevice: async () => ({
-      id: NEW_DEVICE, user_id: USER, status: 'PENDING',
-      sig_spki: toBase64(fixture.deviceSig.spki), kem_spki: toBase64(fixture.deviceKem.spki),
-    }),
+    getDevice: async (id) => (id === fixture.deviceId ? {
+      id: fixture.deviceId,
+      user_id: USER,
+      status: 'PENDING',
+      sig_spki: encodePgBytea(fixture.device.sig.spki),
+      kem_spki: encodePgBytea(fixture.device.kem.spki),
+    } : null),
     countRecentAttempts: async () => 0,
     commitAuthentication: async () => ({ ok: true }),
     logEvent: (event, detail) => { logged.push({ event, detail }); },
@@ -614,240 +911,285 @@ function recoveryDeps(
   };
 }
 
+function verifyRequest(fixture: RecoveryFixture, overrides: Record<string, unknown> = {}) {
+  return {
+    challengeId: CHALLENGE,
+    deviceId: fixture.deviceId,
+    signature: toBase64(fixture.signature),
+    ...overrides,
+  };
+}
+
 describe('verify-recovery', () => {
   it('authenticates a genuine recovery signature but does NOT activate the device', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({}, fixture),
-    );
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({}, fixture));
     expect(result.status).toBe(200);
-    // The device is authenticated, not provisioned: it is still not eligible to
-    // receive any envelope.
-    expect((result.body as { nextState: string }).nextState).toBe('RECOVERY_AUTHENTICATED');
+    expect(result.body).toEqual({
+      authenticated: true, deviceId: NEW_DEVICE, nextState: 'RECOVERY_AUTHENTICATED',
+    });
+  });
+
+  it('binds the commit to the identity and generation it verified', async () => {
+    const fixture = await buildRecoveryFixture();
+    let committed: Record<string, unknown> | null = null;
+    await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      commitAuthentication: async (input) => { committed = { ...input }; return { ok: true }; },
+    }, fixture));
+    expect(committed).toEqual({
+      challengeId: CHALLENGE,
+      deviceId: NEW_DEVICE,
+      recoveryIdentityId: recoveryIdentityUuid(),
+      recoveryVersion: account.recoveryVersion,
+    });
   });
 
   it('rejects a signature from anything but the recovery key', async () => {
-    // A database dump plus an Auth session gets you here and no further.
-    const fixture = await recoveryFixture();
-    const impostor = await createTestAccount();
-    const forged = await signWith(impostor.recSig, new Uint8Array([1, 2, 3]));
+    const fixture = await buildRecoveryFixture();
     const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(forged) },
+      verifyRequest(fixture, { signature: toBase64(await signWith(fixture.device.sig, new Uint8Array(32))) }),
       USER,
-      recoveryDeps({}, fixture),
+      verifyDeps({}, fixture),
     );
     expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_BAD_RECOVERY_SIGNATURE');
+    expect(result.body).toEqual({ error: 'E_BAD_RECOVERY_SIGNATURE' });
+  });
+
+  it('rejects a modified challenge nonce', async () => {
+    const fixture = await buildRecoveryFixture();
+    const tampered = new Uint8Array(fixture.nonce);
+    tampered[0] ^= 0xff;
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getChallenge: async () => ({
+        id: CHALLENGE,
+        user_id: USER,
+        recovery_identity_id: recoveryIdentityUuid(),
+        challenge_nonce: encodePgBytea(tampered),
+        recovery_version: account.recoveryVersion,
+        new_device_id: fixture.deviceId,
+        issued_at: fixture.issuedAt,
+        expires_at: fixture.expiresAt,
+        consumed_at: null,
+      }),
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_BAD_RECOVERY_SIGNATURE' });
   });
 
   it('rejects a replayed challenge', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({
-        getChallenge: async () => ({
-          id: CHALLENGE, user_id: USER, challenge_nonce: toBase64(fixture.nonce),
-          recovery_version: account.recoveryVersion, new_device_id: NEW_DEVICE,
-          issued_at: new Date(fixture.issuedAt).toISOString(),
-          expires_at: new Date(fixture.expiresAt).toISOString(),
-          consumed_at: new Date(NOW - 10).toISOString(),
-        }),
-      }, fixture),
-    );
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getChallenge: async () => ({
+        id: CHALLENGE,
+        user_id: USER,
+        recovery_identity_id: recoveryIdentityUuid(),
+        challenge_nonce: encodePgBytea(fixture.nonce),
+        recovery_version: account.recoveryVersion,
+        new_device_id: fixture.deviceId,
+        issued_at: fixture.issuedAt,
+        expires_at: fixture.expiresAt,
+        consumed_at: new Date(NOW - 1000).toISOString(),
+      }),
+    }, fixture));
     expect(result.status).toBe(409);
-    expect((result.body as { error: string }).error).toBe('E_CHALLENGE_ALREADY_USED');
+    expect(result.body).toEqual({ error: 'E_CHALLENGE_ALREADY_USED' });
+  });
+
+  it('rejects a challenge the commit step finds already spent', async () => {
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      commitAuthentication: async () => ({ ok: false, code: 'E_CHALLENGE_ALREADY_USED' }),
+    }, fixture));
+    expect(result.status).toBe(409);
   });
 
   it('rejects an expired challenge', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({
-        getChallenge: async () => ({
-          id: CHALLENGE, user_id: USER, challenge_nonce: toBase64(fixture.nonce),
-          recovery_version: account.recoveryVersion, new_device_id: NEW_DEVICE,
-          issued_at: new Date(NOW - 200_000).toISOString(),
-          expires_at: new Date(NOW - 1).toISOString(),
-          consumed_at: null,
-        }),
-      }, fixture),
-    );
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      now: () => Date.parse(fixture.expiresAt) + 1,
+    }, fixture));
     expect(result.status).toBe(410);
+    expect(result.body).toEqual({ error: 'E_CHALLENGE_EXPIRED' });
   });
 
   it('rejects a cross-account replay', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      OTHER_USER,
-      recoveryDeps({}, fixture),
-    );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_WRONG_ACCOUNT');
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), OTHER_USER, verifyDeps({}, fixture));
+    expect(result.body).toEqual({ error: 'E_WRONG_ACCOUNT' });
   });
 
   it('rejects a response bound to a different device', async () => {
-    const fixture = await recoveryFixture();
+    const fixture = await buildRecoveryFixture();
     const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: 'd0000000-0000-4000-8000-0000000000ff', signature: toBase64(fixture.signature) },
+      verifyRequest(fixture, { deviceId: OTHER_DEVICE }),
       USER,
-      recoveryDeps({}, fixture),
+      verifyDeps({}, fixture),
     );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_CHALLENGE_DEVICE_MISMATCH');
+    expect(result.body).toEqual({ error: 'E_CHALLENGE_DEVICE_MISMATCH' });
   });
 
   it('rejects a downgrade to a retired recovery generation', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({
-        getCurrentRecoveryIdentity: async () => ({
-          id: 'ffffffff-0000-4000-8000-00000000000f',
-          recovery_version: account.recoveryVersion + 1,
-          rec_sig_spki: toBase64(account.recSig.spki),
-          superseded_at: null,
-        }),
-      }, fixture),
-    );
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getCurrentRecoveryIdentity: async () => ({
+        id: recoveryIdentityUuid(),
+        recovery_version: account.recoveryVersion + 1,
+        rec_sig_spki: encodePgBytea(account.recSig.spki),
+        superseded_at: null,
+      }),
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_RECOVERY_VERSION_MISMATCH' });
+  });
+
+  it('rejects a challenge issued against a REPLACED identity at the same version', async () => {
+    // A version number alone cannot catch this: a rotation can reissue version 1.
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getCurrentRecoveryIdentity: async () => ({
+        id: 'aaaaaaaa-1111-4111-8111-111111111111',
+        recovery_version: account.recoveryVersion,
+        rec_sig_spki: encodePgBytea(account.recSig.spki),
+        superseded_at: null,
+      }),
+    }, fixture));
     expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_RECOVERY_VERSION_MISMATCH');
+    expect(result.body).toEqual({ error: 'E_RECOVERY_IDENTITY_MISMATCH' });
   });
 
   it('rejects a superseded recovery identity', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({
-        getCurrentRecoveryIdentity: async () => ({
-          id: 'ffffffff-0000-4000-8000-00000000000f',
-          recovery_version: account.recoveryVersion,
-          rec_sig_spki: toBase64(account.recSig.spki),
-          superseded_at: new Date(NOW - 1).toISOString(),
-        }),
-      }, fixture),
-    );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_RECOVERY_IDENTITY_SUPERSEDED');
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getCurrentRecoveryIdentity: async () => ({
+        id: recoveryIdentityUuid(),
+        recovery_version: account.recoveryVersion,
+        rec_sig_spki: encodePgBytea(account.recSig.spki),
+        superseded_at: new Date(NOW - 1000).toISOString(),
+      }),
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_RECOVERY_IDENTITY_SUPERSEDED' });
   });
 
   it('rejects a cross-deployment replay', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({ getServerOriginId: async () => new Uint8Array(32).fill(9) }, fixture),
-    );
-    expect(result.status).toBe(403);
-    expect((result.body as { error: string }).error).toBe('E_BAD_RECOVERY_SIGNATURE');
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getServerOriginId: async () => new Uint8Array(32).fill(9),
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_BAD_RECOVERY_SIGNATURE' });
+  });
+
+  it('rejects a client transcript that disagrees with the server reconstruction', async () => {
+    // The client signed a transcript with a different issuedAt. The server
+    // rebuilds from the row, so the signature does not verify.
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getChallenge: async () => ({
+        id: CHALLENGE,
+        user_id: USER,
+        recovery_identity_id: recoveryIdentityUuid(),
+        challenge_nonce: encodePgBytea(fixture.nonce),
+        recovery_version: account.recoveryVersion,
+        new_device_id: fixture.deviceId,
+        // Still inside the protocol's 120s window, so the TTL guard is not what
+        // rejects this — the signature simply covers a different issuedAt.
+        issued_at: new Date(NOW - 29_000).toISOString(),
+        expires_at: fixture.expiresAt,
+        consumed_at: null,
+      }),
+    }, fixture));
+    expect(result.body).toEqual({ error: 'E_BAD_RECOVERY_SIGNATURE' });
   });
 
   it('rate limits attempts', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({ countRecentAttempts: async () => MAX_ATTEMPTS_PER_HOUR }, fixture),
-    );
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      countRecentAttempts: async () => MAX_ATTEMPTS_PER_HOUR,
+    }, fixture));
     expect(result.status).toBe(429);
   });
 
   it('rejects an already-provisioned device', async () => {
-    const fixture = await recoveryFixture();
-    const result = await handleVerifyRecovery(
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: toBase64(fixture.signature) },
-      USER,
-      recoveryDeps({
-        getDevice: async () => ({
-          id: NEW_DEVICE, user_id: USER, status: 'ACTIVE',
-          sig_spki: toBase64(fixture.deviceSig.spki), kem_spki: toBase64(fixture.deviceKem.spki),
-        }),
-      }, fixture),
-    );
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getDevice: async () => ({
+        id: fixture.deviceId,
+        user_id: USER,
+        status: 'ACTIVE',
+        sig_spki: encodePgBytea(fixture.device.sig.spki),
+        kem_spki: encodePgBytea(fixture.device.kem.spki),
+      }),
+    }, fixture));
     expect(result.status).toBe(409);
+    expect(result.body).toEqual({ error: 'E_DEVICE_NOT_PENDING' });
+  });
+
+  it('rejects a base64 bytea column rather than decoding it as hex', async () => {
+    const fixture = await buildRecoveryFixture();
+    const result = await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({
+      getCurrentRecoveryIdentity: async () => ({
+        id: recoveryIdentityUuid(),
+        recovery_version: account.recoveryVersion,
+        rec_sig_spki: toBase64(account.recSig.spki),
+        superseded_at: null,
+      }),
+    }, fixture));
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ error: 'E_MALFORMED_STATE' });
   });
 
   it('rejects malformed input without throwing', async () => {
-    const fixture = await recoveryFixture();
-    const deps = recoveryDeps({}, fixture);
-    for (const body of [
-      {},
-      { challengeId: 1, deviceId: NEW_DEVICE, signature: 'AAA=' },
-      { challengeId: CHALLENGE, deviceId: NEW_DEVICE, signature: 'not base64!!' },
-    ]) {
-      const result = await handleVerifyRecovery(body, USER, deps);
+    const fixture = await buildRecoveryFixture();
+    for (const bad of [{}, { challengeId: 1 }, { challengeId: CHALLENGE }, { signature: '!!!' }]) {
+      const result = await handleVerifyRecovery(bad, USER, verifyDeps({}, fixture));
       expect(result.status).toBe(400);
     }
   });
 
-  it('logs identifiers and codes only', () => {
-    for (const entry of logged) {
-      expect(JSON.stringify(entry)).not.toMatch(/[A-Za-z0-9+/]{80,}/);
-    }
-    expect(vi.isMockFunction(() => {})).toBe(false);
+  it('logs identifiers and codes only', async () => {
+    const fixture = await buildRecoveryFixture();
+    await handleVerifyRecovery(verifyRequest(fixture), USER, verifyDeps({}, fixture));
+    const serialized = JSON.stringify(logged);
+    expect(serialized).toContain(NEW_DEVICE);
+    expect(serialized).not.toContain(hex(fixture.nonce));
+    expect(serialized).not.toContain(hex(account.recSig.spki));
   });
 });
 
 // ---------------------------------------------------------------------------
-// Boundary codec — the representation the Edge functions actually receive
+// The byte boundary
 // ---------------------------------------------------------------------------
 
-describe('bytea boundary codec', () => {
-  it('decodes the PostgreSQL hex form PostgREST returns', async () => {
-    const { decodeDbBytes, encodeDbBytes } = await import('../../supabase/functions/_shared/e2eeVerify.ts');
-    const bytes = new Uint8Array([0x01, 0x23, 0xab, 0xcd, 0x00, 0xff]);
-    // This is what a bytea column looks like coming back through PostgREST.
-    expect(hexBytes(decodeDbBytes('\\x0123abcd00ff'))).toBe('0123abcd00ff');
-    expect(encodeDbBytes(bytes)).toBe('\\x0123abcd00ff');
-    expect(hexBytes(decodeDbBytes(encodeDbBytes(bytes)))).toBe('0123abcd00ff');
+describe('shared byte codec', () => {
+  it('decodes the PostgreSQL hex form and nothing else', () => {
+    expect(hex(decodePgBytea('\\x0011ff')!)).toBe('0011ff');
+    expect(decodePgBytea('AAAA')).toBeNull();
+    expect(decodePgBytea('0011ff')).toBeNull();
+    expect(decodePgBytea(null)).toBeNull();
   });
 
-  it('round-trips every protocol value at its real width', async () => {
-    const { decodeDbBytes, encodeDbBytes } = await import('../../supabase/functions/_shared/e2eeVerify.ts');
-    for (const width of [12, 32, 64, 91, 360, 445]) {
-      const bytes = randomBytes(width);
-      const decoded = decodeDbBytes(encodeDbBytes(bytes));
-      expect(decoded, `width ${width}`).not.toBeNull();
-      expect(decoded!.length).toBe(width);
-      expect(hexBytes(decoded)).toBe(hexBytes(bytes));
+  it('round-trips every protocol value at its real width', () => {
+    for (const width of [16, 32, 64, 91, 203, 360, 445]) {
+      const value = randomBytes(width);
+      expect(hex(decodePgBytea(encodePgBytea(value))!)).toBe(hex(value));
     }
   });
 
-  it('still accepts base64, which is what request bodies carry', async () => {
-    const { decodeDbBytes } = await import('../../supabase/functions/_shared/e2eeVerify.ts');
-    const bytes = randomBytes(32);
-    expect(hexBytes(decodeDbBytes(toBase64(bytes)))).toBe(hexBytes(bytes));
+  it('decodes a base64 transport value and nothing else', () => {
+    const value = randomBytes(32);
+    expect(hex(decodeBase64(encodeBase64(value))!)).toBe(hex(value));
+    // The hex form is not base64, and is refused rather than mangled.
+    expect(decodeBase64(encodePgBytea(value))).toBeNull();
   });
 
-  it('rejects malformed hex rather than returning garbage', async () => {
-    const { decodeDbBytes } = await import('../../supabase/functions/_shared/e2eeVerify.ts');
-    expect(decodeDbBytes('\\x012')).toBeNull();
-    expect(decodeDbBytes('\\xzz')).toBeNull();
-    expect(decodeDbBytes(null)).toBeNull();
-    expect(decodeDbBytes(42)).toBeNull();
+  it('refuses malformed hex rather than returning garbage', () => {
+    expect(decodePgBytea('\\xabc')).toBeNull();
+    expect(decodePgBytea('\\xzz')).toBeNull();
+    expect(decodePgBytea('\\x')).toHaveLength(0);
   });
 
-  it('a hex-form value decoded as base64 produces the wrong bytes', async () => {
-    // Why the codec exists: treating \x... as base64 silently yields garbage,
-    // which then fails a signature check for entirely the wrong reason.
-    const { decodeDbBytes, decodeBase64, encodeDbBytes } = await import('../../supabase/functions/_shared/e2eeVerify.ts');
-    const bytes = randomBytes(32);
-    const dbForm = encodeDbBytes(bytes);
-    expect(hexBytes(decodeDbBytes(dbForm))).toBe(hexBytes(bytes));
-    const asBase64 = decodeBase64(dbForm);
-    expect(asBase64 === null || hexBytes(asBase64) !== hexBytes(bytes)).toBe(true);
+  it('the two decoders disagree, which is the point', () => {
+    // `\x4142` is two bytes as bytea. As base64 it is not even valid. A single
+    // lenient decoder would have quietly picked one interpretation.
+    const asBytea = decodePgBytea('\\x4142');
+    expect(hex(asBytea!)).toBe('4142');
+    expect(decodeBase64('\\x4142')).toBeNull();
   });
 });
-
-function hexBytes(bytes: Uint8Array | null): string {
-  if (!bytes) return '';
-  let out = '';
-  for (const b of bytes) out += b.toString(16).padStart(2, '0');
-  return out;
-}

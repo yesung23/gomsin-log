@@ -1,10 +1,18 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { handleVerifyRecovery } from './handler.ts';
+import { decodePgBytea } from '../_shared/e2eeVerify.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
 
 /**
  * Thin Deno entrypoint. All decisions live in `handler.ts` so they are covered
  * by the vitest suite; this file only injects the platform pieces.
+ *
+ * Binary values go through the shared codec and nowhere else. An earlier
+ * revision read the deployment identity with `atob(...)`, which base64-decoded a
+ * `bytea` hex string and produced garbage that would have failed every origin
+ * comparison for an untraceable reason.
+ *
+ * DENO RUNTIME: UNEXECUTED. No Deno toolchain is available in this environment.
  */
 Deno.serve(async (request) => {
   // The helper takes (method, origin, allowlist) and the allowlist is a parsed
@@ -40,10 +48,16 @@ Deno.serve(async (request) => {
     getServerOriginId: async () => {
       const { data } = await admin.from('crypto_deployment').select('server_origin_id').maybeSingle();
       if (!data?.server_origin_id) return null;
-      return Uint8Array.from(atob(String(data.server_origin_id)), (c) => c.charCodeAt(0));
+      // `bytea`, so the hex codec. Not base64.
+      return decodePgBytea(data.server_origin_id);
     },
+    // By stable uuid, never by the challenge bytes. The nonce is a secret bound
+    // into the signature; making it the row address would turn a guessed value
+    // into a database lookup and force a bytea comparison against caller text.
     getChallenge: async (id) => {
-      const { data } = await admin.from('recovery_challenges').select('*').eq('id', id).maybeSingle();
+      const { data } = await admin.from('recovery_challenges')
+        .select('id,user_id,recovery_identity_id,challenge_nonce,recovery_version,new_device_id,issued_at,expires_at,consumed_at')
+        .eq('id', id).maybeSingle();
       return data ?? null;
     },
     getCurrentRecoveryIdentity: async (userId) => {
@@ -63,20 +77,26 @@ Deno.serve(async (request) => {
         .eq('user_id', userId).gte('issued_at', since);
       return count ?? 0;
     },
-    commitAuthentication: async ({ challengeId, deviceId }) => {
+    commitAuthentication: async ({ challengeId, deviceId, recoveryIdentityId, recoveryVersion }) => {
       // One transaction. Consuming the challenge and moving the device must
       // succeed or fail together: a failure between them would burn a valid
       // single-use credential and leave the device unable to retry.
       const { error } = await admin.rpc('e2ee_commit_recovery_authentication', {
         p_challenge_id: challengeId,
         p_device_id: deviceId,
+        // Re-checked inside the transaction, under the row lock, so a rotation
+        // cannot interleave between this handler's check and the commit.
+        p_recovery_identity_id: recoveryIdentityId,
+        p_recovery_version: recoveryVersion,
       });
       if (error) {
         return {
           ok: false,
           code: error.message.includes('ALREADY_USED')
             ? 'E_CHALLENGE_ALREADY_USED'
-            : 'E_COMMIT_FAILED',
+            : error.message.includes('IDENTITY_MISMATCH') || error.message.includes('SUPERSEDED')
+              ? 'E_RECOVERY_IDENTITY_MISMATCH'
+              : 'E_COMMIT_FAILED',
         };
       }
       return { ok: true };

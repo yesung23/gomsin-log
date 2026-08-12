@@ -1,13 +1,21 @@
 import { registerPlugin } from '@capacitor/core';
+import type { DeviceKeysPlugin } from './definitions';
 
 /**
- * Bridge definition for the first-party device-key plugin.
+ * The first-party device-key plugin, registered and TYPED.
  *
- * The TypeScript contract lives in `src/crypto/keystore/nativeDeviceKeys.ts`;
- * this file only names the plugin so Capacitor can resolve it. Registration is
- * lazy — `getDeviceKeyPort()` falls back to the web implementation whenever the
- * native side is absent, which is the state until the native integration gate
- * closes.
+ * `registerPlugin` is generic on purpose: an untyped registration made every
+ * bridge call `any`, so a renamed native method or a changed option key would
+ * have compiled cleanly and failed at runtime on a device — the one place this
+ * project cannot iterate quickly.
+ *
+ * There is deliberately no `web:` implementation registered here. The web path
+ * is `src/crypto/keystore/webDeviceKeys.ts`, selected explicitly by
+ * `getDeviceKeyPort()`; a silent web fallback inside the plugin would make
+ * "which key store am I actually using" unanswerable from the call site, and
+ * the two have materially different assurance classes.
  */
-export const GomsinlogDeviceKeys = registerPlugin('GomsinlogDeviceKeys');
+export const GomsinlogDeviceKeys = registerPlugin<DeviceKeysPlugin>('GomsinlogDeviceKeys');
+
+export * from './definitions';
 export default GomsinlogDeviceKeys;

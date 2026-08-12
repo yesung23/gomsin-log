@@ -14,19 +14,27 @@
  */
 
 import {
-  concat,
   decodeBase64,
-  decodeDbBytes,
+  decodePgBytea,
   equalBytes,
   sha256,
-  utf8,
   uuidToBytes,
   verifySignature,
 } from '../_shared/e2eeVerify.ts';
+import { encodeRecoveryChallengeTranscript } from '../_shared/e2eeTranscript.ts';
 
 export type ChallengeRow = {
   id: string;
   user_id: string;
+  /**
+   * The recovery identity this challenge was issued against.
+   *
+   * Bound separately from `recovery_version` because a version is a small
+   * integer that repeats across a rotation, while the identity is the thing the
+   * signature actually chains to. Checking both makes "the identity was
+   * replaced" and "the generation was bumped" independently detectable.
+   */
+  recovery_identity_id: string;
   challenge_nonce: string;
   recovery_version: number;
   new_device_id: string | null;
@@ -57,9 +65,19 @@ export type VerifyRecoveryDeps = {
   getCurrentRecoveryIdentity: (userId: string) => Promise<RecoveryIdentityRow | null>;
   getDevice: (id: string) => Promise<DeviceRow | null>;
   countRecentAttempts: (userId: string) => Promise<number>;
-  /** Atomic: burn the challenge and move the device to RECOVERY_AUTHENTICATED. */
-  commitAuthentication: (input: { challengeId: string; deviceId: string })
-    => Promise<{ ok: true } | { ok: false; code: string }>;
+  /**
+   * Atomic: burn the challenge and move the device to RECOVERY_AUTHENTICATED.
+   *
+   * Takes the identity and generation as well, so the same binding this handler
+   * checked is re-checked inside the transaction under a row lock, where a
+   * concurrent rotation cannot interleave between check and commit.
+   */
+  commitAuthentication: (input: {
+    challengeId: string;
+    deviceId: string;
+    recoveryIdentityId: string;
+    recoveryVersion: number;
+  }) => Promise<{ ok: true } | { ok: false; code: string }>;
   logEvent: (event: string, detail: Record<string, string | number>) => void;
 };
 
@@ -83,6 +101,10 @@ const CHALLENGE_TTL_MS = 120_000;
  * point: a response can only verify if the client signed exactly the facts the
  * server holds, which is what blocks cross-account, cross-device and
  * cross-deployment replay as well as a downgrade to an older recovery bundle.
+ *
+ * The layout lives in `_shared/e2eeTranscript.ts` so the issuer, the verifier
+ * and the client all encode identical bytes; this wrapper keeps the existing
+ * call sites and tests pointed at one implementation.
  */
 export function buildRecoveryTranscript(input: {
   serverOriginId: Uint8Array;
@@ -97,26 +119,7 @@ export function buildRecoveryTranscript(input: {
   newSigFp: Uint8Array;
   newKemFp: Uint8Array;
 }): Uint8Array {
-  const u64 = (value: bigint) => {
-    const out = new Uint8Array(8);
-    new DataView(out.buffer).setBigUint64(0, value, false);
-    return out;
-  };
-  return concat(
-    utf8('gomsinlog/recovery-auth/v1'),
-    new Uint8Array([1, 1]),
-    input.serverOriginId,
-    input.userId,
-    input.challengeId,
-    input.challengeNonce,
-    u64(input.issuedAtMs),
-    u64(input.expiresAtMs),
-    new Uint8Array([input.recoveryVersion]),
-    input.recSigPubFp,
-    input.newDeviceId,
-    input.newSigFp,
-    input.newKemFp,
-  );
+  return encodeRecoveryChallengeTranscript(input);
 }
 
 export async function handleVerifyRecovery(
@@ -152,7 +155,11 @@ export async function handleVerifyRecovery(
   if (expiresAt <= now) return reject(410, 'E_CHALLENGE_EXPIRED');
   if (expiresAt - issuedAt > CHALLENGE_TTL_MS + 1000) return reject(403, 'E_CHALLENGE_TTL_TOO_LONG');
 
-  if (challenge.new_device_id && challenge.new_device_id !== request.deviceId) {
+  // A challenge issued for one device may never authenticate another. Migration
+  // 034 makes `new_device_id` NOT NULL at issuance, so an absent value is a
+  // malformed row rather than a wildcard.
+  if (!challenge.new_device_id) return reject(400, 'E_MALFORMED_STATE');
+  if (challenge.new_device_id !== request.deviceId) {
     return reject(403, 'E_CHALLENGE_DEVICE_MISMATCH');
   }
 
@@ -170,6 +177,11 @@ export async function handleVerifyRecovery(
   if (challenge.recovery_version !== identity.recovery_version) {
     return reject(403, 'E_RECOVERY_VERSION_MISMATCH');
   }
+  // And against a REPLACED identity, which a version number alone would not
+  // catch: two generations can share a version across a rotation that reset it.
+  if (challenge.recovery_identity_id !== identity.id) {
+    return reject(403, 'E_RECOVERY_IDENTITY_MISMATCH');
+  }
 
   const serverOriginId = await deps.getServerOriginId();
   if (!serverOriginId) return reject(403, 'E_NO_DEPLOYMENT_IDENTITY');
@@ -177,10 +189,10 @@ export async function handleVerifyRecovery(
   const userIdBytes = uuidToBytes(callerUserId);
   const challengeIdBytes = uuidToBytes(challenge.id);
   const deviceIdBytes = uuidToBytes(device.id);
-  const nonce = decodeDbBytes(challenge.challenge_nonce);
-  const recSigSpki = decodeDbBytes(identity.rec_sig_spki);
-  const deviceSigSpki = decodeDbBytes(device.sig_spki);
-  const deviceKemSpki = decodeDbBytes(device.kem_spki);
+  const nonce = decodePgBytea(challenge.challenge_nonce);
+  const recSigSpki = decodePgBytea(identity.rec_sig_spki);
+  const deviceSigSpki = decodePgBytea(device.sig_spki);
+  const deviceKemSpki = decodePgBytea(device.kem_spki);
   if (!userIdBytes || !challengeIdBytes || !deviceIdBytes || !nonce || !recSigSpki
     || !deviceSigSpki || !deviceKemSpki) {
     return reject(400, 'E_MALFORMED_STATE');
@@ -204,7 +216,12 @@ export async function handleVerifyRecovery(
   const ok = await verifySignature(recSigSpki, transcript, signature);
   if (!ok) return reject(403, 'E_BAD_RECOVERY_SIGNATURE');
 
-  const committed = await deps.commitAuthentication({ challengeId: challenge.id, deviceId: device.id });
+  const committed = await deps.commitAuthentication({
+    challengeId: challenge.id,
+    deviceId: device.id,
+    recoveryIdentityId: identity.id,
+    recoveryVersion: identity.recovery_version,
+  });
   if (!committed.ok) return reject(409, committed.code);
 
   deps.logEvent('verify_recovery_ok', { deviceId: device.id, caller: callerUserId });

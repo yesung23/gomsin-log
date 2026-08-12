@@ -357,6 +357,37 @@ export async function installMockBackend(
       );
     }
 
+    // The partner view calls this on every render, so leaving it unrouted made
+    // the mock answer 500 and the app log "Failed to fetch partner cycle
+    // projection" — which failed the layout matrix's console-error assertion at
+    // every viewport, for the partner role only.
+    //
+    // Shaped to match 026 rather than invented: the RPC is RETURNS TABLE, so
+    // PostgREST sends an array, and it returns NO row when there is no uid, no
+    // active couple, or no partner. When a couple does exist it returns exactly
+    // one row, all-false here because the scenarios share nothing — every cycle
+    // table above answers empty, and consent is never granted.
+    //
+    // The all-false row is the meaningful case to serve: it exercises the real
+    // parsing path in fetchPartnerCycleProjectionFromDB and then renders as an
+    // empty projection, whereas returning [] short-circuits to `projection: null`
+    // before any of those fields is read.
+    if (path === '/rest/v1/rpc/get_partner_cycle_projection') {
+      const failure = failureFor(scenario, 'get_partner_cycle_projection');
+      if (failure) return json(route, failure, failure.status);
+      if (!scenario.coupleId || !scenario.partnerPresent) return json(route, []);
+      return json(route, [{
+        has_current_period_status: false,
+        current_period_active: false,
+        has_prediction_window: false,
+        prediction_window_start: null,
+        prediction_window_end: null,
+        has_fertility_window: false,
+        fertility_window_start: null,
+        fertility_window_end: null,
+      }]);
+    }
+
     if (path === '/rest/v1/rpc/get_my_active_couple_id') {
       return json(route, scenario.coupleId);
     }

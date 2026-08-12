@@ -57,14 +57,7 @@ for (const file of files) {
  * Same discipline as `gatePathCoverage.test.ts`: an unhardened function is only
  * acceptable with a written reason, so the list cannot grow silently.
  */
-const SEARCH_PATH_EXEMPTIONS: Record<string, string> = {
-  'public.create_invitation(uuid, text)':
-    'Created once at 001:299 and never redefined. It has no client caller '
-    + '(`.rpc(\'create_invitation\')` is absent from src/) -- couple creation goes '
-    + 'through create_couple_and_invitation, which IS hardened (015:39-46). Left '
-    + 'as-is because migration 017 is deliberately scoped to the one function the '
-    + 'client actually calls; hardening it needs its own forward migration.',
-};
+const SEARCH_PATH_EXEMPTIONS: Record<string, string> = {};
 
 /** Every RPC the client or the Edge Function actually invokes. */
 const CLIENT_RPCS = [
@@ -112,6 +105,18 @@ describe('every SECURITY DEFINER function ends up with a pinned search_path', ()
 });
 
 describe('effective EXECUTE privileges after every migration has been applied', () => {
+  it('create_invitation is authenticated-only and uses public relations', () => {
+    const entry = latestDefinition.get('public.create_invitation(uuid, text)');
+    expect(entry).toBeDefined();
+    expect(entry!.definition.searchPath).toEqual(['public', 'pg_temp']);
+    expect(entry!.definition.body).toContain('FROM public.couple_members');
+    expect(entry!.definition.body).toContain('INSERT INTO public.invitation_codes');
+    const privileges = executePrivileges(allSql, 'public.create_invitation(uuid, text)');
+    expect(canExecute(privileges, 'authenticated')).toBe(true);
+    expect(canExecute(privileges, 'anon')).toBe(false);
+    expect(privileges.publicHolds).toBe(false);
+  });
+
   for (const signature of CLIENT_RPCS) {
     it(`${signature} is executable by authenticated and by nobody else`, () => {
       const privileges = executePrivileges(allSql, signature);
@@ -143,6 +148,7 @@ describe('effective EXECUTE privileges after every migration has been applied', 
       'public.begin_account_deletion(uuid, uuid[])',
       'public.cancel_account_deletion(uuid)',
       'public.prepare_account_deletion(uuid, uuid[])',
+      'public.cleanup_account_solo_couples(uuid)',
     ]) {
       const privileges = executePrivileges(allSql, signature);
       expect(privileges.statementsApplied, `${signature}: never mentioned`).toBeGreaterThan(0);

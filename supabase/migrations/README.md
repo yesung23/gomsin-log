@@ -6,6 +6,21 @@
 > ⚠️ 이 저장소의 코드만으로는 원격 Supabase 프로젝트의 실제 상태를 알 수 없습니다.
 > 아래 "적용 순서"를 반드시 스테이징 프로젝트에서 먼저 검증하세요.
 
+## 상태 표기의 의미
+
+네 가지는 서로 다른 사실이며 절대 섞어 쓰지 않습니다.
+
+| 표기 | 뜻 |
+| --- | --- |
+| **로컬 존재** | 작업 트리에 파일이 있다. 그 이상 아무것도 뜻하지 않는다. |
+| **Git 추적됨** | 파일이 커밋되었다. **배포되었다는 뜻이 아니다.** |
+| **운영 적용됨** | 원격 카탈로그에서 직접 확인했다. 확인 날짜를 함께 적는다. |
+| **운영 미적용** | 원격에 없다는 것을 확인했거나, 아직 배포한 적이 없다. |
+
+migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 증거가 아닙니다.** 028이
+존재하는 이유 자체가 그 혼동입니다(아래 참고). 운영 상태를 적을 때는 반드시 확인
+방법과 날짜를 함께 남기세요.
+
 ## 파일 목록
 
 | 파일 | 내용 | 상태 |
@@ -38,6 +53,47 @@
 | `025_partner_cycle_projection.sql` | `get_partner_cycle_projection()` — 파트너가 볼 수 있는 sanitized 주기 정보만 계산 | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `026_projection_requires_consent.sql` | 동의를 철회하면 파트너 공유도 즉시 멈추도록 projection 재정의 | **운영 적용됨 (2026-08-11, 확인됨)** |
 | `027_fix_account_deletion_column.sql` | 024 가 잘못된 컬럼명으로 계정 삭제를 전면 중단시킨 것 복구 | **운영 적용됨 (2026-08-11, 확인됨)** |
+| `028_restore_couple_media_authorization.sql` | `couple-media` private bucket의 owner/shared-partner SELECT와 owner DELETE 정책 복원 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
+| `029_cleanup_solo_couples_on_account_deletion.sql` | 계정 삭제 시 다른 멤버가 없는 `couples` 관계 메타데이터만 정리 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
+| `030_harden_create_invitation_search_path.sql` | legacy `create_invitation` SECURITY DEFINER의 temp-schema shadowing 차단 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
+| `031_e2ee_key_foundation.sql` | E2EE Phase 1A 키 인프라 (devices, recovery_identities, recovery_public_anchors, device_certificates, device_enrollments, scope_keys, key_envelopes, recovery_challenges, revocation_statements, crypto_pairings, crypto_write_floor, migration_ledger + epoch/삭제 RPC) | **신규 / 어디에도 미적용** |
+| `032_e2ee_write_floor.sql` | 되돌릴 수 없는 per-scope write floor + `daily_records` 라우팅 컬럼 (전부 비활성 상태) | **신규 / 어디에도 미적용** |
+| `034_e2ee_recovery_challenge_issuance.sql` | 서버 발급 복구 챌린지 (`e2ee_issue_recovery_challenge`), 챌린지-복구 아이덴티티 결속, `e2ee_commit_recovery_authentication` 4-인자 교체 | **신규 / 어디에도 미적용** |
+| `033_rollback_e2ee_key_foundation.sql.disabled` | 031 + 032 + 034 전체 롤백. **번호는 순서를 뜻하지 않습니다** — 정방향은 031 → 032 → 034이고 이 파일은 `.disabled`라 실행 순서에 들어가지 않습니다. E2EE가 활성화된 흔적이 하나라도 있으면 트랜잭션 전체를 중단합니다. | **롤백 전용 / 실행되지 않음** |
+
+## 029 가 보완하는 것 — sole-member couple 개인정보 정리 (2026-08-11)
+
+`couples`는 Auth 외래 키가 없고 `anniversary_date`를 보유합니다. 따라서 계정 삭제가
+사용자의 `couple_members`를 cascade 삭제해도, 한 번도 연결되지 않았거나 유일한
+멤버였던 couple row는 orphan으로 남습니다.
+
+029는 service-role 전용 `cleanup_account_solo_couples(uuid)`를 추가합니다. 다른
+membership row가 하나라도 있으면 상태가 active/pending/disconnected인지와 무관하게
+보존하므로 현재·대기·과거 파트너 데이터는 삭제하지 않습니다. Edge Function은
+`prepare_account_deletion` 성공 뒤, Auth 삭제 전에 이 RPC를 호출합니다.
+
+운영 적용 순서는 **029 migration → 갱신된 delete-account 배포**입니다. rollback은
+반대로 **이전 Edge Function 배포 → RPC 제거** 순서여야 합니다.
+
+## 028 이 복원하는 것 — Storage SELECT/DELETE (2026-08-11)
+
+운영 catalog 재검증 결과 `couple-media`는 private이고 객체는 0개였지만,
+`storage.objects`에는 migration 015의 INSERT 정책 하나만 존재했습니다. 저장소의
+007 파일에 SELECT/DELETE가 있다는 사실은 운영 적용 증거가 아니므로, 028이 현재
+필요한 최종 정책 3개를 forward migration으로 다시 정의합니다.
+
+- 작성자: 자신의 record에 upload/read/delete
+- 활성 파트너: shared record media read only
+- private media, unrelated user, former partner, anon: read 불가
+- partner UPDATE/DELETE: 불가
+- 모든 허용 경로: `{couple_id}/{record_id}/{filename}`와 실제 `daily_records` row,
+  owner, active couple을 함께 검증
+
+운영 적용 전 스테이징에서 A/B/C 계정과 실제 객체로 검증해야 합니다. 특히 policy
+catalog가 맞다는 것과 signed URL이 실제로 발급·거부된다는 것은 별도 증거입니다.
+
+안전한 rollback은 bucket을 private으로 유지한 채 SELECT만 owner-only로 축소하는
+것입니다. `public=true`, `USING (true)`, SELECT/DELETE 전체 제거로 되돌리지 않습니다.
 
 ## 027 이 고치는 것 — 계정 삭제 전면 장애 (2026-08-11)
 

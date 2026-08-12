@@ -509,14 +509,28 @@ try {
   console.log('› Scenario 2b: direct devices.status escalation');
 
   const gucNames = ['gomsinlog.e2ee_status_transition'];
-  const forgedValues = ['on', 'true', '1', 'allowed', 'internal'];
+  const forgedValues = ['on', 'true', '1', 'allowed', 'internal', 'yes'];
 
-  // Each device burns two seeds (sig and kem) and `UNIQUE (user_id, sig_spki)`
-  // makes a repeat a fixture error rather than a finding, so hand out fresh
-  // ones from a range nothing else in this file touches.
-  let g2Seed = 0xd0;
-  const nextSeed = () => (g2Seed += 2);
-  const victim = (status) => mustSql(device(A, nextSeed(), status), `G2 ${status} victim`);
+  // `UNIQUE (user_id, sig_spki)` makes a duplicate key a fixture error rather
+  // than a finding, and this section needs more throwaway devices than the
+  // shared `spki()` helper can express: that one repeats a single byte, so it
+  // offers 256 values in total and the rest of the file already spends most of
+  // them. These use a repeating two-byte pattern instead, which is 91 bytes as
+  // required and cannot collide with a uniform one — `0x5a` is skipped because
+  // 5a5a… is precisely the uniform case.
+  let g2Seed = 0;
+  const nextSeed = () => {
+    g2Seed += 1;
+    if (g2Seed === 0x5a) g2Seed += 1;
+    if (g2Seed > 0xff) throw new Error('G2 fixtures exhausted the seed space');
+    return g2Seed;
+  };
+  const g2Spki = (n) => `decode('${`5a${n.toString(16).padStart(2, '0')}`.repeat(46).slice(0, 182)}', 'hex')`;
+  const g2Device = (status) => mustSql(`
+    INSERT INTO public.devices (user_id, sig_spki, kem_spki, platform, assurance, status)
+    VALUES ('${A}', ${g2Spki(nextSeed())}, ${g2Spki(nextSeed())}, 'ios', 'secure_enclave', '${status}')
+    RETURNING id`, `G2 ${status} victim`);
+  const victim = (status) => g2Device(status);
   const pendingVictim = () => victim('PENDING');
   const provisioningVictim = () => victim('PROVISIONING');
 
@@ -590,7 +604,7 @@ try {
   checkRefused(
     asUser(A, `
       INSERT INTO public.devices (user_id, sig_spki, kem_spki, platform, assurance, status)
-      VALUES ('${A}', ${spki(nextSeed())}, ${spki(nextSeed())}, 'web', 'web_nonextractable', 'ACTIVE')`),
+      VALUES ('${A}', ${g2Spki(nextSeed())}, ${g2Spki(nextSeed())}, 'web', 'web_nonextractable', 'ACTIVE')`),
     null,
     'G2: direct INSERT of an ACTIVE device is refused',
   );
@@ -667,6 +681,51 @@ try {
       'E2EE_DEVICE_NOT_PROVISIONING',
       'G2: an ACTIVE device cannot be marked provisioning-failed',
     );
+  }
+
+  // The same reasoning error appears once more in 031. `enforce_write_floor_
+  // monotonic` lets a DELETE through when gomsinlog.e2ee_account_destruction is
+  // 'on', and its comment claims "a normal authenticated caller can never set
+  // the flag". A caller absolutely can set it — that is what G2 was about.
+  //
+  // It is not exploitable, but not for the reason the comment gives: the floor
+  // is protected because `authenticated` was never granted DELETE or UPDATE on
+  // the table, so the trigger is never even reached. The grant is doing the
+  // work, the flag is not.
+  //
+  // That makes the grant load-bearing and previously unasserted, which is
+  // exactly how G2 happened. These pin it: if a later migration widens the
+  // grant, the forged flag becomes a real plaintext-downgrade attack and this
+  // fails instead of the property silently disappearing.
+  {
+    mustSql(`
+      INSERT INTO public.crypto_write_floor (scope_kind, scope_id, min_cipher_format, activated_at)
+      VALUES ('user', '${A}', 1, now())
+      ON CONFLICT (scope_kind, scope_id) DO UPDATE SET min_cipher_format = 1`,
+      'write floor for A');
+
+    checkRefused(
+      asUser(A, `
+        DO $wf$ BEGIN PERFORM set_config('gomsinlog.e2ee_account_destruction', 'on', false); END $wf$;
+        DELETE FROM public.crypto_write_floor WHERE scope_kind = 'user' AND scope_id = '${A}';`),
+      'permission denied',
+      'G2: forged destruction flag cannot delete the write floor (no DELETE grant)',
+    );
+
+    checkRefused(
+      asUser(A, `
+        DO $wf$ BEGIN PERFORM set_config('gomsinlog.e2ee_account_destruction', 'on', false); END $wf$;
+        UPDATE public.crypto_write_floor SET min_cipher_format = 0
+         WHERE scope_kind = 'user' AND scope_id = '${A}';`),
+      'permission denied',
+      'G2: forged destruction flag cannot lower the write floor (no UPDATE grant)',
+    );
+
+    const floor = mustSql(
+      `SELECT min_cipher_format FROM public.crypto_write_floor WHERE scope_kind = 'user' AND scope_id = '${A}'`,
+      'write floor after attack',
+    );
+    check(floor === '1', `G2: the write floor is unchanged after both attempts (saw ${floor})`);
   }
 
   // -------------------------------------------------------------------------

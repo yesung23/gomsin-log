@@ -1,0 +1,23 @@
+{
+  "_comment": "SPIKE ONLY baseline. Not a production media format proposal.",
+  "runtime": "node v26.7.0 (darwin/arm64)",
+  "fileSizeMB": 45,
+  "singleShotAesGcm": {
+    "encryptMs": 33,
+    "decryptMs": 25,
+    "encryptMBps": 1375.5,
+    "decryptMBps": 1780,
+    "rssBaselineMB": 46.9,
+    "rssAfterAllocMB": 96.3,
+    "rssAfterEncryptMB": 187,
+    "rssAfterDecryptMB": 277.3,
+    "rssGrowthMB": 230.4,
+    "truncationDetected": true,
+    "limitations": [
+      "Whole plaintext and whole ciphertext are resident simultaneously.",
+      "Truncation is detected only after the entire object is processed.",
+      "No per-chunk authentication, so no byte-range playback and no partial decrypt.",
+      "No resumable-upload story: the ciphertext is one indivisible blob."
+    ]
+  }
+}

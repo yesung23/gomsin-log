@@ -1,0 +1,270 @@
+-- =============================================================
+-- 033_rollback_e2ee_key_foundation.sql   [DISABLED — NOT A LIVE MIGRATION]
+-- Removes the ENTIRE unreleased Phase 1A E2EE schema: 031, 032 and 034.
+-- =============================================================
+--
+-- The `.disabled` suffix keeps this out of any migration runner. Its number is
+-- 033 for historical reasons only and carries no ordering meaning: the forward
+-- sequence is 031 -> 032 -> 034, and this one file undoes all three. Rename it
+-- to `.sql` only when deliberately backing the work out.
+--
+-- WHEN THIS IS ALLOWED TO RUN
+--
+-- Before E2EE is activated for anybody. That is the design premise, and it is
+-- enforced rather than assumed: the pre-flight below aborts the whole
+-- transaction on any evidence that real content has moved to ciphertext.
+--
+-- WHAT THIS FILE WILL NEVER DO
+--
+-- It will never decrypt, downgrade or discard encrypted content, and there is
+-- no such path here. Where a scope has encrypted rows, the keys that open them
+-- are the only way back, so dropping the key tables would destroy that data
+-- permanently while appearing to succeed. The answer to "we need to roll back
+-- after activation" is a forward migration that decrypts under user control,
+-- not this file.
+--
+-- WHAT IT COSTS ON A CLEAN DATABASE
+--
+-- Every device identity, recovery identity, certificate and scope key is
+-- destroyed. On a never-activated deployment that costs nothing but a re-run of
+-- bootstrap, because no ciphertext depends on any of it. Which is exactly why
+-- the pre-flight is the load-bearing part of this file.
+--
+-- Exercised, not merely reviewed: `scripts/e2ee/rollback-harness.mjs` applies
+-- 031/032/034 to a throwaway PostgreSQL cluster, runs this file, and diffs the
+-- resulting schema inventory against the pre-031 baseline — then repeats the
+-- run with activation evidence present and requires the refusal.
+
+BEGIN;
+
+-- -------------------------------------------------------------
+-- 0. PRE-FLIGHT — fail closed
+-- -------------------------------------------------------------
+DO $$
+DECLARE
+  v_encrypted_rows BIGINT := 0;
+  v_routed_rows BIGINT := 0;
+  v_active_floors BIGINT := 0;
+  v_ledger_rows BIGINT := 0;
+BEGIN
+  -- R1. Any content row actually written as ciphertext.
+  --
+  -- `cipher_format` is explicit: 0 MEANS plaintext, and nothing anywhere infers
+  -- encryption from the shape of a value. So this count is exact rather than a
+  -- heuristic, and one row is enough to abort.
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'daily_records'
+               AND column_name = 'cipher_format') THEN
+    EXECUTE 'SELECT count(*) FROM public.daily_records WHERE cipher_format >= 1'
+      INTO v_encrypted_rows;
+
+    -- R1b. A row naming a key domain or epoch has been routed to a scope key
+    -- even if its `cipher_format` were somehow reset. Checking both closes the
+    -- gap that either one alone would leave.
+    EXECUTE 'SELECT count(*) FROM public.daily_records WHERE key_domain IS NOT NULL OR key_epoch IS NOT NULL'
+      INTO v_routed_rows;
+  END IF;
+
+  -- R2. An activated write floor. The floor is irreversible BY DESIGN — it is
+  -- the promise that a scope which has started encrypting can never be written
+  -- plaintext again — so dropping its table would silently revoke that promise.
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'crypto_write_floor') THEN
+    EXECUTE 'SELECT count(*) FROM public.crypto_write_floor WHERE min_cipher_format >= 1 OR activated_at IS NOT NULL'
+      INTO v_active_floors;
+  END IF;
+
+  -- R3. Any migration ledger entry. A row here means a real object was
+  -- acknowledged as migrated to E2EE, which is evidence of transition even if
+  -- the content row was later deleted.
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'migration_ledger') THEN
+    EXECUTE 'SELECT count(*) FROM public.migration_ledger' INTO v_ledger_rows;
+  END IF;
+
+  IF v_encrypted_rows > 0 OR v_routed_rows > 0 OR v_active_floors > 0 OR v_ledger_rows > 0 THEN
+    RAISE EXCEPTION
+      'E2EE_ROLLBACK_REFUSED: this deployment has activated E2EE (% encrypted rows, % key-routed rows, % active floors, % ledger entries). Rolling back would strand encrypted content permanently.',
+      v_encrypted_rows, v_routed_rows, v_active_floors, v_ledger_rows
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 1. Detach from PRE-EXISTING tables first
+-- -------------------------------------------------------------
+-- These triggers live on tables that must survive, so they come off before
+-- anything they depend on disappears.
+DROP TRIGGER IF EXISTS trg_daily_records_write_floor ON public.daily_records;
+DROP TRIGGER IF EXISTS trg_membership_revision ON public.couple_members;
+
+DROP FUNCTION IF EXISTS public.enforce_e2ee_write_floor();
+DROP FUNCTION IF EXISTS public.e2ee_floor_for(UUID, UUID);
+DROP FUNCTION IF EXISTS public.bump_membership_revision();
+
+-- -------------------------------------------------------------
+-- 2. Undo 032's content columns
+-- -------------------------------------------------------------
+ALTER TABLE public.daily_records
+  DROP COLUMN IF EXISTS cipher_format,
+  DROP COLUMN IF EXISTS content_revision,
+  DROP COLUMN IF EXISTS key_domain,
+  DROP COLUMN IF EXISTS key_epoch;
+
+-- `record_time` was NOT NULL before 032 relaxed it for encrypted rows. The
+-- pre-flight already refused every encrypted row, so a NULL here means
+-- something else introduced one — worth failing on rather than papering over by
+-- leaving the column permanently nullable.
+DO $$
+DECLARE v_null_times BIGINT;
+BEGIN
+  SELECT count(*) INTO v_null_times FROM public.daily_records WHERE record_time IS NULL;
+  IF v_null_times > 0 THEN
+    RAISE EXCEPTION
+      'E2EE_ROLLBACK_REFUSED: % daily_records rows have a NULL record_time, which the pre-032 schema forbids',
+      v_null_times
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  ALTER TABLE public.daily_records ALTER COLUMN record_time SET NOT NULL;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 3. Functions typed on a table that is about to disappear
+-- -------------------------------------------------------------
+-- `e2ee_can_manage_scope_key` takes `public.scope_keys` — the table's composite
+-- row type — as its parameter, and Postgres refuses to drop a table whose row
+-- type a function still references. So this MUST precede the table drops; an
+-- earlier revision of this file dropped the table first and would have failed
+-- on a real database.
+--
+-- Dropping it explicitly rather than reaching for CASCADE is the rule for this
+-- whole file: a CASCADE would also remove anything else that happened to depend
+-- on these objects, silently, which is the one thing a rollback must not do.
+DROP FUNCTION IF EXISTS public.e2ee_can_manage_scope_key(public.scope_keys);
+
+-- -------------------------------------------------------------
+-- 4. E2EE tables, in dependency order
+-- -------------------------------------------------------------
+-- Leaves first, and no CASCADE anywhere: if something outside this set has
+-- taken a dependency on one of these tables, the drop fails loudly and a human
+-- decides.
+--
+-- Every partial index, unique index, CHECK constraint and trigger defined on
+-- these tables goes with them:
+--   idx_recovery_identity_live, idx_devices_user,
+--   idx_device_certificates_user, idx_device_certificates_subject,
+--   idx_enrollment_nonce, idx_scope_keys_single_active, idx_scope_keys_owner,
+--   idx_scope_keys_couple, idx_envelope_one_per_device,
+--   idx_envelope_one_per_recovery, idx_key_envelopes_scope,
+--   idx_key_envelopes_device, idx_recovery_challenge_nonce,
+--   idx_recovery_challenge_user, idx_recovery_challenge_live_device (034),
+--   idx_revocation_user, idx_crypto_pairing_live, idx_crypto_pairing_nonce,
+--   trg_device_certificates_immutable, trg_scope_keys_insert,
+--   trg_key_envelopes_recipient, trg_revocation_serialize,
+--   trg_revocation_immutable, trg_write_floor_monotonic.
+DROP TABLE IF EXISTS public.key_envelopes;
+DROP TABLE IF EXISTS public.migration_ledger;
+DROP TABLE IF EXISTS public.recovery_challenges;
+DROP TABLE IF EXISTS public.device_enrollments;
+DROP TABLE IF EXISTS public.revocation_statements;
+DROP TABLE IF EXISTS public.crypto_pairings;
+DROP TABLE IF EXISTS public.crypto_write_floor;
+DROP TABLE IF EXISTS public.scope_keys;
+-- `device_certificates` references itself and `recovery_public_anchors`, both
+-- ON DELETE RESTRICT, so the certificates go before the anchors they root at.
+DROP TABLE IF EXISTS public.device_certificates;
+DROP TABLE IF EXISTS public.recovery_public_anchors;
+DROP TABLE IF EXISTS public.recovery_identities;
+DROP TABLE IF EXISTS public.devices;
+DROP TABLE IF EXISTS public.crypto_deployment;
+
+-- -------------------------------------------------------------
+-- 5. Remaining functions
+-- -------------------------------------------------------------
+-- Epoch state machine.
+DROP FUNCTION IF EXISTS public.e2ee_mark_epoch_ready(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_activate_epoch(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_abandon_epoch(UUID);
+
+-- Trigger functions whose triggers went with their tables.
+DROP FUNCTION IF EXISTS public.reject_certificate_mutation();
+DROP FUNCTION IF EXISTS public.enforce_scope_key_insert();
+DROP FUNCTION IF EXISTS public.enforce_envelope_recipient();
+DROP FUNCTION IF EXISTS public.serialize_revocation_insert();
+DROP FUNCTION IF EXISTS public.reject_revocation_mutation();
+DROP FUNCTION IF EXISTS public.enforce_write_floor_monotonic();
+
+-- Write floor activation.
+DROP FUNCTION IF EXISTS public.activate_e2ee_write_floor(TEXT, UUID, UUID);
+
+-- Partner anchor exposure.
+DROP FUNCTION IF EXISTS public.get_partner_recovery_anchor();
+
+-- Account deletion for the key tables. The Phase 0 deletion contract lives in
+-- `prepare_account_deletion()` and is deliberately untouched here.
+DROP FUNCTION IF EXISTS public.e2ee_prepare_account_deletion(UUID);
+
+-- Edge Function commit paths, from 031 and 034.
+DROP FUNCTION IF EXISTS public.e2ee_commit_device_approval(
+  UUID, UUID, BYTEA, BYTEA, BYTEA, BYTEA, UUID, UUID, SMALLINT, BYTEA, BYTEA
+);
+-- BOTH approval signatures, for the same reason as the recovery pair below: 031
+-- created the eleven-argument form and 035 replaced it with a twelve-argument one
+-- that also takes the issuer certificate. A rollback that knew only one shape
+-- would leave the other behind, and on a database that applied 035 the leftover
+-- would be the DEFECTIVE function — reachable, and unable to satisfy
+-- device_certificates_chain.
+DROP FUNCTION IF EXISTS public.e2ee_commit_device_approval(
+  UUID, UUID, BYTEA, BYTEA, BYTEA, BYTEA, UUID, UUID, SMALLINT, BYTEA, BYTEA, UUID
+);
+-- BOTH signatures: 031 created the two-argument form and 034 replaced it with
+-- the four-argument one. A rollback that knew only the current shape would
+-- leave the older function behind on a database that never applied 034.
+DROP FUNCTION IF EXISTS public.e2ee_commit_recovery_authentication(UUID, UUID);
+DROP FUNCTION IF EXISTS public.e2ee_commit_recovery_authentication(UUID, UUID, UUID, SMALLINT);
+DROP FUNCTION IF EXISTS public.e2ee_issue_recovery_challenge(UUID, UUID, BYTEA, INTEGER);
+
+-- -------------------------------------------------------------
+-- 5c. Objects added by 035 (Phase 1A P0 closure)
+-- -------------------------------------------------------------
+-- Dropped before the tables they reference, and unconditionally: the file is one
+-- transaction, and `IF EXISTS` keeps it valid on a database that stopped at 034.
+--
+-- The device-status triggers must go too. Leaving one behind would keep
+-- rejecting status transitions on a restored pre-E2EE `devices` table — except
+-- that table no longer exists after this rollback, so the trigger would be a
+-- dangling reference the inventory diff would catch.
+DROP TRIGGER IF EXISTS trg_devices_status_transition ON public.devices;
+DROP TRIGGER IF EXISTS trg_devices_insert_status ON public.devices;
+DROP FUNCTION IF EXISTS public.enforce_device_status_transition();
+DROP FUNCTION IF EXISTS public.enforce_device_insert_status();
+DROP FUNCTION IF EXISTS public.e2ee_finalize_device_provisioning(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_begin_device_provisioning(UUID);
+-- 036. These run SECURITY DEFINER and write devices.status, so leaving either
+-- behind would strand a privileged writer for a table that no longer exists.
+-- The column grants 036 puts on public.devices need no separate statement:
+-- they are dropped with the table itself further down.
+DROP FUNCTION IF EXISTS public.e2ee_revoke_own_device(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_mark_device_provisioning_failed(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_missing_device_coverage(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_required_epoch_recipients(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_owned_couple_scope_ids();
+DROP FUNCTION IF EXISTS public.e2ee_latest_certificate_id(UUID);
+DROP FUNCTION IF EXISTS public.e2ee_certificate_granted_domains(BYTEA);
+
+-- -------------------------------------------------------------
+-- 6. Columns added to pre-existing tables
+-- -------------------------------------------------------------
+ALTER TABLE public.couples DROP COLUMN IF EXISTS membership_revision;
+
+-- -------------------------------------------------------------
+-- 7. PostgREST schema cache
+-- -------------------------------------------------------------
+-- Functions and columns have disappeared; without this the cache keeps offering
+-- signatures that no longer exist, and clients get a confusing PGRST error
+-- instead of a clean absence.
+NOTIFY pgrst, 'reload schema';
+
+COMMIT;

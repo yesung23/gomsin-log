@@ -55,7 +55,14 @@ function makeAdmin(overrides: Record<string, unknown> = {}) {
     }),
     rpc: vi.fn(async (name: string) => {
       calls.push(`rpc:${name}`);
-      return { data: name === 'prepare_account_deletion' ? { ok: true } : null, error: null };
+      return {
+        data: name === 'e2ee_prepare_account_deletion'
+          ? { partner_remains: false }
+          : name === 'prepare_account_deletion'
+            ? { ok: true }
+            : name === 'cleanup_account_solo_couples' ? 0 : null,
+        error: null,
+      };
     }),
     storage: {
       from: () => ({
@@ -289,14 +296,18 @@ describe('C2 - the delete-account function applies the table end to end', () => 
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true, warnings: [] });
-    // The sequence and its relative order are unchanged. C2 reorders, removes
-    // and re-semanticises nothing; the exact step list including the
-    // pending-flag write is pinned by `deleteAccountFunction.test.ts`.
+    // CORS does not reorder or remove any deletion step. The exact list,
+    // including the pending-flag write and sole-couple cleanup, is pinned by
+    // `deleteAccountFunction.test.ts`.
     expect(admin.calls.filter((call) => call !== 'auth.admin.updateUserById')).toEqual([
       'auth.getUser',
       'from:daily_records.select',
       'rpc:begin_account_deletion',
+      // E2EE key-material cleanup runs before the relational preparation, so a
+      // refusal there stops the deletion before anything is destroyed.
+      'rpc:e2ee_prepare_account_deletion',
       'rpc:prepare_account_deletion',
+      'rpc:cleanup_account_solo_couples',
       'auth.admin.deleteUser',
     ]);
   });

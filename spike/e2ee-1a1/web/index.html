@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>E2EE 1A-1 — Web key persistence probe (SPIKE ONLY)</title>
+<style>
+  body { font: 13px ui-monospace, monospace; margin: 16px; }
+  pre { white-space: pre-wrap; }
+  h1 { font-size: 15px; }
+</style>
+</head>
+<body>
+<h1>E2EE 1A-1 Web probe — TEST ONLY</h1>
+<pre id="out">running…</pre>
+<script type="module">
+/*
+ * SPIKE ONLY. Generates throwaway keys in the browser to measure:
+ *   - non-extractable CryptoKey persistence across reloads in IndexedDB
+ *   - that raw export is refused
+ *   - that same-origin script can still USE the key (the XSS point)
+ *   - agreement with the Node-generated interop vectors
+ * No application data is touched.
+ */
+const DB = 'gomsinlog-e2ee-1a1-spike';
+const STORE = 'keys';
+const log = [];
+const record = (name, status, detail) => log.push({ name, status, detail });
+
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function tx(mode, run) {
+  return idb().then(db => new Promise((res, rej) => {
+    const t = db.transaction(STORE, mode);
+    const req = run(t.objectStore(STORE));
+    let value;
+    req.onsuccess = () => { value = req.result; };
+    t.oncomplete = () => { db.close(); res(value); };
+    t.onabort = () => { db.close(); rej(t.error); };
+  }));
+}
+const hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+const unhex = s => new Uint8Array(s.match(/../g).map(x => parseInt(x, 16)));
+
+async function main() {
+  record('secureContext', window.isSecureContext ? 'VERIFIED' : 'UNSUPPORTED', String(window.isSecureContext));
+  record('userAgent', 'INFO', navigator.userAgent);
+
+  // ---- persistence of a non-extractable key pair ----
+  let sig = await tx('readonly', s => s.get('dev_sig'));
+  let kem = await tx('readonly', s => s.get('dev_kem'));
+  let origin;
+  if (sig && kem) {
+    origin = 'restored-from-indexeddb';
+  } else {
+    sig = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+    kem = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+    await tx('readwrite', s => s.put(sig, 'dev_sig'));
+    await tx('readwrite', s => s.put(kem, 'dev_kem'));
+    origin = 'generated-this-load';
+  }
+  record('keyOrigin', 'INFO', origin);
+  record('storedTypes', 'INFO', `${sig.privateKey.constructor.name}/${sig.privateKey.type} extractable=${sig.privateKey.extractable}`);
+
+  // ---- the key is still USABLE after being restored ----
+  const msg = new TextEncoder().encode('gomsinlog/1a1/web-probe');
+  const s = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, sig.privateKey, msg);
+  const ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, sig.publicKey, s, msg);
+  record('signAfterRestore', ok && s.byteLength === 64 ? 'VERIFIED' : 'FAILED', `len=${s.byteLength} verify=${ok}`);
+
+  const peer = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const z = await crypto.subtle.deriveBits({ name: 'ECDH', public: peer.publicKey }, kem.privateKey, 256);
+  record('deriveBitsAfterRestore', z.byteLength === 32 ? 'VERIFIED' : 'FAILED', `len=${z.byteLength}`);
+
+  // ---- raw export must be refused ----
+  for (const [label, key] of [['ecdsa', sig.privateKey], ['ecdh', kem.privateKey]]) {
+    for (const fmt of ['pkcs8', 'jwk', 'raw']) {
+      let outcome;
+      try { await crypto.subtle.exportKey(fmt, key); outcome = 'EXPORTED (BAD)'; }
+      catch (e) { outcome = `refused: ${e.name}`; }
+      record(`exportPrivate.${label}.${fmt}`, outcome.startsWith('refused') ? 'VERIFIED' : 'FAILED', outcome);
+    }
+  }
+  const pub = await crypto.subtle.exportKey('spki', sig.publicKey);
+  record('exportPublic.spki', pub.byteLength === 91 ? 'VERIFIED' : 'FAILED', `len=${pub.byteLength}`);
+
+  // ---- the XSS point: same-origin script USES the key it cannot export ----
+  const xss = new Function('k', 'm', "return crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'}, k, m)");
+  const stolen = await xss(sig.privateKey, new TextEncoder().encode('attacker-chosen-message'));
+  record(
+    'sameOriginScriptCanUseNonExtractableKey',
+    stolen.byteLength === 64 ? 'VERIFIED' : 'FAILED',
+    'A non-extractable key cannot be exfiltrated, but same-origin script signed an attacker-chosen message with it. Non-extractability is NOT XSS protection.',
+  );
+
+  // ---- cross-engine agreement with the Node-generated vectors ----
+  try {
+    const v = await (await fetch('../vectors/generated/interop-vectors.json')).json();
+    const priv = await crypto.subtle.importKey('pkcs8', unhex(v.vector2_ecdh.privatePkcs8Hex), { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+    const pk = await crypto.subtle.importKey('spki', unhex(v.vector2_ecdh.peerPublicSpkiHex), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+    const shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: pk }, priv, 256);
+    record('vector2.ecdh', hex(shared) === v.vector2_ecdh.sharedSecretHex ? 'VERIFIED' : 'FAILED', hex(shared).slice(0, 24));
+
+    const ikm = await crypto.subtle.importKey('raw', unhex(v.vector3_hkdf.ikmHex), 'HKDF', false, ['deriveBits']);
+    const okm = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: unhex(v.vector3_hkdf.saltHex), info: new TextEncoder().encode(v.vector3_hkdf.infoUtf8) }, ikm, 256);
+    record('vector3.hkdf', hex(okm) === v.vector3_hkdf.okmHex ? 'VERIFIED' : 'FAILED', hex(okm).slice(0, 24));
+
+    const ak = await crypto.subtle.importKey('raw', unhex(v.vector4_aesGcm.keyHex), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: unhex(v.vector4_aesGcm.nonceHex), additionalData: new TextEncoder().encode(v.vector4_aesGcm.aadUtf8), tagLength: 128 }, ak, unhex(v.vector4_aesGcm.plaintextHex));
+    record('vector4.aesGcm', hex(sealed) === v.vector4_aesGcm.ciphertextWithTagHex ? 'VERIFIED' : 'FAILED', hex(sealed).slice(0, 24));
+
+    const vk = await crypto.subtle.importKey('spki', unhex(v.vector5_ecdsa.signerSpkiHex), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    const vok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, vk, unhex(v.vector5_ecdsa.signatureP1363Hex), new TextEncoder().encode(v.vector5_ecdsa.messageUtf8));
+    record('vector5.ecdsa', vok ? 'VERIFIED' : 'FAILED', `verify=${vok}`);
+
+    const lz = await (await fetch('../vectors/generated/ecdh-leading-zero.json')).json();
+    const lzPriv = await crypto.subtle.importKey('pkcs8', unhex(lz.privatePkcs8Hex), { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+    const lzPub = await crypto.subtle.importKey('spki', unhex(lz.peerPublicSpkiHex), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+    const lzZ = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: lzPub }, lzPriv, 256));
+    record('leadingZeroEcdh', (lzZ.length === 32 && lzZ[0] === 0 && hex(lzZ) === lz.sharedSecretHex) ? 'VERIFIED' : 'FAILED', `len=${lzZ.length} first=${lzZ[0]}`);
+  } catch (e) {
+    record('vectors', 'UNVERIFIED', `fetch/import failed: ${e.message}`);
+  }
+
+  // ---- GLK2 envelope produced by Node must open in the browser ----
+  try {
+    const g = await (await fetch('../vectors/generated/glk2-vector.json')).json();
+    const env = unhex(g.envelopeHex);
+    const H = env.slice(0, 171), eph = env.slice(171, 236), nonce = env.slice(236, 248), wrapped = env.slice(248, 296), sigBytes = env.slice(296, 360);
+    const cat = (...p) => { const o = new Uint8Array(p.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of p) { o.set(x, i); i += x.length; } return o; };
+    const T = s => new TextEncoder().encode(s);
+
+    const senderKey = await crypto.subtle.importKey('spki', unhex(g.senderSigSpkiHex), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    const sigOk = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, senderKey, sigBytes, cat(T('gomsinlog/glk2/sig/v1'), H, eph, nonce, wrapped));
+
+    const recipPriv = await crypto.subtle.importKey('pkcs8', unhex(g.recipientKemPkcs8Hex), { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+    const ephPub = await crypto.subtle.importKey('raw', eph, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+    const zz = await crypto.subtle.deriveBits({ name: 'ECDH', public: ephPub }, recipPriv, 256);
+    const salt = await crypto.subtle.digest('SHA-256', cat(T('gomsinlog/glk2/salt/v1'), eph, unhex(g.recipientKemSpkiHex)));
+    const ik = await crypto.subtle.importKey('raw', zz, 'HKDF', false, ['deriveBits']);
+    const kekBits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(salt), info: cat(T('gomsinlog/glk2/kek/v1'), H) }, ik, 256);
+    const kek = await crypto.subtle.importKey('raw', kekBits, { name: 'AES-GCM' }, false, ['decrypt']);
+    const scope = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce, additionalData: cat(T('gomsinlog/glk2/aad/v1'), H, eph), tagLength: 128 }, kek, wrapped);
+
+    record('glk2.nodeToBrowser', (sigOk && hex(scope) === g.expectedScopeKeyHex) ? 'VERIFIED' : 'FAILED', `sig=${sigOk} scopeKeyMatch=${hex(scope) === g.expectedScopeKeyHex}`);
+  } catch (e) {
+    record('glk2.nodeToBrowser', 'FAILED', e.message);
+  }
+
+  document.getElementById('out').textContent = JSON.stringify({ probe: 'e2ee-1a1-web', results: log }, null, 2);
+  document.title = 'DONE';
+}
+main().catch(e => {
+  document.getElementById('out').textContent = 'FATAL ' + e.stack;
+  document.title = 'DONE';
+});
+</script>
+</body>
+</html>

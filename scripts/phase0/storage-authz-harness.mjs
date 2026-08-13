@@ -746,6 +746,15 @@ check(legit.ok && legit.stdout.trim() === 't', '030 an active member CAN still c
  * Each scenario gets its own couple and users so the cases cannot contaminate
  * one another.
  */
+
+/** Fixed-width fixture bytes, in the shapes 031's CHECK constraints require. */
+const spki = (seed) => `decode(repeat('${seed}', 91), 'hex')`;
+const bytes32 = (seed) => `decode(repeat('${seed}', 32), 'hex')`;
+const envelopeBytes = (seed) => `decode(repeat('${seed}', 360), 'hex')`;
+/** A syntactically valid 445-byte GLDC1 certificate. Not a real signature — see p0-harness.mjs. */
+const certificateBytes = (seed) =>
+  `overlay(decode(repeat('${seed}', 445), 'hex') placing decode('474c4443', 'hex') from 1 for 4)`;
+
 function deletionScenario({ label, partnerStatus, expectKeysSurvive }) {
   const suffix = label.replace(/[^a-z]/gi, '').slice(0, 4).toLowerCase().padEnd(4, 'x');
   const hex = [...suffix].map((c) => (c.charCodeAt(0) % 16).toString(16)).join('');
@@ -754,6 +763,11 @@ function deletionScenario({ label, partnerStatus, expectKeysSurvive }) {
   const couple = `c0000000-0000-4000-8000-0000${hex}0003`;
   const device = `d0000000-0000-4000-8000-0000${hex}0004`;
   const key = `c0000000-0000-4000-8000-0000${hex}0005`;
+  const recoveryId = `c0000000-0000-4000-8000-0000${hex}0006`;
+  const anchorId = `c0000000-0000-4000-8000-0000${hex}0007`;
+  const certId = `c0000000-0000-4000-8000-0000${hex}0008`;
+  const envelopeId = `c0000000-0000-4000-8000-0000${hex}0009`;
+  const otherRecord = `c0000000-0000-4000-8000-0000${hex}000a`;
 
   const members = partnerStatus === null
     ? `('${couple}', '${owner}', 'gomsin', 'active')`
@@ -766,6 +780,18 @@ function deletionScenario({ label, partnerStatus, expectKeysSurvive }) {
       ('${owner}', 'owner', 'gomsin')${partnerStatus === null ? '' : `, ('${partner}', 'partner', 'soldier')`};
     INSERT INTO public.couples (id) VALUES ('${couple}');
     INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES ${members};
+
+    -- Inserted BEFORE the write floor below: once a couple-scope floor row
+    -- exists, enforce_e2ee_write_floor refuses any new plaintext
+    -- daily_records write for this couple, and this fixture's plaintext
+    -- shared record is a pre-existing row from before that floor activated,
+    -- exactly like the write floor's own "legacy plaintext stays readable"
+    -- contract.
+    INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+      VALUES ('${otherRecord}', '${owner}', '${couple}', CURRENT_DATE, '${label} shared record', false);
+    INSERT INTO storage.objects (bucket_id, name, owner)
+      VALUES ('couple-media', '${couple}/${otherRecord}/photo.jpg', '${owner}');
+
     INSERT INTO public.scope_keys (id, domain, scope_id, owner_couple_id, key_epoch, state)
       VALUES ('${key}', 'couple', '${couple}', '${couple}', 1, 'ACTIVE');
     INSERT INTO public.crypto_pairings (couple_id, state, pairing_nonce, transcript_hash, proposed_by_user_id)
@@ -775,14 +801,64 @@ function deletionScenario({ label, partnerStatus, expectKeysSurvive }) {
       VALUES ('couple', '${couple}', 1);
   `, `${label}: fixture`);
 
-  // A device and an envelope for the partner, so "the surviving member can
-  // still open the epoch" is a real row rather than an assumption.
+  // A REAL envelope chain for the partner: recovery identity -> public anchor
+  // -> root device certificate -> device -> the envelope that actually wraps
+  // the couple scope key to that device. Asserting "the scope key row still
+  // exists" is not the same claim as "the surviving member can still open it";
+  // the second claim needs this full chain, in the exact shapes 031's CHECK
+  // constraints require (see scripts/e2ee/p0-harness.mjs for the same pattern).
   if (partnerStatus !== null) {
     mustSql(`
       INSERT INTO public.devices (id, user_id, sig_spki, kem_spki, platform, assurance, status)
-      VALUES ('${device}', '${partner}', decode(repeat('ab', 91), 'hex'),
-              decode(repeat('cd', 91), 'hex'), 'ios', 'secure_enclave', 'ACTIVE');
-    `, `${label}: partner device`);
+      VALUES ('${device}', '${partner}', ${spki('ab')}, ${spki('cd')}, 'ios', 'secure_enclave', 'ACTIVE');
+
+      INSERT INTO public.recovery_identities
+        (id, user_id, recovery_version, recovery_salt, rec_sig_spki, rec_kem_spki,
+         enc_rec_sig_priv, enc_rec_kem_priv, recovery_bundle_fp, bundle_sig)
+      VALUES ('${recoveryId}', '${partner}', 1, ${bytes32('11')}, ${spki('11')}, ${spki('12')},
+        decode(repeat('11', 150), 'hex'), decode(repeat('12', 150), 'hex'), ${bytes32('13')},
+        decode(repeat('11', 64), 'hex'));
+
+      INSERT INTO public.recovery_public_anchors
+        (id, user_id, recovery_identity_id, recovery_version, rec_sig_spki, rec_sig_fp, recovery_bundle_fp)
+      VALUES ('${anchorId}', '${partner}', '${recoveryId}', 1, ${spki('11')}, ${bytes32('14')}, ${bytes32('13')});
+
+      INSERT INTO public.device_certificates
+        (id, user_id, subject_device_id, issuer_device_id, issuer_certificate_id,
+         recovery_public_anchor_id, recovery_identity_id, recovery_version,
+         certificate, certificate_fp, subject_sig_spki, subject_kem_spki)
+      VALUES ('${certId}', '${partner}', '${device}', NULL, NULL, '${anchorId}', '${recoveryId}', 1,
+        ${certificateBytes('ab')}, ${bytes32('15')}, ${spki('ab')}, ${spki('cd')});
+
+      INSERT INTO public.key_envelopes
+        (id, scope_key_id, recipient_kind, recipient_device_id, sender_device_id,
+         sender_certificate_id, envelope, self_notarized)
+      VALUES ('${envelopeId}', '${key}', 'device', '${device}', '${device}', '${certId}',
+        ${envelopeBytes('99')}, true);
+    `, `${label}: partner envelope chain`);
+  }
+
+  /**
+   * Ground truth, checked once and reused by every disconnected/pending
+   * scenario below: `key_envelopes` SELECT is gated purely on recipient
+   * ownership (`recipient_device_id`'s `user_id = auth.uid()`), not on couple
+   * membership status. A disconnected or pending member CAN still fetch the
+   * bytes of an envelope addressed to their own device -- by design. The
+   * architecture revokes by epoch rotation, not by deleting or hiding already
+   * -issued envelopes (E2EE_PHASE_1A_ARCHITECTURE_V2_1.md §12: "keys already
+   * held ... stay exposed"; AGENTS.md §10: previously accessed partner data
+   * cannot be claimed remotely revocable). Asserting the opposite here would
+   * be a false test, not a security proof, so this records what the harness
+   * intentionally does NOT assert and why -- before proving what it does.
+   */
+  if (partnerStatus === 'disconnected' || partnerStatus === 'pending') {
+    const envelopeStillFetchable = asUser(
+      partner, `SELECT octet_length(envelope) FROM public.key_envelopes WHERE id = '${envelopeId}'`,
+    );
+    check(
+      envelopeStillFetchable.ok && envelopeStillFetchable.stdout.trim() === '360',
+      `037 ${label}: (expected, not a defect) the envelope recipient can still fetch their own row`,
+    );
   }
 
   // The real ordering.
@@ -818,6 +894,54 @@ function deletionScenario({ label, partnerStatus, expectKeysSurvive }) {
     coupleRow === keys,
     `037 ${label}: couple row and couple keys agree (row=${coupleRow}, keys=${keys})`,
   );
+
+  if (partnerStatus !== null) {
+    // THE REQUESTED PROOF, on the real row: not "a scope key with this
+    // owner_couple_id exists somewhere" but "the specific envelope addressed
+    // to B's device, wrapping the specific couple epoch B needs, is still
+    // there after the real deletion sequence."
+    const envelopeSurvives = mustSql(
+      `SELECT count(*) FROM public.key_envelopes WHERE id = '${envelopeId}' AND scope_key_id = '${key}'`,
+      'envelope recount',
+    );
+    check(
+      envelopeSurvives === want,
+      `037 ${label}: B's actual envelope for the couple epoch ${expectKeysSurvive ? 'SURVIVES' : 'is cleaned (cascaded from scope_keys)'} (saw ${envelopeSurvives})`,
+    );
+  }
+
+  /**
+   * THE REAL ENFORCEMENT PATH for "preserved crypto does not restore
+   * authorization": the couple `scope_keys` row -- the thing that tells a
+   * client which epoch is current -- is gated on active membership, and
+   * neither the shared record nor the shared media object becomes reachable
+   * merely because the underlying keys survived. This is the actual
+   * RLS-protected relation the application uses, not an isolated read of
+   * `get_my_active_couple_id()`.
+   */
+  if (partnerStatus === 'disconnected' || partnerStatus === 'pending') {
+    const scopeKeyVisible = asUser(
+      partner, `SELECT count(*) FROM public.scope_keys WHERE id = '${key}'`,
+    );
+    check(
+      scopeKeyVisible.ok && scopeKeyVisible.stdout.trim() === '0',
+      `037 ${label}: B still CANNOT see the couple scope_keys row through authenticated RLS`,
+    );
+    const recordVisible = asUser(
+      partner, `SELECT count(*) FROM public.daily_records WHERE id = '${otherRecord}'`,
+    );
+    check(
+      recordVisible.ok && recordVisible.stdout.trim() === '0',
+      `037 ${label}: B still CANNOT read the couple's shared daily_records row`,
+    );
+    const mediaVisible = asUser(
+      partner, `SELECT count(*) FROM storage.objects WHERE name = '${couple}/${otherRecord}/photo.jpg'`,
+    );
+    check(
+      mediaVisible.ok && mediaVisible.stdout.trim() === '0',
+      `037 ${label}: B still CANNOT read the couple's shared storage object`,
+    );
+  }
 }
 
 deletionScenario({ label: 'active survivor', partnerStatus: 'active', expectKeysSurvive: true });
@@ -852,6 +976,70 @@ check(
     `SELECT count(*) FROM public.crypto_write_floor WHERE scope_kind = 'couple' AND scope_id = '${coupleD}'`, 'f',
   ) === '0',
   '037 a disconnected sole member still gets their couple write floor cleaned (no unreachable orphan)',
+);
+
+/**
+ * Direct proof of the FK cascade the solo branch relies on.
+ *
+ * In the "truly solo" scenario above, RECIPIENT OWNED already deletes the
+ * lone user's own envelope before the couple-scope loop ever runs, so that
+ * scenario alone cannot show whether `DELETE FROM scope_keys WHERE
+ * domain = 'couple' ...` genuinely cascades to `key_envelopes` -- it never had
+ * anything left to cascade. A row can still be left over for a device that no
+ * longer belongs to any current couple member (e.g. an account that already
+ * completed its OWN deletion earlier while this couple still had a survivor,
+ * or any future write path RECIPIENT OWNED does not anticipate), and 037's
+ * solo cleanup must still remove it. Proven directly against the schema's
+ * `ON DELETE CASCADE`, independent of ordering with the RPC's other deletes.
+ */
+const cascadeCouple = 'c0000000-0000-4000-8000-0000cacd0001';
+const cascadeKey = 'c0000000-0000-4000-8000-0000cacd0002';
+const cascadeUser = 'd0000000-0000-4000-8000-0000cacd0003';
+const cascadeDevice = 'd0000000-0000-4000-8000-0000cacd0004';
+const cascadeRecovery = 'c0000000-0000-4000-8000-0000cacd0005';
+const cascadeAnchor = 'c0000000-0000-4000-8000-0000cacd0006';
+const cascadeCert = 'c0000000-0000-4000-8000-0000cacd0007';
+const cascadeEnvelope = 'c0000000-0000-4000-8000-0000cacd0008';
+mustSql(`
+  INSERT INTO auth.users (id) VALUES ('${cascadeUser}');
+  INSERT INTO public.couples (id) VALUES ('${cascadeCouple}');
+  INSERT INTO public.scope_keys (id, domain, scope_id, owner_couple_id, key_epoch, state)
+    VALUES ('${cascadeKey}', 'couple', '${cascadeCouple}', '${cascadeCouple}', 1, 'ACTIVE');
+  INSERT INTO public.devices (id, user_id, sig_spki, kem_spki, platform, assurance, status)
+    VALUES ('${cascadeDevice}', '${cascadeUser}', ${spki('c1')}, ${spki('c2')}, 'ios', 'secure_enclave', 'ACTIVE');
+  INSERT INTO public.recovery_identities
+    (id, user_id, recovery_version, recovery_salt, rec_sig_spki, rec_kem_spki,
+     enc_rec_sig_priv, enc_rec_kem_priv, recovery_bundle_fp, bundle_sig)
+    VALUES ('${cascadeRecovery}', '${cascadeUser}', 1, ${bytes32('c3')}, ${spki('c3')}, ${spki('c4')},
+      decode(repeat('c3', 150), 'hex'), decode(repeat('c4', 150), 'hex'), ${bytes32('c5')},
+      decode(repeat('c3', 64), 'hex'));
+  INSERT INTO public.recovery_public_anchors
+    (id, user_id, recovery_identity_id, recovery_version, rec_sig_spki, rec_sig_fp, recovery_bundle_fp)
+    VALUES ('${cascadeAnchor}', '${cascadeUser}', '${cascadeRecovery}', 1, ${spki('c3')}, ${bytes32('c6')}, ${bytes32('c5')});
+  INSERT INTO public.device_certificates
+    (id, user_id, subject_device_id, issuer_device_id, issuer_certificate_id,
+     recovery_public_anchor_id, recovery_identity_id, recovery_version,
+     certificate, certificate_fp, subject_sig_spki, subject_kem_spki)
+    VALUES ('${cascadeCert}', '${cascadeUser}', '${cascadeDevice}', NULL, NULL, '${cascadeAnchor}', '${cascadeRecovery}', 1,
+      ${certificateBytes('c1')}, ${bytes32('c7')}, ${spki('c1')}, ${spki('c2')});
+  INSERT INTO public.key_envelopes
+    (id, scope_key_id, recipient_kind, recipient_device_id, sender_device_id, sender_certificate_id, envelope, self_notarized)
+    VALUES ('${cascadeEnvelope}', '${cascadeKey}', 'device', '${cascadeDevice}', '${cascadeDevice}', '${cascadeCert}',
+      ${envelopeBytes('c9')}, true);
+`, 'cascade fixture: an envelope with no owning couple_members row at all');
+
+check(
+  mustSql(`SELECT count(*) FROM public.key_envelopes WHERE id = '${cascadeEnvelope}'`, 'before') === '1',
+  '037 cascade proof: the envelope exists before cleanup',
+);
+// Exactly the predicate 037's solo branch runs.
+mustSql(
+  `DELETE FROM public.scope_keys WHERE domain = 'couple' AND owner_couple_id = '${cascadeCouple}'`,
+  'cascade proof: couple scope key delete',
+);
+check(
+  mustSql(`SELECT count(*) FROM public.key_envelopes WHERE id = '${cascadeEnvelope}'`, 'after') === '0',
+  '037 cascade proof: deleting the couple scope key CASCADES to its envelope',
 );
 
 // ---------------------------------------------------------------------------

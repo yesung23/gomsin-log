@@ -95,6 +95,7 @@ const ORDER = [
   '035_e2ee_phase1a_p0_closure.sql',
   '036_e2ee_device_status_privilege.sql',
   '037_harden_e2ee_account_deletion_survivor_detection.sql',
+  '038_bilateral_talk_about_marks.sql',
 ];
 
 /**
@@ -1040,6 +1041,265 @@ mustSql(
 check(
   mustSql(`SELECT count(*) FROM public.key_envelopes WHERE id = '${cascadeEnvelope}'`, 'after') === '0',
   '037 cascade proof: deleting the couple scope key CASCADES to its envelope',
+);
+
+// ---------------------------------------------------------------------------
+// 038 — bilateral talk-about marks, as real RLS actors
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixture from the top of this file is reused: A and B are the active
+ * couple 1, C is an unrelated user in couple 2, SHARED is A's shared record
+ * and PRIVATE is A's private one.
+ *
+ * Every assertion below runs as `authenticated` with a real JWT subject, so
+ * the thing under test is the policy, not a client-side filter.
+ */
+/** A second shared record for couple 1, created by this block. */
+const OTHER2 = 'a0000000-0000-4000-8000-00000000ab01';
+
+function marksVisibleTo(userId) {
+  const result = asUser(userId, `SELECT count(*) FROM public.talk_about_marks`);
+  return result.ok ? Number(result.stdout.trim()) : -1;
+}
+
+function markAs(userId, recordId, coupleId) {
+  return asUser(userId, `
+    INSERT INTO public.talk_about_marks (record_id, couple_id, actor_user_id)
+    VALUES ('${recordId}', '${coupleId}', '${userId}')`);
+}
+
+// Reset to a clean, fully-active couple 1 (earlier blocks toggled membership).
+mustSql(
+  `UPDATE public.couple_members SET status = 'active' WHERE couple_id = '${COUPLE1}'`,
+  'reactivate couple 1',
+);
+mustSql(`DELETE FROM public.talk_about_marks`, 'clear marks');
+
+// --- The feature itself: both partners can mark, both can see -------------
+const ownerMark = markAs(A, SHARED, COUPLE1);
+check(ownerMark.ok, '038 the record owner CAN mark their own shared record');
+
+const partnerMark = markAs(B, SHARED, COUPLE1);
+check(
+  partnerMark.ok,
+  '038 the active partner CAN mark the other partner\'s shared record (the bilateral point)',
+);
+
+check(marksVisibleTo(A) === 2, '038 A sees both marks (own and partner\'s)');
+check(marksVisibleTo(B) === 2, '038 B sees both marks (own and partner\'s)');
+
+check(
+  mustSql(
+    `SELECT count(DISTINCT actor_user_id) FROM public.talk_about_marks WHERE record_id = '${SHARED}'`,
+    'attribution',
+  ) === '2',
+  '038 each mark is attributed to its own actor, so "who marked this" is representable',
+);
+
+// --- Determinism: a repeat mark is not a second row -----------------------
+const duplicate = asUser(A, `
+  INSERT INTO public.talk_about_marks (record_id, couple_id, actor_user_id)
+  VALUES ('${SHARED}', '${COUPLE1}', '${A}')
+  ON CONFLICT (record_id, actor_user_id) DO NOTHING`);
+check(
+  duplicate.ok && marksVisibleTo(A) === 2,
+  '038 re-marking is idempotent under ON CONFLICT -- no duplicate row',
+);
+const rawDuplicate = markAs(A, SHARED, COUPLE1);
+check(
+  rawDuplicate.ok === false && /duplicate key|unique/i.test(rawDuplicate.stderr),
+  '038 a bare duplicate INSERT is refused by the uniqueness constraint, not silently doubled',
+);
+
+// --- Private records are not markable by the partner ----------------------
+const partnerMarksPrivate = markAs(B, PRIVATE, COUPLE1);
+check(
+  partnerMarksPrivate.ok === false,
+  "038 the partner CANNOT mark the owner's private record",
+);
+const ownerMarksPrivate = markAs(A, PRIVATE, COUPLE1);
+check(
+  ownerMarksPrivate.ok,
+  '038 the OWNER can still mark their own private record (it is their own to flag)',
+);
+mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${PRIVATE}'`, 'tidy private mark');
+
+/**
+ * Isolate the policy's own `is_private` clause.
+ *
+ * The assertion above passes even with that clause deleted, because
+ * `daily_records` RLS already hides A's private row from B's sub-select --
+ * the same two-layers-deny-the-same-thing trap that made an earlier storage
+ * assertion in this file vacuous. Lending B enough record visibility to
+ * reach the mark policy leaves only the outer clause standing.
+ */
+mustSql(
+  `CREATE POLICY "harness_tmp_all_records" ON public.daily_records
+     FOR SELECT TO authenticated USING (true)`,
+  'temporary record visibility',
+);
+const partnerMarksPrivateIsolated = markAs(B, PRIVATE, COUPLE1);
+check(
+  partnerMarksPrivateIsolated.ok === false,
+  '038 the mark policy refuses a private target ON ITS OWN, even when record RLS would allow the read',
+);
+mustSql(
+  `DROP POLICY "harness_tmp_all_records" ON public.daily_records`,
+  'drop temporary record visibility',
+);
+
+// --- Cross-couple: C is in couple 2 and must reach nothing ----------------
+check(marksVisibleTo(C) === 0, "038 an unrelated user CANNOT read another couple's marks");
+check(
+  markAs(C, SHARED, COUPLE1).ok === false,
+  "038 an unrelated user CANNOT mark another couple's record",
+);
+// ...including when they attribute the row to themselves and name their OWN
+// couple, but point `record_id` at a record they do not own. This is the
+// forged-id case, and it is the record/couple agreement clause that stops it.
+check(
+  markAs(C, SHARED, COUPLE2).ok === false,
+  '038 a forged record_id from another couple is refused even under the caller\'s own couple_id',
+);
+asUser(C, `DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}'`);
+check(
+  Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}'`, 'survive',
+  )) === 2,
+  "038 an unrelated user CANNOT delete another couple's marks",
+);
+
+// --- No UPDATE path at all ------------------------------------------------
+const updateAttempt = asUser(B, `
+  UPDATE public.talk_about_marks SET created_at = now() - interval '1 year'
+  WHERE record_id = '${SHARED}'`);
+check(
+  updateAttempt.ok === false && /permission denied/i.test(updateAttempt.stderr),
+  '038 nobody can UPDATE a mark -- there is no grant and no policy',
+);
+
+// --- created_at cannot be forged (column-level INSERT grant) --------------
+const forgedTimestamp = asUser(B, `
+  INSERT INTO public.talk_about_marks (record_id, couple_id, actor_user_id, created_at)
+  VALUES ('${OTHER}', '${COUPLE1}', '${B}', now() + interval '10 years')`);
+check(
+  forgedTimestamp.ok === false && /permission denied/i.test(forgedTimestamp.stderr),
+  '038 a client CANNOT supply created_at -- the column-level grant omits it',
+);
+
+// --- Attribution cannot be forged ----------------------------------------
+mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${B}'`, 'tidy');
+check(
+  asUser(B, `
+    INSERT INTO public.talk_about_marks (record_id, couple_id, actor_user_id)
+    VALUES ('${SHARED}', '${COUPLE1}', '${A}')`).ok === false,
+  '038 B CANNOT create a mark attributed to A',
+);
+
+// --- Either partner may clear, which is the 이야기했어요 resolution --------
+markAs(B, SHARED, COUPLE1);
+const partnerClears = asUser(B, `
+  DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}'`);
+check(
+  partnerClears.ok
+  && Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}'`,
+    'cleared',
+  )) === 0,
+  '038 either partner may clear the other\'s mark (PRODUCT_V3 §8, 이야기했어요 resolves the topic)',
+);
+
+// --- Record deletion leaves nothing behind --------------------------------
+mustSql(`DELETE FROM public.talk_about_marks`, 'reset');
+markAs(A, SHARED, COUPLE1);
+check(
+  Number(mustSql(`SELECT count(*) FROM public.talk_about_marks`, 'before')) === 1,
+  '038 a mark exists before the record is deleted',
+);
+mustSql(`DELETE FROM public.daily_records WHERE id = '${SHARED}'`, 'delete record');
+check(
+  Number(mustSql(`SELECT count(*) FROM public.talk_about_marks`, 'after')) === 0,
+  '038 deleting the record CASCADES its marks away -- no orphan coordination metadata',
+);
+
+// --- Disconnect closes access both ways -----------------------------------
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('${OTHER2}', '${A}', '${COUPLE1}', CURRENT_DATE, 'post-delete shared', false)
+`, 'reseed shared record');
+markAs(A, OTHER2, COUPLE1);
+check(marksVisibleTo(B) === 1, '038 the partner sees the mark while the couple is active');
+
+mustSql(
+  `UPDATE public.couple_members SET status = 'disconnected' WHERE couple_id = '${COUPLE1}'`,
+  'disconnect',
+);
+check(marksVisibleTo(B) === 0, '038 a disconnected partner CANNOT read the marks');
+check(marksVisibleTo(A) === 0, '038 a disconnected owner loses access through the same predicate');
+check(
+  markAs(B, OTHER2, COUPLE1).ok === false,
+  '038 a disconnected partner CANNOT create a new mark',
+);
+
+/**
+ * Isolate the ACTIVE-membership gate on INSERT.
+ *
+ * The assertion above passes even if the policy accepts any membership row
+ * regardless of status, because `daily_records`' own partner-read policy is
+ * also scoped to the active couple -- so the EXISTS sub-select fails first
+ * and the membership clause is never reached. Verified by mutation: weakening
+ * `couple_id = get_my_active_couple_id()` to a plain membership lookup left
+ * every assertion green. Lending the disconnected partner record visibility
+ * removes the inner layer and leaves only the gate under test.
+ */
+mustSql(
+  `CREATE POLICY "harness_tmp_all_records_disc" ON public.daily_records
+     FOR SELECT TO authenticated USING (true)`,
+  'temporary record visibility (disconnect)',
+);
+check(
+  markAs(B, OTHER2, COUPLE1).ok === false,
+  '038 the INSERT policy refuses a disconnected member ON ITS OWN, even when the record is readable',
+);
+mustSql(
+  `DROP POLICY "harness_tmp_all_records_disc" ON public.daily_records`,
+  'drop temporary record visibility (disconnect)',
+);
+asUser(B, `DELETE FROM public.talk_about_marks WHERE record_id = '${OTHER2}'`);
+check(
+  Number(mustSql(`SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${OTHER2}'`, 'still')) === 1,
+  '038 a disconnected partner CANNOT delete an existing mark',
+);
+
+mustSql(
+  `UPDATE public.couple_members SET status = 'active' WHERE couple_id = '${COUPLE1}'`,
+  'reconnect',
+);
+check(marksVisibleTo(B) === 1, '038 reconnecting restores read access');
+
+// --- anon gets nothing ----------------------------------------------------
+const anonMarkRead = asAnon(`SELECT count(*) FROM public.talk_about_marks`);
+check(
+  !anonMarkRead.ok || Number(anonMarkRead.stdout.trim()) === 0,
+  '038 anon CANNOT read marks',
+);
+const anonMarkWrite = asAnon(`
+  INSERT INTO public.talk_about_marks (record_id, couple_id, actor_user_id)
+  VALUES ('${OTHER2}', '${COUPLE1}', '${A}')`);
+check(anonMarkWrite.ok === false, '038 anon CANNOT create a mark');
+
+// --- daily_records write access is exactly as it was ----------------------
+// The reason this table exists at all: adding the feature must not have
+// widened the partner's access to the author's record row.
+asUser(B, `
+  UPDATE public.daily_records SET log_text = 'partner overwrote this' WHERE id = '${OTHER2}'`);
+check(
+  Number(mustSql(
+    `SELECT count(*) FROM public.daily_records WHERE id = '${OTHER2}' AND log_text = 'post-delete shared'`,
+    'unchanged',
+  )) === 1,
+  '038 the partner STILL cannot write the author\'s daily_records row',
 );
 
 // ---------------------------------------------------------------------------

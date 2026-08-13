@@ -59,6 +59,9 @@ vi.mock('@/lib/useStore', () => ({
     deleteRecord: vi.fn(async () => ({ ok: true as const })),
     updateRecordMedia: vi.fn(async () => ({ ok: true as const, failedFiles: [] as string[] })),
     setHighlightedRecordId,
+    markTalkAbout: vi.fn(async () => ({ ok: true })),
+    unmarkTalkAbout: vi.fn(async () => ({ ok: true })),
+    resolveTalkAbout: vi.fn(async () => ({ ok: true })),
   }),
 }));
 

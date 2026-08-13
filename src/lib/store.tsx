@@ -43,6 +43,12 @@ import {
   updateEventInDB,
 } from '@/lib/events';
 import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
+import {
+  fetchTalkAboutMarksFromDB,
+  markTalkAboutInDB,
+  unmarkTalkAboutInDB,
+  resolveTalkAboutInDB,
+} from '@/lib/talkAbout';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   applyDeliveryOutcome,
@@ -226,6 +232,7 @@ const DEFAULT_STATE: AppState = {
   records: [],
   events: [],
   trips: [],
+  talkAboutMarks: [],
   widgetLayout: DEFAULT_LAYOUT_BY_ROLE.gomsin,
   soldierWidgetLayout: DEFAULT_LAYOUT_BY_ROLE.soldier,
   hasSeenInstallPrompt: false,
@@ -1176,6 +1183,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...current,
       highlightedRecordId: undefined,
       records: [],
+      // Couple-scoped coordination metadata goes with the workspace. The
+      // 이야기할 것 list would render empty anyway, since it can only show
+      // records that are present -- but stale couple metadata should not
+      // outlive the authorization that produced it.
+      talkAboutMarks: [],
       // Only owner-private schedules remain visible while shared authorization
       // is uncertain. No snapshot is retained for later restoration.
       events: current.events.filter((event) =>
@@ -1233,6 +1245,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         },
       },
       records: [],
+      talkAboutMarks: [],
       // Private schedules remain owner-readable after a disconnect; shared
       // schedules are revoked with the couple workspace.
       events: current.events.filter((event) =>
@@ -1282,10 +1295,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       // Recovery is never snapshot-based: every shared slice must be read again
       // through the caller's current RLS policy after membership is confirmed.
-      const [recordsResult, eventsResult, tripsResult] = await Promise.all([
+      const [recordsResult, eventsResult, tripsResult, talkAboutMarks] = await Promise.all([
         fetchRecordsResultFromDB(workspace.coupleId),
         fetchEventsResultFromDB(workspace.coupleId),
         fetchTripsResultFromDB(workspace.coupleId),
+        // Metadata only, and deliberately not part of the ok/quarantine gate
+        // below: a mark list that fails to load costs the user a section of
+        // the home screen, whereas treating it as authoritative would
+        // quarantine the whole shared workspace over a coordination detail.
+        // It returns [] on failure, which renders as "nothing to talk about".
+        fetchTalkAboutMarksFromDB(workspace.coupleId),
       ]);
       if (!isLatestCurrentWorkspace()) return false;
       if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
@@ -1309,6 +1328,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         records,
         events: eventsResult.events,
         trips: reconcileParentTrips(tripsResult.trips),
+        talkAboutMarks,
       };
       quarantinedWorkspaceRef.current = null;
       // Shared data is authoritative again. Whether it will keep itself up to
@@ -2866,6 +2886,51 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, highlightedRecordId: id }));
   };
 
+  /**
+   * "이따 이야기하기" writes.
+   *
+   * Each one re-reads the couple's marks from the server afterwards rather
+   * than patching local state optimistically. The list is tiny metadata, the
+   * partner may have changed it concurrently, and the server is the only
+   * place that knows the authoritative `created_at` -- so a refetch is both
+   * cheaper to reason about and the only way the two clients converge.
+   */
+  const refreshTalkAboutMarks = async (): Promise<void> => {
+    const coupleId = stateRef.current.profile.couple.coupleId;
+    if (!coupleId) return;
+    const marks = await fetchTalkAboutMarksFromDB(coupleId);
+    updateStateImmediately((prev) => ({ ...prev, talkAboutMarks: marks }));
+  };
+
+  const markTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+    const current = stateRef.current;
+    const coupleId = current.profile.couple.coupleId;
+    const userId = current.authenticatedUser?.id || current.profile.id;
+    if (!coupleId || !userId) {
+      return { ok: false, error: '커플 연결이 확인되지 않아 표시할 수 없어요.' };
+    }
+    const result = await markTalkAboutInDB(recordId, coupleId, userId);
+    if (result.ok) await refreshTalkAboutMarks();
+    return result;
+  };
+
+  /** Withdraw only your own flag; the partner's stays. */
+  const unmarkTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+    const current = stateRef.current;
+    const userId = current.authenticatedUser?.id || current.profile.id;
+    if (!userId) return { ok: false, error: '해제할 수 없어요.' };
+    const result = await unmarkTalkAboutInDB(recordId, userId);
+    if (result.ok) await refreshTalkAboutMarks();
+    return result;
+  };
+
+  /** 이야기했어요 — the conversation happened, so clear it for both. */
+  const resolveTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+    const result = await resolveTalkAboutInDB(recordId);
+    if (result.ok) await refreshTalkAboutMarks();
+    return result;
+  };
+
   const setAuthenticatedUser = (user: AuthUser | null) => {
     updateStateImmediately((prev) => ({ ...prev, authenticatedUser: user }));
   };
@@ -2938,6 +3003,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setSetupComplete,
         setOnboardingStep,
         setHighlightedRecordId,
+        markTalkAbout,
+        unmarkTalkAbout,
+        resolveTalkAbout,
         setAuthenticatedUser,
         setWidgetLayout,
         setHasSeenInstallPrompt,

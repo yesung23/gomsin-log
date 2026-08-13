@@ -179,6 +179,14 @@ export interface StoreContextType {
   setSetupComplete: (complete: boolean) => void;
   setOnboardingStep: (step: number) => void;
   setHighlightedRecordId: (id?: string) => void;
+  /**
+   * "이따 이야기하기" (migration 038). `markTalkAbout` / `unmarkTalkAbout`
+   * act on the caller's own flag; `resolveTalkAbout` clears the topic for
+   * both partners once the conversation has actually happened.
+   */
+  markTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
+  unmarkTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
+  resolveTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
   setAuthenticatedUser: (user: AuthUser | null) => void;
   /**
    * `role` selects which of the two per-role layouts is written. It defaults to

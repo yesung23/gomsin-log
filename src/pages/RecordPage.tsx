@@ -11,10 +11,11 @@ import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
+import { isMarkedByViewer } from '@/lib/talkAboutList';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Sparkles, Clock, Calendar,
-  Pencil, Trash2, X,
+  Pencil, Trash2, X, MessageCircle,
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
 import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
@@ -84,6 +85,8 @@ export function RecordPage() {
     deleteRecord,
     updateRecordMedia,
     sharedSyncStatus,
+    markTalkAbout,
+    unmarkTalkAbout,
   } = useStore();
   const isOnline = useOnlineStatus();
   const isOffline = !isOnline;
@@ -1234,6 +1237,60 @@ export function RecordPage() {
                         </p>
                       )}
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/*
+                "이따 이야기하기" — available to BOTH partners, which is the
+                whole point (PRODUCT_V3 §8). Shared records only: a private
+                record has no one to talk to about it, and the DB policy
+                refuses it anyway.
+              */}
+              {!selectedRecord.isPrivate && !isEditing && !showDeleteConfirm && (
+                <div className="pt-2 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (isOffline) {
+                        toast.error(OFFLINE_READONLY_MESSAGE);
+                        return;
+                      }
+                      const marked = isMarkedByViewer(
+                        state.talkAboutMarks ?? [], selectedRecord.id, profile.id,
+                      );
+                      const result = marked
+                        ? await unmarkTalkAbout(selectedRecord.id)
+                        : await markTalkAbout(selectedRecord.id);
+                      if (!result.ok) {
+                        toast.error(result.error || '처리하지 못했어요.');
+                        return;
+                      }
+                      toast.success(marked ? '표시를 해제했어요.' : '이따 이야기할 것으로 표시했어요.');
+                    }}
+                    aria-pressed={isMarkedByViewer(state.talkAboutMarks ?? [], selectedRecord.id, profile.id)}
+                    className={cn(
+                      'w-full flex items-center justify-center gap-1.5 px-4 min-h-[44px] rounded-lg font-bold text-label active:scale-95 transition',
+                      isMarkedByViewer(state.talkAboutMarks ?? [], selectedRecord.id, profile.id)
+                        ? 'bg-coral/10 text-coral-strong border border-coral/30'
+                        : 'bg-muted text-foreground',
+                    )}
+                  >
+                    <MessageCircle size={14} aria-hidden="true" />
+                    {isMarkedByViewer(state.talkAboutMarks ?? [], selectedRecord.id, profile.id)
+                      ? '이따 이야기하기 표시됨'
+                      : '이따 이야기하기'}
+                  </button>
+                  {/*
+                    Attribution, not a count of anything hidden: these are
+                    marks on a record this viewer is already reading.
+                  */}
+                  {(state.talkAboutMarks ?? []).some(
+                    (m) => m.recordId === selectedRecord.id && m.actorUserId !== profile.id,
+                  ) && (
+                    <p className="text-caption text-muted-foreground mt-1.5 text-center">
+                      {profile.couple.partnerName || '상대방'}도 이 기록을 표시했어요.
+                    </p>
                   )}
                 </div>
               )}

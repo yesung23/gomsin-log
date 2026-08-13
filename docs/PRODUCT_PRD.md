@@ -1,3 +1,7 @@
+> **Status: SUPERSEDED for product direction.** Use [`PRODUCT_V3.md`](PRODUCT_V3.md)
+> for current product intent. This document remains historical reference material for
+> scenarios and flows.
+
 # 곰신로그 통합 PRD
 
 - 문서 상태: 제품·구현 단일 기준 v5

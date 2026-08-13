@@ -1,3 +1,6 @@
+> **Status: HISTORICAL EVIDENCE.** This audit applies only to the baseline named below;
+> it is not a current completion or release claim.
+
 # GomsinLog v1 completion audit
 
 Baseline: `kiro/web-app-completion-v2` @ `0ba6e8c8494ada3041c7e144e36c2a94541ec2c2`

@@ -1,3 +1,6 @@
+> **Status: HISTORICAL EVIDENCE.** This audit applies only to the dated branch and
+> baseline below; it is not current release evidence.
+
 # 릴리스 감사 2026-07-31
 
 브랜치: `kiro/release-hardening-2026-07-31` (기준 `master` = `bf6ba0b`)

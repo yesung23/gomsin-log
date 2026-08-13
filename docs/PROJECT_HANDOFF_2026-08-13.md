@@ -7,8 +7,8 @@
 > **이 문서는 프로토콜·제품 규칙을 복제하지 않는다.** 각 canonical 문서를
 > 가리키기만 한다. 여기 적힌 요약과 원본이 어긋나면 **원본이 이긴다.**
 >
-> 기준: `origin/master` @ `a92339e`, PR #52 head `017c334` (branch
-> `docs/chat-contract-v1`), 2026-08-13.
+> 기준: `origin/master` @ `58efb7d`, PR #52 merge commit `58efb7d`, PR #53
+> head `f6bff1a` (branch `docs/project-handoff-business-memory`), 2026-08-14.
 
 ---
 
@@ -101,14 +101,16 @@
 
 ### master
 
-- `origin/master` HEAD: **`a92339e`**
-- 최근 머지: PR #50(양방향 이따 이야기하기), #51(WORK_LOG 색인화)
+- `origin/master` HEAD: **`58efb7d`**
+- 최근 머지: PR #52(P4 채팅 계약), PR #51(WORK_LOG 색인화)
 
 ### 열려 있는 PR
 
+현재 확인된 열린 PR은 **8개**이며, 이 핸드오프의 현재 작업 PR은 #53이다.
+
 | # | 브랜치 → 베이스 | 상태 | 비고 |
 |---|---|---|---|
-| **52** | `docs/chat-contract-v1` → `master` | **OPEN, MERGEABLE, CI 14/14 통과.** head `017c334` | **활성 작업.** P4 채팅 제품·데이터·E2EE 계약. 코드·마이그레이션 없음. 병합 가능하지만 이 핸드오프 작업에서 병합하지 않았다 |
+| **53** | `docs/project-handoff-business-memory` → `master` | **OPEN, 현재 핸드오프 PR.** head `f6bff1a` | 프로젝트 핸드오프·장기 비즈니스/메모리 방향 문서 갱신 |
 | 2–9 | `kiro/*`, `codex/*` 브랜치들 (서로를 베이스로 함, `master` 아님) | 대부분 draft, 일부 CONFLICTING | **레거시 — 2026-07-30 전후 작업 체인으로 보인다.** 이 핸드오프에서 내용을 검증하지 않았다. 다른 AI는 이 PR들을 현재 작업 기준으로 삼지 말고, 병합 전 사람이 먼저 그 브랜치 계보와 현재 `master`의 정합성을 재검토해야 한다 |
 
 ### 마이그레이션 — 트래킹 상태 (2026-08-13 저장소 조사)
@@ -242,7 +244,7 @@
 
 | 파일 | 목적 | 상태 |
 |---|---|---|
-| [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md) | 채팅 제품·데이터·E2EE 계약 V1. 스코프, 메타데이터 예산(6필드), GLE1 object type, epoch 강제, tombstone, 계정 삭제, 25가지 위협 모델, 구현 게이트 C1–C12 | **CANONICAL for 채팅** — `PRODUCT_V3.md` §12.1이 여기를 가리킨다. PR #52로 관리 중, 아직 미병합 |
+| [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md) | 채팅 제품·데이터·E2EE 계약 V1. 스코프, 메타데이터 예산(6필드), GLE1 object type, epoch 강제, tombstone, 계정 삭제, 25가지 위협 모델, 구현 게이트 C1–C12 | **CANONICAL for 채팅** — `PRODUCT_V3.md` §12.1이 여기를 가리킨다. PR #52로 머지됨 |
 
 이 카테고리는 지금 하나뿐이다. 앞으로 daily_records E2EE(P5), 암호화 미디어(P6)
 등도 구현 전에 이런 형태의 계약을 먼저 쓰는 것을 권장한다 — 그게 P4의 존재
@@ -292,14 +294,14 @@ PR 번호·머지 상태로만 요약한다. 자세한 내용은 각 PR과 `WORK
 | Core Day Loop P0-a → P3 | 기록 작성 진입점 복구, 작성자 태그, 감정 프라이버시(opt-in), 상대방의 오늘 통합, 원본 라우트 주소 지정 | #49 | 머지됨 |
 | P3 bilateral 이따 이야기하기 | `talk_about_marks` 메타데이터 전용 테이블, RLS 증명 | #50 | 머지됨 |
 | WORK_LOG 색인화 | 작업 기록 위치를 CLAUDE.md에 명시 | #51 | 머지됨 |
-| **P4 채팅 계약** | 채팅 제품·데이터·E2EE 계약 확정 (스키마·코드 없음). 초판 이후 보안 결함 3건(ACTIVE epoch 강제, tombstone 표현, 계정삭제 CASCADE 모순) 정정 | **#52** | **OPEN, 병합 가능, 미병합** |
+| **P4 채팅 계약** | 채팅 제품·데이터·E2EE 계약 확정 (스키마·코드 없음). 초판 이후 보안 결함 3건(ACTIVE epoch 강제, tombstone 표현, 계정삭제 CASCADE 모순) 정정 | **#52** | **머지됨 (`58efb7d`)** |
 
 **다음 엔지니어링 단계는 P5 — `daily_records` E2EE 수직 슬라이스**다
 (`ENGINEERING_ROADMAP.md` 단계표). P4는 순서를 바꾸지 않았다 — 채팅을
 P5보다 먼저 구현하라는 뜻이 아니라, 나중에 scope/epoch/맥락참조 의미가
 어긋나지 않게 하는 계약일 뿐이다.
 
-**이 핸드오프 작업은 P5를 시작하지 않았다.**
+**이 핸드오프 작업은 P5를 시작하지 않았다. P5가 다음 엔지니어링 단계다.**
 
 ---
 

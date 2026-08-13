@@ -302,8 +302,16 @@ describe('role-aware home widgets', () => {
      * useful once the thing it describes is on the screen -- which is why
      * `partner_day` was moved in front of them.
      */
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['partner_day', 'dday']);
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['partner_day', 'talk_about_list', 'dday']);
     expect(DEFAULT_LAYOUT_BY_ROLE.soldier[0]).toBe('partner_day');
+    // `talk_about_list` joined in P3. It is not another DESCRIPTION of the
+    // day -- it is the couple's own explicit marks on records already on this
+    // screen, which is the next step of the loop rather than a restatement of
+    // the previous one. The rule this test protects (the day itself leads,
+    // descriptions do not crowd it) is unchanged.
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('partner_emotion_flow');
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('partner_emotion_summary');
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('care_hint');
   });
 
   it('keeps every demoted widget available rather than deleting it', () => {

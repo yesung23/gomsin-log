@@ -17,6 +17,7 @@ import {
 } from '@/components/widgets/PartnerEmotionWidgets';
 import { PartnerDayTimelineWidget } from '@/components/widgets/PartnerDayTimelineWidget';
 import { CareHintWidget } from '@/components/widgets/CareHintWidget';
+import { TalkAboutListWidget } from '@/components/widgets/TalkAboutListWidget';
 import type { Role } from '@/types';
 
 export type WidgetDef = {
@@ -70,8 +71,8 @@ export type WidgetDef = {
  * default for the side that writes more often: 기록 시작 → 상대방의 오늘 → 보조.
  */
 export const DEFAULT_LAYOUT_BY_ROLE: Record<Role, string[]> = {
-  soldier: ['partner_day', 'dday'],
-  gomsin: ['today_word', 'partner_day', 'today_briefing', 'dday'],
+  soldier: ['partner_day', 'talk_about_list', 'dday'],
+  gomsin: ['today_word', 'partner_day', 'talk_about_list', 'dday'],
 };
 
 const LEGACY_GOMSIN_DEFAULT = ['today_briefing', 'today_word', 'dday'];
@@ -112,6 +113,13 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
     component: PartnerDayTimelineWidget,
     // Both roles: PRODUCT_V3 §5.1 -- the point of the surface is symmetric
     // ("서로의 하루"), not soldier-only. See DEFAULT_LAYOUT_BY_ROLE above.
+  },
+  talk_about_list: {
+    id: 'talk_about_list',
+    label: '오늘 이야기할 것',
+    description: '`이따 이야기하기`로 표시해 둔 기록 모아보기',
+    component: TalkAboutListWidget,
+    // Both roles: either partner marks, either partner reads the list.
   },
   partner_emotion_flow: {
     id: 'partner_emotion_flow',

@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { AppState, DailyRecord, EmotionFlowItem } from '@/types';
+import type { AppState, DailyRecord, EmotionFlowItem, TalkAboutMark } from '@/types';
 
 const ME = 'user-me';
 const PARTNER = 'user-partner';
@@ -17,6 +17,8 @@ const setHighlightedRecordId = vi.fn();
 // TodayLogWidget, which needs these from the same store hook.
 const addRecordWithMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
 const queueRecordForLater = vi.fn(async () => ({ queued: true }));
+const markTalkAbout = vi.fn(async () => ({ ok: true }));
+const unmarkTalkAbout = vi.fn(async () => ({ ok: true }));
 
 function flowItem(overrides: Partial<EmotionFlowItem> = {}): EmotionFlowItem {
   return {
@@ -44,6 +46,8 @@ function record(overrides: Partial<DailyRecord> = {}): DailyRecord {
   };
 }
 
+let currentMarks: TalkAboutMark[] = [];
+
 function makeState(records: DailyRecord[]): AppState {
   return {
     setupComplete: true,
@@ -67,6 +71,7 @@ function makeState(records: DailyRecord[]): AppState {
     records,
     events: [],
     trips: [],
+    talkAboutMarks: currentMarks,
     widgetLayout: [],
     hasSeenInstallPrompt: true,
     theme: 'light',
@@ -107,6 +112,9 @@ vi.mock('@/lib/useStore', () => ({
     deleteRecord,
     updateRecordMedia,
     setHighlightedRecordId,
+    markTalkAbout,
+    unmarkTalkAbout,
+    resolveTalkAbout: vi.fn(async () => ({ ok: true })),
     addRecordWithMedia,
     queueRecordForLater,
     outboxWaiting: 0,
@@ -138,6 +146,9 @@ beforeEach(() => {
   updateRecord.mockClear();
   deleteRecord.mockClear();
   setHighlightedRecordId.mockClear();
+  markTalkAbout.mockClear();
+  unmarkTalkAbout.mockClear();
+  currentMarks = [];
   currentSyncStatus = 'live';
 });
 
@@ -631,5 +642,87 @@ describe('RecordPage: durable source addressing via ?record=<id>', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(toastLog).toEqual([]);
     expect(document.querySelector('.record-highlighted')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The mark control on the record itself. PRODUCT_V3 §8 requires that BOTH
+ * partners can flag a shared record, so the important assertion here is the
+ * one that would have been impossible under the old author-only
+ * `daily_records.talk_about`: the control appears on the PARTNER's record.
+ */
+describe('RecordPage: 이따 이야기하기 on a record', () => {
+  it('offers the mark control on the partner\'s shared record', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([
+      record({ id: 'rec-partner', userId: PARTNER, authorRole: 'soldier', time: '11:00' }),
+    ]);
+    await openRecord(user, '11:00');
+
+    expect(await screen.findByRole('button', { name: /이따 이야기하기/ })).toBeInTheDocument();
+  });
+
+  it('offers it on the viewer\'s own shared record too', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByRole('button', { name: /이따 이야기하기/ })).toBeInTheDocument();
+  });
+
+  it('never offers it on a private record -- there is nobody to talk to about it', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record({ isPrivate: true })]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /이따 이야기하기/ })).not.toBeInTheDocument();
+  });
+
+  it('marking calls the store action for that exact record', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+
+    await user.click(await screen.findByRole('button', { name: /이따 이야기하기/ }));
+    await waitFor(() => expect(markTalkAbout).toHaveBeenCalledWith('rec-mine'));
+    expect(unmarkTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('an already-marked record offers to unmark instead, and unmarks only the viewer\'s own flag', async () => {
+    currentMarks = [{
+      id: 'm1',
+      recordId: 'rec-mine',
+      coupleId: 'couple-1',
+      actorUserId: ME,
+      createdAt: `${TODAY}T11:00:00.000Z`,
+    }];
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+
+    const control = await screen.findByRole('button', { name: /이따 이야기하기 표시됨/ });
+    expect(control).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(control);
+    await waitFor(() => expect(unmarkTalkAbout).toHaveBeenCalledWith('rec-mine'));
+    expect(markTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('tells the viewer when the partner has also marked it', async () => {
+    currentMarks = [{
+      id: 'm1',
+      recordId: 'rec-mine',
+      coupleId: 'couple-1',
+      actorUserId: PARTNER,
+      createdAt: `${TODAY}T11:00:00.000Z`,
+    }];
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByText(/몽룡도 이 기록을 표시했어요/)).toBeInTheDocument();
+    // The viewer has not marked it themselves, so the control still invites them to.
+    expect(screen.getByRole('button', { name: /^이따 이야기하기$/ })).toHaveAttribute('aria-pressed', 'false');
   });
 });

@@ -314,6 +314,22 @@ export const CYCLE_SUPPORT_KINDS = [
 
 export type CycleSupportKind = (typeof CYCLE_SUPPORT_KINDS)[number];
 
+/**
+ * "이따 이야기하기" — a metadata-only flag that a shared record is worth
+ * talking about later (migration 038).
+ *
+ * Note what is absent and must stay absent: no topic, no note, no excerpt, no
+ * summary, no emotion. The list UI renders content from the records the client
+ * already holds; this only identifies WHICH ones.
+ */
+export interface TalkAboutMark {
+  id: string;
+  recordId: string;
+  coupleId: string;
+  actorUserId: string;
+  createdAt: string;
+}
+
 export interface CycleSupportSignal {
   id: string;
   coupleId: string;
@@ -379,6 +395,14 @@ export interface AppState {
   records: DailyRecord[];
   events: CoupleEvent[];
   trips: Trip[];
+  /**
+   * "이따 이야기하기" marks for the active couple (migration 038).
+   *
+   * Metadata only -- ids, actor and timestamp. The list UI joins these
+   * against `records` above, which the client is already authorized to hold,
+   * so no record content ever lives here. See `lib/talkAboutList.ts`.
+   */
+  talkAboutMarks: TalkAboutMark[];
   highlightedRecordId?: string;
   authenticatedUser: AuthUser | null;
   /** Home layout for 곰신. Named without a role suffix for backward compatibility. */

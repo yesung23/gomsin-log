@@ -136,6 +136,16 @@ vi.mock('@/lib/trips', () => ({
   reconcileParentTrips: (trips: unknown[]) => trips,
 }));
 
+// Talk-about marks load alongside the other shared slices. Metadata only, and
+// deliberately outside the ok/quarantine gate, so an empty list is the correct
+// default for every scenario in this file.
+vi.mock('@/lib/talkAbout', () => ({
+  fetchTalkAboutMarksFromDB: vi.fn().mockResolvedValue([]),
+  markTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
+  unmarkTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
+  resolveTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
+}));
+
 const { StoreProvider } = await import('@/lib/store');
 const { useStore } = await import('@/lib/useStore');
 const { fetchTripsResultFromDB: fetchTripsResultFromDBMock } = await import('@/lib/trips') as unknown as { fetchTripsResultFromDB: ReturnType<typeof vi.fn> };

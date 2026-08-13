@@ -418,7 +418,8 @@ Moment 하나는 다음을 **참조로** 연결한다: 날짜/기간 · 연결�
 > 둘만의 공간**이다.
 
 채팅 사용자 콘텐츠는 다른 콘텐츠와 동일하게 Full User-Content E2EE 원칙을 따른다.
-채팅 프로토콜은 이 문서에서 설계하지 않는다.
+채팅 프로토콜은 이 문서에서 설계하지 않는다 →
+[`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md)가 canonical이다.
 
 ### 12.2 사진 — 코어 사용자 콘텐츠
 

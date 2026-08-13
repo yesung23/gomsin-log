@@ -72,5 +72,4 @@
 - PR·HEAD·CI·운영 상태처럼 휘발성인 사실은 live repository/GitHub/Supabase에서
   작업 시점에 확인한다.
 - 새로운 canonical 문서를 만들기 전에 기존 authoritative home이 없는지 먼저 확인한다.
-- `CURRENT_STATE.md`는 활성 P5(PR #54)의 현실과 충돌할 수 있으므로 P5가 해결된 뒤
-  master 기준으로 별도 refresh한다. 이번 문서 정리에서는 broad refresh를 하지 않는다.
+- `CURRENT_STATE.md`는 휘발성 문서이므로 실제 코드와 대조해 갱신한다.

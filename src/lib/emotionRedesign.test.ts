@@ -185,7 +185,7 @@ describe('what actually gets stored', () => {
   const candidates = extractEmotionCandidates('짜증났는데 기분이 나아졌어');
 
   it('never persists the evidence phrase taken from the diary body', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false });
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
     expect(items.length).toBeGreaterThan(0);
     for (const item of items) {
       expect(item).not.toHaveProperty('evidence');
@@ -197,23 +197,49 @@ describe('what actually gets stored', () => {
   });
 
   it('marks everything the author left in place as user_confirmed', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false });
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
     expect(items.every((item) => item.source === 'user_confirmed')).toBe(true);
     // ...which is what lets it survive the write-path filter.
     const stored = emotionFlowForStorage({ isPrivate: false, emotionFlow: items });
     expect(stored).toHaveLength(items.length);
   });
 
-  it('keeps a private record author-only', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: true });
+  it('keeps a private record author-only regardless of the share toggle', () => {
+    const items = candidatesToFlowItems(candidates, { isPrivate: true, shareWithPartner: true });
     expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
     // An author-only item must not reach a shared row.
     expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
   });
 
+  /**
+   * PRODUCT_V3 §13: machine-inferred emotion is private to the author by
+   * default. Leaving suggested chips in place is not an explicit share
+   * action, so a SHARED record's emotion must stay out of what the partner's
+   * RLS-readable row actually contains -- not merely hidden by client UI.
+   */
+  it('a shared record with the share toggle OFF never persists emotion for the partner to read', () => {
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: false });
+    expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
+  });
+
+  it('a shared record with the share toggle ON persists emotion for the partner to read', () => {
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+    expect(items.every((item) => item.visibility === 'shared')).toBe(true);
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toHaveLength(items.length);
+  });
+
+  it('omitting shareWithPartner defaults to author-only, not shared', () => {
+    // @ts-expect-error -- exercising a caller that forgets the now-required flag
+    const items = candidatesToFlowItems(candidates, { isPrivate: false });
+    expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
+  });
+
   it('records which items a human corrected, and which it did not', () => {
     const edited = new Set([candidates[0].id]);
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, editedIds: edited });
+    const items = candidatesToFlowItems(
+      candidates, { isPrivate: false, shareWithPartner: true, editedIds: edited },
+    );
     expect(items[0].userEdited).toBe(true);
     expect(items[1].userEdited).toBe(false);
   });
@@ -221,10 +247,12 @@ describe('what actually gets stored', () => {
   it('a correction changes the analysed shape, not just the label', () => {
     // The reported defect: the label could be fixed while the drawn line stayed
     // wrong. 분노 → 행복 rises; 행복 → 행복 is flat.
-    const rising = analyzeEmotionFlow(candidatesToFlowItems(candidates, { isPrivate: false }));
+    const rising = analyzeEmotionFlow(
+      candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true }),
+    );
     const corrected = candidatesToFlowItems(
       candidates.map((candidate) => ({ ...candidate, basic: 'happiness' as BasicEmotion })),
-      { isPrivate: false },
+      { isPrivate: false, shareWithPartner: true },
     );
     const flat = analyzeEmotionFlow(corrected);
     expect(rising?.shape).not.toBe(flat?.shape);
@@ -332,13 +360,29 @@ describe('role-aware home widgets', () => {
     expect(confirm).toBeLessThan(disclosure);
   });
 
-  it('never offers the partner-facing widgets to the person they describe', () => {
-    for (const id of ['partner_day', 'partner_emotion_flow', 'partner_emotion_summary', 'care_hint']) {
+  it('never offers the partner-DESCRIBING widgets to the person they describe', () => {
+    // `partner_emotion_flow` / `partner_emotion_summary` / `care_hint` are
+    // derived commentary ABOUT the partner's day from the reading side's
+    // point of view -- 곰신 reading a description of her own day back at
+    // herself is incoherent, so these three stay soldier-only.
+    for (const id of ['partner_emotion_flow', 'partner_emotion_summary', 'care_hint']) {
       expect(isWidgetAllowedForRole(id, 'soldier'), id).toBe(true);
       expect(isWidgetAllowedForRole(id, 'gomsin'), id).toBe(false);
     }
     expect(widgetsForRole('gomsin').map((w) => w.id)).not.toContain('partner_emotion_flow');
-    expect(widgetsForRole('gomsin').map((w) => w.id)).not.toContain('partner_day');
+  });
+
+  it('offers partner_day to BOTH roles -- PRODUCT_V3 §5.1, the surface is symmetric', () => {
+    // `partner_day` is the raw evidence timeline, not commentary, and the
+    // north star is "서로의 하루" (each other's day) -- not one-directional.
+    // It used to be soldier-only, which meant 곰신 had a compose surface but
+    // no evidence surface of her own: the exact asymmetry this widget exists
+    // to fix, just pointed the other way.
+    expect(isWidgetAllowedForRole('partner_day', 'soldier')).toBe(true);
+    expect(isWidgetAllowedForRole('partner_day', 'gomsin')).toBe(true);
+    expect(widgetsForRole('gomsin').map((w) => w.id)).toContain('partner_day');
+    expect(widgetsForRole('soldier').map((w) => w.id)).toContain('partner_day');
+    expect(DEFAULT_LAYOUT_BY_ROLE.gomsin).toContain('partner_day');
   });
 
   it('gives both roles a default layout made only of widgets they may use', () => {

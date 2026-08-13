@@ -13,6 +13,10 @@ const updateRecord = vi.fn(async () => ({ ok: true as const }));
 const deleteRecord = vi.fn(async () => ({ ok: true as const }));
 const updateRecordMedia = vi.fn(async () => ({ ok: true as const, failedFiles: [] as string[] }));
 const setHighlightedRecordId = vi.fn();
+// Only exercised by the composer sheet tests below -- RecordPage now embeds
+// TodayLogWidget, which needs these from the same store hook.
+const addRecordWithMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
+const queueRecordForLater = vi.fn(async () => ({ queued: true }));
 
 function flowItem(overrides: Partial<EmotionFlowItem> = {}): EmotionFlowItem {
   return {
@@ -102,6 +106,11 @@ vi.mock('@/lib/useStore', () => ({
     deleteRecord,
     updateRecordMedia,
     setHighlightedRecordId,
+    addRecordWithMedia,
+    queueRecordForLater,
+    outboxWaiting: 0,
+    outboxBlocked: 0,
+    retryBlockedRecords: vi.fn(),
   }),
 }));
 
@@ -480,5 +489,75 @@ describe('RecordPage period summary', () => {
     const summary = await screen.findByTestId('emotion-flow-summary');
     expect(summary).toHaveAttribute('data-state', 'empty');
     expect(summary.textContent).toContain('아직 오늘의 마음이 없어요');
+  });
+});
+
+/**
+ * PRODUCT_V3 §7.1.1 / CURRENT_STATE #1: the 기록 tab used to have no way at
+ * all to create a record -- only a Home widget the user could remove. The
+ * floating "+" button navigated to /home, which showed nothing if that widget
+ * was gone. It now opens a composer sheet that lives on this page and cannot
+ * be removed by any widget-layout choice.
+ */
+describe('RecordPage: the composer sheet is a reliable, non-removable entry point', () => {
+  beforeEach(() => {
+    addRecordWithMedia.mockClear();
+    queueRecordForLater.mockClear();
+  });
+
+  it('is closed by default and opens from the floating CTA', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([]);
+
+    expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    expect(screen.getByRole('dialog', { name: '지금의 마음 남기기' })).toBeInTheDocument();
+  });
+
+  it('is present regardless of the stored widget layout -- it does not read widgetLayout at all', async () => {
+    // makeState() always sets widgetLayout: [] (no today_word, no anything).
+    // A Home rendering the widget list would show nothing here; this sheet
+    // does not consult that list, so it is unaffected.
+    const user = userEvent.setup({ delay: null });
+    renderPage([]);
+    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    const dialog = await screen.findByRole('dialog', { name: '지금의 마음 남기기' });
+    expect(dialog).toBeInTheDocument();
+    // TodayLogWidget's own capture launcher, present the instant the sheet
+    // opens -- before any type is chosen.
+    expect(await screen.findByRole('button', { name: '한줄' })).toBeInTheDocument();
+  });
+
+  it('saving from the sheet calls the same store write TodayLogWidget always used', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([]);
+    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /한줄/ }));
+    await user.type(await screen.findByLabelText('오늘의 기록'), '기록 탭에서 바로 씀');
+    await user.click(screen.getByRole('button', { name: /남기기|저장/ }));
+
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalledTimes(1));
+    expect(addRecordWithMedia.mock.calls[0][0]).toMatchObject({ log: '기록 탭에서 바로 씀' });
+  });
+
+  it('closes itself after a successful save', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([]);
+    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /한줄/ }));
+    await user.type(await screen.findByLabelText('오늘의 기록'), '닫혀야 함');
+    await user.click(screen.getByRole('button', { name: /남기기|저장/ }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument());
+  });
+
+  it('the X button closes the sheet without saving', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([]);
+    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: '닫기' }));
+
+    expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument();
+    expect(addRecordWithMedia).not.toHaveBeenCalled();
   });
 });

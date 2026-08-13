@@ -61,11 +61,17 @@ export type WidgetDef = {
  * only descriptions of them. The briefing is a judgement surface; `partner_day` is
  * the evidence it was judged from. They are not substitutes.
  *
- * 곰신 leads with the briefing and the composer, because she is the one writing.
+ * 곰신 leads with the composer, because she is the one writing -- but PRODUCT_V3
+ * §5.1 is explicit that `상대방의 오늘` belongs to BOTH roles: the north star is
+ * "서로의 하루" (each other's day), not one-directional. `partner_day` used to be
+ * `soldier`-only in `WIDGET_REGISTRY` and absent from 곰신's default entirely, so
+ * she had a compose surface but no evidence surface of her own -- the same asymmetry
+ * `partner_day` was written to fix on the other side. Order follows §5.1's stated
+ * default for the side that writes more often: 기록 시작 → 상대방의 오늘 → 보조.
  */
 export const DEFAULT_LAYOUT_BY_ROLE: Record<Role, string[]> = {
   soldier: ['partner_day', 'dday'],
-  gomsin: ['today_word', 'today_briefing', 'dday'],
+  gomsin: ['today_word', 'partner_day', 'today_briefing', 'dday'],
 };
 
 const LEGACY_GOMSIN_DEFAULT = ['today_briefing', 'today_word', 'dday'];
@@ -104,7 +110,8 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
     label: '상대방의 오늘',
     description: '오늘 공유된 순간을 시간순으로, 사진·영상·음성까지 그대로',
     component: PartnerDayTimelineWidget,
-    roles: ['soldier'],
+    // Both roles: PRODUCT_V3 §5.1 -- the point of the surface is symmetric
+    // ("서로의 하루"), not soldier-only. See DEFAULT_LAYOUT_BY_ROLE above.
   },
   partner_emotion_flow: {
     id: 'partner_emotion_flow',

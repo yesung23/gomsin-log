@@ -24,7 +24,34 @@ import {
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 
-export function TodayLogWidget() {
+/**
+ * The author's own one-tap description of their day.
+ *
+ * This is distinct from the machine-suggested emotion chips above: a tag is
+ * something the author actively picks about THEIR OWN record, never inferred.
+ * It is also distinct from a partner reaction -- nobody but the author can set
+ * this. Kept to the same four values every reading surface already expects
+ * (PartnerDayTimelineWidget, CallBriefingWidget, briefing.ts, callBriefing.ts),
+ * so this is the write side of a value five screens already read.
+ */
+const AUTHOR_TAGS: { value: ReactionType; emoji: string; label: string }[] = [
+  { value: 'good', emoji: '😊', label: '좋았어' },
+  { value: 'event', emoji: '💬', label: '이런 일이' },
+  { value: 'hard', emoji: '🥹', label: '힘들었어' },
+  { value: 'thought_of_you', emoji: '💌', label: '네 생각났어' },
+];
+
+export interface TodayLogWidgetProps {
+  /**
+   * Fires after a record is actually gone from the composer -- delivered,
+   * queued offline, or queued after a failed online attempt. Optional so the
+   * Home widget usage (`WIDGET_REGISTRY`, no props passed) is unaffected; the
+   * 기록 tab's always-available composer sheet uses it to close itself.
+   */
+  onSaved?: () => void;
+}
+
+export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   const { state, addRecordWithMedia, queueRecordForLater } = useStore();
   const partnerName = state.profile.couple.partnerName || '파트너';
   const todayStr = toLocalDateString(localToday());
@@ -46,6 +73,13 @@ export function TodayLogWidget() {
   const [reaction, setReaction] = useState<ReactionType | undefined>(restoredDraft?.reaction);
   const [isPrivate, setIsPrivate] = useState(restoredDraft?.isPrivate ?? false);
   const [talkAbout, setTalkAbout] = useState(false);
+  /**
+   * Explicit, opt-IN sharing of machine-suggested emotion (PRODUCT_V3 §13).
+   * Defaults false: leaving suggested chips untouched is not the same as
+   * choosing to share them, so a shared record's emotion stays author-only
+   * until this is turned on.
+   */
+  const [shareEmotion, setShareEmotion] = useState(false);
   /** Files chosen but not yet uploaded; upload happens on save. */
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   // Reopen the card when there is something waiting, so a restored draft is not
@@ -127,8 +161,8 @@ export function TodayLogWidget() {
    * the database -- the same guarantee `matchedText` always had.
    */
   const userConfirmedFlow: EmotionFlowItem[] = useMemo(
-    () => review.toFlowItems(isPrivate),
-    [review, isPrivate],
+    () => review.toFlowItems(isPrivate, shareEmotion),
+    [review, isPrivate, shareEmotion],
   );
 
   const MAX_ATTACHMENTS = 4;
@@ -391,6 +425,7 @@ export function TodayLogWidget() {
       review.reset();
       setIsPrivate(false);
       setTalkAbout(false);
+      setShareEmotion(false);
       clearComposerDraft(draftUserId);
     };
 
@@ -419,6 +454,7 @@ export function TodayLogWidget() {
       clearComposer();
       setPendingFiles([]);
       setShowInputCard(false);
+      onSaved?.();
       toast.success('오프라인이라 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
       return;
     }
@@ -439,6 +475,7 @@ export function TodayLogWidget() {
       clearComposer();
       setPendingFiles([]);
       setShowInputCard(false);
+      onSaved?.();
       toast.success('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
       return;
     }
@@ -472,6 +509,7 @@ export function TodayLogWidget() {
 
     setPendingFiles([]);
     setShowInputCard(false);
+    onSaved?.();
     toast.success(isPrivate ? '나에게만 남겼어요.' : `${partnerName}에게 전했어요.`);
   };
 
@@ -579,6 +617,34 @@ export function TodayLogWidget() {
             className="w-full h-20 bg-muted rounded-control p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
           />
 
+          {/*
+            One-tap self-description. Optional: `hasContentToSave` already
+            counts `reaction` on its own, so a tag alone is a valid record, and
+            leaving all four unselected is equally valid -- this never blocks
+            save.
+          */}
+          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="오늘 하루 태그">
+            {AUTHOR_TAGS.map((tag) => {
+              const selected = reaction === tag.value;
+              return (
+                <button
+                  key={tag.value}
+                  type="button"
+                  onClick={() => setReaction(selected ? undefined : tag.value)}
+                  aria-pressed={selected}
+                  className={`min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 border active:scale-95 transition ${
+                    selected
+                      ? 'bg-coral/10 border-coral/30 text-coral-strong'
+                      : 'bg-muted border-border text-muted-foreground'
+                  }`}
+                >
+                  <span aria-hidden="true">{tag.emoji}</span>
+                  {tag.label}
+                </button>
+              );
+            })}
+          </div>
+
           {isNative && !hasVoiceAttachment && (
             <p className="flex items-start gap-1.5 text-caption text-muted-foreground leading-tight break-keep">
               <Mic size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -652,8 +718,12 @@ export function TodayLogWidget() {
             visibilityNote={
               isPrivate
                 ? '🔒 나만 보기 기록이라 이 마음도 나만 볼 수 있어요.'
-                : `이 마음은 ${partnerName}에게도 함께 보여요.`
+                : shareEmotion
+                  ? `이 마음은 ${partnerName}에게도 함께 보여요.`
+                  : `기록은 공유해도 이 마음은 나만 볼 수 있어요. ${partnerName}에게도 보여주려면 아래에서 켜주세요.`
             }
+            shareWithPartner={isPrivate ? undefined : shareEmotion}
+            onToggleShareWithPartner={isPrivate ? undefined : setShareEmotion}
             className="animate-fade-in"
           />
 

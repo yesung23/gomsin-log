@@ -26,8 +26,14 @@ export interface EmotionCandidateReview {
   remove: (id: string) => void;
   restore: (id: string) => void;
   changeEmotion: (id: string, basic: BasicEmotion) => void;
-  /** Exactly what should be persisted. `evidence` is dropped here. */
-  toFlowItems: (isPrivate: boolean) => EmotionFlowItem[];
+  /**
+   * Exactly what should be persisted. `evidence` is dropped here.
+   *
+   * `shareWithPartner` is the explicit author action PRODUCT_V3 §13 requires
+   * before machine-inferred emotion can become partner-visible; omitting it
+   * (or a private record) keeps every item `author_only`.
+   */
+  toFlowItems: (isPrivate: boolean, shareWithPartner: boolean) => EmotionFlowItem[];
   /** True once the user removed or corrected anything. */
   touched: boolean;
   reset: () => void;
@@ -82,8 +88,9 @@ function useReview(base: EmotionCandidate[]): EmotionCandidateReview {
   }, []);
 
   const toFlowItems = useCallback(
-    (isPrivate: boolean) => candidatesToFlowItems(candidates, {
+    (isPrivate: boolean, shareWithPartner: boolean) => candidatesToFlowItems(candidates, {
       isPrivate,
+      shareWithPartner,
       editedIds: new Set(Object.keys(overridesRef.current)),
     }),
     [candidates],

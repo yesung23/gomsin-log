@@ -196,7 +196,10 @@ describe("the partner's moments appear on the 군화 home, in time order", () =>
     await user.click(screen.getByRole('button', { name: /10:30/ }));
 
     expect(setHighlightedRecordId).toHaveBeenCalledWith('rec-target');
-    expect(navigate).toHaveBeenCalledWith('/record');
+    // The id also travels in the URL (not just in-memory store state), so a
+    // reload or a direct link still resolves to the exact record. See P2 /
+    // CURRENT_STATE #9.
+    expect(navigate).toHaveBeenCalledWith('/record?record=rec-target');
   });
 });
 
@@ -227,7 +230,7 @@ describe('the widget stays glanceable without hiding anything', () => {
     await user.click(screen.getByText(/나머지 3개 보기/));
 
     expect(setHighlightedRecordId).toHaveBeenCalledWith(`rec-${PARTNER_DAY_VISIBLE_LIMIT}`);
-    expect(navigate).toHaveBeenCalledWith('/record');
+    expect(navigate).toHaveBeenCalledWith(`/record?record=rec-${PARTNER_DAY_VISIBLE_LIMIT}`);
   });
 
   it('offers no overflow control when nothing is cut off', () => {

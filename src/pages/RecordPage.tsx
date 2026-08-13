@@ -10,10 +10,11 @@ import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
+import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Sparkles, Clock, Calendar,
-  Pencil, Trash2,
+  Pencil, Trash2, X,
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
 import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
@@ -111,6 +112,15 @@ export function RecordPage() {
   const [isMediaBusy, setIsMediaBusy] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  /**
+   * PRODUCT_V3 §7.1.1 / CURRENT_STATE #1: before this, the only way to write a
+   * record was a Home widget the user can remove from their own layout, at
+   * which point there was no way left to record anything at all. The 기록 tab
+   * itself had no creation affordance. This sheet is that affordance, and it
+   * cannot be removed by any widget-layout choice because it lives on this
+   * page, not in the widget system.
+   */
+  const [showComposer, setShowComposer] = useState(false);
 
   const closeSelectedRecord = useCallback(() => {
     setSelectedRecordId(null);
@@ -119,6 +129,7 @@ export function RecordPage() {
     setShowDeleteConfirm(false);
   }, []);
   useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
+  useEscapeKey(() => setShowComposer(false), showComposer);
 
   // Own records + the partner's shared ones, with author-only fragments removed.
   // Uses the shared privacy helper so the rule lives in exactly one place.
@@ -367,6 +378,49 @@ export function RecordPage() {
     }, 120);
     return () => clearTimeout(timer);
   }, [state.highlightedRecordId, state.records, selectedDate]);
+
+  /**
+   * The durable half of source addressing: `?record=<id>` in the URL.
+   *
+   * `state.highlightedRecordId` above is in-memory store state -- it answers
+   * "which record did I just tap", not "which record does this URL mean", so
+   * a reload or a direct link opened `/record` with no target at all
+   * (CURRENT_STATE #9 / PRODUCT_V3 §7.5's addressing requirement). Every
+   * caller that used to do `setHighlightedRecordId(id); navigate('/record')`
+   * now also puts the id in the URL, so the SAME effect below fires whether
+   * this page just mounted fresh or the widget navigated here a moment ago.
+   *
+   * Bridges into `setHighlightedRecordId` rather than duplicating the
+   * date-switch/scroll logic above, so there is exactly one place that owns
+   * "how a target record gets to be on screen and highlighted".
+   *
+   * Waits out `sharedSyncStatus === 'unavailable'`: that is the ~2s
+   * membership-confirmation window on a cold load with no realtime socket
+   * yet (see the period-summary honesty tests), during which `state.records`
+   * can be legitimately empty for a reason that has nothing to do with
+   * whether the target record exists. Judging "missing" during that window
+   * would show a false failure on exactly the case this fix is for --
+   * arriving fresh from a deep link.
+   */
+  const recordIdParam = searchParams.get('record');
+  const handledRecordParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!recordIdParam) return;
+    if (sharedSyncStatus === 'unavailable') return;
+    if (handledRecordParamRef.current === recordIdParam) return;
+    handledRecordParamRef.current = recordIdParam;
+
+    const target = state.records.find((record) => record.id === recordIdParam);
+    if (!target) {
+      // Deleted, never existed, or belongs to someone else and was correctly
+      // never sent to this client -- one message covers all three on
+      // purpose. Distinguishing them would tell an unauthorized viewer that
+      // *something* is there, just hidden.
+      toast.info('이 기록은 삭제되었어요.');
+      return;
+    }
+    setHighlightedRecordId(recordIdParam);
+  }, [recordIdParam, sharedSyncStatus, state.records, setHighlightedRecordId]);
 
   // Auto-clear highlight
   useEffect(() => {
@@ -901,19 +955,52 @@ export function RecordPage() {
 
       {/* Floating CTA — the one primary action. 48px via Button size="lg".
           Positioned off the measured bottom chrome so it never overlaps the
-          offline banner or the tab bar. */}
-      <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+12px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-5 z-40">
-        <Button
-          variant="primary"
-          size="lg"
-          full
-          onClick={() => navigate('/home')}
-          className="shadow-md"
-        >
-          <span aria-hidden="true">+</span>
-          <span>지금의 마음 남기기</span>
-        </Button>
-      </div>
+          offline banner or the tab bar. Hidden while the sheet it opens is
+          already open: left visible it sits behind the overlay with a label
+          ("...남기기") that collides with the composer's own save button. */}
+      {!showComposer && (
+        <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+12px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-5 z-40">
+          <Button
+            variant="primary"
+            size="lg"
+            full
+            onClick={() => setShowComposer(true)}
+            className="shadow-md"
+          >
+            <span aria-hidden="true">+</span>
+            <span>지금의 마음 남기기</span>
+          </Button>
+        </div>
+      )}
+
+      {/*
+        Composer sheet. Reuses the exact same TodayLogWidget the Home widget
+        renders -- not a second, differently-shaped editor -- so this and the
+        Home composer can never drift apart. z-[60] to sit above the tab bar,
+        matching the detail modal below.
+      */}
+      {showComposer && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="지금의 마음 남기기"
+            className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-4 shadow-xl max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex justify-end mb-1">
+              <button
+                type="button"
+                onClick={() => setShowComposer(false)}
+                aria-label="닫기"
+                className="min-h-11 min-w-11 flex items-center justify-center text-muted-foreground"
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <TodayLogWidget onSaved={() => setShowComposer(false)} />
+          </div>
+        </div>
+      )}
 
       {/*
         Detail Modal.

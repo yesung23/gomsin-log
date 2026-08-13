@@ -75,7 +75,7 @@ export function PartnerDayTimelineWidget() {
 
   const openRecord = (record: DailyRecord) => {
     setHighlightedRecordId(record.id);
-    navigate('/record');
+    navigate(`/record?record=${record.id}`);
   };
 
   /*

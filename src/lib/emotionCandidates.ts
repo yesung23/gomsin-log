@@ -169,15 +169,28 @@ export function extractEmotionCandidates(logText: string): EmotionCandidate[] {
  * Turn the candidates the user LEFT IN PLACE into what gets stored.
  *
  * `evidence` is dropped here, which is the single point where the display-only
- * phrase is prevented from reaching the database. `source: 'user_confirmed'` is
- * correct under opt-out too: these are the items a person was shown and chose not
- * to remove, and `emotionFlowForStorage` still refuses anything else.
+ * phrase is prevented from reaching the database.
+ *
+ * `visibility` is NOT simply "not private, so shared". PRODUCT_V3 §13 is
+ * explicit: machine-inferred emotion is private to the author by default, and
+ * becoming partner-visible requires an affirmative author action -- not
+ * merely failing to remove a suggestion the app pre-filled. `shareWithPartner`
+ * is that action, gathered from a control the author has to actively engage
+ * (see `EmotionChipEditor`'s share toggle). Leaving every candidate in place
+ * and never touching that toggle keeps the whole flow `author_only`, even on
+ * a record the author otherwise chose to share -- the record can be shared
+ * while the machine's read of it stays private.
+ *
+ * On a private record `shareWithPartner` is moot: nobody but the author can
+ * read the record at all, so visibility is forced `author_only` regardless.
  */
 export function candidatesToFlowItems(
   candidates: EmotionCandidate[],
-  options: { isPrivate: boolean; editedIds?: ReadonlySet<string> },
+  options: { isPrivate: boolean; shareWithPartner: boolean; editedIds?: ReadonlySet<string> },
 ): EmotionFlowItem[] {
-  const visibility: EmotionVisibility = options.isPrivate ? 'author_only' : 'shared';
+  const visibility: EmotionVisibility = (!options.isPrivate && options.shareWithPartner)
+    ? 'shared'
+    : 'author_only';
   return candidates.map((candidate, index) => ({
     id: candidate.id,
     sequence: index + 1,

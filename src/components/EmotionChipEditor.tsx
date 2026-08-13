@@ -38,6 +38,15 @@ export interface EmotionChipEditorProps {
   /** Hidden when editing an already-saved record, where it would be redundant. */
   showHeading?: boolean;
   className?: string;
+  /**
+   * The explicit share-with-partner action PRODUCT_V3 §13 requires: machine-
+   * suggested emotion defaults to author-only, and only turning this on makes
+   * it partner-visible. Rendered only when both are supplied -- the composer
+   * passes them; the post-save correction screen does not, because a private
+   * record has no sharing decision to make.
+   */
+  shareWithPartner?: boolean;
+  onToggleShareWithPartner?: (value: boolean) => void;
 }
 
 export function EmotionChipEditor({
@@ -49,6 +58,8 @@ export function EmotionChipEditor({
   visibilityNote,
   showHeading = true,
   className,
+  shareWithPartner,
+  onToggleShareWithPartner,
 }: EmotionChipEditorProps) {
   if (candidates.length === 0 && removed.length === 0) return null;
 
@@ -70,6 +81,19 @@ export function EmotionChipEditor({
       <p className="text-caption font-semibold leading-tight text-muted-foreground">
         {visibilityNote}
       </p>
+
+      {onToggleShareWithPartner && (
+        <label className="flex items-center gap-1.5 min-h-[44px] px-3 rounded-control bg-card border border-border text-label font-semibold text-foreground cursor-pointer w-fit">
+          <input
+            type="checkbox"
+            checked={!!shareWithPartner}
+            onChange={(event) => onToggleShareWithPartner(event.target.checked)}
+            className="accent-coral"
+            data-testid="emotion-share-toggle"
+          />
+          이 마음도 함께 보여주기
+        </label>
+      )}
 
       {candidates.length === 0 ? (
         <p

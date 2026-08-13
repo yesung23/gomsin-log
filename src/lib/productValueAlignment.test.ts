@@ -11,8 +11,12 @@ describe('product value alignment', () => {
   });
 
   it('migrates only the untouched legacy default and preserves customization', () => {
+    // Migrates forward to the CURRENT gomsin default, whatever that is --
+    // asserted against DEFAULT_LAYOUT_BY_ROLE.gomsin rather than a literal
+    // array, so this does not silently re-pin a stale default the next time
+    // it changes (it already has once: partner_day was added in P0-a).
     expect(migrateWidgetLayout(['today_briefing', 'today_word', 'dday'], 'gomsin'))
-      .toEqual(['today_word', 'today_briefing', 'dday']);
+      .toEqual(DEFAULT_LAYOUT_BY_ROLE.gomsin);
     expect(migrateWidgetLayout(['dday', 'today_word'], 'gomsin'))
       .toEqual(['dday', 'today_word']);
     expect(migrateWidgetLayout(['partner_day', 'dday'], 'soldier'))

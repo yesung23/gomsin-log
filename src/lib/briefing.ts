@@ -12,8 +12,14 @@ export function generateDailySummary(
   const todayStr = new Date().toISOString().split('T')[0];
   const count = sharedRecords.length;
 
-  // Rule: 0 or 1 shared record -> skip summary card
-  if (count <= 1) {
+  /**
+   * PRODUCT_V3 §6.2: a day with exactly one shared record is the day most
+   * likely to be missed, not the day least worth summarising. The previous
+   * rule skipped the summary entirely below two records, which meant the
+   * common case -- someone shares one thing before going quiet -- produced
+   * nothing on the surface built to catch it.
+   */
+  if (count === 0) {
     return {
       date: todayStr,
       items: [],
@@ -78,16 +84,26 @@ export function generateDailySummary(
   const maxItems = count <= 3 ? 1 : 3;
   const finalItems = items.slice(0, maxItems);
 
-  // Generate call opener item
+  /**
+   * Generate the call opener.
+   *
+   * Every branch here must be an honest reaction to something the author
+   * explicitly signalled (a tag), never a guess reconstructed from free
+   * text. This used to have a third branch: any record whose log contained
+   * "업무" produced a fixed sentence claiming it happened "오전" and that the
+   * author "지쳤었다면서" -- a time of day and an emotional state neither the
+   * keyword nor the record actually established, invented from a single
+   * substring match. PRODUCT_V3 §6.4 rules this out ("서사 창작" is listed
+   * as a hard no). The hard/good branches below stay: they react to an
+   * EXPLICIT tag the author chose, and neither one asserts a fact about the
+   * content of the record beyond what the tag itself already says.
+   */
   let openerText = `오늘 제일 기억에 남는 순간이 언제였어?`;
   let openerRecordId = sharedRecords[sharedRecords.length - 1].id;
 
   if (hardRecord) {
     openerText = `오늘 제일 정신없었던 순간이 언제였어? 고생했어!`;
     openerRecordId = hardRecord.id;
-  } else if (textRecords.length > 0 && textRecords[0].log.includes('업무')) {
-    openerText = `오늘 오전 업무 때문에 지쳤었다면서, 지금은 괜찮아?`;
-    openerRecordId = textRecords[0].id;
   } else if (goodRecord) {
     openerText = `오늘 기분 좋은 일 있었다면서! 무슨 일이었어?`;
     openerRecordId = goodRecord.id;

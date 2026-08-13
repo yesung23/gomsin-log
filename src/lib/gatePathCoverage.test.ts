@@ -171,6 +171,15 @@ const STORE_GATED_EXEMPTIONS: Record<string, Record<string, string>> = {
     isCanonicalRecordMediaPath: 'Pure utility: validates a storage path locally',
     classifyMediaFile: 'Pure utility: validates MIME type and size locally',
     buildMediaPath: 'Pure utility: builds a path string',
+    setRecordCryptoEnvironment:
+      'Wiring, not a mutation: installs the P5 key/floor environment. Writes no row '
+      + 'and reaches no network. Called once during E2EE bootstrap.',
+    getRecordCryptoEnvironment:
+      'Read-only accessor for the installed environment, so a test can assert which '
+      + 'one is active without reaching into module state.',
+    encryptionRefusalReason:
+      'Pure utility: maps a refusal to encrypt onto a ServerErrorKind. Deliberately '
+      + 'exported so the store and its tests classify the refusal identically.',
   },
   'events.ts': {
     fetchEventsResultFromDB: 'Read-only: fetches events without mutation',

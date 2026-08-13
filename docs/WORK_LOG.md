@@ -28,6 +28,46 @@
 
 ## 세션 기록
 
+### 2026-08-14 · P5 — `daily_records` E2EE 수직 슬라이스
+
+P4 완료 후 다음 단계인 P5를 구현했다. 시작 시점 `origin/master` HEAD `7c660e6`
+(로컬 `6cc9f72`와 트리 동일 — `7c660e6`은 같은 내용의 머지 커밋).
+
+**구현 전 조사에서 발견한 것 — 032가 남긴 진짜 공백.** 032는 암호화된 행의
+`log_text`·`reaction`·`attachments`·`emotion_flow`·`record_time`을 전부 금지하는데,
+**암호문을 담을 컬럼을 추가하지 않았다.** 즉 032만으로는 암호화된
+`daily_records` 행을 쓸 수 없다 — R4를 지키는 클라이언트는 방금 암호화한 내용을
+넣을 곳이 없다. P5의 중심은 write floor가 아니라 이 공백이었다.
+
+**추가로 발견한 P0 결함 (이미 머지된 032).** `enforce_e2ee_write_floor()`에
+`SECURITY DEFINER`가 없어서 호출자 권한으로 실행되고, 첫 문장이
+`e2ee_floor_for()`를 호출하는데 그 함수는 `authenticated`에게서 EXECUTE가
+회수되어 있다(032:71, 의도된 회수). 따라서 032를 적용하면 **모든 실제 사용자의
+`daily_records` 쓰기가 평문까지 포함해 전부 `42501`로 실패한다.** 기존 P0
+하네스가 `daily_records`에 한 번도 쓰지 않아 드러나지 않았다. 039가
+`ALTER FUNCTION ... SECURITY DEFINER`로 고친다 — 본문을 다시 선언하면 032와
+039에 규칙이 두 벌 생기므로 속성만 바꿨고, 그 사실을 테스트로 고정했다.
+
+| 파일 | 변경 |
+|---|---|
+| `supabase/migrations/039_daily_records_content_envelope.sql` | 신규. `content_envelope BYTEA` + 헤더/라우팅 일치 검증 + 032 P0 수정 |
+| `scripts/e2ee/p5-harness.mjs`, `scripts/e2ee/p5-baseline.sql` | 신규. 실제 PostgreSQL 17 · 실제 RLS 액터 · mutation testing |
+| `src/crypto/recordContent.ts` (+ 테스트) | 신규. 기록 콘텐츠 문서 · PMK/CSK 라우팅 · GLE1 AAD |
+| `src/app/records/contentCrypto.ts` (+ 테스트) | 신규. 유스케이스 — floor/epoch/domain 판단, 평문 fallback 없음 |
+| `src/lib/outboxCrypto.ts` (+ 테스트) | 신규. 오프라인 큐 암호화 (LCK) |
+| `src/lib/records.ts` | 읽기/쓰기 경로가 유스케이스를 통과 |
+| `src/lib/outbox.ts`, `src/lib/store.tsx` | 큐에 암호문 저장, 전송 시점에 개봉 |
+| `src/lib/e2eeLayering.test.ts` | Phase 1A 트립와이어를 P5 범위 불변식으로 전환 (cycle 경로는 그대로 동결) |
+
+**검증.** `test:p5` PASS (74 assertions, mutation 13종), `test:p0` PASS (76),
+`test:rollback` PASS, `npm run test` PASS (2221), typecheck·lint·build PASS.
+
+**하지 않은 것.** 프로덕션 조회·적용 없음. 039는 어디에도 적용되지 않았다.
+실제 두 계정 기기 간 E2E, 키 프로비저닝 UI, 레거시 행 일괄 마이그레이션 실행,
+채팅·미디어·주기는 범위 밖이다.
+
+---
+
 ### 2026-08-14 · PR #53 · P4 병합 후 핸드오프 갱신
 
 PR #52가 `58efb7d`로 `master`에 머지된 뒤 같은 #53 브랜치를 최신 `origin/master`에

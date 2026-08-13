@@ -16,6 +16,7 @@
     "test:edge": "deno test --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts",
     "test:rollback": "node scripts/e2ee/rollback-harness.mjs",
     "test:p0": "node scripts/e2ee/p0-harness.mjs",
+    "test:p5": "node scripts/e2ee/p5-harness.mjs",
     "test:phase0": "node scripts/phase0/storage-authz-harness.mjs",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
     "verify:native": "vitest run --config vitest.config.ts --configLoader runner src/lib/nativeConfig.test.ts src/lib/iosPrivacyManifest.test.ts src/lib/appAssets.test.ts src/lib/nativePermissions.test.ts",

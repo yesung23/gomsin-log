@@ -59,6 +59,7 @@ import {
   isRetryableReason,
   pendingForAccount,
   purgeAccount as purgeOutboxAccount,
+  readQueuedRecord,
   unblockEntry,
   type OutboxPersistence,
 } from '@/lib/outbox';
@@ -2176,7 +2177,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // The account changed mid-flush: stop rather than write one person's queue
         // into another's session.
         if (!isCurrentIdentity(identity)) break;
-        const attempt = await addRecordWithMedia(entry.record, entry.files, {
+
+        /**
+         * Open the queued payload. Entries are sealed at rest under the device's
+         * local cache key (P4 decision 5), so this is where the plaintext comes
+         * back — for the duration of one delivery attempt and no longer.
+         *
+         * A failure here is NOT a delivery failure to be retried: the ciphertext
+         * cannot be authenticated, so no number of retries will change it and
+         * guessing at the payload would write wrong content under a real record
+         * id. Block the entry with a stated reason and keep it.
+         */
+        let queuedRecord;
+        try {
+          queuedRecord = await readQueuedRecord(entry);
+        } catch (error) {
+          console.error('[gomsinlog] Queued record could not be opened:', error);
+          const disposition = await applyDeliveryOutcome(persistence, entry, {
+            ok: false,
+            reason: 'unreadable_queue_entry',
+            message: '임시 보관된 기록을 열 수 없어요. 다시 작성해 주세요.',
+          });
+          if (disposition === 'delivered') result.delivered += 1;
+          else if (disposition === 'requeued') result.requeued += 1;
+          else result.blocked += 1;
+          continue;
+        }
+
+        const attempt = await addRecordWithMedia(queuedRecord, entry.files, {
           recordId: entry.id,
           allowQueue: false,
         });

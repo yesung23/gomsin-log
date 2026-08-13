@@ -33,13 +33,20 @@ export function CareHintWidget() {
   // Describes what was actually shared. Deliberately not a score or a bar: an
   // earlier version rendered `sharedRecords.length * 25` as an "energy level",
   // which looked measured but was a record count in disguise.
+  //
+  // The fallback line used to be a mood claim ('평온하게 하루를 보내고
+  // 있어요') inferred from the ABSENCE of a hard/good/thought_of_you tag.
+  // PRODUCT_V3 §6.4 rules this out explicitly: silence is not evidence of
+  // calm, it just means nothing was tagged -- author tags are optional
+  // (see TodayLogWidget), so no tag at all is the common case, not a signal.
+  // The fallback now states only what is actually known: records exist.
   const moodLabel = shared.length === 0
     ? '오늘 공유된 순간이 아직 없어요'
     : shared.some((r) => r.reaction === 'hard')
       ? '조금 힘든 일이 있었어요 🥹'
       : shared.some((r) => r.reaction === 'good' || r.reaction === 'thought_of_you')
         ? '기분 좋은 순간을 남겼어요 😊'
-        : '평온하게 하루를 보내고 있어요 ✨';
+        : '오늘 순간을 나눴어요';
 
   const careHint = shared.some((r) => r.reaction === 'hard')
     ? '오늘 힘든 순간이 있었으니 수고했다고 다정하게 말해주세요!'

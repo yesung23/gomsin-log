@@ -1,3 +1,6 @@
+> **Status: HISTORICAL EVIDENCE.** This is a dated mapping and must be revalidated against
+> repository code before use; it is not a current implementation authority.
+
 # 곰신로그 추적성 매트릭스
 
 제품 문서의 약속이 실제 화면·데이터·검증과 어디에서 이어지는지 찾기 위한 지도다.

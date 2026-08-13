@@ -1,3 +1,6 @@
+> **Status: HISTORICAL EVIDENCE.** This matrix covers older migrations and is not a
+> current authorization result. Verify current behavior with the repository harnesses.
+
 # RLS Test Matrix
 
 다음 테스트 매트릭스는 A(작성자), B(A의 파트너), C(제3자) 계정을 사용해 005~007 마이그레이션이 정상 동작하는지 검증하기 위한 시나리오입니다.

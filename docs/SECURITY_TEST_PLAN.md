@@ -1,3 +1,7 @@
+> **Status: HISTORICAL SUPPORTING.** Use current repository harnesses and
+> [`docs/rls-test-matrix.md`](rls-test-matrix.md) or task-specific tests for current
+> verification; this document is not proof that tests were executed.
+
 # 곰신로그 (곰신로그) 보안 & RLS 권한 검증 계획서
 
 본 문서는 **`곰신로그` (군화와 곰신을 위한 1:1 비공개 데일리 로그 서비스)**의 DB REST API, Storage API, 각 테스터 JWT 및 RLS 정책을 기준으로 검증하는 종합 보안 테스트 계획서입니다.

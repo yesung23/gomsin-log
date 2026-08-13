@@ -1,3 +1,6 @@
+> **Status: SUPERSEDED.** Use [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md) for
+> current implementation sequencing. This file is retained as historical planning evidence.
+
 # 곰신로그 전체 서비스 청사진
 
 > ⚠️ **이 문서는 v1 시점의 기록 스냅샷입니다. 현재 상태의 근거로 쓰지 마세요.**

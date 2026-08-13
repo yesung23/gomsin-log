@@ -1,3 +1,6 @@
+> **Status: HISTORICAL SUPPORTING.** Product direction is owned by
+> [`PRODUCT_V3.md`](PRODUCT_V3.md); use this file only for detailed flow reference.
+
 # 곰신로그 전체 유저 플로우
 
 > 최상위 가치·MVP·IA·핵심 루프는 `PRODUCT_PRD.md` v5가 기준이다. 이 문서는

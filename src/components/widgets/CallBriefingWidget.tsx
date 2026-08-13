@@ -51,7 +51,7 @@ export function CallBriefingWidget() {
 
   const openRecord = (recordId: string) => {
     setHighlightedRecordId(recordId);
-    navigate('/record');
+    navigate(`/record?record=${recordId}`);
   };
 
   const markCallComplete = () => {

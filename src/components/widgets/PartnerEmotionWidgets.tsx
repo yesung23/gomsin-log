@@ -79,7 +79,7 @@ export function PartnerEmotionFlowWidget() {
       type="button"
       onClick={() => {
         if (firstRecordId) setHighlightedRecordId(firstRecordId);
-        navigate('/record');
+        navigate(firstRecordId ? `/record?record=${firstRecordId}` : '/record');
       }}
       data-testid="widget-partner-emotion-flow"
       className="w-full text-left"
@@ -151,7 +151,7 @@ export function PartnerEmotionSummaryWidget() {
             // Land on the record this headline is about, not just on the page.
             const target = summaryTargetRecordId(summary) ?? todays[0]?.id;
             if (target) setHighlightedRecordId(target);
-            navigate('/record');
+            navigate(target ? `/record?record=${target}` : '/record');
           }}
           className="w-full text-left"
         >

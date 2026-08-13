@@ -88,7 +88,7 @@ export const TodayBriefingWidget = () => {
         // Land on the record the briefing is about, not just on the page.
         const target = summaryTargetRecordId(summary) ?? partnerShared[0]?.id;
         if (target) setHighlightedRecordId(target);
-        navigate('/record');
+        navigate(target ? `/record?record=${target}` : '/record');
       }}
     >
       {partnerShared.length > 0 ? (
@@ -238,7 +238,7 @@ export const MemoriesWidget = () => {
         first
           ? () => {
               setHighlightedRecordId(first.id);
-              navigate('/record');
+              navigate(`/record?record=${first.id}`);
             }
           : undefined
       }

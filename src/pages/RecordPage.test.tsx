@@ -91,6 +91,7 @@ vi.mock('sonner', () => ({
     success: (message: string) => { toastLog.push({ level: 'success', message }); },
     error: (message: string) => { toastLog.push({ level: 'error', message }); },
     warning: (message: string) => { toastLog.push({ level: 'warning', message }); },
+    info: (message: string) => { toastLog.push({ level: 'info', message }); },
   },
 }));
 
@@ -117,11 +118,11 @@ vi.mock('@/lib/useStore', () => ({
 const { RecordPage } = await import('@/pages/RecordPage');
 
 /** RecordPage opens on today, so fixtures are dated today via `TODAY`. */
-function renderPage(records: DailyRecord[]) {
+function renderPage(records: DailyRecord[], initialPath = '/records') {
   currentState = makeState(records);
   vi.setSystemTime(new Date(`${TODAY}T12:00:00.000Z`));
   return render(
-    <MemoryRouter initialEntries={['/records']}>
+    <MemoryRouter initialEntries={[initialPath]}>
       <RecordPage />
     </MemoryRouter>,
   );
@@ -559,5 +560,76 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
 
     expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument();
     expect(addRecordWithMedia).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * PRODUCT_V3 §7.5 / CURRENT_STATE #9: the previous addressing mechanism was
+ * pure in-memory store state (`state.highlightedRecordId`), set by a widget
+ * right before calling `navigate('/record')`. That works only for a
+ * same-session click; a reload, a direct URL, or a future notification deep
+ * link opened `/record` with no target at all, because nothing survived the
+ * navigation except the bare path. `?record=<id>` in the URL is durable
+ * across exactly those cases.
+ */
+describe('RecordPage: durable source addressing via ?record=<id>', () => {
+  beforeEach(() => {
+    toastLog.length = 0;
+  });
+
+  /**
+   * This file's `useStore` mock, like the rest of RecordPage.test.tsx, is
+   * stateless: `setHighlightedRecordId` is a bare spy, not a store action
+   * that actually updates `state.highlightedRecordId`. The downstream
+   * date-switch-and-scroll behaviour driven BY `state.highlightedRecordId`
+   * is already exercised directly, with a stateful fixture, in
+   * `recordJumpToHighlighted.test.tsx`. What is new and untested there is
+   * the BRIDGE from the URL into that mechanism -- a fresh mount with no
+   * prior in-session click, which is exactly what a reload or a direct link
+   * looks like -- so that is what these assert.
+   */
+  it('a fresh mount with ?record=<id> in the URL resolves the id and bridges into the highlight mechanism', async () => {
+    // No prior click happened in this render -- simulating a reload or a
+    // direct link, not a same-session navigation.
+    renderPage(
+      [record({ id: 'rec-mine', time: '10:00' })],
+      '/records?record=rec-mine',
+    );
+
+    await waitFor(() => expect(setHighlightedRecordId).toHaveBeenCalledWith('rec-mine'));
+  });
+
+  it('resolves a target from a different date just as reliably as one from today', async () => {
+    renderPage(
+      [record({ id: 'rec-other-day', date: '2026-07-15', time: '09:00' })],
+      '/records?record=rec-other-day',
+    );
+
+    await waitFor(() => expect(setHighlightedRecordId).toHaveBeenCalledWith('rec-other-day'));
+  });
+
+  it('a missing target fails safely: one generic message, nothing invented', async () => {
+    renderPage([record({ id: 'rec-mine' })], '/records?record=rec-does-not-exist');
+
+    await waitFor(() => expect(toastLog.length).toBeGreaterThan(0));
+    expect(toastLog[0].message).toBe('이 기록은 삭제되었어요.');
+    // No element was fabricated to scroll to or highlight.
+    expect(document.querySelector('.record-highlighted')).not.toBeInTheDocument();
+  });
+
+  it('does not judge a missing target while the shared workspace is still confirming', async () => {
+    currentSyncStatus = 'unavailable';
+    renderPage([], '/records?record=rec-not-loaded-yet');
+
+    // Give any (incorrect) synchronous failure a chance to fire.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(toastLog).toEqual([]);
+  });
+
+  it('no query param at all is simply the ordinary page -- no message, no highlight', async () => {
+    renderPage([record({ id: 'rec-mine' })]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(toastLog).toEqual([]);
+    expect(document.querySelector('.record-highlighted')).not.toBeInTheDocument();
   });
 });

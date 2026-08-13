@@ -379,6 +379,49 @@ export function RecordPage() {
     return () => clearTimeout(timer);
   }, [state.highlightedRecordId, state.records, selectedDate]);
 
+  /**
+   * The durable half of source addressing: `?record=<id>` in the URL.
+   *
+   * `state.highlightedRecordId` above is in-memory store state -- it answers
+   * "which record did I just tap", not "which record does this URL mean", so
+   * a reload or a direct link opened `/record` with no target at all
+   * (CURRENT_STATE #9 / PRODUCT_V3 §7.5's addressing requirement). Every
+   * caller that used to do `setHighlightedRecordId(id); navigate('/record')`
+   * now also puts the id in the URL, so the SAME effect below fires whether
+   * this page just mounted fresh or the widget navigated here a moment ago.
+   *
+   * Bridges into `setHighlightedRecordId` rather than duplicating the
+   * date-switch/scroll logic above, so there is exactly one place that owns
+   * "how a target record gets to be on screen and highlighted".
+   *
+   * Waits out `sharedSyncStatus === 'unavailable'`: that is the ~2s
+   * membership-confirmation window on a cold load with no realtime socket
+   * yet (see the period-summary honesty tests), during which `state.records`
+   * can be legitimately empty for a reason that has nothing to do with
+   * whether the target record exists. Judging "missing" during that window
+   * would show a false failure on exactly the case this fix is for --
+   * arriving fresh from a deep link.
+   */
+  const recordIdParam = searchParams.get('record');
+  const handledRecordParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!recordIdParam) return;
+    if (sharedSyncStatus === 'unavailable') return;
+    if (handledRecordParamRef.current === recordIdParam) return;
+    handledRecordParamRef.current = recordIdParam;
+
+    const target = state.records.find((record) => record.id === recordIdParam);
+    if (!target) {
+      // Deleted, never existed, or belongs to someone else and was correctly
+      // never sent to this client -- one message covers all three on
+      // purpose. Distinguishing them would tell an unauthorized viewer that
+      // *something* is there, just hidden.
+      toast.info('이 기록은 삭제되었어요.');
+      return;
+    }
+    setHighlightedRecordId(recordIdParam);
+  }, [recordIdParam, sharedSyncStatus, state.records, setHighlightedRecordId]);
+
   // Auto-clear highlight
   useEffect(() => {
     if (state.highlightedRecordId) {

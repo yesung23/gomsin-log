@@ -92,9 +92,8 @@ STATUS REQUIRES PRODUCTION READ-ONLY VERIFICATION
 
 | 기능 | 상태 |
 |---|---|
-| 채팅 | 미구현. PRODUCT_V3에서 코어로 승격됨 |
+| 채팅 | 미구현 (테이블·라우트·UI 전부 없음). 계약은 확정 → [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md). 구현 전 게이트 G1–G6 미착수 |
 | 뷰어 반응 (`공감` / `토닥이기`) | 미구현 |
-| 양방향 `이따 이야기하기` | 작성자 방향만 존재 |
 | 알림 (generic 포함) | 완전 미구현 — 의존성·핸들러·설정 전부 없음 |
 | E2EE 기기 · 복구 UX | 암호 라이브러리와 유스케이스는 존재하나 **어떤 화면도 import하지 않는다** |
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |

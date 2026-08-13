@@ -98,7 +98,7 @@ STATUS REQUIRES PRODUCTION READ-ONLY VERIFICATION
 | E2EE 기기 · 복구 UX | 암호 라이브러리와 유스케이스는 존재하나 **어떤 화면도 import하지 않는다** |
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
-| 수익화 / 구독 | 코드 없음 |
+| 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)(가격은 전부 초기 가설) |
 
 ---
 

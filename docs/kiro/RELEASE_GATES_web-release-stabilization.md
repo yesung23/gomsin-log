@@ -1,3 +1,6 @@
+> **Status: HISTORICAL EVIDENCE.** This gate record applies only to the dated branch and
+> baseline below; it is not current release evidence.
+
 # Release gate record — `kimi/web-release-stabilization`
 
 Branch base: `7d82e3efd1b17283b0e8f086e94cf97cf268b625`

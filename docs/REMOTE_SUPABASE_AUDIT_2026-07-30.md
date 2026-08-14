@@ -1,3 +1,6 @@
+> **Status: HISTORICAL EVIDENCE.** This is limited to the dated read-only audit below;
+> it is not evidence of current remote or production state.
+
 # 원격 Supabase 읽기 전용 감사 결과
 
 점검일: 2026-07-30  

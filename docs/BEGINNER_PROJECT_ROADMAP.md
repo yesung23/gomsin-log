@@ -1,3 +1,6 @@
+> **Status: SUPERSEDED.** Use [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md) for
+> current implementation sequencing. This file is retained as historical onboarding evidence.
+
 # 곰신로그 비전공자용 개발·배포 로드맵
 
 작성일: 2026-07-30  

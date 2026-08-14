@@ -1,3 +1,6 @@
+> **Status: SUPERSEDED.** Use [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md) for
+> current implementation sequencing. This file is retained as historical planning evidence.
+
 # 곰신로그 구현 청사진 (implementation_blueprint.md)
 
 이 문서는 `yesung23/gomsin-log` 저장소(master, 2026-07-28 시점)의 실제 파일을 읽고 작성한 구현 지시서다.

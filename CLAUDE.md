@@ -31,6 +31,15 @@
 6. **엔지니어링 계약** → `AGENTS.md`
 7. **시각 디자인** → `docs/DESIGN_V2.md`
 
+## 문서 탐색 규칙
+
+- **ONE FACT → ONE AUTHORITATIVE HOME.** 이미 소유자가 있는 사실을 다른 문서에
+  복사하지 말고 링크한다.
+- 일반 작업의 기본 읽기 순서는 `CLAUDE.md` → `docs/PRODUCT_V3.md` →
+  `docs/ENGINEERING_ROADMAP.md` → `docs/CURRENT_STATE.md` → 작업과 직접 관련된
+  specialist 문서다. `docs/PROJECT_HANDOFF_2026-08-13.md`는 온보딩용 지도이며,
+  일반 세션에서 모든 역사 문서를 읽게 하는 목록이 아니다.
+
 ## 기록할 때 지킬 것
 
 - **"적용됨"과 "커밋됨"을 섞지 않는다.** 마이그레이션 파일이 저장소에 있다는 사실은

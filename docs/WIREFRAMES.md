@@ -1,3 +1,6 @@
+> **Status: HISTORICAL SUPPORTING.** Product direction is owned by
+> [`PRODUCT_V3.md`](PRODUCT_V3.md); visual design is owned by [`DESIGN_V2.md`](DESIGN_V2.md).
+
 # 곰신로그 디자인 방향과 전체 와이어프레임
 
 > 핵심 화면의 최신 우선순위와 IA는 `PRODUCT_PRD.md` v5가 기준이다. 이 문서는

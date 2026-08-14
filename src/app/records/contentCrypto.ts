@@ -63,6 +63,15 @@ export type RecordCryptoEnvironment = {
    * The usable scope key for one epoch, or null when this device holds no
    * envelope for it. Null is normal — a device enrolled after a rotation may
    * legitimately lack an older epoch — and it must never become plaintext.
+   *
+   * This is a trust-boundary contract, not a key lookup by caller-supplied
+   * labels. A real implementation may return a key only after opening a GLK2
+   * envelope whose signed, certificate-verified header matches the requested
+   * domain, exact scope id, owner and epoch. Device Bootstrap is responsible
+   * for installing only those verified keys. P5 deliberately does not invent a
+   * second key-authentication protocol here; an arbitrary self-consistent key
+   * supplied by a compromised client is outside what the server can detect and
+   * produces ciphertext that the legitimate recipient cannot decrypt.
    */
   scopeKeyFor(domain: KeyDomainName, scopeId: string, epoch: bigint): Promise<CryptoKey | null>;
 };

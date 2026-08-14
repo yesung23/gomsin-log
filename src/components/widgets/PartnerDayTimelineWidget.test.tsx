@@ -271,6 +271,35 @@ describe('it never says something it does not know', () => {
     expect(screen.getByTestId('widget-partner-day').textContent)
       .toContain('아직 안 보일 수 있어요');
   });
+
+  it('does not turn an authorized but unreadable row into a blank clickable moment', () => {
+    renderWidget([record({
+      id: 'locked',
+      log: '',
+      contentUnavailable: 'key_unavailable',
+    })]);
+
+    const widget = screen.getByTestId('widget-partner-day');
+    expect(widget).toHaveAttribute('data-state', 'unavailable');
+    expect(widget).toHaveTextContent('이 기기에서 아직 열 수 없는 기록이 있어요.');
+    expect(screen.queryByTestId('partner-day-entry')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /locked|기록 자세히/ })).not.toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps readable moments usable while naming unreadable rows neutrally', () => {
+    renderWidget([
+      record({ id: 'locked', time: '08:00', log: '', contentUnavailable: 'undecryptable' }),
+      record({ id: 'readable', time: '09:00', log: '읽을 수 있는 기록' }),
+    ]);
+
+    expect(screen.getByText('읽을 수 있는 기록')).toBeInTheDocument();
+    expect(screen.getAllByTestId('partner-day-entry')).toHaveLength(1);
+    expect(screen.getByTestId('partner-day-unavailable')).toHaveTextContent(
+      '이 기기에서 아직 열 수 없는 기록이 1개 있어요.',
+    );
+    expect(screen.getByRole('button', { name: /09:00/ })).toBeInTheDocument();
+  });
 });
 
 describe('privacy: only what this viewer is entitled to see', () => {

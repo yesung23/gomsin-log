@@ -1996,11 +1996,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, queued: true, failedFiles: [], reason };
     };
 
+    let authoritativeRevision = 1;
     try {
       const saved = await saveRecordToDB(
         newRecord,
         workspace.coupleId,
         workspace.userId,
+        { kind: 'create' },
       );
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
       if (!saved.ok) {
@@ -2009,6 +2011,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (saved.reason === 'auth_expired') void handleAuthExpired();
         return queueOrFail(saved.reason);
       }
+      authoritativeRevision = saved.contentRevision;
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
       console.error('[gomsinlog] Failed to save record:', error);
@@ -2017,7 +2020,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return queueOrFail(reason);
     }
 
-    const attachments: Attachment[] = [...(newRecord.attachments || [])];
+    // The first INSERT is authoritative. The attachment patch is an UPDATE,
+    // so it must carry the revision returned by that INSERT rather than the
+    // create default. This is also what makes create -> attachment patch work
+    // after migration 032's encrypted-row CAS is active.
+    const savedRecord: DailyRecord = {
+      ...newRecord,
+      contentRevision: authoritativeRevision,
+    };
+    const attachments: Attachment[] = [...(savedRecord.attachments || [])];
     const uploadedPaths: string[] = [];
     const failedFiles: string[] = [];
 
@@ -2060,13 +2071,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (result.attachment.path) uploadedPaths.push(result.attachment.path);
     }
 
-    let finalRecord: DailyRecord = { ...newRecord, attachments };
+    let finalRecord: DailyRecord = { ...savedRecord, attachments };
     if (attachments.length > 0) {
       try {
         const patched = await saveRecordToDB(
           finalRecord,
           workspace.coupleId,
           workspace.userId,
+          {
+            kind: 'update',
+            expectedRevision: finalRecord.contentRevision ?? 1,
+          },
         );
         // Deliberately NOT reclaiming uploads here: the patch has already been
         // issued, so whether the row now references these objects is unknown.
@@ -2077,7 +2092,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
           if (!isCurrentLinkedCouple(workspace)) return staleResult;
           failedFiles.push(...files.map((file) => file.name));
-          finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
+          finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+        } else {
+          finalRecord = { ...finalRecord, contentRevision: patched.contentRevision };
         }
       } catch (error) {
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
@@ -2085,7 +2102,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         failedFiles.push(...files.map((file) => file.name));
-        finalRecord = { ...newRecord, attachments: newRecord.attachments || [] };
+        finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
       }
     }
 
@@ -2297,13 +2314,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
       return recordFailure('deletion_pending');
     }
+    let authoritativeRevision = existing.contentRevision ?? 1;
     try {
-      const saved = await saveRecordToDB(updated, workspace.coupleId, workspace.userId);
+      const saved = await saveRecordToDB(
+        updated,
+        workspace.coupleId,
+        workspace.userId,
+        { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
+      );
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       if (!saved.ok) {
         if (saved.reason === 'auth_expired') void handleAuthExpired();
         return recordFailure(saved.reason);
       }
+      authoritativeRevision = saved.contentRevision;
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       console.error('[gomsinlog] Failed to update record:', error);
@@ -2312,10 +2336,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return recordFailure(reason);
     }
 
-    let recordToCommit = updated;
+    let recordToCommit: DailyRecord = {
+      ...updated,
+      contentRevision: authoritativeRevision,
+    };
     if (updated.attachments?.length) {
       recordToCommit = {
-        ...updated,
+        ...recordToCommit,
         attachments: await resolveAttachmentUrls(
           updated.attachments,
           workspace.coupleId,
@@ -2490,8 +2517,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    let authoritativeRevision = existing.contentRevision ?? 1;
     try {
-      const patched = await saveRecordToDB(patchedRecord, workspace.coupleId, workspace.userId);
+      const patched = await saveRecordToDB(
+        patchedRecord,
+        workspace.coupleId,
+        workspace.userId,
+        { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
+      );
       if (!patched.ok) {
         await rollbackUploads();
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
@@ -2502,6 +2535,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           error: recordFailureMessage(patched.reason),
         };
       }
+      authoritativeRevision = patched.contentRevision;
     } catch (error) {
       console.error('[gomsinlog] Failed to patch record media:', error);
       await rollbackUploads();
@@ -2523,7 +2557,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
-    let committed = patchedRecord;
+    let committed: DailyRecord = {
+      ...patchedRecord,
+      contentRevision: authoritativeRevision,
+    };
     if (committed.attachments?.length) {
       committed = {
         ...committed,

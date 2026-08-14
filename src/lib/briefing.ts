@@ -160,6 +160,7 @@ export interface EmotionFlowBriefingResult {
 export function generateEmotionFlowBriefing(records: DailyRecord[]): EmotionFlowBriefingResult | null {
   const sharedRecords = records
     .filter((r) => !r.isPrivate)
+    .filter(isRecordContentAvailable)
     .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
 
   for (const r of sharedRecords) {

@@ -23,7 +23,9 @@ import { DailyRecord, Attachment } from '@/types';
  * Injected rather than imported so that `records.ts` has no opinion about where
  * keys come from, and so every branch below is reachable in a test. Null means
  * "no E2EE on this client": records are written plaintext exactly as before,
- * which is the current state of every account until a floor is activated.
+ * which is the current state of every account until a floor is activated. P5
+ * does not install this environment; Device Bootstrap must do that in a later
+ * phase after the device holds verified scope-key envelopes.
  *
  * It is deliberately NOT a fallback for failure. Once a scope has a write floor
  * the environment's own refusal is final: `saveRecordToDB` returns the refusal
@@ -50,6 +52,16 @@ export function getRecordCryptoEnvironment(): RecordCryptoEnvironment | null {
 export function encryptionRefusalReason(): ServerErrorKind {
   return 'server';
 }
+
+/**
+ * The caller must say whether this is an insert or an edit.  Inferring that
+ * from ciphertext shape is unsafe: a lost response can replay an insert with
+ * the same id, and an encrypted legacy transition has a real server revision
+ * that is not necessarily 1.
+ */
+export type RecordWriteIntent =
+  | { kind: 'create' }
+  | { kind: 'update'; expectedRevision: number };
 
 /** The five protected fields, as the sealed document carries them. */
 function documentForRecord(record: DailyRecord, coupleId: string) {
@@ -307,6 +319,7 @@ export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[
  * available outcome.
  */
 async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
+  const contentRevision = Number(row.content_revision ?? 1);
   const base: DailyRecord = {
     id: row.id,
     date: row.record_date,
@@ -327,13 +340,18 @@ async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
     emotionUpdatedAt: row.emotion_updated_at || null,
     createdAt: row.created_at,
     userId: row.user_id,
+    // Migration 032 assigns a revision to legacy plaintext rows too. Keeping
+    // it on every mapped row is what makes a later plaintext -> ciphertext
+    // transition use the actual OLD + 1 rather than guessing revision 1.
+    contentRevision: Number.isSafeInteger(contentRevision) && contentRevision >= 1
+      ? contentRevision
+      : 1,
   };
 
   const cipherFormat = typeof row.cipher_format === 'number' ? row.cipher_format : RECORD_CIPHER_PLAINTEXT;
   if (cipherFormat === RECORD_CIPHER_PLAINTEXT) return base;
 
   // Carry the revision so an edit can present `OLD + 1`, which 032's R6 requires.
-  const contentRevision = Number(row.content_revision ?? 1);
   const withRouting: DailyRecord = { ...base, contentRevision };
 
   if (cipherFormat !== RECORD_CIPHER_GLE1) {
@@ -384,7 +402,11 @@ async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
  * carried all the way to the toast.
  */
 export type RecordWriteResult =
-  | { ok: true }
+  | { ok: true; contentRevision?: number }
+  | { ok: false; reason: ServerErrorKind };
+
+export type RecordSaveResult =
+  | { ok: true; contentRevision: number }
   | { ok: false; reason: ServerErrorKind };
 
 /** Reason to use when the client is not configured to reach a server at all. */
@@ -398,7 +420,8 @@ export async function saveRecordToDB(
   record: DailyRecord,
   coupleId: string,
   userId: string,
-): Promise<RecordWriteResult> {
+  intent: RecordWriteIntent = { kind: 'create' },
+): Promise<RecordSaveResult> {
   if (!isSupabaseConfigured || !supabase || !coupleId || !userId) {
     return { ok: false, reason: unconfiguredReason() };
   }
@@ -423,6 +446,15 @@ export async function saveRecordToDB(
 
   const environment = recordCryptoEnvironment;
   let payload: Record<string, unknown>;
+  const contentRevision = intent.kind === 'create'
+    ? 1n
+    : Number.isSafeInteger(intent.expectedRevision) && intent.expectedRevision >= 1
+      ? BigInt(intent.expectedRevision) + 1n
+      : null;
+
+  if (contentRevision === null) {
+    return { ok: false, reason: 'server' };
+  }
 
   if (!environment) {
     payload = { ...metadata, ...plaintextContentColumns(record, coupleId) };
@@ -448,9 +480,9 @@ export async function saveRecordToDB(
         plan,
         routing: { isPrivate: record.isPrivate, ownerUserId: userId, coupleId },
         recordId: record.id,
-        // A new row starts at 1; 032's R6 enforces exactly that, and an edit
-        // path that needs +1 must read the current revision first.
-        contentRevision: BigInt(record.contentRevision ?? 1),
+        // R6 binds this exact value into GLE1 and the database accepts only
+        // INSERT=1 or UPDATE=OLD+1. The write intent above decides which one.
+        contentRevision,
         document: documentForRecord(record, coupleId),
       });
       payload = {
@@ -472,13 +504,39 @@ export async function saveRecordToDB(
     }
   }
 
-  const { error } = await supabase.from('daily_records').upsert(payload);
+  const table = supabase.from('daily_records');
+  const request = intent.kind === 'create'
+    ? table.insert(payload)
+    : table
+        .update(payload)
+        .eq('id', record.id)
+        .eq('user_id', userId)
+        .eq('couple_id', coupleId);
+
+  // Before migration 032 exists there is no revision column to select. That
+  // is the deliberately dormant legacy path; once a crypto environment is
+  // installed, the migration chain is present and the response is mandatory.
+  if (!environment) {
+    const { error } = await request;
+    if (error) {
+      console.error('Failed to save record:', error);
+      return { ok: false, reason: classifyServerError(error).kind };
+    }
+    return { ok: true, contentRevision: record.contentRevision ?? 1 };
+  }
+
+  const { data, error } = await request
+    .select('content_revision')
+    .maybeSingle();
 
   if (error) {
     console.error('Failed to save record:', error);
     return { ok: false, reason: classifyServerError(error).kind };
   }
-  return { ok: true };
+  if (!data || !Number.isSafeInteger(Number(data.content_revision))) {
+    return { ok: false, reason: intent.kind === 'update' ? 'not_found' : 'server' };
+  }
+  return { ok: true, contentRevision: Number(data.content_revision) };
 }
 
 export async function deleteRecordFromDB(

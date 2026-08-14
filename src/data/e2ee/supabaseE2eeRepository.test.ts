@@ -204,6 +204,28 @@ describe('bytea', () => {
   });
 });
 
+describe('write-floor adapter', () => {
+  it('reads a missing floor as zero and keeps scope kind explicit', async () => {
+    const { repository, queries } = repositoryWith([ok(null)]);
+    await expect(repository.getWriteFloor('personal', UUID_A)).resolves.toBe(0);
+    expect(queries[0]).toMatchObject({ table: 'crypto_write_floor', op: 'select' });
+    expect(queries[0].filters).toEqual([
+      { method: 'eq', column: 'scope_kind', value: 'user' },
+      { method: 'eq', column: 'scope_id', value: UUID_A },
+    ]);
+  });
+
+  it('activates a floor only through the guarded RPC contract', async () => {
+    const { repository, rpcs, queries } = repositoryWith([ok(true)]);
+    await repository.activateWriteFloor('couple', UUID_A, UUID_B);
+    expect(rpcs).toEqual([{
+      fn: 'activate_e2ee_write_floor',
+      args: { p_scope_kind: 'couple', p_scope_id: UUID_A, p_device_id: UUID_B },
+    }]);
+    expect(queries).toHaveLength(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // bigint
 // ---------------------------------------------------------------------------

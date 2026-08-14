@@ -64,6 +64,7 @@ import {
   type OutboxPersistence,
 } from '@/lib/outbox';
 import { createIndexedDbOutbox } from '@/lib/outboxStorage';
+import { clearE2eeRuntime } from '@/app/e2ee/runtimeLifecycle';
 import {
   saveRecordToDB,
   deleteRecordFromDB,
@@ -837,6 +838,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const previousHydratedUserId = hydratedUserIdRef.current;
       const identityChanged = previousSessionUserId !== nextSessionUserId;
       if (identityChanged) {
+        // Remove account A's installed E2EE capabilities before account B's
+        // hydration starts. The module-level record/outbox setters are
+        // deliberately cleared at this earliest identity boundary.
+        clearE2eeRuntime();
         sessionGenerationRef.current += 1;
         membershipReconciliationRef.current += 1;
         quarantinedWorkspaceRef.current = null;
@@ -1095,6 +1100,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (event === 'SIGNED_OUT') {
+          clearE2eeRuntime();
           hydratedUserIdRef.current = null;
           // Same reason as the identity-change reset above: a signed-out device
           // holds no answer about any account's couple space.
@@ -2825,6 +2831,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const purgeLocalAccountData = (expected?: ActiveIdentity): boolean => {
     if (expected && !isCurrentIdentity(expected)) return false;
+    clearE2eeRuntime();
     hydratedUserIdRef.current = null;
     membershipReconciliationRef.current += 1;
     quarantinedWorkspaceRef.current = null;

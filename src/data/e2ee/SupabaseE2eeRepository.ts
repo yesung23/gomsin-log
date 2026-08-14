@@ -591,6 +591,34 @@ export class SupabaseE2eeRepository implements E2eeRepository {
 
   // --- scope keys ----------------------------------------------------------
 
+  async getWriteFloor(domain: KeyDomainName, scopeId: string): Promise<number> {
+    const scopeKind = domain === 'couple' ? 'couple' : 'user';
+    const row = await maybeRow(
+      'crypto_write_floor.get',
+      this.db.from('crypto_write_floor')
+        .select('min_cipher_format')
+        .eq('scope_kind', scopeKind)
+        .eq('scope_id', scopeId)
+        .maybeSingle(),
+    );
+    return row ? decodeSmallint(row.min_cipher_format, 'crypto_write_floor.min_cipher_format', 1) : 0;
+  }
+
+  async activateWriteFloor(
+    scopeKind: 'user' | 'couple',
+    scopeId: string,
+    deviceId: string,
+  ): Promise<void> {
+    await unwrap(
+      'rpc.activate_e2ee_write_floor',
+      this.db.rpc('activate_e2ee_write_floor', {
+        p_scope_kind: scopeKind,
+        p_scope_id: scopeId,
+        p_device_id: deviceId,
+      }),
+    );
+  }
+
   async listScopeKeys(domain: KeyDomainName, scopeId: string): Promise<ScopeKeyRecord[]> {
     const found = await rows(
       'scope_keys.list',

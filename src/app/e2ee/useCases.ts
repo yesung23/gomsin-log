@@ -153,10 +153,15 @@ const PARTNER_ASSIST_TTL_MS = 10 * 60 * 1000;
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-function grantsForPlatform(platform: PlatformName): KeyDomainName[] {
+function grantsForPlatform(platform: PlatformName, assurance: string): KeyDomainName[] {
   // Health is off by default on web: a non-extractable key cannot be exported
   // but can be used by same-origin script, so the browser is the weakest class.
-  return platform === 'web' ? ['personal', 'couple'] : ['personal', 'couple', 'health'];
+  // Platform is caller-provided metadata. A native-looking platform must not
+  // receive health capability when the selected key port actually reports the
+  // weak web assurance (for example, a missing native plugin).
+  return platform === 'web' || assurance === ASSURANCE.webNonExtractable
+    ? ['personal', 'couple']
+    : ['personal', 'couple', 'health'];
 }
 
 function domainCode(domain: KeyDomainName) {
@@ -312,41 +317,42 @@ async function createEpoch(
     nowMs: BigInt(deps.now()),
   };
 
-  for (const device of input.recipients.devices) {
-    await deps.repository.insertEnvelope({
-      scopeKeyId,
-      recipientKind: 'device',
-      recipientId: device.deviceId,
-      senderDeviceId: input.sender.deviceId,
-      senderCertificateId: input.sender.certificateId,
-      selfNotarized: input.selfNotarized === true && device.deviceId === input.sender.deviceId,
-      envelope: await sealScopeKeyForRecipient({
-        ...common,
-        recipientKemSpki: device.kemSpki,
-        recipientId: uuidToBytes(device.deviceId),
-        recipientKind: RECIPIENT_KIND.device,
-      }),
-    });
-  }
+  try {
+    for (const device of input.recipients.devices) {
+      await deps.repository.insertEnvelope({
+        scopeKeyId,
+        recipientKind: 'device',
+        recipientId: device.deviceId,
+        senderDeviceId: input.sender.deviceId,
+        senderCertificateId: input.sender.certificateId,
+        selfNotarized: input.selfNotarized === true && device.deviceId === input.sender.deviceId,
+        envelope: await sealScopeKeyForRecipient({
+          ...common,
+          recipientKemSpki: device.kemSpki,
+          recipientId: uuidToBytes(device.deviceId),
+          recipientKind: RECIPIENT_KIND.device,
+        }),
+      });
+    }
 
   // The recovery envelope is what makes a lost device survivable at all. It is
   // written for every epoch, not just the first, which is why a rotation after a
   // device loss does not quietly strand the account's own recovery kit.
-  for (const identity of input.recipients.recoveryIdentities) {
-    await deps.repository.insertEnvelope({
-      scopeKeyId,
-      recipientKind: 'recovery_identity',
-      recipientId: identity.id,
-      senderDeviceId: input.sender.deviceId,
-      senderCertificateId: input.sender.certificateId,
-      envelope: await sealScopeKeyForRecipient({
-        ...common,
-        recipientKemSpki: identity.kemSpki,
-        recipientId: uuidToBytes(identity.id),
-        recipientKind: RECIPIENT_KIND.recoveryIdentity,
-      }),
-    });
-  }
+    for (const identity of input.recipients.recoveryIdentities) {
+      await deps.repository.insertEnvelope({
+        scopeKeyId,
+        recipientKind: 'recovery_identity',
+        recipientId: identity.id,
+        senderDeviceId: input.sender.deviceId,
+        senderCertificateId: input.sender.certificateId,
+        envelope: await sealScopeKeyForRecipient({
+          ...common,
+          recipientKemSpki: identity.kemSpki,
+          recipientId: uuidToBytes(identity.id),
+          recipientKind: RECIPIENT_KIND.recoveryIdentity,
+        }),
+      });
+    }
 
   // Completeness is the SERVER's decision, and `markEpochReady` is where it is
   // made. It cannot be made here: RLS correctly hides the partner's envelope
@@ -358,14 +364,12 @@ async function createEpoch(
   // The RPC raises E2EE_EPOCH_INCOMPLETE when a required recipient is missing, so
   // a genuinely half-built epoch still fails; it is abandoned here so it cannot
   // be mistaken later for a legitimate one, and ABANDONED is terminal.
-  try {
     await deps.repository.markEpochReady(scopeKeyId);
+    await deps.repository.activateEpoch(scopeKeyId);
   } catch (error) {
     await deps.repository.abandonEpoch(scopeKeyId).catch(() => {});
     throw error;
   }
-
-  await deps.repository.activateEpoch(scopeKeyId);
 
   const reloaded = await deps.repository.getScopeKey(scopeKeyId);
   if (!reloaded || reloaded.state !== 'ACTIVE') {
@@ -394,6 +398,18 @@ export type BootstrapResult = {
   kitAnchor: RecoveryKitAnchor;
   resumed: boolean;
 };
+
+async function ensureDeviceProvisioned(deps: UseCaseDeps, deviceId: string): Promise<void> {
+  const device = await deps.repository.getDevice(deviceId);
+  if (!device) fail('E_DEVICE_MISSING', 'the bootstrapped device no longer exists');
+  if (device.status === 'ACTIVE') return;
+  if (device.status === 'PENDING' || device.status === 'RECOVERY_AUTHENTICATED') {
+    await deps.repository.beginDeviceProvisioning(deviceId);
+  } else if (device.status !== 'PROVISIONING') {
+    fail('E_DEVICE_NOT_PROVISIONABLE', `device is in ${device.status}`);
+  }
+  await deps.repository.finalizeDeviceProvisioning(deviceId);
+}
 
 export async function bootstrapState(deps: UseCaseDeps, userId: string) {
   const pending = await deps.localState.loadBootstrap(userId);
@@ -430,6 +446,12 @@ export async function bootstrapFirstDevice(
   }
 
   const resumed = existing !== null;
+  if (!existing && await deps.repository.getRecoveryIdentity(input.userId)) {
+    fail(
+      'E_EXISTING_CRYPTO_ACCOUNT',
+      'this account already has a recovery identity; use device enrollment or recovery instead',
+    );
+  }
   let pending: PendingBootstrap;
 
   if (existing) {
@@ -461,21 +483,24 @@ export async function bootstrapFirstDevice(
     await deps.localState.saveBootstrap(input.userId, pending);
   }
 
-  const grants = grantsForPlatform(pending.platform);
-
   // 1. Device identity, by handle. `hasKey` is what makes the retry safe: a
   // second `generateSigningKey` on the same alias would replace the key the
   // certificate already commits to.
   let sigSpki: Uint8Array;
   let kemSpki: Uint8Array;
-  if (await deps.deviceKeys.hasKey(pending.sigHandle)) {
+  const hasSig = await deps.deviceKeys.hasKey(pending.sigHandle);
+  const hasKem = await deps.deviceKeys.hasKey(pending.kemHandle);
+  if (hasSig && hasKem) {
     sigSpki = await deps.deviceKeys.getPublicKey(pending.sigHandle);
     kemSpki = await deps.deviceKeys.getPublicKey(pending.kemHandle);
-  } else {
+  } else if (!hasSig && !hasKem) {
     sigSpki = (await deps.deviceKeys.generateSigningKey(pending.sigHandle)).publicKeySpki;
     kemSpki = (await deps.deviceKeys.generateAgreementKey(pending.kemHandle)).publicKeySpki;
+  } else {
+    fail('E_DEVICE_KEY_PAIR_INCOMPLETE', 'only one half of the device identity exists; refusing to mint a conflicting pair');
   }
   const assurance = await deps.deviceKeys.getAssurance(pending.sigHandle);
+  const grants = grantsForPlatform(pending.platform, assurance);
 
   if (!(await deps.repository.getDevice(pending.deviceId))) {
     await deps.repository.insertDevice({
@@ -840,6 +865,14 @@ export async function confirmRecoveryKit(
   if (!pending) fail('E_BOOTSTRAP_INCOMPLETE', 'nothing to confirm yet');
   if (pending.state === 'CREATING') fail('E_BOOTSTRAP_INCOMPLETE', 'bootstrap has not finished creating');
 
+  // A response can be lost after the local state is committed but before the
+  // server finishes provisioning. Retrying must continue the server-side gate,
+  // not return early and leave a device marked complete while still unusable.
+  if (pending.state === 'COMPLETE') {
+    await ensureDeviceProvisioned(deps, pending.deviceId);
+    return { state: 'COMPLETE', alreadyComplete: true };
+  }
+
   const identity = await deps.repository.getRecoveryIdentity(input.userId);
   if (!identity) fail('E_RECOVERY_IDENTITY_MISSING', 'there is no recovery identity to confirm against');
 
@@ -891,26 +924,22 @@ export async function confirmRecoveryKit(
   const unsealed = await unsealWithCode(identity, input.recoveryCode, userIdBytes);
   zeroize(unsealed.sigPkcs8, unsealed.kemPkcs8);
 
-  if (pending.state === 'COMPLETE') return { state: 'COMPLETE', alreadyComplete: true };
-
-  await deps.localState.saveBootstrap(input.userId, {
-    ...pending,
-    state: 'COMPLETE',
-    recoverySecret: null,
-  });
-  await deps.localState.clearBootstrapSecret(input.userId);
-
   // Operational status follows the evidence, never leads it — and the server is
   // what checks the evidence. The first device already holds its recovery-rooted
   // certificate and a self-notarized envelope for every epoch bootstrap created,
   // so finalization succeeds here; if it somehow does not, the account stays
   // confirmed but the device stays visibly unprovisioned rather than claiming a
   // readiness it cannot back.
-  const device = await deps.repository.getDevice(pending.deviceId);
-  if (device && device.status !== 'ACTIVE') {
-    await deps.repository.beginDeviceProvisioning(pending.deviceId);
-    await deps.repository.finalizeDeviceProvisioning(pending.deviceId);
-  }
+  await ensureDeviceProvisioned(deps, pending.deviceId);
+  await deps.localState.saveBootstrap(input.userId, {
+    ...pending,
+    state: 'COMPLETE',
+    recoverySecret: null,
+    // The display code is also secret material. Keeping only the anchor tag
+    // after confirmation would let a stolen local state file recover the kit.
+    recoveryCode: null,
+  });
+  await deps.localState.clearBootstrapSecret(input.userId);
   return { state: 'COMPLETE', alreadyComplete: false };
 }
 
@@ -1022,7 +1051,7 @@ export async function recoverWithKit(
     // device's key fingerprints, so the keys must exist first).
     const sig = await deps.deviceKeys.generateSigningKey(sigHandle);
     const kem = await deps.deviceKeys.generateAgreementKey(kemHandle);
-    const grants = grantsForPlatform(input.platform);
+    const grants = grantsForPlatform(input.platform, sig.assurance);
 
     await deps.repository.insertDevice({
       id: deviceId,
@@ -1331,7 +1360,7 @@ export async function beginSecondDeviceEnrollment(
     newDeviceId: deviceId,
     approverDeviceId: input.approverDeviceId ?? null,
     enrollNonce: randomBytes(32),
-    grantedDomains: grantsToMask(grantsForPlatform(input.platform)),
+    grantedDomains: grantsToMask(grantsForPlatform(input.platform, sig.assurance)),
     expiresAt: new Date(deps.now() + ENROLLMENT_TTL_MS).toISOString(),
   });
 

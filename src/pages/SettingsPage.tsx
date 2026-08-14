@@ -20,6 +20,7 @@ import {
 } from '@/lib/supabase';
 import { useEscapeKey } from '@/lib/hooks';
 import { buildPersonalExport } from '@/lib/dataExport';
+import { DeviceProtectionSection } from '@/components/DeviceProtectionSection';
 
 export function SettingsPage() {
   const {
@@ -335,6 +336,11 @@ export function SettingsPage() {
             </p>
           </div>
         </section>
+
+        <DeviceProtectionSection
+          state="UNAVAILABLE"
+          errorMessage="보호 설정을 실제로 시작하려면 이 기기의 보안 저장소 연결이 먼저 필요해요. 현재는 설정 상태만 안전하게 보류하고 있어요."
+        />
 
         <section className="space-y-2">
           <h2 className="text-heading text-foreground">화면 테마</h2>

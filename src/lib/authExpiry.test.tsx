@@ -318,6 +318,7 @@ describe('on-demand workspace resolution', () => {
       expect.objectContaining({ log: '오늘의 기록' }),
       'couple-9',
       'user-a',
+      { kind: 'create' },
     );
     await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-9'));
     expect(screen.getByTestId('lifecycle')).toHaveTextContent('pending');

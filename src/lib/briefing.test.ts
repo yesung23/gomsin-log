@@ -197,4 +197,24 @@ describe('briefing.ts', () => {
       labels: ['행복'],
     });
   });
+
+  it('does not derive an emotion briefing from unreadable shared content', () => {
+    expect(generateEmotionFlowBriefing([{
+      id: 'locked-emotion',
+      date: '2024-01-01',
+      time: '10:00',
+      authorRole: 'gomsin',
+      log: '',
+      isPrivate: false,
+      contentUnavailable: 'key_unavailable',
+      emotionFlow: [{
+        sequence: 1,
+        group: 'sadness',
+        displayLabel: '속상함',
+        source: 'user_confirmed',
+        visibility: 'shared',
+      }],
+      createdAt: '2024-01-01T10:00:00Z',
+    }])).toBeNull();
+  });
 });

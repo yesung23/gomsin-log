@@ -138,9 +138,11 @@ export interface DailyRecord {
   /**
    * The server-validated monotonic revision of an ENCRYPTED record.
    *
-   * Present only for rows with `cipher_format >= 1`. It is bound into the GLE1
-   * associated data, so an edit must present exactly `OLD + 1` (migration 032's
-   * R6) and a concurrent write loses rather than silently overwriting.
+   * Carried from the server for legacy and encrypted rows alike. For encrypted
+   * rows it is bound into GLE1 associated data, so an edit must present exactly
+   * `OLD + 1` (migration 032's R6) and a concurrent write loses rather than
+   * silently overwriting. A legacy row may therefore transition using a revision
+   * greater than 1.
    */
   contentRevision?: number;
   /**

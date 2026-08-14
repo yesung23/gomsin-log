@@ -21,8 +21,8 @@
  * second device to be enrolled.
  */
 
-import { zeroize } from '../bytes';
-import type { KeyDomainCode } from '../domains';
+import { equalBytes, zeroize } from '../bytes';
+import { KEY_DOMAIN, type KeyDomainCode } from '../domains';
 import {
   ENVELOPE_LENGTH,
   openEnvelope,
@@ -114,10 +114,27 @@ export async function provisionScopeKeyToRecipient(input: ProvisionInput): Promi
     });
     raw = opened.scopeKey;
 
-    // The envelope must be for the scope key we were asked to hand on;
-    // otherwise a caller could re-wrap health material into a couple envelope.
+    // The envelope must be for the exact scope key we were asked to hand on.
+    // Domain and epoch alone are insufficient: two personal/couple scopes can
+    // share both values while carrying different key material. GLK2 signs and
+    // AEAD-binds all four routing fields, so compare all four before rewrapping.
     if (opened.header.domain !== input.header.domain) {
       fail('E_DOMAIN_MISMATCH', 'own envelope is for a different key domain');
+    }
+    if (!equalBytes(opened.header.scopeKeyId, input.header.scopeKeyId)) {
+      fail('E_SCOPE_KEY_ID_MISMATCH', 'own envelope names a different scope key');
+    }
+    // Couple scope headers use the pairing ceremony's canonical low-ordered
+    // member as ownerUserId, while the database scope itself is couple-owned.
+    // Callers assisting the other member cannot reconstruct that field from
+    // their own identity, so preserve the authenticated value below. Personal
+    // and health scopes are user-owned and must match the requested owner.
+    if (input.header.domain !== KEY_DOMAIN.couple
+      && !equalBytes(opened.header.ownerUserId, input.header.ownerUserId)) {
+      fail('E_OWNER_MISMATCH', 'own envelope names a different owner');
+    }
+    if (!equalBytes(opened.header.scopeId, input.header.scopeId)) {
+      fail('E_SCOPE_ID_MISMATCH', 'own envelope names a different scope');
     }
     if (opened.header.epoch !== input.header.epoch) {
       fail('E_EPOCH_MISMATCH', 'own envelope is for a different epoch');
@@ -129,7 +146,7 @@ export async function provisionScopeKeyToRecipient(input: ProvisionInput): Promi
         domain: input.header.domain,
         recipientKind: input.recipientKind,
         scopeKeyId: input.header.scopeKeyId,
-        ownerUserId: input.header.ownerUserId,
+        ownerUserId: opened.header.ownerUserId,
         scopeId: input.header.scopeId,
         epoch: input.header.epoch,
         senderDeviceId: input.senderDeviceId,

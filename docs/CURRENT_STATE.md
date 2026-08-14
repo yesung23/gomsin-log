@@ -43,7 +43,7 @@
 
 | # | PRODUCT_V3 기대 | 현재 구현 | 분류 |
 |---|---|---|---|
-| 10 | 사용자 콘텐츠는 E2EE | P5에서 **`daily_records`만** 연결되었다(039 + `src/app/records/contentCrypto.ts`): floor가 활성된 scope는 GLE1 암호문만 쓰고, 평문 fallback 경로가 없다. 나머지 사용자 콘텐츠(일정·여행·주기·미디어)는 **여전히 서버 평문**이다. 또한 P5는 로컬 검증까지이며 **어디에도 배포되지 않았고**, 키 프로비저닝 UI가 없어 실제 계정의 floor는 아직 아무도 활성화할 수 없다 | `FUTURE` `PROD` |
+| 10 | 사용자 콘텐츠는 E2EE | P5에서 **`daily_records`만** 연결되었다(039 + `src/app/records/contentCrypto.ts`): floor가 활성된 scope는 GLE1 암호문만 쓰고, 평문 fallback 경로가 없다. 나머지 사용자 콘텐츠(일정·여행·주기·미디어)는 **여전히 서버 평문**이다. 또한 P5는 로컬 검증까지이며 **어디에도 배포되지 않았고**, 키 프로비저닝 UI가 없어 실제 계정의 floor는 아직 아무도 활성화할 수 없다. `setRecordCryptoEnvironment`와 `setOutboxLocalCacheKey`도 실제 런타임 bootstrap에서 설치되지 않았다. | `FUTURE` `PROD` |
 | 11 | HRK는 CSK로 대체 불가 | `daily_records`에 대해서는 해소되었다. 039가 `health` 도메인을 **거부**하고 봉투 헤더의 domain을 라우팅 컬럼과 대조하므로, 서버가 봉투를 파싱하지 않는다는 전제가 이 테이블에서는 더 이상 성립하지 않는다. 회귀 테스트도 있다(`test:p5` mutation 포함). **다른 테이블에는 여전히 클라이언트 검사뿐이다** | `SEC` `BETA` |
 | 12 | 주기 projection은 소유자 기기가 생성 | 파트너 projection을 **서버가 평문 건강 데이터를 읽어 계산**한다. 동의·설정 게이트는 정확하나 계산 위치가 서버다. Phase 1B에서 단순 이식 불가 → 재설계 필요 | `SEC` `PROD` |
 | 13 | 요약을 서버에 저장하지 않는다 | 평문 요약 캐시 테이블(`briefings`)이 스키마에 남아 있다. read/write 경로 0, 운영 행 0이지만 경로가 열려 있다 | `LEGACY` |
@@ -95,7 +95,7 @@ STATUS REQUIRES PRODUCTION READ-ONLY VERIFICATION
 | 채팅 | 미구현 (테이블·라우트·UI 전부 없음). 계약은 확정 → [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md). 구현 전 게이트 G1–G6 미착수 |
 | 뷰어 반응 (`공감` / `토닥이기`) | 미구현 |
 | 알림 (generic 포함) | 완전 미구현 — 의존성·핸들러·설정 전부 없음 |
-| E2EE 기기 · 복구 UX | 암호 라이브러리와 유스케이스는 존재하나 **어떤 화면도 import하지 않는다** |
+| E2EE 기기 · 복구 UX | 암호 라이브러리와 유스케이스는 존재하나 **어떤 화면도 import하지 않는다**. 따라서 P5의 RecordCryptoEnvironment와 LCK outbox sealing은 구현된 capability이지 실제 계정에서 활성화된 보호가 아니다 |
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)(가격은 전부 초기 가설) |

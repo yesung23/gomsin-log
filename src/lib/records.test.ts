@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   classifyMediaFile,
   buildMediaPath,
@@ -7,7 +7,10 @@ import {
   isCanonicalRecordMediaPath,
   deleteRecordFromDB,
   saveRecordToDB,
+  setRecordCryptoEnvironment,
 } from '@/lib/records';
+import { AES_KEY_BYTES, importAesKey } from '@/crypto/suite';
+import type { RecordCryptoEnvironment, ScopeEpoch } from '@/app/records/contentCrypto';
 
 const { mockFrom, mockSupabase } = vi.hoisted(() => {
   const mockFrom = vi.fn();
@@ -282,13 +285,19 @@ describe('saveRecordToDB', () => {
 
   function mockUpsert(error: unknown) {
     const upsert = vi.fn().mockResolvedValue({ error });
-    mockFrom.mockReturnValue({ upsert });
+    // The production contract uses INSERT for an explicit create intent. Keep
+    // the old helper name because these tests also cover the unchanged legacy
+    // save result shape.
+    mockFrom.mockReturnValue({ insert: upsert, upsert });
     return upsert;
   }
 
   it('reports ok on a successful upsert', async () => {
     mockUpsert(null);
-    expect(await saveRecordToDB(record, 'couple-001', 'user-001')).toEqual({ ok: true });
+    expect(await saveRecordToDB(record, 'couple-001', 'user-001')).toEqual({
+      ok: true,
+      contentRevision: 1,
+    });
   });
 
   it('reports forbidden for an RLS rejection, never a connection failure', async () => {
@@ -308,5 +317,143 @@ describe('saveRecordToDB', () => {
     expect((await saveRecordToDB(record, '', 'user-001')).ok).toBe(false);
     expect((await saveRecordToDB(record, 'couple-001', '')).ok).toBe(false);
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  afterEach(() => {
+    setRecordCryptoEnvironment(null);
+  });
+
+  async function encryptedEnvironment(): Promise<RecordCryptoEnvironment> {
+    const scopeKey = await importAesKey(
+      new Uint8Array(AES_KEY_BYTES).fill(7),
+      ['encrypt', 'decrypt'],
+    );
+    const epoch: ScopeEpoch = {
+      domain: 'couple',
+      scopeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      epoch: 4n,
+      state: 'ACTIVE',
+    };
+    return {
+      floorFor: async () => 1,
+      epochsFor: async () => [epoch],
+      scopeKeyFor: async () => scopeKey,
+    };
+  }
+
+  const encryptedRecord = {
+    ...record,
+    id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  };
+
+  function mockEncryptedResponse(
+    data: { content_revision: number } | null,
+    error: unknown = null,
+  ) {
+    const maybeSingle = vi.fn().mockResolvedValue({ data, error });
+    const select = vi.fn().mockReturnValue({ maybeSingle });
+    const insert = vi.fn().mockReturnValue({ select });
+    const eqCouple = vi.fn().mockReturnValue({ select });
+    const eqUser = vi.fn().mockReturnValue({ eq: eqCouple });
+    const eqId = vi.fn().mockReturnValue({ eq: eqUser });
+    const update = vi.fn().mockReturnValue({ eq: eqId });
+    mockFrom.mockReturnValue({ insert, update });
+    return { insert, update, select, maybeSingle };
+  }
+
+  it('uses the real encrypted client contract for create -> edit -> edit revisions', async () => {
+    setRecordCryptoEnvironment(await encryptedEnvironment());
+    const first = mockEncryptedResponse({ content_revision: 1 });
+    const created = await saveRecordToDB(
+      encryptedRecord,
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      { kind: 'create' },
+    );
+    expect(created).toEqual({ ok: true, contentRevision: 1 });
+    expect(first.insert).toHaveBeenCalledTimes(1);
+    expect(first.insert.mock.calls[0][0]).toMatchObject({
+      cipher_format: 1,
+      content_revision: 1,
+      key_domain: 'couple',
+      key_epoch: '4',
+      log_text: '',
+      reaction: null,
+      attachments: [],
+      emotion_flow: [],
+      record_time: null,
+    });
+
+    const second = mockEncryptedResponse({ content_revision: 2 });
+    const edited = await saveRecordToDB(
+      { ...encryptedRecord, log: 'edit one', contentRevision: 1 },
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      { kind: 'update', expectedRevision: 1 },
+    );
+    expect(edited).toEqual({ ok: true, contentRevision: 2 });
+    expect(second.update.mock.calls[0][0]).toMatchObject({ content_revision: 2 });
+
+    const third = mockEncryptedResponse({ content_revision: 3 });
+    const editedAgain = await saveRecordToDB(
+      { ...encryptedRecord, log: 'edit two', contentRevision: 2 },
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      { kind: 'update', expectedRevision: 2 },
+    );
+    expect(editedAgain).toEqual({ ok: true, contentRevision: 3 });
+    expect(third.update.mock.calls[0][0]).toMatchObject({ content_revision: 3 });
+  });
+
+  it('uses the actual legacy revision for plaintext -> ciphertext transition', async () => {
+    setRecordCryptoEnvironment(await encryptedEnvironment());
+    const query = mockEncryptedResponse({ content_revision: 8 });
+
+    const result = await saveRecordToDB(
+      { ...encryptedRecord, contentRevision: 7 },
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      { kind: 'update', expectedRevision: 7 },
+    );
+
+    expect(result).toEqual({ ok: true, contentRevision: 8 });
+    expect(query.update.mock.calls[0][0]).toMatchObject({
+      cipher_format: 1,
+      content_revision: 8,
+    });
+  });
+
+  it('keeps a stale encrypted update as a server CAS failure', async () => {
+    setRecordCryptoEnvironment(await encryptedEnvironment());
+    const query = mockEncryptedResponse(null, {
+      code: '40001',
+      message: 'E2EE_REVISION_CAS: expected revision 3, got 2',
+    });
+
+    const result = await saveRecordToDB(
+      { ...encryptedRecord, contentRevision: 1 },
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      { kind: 'update', expectedRevision: 1 },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(query.update.mock.calls[0][0]).toMatchObject({ content_revision: 2 });
+  });
+
+  it('uses INSERT for create replay, so a lost response cannot silently update an existing id', async () => {
+    setRecordCryptoEnvironment(await encryptedEnvironment());
+    const query = mockEncryptedResponse(null, { code: '23505', message: 'duplicate key value' });
+
+    const result = await saveRecordToDB(
+      encryptedRecord,
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      { kind: 'create' },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(query.insert).toHaveBeenCalledTimes(1);
+    expect(query.update).not.toHaveBeenCalled();
   });
 });

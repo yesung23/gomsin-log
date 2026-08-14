@@ -398,6 +398,17 @@ try {
     FROM public.daily_records WHERE id = '${legacyId}'`, 'legacy row shape');
   check(legacyShape === '0|1|1', `a legacy row is cipher_format 0, revision 1, no envelope (saw ${legacyShape})`);
 
+  const legacyEdit = asUser(A, `
+    UPDATE public.daily_records
+    SET log_text = '두 번째 평문 수정'
+    WHERE id = '${legacyId}'`);
+  check(legacyEdit.ok, 'legacy plaintext UPDATE succeeds before the floor and advances its revision');
+  const legacyEditedShape = mustSql(`
+    SELECT content_revision || '|' || log_text
+    FROM public.daily_records WHERE id = '${legacyId}'`, 'legacy edited shape');
+  check(legacyEditedShape === '2|두 번째 평문 수정',
+    `legacy plaintext revision is server-authoritative before migration (saw ${legacyEditedShape})`);
+
   checkRefused(
     asUser(A, insertRecord({
       id: nextId(), userId: A, coupleId: COUPLE_AB, isPrivate: false,
@@ -441,6 +452,53 @@ try {
   const privateWrite = asUser(A, privateEncrypted({ id: privateId }));
   check(privateWrite.ok, 'A writes a PRIVATE record encrypted under the personal domain (PMK)');
   if (!privateWrite.ok) console.error(`    ${privateWrite.stderr.trim().split('\n').slice(-2).join('\n    ')}`);
+
+  // This is the database side of the real client contract: INSERT=1, then each
+  // content rewrite is an UPDATE with OLD+1. The client regression test calls
+  // the production saveRecordToDB contract; this actor harness proves the same
+  // payload shape survives the actual trigger and RLS boundary.
+  const lifecycleId = nextId();
+  const lifecycleCreate = asUser(A, sharedEncrypted({ id: lifecycleId }));
+  check(lifecycleCreate.ok, 'client-contract lifecycle CREATE is accepted at revision 1');
+  const lifecycleAfterCreate = mustSql(`
+    SELECT content_revision FROM public.daily_records WHERE id = '${lifecycleId}'`,
+    'lifecycle create revision');
+  check(lifecycleAfterCreate === '1', 'encrypted CREATE returns/stores revision 1');
+
+  const lifecycleEditOne = asUser(A, `
+    UPDATE public.daily_records
+    SET content_envelope = ${envelope(DOMAIN_WIRE.couple, 1, { plaintextBytes: 80 })},
+        content_revision = 2
+    WHERE id = '${lifecycleId}'`);
+  check(lifecycleEditOne.ok, 'encrypted UPDATE 1 (revision 1 -> 2) is accepted');
+
+  const lifecycleAttachmentPatch = asUser(A, `
+    UPDATE public.daily_records
+    SET content_envelope = ${envelope(DOMAIN_WIRE.couple, 1, { plaintextBytes: 96 })},
+        content_revision = 3,
+        talk_about = true
+    WHERE id = '${lifecycleId}'`);
+  check(lifecycleAttachmentPatch.ok,
+    'create -> attachment/metadata patch succeeds at revision 2 -> 3');
+
+  const lifecycleRevision = mustSql(`
+    SELECT content_revision || '|' || talk_about
+    FROM public.daily_records WHERE id = '${lifecycleId}'`, 'lifecycle final revision');
+  check(lifecycleRevision === '3|true',
+    `encrypted create -> edit -> patch is 1 -> 2 -> 3 (saw ${lifecycleRevision})`);
+
+  checkRefused(
+    asUser(A, `
+      UPDATE public.daily_records
+      SET content_envelope = ${envelope(DOMAIN_WIRE.couple, 1)}, content_revision = 3
+      WHERE id = '${lifecycleId}'`),
+    'E2EE_REVISION_CAS',
+    'reject: stale concurrent encrypted update after the lifecycle reached revision 3',
+  );
+
+  const replay = asUser(A, sharedEncrypted({ id: lifecycleId }));
+  checkRefused(replay, 'duplicate key|already exists',
+    'reject: lost-response CREATE replay uses INSERT and cannot silently overwrite the row');
 
   // =========================================================================
   // Scenario 3 — no plaintext residue on an encrypted row
@@ -513,7 +571,7 @@ try {
 
   const legacyStillReadable = mustAsUser(A,
     `SELECT log_text FROM public.daily_records WHERE id = '${legacyId}'`, 'legacy read');
-  check(legacyStillReadable === '오늘은 눈이 왔어',
+  check(legacyStillReadable === '두 번째 평문 수정',
     'a legacy plaintext row stays readable forever (migration plan, not a leak)');
 
   const migrated = asUser(A, `
@@ -526,6 +584,11 @@ try {
     WHERE id = '${legacyId}'`);
   check(migrated.ok, 'a legacy row migrates to ciphertext in one atomic UPDATE');
   if (!migrated.ok) console.error(`    ${migrated.stderr.trim().split('\n').slice(-2).join('\n    ')}`);
+  const migratedRevision = mustSql(`
+    SELECT content_revision FROM public.daily_records WHERE id = '${legacyId}'`,
+    'legacy migration revision');
+  check(migratedRevision === '3',
+    `legacy plaintext revision 2 transitions to ciphertext at OLD+1=3 (saw ${migratedRevision})`);
 
   // =========================================================================
   // Scenario 5 — domain routing: PMK and CSK cannot be swapped
@@ -1037,6 +1100,40 @@ try {
     check(
       exposed === '1',
       'mutation "partner visibility": removing `is_private = false` exposes the private row',
+    );
+  }
+
+  // Former-partner denial must be proved by RLS itself, not by the 039
+  // membership trigger. Remove that trigger branch in a mutated database and
+  // keep the disconnected actor: the write must still fail because the real
+  // daily_records WITH CHECK is the remaining load-bearing control.
+  {
+    const name = `p5_mut_${(mutationDb += 1)}`;
+    buildDatabase(name, {
+      mutate: (candidate, text) => (candidate === '039_daily_records_content_envelope.sql'
+        ? text.split("IF NEW.key_domain = 'couple' THEN").join('IF false THEN')
+        : text),
+    });
+    seed(name);
+    activateFloors(name);
+    // Make E2EE itself permissive for this probe. The disconnected couple gets
+    // a real ACTIVE epoch and floor, so any remaining denial is necessarily the
+    // daily_records RLS WITH CHECK rather than stale routing or floor state.
+    mustSql(`
+      INSERT INTO public.scope_keys (domain, scope_id, owner_couple_id, key_epoch, state)
+      VALUES ('couple', '${COUPLE_AD}', '${COUPLE_AD}', 1, 'ACTIVE');
+      INSERT INTO public.crypto_write_floor (scope_kind, scope_id, min_cipher_format, activated_at)
+      VALUES ('couple', '${COUPLE_AD}', 1, now());
+    `, 'seed former-couple epoch and floor', name);
+    const formerProbe = asUser(D, sharedEncrypted({
+      userId: D,
+      coupleId: COUPLE_AD,
+    }), name);
+    check(
+      !formerProbe.ok
+        && /row-level security|violates row-level security/.test(formerProbe.stderr)
+        && !/E2EE_COUPLE_MEMBERSHIP_REQUIRED/.test(formerProbe.stderr),
+      'mutation "former partner RLS": removing the E2EE membership check still leaves disconnected writes denied by RLS',
     );
   }
 } catch (error) {

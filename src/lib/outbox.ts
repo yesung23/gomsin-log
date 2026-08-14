@@ -165,10 +165,14 @@ export async function countForAccount(
  *
  * Injected the same way the record crypto environment is, so the queue has no
  * opinion about the keystore and every branch stays testable. Null means entries
- * are queued in the clear, which is the pre-P5 behaviour: refusing to queue at
- * all would trade a disk-at-rest exposure for guaranteed data loss, and losing
- * the user's record is the worse outcome. The entry records which it is, so
- * nothing downstream has to guess.
+ * are queued in the clear, which is the pre-P5 behaviour. This is a capability
+ * boundary, not a claim that the current runtime is protected: Device Bootstrap
+ * has not yet installed an LCK, so production currently remains on this legacy
+ * branch. Once an LCK is installed, new entries are sealed and the plaintext is
+ * dropped before persistence. Refusing to queue before that activation would
+ * trade a disk-at-rest exposure for guaranteed data loss, and losing the user's
+ * record is the worse outcome. The entry records which it is, so nothing
+ * downstream has to guess.
  */
 let localCacheKey: CryptoKey | null = null;
 

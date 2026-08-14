@@ -36,6 +36,18 @@ P5 해결 후 별도 작업으로 유보했다.
 
 ## 세션 기록
 
+### 2026-08-14 · 00-BM — iCloud-first 기억 제품 사업 모델 전환
+
+기존 Free 5GB / Plus 100GB / Archive 300GB와 저장용량·원본 화질·긴 미디어를 판매하는
+구독 가설을 폐기했다. 연결과 정상적인 보존은 무료로 유지하고, 사용자가 고른 시간을
+정리·편집·제작하는 디지털/실물 기억 제품을 주요 수익 모델로 재정의했다.
+
+`PRODUCT_V3.md`에는 보존 과금 원칙, 코어 이후 미디어 확장, iOS-first 사용자 소유
+iCloud/CloudKit 방향과 미구현 상태를 반영했다. `BUSINESS_MEMORY_ROADMAP_V1.md`는
+FREE CORE + 일회성 기억 제품 + 실물 제품 + 검증 후 optional Plus 구조로 재작성했다.
+`ENGINEERING_ROADMAP.md`에는 P5 뒤, P6 구현 전의 `ARCH-P6` 검증 단계를 추가했다.
+CloudKit 구현·코드·migration·crypto·P5 PR·production은 변경하지 않았다.
+
 ### 2026-08-14 · PR #56 최종 문서 정합성 정리
 
 `PROJECT_HANDOFF_2026-08-13.md`에서 특정 PR이나 활성 작업을 전제로 한 `CURRENT_STATE.md`

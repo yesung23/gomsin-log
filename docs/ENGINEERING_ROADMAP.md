@@ -3,7 +3,7 @@
 > 구현 **순서**만 담는다. 제품 의도는 [`PRODUCT_V3.md`](PRODUCT_V3.md),
 > 현재 저장소 상태는 [`CURRENT_STATE.md`](CURRENT_STATE.md).
 
-- 기준일: 2026-08-13
+- 기준일: 2026-08-14
 - 이 문서는 어떤 것도 구현하지 않는다.
 
 ---
@@ -44,7 +44,8 @@ Phase 1B는 로컬에서 Phase 1A 마이그레이션 체인(031→032→034→03
 | **P3** | **양방향 `이따 이야기하기`** | 조율 메타데이터 추가에 그친다. 암호화 이후에 스키마를 건드리는 것보다 안전하다 |
 | **P4** | **채팅 제품/데이터 계약 및 구현 계획** → [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md) **(계약 작성 완료, 구현 미착수)** | 채팅은 코어이며 사용자 콘텐츠다. E2EE 수직 슬라이스를 시작하기 **전에** 계약을 확정해야, daily_records와 채팅이 같은 봉투/키 경로를 두 번 설계하지 않는다. 계약 §20이 구현 전 닫아야 할 게이트 9개(C1–C9)를, §19가 P5·P6이 보존해야 할 결정을 정의한다. **P4는 채팅을 P5보다 먼저 구현하라는 뜻이 아니다** — P5는 여전히 daily_records E2EE가 우선이고, P4는 나중에 맞지 않는 scope/epoch/맥락참조 의미가 생기는 것을 막는 계약일 뿐이다 |
 | **P5** | **`daily_records` E2EE 수직 슬라이스** | Phase 1B의 첫 실제 콘텐츠 도메인 |
-| **P6** | **사진 E2EE / 암호화 미디어 기반** | P0-b가 선행되어야 한다 |
+| **ARCH-P6** | **iCloud Media Architecture** | P6 구현 전에 iOS-first 미디어 소유권·공유·복구·플랫폼 경계를 검증한다 |
+| **P6** | **사진 E2EE / iCloud-first 암호화 미디어 기반** | ARCH-P6와 P0-b가 선행되어야 한다 |
 | **P7** | **일정 · 군 관련 날짜** | 기록보다 데이터가 적어 마이그레이션 위험이 낮다. generic 알림도 여기(P2의 주소 지정에 의존) |
 | **P8** | **주기 / HRK 재설계** | **단순 이관이 아니다.** 파트너 projection이 서버 측 평문 계산이므로 소유자 기기 생성 + CSK 암호화로 다시 만들어야 한다. 가장 민감하므로 envelope·rotation·복구가 실전 검증된 뒤 |
 | **P9** | **Moment / 아카이브 기반** | 데이터가 쌓인 뒤 |
@@ -52,12 +53,10 @@ Phase 1B는 로컬에서 Phase 1A 마이그레이션 체인(031→032→034→03
 
 ### 로드맵에 없는 것
 
-**오디오와 영상은 P0–P5(현재 활성 구간)에 없다.** 장기적으로는 P6(암호화
-미디어 기반) 이후의 유료 미디어 확장으로 편입됐다 — 방향은
-[`PRODUCT_V3.md`](PRODUCT_V3.md) §12.3, 구체 요금제·아키텍처는
-[`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가
-canonical이다. **현재 P0–P5 로드맵 용량을 여기에 배정하지 않는다** — 순서는
-바뀌지 않았다.
+**오디오와 영상은 P0–P5(현재 활성 구간)에 없다.** P6 사진 기반이 안정된 뒤의
+코어 이후 미디어 확장이다. 저장용량 premium gate가 아니라 engineering priority,
+복구·프라이버시 검증 결과에 따라 순서를 정한다. **현재 P0–P5 로드맵 용량을 여기에
+배정하지 않는다** — 순서는 바뀌지 않았다.
 
 여행 플래너·공동 할 일 확장, 서버 측 검색도 로드맵에 없다.
 
@@ -75,6 +74,35 @@ E2EE보다 제품 작업을 먼저 하더라도 다음을 어기지 않는다.
 
 ---
 
+## 3.5 ARCH-P6 — iCloud Media Architecture
+
+P5 이후, 실제 P6 구현 전에 다음을 read-only architecture decision으로 검증한다.
+이 단계에서는 새 암호 프로토콜을 발명하지 않으며, 필요한 경우 Architect decision을
+먼저 남긴다.
+
+- CloudKit 데이터 소유권과 `CKAsset` 미디어 저장
+- 파트너 공유 모델(`CKShare` 또는 승인된 equivalent)
+- E2EE blob lifecycle과 CSK/PMK 미디어 라우팅
+- 서버·CloudKit·공유 메타데이터 leakage
+- EXIF/GPS 제거와 thumbnail/preview 경계
+- upload/download retry 및 offline queue
+- iCloud quota exceeded와 iCloud account unavailable 처리
+- account unlink, author delete, partner access revocation, device loss
+- legacy Supabase Storage 경로의 migration/disable plan
+- Android/non-iOS boundary
+
+검증 후 구현 순서는 다음과 같다.
+
+```text
+ARCH-P6
+→ photo
+→ upload/share/download/decrypt/delete/unlink lifecycle 증명
+→ audio
+→ video
+```
+
+---
+
 ## 4. BETA 배포 게이트
 
 외부 베타 이전에 **전부** 충족해야 한다.
@@ -83,7 +111,7 @@ E2EE보다 제품 작업을 먼저 하더라도 다음을 어기지 않는다.
 |---|---|---|
 | B1 | Storage 권한 정책이 실제 운영에 적용되었음을 **카탈로그와 실제 동작 양쪽으로** 검증 | 파일 존재는 배포 증거가 아니다 |
 | B2 | 마이그레이션 원장과 원격 상태의 drift 해소 | 저장소만으로 원격 상태를 알 수 없다 |
-| B3 | 백업 부재에 대한 데이터 손실 정책 확정 및 사용자 고지 | 현 요금제는 예약 백업·PITR을 제공하지 않는다 |
+| B3 | 백업 부재에 대한 데이터 손실 정책 확정 및 사용자 고지 | 예약 백업·PITR 제공 여부와 사용자 책임을 명확히 한다 |
 | B4 | **정밀 위치 게이트** — §6 |
 | B5 | **평문 영상 게이트** — §7 |
 | B6 | 실제 두 계정으로 기록 → 상대방의 오늘 → 원본 → 삭제 → 내보내기 → 연결 해제 E2E 검증 | |

@@ -1,0 +1,81 @@
+name: Chat E2EE foundation PR validation
+
+on:
+  pull_request:
+    branches:
+      - codex/p5-daily-records-e2ee-slice
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chat-e2ee-foundation-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  VITE_SUPABASE_URL: https://example.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_chat_test_public_key_not_a_secret
+
+jobs:
+  foundation:
+    name: Chat foundation, security harness, and existing suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Install PostgreSQL harness runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql
+          echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+          "$(pg_config --bindir)/initdb" --version
+
+      - name: Diff integrity
+        run: git diff --check "${{ github.event.pull_request.base.sha }}..HEAD"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Chat PostgreSQL actor and mutation harness
+        run: npm run test:chat
+
+      - name: Existing E2EE harnesses
+        run: |
+          npm run test:p5
+          npm run test:p0
+          npm run test:rollback
+
+      - name: Run every Vitest suite
+        run: npm test
+
+      - name: Build with placeholders
+        run: npm run build
+
+      - name: Bare build must fail closed without Supabase configuration
+        shell: bash
+        env:
+          VITE_SUPABASE_URL: ''
+          VITE_SUPABASE_PUBLISHABLE_KEY: ''
+        run: |
+          set -uo pipefail
+          if npm run build > "${RUNNER_TEMP}/chat-bare-build.log" 2>&1; then
+            echo 'Bare build unexpectedly succeeded.' >&2
+            exit 1
+          fi
+          grep -F 'VITE_SUPABASE_URL' "${RUNNER_TEMP}/chat-bare-build.log"

@@ -64,6 +64,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `037_harden_e2ee_account_deletion_survivor_detection.sql` | `e2ee_prepare_account_deletion`이 생존 파트너를 029와 같은 기준(멤버십 row 존재 여부)으로 판정하도록 교체. active만 보던 기존 판정은 disconnected/pending 파트너의 커플 키를 파괴했다 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
 | `038_bilateral_talk_about_marks.sql` | `이따 이야기하기` 양방향 조율용 `talk_about_marks` 테이블. 메타데이터 전용(record_id / couple_id / actor_user_id / created_at)이며 기록 본문·주제·요약을 저장하지 않는다. `daily_records` 쓰기 권한은 그대로 두고 별도 테이블 + RLS로만 해결 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
 | `039_daily_records_content_envelope.sql` | P5. 암호화된 `daily_records` 행이 콘텐츠를 담는 `content_envelope BYTEA`(GLE1 봉투) 추가 + 봉투 헤더의 domain/epoch를 라우팅 컬럼과 대조 + `health` 도메인 거부 + couple 도메인의 active 멤버십 요구. **032의 P0 결함도 함께 고친다** (아래 참고) | **신규 / 어디에도 미적용** |
+| `040_chat_messages_e2ee.sql` | 04A. V1 텍스트 채팅의 여섯 개 서버 필드, CSK/GLE1 ciphertext, ACTIVE epoch 검사, per-couple ordinal, sender-only irreversible tombstone, RLS | **신규 / 어디에도 미적용** |
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 

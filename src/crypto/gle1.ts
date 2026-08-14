@@ -75,6 +75,8 @@ export const OBJECT_TYPE = {
   cycleDailyLog: 5,
   attachment: 6,
   cycleProjection: 7,
+  /** V1 text chat message. Never reuse this value for another object class. */
+  chatMessage: 8,
 } as const;
 
 /** Field ids within an object. */
@@ -87,6 +89,8 @@ export const FIELD_ID = {
   note: 6,
   title: 7,
   memo: 8,
+  /** The text-only chat payload document. */
+  messageText: 9,
 } as const;
 
 export class Gle1Error extends Error {

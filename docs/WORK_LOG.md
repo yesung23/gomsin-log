@@ -68,6 +68,22 @@ P4 완료 후 다음 단계인 P5를 구현했다. 시작 시점 `origin/master`
 
 ---
 
+### 2026-08-14 · P5 master 정합화 및 재검증
+
+최신 `origin/master` `88cb7a9`를 P5 브랜치에 병합했다. 실제 충돌은
+`docs/WORK_LOG.md` 하나였고 `docs/work-log only`로 분류했다. 최신 master의
+PRODUCT_V3·PROJECT_HANDOFF·문서 정규화 내용을 우선 보존하면서 P5 구현 기록을 유지했다.
+코드·migration·E2EE 의미 충돌은 없었다.
+
+재검증 결과: `npm run test:p5` 74 assertions PASS(13 mutation), `npm run test:p0`
+76 assertions PASS, `npm run test:rollback` PASS, `npm test` 148 files / 2235 tests PASS,
+typecheck PASS, lint PASS, build PASS. 최초 전체 테스트는 불완전한 `node_modules`로 iOS
+privacy manifest 2건이 실패했으나 `npm ci` 후 재실행해 통과했다. build는 실제 비밀값 없이
+형식 검증용 Supabase placeholder를 프로세스 환경에만 주입했다. Production Supabase
+migration/deploy는 실행하지 않았다.
+
+---
+
 ### 2026-08-14 · PR #53 · P4 병합 후 핸드오프 갱신
 
 PR #52가 `58efb7d`로 `master`에 머지된 뒤 같은 #53 브랜치를 최신 `origin/master`에

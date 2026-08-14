@@ -1,5 +1,5 @@
 -- =============================================================
--- 040_chat_messages_e2ee.sql
+-- 041_chat_messages_e2ee.sql
 -- V1 text chat: minimal metadata, CSK/GLE1 ciphertext, RLS and tombstones.
 -- =============================================================
 --

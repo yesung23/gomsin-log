@@ -16,7 +16,7 @@ const FORWARD = [
   '035_e2ee_phase1a_p0_closure.sql',
   '036_e2ee_device_status_privilege.sql',
   '039_daily_records_content_envelope.sql',
-  '040_chat_messages_e2ee.sql',
+  '041_chat_messages_e2ee.sql',
 ];
 const ENV = { ...process.env, LC_ALL: 'C', LANG: 'C', LC_MESSAGES: 'C' };
 const have = (binary) => spawnSync('which', [binary], { encoding: 'utf8' }).status === 0;
@@ -181,20 +181,20 @@ try {
 
   // RLS mutation: remove active-couple SELECT condition. C must then see AB rows.
   const selectMut = 'USING (couple_id = public.get_my_active_couple_id())';
-  const mutatedSelect = buildDatabase('chat_mut_select', (file, text) => file === '040_chat_messages_e2ee.sql' ? text.replace(selectMut, 'USING (true)') : text);
+  const mutatedSelect = buildDatabase('chat_mut_select', (file, text) => file === '041_chat_messages_e2ee.sql' ? text.replace(selectMut, 'USING (true)') : text);
   seed(mutatedSelect);
   mustSql(insertMessage(M1, AB, envelope(WIRE.couple, 1), A), 'seed mutated select row', mutatedSelect);
   check(asUser(C, `SELECT count(*) FROM public.chat_messages WHERE couple_id='${AB}'`, mutatedSelect).stdout.trim() === '1', 'mutation: removing SELECT couple predicate exposes unrelated chat');
 
   // RLS mutation: remove sender predicate from UPDATE. B must then tombstone M1.
-  const updateMut = buildDatabase('chat_mut_sender', (file, text) => file === '040_chat_messages_e2ee.sql' ? text.replace('AND sender_user_id = auth.uid()\n    AND ciphertext IS NOT NULL', 'AND ciphertext IS NOT NULL') : text);
+  const updateMut = buildDatabase('chat_mut_sender', (file, text) => file === '041_chat_messages_e2ee.sql' ? text.replace('AND sender_user_id = auth.uid()\n    AND ciphertext IS NOT NULL', 'AND ciphertext IS NOT NULL') : text);
   seed(updateMut);
   mustSql(insertMessage(M1, AB, envelope(WIRE.couple, 1), A), 'seed mutated update row', updateMut);
   check(asUser(B, `UPDATE public.chat_messages SET ciphertext=NULL WHERE message_id='${M1}'`, updateMut).ok, 'mutation: removing sender predicate lets partner tombstone');
 
   // Epoch mutation: remove the ACTIVE lookup. A retired envelope must then pass
   // the remaining server/RLS boundaries, proving the epoch check is load-bearing.
-  const epochMut = buildDatabase('chat_mut_epoch', (file, text) => file === '040_chat_messages_e2ee.sql' ? text.replace("AND sk.state = 'ACTIVE'\n        AND sk.key_epoch::NUMERIC = v_header_epoch", 'AND sk.key_epoch::NUMERIC = v_header_epoch') : text);
+  const epochMut = buildDatabase('chat_mut_epoch', (file, text) => file === '041_chat_messages_e2ee.sql' ? text.replace("AND sk.state = 'ACTIVE'\n        AND sk.key_epoch::NUMERIC = v_header_epoch", 'AND sk.key_epoch::NUMERIC = v_header_epoch') : text);
   seed(epochMut);
   check(asUser(A, insertMessage('00000000-0000-4000-8000-00000000000f', AB, envelope(WIRE.couple, 2)), epochMut).ok, 'mutation: removing ACTIVE epoch check admits retired message');
 } catch (error) {

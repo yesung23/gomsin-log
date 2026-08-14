@@ -98,6 +98,7 @@ export type MemoryServer = {
   pairings: PairingRecord[];
   revocations: RevocationRecord[];
   challenges: ChallengeRow[];
+  writeFloors: Map<string, number>;
   /** couple id → the two member user ids. */
   couples: Map<string, [string, string]>;
   now: () => number;
@@ -118,6 +119,7 @@ export function createMemoryServer(startMs = 1_800_000_000_000): MemoryServer {
     pairings: [],
     revocations: [],
     challenges: [],
+    writeFloors: new Map(),
     couples: new Map(),
     now: () => clock,
     setNow: (value: number) => { clock = value; },
@@ -328,6 +330,16 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
       };
     },
 
+    getWriteFloor: async (domain, scopeId) =>
+      server.writeFloors.get(`${domain}:${scopeId}`) ?? 0,
+    activateWriteFloor: async (scopeKind, scopeId, deviceId) => {
+      const device = server.devices.find((candidate) => candidate.id === deviceId);
+      if (!device || device.userId !== userId) reject('E2EE_DEVICE_WRONG_ACCOUNT');
+      const domain = scopeKind === 'couple' ? 'couple' : 'personal';
+      const scope = server.scopeKeys.find((key) => key.domain === domain && key.scopeId === scopeId && key.state === 'ACTIVE');
+      if (!scope) reject('E2EE_FLOOR_NO_ACTIVE_EPOCH');
+      server.writeFloors.set(`${domain}:${scopeId}`, 1);
+    },
     listScopeKeys: async (domain, scopeId) =>
       server.scopeKeys
         .filter((k) => k.domain === domain && k.scopeId === scopeId)

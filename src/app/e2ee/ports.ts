@@ -235,6 +235,10 @@ export interface E2eeRepository {
   getPartnerRecoveryAnchor(): Promise<PartnerRecoveryAnchorRecord | null>;
 
   // --- scope keys ----------------------------------------------------------
+  /** The server-authoritative minimum cipher format for one scope. */
+  getWriteFloor(domain: KeyDomainName, scopeId: string): Promise<number>;
+  /** The only application path allowed to request an irreversible floor. */
+  activateWriteFloor(scopeKind: 'user' | 'couple', scopeId: string, deviceId: string): Promise<void>;
   listScopeKeys(domain: KeyDomainName, scopeId: string): Promise<ScopeKeyRecord[]>;
   getScopeKey(scopeKeyId: string): Promise<ScopeKeyRecord | null>;
   insertScopeKey(record: NewScopeKey): Promise<string>;

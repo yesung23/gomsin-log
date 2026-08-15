@@ -26,12 +26,16 @@ export { createWebLocalKeyPort, isWebLocalKeyPortAvailable } from './webLocalKey
 let cached: DeviceKeyPort | null = null;
 let cachedLocal: LocalKeyPort | null = null;
 
-function nativeAvailable(): boolean {
+function nativePlatform(): boolean {
   try {
-    return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('GomsinlogDeviceKeys');
+    return Capacitor.isNativePlatform();
   } catch {
     return false;
   }
+}
+
+function nativeAvailable(): boolean {
+  return nativePlatform() && Capacitor.isPluginAvailable('GomsinlogDeviceKeys');
 }
 
 /**
@@ -48,6 +52,9 @@ export function getDeviceKeyPort(): DeviceKeyPort | null {
     cached = createNativeDeviceKeyPort(plugin);
     return cached;
   }
+  // A native build without its first-party plugin is not a web device. Do not
+  // silently downgrade iOS/Android bootstrap to WebCrypto.
+  if (nativePlatform()) return null;
   if (isWebDeviceKeyStoreAvailable()) {
     cached = createWebDeviceKeyPort();
     return cached;
@@ -63,6 +70,7 @@ export function getLocalKeyPort(): LocalKeyPort | null {
     cachedLocal = createNativeLocalKeyPort(plugin);
     return cachedLocal;
   }
+  if (nativePlatform()) return null;
   if (isWebLocalKeyPortAvailable()) {
     cachedLocal = createWebLocalKeyPort();
     return cachedLocal;

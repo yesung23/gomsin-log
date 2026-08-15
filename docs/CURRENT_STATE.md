@@ -32,7 +32,8 @@
 | Device Bootstrap | PR #58에 active draft로 존재하나 아직 merge되지 않음 |
 | Chat foundation | PR #59 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
 | Chat product UI | PR #60 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
-| active migrations 039–042 | repository/PR에는 존재하지만 이 문서 작업에서 production 적용을 확인하지 않음 |
+| Core Privacy Foundation integration | `codex/core-privacy-foundation-v1`에 P4 + P5.1 + P5.2를 통합했으나 master에는 아직 merge되지 않음 |
+| active migrations 039/040/043/044 | integration branch에 존재하며 이 문서 작업에서 production 적용을 확인하지 않음 |
 | ARCH-P6 | architecture decision은 완료, P6 implementation은 시작되지 않음 |
 
 따라서 master만 기준으로 보면 P5 E2EE·Device Bootstrap·chat은 **not merged**다.
@@ -50,6 +51,7 @@ PR state, draft, mergeability, base/head, CI를 다시 확인한다.
 | P5.2 Device Bootstrap | PR #58 / `codex/03a-device-bootstrap` / `ac81f07f5dc3220b1bc79490e693702add957a0b` | active draft; H-1 duplicate Android registration wiring fix is in the live HEAD; crypto and migration semantics are unchanged by that fix; code-delta review pending |
 | P5.3 Chat Foundation | PR #59 / `codex/04a-chat-e2ee-foundation` / `ce4a1355b2738f898109c2d70b038822996f77e7` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; migration 041 remains unapplied per PR declaration; independent security review pending |
 | P5.4 Chat Product UI | PR #60 / `codex/04b-chat-product-ui` / `c409d92d4fa6e5e4913adb8fef2cf6f1bdacba8a` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; no V1 entry-path integration; real Device Bootstrap runtime integration remains unverified |
+| P5.5 Core Privacy Foundation integration | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | P4 Conversation Bridge + P5.1 + P5.2 integration branch. Session runtime install, floor guard, account-switch teardown, unlink authority tombstone, and forward migration 044 are code/test-verified locally; not merged, production unapplied, and real-device validation remains unverified |
 
 PR #54는 open/non-draft이고 #58/#59/#60은 open draft다 at this checkpoint. PR-specific
 CI 결과는 영구 acceptance가 아니다. PR #58의 remaining environment gates는 missing
@@ -62,8 +64,10 @@ Secure Enclave/LCK/`dev_sig`/`dev_kem` 동작 미검증이다.
 |---|---|---|
 | 039 | daily_records P5 | NOT APPLIED per active PR declaration; remote catalog independently UNVERIFIED |
 | 040 | Device Bootstrap/write-floor semantics | active branch only; remote catalog independently UNVERIFIED |
-| 041 | chat messages | NOT APPLIED per PR #59/#60 declarations; remote catalog independently UNVERIFIED |
-| 042 | media coordination | reserved; implementation not started |
+| 041 | chat messages | frozen/deferred active-draft asset; NOT APPLIED per PR #59/#60 declarations; remote catalog independently UNVERIFIED |
+| 042 | media coordination | frozen P6 draft number; implementation not started. It must be reissued as 045+ before P6 resumes because active V1 now has 043/044 |
+| 043 | Conversation Bridge completion | integration branch only; remote catalog independently UNVERIFIED |
+| 044 | unlink crypto pairing authority | integration branch only; remote catalog independently UNVERIFIED |
 
 No remote Supabase mutation was performed by this documentation task.
 
@@ -82,7 +86,7 @@ master에서 active PR 코드를 구현된 것으로 세지 않으면, 사용자
 | 평문 영상 | 기존 평문 첨부 경로가 존재하며 Full User-Content E2EE 전에는 해소 필요 | `PRODUCT` `BETA` |
 | 레거시 건강 평문 | 레거시 주기 테이블·백업 데이터가 남아 있음 | `LEGACY` |
 | `briefings` 레거시 스키마 | 평문 요약 캐시 테이블이 스키마에 남아 있다. `master`의 `src/**`에 read/write 경로가 없어 **동작하는 평문 요약 파이프라인은 아니다**. 삭제하는 migration도 없어 스키마 정리 대상으로 남는다 | `LEGACY` |
-| 연결 해제와 pairing 상태 | `disconnect_couple`이 `couple_members`만 갱신하고 `crypto_pairings`를 `UNLINKED`로 전이하지 않는다. `UNLINKED` 값은 031에 정의되어 있으나 이 RPC가 사용하지 않는다. **데이터 유출이 아니라 lifecycle/state 정합성 문제**다 | `FUTURE` |
+| 연결 해제와 pairing 상태 | master에는 `disconnect_couple`이 `couple_members`만 갱신하는 상태다. integration branch의 044가 pairing도 `UNLINKED`로 전이하며 local tombstone을 함께 처리한다. 아직 merge·원격 적용 전이다 | `FUTURE` `PROD` |
 
 ## 4. 핵심 루프와 범위 밖 기능
 
@@ -91,7 +95,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 
 | 기능 | 현재 상태 |
 |---|---|
-| `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위; 이야기거리 보관함·완료 처리는 후속 구현 대상 |
+| `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위. 이야기거리 보관함·완료 처리 P4는 integration branch에 있으나 master에는 아직 merge되지 않음 |
 | 알림 | 완전 미구현 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |

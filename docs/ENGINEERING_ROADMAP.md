@@ -85,24 +85,28 @@ code acceptance와 native device gate가 모두 통과되기 전에는 P5.2를 �
 - talk-about handoff
 - plaintext context URL 금지
 
-### P5.5 — Security Stack Integration
+### P5.5 — Core Privacy Foundation Integration
 
-P5.5 보안 gate의 기존 통합 기준은 동결 자산의 재개 또는 P6 선행 검증에만 적용한다.
-Conversation Bridge V1의 진입 조건을 약화시키거나 대체하지 않는다.
+P5.5는 현재 V1의 P5.1/P5.2와 P4 Conversation Bridge를 하나의 integration base에서
+검증하는 마지막 보안 gate다. P5.3/P5.4는 삭제하지 않은 **FROZEN / DEFERRED** chat
+자산이므로 이 gate나 P6 진입의 필수 경로가 아니다. 그 자산을 재개할 때만 별도의
+chat integration/security review를 다시 연다.
 
 ```text
-P5.1 → P5.2 → P5.3 → P5.4 → integrated review
+P4 Conversation Bridge + P5.1 daily_records + P5.2 Device Bootstrap
+→ Core Privacy Foundation integration review
 ```
 
 다음 항목을 하나의 integration base에서 검증한다.
 
-- migration numbering과 coexistence
-- native runtime 및 LCK
-- `RecordCryptoEnvironment`와 `ChatCryptoEnvironment`
-- account/logout/unlink teardown
-- browser/native E2E
+- active migration `039 → 040 → 043 → 044` coexistence와 rollback 경계
+- login/session runtime 설치, LCK, post-floor no-plaintext refusal
+- `RecordCryptoEnvironment`와 Conversation Bridge metadata의 원문 비복사 경계
+- account/logout/account-switch/unlink teardown 및 local couple-authority tombstone
+- browser/native E2E와 real-device gate
 
-P5.5가 P6A를 시작하기 전 마지막 gate다.
+P5.5가 P6A를 시작하기 전 마지막 gate이며, 이 정정은 native validation이나 P6의
+보안 의존성을 약화시키지 않는다.
 
 ### ARCH-P6 — architecture decision
 
@@ -124,16 +128,18 @@ ARCH-P6 결정은 완료되었으며 상태는 **READY FOR IMPLEMENTATION**이�
 - Android boundary intentionally deferred
 
 구현 순서는 `P6A Native CloudKit Media Foundation` → `P6B Media E2EE + GME1 +
-normalization + migration 042` → `P6C Photo Product Integration` → `P6D Two Apple
-IDs / real devices / quota / unlink / account-switch / security hardening`이다.
+normalization + 새 forward migration(045 이상; frozen 042를 재사용하지 않음)` →
+`P6C Photo Product Integration` → `P6D Two Apple IDs / real devices / quota / unlink /
+account-switch / security hardening`이다.
 
 ### P6 entry conditions
 
 다음 조건을 모두 만족하기 전에는 P6A를 시작하지 않는다.
 
-- P5.1/P5.2/P5.3/P5.4 integration base
+- P4 + P5.1/P5.2 Core Privacy Foundation integration base
 - `DeviceKeys`/LCK real iPhone validation
-- migration 040/041 coexistence verified
+- active migration 039/040/043/044 coexistence verified; frozen 041/042는 포함하지 않음
+- P6 재개 시 042 내용을 045 이상의 새 migration으로 재발급하는 계획 검토
 - CloudKit development entitlement/container prerequisites
 - Production mutation 없음
 

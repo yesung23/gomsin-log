@@ -972,6 +972,86 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-15 · [Control Tower / Core Privacy Foundation V1] canonical integration-gate correction
+
+#### PLAN POSITION
+- Phase: P5.5
+- Workstream: Core Privacy Foundation / P4 Conversation Bridge + P5.1 + P5.2
+- Step: active integration base와 P6 entry gate 정정
+- Previous Gate: Conversation Bridge CORE / chat FROZEN-DEFERRED decision
+- This Gate: chat stack을 V1/P6 필수 선행 조건에서 분리하고, active migration ordering과 native gate를 명시
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-15 Conversation Bridge direction entries — YES
+- MASTER PLAN version / 기준일: Control Tower latest product decision / 2026-08-15
+- Does this task conflict with canonical direction: NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: Control Tower implementation owner
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `006257ae6a737f9db1dae2a5ce5d3635a4783262`
+- Old HEAD: `006257ae6a737f9db1dae2a5ce5d3635a4783262`
+- New HEAD / Reviewed HEAD: this commit; related integration branch `codex/core-privacy-foundation-v1` at `35da04cf739649667c4d405a6c64c522d9e000e3`
+
+#### CHANGED / REVIEWED
+- `docs/ENGINEERING_ROADMAP.md`: P5.5를 P4 + P5.1 + P5.2 Core Privacy Foundation integration gate로 정확히 정정. frozen P5.3/P5.4를 삭제하거나 숨기지 않고 current V1/P6 dependency에서만 제외.
+- `docs/CURRENT_STATE.md`: integration branch, 043/044 migration assets, runtime/local test 사실, master/production 미병합·미적용 상태를 분리해 기록.
+- `docs/WORK_LOG.md`: 이 canonical correction의 source·gate·unverified evidence index.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: PMK/CSK/HRK 규칙과 P5 native gate 변경 없음
+- DB/migration semantics: 이 docs commit은 migration을 적용하거나 SQL을 변경하지 않음
+- product semantics: Conversation Bridge CORE / self-chat DEFERRED 결정을 재확인했을 뿐 새 제품 범위를 추가하지 않음
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: related integration branch `npm run test:p5`
+- PASS: 93 assertions including authenticated unlink actor path and mutation proof; local temporary PostgreSQL only
+- command: related integration branch targeted Vitest (`runtimeSession`, `runtime`, migration contracts)
+- PASS: 115 tests; runtime session guard/verified install and migration latest-function contracts covered
+- command: `git diff --check`
+- PASS: whitespace 오류 없음
+- UNVERIFIED: remote Supabase catalog, production migration history, browser/native E2E, physical iPhone/Android keystore behavior
+
+#### REVIEW IMPACT
+- DELTA — P5.5/P6 dependency wording changed. Earlier chat reviews remain valid only for their frozen draft heads and do not authorize a V1 chat path.
+
+#### BLOCKERS
+- code: merge/review of the Core Privacy Foundation integration branch
+- environment: real-device native validation and remote staging/production catalog evidence
+- external/manual: no Production migration without separate authorization
+
+#### STOPPED AT
+- exact completed boundary: canonical gate corrected; integration branch was pushed separately; no chat or P6 code integrated
+
+#### REMAINING
+- independent review of `35da04c`
+- real iPhone/Android DeviceKeys/LCK validation
+- staging migration/RLS rollout rehearsal for 039/040/043/044
+
+#### NEXT ACTION
+- next owner: security reviewer
+- tool/model: Terra / High
+- 기준 SHA: `35da04cf739649667c4d405a6c64c522d9e000e3`
+- exact next task: review Core Privacy Foundation integration diff, especially session lifecycle and 044 unlink semantics
+
+#### DO NOT ADVANCE UNTIL
+- native device gate and staging actor/RLS rehearsal are evidenced
+- P6 must not reuse frozen migration 042; any restart uses a reviewed 045+ forward migration
+
+#### PRODUCTION
+- NOT APPLIED — no remote mutation, migration, deployment, or Supabase catalog change
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

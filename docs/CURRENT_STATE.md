@@ -30,8 +30,8 @@
 |---|---|
 | P5.1 daily_records E2EE | PR #54에 구현되어 있으나 아직 merge되지 않음 |
 | Device Bootstrap | PR #58에 active draft로 존재하나 아직 merge되지 않음 |
-| Chat foundation | PR #59에 구현되어 있으나 아직 merge되지 않음 |
-| Chat product UI | PR #60에 구현되어 있으나 아직 merge되지 않음 |
+| Chat foundation | PR #59 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
+| Chat product UI | PR #60 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
 | active migrations 039–042 | repository/PR에는 존재하지만 이 문서 작업에서 production 적용을 확인하지 않음 |
 | ARCH-P6 | architecture decision은 완료, P6 implementation은 시작되지 않음 |
 
@@ -48,8 +48,8 @@ PR state, draft, mergeability, base/head, CI를 다시 확인한다.
 |---|---|---|
 | P5.1 daily_records E2EE | PR #54 / `codex/p5-daily-records-e2ee-slice` / `835cddd16b71686abc5fb296e4ddce3456844ad0` | implemented in active branch, not merged; production unapplied per PR declaration; final independent acceptance pending unless live evidence changes this |
 | P5.2 Device Bootstrap | PR #58 / `codex/03a-device-bootstrap` / `ac81f07f5dc3220b1bc79490e693702add957a0b` | active draft; H-1 duplicate Android registration wiring fix is in the live HEAD; crypto and migration semantics are unchanged by that fix; code-delta review pending |
-| P5.3 Chat Foundation | PR #59 / `codex/04a-chat-e2ee-foundation` / `ce4a1355b2738f898109c2d70b038822996f77e7` | implemented active draft, not merged; migration 041 unapplied per PR declaration; independent security review pending |
-| P5.4 Chat Product UI | PR #60 / `codex/04b-chat-product-ui` / `c409d92d4fa6e5e4913adb8fef2cf6f1bdacba8a` | implemented active draft, not merged; real Device Bootstrap runtime integration pending; final review deferred until stack integration |
+| P5.3 Chat Foundation | PR #59 / `codex/04a-chat-e2ee-foundation` / `ce4a1355b2738f898109c2d70b038822996f77e7` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; migration 041 remains unapplied per PR declaration; independent security review pending |
+| P5.4 Chat Product UI | PR #60 / `codex/04b-chat-product-ui` / `c409d92d4fa6e5e4913adb8fef2cf6f1bdacba8a` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; no V1 entry-path integration; real Device Bootstrap runtime integration remains unverified |
 
 PR #54는 open/non-draft이고 #58/#59/#60은 open draft다 at this checkpoint. PR-specific
 CI 결과는 영구 acceptance가 아니다. PR #58의 remaining environment gates는 missing
@@ -76,7 +76,7 @@ master에서 active PR 코드를 구현된 것으로 세지 않으면, 사용자
 |---|---|---|
 | 사용자 콘텐츠 E2EE | daily_records P5는 active PR에 있으나 unmerged; 일정·여행·주기·미디어는 active P5 stack 밖 | `FUTURE` `PROD` |
 | 기기·복구 UX | P5 capability와 PR #58 foundation이 있으나 master에 merge되지 않았고 실제 기기 gate 미검증 | `FUTURE` `PROD` |
-| 채팅 | master에는 not merged; PR #59 foundation과 PR #60 product UI가 active draft에 존재 | `FUTURE` |
+| 자체 채팅 | master에는 not merged; PR #59 foundation과 PR #60 product UI가 active draft에 존재하나 현재 V1은 **FROZEN / DEFERRED** | `FUTURE` |
 | 주기 projection | 서버 평문 건강 데이터 계산 경계는 재설계 필요 | `SEC` `PROD` |
 | 정밀 위치 | 여행 항목에 정밀 위경도 평문 경로가 남아 있음 | `SEC` `BETA` |
 | 평문 영상 | 기존 평문 첨부 경로가 존재하며 Full User-Content E2EE 전에는 해소 필요 | `PRODUCT` `BETA` |
@@ -87,11 +87,11 @@ master에서 active PR 코드를 구현된 것으로 세지 않으면, 사용자
 ## 4. 핵심 루프와 범위 밖 기능
 
 P0–P4의 핵심 루프 작업은 default branch에 merge된 기록과 코드에서 확인한다.
-P5.3/P5.4 chat stack은 아직 unmerged다.
+P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진입 경로에서 동결한다.
 
 | 기능 | 현재 상태 |
 |---|---|
-| `상대방의 오늘` → 정확한 원본 → 대화 준비 | P0–P4 제품 작업은 merge된 범위; encrypted chat stack은 active draft |
+| `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위; 이야기거리 보관함·완료 처리는 후속 구현 대상 |
 | 알림 | 완전 미구현 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |

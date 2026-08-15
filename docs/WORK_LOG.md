@@ -825,6 +825,83 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-15 · [Control Tower / Conversation Bridge V1] canonical direction update
+
+#### PLAN POSITION
+- Phase: P4 / M2 direction update
+- Workstream: Product + Engineering canonicalization
+- Step: Conversation Bridge V1 CORE; 자체 Chat/Messenger DEFERRED
+- Previous Gate: Control Tower explicit decision
+- This Gate: canonical sources aligned; code implementation moves to a separate `origin/master` branch
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-15 Memory Product validation entry — YES
+- MASTER PLAN version / 기준일: Control Tower explicit decision / 2026-08-15
+- Does this task conflict with canonical direction: YES — prior documents treated chat as V1 core
+- If YES, what conflict: Control Tower explicitly supersedes that direction; this entry and canonical edits resolve it
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: Control Tower implementation owner
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `fc35ad0019eed14d41bfbe8bb8a0ee1760c311a1`
+- Old HEAD: `fc35ad0019eed14d41bfbe8bb8a0ee1760c311a1`
+- New HEAD / Reviewed HEAD: this commit (live push verified after commit)
+
+#### CHANGED / REVIEWED
+- `docs/PRODUCT_V3.md`: Conversation Bridge core loop, talk-about lifecycle, V1 scope, deferred self-chat boundary
+- `docs/BUSINESS_MEMORY_ROADMAP_V1.md`: M2, Free Core, and daily-flow wording
+- `docs/ENGINEERING_ROADMAP.md`: P4 ownership; P5.3/P5.4 FROZEN / DEFERRED while preserving P5.5/P6 gates
+- `docs/CURRENT_STATE.md`: PR #59/#60 and migration 041 recorded as active-draft assets, not V1 entry-path work
+- `docs/WORK_LOG.md`: this direction decision and evidence index
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; migration 041 remains an unapplied active-draft asset
+- product semantics: Control Tower direction update only; no implementation claim
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- `git diff --check`: PASS — no whitespace errors
+- live `gh pr view 61`: PASS — branch/head verified before writing
+- `rg` canonical chat/core references: PASS — remaining references identify DEFERRED/frozen historical assets or future review
+- remote Supabase catalog and production migration state: UNVERIFIED
+
+#### REVIEW IMPACT
+- DELTA — canonical product/roadmap/current-state direction changed; prior chat-product direction reviews do not authorize a V1 chat entry path
+
+#### BLOCKERS
+- code: none for the separate Conversation Bridge implementation branch
+- environment: remote Supabase catalog remains UNVERIFIED
+- external/manual: none
+
+#### STOPPED AT
+- exact completed boundary: canonical direction updated; no application or migration files changed on PR #61
+
+#### REMAINING
+- create separate `origin/master`-based code branch and implement Conversation Bridge V1
+
+#### NEXT ACTION
+- next owner: Codex implementation owner
+- tool/model: Terra / High
+- 기준 SHA: current `origin/master`
+- exact next task: extend existing P3 talk-about metadata/list path without using P5.3/P5.4 chat branches
+
+#### DO NOT ADVANCE UNTIL
+- canonical commit is pushed to PR #61
+- new code branch is created from live `origin/master`
+
+#### PRODUCTION
+- NOT APPLIED — no remote mutation, migration, or deployment
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

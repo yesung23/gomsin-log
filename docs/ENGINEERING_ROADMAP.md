@@ -42,11 +42,11 @@ Phase 1B는 로컬에서 Phase 1A 마이그레이션 체인(031→032→034→03
 | **P1** | **`상대방의 오늘` 통합** — 로컬·결정적·사실 기반, 뷰어가 볼 수 있는 기록만 | 순수 클라이언트 로직이며 현재 데이터 위에서 완전히 테스트 가능하다. E2EE 이후에는 "평문이 어디서 오는가"만 달라진다. 암호화 마이그레이션과 제품 로직 변경을 같은 단계에 묶으면 회귀 원인을 분리할 수 없다 |
 | **P2** | **정확한 원본 이동 하드닝 + 라우트/딥링크 동일성** | P1과 같은 이유. 삭제·수정·날짜 불일치를 먼저 고정한다. 라우트 주소 지정은 알림의 선행 조건이므로 함께 처리한다 |
 | **P3** | **양방향 `이따 이야기하기`** | 조율 메타데이터 추가에 그친다. 암호화 이후에 스키마를 건드리는 것보다 안전하다 |
-| **P4** | **채팅 제품/데이터 계약 및 구현 계획** → [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md) **(계약 작성 완료; 구현은 P5.3/P5.4가 소유)** | 채팅은 코어이며 사용자 콘텐츠다. E2EE 수직 슬라이스를 시작하기 **전에** 계약을 확정해야, daily_records와 채팅이 같은 봉투/키 경로를 두 번 설계하지 않는다. 계약 §20이 구현 전 닫아야 할 게이트 9개(C1–C9)를, §19가 P5·P6이 보존해야 할 결정을 정의한다. **P4는 채팅을 P5보다 먼저 구현하라는 뜻이 아니다** — P5.3/P5.4 active train이 계약을 실제 흐름에 연결한다 |
+| **P4** | **Conversation Bridge 완성** | P3의 양방향 조율 메타데이터를 이야기거리 보관함·정확한 원본·완료 처리까지 연결한다. 원문을 복사하지 않고 original-record 권한을 그대로 따른다 |
 | **P5.1** | **`daily_records` E2EE 수직 슬라이스** | Phase 1B의 첫 실제 콘텐츠 도메인 |
 | **P5.2** | **Device Bootstrap** | native device identity와 실제 기기 보호 상태가 먼저 고정되어야 한다 |
-| **P5.3** | **Chat E2EE Foundation** | 기존 couple CSK/GLE1 경계를 채팅 데이터에 적용한다 |
-| **P5.4** | **Chat Product Integration** | 암호화 기반을 실제 `/chat` 사용자 흐름에 연결한다 |
+| **P5.3** | **Chat E2EE Foundation — FROZEN / DEFERRED** | active draft에 구현된 couple CSK/GLE1 채팅 기반을 삭제하지 않고 동결한다. V1 제품 진입 경로에는 연결하지 않는다 |
+| **P5.4** | **Chat Product Integration — FROZEN / DEFERRED** | active draft의 `/chat` 통합 자산을 삭제하지 않고 동결한다. 재개에는 별도 제품·보안 승인 필요 |
 | **P5.5** | **Security Stack Integration** | P6A 이전 마지막 통합 gate다 |
 | **ARCH-P6** | **암호화 미디어 architecture decision** | 결정은 완료되었지만 P6 코드는 아직 구현하지 않는다 |
 | **P6A–P6D** | **CloudKit 미디어 구현·통합·실기기 hardening** | P5.5와 P6 entry conditions 이후에만 시작한다 |
@@ -69,7 +69,7 @@ write-floor, 로컬 outbox 보호와 negative authorization 증명을 고정한�
 
 code acceptance와 native device gate가 모두 통과되기 전에는 P5.2를 완료로 보지 않는다.
 
-### P5.3 — Chat E2EE Foundation
+### P5.3 — Chat E2EE Foundation (FROZEN / DEFERRED)
 
 - existing couple CSK와 GLE1
 - ciphertext-only server message
@@ -77,7 +77,7 @@ code acceptance와 native device gate가 모두 통과되기 전에는 P5.2를 �
 - LCK-sealed outbox
 - tombstone semantics
 
-### P5.4 — Chat Product Integration
+### P5.4 — Chat Product Integration (FROZEN / DEFERRED)
 
 - `/chat`과 Home one-action entry
 - sending, retry, unavailable, protection 상태
@@ -87,7 +87,8 @@ code acceptance와 native device gate가 모두 통과되기 전에는 P5.2를 �
 
 ### P5.5 — Security Stack Integration
 
-직선 통합 기준은 다음과 같다.
+P5.5 보안 gate의 기존 통합 기준은 동결 자산의 재개 또는 P6 선행 검증에만 적용한다.
+Conversation Bridge V1의 진입 조건을 약화시키거나 대체하지 않는다.
 
 ```text
 P5.1 → P5.2 → P5.3 → P5.4 → integrated review
@@ -147,7 +148,7 @@ gate다. M-stage가 P-stage를 대체하거나, 사업계획서의 개발 예정
 | 사업 단계 | 기술 대응 | 경계 |
 |---|---|---|
 | M1 개인정보 보호 | P5.1 / P5.2 | 텍스트 E2EE와 device/bootstrap gate를 개발·검증한다. 전체 사용자 콘텐츠 E2EE 완료를 뜻하지 않는다. |
-| M2 대화 연결 | P5.3 / P5.4 / P5.5 | 채팅 기반과 제품 흐름을 통합하고 security stack gate를 통과시킨다. |
+| M2 대화 연결 | P3 / P4 | Conversation Bridge로 기록에서 실제 대화까지의 맥락 연결을 완성한다. 자체 채팅은 V1 DEFERRED다. |
 | M3 고객 문제검증 | **LV — Limited Validation Gate** | 곰신 고객문제·연결행동·실제 대화를 검증하는 사업 단계다. 통제된 소규모 외부 검증에는 LV gate가 필요하고, 전체 P10 Public Beta/Production gate 통과를 요구하지는 않는다. |
 | M4 UX 개선 | 별도 P-stage 대체 없음 | 실증 이탈구간을 개선하는 제품 실행 단계다. |
 | M5 장기 기록 | P6A / P6B / P6C / 관련 P6D | 사진 E2EE·기본 기억 아카이브·개인 클라우드 연계 PoC의 판단 자료다. |

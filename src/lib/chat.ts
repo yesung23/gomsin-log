@@ -20,6 +20,10 @@ import type { ChatContext, ChatMessageContent } from '@/crypto/chatContent';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
+// Presentation code consumes these application types without reaching into the
+// crypto implementation module directly.
+export type { ChatContext, ChatMessageContent } from '@/crypto/chatContent';
+
 const CHAT_SELECT = 'message_id,couple_id,sender_user_id,ciphertext,ordinal,created_at';
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;

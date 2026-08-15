@@ -39,7 +39,10 @@ import {
  *    stops account B from replaying account A's writes into B's couple space.
  */
 
-export const OUTBOX_SCHEMA_VERSION = 1;
+// Version 2 adds the encrypted chat object store while preserving the existing
+// record queue. Both adapters open the same database and therefore share this
+// migration number.
+export const OUTBOX_SCHEMA_VERSION = 2;
 
 /**
  * Why a queued write could not be delivered.

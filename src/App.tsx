@@ -36,6 +36,9 @@ const TripDetailPage = lazy(() =>
 const ServicePage = lazy(() =>
   import('@/pages/ServicePage').then((m) => ({ default: m.ServicePage })),
 );
+const ChatPage = lazy(() =>
+  import('@/features/chat/ChatPage').then((m) => ({ default: m.ChatPage })),
+);
 const LegalPage = lazy(() =>
   import('@/pages/LegalPage').then((m) => ({ default: m.LegalPage })),
 );
@@ -262,6 +265,7 @@ export function App() {
           <>
             <Route path="/" element={<HomePage />} />
             <Route path="/home" element={<HomePage />} />
+            <Route path="/chat" element={<ChatPage />} />
             <Route path="/record" element={<RecordPage />} />
             <Route path="/schedule" element={<SchedulePage />} />
             <Route path="/service" element={<ServicePage />} />

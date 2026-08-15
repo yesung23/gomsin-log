@@ -92,6 +92,14 @@ export function TalkAboutListWidget() {
               >
                 <Check size={16} aria-hidden="true" />
               </button>
+              <button
+                type="button"
+                onClick={() => navigate('/chat', { state: { chatContext: { kind: 'talk_about', id: topic.record.id } } })}
+                aria-label={`${topic.record.time} 기록에 대해 채팅으로 이야기하기`}
+                className="shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-control text-coral-strong active:scale-95 transition"
+              >
+                <MessageCircle size={16} aria-hidden="true" />
+              </button>
             </li>
           ))}
         </ul>

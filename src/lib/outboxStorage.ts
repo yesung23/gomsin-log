@@ -17,6 +17,7 @@ import { OUTBOX_SCHEMA_VERSION } from '@/lib/outbox';
 
 const DATABASE_NAME = 'gomsinlog-outbox';
 const STORE_NAME = 'records';
+const CHAT_STORE_NAME = 'chat_messages';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -27,6 +28,9 @@ function openDatabase(): Promise<IDBDatabase> {
         // Keyed by the entry id, which is also the eventual `daily_records` row id,
         // so re-putting an entry updates it instead of duplicating it.
         database.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+      if (!database.objectStoreNames.contains(CHAT_STORE_NAME)) {
+        database.createObjectStore(CHAT_STORE_NAME, { keyPath: 'messageId' });
       }
     };
     request.onsuccess = () => resolve(request.result);

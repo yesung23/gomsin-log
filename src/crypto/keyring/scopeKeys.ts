@@ -22,7 +22,7 @@
  */
 
 import { equalBytes, zeroize } from '../bytes';
-import { KEY_DOMAIN, type KeyDomainCode } from '../domains';
+import { type KeyDomainCode } from '../domains';
 import {
   ENVELOPE_LENGTH,
   openEnvelope,
@@ -124,13 +124,11 @@ export async function provisionScopeKeyToRecipient(input: ProvisionInput): Promi
     if (!equalBytes(opened.header.scopeKeyId, input.header.scopeKeyId)) {
       fail('E_SCOPE_KEY_ID_MISMATCH', 'own envelope names a different scope key');
     }
-    // Couple scope headers use the pairing ceremony's canonical low-ordered
-    // member as ownerUserId, while the database scope itself is couple-owned.
-    // Callers assisting the other member cannot reconstruct that field from
-    // their own identity, so preserve the authenticated value below. Personal
-    // and health scopes are user-owned and must match the requested owner.
-    if (input.header.domain !== KEY_DOMAIN.couple
-      && !equalBytes(opened.header.ownerUserId, input.header.ownerUserId)) {
+    // Every domain has an exact owner contract. In particular, couple headers
+    // must already carry the SAS transcript's canonical low user; preserving an
+    // arbitrary opened owner would let a self-consistent attacker envelope be
+    // rewrapped into a valid recipient envelope.
+    if (!equalBytes(opened.header.ownerUserId, input.header.ownerUserId)) {
       fail('E_OWNER_MISMATCH', 'own envelope names a different owner');
     }
     if (!equalBytes(opened.header.scopeId, input.header.scopeId)) {

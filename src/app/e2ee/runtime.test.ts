@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { aesGcmOpen, aesGcmSeal, importAesKey, randomBytes, randomNonce } from '@/crypto/suite';
+import {
+  aesGcmOpen,
+  aesGcmSeal,
+  generateEphemeralAgreement,
+  importAesKey,
+  randomBytes,
+  randomNonce,
+} from '@/crypto/suite';
+import { uuidToBytes } from '@/crypto/bytes';
+import { KEY_DOMAIN, RECIPIENT_KIND } from '@/crypto/domains';
+import { sealScopeKeyForRecipient } from '@/crypto/keyring/scopeKeys';
 import { decideRecordWrite } from '@/app/records/contentCrypto';
 import { getRecordCryptoEnvironment } from '@/lib/records';
 import { getOutboxLocalCacheKey } from '@/lib/outbox';
@@ -40,6 +50,7 @@ describe('verified E2EE runtime', () => {
     const key = await environment.scopeKeyFor('personal', account.userId, 1n);
     expect(key).not.toBeNull();
     expect(key?.extractable).toBe(false);
+    expect(await environment.scopeKeyFor('health', account.userId, 1n)).not.toBeNull();
     await activatePersonalProtection({
       userId: account.userId,
       deviceId: bootstrapped.deviceId,
@@ -124,6 +135,103 @@ describe('verified E2EE runtime', () => {
     envelope.envelope[envelope.envelope.length - 1] ^= 1;
     await expect(environment.scopeKeyFor('personal', account.userId, 1n))
       .rejects.toThrow(/E_BAD_SIGNATURE|E2EE/);
+  });
+
+  it('rejects the Kiro cross-account personal-scope attack before key import', async () => {
+    const server = createMemoryServer();
+    const alice = createMemoryAccount(server);
+    const bob = createMemoryAccount(server);
+    const aliceBoot = await bootstrapFirstDevice(alice.devices[0].deps, { userId: alice.userId, platform: 'ios' });
+    await confirmRecoveryKit(alice.devices[0].deps, {
+      userId: alice.userId, recoveryCode: aliceBoot.recoveryCode, kitAnchor: aliceBoot.kitAnchor,
+    });
+    const bobBoot = await bootstrapFirstDevice(bob.devices[0].deps, { userId: bob.userId, platform: 'ios' });
+    await confirmRecoveryKit(bob.devices[0].deps, {
+      userId: bob.userId, recoveryCode: bobBoot.recoveryCode, kitAnchor: bobBoot.kitAnchor,
+    });
+
+    // B's legitimate anchor is pinned as partner material, but that fact must
+    // not grant B authority over A's personal scope.
+    await alice.localState.pinTrustAnchor(bob.userId, (await bob.localState.loadTrustAnchor(bob.userId))!);
+    const personal = server.scopeKeys.find((scope) => scope.domain === 'personal' && scope.scopeId === alice.userId)!;
+    const bobDevice = server.devices.find((device) => device.id === bobBoot.deviceId)!;
+    const aliceDevice = server.devices.find((device) => device.id === aliceBoot.deviceId)!;
+    const bobCertificate = server.certificates.find((certificate) => certificate.subjectDeviceId === bobBoot.deviceId)!;
+    const attackerEnvelope = await sealScopeKeyForRecipient({
+      scopeKey: randomBytes(32),
+      recipientKemSpki: aliceDevice.kemSpki,
+      recipientId: uuidToBytes(aliceBoot.deviceId),
+      recipientKind: RECIPIENT_KIND.device,
+      senderDeviceId: uuidToBytes(bobBoot.deviceId),
+      senderSigSpki: bobDevice.sigSpki,
+      sign: (message) => bob.devices[0].deviceKeys.sign(`dev_sig:${bobBoot.deviceId}`, message),
+      makeEphemeral: (peer) => generateEphemeralAgreement(peer),
+      header: {
+        domain: KEY_DOMAIN.personal,
+        scopeKeyId: uuidToBytes(personal.id),
+        ownerUserId: uuidToBytes(alice.userId),
+        scopeId: uuidToBytes(alice.userId),
+        epoch: personal.epoch,
+      },
+      nowMs: BigInt(server.now()),
+    });
+    server.envelopes = server.envelopes.filter(
+      (envelope) => !(envelope.scopeKeyId === personal.id && envelope.recipientId === aliceBoot.deviceId),
+    );
+    server.envelopes.push({
+      scopeKeyId: personal.id,
+      recipientKind: 'device',
+      recipientId: aliceBoot.deviceId,
+      senderDeviceId: bobBoot.deviceId,
+      senderCertificateId: bobCertificate.id,
+      envelope: attackerEnvelope,
+      selfNotarized: false,
+    });
+
+    const environment = await createVerifiedRecordCryptoEnvironment({
+      userId: alice.userId,
+      deviceId: aliceBoot.deviceId,
+      repository: alice.devices[0].deps.repository,
+      localState: alice.localState,
+      deviceKeys: alice.devices[0].deviceKeys,
+      now: () => server.now(),
+    });
+    await expect(environment.scopeKeyFor('personal', alice.userId, personal.epoch))
+      .rejects.toMatchObject({ code: 'E_SCOPE_SENDER_UNAUTHORIZED' });
+
+    const health = server.scopeKeys.find((scope) => scope.domain === 'health' && scope.scopeId === alice.userId)!;
+    const healthAttack = await sealScopeKeyForRecipient({
+      scopeKey: randomBytes(32),
+      recipientKemSpki: aliceDevice.kemSpki,
+      recipientId: uuidToBytes(aliceBoot.deviceId),
+      recipientKind: RECIPIENT_KIND.device,
+      senderDeviceId: uuidToBytes(bobBoot.deviceId),
+      senderSigSpki: bobDevice.sigSpki,
+      sign: (message) => bob.devices[0].deviceKeys.sign(`dev_sig:${bobBoot.deviceId}`, message),
+      makeEphemeral: (peer) => generateEphemeralAgreement(peer),
+      header: {
+        domain: KEY_DOMAIN.health,
+        scopeKeyId: uuidToBytes(health.id),
+        ownerUserId: uuidToBytes(alice.userId),
+        scopeId: uuidToBytes(alice.userId),
+        epoch: health.epoch,
+      },
+      nowMs: BigInt(server.now()),
+    });
+    server.envelopes = server.envelopes.filter(
+      (envelope) => !(envelope.scopeKeyId === health.id && envelope.recipientId === aliceBoot.deviceId),
+    );
+    server.envelopes.push({
+      scopeKeyId: health.id,
+      recipientKind: 'device',
+      recipientId: aliceBoot.deviceId,
+      senderDeviceId: bobBoot.deviceId,
+      senderCertificateId: bobCertificate.id,
+      envelope: healthAttack,
+      selfNotarized: false,
+    });
+    await expect(environment.scopeKeyFor('health', alice.userId, health.epoch))
+      .rejects.toMatchObject({ code: 'E_SCOPE_SENDER_UNAUTHORIZED' });
   });
 
   it('installs LCK and record environment together, and clears both on close', async () => {

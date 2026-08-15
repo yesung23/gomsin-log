@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '@/lib/useStore';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { classifyServerError } from '@/lib/serverErrors';
@@ -21,6 +21,10 @@ import {
 import { useEscapeKey } from '@/lib/hooks';
 import { buildPersonalExport } from '@/lib/dataExport';
 import { DeviceProtectionSection } from '@/components/DeviceProtectionSection';
+import { loadSettingsBootstrapFacts } from '@/app/e2ee/settingsFacts';
+import type { BootstrapFacts } from '@/app/e2ee/bootstrapStateMachine';
+
+const SETTINGS_INSTALLATION_NAMESPACE = 'gomsinlog-settings-protected-state-v1';
 
 export function SettingsPage() {
   const {
@@ -61,6 +65,28 @@ export function SettingsPage() {
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
   const ownRecords = records.filter((record) => record.userId === settingsIdentityKey);
   const hasCoupleSpace = !!profile.couple.coupleId;
+  const [bootstrapFacts, setBootstrapFacts] = useState<BootstrapFacts | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBootstrapFacts(null);
+    const userId = settingsIdentityKey;
+    if (!userId || !supabase) return () => { cancelled = true; };
+    void (async () => {
+      try {
+        const facts = await loadSettingsBootstrapFacts({
+          userId,
+          coupleId: profile.couple.coupleId ?? null,
+          installationId: SETTINGS_INSTALLATION_NAMESPACE,
+          supabaseClient: supabase,
+        });
+        if (!cancelled) setBootstrapFacts(facts);
+      } catch {
+        if (!cancelled) setBootstrapFacts(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile.couple.coupleId, settingsIdentityKey]);
 
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
@@ -338,8 +364,10 @@ export function SettingsPage() {
         </section>
 
         <DeviceProtectionSection
-          state="UNAVAILABLE"
-          errorMessage="보호 설정을 실제로 시작하려면 이 기기의 보안 저장소 연결이 먼저 필요해요. 현재는 설정 상태만 안전하게 보류하고 있어요."
+          facts={bootstrapFacts ?? undefined}
+          state={bootstrapFacts ? undefined : 'UNAVAILABLE'}
+          onStart={() => toast.info('보호 설정은 이 기기의 보안 절차에서 진행됩니다.')}
+          errorMessage={!bootstrapFacts ? '보호 설정 상태를 확인하려면 이 기기의 보호 저장소 연결이 필요해요.' : undefined}
         />
 
         <section className="space-y-2">

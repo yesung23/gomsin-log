@@ -4,6 +4,7 @@ import {
   openOutboxRecord,
   sealOutboxRecord,
   type SealedOutboxRecord,
+  type OutboxLocalKey,
 } from '@/lib/outboxCrypto';
 
 /**
@@ -174,13 +175,13 @@ export async function countForAccount(
  * record is the worse outcome. The entry records which it is, so nothing
  * downstream has to guess.
  */
-let localCacheKey: CryptoKey | null = null;
+let localCacheKey: OutboxLocalKey | null = null;
 
-export function setOutboxLocalCacheKey(key: CryptoKey | null): void {
+export function setOutboxLocalCacheKey(key: OutboxLocalKey | null): void {
   localCacheKey = key;
 }
 
-export function getOutboxLocalCacheKey(): CryptoKey | null {
+export function getOutboxLocalCacheKey(): OutboxLocalKey | null {
   return localCacheKey;
 }
 

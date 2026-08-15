@@ -13,6 +13,7 @@ import { KEY_DOMAIN, type KeyDomainName } from '@/crypto/domains';
 import { openEnvelope } from '@/crypto/glk2';
 import { importScopeKeyForUse } from '@/crypto/keyring/scopeKeys';
 import { type DeviceKeyPort } from '@/crypto/keystore';
+import type { LocalKeyBinding, LocalKeyPort } from '@/crypto/keystore/LocalKeyPort';
 import { loadRevocationSet, anchorFromPin, buildChain, certificatesById } from './trust';
 import { isDeviceTrusted } from '@/crypto/deviceCertificate';
 import type { RecordCryptoEnvironment, ScopeEpoch } from '@/app/records/contentCrypto';
@@ -35,18 +36,7 @@ function fail(code: string, message: string): never {
   throw new E2eeRuntimeError(code, message);
 }
 
-export type RuntimeLocalKeyProvider = {
-  /**
-   * Returns an account/device-scoped LCK from an approved secure local store.
-   * A provider must never implement this with localStorage or plaintext
-   * IndexedDB. This port is intentionally required by installation.
-   */
-  loadOrCreateLck(userId: string, deviceId: string): Promise<{
-    key: CryptoKey;
-    userId: string;
-    deviceId: string;
-  } | null>;
-};
+export type RuntimeLocalKeyProvider = LocalKeyPort;
 
 export type RuntimeInstallInput = {
   userId: string;
@@ -54,11 +44,18 @@ export type RuntimeInstallInput = {
   localState: E2eeLocalState;
   deviceKeys: DeviceKeyPort;
   localKeys: RuntimeLocalKeyProvider;
+  installationId: string;
+  /** Read-only probe used to refuse silent LCK replacement after ciphertext loss. */
+  hasSealedOutbox?: () => Promise<boolean>;
   now?: () => number;
 };
 
 function deviceKemHandle(deviceId: string): string {
   return `dev_kem:${deviceId}`;
+}
+
+function deviceSigHandle(deviceId: string): string {
+  return `dev_sig:${deviceId}`;
 }
 
 async function exactTrustedSender(input: {
@@ -73,9 +70,13 @@ async function exactTrustedSender(input: {
   }
   const pin = await input.localState.loadTrustAnchor(input.certificate.userId);
   if (!pin) fail('E_SENDER_ANCHOR_MISSING', 'the sender account has no locally confirmed trust anchor');
+  const serverOriginId = await input.repository.serverOriginId();
+  if (pin.subjectUserId !== input.certificate.userId || !equalBytes(pin.serverOriginId, serverOriginId)) {
+    fail('E_SENDER_ANCHOR_CONTEXT_MISMATCH', 'the pinned sender anchor is bound to another user or server');
+  }
   const anchor = await anchorFromPin({
     userId: input.certificate.userId,
-    serverOriginId: await input.repository.serverOriginId(),
+    serverOriginId,
     rootRecSigSpki: pin.rootRecSigSpki,
     recoveryIdentityId: pin.recoveryIdentityId,
     recoveryVersion: pin.recoveryVersion,
@@ -120,10 +121,17 @@ export async function createVerifiedRecordCryptoEnvironment(input: {
   }
   const device = await input.repository.getDevice(input.deviceId);
   if (!device || device.userId !== input.userId) fail('E_DEVICE_NOT_FOUND', 'the runtime device is not owned by this account');
+  if (!(await input.deviceKeys.hasKey(deviceSigHandle(input.deviceId)))) {
+    fail('E_DEVICE_SIG_UNAVAILABLE', 'the device signing key is unavailable');
+  }
   if (!(await input.deviceKeys.hasKey(deviceKemHandle(input.deviceId)))) {
     fail('E_DEVICE_KEM_UNAVAILABLE', 'the device agreement key is unavailable');
   }
+  const ownSigSpki = await input.deviceKeys.getPublicKey(deviceSigHandle(input.deviceId));
   const ownKemSpki = await input.deviceKeys.getPublicKey(deviceKemHandle(input.deviceId));
+  if (!equalBytes(ownSigSpki, device.sigSpki)) {
+    fail('E_DEVICE_KEY_MISMATCH', 'the installed device signing key does not match the server public key');
+  }
   if (!equalBytes(ownKemSpki, device.kemSpki)) {
     fail('E_DEVICE_KEY_MISMATCH', 'the installed device key does not match the server public key');
   }
@@ -206,21 +214,43 @@ export async function installE2eeRuntime(input: RuntimeInstallInput): Promise<In
   const pending = await input.localState.loadBootstrap(input.userId);
   if (!pending || pending.state !== 'COMPLETE') fail('E_BOOTSTRAP_NOT_COMPLETE', 'bootstrap is not complete');
   const environment = await createVerifiedRecordCryptoEnvironment({ ...input, deviceId: pending.deviceId });
-  const lck = await input.localKeys.loadOrCreateLck(input.userId, pending.deviceId);
+  const binding: LocalKeyBinding = {
+    installationId: input.installationId,
+    userId: input.userId,
+    deviceId: pending.deviceId,
+    purpose: 'lck',
+    version: 1,
+  };
+  if (input.hasSealedOutbox && await input.hasSealedOutbox()) {
+    const existing = await input.localKeys.load(binding);
+    if (!existing || !(await existing.has())) {
+      fail('E_LCK_MISSING_WITH_CIPHERTEXT', 'sealed outbox content exists but its LCK is unavailable');
+    }
+  }
+  const lck = await input.localKeys.loadOrCreate(binding);
   if (!lck) fail('E_SECURE_LOCAL_STORAGE_REQUIRED', 'no approved secure local storage is available for the LCK');
-  if (lck.userId !== input.userId || lck.deviceId !== pending.deviceId) {
+  if (lck.binding.userId !== input.userId || lck.binding.deviceId !== pending.deviceId
+    || lck.binding.installationId !== input.installationId) {
     fail('E_LOCAL_KEY_ACCOUNT_MISMATCH', 'the local cache key is bound to a different account or device');
   }
 
   // Re-installation is single-owner too: a late duplicate bootstrap must not
   // leave two teardown callbacks with different account/device bindings.
   clearRuntimeLifecycle();
-  setRecordCryptoEnvironment(environment);
-  setOutboxLocalCacheKey(lck.key);
-  registerE2eeRuntimeTeardown(() => {
+  try {
+    setRecordCryptoEnvironment(environment);
+    setOutboxLocalCacheKey(lck);
+    registerE2eeRuntimeTeardown(() => {
+      setRecordCryptoEnvironment(null);
+      setOutboxLocalCacheKey(null);
+    });
+  } catch (error) {
+    // Do not leave one capability installed if a later registration step fails.
     setRecordCryptoEnvironment(null);
     setOutboxLocalCacheKey(null);
-  });
+    clearRuntimeLifecycle();
+    throw error;
+  }
   let closed = false;
   return {
     environment,

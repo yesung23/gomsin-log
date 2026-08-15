@@ -15,6 +15,7 @@
     "check:edge": "deno check supabase/functions/delete-account/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts supabase/functions/_shared/e2eeVerify.ts supabase/functions/_shared/e2eeTranscript.ts supabase/functions/approve-device/handler.ts supabase/functions/approve-device/index.ts supabase/functions/verify-recovery/handler.ts supabase/functions/verify-recovery/index.ts supabase/functions/issue-recovery-challenge/handler.ts supabase/functions/issue-recovery-challenge/index.ts",
     "test:edge": "deno test --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts",
     "test:rollback": "node scripts/e2ee/rollback-harness.mjs",
+    "test:write-floor": "node scripts/e2ee/write-floor-scope-harness.mjs",
     "test:p0": "node scripts/e2ee/p0-harness.mjs",
     "test:p5": "node scripts/e2ee/p5-harness.mjs",
     "test:phase0": "node scripts/phase0/storage-authz-harness.mjs",

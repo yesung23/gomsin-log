@@ -393,10 +393,15 @@ export type PendingBootstrap = {
 };
 
 export type PinnedTrustAnchor = {
+  /** Full pin-once tuple. Every field is compared before accepting a server row. */
+  subjectUserId: string;
+  serverOriginId: Uint8Array;
   rootRecSigPubFp: Uint8Array;
   rootRecSigSpki: Uint8Array;
   recoveryIdentityId: string;
   recoveryVersion: number;
+  recoveryBundleFp: Uint8Array;
+  pinSource: 'bootstrap' | 'device_enrollment' | 'pairing' | 'recovery';
 };
 
 export interface E2eeLocalState {

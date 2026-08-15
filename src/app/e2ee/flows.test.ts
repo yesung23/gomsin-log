@@ -130,6 +130,8 @@ describe('Scenario A — first device setup', () => {
       userId: alice.userId, recoveryCode: result.recoveryCode, kitAnchor: result.kitAnchor,
     });
     expect(alice.localState.bootstraps.get(alice.userId)!.state).toBe('COMPLETE');
+    expect(alice.localState.bootstraps.get(alice.userId)!.recoverySecret).toBeNull();
+    expect(alice.localState.bootstraps.get(alice.userId)!.recoveryCode).toBeNull();
     expect(server.devices[0].status).toBe('ACTIVE');
   });
 
@@ -203,13 +205,11 @@ describe('Scenario A — first device setup', () => {
     expect(server.devices).toHaveLength(0);
   });
 
-  it('grants no health domain on web', async () => {
+  it('refuses Web as a first or only bootstrap device', async () => {
     const web = createMemoryAccount(server);
-    await bootstrapFirstDevice(web.devices[0].deps, { userId: web.userId, platform: 'web' });
-    expect(server.scopeKeys.filter((k) => k.domain === 'health' && k.scopeId === web.userId))
-      .toHaveLength(0);
-    expect(server.scopeKeys.filter((k) => k.domain === 'personal' && k.scopeId === web.userId))
-      .toHaveLength(1);
+    await expect(bootstrapFirstDevice(web.devices[0].deps, { userId: web.userId, platform: 'web' }))
+      .rejects.toThrow('E_WEB_BOOTSTRAP_RESTRICTED');
+    expect(server.scopeKeys.filter((k) => k.scopeId === web.userId)).toHaveLength(0);
   });
 });
 

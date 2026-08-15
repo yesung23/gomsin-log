@@ -14,7 +14,8 @@ import Capacitor
 /// A Secure Enclave key physically cannot leave the SEP — the Phase 1A-1 spike
 /// confirmed the token itself refuses with `errSecUnimplemented` — so such a
 /// method would be a promise the platform cannot keep. The surface below is
-/// exactly the eight operations `DeviceKeyPort` needs, all operation-by-handle.
+/// exactly the device-key operations plus the five LCK capability operations;
+/// all secret operations remain native and operation-by-handle.
 ///
 /// ## Logging
 ///
@@ -53,9 +54,15 @@ public class GomsinlogDeviceKeysPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "deleteKey", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getAssurance", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "hasKey", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "lckEnsure", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "lckHas", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "lckSeal", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "lckOpen", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "lckDelete", returnType: CAPPluginReturnPromise),
     ]
 
     private let keys = DeviceKeys()
+    private let localKeys = LocalKeys()
 
     /// A P-256 SubjectPublicKeyInfo is exactly this wide.
     private static let spkiP256Bytes = 91
@@ -165,6 +172,20 @@ public class GomsinlogDeviceKeysPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    // MARK: - LCK capability
+
+    @objc func lckEnsure(_ call: CAPPluginCall) { guard let tag = localTag(call) else { return }; runBounded(call) { [self] in ["present": try localKeys.ensure(tag: tag)] } }
+    @objc func lckHas(_ call: CAPPluginCall) { guard let tag = localTag(call) else { return }; runBounded(call) { [self] in ["present": try localKeys.has(tag: tag)] } }
+    @objc func lckSeal(_ call: CAPPluginCall) {
+        guard let tag = localTag(call), let plaintext = requireBytes(call, "plaintext"), let aad = requireBytes(call, "aad") else { return }
+        runBounded(call) { [self] in let sealed = try localKeys.seal(tag: tag, plaintext: plaintext, aad: aad); return ["nonce": sealed.nonce.base64EncodedString(), "ciphertext": sealed.ciphertext.base64EncodedString()] }
+    }
+    @objc func lckOpen(_ call: CAPPluginCall) {
+        guard let tag = localTag(call), let nonce = requireBytes(call, "nonce"), let ciphertext = requireBytes(call, "ciphertext"), let aad = requireBytes(call, "aad") else { return }
+        runBounded(call) { [self] in ["plaintext": try localKeys.open(tag: tag, nonce: nonce, ciphertext: ciphertext, aad: aad).base64EncodedString()] }
+    }
+    @objc func lckDelete(_ call: CAPPluginCall) { guard let tag = localTag(call) else { return }; runBounded(call) { [self] in try localKeys.delete(tag: tag); return [:] } }
+
     // MARK: - Boundary helpers
 
     /// Run a delegated operation and translate failures into a bounded rejection.
@@ -218,5 +239,17 @@ public class GomsinlogDeviceKeysPlugin: CAPPlugin, CAPBridgedPlugin {
             return nil
         }
         return bytes
+    }
+
+    private func localTag(_ call: CAPPluginCall) -> String? {
+        guard let installation = call.getString("installationId"),
+              let user = call.getString("userId"),
+              let device = call.getString("deviceId"),
+              let purpose = call.getString("purpose"),
+              let version = call.getInt("version") else {
+            call.reject("local capability binding is incomplete", "E_BAD_LOCAL_BINDING")
+            return nil
+        }
+        return "v\(version)|\(installation)|\(user)|\(device)|\(purpose)"
     }
 }

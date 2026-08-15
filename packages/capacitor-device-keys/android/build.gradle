@@ -11,7 +11,10 @@ android {
     namespace "app.gomsinlog.devicekeys"
     compileSdk 35
     defaultConfig {
-        minSdk 26
+        // The app still installs on the historical minSdk, but the plugin
+        // rejects all Device Bootstrap operations below API 31 at runtime;
+        // there is no software fallback on API 23-30.
+        minSdk 23
         targetSdk 35
     }
     compileOptions {

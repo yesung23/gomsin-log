@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { importAesKey, randomBytes } from '@/crypto/suite';
+import { aesGcmOpen, aesGcmSeal, importAesKey, randomBytes, randomNonce } from '@/crypto/suite';
 import { decideRecordWrite } from '@/app/records/contentCrypto';
 import { getRecordCryptoEnvironment } from '@/lib/records';
 import { getOutboxLocalCacheKey } from '@/lib/outbox';
@@ -145,17 +145,53 @@ describe('verified E2EE runtime', () => {
       localState: device.deps.localState,
       deviceKeys: device.deviceKeys,
       localKeys: {
-        loadOrCreateLck: async () => ({
-          key: await importAesKey(randomBytes(32), ['encrypt', 'decrypt']),
-          userId: account.userId,
-          deviceId: bootstrapped.deviceId,
-        }),
+        load: async () => null,
+        loadOrCreate: async (binding) => {
+          const key = await importAesKey(randomBytes(32), ['encrypt', 'decrypt']);
+          return {
+            binding,
+            has: async () => true,
+            seal: async ({ plaintext, aad }) => {
+              const nonce = randomNonce();
+              return { nonce, ciphertext: await aesGcmSeal(key, nonce, plaintext, aad) };
+            },
+            open: async ({ sealed, aad }) => aesGcmOpen(key, sealed.nonce, sealed.ciphertext, aad),
+            delete: async () => {},
+          };
+        },
       },
+      installationId: 'installation-test',
       now: () => server.now(),
     });
     expect(getRecordCryptoEnvironment()).toBe(installed.environment);
     expect(getOutboxLocalCacheKey()).not.toBeNull();
     installed.close();
+    expect(getRecordCryptoEnvironment()).toBeNull();
+    expect(getOutboxLocalCacheKey()).toBeNull();
+  });
+
+  it('does not replace a missing LCK when sealed ciphertext is present', async () => {
+    const server = createMemoryServer();
+    const account = createMemoryAccount(server);
+    const device = account.devices[0];
+    const bootstrapped = await bootstrapFirstDevice(device.deps, {
+      userId: account.userId,
+      platform: 'ios',
+    });
+    await confirmRecoveryKit(device.deps, {
+      userId: account.userId,
+      recoveryCode: bootstrapped.recoveryCode,
+      kitAnchor: bootstrapped.kitAnchor,
+    });
+    await expect(installE2eeRuntime({
+      userId: account.userId,
+      repository: device.deps.repository,
+      localState: device.deps.localState,
+      deviceKeys: device.deviceKeys,
+      installationId: 'installation-loss-test',
+      localKeys: { load: async () => null, loadOrCreate: async () => null },
+      hasSealedOutbox: async () => true,
+    })).rejects.toThrow('E_LCK_MISSING_WITH_CIPHERTEXT');
     expect(getRecordCryptoEnvironment()).toBeNull();
     expect(getOutboxLocalCacheKey()).toBeNull();
   });

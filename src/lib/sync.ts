@@ -4,6 +4,7 @@ import { fetchRecordsResultFromDB } from '@/lib/records';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { fetchEventsResultFromDB } from '@/lib/events';
 import { fetchTripsResultFromDB } from '@/lib/trips';
+import { fetchTalkAboutMarksFromDB } from '@/lib/talkAbout';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 
 export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
@@ -251,7 +252,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
      * waiting saw their entries vanish on the next load.
      */
     const coupleSpaceId = couple.coupleId;
-    const [recordsResult, eventsResult, tripsResult] = await Promise.all([
+    const [recordsResult, eventsResult, tripsResult, talkAboutMarks] = await Promise.all([
       coupleSpaceId
         ? fetchRecordsResultFromDB(coupleSpaceId)
         : Promise.resolve({ ok: true as const, records: [] as DailyRecord[] }),
@@ -261,6 +262,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       coupleSpaceId
         ? fetchTripsResultFromDB(coupleSpaceId)
         : Promise.resolve({ ok: true as const, trips: [] as Trip[] }),
+      coupleSpaceId ? fetchTalkAboutMarksFromDB(coupleSpaceId) : Promise.resolve([]),
     ]);
     if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
       // Prefer a definite cause over a generic one: `forbidden` from a slice read
@@ -303,6 +305,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
         records,
         events,
         trips,
+        talkAboutMarks,
         setupComplete: !!profileData.onboarding_completed_at,
       },
     };

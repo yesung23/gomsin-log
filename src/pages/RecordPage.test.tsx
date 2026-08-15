@@ -696,6 +696,7 @@ describe('RecordPage: 이따 이야기하기 on a record', () => {
       coupleId: 'couple-1',
       actorUserId: ME,
       createdAt: `${TODAY}T11:00:00.000Z`,
+      isCompleted: false,
     }];
     const user = userEvent.setup({ delay: null });
     renderPage([record()]);
@@ -716,6 +717,7 @@ describe('RecordPage: 이따 이야기하기 on a record', () => {
       coupleId: 'couple-1',
       actorUserId: PARTNER,
       createdAt: `${TODAY}T11:00:00.000Z`,
+      isCompleted: false,
     }];
     const user = userEvent.setup({ delay: null });
     renderPage([record()]);

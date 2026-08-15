@@ -15,6 +15,7 @@ vi.mock('@/lib/supabase', () => ({
 const mockFetchRecordsResultFromDB = vi.hoisted(() => vi.fn());
 const mockFetchEventsResultFromDB = vi.hoisted(() => vi.fn());
 const mockFetchTripsResultFromDB = vi.hoisted(() => vi.fn());
+const mockFetchTalkAboutMarksFromDB = vi.hoisted(() => vi.fn());
 const mockVisibleRecordsForViewer = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/records', () => ({
@@ -27,6 +28,10 @@ vi.mock('@/lib/events', () => ({
 
 vi.mock('@/lib/trips', () => ({
   fetchTripsResultFromDB: mockFetchTripsResultFromDB,
+}));
+
+vi.mock('@/lib/talkAbout', () => ({
+  fetchTalkAboutMarksFromDB: mockFetchTalkAboutMarksFromDB,
 }));
 
 vi.mock('@/lib/privacy', () => ({
@@ -100,11 +105,13 @@ describe('fetchFullStateFromDB', () => {
     mockFetchRecordsResultFromDB.mockReset();
     mockFetchEventsResultFromDB.mockReset();
     mockFetchTripsResultFromDB.mockReset();
+    mockFetchTalkAboutMarksFromDB.mockReset();
     mockVisibleRecordsForViewer.mockReset();
 
     mockFetchRecordsResultFromDB.mockResolvedValue({ ok: true, records: [] });
     mockFetchEventsResultFromDB.mockResolvedValue({ ok: true, events: [] });
     mockFetchTripsResultFromDB.mockResolvedValue({ ok: true, trips: [] });
+    mockFetchTalkAboutMarksFromDB.mockResolvedValue([]);
     mockVisibleRecordsForViewer.mockReturnValue([]);
   });
 

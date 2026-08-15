@@ -295,6 +295,85 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-15 · [P4 / M2] Conversation Bridge V1 implementation
+
+#### PLAN POSITION
+- Phase: P4 / M2
+- Workstream: Conversation Bridge
+- Step: P3 `talk_about_marks` extension — pending list, exact source, completion, unavailable source
+- Previous Gate: Control Tower canonical update `def18da` on PR #61
+- This Gate: local implementation and actor-RLS verification complete; remote migration remains unapplied
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES (Control Tower branch `def18da`)
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES (Control Tower branch `def18da`)
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES (Control Tower branch `def18da`)
+- Current-state checked: `docs/CURRENT_STATE.md` — YES (Control Tower branch `def18da`)
+- Latest relevant Work Log checked: Control Tower Conversation Bridge direction entry — YES
+- MASTER PLAN version / 기준일: Control Tower explicit decision / 2026-08-15
+- Does this task conflict with canonical direction: NO — implemented the explicitly approved Conversation Bridge V1; P5.3/P5.4 were not used
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: implementation owner
+- PR: not opened
+- Branch: `codex/conversation-bridge-v1`
+- Base SHA: `88cb7a9528e31692224d2c71c9fb35c09cef1482` (`origin/master`)
+- Old HEAD: `88cb7a9528e31692224d2c71c9fb35c09cef1482`
+- New HEAD / Reviewed HEAD: this commit (verified after commit)
+
+#### CHANGED / REVIEWED
+- `supabase/migrations/043_conversation_bridge_completion.sql`: adds monotonic `is_completed` coordination metadata, active-couple UPDATE RLS, and retains only an opaque source id after record deletion
+- `src/lib/talkAbout.ts`, `talkAboutList.ts`, `store.tsx`, `sync.ts`: pending-only hydration, realtime invalidation, account/workspace guards, exact-source unavailable handling
+- `TalkAboutListWidget.tsx`: Home `오늘 이야기할 것 · N`, author/date/safe preview, explicit original view and completion action
+- regression tests and local actor-RLS harness: updated for completion, unavailable sources, account-switch isolation, duplicate and authorization paths
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics outside `talk_about_marks`: unchanged
+- product semantics: no self-chat, external messenger SDK, share-sheet transfer, media, AI, archive, or redesign
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- targeted Vitest (`store`, `sync`, `talkAboutList`, widget, RecordPage): PASS — 106 tests
+- `node scripts/phase0/storage-authz-harness.mjs`: PASS — 124 actor/RLS assertions on throwaway PostgreSQL
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS
+- `npm run build`: PASS
+- `git diff --check`: PASS
+- remote Supabase catalog / production migration state / physical device: UNVERIFIED
+
+#### REVIEW IMPACT
+- FULL — new RLS-enabled migration and authorization lifecycle path; independent review required for this HEAD
+
+#### BLOCKERS
+- code: none
+- environment: remote migration state is UNVERIFIED
+- external/manual: Production application is intentionally not authorized
+
+#### STOPPED AT
+- exact completed boundary: local code and migration are verified only; no remote mutation or deployment
+
+#### REMAINING
+- independent review result, intentional commit/push/PR handoff
+
+#### NEXT ACTION
+- next owner: reviewer, then release owner
+- tool/model: Terra / High
+- 기준 SHA: this branch HEAD after commit
+- exact next task: review Conversation Bridge migration and lifecycle diff; apply no Production migration without separate approval
+
+#### DO NOT ADVANCE UNTIL
+- independent review has no unresolved security finding
+- migration is separately rehearsed and authorized before any remote application
+
+#### PRODUCTION
+- NOT APPLIED
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

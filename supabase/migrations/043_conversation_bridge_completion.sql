@@ -45,6 +45,30 @@ USING public.daily_records AS record
 WHERE record.id = mark.record_id
   AND record.is_private = true;
 
+-- A record that is later made private must revoke its coordination metadata in
+-- the same database change. Showing even a generic unavailable topic to the
+-- partner would disclose that a now-private record exists and was marked.
+CREATE OR REPLACE FUNCTION public.clear_talk_about_marks_when_record_private()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  DELETE FROM public.talk_about_marks WHERE record_id = NEW.id;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.clear_talk_about_marks_when_record_private() FROM PUBLIC;
+
+DROP TRIGGER IF EXISTS clear_talk_about_marks_when_record_private ON public.daily_records;
+CREATE TRIGGER clear_talk_about_marks_when_record_private
+  AFTER UPDATE OF is_private ON public.daily_records
+  FOR EACH ROW
+  WHEN (OLD.is_private = false AND NEW.is_private = true)
+  EXECUTE FUNCTION public.clear_talk_about_marks_when_record_private();
+
 -- Keep the opaque source id after a record is deleted. INSERT RLS continues
 -- to prove that a live shared record belongs to the current active couple;
 -- this only changes post-delete retention so the client can render a generic
@@ -92,6 +116,8 @@ COMMIT;
 --   DROP POLICY IF EXISTS "Active members complete couple talk-about marks" ON public.talk_about_marks;
 --   DROP INDEX IF EXISTS public.idx_talk_about_marks_couple_pending_created;
 --   ALTER TABLE public.talk_about_marks DROP COLUMN IF EXISTS is_completed;
+--   DROP TRIGGER IF EXISTS clear_talk_about_marks_when_record_private ON public.daily_records;
+--   DROP FUNCTION IF EXISTS public.clear_talk_about_marks_when_record_private();
 -- Re-adding 038's record FK is safe only after removing marks whose source
 -- record no longer exists; do not apply that destructive rollback in Production
 -- without an explicit data-retention decision.

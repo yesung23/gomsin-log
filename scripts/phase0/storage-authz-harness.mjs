@@ -1272,6 +1272,20 @@ markAs(A, OTHER2, COUPLE1);
 check(marksVisibleTo(B) === 1, '038 the partner sees the mark while the couple is active');
 
 mustSql(
+  `UPDATE public.daily_records SET is_private = true WHERE id = '${OTHER2}'`,
+  'make marked record private',
+);
+check(
+  marksVisibleTo(B) === 0,
+  '043 making a previously shared record private removes its marks before they can reveal private-record existence',
+);
+mustSql(
+  `UPDATE public.daily_records SET is_private = false WHERE id = '${OTHER2}'`,
+  'restore shared record for disconnect assertions',
+);
+markAs(A, OTHER2, COUPLE1);
+
+mustSql(
   `UPDATE public.couple_members SET status = 'disconnected' WHERE couple_id = '${COUPLE1}'`,
   'disconnect',
 );

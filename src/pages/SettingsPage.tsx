@@ -35,6 +35,7 @@ import {
 import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { formatRecoveryKitArtifact, parseRecoveryKitArtifact } from '@/app/e2ee/recoveryKitArtifact';
 import type { BootstrapResult } from '@/app/e2ee/useCases';
+import { NotificationPreferencesSection } from '@/components/NotificationPreferencesSection';
 
 function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
   const platform = Capacitor.getPlatform();
@@ -520,6 +521,8 @@ export function SettingsPage() {
           onRecover={startProtectionRecovery}
           busy={isProtectionBusy}
         />
+
+        <NotificationPreferencesSection userId={settingsIdentityKey} />
 
         <section className="space-y-2">
           <h2 className="text-heading text-foreground">화면 테마</h2>

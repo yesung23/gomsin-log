@@ -91,6 +91,29 @@
 
 ---
 
+### 2026-08-16 · Notification & Re-entry V1 — privacy-safe local delivery
+
+`codex/device-protection-recovery-v1`의 Queue 1 완료 커밋 `67b8cb8`을 기준으로
+`codex/notification-reentry-v1`에서 구현했다. 기존 couple realtime 재검증 경로를
+재사용하되, 초기 authoritative refresh가 끝난 뒤 새로 확인된 partner shared record와
+partner talk-about mark만 generic 재진입 이벤트로 만든다. cold load에서 기존 기록을
+새 알림으로 재생하지 않으며, 현재 active couple/session이 아니면 이벤트를 버린다.
+
+- 앱 안 알림과 Settings의 계정별 알림 설정을 추가했다. 시스템 알림은 브라우저
+  `Notification` 권한 adapter만 연결했으며 APNs/FCM/native background delivery는 아직
+  연결하지 않았다.
+- 제목·본문·push data에는 기록 본문, 사진, 일정, 상대방 이름을 넣지 않는다. 전달하는
+  destination은 opaque record id뿐이고, 클릭 시 기존 RecordPage의 현재 authorization과
+  deleted/unavailable surface를 다시 통과한다. 조용한 다른 기록 fallback은 없다.
+- 이벤트 dedupe, disabled preference, unsupported notification API, stale session drop을
+  회귀 테스트로 고정했다. 새 DB 컬럼·migration·remote preference 저장은 추가하지 않았다.
+- 검증: targeted Vitest 91 tests PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run typecheck` PASS, `npm run lint` PASS, `npm run build` PASS,
+  `git diff --check` PASS. 실기기 백그라운드 수신, APNs/FCM, 원격 Supabase 상태는
+  UNVERIFIED / NOT APPLIED.
+
+---
+
 ### 2026-08-16 · Device Protection & Recovery UX V1 — local implementation
 
 `35da04c` Core Privacy Foundation integration을 기준으로 `daily_records` P5 actor/RLS

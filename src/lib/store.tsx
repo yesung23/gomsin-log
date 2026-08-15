@@ -70,6 +70,7 @@ import {
   markE2eeCoupleAuthorityUnlinked,
 } from '@/app/e2ee/runtimeLifecycle';
 import { installE2eeRuntimeForAuthenticatedSession } from '@/app/e2ee/runtimeSession';
+import { emitNotification } from '@/lib/notifications';
 import {
   saveRecordToDB,
   deleteRecordFromDB,
@@ -1405,6 +1406,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const generation = sessionGenerationRef.current;
     const workspace: ActiveWorkspace = { userId: authUserId, coupleId, generation };
     const timers = new Map<SyncSlice, number>();
+    // Re-entry events are armed only after the initial authoritative refresh.
+    // Otherwise a cold-load reconciliation would notify about every existing
+    // partner record as if it had just been created.
+    let notificationsArmed = false;
     const isCurrentActiveCouple = () => {
       const current = stateRef.current;
       return !disposed
@@ -1453,6 +1458,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             })),
             { userId: authUserId, role },
           );
+          if (notificationsArmed) {
+            const previousIds = new Set(stateRef.current.records.map((record) => record.id));
+            result.records
+              .filter((record) => record.userId !== authUserId && !record.isPrivate && !previousIds.has(record.id))
+              .forEach((record) => {
+                void emitNotification({
+                  userId: authUserId,
+                  eventType: 'new_shared_record',
+                  recordId: record.id,
+                  isCurrent: isCurrentActiveCouple,
+                });
+              });
+          }
           if (isCurrentRefresh()) {
             updateStateImmediately((current) =>
               isCurrentRefresh() ? { ...current, records } : current,
@@ -1475,6 +1493,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (slice === 'talk-about') {
           const marks = await fetchTalkAboutMarksFromDB(coupleId);
           if (!isCurrentRefresh()) return;
+          if (notificationsArmed) {
+            const previousMarks = new Set(
+              stateRef.current.talkAboutMarks.map((mark) => `${mark.recordId}:${mark.actorUserId}`),
+            );
+            marks
+              .filter((mark) => mark.actorUserId !== authUserId
+                && !previousMarks.has(`${mark.recordId}:${mark.actorUserId}`))
+              .forEach((mark) => {
+                void emitNotification({
+                  userId: authUserId,
+                  eventType: 'talk_about_mark',
+                  recordId: mark.recordId,
+                  isCurrent: isCurrentActiveCouple,
+                });
+              });
+          }
           updateStateImmediately((current) =>
             isCurrentRefresh() ? { ...current, talkAboutMarks: marks } : current,
           );
@@ -1615,7 +1649,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           realtimeHealthyRef.current = true;
           clearRecovery();
           recoveryAttempt = 0;
-          void reconcileOwnMembership();
+          void reconcileOwnMembership().then((recovered) => {
+            if (recovered && isCurrentActiveCouple()) notificationsArmed = true;
+          });
           return;
         }
         if (
@@ -1626,6 +1662,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           // disconnect would both go unnoticed. Hide shared content until a check
           // succeeds, then keep re-checking over HTTP.
           realtimeHealthyRef.current = false;
+          notificationsArmed = false;
           quarantineSharedAccess(workspace);
           scheduleRecovery();
         }

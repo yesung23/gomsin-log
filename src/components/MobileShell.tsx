@@ -6,6 +6,7 @@ import { routeAnnouncement } from '@/lib/routeAnnouncement';
 import { InstallPromptBanner } from '@/components/InstallPromptBanner';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
+import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
 
 /**
  * Five tabs: 홈 · 기록 · 일정 · 우리 · 마이.
@@ -152,6 +153,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
           tabIndex={-1}
           className="flex-1 pb-20 overflow-y-auto focus:outline-none"
         >
+          <NotificationReentryBridge />
           {/* Shown above every tab, because a stale or withheld shared workspace
               affects the timeline, the calendar and the trip list alike. */}
           <SharedSyncBanner />

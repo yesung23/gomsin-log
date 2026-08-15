@@ -541,9 +541,9 @@ describe('both platforms are installed and reproducible from the lockfile', () =
   it('every pod is a local path reference, so Podfile.lock is a pure function of npm', () => {
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
-    expect(pods.length).toBe(4);
+    expect(pods.length).toBe(5);
     for (const [, , path] of pods) {
-      expect(path.startsWith('../../node_modules/')).toBe(true);
+      expect(path.startsWith('../../node_modules/') || path === '../../packages/capacitor-device-keys').toBe(true);
     }
     const lock = read('ios/App/Podfile.lock');
     for (const [, name] of pods) expect(lock, name).toContain(`${name}:`);

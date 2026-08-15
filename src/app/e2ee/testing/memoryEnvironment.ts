@@ -964,7 +964,21 @@ export function createMemoryLocalState(): MemoryLocalState {
       const pending = bootstraps.get(userId);
       if (pending) bootstraps.set(userId, { ...pending, recoverySecret: null });
     },
-    pinTrustAnchor: async (userId, anchor) => { anchors.set(userId, anchor); },
+    pinTrustAnchor: async (userId, anchor) => {
+      const existing = anchors.get(userId);
+      if (!existing) {
+        anchors.set(userId, anchor);
+        return;
+      }
+      const same = existing.subjectUserId === anchor.subjectUserId
+        && existing.recoveryIdentityId === anchor.recoveryIdentityId
+        && existing.recoveryVersion === anchor.recoveryVersion
+        && equalBytes(existing.serverOriginId, anchor.serverOriginId)
+        && equalBytes(existing.rootRecSigPubFp, anchor.rootRecSigPubFp)
+        && equalBytes(existing.rootRecSigSpki, anchor.rootRecSigSpki)
+        && equalBytes(existing.recoveryBundleFp, anchor.recoveryBundleFp);
+      if (!same) reject('E_TRUST_ANCHOR_PINNED');
+    },
     loadTrustAnchor: async (userId) => anchors.get(userId) ?? null,
   };
 }

@@ -1,6 +1,8 @@
 # @gomsinlog/capacitor-device-keys
 
-First-party Capacitor plugin providing **operation-by-handle** P-256 device keys.
+First-party Capacitor plugin providing **operation-by-handle** P-256 device keys
+and a native AES-GCM LCK capability. The LCK is bound to installation, user,
+device, purpose and version; no raw AES key crosses the Capacitor bridge.
 
 Nine methods, deliberately. A small surface is auditable; a large one is not.
 There is no method that returns a private key, and there must never be one.
@@ -12,8 +14,8 @@ There is no method that returns a private key, and there must never be one.
 | **iOS** | Secure Enclave P-256 signing, **key agreement**, and non-exportability were VERIFIED on real Apple Secure Enclave hardware during Phase 1A-1, through the same Security.framework/CryptoKit API surface iOS uses. iOS *lifecycle* and entitlements are **DEFERRED TO THE NATIVE INTEGRATION GATE**. |
 | **Android** | **Nothing verified.** No SDK was available. AndroidKeyStore behaviour, StrongBox/TEE detection, key invalidation and whether Conscrypt matches SunEC on ECDH output width are all **DEFERRED TO THE NATIVE INTEGRATION GATE**. |
 
-Neither implementation has been wired into the app. `getDeviceKeyPort()` falls
-back to the web implementation until the plugin is registered.
+The package is wired into the tracked iOS Podfile and Android app module. Native
+build/device execution remains a separate integration gate.
 
 ## Wire contract
 

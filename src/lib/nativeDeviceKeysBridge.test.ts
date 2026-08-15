@@ -29,6 +29,7 @@ const swiftBridge = read('packages/capacitor-device-keys/ios/Sources/DeviceKeysP
 const kotlinBridge = read('packages/capacitor-device-keys/android/src/main/java/app/gomsinlog/devicekeys/DeviceKeysPlugin.kt');
 const keystoreIndex = read('src/crypto/keystore/index.ts');
 const nativePort = read('src/crypto/keystore/nativeDeviceKeys.ts');
+const nativeLocalPort = read('src/crypto/keystore/nativeLocalKey.ts');
 
 /** The eight operations `DeviceKeyPort` needs, and the only ones. */
 const BRIDGE_METHODS = [
@@ -39,6 +40,11 @@ const BRIDGE_METHODS = [
   'deleteKey',
   'getAssurance',
   'hasKey',
+  'lckEnsure',
+  'lckHas',
+  'lckSeal',
+  'lckOpen',
+  'lckDelete',
 ] as const;
 
 const PLUGIN_NAME = 'GomsinlogDeviceKeys';
@@ -97,7 +103,10 @@ describe('the three declarations agree', () => {
   });
 
   it('the native TypeScript port calls exactly those methods and no others', () => {
-    const called = new Set([...nativePort.matchAll(/plugin\.([a-zA-Z]+)\(/g)].map((m) => m[1]));
+    const called = new Set([
+      ...[...nativePort.matchAll(/plugin\.([a-zA-Z]+)\(/g)].map((m) => m[1]),
+      ...[...nativeLocalPort.matchAll(/plugin\.([a-zA-Z]+)\(/g)].map((m) => m[1]),
+    ]);
     expect([...called].sort()).toEqual([...BRIDGE_METHODS].sort());
   });
 });
@@ -109,6 +118,7 @@ describe('no API exports a private key', () => {
     ['DeviceKeysPlugin.swift', swiftBridge],
     ['DeviceKeysPlugin.kt', kotlinBridge],
     ['nativeDeviceKeys.ts', nativePort],
+    ['nativeLocalKey.ts', nativeLocalPort],
   ];
 
   it('declares no export/extract/getPrivate method anywhere on the bridge', () => {
@@ -132,7 +142,7 @@ describe('no API exports a private key', () => {
 
   it('the bridge method list itself cannot grow a private-key method unnoticed', () => {
     // Pinned by exact equality above; restated here as the security claim it is.
-    expect(BRIDGE_METHODS).toHaveLength(7);
+    expect(BRIDGE_METHODS).toHaveLength(12);
     expect(BRIDGE_METHODS).not.toContain('exportKey');
   });
 });

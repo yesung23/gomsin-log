@@ -1,8 +1,10 @@
 import { Shield, ChevronRight, AlertTriangle } from 'lucide-react';
-import type { BootstrapState } from '@/app/e2ee/bootstrapStateMachine';
+import { bootstrapStateFromFacts, type BootstrapFacts, type BootstrapState } from '@/app/e2ee/bootstrapStateMachine';
 
 export type DeviceProtectionSectionProps = {
-  state: BootstrapState | 'UNAVAILABLE';
+  /** State is retained for the unavailable shell; verified facts take precedence. */
+  state?: BootstrapState | 'UNAVAILABLE';
+  facts?: BootstrapFacts;
   onStart?: () => void;
   busy?: boolean;
   errorMessage?: string;
@@ -11,13 +13,18 @@ export type DeviceProtectionSectionProps = {
 /** Small, state-driven surface for My/Settings. Crypto jargon stays in code. */
 export function DeviceProtectionSection({
   state,
+  facts,
   onStart,
   busy = false,
   errorMessage,
 }: DeviceProtectionSectionProps) {
-  const unavailable = state === 'UNAVAILABLE';
-  const ready = state === 'ACTIVE' || state === 'RUNTIME_READY' || state === 'COUPLE_KEYS_READY';
-  const couplePending = state === 'COUPLE_KEYS_PENDING';
+  const derivedState = facts ? bootstrapStateFromFacts(facts) : state ?? 'UNAVAILABLE';
+  const unavailable = derivedState === 'UNAVAILABLE';
+  // COUPLE_KEYS_READY only means the shared key is available. It is not proof
+  // that the runtime/LCK is installed, so it must not suppress the CTA or claim
+  // that protected records are ready.
+  const ready = derivedState === 'ACTIVE' || derivedState === 'RUNTIME_READY';
+  const couplePending = derivedState === 'COUPLE_KEYS_PENDING';
 
   return (
     <section className="rounded-surface bg-card border border-border p-4 space-y-3" data-testid="device-protection">

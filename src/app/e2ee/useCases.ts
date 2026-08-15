@@ -107,6 +107,7 @@ import type {
   E2eeRepository,
   EnvelopeRecord,
   PendingBootstrap,
+  PinnedTrustAnchor,
   RecoveryIdentityRecord,
   ScopeKeyRecord,
 } from './ports';
@@ -135,6 +136,12 @@ export type UseCaseDeps = {
 
 function requireEnabled(deps: UseCaseDeps): void {
   if (!deps.flag.isEnabled()) fail('E_E2EE_DISABLED', 'the E2EE feature flag is off');
+}
+
+function requireNativeCeremony(platform: PlatformName): void {
+  if (platform === 'web') {
+    fail('E_WEB_BOOTSTRAP_RESTRICTED', 'Web cannot perform bootstrap, recovery re-root, or device enrollment');
+  }
 }
 
 /** Handles are derived from the device id, so a resumed flow finds its keys. */
@@ -234,12 +241,34 @@ async function publicSpkiFromPkcs8(pkcs8: Uint8Array, kind: 'ECDSA' | 'ECDH'): P
 async function pinnedAnchor(deps: UseCaseDeps, userId: string): Promise<TrustAnchor> {
   const pin = await deps.localState.loadTrustAnchor(userId);
   if (!pin) fail('E_NO_PINNED_ANCHOR', `no trust anchor is pinned for ${userId}`);
+  const serverOriginId = await deps.repository.serverOriginId();
+  if (pin.subjectUserId !== userId || !equalBytes(pin.serverOriginId, serverOriginId)) {
+    fail('E_PINNED_ANCHOR_CONTEXT_MISMATCH', 'the pinned anchor belongs to another user or server origin');
+  }
   return anchorFromPin({
     userId,
-    serverOriginId: await deps.repository.serverOriginId(),
+    serverOriginId,
     rootRecSigSpki: pin.rootRecSigSpki,
     recoveryIdentityId: pin.recoveryIdentityId,
     recoveryVersion: pin.recoveryVersion,
+  });
+}
+
+async function pinRecoveryIdentity(
+  deps: UseCaseDeps,
+  userId: string,
+  identity: RecoveryIdentityRecord,
+  pinSource: PinnedTrustAnchor['pinSource'],
+): Promise<void> {
+  await deps.localState.pinTrustAnchor(userId, {
+    subjectUserId: userId,
+    serverOriginId: await deps.repository.serverOriginId(),
+    rootRecSigPubFp: await publicKeyFingerprint(identity.recSigSpki),
+    rootRecSigSpki: identity.recSigSpki,
+    recoveryIdentityId: identity.id,
+    recoveryVersion: identity.recoveryVersion,
+    recoveryBundleFp: identity.recoveryBundleFp,
+    pinSource,
   });
 }
 
@@ -437,6 +466,7 @@ export async function bootstrapFirstDevice(
   input: { userId: string; platform: PlatformName },
 ): Promise<BootstrapResult> {
   requireEnabled(deps);
+  requireNativeCeremony(input.platform);
 
   const userIdBytes = uuidToBytes(input.userId);
   const serverOriginId = await deps.repository.serverOriginId();
@@ -552,12 +582,7 @@ export async function bootstrapFirstDevice(
 
   // The trust root exists before any scope key does, so there is never a window
   // in which a device is trusted by status alone.
-  await deps.localState.pinTrustAnchor(input.userId, {
-    rootRecSigPubFp: rootRecSigFp,
-    rootRecSigSpki: identity.recSigSpki,
-    recoveryIdentityId: identity.id,
-    recoveryVersion: identity.recoveryVersion,
-  });
+  await pinRecoveryIdentity(deps, input.userId, identity, 'bootstrap');
 
   // 4. The first device certificate, signed by the recovery key. Signing needs
   // the recovery private half, which means unsealing it with the kit secret —
@@ -988,6 +1013,7 @@ export async function recoverWithKit(
   },
 ): Promise<RecoveryResult> {
   requireEnabled(deps);
+  requireNativeCeremony(input.platform);
 
   const userIdBytes = uuidToBytes(input.userId);
   const serverOriginId = await deps.repository.serverOriginId();
@@ -1165,12 +1191,7 @@ export async function recoverWithKit(
     // direct status write is refused by the database.
     await deps.repository.beginDeviceProvisioning(deviceId);
 
-    await deps.localState.pinTrustAnchor(input.userId, {
-      rootRecSigPubFp: rootRecSigFp,
-      rootRecSigSpki: identity.recSigSpki,
-      recoveryIdentityId: identity.id,
-      recoveryVersion: identity.recoveryVersion,
-    });
+    await pinRecoveryIdentity(deps, input.userId, identity, 'device_enrollment');
 
     const sender: SenderIdentity = {
       deviceId,
@@ -1340,6 +1361,7 @@ export async function beginSecondDeviceEnrollment(
   input: { userId: string; platform: PlatformName; approverDeviceId?: string },
 ): Promise<BeginEnrollmentResult> {
   requireEnabled(deps);
+  requireNativeCeremony(input.platform);
 
   const deviceId = deps.newId();
   const sig = await deps.deviceKeys.generateSigningKey(sigHandleFor(deviceId));
@@ -1555,12 +1577,7 @@ export async function acceptEnrollmentSas(
   );
   if (!bundleSigOk) fail('E_BUNDLE_SIG_INVALID', 'the served recovery bundle signature does not verify');
 
-  await deps.localState.pinTrustAnchor(input.userId, {
-    rootRecSigPubFp: await publicKeyFingerprint(identity.recSigSpki),
-    rootRecSigSpki: identity.recSigSpki,
-    recoveryIdentityId: identity.id,
-    recoveryVersion: identity.recoveryVersion,
-  });
+  await pinRecoveryIdentity(deps, input.userId, identity, 'device_enrollment');
   return { pinned: true };
 }
 
@@ -2003,10 +2020,14 @@ export async function completeCouplePairing(
   // the couple key needs a root for the partner's devices, and this — not a
   // fresh server answer — is where it comes from.
   await deps.localState.pinTrustAnchor(input.partnerUserId, {
+    subjectUserId: input.partnerUserId,
+    serverOriginId: await deps.repository.serverOriginId(),
     rootRecSigPubFp: partnerRootFp,
     rootRecSigSpki: partnerAnchorRow.recSigSpki,
     recoveryIdentityId: partnerAnchorRow.recoveryIdentityId,
     recoveryVersion: partnerAnchorRow.recoveryVersion,
+    recoveryBundleFp: partnerAnchorRow.recoveryBundleFp,
+    pinSource: 'pairing',
   });
 
   const pairing = await deps.repository.getPairing(input.coupleId);

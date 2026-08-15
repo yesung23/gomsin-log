@@ -110,6 +110,8 @@ export type BootstrapFacts = {
   coupleKeysReady: boolean;
   runtimeReady: boolean;
   floorActive: boolean;
+  /** A current couple scope exists; key availability is separate from floor state. */
+  hasCoupleScope?: boolean;
   error?: boolean;
 };
 
@@ -124,5 +126,6 @@ export function bootstrapStateFromFacts(facts: BootstrapFacts): BootstrapState {
   if (!facts.runtimeReady) {
     return facts.coupleKeysReady ? BOOTSTRAP_STATE.coupleKeysReady : BOOTSTRAP_STATE.coupleKeysPending;
   }
+  if (facts.hasCoupleScope && !facts.coupleKeysReady) return BOOTSTRAP_STATE.coupleKeysPending;
   return facts.floorActive ? BOOTSTRAP_STATE.active : BOOTSTRAP_STATE.runtimeReady;
 }

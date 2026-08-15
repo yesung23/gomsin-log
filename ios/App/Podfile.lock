@@ -6,12 +6,14 @@ PODS:
   - CapacitorBrowser (7.0.5):
     - Capacitor
   - CapacitorCordova (7.6.8)
+  - GomsinlogDeviceKeys (0.1.0)
 
 DEPENDENCIES:
   - "Capacitor (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorApp (from `../../node_modules/@capacitor/app`)"
   - "CapacitorBrowser (from `../../node_modules/@capacitor/browser`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
+  - "GomsinlogDeviceKeys (from `../../packages/capacitor-device-keys`)"
 
 EXTERNAL SOURCES:
   Capacitor:
@@ -22,13 +24,16 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/browser"
   CapacitorCordova:
     :path: "../../node_modules/@capacitor/ios"
+  GomsinlogDeviceKeys:
+    :path: "../../packages/capacitor-device-keys"
 
 SPEC CHECKSUMS:
   Capacitor: ff6bf01336ac353098378828aff465095a89e459
   CapacitorApp: f01a913211780e0718dae9750442c3e23f96e106
   CapacitorBrowser: 6d09f59655e89aede71654ef08b98de55cf032b6
   CapacitorCordova: e61ee8c40101b8cd011d0224261606a290c082cf
+  GomsinlogDeviceKeys: 360a506a01d12417223fd1e3aa3648f36308aa8e
 
-PODFILE CHECKSUM: 4aff2922841799f9ef78cd5d462744c7648af68b
+PODFILE CHECKSUM: 3e9f3b80a98596cdc4bd3346bccd605e510b16ad
 
 COCOAPODS: 1.17.0

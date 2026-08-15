@@ -29,8 +29,14 @@
 
 import { concat, utf8 } from '@/crypto/bytes';
 import { GCM_NONCE_BYTES, aesGcmOpen, aesGcmSeal, randomNonce } from '@/crypto/suite';
+import type { LocalKeyCapability } from '@/crypto/keystore/LocalKeyPort';
 
 const AAD_LABEL = utf8('gomsinlog/outbox/v1');
+export type OutboxLocalKey = CryptoKey | LocalKeyCapability;
+
+function isCapability(key: OutboxLocalKey): key is LocalKeyCapability {
+  return typeof key === 'object' && 'seal' in key && 'open' in key;
+}
 
 /** The queue payload, once decoded. Files travel separately — see below. */
 export type OutboxPlaintext = {
@@ -58,19 +64,19 @@ function aadFor(entryId: string, userId: string): Uint8Array {
 }
 
 export async function sealOutboxRecord(input: {
-  localCacheKey: CryptoKey;
+  localCacheKey: OutboxLocalKey;
   entryId: string;
   userId: string;
   record: unknown;
 }): Promise<SealedOutboxRecord> {
   const nonce = randomNonce();
   const plaintext = utf8(JSON.stringify(input.record));
-  const ciphertext = await aesGcmSeal(
-    input.localCacheKey,
-    nonce,
-    plaintext,
-    aadFor(input.entryId, input.userId),
-  );
+  const aad = aadFor(input.entryId, input.userId);
+  if (isCapability(input.localCacheKey)) {
+    const sealed = await input.localCacheKey.seal({ plaintext, aad });
+    return { version: OUTBOX_CIPHER_VERSION, nonce: sealed.nonce, ciphertext: sealed.ciphertext };
+  }
+  const ciphertext = await aesGcmSeal(input.localCacheKey, nonce, plaintext, aad);
   return { version: OUTBOX_CIPHER_VERSION, nonce, ciphertext };
 }
 
@@ -84,7 +90,7 @@ export class OutboxCryptoError extends Error {
 }
 
 export async function openOutboxRecord(input: {
-  localCacheKey: CryptoKey;
+  localCacheKey: OutboxLocalKey;
   entryId: string;
   userId: string;
   sealed: SealedOutboxRecord;
@@ -95,12 +101,10 @@ export async function openOutboxRecord(input: {
   if (input.sealed.nonce.length !== GCM_NONCE_BYTES) {
     throw new OutboxCryptoError('E_OUTBOX_NONCE', 'outbox nonce has the wrong width');
   }
-  const plaintext = await aesGcmOpen(
-    input.localCacheKey,
-    input.sealed.nonce,
-    input.sealed.ciphertext,
-    aadFor(input.entryId, input.userId),
-  );
+  const aad = aadFor(input.entryId, input.userId);
+  const plaintext = isCapability(input.localCacheKey)
+    ? await input.localCacheKey.open({ sealed: input.sealed, aad })
+    : await aesGcmOpen(input.localCacheKey, input.sealed.nonce, input.sealed.ciphertext, aad);
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
 

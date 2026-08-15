@@ -1,5 +1,7 @@
 import { MobileShell } from '@/components/MobileShell';
 import { WidgetDashboard } from '@/features/home/WidgetDashboard';
+import { Link } from 'react-router-dom';
+import { MessageCircle } from 'lucide-react';
 
 /**
  * One home for both roles.
@@ -17,6 +19,16 @@ import { WidgetDashboard } from '@/features/home/WidgetDashboard';
 export function HomePage() {
   return (
     <MobileShell>
+      <div className="px-4 pt-3">
+        <Link
+          to="/chat"
+          aria-label="채팅으로 이동"
+          className="flex min-h-11 items-center gap-2 text-label font-semibold text-coral-strong"
+        >
+          <MessageCircle size={18} aria-hidden="true" />
+          채팅
+        </Link>
+      </div>
       <WidgetDashboard />
     </MobileShell>
   );

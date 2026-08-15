@@ -15,6 +15,7 @@ const ROUTES: { prefix: string; name: string; exact?: boolean }[] = [
   { prefix: '/', name: '홈', exact: true },
   { prefix: '/home', name: '홈' },
   { prefix: '/record', name: '기록' },
+  { prefix: '/chat', name: '채팅' },
   { prefix: '/schedule', name: '일정' },
   { prefix: '/trips', name: '일정' },
   { prefix: '/us', name: '우리' },

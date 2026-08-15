@@ -10,6 +10,7 @@
 import {
   isRetryableReason,
   MAX_DELIVERY_ATTEMPTS,
+  OUTBOX_SCHEMA_VERSION,
   type RetryableReason,
 } from '@/lib/outbox';
 import {
@@ -138,4 +139,63 @@ export async function applyChatDeliveryOutcome(
 
 export function isChatRetryableReason(reason: string): reason is RetryableReason {
   return isRetryableReason(reason);
+}
+
+/**
+ * The durable adapter for chat's sealed queue.
+ *
+ * It intentionally shares the existing outbox database but uses a separate
+ * object store and key path. The record queue can therefore evolve independently
+ * while both queues retain the repository's account-scoped IndexedDB boundary.
+ */
+const DATABASE_NAME = 'gomsinlog-outbox';
+const STORE_NAME = 'chat_messages';
+
+function openChatDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE_NAME, OUTBOX_SCHEMA_VERSION);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains('records')) {
+        database.createObjectStore('records', { keyPath: 'id' });
+      }
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        database.createObjectStore(STORE_NAME, { keyPath: 'messageId' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function chatTransaction<T>(
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
+  return openChatDatabase().then((database) => new Promise<T>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, mode);
+    const request = run(transaction.objectStore(STORE_NAME));
+    let result: T;
+    let requestError: DOMException | null = null;
+    request.onsuccess = () => { result = request.result; };
+    request.onerror = () => { requestError = request.error; };
+    transaction.oncomplete = () => {
+      database.close();
+      resolve(result);
+    };
+    transaction.onabort = () => {
+      database.close();
+      reject(transaction.error || requestError || new Error('IndexedDB transaction aborted.'));
+    };
+  }));
+}
+
+/** Returns null when this device cannot durably store a sealed message. */
+export function createIndexedDbChatOutbox(): ChatOutboxPersistence | null {
+  if (typeof indexedDB === 'undefined') return null;
+  return {
+    all: () => chatTransaction<QueuedChatMessage[]>('readonly', (store) => store.getAll()),
+    put: (entry) => chatTransaction('readwrite', (store) => store.put(entry)).then(() => undefined),
+    remove: (messageId) => chatTransaction('readwrite', (store) => store.delete(messageId)).then(() => undefined),
+  };
 }

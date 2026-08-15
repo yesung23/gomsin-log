@@ -5,6 +5,77 @@
 → 그 파일은 **[`docs/WORK_LOG.md`](docs/WORK_LOG.md)** 다. 세션이 끝날 때마다
 항목 하나를 추가한다.
 
+## Control Tower session protocol
+
+대화 기억은 source of truth가 아니다. 새 채팅을 포함한 모든 비사소한 작업은
+다음 순서로 현재 상태를 복구한다.
+
+1. 이 문서
+2. [`docs/PRODUCT_V3.md`](docs/PRODUCT_V3.md)
+3. [`docs/ENGINEERING_ROADMAP.md`](docs/ENGINEERING_ROADMAP.md)
+4. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md)
+5. [`docs/WORK_LOG.md`](docs/WORK_LOG.md)의 최신 관련 세션
+6. [`docs/PROJECT_HANDOFF_2026-08-13.md`](docs/PROJECT_HANDOFF_2026-08-13.md)
+7. `AGENTS.md` (engineering 작업인 경우)
+8. 작업과 직접 관련된 specialist 문서
+
+문서 복구 뒤 volatile 사실은 GitHub·저장소·Supabase·로컬 환경에서 다시 확인한다.
+
+### Start checkpoint
+
+작업을 시작하기 전에 최소한 다음을 확정하고, 확인할 수 없는 항목은
+`UNVERIFIED`로 표시한다.
+
+- CURRENT PHASE
+- ACTIVE STEP
+- ACTIVE PR / BRANCH
+- VERIFIED BASE / HEAD
+- LAST GATE
+- CURRENT BLOCKER
+- NEXT GATE
+- DO NOT ADVANCE UNTIL
+
+### Volatile fact rule
+
+다음은 문서의 과거 기록을 그대로 믿지 말고 작업 시점에 live 확인한다.
+
+- PR state, draft, mergeability, base/head SHA, CI
+- branch HEAD와 remote ref
+- remote migration state
+- local SDK/device state
+
+문서에 남은 PR·SHA는 checkpoint일 뿐이다.
+
+### Canonical ownership
+
+| 질문 | authoritative home |
+|---|---|
+| 제품 의도 | `docs/PRODUCT_V3.md` |
+| 구현 순서·단계·gate | `docs/ENGINEERING_ROADMAP.md` |
+| 현재 구현 현실·blocker | 저장소 코드, 그 다음 `docs/CURRENT_STATE.md` |
+| 세션 작업 이력 | `docs/WORK_LOG.md` |
+| 새 AI의 지도·복구 방법 | `docs/PROJECT_HANDOFF_2026-08-13.md` |
+| migration 적용 원장 | `supabase/migrations/README.md` |
+
+ONE FACT → ONE AUTHORITATIVE HOME을 지킨다. 지도와 작업 로그에는 다른 문서의
+상세 사실을 복제하지 말고 링크와 짧은 요약만 남긴다.
+
+### Update propagation
+
+모든 비사소한 작업은 `WORK_LOG.md`에 기록한다. 현재 구현·gate·blocker가 바뀌면
+`CURRENT_STATE.md`도 갱신하고, 계획·단계·진입 조건이 바뀌면
+`ENGINEERING_ROADMAP.md`를 갱신한다. 제품 방향은 `PRODUCT_V3.md`, remote
+migration 변경은 migration README가 소유한다. 문서를 매번 모두 수정하지 않는다.
+
+### Session end checkpoint
+
+세션 종료 시 `WORK_LOG.md`에 표준 원장 형식으로 다음을 남긴다. 실제 실행한 검증과
+실행하지 않은 검증, code/migration/production 변경 여부, 정확한 중단 지점과 다음
+작업을 구분한다. READ-ONLY reviewer는 저장소를 수정하지 않고 `READY-TO-COPY
+WORK_LOG ENTRY`만 출력한다. Control Tower 또는 write-capable Worker가 이를
+반영하며, review 대상 security PR에 WORK_LOG-only commit을 추가해 review를
+stale하게 만들지 않는다.
+
 ---
 
 ## 수정 사항을 어디에 적는가

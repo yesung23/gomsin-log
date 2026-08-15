@@ -57,7 +57,40 @@
 엔지니어링 작업은 [`AGENTS.md`](../AGENTS.md)도 읽는다. DB·보안·암호·채팅·디자인
 작업일 때만 위 표의 해당 문서를 추가한다. 모든 Markdown을 무조건 읽을 필요는 없다.
 
-## 4. 다른 AI가 시작하는 방법
+## 4. 새 Control Tower / 새 AI 시작 방법
+
+새 세션은 대화 기억을 복구 수단으로 사용하지 않는다. 다음 순서로 저장소 문서를
+읽고, 마지막에 volatile 사실을 live 확인한다.
+
+```text
+CLAUDE
+→ PRODUCT
+→ ROADMAP
+→ CURRENT_STATE
+→ WORK_LOG latest relevant entries
+→ PROJECT_HANDOFF
+→ AGENTS
+→ specialist docs
+→ live GitHub verification
+```
+
+복구 직후 Control Tower가 먼저 보고할 항목은 다음과 같다.
+
+- CURRENT PHASE
+- ACTIVE STEP
+- ACTIVE PR
+- VERIFIED HEAD
+- LAST GATE
+- CURRENT BLOCKER
+- NEXT GATE
+- STALE REVIEWS
+- DO NOT ADVANCE UNTIL
+
+PR inventory를 이 문서에 복사하지 않는다. active PR·HEAD·CI·mergeability는
+`CURRENT_STATE.md`의 checkpoint와 live GitHub를 함께 사용하되, 항상 live 값을
+다시 검증한다.
+
+## 5. 다른 AI가 시작하는 방법
 
 1. 작업 범위를 제품 기능, 구현 순서, 현재 결함, 계약, 또는 운영 상태로 분류한다.
 2. 위 표에서 해당 authoritative home을 확인하고, 관련 코드 경로를 직접 추적한다.
@@ -65,7 +98,7 @@
 4. 변경 후 `docs/WORK_LOG.md`에 짧은 색인 항목을 남기고, 실행한 검증과 하지 않은 검증을
    구분한다.
 
-## 5. 유지 원칙
+## 6. 유지 원칙
 
 - 이 문서에 제품 비전, 상세 암호 프로토콜, 장문의 blocker 목록, migration 표, PR
   inventory, 완료 이력을 추가하지 않는다. 이미 소유자가 있는 문서로 연결한다.

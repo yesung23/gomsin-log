@@ -3,7 +3,7 @@
 > 구현 **순서**만 담는다. 제품 의도는 [`PRODUCT_V3.md`](PRODUCT_V3.md),
 > 현재 저장소 상태는 [`CURRENT_STATE.md`](CURRENT_STATE.md).
 
-- 기준일: 2026-08-14
+- 기준일: 2026-08-15
 - 이 문서는 어떤 것도 구현하지 않는다.
 
 ---
@@ -42,14 +42,101 @@ Phase 1B는 로컬에서 Phase 1A 마이그레이션 체인(031→032→034→03
 | **P1** | **`상대방의 오늘` 통합** — 로컬·결정적·사실 기반, 뷰어가 볼 수 있는 기록만 | 순수 클라이언트 로직이며 현재 데이터 위에서 완전히 테스트 가능하다. E2EE 이후에는 "평문이 어디서 오는가"만 달라진다. 암호화 마이그레이션과 제품 로직 변경을 같은 단계에 묶으면 회귀 원인을 분리할 수 없다 |
 | **P2** | **정확한 원본 이동 하드닝 + 라우트/딥링크 동일성** | P1과 같은 이유. 삭제·수정·날짜 불일치를 먼저 고정한다. 라우트 주소 지정은 알림의 선행 조건이므로 함께 처리한다 |
 | **P3** | **양방향 `이따 이야기하기`** | 조율 메타데이터 추가에 그친다. 암호화 이후에 스키마를 건드리는 것보다 안전하다 |
-| **P4** | **채팅 제품/데이터 계약 및 구현 계획** → [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md) **(계약 작성 완료, 구현 미착수)** | 채팅은 코어이며 사용자 콘텐츠다. E2EE 수직 슬라이스를 시작하기 **전에** 계약을 확정해야, daily_records와 채팅이 같은 봉투/키 경로를 두 번 설계하지 않는다. 계약 §20이 구현 전 닫아야 할 게이트 9개(C1–C9)를, §19가 P5·P6이 보존해야 할 결정을 정의한다. **P4는 채팅을 P5보다 먼저 구현하라는 뜻이 아니다** — P5는 여전히 daily_records E2EE가 우선이고, P4는 나중에 맞지 않는 scope/epoch/맥락참조 의미가 생기는 것을 막는 계약일 뿐이다 |
-| **P5** | **`daily_records` E2EE 수직 슬라이스** | Phase 1B의 첫 실제 콘텐츠 도메인 |
-| **ARCH-P6** | **iCloud Media Architecture** | P6 구현 전에 iOS-first 미디어 소유권·공유·복구·플랫폼 경계를 검증한다 |
-| **P6** | **사진 E2EE / iCloud-first 암호화 미디어 기반** | ARCH-P6와 P0-b가 선행되어야 한다 |
-| **P7** | **일정 · 군 관련 날짜** | 기록보다 데이터가 적어 마이그레이션 위험이 낮다. generic 알림도 여기(P2의 주소 지정에 의존) |
-| **P8** | **주기 / HRK 재설계** | **단순 이관이 아니다.** 파트너 projection이 서버 측 평문 계산이므로 소유자 기기 생성 + CSK 암호화로 다시 만들어야 한다. 가장 민감하므로 envelope·rotation·복구가 실전 검증된 뒤 |
-| **P9** | **Moment / 아카이브 기반** | 데이터가 쌓인 뒤 |
-| **P10** | **베타 계측 + 릴리스 하드닝** | 측정할 루프가 완성된 뒤 |
+| **P4** | **채팅 제품/데이터 계약 및 구현 계획** → [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md) **(계약 작성 완료; 구현은 P5.3/P5.4가 소유)** | 채팅은 코어이며 사용자 콘텐츠다. E2EE 수직 슬라이스를 시작하기 **전에** 계약을 확정해야, daily_records와 채팅이 같은 봉투/키 경로를 두 번 설계하지 않는다. 계약 §20이 구현 전 닫아야 할 게이트 9개(C1–C9)를, §19가 P5·P6이 보존해야 할 결정을 정의한다. **P4는 채팅을 P5보다 먼저 구현하라는 뜻이 아니다** — P5.3/P5.4 active train이 계약을 실제 흐름에 연결한다 |
+| **P5.1** | **`daily_records` E2EE 수직 슬라이스** | Phase 1B의 첫 실제 콘텐츠 도메인 |
+| **P5.2** | **Device Bootstrap** | native device identity와 실제 기기 보호 상태가 먼저 고정되어야 한다 |
+| **P5.3** | **Chat E2EE Foundation** | 기존 couple CSK/GLE1 경계를 채팅 데이터에 적용한다 |
+| **P5.4** | **Chat Product Integration** | 암호화 기반을 실제 `/chat` 사용자 흐름에 연결한다 |
+| **P5.5** | **Security Stack Integration** | P6A 이전 마지막 통합 gate다 |
+| **ARCH-P6** | **암호화 미디어 architecture decision** | 결정은 완료되었지만 P6 코드는 아직 구현하지 않는다 |
+| **P6A–P6D** | **CloudKit 미디어 구현·통합·실기기 hardening** | P5.5와 P6 entry conditions 이후에만 시작한다 |
+
+### P5.1 — `daily_records` E2EE vertical slice
+
+첫 콘텐츠 도메인으로서 `daily_records`에 암호문 envelope, PMK/CSK routing,
+write-floor, 로컬 outbox 보호와 negative authorization 증명을 고정한다.
+이 단계가 branch에 존재하는 것과 default branch/production에 적용된 것은 별개다.
+
+### P5.2 — Device Bootstrap
+
+다음 범위를 하나의 gate로 검증한다.
+
+- native device identity, `dev_sig`, `dev_kem`
+- LCK와 protected local state
+- trusted-device bootstrap 및 exact scope authority
+- write-floor activation prerequisites
+- real-device validation
+
+code acceptance와 native device gate가 모두 통과되기 전에는 P5.2를 완료로 보지 않는다.
+
+### P5.3 — Chat E2EE Foundation
+
+- existing couple CSK와 GLE1
+- ciphertext-only server message
+- RLS 및 ACTIVE write / RETIRED read
+- LCK-sealed outbox
+- tombstone semantics
+
+### P5.4 — Chat Product Integration
+
+- `/chat`과 Home one-action entry
+- sending, retry, unavailable, protection 상태
+- encrypted local persistence
+- talk-about handoff
+- plaintext context URL 금지
+
+### P5.5 — Security Stack Integration
+
+직선 통합 기준은 다음과 같다.
+
+```text
+P5.1 → P5.2 → P5.3 → P5.4 → integrated review
+```
+
+다음 항목을 하나의 integration base에서 검증한다.
+
+- migration numbering과 coexistence
+- native runtime 및 LCK
+- `RecordCryptoEnvironment`와 `ChatCryptoEnvironment`
+- account/logout/unlink teardown
+- browser/native E2E
+
+P5.5가 P6A를 시작하기 전 마지막 gate다.
+
+### ARCH-P6 — architecture decision
+
+ARCH-P6 결정은 완료되었으며 상태는 **READY FOR IMPLEMENTATION**이다. 이것은 P6
+코드가 구현되었다는 뜻이 아니다. 결정의 핵심은 다음과 같다.
+
+- iOS-first
+- uploader-owned CloudKit private DB/custom zone
+- CKAsset ciphertext
+- CKShare read-only partner
+- Supabase는 coordination metadata only
+- PMK private photo / CSK shared photo
+- HRK forbidden
+- separate GME1 media envelope
+- plaintext media durable storage 금지
+- normalize/EXIF strip before encryption
+- no silent Supabase Storage fallback
+- account unlink/account switch fail closed
+- Android boundary intentionally deferred
+
+구현 순서는 `P6A Native CloudKit Media Foundation` → `P6B Media E2EE + GME1 +
+normalization + migration 042` → `P6C Photo Product Integration` → `P6D Two Apple
+IDs / real devices / quota / unlink / account-switch / security hardening`이다.
+
+### P6 entry conditions
+
+다음 조건을 모두 만족하기 전에는 P6A를 시작하지 않는다.
+
+- P5.1/P5.2/P5.3/P5.4 integration base
+- `DeviceKeys`/LCK real iPhone validation
+- migration 040/041 coexistence verified
+- CloudKit development entitlement/container prerequisites
+- Production mutation 없음
+
+ARCH-P6 완료는 P6A 시작 허가와 같지 않다.
 
 ### 로드맵에 없는 것
 

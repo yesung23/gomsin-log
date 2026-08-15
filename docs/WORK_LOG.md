@@ -8,6 +8,76 @@
 > [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다.
 
+## 앞으로 사용할 표준 세션 원장 형식
+
+새 세션 기록은 아래 구조를 사용한다. 과거 자유형식 기록은 역사 보존을 위해
+삭제·재작성하지 않는다.
+
+```markdown
+### YYYY-MM-DD · [Phase/Step] 세션 제목
+
+#### PLAN POSITION
+- Phase:
+- Workstream:
+- Step:
+- Previous Gate:
+- This Gate:
+
+#### OWNERSHIP
+- Tool:
+- Model:
+- Role:
+- PR:
+- Branch:
+- Base SHA:
+- Old HEAD:
+- New/Reviewed HEAD:
+
+#### CHANGED / REVIEWED
+- file:
+- function/component/migration:
+- what changed/reviewed:
+- why:
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics:
+- DB/migration semantics:
+- product semantics:
+- Production:
+
+#### VERIFICATION
+- command:
+- PASS / FAIL / UNVERIFIED:
+- what it actually proves:
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL:
+- whether an earlier review is stale:
+
+#### BLOCKERS
+- code:
+- environment:
+- external/manual:
+
+#### STOPPED AT
+- exact completed boundary:
+
+#### REMAINING
+- not completed:
+
+#### NEXT ACTION
+- next owner:
+- tool/model:
+- 기준 SHA:
+- exact next task:
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions:
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED:
+```
+
 ---
 
 ### 2026-08-14 · 문서 source-of-truth 정규화
@@ -35,6 +105,69 @@ P5 해결 후 별도 작업으로 유보했다.
 ---
 
 ## 세션 기록
+
+### 2026-08-15 · [Control Tower Governance / documentation infrastructure] canonical 문서 governance 정규화
+
+#### PLAN POSITION
+- Phase: Control Tower Governance / documentation infrastructure
+- Workstream: canonical documentation foundation
+- Step: session start/end recovery and review freshness normalization
+- Previous Gate: canonical documents existed but active plan/state/session ownership was split
+- This Gate: new-AI recovery protocol, build train, active-state split, and work ledger rules recorded
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Luna / High
+- Role: Documentation Worker + Verifier
+- PR: docs-only draft PR, number assigned after push
+- Branch: `docs/control-tower-governance`
+- Base SHA: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- Old HEAD: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- New/Reviewed HEAD: docs governance commit on this branch
+
+#### CHANGED / REVIEWED
+- file: `CLAUDE.md`, `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/CURRENT_STATE.md`, `docs/WORK_LOG.md`, `docs/PROJECT_HANDOFF_2026-08-13.md`
+- function/component/migration: documentation rules only
+- what changed/reviewed: session boot/end protocol, mandatory ledger, review freshness, P5.1–P5.5/ARCH-P6 train, master-vs-active checkpoint, and handoff recovery map
+- why: new AI sessions must recover the same plan and state without conversation memory
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none
+- product semantics: none
+- Production: no mutation
+
+#### VERIFICATION
+- command: `git diff --check`, changed-file audit, Markdown/link and stale-statement scans, live `gh pr view` metadata for PRs #54/#57/#58/#59/#60
+- PASS / FAIL / UNVERIFIED: PASS for documentation scope; remote Supabase/device gates UNVERIFIED
+- what it actually proves: only the six allowed documents changed on this branch and the recorded PR checkpoints matched live GitHub at review time
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: NONE for the security PRs; this is a separate docs-only branch
+- whether an earlier review is stale: no security PR HEAD was changed
+
+#### BLOCKERS
+- code: none in this docs-only scope
+- environment: native Android/iOS and physical-device gates remain outside this task
+- external/manual: Control Tower must reverify volatile PR/CI/mergeability and remote migration state before advancing
+
+#### STOPPED AT
+- Control Tower governance rules committed and draft PR opened
+
+#### REMAINING
+- live reviewer approval and future sessions applying the protocol
+
+#### NEXT ACTION
+- next owner: Control Tower
+- tool/model: GitHub live verification, then assigned Worker/Reviewer
+- 기준 SHA: this docs branch HEAD after push
+- exact next task: verify the diff and approve or request changes on the docs-only PR
+
+#### DO NOT ADVANCE UNTIL
+- six-document diff is approved, active PR facts are refreshed, and P5.2 native/device gates are independently verified before P6A
+
+#### PRODUCTION
+- NOT APPLIED
 
 ### 2026-08-14 · 00-BM — iCloud-first 기억 제품 사업 모델 전환
 
@@ -182,7 +315,7 @@ C12 계정 삭제). 실제 DB 증명은 구현 시점의 몫이고 이 PR에서 
 | `docs/CHAT_PRODUCT_DATA_CONTRACT_V1.md` | 신규. 22개 절(§0–21), 약 630줄 |
 | `docs/PRODUCT_V3.md` | §12.1이 계약을 가리키도록 한 줄 |
 | `docs/ENGINEERING_ROADMAP.md` | P4 행에 산출물·게이트 C1–C9·P5 독립성 명시 |
-| `docs/CURRENT_STATE.md` | 채팅 미구현 갱신, PR #50으로 해소된 행 삭제, #17 심각도 정정 |
+| `docs/CURRENT_STATE.md` | 당시 채팅 상태 갱신, PR #50으로 해소된 행 삭제, #17 심각도 정정 |
 
 #### 저장소 조사에서 나온 결정적 사실
 

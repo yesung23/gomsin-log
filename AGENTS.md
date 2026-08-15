@@ -404,3 +404,92 @@ copying them into prompts: `docs/kiro/AI_HANDOFF.md` for application invariants,
 `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md` for privacy/E2EE
 decisions, `docs/SECURITY_TEST_PLAN.md` and `docs/rls-test-matrix.md` for
 security/RLS coverage, and `docs/operations/rollback-runbook.md` for rollback.
+
+## 18. Mandatory Work Ledger
+
+Every substantial engineering, verification, or security-review result must have a
+corresponding `docs/WORK_LOG.md` entry. Keep detailed implementation rationale in
+the commit or PR and use the ledger as the session index. The entry must include:
+
+```text
+PLAN POSITION
+- Phase:
+- Workstream:
+- Step:
+- Previous Gate:
+- This Gate:
+
+OWNERSHIP
+- Tool:
+- Model:
+- Role:
+- PR:
+- Branch:
+- Base SHA:
+- Old HEAD:
+- New HEAD / Reviewed HEAD:
+
+CHANGED / REVIEWED
+- file:
+- function/component/migration:
+- what changed/reviewed:
+- why:
+
+EXPLICITLY NOT CHANGED
+- crypto semantics:
+- DB/migration semantics:
+- product semantics:
+- Production:
+
+VERIFICATION
+- command:
+- PASS / FAIL / UNVERIFIED:
+- what it actually proves:
+
+REVIEW IMPACT
+- NONE / DELTA / FULL:
+- whether an earlier review is stale:
+
+BLOCKERS
+- code:
+- environment:
+- external/manual:
+
+STOPPED AT
+- exact completed boundary:
+
+REMAINING
+- not completed:
+
+NEXT ACTION
+- next owner:
+- tool/model:
+- 기준 SHA:
+- exact next task:
+
+DO NOT ADVANCE UNTIL
+- next-step conditions:
+
+PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED:
+```
+
+`CURRENT_STATE.md`에는 현재 현실만, `ENGINEERING_ROADMAP.md`에는 순서와 gate만
+기록한다. 완료 주장보다 실제 명령과 증거를 우선한다.
+
+## 19. Review Freshness
+
+Review는 특정 exact commit에 대한 판정이다. HEAD가 바뀌면 이전 review를 자동으로
+승계하지 않는다. 각 작업 종료 기록의 `REVIEW IMPACT`를 반드시 채운다.
+
+| 변경 분류 | 필요한 영향 평가 |
+|---|---|
+| A. docs/comment/test wording only, security semantics 없음 | review 불필요 또는 narrow DELTA |
+| B. packaging/native wiring 같은 좁은 변경 | targeted DELTA review |
+| C. authorization/RLS/DB schema/migration | 해당 security review 재수행 |
+| D. crypto protocol/trust authority/key semantics | Architect 판단 + FULL security review |
+| E. parent/base/rebase가 security semantics에 영향 | integration/delta review |
+
+리뷰 대상 PR의 보안 의미를 바꾸지 않는 별도 docs-only branch는 그 PR의 HEAD에
+WORK_LOG-only commit을 추가하지 않는다. READ-ONLY Kiro Reviewer/Sol Architect는
+저장소를 수정하지 않으며, 다음 write-capable owner가 복사할 수 있는 결과만 남긴다.

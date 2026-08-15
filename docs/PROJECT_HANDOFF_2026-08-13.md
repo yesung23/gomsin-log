@@ -21,7 +21,8 @@
 | 질문 | authoritative home |
 |---|---|
 | 제품의 목적·North Star·범위·비목표 | [`PRODUCT_V3.md`](PRODUCT_V3.md) |
-| 수익화·보존·미디어·Book Studio 가설 | [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |
+| 수익화·보존·미디어·기억상품 가격·검증 가설 | [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |
+| Book Studio 제품 방향 | [`PRODUCT_V3.md`](PRODUCT_V3.md) §12.5 |
 | 구현 순서와 engineering gate | [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md) |
 | 현재 결함·미구현·차단 요소 | 저장소 코드, 그 다음 [`CURRENT_STATE.md`](CURRENT_STATE.md) |
 | 암호 프로토콜 | [`E2EE_PHASE_1A_ARCHITECTURE_V2_1.md`](E2EE_PHASE_1A_ARCHITECTURE_V2_1.md) |

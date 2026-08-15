@@ -562,6 +562,155 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-15 · [Control Tower Governance / canonical correction] MASTER PLAN 감사 gap 반영
+
+#### PLAN POSITION
+- Phase: Control Tower Governance / documentation canonicalization
+- Workstream: Product / Business / Engineering strategy maintenance
+- Step: 독립 감사(@ `1944361`)가 지적한 canonical gap을 문서에 반영
+- Previous Gate: independent read-only audit 완료, 판정 `REQUEST CANONICAL CORRECTIONS`
+- This Gate: M3/M7 engineering owner 신설, 사업문서 보정, 과거 packet 무효화 표기 완료
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES (`origin/master` 코드/migration 재확인)
+- Latest relevant Work Log checked: 직전 두 항목 — YES
+- MASTER PLAN version / 기준일: 사용자 승인 MASTER PLAN / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A — 승인된 전략을 바꾸지 않고 실행 gap만 닫았다
+
+#### OWNERSHIP
+- Tool: Kiro
+- Model: Opus 5 / MAX
+- Role: Strategy Maintainer + Verifier (write-capable, bounded)
+- PR: #61 (draft 유지)
+- Branch: `docs/control-tower-governance`
+- Base SHA: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- Old HEAD: `194436174919213cd4c73090398dc2c5644791a7`
+- New HEAD / Reviewed HEAD: 이 커밋 SHA (push 후 live 확인)
+
+#### CHANGED
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: §2.5 crosswalk M3/M7 행, 신설 `LV`·`P-MP` 단계
+- what changed: M3에 `LV — Limited Validation Gate`(통제된 소규모 외부 검증 진입조건,
+  Public Beta/Production과 명시적 분리), M7에 `P-MP — Memory Product MVP`(구성·선택·
+  결정적 초안·편집·미리보기·주문·결제·POD handoff·계측 범위 한정)를 추가했다.
+- why: M3는 실제 사용자를 요구하는데 Beta gate가 P10에 있어 순환이었고, M7이 요구하는
+  판매 가능한 제품을 어떤 단계도 소유하지 않았다.
+- file: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- function/component/migration: §9.2 구매자 경계, §9.4 기여이익, §11 M-stage 앵커, §13 리스크
+- what changed: M1–M8을 8개 순차 실행구간으로 정의하고 달력 확정을 제출 시점으로 유보,
+  기여이익 산식에 `플랫폼·판매채널 수수료(해당되는 경우)` 추가, 구매자·미리보기 노출·연결
+  해제 후 접근을 결제 구현 전 선행 gate로 명시, `고객 문제강도·반복사용 미달`과 `실물 배송
+  개인정보` 리스크 2건 추가, iOS 우선이 영구 결정이 아님을 명시, M1/M2가 사전 고객조사를
+  금지하지 않음을 명시.
+- why: 협약기간 현실성 판단, 저단가 디지털 상품의 기여이익 왜곡 방지, 음성 검증결과의
+  실행 가능한 대응 확보.
+- file: `docs/CHAT_PRODUCT_DATA_CONTRACT_V1.md`
+- function/component/migration: §13 미디어 주석, §21 범위 밖 표
+- what changed: 오디오·영상의 `Premium Candidate` 표현을 `코어 이후 미디어 확장(유료 게이트
+  아님)`으로 교체하고, 지연 이유가 P6 기반·engineering priority·복구/프라이버시 검증임을
+  명시했다. 채팅 crypto/데이터 계약은 건드리지 않았다.
+- why: canonical 문서가 폐기된 유료 미디어 게이트 표현을 유지하고 있었고
+  `PRODUCT_V3.md` §12.3이 더는 하지 않는 주장을 인용하고 있었다.
+- file: `docs/CURRENT_STATE.md`
+- function/component/migration: §3 default-branch product/security reality 표
+- what changed: `briefings` 레거시 스키마와 연결 해제 시 `crypto_pairings` `UNLINKED`
+  미전이 2건을 정확한 성격으로 복원했다. `briefings`는 `master` `src/**`에 read/write 경로가
+  없으므로 동작하는 평문 요약 파이프라인이 아니라 스키마 정리 대상으로, pairing 문제는
+  데이터 유출이 아니라 lifecycle/state 정합성 문제로 기술했다.
+- why: 두 항목 모두 해소 증거가 없는데 문서에서 사라져 있었다.
+- file: `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md`
+- function/component/migration: §E E2EE Scope — Memory Product 실물 제작·배송 경계 신설
+- what changed: 사용자 선택 콘텐츠만 경계 이탈, 최소수집, 목적제한, 처리자 범위 한정,
+  보관·삭제, 건강데이터 배제, 결제 전 고지를 PRODUCT PRIVACY DECISION으로 추가하고,
+  법적 판단은 `LEGAL SPECIALIST FOLLOW-UP REQUIRED`로 남겼다.
+- why: 실물 배송은 실명·주소·연락처와 외부 처리자를 도입하는 첫 흐름인데 경계가 없었다.
+- file: `docs/PROJECT_HANDOFF_2026-08-13.md`
+- function/component/migration: §2 authoritative home 표
+- what changed: Book Studio 제품 방향을 `PRODUCT_V3.md` §12.5로, 가격·검증 가설을
+  business 문서로 분리했다.
+- why: 기존 포인터가 Book Studio를 business 문서로 보냈지만 그 문서에는 해당 서술이 없었다.
+- file: `docs/PRODUCT_V3.md`
+- function/component/migration: 문서 머리말 기준일
+- what changed: 기준일 2026-08-14 → 2026-08-15. 제품 의미 변경 없음.
+- why: 이 PR에서 실제로 수정된 canonical 문서의 기준일이 과거로 남아 있었다.
+
+#### LOCAL-ONLY / UNTRACKED (PR에 포함되지 않음)
+- `GOMSINLOG_BUSINESS_PLAN_MASTER_V2_FINAL.md`, `GOMSINLOG_PRODUCTION_BRIEF_V1_FINAL.md`
+- 문서 최상단에 `SUPERSEDED / SUPPORTING SUBMISSION PACKET` 경고와 현재 사업전략/가격가설/
+  폐기 전략을 추가했다. 원문은 삭제하지 않았다.
+- 두 파일은 untracked 상태를 유지했고 `git add`하지 않았다. **LOCAL-ONLY / UNTRACKED /
+  NOT INCLUDED IN PR.**
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음 (`supabase/migrations/*.sql` 무수정)
+- product semantics: 승인된 MASTER PLAN 방향 변경 없음. M2/채팅 순서 유지, 새 M0 신설 안 함
+- Production: remote mutation·migration·배포·Supabase 조회 없음
+- 그 외: `src/**`, `packages/**`, `e2e/**`, native, `AGENTS.md`, `CLAUDE.md` 무수정.
+  security PR #54/#58/#59/#60 HEAD 무변경
+
+#### VERIFICATION
+- command: `git rev-parse HEAD` / `gh pr view 61`
+- PASS / FAIL / UNVERIFIED: PASS — 편집 전 HEAD가 감사 대상 `1944361`과 일치
+- what it actually proves: 시작 지점 동일성만 증명한다
+- command: `git grep`으로 `briefings` / `disconnect_couple` / `UNLINKED`를 `origin/master`에서 재확인
+- PASS: `briefings`는 `src/**` 참조 0건이고 DROP migration 없음. `disconnect_couple`은
+  `couple_members`만 갱신하며 `crypto_pairings`를 전이하지 않음
+- what it actually proves: 복원한 두 항목이 실제로 미해소임을 증명한다. remote 상태는 아니다
+- command: `rg`로 `Premium Candidate` / `39,000` / `100GB` / `300GB` / `storage tier` 재검색
+- PASS: canonical 문서에 active 잔존 없음. 남은 것은 `WORK_LOG`·`AGENTS.md` guard·
+  superseded 문서·경고 배너가 붙은 untracked packet뿐
+- what it actually proves: 문구 수준 잔존만 증명한다
+- command: `git diff --check`
+- PASS: whitespace 오류 없음
+- command: 단계 보존 확인 (`P5.1`–`P5.5`, `P6A`–`P6D`, `P7`–`P10`, `LV`, `P-MP`, `M1`–`M8`)
+- PASS: 삭제된 단계 없음
+- UNVERIFIED: remote Supabase catalog, production migration state, native device gate,
+  POD 법적 요건, 실제 협약기간 길이
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — documentation/strategy only
+- whether an earlier review is stale: **YES.** `1944361`에 대한 이전 Opus 감사는 이 커밋으로
+  HEAD가 바뀌었으므로 STALE이다. 새 HEAD 기준 delta 확인이 필요하다. security PR
+  #54/#58/#59/#60 리뷰는 영향받지 않는다(HEAD 무변경)
+
+#### BLOCKERS
+- code: 없음 (문서 범위)
+- environment: remote Supabase catalog, native Android/iOS device gate
+- external/manual: POD 처리위탁·국외이전·보관기간은 법률 검토 필요. 협약기간 길이는
+  사용자 확정 필요. untracked packet의 Git 추적 여부는 사용자 결정
+
+#### STOPPED AT
+- exact completed boundary: 감사가 지적한 tracked 문서 보정 완료, untracked packet에 경고
+  배너 추가 완료, PR #61 draft 유지
+
+#### REMAINING
+- Control Tower의 최종 diff 확인
+- 별도 Opus delta review 필요 여부 판단
+- 협약기간 길이 확정 시 M1–M8 달력 매핑
+- POD 법률 검토
+
+#### NEXT ACTION
+- next owner: ChatGPT Control Tower
+- tool/model: 최종 diff 검토 후 필요 시 Opus delta review
+- 기준 SHA: 이 커밋 SHA
+- exact next task: 최종 diff를 독립 확인하고 별도 delta review 필요 여부를 결정한다
+
+#### DO NOT ADVANCE UNTIL
+- 최종 diff에 문서 경로만 포함되어 있음이 확인됨
+- P5.2 native/device gate가 독립 검증되기 전 P6A를 시작하지 않음
+- PR #57이 먼저 merge됨 (base chain)
+- POD 실제 배송 전에 법률 검토가 완료됨
+
+#### PRODUCTION
+- NOT APPLIED — remote mutation·migration·배포·Supabase 조회 없음
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

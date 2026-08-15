@@ -81,6 +81,8 @@ master에서 active PR 코드를 구현된 것으로 세지 않으면, 사용자
 | 정밀 위치 | 여행 항목에 정밀 위경도 평문 경로가 남아 있음 | `SEC` `BETA` |
 | 평문 영상 | 기존 평문 첨부 경로가 존재하며 Full User-Content E2EE 전에는 해소 필요 | `PRODUCT` `BETA` |
 | 레거시 건강 평문 | 레거시 주기 테이블·백업 데이터가 남아 있음 | `LEGACY` |
+| `briefings` 레거시 스키마 | 평문 요약 캐시 테이블이 스키마에 남아 있다. `master`의 `src/**`에 read/write 경로가 없어 **동작하는 평문 요약 파이프라인은 아니다**. 삭제하는 migration도 없어 스키마 정리 대상으로 남는다 | `LEGACY` |
+| 연결 해제와 pairing 상태 | `disconnect_couple`이 `couple_members`만 갱신하고 `crypto_pairings`를 `UNLINKED`로 전이하지 않는다. `UNLINKED` 값은 031에 정의되어 있으나 이 RPC가 사용하지 않는다. **데이터 유출이 아니라 lifecycle/state 정합성 문제**다 | `FUTURE` |
 
 ## 4. 핵심 루프와 범위 밖 기능
 

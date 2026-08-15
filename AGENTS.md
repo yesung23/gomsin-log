@@ -331,6 +331,7 @@ Each question has exactly one deciding document:
 | Question | Canonical source |
 |---|---|
 | What should the product do? | `docs/PRODUCT_V3.md` |
+| What is the approved business strategy? | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |
 | What is currently implemented / blocked? | the repository, then `docs/CURRENT_STATE.md` |
 | What order do we build in? | `docs/ENGINEERING_ROADMAP.md` |
 | Cryptographic protocol | `docs/E2EE_PHASE_1A_ARCHITECTURE_V2_1.md` |
@@ -351,6 +352,23 @@ If documentation conflicts with actual verified production behavior, report the 
 The primary agent owns user intent, scope, integration, final diff review, and
 the completion report. It must not delegate merely to use subagents, or accept
 a subagent's completion claim as proof.
+
+### DIRECTION CHECK — mandatory before substantial work
+
+Before implementation or a consequential documentation change, record:
+
+- Product source checked:
+- Business source checked / NOT APPLICABLE:
+- Engineering source checked:
+- Current-state checked:
+- Latest relevant Work Log checked:
+- Does this task conflict with canonical direction? YES / NO
+- If YES, what conflict?
+
+Business source review is required when a task can change the customer, problem definition,
+product scope, AI role, monetization, pricing, storage/cloud strategy, media strategy, Memory
+Product, KPI, or market expansion. If the conflict answer is `YES`, **STOP BEFORE
+IMPLEMENTATION** and report the conflict to the Control Tower/user.
 
 For non-trivial tasks, delegate bounded independent exploration, implementation,
 verification, or review work to the appropriate configured subagent when doing
@@ -405,6 +423,27 @@ copying them into prompts: `docs/kiro/AI_HANDOFF.md` for application invariants,
 decisions, `docs/SECURITY_TEST_PLAN.md` and `docs/rls-test-matrix.md` for
 security/RLS coverage, and `docs/operations/rollback-runbook.md` for rollback.
 
+### Abandoned-strategy guard
+
+The following are superseded strategy, not active defaults. If a request reintroduces one,
+mark `DIRECTION CONFLICT`, stop before changing the canonical plan, and ask whether the user
+is intentionally changing strategy:
+
+- Free 5GB / Plus 100GB / Archive 300GB or any storage-capacity subscription
+- paid high-quality photo or paid long video
+- E2EE or privacy as a premium gate
+- subscription-first initial business model
+- company-server-only media architecture
+- AI selecting important memories automatically
+- relationship score, affection score, breakup prediction, or hidden relationship analysis
+- time-spent North Star or downloads as acquisition success
+- military population treated as the entire customer market
+- CloudKit described as already implemented
+- audio/video described as currently complete
+
+Historical `WORK_LOG` entries and superseded source packets remain for traceability, but they
+must not be used as current business direction without an explicit user decision.
+
 ## 18. Mandatory Work Ledger
 
 Every substantial engineering, verification, or security-review result must have a
@@ -418,6 +457,16 @@ PLAN POSITION
 - Step:
 - Previous Gate:
 - This Gate:
+
+DIRECTION CHECK
+- Product source checked:
+- Business source checked / NOT APPLICABLE:
+- Engineering source checked:
+- Current-state checked:
+- Latest relevant Work Log checked:
+- MASTER PLAN version / 기준일:
+- Does this task conflict with canonical direction? YES / NO
+- If YES, what conflict:
 
 OWNERSHIP
 - Tool:

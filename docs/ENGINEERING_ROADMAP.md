@@ -138,6 +138,40 @@ IDs / real devices / quota / unlink / account-switch / security hardening`이다
 
 ARCH-P6 완료는 P6A 시작 허가와 같지 않다.
 
+## 2.5 사업 M-stage ↔ engineering P-stage crosswalk
+
+M1–M8은 협약기간의 사업 실행·고객검증 순서이고, P-stage는 기술 의존성과 engineering
+gate다. M-stage가 P-stage를 대체하거나, 사업계획서의 개발 예정이 기술 구현 완료를
+증명하지 않는다.
+
+| 사업 단계 | 기술 대응 | 경계 |
+|---|---|---|
+| M1 개인정보 보호 | P5.1 / P5.2 | 텍스트 E2EE와 device/bootstrap gate를 개발·검증한다. 전체 사용자 콘텐츠 E2EE 완료를 뜻하지 않는다. |
+| M2 대화 연결 | P5.3 / P5.4 / P5.5 | 채팅 기반과 제품 흐름을 통합하고 security stack gate를 통과시킨다. |
+| M3 고객 문제검증 | 별도 P-stage 대체 없음 | 곰신 고객문제·연결행동·실제 대화를 검증하는 사업 단계다. |
+| M4 UX 개선 | 별도 P-stage 대체 없음 | 실증 이탈구간을 개선하는 제품 실행 단계다. |
+| M5 장기 기록 | P6A / P6B / P6C / 관련 P6D | 사진 E2EE·기본 기억 아카이브·개인 클라우드 연계 PoC의 판단 자료다. |
+| M6 AI 실증 | 별도 P-stage 대체 없음 | 지원기기 온디바이스 요약과 미지원기기 fallback을 검증한다. |
+| M7 BM 검증 | 별도 P-stage 대체 없음 | `우리의 한 달` MVP·POD·가격·구매를 검증한다. |
+| M8 사업화 판단 | Beta/Production gate와 별도 | 반복사용·원가·구매·운영부담을 종합해 GO/HOLD를 판단한다. 배포 승인이 아니다. |
+
+**M5 Basic Memory Archive ≠ P9 Advanced Moment/Archive.** M5는 텍스트·사진 중심의
+기본 기록축적과 기억상품 검증을 뜻하고, P9는 이후 고급 Moment/Archive 기술·제품 단계다.
+
+### 후속 engineering stages 보존
+
+P6 이후의 다음 단계도 사업 M-stage와 혼동하지 않고 별도 engineering 순서로 보존한다.
+
+| 단계 | 범위 | 상태 경계 |
+|---|---|---|
+| **P7** | Schedule / military dates | 일정·군 복무일 관련 후속 구조와 권한을 검토하는 단계. 현재 완료 주장이 아니다. |
+| **P8** | HRK / cycle redesign | 건강·주기 데이터의 독립 키·공유 경계를 재설계·검증하는 단계. HRK를 CSK로 대체하지 않는다. |
+| **P9** | Advanced Moment / Archive | M5 기본 아카이브 이후의 고급 회고·Moment·Archive 단계. |
+| **P10** | Beta / release hardening | 실제 계정·기기·권한·삭제·내보내기·Production gate를 통과시키는 후속 단계. |
+
+각 단계의 진입 조건과 현재 gate는 `CURRENT_STATE.md`, Beta/Production 승인 기준은 이
+문서 §4–§7과 관련 보안 문서에서 다시 확인한다.
+
 ### 로드맵에 없는 것
 
 **오디오와 영상은 P0–P5(현재 활성 구간)에 없다.** P6 사진 기반이 안정된 뒤의

@@ -6,9 +6,34 @@
 
 당신은 군 복무 중인 커플을 위한 1:1 비공개 기록 서비스 **곰신로그**의 독립적인 최종 검증자이자 구현 책임자다. 나는 비전공자이므로, 내게 기술적 선택을 되묻기보다 코드와 제품 문서를 근거로 가장 안전하고 성공 가능성이 높은 방향을 판단하라.
 
+## 0-A. Canonical direction check
+
+작업 시작 전에 다음 문서를 읽고, 대화 기억이나 오래된 제출 원고를 최신 전략의 근거로
+사용하지 마라.
+
+- Product source: `docs/PRODUCT_V3.md`
+- Business source: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source: `docs/ENGINEERING_ROADMAP.md`
+- Current-state source: `docs/CURRENT_STATE.md`
+- Latest relevant ledger: `docs/WORK_LOG.md`
+
+다음을 먼저 보고하라.
+
+- Product source checked:
+- Business source checked / NOT APPLICABLE:
+- Engineering source checked:
+- Current-state checked:
+- Latest relevant Work Log checked:
+- Does this task conflict with canonical direction? YES / NO
+- If YES, what conflict?
+
+충돌이 `YES`이면 구현 전에 멈추고 Control Tower/user에게 보고하라. 특히 저장용량
+구독·기능별 미디어 유료화·E2EE 유료화·AI 관계평가·CloudKit 완료 주장은 현재 방향이
+아니다.
+
 이번 작업의 목적은 이미 작성된 코드와 문서를 신뢰하고 확인 도장만 찍는 것이 아니다. **제품 가치, 실제 구현, 데이터베이스 권한, 모바일 환경, 운영 비용, 앱스토어 출시 조건이 서로 일치하는지 교차검증하고, 근거가 충분한 문제는 직접 수정하여 서비스 가능한 상태로 끌어올리는 것**이다.
 
-## 0. 작업 원칙
+## 0-B. 작업 원칙
 
 1. 먼저 저장소 전체와 현재 `git status`를 읽고 사용자의 기존 변경을 보존한다.
 2. 문서의 “구현 완료” 표기를 사실로 간주하지 말고 실제 호출 경로, DB 스키마, RLS, Storage 정책, 테스트를 대조한다.
@@ -23,21 +48,29 @@
 
 ## 1. 먼저 읽을 기준 문서
 
-다음 순서로 읽고, 서로 충돌하면 `PRODUCT_PRD.md`의 최신 버전을 제품 기준으로 삼되 실제 코드를 최종 사실로 본다.
+다음 순서로 읽고, 서로 충돌하면 canonical 문서를 우선하되 현재 구현 사실은 실제 코드와
+`CURRENT_STATE.md`를 대조한다. `PRODUCT_PRD.md`는 제품 방향에 대해 SUPERSEDED인 역사
+참고자료다.
 
-1. `docs/PRODUCT_PRD.md`
-2. `docs/SERVICE_OVERVIEW.md`
-3. `docs/USER_FLOWS.md`
-4. `docs/WIREFRAMES.md`
-5. `docs/FEATURE_SPEC.md`
-6. `docs/TRACEABILITY_MATRIX.md`
-7. `docs/privacy-access-matrix.md`
-8. `docs/SECURITY_TEST_PLAN.md`
-9. `docs/kiro/AI_HANDOFF.md`
-10. `docs/kiro/NATIVE_RELEASE_GUIDE.md`
-11. `docs/kiro/PLAY_STORE_ROADMAP.md`
-12. `docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`
-13. `docs/artifacts/곰신로그_베타테스트_운영패키지.docx`
+1. `CLAUDE.md`
+2. `docs/PRODUCT_V3.md`
+3. `docs/BUSINESS_MEMORY_ROADMAP_V1.md` (사업·고객·BM·AI·미디어·기억에 영향이 있는 경우)
+4. `docs/ENGINEERING_ROADMAP.md`
+5. `docs/CURRENT_STATE.md`
+6. `docs/WORK_LOG.md`의 최신 관련 항목
+7. `docs/PROJECT_HANDOFF_2026-08-13.md`
+8. `docs/SERVICE_OVERVIEW.md`
+9. `docs/USER_FLOWS.md`
+10. `docs/WIREFRAMES.md`
+11. `docs/FEATURE_SPEC.md`
+12. `docs/TRACEABILITY_MATRIX.md`
+13. `docs/privacy-access-matrix.md`
+14. `docs/SECURITY_TEST_PLAN.md`
+15. `docs/kiro/AI_HANDOFF.md`
+16. `docs/kiro/NATIVE_RELEASE_GUIDE.md`
+17. `docs/kiro/PLAY_STORE_ROADMAP.md`
+18. `docs/kiro/MANUAL_TWO_ACCOUNT_TEST.md`
+19. `docs/artifacts/곰신로그_베타테스트_운영패키지.docx`
 
 오래된 문서가 현재 코드와 충돌하면 오래된 문서의 결론을 구현 근거로 사용하지 말고, 어떤 문서가 사문화됐는지 별도로 표시한다.
 
@@ -45,7 +78,11 @@
 
 곰신로그의 핵심 가치는 다음과 같다.
 
-> 떨어져 지내는 군 복무 커플이 짧게 하루를 기록하고, 상대가 통화 전에 60초 안에 핵심을 확인해 더 좋은 대화를 나누도록 돕는다.
+> 함께하지 못한 하루를 안전하고 간편하게 이어주고, 그렇게 이어온 시간을 다시 정리할
+> 필요 없이 둘만의 기억으로 만들어준다.
+
+Daily Core는 `간편 기록 → 상대방의 오늘 → 정확한 원본 → 이따 이야기하기 → 실제 대화`다.
+앱 체류시간이 아니라 실제 대화 연결을 핵심 성공상태로 확인하라.
 
 다음을 확인하라.
 
@@ -177,22 +214,26 @@ RLS는 E2EE가 아니다. 현재 보안 수준을 정확히 표현하고 “운�
 
 ## 9. 수익화·구독 준비도
 
-권장 사업 모델은 기본 기록 루프는 무료, 비용이 발생하는 미디어 보관과 선택형 AI를 커플 단위 프리미엄으로 제공하는 것이다.
+최신 사업모델은 `Free Core + 1회성 Memory Product + 검증 후 선택형 Plus`다. 연결과
+보존은 무료이며, 저장용량·원본 화질·기본 미디어·E2EE·기본 채팅을 결제 장벽으로 만들지
+않는다. 첫 수익검증 대상은 사용자가 고른 기록을 바탕으로 하는 **「우리의 한 달」**
+Memory Product다. 디지털 3,900~7,900원, 실물 2~5만원대는 초기 가격가설일 뿐이며
+실제 구매전환·POD 원가·기여이익 검증 전에는 확정하지 않는다.
 
 다음을 검증·설계하라.
 
 - 무료 기능을 지나치게 막아 첫 가치 경험을 훼손하지 않는가?
-- 사진·영상·음성의 무료 할당량과 유료 저장공간 경계
-- 한 명 결제 시 연결된 두 사람에게 entitlement를 안전하게 공유하는 방법
-- 연결 해제 후 구독 소유자와 상대 권한 처리
-- App Store IAP / Google Play Billing, 구독 복원, 환불, 유예기간
-- 월간·연간 상품과 7일 체험의 상태 모델
-- 저장공간 초과 시 기존 미디어를 삭제하지 않고 신규 업로드만 제한하는 방식
-- 결제 서버 검증과 클라이언트 조작 방지
-- AI API 사용량 제한, 재시도, 장애 시 기본 기능 유지
+- `우리의 한 달`의 노출 → 미리보기 → 제작 → 실제 결제 → 기여이익 funnel
+- 디지털·POD 상품의 형태·가격·제작시점·원가·배송·CS 검증
+- Memory Product에서 반복 지불가치가 확인된 뒤에만 Plus 후보를 검증하는가
+- Plus를 도입하지 않아도 되는지, 구독이 새로운 가치를 실제로 제공하는지
+- 결제 서버 검증과 클라이언트 조작 방지 (실제 도입 승인 이후)
+- AI 비용 변동과 온디바이스/fallback의 실제 운영 효과
 - 일반 채팅이 제품 차별성과 운영비·신고 의무를 악화시키는지
 
-결제 코드를 실제로 추가하지 말고 필요한 데이터 모델, 서버 검증 경계, 단계별 구현 순서를 제안하라.
+저장용량 구독·E2EE Premium·기능별 고화질/긴 영상 유료화는 사용자 승인 없이 제안하거나
+구현하지 마라. 결제 코드를 실제로 추가하지 말고, 승인된 Memory Product의 필요한
+데이터 모델·서버 검증 경계·단계별 구현 순서를 제안하라.
 
 ## 10. 앱스토어·베타 출시 준비도
 

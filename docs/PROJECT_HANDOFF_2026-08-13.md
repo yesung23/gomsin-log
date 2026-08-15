@@ -50,9 +50,10 @@
 
 1. [`CLAUDE.md`](../CLAUDE.md)
 2. [`PRODUCT_V3.md`](PRODUCT_V3.md)
-3. [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)
-4. [`CURRENT_STATE.md`](CURRENT_STATE.md)
-5. 작업과 직접 관련된 specialist 문서 하나 이상
+3. [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) (사업·고객·BM·AI·미디어·기억·시장·KPI에 영향이 있는 경우)
+4. [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)
+5. [`CURRENT_STATE.md`](CURRENT_STATE.md)
+6. 작업과 직접 관련된 specialist 문서 하나 이상
 
 엔지니어링 작업은 [`AGENTS.md`](../AGENTS.md)도 읽는다. DB·보안·암호·채팅·디자인
 작업일 때만 위 표의 해당 문서를 추가한다. 모든 Markdown을 무조건 읽을 필요는 없다.
@@ -65,7 +66,8 @@
 ```text
 CLAUDE
 → PRODUCT
-→ ROADMAP
+→ BUSINESS (사업·고객·BM 영향 시)
+→ ENGINEERING ROADMAP
 → CURRENT_STATE
 → WORK_LOG latest relevant entries
 → PROJECT_HANDOFF
@@ -106,3 +108,33 @@ PR inventory를 이 문서에 복사하지 않는다. active PR·HEAD·CI·merge
   작업 시점에 확인한다.
 - 새로운 canonical 문서를 만들기 전에 기존 authoritative home이 없는지 먼저 확인한다.
 - `CURRENT_STATE.md`는 휘발성 문서이므로 실제 코드와 대조해 갱신한다.
+
+## 7. 문서 분류와 최신 사업전략 경계
+
+### Canonical
+
+- `PRODUCT_V3.md`: 제품 의도·North Star·Daily Core·제품 경계
+- `BUSINESS_MEMORY_ROADMAP_V1.md`: 고객·문제·시장·BM·Memory Product·M1–M8·팀·사업화 판단
+- `ENGINEERING_ROADMAP.md`: P-stage 기술 의존성·gate·M↔P crosswalk
+- `CURRENT_STATE.md`: 현재 저장소·branch·Production 검증 현실
+- `WORK_LOG.md`: 세션 작업 원장
+- 이 문서: 새 AI의 복구 지도
+
+### Supporting / historical source packets
+
+| 분류 | 문서 | 사용 규칙 |
+|---|---|---|
+| SUPPORTING | `CHAT_PRODUCT_DATA_CONTRACT_V1.md`, E2EE·DATA_LEGAL·SECURITY specialist 문서 | 각 전문영역의 세부 계약·보안 판단에만 사용 |
+| HISTORICAL SNAPSHOT | `SERVICE_OVERVIEW.md`, `FEATURE_SPEC.md`, 기존 디자인·운영 문서 | 구현·시각·운영 참고. 현재 제품 의도·사업전략의 단일 근거가 아님 |
+| SUPERSEDED | `PRODUCT_PRD.md`, `BEGINNER_PROJECT_ROADMAP.md`, `implementation_plan v1.md`, `implementation_plan_v2.md` | 역사적 시나리오·계획·분석으로 보존. 현재 방향과 충돌하면 사용하지 않음 |
+| SUPPORTING SUBMISSION PACKET | `GOMSINLOG_BUSINESS_PLAN_MASTER_V2_FINAL.md`, `GOMSINLOG_PRODUCTION_BRIEF_V1_FINAL.md` | 제출 원고·원자료 증빙 패킷. 최신 MASTER PLAN과 충돌하는 과거 가격·저장용량 과금 표현은 superseded |
+| OPERATIONAL PROMPT | `CLAUDE_OPUS_5_CROSS_VALIDATION_PROMPT.md` | canonical 문서를 읽고 검증하도록 지시하는 실행 프롬프트. 독립 source of truth가 아님 |
+
+최신 승인 사업전략과 충돌하면 `BUSINESS_MEMORY_ROADMAP_V1.md`와 사용자가 제공한 최신
+MASTER PLAN을 우선하고, 원문은 삭제하지 않고 역사로 보존한다.
+
+`CLAUDE_OPUS_5_CROSS_VALIDATION_PROMPT.md`는 canonical 문서를 읽도록 지시하는 실행
+프롬프트다. 이 프롬프트 자체가 제품·사업전략의 독립적인 source of truth는 아니다.
+
+특히 과거 저장용량 구독·기능별 유료화·초기 구독 우선·CloudKit 완료 표현·검증되지 않은
+성과 숫자는 현재 사업전략의 근거로 사용하지 않는다.

@@ -5,7 +5,8 @@
 > **이 문서는 "무엇을 했는가"의 기록이다.** 제품 의도는
 > [`PRODUCT_V3.md`](PRODUCT_V3.md), 저장소 현실은
 > [`CURRENT_STATE.md`](CURRENT_STATE.md), 구현 순서는
-> [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)가 각각 canonical이다.
+> [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md), 사업전략은
+> [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다.
 
 ## 앞으로 사용할 표준 세션 원장 형식
@@ -22,6 +23,16 @@
 - Step:
 - Previous Gate:
 - This Gate:
+
+#### DIRECTION CHECK
+- Product source checked:
+- Business source checked / NOT APPLICABLE:
+- Engineering source checked:
+- Current-state checked:
+- Latest relevant Work Log checked:
+- MASTER PLAN version / 기준일:
+- Does this task conflict with canonical direction? YES / NO
+- If YES, what conflict:
 
 #### OWNERSHIP
 - Tool:
@@ -437,6 +448,117 @@ P3는 이 PR에서 보안 마이그레이션 필요를 이유로 의도적으로
 `PRODUCT_V3.md`(제품 의도, 안정) / `ENGINEERING_ROADMAP.md`(구현 순서) /
 `CURRENT_STATE.md`(저장소 현실, 휘발성). 채팅·사진을 코어로 승격, 오디오·영상을
 Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
+
+---
+
+### 2026-08-15 · 문서 canonical MASTER PLAN 정렬
+
+#### PLAN POSITION
+- Phase: 문서·사업전략 canonical consolidation
+- Workstream: Product / Business / Engineering governance
+- Step: 최신 MASTER PLAN을 기존 authoritative home에 반영
+- Previous Gate: 기존 Product·Engineering·Current State 분리 및 memory-business 방향 기록
+- This Gate: Business canonical 완성, M-stage ↔ P-stage crosswalk, DIRECTION CHECK 거버넌스 정렬
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: `docs/WORK_LOG.md` — YES
+- MASTER PLAN version / 기준일: 사용자 제공 최신 36-section MASTER PLAN / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Luna / High
+- Role: Primary Documentation Strategy Implementer + Verifier
+- PR: `docs/control-tower-governance` draft PR status to be live-checked
+- Branch: `docs/control-tower-governance`
+- Base SHA: `origin/master` merge-base to be live-recorded in final report
+- Old HEAD: `d03f390918f8c890e0766221bb951a94c9125f25`
+- New/Reviewed HEAD: working tree after this docs-only alignment; exact commit recorded after verification
+
+#### CHANGED / REVIEWED
+- file: `docs/PRODUCT_V3.md`
+- function/component/migration: product definition, source-of-truth table, Daily Core heading
+- what changed/reviewed: Added the exact approved product definition and linked business ownership without moving business detail into the product document.
+- why: Make the latest product definition reconstructable by a new AI while preserving ONE FACT → ONE AUTHORITATIVE HOME.
+- file: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- function/component/migration: entire canonical business roadmap
+- what changed/reviewed: Added Primary Customer/acquisition, problem chain, market methodology, four fact states, Daily Core, AI/privacy/cloud strategy, Free Core, Memory Product, pricing hypotheses, POD economics, Plus, KPI, M1–M8, risks, expansion, Team, execution evidence, validation prohibition, and M8 GO/HOLD.
+- why: Make the user-approved MASTER PLAN the complete business-strategy home and separate strategy from implementation/Production facts.
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: M-stage ↔ P-stage crosswalk and later P7–P10 preservation
+- what changed/reviewed: Added crosswalk boundaries, M5 Basic Memory Archive ≠ P9 Advanced Moment/Archive, and later engineering-stage table.
+- why: Preserve technical dependency order without replacing it with the business M1–M8 sequence.
+- file: `CLAUDE.md`
+- function/component/migration: session recovery, canonical ownership, DIRECTION CHECK
+- what changed/reviewed: Added conditional business-source read, business ownership, and mandatory direction checklist.
+- why: Prevent future agents from inferring business strategy from stale conversation or source packets.
+- file: `AGENTS.md`
+- function/component/migration: documentation sources, orchestration, work ledger
+- what changed/reviewed: Added Business canonical source, DIRECTION CHECK, abandoned-strategy guard, and ledger fields.
+- why: Stop reintroduction of storage-first/subscription-first/AI-judgment strategy and require per-session traceability.
+- file: `docs/PROJECT_HANDOFF_2026-08-13.md`
+- function/component/migration: reading order and document classification
+- what changed/reviewed: Added business canonical to recovery order and classified root submission packets as non-authoritative supporting/history material.
+- why: Allow a new AI to navigate the latest plan without erasing historical source packets.
+- file: `docs/CLAUDE_OPUS_5_CROSS_VALIDATION_PROMPT.md`
+- function/component/migration: Opus cross-validation prompt preamble, source order, product value, monetization section
+- what changed/reviewed: Repointed the prompt to canonical Product/Business/Engineering/Current-State sources and replaced storage-first subscription guidance with Free Core + Memory Product + optional Plus after validation.
+- why: Prevent the AI audit prompt itself from reintroducing superseded business strategy.
+- file: `docs/WORK_LOG.md`
+- function/component/migration: standard template and this session entry
+- what changed/reviewed: Added DIRECTION CHECK to the ledger template and recorded this session.
+- why: Require exact direction and verification trace for future substantial work.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: not changed
+- DB/migration semantics: not changed
+- product semantics: only canonical wording/ownership alignment; no new product feature
+- Production: no remote action, migration, deployment, or Supabase mutation
+
+#### VERIFICATION
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: whitespace errors only; not product, security, or Production correctness
+- command: repository search and section audit against user MASTER PLAN
+- PASS / FAIL / UNVERIFIED: PASS for covered canonical sections; the older root submission packet is not the latest MASTER PLAN
+- what it actually proves: required strategy homes and guardrails are present in the edited documents
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA for documentation/governance only
+- whether an earlier review is stale: application/security reviews are not changed; this docs branch requires an independent canonical-strategy review at its final reviewed SHA
+
+#### BLOCKERS
+- code: none for docs-only scope
+- environment: higher-model Kiro/Claude Opus 5 canonical audit not run in this session
+- external/manual: live PR/base/remote status and external submission evidence require separate verification
+
+#### STOPPED AT
+- exact completed boundary: repository documents aligned to the user-provided MASTER PLAN; no commit/push/PR mutation yet at ledger creation
+
+#### REMAINING
+- final diff and coverage verification
+- independent Kiro/Claude Opus 5 canonical strategy audit
+- commit/push and draft PR only after local verification and scope confirmation
+
+#### NEXT ACTION
+- next owner: Kiro / Claude Opus 5 independent canonical strategy auditor
+- tool/model: Kiro / Claude Opus 5, high or max reasoning as available
+- 기준 SHA: final docs-only alignment commit SHA
+- exact next task: Audit all canonical documents against the latest MASTER PLAN; report omitted items, active strategy conflicts, stale source packets, and fact-state errors without editing the repository.
+
+#### DO NOT ADVANCE UNTIL
+- final diff contains only approved docs/governance paths
+- `git diff --check` passes
+- no application source/tests/migrations/crypto/native/Production files are changed
+- independent canonical strategy audit is reviewed by the primary agent
+
+#### PRODUCTION
+- NOT APPLIED — no remote mutation, migration, deployment, or Supabase action performed
 
 ---
 

@@ -14,6 +14,7 @@
 | 질문 | 판정 문서 |
 |---|---|
 | 제품이 무엇을 해야 하는가 | **`docs/PRODUCT_V3.md`** (이 문서) |
+| 사업모델·시장·수익화·Memory Product | **`docs/BUSINESS_MEMORY_ROADMAP_V1.md`** |
 | 지금 무엇이 구현되어 있는가 | 저장소 코드 + [`docs/CURRENT_STATE.md`](CURRENT_STATE.md) |
 | 무엇을 어떤 순서로 만드는가 | [`docs/ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md) |
 | 암호 프로토콜 | [`docs/E2EE_PHASE_1A_ARCHITECTURE_V2_1.md`](E2EE_PHASE_1A_ARCHITECTURE_V2_1.md) |
@@ -38,6 +39,15 @@ V3의 목표 상태와 다를 수 있다.
 ---
 
 ## 1. North Star
+
+### 제품 정의
+
+> **함께하지 못한 하루를 안전하고 간편하게 이어주고, 그렇게 이어온 시간을 다시 정리할
+> 필요 없이 둘만의 기억으로 만들어주는 서비스**
+
+초기시장은 군 복무 커플이지만, 제품이 장기적으로 해결하는 문제는 반복되는
+**생활시간 비대칭**이다. 제품의 사업모델·시장·가격·검증 순서는
+[`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 소유한다.
 
 ### 지금 해결하는 문제
 
@@ -127,7 +137,7 @@ SumOne 클론 · AI 관계 평가기 · 범용 일기장.
 
 ---
 
-## 4. 핵심 제품 루프
+## 4. Daily Core — 핵심 제품 루프
 
 ```text
 가볍게 기록

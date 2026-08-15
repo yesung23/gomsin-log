@@ -1,4 +1,5 @@
 import type { DailyRecord, ReactionType } from '@/types';
+import { isRecordContentAvailable } from '@/lib/recordAvailability';
 import { parseLocalDate, toLocalDateString } from '@/lib/utils';
 
 export const CALL_BRIEFING_LOOKBACK_DAYS = 7;
@@ -113,6 +114,10 @@ export function buildCallBriefing(
 
   const eligible = records
     .filter((record) => !record.isPrivate)
+    // Excluded rather than described. `fallbackText` would otherwise announce
+    // `함께 확인할 순간을 남겼어요` for a record whose content this device could
+    // not read — a claim about unreadable data. See `recordAvailability.ts`.
+    .filter(isRecordContentAvailable)
     .filter((record) => record.date >= rangeStart && record.date <= todayStr)
     .filter((record) => !confirmedIds.has(record.id))
     .filter((record) => !Number.isFinite(checkpointTime) || timestamp(record) > checkpointTime)

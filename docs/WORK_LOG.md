@@ -1214,6 +1214,91 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-14 · P5 PR #54 review follow-up — revision/CAS와 unavailable surface 정합화
+
+독립 보안 리뷰의 B1/B2/H1/H2/M2/M3 지적을 실제 코드와 PostgreSQL harness에 대조해
+수정했다. `saveRecordToDB()`는 이제 create/update intent를 명시적으로 받고, create는
+`INSERT`, update는 소유자·커플 조건이 붙은 `UPDATE`를 사용한다. 암호화 행은
+`INSERT=1`, `UPDATE=expectedRevision+1`을 GLE1과 DB CAS 양쪽에 전달하며,
+`content_revision`을 PostgREST 응답에서 다시 읽어 store의 다음 attachment patch와
+후속 편집에 반영한다. `mapRow()`는 legacy plaintext row의 실제 revision도 보존한다.
+
+`상대방의 오늘`은 authorized-but-unreadable row를 빈 clickable row로 렌더링하지 않고
+중립 unavailable 상태로 표시하며, emotion-flow briefing도 동일한 availability gate를
+사용한다. GLK2 scope-key provisioning은 domain/epoch뿐 아니라 scope key id·owner·scope
+까지 비교하도록 강화했다. 이는 새 암호를 추가한 것이 아니라 기존 signed GLK2 header와
+verified certificate-chain 전제를 `RecordCryptoEnvironment` 계약에 명시한 것이다.
+
+실제 PostgreSQL 17 harness에 legacy revision `2 → ciphertext 3`, encrypted
+`1 → 2 → 3`, attachment/metadata patch, stale CAS, lost-response INSERT replay,
+former-partner RLS mutation을 추가했다. H2는 runtime bootstrap이 아직
+`setRecordCryptoEnvironment`/`setOutboxLocalCacheKey`를 호출하지 않는다는 사실을
+`CURRENT_STATE.md`와 코드 주석에 명시했다. P5 migration은 계속 **신규 / 어디에도
+미적용**이며 Production mutation은 없었다.
+
+검증은 최종적으로 `npm run test:p5` 85 assertions PASS(14 mutation boundary 포함),
+`npm run test:p0` 76 PASS, `npm run test:rollback` PASS, targeted E2EE flow 20 PASS,
+`npm test` 149 files / 2243 tests PASS, typecheck PASS, lint PASS, placeholder build
+PASS, `git diff --check` PASS였다. 첫 전체 suite 실행에서는 새 4번째 write-intent 인자를
+반영하기 전 테스트 1건이 실패했고, exact GLK2 owner 보강 직후에는 partner-assist
+flow 1건이 실패했으나 둘 다 원인 수정 후 새 프로세스로 재실행해 통과시켰다. 환경변수
+없는 bare build는 의도대로 `VITE_SUPABASE_URL` 누락으로 중단됐고, 실제 비밀값이 아닌
+CI placeholder로 재실행해 통과했다.
+
+### 2026-08-14 · P5 — `daily_records` E2EE 수직 슬라이스
+
+P4 완료 후 다음 단계인 P5를 구현했다. 시작 시점 `origin/master` HEAD `7c660e6`
+(로컬 `6cc9f72`와 트리 동일 — `7c660e6`은 같은 내용의 머지 커밋).
+
+**구현 전 조사에서 발견한 것 — 032가 남긴 진짜 공백.** 032는 암호화된 행의
+`log_text`·`reaction`·`attachments`·`emotion_flow`·`record_time`을 전부 금지하는데,
+**암호문을 담을 컬럼을 추가하지 않았다.** 즉 032만으로는 암호화된
+`daily_records` 행을 쓸 수 없다 — R4를 지키는 클라이언트는 방금 암호화한 내용을
+넣을 곳이 없다. P5의 중심은 write floor가 아니라 이 공백이었다.
+
+**추가로 발견한 P0 결함 (이미 머지된 032).** `enforce_e2ee_write_floor()`에
+`SECURITY DEFINER`가 없어서 호출자 권한으로 실행되고, 첫 문장이
+`e2ee_floor_for()`를 호출하는데 그 함수는 `authenticated`에게서 EXECUTE가
+회수되어 있다(032:71, 의도된 회수). 따라서 032를 적용하면 **모든 실제 사용자의
+`daily_records` 쓰기가 평문까지 포함해 전부 `42501`로 실패한다.** 기존 P0
+하네스가 `daily_records`에 한 번도 쓰지 않아 드러나지 않았다. 039가
+`ALTER FUNCTION ... SECURITY DEFINER`로 고친다 — 본문을 다시 선언하면 032와
+039에 규칙이 두 벌 생기므로 속성만 바꿨고, 그 사실을 테스트로 고정했다.
+
+| 파일 | 변경 |
+|---|---|
+| `supabase/migrations/039_daily_records_content_envelope.sql` | 신규. `content_envelope BYTEA` + 헤더/라우팅 일치 검증 + 032 P0 수정 |
+| `scripts/e2ee/p5-harness.mjs`, `scripts/e2ee/p5-baseline.sql` | 신규. 실제 PostgreSQL 17 · 실제 RLS 액터 · mutation testing |
+| `src/crypto/recordContent.ts` (+ 테스트) | 신규. 기록 콘텐츠 문서 · PMK/CSK 라우팅 · GLE1 AAD |
+| `src/app/records/contentCrypto.ts` (+ 테스트) | 신규. 유스케이스 — floor/epoch/domain 판단, 평문 fallback 없음 |
+| `src/lib/outboxCrypto.ts` (+ 테스트) | 신규. 오프라인 큐 암호화 (LCK) |
+| `src/lib/records.ts` | 읽기/쓰기 경로가 유스케이스를 통과 |
+| `src/lib/outbox.ts`, `src/lib/store.tsx` | 큐에 암호문 저장, 전송 시점에 개봉 |
+| `src/lib/e2eeLayering.test.ts` | Phase 1A 트립와이어를 P5 범위 불변식으로 전환 (cycle 경로는 그대로 동결) |
+
+**검증.** `test:p5` PASS (74 assertions, mutation 13종), `test:p0` PASS (76),
+`test:rollback` PASS, `npm run test` PASS (2221), typecheck·lint·build PASS.
+
+**하지 않은 것.** 프로덕션 조회·적용 없음. 039는 어디에도 적용되지 않았다.
+실제 두 계정 기기 간 E2E, 키 프로비저닝 UI, 레거시 행 일괄 마이그레이션 실행,
+채팅·미디어·주기는 범위 밖이다.
+
+### 2026-08-14 · P5 master 정합화 및 재검증
+
+최신 `origin/master` `88cb7a9`를 P5 브랜치에 병합했다. 실제 충돌은
+`docs/WORK_LOG.md` 하나였고 `docs/work-log only`로 분류했다. 최신 master의
+PRODUCT_V3·PROJECT_HANDOFF·문서 정규화 내용을 우선 보존하면서 P5 구현 기록을 유지했다.
+코드·migration·E2EE 의미 충돌은 없었다.
+
+재검증 결과: `npm run test:p5` 74 assertions PASS(13 mutation), `npm run test:p0`
+76 assertions PASS, `npm run test:rollback` PASS, `npm test` 148 files / 2235 tests PASS,
+typecheck PASS, lint PASS, build PASS. 최초 전체 테스트는 불완전한 `node_modules`로 iOS
+privacy manifest 2건이 실패했으나 `npm ci` 후 재실행해 통과했다. build는 실제 비밀값 없이
+형식 검증용 Supabase placeholder를 프로세스 환경에만 주입했다. Production Supabase
+migration/deploy는 실행하지 않았다.
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

@@ -2,7 +2,137 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { emotionFlowForStorage } from '@/lib/privacy';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 import { sanitizePhotoForUpload } from '@/lib/imageSanitization';
+import {
+  RECORD_CIPHER_GLE1,
+  RECORD_CIPHER_PLAINTEXT,
+  decideRecordWrite,
+  decryptRecordRow,
+  encryptRecordForWrite,
+  type RecordCryptoEnvironment,
+} from '@/app/records/contentCrypto';
+import { fromBase64 } from '@/crypto/bytes';
 import { DailyRecord, Attachment } from '@/types';
+
+// ==========================================
+// E2EE routing (P5)
+// ==========================================
+
+/**
+ * The crypto environment, or null when this build/device has none.
+ *
+ * Injected rather than imported so that `records.ts` has no opinion about where
+ * keys come from, and so every branch below is reachable in a test. Null means
+ * "no E2EE on this client": records are written plaintext exactly as before,
+ * which is the current state of every account until a floor is activated. P5
+ * does not install this environment; Device Bootstrap must do that in a later
+ * phase after the device holds verified scope-key envelopes.
+ *
+ * It is deliberately NOT a fallback for failure. Once a scope has a write floor
+ * the environment's own refusal is final: `saveRecordToDB` returns the refusal
+ * rather than writing plaintext.
+ */
+let recordCryptoEnvironment: RecordCryptoEnvironment | null = null;
+
+export function setRecordCryptoEnvironment(environment: RecordCryptoEnvironment | null): void {
+  recordCryptoEnvironment = environment;
+}
+
+export function getRecordCryptoEnvironment(): RecordCryptoEnvironment | null {
+  return recordCryptoEnvironment;
+}
+
+/**
+ * How a refusal to encrypt is reported.
+ *
+ * Mapped to `server` rather than to a retryable kind: the request was never
+ * sent, and retrying the identical write cannot succeed until the device holds
+ * the key. Reporting it as `offline` would put it in the outbox to be retried
+ * forever against a cause the network cannot fix.
+ */
+export function encryptionRefusalReason(): ServerErrorKind {
+  return 'server';
+}
+
+/**
+ * The caller must say whether this is an insert or an edit.  Inferring that
+ * from ciphertext shape is unsafe: a lost response can replay an insert with
+ * the same id, and an encrypted legacy transition has a real server revision
+ * that is not necessarily 1.
+ */
+export type RecordWriteIntent =
+  | { kind: 'create' }
+  | { kind: 'update'; expectedRevision: number };
+
+/** The five protected fields, as the sealed document carries them. */
+function documentForRecord(record: DailyRecord, coupleId: string) {
+  return {
+    log: record.log ?? '',
+    ...(record.reaction ? { reaction: record.reaction } : {}),
+    attachments: (record.attachments || [])
+      .map((attachment) => mapAuthenticatedAttachment(attachment, coupleId, record.id, false))
+      .filter((attachment): attachment is Attachment => !!attachment)
+      .map(({ type, name, path }) => ({ type, name, path })),
+    ...(record.emotionFlow ? { emotionFlow: emotionFlowForStorage(record) } : {}),
+    ...(record.time ? { time: record.time } : {}),
+  };
+}
+
+/**
+ * `bytea` wants hex, and PostgREST passes a `\x…` string straight through.
+ *
+ * Base64 was the alternative and is worse here: `bytea` has no base64 input
+ * syntax, so it would need a server-side `decode()` call inside the insert, which
+ * means constructing SQL. Hex keeps the value an ordinary bound parameter.
+ */
+function bytesToHex(bytes: Uint8Array): string {
+  let out = '';
+  for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
+  return out;
+}
+
+function hexToBytes(text: string): Uint8Array {
+  const body = text.startsWith('\\x') ? text.slice(2) : text;
+  if (body.length % 2 !== 0) throw new Error('bytea hex payload has an odd length');
+  const out = new Uint8Array(body.length / 2);
+  for (let i = 0; i < out.length; i += 1) out[i] = Number.parseInt(body.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+/**
+ * Read a `content_envelope` value from a row.
+ *
+ * PostgREST renders `bytea` as a `\x…` hex string; a Uint8Array or base64 string
+ * can arrive from a test double or a future transport change. All three are
+ * accepted, and anything else is `null` rather than a guess — a mis-decoded
+ * envelope would surface as an authentication failure and look like corruption.
+ */
+function readEnvelope(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value;
+  if (typeof value !== 'string' || value.length === 0) return null;
+  try {
+    return value.startsWith('\\x') ? hexToBytes(value) : fromBase64(value);
+  } catch {
+    return null;
+  }
+}
+
+/** The plaintext content columns, for a scope with no write floor. */
+function plaintextContentColumns(record: DailyRecord, coupleId: string) {
+  return {
+    record_time: record.time,
+    log_text: record.log,
+    reaction: record.reaction || null,
+    // Never persist the signed URL: it expires, and `path` is the durable
+    // reference we re-sign on every read.
+    attachments: (record.attachments || [])
+      .map((attachment) => mapAuthenticatedAttachment(attachment, coupleId, record.id, false))
+      .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
+      .map(({ type, name, path }) => ({ type, name, path })),
+    // Author-only emotion items must not travel inside a shared row, because the
+    // partner is allowed to read that row.
+    emotion_flow: emotionFlowForStorage(record),
+  };
+}
 
 // ==========================================
 // Records Synchronization
@@ -133,27 +263,9 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
     return { ok: false, records: [], error };
   }
 
-  const records: DailyRecord[] = (data || []).map((row: any) => ({
-    id: row.id,
-    date: row.record_date,
-    time: row.record_time,
-    authorRole: 'gomsin', // recomputed from user_id in sync.ts
-    log: row.log_text,
-    reaction: row.reaction,
-    attachments: Array.isArray(row.attachments)
-      ? row.attachments
-          .map((attachment: unknown) =>
-            mapAuthenticatedAttachment(attachment, coupleId, row.id, true),
-          )
-          .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
-      : [],
-    isPrivate: row.is_private,
-    ...(row.talk_about === true ? { talkAbout: true } : {}),
-    emotionFlow: row.emotion_flow || [],
-    emotionUpdatedAt: row.emotion_updated_at || null,
-    createdAt: row.created_at,
-    userId: row.user_id,
-  }));
+  const records: DailyRecord[] = await Promise.all(
+    (data || []).map((row: any) => mapRow(row, coupleId)),
+  );
 
   const allAttachments = records.flatMap((record) => record.attachments || []);
   if (allAttachments.length === 0) return { ok: true, records };
@@ -195,6 +307,92 @@ export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[
 }
 
 /**
+ * Turn one row into a `DailyRecord`, decrypting it when it is encrypted.
+ *
+ * `cipher_format` decides, by column value. Nothing here inspects whether a
+ * string happens to look like base64 — that inference is what invariant 12
+ * forbids, and it is how mixed-version clients corrupt each other's data.
+ *
+ * A row that cannot be opened is returned as `contentUnavailable` rather than as
+ * an empty record. An empty record is indistinguishable from one the author
+ * cleared, and showing a blank page where a diary entry should be is the worst
+ * available outcome.
+ */
+async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
+  const contentRevision = Number(row.content_revision ?? 1);
+  const base: DailyRecord = {
+    id: row.id,
+    date: row.record_date,
+    time: row.record_time,
+    authorRole: 'gomsin', // recomputed from user_id in sync.ts
+    log: row.log_text,
+    reaction: row.reaction,
+    attachments: Array.isArray(row.attachments)
+      ? row.attachments
+          .map((attachment: unknown) =>
+            mapAuthenticatedAttachment(attachment, coupleId, row.id, true),
+          )
+          .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
+      : [],
+    isPrivate: row.is_private,
+    ...(row.talk_about === true ? { talkAbout: true } : {}),
+    emotionFlow: row.emotion_flow || [],
+    emotionUpdatedAt: row.emotion_updated_at || null,
+    createdAt: row.created_at,
+    userId: row.user_id,
+    // Migration 032 assigns a revision to legacy plaintext rows too. Keeping
+    // it on every mapped row is what makes a later plaintext -> ciphertext
+    // transition use the actual OLD + 1 rather than guessing revision 1.
+    contentRevision: Number.isSafeInteger(contentRevision) && contentRevision >= 1
+      ? contentRevision
+      : 1,
+  };
+
+  const cipherFormat = typeof row.cipher_format === 'number' ? row.cipher_format : RECORD_CIPHER_PLAINTEXT;
+  if (cipherFormat === RECORD_CIPHER_PLAINTEXT) return base;
+
+  // Carry the revision so an edit can present `OLD + 1`, which 032's R6 requires.
+  const withRouting: DailyRecord = { ...base, contentRevision };
+
+  if (cipherFormat !== RECORD_CIPHER_GLE1) {
+    // A format this build does not implement. Refusing to render is correct:
+    // guessing at the bytes is how content gets destroyed on the next save.
+    return { ...withRouting, log: '', contentUnavailable: 'undecryptable' };
+  }
+
+  const environment = recordCryptoEnvironment;
+  const envelope = readEnvelope(row.content_envelope);
+  if (!environment || !envelope) {
+    return { ...withRouting, log: '', contentUnavailable: 'key_unavailable' };
+  }
+
+  const opened = await decryptRecordRow(environment, {
+    recordId: row.id,
+    isPrivate: row.is_private,
+    ownerUserId: row.user_id,
+    coupleId,
+    keyDomain: row.key_domain,
+    keyEpoch: BigInt(row.key_epoch ?? 0),
+    contentRevision: BigInt(contentRevision),
+    envelope,
+  });
+
+  if (!opened.ok) return { ...withRouting, log: '', contentUnavailable: opened.reason };
+
+  const { document } = opened;
+  return {
+    ...withRouting,
+    log: document.log,
+    ...(document.reaction ? { reaction: document.reaction as DailyRecord['reaction'] } : {}),
+    time: document.time ?? base.time,
+    attachments: (document.attachments || [])
+      .map((attachment) => mapAuthenticatedAttachment(attachment, coupleId, row.id, false))
+      .filter((attachment: Attachment | null): attachment is Attachment => !!attachment),
+    emotionFlow: (document.emotionFlow || []) as DailyRecord['emotionFlow'],
+  };
+}
+
+/**
  * Outcome of a record write or delete.
  *
  * Deliberately not a boolean. `false` threw away the only information the user
@@ -204,7 +402,11 @@ export async function fetchRecordsFromDB(coupleId: string): Promise<DailyRecord[
  * carried all the way to the toast.
  */
 export type RecordWriteResult =
-  | { ok: true }
+  | { ok: true; contentRevision?: number }
+  | { ok: false; reason: ServerErrorKind };
+
+export type RecordSaveResult =
+  | { ok: true; contentRevision: number }
   | { ok: false; reason: ServerErrorKind };
 
 /** Reason to use when the client is not configured to reach a server at all. */
@@ -218,43 +420,123 @@ export async function saveRecordToDB(
   record: DailyRecord,
   coupleId: string,
   userId: string,
-): Promise<RecordWriteResult> {
+  intent: RecordWriteIntent = { kind: 'create' },
+): Promise<RecordSaveResult> {
   if (!isSupabaseConfigured || !supabase || !coupleId || !userId) {
     return { ok: false, reason: unconfiguredReason() };
   }
 
-  const { error } = await supabase
-    .from('daily_records')
-    .upsert({
-      id: record.id,
-      user_id: userId,
-      couple_id: coupleId,
-      record_date: record.date,
-      record_time: record.time,
-      log_text: record.log,
-      reaction: record.reaction || null,
-      // Never persist the signed URL: it expires, and `path` is the durable
-      // reference we re-sign on every read.
-      attachments: (record.attachments || [])
-        .map((attachment) =>
-          mapAuthenticatedAttachment(attachment, coupleId, record.id, false),
-        )
-        .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
-        .map(({ type, name, path }) => ({ type, name, path })),
-      is_private: record.isPrivate,
-      talk_about: !record.isPrivate && record.talkAbout === true,
-      // Author-only emotion items must not travel inside a shared row, because
-      // the partner is allowed to read that row.
-      emotion_flow: emotionFlowForStorage(record),
-      emotion_updated_at: record.emotionUpdatedAt || null,
-      updated_at: new Date().toISOString(),
+  /**
+   * Metadata the server keeps in the clear either way.
+   *
+   * `record_date` is accepted leakage (ordering), `talk_about` is bilateral
+   * coordination metadata, and `emotion_updated_at` is a timestamp. Architecture
+   * V2.1 §10 lists all three; nothing here adds to that set.
+   */
+  const metadata = {
+    id: record.id,
+    user_id: userId,
+    couple_id: coupleId,
+    record_date: record.date,
+    is_private: record.isPrivate,
+    talk_about: !record.isPrivate && record.talkAbout === true,
+    emotion_updated_at: record.emotionUpdatedAt || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const environment = recordCryptoEnvironment;
+  let payload: Record<string, unknown>;
+  const contentRevision = intent.kind === 'create'
+    ? 1n
+    : Number.isSafeInteger(intent.expectedRevision) && intent.expectedRevision >= 1
+      ? BigInt(intent.expectedRevision) + 1n
+      : null;
+
+  if (contentRevision === null) {
+    return { ok: false, reason: 'server' };
+  }
+
+  if (!environment) {
+    payload = { ...metadata, ...plaintextContentColumns(record, coupleId) };
+  } else {
+    const plan = await decideRecordWrite(environment, {
+      isPrivate: record.isPrivate,
+      ownerUserId: userId,
+      coupleId,
     });
+
+    if (plan.mode === 'refused') {
+      // No plaintext fallback, ever. The scope is past its write floor, so
+      // sending this in the clear is the exact downgrade the floor prevents --
+      // and the database would refuse it anyway. Fail closed and say why.
+      console.error('[gomsinlog] Refusing to write a record unencrypted:', plan.reason);
+      return { ok: false, reason: encryptionRefusalReason() };
+    }
+
+    if (plan.mode === 'plaintext') {
+      payload = { ...metadata, ...plaintextContentColumns(record, coupleId) };
+    } else {
+      const columns = await encryptRecordForWrite({
+        plan,
+        routing: { isPrivate: record.isPrivate, ownerUserId: userId, coupleId },
+        recordId: record.id,
+        // R6 binds this exact value into GLE1 and the database accepts only
+        // INSERT=1 or UPDATE=OLD+1. The write intent above decides which one.
+        contentRevision,
+        document: documentForRecord(record, coupleId),
+      });
+      payload = {
+        ...metadata,
+        // Every protected column is emptied in the SAME statement that writes the
+        // ciphertext. 032's R4 refuses the row otherwise, and doing it here means
+        // there is no window in which both representations exist.
+        log_text: '',
+        reaction: null,
+        attachments: [],
+        emotion_flow: [],
+        record_time: null,
+        cipher_format: columns.cipherFormat,
+        content_revision: columns.contentRevision,
+        key_domain: columns.keyDomain,
+        key_epoch: columns.keyEpoch,
+        content_envelope: `\\x${bytesToHex(columns.contentEnvelope)}`,
+      };
+    }
+  }
+
+  const table = supabase.from('daily_records');
+  const request = intent.kind === 'create'
+    ? table.insert(payload)
+    : table
+        .update(payload)
+        .eq('id', record.id)
+        .eq('user_id', userId)
+        .eq('couple_id', coupleId);
+
+  // Before migration 032 exists there is no revision column to select. That
+  // is the deliberately dormant legacy path; once a crypto environment is
+  // installed, the migration chain is present and the response is mandatory.
+  if (!environment) {
+    const { error } = await request;
+    if (error) {
+      console.error('Failed to save record:', error);
+      return { ok: false, reason: classifyServerError(error).kind };
+    }
+    return { ok: true, contentRevision: record.contentRevision ?? 1 };
+  }
+
+  const { data, error } = await request
+    .select('content_revision')
+    .maybeSingle();
 
   if (error) {
     console.error('Failed to save record:', error);
     return { ok: false, reason: classifyServerError(error).kind };
   }
-  return { ok: true };
+  if (!data || !Number.isSafeInteger(Number(data.content_revision))) {
+    return { ok: false, reason: intent.kind === 'update' ? 'not_found' : 'server' };
+  }
+  return { ok: true, contentRevision: Number(data.content_revision) };
 }
 
 export async function deleteRecordFromDB(

@@ -235,6 +235,10 @@ export interface E2eeRepository {
   getPartnerRecoveryAnchor(): Promise<PartnerRecoveryAnchorRecord | null>;
 
   // --- scope keys ----------------------------------------------------------
+  /** The server-authoritative minimum cipher format for one scope. */
+  getWriteFloor(domain: KeyDomainName, scopeId: string): Promise<number>;
+  /** The only application path allowed to request an irreversible floor. */
+  activateWriteFloor(scopeKind: 'user' | 'couple', scopeId: string, deviceId: string): Promise<void>;
   listScopeKeys(domain: KeyDomainName, scopeId: string): Promise<ScopeKeyRecord[]>;
   getScopeKey(scopeKeyId: string): Promise<ScopeKeyRecord | null>;
   insertScopeKey(record: NewScopeKey): Promise<string>;
@@ -281,6 +285,7 @@ export interface E2eeRepository {
 
   // --- pairing -------------------------------------------------------------
   getPairing(coupleId: string): Promise<PairingRecord | null>;
+  getCoupleAuthorizationSnapshot(coupleId: string): Promise<CoupleAuthorizationSnapshot>;
   setPairingState(pairingId: string, state: string): Promise<void>;
 
   /**
@@ -389,10 +394,42 @@ export type PendingBootstrap = {
 };
 
 export type PinnedTrustAnchor = {
+  /** Full pin-once tuple. Every field is compared before accepting a server row. */
+  subjectUserId: string;
+  serverOriginId: Uint8Array;
   rootRecSigPubFp: Uint8Array;
   rootRecSigSpki: Uint8Array;
   recoveryIdentityId: string;
   recoveryVersion: number;
+  recoveryBundleFp: Uint8Array;
+  pinSource: 'bootstrap' | 'device_enrollment' | 'pairing' | 'recovery';
+};
+
+/** An exact anchor is never inferred from a current server response. */
+export type ExactPinnedAnchor = PinnedTrustAnchor;
+
+export type PinnedCoupleAuthority = {
+  serverOriginId: Uint8Array;
+  coupleId: string;
+  transcriptHash: Uint8Array;
+  lowUserId: string;
+  highUserId: string;
+  lowAnchor: ExactPinnedAnchor;
+  highAnchor: ExactPinnedAnchor;
+  state: 'CONFIRMED' | 'CRYPTO_ACTIVE' | 'UNLINKED';
+};
+
+export type AcceptedEnvelopeRecord = {
+  coupleId: string;
+  scopeKeyId: string;
+  epoch: bigint;
+  envelopeFingerprint: Uint8Array;
+};
+
+export type CoupleAuthorizationSnapshot = {
+  currentUserActiveCoupleId: string | null;
+  activeUserIds: string[];
+  pairingState: string | null;
 };
 
 export interface E2eeLocalState {
@@ -402,6 +439,12 @@ export interface E2eeLocalState {
   /** The pinned trust anchor for an account. Written once, at provisioning. */
   pinTrustAnchor(userId: string, anchor: PinnedTrustAnchor): Promise<void>;
   loadTrustAnchor(userId: string): Promise<PinnedTrustAnchor | null>;
+  pinCoupleAuthority(record: PinnedCoupleAuthority): Promise<void>;
+  loadCoupleAuthority(coupleId: string): Promise<PinnedCoupleAuthority | null>;
+  markCoupleAuthorityCryptoActive(coupleId: string): Promise<void>;
+  markCoupleAuthorityUnlinked(coupleId: string): Promise<void>;
+  recordAcceptedEnvelope(record: AcceptedEnvelopeRecord): Promise<void>;
+  listAcceptedEnvelopes(coupleId: string): Promise<AcceptedEnvelopeRecord[]>;
 }
 
 /** Feature flag. E2EE stays OFF until the native integration gate closes. */

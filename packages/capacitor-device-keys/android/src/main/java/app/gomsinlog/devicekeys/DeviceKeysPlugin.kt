@@ -20,8 +20,8 @@ import com.getcapacitor.annotation.CapacitorPlugin
  * There is no method that exports a private key, and there must never be one.
  * On AndroidKeyStore the private key physically cannot leave the hardware, so
  * such a method would be unimplementable; adding one to the bridge would be a
- * promise the platform cannot keep. The exported surface below is exactly the
- * eight operations `DeviceKeyPort` needs, all of them operation-by-handle.
+ * promise the platform cannot keep. The device-key surface below is operation-
+ * by-handle; the separate LCK methods perform AES-GCM without exporting a key.
  *
  * LOGGING
  *
@@ -47,6 +47,7 @@ import com.getcapacitor.annotation.CapacitorPlugin
 class DeviceKeysPlugin : Plugin() {
 
     private val keys = DeviceKeys()
+    private val localKeys = LocalKeys()
 
     // -----------------------------------------------------------------------
     // Generation
@@ -150,6 +151,27 @@ class DeviceKeysPlugin : Plugin() {
     }
 
     // -----------------------------------------------------------------------
+    // LCK capability
+    // -----------------------------------------------------------------------
+
+    @PluginMethod
+    fun lckEnsure(call: PluginCall) { val binding = call.localBinding() ?: return; runBounded(call) { JSObject().put("present", localKeys.ensure(binding)) } }
+    @PluginMethod
+    fun lckHas(call: PluginCall) { val binding = call.localBinding() ?: return; runBounded(call) { JSObject().put("present", localKeys.has(binding)) } }
+    @PluginMethod
+    fun lckSeal(call: PluginCall) {
+        val binding = call.localBinding() ?: return; val plaintext = call.requireBytes("plaintext") ?: return; val aad = call.requireBytes("aad") ?: return
+        runBounded(call) { val (nonce, ciphertext) = localKeys.seal(binding, plaintext, aad); JSObject().apply { put("nonce", encode(nonce)); put("ciphertext", encode(ciphertext)) } }
+    }
+    @PluginMethod
+    fun lckOpen(call: PluginCall) {
+        val binding = call.localBinding() ?: return; val nonce = call.requireBytes("nonce") ?: return; val ciphertext = call.requireBytes("ciphertext") ?: return; val aad = call.requireBytes("aad") ?: return
+        runBounded(call) { JSObject().put("plaintext", encode(localKeys.open(binding, nonce, ciphertext, aad))) }
+    }
+    @PluginMethod
+    fun lckDelete(call: PluginCall) { val binding = call.localBinding() ?: return; runBounded(call) { localKeys.delete(binding); JSObject() } }
+
+    // -----------------------------------------------------------------------
     // Boundary helpers
     // -----------------------------------------------------------------------
 
@@ -202,6 +224,19 @@ class DeviceKeysPlugin : Plugin() {
             reject("E_BAD_INPUT", "$name is not valid base64")
             null
         }
+    }
+
+    private fun PluginCall.localBinding(): String? {
+        val installation = getString("installationId")
+        val user = getString("userId")
+        val device = getString("deviceId")
+        val purpose = getString("purpose")
+        val version = getInt("version")
+        if (installation.isNullOrEmpty() || user.isNullOrEmpty() || device.isNullOrEmpty() || purpose.isNullOrEmpty() || version == null) {
+            reject("E_BAD_LOCAL_BINDING", "local capability binding is incomplete")
+            return null
+        }
+        return "v$version|$installation|$user|$device|$purpose"
     }
 
     private fun encode(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)

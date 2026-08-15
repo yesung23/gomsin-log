@@ -67,7 +67,7 @@ canonical `master`가 된 뒤에만 #62–#67을 그 기준에 맞춰 정렬한�
 
 | PR | scope | live branch / HEAD | live base | state |
 |---|---|---|---|---|
-| #61 | canonical governance fix | `docs/control-tower-governance` / `deec2acb53f5f09405422397729a5abf98d5a0e6` | `master` / `42ac1f307f19e84e8a3891311aa2a3d19179eed1` | OPEN / DRAFT; not merged |
+| #61 | canonical governance fix | `docs/control-tower-governance` / `5f1d7b4929a866ac708e84d821251d05857149fd` | `master` / `42ac1f307f19e84e8a3891311aa2a3d19179eed1` | MERGED; resulting master `8a2167073bce4d9c9ef6dbe35f1b40a8122180c6` |
 | #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | OPEN / DRAFT |
 | #63 | notification re-entry | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | OPEN / DRAFT |
 | #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | OPEN / DRAFT |

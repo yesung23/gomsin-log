@@ -217,6 +217,62 @@ describe('RecordPage ownership controls', () => {
   });
 });
 
+/**
+ * P5: a record the viewer is authorized to see but this device cannot decrypt.
+ *
+ * The failure mode being guarded against is not a blank screen — it is a
+ * CONFIDENT blank screen. `(내용 없음)` tells the author they wrote nothing, and
+ * offering 수정 on top of that invites them to overwrite content that is still
+ * recoverable once the epoch key arrives.
+ */
+describe('RecordPage: a record whose content cannot be decrypted', () => {
+  it('explains the cause instead of claiming the record is empty', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record({ log: '', contentUnavailable: 'key_unavailable' })]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByTestId('record-content-unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('(내용 없음)')).not.toBeInTheDocument();
+  });
+
+  it('distinguishes a key that may still arrive from one that cannot open it', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record({ log: '', contentUnavailable: 'undecryptable' })]);
+    await openRecord(user, '10:00');
+
+    const message = await screen.findByTestId('record-content-unavailable');
+    expect(message.textContent).toContain('열 수 없어요');
+    // Not the "wait for provisioning" wording, which would be a false promise.
+    expect(message.textContent).not.toContain('기기 연결이 끝나면');
+  });
+
+  it('withholds 수정 so an unreadable record cannot be overwritten', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record({ log: '', contentUnavailable: 'key_unavailable' })]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText('수정')).not.toBeInTheDocument();
+  });
+
+  it('still offers 삭제, which is a legitimate choice for a record you cannot read', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record({ log: '', contentUnavailable: 'undecryptable' })]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByText('삭제')).toBeInTheDocument();
+  });
+
+  it('leaves a readable record fully editable', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+
+    expect(await screen.findByText('수정')).toBeInTheDocument();
+    expect(screen.queryByTestId('record-content-unavailable')).not.toBeInTheDocument();
+  });
+});
+
 describe('RecordPage partner privacy sanitisation', () => {
   it('never renders the partner\'s author_only emotion items', async () => {
     const user = userEvent.setup({ delay: null });

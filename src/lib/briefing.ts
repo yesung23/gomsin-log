@@ -1,4 +1,5 @@
 import type { DailyRecord, DailySummary, SummaryItem } from '@/types';
+import { isRecordContentAvailable } from '@/lib/recordAvailability';
 
 export function generateDailySummary(
   records: DailyRecord[],
@@ -7,6 +8,16 @@ export function generateDailySummary(
   // Filter out private records, sort chronologically
   const sharedRecords = records
     .filter((r) => !r.isPrivate)
+    /**
+     * A record this device cannot decrypt is excluded, not summarised.
+     *
+     * It arrives with an empty `log`, which the branches below would read as "no
+     * text but something happened" and turn into a sentence about content that
+     * was never available. That is a narrative invented from unreadable data, and
+     * it would also make 정확한 원본 이동 point at a record that cannot render.
+     * See `recordAvailability.ts`.
+     */
+    .filter(isRecordContentAvailable)
     .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -149,6 +160,7 @@ export interface EmotionFlowBriefingResult {
 export function generateEmotionFlowBriefing(records: DailyRecord[]): EmotionFlowBriefingResult | null {
   const sharedRecords = records
     .filter((r) => !r.isPrivate)
+    .filter(isRecordContentAvailable)
     .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
 
   for (const r of sharedRecords) {

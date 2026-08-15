@@ -66,15 +66,30 @@ function walk(dir: string, skip: (path: string) => boolean): string[] {
 const capacitorConfig = read('capacitor.config.ts');
 const manifest = read('android/app/src/main/AndroidManifest.xml');
 const appGradle = read('android/app/build.gradle');
+const androidSettings = read('android/settings.gradle');
+const generatedAndroidSettings = read('android/capacitor.settings.gradle');
+const generatedAndroidBuild = read('android/app/capacitor.build.gradle');
 const strings = read('android/app/src/main/res/values/strings.xml');
 const infoPlist = read('ios/App/App/Info.plist');
+const iosPodfile = read('ios/App/Podfile');
 const entitlements = read('ios/App/App/App.entitlements');
 const privacyManifest = read('ios/App/App/PrivacyInfo.xcprivacy');
 const pbxproj = read('ios/App/App.xcodeproj/project.pbxproj');
 const packageJson = JSON.parse(read('package.json')) as {
   version: string;
+  dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
 };
+const devicePluginPackage = JSON.parse(read('packages/capacitor-device-keys/package.json')) as {
+  private?: boolean;
+  files?: string[];
+  capacitor?: { ios?: { src?: string }; android?: { src?: string } };
+};
+const devicePodspec = read('packages/capacitor-device-keys/GomsinlogCapacitorDeviceKeys.podspec');
+const deviceJavaScriptPlugin = read('packages/capacitor-device-keys/src/index.ts');
+const deviceAndroidPlugin = read(
+  'packages/capacitor-device-keys/android/src/main/java/app/gomsinlog/devicekeys/DeviceKeysPlugin.kt',
+);
 
 /** 곰신로그 escaped, so a charset accident cannot make an assertion pass. */
 const STORE_LABEL = '\uACF0\uC2E0\uB85C\uADF8';
@@ -541,11 +556,71 @@ describe('both platforms are installed and reproducible from the lockfile', () =
   it('every pod is a local path reference, so Podfile.lock is a pure function of npm', () => {
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
-    expect(pods.length).toBe(4);
+    expect(pods.length).toBe(5);
     for (const [, , path] of pods) {
-      expect(path.startsWith('../../node_modules/')).toBe(true);
+      expect(path.startsWith('../../node_modules/') || path === '../../packages/capacitor-device-keys').toBe(true);
     }
     const lock = read('ios/App/Podfile.lock');
     for (const [, name] of pods) expect(lock, name).toContain(`${name}:`);
+  });
+});
+
+describe('Capacitor DeviceKeys packaging has one sync-owned native path', () => {
+  const LOCAL_PLUGIN = '@gomsinlog/capacitor-device-keys';
+  const LOCAL_PATH = 'file:packages/capacitor-device-keys';
+  const JS_PLUGIN_NAME = 'GomsinlogDeviceKeys';
+  const ANDROID_PROJECT = ':gomsinlog-capacitor-device-keys';
+  const IOS_POD = 'GomsinlogCapacitorDeviceKeys';
+
+  it('installs exactly one private local plugin dependency', () => {
+    expect(Object.entries(packageJson.dependencies).filter(([name]) => name === LOCAL_PLUGIN))
+      .toEqual([[LOCAL_PLUGIN, LOCAL_PATH]]);
+    expect(packageJson.devDependencies[LOCAL_PLUGIN]).toBeUndefined();
+    expect(devicePluginPackage.private).toBe(true);
+  });
+
+  it('removes the obsolete manual Android registration', () => {
+    expect(androidSettings).not.toMatch(/:capacitor-device-keys\b/);
+    expect(appGradle).not.toMatch(
+      /implementation\s+project\s*\(\s*['"]:capacitor-device-keys['"]\s*\)/,
+    );
+  });
+
+  it('keeps exactly one Capacitor-generated Android project and dependency', () => {
+    expect(generatedAndroidSettings).toMatch(
+      /include\s+['"]:gomsinlog-capacitor-device-keys['"]/,
+    );
+    expect(generatedAndroidSettings).toMatch(
+      /project\s*\(\s*['"]:gomsinlog-capacitor-device-keys['"]\s*\)\.projectDir\s*=\s*new File\s*\(\s*['"]\.\.\/packages\/capacitor-device-keys\/android['"]\s*\)/,
+    );
+    expect([...generatedAndroidSettings.matchAll(/include\s+['"]:gomsinlog-capacitor-device-keys['"]/g)])
+      .toHaveLength(1);
+    expect([...generatedAndroidBuild.matchAll(/implementation\s+project\s*\(\s*['"]:gomsinlog-capacitor-device-keys['"]\s*\)/g)])
+      .toHaveLength(1);
+    const projectPathReferences = [
+      ...`${androidSettings}\n${generatedAndroidSettings}\n${appGradle}\n${generatedAndroidBuild}`
+        .matchAll(/projectDir\s*=\s*new File\s*\(\s*['"]\.\.\/packages\/capacitor-device-keys\/android['"]\s*\)/g),
+    ];
+    expect(projectPathReferences).toHaveLength(1);
+  });
+
+  it('preserves the JS/native plugin name at the bridge boundary', () => {
+    expect(deviceJavaScriptPlugin).toMatch(
+      /registerPlugin<DeviceKeysPlugin>\(\s*['"]GomsinlogDeviceKeys['"]\s*\)/,
+    );
+    expect(deviceAndroidPlugin).toMatch(
+      /@CapacitorPlugin\(\s*name\s*[:=]\s*['"]GomsinlogDeviceKeys['"]\s*\)/,
+    );
+  });
+
+  it('keeps the iOS Pod target name distinct from the Capacitor plugin name', () => {
+    expect(devicePodspec).toMatch(/s\.name\s*=\s*['"]GomsinlogCapacitorDeviceKeys['"]/);
+    expect(iosPodfile).toMatch(
+      /pod\s+['"]GomsinlogCapacitorDeviceKeys['"]\s*,\s*:path\s*=>/,
+    );
+    expect(devicePluginPackage.files).toContain('GomsinlogCapacitorDeviceKeys.podspec');
+    expect(iosPodfile).not.toMatch(/pod\s+['"]GomsinlogDeviceKeys['"]\s*,/);
+    expect(devicePodspec).not.toMatch(/s\.name\s*=\s*['"]GomsinlogDeviceKeys['"]/);
+    expect(devicePluginPackage.capacitor).toEqual({ ios: { src: 'ios' }, android: { src: 'android' } });
   });
 });

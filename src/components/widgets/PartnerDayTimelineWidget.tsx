@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Film, Image as ImageIcon, Mic } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
+import { withReadableContent } from '@/lib/recordAvailability';
 import { localToday, toLocalDateString } from '@/lib/utils';
 import { AttachmentMedia } from '@/components/AttachmentMedia';
 import { Badge } from '@/components/ui/Badge';
@@ -70,8 +71,10 @@ export function PartnerDayTimelineWidget() {
       .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   }, [state.records, profile.id, profile.role, todayStr]);
 
-  const visible = todays.slice(0, PARTNER_DAY_VISIBLE_LIMIT);
-  const hiddenCount = todays.length - visible.length;
+  const readableTodays = withReadableContent(todays);
+  const unavailableCount = todays.length - readableTodays.length;
+  const visible = readableTodays.slice(0, PARTNER_DAY_VISIBLE_LIMIT);
+  const hiddenCount = readableTodays.length - visible.length;
 
   const openRecord = (record: DailyRecord) => {
     setHighlightedRecordId(record.id);
@@ -110,6 +113,18 @@ export function PartnerDayTimelineWidget() {
     );
   }
 
+  if (readableTodays.length === 0) {
+    return (
+      <div data-testid="widget-partner-day" data-state="unavailable">
+        <SectionHeader title={`${partnerName}의 오늘`} caption={`순간 ${todays.length}개`} />
+        <EmptyState
+          title="이 기기에서 아직 열 수 없는 기록이 있어요."
+          description="키가 준비되면 내용을 확인할 수 있어요."
+        />
+      </div>
+    );
+  }
+
   return (
     <div data-testid="widget-partner-day" data-state="ready">
       <SectionHeader
@@ -120,13 +135,22 @@ export function PartnerDayTimelineWidget() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => openRecord(todays[PARTNER_DAY_VISIBLE_LIMIT])}
+              onClick={() => openRecord(readableTodays[PARTNER_DAY_VISIBLE_LIMIT])}
             >
               전체 보기
             </Button>
           ) : undefined
         }
       />
+
+      {unavailableCount > 0 && (
+        <div
+          data-testid="partner-day-unavailable"
+          className="text-caption text-muted-foreground pb-2"
+        >
+          이 기기에서 아직 열 수 없는 기록이 {unavailableCount}개 있어요.
+        </div>
+      )}
 
       {/* Editorial timeline: time rail → media → prose. No card per entry. */}
       <RowGroup>
@@ -197,7 +221,7 @@ export function PartnerDayTimelineWidget() {
         <Button
           variant="outline"
           full
-          onClick={() => openRecord(todays[PARTNER_DAY_VISIBLE_LIMIT])}
+          onClick={() => openRecord(readableTodays[PARTNER_DAY_VISIBLE_LIMIT])}
           className="mt-3"
         >
           나머지 {hiddenCount}개 보기 →

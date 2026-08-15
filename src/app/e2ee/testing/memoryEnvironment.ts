@@ -40,6 +40,8 @@ import { handleVerifyRecovery } from '../../../../supabase/functions/verify-reco
 import { handleIssueRecoveryChallenge } from '../../../../supabase/functions/issue-recovery-challenge/handler';
 import type {
   CertificateRecord,
+  AcceptedEnvelopeRecord,
+  CoupleAuthorizationSnapshot,
   DeviceRecord,
   E2eeLocalState,
   E2eeRepository,
@@ -55,6 +57,7 @@ import type {
   PartnerRecoveryAnchorRecord,
   PendingBootstrap,
   PinnedTrustAnchor,
+  PinnedCoupleAuthority,
   RecoveryAnchorRecord,
   RecoveryChallengeRecord,
   RecoveryIdentityRecord,
@@ -98,8 +101,11 @@ export type MemoryServer = {
   pairings: PairingRecord[];
   revocations: RevocationRecord[];
   challenges: ChallengeRow[];
+  writeFloors: Map<string, number>;
   /** couple id → the two member user ids. */
   couples: Map<string, [string, string]>;
+  /** Mutable active-membership snapshot used by lifecycle negative tests. */
+  activeMembers: Map<string, string[]>;
   now: () => number;
   setNow: (value: number) => void;
 };
@@ -118,7 +124,9 @@ export function createMemoryServer(startMs = 1_800_000_000_000): MemoryServer {
     pairings: [],
     revocations: [],
     challenges: [],
+    writeFloors: new Map(),
     couples: new Map(),
+    activeMembers: new Map(),
     now: () => clock,
     setNow: (value: number) => { clock = value; },
   };
@@ -328,6 +336,16 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
       };
     },
 
+    getWriteFloor: async (domain, scopeId) =>
+      server.writeFloors.get(`${domain}:${scopeId}`) ?? 0,
+    activateWriteFloor: async (scopeKind, scopeId, deviceId) => {
+      const device = server.devices.find((candidate) => candidate.id === deviceId);
+      if (!device || device.userId !== userId) reject('E2EE_DEVICE_WRONG_ACCOUNT');
+      const domain = scopeKind === 'couple' ? 'couple' : 'personal';
+      const scope = server.scopeKeys.find((key) => key.domain === domain && key.scopeId === scopeId && key.state === 'ACTIVE');
+      if (!scope) reject('E2EE_FLOOR_NO_ACTIVE_EPOCH');
+      server.writeFloors.set(`${domain}:${scopeId}`, 1);
+    },
     listScopeKeys: async (domain, scopeId) =>
       server.scopeKeys
         .filter((k) => k.domain === domain && k.scopeId === scopeId)
@@ -487,6 +505,14 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
     approveDeviceEnrollment: async (input) => runApproveDevice(server, userId, input),
 
     getPairing: async (coupleId) => server.pairings.find((p) => p.coupleId === coupleId) ?? null,
+    getCoupleAuthorizationSnapshot: async (coupleId): Promise<CoupleAuthorizationSnapshot> => {
+      const activeUserIds = server.activeMembers.get(coupleId) ?? server.couples.get(coupleId) ?? [];
+      return {
+        currentUserActiveCoupleId: activeUserIds.includes(userId) ? coupleId : null,
+        activeUserIds: [...activeUserIds],
+        pairingState: server.pairings.find((p) => p.coupleId === coupleId)?.state ?? null,
+      };
+    },
 
     /**
      * `e2ee_owned_couple_scope_ids()`.
@@ -931,6 +957,8 @@ async function runVerifyRecovery(
 export type MemoryLocalState = E2eeLocalState & {
   bootstraps: Map<string, PendingBootstrap>;
   anchors: Map<string, PinnedTrustAnchor>;
+  coupleAuthorities: Map<string, PinnedCoupleAuthority>;
+  acceptedEnvelopes: Map<string, AcceptedEnvelopeRecord[]>;
 };
 
 /**
@@ -943,17 +971,75 @@ export type MemoryLocalState = E2eeLocalState & {
 export function createMemoryLocalState(): MemoryLocalState {
   const bootstraps = new Map<string, PendingBootstrap>();
   const anchors = new Map<string, PinnedTrustAnchor>();
+  const coupleAuthorities = new Map<string, PinnedCoupleAuthority>();
+  const acceptedEnvelopes = new Map<string, AcceptedEnvelopeRecord[]>();
+  const sameAnchor = (a: PinnedTrustAnchor, b: PinnedTrustAnchor) => a.subjectUserId === b.subjectUserId
+    && a.recoveryIdentityId === b.recoveryIdentityId
+    && a.recoveryVersion === b.recoveryVersion
+    && equalBytes(a.serverOriginId, b.serverOriginId)
+    && equalBytes(a.rootRecSigPubFp, b.rootRecSigPubFp)
+    && equalBytes(a.rootRecSigSpki, b.rootRecSigSpki)
+    && equalBytes(a.recoveryBundleFp, b.recoveryBundleFp);
+  const sameAuthorityIdentity = (a: PinnedCoupleAuthority, b: PinnedCoupleAuthority) =>
+    a.coupleId === b.coupleId
+    && a.lowUserId === b.lowUserId
+    && a.highUserId === b.highUserId
+    && equalBytes(a.serverOriginId, b.serverOriginId)
+    && equalBytes(a.transcriptHash, b.transcriptHash)
+    && sameAnchor(a.lowAnchor, b.lowAnchor)
+    && sameAnchor(a.highAnchor, b.highAnchor);
   return {
     bootstraps,
     anchors,
+    coupleAuthorities,
+    acceptedEnvelopes,
     loadBootstrap: async (userId) => bootstraps.get(userId) ?? null,
     saveBootstrap: async (userId, pending) => { bootstraps.set(userId, { ...pending }); },
     clearBootstrapSecret: async (userId) => {
       const pending = bootstraps.get(userId);
       if (pending) bootstraps.set(userId, { ...pending, recoverySecret: null });
     },
-    pinTrustAnchor: async (userId, anchor) => { anchors.set(userId, anchor); },
+    pinTrustAnchor: async (userId, anchor) => {
+      const existing = anchors.get(userId);
+      if (!existing) {
+        anchors.set(userId, anchor);
+        return;
+      }
+      const same = sameAnchor(existing, anchor);
+      if (!same) reject('E_TRUST_ANCHOR_PINNED');
+    },
     loadTrustAnchor: async (userId) => anchors.get(userId) ?? null,
+    pinCoupleAuthority: async (record) => {
+      const existing = coupleAuthorities.get(record.coupleId);
+      if (!existing) {
+        coupleAuthorities.set(record.coupleId, record);
+        return;
+      }
+      if (!sameAuthorityIdentity(existing, record)) reject('E_COUPLE_AUTHORITY_PINNED');
+      const allowed = existing.state === record.state
+        || (existing.state === 'CONFIRMED' && record.state === 'CRYPTO_ACTIVE')
+        || (existing.state !== 'UNLINKED' && record.state === 'UNLINKED');
+      if (!allowed) reject('E_COUPLE_AUTHORITY_STATE');
+      coupleAuthorities.set(record.coupleId, record);
+    },
+    loadCoupleAuthority: async (coupleId) => coupleAuthorities.get(coupleId) ?? null,
+    markCoupleAuthorityCryptoActive: async (coupleId) => {
+      const existing = coupleAuthorities.get(coupleId);
+      if (!existing || existing.state === 'UNLINKED') reject('E_COUPLE_AUTHORITY_STATE');
+      if (existing.state === 'CONFIRMED') coupleAuthorities.set(coupleId, { ...existing, state: 'CRYPTO_ACTIVE' });
+    },
+    markCoupleAuthorityUnlinked: async (coupleId) => {
+      const existing = coupleAuthorities.get(coupleId);
+      if (!existing) return;
+      if (existing.state !== 'UNLINKED') coupleAuthorities.set(coupleId, { ...existing, state: 'UNLINKED' });
+    },
+    recordAcceptedEnvelope: async (record) => {
+      const list = acceptedEnvelopes.get(record.coupleId) ?? [];
+      if (!list.some((item) => item.scopeKeyId === record.scopeKeyId && item.epoch === record.epoch
+        && equalBytes(item.envelopeFingerprint, record.envelopeFingerprint))) list.push(record);
+      acceptedEnvelopes.set(record.coupleId, list);
+    },
+    listAcceptedEnvelopes: async (coupleId) => [...(acceptedEnvelopes.get(coupleId) ?? [])],
   };
 }
 
@@ -1065,6 +1151,7 @@ export function createMemoryAccount(server: MemoryServer, userId = crypto.random
 export function linkCouple(server: MemoryServer, a: string, b: string): string {
   const coupleId = crypto.randomUUID();
   server.couples.set(coupleId, [a, b]);
+  server.activeMembers.set(coupleId, [a, b]);
   server.pairings.push({
     id: crypto.randomUUID(),
     coupleId,

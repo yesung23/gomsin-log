@@ -138,6 +138,27 @@ Settings가 `src/crypto` 타입·adapter를 직접 가져가던 문제는 applic
 
 ---
 
+### 2026-08-16 · P6 Readiness — entry gates remain closed
+
+Queue 1–3 완료 HEAD `fa68c72`에서 P6를 구현하지 않고 read-only readiness audit만
+수행했다. `ENGINEERING_ROADMAP.md`의 P6는 P0-b와 사진 E2EE 기반을 전제로 하며,
+현재 저장소의 미디어 경로와 native/iCloud 상태는 그 진입 조건을 충족하지 않는다.
+
+| Gate | 저장소에서 확인한 사실 | 판정 |
+|---|---|---|
+| Core Privacy Foundation | `35da04c` integration 위에 Queue 1–3이 순차적으로 쌓였고 local P0/P5 actor harness가 통과했다 | DEVELOPMENT EVIDENCE ONLY |
+| DeviceKeys / LCK | first-party Capacitor plugin의 iOS Podfile·Android Gradle wiring과 static tests는 존재한다. 실제 iPhone에서 setup/restart/logout/recovery/locked-state를 수행하지 않았다 | UNVERIFIED / MANUAL GATE |
+| Active migration chain | local harness는 031→032→034→035→036→039→044를 throwaway PostgreSQL에서 검증한다. migration ledger는 E2EE chain을 신규/어디에도 미적용으로 둔다 | REMOTE UNVERIFIED; NOT APPLIED |
+| CloudKit prerequisite | `ios/App/App/App.entitlements`에 iCloud container/ubiquity entitlement가 없고, native guide도 iCloud container가 없다고 명시한다. CloudKit/CKShare/CKAsset 구현·container identifier·test harness가 없다 | BLOCKED |
+| Current media path | `src/lib/records.ts`가 `File`을 private `couple-media` Storage에 직접 업로드하고 signed URL로 읽는다. media ciphertext/envelope/CloudKit ownership 경계가 없다 | P6 NOT READY |
+| Future migration number | migration README가 042를 frozen P6 draft 충돌로 예약하고, 재개 시 045 이상 새 forward migration을 요구한다 | RECORDED; DO NOT USE 042 |
+
+`npm run verify:native`는 85 static/native contract tests PASS였지만, 이것은 실제
+서명·기기·CloudKit entitlement 검증이 아니다. 따라서 P6A 구현, media migration,
+CloudKit container 생성, remote mutation은 수행하지 않았다.
+
+---
+
 ### 2026-08-16 · Device Protection & Recovery UX V1 — local implementation
 
 `35da04c` Core Privacy Foundation integration을 기준으로 `daily_records` P5 actor/RLS

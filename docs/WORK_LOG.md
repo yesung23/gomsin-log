@@ -91,6 +91,25 @@
 
 ---
 
+### 2026-08-16 · QUEUE 2–7 — gate 재평가 (환경 전제조건으로 대부분 차단)
+
+QUEUE 1을 닫은 뒤 남은 queue의 진입 조건을 이 checkout에서 재확인했다. 코드를 쓰지 않고
+gate만 판정했으며, 충족되지 않은 단계는 구현하지 않았다.
+
+| Queue | 판정 | 이 checkout에서 확인한 사실 |
+|---|---|---|
+| 2 실기기/두 계정 지원 | PARTIAL — 문서만 진행 | 실기기 없음, `xcodebuild`가 Command Line Tools만 가리켜 iOS native 검증 불가, `deno` 없어 `test:edge` 실행 불가. 자동화 가능한 부분(static/native contract 85 tests)은 이미 통과 상태다. QUEUE 1이 닫은 항목을 검증할 수 있도록 두 계정 체크리스트에 `5-4b` 12항목을 추가했다 |
+| 3 사진 E2EE + CloudKit | BLOCKED | `ios/App/App/App.entitlements`에 iCloud container/ubiquity entitlement가 없고 주석이 명시적으로 `No iCloud storage. Sync is Supabase only.`라고 적혀 있다. CloudKit container 생성은 manual Apple developer configuration이며 사용자 승인·자격증명이 필요하다. 현재 미디어 경로는 `src/lib/records.ts`가 `couple-media` Storage에 직접 업로드한다 |
+| 4 기본 기억 아카이브 | NOT STARTED — QUEUE 3 의존 | 사진 E2EE 기반 이후로 정의된 단계다. 평문 미디어 위에 아카이브를 세우면 나중에 되돌리기 어려운 표면이 생긴다 |
+| 5 온디바이스 AI | NOT STARTED — QUEUE 4 의존 | 정리할 기록 corpus와 아카이브가 선행 조건이다. Apple on-device stack 조사는 실기기·Full Xcode 없이는 성능/열/지연을 측정할 수 없다 |
+| 6 우리의 한 달 MVP | NOT STARTED — 상위 queue 의존 | `ENGINEERING_ROADMAP`의 `P-MP` 단계가 소유하며 M5 축적 기반 이후다. 결제·POD는 법적·비용 경계가 열려 있어 이번에 만들지 않았다 |
+| 7 Limited Validation hardening | NOT STARTED — QUEUE 1 리뷰 선행 | `LV` gate는 QUEUE 1의 보안 수정이 독립 리뷰를 통과한 뒤에 의미가 있다 |
+
+보안 gate를 우회해 후속 기능을 먼저 만들지 않았다. Production·remote Supabase·master
+merge·PR merge는 수행하지 않았다.
+
+---
+
 ### 2026-08-16 · QUEUE 1 — P5.5 security blocker closure (1B / 1C / actor binding)
 
 PR #66 감사 HEAD `d1bace6`에서 남은 P5.5 blocker를 실제 코드로 닫았다. Production /

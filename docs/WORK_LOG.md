@@ -119,11 +119,11 @@ P5 해결 후 별도 작업으로 유보했다.
 - Tool: Codex
 - Model: Luna / High
 - Role: Documentation Worker + Verifier
-- PR: docs-only draft PR, number assigned after push
+- PR: #61 (draft) — https://github.com/yesung23/gomsin-log/pull/61
 - Branch: `docs/control-tower-governance`
 - Base SHA: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
 - Old HEAD: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
-- New/Reviewed HEAD: docs governance commit on this branch
+- New/Reviewed HEAD: `6675d2b23b75ca57cbae9728797b88e4d3d20412`
 
 #### CHANGED / REVIEWED
 - file: `CLAUDE.md`, `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/CURRENT_STATE.md`, `docs/WORK_LOG.md`, `docs/PROJECT_HANDOFF_2026-08-13.md`

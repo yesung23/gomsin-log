@@ -23,6 +23,8 @@ import { buildPairingSide, proposePairing } from '@/crypto/protocol/pairing';
 import { pairingConfirmMessage, partnerAssistConfirmMessage } from '@/crypto/transcripts';
 import { revocationLogGenesis } from '@/crypto/revocation';
 import { createVerifiedRecordCryptoEnvironment } from './runtime';
+import { clearE2eeRuntime } from './runtimeLifecycle';
+import { installE2eeRuntimeForSession } from './runtimeSession';
 import {
   acceptEnrollmentSas,
   approveSecondDeviceEnrollment,
@@ -524,6 +526,52 @@ describe('Scenario C — couple pairing', () => {
     expect((await alice.localState.loadCoupleAuthority(coupleId))?.state).toBe('UNLINKED');
     await expect(alice.localState.pinCoupleAuthority({ ...authority!, state: 'CRYPTO_ACTIVE' }))
       .rejects.toThrow(/E_COUPLE_AUTHORITY_STATE/);
+  });
+
+  it('activates the couple write floor from the session once a real CSK exists', async () => {
+    const ceremony = await pairAccounts(alice, bob, aliceDeviceId, bobDeviceId, coupleId);
+    await completeCouplePairing(alice.devices[0].deps, {
+      coupleId,
+      ownUserId: alice.userId,
+      partnerUserId: bob.userId,
+      transcriptHash: ceremony.proposed.transcriptHash,
+      ownSide: ceremony.sideA,
+      partnerSide: ceremony.sideB,
+      ownConfirmation: ceremony.confirmationA,
+      partnerConfirmation: ceremony.confirmationB,
+      senderDeviceId: aliceDeviceId,
+      expiresAtMs: BigInt(server.now() + 600_000),
+    });
+
+    const keyPort = {
+      load: async () => null,
+      loadOrCreate: async (binding: {
+        installationId: string; userId: string; deviceId: string; purpose: string; version: number;
+      }) => ({
+        binding,
+        has: async () => true,
+        seal: async () => ({ nonce: new Uint8Array(12), ciphertext: new Uint8Array() }),
+        open: async () => new Uint8Array(),
+        delete: async () => {},
+      }),
+    };
+
+    // This is the defect QUEUE 1B closes: before this, a real paired couple could
+    // keep writing shared records below their floor because nothing in the
+    // product flow ever activated it.
+    const installed = await installE2eeRuntimeForSession({
+      userId: alice.userId,
+      repository: alice.devices[0].deps.repository,
+      localState: alice.localState,
+      deviceKeys: alice.devices[0].deviceKeys,
+      localKeys: keyPort,
+      installationId: 'flows-session',
+      activeCoupleId: coupleId,
+    });
+
+    expect(installed).toMatchObject({ status: 'installed', coupleProtection: 'activated' });
+    expect(server.writeFloors.get(`couple:${coupleId}`)).toBe(1);
+    clearE2eeRuntime();
   });
 
   it('creates no CSK at all without both confirmations', async () => {

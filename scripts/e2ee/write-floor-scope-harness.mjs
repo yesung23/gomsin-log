@@ -23,6 +23,7 @@ const FORWARD = [
   '039_daily_records_content_envelope.sql',
   '040_e2ee_write_floor_scope_semantics.sql',
   '045_harden_e2ee_write_floor_activation.sql',
+  '046_require_actor_for_device_provisioning.sql',
 ];
 const PG_ENV = { ...process.env, LC_ALL: 'C', LANG: 'C', LC_MESSAGES: 'C' };
 const keep = process.argv.includes('--keep');
@@ -281,6 +282,34 @@ try {
   const wrongRecipientKey = epoch('couple', AB, null, AB, 'ACTIVE', 1, wrongRecipientDb);
   provision(wrongRecipientKey, DEVICE_B, CERT_B, wrongRecipientDb);
   refused(activate('couple', AB, DEVICE_A, A, wrongRecipientDb), 'E2EE_FLOOR_DEVICE_NOT_PROVISIONED', 'couple activation: another member envelope does not cover this device');
+
+  // 046: the two device-provisioning transitions require an authenticated owner.
+  // Before 046 both compared ownership only when `auth.uid()` was not NULL, so a
+  // NULL-actor context skipped the comparison and could move another account's
+  // device to PROVISIONING or ACTIVE.
+  createDatabase('provisioning_actor'); apply('provisioning_actor'); seed('provisioning_actor');
+  const actorDb = 'provisioning_actor';
+  const beginSql = (deviceId) => `SELECT public.e2ee_begin_device_provisioning('${deviceId}')`;
+  const finalizeSql = (deviceId) => `SELECT public.e2ee_finalize_device_provisioning('${deviceId}')`;
+
+  // An authenticated role with no `request.jwt.claim.sub` makes `auth.uid()`
+  // NULL. This is the exact context that previously skipped ownership.
+  refused(asRole('authenticated', null, beginSql(DEVICE_A), actorDb), 'Not authenticated',
+    '046 begin provisioning: NULL actor denied');
+  refused(asRole('authenticated', null, finalizeSql(DEVICE_A), actorDb), 'Not authenticated',
+    '046 finalize provisioning: NULL actor denied');
+
+  // An authenticated non-owner is refused by exact ownership, not by status luck.
+  refused(asUser(B, beginSql(DEVICE_A), actorDb), 'E2EE_DEVICE_WRONG_ACCOUNT',
+    '046 begin provisioning: another account denied');
+  refused(asUser(B, finalizeSql(DEVICE_A), actorDb), 'E2EE_DEVICE_WRONG_ACCOUNT',
+    '046 finalize provisioning: another account denied');
+
+  // anon holds no EXECUTE at all.
+  refused(asAnon(beginSql(DEVICE_A), actorDb), 'Not authenticated|permission denied',
+    '046 begin provisioning: anon denied');
+  refused(asAnon(finalizeSql(DEVICE_A), actorDb), 'Not authenticated|permission denied',
+    '046 finalize provisioning: anon denied');
 
   // Mutation proof: forcing the shared branch through the user scope makes an
   // allowed shared plaintext write fail under a user-only floor.

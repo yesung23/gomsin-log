@@ -48,6 +48,7 @@ const FORWARD = [
   '043_conversation_bridge_completion.sql',
   '044_unlink_crypto_pairing_authority.sql',
   '045_harden_e2ee_write_floor_activation.sql',
+  '046_require_actor_for_device_provisioning.sql',
 ];
 
 const keep = process.argv.includes('--keep');

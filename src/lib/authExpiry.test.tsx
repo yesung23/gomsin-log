@@ -90,6 +90,7 @@ vi.mock('@/lib/records', () => ({
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
   installE2eeRuntimeForAuthenticatedSession: vi.fn().mockResolvedValue({ status: 'guarded' }),
+  activateCoupleProtectionForAuthenticatedSession: vi.fn().mockResolvedValue('not_paired'),
 }));
 
 vi.mock('@/lib/events', () => ({

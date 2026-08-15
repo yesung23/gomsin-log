@@ -69,7 +69,10 @@ import {
   clearE2eeRuntime,
   markE2eeCoupleAuthorityUnlinked,
 } from '@/app/e2ee/runtimeLifecycle';
-import { installE2eeRuntimeForAuthenticatedSession } from '@/app/e2ee/runtimeSession';
+import {
+  activateCoupleProtectionForAuthenticatedSession,
+  installE2eeRuntimeForAuthenticatedSession,
+} from '@/app/e2ee/runtimeSession';
 import { emitNotification, unseenPartnerTalkAboutMarks } from '@/lib/notifications';
 import {
   saveRecordToDB,
@@ -650,6 +653,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setInvitationExpiresAt(
       remote?.invitationActive ? remote.invitationExpiresAt : null,
     );
+    /**
+     * Couple protection is completed here because this is the single place every
+     * pairing path passes through: the inviter's pending poll, the redeemer's code
+     * entry, hydration, and reconnection after unlink.
+     *
+     * It runs only for a definite `connected` answer, so a pending invitation
+     * never activates a floor. The couple itself is still chosen server-side and
+     * re-validated against the pinned two-party authority, and a failure leaves
+     * shared writes closed rather than falling back to plaintext.
+     */
+    if (lifecycle === 'connected') {
+      void activateCoupleProtectionForAuthenticatedSession({
+        userId: identity.userId,
+        supabaseClient: supabase,
+        activeCoupleId: remote?.coupleId ?? null,
+        hasSealedOutbox: async () => {
+          const persistence = outboxRef.current;
+          return persistence ? hasSealedOutboxForAccount(persistence, identity.userId) : false;
+        },
+        isCurrentSession: () => isCurrentIdentity(identity),
+      });
+    }
     return lifecycle;
   }, [captureActiveIdentity, handleAuthExpired, isCurrentIdentity, updateStateImmediately]);
 

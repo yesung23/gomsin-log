@@ -14,7 +14,7 @@ import {
   installE2eeRuntimeForSession,
 } from './runtimeSession';
 import { bootstrapFirstDevice, confirmRecoveryKit } from './useCases';
-import { createMemoryAccount, createMemoryServer } from './testing/memoryEnvironment';
+import { createMemoryAccount, createMemoryServer, linkCouple } from './testing/memoryEnvironment';
 
 describe('authenticated E2EE runtime session', () => {
   afterEach(() => clearE2eeRuntime());
@@ -107,12 +107,66 @@ describe('authenticated E2EE runtime session', () => {
       localKeys: keyPort,
       installationId: 'test-session',
     });
-    expect(result).toEqual({ status: 'installed', deviceId: bootstrapped.deviceId });
+    // An account with no server-owned couple scope is `not_paired`, which is
+    // deliberately different from a couple whose CSK could not be reached.
+    expect(result).toEqual({
+      status: 'installed',
+      deviceId: bootstrapped.deviceId,
+      coupleProtection: 'not_paired',
+    });
     await expect(decideRecordWrite(getRecordCryptoEnvironment()!, {
       isPrivate: true,
       ownerUserId: account.userId,
       coupleId: crypto.randomUUID(),
     })).resolves.toMatchObject({ mode: 'gle1', keyEpoch: 1n });
+  });
+
+  it('reports couple protection as unavailable when a paired CSK cannot be reached', async () => {
+    const server = createMemoryServer();
+    const account = createMemoryAccount(server);
+    const partner = createMemoryAccount(server);
+    const device = account.devices[0];
+    const bootstrapped = await bootstrapFirstDevice(device.deps, {
+      userId: account.userId,
+      platform: 'ios',
+    });
+    await confirmRecoveryKit(device.deps, {
+      userId: account.userId,
+      recoveryCode: bootstrapped.recoveryCode,
+      kitAnchor: bootstrapped.kitAnchor,
+    });
+    server.writeFloors.set(`personal:${account.userId}`, 1);
+    const coupleId = linkCouple(server, account.userId, partner.userId);
+    const keyPort = {
+      load: async () => null,
+      loadOrCreate: async (binding: { installationId: string; userId: string; deviceId: string; purpose: string; version: number }) => ({
+        binding,
+        has: async () => true,
+        seal: async () => ({ nonce: new Uint8Array(12), ciphertext: new Uint8Array() }),
+        open: async () => new Uint8Array(),
+        delete: async () => {},
+      }),
+    };
+
+    const result = await installE2eeRuntimeForSession({
+      userId: account.userId,
+      repository: device.deps.repository,
+      localState: account.localState,
+      deviceKeys: device.deviceKeys,
+      localKeys: keyPort,
+      installationId: 'test-session',
+      activeCoupleId: coupleId,
+    });
+
+    // The couple exists but no pairing ceremony produced a usable CSK on this
+    // device, so the floor must NOT be activated and the shared write must fail
+    // closed instead of downgrading to plaintext.
+    expect(result).toEqual({
+      status: 'installed',
+      deviceId: bootstrapped.deviceId,
+      coupleProtection: 'keys_pending',
+    });
+    expect(server.writeFloors.get(`couple:${coupleId}`)).toBeUndefined();
   });
 
   it('makes local couple-authority tombstoning session-bound', async () => {

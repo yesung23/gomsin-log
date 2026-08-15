@@ -91,6 +91,54 @@
 
 ---
 
+### 2026-08-16 · QUEUE 1 — P5.5 security blocker closure (1B / 1C / actor binding)
+
+PR #66 감사 HEAD `d1bace6`에서 남은 P5.5 blocker를 실제 코드로 닫았다. Production /
+remote Supabase에는 조회·배포·mutation을 실행하지 않았다.
+
+**1B — Couple Protection Activation (닫힘).** `activateCoupleProtection`은 구현되어
+있었지만 **어떤 제품 경로에서도 호출되지 않았다**(호출자는 Settings 1인 ceremony의
+`activatePersonalProtection`뿐). 실제 커플이 shared record를 floor 아래에서 계속 쓸 수
+있던 gap이다. `runtimeSession.ts`에 server-authoritative 활성화를 추가하고
+`refreshCoupleLifecycle`의 `connected` 판정 한 곳에 연결했다 — 초대자 폴링, 수락자 코드
+입력, hydration, unlink 후 재연결이 모두 지나는 단일 지점이다. 커플은
+`listOwnedCoupleScopeIds()`가 고르고 client state가 고르지 않으며, scope가 정확히 1개가
+아니면 거부한다. 상태를 `activated / not_paired / keys_pending / unavailable`로 분리해
+pending invitation과 "커플은 있으나 CSK 미발급"을 구분한다. 실패는 floor를 켜지 않고
+shared write를 fail closed로 남긴다.
+
+**1C — Kit-Verified 복구 경로 (닫힘).** protected local state는 이미 ciphertext가 있을 때
+대체 키 생성을 거부하고 `E_PROTECTED_STATE_KEY_MISSING`을 던졌지만, **그 오류를 아무도
+처리하지 않았다.** Settings는 `TEMPORARILY_UNAVAILABLE`로, 세션은 조용한 `localState =
+null`로 보고해 사용자가 Recovery Kit 검증에 도달할 수 없었다. 이제 server recovery
+identity가 있을 때 `RECOVERY_REQUIRED`로, 없으면 `SECURE_STORAGE_UNAVAILABLE`로
+보고하고, 세션은 `guarded / recovery_required`를 반환한다. 어느 경로도
+`SETUP_REQUIRED`가 되지 않는다 — 기존 ciphertext에 대한 대체 권한 생성을 막는다.
+
+**1A — Actor-Bound Recovery (부분: 서버 결속 확인 + 046 forward fix).** 감사가 우려한
+actor binding은 상당 부분 이미 존재했다: `verify-recovery` Edge Function이
+`caller.user.id`로 challenge와 device 양쪽 소유를 확인하고 `E_WRONG_ACCOUNT`로 거부하며
+(negative 테스트 3건 존재), `e2ee_commit_recovery_authentication`은 challenge 소비와
+device 전이를 한 트랜잭션에서 수행한다. 반면 `e2ee_begin_device_provisioning`과
+`e2ee_finalize_device_provisioning`은 소유권을 `v_uid IS NOT NULL AND ...`로 비교해
+**`auth.uid()`가 NULL인 실행 컨텍스트에서 소유권 비교를 건너뛰었다.** migration 046이
+045와 동일한 형태로 NULL actor를 먼저 거부하도록 forward 수정했다. revocation 우선순위·
+인증서 요구·envelope coverage·허용 상태·idempotent 반환은 그대로 보존했다.
+
+검증: full Vitest **158 files / 2,299 tests PASS**, write-floor **39 assertions PASS**
+(046 신규 6건: NULL actor·타 계정·anon × begin/finalize), P0 76 · Phase 0 fresh-chain ·
+P5 integrated 93 · rollback PASS, native static 85 PASS, typecheck / lint / build /
+`git diff --check` PASS. 실기기 recovery·cold-start, remote catalog, staging, production은
+**UNVERIFIED / NOT APPLIED**.
+
+남은 1A 범위: recovery는 인증 이후에도 certificate → provisioning → 회전 → finalize가
+여러 요청으로 남아 있다. 각 단계가 서버에서 actor·상태를 재검증하고 실패 시
+`PROVISIONING_FAILED`로 닫히지만, 단일 ceremony RPC로의 통합과 실기기 검증은 남았다.
+ceremony 자체는 `VITE_E2EE_DEVICE_PROTECTION_ENABLED` build flag 뒤에 있어 기본
+빌드에서 노출되지 않는다.
+
+---
+
 ### 2026-08-16 · Security Stack Integration Audit & Repair V1
 
 Queue 1–4 통합 HEAD `e97b951`을 기준으로 실제 runtime·outbox·RLS/RPC·migration

@@ -13,7 +13,7 @@ import type { LocalKeyPort } from '@/crypto/keystore/LocalKeyPort';
 import { getDeviceKeyPort, getLocalKeyPort } from '@/crypto/keystore';
 import { createSupabaseE2eeRepository } from '@/data/e2ee/SupabaseE2eeRepository';
 import { createProtectedE2eeLocalState } from './protectedLocalState';
-import { E2eeRuntimeError, installE2eeRuntime } from './runtime';
+import { E2eeRuntimeError, activateCoupleProtection, installE2eeRuntime } from './runtime';
 import {
   registerE2eeCoupleAuthorityUnlink,
 } from './runtimeLifecycle';
@@ -22,9 +22,34 @@ import { setRecordCryptoEnvironment } from '@/lib/records';
 export const E2EE_RUNTIME_INSTALLATION_ID = 'gomsinlog-e2ee-runtime-v1';
 
 export type RuntimeSessionResult =
-  | { status: 'installed'; deviceId: string }
-  | { status: 'guarded'; reason: 'bootstrap_incomplete' | 'secure_storage_unavailable' | 'runtime_unavailable' }
+  | { status: 'installed'; deviceId: string; coupleProtection: CoupleProtectionOutcomeReason }
+  | {
+      status: 'guarded';
+      reason: 'bootstrap_incomplete'
+        | 'secure_storage_unavailable'
+        | 'runtime_unavailable'
+        /** Protected ciphertext exists but its local key is gone: kit-verified recovery only. */
+        | 'recovery_required';
+    }
   | { status: 'stale' };
+
+/**
+ * Why couple protection is or is not active for the installed session.
+ *
+ * `not_paired` means the server reports no couple scope this account owns a live
+ * key for. That covers a solo account, a pending invitation, and a couple whose
+ * pairing ceremony has not yet produced a CSK.
+ *
+ * `keys_pending` means a couple scope exists but this device cannot yet use its
+ * CSK. `unavailable` means activation was attempted and refused. Neither ever
+ * downgrades a shared write: both leave the floor unactivated and the write
+ * failing closed rather than falling back to plaintext.
+ */
+export type CoupleProtectionOutcomeReason =
+  | 'activated'
+  | 'not_paired'
+  | 'keys_pending'
+  | 'unavailable';
 
 function floorGuard(repository: E2eeRepository): RecordCryptoEnvironment {
   return {
@@ -51,8 +76,81 @@ export type InstallRuntimeForSessionInput = {
   localKeys: LocalKeyPort | null;
   installationId: string;
   hasSealedOutbox?: () => Promise<boolean>;
+  /** Reported couple id, used only for honest status reporting (see below). */
+  activeCoupleId?: string | null;
   isCurrentSession?: () => boolean;
 };
+
+/**
+ * Activate the couple write floor for the one couple the server says this
+ * account actually holds.
+ *
+ * The couple is never taken from client state. `listOwnedCoupleScopeIds()` is
+ * server-authoritative, and `activateCoupleProtection` independently re-checks
+ * the pinned two-party lifecycle and requires a verified CSK, so a former
+ * partner, a stale pairing, or a pending invitation cannot activate a floor.
+ *
+ * A failure here is never fatal to the session: the verified runtime stays
+ * installed and shared writes keep failing closed above the floor.
+ */
+async function activateOwnedCoupleProtection(input: {
+  userId: string;
+  deviceId: string;
+  environment: RecordCryptoEnvironment;
+  repository: E2eeRepository;
+  localState: E2eeLocalState;
+  /**
+   * The couple this session believes it is in, used only to tell a pending CSK
+   * apart from having no couple at all. It never selects the scope that gets a
+   * floor: that stays server-authoritative.
+   */
+  activeCoupleId?: string | null;
+  isCurrentSession: () => boolean;
+}): Promise<CoupleProtectionOutcomeReason> {
+  let owned: string[];
+  try {
+    owned = await input.repository.listOwnedCoupleScopeIds();
+  } catch {
+    return 'unavailable';
+  }
+  if (!input.isCurrentSession()) return 'unavailable';
+  if (owned.length === 0) {
+    // No live couple key. Distinguish a solo/pending account from a real active
+    // couple whose CSK has not been issued yet: the second one is a protection
+    // gap a person may need to act on, and calling it `not_paired` would hide it.
+    if (!input.activeCoupleId) return 'not_paired';
+    try {
+      const snapshot = await input.repository.getCoupleAuthorizationSnapshot(input.activeCoupleId);
+      return snapshot.currentUserActiveCoupleId === input.activeCoupleId
+        && snapshot.activeUserIds.length === 2
+        ? 'keys_pending'
+        : 'not_paired';
+    } catch {
+      return 'unavailable';
+    }
+  }
+  // V1 is a two-person product: exactly one couple scope is the only shape whose
+  // floor this session may activate. More than one is an unexpected server state,
+  // and guessing which one to protect is not an acceptable resolution.
+  if (owned.length !== 1) return 'unavailable';
+
+  try {
+    await activateCoupleProtection({
+      userId: input.userId,
+      deviceId: input.deviceId,
+      coupleId: owned[0],
+      repository: input.repository,
+      localState: input.localState,
+      environment: input.environment,
+      isCurrentSession: input.isCurrentSession,
+    });
+    return 'activated';
+  } catch {
+    // Includes a pending CSK, an unlinked/non-canonical pinned authority, and a
+    // server lifecycle that is not the pinned two-party state.
+    return 'unavailable';
+  }
+}
 
 export async function installE2eeRuntimeForSession(
   input: InstallRuntimeForSessionInput,
@@ -95,7 +193,23 @@ export async function installE2eeRuntimeForSession(
       installed.close();
       return { status: 'stale' };
     }
-    return { status: 'installed', deviceId: installed.deviceId };
+    // Couple protection is completed here, inside the authenticated session that
+    // just installed a verified runtime. Leaving it to a Settings ceremony was the
+    // gap that let real couples keep writing shared records below their floor.
+    const coupleProtection = await activateOwnedCoupleProtection({
+      userId: input.userId,
+      deviceId: installed.deviceId,
+      environment: installed.environment,
+      repository: input.repository,
+      localState: input.localState,
+      activeCoupleId: input.activeCoupleId,
+      isCurrentSession: isCurrent,
+    });
+    if (!isCurrent()) {
+      installed.close();
+      return { status: 'stale' };
+    }
+    return { status: 'installed', deviceId: installed.deviceId, coupleProtection };
   } catch (error) {
     if (!isCurrent()) return { status: 'stale' };
     // Keep the floor guard in place. No installation error may restore the
@@ -111,6 +225,7 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
   userId: string;
   supabaseClient: SupabaseClient | null;
   hasSealedOutbox?: () => Promise<boolean>;
+  activeCoupleId?: string | null;
   isCurrentSession?: () => boolean;
 }): Promise<RuntimeSessionResult> {
   if (!input.supabaseClient) return { status: 'guarded', reason: 'secure_storage_unavailable' };
@@ -123,6 +238,7 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
   const deviceKeys = getDeviceKeyPort();
   const localKeys = getLocalKeyPort();
   let localState: E2eeLocalState | null = null;
+  let protectedStateRecoveryRequired = false;
   if (localKeys) {
     try {
       localState = await createProtectedE2eeLocalState({
@@ -130,14 +246,27 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
         userId: input.userId,
         localKeys,
       });
-    } catch {
+    } catch (error) {
       // The exact cause is deliberately not surfaced here: it may describe a
       // device keystore. The floor guard below still prevents a downgrade.
+      //
+      // One cause is distinguished internally: protected ciphertext that exists
+      // while its local key is gone. That is a recovery case, and it must never
+      // be retried as a fresh initialization that would replace authority over
+      // existing ciphertext.
+      const code = error instanceof Error ? error.message : '';
+      protectedStateRecoveryRequired = code === 'E_PROTECTED_STATE_KEY_MISSING'
+        || code === 'E_PROTECTED_STATE_UNREADABLE';
       localState = null;
     }
   }
   if (input.isCurrentSession && !input.isCurrentSession()) {
     return { status: 'stale' };
+  }
+  if (protectedStateRecoveryRequired) {
+    // The floor guard installed above stays in place, so writes above a floor
+    // keep failing closed until an explicit kit-verified recovery runs.
+    return { status: 'guarded', reason: 'recovery_required' };
   }
   return installE2eeRuntimeForSession({
     userId: input.userId,
@@ -147,6 +276,31 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
     localKeys,
     installationId: E2EE_RUNTIME_INSTALLATION_ID,
     hasSealedOutbox: input.hasSealedOutbox,
+    activeCoupleId: input.activeCoupleId,
     isCurrentSession: input.isCurrentSession,
   });
+}
+
+/**
+ * Complete couple protection for an account whose pairing became usable after
+ * its runtime was installed — the real product order when a partner accepts an
+ * invitation while the inviter's app is already open.
+ *
+ * This re-installs the verified runtime for the current device rather than
+ * trusting any cached environment, then activates the floor for the single
+ * server-owned couple scope. It is safe to call repeatedly: an already-active
+ * floor is a no-op, and every failure keeps shared writes closed.
+ */
+export async function activateCoupleProtectionForAuthenticatedSession(input: {
+  userId: string;
+  supabaseClient: SupabaseClient | null;
+  hasSealedOutbox?: () => Promise<boolean>;
+  activeCoupleId?: string | null;
+  isCurrentSession?: () => boolean;
+}): Promise<CoupleProtectionOutcomeReason> {
+  const isCurrent = () => input.isCurrentSession?.() ?? true;
+  if (!input.supabaseClient || !isCurrent()) return 'unavailable';
+  const installed = await installE2eeRuntimeForAuthenticatedSession(input);
+  if (installed.status !== 'installed') return 'unavailable';
+  return installed.coupleProtection;
 }

@@ -41,8 +41,13 @@ const FORWARD = [
   '034_e2ee_recovery_challenge_issuance.sql',
   '035_e2ee_phase1a_p0_closure.sql',
   '036_e2ee_device_status_privilege.sql',
+  '037_harden_e2ee_account_deletion_survivor_detection.sql',
+  '038_bilateral_talk_about_marks.sql',
   '039_daily_records_content_envelope.sql',
+  '040_e2ee_write_floor_scope_semantics.sql',
+  '043_conversation_bridge_completion.sql',
   '044_unlink_crypto_pairing_authority.sql',
+  '045_harden_e2ee_write_floor_activation.sql',
 ];
 
 const keep = process.argv.includes('--keep');
@@ -169,6 +174,10 @@ const COUPLE_C = '22222222-0000-4000-8000-000000000002';
 /** A's former couple with D. Both memberships are `disconnected`. */
 const COUPLE_AD = '33333333-0000-4000-8000-000000000003';
 const COUPLE_ORPHAN = '44444444-0000-4000-8000-000000000004';
+const DEVICE_A = 'aaaaaaaa-1111-4000-8000-00000000000a';
+const CERT_A = 'aaaaaaaa-2222-4000-8000-00000000000a';
+
+const bytes = (length, hex) => `decode(repeat('${hex}', ${length}), 'hex')`;
 
 /**
  * A syntactically real GLE1 envelope, built in SQL.
@@ -276,6 +285,25 @@ function seed(name) {
 
     INSERT INTO public.crypto_pairings (couple_id, state)
     VALUES ('${COUPLE_AB}', 'CRYPTO_ACTIVE');
+
+    INSERT INTO public.devices
+      (id,user_id,sig_spki,kem_spki,platform,assurance,status,enrollment_method)
+    VALUES
+      ('${DEVICE_A}','${A}',${bytes(91, '11')},${bytes(91, '12')},'ios','software_keystore','ACTIVE','bootstrap');
+
+    INSERT INTO public.recovery_public_anchors
+      (id,user_id,recovery_identity_id,recovery_version,rec_sig_spki,rec_sig_fp,recovery_bundle_fp)
+    VALUES
+      ('aaaaaaaa-3333-4000-8000-00000000000a','${A}','aaaaaaaa-4444-4000-8000-00000000000a',1,
+       ${bytes(91, '51')},${bytes(32, '52')},${bytes(32, '53')});
+
+    INSERT INTO public.device_certificates
+      (id,user_id,subject_device_id,recovery_public_anchor_id,recovery_identity_id,recovery_version,
+       certificate,certificate_fp,subject_sig_spki,subject_kem_spki)
+    VALUES
+      ('${CERT_A}','${A}','${DEVICE_A}','aaaaaaaa-3333-4000-8000-00000000000a',
+       'aaaaaaaa-4444-4000-8000-00000000000a',1,${bytes(445, '91')},${bytes(32, '92')},
+       ${bytes(91, '11')},${bytes(91, '12')});
   `, `seed users (${name})`, name);
 
   const scopeKey = (domain, scopeId, ownerUser, ownerCouple, epoch, state) => `
@@ -290,13 +318,22 @@ function seed(name) {
   mustSql(scopeKey('health', A, A, null, 1, 'ACTIVE'), 'A health epoch', name);
   mustSql(scopeKey('couple', COUPLE_AB, null, COUPLE_AB, 1, 'ACTIVE'), 'AB couple epoch', name);
   mustSql(scopeKey('couple', COUPLE_C, null, COUPLE_C, 7, 'ACTIVE'), 'C couple epoch', name);
+
+  mustSql(`
+    INSERT INTO public.key_envelopes
+      (scope_key_id,recipient_kind,recipient_device_id,sender_device_id,sender_certificate_id,envelope,self_notarized)
+    SELECT sk.id,'device','${DEVICE_A}','${DEVICE_A}','${CERT_A}',${bytes(360, 'aa')},true
+    FROM public.scope_keys sk
+    WHERE (sk.domain='personal' AND sk.scope_id='${A}' AND sk.key_epoch=2)
+       OR (sk.domain='couple' AND sk.scope_id='${COUPLE_AB}' AND sk.key_epoch=1)
+  `, 'A provisioned scope envelopes', name);
   return name;
 }
 
 /** Activate both of A's write floors, the way the client bootstrap will. */
 function activateFloors(name) {
-  mustAsUser(A, `SELECT public.activate_e2ee_write_floor('user', '${A}', NULL)`, 'personal floor', name);
-  mustAsUser(A, `SELECT public.activate_e2ee_write_floor('couple', '${COUPLE_AB}', NULL)`, 'couple floor', name);
+  mustAsUser(A, `SELECT public.activate_e2ee_write_floor('user', '${A}', '${DEVICE_A}')`, 'personal floor', name);
+  mustAsUser(A, `SELECT public.activate_e2ee_write_floor('couple', '${COUPLE_AB}', '${DEVICE_A}')`, 'couple floor', name);
 }
 
 /** Insert one record. Every column is explicit, so nothing is implied. */
@@ -437,13 +474,13 @@ try {
   passes.push('A activates the personal and couple write floors');
 
   checkRefused(
-    asUser(C, `SELECT public.activate_e2ee_write_floor('user', '${A}', NULL)`),
-    'E2EE_FLOOR_SCOPE_FORBIDDEN',
+    asUser(C, `SELECT public.activate_e2ee_write_floor('user', '${A}', '${DEVICE_A}')`),
+    'E2EE_DEVICE_SCOPE_FORBIDDEN|E2EE_FLOOR_SCOPE_FORBIDDEN',
     "reject: unrelated user activates another account's personal floor",
   );
   checkRefused(
-    asUser(C, `SELECT public.activate_e2ee_write_floor('couple', '${COUPLE_AB}', NULL)`),
-    'E2EE_FLOOR_SCOPE_FORBIDDEN',
+    asUser(C, `SELECT public.activate_e2ee_write_floor('couple', '${COUPLE_AB}', '${DEVICE_A}')`),
+    'E2EE_DEVICE_SCOPE_FORBIDDEN|E2EE_FLOOR_SCOPE_FORBIDDEN',
     "reject: unrelated user activates another couple's floor",
   );
 
@@ -1020,7 +1057,7 @@ try {
 
   mutationSurvives({
     label: 'private record must not use the couple key',
-    file: '032_e2ee_write_floor.sql',
+    file: '040_e2ee_write_floor_scope_semantics.sql',
     find: "IF NEW.is_private AND NEW.key_domain <> 'personal' THEN",
     replace: 'IF false THEN',
     probe: insertRecord({
@@ -1033,7 +1070,7 @@ try {
 
   mutationSurvives({
     label: 'shared record must not use the personal key',
-    file: '032_e2ee_write_floor.sql',
+    file: '040_e2ee_write_floor_scope_semantics.sql',
     find: "IF NOT NEW.is_private AND NEW.key_domain <> 'couple' THEN",
     replace: 'IF false THEN',
     probe: insertRecord({
@@ -1046,7 +1083,7 @@ try {
 
   mutationSurvives({
     label: 'only an ACTIVE epoch accepts writes',
-    file: '032_e2ee_write_floor.sql',
+    file: '040_e2ee_write_floor_scope_semantics.sql',
     find: "WHERE sk.state = 'ACTIVE'",
     replace: "WHERE sk.state IN ('ACTIVE', 'RETIRED')",
     probe: insertRecord({
@@ -1059,7 +1096,7 @@ try {
 
   mutationSurvives({
     label: 'plaintext residue in log_text',
-    file: '032_e2ee_write_floor.sql',
+    file: '040_e2ee_write_floor_scope_semantics.sql',
     find: "IF NEW.log_text IS NOT NULL AND NEW.log_text <> '' THEN",
     replace: 'IF false THEN',
     probe: sharedEncrypted({ logText: "'남은 평문'" }),
@@ -1068,7 +1105,7 @@ try {
 
   mutationSurvives({
     label: 'plaintext residue in attachments',
-    file: '032_e2ee_write_floor.sql',
+    file: '040_e2ee_write_floor_scope_semantics.sql',
     find: "IF NEW.attachments IS NOT NULL AND NEW.attachments <> '[]'::jsonb THEN",
     replace: 'IF false THEN',
     probe: sharedEncrypted({ attachments: '\'[{"type":"photo","name":"a.jpg","path":"p"}]\'::jsonb' }),
@@ -1077,7 +1114,7 @@ try {
 
   mutationSurvives({
     label: 'the write floor blocks new plaintext',
-    file: '032_e2ee_write_floor.sql',
+    file: '040_e2ee_write_floor_scope_semantics.sql',
     find: 'IF TG_OP = \'INSERT\' AND NEW.cipher_format < v_floor THEN',
     replace: 'IF false THEN',
     probe: insertRecord({
@@ -1098,7 +1135,7 @@ try {
 
     const r3Only = `p5_mut_${(mutationDb += 1)}`;
     buildDatabase(r3Only, {
-      mutate: (candidate, text) => (candidate === '032_e2ee_write_floor.sql'
+      mutate: (candidate, text) => (candidate === '040_e2ee_write_floor_scope_semantics.sql'
         ? text.split("IF TG_OP = 'UPDATE' AND OLD.cipher_format >= 1 AND NEW.cipher_format < OLD.cipher_format THEN")
           .join('IF false THEN')
         : text),
@@ -1117,7 +1154,7 @@ try {
     const bothGone = `p5_mut_${(mutationDb += 1)}`;
     buildDatabase(bothGone, {
       mutate: (candidate, text) => {
-        if (candidate !== '032_e2ee_write_floor.sql') return text;
+        if (candidate !== '040_e2ee_write_floor_scope_semantics.sql') return text;
         return text
           .split("IF TG_OP = 'UPDATE' AND OLD.cipher_format >= 1 AND NEW.cipher_format < OLD.cipher_format THEN")
           .join('IF false THEN')

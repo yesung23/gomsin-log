@@ -112,10 +112,18 @@ export async function createProtectedE2eeLocalState(input: {
     purpose: 'protected_state',
     version: 1,
   };
-  const capability = await input.localKeys.loadOrCreate(binding);
+  const storageKey = `${input.installationId}:${input.userId}:v${STATE_VERSION}`;
+  const storedAtOpen = await readStored(storageKey);
+  // Existing ciphertext is permanently bound to its original local key. A
+  // replacement key would make the state look freshly initialized and could
+  // invite a dangerous second bootstrap, so key loss is a terminal local-state
+  // error instead of a create-on-read path.
+  const capability = storedAtOpen
+    ? await input.localKeys.load(binding)
+    : await input.localKeys.loadOrCreate(binding);
+  if (storedAtOpen && !capability) throw new Error('E_PROTECTED_STATE_KEY_MISSING');
   if (!capability) return null;
   const protectedCapability = capability;
-  const storageKey = `${input.installationId}:${input.userId}:v${STATE_VERSION}`;
   const aad = utf8(`gomsinlog/protected-state/v${STATE_VERSION}|${storageKey}`);
 
   async function load(): Promise<Persisted> {

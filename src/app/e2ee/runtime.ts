@@ -391,14 +391,25 @@ export async function activatePersonalProtection(input: {
   repository: E2eeRepository;
   localState: E2eeLocalState;
   environment: RecordCryptoEnvironment;
+  isCurrentSession?: () => boolean;
 }): Promise<void> {
+  const assertCurrent = () => {
+    if (input.isCurrentSession && !input.isCurrentSession()) {
+      fail('E_RUNTIME_SESSION_STALE', 'the authenticated session changed during floor activation');
+    }
+  };
+  assertCurrent();
   const pending = await input.localState.loadBootstrap(input.userId);
+  assertCurrent();
   if (!pending || pending.state !== 'COMPLETE' || pending.deviceId !== input.deviceId) {
     fail('E_RECOVERY_CONFIRMATION_REQUIRED', 'recovery confirmation is required before activation');
   }
   if (await input.repository.getWriteFloor('personal', input.userId) >= 1) return;
+  assertCurrent();
   await requireRuntimeKey({ environment: input.environment, domain: 'personal', scopeId: input.userId });
+  assertCurrent();
   await input.repository.activateWriteFloor('user', input.userId, input.deviceId);
+  assertCurrent();
 }
 
 /** Guarded couple-floor activation. A missing CSK is a hard refusal, never PMK/HRK substitution. */
@@ -409,13 +420,24 @@ export async function activateCoupleProtection(input: {
   repository: E2eeRepository;
   localState: E2eeLocalState;
   environment: RecordCryptoEnvironment;
+  isCurrentSession?: () => boolean;
 }): Promise<void> {
+  const assertCurrent = () => {
+    if (input.isCurrentSession && !input.isCurrentSession()) {
+      fail('E_RUNTIME_SESSION_STALE', 'the authenticated session changed during floor activation');
+    }
+  };
+  assertCurrent();
   const pending = await input.localState.loadBootstrap(input.userId);
+  assertCurrent();
   if (!pending || pending.state !== 'COMPLETE' || pending.deviceId !== input.deviceId) {
     fail('E_RECOVERY_CONFIRMATION_REQUIRED', 'recovery confirmation is required before activation');
   }
   if (!input.coupleId) fail('E_COUPLE_KEYS_PENDING', 'there is no active couple scope');
   if (await input.repository.getWriteFloor('couple', input.coupleId) >= 1) return;
+  assertCurrent();
   await requireRuntimeKey({ environment: input.environment, domain: 'couple', scopeId: input.coupleId });
+  assertCurrent();
   await input.repository.activateWriteFloor('couple', input.coupleId, input.deviceId);
+  assertCurrent();
 }

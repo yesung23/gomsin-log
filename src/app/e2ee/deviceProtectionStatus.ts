@@ -38,8 +38,20 @@ export function deviceProtectionStatusFromFacts(input: {
     && facts.recoveryConfirmed
     && facts.deviceEnrolled
     && facts.personalKeysReady
-    && facts.runtimeReady) {
+    && facts.runtimeReady
+    && facts.floorActive
+    && (!facts.hasCoupleScope || facts.coupleKeysReady)) {
     return 'PROTECTED';
+  }
+
+  // Once bootstrap is complete, missing runtime/floor/current-couple key facts
+  // describe a temporarily unusable protected device, not a first-device setup.
+  // Offering setup here could create replacement authority for existing data.
+  if (facts.hasLocalIdentity
+    && facts.recoveryConfirmed
+    && facts.deviceEnrolled
+    && facts.personalKeysReady) {
+    return 'TEMPORARILY_UNAVAILABLE';
   }
 
   // A server-side recovery identity with no matching local bootstrap is the

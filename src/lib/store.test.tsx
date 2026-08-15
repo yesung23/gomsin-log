@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import type { AppState } from '@/types';
+import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
 
 type AuthCallback = (event: string, session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } } | null) => void;
 
@@ -54,6 +55,17 @@ const saveCoupleAnniversary = vi.fn().mockResolvedValue(true);
 // couple state untouched, so every pre-existing scenario keeps its fixture
 // workspace. Tests that care about a definite answer set it explicitly.
 const fetchMyCoupleState = vi.fn().mockResolvedValue({ ok: false, reason: 'server' });
+
+const outboxEntries = new Map<string, QueuedRecord>();
+const outboxPersistence: OutboxPersistence = {
+  all: vi.fn(async () => Array.from(outboxEntries.values())),
+  put: vi.fn(async (entry) => { outboxEntries.set(entry.id, entry); }),
+  remove: vi.fn(async (id) => { outboxEntries.delete(id); }),
+};
+
+vi.mock('@/lib/outboxStorage', () => ({
+  createIndexedDbOutbox: () => outboxPersistence,
+}));
 
 vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
@@ -140,11 +152,13 @@ vi.mock('@/lib/trips', () => ({
   reconcileParentTrips: (trips: unknown[]) => trips,
 }));
 
-// Talk-about marks load alongside the other shared slices. Metadata only, and
-// deliberately outside the ok/quarantine gate, so an empty list is the correct
-// default for every scenario in this file.
+const fetchTalkAboutMarksResultFromDB = vi.fn()
+  .mockResolvedValue({ ok: true, marks: [] });
+
+// Talk-about marks load alongside the other shared slices. A failed read keeps
+// the old list; the normal default here is an authoritative empty result.
 vi.mock('@/lib/talkAbout', () => ({
-  fetchTalkAboutMarksFromDB: vi.fn().mockResolvedValue([]),
+  fetchTalkAboutMarksResultFromDB: (...args: unknown[]) => fetchTalkAboutMarksResultFromDB(...args),
   markTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
   unmarkTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
   resolveTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
@@ -152,13 +166,31 @@ vi.mock('@/lib/talkAbout', () => ({
 
 const { StoreProvider } = await import('@/lib/store');
 const { useStore } = await import('@/lib/useStore');
+const { setOutboxLocalCacheKey } = await import('@/lib/outbox');
+const { registerE2eeRuntimeTeardown } = await import('@/app/e2ee/runtimeLifecycle');
 const { fetchTripsResultFromDB: fetchTripsResultFromDBMock } = await import('@/lib/trips') as unknown as { fetchTripsResultFromDB: ReturnType<typeof vi.fn> };
 const STORE_KEY = 'gomsinlog.state.v2';
 
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
+let lastFlushResult: { delivered: number; requeued: number; blocked: number } | null = null;
 
 function Probe({ files = [] as File[] }: { files?: File[] }) {
-  const { state, isReady, authSyncUnavailable, sharedSyncStatus, signOut, disconnect, updateProfile, addRecordWithMedia, addEvent, reloadEvents } = useStore();
+  const {
+    state,
+    isReady,
+    authSyncUnavailable,
+    sharedSyncStatus,
+    signOut,
+    disconnect,
+    updateProfile,
+    addRecordWithMedia,
+    queueRecordForLater,
+    flushOutbox,
+    outboxWaiting,
+    outboxBlocked,
+    addEvent,
+    reloadEvents,
+  } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
@@ -181,6 +213,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
           .join(',')}
       </span>
       <span data-testid="logs">{state.records.map((r) => r.log).join('|')}</span>
+      <span data-testid="outbox">{outboxWaiting}:{outboxBlocked}</span>
       <button
         onClick={() => {
           void addRecordWithMedia(
@@ -199,6 +232,18 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       >
         post
       </button>
+      <button onClick={() => {
+        void queueRecordForLater({
+          date: '2026-08-16',
+          time: '12:00',
+          authorRole: 'gomsin',
+          log: 'queued old couple record',
+          isPrivate: false,
+        }, []);
+      }}>queue</button>
+      <button onClick={() => {
+        void flushOutbox().then((result) => { lastFlushResult = result; });
+      }}>flush</button>
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
       <button onClick={() => void updateProfile({ myName: 'updated-name' })}>update-profile</button>
@@ -246,6 +291,9 @@ describe('StoreProvider auth lifecycle', () => {
     authCallbacks.length = 0;
     createdChannels.length = 0;
     localStorage.clear();
+    outboxEntries.clear();
+    setOutboxLocalCacheKey(null);
+    lastFlushResult = null;
     fetchFullStateFromDB.mockReset();
     mockSupabase.profileUpdateError = null;
     mockSupabase.profileUpdateMatched = true;
@@ -267,6 +315,7 @@ describe('StoreProvider auth lifecycle', () => {
     disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
     fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });
+    fetchTalkAboutMarksResultFromDB.mockReset().mockResolvedValue({ ok: true, marks: [] });
     saveEventToDB.mockReset().mockResolvedValue(null);
     updateEventInDB.mockReset().mockResolvedValue(null);
     deleteEventFromDB.mockReset().mockResolvedValue(true);
@@ -276,6 +325,131 @@ describe('StoreProvider auth lifecycle', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    setOutboxLocalCacheKey(null);
+  });
+
+  it('clears module-level E2EE capabilities when the provider unmounts', async () => {
+    const teardown = vi.fn();
+    registerE2eeRuntimeTeardown(teardown);
+    const view = render(<StoreProvider><Probe /></StoreProvider>);
+
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('loading'));
+    view.unmount();
+
+    expect(teardown).toHaveBeenCalledOnce();
+  });
+
+  it('blocks an old-couple outbox entry before opening or sending it after re-pairing', async () => {
+    let remoteCoupleId = 'couple-old';
+    fetchFullStateFromDB.mockImplementation(async () => serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: {
+          coupleId: remoteCoupleId,
+          partnerName: '몽룡',
+          coupleCode: '',
+          connected: true,
+          status: 'active',
+        },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+    const open = vi.fn(async () => new Uint8Array());
+    setOutboxLocalCacheKey({
+      binding: {
+        installationId: 'test',
+        userId: 'user-a',
+        deviceId: 'device-a',
+        purpose: 'lck',
+        version: 1,
+      },
+      has: async () => true,
+      seal: async () => ({ nonce: new Uint8Array(12), ciphertext: new Uint8Array([1]) }),
+      open,
+      delete: async () => {},
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-old'));
+    await act(async () => { screen.getByText('queue').click(); });
+    await waitFor(() => expect(outboxEntries.size).toBe(1));
+    expect(Array.from(outboxEntries.values())[0].sealedRecord).toBeDefined();
+
+    remoteCoupleId = 'couple-new';
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-new'));
+    saveRecordToDB.mockClear();
+    await act(async () => { screen.getByText('flush').click(); });
+    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 1 }));
+
+    expect(open).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(Array.from(outboxEntries.values())[0].blocked?.reason).toBe('couple_changed');
+  });
+
+  it('rechecks the queued couple after payload open before the first replay mutation', async () => {
+    let remoteCoupleId = 'couple-old';
+    fetchFullStateFromDB.mockImplementation(async () => serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: {
+          coupleId: remoteCoupleId,
+          partnerName: '몽룡',
+          coupleCode: '',
+          connected: true,
+          status: 'active',
+        },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+    let resolveOpen!: (plaintext: Uint8Array) => void;
+    const open = vi.fn(() => new Promise<Uint8Array>((resolve) => { resolveOpen = resolve; }));
+    setOutboxLocalCacheKey({
+      binding: {
+        installationId: 'test',
+        userId: 'user-a',
+        deviceId: 'device-a',
+        purpose: 'lck',
+        version: 1,
+      },
+      has: async () => true,
+      seal: async () => ({ nonce: new Uint8Array(12), ciphertext: new Uint8Array([1]) }),
+      open,
+      delete: async () => {},
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-old'));
+    await act(async () => { screen.getByText('queue').click(); });
+    await waitFor(() => expect(outboxEntries.size).toBe(1));
+
+    saveRecordToDB.mockClear();
+    screen.getByText('flush').click();
+    await waitFor(() => expect(open).toHaveBeenCalledOnce());
+    remoteCoupleId = 'couple-new';
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-new'));
+    await act(async () => resolveOpen(new TextEncoder().encode(JSON.stringify({
+      record: {
+        date: '2026-08-16',
+        time: '12:00',
+        authorRole: 'gomsin',
+        log: 'queued old couple record',
+        isPrivate: false,
+      },
+    }))));
+    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 1 }));
+
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(Array.from(outboxEntries.values())[0].blocked?.reason).toBe('couple_changed');
   });
 
   it('becomes ready after a session is restored', async () => {

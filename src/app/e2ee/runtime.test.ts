@@ -109,6 +109,46 @@ describe('verified E2EE runtime', () => {
     expect(await device.deps.repository.getWriteFloor('personal', account.userId)).toBe(1);
   });
 
+  it('does not activate a floor after the authenticated session changes mid-check', async () => {
+    const server = createMemoryServer();
+    const account = createMemoryAccount(server);
+    const device = account.devices[0];
+    const bootstrapped = await bootstrapFirstDevice(device.deps, {
+      userId: account.userId,
+      platform: 'ios',
+    });
+    await confirmRecoveryKit(device.deps, {
+      userId: account.userId,
+      recoveryCode: bootstrapped.recoveryCode,
+      kitAnchor: bootstrapped.kitAnchor,
+    });
+    const environment = await createVerifiedRecordCryptoEnvironment({
+      userId: account.userId,
+      deviceId: bootstrapped.deviceId,
+      repository: device.deps.repository,
+      localState: device.deps.localState,
+      deviceKeys: device.deviceKeys,
+      now: () => server.now(),
+    });
+    let current = true;
+    const originalGetWriteFloor = device.deps.repository.getWriteFloor.bind(device.deps.repository);
+    device.deps.repository.getWriteFloor = async (...args) => {
+      const floor = await originalGetWriteFloor(...args);
+      current = false;
+      return floor;
+    };
+
+    await expect(activatePersonalProtection({
+      userId: account.userId,
+      deviceId: bootstrapped.deviceId,
+      repository: device.deps.repository,
+      localState: device.deps.localState,
+      environment,
+      isCurrentSession: () => current,
+    })).rejects.toThrow('E_RUNTIME_SESSION_STALE');
+    expect(await originalGetWriteFloor('personal', account.userId)).toBe(0);
+  });
+
   it('rejects a tampered GLK2 envelope instead of returning a replacement key', async () => {
     const server = createMemoryServer();
     const account = createMemoryAccount(server);

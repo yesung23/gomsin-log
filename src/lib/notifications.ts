@@ -44,6 +44,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
 const PREFERENCES_PREFIX = 'gomsinlog.notifications.v1.';
 const listeners = new Set<(notification: ReentryNotification) => void>();
 const delivered = new Set<string>();
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function preferencesKey(userId: string): string {
   return `${PREFERENCES_PREFIX}${userId}`;
@@ -111,7 +112,9 @@ export function notificationDestination(input: unknown): string | null {
   const destination = row.destination;
   if (!destination || typeof destination !== 'object' || Array.isArray(destination)) return null;
   const candidate = destination as Record<string, unknown>;
-  if (candidate.kind !== 'record' || typeof candidate.recordId !== 'string' || !candidate.recordId) {
+  if (candidate.kind !== 'record'
+    || typeof candidate.recordId !== 'string'
+    || !UUID_PATTERN.test(candidate.recordId)) {
     return null;
   }
   return `/record?record=${encodeURIComponent(candidate.recordId)}`;
@@ -152,21 +155,39 @@ function systemNotification(notification: ReentryNotification): void {
   }
 }
 
+/** Compare immutable rows before the Store emits partner talk-about events. */
+export function unseenPartnerTalkAboutMarks<T extends { id: string; actorUserId: string }>(
+  previous: T[],
+  current: T[],
+  viewerUserId: string,
+): T[] {
+  const previousIds = new Set(previous.map((mark) => mark.id));
+  return current.filter((mark) => mark.actorUserId !== viewerUserId && !previousIds.has(mark.id));
+}
+
 /** Emit one deduplicated generic event for the current authenticated account. */
 export async function emitNotification(input: {
   userId: string;
   eventType: NotificationEventType;
+  /** Immutable event row id; talk-about re-marks on one record remain distinct. */
+  eventId: string;
   recordId: string;
   isCurrent?: () => boolean;
 }): Promise<void> {
-  if (!input.userId || !input.recordId || input.isCurrent && !input.isCurrent()) return;
-  const id = `${input.userId}:${input.eventType}:${input.recordId}`;
-  if (delivered.has(id)) return;
-  delivered.add(id);
+  if (!input.userId
+    || !UUID_PATTERN.test(input.eventId)
+    || !UUID_PATTERN.test(input.recordId)
+    || input.isCurrent && !input.isCurrent()) return;
 
   const preferences = loadNotificationPreferences(input.userId);
   if (input.eventType === 'new_shared_record' && !preferences.sharedRecordEnabled) return;
   if (input.eventType === 'talk_about_mark' && !preferences.talkAboutEnabled) return;
+  if (!preferences.inAppEnabled && !preferences.systemEnabled) return;
+  if (input.isCurrent && !input.isCurrent()) return;
+
+  const id = `${input.userId}:${input.eventType}:${input.eventId}`;
+  if (delivered.has(id)) return;
+  delivered.add(id);
 
   const copy = genericCopy(input.eventType);
   const notification: ReentryNotification = {
@@ -178,7 +199,6 @@ export async function emitNotification(input: {
     eventType: input.eventType,
     destination: { kind: 'record', recordId: input.recordId },
   };
-  if (input.isCurrent && !input.isCurrent()) return;
   if (preferences.inAppEnabled) listeners.forEach((listener) => listener(notification));
   if (preferences.systemEnabled) systemNotification(notification);
 }

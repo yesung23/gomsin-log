@@ -52,6 +52,8 @@ export type RecordMutationReason =
    * and the user is not the one who can.
    */
   | 'workspace_unconfigured'
+  /** A queued record belongs to a different couple space than the current one. */
+  | 'couple_changed'
   /** The device has crossed the write floor but has not completed protection setup. */
   | 'protection_required'
   /** A deletion is pending for this account. */

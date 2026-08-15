@@ -115,6 +115,11 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
 }): Promise<RuntimeSessionResult> {
   if (!input.supabaseClient) return { status: 'guarded', reason: 'secure_storage_unavailable' };
   const repository = createSupabaseE2eeRepository(input.supabaseClient);
+  // This composition wrapper performs protected-state I/O before delegating to
+  // `installE2eeRuntimeForSession`. Install the same fail-closed guard here,
+  // synchronously, so that first await cannot leave the legacy null environment
+  // available for a plaintext write or outbox replay.
+  setRecordCryptoEnvironment(floorGuard(repository));
   const deviceKeys = getDeviceKeyPort();
   const localKeys = getLocalKeyPort();
   let localState: E2eeLocalState | null = null;

@@ -38,14 +38,28 @@ export function createDeviceProtectionFlow(input: {
   platform: DeviceProtectionPlatform;
   deps: UseCaseDeps;
   localKeys: LocalKeyPort;
+  /** Account/session ownership captured when the Settings ceremony starts. */
+  isCurrentSession?: () => boolean;
 }): DeviceProtectionFlow {
+  const assertCurrentSession = () => {
+    if (input.isCurrentSession && !input.isCurrentSession()) {
+      throw new Error('E_PROTECTION_SESSION_STALE');
+    }
+  };
   return {
-    beginFirstDevice: () => bootstrapFirstDevice(input.deps, {
-      userId: input.userId,
-      platform: input.platform,
-    }),
+    async beginFirstDevice() {
+      assertCurrentSession();
+      const result = await bootstrapFirstDevice(input.deps, {
+        userId: input.userId,
+        platform: input.platform,
+      });
+      assertCurrentSession();
+      return result;
+    },
     async confirmFirstDevice({ recoveryCode, kitAnchor }) {
+      assertCurrentSession();
       await confirmRecoveryKit(input.deps, { userId: input.userId, recoveryCode, kitAnchor });
+      assertCurrentSession();
       const installed = await installE2eeRuntime({
         userId: input.userId,
         repository: input.deps.repository,
@@ -53,7 +67,12 @@ export function createDeviceProtectionFlow(input: {
         deviceKeys: input.deps.deviceKeys,
         localKeys: input.localKeys,
         installationId: E2EE_RUNTIME_INSTALLATION_ID,
+        isCurrentSession: input.isCurrentSession,
       });
+      if (input.isCurrentSession && !input.isCurrentSession()) {
+        installed.close();
+        assertCurrentSession();
+      }
       // This is the first device, before any protected runtime existed, so it
       // cannot be replacing an LCK that sealed queued ciphertext. Later session
       // restoration performs that separate outbox-loss check.
@@ -63,13 +82,24 @@ export function createDeviceProtectionFlow(input: {
         repository: input.deps.repository,
         localState: input.deps.localState,
         environment: installed.environment,
+        isCurrentSession: input.isCurrentSession,
       });
+      assertCurrentSession();
     },
-    recover: ({ recoveryCode, kitAnchor }) => recoverWithKit(input.deps, {
-      userId: input.userId,
-      platform: input.platform,
-      recoveryCode,
-      kitAnchor,
-    }),
+    async recover({ recoveryCode, kitAnchor }) {
+      // Recovery still performs several server-side transitions. These checks
+      // prevent starting from or reporting into another account session, while
+      // the audit keeps the ceremony blocked from production until its server
+      // mutations are actor-bound atomically.
+      assertCurrentSession();
+      const result = await recoverWithKit(input.deps, {
+        userId: input.userId,
+        platform: input.platform,
+        recoveryCode,
+        kitAnchor,
+      });
+      assertCurrentSession();
+      return result;
+    },
   };
 }

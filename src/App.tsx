@@ -130,6 +130,7 @@ const AUTH_STAGE_CODES: Record<AuthSyncStage, string> = {
   records: 'RECORDS',
   events: 'EVENTS',
   trips: 'TRIPS',
+  'talk-about': 'TALK_ABOUT',
   unexpected: 'UNEXPECTED',
   timeout: 'TIMEOUT',
 };

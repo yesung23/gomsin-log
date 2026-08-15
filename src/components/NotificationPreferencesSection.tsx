@@ -39,7 +39,7 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
       <h2 className="text-heading text-foreground">알림과 다시 들어오기</h2>
       <div className="rounded-surface bg-card border border-border p-4 space-y-3">
         <p className="text-caption text-muted-foreground leading-relaxed">
-          알림에는 기록 본문이나 사진이 들어가지 않아요. 눌렀을 때 현재 권한으로 확인할 수 있는 정확한 원본으로 이동합니다.
+          알림에는 기록 본문이나 사진이 들어가지 않아요. 현재는 앱이 열려 있을 때만 알려주며, 누르면 현재 권한으로 확인할 수 있는 정확한 원본으로 이동해요.
         </p>
         <label className="flex items-center justify-between gap-3 min-h-11">
           <span className="flex items-center gap-2 text-label font-semibold text-foreground"><Bell size={16} className="text-coral" />앱 안에서 다시 알려주기</span>
@@ -54,12 +54,12 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
           <input type="checkbox" checked={preferences.talkAboutEnabled} onChange={(event) => update({ talkAboutEnabled: event.target.checked })} className="h-5 w-5 accent-coral" />
         </label>
         {permission === 'unsupported' ? (
-          <p className="text-caption text-muted-foreground">이 기기에서는 백그라운드 알림을 아직 연결할 수 없어요. 앱 안 다시 들어오기 안내는 사용할 수 있어요.</p>
+          <p className="text-caption text-muted-foreground">이 기기에서는 앱이 열려 있을 때 보여주는 안내만 사용할 수 있어요.</p>
         ) : permission === 'denied' ? (
           <p className="text-caption text-muted-foreground">브라우저 알림이 차단되어 있어요. 기기 설정에서 허용하면 사용할 수 있어요.</p>
         ) : (
           <button type="button" onClick={() => void request()} disabled={permission === 'granted'} className="w-full min-h-11 rounded-control border border-border text-label font-semibold text-foreground disabled:opacity-60">
-            {permission === 'granted' ? '기기 알림이 허용되어 있어요' : '기기 알림 허용하기'}
+            {permission === 'granted' ? '앱이 열려 있을 때 브라우저 알림 사용' : '앞에서 보여줄 브라우저 알림 허용'}
           </button>
         )}
       </div>

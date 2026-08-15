@@ -15,7 +15,7 @@ vi.mock('@/lib/supabase', () => ({
 const mockFetchRecordsResultFromDB = vi.hoisted(() => vi.fn());
 const mockFetchEventsResultFromDB = vi.hoisted(() => vi.fn());
 const mockFetchTripsResultFromDB = vi.hoisted(() => vi.fn());
-const mockFetchTalkAboutMarksFromDB = vi.hoisted(() => vi.fn());
+const mockFetchTalkAboutMarksResultFromDB = vi.hoisted(() => vi.fn());
 const mockVisibleRecordsForViewer = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/records', () => ({
@@ -31,7 +31,7 @@ vi.mock('@/lib/trips', () => ({
 }));
 
 vi.mock('@/lib/talkAbout', () => ({
-  fetchTalkAboutMarksFromDB: mockFetchTalkAboutMarksFromDB,
+  fetchTalkAboutMarksResultFromDB: mockFetchTalkAboutMarksResultFromDB,
 }));
 
 vi.mock('@/lib/privacy', () => ({
@@ -105,13 +105,13 @@ describe('fetchFullStateFromDB', () => {
     mockFetchRecordsResultFromDB.mockReset();
     mockFetchEventsResultFromDB.mockReset();
     mockFetchTripsResultFromDB.mockReset();
-    mockFetchTalkAboutMarksFromDB.mockReset();
+    mockFetchTalkAboutMarksResultFromDB.mockReset();
     mockVisibleRecordsForViewer.mockReset();
 
     mockFetchRecordsResultFromDB.mockResolvedValue({ ok: true, records: [] });
     mockFetchEventsResultFromDB.mockResolvedValue({ ok: true, events: [] });
     mockFetchTripsResultFromDB.mockResolvedValue({ ok: true, trips: [] });
-    mockFetchTalkAboutMarksFromDB.mockResolvedValue([]);
+    mockFetchTalkAboutMarksResultFromDB.mockResolvedValue({ ok: true, marks: [] });
     mockVisibleRecordsForViewer.mockReturnValue([]);
   });
 
@@ -415,6 +415,7 @@ describe('fetchFullStateFromDB', () => {
     ['records', () => mockFetchRecordsResultFromDB.mockResolvedValue({ ok: false, records: [], error: new Error('records unavailable') })],
     ['events', () => mockFetchEventsResultFromDB.mockResolvedValue({ ok: false, reason: 'error' })],
     ['trips', () => mockFetchTripsResultFromDB.mockResolvedValue({ ok: false, reason: 'error' })],
+    ['talk-about', () => mockFetchTalkAboutMarksResultFromDB.mockResolvedValue({ ok: false, error: new Error('marks unavailable') })],
   ])('returns unavailable when the %s slice cannot be fetched', async (_slice, failSlice) => {
     const coupleId = 'couple-123';
     const profileChain = setupProfileMock(profileRow);

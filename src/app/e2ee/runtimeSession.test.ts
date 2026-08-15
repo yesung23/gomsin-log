@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { decideRecordWrite } from '@/app/records/contentCrypto';
+import * as keystore from '@/crypto/keystore';
 import { getRecordCryptoEnvironment } from '@/lib/records';
+import * as protectedLocalState from './protectedLocalState';
 import {
   clearE2eeRuntime,
   markE2eeCoupleAuthorityUnlinked,
   registerE2eeCoupleAuthorityUnlink,
 } from './runtimeLifecycle';
-import { installE2eeRuntimeForSession } from './runtimeSession';
+import {
+  installE2eeRuntimeForAuthenticatedSession,
+  installE2eeRuntimeForSession,
+} from './runtimeSession';
 import { bootstrapFirstDevice, confirmRecoveryKit } from './useCases';
 import { createMemoryAccount, createMemoryServer } from './testing/memoryEnvironment';
 
@@ -35,6 +41,35 @@ describe('authenticated E2EE runtime session', () => {
       ownerUserId: account.userId,
       coupleId: crypto.randomUUID(),
     })).resolves.toEqual({ mode: 'refused', reason: 'no_active_epoch' });
+  });
+
+  it('installs the authenticated-wrapper guard while protected-state creation is still pending', async () => {
+    const localKeys = {
+      load: vi.fn(),
+      loadOrCreate: vi.fn(),
+    };
+    vi.spyOn(keystore, 'getLocalKeyPort').mockReturnValue(localKeys);
+    vi.spyOn(keystore, 'getDeviceKeyPort').mockReturnValue(null);
+    let resolveProtectedState!: (value: null) => void;
+    const pendingProtectedState = new Promise<null>((resolve) => {
+      resolveProtectedState = resolve;
+    });
+    vi.spyOn(protectedLocalState, 'createProtectedE2eeLocalState')
+      .mockReturnValue(pendingProtectedState);
+
+    const installation = installE2eeRuntimeForAuthenticatedSession({
+      userId: crypto.randomUUID(),
+      supabaseClient: {} as SupabaseClient,
+    });
+
+    const guard = getRecordCryptoEnvironment();
+    expect(guard).not.toBeNull();
+    await expect(guard!.scopeKeyFor('personal', crypto.randomUUID(), 1n)).resolves.toBeNull();
+    resolveProtectedState(null);
+    await expect(installation).resolves.toEqual({
+      status: 'guarded',
+      reason: 'secure_storage_unavailable',
+    });
   });
 
   it('replaces the guard with the verified runtime once the local bootstrap is complete', async () => {

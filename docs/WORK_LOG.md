@@ -91,6 +91,38 @@
 
 ---
 
+### 2026-08-16 · Security Stack Integration Audit & Repair V1
+
+Queue 1–4 통합 HEAD `e97b951`을 기준으로 실제 runtime·outbox·RLS/RPC·migration
+chain·알림·계정/커플 lifecycle을 감사했다. Production/remote Supabase에는
+조회·배포·mutation을 실행하지 않았다.
+
+- migration 045로 write-floor 활성화를 소유 ACTIVE 기기의 인증서와 해당 ACTIVE
+  scope epoch의 self-notarized envelope에 결속했다. PENDING·recovery·provisioning·
+  failed·revoked 기기는 personal/couple 모두 거부한다.
+- 인증 runtime의 첫 await 전 fail-closed guard, 보호 ciphertext가 있을 때 대체 LCK 생성
+  금지, floor/couple-key를 포함한 정직한 보호 상태, account-switch session predicate,
+  provider unmount teardown을 추가했다.
+- outbox를 원래 couple id에 고정해 unlink 후 새 파트너에게 예전 기록이 전송되는
+  경로를 payload open 전과 첫 mutation 전 두 곳에서 차단했다.
+- talk-about read 실패를 빈 성공으로 변환하지 않고 기존 목록을 유지하며, full
+  hydration에서는 `talk-about` unavailable stage로 보고한다. 알림 dedupe는 immutable event
+  id를 사용하고 preference 통과 후에만 소비한다. 백그라운드/native push가 없는
+  현재 범위를 Settings에 `앱이 열려 있을 때`로 표시했다.
+- 탈퇴 복구 marker는 logout 후에도 보존하되, signed-out 사용자를 가두던 in-memory
+  recovery route state는 해제했다. 동일 계정 재로그인 시 marker로 다시 복구한다.
+- P5 actor harness를 `031→032→034→035→036→037→038→039→040→043→044→045`
+  fresh chain으로 교정하고, 예전 032만 훼손하던 mutation test를 최종 040 정의에
+  결속했다.
+- 검증: full Vitest 157 files / 2,294 tests PASS, P0 76·Phase 0 active fresh-chain
+  125·P5 integrated 93·write-floor 33 assertions PASS, rollback(031–036 pre-activation contract) PASS,
+  native static 85 tests PASS, typecheck/lint/build/diff-check PASS. 실기기 recovery/cold-start,
+  remote catalog/staging/production은 **UNVERIFIED / NOT APPLIED**.
+
+P6는 여전히 차단된다. production couple pairing/floor activation 경로, LCK-loss 후 kit-verified
+protected-state replacement, recovery 중 account-switch와 server mutation의 원자적 결속, 실기기
+native/CloudKit gate가 남아 있다.
+
 ### 2026-08-16 · Notification & Re-entry V1 — privacy-safe local delivery
 
 `codex/device-protection-recovery-v1`의 Queue 1 완료 커밋 `67b8cb8`을 기준으로
@@ -148,10 +180,10 @@ Queue 1–3 완료 HEAD `fa68c72`에서 P6를 구현하지 않고 read-only read
 |---|---|---|
 | Core Privacy Foundation | `35da04c` integration 위에 Queue 1–3이 순차적으로 쌓였고 local P0/P5 actor harness가 통과했다 | DEVELOPMENT EVIDENCE ONLY |
 | DeviceKeys / LCK | first-party Capacitor plugin의 iOS Podfile·Android Gradle wiring과 static tests는 존재한다. 실제 iPhone에서 setup/restart/logout/recovery/locked-state를 수행하지 않았다 | UNVERIFIED / MANUAL GATE |
-| Active migration chain | local harness는 031→032→034→035→036→039→044를 throwaway PostgreSQL에서 검증한다. migration ledger는 E2EE chain을 신규/어디에도 미적용으로 둔다 | REMOTE UNVERIFIED; NOT APPLIED |
+| Active migration chain | 후속 통합 감사에서 local harness를 031→032→034→035→036→037→038→039→040→043→044→045 fresh chain으로 교정했다. migration ledger는 E2EE chain을 신규/어디에도 미적용으로 둔다 | REMOTE UNVERIFIED; NOT APPLIED |
 | CloudKit prerequisite | `ios/App/App/App.entitlements`에 iCloud container/ubiquity entitlement가 없고, native guide도 iCloud container가 없다고 명시한다. CloudKit/CKShare/CKAsset 구현·container identifier·test harness가 없다 | BLOCKED |
 | Current media path | `src/lib/records.ts`가 `File`을 private `couple-media` Storage에 직접 업로드하고 signed URL로 읽는다. media ciphertext/envelope/CloudKit ownership 경계가 없다 | P6 NOT READY |
-| Future migration number | migration README가 042를 frozen P6 draft 충돌로 예약하고, 재개 시 045 이상 새 forward migration을 요구한다 | RECORDED; DO NOT USE 042 |
+| Future migration number | 045는 write-floor 활성화 보안 수정에 사용했다. frozen 042를 재발급하지 않고 P6 재개 시 046 이상 새 forward migration을 사용한다 | RECORDED; DO NOT USE 042 |
 
 `npm run verify:native`는 85 static/native contract tests PASS였지만, 이것은 실제
 서명·기기·CloudKit entitlement 검증이 아니다. 따라서 P6A 구현, media migration,

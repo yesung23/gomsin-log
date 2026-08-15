@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real PostgreSQL proof for migration 040.
+ * Real PostgreSQL proof for migrations 040 and 045.
  *
  * Every assertion is driven as a real authenticated/anon actor. The mutation
  * probes remove the exact-scope branch from the forward migration and must then
@@ -22,6 +22,7 @@ const FORWARD = [
   '036_e2ee_device_status_privilege.sql',
   '039_daily_records_content_envelope.sql',
   '040_e2ee_write_floor_scope_semantics.sql',
+  '045_harden_e2ee_write_floor_activation.sql',
 ];
 const PG_ENV = { ...process.env, LC_ALL: 'C', LANG: 'C', LC_MESSAGES: 'C' };
 const keep = process.argv.includes('--keep');
@@ -92,6 +93,10 @@ const DEVICE_A = 'aaaaaaaa-1111-4000-8000-00000000000a';
 const DEVICE_B = 'bbbbbbbb-1111-4000-8000-00000000000b';
 const DEVICE_C = 'cccccccc-1111-4000-8000-00000000000c';
 const DEVICE_D = 'dddddddd-1111-4000-8000-00000000000d';
+const CERT_A = 'aaaaaaaa-2222-4000-8000-00000000000a';
+const CERT_B = 'bbbbbbbb-2222-4000-8000-00000000000b';
+const CERT_C = 'cccccccc-2222-4000-8000-00000000000c';
+const CERT_D = 'dddddddd-2222-4000-8000-00000000000d';
 let id = 0;
 const nextId = () => `00000000-0400-4000-8000-${(++id).toString(16).padStart(12, '0')}`;
 const bytes = (n, hex) => `decode(repeat('${hex}', ${n}), 'hex')`;
@@ -149,6 +154,20 @@ function seed(name = DB) {
              ('${DEVICE_B}','${B}',${bytes(91,'21')},${bytes(91,'22')},'android','software_keystore','ACTIVE'),
              ('${DEVICE_C}','${C}',${bytes(91,'31')},${bytes(91,'32')},'ios','software_keystore','ACTIVE'),
              ('${DEVICE_D}','${D}',${bytes(91,'41')},${bytes(91,'42')},'ios','software_keystore','ACTIVE');
+    INSERT INTO public.recovery_public_anchors
+      (id,user_id,recovery_identity_id,recovery_version,rec_sig_spki,rec_sig_fp,recovery_bundle_fp)
+      VALUES
+        ('aaaaaaaa-3333-4000-8000-00000000000a','${A}','aaaaaaaa-4444-4000-8000-00000000000a',1,${bytes(91,'51')},${bytes(32,'52')},${bytes(32,'53')}),
+        ('bbbbbbbb-3333-4000-8000-00000000000b','${B}','bbbbbbbb-4444-4000-8000-00000000000b',1,${bytes(91,'61')},${bytes(32,'62')},${bytes(32,'63')}),
+        ('cccccccc-3333-4000-8000-00000000000c','${C}','cccccccc-4444-4000-8000-00000000000c',1,${bytes(91,'71')},${bytes(32,'72')},${bytes(32,'73')}),
+        ('dddddddd-3333-4000-8000-00000000000d','${D}','dddddddd-4444-4000-8000-00000000000d',1,${bytes(91,'81')},${bytes(32,'82')},${bytes(32,'83')});
+    INSERT INTO public.device_certificates
+      (id,user_id,subject_device_id,recovery_public_anchor_id,recovery_identity_id,recovery_version,certificate,certificate_fp,subject_sig_spki,subject_kem_spki)
+      VALUES
+        ('${CERT_A}','${A}','${DEVICE_A}','aaaaaaaa-3333-4000-8000-00000000000a','aaaaaaaa-4444-4000-8000-00000000000a',1,${bytes(445,'91')},${bytes(32,'92')},${bytes(91,'11')},${bytes(91,'12')}),
+        ('${CERT_B}','${B}','${DEVICE_B}','bbbbbbbb-3333-4000-8000-00000000000b','bbbbbbbb-4444-4000-8000-00000000000b',1,${bytes(445,'93')},${bytes(32,'94')},${bytes(91,'21')},${bytes(91,'22')}),
+        ('${CERT_C}','${C}','${DEVICE_C}','cccccccc-3333-4000-8000-00000000000c','cccccccc-4444-4000-8000-00000000000c',1,${bytes(445,'95')},${bytes(32,'96')},${bytes(91,'31')},${bytes(91,'32')}),
+        ('${CERT_D}','${D}','${DEVICE_D}','dddddddd-3333-4000-8000-00000000000d','dddddddd-4444-4000-8000-00000000000d',1,${bytes(445,'97')},${bytes(32,'98')},${bytes(91,'41')},${bytes(91,'42')});
   `, 'seed actors', name);
   mustSql(`
     GRANT USAGE ON SCHEMA public, auth TO authenticated, anon;
@@ -159,8 +178,15 @@ function seed(name = DB) {
   `, 'harness grants', name);
 }
 function epoch(domain, scopeId, ownerUser, ownerCouple, state = 'ACTIVE', e = 1, name = DB) {
-  mustSql(`INSERT INTO public.scope_keys (domain,scope_id,owner_user_id,owner_couple_id,key_epoch,state)
-    VALUES ('${domain}','${scopeId}',${ownerUser ? `'${ownerUser}'` : 'NULL'},${ownerCouple ? `'${ownerCouple}'` : 'NULL'},${e},'${state}')`, 'seed epoch', name);
+  return mustSql(`INSERT INTO public.scope_keys (domain,scope_id,owner_user_id,owner_couple_id,key_epoch,state)
+    VALUES ('${domain}','${scopeId}',${ownerUser ? `'${ownerUser}'` : 'NULL'},${ownerCouple ? `'${ownerCouple}'` : 'NULL'},${e},'${state}') RETURNING id`, 'seed epoch', name);
+}
+function provision(scopeKeyId, deviceId, certificateId, name = DB, options = {}) {
+  const senderDeviceId = options.senderDeviceId ?? deviceId;
+  const selfNotarized = options.selfNotarized ?? true;
+  mustSql(`INSERT INTO public.key_envelopes
+    (scope_key_id,recipient_kind,recipient_device_id,sender_device_id,sender_certificate_id,envelope,self_notarized)
+    VALUES ('${scopeKeyId}','device','${deviceId}','${senderDeviceId}','${certificateId}',${bytes(360,'aa')},${selfNotarized})`, 'seed provisioned envelope', name);
 }
 function floor(kind, scopeId, name = DB) {
   mustSql(`INSERT INTO public.crypto_write_floor (scope_kind,scope_id,min_cipher_format,activated_at) VALUES ('${kind}','${scopeId}',1,now())`, 'seed floor', name);
@@ -195,7 +221,8 @@ try {
   // Personal activation is PMK-only and identity-bound.
   const activationDb = 'floor_activation';
   prepare(activationDb);
-  epoch('personal', A, A, null, 'ACTIVE', 1, activationDb);
+  const personalKey = epoch('personal', A, A, null, 'ACTIVE', 1, activationDb);
+  provision(personalKey, DEVICE_A, CERT_A, activationDb);
   const success = activate('user', A, DEVICE_A, A, activationDb);
   check(success.ok, 'personal activation: ACTIVE PMK succeeds');
   createDatabase('floor_personal_cases'); apply('floor_personal_cases'); seed('floor_personal_cases');
@@ -208,12 +235,52 @@ try {
   refused(asAnon(`SELECT public.activate_e2ee_write_floor('user','${A}','${DEVICE_A}')`, cases), 'Not authenticated|permission denied', 'personal activation: anon denied');
 
   // Couple activation requires an active member and matching owner_couple_id.
-  epoch('couple', AB, null, AB, 'ACTIVE', 1, activationDb);
+  const coupleKey = epoch('couple', AB, null, AB, 'ACTIVE', 1, activationDb);
+  provision(coupleKey, DEVICE_A, CERT_A, activationDb);
   const coupleSuccess = activate('couple', AB, DEVICE_A, A, activationDb);
   check(coupleSuccess.ok, 'couple activation: active member succeeds');
   refused(activate('couple', AB, DEVICE_C, C, activationDb), 'E2EE_FLOOR_SCOPE_FORBIDDEN', 'couple activation: unrelated user denied');
   refused(activate('couple', AD, DEVICE_D, D, activationDb), 'E2EE_FLOOR_SCOPE_FORBIDDEN', 'couple activation: former partner denied');
   refused(activate('couple', AC, DEVICE_A, A, activationDb), 'E2EE_FLOOR_SCOPE_FORBIDDEN|E2EE_FLOOR_NO_ACTIVE_COUPLE_EPOCH', 'couple activation: wrong couple denied');
+
+  // Operational status is never enough. Every incomplete or revoked device
+  // state must be rejected for both irreversible floor scopes even when the
+  // certificate and envelope rows exist.
+  for (const status of ['PENDING', 'RECOVERY_AUTHENTICATED', 'PROVISIONING', 'PROVISIONING_FAILED', 'REVOKED']) {
+    mustSql(`UPDATE public.devices SET status='${status}' WHERE id='${DEVICE_A}'`, `set ${status}`, activationDb);
+    refused(activate('user', A, DEVICE_A, A, activationDb), 'E2EE_DEVICE_SCOPE_FORBIDDEN', `personal activation: ${status} device denied`);
+    refused(activate('couple', AB, DEVICE_A, A, activationDb), 'E2EE_DEVICE_SCOPE_FORBIDDEN', `couple activation: ${status} device denied`);
+  }
+  mustSql(`UPDATE public.devices SET status='ACTIVE' WHERE id='${DEVICE_A}'`, 'restore ACTIVE', activationDb);
+
+  createDatabase('floor_missing_proof'); apply('floor_missing_proof'); seed('floor_missing_proof');
+  const missingProofDb = 'floor_missing_proof';
+  epoch('personal', A, A, null, 'ACTIVE', 1, missingProofDb);
+  refused(activate('user', A, DEVICE_A, A, missingProofDb), 'E2EE_FLOOR_DEVICE_NOT_PROVISIONED', 'personal activation: ACTIVE device without scope envelope denied');
+
+  createDatabase('floor_not_notarized'); apply('floor_not_notarized'); seed('floor_not_notarized');
+  const notNotarizedDb = 'floor_not_notarized';
+  const notNotarizedKey = epoch('personal', A, A, null, 'ACTIVE', 1, notNotarizedDb);
+  provision(notNotarizedKey, DEVICE_A, CERT_A, notNotarizedDb, { selfNotarized: false });
+  refused(activate('user', A, DEVICE_A, A, notNotarizedDb), 'E2EE_FLOOR_DEVICE_NOT_PROVISIONED', 'personal activation: non-self-notarized envelope denied');
+
+  createDatabase('floor_wrong_certificate'); apply('floor_wrong_certificate'); seed('floor_wrong_certificate');
+  const wrongCertificateDb = 'floor_wrong_certificate';
+  const wrongCertificateKey = epoch('personal', A, A, null, 'ACTIVE', 1, wrongCertificateDb);
+  provision(wrongCertificateKey, DEVICE_A, CERT_B, wrongCertificateDb);
+  refused(activate('user', A, DEVICE_A, A, wrongCertificateDb), 'E2EE_FLOOR_DEVICE_NOT_PROVISIONED', 'personal activation: another device certificate denied');
+
+  createDatabase('floor_wrong_sender'); apply('floor_wrong_sender'); seed('floor_wrong_sender');
+  const wrongSenderDb = 'floor_wrong_sender';
+  const wrongSenderKey = epoch('personal', A, A, null, 'ACTIVE', 1, wrongSenderDb);
+  provision(wrongSenderKey, DEVICE_A, CERT_A, wrongSenderDb, { senderDeviceId: DEVICE_B });
+  refused(activate('user', A, DEVICE_A, A, wrongSenderDb), 'E2EE_FLOOR_DEVICE_NOT_PROVISIONED', 'personal activation: mismatched envelope sender device denied');
+
+  createDatabase('floor_wrong_recipient'); apply('floor_wrong_recipient'); seed('floor_wrong_recipient');
+  const wrongRecipientDb = 'floor_wrong_recipient';
+  const wrongRecipientKey = epoch('couple', AB, null, AB, 'ACTIVE', 1, wrongRecipientDb);
+  provision(wrongRecipientKey, DEVICE_B, CERT_B, wrongRecipientDb);
+  refused(activate('couple', AB, DEVICE_A, A, wrongRecipientDb), 'E2EE_FLOOR_DEVICE_NOT_PROVISIONED', 'couple activation: another member envelope does not cover this device');
 
   // Mutation proof: forcing the shared branch through the user scope makes an
   // allowed shared plaintext write fail under a user-only floor.

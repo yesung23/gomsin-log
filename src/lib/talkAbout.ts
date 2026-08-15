@@ -39,9 +39,17 @@ export function isTalkAboutMarkActive(mark: TalkAboutMark, now: Date = new Date(
   return !mark.isCompleted;
 }
 
-export async function fetchTalkAboutMarksFromDB(coupleId: string): Promise<TalkAboutMark[]> {
-  if (!isSupabaseConfigured || !supabase) return [];
-  if (!coupleId) return [];
+export type TalkAboutFetchResult =
+  | { ok: true; marks: TalkAboutMark[] }
+  | { ok: false; error: unknown };
+
+export async function fetchTalkAboutMarksResultFromDB(
+  coupleId: string,
+): Promise<TalkAboutFetchResult> {
+  if (!coupleId) return { ok: true, marks: [] };
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: new Error('E_TALK_ABOUT_UNAVAILABLE') };
+  }
 
   const { data, error } = await supabase
     .from('talk_about_marks')
@@ -52,9 +60,9 @@ export async function fetchTalkAboutMarksFromDB(coupleId: string): Promise<TalkA
 
   if (error) {
     console.error('Failed to fetch talk-about marks:', error);
-    return [];
+    return { ok: false, error };
   }
-  return (data || []).map(mapRow);
+  return { ok: true, marks: (data || []).map(mapRow) };
 }
 
 export interface TalkAboutWriteResult {

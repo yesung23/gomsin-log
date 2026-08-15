@@ -44,7 +44,7 @@ import {
 } from '@/lib/events';
 import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
 import {
-  fetchTalkAboutMarksFromDB,
+  fetchTalkAboutMarksResultFromDB,
   markTalkAboutInDB,
   unmarkTalkAboutInDB,
   resolveTalkAboutInDB,
@@ -70,7 +70,7 @@ import {
   markE2eeCoupleAuthorityUnlinked,
 } from '@/app/e2ee/runtimeLifecycle';
 import { installE2eeRuntimeForAuthenticatedSession } from '@/app/e2ee/runtimeSession';
-import { emitNotification } from '@/lib/notifications';
+import { emitNotification, unseenPartnerTalkAboutMarks } from '@/lib/notifications';
 import {
   saveRecordToDB,
   deleteRecordFromDB,
@@ -299,6 +299,8 @@ function recordFailureMessage(reason: RecordMutationReason): string {
       // alternatives on this path were a transient-retry message and, worse, a
       // connection diagnosis for a device that was online.
       return '서버 설정이 아직 끝나지 않아 커플 공간을 확인할 수 없어요. 관리자에게 문의해 주세요.';
+    case 'couple_changed':
+      return '기록을 남겨 둔 커플 공간과 현재 공간이 달라 자동으로 보내지 않았어요.';
     case 'protection_required':
       return '이 기기에서 기록 보호 설정이 필요해요. 설정에서 먼저 준비해 주세요.';
     case 'deletion_pending':
@@ -458,6 +460,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * realtime channel constantly.
    */
   const flushOutboxRef = useRef<(() => Promise<unknown>) | null>(null);
+
+  // Module-level crypto capabilities must not outlive the provider instance
+  // that installed them (including test/app-shell unmount and remount cycles).
+  useEffect(() => () => clearE2eeRuntime(), []);
 
   const replaceStateImmediately = useCallback((nextState: AppState) => {
     stateRef.current = nextState;
@@ -1134,6 +1140,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (event === 'SIGNED_OUT') {
           clearE2eeRuntime();
           hydratedUserIdRef.current = null;
+          // Keep the durable per-account recovery marker, but release the
+          // in-memory route gate so a signed-out user can reach authentication.
+          setAccountDeletionRecovery(null);
+          applyDeletionStatus({ kind: 'unknown' });
           // Same reason as the identity-change reset above: a signed-out device
           // holds no answer about any account's couple space.
           revokedCoupleRef.current = null;
@@ -1343,16 +1353,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       // Recovery is never snapshot-based: every shared slice must be read again
       // through the caller's current RLS policy after membership is confirmed.
-      const [recordsResult, eventsResult, tripsResult, talkAboutMarks] = await Promise.all([
+      const [recordsResult, eventsResult, tripsResult, talkAboutResult] = await Promise.all([
         fetchRecordsResultFromDB(workspace.coupleId),
         fetchEventsResultFromDB(workspace.coupleId),
         fetchTripsResultFromDB(workspace.coupleId),
-        // Metadata only, and deliberately not part of the ok/quarantine gate
-        // below: a mark list that fails to load costs the user a section of
-        // the home screen, whereas treating it as authoritative would
-        // quarantine the whole shared workspace over a coordination detail.
-        // It returns [] on failure, which renders as "nothing to talk about".
-        fetchTalkAboutMarksFromDB(workspace.coupleId),
+        fetchTalkAboutMarksResultFromDB(workspace.coupleId),
       ]);
       if (!isLatestCurrentWorkspace()) return false;
       if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
@@ -1376,7 +1381,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         records,
         events: eventsResult.events,
         trips: reconcileParentTrips(tripsResult.trips),
-        talkAboutMarks,
+        // A coordination read failure is not evidence that every topic was
+        // removed. Preserve the last authorized list and let the next
+        // invalidation/manual refresh retry it.
+        talkAboutMarks: talkAboutResult.ok ? talkAboutResult.marks : current.talkAboutMarks,
       };
       quarantinedWorkspaceRef.current = null;
       // Shared data is authoritative again. Whether it will keep itself up to
@@ -1475,6 +1483,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 void emitNotification({
                   userId: authUserId,
                   eventType: 'new_shared_record',
+                  eventId: record.id,
                   recordId: record.id,
                   isCurrent: isCurrentActiveCouple,
                 });
@@ -1500,19 +1509,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         if (slice === 'talk-about') {
-          const marks = await fetchTalkAboutMarksFromDB(coupleId);
+          const result = await fetchTalkAboutMarksResultFromDB(coupleId);
           if (!isCurrentRefresh()) return;
+          if (!result.ok) return;
+          const marks = result.marks;
           if (notificationsArmed) {
-            const previousMarks = new Set(
-              stateRef.current.talkAboutMarks.map((mark) => `${mark.recordId}:${mark.actorUserId}`),
-            );
-            marks
-              .filter((mark) => mark.actorUserId !== authUserId
-                && !previousMarks.has(`${mark.recordId}:${mark.actorUserId}`))
+            unseenPartnerTalkAboutMarks(stateRef.current.talkAboutMarks, marks, authUserId)
               .forEach((mark) => {
                 void emitNotification({
                   userId: authUserId,
                   eventType: 'talk_about_mark',
+                  eventId: mark.id,
                   recordId: mark.recordId,
                   isCurrent: isCurrentActiveCouple,
                 });
@@ -2001,7 +2008,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
      * an endless cycle -- the outbox decides what happens to a failed entry, and it
      * has the attempt count to do that with.
      */
-    options?: { recordId?: string; allowQueue?: boolean },
+    options?: { recordId?: string; allowQueue?: boolean; expectedCoupleId?: string },
   ): Promise<{
     ok: boolean;
     failedFiles: string[];
@@ -2036,6 +2043,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         error: workspace.error,
       };
     }
+    if (options?.expectedCoupleId && workspace.coupleId !== options.expectedCoupleId) {
+      return {
+        ok: false,
+        failedFiles: files.map((file) => file.name),
+        error: recordFailureMessage('couple_changed'),
+        reason: 'couple_changed',
+      };
+    }
     const newRecord: DailyRecord = { ...baseRecord, userId: workspace.userId };
     const staleResult = {
       ok: false,
@@ -2046,6 +2061,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Aborted at phase zero, so there is no orphaned `daily_records` row and no
     // orphaned storage object.
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return staleResult;
+    // The deletion pre-flight awaited the server. Pin replay to the queued
+    // couple again immediately before the first mutation so an unlink/re-pair
+    // during that await cannot redirect the old record into the new workspace.
+    if (options?.expectedCoupleId
+      && (workspace.coupleId !== options.expectedCoupleId || !isCurrentLinkedCouple(workspace))) {
+      return {
+        ok: false,
+        failedFiles: files.map((file) => file.name),
+        error: recordFailureMessage('couple_changed'),
+        reason: 'couple_changed',
+      };
+    }
 
     /**
      * Hand a refused write to the outbox instead of losing it.
@@ -2287,6 +2314,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // into another's session.
         if (!isCurrentIdentity(identity)) break;
 
+        // Couple identity is part of the queue's authority boundary. Check it
+        // before opening sealed content so an old-couple entry remains opaque
+        // and blocked after unlink/re-pair instead of being sent to the new one.
+        const currentWorkspace = captureLinkedCouple();
+        if (!currentWorkspace || entry.coupleId !== currentWorkspace.coupleId) {
+          const disposition = await applyDeliveryOutcome(persistence, entry, {
+            ok: false,
+            reason: 'couple_changed',
+            message: recordFailureMessage('couple_changed'),
+          });
+          if (disposition === 'delivered') result.delivered += 1;
+          else if (disposition === 'requeued') result.requeued += 1;
+          else result.blocked += 1;
+          continue;
+        }
+
         /**
          * Open the queued payload. Entries are sealed at rest under the device's
          * local cache key (P4 decision 5), so this is where the plaintext comes
@@ -2316,6 +2359,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const attempt = await addRecordWithMedia(queuedRecord, entry.files, {
           recordId: entry.id,
           allowQueue: false,
+          expectedCoupleId: entry.coupleId,
         });
         const disposition = await applyDeliveryOutcome(
           persistence,
@@ -2933,6 +2977,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Unsent composer text is held in memory, so it is not covered by removing the
     // storage keys above. It must not outlive the session that produced it.
     clearAllComposerDrafts();
+    // The durable deletion marker intentionally survives logout. Only this
+    // process-local route state is cleared; the same account restores it from
+    // the marker on its next authenticated hydration.
+    setAccountDeletionRecovery(null);
+    applyDeletionStatus({ kind: 'unknown' });
     /*
      * Avatar photos live under their own `gomsinlog.avatar.*` keys, deliberately
      * outside `STORE_KEY`, so the two `removeItem` calls above do not reach them.
@@ -3064,13 +3113,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ? { coupleId, userId, generation: sessionGenerationRef.current }
       : null;
     if (!workspace || (expected && !workspaceRefMatches(workspace, expected))) return;
-    const marks = await fetchTalkAboutMarksFromDB(workspace.coupleId);
+    const result = await fetchTalkAboutMarksResultFromDB(workspace.coupleId);
     if (!workspaceRefMatches({
       coupleId: stateRef.current.profile.couple.coupleId || '',
       userId: stateRef.current.authenticatedUser?.id || stateRef.current.profile.id || '',
       generation: sessionGenerationRef.current,
     }, workspace)) return;
-    updateStateImmediately((prev) => ({ ...prev, talkAboutMarks: marks }));
+    if (!result.ok) return;
+    updateStateImmediately((prev) => ({ ...prev, talkAboutMarks: result.marks }));
   };
 
   const markTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {

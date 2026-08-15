@@ -110,6 +110,7 @@ vi.mock('@/lib/supabase', () => ({
   // alter the couple state these deletion scenarios set up, and is NOT logged:
   // it is not a mutation and the call-order assertions are about mutations.
   fetchMyCoupleState: vi.fn(async () => ({ ok: false, reason: 'server' })),
+  fetchAuthProviderAvailability: vi.fn(async () => ({ google: true, kakao: false })),
 }));
 
 vi.mock('@/lib/sync', () => ({
@@ -169,6 +170,7 @@ vi.mock('@/lib/trips', () => ({
 // Kept light: App imports the home page eagerly, and asserting on this marker is
 // how "a normal route rendered" is detected.
 vi.mock('@/pages/HomePage', () => ({ HomePage: () => <div>HOME-PAGE-RENDERED</div> }));
+vi.mock('@/pages/OnboardingPage', () => ({ OnboardingPage: () => <div>ONBOARDING-PAGE-RENDERED</div> }));
 vi.mock('@/pages/AuthCallbackPage', () => ({
   AuthCallbackPage: () => <div>AUTH-CALLBACK-RENDERED</div>,
 }));
@@ -332,6 +334,8 @@ describe('Deletion-Recovery Suite', () => {
     // Logging out does not cancel an irreversible deletion.
     expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
     expect(authRepositorySignOut).toHaveBeenCalled();
+    expect(screen.getByTestId('recovery')).toHaveTextContent('none');
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
     expect(screen.queryByText(/탈퇴가 완료되었/)).toBeNull();
   });
 

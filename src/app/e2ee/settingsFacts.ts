@@ -9,6 +9,17 @@ import {
   type DeviceProtectionSnapshot,
 } from './deviceProtectionStatus';
 
+/** Pending invitation spaces do not yet have a shared crypto scope. */
+export function activeCoupleScopeId(input: {
+  coupleId?: string;
+  connected: boolean;
+  status: string;
+}): string | null {
+  return input.connected && input.status === 'active' && input.coupleId
+    ? input.coupleId
+    : null;
+}
+
 /** Composition boundary for Settings; the component consumes facts only. */
 export async function loadSettingsBootstrapFacts(input: {
   userId: string;

@@ -1,5 +1,10 @@
 node_modules
 dist
+.DS_Store
+/.codex/
+/output/
+/tmp/
+/supabase/.temp/
 .codex-runtime/
 *.local
 .env

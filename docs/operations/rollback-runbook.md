@@ -1,4 +1,4 @@
-# Rollback Runbook (005~007 Migrations)
+# Rollback Runbook
 
 만약 005~007 마이그레이션을 데이터베이스에 배포(push)한 이후 심각한 서비스 장애가 발생했다면, 보안 수준을 치명적으로 낮추거나 사용자 데이터를 파괴(삭제)하지 않는 선에서 롤백(또는 Forward-fix)을 수행해야 합니다.
 
@@ -41,3 +41,24 @@ CREATE OR REPLACE FUNCTION public.get_my_active_couple_id() RETURNS UUID AS $$ D
 
 -- (나머지 001 수준 정책 복구)
 ```
+
+## 4. E2EE write floor / Conversation Bridge / unlink (040·043·044·045)
+
+이 migration들은 단순한 예전 함수 복원으로 rollback하지 않고 **forward-fix**로
+복구한다. 특히 write floor가 한 번 활성화된 scope는 평문 쓰기로 낮출 수 없다.
+
+- `040`/`045`: `crypto_write_floor` 행을 삭제하거나 `min_cipher_format`을 낮추지 않는다.
+  활성화 RPC의 결함은 더 큰 번호의 `CREATE OR REPLACE FUNCTION`으로 고친다.
+  한 scope에 floor가 활성화된 후에는 평문 `daily_records` 쓰기를 하는 구버전 클라이언트를
+  재배포하지 않는다. 복구 버전도 현재 GLE1 봉투·exact-scope epoch·revision CAS를
+  유지해야 하며, compatibility 검증 전에 writer를 낮추지 않는다.
+- `043`: 원본 FK/policy만 부분 복원하면 완료 상태와 private-conversion trigger가 어괋나
+  stale reference·privacy 규칙이 깨진다. 현재 PRODUCT 계약을 보존하는 forward migration으로만 수정한다.
+- `044`: 이 문서 §3의 legacy `disconnect_couple()` 복원 SQL을 **044 적용 후에는 실행하지
+  않는다.** 그 SQL은 상대 멤버십과 `crypto_pairings = UNLINKED`를 누락해 권한·정합성을
+  후퇴시킨다.
+- 복구 순서: 원격 catalog/read-only 확인 → 영향 scope 식별 → 스테이징 fresh-chain
+  actor 검증 → 새 forward migration → 암호문 기록·private 전환·unlink 경로 재검증.
+
+이 절은 rollback SQL이 아니라 금지조건과 안전한 복구 절차다. 원격 적용 여부가
+`UNVERIFIED`이면 먼저 read-only catalog 조회로 사실을 확정한다.

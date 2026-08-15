@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Executable proof for the Phase 0 baseline: migrations 028, 029 and 030.
+ * Executable proof for the real fresh active chain through migration 045.
  *
  * The string-level tests next to these migrations prove the SQL text says what
  * we think it says. They cannot prove the policies DENY anything, because a
@@ -10,7 +10,8 @@
  * refused by a real database.
  *
  * So this harness starts a throwaway PostgreSQL 17 cluster, applies the actual
- * migration chain 001..030, and drives the actual policies as actual RLS
+ * active migration chain 001..040 + 043..045 (041/042 are frozen), and drives
+ * the actual policies as actual RLS
  * actors, in the same shape as `scripts/e2ee/p0-harness.mjs`:
  *
  *   A   owner, member of couple 1
@@ -96,7 +97,11 @@ const ORDER = [
   '036_e2ee_device_status_privilege.sql',
   '037_harden_e2ee_account_deletion_survivor_detection.sql',
   '038_bilateral_talk_about_marks.sql',
+  '039_daily_records_content_envelope.sql',
+  '040_e2ee_write_floor_scope_semantics.sql',
   '043_conversation_bridge_completion.sql',
+  '044_unlink_crypto_pairing_authority.sql',
+  '045_harden_e2ee_write_floor_activation.sql',
 ];
 
 /**
@@ -304,7 +309,7 @@ function checkVisible(userId, predicate, expected, message) {
 // Cluster
 // ---------------------------------------------------------------------------
 
-console.log('phase 0 baseline harness — migrations 001..030 on a throwaway PostgreSQL 17\n');
+console.log('active fresh-chain harness — migrations 001..040 + 043..045 on throwaway PostgreSQL 17\n');
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,

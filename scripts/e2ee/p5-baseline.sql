@@ -129,3 +129,44 @@ GRANT USAGE ON SCHEMA auth TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_my_active_couple_id() TO anon, authenticated;
 GRANT SELECT ON public.couple_members, public.couples TO authenticated;
+
+-- From 014: metadata-only invalidation channel required by migration 038.
+-- The P5 baseline represents the already-applied pre-E2EE schema, so this is a
+-- prerequisite rather than part of the forward chain under test.
+CREATE TABLE IF NOT EXISTS public.collaboration_invalidations (
+  couple_id UUID NOT NULL REFERENCES public.couples(id) ON DELETE CASCADE,
+  slice TEXT NOT NULL CHECK (slice IN ('events', 'cycle_support')),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (couple_id, slice)
+);
+
+ALTER TABLE public.collaboration_invalidations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Active members can read collaboration invalidations"
+  ON public.collaboration_invalidations FOR SELECT TO authenticated
+  USING (
+    auth.uid() IS NOT NULL
+    AND couple_id = public.get_my_active_couple_id()
+  );
+
+REVOKE ALL ON TABLE public.collaboration_invalidations FROM PUBLIC, anon;
+GRANT SELECT ON TABLE public.collaboration_invalidations TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.emit_collaboration_invalidation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_couple_id UUID;
+BEGIN
+  v_couple_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.couple_id ELSE NEW.couple_id END;
+  INSERT INTO public.collaboration_invalidations (couple_id, slice, updated_at)
+  VALUES (v_couple_id, TG_ARGV[0], clock_timestamp())
+  ON CONFLICT (couple_id, slice)
+  DO UPDATE SET updated_at = EXCLUDED.updated_at;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.emit_collaboration_invalidation() FROM PUBLIC, anon;

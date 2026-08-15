@@ -22,7 +22,7 @@ import {
 import { useEscapeKey } from '@/lib/hooks';
 import { buildPersonalExport } from '@/lib/dataExport';
 import { DeviceProtectionSection } from '@/components/DeviceProtectionSection';
-import { loadSettingsBootstrapFacts } from '@/app/e2ee/settingsFacts';
+import { activeCoupleScopeId, loadSettingsBootstrapFacts } from '@/app/e2ee/settingsFacts';
 import type { DeviceProtectionSnapshot } from '@/app/e2ee/deviceProtectionStatus';
 import { createSupabaseE2eeRepository } from '@/data/e2ee/SupabaseE2eeRepository';
 import { createProtectedE2eeLocalState } from '@/app/e2ee/protectedLocalState';
@@ -81,6 +81,7 @@ export function SettingsPage() {
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
   const ownRecords = records.filter((record) => record.userId === settingsIdentityKey);
   const hasCoupleSpace = !!profile.couple.coupleId;
+  const protectionCoupleId = activeCoupleScopeId(profile.couple);
   const [protectionSnapshot, setProtectionSnapshot] = useState<DeviceProtectionSnapshot>({
     status: 'TEMPORARILY_UNAVAILABLE',
   });
@@ -100,7 +101,7 @@ export function SettingsPage() {
       try {
         const snapshot = await loadSettingsBootstrapFacts({
           userId,
-          coupleId: profile.couple.coupleId ?? null,
+          coupleId: protectionCoupleId,
           supabaseClient: supabase,
         });
         if (!cancelled) setProtectionSnapshot(snapshot);
@@ -109,24 +110,28 @@ export function SettingsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [profile.couple.coupleId, settingsIdentityKey]);
+  }, [protectionCoupleId, settingsIdentityKey]);
 
-  const loadDeviceProtectionFlow = async () => {
-    if (!settingsIdentityKey || !supabase) throw new Error('E_PROTECTION_SESSION');
+  const loadDeviceProtectionFlow = async (identity = captureIdentity()) => {
+    if (!identity.userId || !supabase || !isCurrentIdentity(identity)) {
+      throw new Error('E_PROTECTION_SESSION');
+    }
     const platform = nativeProtectionPlatform();
     if (!platform) throw new Error('E_PROTECTION_NATIVE_REQUIRED');
     const { deviceKeys, localKeys } = getDeviceProtectionPorts();
     if (!deviceKeys || !localKeys) throw new Error('E_PROTECTION_STORAGE_UNAVAILABLE');
     const localState = await createProtectedE2eeLocalState({
       installationId: E2EE_RUNTIME_INSTALLATION_ID,
-      userId: settingsIdentityKey,
+      userId: identity.userId,
       localKeys,
     });
+    if (!isCurrentIdentity(identity)) throw new Error('E_PROTECTION_SESSION_STALE');
     if (!localState) throw new Error('E_PROTECTION_STORAGE_UNAVAILABLE');
     return createDeviceProtectionFlow({
-      userId: settingsIdentityKey,
+      userId: identity.userId,
       platform,
       localKeys,
+      isCurrentSession: () => isCurrentIdentity(identity),
       deps: {
         repository: createSupabaseE2eeRepository(supabase),
         localState,
@@ -142,7 +147,7 @@ export function SettingsPage() {
     if (!identity.userId || !supabase) return;
     const snapshot = await loadSettingsBootstrapFacts({
       userId: identity.userId,
-      coupleId: profile.couple.coupleId ?? null,
+      coupleId: protectionCoupleId,
       supabaseClient: supabase,
     });
     if (isCurrentIdentity(identity)) setProtectionSnapshot(snapshot);
@@ -157,7 +162,7 @@ export function SettingsPage() {
     const identity = captureIdentity();
     setIsProtectionBusy(true);
     try {
-      const flow = await loadDeviceProtectionFlow();
+      const flow = await loadDeviceProtectionFlow(identity);
       const result = await flow.beginFirstDevice();
       if (!isCurrentIdentity(identity)) return;
       setSetupResult(result);
@@ -186,7 +191,7 @@ export function SettingsPage() {
     const identity = captureIdentity();
     setIsProtectionBusy(true);
     try {
-      const flow = await loadDeviceProtectionFlow();
+      const flow = await loadDeviceProtectionFlow(identity);
       await flow.confirmFirstDevice({
         recoveryCode: recoveryCodeInput,
         kitAnchor: setupResult.kitAnchor,
@@ -218,7 +223,7 @@ export function SettingsPage() {
     setIsProtectionBusy(true);
     try {
       const kitAnchor = parseRecoveryKitArtifact(recoveryArtifactInput);
-      const flow = await loadDeviceProtectionFlow();
+      const flow = await loadDeviceProtectionFlow(identity);
       await flow.recover({ recoveryCode: recoveryCodeInput, kitAnchor });
       if (!isCurrentIdentity(identity)) return;
       setShowProtectionDialog(false);

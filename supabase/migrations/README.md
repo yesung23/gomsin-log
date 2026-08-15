@@ -6,7 +6,8 @@
 > **042 번호 예약 충돌 (2026-08-15).** active V1에는 이미 043/044가 있고, frozen
 > P6 draft에만 042가 있습니다. 042는 어느 환경에도 적용되지 않은 보존 자산이며,
 > 앞으로 P6를 재개할 때는 그 파일을 적용하지 않습니다. 042의 내용을 재검증해
-> **045 이상의 새 forward migration**으로 다시 발급해야 합니다. 기존 환경의
+> **046 이상의 새 forward migration**으로 다시 발급해야 합니다. 045는
+> write-floor 활성화 보안 수정에 사용했습니다. 기존 환경의
 > `039 → 040 → 043 → 044` 이력과 fresh 환경의 숫자 순서를 섞어 적용하지 마세요.
 > 041 chat migration도 동일하게 frozen/deferred 자산이며 active V1 stack에는 없습니다.
 
@@ -74,6 +75,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `040_e2ee_write_floor_scope_semantics.sql` | 03A follow-up. `e2ee_floor_for(scope_kind, scope_id)` exact-scope lookup, private=user / shared=couple floor routing, PMK-only personal activation, active-couple-only activation, and forward replacement of the 032 enforcement body while preserving the 039 SECURITY DEFINER correction | **신규 / 어디에도 미적용** |
 | `043_conversation_bridge_completion.sql` | Conversation Bridge V1: `talk_about_marks`에 완료 상태를 추가하고, 삭제된 원본의 opaque record ID만 보존해 generic unavailable 상태를 표시한다. 원문·preview·주제는 저장하지 않으며 완료 UPDATE는 active couple의 `is_completed = true` 단방향 경로로 제한한다 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
 | `044_unlink_crypto_pairing_authority.sql` | `disconnect_couple()`가 관계 멤버십과 live `crypto_pairings`를 같은 트랜잭션에서 `UNLINKED`로 전환한다. historical key row를 삭제하지 않으며, former partner와 stale local authority가 새 couple scope를 다시 열 수 없도록 하는 forward correction이다 | **Git 추적됨 / 운영 미적용 — 031–040 및 043과 함께 staging actor/RLS 검증 필요** |
+| `045_harden_e2ee_write_floor_activation.sql` | 되돌릴 수 없는 exact-scope write floor 활성화를 소유 ACTIVE 기기 + 기기 인증서 + 해당 ACTIVE epoch의 self-notarized envelope에 결속한다. PENDING·recovery·provisioning·failed·revoked 기기는 거부한다 | **신규 / 어디에도 미적용 — 031→032→034→035→036→037→038→039→040→043→044→045 fresh-chain actor 검증 필요** |
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 

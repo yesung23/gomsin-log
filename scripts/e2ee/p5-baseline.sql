@@ -47,7 +47,8 @@ $$;
 CREATE TABLE IF NOT EXISTS public.couples (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   anniversary_date DATE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS public.couple_members (

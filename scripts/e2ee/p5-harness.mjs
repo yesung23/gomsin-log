@@ -42,6 +42,7 @@ const FORWARD = [
   '035_e2ee_phase1a_p0_closure.sql',
   '036_e2ee_device_status_privilege.sql',
   '039_daily_records_content_envelope.sql',
+  '044_unlink_crypto_pairing_authority.sql',
 ];
 
 const keep = process.argv.includes('--keep');
@@ -272,6 +273,9 @@ function seed(name) {
       ('${COUPLE_C}',  '${C}', 'active'),
       ('${COUPLE_AD}', '${A}', 'disconnected'),
       ('${COUPLE_AD}', '${D}', 'disconnected');
+
+    INSERT INTO public.crypto_pairings (couple_id, state)
+    VALUES ('${COUPLE_AB}', 'CRYPTO_ACTIVE');
   `, `seed users (${name})`, name);
 
   const scopeKey = (domain, scopeId, ownerUser, ownerCouple, epoch, state) => `
@@ -867,7 +871,63 @@ try {
   );
 
   // =========================================================================
-  // Scenario 11 — MUTATION TESTING
+  // Scenario 11 — unlink revokes server pairing authority with membership
+  // =========================================================================
+  // Use a separate database: the remainder of the P5 probes intentionally
+  // needs A and B to stay active. This is a real authenticated RPC path, not a
+  // superuser inspection of the function body.
+  console.log('› Scenario 11: unlink revokes pairing authority and shared access');
+  const unlinkDb = 'p5_unlink';
+  buildDatabase(unlinkDb);
+  seed(unlinkDb);
+  check(
+    mustSql(`SELECT state FROM public.crypto_pairings WHERE couple_id = '${COUPLE_AB}'`, 'pairing before unlink', unlinkDb)
+      === 'CRYPTO_ACTIVE',
+    'fixture contains an active crypto pairing before unlink',
+  );
+  const unlink = asUser(A, 'SELECT public.disconnect_couple()', unlinkDb);
+  check(unlink.ok, 'an active member can unlink through disconnect_couple()');
+  const pairingAfterUnlink = mustSql(
+    `SELECT state FROM public.crypto_pairings WHERE couple_id = '${COUPLE_AB}'`,
+    'pairing after unlink', unlinkDb,
+  );
+  check(pairingAfterUnlink === 'UNLINKED', 'disconnect changes the live pairing to terminal UNLINKED');
+  const noMembers = mustSql(
+    `SELECT count(*) FROM public.couple_members WHERE couple_id = '${COUPLE_AB}' AND status = 'active'`,
+    'members after unlink', unlinkDb,
+  );
+  check(noMembers === '0', 'disconnect revokes both active memberships in the same transaction');
+  check(
+    mustAsUser(B, `SELECT count(*) FROM public.daily_records WHERE couple_id = '${COUPLE_AB}'`, 'former partner read after unlink', unlinkDb)
+      === '0',
+    'former partner cannot read shared records after unlink',
+  );
+  checkRefused(
+    asUser(D, 'SELECT public.disconnect_couple()', unlinkDb),
+    'Active couple not found',
+    'former partner cannot invoke a second unlink',
+  );
+
+  const unlinkMutationDb = 'p5_unlink_mut';
+  buildDatabase(unlinkMutationDb, {
+    mutate: (candidate, text) => (candidate === '044_unlink_crypto_pairing_authority.sql'
+      ? text.replace(
+        /UPDATE public\.crypto_pairings\n  SET state = 'UNLINKED', updated_at = now\(\)\n  WHERE couple_id = v_couple_id\n    AND state IN \([\s\S]*?\n    \);/,
+        '-- intentionally removed by mutation test',
+      )
+      : text),
+  });
+  seed(unlinkMutationDb);
+  const mutatedUnlink = asUser(A, 'SELECT public.disconnect_couple()', unlinkMutationDb);
+  check(mutatedUnlink.ok, 'mutation fixture still performs membership disconnect');
+  check(
+    mustSql(`SELECT state FROM public.crypto_pairings WHERE couple_id = '${COUPLE_AB}'`, 'mutated pairing after unlink', unlinkMutationDb)
+      === 'CRYPTO_ACTIVE',
+    'mutation "unlink pairing transition": removing the UPDATE leaves CRYPTO_ACTIVE, proving the assertion is load-bearing',
+  );
+
+  // =========================================================================
+  // Scenario 12 — MUTATION TESTING
   // =========================================================================
   // Every control asserted above is now removed one at a time. If the matching
   // attack is STILL refused with the control gone, the assertion was never

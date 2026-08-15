@@ -3,6 +3,13 @@
 이 폴더의 `.sql` 파일은 **번호 순서대로** 적용합니다. 파일을 직접 수정하지 말고,
 변경이 필요하면 새 번호의 파일을 추가하세요.
 
+> **042 번호 예약 충돌 (2026-08-15).** active V1에는 이미 043/044가 있고, frozen
+> P6 draft에만 042가 있습니다. 042는 어느 환경에도 적용되지 않은 보존 자산이며,
+> 앞으로 P6를 재개할 때는 그 파일을 적용하지 않습니다. 042의 내용을 재검증해
+> **045 이상의 새 forward migration**으로 다시 발급해야 합니다. 기존 환경의
+> `039 → 040 → 043 → 044` 이력과 fresh 환경의 숫자 순서를 섞어 적용하지 마세요.
+> 041 chat migration도 동일하게 frozen/deferred 자산이며 active V1 stack에는 없습니다.
+
 > ⚠️ 이 저장소의 코드만으로는 원격 Supabase 프로젝트의 실제 상태를 알 수 없습니다.
 > 아래 "적용 순서"를 반드시 스테이징 프로젝트에서 먼저 검증하세요.
 
@@ -65,6 +72,8 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `038_bilateral_talk_about_marks.sql` | `이따 이야기하기` 양방향 조율용 `talk_about_marks` 테이블. 메타데이터 전용(record_id / couple_id / actor_user_id / created_at)이며 기록 본문·주제·요약을 저장하지 않는다. `daily_records` 쓰기 권한은 그대로 두고 별도 테이블 + RLS로만 해결 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
 | `039_daily_records_content_envelope.sql` | P5. 암호화된 `daily_records` 행이 콘텐츠를 담는 `content_envelope BYTEA`(GLE1 봉투) 추가 + 봉투 헤더의 domain/epoch를 라우팅 컬럼과 대조 + `health` 도메인 거부 + couple 도메인의 active 멤버십 요구. **032의 P0 결함도 함께 고친다** (아래 참고) | **신규 / 어디에도 미적용** |
 | `040_e2ee_write_floor_scope_semantics.sql` | 03A follow-up. `e2ee_floor_for(scope_kind, scope_id)` exact-scope lookup, private=user / shared=couple floor routing, PMK-only personal activation, active-couple-only activation, and forward replacement of the 032 enforcement body while preserving the 039 SECURITY DEFINER correction | **신규 / 어디에도 미적용** |
+| `043_conversation_bridge_completion.sql` | Conversation Bridge V1: `talk_about_marks`에 완료 상태를 추가하고, 삭제된 원본의 opaque record ID만 보존해 generic unavailable 상태를 표시한다. 원문·preview·주제는 저장하지 않으며 완료 UPDATE는 active couple의 `is_completed = true` 단방향 경로로 제한한다 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
+| `044_unlink_crypto_pairing_authority.sql` | `disconnect_couple()`가 관계 멤버십과 live `crypto_pairings`를 같은 트랜잭션에서 `UNLINKED`로 전환한다. historical key row를 삭제하지 않으며, former partner와 stale local authority가 새 couple scope를 다시 열 수 없도록 하는 forward correction이다 | **Git 추적됨 / 운영 미적용 — 031–040 및 043과 함께 staging actor/RLS 검증 필요** |
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 

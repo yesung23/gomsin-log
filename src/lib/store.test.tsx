@@ -117,6 +117,10 @@ vi.mock('@/lib/records', () => ({
   },
 }));
 
+vi.mock('@/app/e2ee/runtimeSession', () => ({
+  installE2eeRuntimeForAuthenticatedSession: vi.fn().mockResolvedValue({ status: 'guarded' }),
+}));
+
 const fetchEventsResultFromDB = vi.fn().mockResolvedValue({ ok: true, events: [] });
 const saveEventToDB = vi.fn().mockResolvedValue(null);
 const updateEventInDB = vi.fn().mockResolvedValue(null);

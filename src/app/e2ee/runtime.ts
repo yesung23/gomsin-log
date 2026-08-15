@@ -28,7 +28,11 @@ import type {
 } from './ports';
 import { setRecordCryptoEnvironment } from '@/lib/records';
 import { setOutboxLocalCacheKey } from '@/lib/outbox';
-import { clearE2eeRuntime as clearRuntimeLifecycle, registerE2eeRuntimeTeardown } from './runtimeLifecycle';
+import {
+  clearE2eeRuntime as clearRuntimeLifecycle,
+  clearE2eeRuntimeCapabilities,
+  registerE2eeRuntimeTeardown,
+} from './runtimeLifecycle';
 
 export class E2eeRuntimeError extends Error {
   readonly code: string;
@@ -55,6 +59,8 @@ export type RuntimeInstallInput = {
   installationId: string;
   /** Read-only probe used to refuse silent LCK replacement after ciphertext loss. */
   hasSealedOutbox?: () => Promise<boolean>;
+  /** Refuses a late async install after the authenticated identity changed. */
+  isCurrentSession?: () => boolean;
   now?: () => number;
 };
 
@@ -302,6 +308,12 @@ export type InstalledE2eeRuntime = {
 
 /** Install both runtime capabilities atomically, or install neither. */
 export async function installE2eeRuntime(input: RuntimeInstallInput): Promise<InstalledE2eeRuntime> {
+  const assertCurrentSession = () => {
+    if (input.isCurrentSession && !input.isCurrentSession()) {
+      fail('E_RUNTIME_SESSION_STALE', 'the authenticated session changed during runtime installation');
+    }
+  };
+  assertCurrentSession();
   const pending = await input.localState.loadBootstrap(input.userId);
   if (!pending || pending.state !== 'COMPLETE') fail('E_BOOTSTRAP_NOT_COMPLETE', 'bootstrap is not complete');
   const environment = await createVerifiedRecordCryptoEnvironment({ ...input, deviceId: pending.deviceId });
@@ -324,10 +336,11 @@ export async function installE2eeRuntime(input: RuntimeInstallInput): Promise<In
     || lck.binding.installationId !== input.installationId) {
     fail('E_LOCAL_KEY_ACCOUNT_MISMATCH', 'the local cache key is bound to a different account or device');
   }
+  assertCurrentSession();
 
   // Re-installation is single-owner too: a late duplicate bootstrap must not
   // leave two teardown callbacks with different account/device bindings.
-  clearRuntimeLifecycle();
+  clearE2eeRuntimeCapabilities();
   try {
     setRecordCryptoEnvironment(environment);
     setOutboxLocalCacheKey(lck);

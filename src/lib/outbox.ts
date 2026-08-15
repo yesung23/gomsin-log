@@ -133,6 +133,17 @@ export async function pendingForAccount(
     .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
 }
 
+/**
+ * Probe only for ciphertext already bound to this account.  Runtime setup uses
+ * this before creating an LCK: replacing a lost LCK would strand that content.
+ */
+export async function hasSealedOutboxForAccount(
+  persistence: OutboxPersistence,
+  userId: string,
+): Promise<boolean> {
+  return (await persistence.all()).some((entry) => entry.userId === userId && !!entry.sealedRecord);
+}
+
 /** The entries a flush should attempt: this account's, not blocked, under the cap. */
 export async function deliverableForAccount(
   persistence: OutboxPersistence,

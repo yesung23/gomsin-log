@@ -57,6 +57,7 @@ import {
   discardEntry as discardOutboxEntry,
   enqueueRecord,
   isRetryableReason,
+  hasSealedOutboxForAccount,
   pendingForAccount,
   purgeAccount as purgeOutboxAccount,
   readQueuedRecord,
@@ -64,7 +65,11 @@ import {
   type OutboxPersistence,
 } from '@/lib/outbox';
 import { createIndexedDbOutbox } from '@/lib/outboxStorage';
-import { clearE2eeRuntime } from '@/app/e2ee/runtimeLifecycle';
+import {
+  clearE2eeRuntime,
+  markE2eeCoupleAuthorityUnlinked,
+} from '@/app/e2ee/runtimeLifecycle';
+import { installE2eeRuntimeForAuthenticatedSession } from '@/app/e2ee/runtimeSession';
 import {
   saveRecordToDB,
   deleteRecordFromDB,
@@ -1080,6 +1085,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             })();
             replaceStateImmediately(nextState);
 
+            // Install a floor-aware guard immediately, then the verified
+            // PMK/CSK runtime if this account has completed device bootstrap.
+            // The predicate makes a late async completion harmless on account
+            // switch/sign-out: it must not re-install account A's capabilities
+            // after account B has started hydrating.
+            void installE2eeRuntimeForAuthenticatedSession({
+              userId: sessionUser.id,
+              supabaseClient: supabase,
+              hasSealedOutbox: async () => {
+                const persistence = outboxRef.current;
+                return persistence ? hasSealedOutboxForAccount(persistence, sessionUser.id) : false;
+              },
+              isCurrentSession: () => !disposed
+                && sessionGenerationRef.current === authGeneration
+                && sessionUserIdRef.current === sessionUser.id,
+            });
+
             hydratedUserIdRef.current = dbState && dbState !== FULL_STATE_UNAVAILABLE
               ? sessionUser.id
               : null;
@@ -1232,6 +1254,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     revokedCoupleRef.current = revokedCoupleId && revokedUserId
       ? { userId: revokedUserId, coupleId: revokedCoupleId }
       : null;
+    if (revokedCoupleId) {
+      // The server has already revoked membership on this path (or the
+      // authoritative reconciliation observed that it did). Persist the local
+      // authority tombstone too; it prevents an old couple transcript from
+      // becoming acceptable if ids or cached data are later encountered.
+      void markE2eeCoupleAuthorityUnlinked(revokedCoupleId).catch(() => {
+        console.error('[gomsinlog] Failed to tombstone local couple authority');
+      });
+    }
     setCoupleLifecycle('disconnected');
     // The expiry described the invitation of the space that just went away.
     setInvitationExpiresAt(null);
@@ -2781,6 +2812,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const disconnected = await disconnectCoupleFromDB();
       clearPendingDisconnect();
       if (!disconnected || !isCurrentLinkedCouple(pending)) return false;
+      await markE2eeCoupleAuthorityUnlinked(pending.coupleId);
       return purgeSharedAccess(pending);
     } catch (error) {
       clearPendingDisconnect();
@@ -2812,7 +2844,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
       clearPendingDisconnect();
-      if (disconnected) return purgeSharedAccess(workspace);
+      if (disconnected) {
+        await markE2eeCoupleAuthorityUnlinked(workspace.coupleId);
+        return purgeSharedAccess(workspace);
+      }
       await reconcileSharedAccess(workspace);
       return false;
     } catch (error) {

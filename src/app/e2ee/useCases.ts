@@ -69,6 +69,7 @@ import { deriveSas } from '@/crypto/sas';
 import {
   encodeRecoveryChallengeTranscript,
   enrollmentTranscriptHash,
+  orderPairingSides,
   partnerAssistConfirmMessage,
   partnerAssistTranscriptHash,
   recoveryBundleFingerprint,
@@ -2011,8 +2012,12 @@ export async function completeCouplePairing(
     || bytesToUuid(input.partnerSide.userId) !== input.partnerUserId) {
     fail('E_PAIRING_SIDE_ID_MISMATCH', 'the confirmed transcript sides do not match the account ids');
   }
-  const lowUserId = canonicalCoupleOwnerUserId(input.ownUserId, input.partnerUserId);
-  const highUserId = lowUserId === input.ownUserId ? input.partnerUserId : input.ownUserId;
+  const orderedSides = orderPairingSides(input.ownSide, input.partnerSide);
+  const lowUserId = bytesToUuid(orderedSides.low.userId);
+  const highUserId = bytesToUuid(orderedSides.high.userId);
+  if (canonicalCoupleOwnerUserId(lowUserId, highUserId) !== lowUserId) {
+    fail('E_COUPLE_OWNER_INVALID', 'the confirmed pairing transcript has a non-canonical low user');
+  }
   const snapshot = await deps.repository.getCoupleAuthorizationSnapshot(input.coupleId);
   const activeUsers = [...snapshot.activeUserIds].sort();
   if (snapshot.currentUserActiveCoupleId !== input.coupleId

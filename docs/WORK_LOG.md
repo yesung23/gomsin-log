@@ -711,6 +711,120 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-15 · [Control Tower Governance / canonical correction] Memory Product 검증 순서 확정
+
+#### PLAN POSITION
+- Phase: Control Tower Governance / documentation canonicalization
+- Workstream: Business / Engineering strategy maintenance
+- Step: 사용자 결정 6건 반영 (M7 검증 순서 명시 1건만 문서 변경)
+- Previous Gate: 감사 gap 반영 완료 (`36d917c`)
+- This Gate: M7 내부 `디지털 → POD` 검증 순서 확정
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES (변경 없음)
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES (변경 없음)
+- Latest relevant Work Log checked: 직전 항목 — YES
+- MASTER PLAN version / 기준일: 사용자 승인 MASTER PLAN / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A — 승인된 `Memory Product 우선` 전략 안에서 검증 순서만 구체화
+
+#### OWNERSHIP
+- Tool: Kiro
+- Model: Opus 5 / MAX
+- Role: Strategy Maintainer + Verifier (write-capable, bounded)
+- PR: #61 (draft 유지)
+- Branch: `docs/control-tower-governance`
+- Base SHA: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- Old HEAD: `36d917cc7dcaa6e7db6ee515fcfc5e08f3324a1c`
+- New HEAD / Reviewed HEAD: 이 커밋 SHA (push 후 live 확인)
+
+#### CHANGED
+- file: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- function/component/migration: §9.4 실물상품과 POD — `검증 순서 — 디지털 먼저, POD 다음` 신설
+- what changed: 디지털 기억상품으로 지불의향·제작완료·실제결제를 먼저 검증한 뒤 POD 실물
+  제작을 검증한다는 순서를 명시했다. 디지털 실제결제 확인 전 POD 업체 계약·최소 제작수량·
+  선투자를 진행하지 않는다는 제약과, 실물 개시 전 §13 개인정보·법률 검토 선행을 함께 적었다.
+- why: 디지털 경로는 배송·수령인 개인정보·외부 벤더 없이 수요를 확인할 수 있어, 벤더
+  선투자 위험을 지불의향 확인 이후로 미룰 수 있다.
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: `P-MP — Memory Product MVP` 범위·순서
+- what changed: POD handoff 항목에 `디지털 실제결제 확인 이후` 조건을 붙이고, 순서 블록을
+  `M7 디지털 검증 → M7 POD 실물 검증`으로 분리했다. P-MP 안에서 디지털 경로를 먼저 완성하고
+  디지털 실제결제 확인 전 POD 벤더 연동·선투자를 하지 않는다는 제약을 추가했다.
+- why: 사업문서의 검증 순서가 engineering 단계 범위와 어긋나지 않게 맞춘다.
+- file: `docs/WORK_LOG.md`
+- function/component/migration: 이 세션 항목
+- what changed: 사용자 결정 6건과 그중 문서 변경 1건을 기록했다.
+- why: 결정 근거와 미변경 이유를 추적 가능하게 남긴다.
+
+#### 사용자 결정 기록 (문서 변경 없이 확정된 항목)
+- 제출 패킷 2개: **untracked 유지**. `git add`하지 않는다
+- 협약기간 길이: 확정 전까지 `8개 순차 실행구간` 표현 유지
+- POD 법률 검토: 실제 실물 fulfillment 전 필수 gate로 유지
+- M2 → M3 순서: 변경하지 않는다. 채팅을 M3 뒤로 미루지 않는다
+- PR #61: draft 유지. #57 merge 후 master 기준 재검증하고 review 전환
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: 승인된 전략 변경 없음. M2/채팅 순서 유지, 새 M0 없음, 가격가설 불변
+- Production: remote mutation·migration·배포·Supabase 조회 없음
+- 그 외: `src/**`, `packages/**`, `e2e/**`, native, `AGENTS.md`, `CLAUDE.md`,
+  `PRODUCT_V3.md`, `CURRENT_STATE.md` 무수정. security PR #54/#58/#59/#60 HEAD 무변경
+- untracked 제출 패킷: 이 커밋에 포함하지 않았다
+
+#### VERIFICATION
+- command: `git rev-parse HEAD` 편집 전 확인
+- PASS: `36d917c` — 직전 커밋과 일치
+- what it actually proves: 시작 지점 동일성만 증명한다
+- command: `git diff --check`
+- PASS: whitespace 오류 없음
+- command: `git diff --name-only` / staged 경로 확인
+- PASS: 문서 3개만 변경. untracked 파일 미포함
+- command: 단계 보존 확인 (`P5.1`–`P5.5`, `P6A`–`P6D`, `P7`–`P10`, `LV`, `P-MP`, `M1`–`M8`)
+- PASS: 삭제된 단계 없음
+- UNVERIFIED: remote Supabase catalog, production migration state, native device gate,
+  POD 법적 요건, 실제 협약기간 길이, 디지털/POD 실제 수요
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — documentation/strategy only, class A
+- whether an earlier review is stale: **YES.** `1944361` 감사와 `36d917c` 상태 모두 이
+  커밋으로 대체된다. security PR 리뷰는 영향 없음(HEAD 무변경)
+
+#### BLOCKERS
+- code: 없음
+- environment: remote Supabase catalog, native device gate
+- external/manual: POD 법률 검토, 협약기간 길이 확정, PR #57 merge
+
+#### STOPPED AT
+- exact completed boundary: M7 검증 순서를 business/engineering 양쪽에 반영하고 push.
+  PR #61 draft 유지
+
+#### REMAINING
+- PR #57 merge
+- #61을 master 기준으로 재검증한 뒤 review 전환
+- 협약기간 확정 시 M1–M8 달력 매핑
+- 실물 fulfillment 전 POD 법률 검토
+
+#### NEXT ACTION
+- next owner: ChatGPT Control Tower
+- tool/model: PR #57 merge 후 `#61` rebase/재검증 담당자
+- 기준 SHA: 이 커밋 SHA
+- exact next task: PR #57을 merge하고 `#61`을 master 기준으로 재검증한 뒤 review 상태로 전환
+
+#### DO NOT ADVANCE UNTIL
+- PR #57이 merge되고 `#61`이 master 기준으로 재검증됨
+- P5.2 native/device gate 독립 검증 전 P6A 시작 금지
+- 디지털 기억상품 실제결제 확인 전 POD 벤더 선투자 금지
+- 실물 배송 개시 전 개인정보·법률 검토 완료
+
+#### PRODUCTION
+- NOT APPLIED — remote mutation·migration·배포·Supabase 조회 없음
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

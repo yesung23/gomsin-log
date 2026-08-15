@@ -1,30 +1,26 @@
 import { Shield, ChevronRight, AlertTriangle } from 'lucide-react';
-import { bootstrapStateFromFacts, type BootstrapFacts, type BootstrapState } from '@/app/e2ee/bootstrapStateMachine';
+import type { DeviceProtectionStatus } from '@/app/e2ee/deviceProtectionStatus';
 
 export type DeviceProtectionSectionProps = {
-  /** State is retained for the unavailable shell; verified facts take precedence. */
-  state?: BootstrapState | 'UNAVAILABLE';
-  facts?: BootstrapFacts;
+  status: DeviceProtectionStatus;
   onStart?: () => void;
+  onRecover?: () => void;
   busy?: boolean;
   errorMessage?: string;
 };
 
 /** Small, state-driven surface for My/Settings. Crypto jargon stays in code. */
 export function DeviceProtectionSection({
-  state,
-  facts,
+  status,
   onStart,
+  onRecover,
   busy = false,
   errorMessage,
 }: DeviceProtectionSectionProps) {
-  const derivedState = facts ? bootstrapStateFromFacts(facts) : state ?? 'UNAVAILABLE';
-  const unavailable = derivedState === 'UNAVAILABLE';
-  // COUPLE_KEYS_READY only means the shared key is available. It is not proof
-  // that the runtime/LCK is installed, so it must not suppress the CTA or claim
-  // that protected records are ready.
-  const ready = derivedState === 'ACTIVE' || derivedState === 'RUNTIME_READY';
-  const couplePending = derivedState === 'COUPLE_KEYS_PENDING';
+  const protectedOnThisDevice = status === 'PROTECTED';
+  const setupRequired = status === 'SETUP_REQUIRED';
+  const recoveryRequired = status === 'RECOVERY_REQUIRED';
+  const storageUnavailable = status === 'SECURE_STORAGE_UNAVAILABLE';
 
   return (
     <section className="rounded-surface bg-card border border-border p-4 space-y-3" data-testid="device-protection">
@@ -33,13 +29,15 @@ export function DeviceProtectionSection({
         <div className="min-w-0 flex-1">
           <h2 className="text-heading text-foreground">기록 보호</h2>
           <p className="text-caption text-muted-foreground mt-1 leading-relaxed">
-            {unavailable
-              ? '이 기기에서 보호 설정 상태를 확인할 수 없어요.'
-              : ready
-                ? '이 기기에서 안전한 기록을 사용할 준비가 되었어요.'
-                : couplePending
-                  ? '개인 기록 보호는 준비되었어요. 함께 보는 기록의 보호 설정은 파트너 연결 후 완료돼요.'
-                  : '이 기기에서 곰신로그의 기록을 안전하게 보호하려면 한 번의 보안 설정이 필요해요.'}
+            {protectedOnThisDevice
+              ? '이 기기에서 기록 보호를 사용할 수 있어요.'
+              : setupRequired
+                ? '이 기기의 보안 저장소를 이용해 기록 보호를 설정해 주세요.'
+                : recoveryRequired
+                  ? '이 기기에서는 기록 보호를 복구해야 해요.'
+                  : storageUnavailable
+                    ? '이 기기에서 필요한 보안 저장소를 사용할 수 없어요.'
+                    : '보호 상태를 지금 확인할 수 없어요. 잠시 후 다시 시도해 주세요.'}
           </p>
           {errorMessage && (
             <p className="text-caption text-warning-foreground bg-warning-surface border border-warning/30 rounded-control p-2 mt-2 flex gap-2">
@@ -49,7 +47,7 @@ export function DeviceProtectionSection({
           )}
         </div>
       </div>
-      {!unavailable && !ready && onStart && (
+      {setupRequired && onStart && (
         <button
           type="button"
           onClick={onStart}
@@ -57,6 +55,17 @@ export function DeviceProtectionSection({
           className="w-full h-11 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
         >
           {busy ? '준비 중...' : '보호 설정 시작'}
+          {!busy && <ChevronRight size={16} aria-hidden="true" />}
+        </button>
+      )}
+      {recoveryRequired && onRecover && (
+        <button
+          type="button"
+          onClick={onRecover}
+          disabled={busy}
+          className="w-full h-11 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          {busy ? '준비 중...' : '기록 보호 복구'}
           {!busy && <ChevronRight size={16} aria-hidden="true" />}
         </button>
       )}

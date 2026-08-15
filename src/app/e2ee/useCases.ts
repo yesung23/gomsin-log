@@ -1249,7 +1249,7 @@ export async function recoverWithKit(
     // direct status write is refused by the database.
     await deps.repository.beginDeviceProvisioning(deviceId);
 
-    await pinRecoveryIdentity(deps, input.userId, identity, 'device_enrollment');
+    await pinRecoveryIdentity(deps, input.userId, identity, 'recovery');
 
     const sender: SenderIdentity = {
       deviceId,
@@ -1359,6 +1359,32 @@ export async function recoverWithKit(
     // certificate, the absence of a revocation, and full envelope coverage; a
     // partial recovery cannot reach ACTIVE by asserting that it did.
     await deps.repository.finalizeDeviceProvisioning(deviceId);
+
+    // Runtime installation discovers its own device through protected local
+    // state. Without this durable hand-off recovery could mark a device ACTIVE
+    // on the server, then leave it unable to open any envelope after a restart.
+    // This carries only handles and public identifiers; the kit secret is never
+    // re-persisted on the recovered device.
+    const personalScope = (await deps.repository.listScopeKeys('personal', input.userId))
+      .find((scope) => scope.state === 'ACTIVE')?.id ?? null;
+    const healthScope = (await deps.repository.listScopeKeys('health', input.userId))
+      .find((scope) => scope.state === 'ACTIVE')?.id ?? null;
+    await deps.localState.saveBootstrap(input.userId, {
+      state: 'COMPLETE',
+      deviceId,
+      sigHandle,
+      kemHandle,
+      platform: input.platform,
+      recoverySecret: null,
+      recoveryIdentityId: identity.id,
+      recoveryVersion: identity.recoveryVersion,
+      recoveryAnchorId: anchorId,
+      certificateId,
+      recoveryCode: null,
+      anchorTag: null,
+      personalScopeKeyId: personalScope,
+      healthScopeKeyId: healthScope,
+    });
     return {
       state: 'ACTIVE',
       deviceId,

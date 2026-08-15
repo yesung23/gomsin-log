@@ -825,6 +825,15 @@ describe('Scenario E — kit recovery onto a new device', () => {
 
     expect(recovered.state).toBe('ACTIVE');
     expect(server.devices.find((d) => d.id === recovered.deviceId)!.status).toBe('ACTIVE');
+    // A recovered device must remain installable after the recovery function
+    // returns. Runtime discovery uses protected local bootstrap state rather
+    // than a server-status shortcut.
+    expect(alice.localState.bootstraps.get(alice.userId)).toMatchObject({
+      state: 'COMPLETE',
+      deviceId: recovered.deviceId,
+      recoverySecret: null,
+      recoveryCode: null,
+    });
 
     // A new certificate, rooted at the recovery identity.
     const certificate = server.certificates.find((c) => c.subjectDeviceId === recovered.deviceId)!;

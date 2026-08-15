@@ -91,6 +91,28 @@
 
 ---
 
+### 2026-08-16 · Device Protection & Recovery UX V1 — local implementation
+
+`35da04c` Core Privacy Foundation integration을 기준으로 `daily_records` P5 actor/RLS
+harness를 다시 실행했고, 93 assertions가 통과했다. Production·remote Supabase에는
+조회나 변경을 하지 않았다.
+
+- Settings는 runtime과 같은 protected-local-state namespace를 읽고, verified runtime/LCK
+  기준의 `보호됨 / 설정 필요 / 복구 필요 / 보안 저장소 사용 불가 / 일시 확인 불가`를
+  표시한다. 상태를 알 수 없을 때 보호됨으로 표시하지 않는다.
+- 최초 native 설정은 recovery code와 기존 canonical recovery anchor artifact를 명시적으로
+  저장·재입력한 뒤에만 완료한다. 자동 clipboard 복사는 하지 않는다. ceremony는 명시적
+  `VITE_E2EE_DEVICE_PROTECTION_ENABLED=true` build flag가 있어야 시작한다.
+- 실제 결함을 수정했다: Settings가 runtime과 다른 namespace를 읽어 bootstrap을 놓치던
+  문제와, `recoverWithKit`가 server ACTIVE device를 만든 뒤 local runtime-discovery state를
+  저장하지 않던 문제. recovery artifact는 새 crypto format이 아니라 기존 canonical anchor
+  bytes의 display/transport form이다.
+- 검증: targeted Vitest 42 tests PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run typecheck` PASS. Native device/restart/logout/recovery drill, remote catalog,
+  migration deployment은 UNVERIFIED / NOT APPLIED.
+
+---
+
 ### 2026-08-14 · 문서 source-of-truth 정규화
 
 문서 아키텍처를 정리했다. `PROJECT_HANDOFF_2026-08-13.md`를 프로젝트 상태 스냅샷에서
@@ -1296,6 +1318,28 @@ typecheck PASS, lint PASS, build PASS. 최초 전체 테스트는 불완전한 `
 privacy manifest 2건이 실패했으나 `npm ci` 후 재실행해 통과했다. build는 실제 비밀값 없이
 형식 검증용 Supabase placeholder를 프로세스 환경에만 주입했다. Production Supabase
 migration/deploy는 실행하지 않았다.
+
+---
+
+### 2026-08-16 · Device Protection & Recovery UX V1 — local implementation
+
+`35da04c` Core Privacy Foundation integration을 기준으로 `daily_records` P5 actor/RLS
+harness를 다시 실행했고, 93 assertions가 통과했다. Production·remote Supabase에는
+조회나 변경을 하지 않았다.
+
+- Settings는 runtime과 같은 protected-local-state namespace를 읽고, verified runtime/LCK
+  기준의 `보호됨 / 설정 필요 / 복구 필요 / 보안 저장소 사용 불가 / 일시 확인 불가`를
+  표시한다. 상태를 알 수 없을 때 보호됨으로 표시하지 않는다.
+- 최초 native 설정은 recovery code와 기존 canonical recovery anchor artifact를 명시적으로
+  저장·재입력한 뒤에만 완료한다. 자동 clipboard 복사는 하지 않는다. ceremony는 명시적
+  `VITE_E2EE_DEVICE_PROTECTION_ENABLED=true` build flag가 있어야 시작한다.
+- 실제 결함을 수정했다: Settings가 runtime과 다른 namespace를 읽어 bootstrap을 놓치던
+  문제와, `recoverWithKit`가 server ACTIVE device를 만든 뒤 local runtime-discovery state를
+  저장하지 않던 문제. recovery artifact는 새 crypto format이 아니라 기존 canonical anchor
+  bytes의 display/transport form이다.
+- 검증: targeted Vitest 42 tests PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run typecheck` PASS. Native device/restart/logout/recovery drill, remote catalog,
+  migration deployment은 UNVERIFIED / NOT APPLIED.
 
 ---
 

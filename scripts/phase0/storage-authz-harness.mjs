@@ -96,6 +96,7 @@ const ORDER = [
   '036_e2ee_device_status_privilege.sql',
   '037_harden_e2ee_account_deletion_survivor_detection.sql',
   '038_bilateral_talk_about_marks.sql',
+  '043_conversation_bridge_completion.sql',
 ];
 
 /**
@@ -1120,10 +1121,9 @@ check(
 );
 const ownerMarksPrivate = markAs(A, PRIVATE, COUPLE1);
 check(
-  ownerMarksPrivate.ok,
-  '038 the OWNER can still mark their own private record (it is their own to flag)',
+  ownerMarksPrivate.ok === false,
+  '043 the OWNER CANNOT mark an own-private record; Conversation Bridge is shared-record only',
 );
-mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${PRIVATE}'`, 'tidy private mark');
 
 /**
  * Isolate the policy's own `is_private` clause.
@@ -1142,7 +1142,7 @@ mustSql(
 const partnerMarksPrivateIsolated = markAs(B, PRIVATE, COUPLE1);
 check(
   partnerMarksPrivateIsolated.ok === false,
-  '038 the mark policy refuses a private target ON ITS OWN, even when record RLS would allow the read',
+  '043 the mark policy refuses any private target ON ITS OWN, even when record RLS would allow the read',
 );
 mustSql(
   `DROP POLICY "harness_tmp_all_records" ON public.daily_records`,
@@ -1197,7 +1197,7 @@ check(
   '038 B CANNOT create a mark attributed to A',
 );
 
-// --- Either partner may clear, which is the 이야기했어요 resolution --------
+// --- Either partner may complete, which is the 이야기했어요 resolution -----
 markAs(B, SHARED, COUPLE1);
 const partnerClears = asUser(B, `
   DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}'`);
@@ -1207,10 +1207,48 @@ check(
     `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}'`,
     'cleared',
   )) === 0,
-  '038 either partner may clear the other\'s mark (PRODUCT_V3 §8, 이야기했어요 resolves the topic)',
+  '038 either partner may withdraw the other\'s mark before completion',
 );
 
-// --- Record deletion leaves nothing behind --------------------------------
+mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}'`, 'reset before completion');
+markAs(A, SHARED, COUPLE1);
+markAs(B, SHARED, COUPLE1);
+const partnerCompletes = asUser(B, `
+  UPDATE public.talk_about_marks SET is_completed = true WHERE record_id = '${SHARED}'`);
+check(
+  partnerCompletes.ok
+  && Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND is_completed = true`,
+    'completed',
+  )) === 2,
+  '043 either active partner CAN complete both marks without changing the source record',
+);
+const reopenAttempt = asUser(B, `
+  UPDATE public.talk_about_marks SET is_completed = false WHERE record_id = '${SHARED}'`);
+check(
+  reopenAttempt.ok
+  && Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND is_completed = false`,
+    'completion remains monotonic',
+  )) === 0,
+  '043 a completed topic CANNOT be reopened through the client update path',
+);
+const reMarkCompleted = asUser(A, `
+  DELETE FROM public.talk_about_marks
+  WHERE record_id = '${SHARED}' AND actor_user_id = '${A}' AND is_completed = true`);
+const reMarkAfterCompletion = markAs(A, SHARED, COUPLE1);
+check(
+  reMarkCompleted.ok
+  && reMarkAfterCompletion.ok
+  && Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}' AND is_completed = false`,
+    're-marked pending item',
+  )) === 1,
+  '043 a user can create one new pending mark after completing their earlier mark',
+);
+mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}'`, 'tidy completed marks');
+
+// --- Record deletion keeps only the opaque source id -----------------------
 mustSql(`DELETE FROM public.talk_about_marks`, 'reset');
 markAs(A, SHARED, COUPLE1);
 check(
@@ -1219,9 +1257,11 @@ check(
 );
 mustSql(`DELETE FROM public.daily_records WHERE id = '${SHARED}'`, 'delete record');
 check(
-  Number(mustSql(`SELECT count(*) FROM public.talk_about_marks`, 'after')) === 0,
-  '038 deleting the record CASCADES its marks away -- no orphan coordination metadata',
+  Number(mustSql(`SELECT count(*) FROM public.talk_about_marks`, 'after')) === 1
+  && mustSql(`SELECT record_id FROM public.talk_about_marks LIMIT 1`, 'opaque source id') === SHARED,
+  '043 deleting the record retains only its opaque id for a generic unavailable Conversation Bridge item',
 );
+mustSql(`DELETE FROM public.talk_about_marks`, 'tidy deleted-source mark');
 
 // --- Disconnect closes access both ways -----------------------------------
 mustSql(`

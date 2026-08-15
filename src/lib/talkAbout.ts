@@ -13,20 +13,7 @@ import type { TalkAboutMark } from '@/types';
  * trip through this table.
  */
 
-/**
- * How long a mark stays on the list before it stops being shown.
- *
- * PRODUCT_V3 §8 asks for a silent 14-day expiry. It is applied on READ rather
- * than as a server-side lifetime, deliberately: `UNIQUE (record_id,
- * actor_user_id)` means a row that is invisible-but-present would make
- * re-marking the same record fail with a constraint violation the user could
- * not explain or clear. Filtering on read keeps "what I can see" and "what I
- * can create" describing the same set. Expired rows are inert, still
- * deletable by either partner, and go away with their record.
- */
-export const TALK_ABOUT_TTL_DAYS = 14;
-
-const COLUMNS = 'id, record_id, couple_id, actor_user_id, created_at';
+const COLUMNS = 'id, record_id, couple_id, actor_user_id, created_at, is_completed';
 
 function mapRow(row: {
   id: string;
@@ -34,6 +21,7 @@ function mapRow(row: {
   couple_id: string;
   actor_user_id: string;
   created_at: string;
+  is_completed: boolean;
 }): TalkAboutMark {
   return {
     id: row.id,
@@ -41,15 +29,14 @@ function mapRow(row: {
     coupleId: row.couple_id,
     actorUserId: row.actor_user_id,
     createdAt: row.created_at,
+    isCompleted: row.is_completed,
   };
 }
 
-/** Whether a mark is still inside the display window. */
+/** Pending marks never expire just because the date changes. */
 export function isTalkAboutMarkActive(mark: TalkAboutMark, now: Date = new Date()): boolean {
-  const created = Date.parse(mark.createdAt);
-  if (!Number.isFinite(created)) return true; // Undatable: show it rather than hide it.
-  const ageMs = now.getTime() - created;
-  return ageMs <= TALK_ABOUT_TTL_DAYS * 24 * 60 * 60 * 1000;
+  void now;
+  return !mark.isCompleted;
 }
 
 export async function fetchTalkAboutMarksFromDB(coupleId: string): Promise<TalkAboutMark[]> {
@@ -60,6 +47,7 @@ export async function fetchTalkAboutMarksFromDB(coupleId: string): Promise<TalkA
     .from('talk_about_marks')
     .select(COLUMNS)
     .eq('couple_id', coupleId)
+    .eq('is_completed', false)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -95,6 +83,21 @@ export async function markTalkAboutInDB(
   }
   if (await serverCallBlockedByPendingDeletion()) {
     return { ok: false, error: '계정 삭제가 진행 중이라 표시할 수 없어요.' };
+  }
+
+  // A completed item is intentionally not kept as user-visible history. If
+  // this exact person later needs the same original as a new conversation
+  // topic, remove only their old completion first, then let the original
+  // unique constraint enforce one pending mark. No record is touched.
+  const { error: clearCompletedError } = await supabase
+    .from('talk_about_marks')
+    .delete()
+    .eq('record_id', recordId)
+    .eq('actor_user_id', actorUserId)
+    .eq('is_completed', true);
+  if (clearCompletedError) {
+    console.error('Failed to clear completed talk-about mark:', clearCompletedError);
+    return { ok: false, error: '표시하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
 
   // Only the three columns the INSERT grant actually allows. `created_at` is
@@ -143,11 +146,13 @@ export async function unmarkTalkAboutInDB(
  *
  * Distinct from `unmark` on purpose. Unmarking withdraws your own intention;
  * this resolves a topic the couple has actually discussed, which is the whole
- * point of the feature, and leaving the partner's mark behind would keep a
- * finished topic on the list forever. RLS permits it (PRODUCT_V3 §8,
- * "양쪽 다 해제할 수 있다"); the scope is chosen here rather than there.
+ * point of the feature. This changes metadata only; it never changes the
+ * source record, and the monotonic RLS policy prevents reopening it.
  */
-export async function resolveTalkAboutInDB(recordId: string): Promise<TalkAboutWriteResult> {
+export async function resolveTalkAboutInDB(
+  recordId: string,
+  coupleId: string,
+): Promise<TalkAboutWriteResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 처리할 수 없어요.' };
   }
@@ -157,8 +162,10 @@ export async function resolveTalkAboutInDB(recordId: string): Promise<TalkAboutW
 
   const { error } = await supabase
     .from('talk_about_marks')
-    .delete()
-    .eq('record_id', recordId);
+    .update({ is_completed: true })
+    .eq('record_id', recordId)
+    .eq('couple_id', coupleId)
+    .eq('is_completed', false);
 
   if (error) {
     console.error('Failed to resolve talk-about:', error);

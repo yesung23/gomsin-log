@@ -93,7 +93,7 @@ import {
 } from '@/lib/accountDeletion';
 
 /** Which slice of shared state a realtime notification affects. */
-type SyncSlice = 'records' | 'events' | 'trips';
+type SyncSlice = 'records' | 'events' | 'trips' | 'talk-about';
 type ActiveIdentity = { userId: string; generation: number };
 type ActiveWorkspace = ActiveIdentity & { coupleId: string };
 
@@ -1434,6 +1434,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           );
           return;
         }
+        if (slice === 'talk-about') {
+          const marks = await fetchTalkAboutMarksFromDB(coupleId);
+          if (!isCurrentRefresh()) return;
+          updateStateImmediately((current) =>
+            isCurrentRefresh() ? { ...current, talkAboutMarks: marks } : current,
+          );
+          return;
+        }
         const result = await fetchTripsResultFromDB(coupleId);
         if (!isCurrentRefresh()) return;
         if (!result.ok) {
@@ -1540,6 +1548,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         (payload) => {
           const invalidation = payload.new as Record<string, unknown>;
           if (invalidation.slice === 'events') scheduleRefresh('events');
+          if (invalidation.slice === 'talk_about') scheduleRefresh('talk-about');
         },
       )
       .on(
@@ -2895,10 +2904,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * place that knows the authoritative `created_at` -- so a refetch is both
    * cheaper to reason about and the only way the two clients converge.
    */
-  const refreshTalkAboutMarks = async (): Promise<void> => {
+  const refreshTalkAboutMarks = async (expected?: ActiveWorkspace): Promise<void> => {
     const coupleId = stateRef.current.profile.couple.coupleId;
-    if (!coupleId) return;
-    const marks = await fetchTalkAboutMarksFromDB(coupleId);
+    const userId = stateRef.current.authenticatedUser?.id || stateRef.current.profile.id;
+    const workspace: ActiveWorkspace | null = coupleId && userId
+      ? { coupleId, userId, generation: sessionGenerationRef.current }
+      : null;
+    if (!workspace || (expected && !workspaceRefMatches(workspace, expected))) return;
+    const marks = await fetchTalkAboutMarksFromDB(workspace.coupleId);
+    if (!workspaceRefMatches({
+      coupleId: stateRef.current.profile.couple.coupleId || '',
+      userId: stateRef.current.authenticatedUser?.id || stateRef.current.profile.id || '',
+      generation: sessionGenerationRef.current,
+    }, workspace)) return;
     updateStateImmediately((prev) => ({ ...prev, talkAboutMarks: marks }));
   };
 
@@ -2909,8 +2927,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!coupleId || !userId) {
       return { ok: false, error: '커플 연결이 확인되지 않아 표시할 수 없어요.' };
     }
+    const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
     const result = await markTalkAboutInDB(recordId, coupleId, userId);
-    if (result.ok) await refreshTalkAboutMarks();
+    if (result.ok) await refreshTalkAboutMarks(workspace);
     return result;
   };
 
@@ -2918,16 +2937,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const unmarkTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
     const current = stateRef.current;
     const userId = current.authenticatedUser?.id || current.profile.id;
-    if (!userId) return { ok: false, error: '해제할 수 없어요.' };
+    const coupleId = current.profile.couple.coupleId;
+    if (!userId || !coupleId) return { ok: false, error: '해제할 수 없어요.' };
+    const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
     const result = await unmarkTalkAboutInDB(recordId, userId);
-    if (result.ok) await refreshTalkAboutMarks();
+    if (result.ok) await refreshTalkAboutMarks(workspace);
     return result;
   };
 
   /** 이야기했어요 — the conversation happened, so clear it for both. */
   const resolveTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
-    const result = await resolveTalkAboutInDB(recordId);
-    if (result.ok) await refreshTalkAboutMarks();
+    const current = stateRef.current;
+    const coupleId = current.profile.couple.coupleId;
+    const userId = current.authenticatedUser?.id || current.profile.id;
+    if (!coupleId || !userId) return { ok: false, error: '커플 연결이 확인되지 않아 처리할 수 없어요.' };
+    const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
+    const result = await resolveTalkAboutInDB(recordId, coupleId);
+    if (result.ok) await refreshTalkAboutMarks(workspace);
     return result;
   };
 

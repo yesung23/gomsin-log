@@ -328,6 +328,8 @@ export interface TalkAboutMark {
   coupleId: string;
   actorUserId: string;
   createdAt: string;
+  /** Conversation Bridge completion state; no record content is stored here. */
+  isCompleted: boolean;
 }
 
 export interface CycleSupportSignal {

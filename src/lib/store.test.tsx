@@ -169,6 +169,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
       <span data-testid="events">{state.events.map((event) => event.id).join(',')}</span>
       <span data-testid="trips">{state.trips.map((trip) => trip.id).join(',')}</span>
+      <span data-testid="talkAboutMarks">{(state.talkAboutMarks ?? []).map((mark) => mark.id).join(',')}</span>
       <span data-testid="attachments">
         {state.records
           .flatMap((r) => r.attachments || [])
@@ -325,6 +326,7 @@ describe('StoreProvider auth lifecycle', () => {
       userId === 'user-a'
         ? serverState({
             records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'A', isPrivate: false, createdAt: 'x' }] as never,
+            talkAboutMarks: [{ id: 'mark-a', recordId: 'rec-a', coupleId: 'couple-a', actorUserId: 'user-a', createdAt: 'x', isCompleted: false }],
             profile: { myName: 'A', role: 'gomsin', couple: { partnerName: '', coupleCode: '', connected: false, status: 'pending' }, military: {} as never, contact: {} as never } as never,
           })
         : null,
@@ -341,6 +343,7 @@ describe('StoreProvider auth lifecycle', () => {
       emitAuth('SIGNED_IN', 'user-a');
     });
     await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('rec-a'));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-a');
 
     // Account B has no profile row yet; account A's cached records must not survive.
     await act(async () => {
@@ -349,6 +352,7 @@ describe('StoreProvider auth lifecycle', () => {
 
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-b'));
     expect(screen.getByTestId('records')).toHaveTextContent('');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
     expect(screen.getByTestId('name')).toHaveTextContent('');
   });
 

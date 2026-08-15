@@ -191,9 +191,12 @@ describe('input validation at the boundary', () => {
 
 describe('platform selection', () => {
   it('chooses native ONLY when Capacitor is native AND the plugin is available', () => {
-    expect(keystoreIndex).toMatch(
-      /Capacitor\.isNativePlatform\(\)\s*&&\s*Capacitor\.isPluginAvailable\('GomsinlogDeviceKeys'\)/,
-    );
+    expect(keystoreIndex).toMatch(/function nativePlatform\(\)[\s\S]*Capacitor\.isNativePlatform\(\)/);
+    expect(keystoreIndex).toMatch(/function nativeAvailable\(\)[\s\S]*nativePlatform\(\)[\s\S]*Capacitor\.isPluginAvailable\('GomsinlogDeviceKeys'\)/);
+  });
+
+  it('fails closed on a native platform when the first-party plugin is unavailable', () => {
+    expect(keystoreIndex.match(/if \(nativePlatform\(\)\) return null;/g)).toHaveLength(2);
   });
 
   it('keeps the web implementation selectable', () => {

@@ -1,5 +1,5 @@
+import { getDeviceKeyPort, getLocalKeyPort } from '@/crypto/keystore';
 import type { LocalKeyPort } from '@/crypto/keystore/LocalKeyPort';
-import type { PlatformName } from '@/crypto/domains';
 import { activatePersonalProtection, installE2eeRuntime } from './runtime';
 import { E2EE_RUNTIME_INSTALLATION_ID } from './runtimeSession';
 import {
@@ -11,6 +11,17 @@ import {
   type UseCaseDeps,
 } from './useCases';
 import type { RecoveryKitAnchor } from '@/crypto/recoveryCode';
+
+/** Native platforms on which the first-device ceremony is allowed to run. */
+export type DeviceProtectionPlatform = 'ios' | 'android';
+
+/** Resolve the platform key capabilities behind the application boundary. */
+export function getDeviceProtectionPorts() {
+  return {
+    deviceKeys: getDeviceKeyPort(),
+    localKeys: getLocalKeyPort(),
+  };
+}
 
 export type DeviceProtectionFlow = {
   beginFirstDevice(): Promise<BootstrapResult>;
@@ -24,7 +35,7 @@ export type DeviceProtectionFlow = {
  */
 export function createDeviceProtectionFlow(input: {
   userId: string;
-  platform: PlatformName;
+  platform: DeviceProtectionPlatform;
   deps: UseCaseDeps;
   localKeys: LocalKeyPort;
 }): DeviceProtectionFlow {

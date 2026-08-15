@@ -24,17 +24,19 @@ import { buildPersonalExport } from '@/lib/dataExport';
 import { DeviceProtectionSection } from '@/components/DeviceProtectionSection';
 import { loadSettingsBootstrapFacts } from '@/app/e2ee/settingsFacts';
 import type { DeviceProtectionSnapshot } from '@/app/e2ee/deviceProtectionStatus';
-import { getDeviceKeyPort, getLocalKeyPort } from '@/crypto/keystore';
 import { createSupabaseE2eeRepository } from '@/data/e2ee/SupabaseE2eeRepository';
 import { createProtectedE2eeLocalState } from '@/app/e2ee/protectedLocalState';
 import { E2EE_RUNTIME_INSTALLATION_ID } from '@/app/e2ee/runtimeSession';
-import { createDeviceProtectionFlow } from '@/app/e2ee/deviceProtectionFlow';
+import {
+  createDeviceProtectionFlow,
+  getDeviceProtectionPorts,
+  type DeviceProtectionPlatform,
+} from '@/app/e2ee/deviceProtectionFlow';
 import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { formatRecoveryKitArtifact, parseRecoveryKitArtifact } from '@/app/e2ee/recoveryKitArtifact';
 import type { BootstrapResult } from '@/app/e2ee/useCases';
-import type { PlatformName } from '@/crypto/domains';
 
-function nativeProtectionPlatform(): PlatformName | null {
+function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
   const platform = Capacitor.getPlatform();
   return platform === 'ios' || platform === 'android' ? platform : null;
 }
@@ -112,8 +114,7 @@ export function SettingsPage() {
     if (!settingsIdentityKey || !supabase) throw new Error('E_PROTECTION_SESSION');
     const platform = nativeProtectionPlatform();
     if (!platform) throw new Error('E_PROTECTION_NATIVE_REQUIRED');
-    const deviceKeys = getDeviceKeyPort();
-    const localKeys = getLocalKeyPort();
+    const { deviceKeys, localKeys } = getDeviceProtectionPorts();
     if (!deviceKeys || !localKeys) throw new Error('E_PROTECTION_STORAGE_UNAVAILABLE');
     const localState = await createProtectedE2eeLocalState({
       installationId: E2EE_RUNTIME_INSTALLATION_ID,

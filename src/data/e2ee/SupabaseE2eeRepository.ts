@@ -37,6 +37,7 @@ import {
 } from './codec';
 import type {
   CertificateRecord,
+  CoupleAuthorizationSnapshot,
   DeviceRecord,
   E2eeRepository,
   EnrollmentRecord,
@@ -811,6 +812,26 @@ export class SupabaseE2eeRepository implements E2eeRepository {
         .maybeSingle(),
     );
     return row ? toPairing(row) : null;
+  }
+
+  async getCoupleAuthorizationSnapshot(coupleId: string): Promise<CoupleAuthorizationSnapshot> {
+    const current = await unwrap(
+      'rpc.get_my_active_couple_id',
+      this.db.rpc('get_my_active_couple_id'),
+    );
+    const members = await rows(
+      'couple_members.authorization_snapshot',
+      this.db.from('couple_members')
+        .select('user_id')
+        .eq('couple_id', coupleId)
+        .eq('status', 'active'),
+    );
+    const pairing = await this.getPairing(coupleId);
+    return {
+      currentUserActiveCoupleId: optionalString(current, 'get_my_active_couple_id'),
+      activeUserIds: members.map((row, index) => requireString(row.user_id, `couple_members[${index}].user_id`)),
+      pairingState: pairing?.state ?? null,
+    };
   }
 
   async setPairingState(pairingId: string, state: string): Promise<void> {

@@ -20,6 +20,7 @@
  */
 
 import { bytesToUuid, concat, equalBytes, fromBase64, uuidToBytes, utf8, zeroize } from '@/crypto/bytes';
+import { canonicalCoupleOwnerUserId } from '@/crypto/canonicalOwner';
 import {
   ASSURANCE,
   KEY_DOMAIN,
@@ -101,13 +102,14 @@ import {
   verifyDeviceById,
 } from './trust';
 import type {
-  CertificateRecord,
+  ExactPinnedAnchor,
   E2eeFeatureFlag,
   E2eeLocalState,
   E2eeRepository,
   EnvelopeRecord,
   PendingBootstrap,
   PinnedTrustAnchor,
+  PinnedCoupleAuthority,
   RecoveryIdentityRecord,
   ScopeKeyRecord,
 } from './ports';
@@ -270,6 +272,61 @@ async function pinRecoveryIdentity(
     recoveryBundleFp: identity.recoveryBundleFp,
     pinSource,
   });
+}
+
+async function requireCoupleAuthority(
+  deps: UseCaseDeps,
+  coupleId: string,
+  runtimeUserId: string,
+): Promise<PinnedCoupleAuthority> {
+  const authority = await deps.localState.loadCoupleAuthority(coupleId);
+  if (!authority || authority.state !== 'CRYPTO_ACTIVE') {
+    if (authority?.state === 'UNLINKED') fail('E_COUPLE_UNLINKED', 'the couple authority is permanently unlinked');
+    fail('E_COUPLE_AUTHORITY_UNAVAILABLE', 'the SAS-confirmed couple authority is not active');
+  }
+  const canonical = canonicalCoupleOwnerUserId(authority.lowUserId, authority.highUserId);
+  if (canonical !== authority.lowUserId) fail('E_COUPLE_OWNER_INVALID', 'the pinned low user is not canonical');
+  const snapshot = await deps.repository.getCoupleAuthorizationSnapshot(coupleId);
+  const active = [...snapshot.activeUserIds].sort();
+  const expected = [authority.lowUserId, authority.highUserId].sort();
+  if (snapshot.currentUserActiveCoupleId !== coupleId
+    || snapshot.pairingState !== 'CRYPTO_ACTIVE'
+    || active.length !== 2
+    || active.some((userId, index) => userId !== expected[index])) {
+    fail('E_COUPLE_LIFECYCLE_INVALID', 'the server couple snapshot is not the pinned two-party state');
+  }
+  if (runtimeUserId !== authority.lowUserId && runtimeUserId !== authority.highUserId) {
+    fail('E_COUPLE_ACTOR_UNAUTHORIZED', 'the current user is not one of the paired users');
+  }
+  return authority;
+}
+
+async function ownerUserIdBytesForScope(
+  deps: UseCaseDeps,
+  scope: ScopeKeyRecord,
+  runtimeUserId: string,
+): Promise<Uint8Array> {
+  if (scope.domain === 'personal' || scope.domain === 'health') {
+    if (!scope.ownerUserId || scope.ownerCoupleId !== null || scope.scopeId !== scope.ownerUserId
+      || scope.ownerUserId !== runtimeUserId) {
+      fail('E_SCOPE_STRUCTURE_INVALID', 'the user-owned scope has invalid owner structure');
+    }
+    return uuidToBytes(scope.ownerUserId);
+  }
+  const authority = await requireCoupleAuthority(deps, scope.scopeId, runtimeUserId);
+  if (scope.ownerUserId !== null || scope.ownerCoupleId !== scope.scopeId) {
+    fail('E_SCOPE_STRUCTURE_INVALID', 'the couple-owned scope has invalid owner structure');
+  }
+  return uuidToBytes(authority.lowUserId);
+}
+
+/** Local unlink observation is monotonic and never reactivates an old pair. */
+export async function markCoupleAuthorityUnlinked(
+  deps: UseCaseDeps,
+  coupleId: string,
+): Promise<void> {
+  requireEnabled(deps);
+  await deps.localState.markCoupleAuthorityUnlinked(coupleId);
 }
 
 type SenderIdentity = {
@@ -1202,7 +1259,6 @@ export async function recoverWithKit(
 
     // 13-15. Recover every scope through the recovery envelopes, then provision
     // this device into each of those live epochs.
-    const certificates = await deps.repository.listCertificates(input.userId);
     const recoveryEnvelopes = await deps.repository.listEnvelopesForRecoveryIdentity(identity.id);
     const recovered: RecoveryResult['recoveredScopes'] = [];
     const deriveWithRecoveryKem = (peer: Uint8Array) => ecdhWithCryptoKey(recovery.kem.privateKey, peer);
@@ -1214,7 +1270,7 @@ export async function recoverWithKit(
       const rewrapped = await provisionScopeKeyToRecipient({
         ownEnvelope: envelope.envelope,
         ownKemSpki: identity.recKemSpki,
-        ownEnvelopeSenderSigSpki: await verifiedSenderKey(envelope, certificates, anchor, nowMs),
+        ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, scope, envelope, nowMs),
         deriveSecret: deriveWithRecoveryKem,
         recipientKemSpki: kem.publicKeySpki,
         recipientId: uuidToBytes(deviceId),
@@ -1226,7 +1282,7 @@ export async function recoverWithKit(
         header: {
           domain: domainCode(scope.domain),
           scopeKeyId: uuidToBytes(scope.id),
-          ownerUserId: scope.ownerUserId ? uuidToBytes(scope.ownerUserId) : userIdBytes,
+          ownerUserId: await ownerUserIdBytesForScope(deps, scope, input.userId),
           scopeId: uuidToBytes(scope.scopeId),
           epoch: scope.epoch,
         },
@@ -1320,22 +1376,78 @@ export async function recoverWithKit(
   }
 }
 
-/** The certified signing key of whoever wrote an envelope. */
-async function verifiedSenderKey(
+function anchorsMatch(a: ExactPinnedAnchor, b: ExactPinnedAnchor): boolean {
+  return a.subjectUserId === b.subjectUserId
+    && a.recoveryIdentityId === b.recoveryIdentityId
+    && a.recoveryVersion === b.recoveryVersion
+    && equalBytes(a.serverOriginId, b.serverOriginId)
+    && equalBytes(a.rootRecSigPubFp, b.rootRecSigPubFp)
+    && equalBytes(a.rootRecSigSpki, b.rootRecSigSpki)
+    && equalBytes(a.recoveryBundleFp, b.recoveryBundleFp);
+}
+
+/** Scope-driven sender verification used before every re-wrap. */
+async function verifiedScopeSenderKey(
+  deps: UseCaseDeps,
+  runtimeUserId: string,
+  scope: ScopeKeyRecord,
   envelope: EnvelopeRecord,
-  certificates: readonly CertificateRecord[],
-  anchor: TrustAnchor,
   atMs: bigint,
 ): Promise<Uint8Array> {
-  const byId = certificatesById(certificates);
-  const senderCertificate = byId.get(envelope.senderCertificateId);
-  if (!senderCertificate) fail('E_UNKNOWN_SENDER_CERT', 'the envelope names a certificate that is not present');
-  const verified = await verifyCertificateChain({
-    chain: buildChain(senderCertificate, byId),
+  const certificate = await deps.repository.getCertificate(envelope.senderCertificateId);
+  if (!certificate || certificate.subjectDeviceId !== envelope.senderDeviceId) {
+    fail('E_ENVELOPE_SENDER_MISMATCH', 'the envelope sender does not match its certificate');
+  }
+  let pin: ExactPinnedAnchor | null = null;
+  if (scope.domain === 'personal' || scope.domain === 'health') {
+    if (!scope.ownerUserId || scope.ownerCoupleId !== null || scope.scopeId !== scope.ownerUserId
+      || scope.ownerUserId !== runtimeUserId || certificate.userId !== scope.ownerUserId) {
+      fail('E_SCOPE_SENDER_UNAUTHORIZED', 'the sender is not authorized for this user scope');
+    }
+    pin = await deps.localState.loadTrustAnchor(scope.ownerUserId);
+  } else {
+    const authority = await requireCoupleAuthority(deps, scope.scopeId, runtimeUserId);
+    if (certificate.userId !== authority.lowUserId && certificate.userId !== authority.highUserId) {
+      fail('E_SCOPE_SENDER_UNAUTHORIZED', 'the sender is not one of the paired users');
+    }
+    const expected = certificate.userId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
+    pin = certificate.userId === runtimeUserId
+      ? await deps.localState.loadTrustAnchor(certificate.userId)
+      : expected;
+    if (!pin || !anchorsMatch(pin, expected)) fail('E_PARTNER_ANCHOR_MISMATCH', 'sender anchor differs from pairing authority');
+  }
+  if (!pin) fail('E_SENDER_ANCHOR_MISSING', 'the sender anchor is not locally pinned');
+  const serverOriginId = await deps.repository.serverOriginId();
+  if (pin.subjectUserId !== certificate.userId || !equalBytes(pin.serverOriginId, serverOriginId)) {
+    fail('E_SENDER_ANCHOR_CONTEXT_MISMATCH', 'the sender anchor has the wrong account or origin');
+  }
+  const certificates = await deps.repository.listCertificates(certificate.userId);
+  const revocations = await loadRevocationSet(
+    deps.repository,
+    certificate.userId,
+    await anchorFromPin({
+      userId: certificate.userId,
+      serverOriginId,
+      rootRecSigSpki: pin.rootRecSigSpki,
+      recoveryIdentityId: pin.recoveryIdentityId,
+      recoveryVersion: pin.recoveryVersion,
+    }),
+    atMs,
+  );
+  const anchor = await anchorFromPin({
+    userId: certificate.userId,
+    serverOriginId,
+    rootRecSigSpki: pin.rootRecSigSpki,
+    recoveryIdentityId: pin.recoveryIdentityId,
+    recoveryVersion: pin.recoveryVersion,
+  });
+  return (await verifyCertificateChain({
+    chain: buildChain(certificate, certificatesById(certificates)),
     anchor,
     atMs,
-  });
-  return verified.sigSpki;
+    requiredDomain: scope.domain,
+    isRevoked: revocations.asLookup(),
+  })).sigSpki;
 }
 
 // ---------------------------------------------------------------------------
@@ -1680,8 +1792,6 @@ export async function completeSecondDeviceProvisioning(
   const anchor = await pinnedAnchor(deps, input.userId);
   const nowMs = BigInt(deps.now());
   const revocations = await loadRevocationSet(deps.repository, input.userId, anchor, nowMs);
-  const certificates = await deps.repository.listCertificates(input.userId);
-
   const provisioner = await verifyDeviceById(deps.repository, {
     userId: input.userId, deviceId: input.provisioningDeviceId, anchor, atMs: nowMs, revocations,
   });
@@ -1725,7 +1835,7 @@ export async function completeSecondDeviceProvisioning(
     const rewrapped = await provisionScopeKeyToRecipient({
       ownEnvelope: own.envelope,
       ownKemSpki: provisioner.verified.kemSpki,
-      ownEnvelopeSenderSigSpki: await verifiedSenderKey(own, certificates, anchor, nowMs),
+      ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, active, own, nowMs),
       deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandle, peer),
       recipientKemSpki: target.verified.kemSpki,
       recipientId: target.verified.deviceId,
@@ -1737,7 +1847,7 @@ export async function completeSecondDeviceProvisioning(
       header: {
         domain: domainCode(domain),
         scopeKeyId: uuidToBytes(active.id),
-        ownerUserId: active.ownerUserId ? uuidToBytes(active.ownerUserId) : uuidToBytes(input.userId),
+        ownerUserId: await ownerUserIdBytesForScope(deps, active, input.userId),
         scopeId: uuidToBytes(active.scopeId),
         epoch: active.epoch,
       },
@@ -1759,7 +1869,7 @@ export async function completeSecondDeviceProvisioning(
       const forRecovery = await provisionScopeKeyToRecipient({
         ownEnvelope: own.envelope,
         ownKemSpki: provisioner.verified.kemSpki,
-        ownEnvelopeSenderSigSpki: await verifiedSenderKey(own, certificates, anchor, nowMs),
+        ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, active, own, nowMs),
         deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandle, peer),
         recipientKemSpki: identity.recKemSpki,
         recipientId: uuidToBytes(identity.id),
@@ -1771,7 +1881,7 @@ export async function completeSecondDeviceProvisioning(
         header: {
           domain: domainCode(domain),
           scopeKeyId: uuidToBytes(active.id),
-          ownerUserId: active.ownerUserId ? uuidToBytes(active.ownerUserId) : uuidToBytes(input.userId),
+          ownerUserId: await ownerUserIdBytesForScope(deps, active, input.userId),
           scopeId: uuidToBytes(active.scopeId),
           epoch: active.epoch,
         },
@@ -1812,7 +1922,6 @@ export async function selfNotarizeOwnEnvelopes(
   const self = await verifyDeviceById(deps.repository, {
     userId: input.userId, deviceId: input.deviceId, anchor, atMs: nowMs, revocations,
   });
-  const certificates = await deps.repository.listCertificates(input.userId);
   const envelopes = await deps.repository.listEnvelopesForDevice(input.deviceId);
 
   let notarized = 0;
@@ -1824,7 +1933,7 @@ export async function selfNotarizeOwnEnvelopes(
     const rewrapped = await provisionScopeKeyToRecipient({
       ownEnvelope: envelope.envelope,
       ownKemSpki: self.verified.kemSpki,
-      ownEnvelopeSenderSigSpki: await verifiedSenderKey(envelope, certificates, anchor, nowMs),
+      ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, scope, envelope, nowMs),
       deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandleFor(input.deviceId), peer),
       recipientKemSpki: self.verified.kemSpki,
       recipientId: self.verified.deviceId,
@@ -1836,7 +1945,7 @@ export async function selfNotarizeOwnEnvelopes(
       header: {
         domain: domainCode(scope.domain),
         scopeKeyId: uuidToBytes(scope.id),
-        ownerUserId: scope.ownerUserId ? uuidToBytes(scope.ownerUserId) : uuidToBytes(input.userId),
+        ownerUserId: await ownerUserIdBytesForScope(deps, scope, input.userId),
         scopeId: uuidToBytes(scope.scopeId),
         epoch: scope.epoch,
       },
@@ -1898,7 +2007,24 @@ export async function completeCouplePairing(
   requireEnabled(deps);
   const nowMs = BigInt(deps.now());
 
+  if (bytesToUuid(input.ownSide.userId) !== input.ownUserId
+    || bytesToUuid(input.partnerSide.userId) !== input.partnerUserId) {
+    fail('E_PAIRING_SIDE_ID_MISMATCH', 'the confirmed transcript sides do not match the account ids');
+  }
+  const lowUserId = canonicalCoupleOwnerUserId(input.ownUserId, input.partnerUserId);
+  const highUserId = lowUserId === input.ownUserId ? input.partnerUserId : input.ownUserId;
+  const snapshot = await deps.repository.getCoupleAuthorizationSnapshot(input.coupleId);
+  const activeUsers = [...snapshot.activeUserIds].sort();
+  if (snapshot.currentUserActiveCoupleId !== input.coupleId
+    || activeUsers.length !== 2
+    || activeUsers[0] !== [lowUserId, highUserId].sort()[0]
+    || activeUsers[1] !== [lowUserId, highUserId].sort()[1]) {
+    fail('E_COUPLE_LIFECYCLE_INVALID', 'the initial pairing does not have the exact two active users');
+  }
+
   const ownAnchor = await pinnedAnchor(deps, input.ownUserId);
+  const ownPin = await deps.localState.loadTrustAnchor(input.ownUserId);
+  if (!ownPin) fail('E_OWN_ANCHOR_MISSING', 'the local self anchor is not persisted');
   if (!equalBytes(ownAnchor.rootRecSigPubFp, input.ownSide.rootRecSigPubFp)) {
     fail('E_OWN_ANCHOR_MISMATCH', 'the confirmed transcript names a different root for this account');
   }
@@ -1924,6 +2050,26 @@ export async function completeCouplePairing(
     recoveryIdentityId: partnerAnchorRow.recoveryIdentityId,
     recoveryVersion: partnerAnchorRow.recoveryVersion,
   });
+  const partnerPin: ExactPinnedAnchor = {
+    subjectUserId: input.partnerUserId,
+    serverOriginId: ownAnchor.serverOriginId,
+    rootRecSigPubFp: partnerRootFp,
+    rootRecSigSpki: partnerAnchorRow.recSigSpki,
+    recoveryIdentityId: partnerAnchorRow.recoveryIdentityId,
+    recoveryVersion: partnerAnchorRow.recoveryVersion,
+    recoveryBundleFp: partnerAnchorRow.recoveryBundleFp,
+    pinSource: 'pairing',
+  };
+  const authority: PinnedCoupleAuthority = {
+    serverOriginId: ownAnchor.serverOriginId,
+    coupleId: input.coupleId,
+    transcriptHash: input.transcriptHash,
+    lowUserId,
+    highUserId,
+    lowAnchor: lowUserId === input.ownUserId ? ownPin : partnerPin,
+    highAnchor: highUserId === input.ownUserId ? ownPin : partnerPin,
+    state: 'CONFIRMED',
+  };
 
   // Both revocation sets come from persisted signed statements.
   const ownRevocations = await loadRevocationSet(deps.repository, input.ownUserId, ownAnchor, nowMs);
@@ -1953,7 +2099,7 @@ export async function completeCouplePairing(
     fail('E_CONFIRMING_DEVICE_UNTRUSTED', 'the confirming device on the partner side is not certified');
   }
 
-  const ownIsLow = compareUserIds(input.ownSide.userId, input.partnerSide.userId) < 0;
+  const ownIsLow = input.ownUserId === lowUserId;
   const lowConfirmation: Confirmation = {
     device: (ownIsLow ? ownConfirming : partnerConfirming).verified,
     signature: ownIsLow ? input.ownConfirmation.signature : input.partnerConfirmation.signature,
@@ -1975,6 +2121,8 @@ export async function completeCouplePairing(
   });
   // No CSK before CONFIRMED_BOTH. This is the whole point of the flow.
   if (!gate.allowed) fail('E_PAIRING_NOT_CONFIRMED', gate.reason ?? 'pairing is not confirmed');
+
+  await deps.localState.pinCoupleAuthority(authority);
 
   const ownIdentity = await deps.repository.getRecoveryIdentity(input.ownUserId);
   if (!ownIdentity) fail('E_RECOVERY_IDENTITY_MISSING', 'this account has no recovery identity');
@@ -2002,7 +2150,7 @@ export async function completeCouplePairing(
       ownerUserId: null,
       ownerCoupleId: input.coupleId,
       // The low-ordered member, so both sides build identical header bytes.
-      ownerUserIdBytes: ownIsLow ? input.ownSide.userId : input.partnerSide.userId,
+      ownerUserIdBytes: uuidToBytes(authority.lowUserId),
       scopeKey,
       recipients,
       sender: {
@@ -2032,6 +2180,7 @@ export async function completeCouplePairing(
 
   const pairing = await deps.repository.getPairing(input.coupleId);
   if (pairing) await deps.repository.setPairingState(pairing.id, 'CRYPTO_ACTIVE');
+  await deps.localState.markCoupleAuthorityCryptoActive(input.coupleId);
 
   return {
     scopeKeyId: created.id,
@@ -2041,11 +2190,6 @@ export async function completeCouplePairing(
       recoveryIdentities: recipients.recoveryIdentities.length,
     },
   };
-}
-
-function compareUserIds(a: Uint8Array, b: Uint8Array): number {
-  for (let i = 0; i < 16; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
-  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2096,13 +2240,34 @@ export async function partnerAssistRecoverCouple(
     fail('E_ASSIST_TTL_TOO_LONG', 'the partner-assist window is longer than the protocol allows');
   }
 
+  const authority = await requireCoupleAuthority(deps, input.coupleId, input.ownUserId);
+  if ((input.ownUserId !== authority.lowUserId && input.ownUserId !== authority.highUserId)
+    || (input.partnerUserId !== authority.lowUserId && input.partnerUserId !== authority.highUserId)
+    || input.ownUserId === input.partnerUserId) {
+    fail('E_COUPLE_ACTOR_UNAUTHORIZED', 'the partner-assist users are not the pinned pair');
+  }
+
   // CSK only. Resolved here, from the couple id, with no domain input anywhere.
   const keys = await deps.repository.listScopeKeys('couple', input.coupleId);
   const active = keys.find((key) => key.state === 'ACTIVE');
   if (!active) fail('E_NO_ACTIVE_COUPLE_KEY', 'there is no active couple key to share');
 
-  const ownAnchor = await pinnedAnchor(deps, input.ownUserId);
-  const partnerAnchor = await pinnedAnchor(deps, input.partnerUserId);
+  const ownPin = input.ownUserId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
+  const partnerPin = input.partnerUserId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
+  const ownAnchor = await anchorFromPin({
+    userId: input.ownUserId,
+    serverOriginId: authority.serverOriginId,
+    rootRecSigSpki: ownPin.rootRecSigSpki,
+    recoveryIdentityId: ownPin.recoveryIdentityId,
+    recoveryVersion: ownPin.recoveryVersion,
+  });
+  const partnerAnchor = await anchorFromPin({
+    userId: input.partnerUserId,
+    serverOriginId: authority.serverOriginId,
+    rootRecSigSpki: partnerPin.rootRecSigSpki,
+    recoveryIdentityId: partnerPin.recoveryIdentityId,
+    recoveryVersion: partnerPin.recoveryVersion,
+  });
   const ownRevocations = await loadRevocationSet(deps.repository, input.ownUserId, ownAnchor, nowMs);
   const partnerRevocations = await loadRevocationSet(
     deps.repository, input.partnerUserId, partnerAnchor, nowMs,
@@ -2161,11 +2326,10 @@ export async function partnerAssistRecoverCouple(
     return { scopeKeyId: active.id, epoch: active.epoch, sas: await deriveSas('partner-assist', transcriptHash) };
   }
 
-  const certificates = await deps.repository.listCertificates(input.ownUserId);
   const rewrapped = await provisionScopeKeyToRecipient({
     ownEnvelope: own.envelope,
     ownKemSpki: assisting.verified.kemSpki,
-    ownEnvelopeSenderSigSpki: await verifiedSenderKey(own, certificates, ownAnchor, nowMs),
+    ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.ownUserId, active, own, nowMs),
     deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandleFor(input.assistingDeviceId), peer),
     recipientKemSpki: target.verified.kemSpki,
     recipientId: target.verified.deviceId,
@@ -2177,7 +2341,7 @@ export async function partnerAssistRecoverCouple(
     header: {
       domain: domainCode('couple'),
       scopeKeyId: uuidToBytes(active.id),
-      ownerUserId: active.ownerUserId ? uuidToBytes(active.ownerUserId) : uuidToBytes(input.ownUserId),
+      ownerUserId: await ownerUserIdBytesForScope(deps, active, input.ownUserId),
       scopeId: uuidToBytes(input.coupleId),
       epoch: active.epoch,
     },
@@ -2418,14 +2582,17 @@ async function rotateCoupleScope(
     atMs: bigint;
   },
 ): Promise<{ domain: KeyDomainName; scopeId: string; epoch: bigint }> {
+  const authority = await requireCoupleAuthority(deps, input.coupleId, input.userId);
   const partnerAnchorRow = await deps.repository.getPartnerRecoveryAnchor();
   if (!partnerAnchorRow) fail('E_NO_PARTNER_ANCHOR', 'the partner has no published recovery anchor');
 
-  const partnerUserId = await partnerUserIdFor(deps, partnerAnchorRow.recoveryIdentityId);
-  const pin = await deps.localState.loadTrustAnchor(partnerUserId);
-  if (!pin) fail('E_PARTNER_ANCHOR_NOT_PINNED', 'no confirmed pairing anchor for the partner');
+  const partnerUserId = authority.lowUserId === input.userId ? authority.highUserId : authority.lowUserId;
+  const pin = partnerUserId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
   const servedFp = await publicKeyFingerprint(partnerAnchorRow.recSigSpki);
-  if (!equalBytes(servedFp, pin.rootRecSigPubFp)) {
+  if (partnerAnchorRow.recoveryIdentityId !== pin.recoveryIdentityId
+    || partnerAnchorRow.recoveryVersion !== pin.recoveryVersion
+    || !equalBytes(servedFp, pin.rootRecSigPubFp)
+    || !equalBytes(partnerAnchorRow.recoveryBundleFp, pin.recoveryBundleFp)) {
     fail('E_PARTNER_ANCHOR_MISMATCH', 'the served partner root is not the confirmed one');
   }
 
@@ -2455,9 +2622,6 @@ async function rotateCoupleScope(
     revocations: partnerRevocations,
   });
 
-  const previous = await deps.repository.listScopeKeys('couple', input.coupleId);
-  const previousActive = previous.find((key) => key.state === 'ACTIVE');
-
   const scopeKey = generateScopeKeyBytes();
   try {
     const created = await createEpoch(deps, {
@@ -2465,9 +2629,7 @@ async function rotateCoupleScope(
       scopeId: input.coupleId,
       ownerUserId: null,
       ownerCoupleId: input.coupleId,
-      ownerUserIdBytes: previousActive?.ownerUserId
-        ? uuidToBytes(previousActive.ownerUserId)
-        : uuidToBytes(input.userId),
+      ownerUserIdBytes: uuidToBytes(authority.lowUserId),
       scopeKey,
       recipients: {
         devices: [...ownDevices, ...partnerDevices].map((d) => ({
@@ -2486,13 +2648,6 @@ async function rotateCoupleScope(
   } finally {
     zeroize(scopeKey);
   }
-}
-
-/** Which account a recovery identity belongs to, from its published anchor. */
-async function partnerUserIdFor(deps: UseCaseDeps, recoveryIdentityId: string): Promise<string> {
-  const anchor = await deps.repository.getRecoveryAnchorFor(recoveryIdentityId);
-  if (!anchor) fail('E_NO_PARTNER_ANCHOR', 'the partner recovery identity has no public anchor row');
-  return anchor.userId;
 }
 
 export type RevocationOutcome = {

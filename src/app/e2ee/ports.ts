@@ -285,6 +285,7 @@ export interface E2eeRepository {
 
   // --- pairing -------------------------------------------------------------
   getPairing(coupleId: string): Promise<PairingRecord | null>;
+  getCoupleAuthorizationSnapshot(coupleId: string): Promise<CoupleAuthorizationSnapshot>;
   setPairingState(pairingId: string, state: string): Promise<void>;
 
   /**
@@ -404,6 +405,33 @@ export type PinnedTrustAnchor = {
   pinSource: 'bootstrap' | 'device_enrollment' | 'pairing' | 'recovery';
 };
 
+/** An exact anchor is never inferred from a current server response. */
+export type ExactPinnedAnchor = PinnedTrustAnchor;
+
+export type PinnedCoupleAuthority = {
+  serverOriginId: Uint8Array;
+  coupleId: string;
+  transcriptHash: Uint8Array;
+  lowUserId: string;
+  highUserId: string;
+  lowAnchor: ExactPinnedAnchor;
+  highAnchor: ExactPinnedAnchor;
+  state: 'CONFIRMED' | 'CRYPTO_ACTIVE' | 'UNLINKED';
+};
+
+export type AcceptedEnvelopeRecord = {
+  coupleId: string;
+  scopeKeyId: string;
+  epoch: bigint;
+  envelopeFingerprint: Uint8Array;
+};
+
+export type CoupleAuthorizationSnapshot = {
+  currentUserActiveCoupleId: string | null;
+  activeUserIds: string[];
+  pairingState: string | null;
+};
+
 export interface E2eeLocalState {
   loadBootstrap(userId: string): Promise<PendingBootstrap | null>;
   saveBootstrap(userId: string, pending: PendingBootstrap): Promise<void>;
@@ -411,6 +439,12 @@ export interface E2eeLocalState {
   /** The pinned trust anchor for an account. Written once, at provisioning. */
   pinTrustAnchor(userId: string, anchor: PinnedTrustAnchor): Promise<void>;
   loadTrustAnchor(userId: string): Promise<PinnedTrustAnchor | null>;
+  pinCoupleAuthority(record: PinnedCoupleAuthority): Promise<void>;
+  loadCoupleAuthority(coupleId: string): Promise<PinnedCoupleAuthority | null>;
+  markCoupleAuthorityCryptoActive(coupleId: string): Promise<void>;
+  markCoupleAuthorityUnlinked(coupleId: string): Promise<void>;
+  recordAcceptedEnvelope(record: AcceptedEnvelopeRecord): Promise<void>;
+  listAcceptedEnvelopes(coupleId: string): Promise<AcceptedEnvelopeRecord[]>;
 }
 
 /** Feature flag. E2EE stays OFF until the native integration gate closes. */

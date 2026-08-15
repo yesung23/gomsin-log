@@ -9,7 +9,9 @@
  */
 
 import { equalBytes, uuidToBytes, zeroize } from '@/crypto/bytes';
-import { KEY_DOMAIN, type KeyDomainName } from '@/crypto/domains';
+import { KEY_DOMAIN, RECIPIENT_KIND, type KeyDomainName } from '@/crypto/domains';
+import { canonicalCoupleOwnerUserId } from '@/crypto/canonicalOwner';
+import { sha256 } from '@/crypto/suite';
 import { openEnvelope } from '@/crypto/glk2';
 import { importScopeKeyForUse } from '@/crypto/keyring/scopeKeys';
 import { type DeviceKeyPort } from '@/crypto/keystore';
@@ -17,7 +19,13 @@ import type { LocalKeyBinding, LocalKeyPort } from '@/crypto/keystore/LocalKeyPo
 import { loadRevocationSet, anchorFromPin, buildChain, certificatesById } from './trust';
 import { isDeviceTrusted } from '@/crypto/deviceCertificate';
 import type { RecordCryptoEnvironment, ScopeEpoch } from '@/app/records/contentCrypto';
-import type { E2eeLocalState, E2eeRepository, CertificateRecord } from './ports';
+import type {
+  E2eeLocalState,
+  E2eeRepository,
+  CertificateRecord,
+  PinnedTrustAnchor,
+  ScopeKeyRecord,
+} from './ports';
 import { setRecordCryptoEnvironment } from '@/lib/records';
 import { setOutboxLocalCacheKey } from '@/lib/outbox';
 import { clearE2eeRuntime as clearRuntimeLifecycle, registerE2eeRuntimeTeardown } from './runtimeLifecycle';
@@ -58,24 +66,91 @@ function deviceSigHandle(deviceId: string): string {
   return `dev_sig:${deviceId}`;
 }
 
-async function exactTrustedSender(input: {
+function sameAnchor(a: PinnedTrustAnchor, b: PinnedTrustAnchor): boolean {
+  return a.subjectUserId === b.subjectUserId
+    && a.recoveryIdentityId === b.recoveryIdentityId
+    && a.recoveryVersion === b.recoveryVersion
+    && equalBytes(a.serverOriginId, b.serverOriginId)
+    && equalBytes(a.rootRecSigPubFp, b.rootRecSigPubFp)
+    && equalBytes(a.rootRecSigSpki, b.rootRecSigSpki)
+    && equalBytes(a.recoveryBundleFp, b.recoveryBundleFp);
+}
+
+async function authorizeAndVerifyScopeSender(input: {
+  runtimeUserId: string;
   repository: E2eeRepository;
   localState: E2eeLocalState;
+  scope: ScopeKeyRecord;
+  envelope: {
+    senderDeviceId: string | null;
+    recipientKind: 'device' | 'recovery_identity';
+    recipientId: string;
+    envelope: Uint8Array;
+  };
   certificate: CertificateRecord;
-  domain: KeyDomainName;
   atMs: bigint;
 }) {
-  if (!input.certificate.issuerCertificateId && !input.certificate.recoveryPublicAnchorId) {
-    fail('E_CERTIFICATE_UNBOUND', 'the envelope sender certificate has no trust anchor');
+  const { scope, certificate } = input;
+  let pin: PinnedTrustAnchor | null = null;
+  let expectedOwnerUserId: string;
+
+  if (scope.domain === 'personal' || scope.domain === 'health') {
+    if (!scope.ownerUserId || scope.ownerCoupleId !== null || scope.scopeId !== scope.ownerUserId
+      || scope.ownerUserId !== input.runtimeUserId) {
+      fail('E_SCOPE_STRUCTURE_INVALID', 'a user-owned scope has invalid owner structure');
+    }
+    expectedOwnerUserId = scope.ownerUserId;
+    // This check is deliberately before any generic trust-anchor lookup.
+    if (certificate.userId !== expectedOwnerUserId) {
+      fail('E_SCOPE_SENDER_UNAUTHORIZED', 'the sender is not the owner of this user scope');
+    }
+    pin = await input.localState.loadTrustAnchor(expectedOwnerUserId);
+  } else {
+    if (scope.ownerUserId !== null || scope.ownerCoupleId !== scope.scopeId) {
+      fail('E_SCOPE_STRUCTURE_INVALID', 'a couple scope has invalid owner structure');
+    }
+    const authority = await input.localState.loadCoupleAuthority(scope.scopeId);
+    if (authority?.state === 'UNLINKED') {
+      fail('E_COUPLE_UNLINKED', 'the pinned couple authority is permanently unlinked');
+    }
+    if (!authority || authority.state !== 'CRYPTO_ACTIVE') {
+      fail('E_COUPLE_AUTHORITY_UNAVAILABLE', 'the local pairing authority is not crypto-active');
+    }
+    const canonicalOwner = canonicalCoupleOwnerUserId(authority.lowUserId, authority.highUserId);
+    if (canonicalOwner !== authority.lowUserId) {
+      fail('E_COUPLE_OWNER_INVALID', 'the pinned pairing transcript has a non-canonical low owner');
+    }
+    const snapshot = await input.repository.getCoupleAuthorizationSnapshot(scope.scopeId);
+    const active = [...snapshot.activeUserIds].sort();
+    const expectedMembers = [authority.lowUserId, authority.highUserId].sort();
+    if (snapshot.currentUserActiveCoupleId !== scope.scopeId
+      || snapshot.pairingState !== 'CRYPTO_ACTIVE'
+      || active.length !== 2
+      || active.some((userId, index) => userId !== expectedMembers[index])) {
+      fail('E_COUPLE_LIFECYCLE_INVALID', 'server couple lifecycle is not the pinned two-party state');
+    }
+    if (certificate.userId !== authority.lowUserId && certificate.userId !== authority.highUserId) {
+      fail('E_SCOPE_SENDER_UNAUTHORIZED', 'the sender is not one of the paired users');
+    }
+    expectedOwnerUserId = authority.lowUserId;
+    const expectedAnchor = certificate.userId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
+    pin = certificate.userId === input.runtimeUserId
+      ? await input.localState.loadTrustAnchor(certificate.userId)
+      : expectedAnchor;
+    if (!pin || !sameAnchor(pin, expectedAnchor)) {
+      fail('E_PARTNER_ANCHOR_MISMATCH', 'the sender anchor is not the pinned pairing anchor');
+    }
   }
-  const pin = await input.localState.loadTrustAnchor(input.certificate.userId);
   if (!pin) fail('E_SENDER_ANCHOR_MISSING', 'the sender account has no locally confirmed trust anchor');
   const serverOriginId = await input.repository.serverOriginId();
-  if (pin.subjectUserId !== input.certificate.userId || !equalBytes(pin.serverOriginId, serverOriginId)) {
+  if (pin.subjectUserId !== certificate.userId || !equalBytes(pin.serverOriginId, serverOriginId)) {
     fail('E_SENDER_ANCHOR_CONTEXT_MISMATCH', 'the pinned sender anchor is bound to another user or server');
   }
+  if (!certificate.issuerCertificateId && !certificate.recoveryPublicAnchorId) {
+    fail('E_CERTIFICATE_UNBOUND', 'the envelope sender certificate has no trust anchor');
+  }
   const anchor = await anchorFromPin({
-    userId: input.certificate.userId,
+    userId: certificate.userId,
     serverOriginId,
     rootRecSigSpki: pin.rootRecSigSpki,
     recoveryIdentityId: pin.recoveryIdentityId,
@@ -83,15 +158,15 @@ async function exactTrustedSender(input: {
   });
   const revocations = await loadRevocationSet(
     input.repository,
-    input.certificate.userId,
+    certificate.userId,
     anchor,
     input.atMs,
   );
-  const all = await input.repository.listCertificates(input.certificate.userId);
+  const all = await input.repository.listCertificates(certificate.userId);
   const byId = certificatesById(all);
   let chain;
   try {
-    chain = buildChain(input.certificate, byId);
+    chain = buildChain(certificate, byId);
   } catch {
     fail('E_SENDER_CHAIN_INVALID', 'the envelope sender certificate chain is incomplete');
   }
@@ -99,11 +174,14 @@ async function exactTrustedSender(input: {
     chain,
     anchor,
     atMs: input.atMs,
-    requiredDomain: input.domain,
+    requiredDomain: scope.domain,
     isRevoked: revocations.asLookup(),
   });
   if (!verified) fail('E_SENDER_NOT_TRUSTED', 'the envelope sender is not trusted for this domain');
-  return verified;
+  if (!input.envelope.senderDeviceId || input.envelope.senderDeviceId !== certificate.subjectDeviceId) {
+    fail('E_ENVELOPE_SENDER_MISMATCH', 'the envelope sender device does not match its certificate');
+  }
+  return { verified, expectedOwnerUserId };
 }
 
 export async function createVerifiedRecordCryptoEnvironment(input: {
@@ -163,29 +241,42 @@ export async function createVerifiedRecordCryptoEnvironment(input: {
         if (!certificate || certificate.subjectDeviceId !== envelope.senderDeviceId) {
           fail('E_ENVELOPE_CERTIFICATE_MISMATCH', 'the envelope sender certificate does not name its sender');
         }
-        const sender = await exactTrustedSender({
+        const sender = await authorizeAndVerifyScopeSender({
+          runtimeUserId: input.userId,
           repository: input.repository,
           localState: input.localState,
+          scope,
+          envelope,
           certificate,
-          domain,
           atMs: BigInt(now()),
         });
         const unwrapped = await openEnvelope({
           envelope: envelope.envelope,
           recipientKemSpki: ownKemSpki,
-          senderSigSpki: sender.sigSpki,
+          senderSigSpki: sender.verified.sigSpki,
           deriveSecret: (peer) => input.deviceKeys.deriveSecret(deviceKemHandle(input.deviceId), peer),
         });
-        const expectedOwner = scope.ownerUserId ? uuidToBytes(scope.ownerUserId) : null;
-        if (unwrapped.header.domain !== KEY_DOMAIN[domain]
-          || !equalBytes(unwrapped.header.scopeKeyId, uuidToBytes(scope.id))
-          || !equalBytes(unwrapped.header.scopeId, uuidToBytes(scope.scopeId))
-          || unwrapped.header.epoch !== scope.epoch
-          || (expectedOwner && !equalBytes(unwrapped.header.ownerUserId, expectedOwner))) {
-          zeroize(unwrapped.scopeKey);
-          fail('E_ENVELOPE_ROUTING_MISMATCH', 'the authenticated envelope routing does not match the scope row');
-        }
         try {
+          const expectedOwner = uuidToBytes(sender.expectedOwnerUserId);
+          if (unwrapped.header.domain !== KEY_DOMAIN[domain]
+            || !equalBytes(unwrapped.header.scopeKeyId, uuidToBytes(scope.id))
+            || !equalBytes(unwrapped.header.scopeId, uuidToBytes(scope.scopeId))
+            || unwrapped.header.epoch !== scope.epoch
+            || !equalBytes(unwrapped.header.ownerUserId, expectedOwner)
+            || !equalBytes(unwrapped.header.senderDeviceId, uuidToBytes(envelope.senderDeviceId))
+            || !equalBytes(unwrapped.header.senderDeviceId, uuidToBytes(certificate.subjectDeviceId))
+            || unwrapped.header.recipientKind !== RECIPIENT_KIND.device
+            || !equalBytes(unwrapped.header.recipientId, uuidToBytes(input.deviceId))) {
+            fail('E_ENVELOPE_ROUTING_MISMATCH', 'the authenticated envelope routing does not match the scope row');
+          }
+          if (scope.domain === 'couple') {
+            await input.localState.recordAcceptedEnvelope({
+              coupleId: scope.scopeId,
+              scopeKeyId: scope.id,
+              epoch: scope.epoch,
+              envelopeFingerprint: await sha256(envelope.envelope),
+            });
+          }
           return await importScopeKeyForUse(unwrapped.scopeKey);
         } finally {
           zeroize(unwrapped.scopeKey);

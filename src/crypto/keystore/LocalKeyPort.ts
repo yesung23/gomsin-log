@@ -5,7 +5,7 @@ export type LocalKeyBinding = {
   installationId: string;
   userId: string;
   deviceId: string;
-  purpose: 'lck';
+  purpose: 'lck' | 'protected_state';
   version: 1;
 };
 

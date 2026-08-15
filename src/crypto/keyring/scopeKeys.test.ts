@@ -59,4 +59,44 @@ describe('scope-key provisioning trust boundary', () => {
       nowMs: 2n,
     })).rejects.toThrow(/E_SCOPE_ID_MISMATCH/);
   });
+
+  it('rejects a couple re-wrap whose requested owner is not the canonical transcript owner', async () => {
+    const account = await createTestAccount({ grantedDomains: ['couple'] });
+    const sender = account.devices[0];
+    const recipient = await addEnrolledDevice(account, sender, { grantedDomains: ['couple'] });
+    const header = {
+      domain: KEY_DOMAIN.couple,
+      scopeKeyId: uuidToBytes('11111111-1111-4111-8111-111111111111'),
+      ownerUserId: uuidToBytes('22222222-2222-4222-8222-222222222222'),
+      scopeId: uuidToBytes('33333333-3333-4333-8333-333333333333'),
+      epoch: 1n,
+    } as const;
+    const ownEnvelope = await sealScopeKeyForRecipient({
+      scopeKey: new Uint8Array(32).fill(7),
+      recipientKemSpki: sender.kem.spki,
+      recipientId: sender.deviceId,
+      recipientKind: RECIPIENT_KIND.device,
+      senderDeviceId: sender.deviceId,
+      senderSigSpki: sender.sig.spki,
+      sign: (message) => signWith(sender.sig, message),
+      makeEphemeral: (peer) => generateEphemeralAgreement(peer),
+      header,
+      nowMs: 1n,
+    });
+    await expect(provisionScopeKeyToRecipient({
+      ownEnvelope,
+      ownKemSpki: sender.kem.spki,
+      ownEnvelopeSenderSigSpki: sender.sig.spki,
+      deriveSecret: (peer) => deriveWith(sender.kem, peer),
+      recipientKemSpki: recipient.kem.spki,
+      recipientId: recipient.deviceId,
+      recipientKind: RECIPIENT_KIND.device,
+      senderDeviceId: sender.deviceId,
+      senderSigSpki: sender.sig.spki,
+      sign: (message) => signWith(sender.sig, message),
+      makeEphemeral: (peer) => generateEphemeralAgreement(peer),
+      header: { ...header, ownerUserId: uuidToBytes('44444444-4444-4444-8444-444444444444') },
+      nowMs: 2n,
+    })).rejects.toThrow(/E_OWNER_MISMATCH/);
+  });
 });

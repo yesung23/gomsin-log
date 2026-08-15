@@ -325,7 +325,7 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 - New HEAD / Reviewed HEAD: this commit (verified after commit)
 
 #### CHANGED / REVIEWED
-- `supabase/migrations/043_conversation_bridge_completion.sql`: adds monotonic `is_completed` coordination metadata, active-couple UPDATE RLS, and retains only an opaque source id after record deletion
+- `supabase/migrations/043_conversation_bridge_completion.sql`: adds monotonic `is_completed` coordination metadata, active-couple UPDATE RLS, retains only an opaque source id after record deletion, and removes marks atomically when a shared record becomes private
 - `src/lib/talkAbout.ts`, `talkAboutList.ts`, `store.tsx`, `sync.ts`: pending-only hydration, realtime invalidation, account/workspace guards, exact-source unavailable handling
 - `TalkAboutListWidget.tsx`: Home `오늘 이야기할 것 · N`, author/date/safe preview, explicit original view and completion action
 - regression tests and local actor-RLS harness: updated for completion, unavailable sources, account-switch isolation, duplicate and authorization paths
@@ -338,7 +338,7 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 #### VERIFICATION
 - targeted Vitest (`store`, `sync`, `talkAboutList`, widget, RecordPage): PASS — 106 tests
-- `node scripts/phase0/storage-authz-harness.mjs`: PASS — 124 actor/RLS assertions on throwaway PostgreSQL
+- `node scripts/phase0/storage-authz-harness.mjs`: PASS — 125 actor/RLS assertions on throwaway PostgreSQL
 - `npm run typecheck`: PASS
 - `npm run lint`: PASS
 - `npm run build`: PASS

@@ -299,6 +299,8 @@ function recordFailureMessage(reason: RecordMutationReason): string {
       // alternatives on this path were a transient-retry message and, worse, a
       // connection diagnosis for a device that was online.
       return '서버 설정이 아직 끝나지 않아 커플 공간을 확인할 수 없어요. 관리자에게 문의해 주세요.';
+    case 'protection_required':
+      return '이 기기에서 기록 보호 설정이 필요해요. 설정에서 먼저 준비해 주세요.';
     case 'deletion_pending':
       return '탈퇴 처리가 진행 중이어서 기록을 저장할 수 없어요.';
     default:
@@ -308,6 +310,13 @@ function recordFailureMessage(reason: RecordMutationReason): string {
 
 function recordFailure(reason: RecordMutationReason): RecordMutationResult {
   return { ok: false, reason, error: recordFailureMessage(reason) };
+}
+
+function recordSaveFailureReason(result: {
+  reason: ServerErrorKind;
+  protectionRequired?: boolean;
+}): RecordMutationReason {
+  return result.protectionRequired ? 'protection_required' : result.reason;
 }
 
 function blocksServerCall(status: DeletionStatus): boolean {
@@ -2092,7 +2101,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // The cause travels all the way from PostgREST to the toast, so a `42501`
         // membership rejection can no longer be reported as a network problem.
         if (saved.reason === 'auth_expired') void handleAuthExpired();
-        return queueOrFail(saved.reason);
+        return queueOrFail(recordSaveFailureReason(saved));
       }
       authoritativeRevision = saved.contentRevision;
     } catch (error) {
@@ -2408,7 +2417,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       if (!saved.ok) {
         if (saved.reason === 'auth_expired') void handleAuthExpired();
-        return recordFailure(saved.reason);
+        return recordFailure(recordSaveFailureReason(saved));
       }
       authoritativeRevision = saved.contentRevision;
     } catch (error) {
@@ -2615,7 +2624,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return {
           ok: false,
           failedFiles: allFileNames,
-          error: recordFailureMessage(patched.reason),
+          error: recordFailureMessage(recordSaveFailureReason(patched)),
         };
       }
       authoritativeRevision = patched.contentRevision;

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { AppState } from '@/types';
 import { clearAllComposerDrafts } from '@/lib/composerDraft';
 
@@ -34,11 +34,20 @@ const setHighlightedRecordId = vi.fn();
 
 let online = true;
 const toastLog: { level: string; message: string }[] = [];
+const toastActions: { label: string; onClick: () => void }[] = [];
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{location.pathname}</output>;
+}
 
 vi.mock('sonner', () => ({
   toast: {
     success: (message: string) => { toastLog.push({ level: 'success', message }); },
-    error: (message: string) => { toastLog.push({ level: 'error', message }); },
+    error: (message: string, options?: { action?: { label: string; onClick: () => void } }) => {
+      toastLog.push({ level: 'error', message });
+      if (options?.action) toastActions.push(options.action);
+    },
     warning: (message: string) => { toastLog.push({ level: 'warning', message }); },
     info: (message: string) => { toastLog.push({ level: 'info', message }); },
   },
@@ -109,6 +118,7 @@ beforeEach(() => {
   addRecordWithMedia.mockClear();
   queueRecordForLater.mockClear();
   toastLog.length = 0;
+  toastActions.length = 0;
   online = true;
   clearAllComposerDrafts();
   clearAllComposerDrafts();
@@ -199,6 +209,25 @@ describe('online but unreachable: the store queues, the composer says so', () =>
     expect(messages('error')[0]).toBe('권한이 없어요.');
     expect(messages('success')).toEqual([]);
     expect(screen.getByDisplayValue('권한 실패')).toBeInTheDocument();
+  });
+
+  it('sends a protection-required write to Settings without losing the draft', async () => {
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: false,
+      failedFiles: [],
+      error: '이 기기에서 기록 보호 설정이 필요해요. 설정에서 먼저 준비해 주세요.',
+      reason: 'protection_required',
+    } as never);
+    const user = userEvent.setup();
+    render(<MemoryRouter><LocationProbe /><TodayLogWidget /></MemoryRouter>);
+
+    await typeAndSave(user, '보호 설정이 필요한 기록');
+
+    await waitFor(() => expect(toastActions).toHaveLength(1));
+    expect(toastActions[0].label).toBe('설정 열기');
+    await act(async () => { toastActions[0].onClick(); });
+    expect(screen.getByTestId('location')).toHaveTextContent('/settings');
+    expect(screen.getByDisplayValue('보호 설정이 필요한 기록')).toBeInTheDocument();
   });
 
   it('PRESERVATION: a normal save still reports delivery, not queueing', async () => {

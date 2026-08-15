@@ -114,6 +114,30 @@ partner talk-about mark만 generic 재진입 이벤트로 만든다. cold load�
 
 ---
 
+### 2026-08-16 · Limited Validation Ready Core UX — write protection handoff
+
+Queue 2의 완료 HEAD를 기준으로 핵심 사용자 경로를 다시 검증했다. 전체 Vitest를
+실행하면서 두 통합 회귀를 실제로 발견·수정했다: 알림 재진입 bridge를 `MobileShell` 안에
+두어 StoreProvider 없는 shell 단위 테스트가 깨지던 문제는 App/store 경계로 옮겼고,
+Settings가 `src/crypto` 타입·adapter를 직접 가져가던 문제는 application boundary로
+모았다. 그 결과 독립 shell/accessibility 테스트와 E2EE layering 경계가 함께 통과한다.
+
+- write floor에서 device key/epoch가 없을 때 `saveRecordToDB()`가 일반 서버 오류로
+  뭉개지지 않고 `protectionRequired` 증거를 전달한다. Store는 이를
+  `protection_required`로 분류하고, 기록 컴포저는 draft를 유지한 채 Settings로 바로
+  이동할 수 있는 `설정 열기` action을 제공한다. 평문 fallback은 추가하지 않았다.
+- record 작성 탭의 독립 컴포저, 양쪽 role의 `상대방의 오늘`, durable `?record=` 원본
+  라우팅과 offline outbox를 현재 코드·회귀 테스트와 대조해 CURRENT_STATE의 해결 항목을
+  갱신했다.
+- 검증: targeted core tests 73 tests PASS, 전체 Vitest 157 files / 2283 tests PASS,
+  `npm run test:p0` 76 assertions PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run test:write-floor` 18 assertions PASS, `npm run test:rollback` PASS,
+  `npm run typecheck` PASS, `npm run lint` PASS, `npm run build` PASS,
+  `git diff --check` PASS. 실기기 종료·재실행/실제 계정 전환·remote Supabase 상태는
+  UNVERIFIED / MANUAL GATE.
+
+---
+
 ### 2026-08-16 · Device Protection & Recovery UX V1 — local implementation
 
 `35da04c` Core Privacy Foundation integration을 기준으로 `daily_records` P5 actor/RLS

@@ -52,6 +52,8 @@ export type RecordMutationReason =
    * and the user is not the one who can.
    */
   | 'workspace_unconfigured'
+  /** The device has crossed the write floor but has not completed protection setup. */
+  | 'protection_required'
   /** A deletion is pending for this account. */
   | 'deletion_pending';
 
@@ -129,7 +131,13 @@ export interface StoreContextType {
   addRecordWithMedia: (
     record: Omit<DailyRecord, 'id' | 'createdAt'>,
     files: File[],
-  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string; queued?: boolean }>;
+  ) => Promise<{
+    ok: boolean;
+    failedFiles: string[];
+    error?: string;
+    queued?: boolean;
+    reason?: RecordMutationReason;
+  }>;
   /**
    * Store a record for later without attempting the write.
    *

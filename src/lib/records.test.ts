@@ -441,6 +441,24 @@ describe('saveRecordToDB', () => {
     expect(query.update.mock.calls[0][0]).toMatchObject({ content_revision: 2 });
   });
 
+  it('reports protection-required separately when the write floor has no usable key', async () => {
+    setRecordCryptoEnvironment({
+      floorFor: async () => 1,
+      epochsFor: async () => [],
+      scopeKeyFor: async () => null,
+    });
+
+    const result = await saveRecordToDB(
+      encryptedRecord,
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '11111111-1111-4111-8111-111111111111',
+      { kind: 'create' },
+    );
+
+    expect(result).toEqual({ ok: false, reason: 'server', protectionRequired: true });
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
   it('uses INSERT for create replay, so a lost response cannot silently update an existing id', async () => {
     setRecordCryptoEnvironment(await encryptedEnvironment());
     const query = mockEncryptedResponse(null, { code: '23505', message: 'duplicate key value' });

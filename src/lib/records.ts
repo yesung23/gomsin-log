@@ -407,7 +407,12 @@ export type RecordWriteResult =
 
 export type RecordSaveResult =
   | { ok: true; contentRevision: number }
-  | { ok: false; reason: ServerErrorKind };
+  | {
+      ok: false;
+      reason: ServerErrorKind;
+      /** The request was blocked locally because the device lacks a required key. */
+      protectionRequired?: boolean;
+    };
 
 /** Reason to use when the client is not configured to reach a server at all. */
 function unconfiguredReason(): ServerErrorKind {
@@ -470,7 +475,7 @@ export async function saveRecordToDB(
       // sending this in the clear is the exact downgrade the floor prevents --
       // and the database would refuse it anyway. Fail closed and say why.
       console.error('[gomsinlog] Refusing to write a record unencrypted:', plan.reason);
-      return { ok: false, reason: encryptionRefusalReason() };
+      return { ok: false, reason: encryptionRefusalReason(), protectionRequired: true };
     }
 
     if (plan.mode === 'plaintext') {

@@ -902,6 +902,76 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-15 · [Control Tower / Conversation Bridge V1] private-source privacy clarification
+
+#### PLAN POSITION
+- Phase: P4 / M2
+- Workstream: Product privacy clarification
+- Step: private-source transition exception for Conversation Bridge unavailable state
+- Previous Gate: Conversation Bridge canonical direction update `def18da`
+- This Gate: shared → private removes coordination metadata before the partner can see an unavailable item
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: preceding Conversation Bridge entry — YES
+- Does this task conflict with canonical direction: NO — it resolves an ambiguity in favor of the existing private-record non-disclosure rule
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: Control Tower implementation owner
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `def18da6a5764268262d41dea71ef959470c7f2f`
+- Old HEAD: `def18da6a5764268262d41dea71ef959470c7f2f`
+- New HEAD / Reviewed HEAD: this commit
+
+#### CHANGED / REVIEWED
+- `docs/PRODUCT_V3.md`: a deleted/stale source remains generic unavailable; a shared → private transition removes the metadata so no private-record existence or mark state is disclosed
+- `docs/WORK_LOG.md`: this privacy interpretation index
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged in this documentation commit
+- product semantics: no self-chat or scope expansion
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- `git diff --check`: PASS
+- remote Supabase catalog / production migration state: UNVERIFIED
+
+#### REVIEW IMPACT
+- DELTA — product privacy wording; aligned with private-record non-disclosure invariant
+
+#### BLOCKERS
+- code: implementation is on separate `codex/conversation-bridge-v1` branch
+- environment: remote migration state UNVERIFIED
+- external/manual: none
+
+#### STOPPED AT
+- exact completed boundary: canonical privacy wording clarified; no code or remote action on PR #61
+
+#### REMAINING
+- review and merge decisions remain separate
+
+#### NEXT ACTION
+- next owner: release owner
+- tool/model: Terra / High
+- 기준 SHA: current PR #61 head after commit
+- exact next task: review the separate Conversation Bridge implementation branch
+
+#### DO NOT ADVANCE UNTIL
+- no Production migration without separate authorization
+
+#### PRODUCTION
+- NOT APPLIED
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

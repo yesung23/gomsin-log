@@ -10,17 +10,21 @@
 | `hooks/` | 코드로 결정 가능한 금지 | 판단이 필요한 회색지대 |
 | `docs/CURRENT_STATE.md` · live Git | 휘발성 사실 | 제품 전략 |
 
-## Skills
+## Skills — 얇은 래퍼일 뿐이다
 
-| Skill | 사용 시점 |
-|---|---|
-| `gomsin-control-tower` | 세션 시작, 상태 복구, DIRECTION CHECK |
-| `gomsin-feature-build` | 기능 구현·비사소한 버그 수정 |
-| `gomsin-security-review` | 인증·E2EE·RLS·커플 lifecycle |
-| `gomsin-migration-gate` | migration 작성·검증 |
-| `gomsin-release-validation` | 종료 전 검증과 unverified 분류 |
+절차의 **원본은 [`docs/skills/`](../docs/skills/README.md)** 이며 Codex·Kiro와 공유한다.
+`.claude/skills/*/SKILL.md`는 frontmatter(trigger 조건) + "원본을 읽어라" 4줄뿐이다.
 
-Skill 본문은 짧게 유지하고 canonical 문서를 **읽도록 지시**한다. 복사하지 않는다.
+| Skill | 원본 | 사용 시점 |
+|---|---|---|
+| `gomsin-control-tower` | `docs/skills/control-tower.md` | 세션 시작, 상태 복구, DIRECTION CHECK |
+| `gomsin-feature-build` | `docs/skills/feature-build.md` | 기능 구현·비사소한 버그 수정 |
+| `gomsin-security-review` | `docs/skills/security-review.md` | 인증·E2EE·RLS·커플 lifecycle |
+| `gomsin-migration-gate` | `docs/skills/migration-gate.md` | migration 작성·검증 |
+| `gomsin-release-validation` | `docs/skills/release-validation.md` | 종료 전 검증과 unverified 분류 |
+
+절차를 고칠 때는 **원본만** 고친다. 래퍼는 경로가 바뀔 때만 손댄다. 같은 규칙을 도구마다
+복사하면 반드시 갈라진다.
 
 ## Hooks (deterministic, PreToolUse)
 

@@ -1,0 +1,5 @@
+# Verification can create ordinary local test/build artifacts but must not make
+# product or design changes unless the primary explicitly asks for a tiny fix.
+sandbox_mode = "workspace-write"
+model = "gpt-5.6-luna"
+model_reasoning_effort = "high"

@@ -91,6 +91,40 @@
 
 ---
 
+### 2026-08-16 · 세 도구 공용 절차서 통합 (Codex · Kiro · Claude Code)
+
+같은 절차를 도구마다 따로 두면 반드시 갈라지므로, 절차 원본을 `docs/skills/`(도구 중립,
+Git 추적) 한 곳으로 모으고 각 도구는 그 파일을 가리키는 얇은 래퍼만 갖게 했다. 제품
+코드·crypto·migration·Production은 변경하지 않았다.
+
+- `docs/skills/` 신설: `control-tower` `feature-build` `security-review`
+  `migration-gate` `release-validation` + `README.md`(도구별 진입점, 공유되는 사실의
+  소유자, 도구 간 인계 절차).
+- `.claude/skills/*/SKILL.md`를 70줄대 본문에서 **10줄 래퍼**로 축소(frontmatter +
+  "원본을 읽어라"). 내용 중복 제거.
+- `.kiro/steering/shared-procedures.md` 신설 — Kiro가 같은 절차서를 쓰도록 하고, 다른
+  도구가 남긴 작업을 이어받는 절차와 이 저장소에서 실제로 나온 실수 3건을 명시.
+- `.kiro/steering/merge-policy.md` 수정: `kiro/v1-product-excellence-audit`로의 **자동
+  merge 허용을 제거**했다. 그 브랜치는 현재 활성 스택과 무관해졌고(stale), 도구마다 다른
+  merge 권한을 갖는 것 자체가 위험하다. 이제 세 도구 모두 "merge는 사용자만"으로
+  통일된다(Claude Code는 hook으로 `gh pr merge`를 차단). CI가 없을 때 green을 주장하지
+  않는다는 규칙과 정직성 요구사항은 보존했다.
+- `AGENTS.md` §16에 `docs/skills/README.md` 행을 추가하고, **누락돼 있던 business
+  canonical**(`BUSINESS_MEMORY_ROADMAP_V1.md`)을 추가했다.
+- `.gitignore`: `/.codex/` 전체 제외를 유지하면서 `config.toml`과 `agents/`만 예외로
+  추적한다(worktree 체크아웃·캐시·세션 DB는 계속 제외). 이제 새 기기·새 clone에서도
+  subagent 5개 설정이 따라온다.
+- `scripts/claude/` → `scripts/agent/`로 이동. 공용 절차서가 특정 도구 경로를 가리키지
+  않게 했다.
+
+검증: 마크다운 링크 전수 검사 **깨진 링크 0건**, Skill 래퍼 5/5 경로 유효,
+`.codex/` 추적 대상이 정확히 설정 6개(worktree 복사본 제외됨), hook 재확인
+(`gh pr merge` 차단 / `npm test` 통과), `live-state.sh`·`validate.sh` 새 경로에서 동작,
+typecheck·lint PASS, full Vitest **158 files / 2,302 tests PASS**.
+Production **NOT APPLIED**, master merge 없음.
+
+---
+
 ### 2026-08-16 · Claude Code 오케스트레이션 레이어 정리 (제품 코드 변경 없음)
 
 반복 지침을 올바른 레이어로 옮겼다. 제품 기능·crypto·migration·Production은 건드리지
@@ -108,7 +142,7 @@
   `gh pr merge`, frozen 041/042 조작, secret 읽기, 기존 migration 재작성, credential
   파일 쓰기. PostToolUse·Stop hook은 **의도적으로 두지 않았다** — 매 저장/종료마다 느린
   검사를 강제하지 않고 범위별 validation을 쓴다.
-- `scripts/claude/live-state.sh`(read-only 상태 출력), `scripts/claude/validate.sh`
+- `scripts/agent/live-state.sh`(read-only 상태 출력), `scripts/agent/validate.sh`
   (`docs|app|security|migration` 범위별 검증 + unverified 고정 출력). 후자는
   `package.json`에 실제 있는 script만 호출한다.
 - Agent Teams: **2.1.220에 team/swarm 기능이 없음**을 `claude --help`로 확인. 정책상 OFF.

@@ -7,13 +7,16 @@
 
 > 절차가 필요한 작업은 아래 Skill을 쓴다. 이 파일에 절차를 복사하지 않는다.
 >
-> | 상황 | Skill |
-> |---|---|
-> | 세션 시작·상태 복구·방향 확인 | `gomsin-control-tower` |
-> | 기능 구현 | `gomsin-feature-build` |
-> | 인증·E2EE·RLS·커플 lifecycle 검토 | `gomsin-security-review` |
-> | migration 작성·검증 | `gomsin-migration-gate` |
-> | 종료 전 검증 | `gomsin-release-validation` |
+> | 상황 | Skill | 원본 |
+> |---|---|---|
+> | 세션 시작·상태 복구·방향 확인 | `gomsin-control-tower` | `docs/skills/control-tower.md` |
+> | 기능 구현 | `gomsin-feature-build` | `docs/skills/feature-build.md` |
+> | 인증·E2EE·RLS·커플 lifecycle 검토 | `gomsin-security-review` | `docs/skills/security-review.md` |
+> | migration 작성·검증 | `gomsin-migration-gate` | `docs/skills/migration-gate.md` |
+> | 종료 전 검증 | `gomsin-release-validation` | `docs/skills/release-validation.md` |
+>
+> 절차의 원본은 [`docs/skills/`](docs/skills/README.md)이며 Codex·Kiro와 공유한다.
+> Skill은 그 파일을 가리키는 얇은 래퍼다. 절차를 고칠 때는 원본만 고친다.
 
 ## Control Tower session protocol
 

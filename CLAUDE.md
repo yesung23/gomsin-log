@@ -5,6 +5,16 @@
 → 그 파일은 **[`docs/WORK_LOG.md`](docs/WORK_LOG.md)** 다. 세션이 끝날 때마다
 항목 하나를 추가한다.
 
+> 절차가 필요한 작업은 아래 Skill을 쓴다. 이 파일에 절차를 복사하지 않는다.
+>
+> | 상황 | Skill |
+> |---|---|
+> | 세션 시작·상태 복구·방향 확인 | `gomsin-control-tower` |
+> | 기능 구현 | `gomsin-feature-build` |
+> | 인증·E2EE·RLS·커플 lifecycle 검토 | `gomsin-security-review` |
+> | migration 작성·검증 | `gomsin-migration-gate` |
+> | 종료 전 검증 | `gomsin-release-validation` |
+
 ## Control Tower session protocol
 
 대화 기억은 source of truth가 아니다. 새 채팅을 포함한 모든 비사소한 작업은
@@ -133,6 +143,14 @@ stale하게 만들지 않는다.
   `docs/BUSINESS_MEMORY_ROADMAP_V1.md` → `docs/ENGINEERING_ROADMAP.md` → `docs/CURRENT_STATE.md` → 작업과 직접 관련된
   specialist 문서다. `docs/PROJECT_HANDOFF_2026-08-13.md`는 온보딩용 지도이며,
   일반 세션에서 모든 역사 문서를 읽게 하는 목록이 아니다.
+
+## 이 파일에 넣지 않는 것
+
+- PR 번호·HEAD·SHA·CI 결과·현재 blocker 같은 휘발성 상태 → `docs/CURRENT_STATE.md`와
+  작업 시점의 live 확인이 소유한다.
+- 특정 작업에서만 필요한 절차 → 해당 Skill.
+- 코드로 강제되는 금지 규칙(Production mutation, master 직접 push, frozen migration
+  041/042 재사용, secret 노출) → `.claude/hooks/`가 결정적으로 차단한다.
 
 ## 기록할 때 지킬 것
 

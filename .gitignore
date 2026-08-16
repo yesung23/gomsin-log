@@ -1,6 +1,10 @@
 node_modules
 dist
 .DS_Store
+
+# Claude Code: per-developer permission grants. The shared orchestration layer
+# (skills, hooks, settings.json) IS tracked; only local approvals are not.
+.claude/settings.local.json
 /.codex/
 /output/
 /tmp/

@@ -91,6 +91,37 @@
 
 ---
 
+### 2026-08-16 · Claude Code 오케스트레이션 레이어 정리 (제품 코드 변경 없음)
+
+반복 지침을 올바른 레이어로 옮겼다. 제품 기능·crypto·migration·Production은 건드리지
+않았다. 설치 버전을 실제로 확인했다: **Claude Code 2.1.220**.
+
+- `CLAUDE.md`: 49 → 63줄. 항상 참인 규칙만 남기고 절차는 Skill로, 결정 가능한 금지는
+  Hook으로 옮겼다. 누락된 business canonical(우선순위 2번)을 추가했고, "이 파일에 넣지
+  않는 것"(휘발성 PR/HEAD/blocker)을 명시했다.
+- `.claude/skills/` 5개 신설: `gomsin-control-tower`(복구·live 검증·DIRECTION CHECK),
+  `gomsin-feature-build`, `gomsin-security-review`, `gomsin-migration-gate`,
+  `gomsin-release-validation`. 각 47–77줄이며 canonical 문서를 복사하지 않고 읽도록
+  지시한다. 모든 description에 "Do not use for…" 경계를 넣어 trigger 범위를 좁혔다.
+- `.claude/hooks/` 2개 신설(PreToolUse, deterministic): 원격 Supabase migration/link,
+  force push, `reset --hard`, `clean -f`, worktree 폐기, master 직접 push, `git merge`,
+  `gh pr merge`, frozen 041/042 조작, secret 읽기, 기존 migration 재작성, credential
+  파일 쓰기. PostToolUse·Stop hook은 **의도적으로 두지 않았다** — 매 저장/종료마다 느린
+  검사를 강제하지 않고 범위별 validation을 쓴다.
+- `scripts/claude/live-state.sh`(read-only 상태 출력), `scripts/claude/validate.sh`
+  (`docs|app|security|migration` 범위별 검증 + unverified 고정 출력). 후자는
+  `package.json`에 실제 있는 script만 호출한다.
+- Agent Teams: **2.1.220에 team/swarm 기능이 없음**을 `claude --help`로 확인. 정책상 OFF.
+- MCP: 연결된 8개(Notion·Gmail·Drive·Slack 등)는 이 프로젝트와 무관. 저장소 작업에서
+  사용하지 않고 GitHub live state는 `gh`로 충분. Production write는 자동 루프에 금지.
+- `.claude/settings.local.json`은 개인 권한 파일이라 `.gitignore`에 추가(공유 레이어만 추적).
+
+검증: hook 차단 8/8 + 파일 5/5 정확, 정상 개발 명령 12건 오탐 **0건**, 쓰기 허용 5/5,
+`claude doctor` OK, JSON/shell 문법 OK, typecheck·lint·build PASS,
+full Vitest **158 files / 2,302 tests PASS**. Production **NOT APPLIED**, master merge 없음.
+
+---
+
 ### 2026-08-16 · QUEUE 2–7 — gate 재평가 (환경 전제조건으로 대부분 차단)
 
 QUEUE 1을 닫은 뒤 남은 queue의 진입 조건을 이 checkout에서 재확인했다. 코드를 쓰지 않고

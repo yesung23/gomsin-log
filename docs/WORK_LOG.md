@@ -1517,6 +1517,9 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 시도할 수 있는 경로와, 활성화 결과·계정 전환·복구 상태를 함께 다뤄야 하는 공백을
 확인했다.
 
+원본 security code commit은 `08063a1d3e9e8650484149f5e8cde6fe045e1f8d`이고, 이후
+문서-only handoff commit이 별도로 이어졌다.
+
 - `coupleProtectionBarrier`를 계정·정확한 couple scope에만 묶어 연결 상태가 공개되기
   전부터 shared write를 fail closed로 만들고, 서버 floor가 실제 활성화된 뒤에만
   해제했다. runtime/session/store의 single-flight와 teardown도 같은 범위로 정합화했다.

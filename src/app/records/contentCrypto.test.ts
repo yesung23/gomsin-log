@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { AES_KEY_BYTES, importAesKey } from '@/crypto/suite';
 import { sealRecordContent } from '@/crypto/recordContent';
@@ -12,6 +12,10 @@ import {
   type RecordCryptoEnvironment,
   type ScopeEpoch,
 } from './contentCrypto';
+import {
+  clearCoupleProtectionRequirement,
+  requireCoupleProtection,
+} from '@/app/e2ee/coupleProtectionBarrier';
 
 const OWNER = '11111111-2222-4333-8444-555555555555';
 const COUPLE = 'aaaaaaaa-2222-4333-8444-555555555555';
@@ -49,9 +53,17 @@ const sharedRouting = { isPrivate: false, ownerUserId: OWNER, coupleId: COUPLE }
 const privateRouting = { isPrivate: true, ownerUserId: OWNER, coupleId: COUPLE };
 
 describe('decideRecordWrite', () => {
+  afterEach(() => clearCoupleProtectionRequirement(OWNER, COUPLE));
+
   it('writes plaintext while the scope has no write floor', async () => {
     const plan = await decideRecordWrite(environment({}), sharedRouting);
     expect(plan.mode).toBe('plaintext');
+  });
+
+  it('refuses a connected couple while its local protection barrier is active', async () => {
+    requireCoupleProtection(OWNER, COUPLE);
+    const plan = await decideRecordWrite(environment({}), sharedRouting);
+    expect(plan).toEqual({ mode: 'refused', reason: 'no_active_epoch' });
   });
 
   it('reads the floor of the scope the record routes to, not a global flag', async () => {

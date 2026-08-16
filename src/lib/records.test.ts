@@ -11,6 +11,10 @@ import {
 } from '@/lib/records';
 import { AES_KEY_BYTES, importAesKey } from '@/crypto/suite';
 import type { RecordCryptoEnvironment, ScopeEpoch } from '@/app/records/contentCrypto';
+import {
+  clearCoupleProtectionRequirement,
+  requireCoupleProtection,
+} from '@/app/e2ee/coupleProtectionBarrier';
 
 const { mockFrom, mockSupabase } = vi.hoisted(() => {
   const mockFrom = vi.fn();
@@ -321,6 +325,8 @@ describe('saveRecordToDB', () => {
 
   afterEach(() => {
     setRecordCryptoEnvironment(null);
+    clearCoupleProtectionRequirement('user-001', 'couple-001');
+    clearCoupleProtectionRequirement('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
   });
 
   async function encryptedEnvironment(): Promise<RecordCryptoEnvironment> {
@@ -452,6 +458,27 @@ describe('saveRecordToDB', () => {
       encryptedRecord,
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       '11111111-1111-4111-8111-111111111111',
+      { kind: 'create' },
+    );
+
+    expect(result).toEqual({ ok: false, reason: 'server', protectionRequired: true });
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it('blocks shared plaintext while an authoritative connected-couple barrier is active', async () => {
+    setRecordCryptoEnvironment({
+      floorFor: async () => 0,
+      epochsFor: async () => [],
+      scopeKeyFor: async () => null,
+    });
+    const userId = '11111111-1111-4111-8111-111111111111';
+    const coupleId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    requireCoupleProtection(userId, coupleId);
+
+    const result = await saveRecordToDB(
+      { ...encryptedRecord, isPrivate: false },
+      coupleId,
+      userId,
       { kind: 'create' },
     );
 

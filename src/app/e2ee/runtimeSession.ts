@@ -22,14 +22,13 @@ import { setRecordCryptoEnvironment } from '@/lib/records';
 export const E2EE_RUNTIME_INSTALLATION_ID = 'gomsinlog-e2ee-runtime-v1';
 
 export type RuntimeSessionResult =
-  | { status: 'installed'; deviceId: string; coupleProtection: CoupleProtectionOutcomeReason }
+  | { status: 'installed'; deviceId: string; coupleProtection: CoupleProtectionOutcomeReason | 'not_attempted' }
   | {
       status: 'guarded';
       reason: 'bootstrap_incomplete'
         | 'secure_storage_unavailable'
         | 'runtime_unavailable'
-        /** Protected ciphertext exists but its local key is gone: kit-verified recovery only. */
-        | 'recovery_required';
+        /** Protected local state is unusable; no replacement authority is minted. */
     }
   | { status: 'stale' };
 
@@ -78,6 +77,8 @@ export type InstallRuntimeForSessionInput = {
   hasSealedOutbox?: () => Promise<boolean>;
   /** Reported couple id, used only for honest status reporting (see below). */
   activeCoupleId?: string | null;
+  /** Session hydration installs the runtime first; connected lifecycle owns activation. */
+  activateCoupleProtection?: boolean;
   isCurrentSession?: () => boolean;
 };
 
@@ -193,18 +194,17 @@ export async function installE2eeRuntimeForSession(
       installed.close();
       return { status: 'stale' };
     }
-    // Couple protection is completed here, inside the authenticated session that
-    // just installed a verified runtime. Leaving it to a Settings ceremony was the
-    // gap that let real couples keep writing shared records below their floor.
-    const coupleProtection = await activateOwnedCoupleProtection({
-      userId: input.userId,
-      deviceId: installed.deviceId,
-      environment: installed.environment,
-      repository: input.repository,
-      localState: input.localState,
-      activeCoupleId: input.activeCoupleId,
-      isCurrentSession: isCurrent,
-    });
+    const coupleProtection = input.activateCoupleProtection === false
+      ? 'not_attempted' as const
+      : await activateOwnedCoupleProtection({
+        userId: input.userId,
+        deviceId: installed.deviceId,
+        environment: installed.environment,
+        repository: input.repository,
+        localState: input.localState,
+        activeCoupleId: input.activeCoupleId,
+        isCurrentSession: isCurrent,
+      });
     if (!isCurrent()) {
       installed.close();
       return { status: 'stale' };
@@ -226,6 +226,7 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
   supabaseClient: SupabaseClient | null;
   hasSealedOutbox?: () => Promise<boolean>;
   activeCoupleId?: string | null;
+  activateCoupleProtection?: boolean;
   isCurrentSession?: () => boolean;
 }): Promise<RuntimeSessionResult> {
   if (!input.supabaseClient) return { status: 'guarded', reason: 'secure_storage_unavailable' };
@@ -238,7 +239,7 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
   const deviceKeys = getDeviceKeyPort();
   const localKeys = getLocalKeyPort();
   let localState: E2eeLocalState | null = null;
-  let protectedStateRecoveryRequired = false;
+  let protectedStateUnavailable = false;
   if (localKeys) {
     try {
       localState = await createProtectedE2eeLocalState({
@@ -255,7 +256,7 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
       // be retried as a fresh initialization that would replace authority over
       // existing ciphertext.
       const code = error instanceof Error ? error.message : '';
-      protectedStateRecoveryRequired = code === 'E_PROTECTED_STATE_KEY_MISSING'
+      protectedStateUnavailable = code === 'E_PROTECTED_STATE_KEY_MISSING'
         || code === 'E_PROTECTED_STATE_UNREADABLE';
       localState = null;
     }
@@ -263,10 +264,11 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
   if (input.isCurrentSession && !input.isCurrentSession()) {
     return { status: 'stale' };
   }
-  if (protectedStateRecoveryRequired) {
-    // The floor guard installed above stays in place, so writes above a floor
-    // keep failing closed until an explicit kit-verified recovery runs.
-    return { status: 'guarded', reason: 'recovery_required' };
+  if (protectedStateUnavailable) {
+    // The existing recovery use case requires a usable local-state capability
+    // and does not define a safe replacement protocol for this local key/blob.
+    // Do not invent that protocol here; remain guarded and honest.
+    return { status: 'guarded', reason: 'secure_storage_unavailable' };
   }
   return installE2eeRuntimeForSession({
     userId: input.userId,
@@ -277,6 +279,7 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
     installationId: E2EE_RUNTIME_INSTALLATION_ID,
     hasSealedOutbox: input.hasSealedOutbox,
     activeCoupleId: input.activeCoupleId,
+    activateCoupleProtection: input.activateCoupleProtection,
     isCurrentSession: input.isCurrentSession,
   });
 }
@@ -300,7 +303,11 @@ export async function activateCoupleProtectionForAuthenticatedSession(input: {
 }): Promise<CoupleProtectionOutcomeReason> {
   const isCurrent = () => input.isCurrentSession?.() ?? true;
   if (!input.supabaseClient || !isCurrent()) return 'unavailable';
-  const installed = await installE2eeRuntimeForAuthenticatedSession(input);
+  const installed = await installE2eeRuntimeForAuthenticatedSession({
+    ...input,
+    activateCoupleProtection: true,
+  });
   if (installed.status !== 'installed') return 'unavailable';
+  if (installed.coupleProtection === 'not_attempted') return 'unavailable';
   return installed.coupleProtection;
 }

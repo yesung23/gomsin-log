@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import type { AppState } from '@/types';
 import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
+import {
+  clearAllCoupleProtectionRequirements,
+  isCoupleProtectionRequired,
+} from '@/app/e2ee/coupleProtectionBarrier';
 
 type AuthCallback = (event: string, session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } } | null) => void;
 
@@ -95,8 +99,19 @@ vi.mock('@/lib/sync', () => ({
 
 /** Ordered log of media-related calls, used to assert the two-phase upload flow. */
 const callOrder: string[] = [];
-const saveRecordToDB = vi.fn(async () => {
+let enforceProtectionBarrierInStoreMock = false;
+const saveRecordToDB = vi.fn(async (...args: unknown[]) => {
   callOrder.push('saveRecord');
+  const record = args[0] as { isPrivate?: boolean } | undefined;
+  const coupleId = args[1];
+  const userId = args[2];
+  if (enforceProtectionBarrierInStoreMock
+    && record?.isPrivate === false
+    && typeof userId === 'string'
+    && typeof coupleId === 'string'
+    && isCoupleProtectionRequired(userId, coupleId)) {
+    return { ok: false as const, reason: 'server' as const, protectionRequired: true };
+  }
   return { ok: true as const };
 });
 const uploadRecordMedia = vi.fn(async (file: File) => {
@@ -110,6 +125,7 @@ const removeRecordMedia = vi.fn(async () => {
 const fetchRecordsFromDB = vi.fn(async () => []);
 
 const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
+const activateCoupleProtectionForAuthenticatedSession = vi.fn(async () => 'not_paired' as const);
 
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
@@ -131,7 +147,8 @@ vi.mock('@/lib/records', () => ({
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
   installE2eeRuntimeForAuthenticatedSession: vi.fn().mockResolvedValue({ status: 'guarded' }),
-  activateCoupleProtectionForAuthenticatedSession: vi.fn().mockResolvedValue('not_paired'),
+  activateCoupleProtectionForAuthenticatedSession: (...args: unknown[]) =>
+    activateCoupleProtectionForAuthenticatedSession(...(args as [])),
 }));
 
 const fetchEventsResultFromDB = vi.fn().mockResolvedValue({ ok: true, events: [] });
@@ -187,6 +204,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
     addRecordWithMedia,
     queueRecordForLater,
     flushOutbox,
+    refreshCoupleLifecycle,
     outboxWaiting,
     outboxBlocked,
     addEvent,
@@ -245,6 +263,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <button onClick={() => {
         void flushOutbox().then((result) => { lastFlushResult = result; });
       }}>flush</button>
+      <button onClick={() => void refreshCoupleLifecycle()}>refresh-lifecycle</button>
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
       <button onClick={() => void updateProfile({ myName: 'updated-name' })}>update-profile</button>
@@ -293,6 +312,8 @@ describe('StoreProvider auth lifecycle', () => {
     createdChannels.length = 0;
     localStorage.clear();
     outboxEntries.clear();
+    clearAllCoupleProtectionRequirements();
+    enforceProtectionBarrierInStoreMock = false;
     setOutboxLocalCacheKey(null);
     lastFlushResult = null;
     fetchFullStateFromDB.mockReset();
@@ -313,6 +334,7 @@ describe('StoreProvider auth lifecycle', () => {
     // `vi.restoreAllMocks()` strips this too. Default: the lifecycle RPC could
     // not answer, which by contract must leave local couple state untouched.
     fetchMyCoupleState.mockReset().mockResolvedValue({ ok: false, reason: 'server' });
+    activateCoupleProtectionForAuthenticatedSession.mockReset().mockResolvedValue('not_paired');
     disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
     fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });
@@ -984,6 +1006,78 @@ describe('StoreProvider auth lifecycle', () => {
     // A second save patches the row with the attachment metadata.
     expect(callOrder.filter((c) => c === 'saveRecord')).toHaveLength(2);
     expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
+  });
+
+  it('blocks an immediate shared save while connected couple protection is pending', async () => {
+    lastMediaResult = null;
+    enforceProtectionBarrierInStoreMock = true;
+    let resolveActivation!: (outcome: 'activated' | 'unavailable') => void;
+    const activationPending = new Promise<'activated' | 'unavailable'>((resolve) => {
+      resolveActivation = resolve;
+    });
+    activateCoupleProtectionForAuthenticatedSession.mockImplementationOnce(
+      async () => activationPending,
+    );
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+    fetchMyCoupleState.mockResolvedValue({
+      ok: true,
+      state: {
+        coupleId: 'couple-1',
+        role: 'gomsin',
+        memberStatus: 'active',
+        partnerPresent: true,
+        invitationActive: false,
+        invitationExpiresAt: null,
+      },
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await waitFor(() => expect(activateCoupleProtectionForAuthenticatedSession).toHaveBeenCalledTimes(1));
+
+    // Repeated connected refreshes reuse the unresolved activation attempt.
+    await act(async () => {
+      screen.getByText('refresh-lifecycle').click();
+      screen.getByText('refresh-lifecycle').click();
+    });
+    expect(activateCoupleProtectionForAuthenticatedSession).toHaveBeenCalledTimes(1);
+
+    // The real records writer is separately covered by records.test.ts; this
+    // store boundary proves the connected state cannot proceed as a plaintext
+    // save while the activation promise is unresolved.
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+    expect(lastMediaResult?.ok).toBe(false);
+    expect(lastMediaResult?.reason).toBe('protection_required');
+    expect(screen.getByTestId('logs')).toHaveTextContent('');
+
+    resolveActivation('unavailable');
+    await waitFor(() => expect(isCoupleProtectionRequired('user-a', 'couple-1')).toBe(true));
+
+    // A failed activation does not clear the barrier. A later connected refresh
+    // may retry, and only that retry's confirmed success can release it.
+    activateCoupleProtectionForAuthenticatedSession.mockImplementationOnce(
+      async () => 'activated' as const,
+    );
+    await act(async () => screen.getByText('refresh-lifecycle').click());
+    await waitFor(() => expect(isCoupleProtectionRequired('user-a', 'couple-1')).toBe(false));
+
+    lastMediaResult = null;
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult?.ok).toBe(true));
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
   });
 
   it('keeps the written text when a media upload fails, and reports the failure', async () => {

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { decideRecordWrite } from '@/app/records/contentCrypto';
 import * as keystore from '@/crypto/keystore';
 import { getRecordCryptoEnvironment } from '@/lib/records';
+import { requireCoupleProtection } from './coupleProtectionBarrier';
 import * as protectedLocalState from './protectedLocalState';
 import {
   clearE2eeRuntime,
@@ -167,6 +168,12 @@ describe('authenticated E2EE runtime session', () => {
       coupleProtection: 'keys_pending',
     });
     expect(server.writeFloors.get(`couple:${coupleId}`)).toBeUndefined();
+    requireCoupleProtection(account.userId, coupleId);
+    await expect(decideRecordWrite(getRecordCryptoEnvironment()!, {
+      isPrivate: false,
+      ownerUserId: account.userId,
+      coupleId,
+    })).resolves.toEqual({ mode: 'refused', reason: 'no_active_epoch' });
   });
 
   it('makes local couple-authority tombstoning session-bound', async () => {

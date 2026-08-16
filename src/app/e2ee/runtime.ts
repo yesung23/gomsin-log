@@ -440,4 +440,9 @@ export async function activateCoupleProtection(input: {
   assertCurrent();
   await input.repository.activateWriteFloor('couple', input.coupleId, input.deviceId);
   assertCurrent();
+  // The barrier may clear only after the server confirms the irreversible floor
+  // is actually visible for this exact couple scope.
+  if (await input.repository.getWriteFloor('couple', input.coupleId) < 1) {
+    fail('E_COUPLE_FLOOR_NOT_ACTIVE', 'the couple write floor was not confirmed active');
+  }
 }

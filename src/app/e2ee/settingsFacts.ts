@@ -61,21 +61,12 @@ export async function loadSettingsBootstrapFacts(input: {
       facts,
     };
   } catch (error) {
-    // Protected local state whose key is gone while its ciphertext remains is a
-    // recovery case, not a transient failure. Reporting it as temporarily
-    // unavailable hid the one action that can restore this device, and offering
-    // setup would create replacement authority over existing ciphertext.
+    // Protected local state is unusable, but the current recovery use case does
+    // not define a safe kit-verified replacement protocol for this local key/blob.
+    // Do not offer an unreachable recovery action or mint replacement authority.
     const code = error instanceof Error ? error.message : '';
     if (code === 'E_PROTECTED_STATE_KEY_MISSING' || code === 'E_PROTECTED_STATE_UNREADABLE') {
-      try {
-        // Only an account the server already knows has a recovery identity can be
-        // recovered. Without one there is nothing to verify a kit against.
-        return await repository.getRecoveryIdentity(input.userId)
-          ? { status: 'RECOVERY_REQUIRED' }
-          : { status: 'SECURE_STORAGE_UNAVAILABLE' };
-      } catch {
-        return { status: 'TEMPORARILY_UNAVAILABLE' };
-      }
+      return { status: 'SECURE_STORAGE_UNAVAILABLE' };
     }
     return { status: 'TEMPORARILY_UNAVAILABLE' };
   }

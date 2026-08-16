@@ -4,6 +4,8 @@
  * Store code imports this tiny module so auth tests and the auth shell do not
  * load crypto/records adapters just to clear a capability that may not exist.
  */
+import { clearAllCoupleProtectionRequirements } from './coupleProtectionBarrier';
+
 let teardown: (() => void) | null = null;
 let coupleAuthorityUnlink: ((coupleId: string) => Promise<void>) | null = null;
 
@@ -40,4 +42,5 @@ export async function markE2eeCoupleAuthorityUnlinked(coupleId: string): Promise
 export function clearE2eeRuntime(): void {
   clearE2eeRuntimeCapabilities();
   coupleAuthorityUnlink = null;
+  clearAllCoupleProtectionRequirements();
 }

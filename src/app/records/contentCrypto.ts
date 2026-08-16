@@ -30,6 +30,7 @@ import {
   sealRecordContent,
   type RecordContentDocument,
 } from '@/crypto/recordContent';
+import { isCoupleProtectionRequired } from '@/app/e2ee/coupleProtectionBarrier';
 
 /** The cipher_format column values, mirroring `crypto/versions.ts`. */
 export const RECORD_CIPHER_PLAINTEXT = 0;
@@ -128,7 +129,14 @@ export async function decideRecordWrite(
   const domain = domainForRecord(routing.isPrivate);
   const scopeId = scopeIdForRecord(routing.isPrivate, routing.ownerUserId, routing.coupleId);
 
-  const floor = await environment.floorFor(domain, scopeId);
+  const serverFloor = await environment.floorFor(domain, scopeId);
+  // A connected couple is protection-required before the irreversible server
+  // floor is confirmed. This local barrier is exact-scope and account-bound;
+  // it does not change the legacy floor=0 contract for genuinely unprotected
+  // scopes, and it never supplies a key or substitutes another key domain.
+  const localCoupleBarrier = domain === 'couple'
+    && isCoupleProtectionRequired(routing.ownerUserId, scopeId);
+  const floor = Math.max(serverFloor, localCoupleBarrier ? RECORD_CIPHER_GLE1 : 0);
   if (floor < RECORD_CIPHER_GLE1) return { mode: 'plaintext' };
 
   const epochs = await environment.epochsFor(domain, scopeId);

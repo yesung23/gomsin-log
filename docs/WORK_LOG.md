@@ -1510,6 +1510,25 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 
 ---
 
+### 2026-08-16 · PR #67 — independent security delta fix (Codex / Luna / High)
+
+이 기록은 PR #67의 독립 보안 delta 작업 이력이다. `d1bace6` 기반의 R1/R2/R3
+검토에서, 연결된 커플이 write-floor 활성화 중에도 기존 floor=0 경로로 평문 기록을
+시도할 수 있는 경로와, 활성화 결과·계정 전환·복구 상태를 함께 다뤄야 하는 공백을
+확인했다.
+
+- `coupleProtectionBarrier`를 계정·정확한 couple scope에만 묶어 연결 상태가 공개되기
+  전부터 shared write를 fail closed로 만들고, 서버 floor가 실제 활성화된 뒤에만
+  해제했다. runtime/session/store의 single-flight와 teardown도 같은 범위로 정합화했다.
+- `KEY_MISSING`/`UNREADABLE` protected local state는 안전한 kit-verified 교체 프로토콜이
+  정의되지 않았으므로 `SETUP_REQUIRED`나 대체 authority를 만들지 않고 보호 저장소
+  사용 불가로 남겼다. 이 복구 범위는 PARTIAL이며 향후 Architect 결정이 필요하다.
+- PMK/CSK/HRK, GLE1/GLK2, migration 031–046, 제품 방향, P6, Production은 이 delta에서
+  바꾸지 않았다. 원격 Supabase와 Production은 NOT APPLIED다.
+- 당시 기록된 검증은 targeted/full Vitest, write-floor/P0/Phase 0/P5/rollback/native,
+  typecheck/lint/build/diff-check였으며, 실기기·원격 catalog·staging·Production은
+  UNVERIFIED였다. 새 정렬 head에서는 독립 delta 재검토가 필요하다.
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

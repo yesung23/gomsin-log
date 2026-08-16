@@ -72,7 +72,12 @@ import {
 import {
   activateCoupleProtectionForAuthenticatedSession,
   installE2eeRuntimeForAuthenticatedSession,
+  type CoupleProtectionOutcomeReason,
 } from '@/app/e2ee/runtimeSession';
+import {
+  clearCoupleProtectionRequirement,
+  requireCoupleProtection,
+} from '@/app/e2ee/coupleProtectionBarrier';
 import { emitNotification, unseenPartnerTalkAboutMarks } from '@/lib/notifications';
 import {
   saveRecordToDB,
@@ -455,6 +460,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
   /** Single-flight: a flush triggered by `online` must not race one from visibility. */
   const flushInFlightRef = useRef(false);
+  /** Single-flight connected-couple activation, keyed by the current user/scope. */
+  const coupleProtectionFlightRef = useRef<{
+    key: string;
+    promise: Promise<CoupleProtectionOutcomeReason>;
+  } | null>(null);
   /**
    * The flush, reachable from the realtime effect.
    *
@@ -583,6 +593,50 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   [isCurrentIdentity]);
 
   /**
+   * Mark a connected couple as protection-required before publishing that state.
+   * Repeated lifecycle refreshes reuse one activation attempt; only a confirmed
+   * `activated` result can clear the barrier. Account/couple changes invalidate
+   * the old attempt through the captured identity and exact scope checks.
+   */
+  const startCoupleProtection = useCallback((identity: ActiveIdentity, coupleId: string) => {
+    requireCoupleProtection(identity.userId, coupleId);
+    const key = `${identity.userId}:${identity.generation}:${coupleId}`;
+    const existing = coupleProtectionFlightRef.current;
+    if (existing?.key === key) return existing.promise;
+
+    const promise = Promise.resolve().then(() => activateCoupleProtectionForAuthenticatedSession({
+      userId: identity.userId,
+      supabaseClient: supabase,
+      activeCoupleId: coupleId,
+      hasSealedOutbox: async () => {
+        const persistence = outboxRef.current;
+        return persistence ? hasSealedOutboxForAccount(persistence, identity.userId) : false;
+      },
+      isCurrentSession: () => isCurrentIdentity(identity)
+        && stateRef.current.profile.couple.coupleId === coupleId
+        && stateRef.current.profile.couple.connected === true,
+    })).then((outcome) => outcome ?? 'unavailable');
+    coupleProtectionFlightRef.current = { key, promise };
+
+    void promise.then((outcome) => {
+      const current = coupleProtectionFlightRef.current;
+      if (!current || current.promise !== promise) return;
+      coupleProtectionFlightRef.current = null;
+      if (outcome === 'activated'
+        && isCurrentIdentity(identity)
+        && stateRef.current.profile.couple.coupleId === coupleId
+        && stateRef.current.profile.couple.connected === true) {
+        clearCoupleProtectionRequirement(identity.userId, coupleId);
+      }
+    }, () => {
+      if (coupleProtectionFlightRef.current?.promise === promise) {
+        coupleProtectionFlightRef.current = null;
+      }
+    });
+    return promise;
+  }, [isCurrentIdentity]);
+
+  /**
    * Ask the server what couple space this account is in, and merge the answer.
    *
    * This is the ONLY authoritative answer available to the client: migration 013
@@ -642,6 +696,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       derived === 'personal' && revokedCoupleRef.current?.userId === identity.userId
         ? 'disconnected'
         : derived;
+    const previousCoupleId = stateRef.current.profile.couple.coupleId;
+    const connectedCoupleId = lifecycle === 'connected' ? remote?.coupleId : null;
+    if (connectedCoupleId) {
+      // Install the barrier before publishing connected state. A synchronous
+      // record action can therefore never observe floor=0 as a legacy scope.
+      requireCoupleProtection(identity.userId, connectedCoupleId);
+      if (previousCoupleId && previousCoupleId !== connectedCoupleId) {
+        clearCoupleProtectionRequirement(identity.userId, previousCoupleId);
+      }
+    } else if (previousCoupleId && lifecycle !== 'unknown') {
+      // Pending/personal/disconnected is not a connected protection verdict;
+      // preserve the existing floor=0 compatibility for that exact scope.
+      clearCoupleProtectionRequirement(identity.userId, previousCoupleId);
+    }
     updateStateImmediately((current) => {
       if (!isCurrentIdentity(identity)) return current;
       const merged = mergeCoupleState(current.profile.couple, remote);
@@ -653,30 +721,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setInvitationExpiresAt(
       remote?.invitationActive ? remote.invitationExpiresAt : null,
     );
-    /**
-     * Couple protection is completed here because this is the single place every
-     * pairing path passes through: the inviter's pending poll, the redeemer's code
-     * entry, hydration, and reconnection after unlink.
-     *
-     * It runs only for a definite `connected` answer, so a pending invitation
-     * never activates a floor. The couple itself is still chosen server-side and
-     * re-validated against the pinned two-party authority, and a failure leaves
-     * shared writes closed rather than falling back to plaintext.
-     */
     if (lifecycle === 'connected') {
-      void activateCoupleProtectionForAuthenticatedSession({
-        userId: identity.userId,
-        supabaseClient: supabase,
-        activeCoupleId: remote?.coupleId ?? null,
-        hasSealedOutbox: async () => {
-          const persistence = outboxRef.current;
-          return persistence ? hasSealedOutboxForAccount(persistence, identity.userId) : false;
-        },
-        isCurrentSession: () => isCurrentIdentity(identity),
-      });
+      const coupleId = remote?.coupleId;
+      if (coupleId) void startCoupleProtection(identity, coupleId);
     }
     return lifecycle;
-  }, [captureActiveIdentity, handleAuthExpired, isCurrentIdentity, updateStateImmediately]);
+  }, [captureActiveIdentity, handleAuthExpired, isCurrentIdentity, startCoupleProtection, updateStateImmediately]);
 
   /**
    * Record a resolved status.
@@ -1124,6 +1174,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ...(remoteProfile ? { profile: remoteProfile } : {}),
               };
             })();
+            if (nextState.profile.couple.connected && nextState.profile.couple.coupleId) {
+              // A cached server snapshot may already say connected before the
+              // fresh lifecycle probe returns. Keep the shared write path closed
+              // during that honest-but-not-yet-activated interval.
+              requireCoupleProtection(sessionUser.id, nextState.profile.couple.coupleId);
+            }
             replaceStateImmediately(nextState);
 
             // Install a floor-aware guard immediately, then the verified
@@ -1134,6 +1190,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             void installE2eeRuntimeForAuthenticatedSession({
               userId: sessionUser.id,
               supabaseClient: supabase,
+              activateCoupleProtection: false,
               hasSealedOutbox: async () => {
                 const persistence = outboxRef.current;
                 return persistence ? hasSealedOutboxForAccount(persistence, sessionUser.id) : false;
@@ -1807,6 +1864,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
         setCoupleLifecycle('connected');
+        requireCoupleProtection(authUserId, coupleId);
+        void startCoupleProtection(
+          { userId: authUserId, generation: sessionGenerationRef.current },
+          coupleId,
+        );
         setInvitationExpiresAt(null);
         return; // Connected: stop polling.
       }
@@ -1849,6 +1911,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     handleAuthExpired,
     isAuthChecked,
     refreshCoupleLifecycle,
+    startCoupleProtection,
     updateStateImmediately,
   ]);
 
@@ -2004,7 +2067,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         },
       };
     });
-    setCoupleLifecycle(deriveCoupleLifecycle(remote, stateRef.current.profile.couple));
+    const lifecycle = deriveCoupleLifecycle(remote, stateRef.current.profile.couple);
+    setCoupleLifecycle(lifecycle);
+    if (lifecycle === 'connected') {
+      requireCoupleProtection(identity.userId, coupleId);
+      void startCoupleProtection(identity, coupleId);
+    } else {
+      clearCoupleProtectionRequirement(identity.userId, coupleId);
+    }
     setInvitationExpiresAt(remote.invitationActive ? remote.invitationExpiresAt : null);
 
     const workspace: ActiveWorkspace = { ...identity, coupleId };

@@ -173,16 +173,56 @@ After receiving agent reports (or READY-TO-COPY blocks), the state-sync role:
 - keeps the three files as single source of "last known non-canonical snapshot"
 - never rewrites agent-authored reports under reports/<agent>/
 
+### 8.8 Successful report persistence (required step after creating the report file)
+
+After an agent has created its NEW report file under:
+
+    control-tower/reports/<agent>/YYYY-MM-DD_HHMM_<task>_<agent>.md
+
+the agent MUST attempt to persist it in the dedicated memory worktree:
+
+1. cd /Users/han-yejun/Desktop/gomsinlog-control-tower-memory
+2. git fetch origin
+3. git checkout docs/shared-ai-control-tower-v1
+4. git pull --ff-only origin/docs/shared-ai-control-tower-v1   # fast-forward only; abort if not clean
+5. git add ONLY the newly-created report file (never add Dashboard.md, Current Gate.md, Decision Log.md, or any other agent's files)
+6. git commit -m "docs(control-tower): add <agent> report <task>"
+7. git push origin docs/shared-ai-control-tower-v1
+
+Rules:
+- Never force-push.
+- Never amend or rewrite another agent's report.
+- Normal agents may only commit their own report files.
+- If the remote branch has moved ahead and a clean fast-forward is not possible, or if any step fails safely:
+  - STOP the memory sync attempt.
+  - Emit a complete READY-TO-COPY CONTROL-TOWER REPORT (see 8.5).
+  - Do NOT mark the engineering task as failed.
+  - The Control Tower state-sync owner will reconcile later.
+
+This makes successful report persistence an explicit, auditable step rather than an implicit side-effect.
+
 ## 9. Obsidian volatile files (gitignore only)
 
-The following may be added to .gitignore when they appear (they are local to a machine's Obsidian workspace and must not be committed):
+The Obsidian vault root for the shared Control Tower memory is:
 
-.obsidian/workspace.json
-.obsidian/cache/
-.obsidian/plugins/*/data.json   (when it contains machine-specific state)
-.obsidian/appearance.json         (only if customized per-machine; usually safe to track)
+    control-tower/
 
-Do not ignore the vault structure itself or any .md content under control-tower/.
+Machine-specific / volatile Obsidian state under this vault MUST be ignored so that
+the shared Markdown content remains clean across machines.
+
+Add (or keep) the following in .gitignore (scoped to the vault root):
+
+control-tower/.obsidian/workspace.json
+control-tower/.obsidian/cache/
+control-tower/.obsidian/workspace-cache/
+control-tower/.obsidian/plugins/*/data.json   (machine-specific plugin state)
+control-tower/.obsidian/appearance.json       (only if customized per-machine)
+
+Do NOT ignore:
+
+control-tower/**/*.md
+
+All shared Markdown reports, procedures, and documentation must remain tracked.
 
 ## 10. Cross-branch memory access summary (for all agents)
 

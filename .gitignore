@@ -101,6 +101,6 @@ deno.lock
 e2e/.artifacts/
 
 # Obsidian volatile / machine-specific (shared vault content is tracked)
-.obsidian/workspace.json
-.obsidian/cache/
-.obsidian/workspace-cache/
+control-tower/.obsidian/workspace.json
+control-tower/.obsidian/cache/
+control-tower/.obsidian/workspace-cache/

@@ -99,6 +99,7 @@ STATUS REQUIRES PRODUCTION READ-ONLY VERIFICATION
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)(가격은 전부 초기 가설) |
+| iCloud-first 미디어 | 제품·로드맵 방향으로 결정됨. CloudKit 구현은 아직 시작하지 않음; ARCH-P6에서 검증 예정 |
 
 ---
 

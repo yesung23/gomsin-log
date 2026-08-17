@@ -158,7 +158,11 @@ test('an unsent draft survives a tab round-trip and is never written to storage'
 test('a saved record clears the draft instead of leaving it to be re-sent', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, {
-    ...CREATOR,
+    // Connected couples are protection-required until a real E2EE ceremony
+    // confirms the floor. This regression targets successful legacy record
+    // persistence and draft clearing, so use the legitimate owner-before-join
+    // state rather than fabricating a trusted device or CSK in the browser mock.
+    ...CREATOR_PENDING,
     trips: [{ id: 't1', couple_id: 'couple-1', created_by: 'user-creator', title: 'x', start_date: TODAY, end_date: TODAY, status: 'planned', created_at: `${TODAY}T00:00:00Z` }],
   });
   const page = await context.newPage();

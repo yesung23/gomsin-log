@@ -282,7 +282,11 @@ test('owner edit/delete controls are hit-testable and not intercepted by the tab
 // ---------------------------------------------------------------------------
 test('a failed attachment upload keeps the file in the composer (D-05, in a browser)', async ({ browser }) => {
   const { context, page, errors } = await open(browser, {
-    ...CREATOR,
+    // A connected couple is protection-required until a real E2EE device/CSK
+    // ceremony confirms the irreversible floor. This test targets the distinct
+    // storage failure path, so use the legitimate pre-partner owner state where
+    // the absent floor means the migration's legacy plaintext contract applies.
+    ...CREATOR_PENDING,
     failures: { storage_upload: { status: 500, code: 'StorageError', message: 'upload failed' } },
   });
   await goto(page, '/');

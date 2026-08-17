@@ -281,6 +281,25 @@ export async function installMockBackend(
       ]);
     }
 
+    if (path === '/rest/v1/recovery_identities' && method === 'GET') {
+      const failure = failureFor(scenario, 'recovery_identities');
+      if (failure) return json(route, failure, failure.status);
+      // The browser scenarios do not seed a recovery ceremony. `maybeSingle()`
+      // therefore receives PostgREST's contractually correct no-row response,
+      // which the repository parses as a missing recovery identity.
+      return rows(route, []);
+    }
+
+    if (path === '/rest/v1/crypto_write_floor' && method === 'GET') {
+      const failure = failureFor(scenario, 'crypto_write_floor');
+      if (failure) return json(route, failure, failure.status);
+      // No seeded bootstrap/activation means no write-floor row for the
+      // requested scope. The repository maps this exact absence to floor 0;
+      // returning a fabricated floor would change the security state the browser
+      // is meant to exercise.
+      return rows(route, []);
+    }
+
     if (path === '/rest/v1/couples') {
       return rows(route, [
         {
@@ -309,12 +328,29 @@ export async function installMockBackend(
       if (method === 'GET') return rows(route, scenario.records ?? []);
       // Writes echo the payload back, as PostgREST does with `return=representation`.
       const body = request.postDataJSON();
-      return rows(route, Array.isArray(body) ? body : [body]);
+      const payloads = Array.isArray(body) ? body : [body];
+      // Migration 032 supplies this server-side DEFAULT for legacy plaintext
+      // inserts, and saveRecordToDB selects it to pin the next CAS revision.
+      return rows(route, payloads.map((payload) => ({
+        ...payload,
+        content_revision: Number.isSafeInteger(payload?.content_revision)
+          && payload.content_revision >= 1
+          ? payload.content_revision
+          : 1,
+      })));
     }
 
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
     if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);
+    if (path === '/rest/v1/talk_about_marks' && method === 'GET') {
+      const failure = failureFor(scenario, 'talk_about_marks');
+      if (failure) return json(route, failure, failure.status);
+      // `fetchTalkAboutMarksResultFromDB` selects pending metadata rows for the
+      // active couple. These scenarios seed no marks, so the real empty result is
+      // an empty array; no record content or security authority is fabricated.
+      return rows(route, []);
+    }
     if (path === '/rest/v1/trip_items' || path === '/rest/v1/trip_checklists') {
       const failure = failureFor(scenario, path.replace('/rest/v1/', ''));
       if (failure) return json(route, failure, failure.status);

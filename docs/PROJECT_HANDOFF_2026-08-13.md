@@ -128,7 +128,7 @@ PR inventory를 이 문서에 복사하지 않는다. active PR·HEAD·CI·merge
 | SUPPORTING | `CHAT_PRODUCT_DATA_CONTRACT_V1.md`, E2EE·DATA_LEGAL·SECURITY specialist 문서 | 각 전문영역의 세부 계약·보안 판단에만 사용 |
 | HISTORICAL SNAPSHOT | `SERVICE_OVERVIEW.md`, `FEATURE_SPEC.md`, 기존 디자인·운영 문서 | 구현·시각·운영 참고. 현재 제품 의도·사업전략의 단일 근거가 아님 |
 | SUPERSEDED | `PRODUCT_PRD.md`, `BEGINNER_PROJECT_ROADMAP.md`, `implementation_plan v1.md`, `implementation_plan_v2.md` | 역사적 시나리오·계획·분석으로 보존. 현재 방향과 충돌하면 사용하지 않음 |
-| SUPPORTING SUBMISSION PACKET | `GOMSINLOG_BUSINESS_PLAN_MASTER_V2_FINAL.md`, `GOMSINLOG_PRODUCTION_BRIEF_V1_FINAL.md` | 제출 원고·원자료 증빙 패킷. 최신 MASTER PLAN과 충돌하는 과거 가격·저장용량 과금 표현은 superseded |
+| LOCAL / USER-SUPPLIED SUPPORTING SUBMISSION PACKET — NOT PRESENT IN REPOSITORY / NOT CANONICAL | `GOMSINLOG_BUSINESS_PLAN_MASTER_V2_FINAL.md`, `GOMSINLOG_PRODUCTION_BRIEF_V1_FINAL.md` | 이 저장소에 포함되지 않은 제출 원고·원자료 증빙 패킷. 새 repository agent는 읽을 수 없으며, 최신 MASTER PLAN과 충돌하는 과거 가격·저장용량 과금 표현은 superseded |
 | OPERATIONAL PROMPT | `CLAUDE_OPUS_5_CROSS_VALIDATION_PROMPT.md` | canonical 문서를 읽고 검증하도록 지시하는 실행 프롬프트. 독립 source of truth가 아님 |
 
 최신 승인 사업전략과 충돌하면 `BUSINESS_MEMORY_ROADMAP_V1.md`와 사용자가 제공한 최신

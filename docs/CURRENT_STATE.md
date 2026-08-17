@@ -7,7 +7,7 @@
 > 이 문서는 default branch reality와 active development checkpoint를 분리한다.
 > active draft PR의 코드가 default branch에 구현된 것으로 보이지 않게 한다.
 
-- 조사 기준: default branch `master`와 GitHub active PR checkpoint, 2026-08-15
+- 조사 기준: default branch `master`와 GitHub active PR checkpoint, 2026-08-17
 - 조사 방식: 저장소와 GitHub PR metadata/body 대조
 - remote Supabase catalog, production migration state, 실제 기기 state: **UNVERIFIED**
 
@@ -58,16 +58,38 @@ CI 결과는 영구 acceptance가 아니다. PR #58의 remaining environment gat
 Android SDK, Full Xcode가 필요한 iOS native validation, 그리고 physical iPhone의
 Secure Enclave/LCK/`dev_sig`/`dev_kem` 동작 미검증이다.
 
+### Control Tower canonical convergence checkpoint — 2026-08-17
+
+아래는 live GitHub에서 확인한 현재 stacked development reality다. 모두 `DRAFT`인
+개발 증거이며 `master`가 아니고 Production도 아니다. #62–#67은 이전 engineering
+line에서 이어진 stack이므로 canonical 문서가 #61과 어긋날 수 있다. #61이 새로운
+canonical `master`가 된 뒤에만 #62–#67을 그 기준에 맞춰 정렬한다.
+
+| PR | scope | live branch / HEAD | live base | state |
+|---|---|---|---|---|
+| #61 | canonical governance fix | `docs/control-tower-governance` / `deec2acb53f5f09405422397729a5abf98d5a0e6` | `master` / `42ac1f307f19e84e8a3891311aa2a3d19179eed1` | OPEN / DRAFT; not merged |
+| #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | OPEN / DRAFT |
+| #63 | notification re-entry | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | OPEN / DRAFT |
+| #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | OPEN / DRAFT |
+| #65 | P6 readiness audit | `codex/p6-readiness-audit-v1` / `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5` | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | OPEN / DRAFT |
+| #66 | security stack integration | `codex/sol-integration-audit-v1` / `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5` | `codex/p6-readiness-audit-v1` / `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5` | OPEN / DRAFT |
+| #67 | security blocker fixes | `codex/opus-security-blockers-v1` / `e96a5e68a1639f0eccd125e8986758d1c0246413` | `codex/sol-integration-audit-v1` / `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5` | OPEN / DRAFT |
+
+Convergence order is **#61 canonical merge first → #62–#67 alignment afterward**.
+This records the order only; #61 is not merged by this change.
+
 ## 2. Active migration ledger facts
 
 | migration | scope | production state for this docs task |
 |---|---|---|
 | 039 | daily_records P5 | NOT APPLIED per active PR declaration; remote catalog independently UNVERIFIED |
 | 040 | Device Bootstrap/write-floor semantics | active branch only; remote catalog independently UNVERIFIED |
-| 041 | chat messages | frozen/deferred active-draft asset; NOT APPLIED per PR #59/#60 declarations; remote catalog independently UNVERIFIED |
-| 042 | media coordination | frozen P6 draft number; implementation not started. It must be reissued as 045+ before P6 resumes because active V1 now has 043/044 |
+| 041 | chat messages | absent from master; frozen/deferred active-draft asset; NOT APPLIED per PR #59/#60 declarations; remote catalog independently UNVERIFIED |
+| 042 | media coordination | absent from master; frozen/deferred P6 draft number; implementation not started. It must be reissued as 045+ before P6 resumes because active V1 now has 043/044 |
 | 043 | Conversation Bridge completion | integration branch only; remote catalog independently UNVERIFIED |
 | 044 | unlink crypto pairing authority | integration branch only; remote catalog independently UNVERIFIED |
+| 045 | E2EE write-floor activation hardening | stacked development migration on #66/#67 only; NOT APPLIED; remote catalog independently UNVERIFIED |
+| 046 | device provisioning actor requirement | stacked development migration on #67 only; NOT APPLIED; remote catalog independently UNVERIFIED |
 
 No remote Supabase mutation was performed by this documentation task.
 

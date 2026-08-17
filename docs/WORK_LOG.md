@@ -1052,6 +1052,89 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 
 ---
 
+### 2026-08-17 · [Control Tower / PR #61] canonical governance convergence fix
+
+#### PLAN POSITION
+- Phase: Control Tower canonical convergence
+- Workstream: PR #61 documentation/governance correction
+- Step: R-1~R-5 correction before targeted canonical delta review
+- Previous Gate: Opus final canonical review target `deec2acb53f5f09405422397729a5abf98d5a0e6` returned REQUEST CANONICAL CHANGES; Product/Business/Engineering consistency itself passed, while parallel canonical ownership with #62–#67 was the blocker
+- This Gate: Option A — #61 canonical merge first, then #62–#67 alignment
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES; strategy unchanged
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no business strategy change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: prior PR #61 canonical integration-gate entry — YES
+- Does this task conflict with canonical direction: NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Luna / High
+- Role: PR #61 Canonical Governance Fix Worker
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `42ac1f307f19e84e8a3891311aa2a3d19179eed1`
+- Old HEAD: `deec2acb53f5f09405422397729a5abf98d5a0e6`
+- New HEAD / Reviewed HEAD: this documentation commit; verify live after push
+
+#### CHANGED / REVIEWED
+- R-1: added one canonical write-owner lock to `AGENTS.md`
+- R-2: recorded live #62–#67 draft stack and the Option A convergence order in `CURRENT_STATE.md`; added development-only, NOT APPLIED / remote UNVERIFIED status for migrations 045/046 while retaining 041/042 frozen/deferred reality
+- R-3: made `CLAUDE.md`, `PRODUCT_V3.md`, and `CURRENT_STATE.md` the README entry path without rewriting historical/general orientation
+- R-4: downgraded `docs/kiro/AI_HANDOFF.md` to structural-traps / historical implementation notes that must be verified against current code and canonical docs
+- R-5: marked the two business/production packet files as local user-supplied, not present in the repository, and not canonical
+- PR #62–#67 branches, commits, migrations, application code, security code, native code, and Production were not changed
+
+#### LIVE STACK
+- #61 `docs/control-tower-governance` @ `deec2acb53f5f09405422397729a5abf98d5a0e6`, base `master` @ `42ac1f3`
+- #62 `codex/device-protection-recovery-v1` @ `c7f9d13b1f8ba10d8be6ee422ed163044a05201b`
+- #63 `codex/notification-reentry-v1` @ `de4eaf63eaad1b2c58aca5e63714b149936c8317`
+- #64 `codex/lv-core-ux-v1` @ `fa68c72a86610e095ff77e322b7703e049972743`
+- #65 `codex/p6-readiness-audit-v1` @ `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5`
+- #66 `codex/sol-integration-audit-v1` @ `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5`
+- #67 `codex/opus-security-blockers-v1` @ `e96a5e68a1639f0eccd125e8986758d1c0246413`
+- All #61–#67 are OPEN / DRAFT; #61 is not merged and the stack is not Production.
+
+#### VERIFICATION
+- command: full Vitest through the repository test runner
+- PASS: 143 test files, 2,147 tests
+- command: `git diff --check`
+- PASS: no whitespace errors
+- command: `scripts/agent/validate.sh docs`
+- NOT RUN: script is absent from this HEAD (`No such file or directory`)
+- checked: no `src/`, `supabase/migrations/`, or native paths changed by this diff
+- checked: local submission packets were not staged
+- remote Supabase catalog / Production migration state: UNVERIFIED; no remote mutation performed
+
+#### REVIEW IMPACT
+- Previous Opus canonical review at `deec2ac` is STALE after this commit.
+- Required next review: targeted canonical delta review of R-1~R-5 only.
+
+#### STOPPED AT
+- exact completed boundary: documentation/governance fixes prepared; no merge, security-stack alignment, migration, native, or Production action
+
+#### REMAINING
+- commit and push the documentation-only delta to PR #61
+- update PR #61 body with the stale-review and targeted-review handoff
+- obtain targeted Opus canonical delta review
+- keep #62–#67 untouched until after #61 canonical merge
+
+#### NEXT ACTION
+- next owner: Opus canonical reviewer
+- exact next task: targeted review of R-1~R-5 against the effective PR #61 diff
+
+#### DO NOT ADVANCE UNTIL
+- targeted canonical delta review is complete
+- do not merge #61 in this task; do not align #62–#67; do not start P6
+
+#### PRODUCTION
+- NOT APPLIED — no remote migration, deployment, or Supabase mutation
+
+---
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

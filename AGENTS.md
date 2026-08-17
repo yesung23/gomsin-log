@@ -328,6 +328,12 @@ Never present assumptions as verified facts.
 When relevant, consult repository documentation before changing architecture.
 Each question has exactly one deciding document:
 
+Canonical Product/Business/Engineering documents have one active write owner.
+Do not independently modify the same canonical source on parallel feature,
+security, or audit branches. If such divergence already exists, the designated
+canonical branch wins strategy conflicts; implementation branches must align
+during convergence.
+
 | Question | Canonical source |
 |---|---|
 | What should the product do? | `docs/PRODUCT_V3.md` |
@@ -337,7 +343,7 @@ Each question has exactly one deciding document:
 | Cryptographic protocol | `docs/E2EE_PHASE_1A_ARCHITECTURE_V2_1.md` |
 | Privacy / data / legal architecture | `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md` |
 | Visual presentation | `docs/DESIGN_V2.md` |
-| Application invariants | `docs/kiro/AI_HANDOFF.md` |
+| Codebase structural traps / historical implementation notes | `docs/kiro/AI_HANDOFF.md` — verify against current code and canonical docs |
 | Security / RLS coverage | `docs/SECURITY_TEST_PLAN.md`, `docs/rls-test-matrix.md` |
 | Rollback | `docs/operations/rollback-runbook.md` |
 
@@ -418,7 +424,8 @@ Before reporting completion, the primary agent independently checks the actual
 diff, changed files, test output, typecheck, lint, build necessity, user-flow
 impact, and remaining risks. For high-risk data/security work, include relevant
 negative authorization tests. Read project documents as needed rather than
-copying them into prompts: `docs/kiro/AI_HANDOFF.md` for application invariants,
+copying them into prompts: `docs/kiro/AI_HANDOFF.md` for codebase structural traps
+and historical implementation notes,
 `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md` for privacy/E2EE
 decisions, `docs/SECURITY_TEST_PLAN.md` and `docs/rls-test-matrix.md` for
 security/RLS coverage, and `docs/operations/rollback-runbook.md` for rollback.

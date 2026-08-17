@@ -29,6 +29,29 @@ scripts/agent/live-state.sh
 
 문서에 적힌 PR·HEAD·CI는 checkpoint일 뿐이다. 항상 live 값을 다시 확인한다.
 
+
+## 2.5 Shared AI memory recovery (non-canonical)
+
+After canonical recovery + live verification, if a shared AI memory vault is present:
+
+1. Read `control-tower/AI_ENTRYPOINT.md`
+2. Read `control-tower/Dashboard.md`
+3. Read only the task/audit/report files that are directly relevant to the current bounded request.
+
+The shared memory under `control-tower/` is NON-CANONICAL.
+
+It must never override:
+- live Git / GitHub / CI facts
+- repository code
+- canonical documents (PRODUCT_V3, BUSINESS_MEMORY_ROADMAP_V1, ENGINEERING_ROADMAP, CURRENT_STATE, WORK_LOG, PROJECT_HANDOFF, AGENTS.md, skills procedures)
+- security architecture decisions
+- migration ledger
+- production / remote / device state that can be independently verified
+
+This preserves ONE FACT → ONE AUTHORITATIVE HOME.
+
+Obsidian is only a viewer for the parked shared context. It is not an authority.
+
 ## 3. Start checkpoint 보고
 
 확인할 수 없는 항목은 추측하지 않고 `UNVERIFIED`로 남긴다.

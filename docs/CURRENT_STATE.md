@@ -1,139 +1,158 @@
 # 곰신로그 CURRENT STATE — 저장소 현실
 
-> **이 문서는 현시점의 저장소 현실을 기술한다. 제품 정의가 아니다.**
-> 제품 의도는 [`PRODUCT_V3.md`](PRODUCT_V3.md)가 이긴다 — 보안 아키텍처 문서가 달리 말하지
-> 않는 한. 구현 순서는 [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md).
+> **이 문서는 현시점의 저장소 현실을 기술한다.** 제품 정의는
+> [`PRODUCT_V3.md`](PRODUCT_V3.md), 구현 순서는
+> [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)가 소유한다.
 >
-> **이 문서는 의도적으로 휘발성이다.** 구현이 진행되면 항목이 사라진다. 여기 있는 사실을
-> 근거로 제품 방향을 바꾸지 않는다. 오래된 항목은 코드로 재확인한다.
+> 이 문서는 default branch reality와 active development checkpoint를 분리한다.
+> active draft PR의 코드가 default branch에 구현된 것으로 보이지 않게 한다.
 
-- 조사 기준: `feat/e2ee-phase-1a-key-foundation` @ `8c9cca0`, 2026-08-13
-- 조사 방식: 저장소 정적 조사. **원격 프로덕션 상태는 2026-08-11 read-only 감사 기록에 의존**
+- 조사 기준: default branch `master`와 GitHub active PR checkpoint, 2026-08-17
+- 조사 방식: 저장소와 GitHub PR metadata/body 대조
+- remote Supabase catalog, production migration state, 실제 기기 state: **UNVERIFIED**
 
 분류:
 
 | 코드 | 뜻 |
 |---|---|
-| `FUTURE` | EXPECTED FUTURE WORK — 예정된 작업, 충돌 아님 |
-| `PRODUCT` | POTENTIAL PRODUCT CONFLICT — 사람의 제품 판단 필요 |
+| `FUTURE` | EXPECTED FUTURE WORK |
+| `PRODUCT` | PRODUCT DECISION 또는 product gap |
 | `SEC` | SECURITY/PRIVACY CONFLICT |
 | `LEGACY` | LEGACY TO DEPRECATE |
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
 
----
+## 0. Default-branch reality
 
-## 1. 핵심 루프 결함 (P0)
+이 절은 merge된 default branch만 설명한다.
 
-| # | PRODUCT_V3 기대 | 현재 구현 | 분류 |
-|---|---|---|---|
-| 1 | 기록 작성은 항상 가능 | 작성기가 **제거 가능한 홈 위젯 하나뿐**이고 기록 탭에 작성 수단이 없다. 위젯을 지우면 기록을 남길 방법이 사라진다 | `PRODUCT` `BETA` |
-| 2 | 작성자 태그가 요약 우선순위를 결정 | `ReactionType`을 5개 화면이 읽지만 **쓰는 화면이 없다.** 컴포저에 선택 UI 부재 → 요약 우선순위의 상위 분기가 항상 비어 있다 | `PRODUCT` `BETA` |
-| 3 | `상대방의 오늘`은 양쪽 모두의 홈에 | 곰신 기본 레이아웃에 `partner_day`가 없다. `통화 전 60초`는 군화 전용·고정 | `PRODUCT` |
-| 4 | 요약은 하나의 표면 | 다섯 개 위젯이 같은 맥락을 반복한다 | `FUTURE` |
-| 5 | 기록 1건이어도 요약 | 공유 기록 ≤1이면 빈 요약을 반환한다 | `FUTURE` |
-| 6 | 앱은 서사를 만들지 않는다 | 요약 생성기가 본문 키워드에 따라 정해진 문장을 출력하는 분기를 갖는다 | `PRODUCT` |
-| 7 | 침묵으로부터 추론하지 않는다 | 태그 부재로부터 "평온하게 보내고 있어요"를 추론하는 위젯이 있다 | `PRODUCT` |
-| 8 | 미확인 기계 추론은 파트너에게 노출 금지 | 감정이 **opt-out** 구조다. 사용자가 지우지 않으면 기계 판독이 확인된 것으로 저장되어 파트너에게 전달될 수 있다 | `SEC` `BETA` |
-| 9 | 원본은 라우트로 주소 지정 | 대상 record가 휘발성 앱 상태로만 지정된다. 새로고침·딥링크·알림에서 원본에 도달 불가 | `FUTURE` |
-
----
-
-## 2. 프라이버시 / 보안 충돌
-
-| # | PRODUCT_V3 기대 | 현재 구현 | 분류 |
-|---|---|---|---|
-| 10 | 사용자 콘텐츠는 E2EE | **모든 사용자 콘텐츠가 서버 평문**이다. Phase 1A는 키 인프라이며 콘텐츠 암호화 primitive는 어떤 데이터 경로에도 연결되어 있지 않다 | `FUTURE` `PROD` |
-| 11 | HRK는 CSK로 대체 불가 | 방벽이 **클라이언트 검사 한 곳뿐이고 회귀 테스트가 없다.** 서버는 봉투 내부를 파싱하지 않아 검증할 수 없다 | `SEC` `BETA` |
-| 12 | 주기 projection은 소유자 기기가 생성 | 파트너 projection을 **서버가 평문 건강 데이터를 읽어 계산**한다. 동의·설정 게이트는 정확하나 계산 위치가 서버다. Phase 1B에서 단순 이식 불가 → 재설계 필요 | `SEC` `PROD` |
-| 13 | 요약을 서버에 저장하지 않는다 | 평문 요약 캐시 테이블(`briefings`)이 스키마에 남아 있다. read/write 경로 0, 운영 행 0이지만 경로가 열려 있다 | `LEGACY` |
-| 14 | 정밀 위치를 평문으로 남기지 않는다 | 여행 항목이 **정밀 위경도를 평문으로** 담고, 행 단위 공개 범위가 없다 | `SEC` `BETA` |
-| 15 | 평문 영상 경로 없음 | 영상 첨부가 구현·노출되어 있고 평문으로 업로드된다 | `PRODUCT` `BETA` |
-| 16 | 레거시 건강 평문 없음 | 레거시 주기 테이블과 백업 테이블이 평문으로 남아 있다 | `LEGACY` |
-| 17 | 연결 해제가 암호 상태에 반영 | 연결 해제 RPC가 pairing 상태를 `UNLINKED`로 전이하지 않는다(RPC가 E2EE 마이그레이션보다 앞선다). **데이터 누출 위험은 아니다** — 초대 발행 3경로가 모두 active 멤버십을 요구하므로 해제된 커플은 되살아날 수 없고, 재연결은 항상 새 couple_id다([채팅 계약](CHAT_PRODUCT_DATA_CONTRACT_V1.md) §0·§10). 상태 일관성 문제로 남는다 | `FUTURE` |
-| 18 | Storage 권한이 실제로 작동 | §3 참조 | `SEC` `BETA` |
-
----
-
-## 3. 마이그레이션 028–030 배포 상태
-
-두 개의 선행 조사가 충돌했다. 하나는 "028–030이 프로덕션에 적용되었으나 Git에 없다"고
-보고했고, 다른 하나는 "적용되지 않았다"고 보고했다.
-
-### 판정: **프로덕션에 적용되지 않았다.** 두 개의 독립 저장소 기록이 일치한다.
-
-| 증거 | 내용 |
+| 영역 | master 기준 현실 |
 |---|---|
-| `supabase/migrations/README.md` (마이그레이션 원장) | 025·026·027은 **"운영 적용됨 (2026-08-11, 확인됨)"**, 028·029·030은 **"신규 / 운영 미적용"**, 031·032·034는 **"신규 / 어디에도 미적용"**으로 명시 |
-| `DATA_LEGAL_..._2026-08-11.md` §B | 2026-08-11 원격 read-only 조회 결과 **"운영 DB에는 INSERT 정책 1개만 존재한다. SELECT와 DELETE 정책은 없다."** — 028이 복원하려는 바로 그 정책들 |
-| `DATA_LEGAL_..._2026-08-11.md` §K | 운영 Storage 검증 항목에 `Storage policy: INSERT 1개만 존재` |
-| Git | 028·029·030은 **untracked working-tree 파일**이다(커밋되지 않음) |
+| P5.1 daily_records E2EE | PR #54에 구현되어 있으나 아직 merge되지 않음 |
+| Device Bootstrap | PR #58에 active draft로 존재하나 아직 merge되지 않음 |
+| Chat foundation | PR #59 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
+| Chat product UI | PR #60 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
+| Core Privacy Foundation integration | `codex/core-privacy-foundation-v1`에 P4 + P5.1 + P5.2를 통합했으나 master에는 아직 merge되지 않음 |
+| active migrations 039/040/043/044 | integration branch에 존재하며 이 문서 작업에서 production 적용을 확인하지 않음 |
+| ARCH-P6 | architecture decision은 완료, P6 implementation은 시작되지 않음 |
 
-**충돌의 원인:** 앞선 보고가 "Git에 커밋되지 않음"을 "프로덕션에 이미 적용됨"으로 오해한
-것으로 보인다. 실제로는 **커밋되지도, 배포되지도 않았다.**
+따라서 master만 기준으로 보면 P5 E2EE·Device Bootstrap·chat은 **not merged**다.
+active development를 함께 보면 각 draft branch에 해당 foundation 또는 product
+integration이 존재한다.
 
-### 한계
+## 1. Active development checkpoint — 2026-08-15
 
-이 판정은 **2026-08-11 시점의 read-only 감사 기록**에 근거하며, 이번 작업에서 원격
-프로덕션을 다시 조회하지 않았다(문서 작업 범위 밖이며 프로덕션을 변경하지 않는다).
+아래 PR/HEAD는 live GitHub에서 확인한 volatile checkpoint다. 다음 세션은 작업 전에
+PR state, draft, mergeability, base/head, CI를 다시 확인한다.
 
-따라서 Beta 게이트 B1 직전에는:
+| 단계 | active checkpoint | 상태·gate |
+|---|---|---|
+| P5.1 daily_records E2EE | PR #54 / `codex/p5-daily-records-e2ee-slice` / `835cddd16b71686abc5fb296e4ddce3456844ad0` | implemented in active branch, not merged; production unapplied per PR declaration; final independent acceptance pending unless live evidence changes this |
+| P5.2 Device Bootstrap | PR #58 / `codex/03a-device-bootstrap` / `ac81f07f5dc3220b1bc79490e693702add957a0b` | active draft; H-1 duplicate Android registration wiring fix is in the live HEAD; crypto and migration semantics are unchanged by that fix; code-delta review pending |
+| P5.3 Chat Foundation | PR #59 / `codex/04a-chat-e2ee-foundation` / `ce4a1355b2738f898109c2d70b038822996f77e7` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; migration 041 remains unapplied per PR declaration; independent security review pending |
+| P5.4 Chat Product UI | PR #60 / `codex/04b-chat-product-ui` / `c409d92d4fa6e5e4913adb8fef2cf6f1bdacba8a` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; no V1 entry-path integration; real Device Bootstrap runtime integration remains unverified |
+| P5.5 Core Privacy Foundation integration | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | P4 Conversation Bridge + P5.1 + P5.2 integration branch. Session runtime install, floor guard, account-switch teardown, unlink authority tombstone, and forward migration 044 are code/test-verified locally; not merged, production unapplied, and real-device validation remains unverified |
 
-```text
-STATUS REQUIRES PRODUCTION READ-ONLY VERIFICATION
-```
+PR #54는 open/non-draft이고 #58/#59/#60은 open draft다 at this checkpoint. PR-specific
+CI 결과는 영구 acceptance가 아니다. PR #58의 remaining environment gates는 missing
+Android SDK, Full Xcode가 필요한 iOS native validation, 그리고 physical iPhone의
+Secure Enclave/LCK/`dev_sig`/`dev_kem` 동작 미검증이다.
 
-정책 카탈로그가 맞다는 것과 signed URL이 실제로 발급·거부된다는 것은 **별개의 증거**다.
-둘 다 확인해야 한다.
+### Control Tower canonical convergence checkpoint — 2026-08-17
 
----
+아래는 live GitHub에서 확인한 현재 stacked development reality다. 모두 `DRAFT`인
+개발 증거이며 `master`가 아니고 Production도 아니다. #62–#67은 이전 engineering
+line에서 이어진 stack이므로 canonical 문서가 #61과 어긋날 수 있다. #61이 새로운
+canonical `master`가 된 뒤에만 #62–#67을 그 기준에 맞춰 정렬한다.
 
-## 4. 미구현 기능
+| PR | scope | live branch / HEAD | live base | state |
+|---|---|---|---|---|
+| #61 | canonical governance fix | `docs/control-tower-governance` / `deec2acb53f5f09405422397729a5abf98d5a0e6` | `master` / `42ac1f307f19e84e8a3891311aa2a3d19179eed1` | OPEN / DRAFT; not merged |
+| #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | OPEN / DRAFT |
+| #63 | notification re-entry | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | OPEN / DRAFT |
+| #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | OPEN / DRAFT |
+| #65 | P6 readiness audit | `codex/p6-readiness-audit-v1` / `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5` | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | OPEN / DRAFT |
+| #66 | security stack integration | `codex/sol-integration-audit-v1` / `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5` | `codex/p6-readiness-audit-v1` / `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5` | OPEN / DRAFT |
+| #67 | security blocker fixes | `codex/opus-security-blockers-v1` / `e96a5e68a1639f0eccd125e8986758d1c0246413` | `codex/sol-integration-audit-v1` / `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5` | OPEN / DRAFT |
 
-| 기능 | 상태 |
+Convergence order is **#61 canonical merge first → #62–#67 alignment afterward**.
+This records the order only; #61 is not merged by this change.
+
+## 2. Active migration ledger facts
+
+| migration | scope | production state for this docs task |
+|---|---|---|
+| 039 | daily_records P5 | NOT APPLIED per active PR declaration; remote catalog independently UNVERIFIED |
+| 040 | Device Bootstrap/write-floor semantics | active branch only; remote catalog independently UNVERIFIED |
+| 041 | chat messages | absent from master; frozen/deferred active-draft asset; NOT APPLIED per PR #59/#60 declarations; remote catalog independently UNVERIFIED |
+| 042 | media coordination | absent from master; frozen/deferred P6 draft number; implementation not started. It must be reissued as 045+ before P6 resumes because active V1 now has 043/044 |
+| 043 | Conversation Bridge completion | integration branch only; remote catalog independently UNVERIFIED |
+| 044 | unlink crypto pairing authority | integration branch only; remote catalog independently UNVERIFIED |
+| 045 | E2EE write-floor activation hardening | stacked development migration on #66/#67 only; NOT APPLIED; remote catalog independently UNVERIFIED |
+| 046 | device provisioning actor requirement | stacked development migration on #67 only; NOT APPLIED; remote catalog independently UNVERIFIED |
+
+No remote Supabase mutation was performed by this documentation task.
+
+## 3. Default-branch product/security reality
+
+master에서 active PR 코드를 구현된 것으로 세지 않으면, 사용자 콘텐츠 전체 E2EE는
+아직 달성되지 않았다. P5.1–P5.4는 active branch checkpoint이지 배포 사실이 아니다.
+
+| 기대 | master 기준 현재 현실 | 분류 |
+|---|---|---|
+| 사용자 콘텐츠 E2EE | daily_records P5는 active PR에 있으나 unmerged; 일정·여행·주기·미디어는 active P5 stack 밖 | `FUTURE` `PROD` |
+| 기기·복구 UX | P5 capability와 PR #58 foundation이 있으나 master에 merge되지 않았고 실제 기기 gate 미검증 | `FUTURE` `PROD` |
+| 자체 채팅 | master에는 not merged; PR #59 foundation과 PR #60 product UI가 active draft에 존재하나 현재 V1은 **FROZEN / DEFERRED** | `FUTURE` |
+| 주기 projection | 서버 평문 건강 데이터 계산 경계는 재설계 필요 | `SEC` `PROD` |
+| 정밀 위치 | 여행 항목에 정밀 위경도 평문 경로가 남아 있음 | `SEC` `BETA` |
+| 평문 영상 | 기존 평문 첨부 경로가 존재하며 Full User-Content E2EE 전에는 해소 필요 | `PRODUCT` `BETA` |
+| 레거시 건강 평문 | 레거시 주기 테이블·백업 데이터가 남아 있음 | `LEGACY` |
+| `briefings` 레거시 스키마 | 평문 요약 캐시 테이블이 스키마에 남아 있다. `master`의 `src/**`에 read/write 경로가 없어 **동작하는 평문 요약 파이프라인은 아니다**. 삭제하는 migration도 없어 스키마 정리 대상으로 남는다 | `LEGACY` |
+| 연결 해제와 pairing 상태 | master에는 `disconnect_couple`이 `couple_members`만 갱신하는 상태다. integration branch의 044가 pairing도 `UNLINKED`로 전이하며 local tombstone을 함께 처리한다. 아직 merge·원격 적용 전이다 | `FUTURE` `PROD` |
+
+## 4. 핵심 루프와 범위 밖 기능
+
+P0–P4의 핵심 루프 작업은 default branch에 merge된 기록과 코드에서 확인한다.
+P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진입 경로에서 동결한다.
+
+| 기능 | 현재 상태 |
 |---|---|
-| 채팅 | 미구현 (테이블·라우트·UI 전부 없음). 계약은 확정 → [`CHAT_PRODUCT_DATA_CONTRACT_V1.md`](CHAT_PRODUCT_DATA_CONTRACT_V1.md). 구현 전 게이트 G1–G6 미착수 |
-| 뷰어 반응 (`공감` / `토닥이기`) | 미구현 |
-| 알림 (generic 포함) | 완전 미구현 — 의존성·핸들러·설정 전부 없음 |
-| E2EE 기기 · 복구 UX | 암호 라이브러리와 유스케이스는 존재하나 **어떤 화면도 import하지 않는다** |
-| `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
+| `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위. 이야기거리 보관함·완료 처리 P4는 integration branch에 있으나 master에는 아직 merge되지 않음 |
+| 알림 | 완전 미구현 |
 | Moment / 월간 히스토리 | 미구현 |
-| 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)(가격은 전부 초기 가설) |
-| iCloud-first 미디어 | 제품·로드맵 방향으로 결정됨. CloudKit 구현은 아직 시작하지 않음; ARCH-P6에서 검증 예정 |
+| 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |
+| 여행 플래너·공동 할 일 | 동결. 새 투자 없음. 위치 privacy gate는 별도 충족 필요 |
 
----
+## 5. Phase 0 production baseline
 
-## 5. 범위 밖이지만 동작 중인 기능
+028–030에 대해서는 기존 독립 기록 두 개가 모두 운영 미적용을 가리킨다. 다만 이
+문서 작업에서는 원격 Supabase를 다시 조회하지 않았으므로 live catalog는
+`UNVERIFIED`다.
 
-PRODUCT_V3의 범위를 넘지만 이미 구현되어 있다. **삭제하지 않고 동결한다.**
-
-| 기능 | 결정 |
+| migration | repository ledger / prior read-only evidence |
 |---|---|
-| 여행 플래너 (장소·주소·영업시간·좌표·지도 OCR·체크리스트) | 동결. 새 투자 없음. 단 §2-14의 위치 게이트는 적용된다 |
-| 공동 할 일 | 동결. 새 투자 없음 |
+| 025–027 | 2026-08-11 운영 적용됨으로 기록됨 |
+| 028–030 | 신규 / 운영 미적용으로 기록됨 |
+| 031–034 | 신규 / 어디에도 미적용으로 기록됨 |
 
----
+Beta gate B1 전에는 Storage policy catalog와 실제 signed-URL 동작을 모두 다시
+검증해야 한다. migration 파일 존재는 production 적용 증거가 아니다.
 
 ## 6. 확인된 좋은 설계 — 되돌리지 말 것
 
-조사 중 확인된, PRODUCT_V3보다 **더 나은** 현행 설계.
-
 | 항목 | 왜 유지하는가 |
 |---|---|
-| 배려 신호가 주기 데이터에서 파생되지 않는다 | 사용자가 당일 직접 고르는 독립 opt-in 신호. 컨디션을 주기 탓으로 돌리지 않고, 주기를 쓰지 않는 사용자도 쓸 수 있으며, HRK 경계가 단순해진다. **주기 파생 배려 문구를 도입하는 것은 후퇴다** |
-| 아무것도 공유하지 않으면 파트너 주기 카드가 아예 렌더되지 않는다 | 파트너가 "공유를 고려했다가 거절했다"는 사실조차 추론할 수 없다 |
-| 파트너 projection 타입에 증상·통증·메모를 담을 필드가 **아예 없다** | 실수로도 건강 원본을 넘길 수 없는 타입 수준 경계 |
+| 배려 신호가 주기 데이터에서 파생되지 않는다 | 사용자가 당일 직접 고르는 독립 opt-in 신호이며 HRK 경계를 단순하게 유지한다 |
+| 아무것도 공유하지 않으면 파트너 주기 카드가 렌더되지 않는다 | 공유 거절 사실 자체를 추론할 수 없게 한다 |
+| 파트너 projection 타입에 증상·통증·메모 필드가 없다 | 건강 원본이 실수로 전달되는 경로를 타입 수준에서 줄인다 |
 | 요약이 캐시되지 않고 매번 재계산된다 | stale 상태가 구조적으로 존재하지 않는다 |
-| 원본 이동 대상이 없으면 아무 것도 하지 않는다 | 조용한 대체가 발생하지 않는다. PRODUCT_V3는 여기에 "사유를 말할 것"만 추가한다 |
-| 외부 AI·분석·크래시 SDK가 하나도 없다 | 계측이 백지 상태이므로 프라이버시 안전 설계를 처음부터 적용할 수 있다 |
-| 사진 업로드 시 EXIF/GPS 제거, 실패 시 원본 업로드 거부 | |
-
----
+| 원본 이동 대상이 없으면 대체하지 않는다 | 잘못된 기록으로 조용히 이동하지 않는다 |
+| 외부 AI·분석·크래시 SDK가 없다 | 계측 도입 시 프라이버시 경계를 처음부터 설계할 수 있다 |
+| 사진 업로드 시 EXIF/GPS 제거 실패 시 원본 업로드 거부 | 정밀 위치 메타데이터의 조용한 유출을 막는다 |
 
 ## 7. 이 문서의 유지
 
-- 항목이 해소되면 **삭제한다.** 완료 이력을 여기 쌓지 않는다.
-- 제품 의도를 여기 쓰지 않는다 → `PRODUCT_V3.md`.
-- 구현 순서를 여기 쓰지 않는다 → `ENGINEERING_ROADMAP.md`.
-- 원격 상태 주장에는 **날짜와 증거 출처**를 함께 적는다. 저장소에 파일이 있다는 것은
-  배포 증거가 아니다.
+- 항목이 해소되면 삭제한다. 완료 이력을 여기에 쌓지 않는다.
+- 제품 의도는 `PRODUCT_V3.md`, 구현 순서는 `ENGINEERING_ROADMAP.md`에 쓴다.
+- remote 상태 주장은 날짜·증거 출처와 함께 적고, 확인할 수 없으면 `UNVERIFIED`다.
+- active PR/HEAD/CI는 checkpoint일 뿐이며 다음 세션에서 live 재검증한다.

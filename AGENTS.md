@@ -328,15 +328,22 @@ Never present assumptions as verified facts.
 When relevant, consult repository documentation before changing architecture.
 Each question has exactly one deciding document:
 
+Canonical Product/Business/Engineering documents have one active write owner.
+Do not independently modify the same canonical source on parallel feature,
+security, or audit branches. If such divergence already exists, the designated
+canonical branch wins strategy conflicts; implementation branches must align
+during convergence.
+
 | Question | Canonical source |
 |---|---|
 | What should the product do? | `docs/PRODUCT_V3.md` |
+| What is the approved business strategy? | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |
 | What is currently implemented / blocked? | the repository, then `docs/CURRENT_STATE.md` |
 | What order do we build in? | `docs/ENGINEERING_ROADMAP.md` |
 | Cryptographic protocol | `docs/E2EE_PHASE_1A_ARCHITECTURE_V2_1.md` |
 | Privacy / data / legal architecture | `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md` |
 | Visual presentation | `docs/DESIGN_V2.md` |
-| Application invariants | `docs/kiro/AI_HANDOFF.md` |
+| Codebase structural traps / historical implementation notes | `docs/kiro/AI_HANDOFF.md` — verify against current code and canonical docs |
 | Security / RLS coverage | `docs/SECURITY_TEST_PLAN.md`, `docs/rls-test-matrix.md` |
 | Rollback | `docs/operations/rollback-runbook.md` |
 
@@ -351,6 +358,23 @@ If documentation conflicts with actual verified production behavior, report the 
 The primary agent owns user intent, scope, integration, final diff review, and
 the completion report. It must not delegate merely to use subagents, or accept
 a subagent's completion claim as proof.
+
+### DIRECTION CHECK — mandatory before substantial work
+
+Before implementation or a consequential documentation change, record:
+
+- Product source checked:
+- Business source checked / NOT APPLICABLE:
+- Engineering source checked:
+- Current-state checked:
+- Latest relevant Work Log checked:
+- Does this task conflict with canonical direction? YES / NO
+- If YES, what conflict?
+
+Business source review is required when a task can change the customer, problem definition,
+product scope, AI role, monetization, pricing, storage/cloud strategy, media strategy, Memory
+Product, KPI, or market expansion. If the conflict answer is `YES`, **STOP BEFORE
+IMPLEMENTATION** and report the conflict to the Control Tower/user.
 
 For non-trivial tasks, delegate bounded independent exploration, implementation,
 verification, or review work to the appropriate configured subagent when doing
@@ -400,7 +424,128 @@ Before reporting completion, the primary agent independently checks the actual
 diff, changed files, test output, typecheck, lint, build necessity, user-flow
 impact, and remaining risks. For high-risk data/security work, include relevant
 negative authorization tests. Read project documents as needed rather than
-copying them into prompts: `docs/kiro/AI_HANDOFF.md` for application invariants,
+copying them into prompts: `docs/kiro/AI_HANDOFF.md` for codebase structural traps
+and historical implementation notes,
 `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md` for privacy/E2EE
 decisions, `docs/SECURITY_TEST_PLAN.md` and `docs/rls-test-matrix.md` for
 security/RLS coverage, and `docs/operations/rollback-runbook.md` for rollback.
+
+### Abandoned-strategy guard
+
+The following are superseded strategy, not active defaults. If a request reintroduces one,
+mark `DIRECTION CONFLICT`, stop before changing the canonical plan, and ask whether the user
+is intentionally changing strategy:
+
+- Free 5GB / Plus 100GB / Archive 300GB or any storage-capacity subscription
+- paid high-quality photo or paid long video
+- E2EE or privacy as a premium gate
+- subscription-first initial business model
+- company-server-only media architecture
+- AI selecting important memories automatically
+- relationship score, affection score, breakup prediction, or hidden relationship analysis
+- time-spent North Star or downloads as acquisition success
+- military population treated as the entire customer market
+- CloudKit described as already implemented
+- audio/video described as currently complete
+
+Historical `WORK_LOG` entries and superseded source packets remain for traceability, but they
+must not be used as current business direction without an explicit user decision.
+
+## 18. Mandatory Work Ledger
+
+Every substantial engineering, verification, or security-review result must have a
+corresponding `docs/WORK_LOG.md` entry. Keep detailed implementation rationale in
+the commit or PR and use the ledger as the session index. The entry must include:
+
+```text
+PLAN POSITION
+- Phase:
+- Workstream:
+- Step:
+- Previous Gate:
+- This Gate:
+
+DIRECTION CHECK
+- Product source checked:
+- Business source checked / NOT APPLICABLE:
+- Engineering source checked:
+- Current-state checked:
+- Latest relevant Work Log checked:
+- MASTER PLAN version / 기준일:
+- Does this task conflict with canonical direction? YES / NO
+- If YES, what conflict:
+
+OWNERSHIP
+- Tool:
+- Model:
+- Role:
+- PR:
+- Branch:
+- Base SHA:
+- Old HEAD:
+- New HEAD / Reviewed HEAD:
+
+CHANGED / REVIEWED
+- file:
+- function/component/migration:
+- what changed/reviewed:
+- why:
+
+EXPLICITLY NOT CHANGED
+- crypto semantics:
+- DB/migration semantics:
+- product semantics:
+- Production:
+
+VERIFICATION
+- command:
+- PASS / FAIL / UNVERIFIED:
+- what it actually proves:
+
+REVIEW IMPACT
+- NONE / DELTA / FULL:
+- whether an earlier review is stale:
+
+BLOCKERS
+- code:
+- environment:
+- external/manual:
+
+STOPPED AT
+- exact completed boundary:
+
+REMAINING
+- not completed:
+
+NEXT ACTION
+- next owner:
+- tool/model:
+- 기준 SHA:
+- exact next task:
+
+DO NOT ADVANCE UNTIL
+- next-step conditions:
+
+PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED:
+```
+
+`CURRENT_STATE.md`에는 현재 현실만, `ENGINEERING_ROADMAP.md`에는 순서와 gate만
+기록한다. 완료 주장보다 실제 명령과 증거를 우선한다.
+
+## 19. Review Freshness
+
+Review는 특정 exact commit에 대한 판정이다. HEAD가 바뀌면 이전 review를 자동으로
+승계하지 않는다. 각 작업 종료 기록의 `REVIEW IMPACT`를 반드시 채운다.
+
+| 변경 분류 | 필요한 영향 평가 |
+|---|---|
+| A. docs/comment/test wording only, security semantics 없음 | review 불필요 또는 narrow DELTA |
+| B. packaging/native wiring 같은 좁은 변경 | targeted DELTA review |
+| C. authorization/RLS/DB schema/migration | 해당 security review 재수행 |
+| D. crypto protocol/trust authority/key semantics | Architect 판단 + FULL security review |
+| E. parent/base/rebase가 security semantics에 영향 | integration/delta review |
+
+리뷰 대상 PR의 보안 의미를 바꾸지 않는 별도 docs-only branch는 그 PR의 HEAD에
+WORK_LOG-only commit을 추가하지 않는다. READ-ONLY Kiro Reviewer/Sol Architect는
+저장소를 수정하지 않으며, 다음 write-capable owner가 복사할 수 있는 결과만 남긴다.

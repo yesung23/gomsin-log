@@ -4,6 +4,11 @@
 
 > "답장이 늦어도, 오늘의 순간은 놓치지 않도록."
 
+> **현재 문서 진입점:** 현재 제품 방향은 [`docs/PRODUCT_V3.md`](docs/PRODUCT_V3.md)가
+> 소유하며, AI·개발 세션은 [`CLAUDE.md`](CLAUDE.md)에서 시작하고 현재 저장소 상태는
+> [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md)에서 확인합니다. 이 README의 설명은
+> 역사적·일반적 안내일 수 있으며 canonical source를 재정의하지 않습니다.
+
 ---
 
 ## 1. 제품 정의
@@ -72,7 +77,9 @@ npm run assets:generate   # public/favicon.svg 에서 모든 래스터 자산 �
 
 ### 문서
 
-시작 지점은 **[`docs/kiro/AI_HANDOFF.md`](docs/kiro/AI_HANDOFF.md)** 입니다.
+AI·개발 세션 시작 지점은 **[`CLAUDE.md`](CLAUDE.md)** 입니다. 실제 라우트 구조와
+구조적 제약을 확인할 때는 [`docs/kiro/AI_HANDOFF.md`](docs/kiro/AI_HANDOFF.md)를
+현재 코드 및 canonical 문서와 대조해 참고합니다.
 
 | 문서 | 용도 |
 | --- | --- |

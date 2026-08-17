@@ -5,8 +5,89 @@
 > **이 문서는 "무엇을 했는가"의 기록이다.** 제품 의도는
 > [`PRODUCT_V3.md`](PRODUCT_V3.md), 저장소 현실은
 > [`CURRENT_STATE.md`](CURRENT_STATE.md), 구현 순서는
-> [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)가 각각 canonical이다.
+> [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md), 사업전략은
+> [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다.
+
+## 앞으로 사용할 표준 세션 원장 형식
+
+새 세션 기록은 아래 구조를 사용한다. 과거 자유형식 기록은 역사 보존을 위해
+삭제·재작성하지 않는다.
+
+```markdown
+### YYYY-MM-DD · [Phase/Step] 세션 제목
+
+#### PLAN POSITION
+- Phase:
+- Workstream:
+- Step:
+- Previous Gate:
+- This Gate:
+
+#### DIRECTION CHECK
+- Product source checked:
+- Business source checked / NOT APPLICABLE:
+- Engineering source checked:
+- Current-state checked:
+- Latest relevant Work Log checked:
+- MASTER PLAN version / 기준일:
+- Does this task conflict with canonical direction? YES / NO
+- If YES, what conflict:
+
+#### OWNERSHIP
+- Tool:
+- Model:
+- Role:
+- PR:
+- Branch:
+- Base SHA:
+- Old HEAD:
+- New/Reviewed HEAD:
+
+#### CHANGED / REVIEWED
+- file:
+- function/component/migration:
+- what changed/reviewed:
+- why:
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics:
+- DB/migration semantics:
+- product semantics:
+- Production:
+
+#### VERIFICATION
+- command:
+- PASS / FAIL / UNVERIFIED:
+- what it actually proves:
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL:
+- whether an earlier review is stale:
+
+#### BLOCKERS
+- code:
+- environment:
+- external/manual:
+
+#### STOPPED AT
+- exact completed boundary:
+
+#### REMAINING
+- not completed:
+
+#### NEXT ACTION
+- next owner:
+- tool/model:
+- 기준 SHA:
+- exact next task:
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions:
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED:
+```
 
 ---
 
@@ -35,6 +116,69 @@ P5 해결 후 별도 작업으로 유보했다.
 ---
 
 ## 세션 기록
+
+### 2026-08-15 · [Control Tower Governance / documentation infrastructure] canonical 문서 governance 정규화
+
+#### PLAN POSITION
+- Phase: Control Tower Governance / documentation infrastructure
+- Workstream: canonical documentation foundation
+- Step: session start/end recovery and review freshness normalization
+- Previous Gate: canonical documents existed but active plan/state/session ownership was split
+- This Gate: new-AI recovery protocol, build train, active-state split, and work ledger rules recorded
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Luna / High
+- Role: Documentation Worker + Verifier
+- PR: #61 (draft) — https://github.com/yesung23/gomsin-log/pull/61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- Old HEAD: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- New/Reviewed HEAD: `6675d2b23b75ca57cbae9728797b88e4d3d20412`
+
+#### CHANGED / REVIEWED
+- file: `CLAUDE.md`, `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/CURRENT_STATE.md`, `docs/WORK_LOG.md`, `docs/PROJECT_HANDOFF_2026-08-13.md`
+- function/component/migration: documentation rules only
+- what changed/reviewed: session boot/end protocol, mandatory ledger, review freshness, P5.1–P5.5/ARCH-P6 train, master-vs-active checkpoint, and handoff recovery map
+- why: new AI sessions must recover the same plan and state without conversation memory
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none
+- product semantics: none
+- Production: no mutation
+
+#### VERIFICATION
+- command: `git diff --check`, changed-file audit, Markdown/link and stale-statement scans, live `gh pr view` metadata for PRs #54/#57/#58/#59/#60
+- PASS / FAIL / UNVERIFIED: PASS for documentation scope; remote Supabase/device gates UNVERIFIED
+- what it actually proves: only the six allowed documents changed on this branch and the recorded PR checkpoints matched live GitHub at review time
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: NONE for the security PRs; this is a separate docs-only branch
+- whether an earlier review is stale: no security PR HEAD was changed
+
+#### BLOCKERS
+- code: none in this docs-only scope
+- environment: native Android/iOS and physical-device gates remain outside this task
+- external/manual: Control Tower must reverify volatile PR/CI/mergeability and remote migration state before advancing
+
+#### STOPPED AT
+- Control Tower governance rules committed and draft PR opened
+
+#### REMAINING
+- live reviewer approval and future sessions applying the protocol
+
+#### NEXT ACTION
+- next owner: Control Tower
+- tool/model: GitHub live verification, then assigned Worker/Reviewer
+- 기준 SHA: this docs branch HEAD after push
+- exact next task: verify the diff and approve or request changes on the docs-only PR
+
+#### DO NOT ADVANCE UNTIL
+- six-document diff is approved, active PR facts are refreshed, and P5.2 native/device gates are independently verified before P6A
+
+#### PRODUCTION
+- NOT APPLIED
 
 ### 2026-08-14 · 00-BM — iCloud-first 기억 제품 사업 모델 전환
 
@@ -182,7 +326,7 @@ C12 계정 삭제). 실제 DB 증명은 구현 시점의 몫이고 이 PR에서 
 | `docs/CHAT_PRODUCT_DATA_CONTRACT_V1.md` | 신규. 22개 절(§0–21), 약 630줄 |
 | `docs/PRODUCT_V3.md` | §12.1이 계약을 가리키도록 한 줄 |
 | `docs/ENGINEERING_ROADMAP.md` | P4 행에 산출물·게이트 C1–C9·P5 독립성 명시 |
-| `docs/CURRENT_STATE.md` | 채팅 미구현 갱신, PR #50으로 해소된 행 삭제, #17 심각도 정정 |
+| `docs/CURRENT_STATE.md` | 당시 채팅 상태 갱신, PR #50으로 해소된 행 삭제, #17 심각도 정정 |
 
 #### 저장소 조사에서 나온 결정적 사실
 
@@ -304,6 +448,690 @@ P3는 이 PR에서 보안 마이그레이션 필요를 이유로 의도적으로
 `PRODUCT_V3.md`(제품 의도, 안정) / `ENGINEERING_ROADMAP.md`(구현 순서) /
 `CURRENT_STATE.md`(저장소 현실, 휘발성). 채팅·사진을 코어로 승격, 오디오·영상을
 Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
+
+---
+
+### 2026-08-15 · 문서 canonical MASTER PLAN 정렬
+
+#### PLAN POSITION
+- Phase: 문서·사업전략 canonical consolidation
+- Workstream: Product / Business / Engineering governance
+- Step: 최신 MASTER PLAN을 기존 authoritative home에 반영
+- Previous Gate: 기존 Product·Engineering·Current State 분리 및 memory-business 방향 기록
+- This Gate: Business canonical 완성, M-stage ↔ P-stage crosswalk, DIRECTION CHECK 거버넌스 정렬
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: `docs/WORK_LOG.md` — YES
+- MASTER PLAN version / 기준일: 사용자 제공 최신 36-section MASTER PLAN / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Luna / High
+- Role: Primary Documentation Strategy Implementer + Verifier
+- PR: `docs/control-tower-governance` draft PR status to be live-checked
+- Branch: `docs/control-tower-governance`
+- Base SHA: `origin/master` merge-base to be live-recorded in final report
+- Old HEAD: `d03f390918f8c890e0766221bb951a94c9125f25`
+- New/Reviewed HEAD: working tree after this docs-only alignment; exact commit recorded after verification
+
+#### CHANGED / REVIEWED
+- file: `docs/PRODUCT_V3.md`
+- function/component/migration: product definition, source-of-truth table, Daily Core heading
+- what changed/reviewed: Added the exact approved product definition and linked business ownership without moving business detail into the product document.
+- why: Make the latest product definition reconstructable by a new AI while preserving ONE FACT → ONE AUTHORITATIVE HOME.
+- file: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- function/component/migration: entire canonical business roadmap
+- what changed/reviewed: Added Primary Customer/acquisition, problem chain, market methodology, four fact states, Daily Core, AI/privacy/cloud strategy, Free Core, Memory Product, pricing hypotheses, POD economics, Plus, KPI, M1–M8, risks, expansion, Team, execution evidence, validation prohibition, and M8 GO/HOLD.
+- why: Make the user-approved MASTER PLAN the complete business-strategy home and separate strategy from implementation/Production facts.
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: M-stage ↔ P-stage crosswalk and later P7–P10 preservation
+- what changed/reviewed: Added crosswalk boundaries, M5 Basic Memory Archive ≠ P9 Advanced Moment/Archive, and later engineering-stage table.
+- why: Preserve technical dependency order without replacing it with the business M1–M8 sequence.
+- file: `CLAUDE.md`
+- function/component/migration: session recovery, canonical ownership, DIRECTION CHECK
+- what changed/reviewed: Added conditional business-source read, business ownership, and mandatory direction checklist.
+- why: Prevent future agents from inferring business strategy from stale conversation or source packets.
+- file: `AGENTS.md`
+- function/component/migration: documentation sources, orchestration, work ledger
+- what changed/reviewed: Added Business canonical source, DIRECTION CHECK, abandoned-strategy guard, and ledger fields.
+- why: Stop reintroduction of storage-first/subscription-first/AI-judgment strategy and require per-session traceability.
+- file: `docs/PROJECT_HANDOFF_2026-08-13.md`
+- function/component/migration: reading order and document classification
+- what changed/reviewed: Added business canonical to recovery order and classified root submission packets as non-authoritative supporting/history material.
+- why: Allow a new AI to navigate the latest plan without erasing historical source packets.
+- file: `docs/CLAUDE_OPUS_5_CROSS_VALIDATION_PROMPT.md`
+- function/component/migration: Opus cross-validation prompt preamble, source order, product value, monetization section
+- what changed/reviewed: Repointed the prompt to canonical Product/Business/Engineering/Current-State sources and replaced storage-first subscription guidance with Free Core + Memory Product + optional Plus after validation.
+- why: Prevent the AI audit prompt itself from reintroducing superseded business strategy.
+- file: `docs/WORK_LOG.md`
+- function/component/migration: standard template and this session entry
+- what changed/reviewed: Added DIRECTION CHECK to the ledger template and recorded this session.
+- why: Require exact direction and verification trace for future substantial work.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: not changed
+- DB/migration semantics: not changed
+- product semantics: only canonical wording/ownership alignment; no new product feature
+- Production: no remote action, migration, deployment, or Supabase mutation
+
+#### VERIFICATION
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: whitespace errors only; not product, security, or Production correctness
+- command: repository search and section audit against user MASTER PLAN
+- PASS / FAIL / UNVERIFIED: PASS for covered canonical sections; the older root submission packet is not the latest MASTER PLAN
+- what it actually proves: required strategy homes and guardrails are present in the edited documents
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA for documentation/governance only
+- whether an earlier review is stale: application/security reviews are not changed; this docs branch requires an independent canonical-strategy review at its final reviewed SHA
+
+#### BLOCKERS
+- code: none for docs-only scope
+- environment: higher-model Kiro/Claude Opus 5 canonical audit not run in this session
+- external/manual: live PR/base/remote status and external submission evidence require separate verification
+
+#### STOPPED AT
+- exact completed boundary: repository documents aligned to the user-provided MASTER PLAN; no commit/push/PR mutation yet at ledger creation
+
+#### REMAINING
+- final diff and coverage verification
+- independent Kiro/Claude Opus 5 canonical strategy audit
+- commit/push and draft PR only after local verification and scope confirmation
+
+#### NEXT ACTION
+- next owner: Kiro / Claude Opus 5 independent canonical strategy auditor
+- tool/model: Kiro / Claude Opus 5, high or max reasoning as available
+- 기준 SHA: final docs-only alignment commit SHA
+- exact next task: Audit all canonical documents against the latest MASTER PLAN; report omitted items, active strategy conflicts, stale source packets, and fact-state errors without editing the repository.
+
+#### DO NOT ADVANCE UNTIL
+- final diff contains only approved docs/governance paths
+- `git diff --check` passes
+- no application source/tests/migrations/crypto/native/Production files are changed
+- independent canonical strategy audit is reviewed by the primary agent
+
+#### PRODUCTION
+- NOT APPLIED — no remote mutation, migration, deployment, or Supabase action performed
+
+---
+
+### 2026-08-15 · [Control Tower Governance / canonical correction] MASTER PLAN 감사 gap 반영
+
+#### PLAN POSITION
+- Phase: Control Tower Governance / documentation canonicalization
+- Workstream: Product / Business / Engineering strategy maintenance
+- Step: 독립 감사(@ `1944361`)가 지적한 canonical gap을 문서에 반영
+- Previous Gate: independent read-only audit 완료, 판정 `REQUEST CANONICAL CORRECTIONS`
+- This Gate: M3/M7 engineering owner 신설, 사업문서 보정, 과거 packet 무효화 표기 완료
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES (`origin/master` 코드/migration 재확인)
+- Latest relevant Work Log checked: 직전 두 항목 — YES
+- MASTER PLAN version / 기준일: 사용자 승인 MASTER PLAN / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A — 승인된 전략을 바꾸지 않고 실행 gap만 닫았다
+
+#### OWNERSHIP
+- Tool: Kiro
+- Model: Opus 5 / MAX
+- Role: Strategy Maintainer + Verifier (write-capable, bounded)
+- PR: #61 (draft 유지)
+- Branch: `docs/control-tower-governance`
+- Base SHA: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- Old HEAD: `194436174919213cd4c73090398dc2c5644791a7`
+- New HEAD / Reviewed HEAD: 이 커밋 SHA (push 후 live 확인)
+
+#### CHANGED
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: §2.5 crosswalk M3/M7 행, 신설 `LV`·`P-MP` 단계
+- what changed: M3에 `LV — Limited Validation Gate`(통제된 소규모 외부 검증 진입조건,
+  Public Beta/Production과 명시적 분리), M7에 `P-MP — Memory Product MVP`(구성·선택·
+  결정적 초안·편집·미리보기·주문·결제·POD handoff·계측 범위 한정)를 추가했다.
+- why: M3는 실제 사용자를 요구하는데 Beta gate가 P10에 있어 순환이었고, M7이 요구하는
+  판매 가능한 제품을 어떤 단계도 소유하지 않았다.
+- file: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- function/component/migration: §9.2 구매자 경계, §9.4 기여이익, §11 M-stage 앵커, §13 리스크
+- what changed: M1–M8을 8개 순차 실행구간으로 정의하고 달력 확정을 제출 시점으로 유보,
+  기여이익 산식에 `플랫폼·판매채널 수수료(해당되는 경우)` 추가, 구매자·미리보기 노출·연결
+  해제 후 접근을 결제 구현 전 선행 gate로 명시, `고객 문제강도·반복사용 미달`과 `실물 배송
+  개인정보` 리스크 2건 추가, iOS 우선이 영구 결정이 아님을 명시, M1/M2가 사전 고객조사를
+  금지하지 않음을 명시.
+- why: 협약기간 현실성 판단, 저단가 디지털 상품의 기여이익 왜곡 방지, 음성 검증결과의
+  실행 가능한 대응 확보.
+- file: `docs/CHAT_PRODUCT_DATA_CONTRACT_V1.md`
+- function/component/migration: §13 미디어 주석, §21 범위 밖 표
+- what changed: 오디오·영상의 `Premium Candidate` 표현을 `코어 이후 미디어 확장(유료 게이트
+  아님)`으로 교체하고, 지연 이유가 P6 기반·engineering priority·복구/프라이버시 검증임을
+  명시했다. 채팅 crypto/데이터 계약은 건드리지 않았다.
+- why: canonical 문서가 폐기된 유료 미디어 게이트 표현을 유지하고 있었고
+  `PRODUCT_V3.md` §12.3이 더는 하지 않는 주장을 인용하고 있었다.
+- file: `docs/CURRENT_STATE.md`
+- function/component/migration: §3 default-branch product/security reality 표
+- what changed: `briefings` 레거시 스키마와 연결 해제 시 `crypto_pairings` `UNLINKED`
+  미전이 2건을 정확한 성격으로 복원했다. `briefings`는 `master` `src/**`에 read/write 경로가
+  없으므로 동작하는 평문 요약 파이프라인이 아니라 스키마 정리 대상으로, pairing 문제는
+  데이터 유출이 아니라 lifecycle/state 정합성 문제로 기술했다.
+- why: 두 항목 모두 해소 증거가 없는데 문서에서 사라져 있었다.
+- file: `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md`
+- function/component/migration: §E E2EE Scope — Memory Product 실물 제작·배송 경계 신설
+- what changed: 사용자 선택 콘텐츠만 경계 이탈, 최소수집, 목적제한, 처리자 범위 한정,
+  보관·삭제, 건강데이터 배제, 결제 전 고지를 PRODUCT PRIVACY DECISION으로 추가하고,
+  법적 판단은 `LEGAL SPECIALIST FOLLOW-UP REQUIRED`로 남겼다.
+- why: 실물 배송은 실명·주소·연락처와 외부 처리자를 도입하는 첫 흐름인데 경계가 없었다.
+- file: `docs/PROJECT_HANDOFF_2026-08-13.md`
+- function/component/migration: §2 authoritative home 표
+- what changed: Book Studio 제품 방향을 `PRODUCT_V3.md` §12.5로, 가격·검증 가설을
+  business 문서로 분리했다.
+- why: 기존 포인터가 Book Studio를 business 문서로 보냈지만 그 문서에는 해당 서술이 없었다.
+- file: `docs/PRODUCT_V3.md`
+- function/component/migration: 문서 머리말 기준일
+- what changed: 기준일 2026-08-14 → 2026-08-15. 제품 의미 변경 없음.
+- why: 이 PR에서 실제로 수정된 canonical 문서의 기준일이 과거로 남아 있었다.
+
+#### LOCAL-ONLY / UNTRACKED (PR에 포함되지 않음)
+- `GOMSINLOG_BUSINESS_PLAN_MASTER_V2_FINAL.md`, `GOMSINLOG_PRODUCTION_BRIEF_V1_FINAL.md`
+- 문서 최상단에 `SUPERSEDED / SUPPORTING SUBMISSION PACKET` 경고와 현재 사업전략/가격가설/
+  폐기 전략을 추가했다. 원문은 삭제하지 않았다.
+- 두 파일은 untracked 상태를 유지했고 `git add`하지 않았다. **LOCAL-ONLY / UNTRACKED /
+  NOT INCLUDED IN PR.**
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음 (`supabase/migrations/*.sql` 무수정)
+- product semantics: 승인된 MASTER PLAN 방향 변경 없음. M2/채팅 순서 유지, 새 M0 신설 안 함
+- Production: remote mutation·migration·배포·Supabase 조회 없음
+- 그 외: `src/**`, `packages/**`, `e2e/**`, native, `AGENTS.md`, `CLAUDE.md` 무수정.
+  security PR #54/#58/#59/#60 HEAD 무변경
+
+#### VERIFICATION
+- command: `git rev-parse HEAD` / `gh pr view 61`
+- PASS / FAIL / UNVERIFIED: PASS — 편집 전 HEAD가 감사 대상 `1944361`과 일치
+- what it actually proves: 시작 지점 동일성만 증명한다
+- command: `git grep`으로 `briefings` / `disconnect_couple` / `UNLINKED`를 `origin/master`에서 재확인
+- PASS: `briefings`는 `src/**` 참조 0건이고 DROP migration 없음. `disconnect_couple`은
+  `couple_members`만 갱신하며 `crypto_pairings`를 전이하지 않음
+- what it actually proves: 복원한 두 항목이 실제로 미해소임을 증명한다. remote 상태는 아니다
+- command: `rg`로 `Premium Candidate` / `39,000` / `100GB` / `300GB` / `storage tier` 재검색
+- PASS: canonical 문서에 active 잔존 없음. 남은 것은 `WORK_LOG`·`AGENTS.md` guard·
+  superseded 문서·경고 배너가 붙은 untracked packet뿐
+- what it actually proves: 문구 수준 잔존만 증명한다
+- command: `git diff --check`
+- PASS: whitespace 오류 없음
+- command: 단계 보존 확인 (`P5.1`–`P5.5`, `P6A`–`P6D`, `P7`–`P10`, `LV`, `P-MP`, `M1`–`M8`)
+- PASS: 삭제된 단계 없음
+- UNVERIFIED: remote Supabase catalog, production migration state, native device gate,
+  POD 법적 요건, 실제 협약기간 길이
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — documentation/strategy only
+- whether an earlier review is stale: **YES.** `1944361`에 대한 이전 Opus 감사는 이 커밋으로
+  HEAD가 바뀌었으므로 STALE이다. 새 HEAD 기준 delta 확인이 필요하다. security PR
+  #54/#58/#59/#60 리뷰는 영향받지 않는다(HEAD 무변경)
+
+#### BLOCKERS
+- code: 없음 (문서 범위)
+- environment: remote Supabase catalog, native Android/iOS device gate
+- external/manual: POD 처리위탁·국외이전·보관기간은 법률 검토 필요. 협약기간 길이는
+  사용자 확정 필요. untracked packet의 Git 추적 여부는 사용자 결정
+
+#### STOPPED AT
+- exact completed boundary: 감사가 지적한 tracked 문서 보정 완료, untracked packet에 경고
+  배너 추가 완료, PR #61 draft 유지
+
+#### REMAINING
+- Control Tower의 최종 diff 확인
+- 별도 Opus delta review 필요 여부 판단
+- 협약기간 길이 확정 시 M1–M8 달력 매핑
+- POD 법률 검토
+
+#### NEXT ACTION
+- next owner: ChatGPT Control Tower
+- tool/model: 최종 diff 검토 후 필요 시 Opus delta review
+- 기준 SHA: 이 커밋 SHA
+- exact next task: 최종 diff를 독립 확인하고 별도 delta review 필요 여부를 결정한다
+
+#### DO NOT ADVANCE UNTIL
+- 최종 diff에 문서 경로만 포함되어 있음이 확인됨
+- P5.2 native/device gate가 독립 검증되기 전 P6A를 시작하지 않음
+- PR #57이 먼저 merge됨 (base chain)
+- POD 실제 배송 전에 법률 검토가 완료됨
+
+#### PRODUCTION
+- NOT APPLIED — remote mutation·migration·배포·Supabase 조회 없음
+
+---
+
+### 2026-08-15 · [Control Tower Governance / canonical correction] Memory Product 검증 순서 확정
+
+#### PLAN POSITION
+- Phase: Control Tower Governance / documentation canonicalization
+- Workstream: Business / Engineering strategy maintenance
+- Step: 사용자 결정 6건 반영 (M7 검증 순서 명시 1건만 문서 변경)
+- Previous Gate: 감사 gap 반영 완료 (`36d917c`)
+- This Gate: M7 내부 `디지털 → POD` 검증 순서 확정
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES (변경 없음)
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES (변경 없음)
+- Latest relevant Work Log checked: 직전 항목 — YES
+- MASTER PLAN version / 기준일: 사용자 승인 MASTER PLAN / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A — 승인된 `Memory Product 우선` 전략 안에서 검증 순서만 구체화
+
+#### OWNERSHIP
+- Tool: Kiro
+- Model: Opus 5 / MAX
+- Role: Strategy Maintainer + Verifier (write-capable, bounded)
+- PR: #61 (draft 유지)
+- Branch: `docs/control-tower-governance`
+- Base SHA: `83c9b82b4cb9a5f3978b192a16927f3c01dba213`
+- Old HEAD: `36d917cc7dcaa6e7db6ee515fcfc5e08f3324a1c`
+- New HEAD / Reviewed HEAD: 이 커밋 SHA (push 후 live 확인)
+
+#### CHANGED
+- file: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- function/component/migration: §9.4 실물상품과 POD — `검증 순서 — 디지털 먼저, POD 다음` 신설
+- what changed: 디지털 기억상품으로 지불의향·제작완료·실제결제를 먼저 검증한 뒤 POD 실물
+  제작을 검증한다는 순서를 명시했다. 디지털 실제결제 확인 전 POD 업체 계약·최소 제작수량·
+  선투자를 진행하지 않는다는 제약과, 실물 개시 전 §13 개인정보·법률 검토 선행을 함께 적었다.
+- why: 디지털 경로는 배송·수령인 개인정보·외부 벤더 없이 수요를 확인할 수 있어, 벤더
+  선투자 위험을 지불의향 확인 이후로 미룰 수 있다.
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: `P-MP — Memory Product MVP` 범위·순서
+- what changed: POD handoff 항목에 `디지털 실제결제 확인 이후` 조건을 붙이고, 순서 블록을
+  `M7 디지털 검증 → M7 POD 실물 검증`으로 분리했다. P-MP 안에서 디지털 경로를 먼저 완성하고
+  디지털 실제결제 확인 전 POD 벤더 연동·선투자를 하지 않는다는 제약을 추가했다.
+- why: 사업문서의 검증 순서가 engineering 단계 범위와 어긋나지 않게 맞춘다.
+- file: `docs/WORK_LOG.md`
+- function/component/migration: 이 세션 항목
+- what changed: 사용자 결정 6건과 그중 문서 변경 1건을 기록했다.
+- why: 결정 근거와 미변경 이유를 추적 가능하게 남긴다.
+
+#### 사용자 결정 기록 (문서 변경 없이 확정된 항목)
+- 제출 패킷 2개: **untracked 유지**. `git add`하지 않는다
+- 협약기간 길이: 확정 전까지 `8개 순차 실행구간` 표현 유지
+- POD 법률 검토: 실제 실물 fulfillment 전 필수 gate로 유지
+- M2 → M3 순서: 변경하지 않는다. 채팅을 M3 뒤로 미루지 않는다
+- PR #61: draft 유지. #57 merge 후 master 기준 재검증하고 review 전환
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: 승인된 전략 변경 없음. M2/채팅 순서 유지, 새 M0 없음, 가격가설 불변
+- Production: remote mutation·migration·배포·Supabase 조회 없음
+- 그 외: `src/**`, `packages/**`, `e2e/**`, native, `AGENTS.md`, `CLAUDE.md`,
+  `PRODUCT_V3.md`, `CURRENT_STATE.md` 무수정. security PR #54/#58/#59/#60 HEAD 무변경
+- untracked 제출 패킷: 이 커밋에 포함하지 않았다
+
+#### VERIFICATION
+- command: `git rev-parse HEAD` 편집 전 확인
+- PASS: `36d917c` — 직전 커밋과 일치
+- what it actually proves: 시작 지점 동일성만 증명한다
+- command: `git diff --check`
+- PASS: whitespace 오류 없음
+- command: `git diff --name-only` / staged 경로 확인
+- PASS: 문서 3개만 변경. untracked 파일 미포함
+- command: 단계 보존 확인 (`P5.1`–`P5.5`, `P6A`–`P6D`, `P7`–`P10`, `LV`, `P-MP`, `M1`–`M8`)
+- PASS: 삭제된 단계 없음
+- UNVERIFIED: remote Supabase catalog, production migration state, native device gate,
+  POD 법적 요건, 실제 협약기간 길이, 디지털/POD 실제 수요
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — documentation/strategy only, class A
+- whether an earlier review is stale: **YES.** `1944361` 감사와 `36d917c` 상태 모두 이
+  커밋으로 대체된다. security PR 리뷰는 영향 없음(HEAD 무변경)
+
+#### BLOCKERS
+- code: 없음
+- environment: remote Supabase catalog, native device gate
+- external/manual: POD 법률 검토, 협약기간 길이 확정, PR #57 merge
+
+#### STOPPED AT
+- exact completed boundary: M7 검증 순서를 business/engineering 양쪽에 반영하고 push.
+  PR #61 draft 유지
+
+#### REMAINING
+- PR #57 merge
+- #61을 master 기준으로 재검증한 뒤 review 전환
+- 협약기간 확정 시 M1–M8 달력 매핑
+- 실물 fulfillment 전 POD 법률 검토
+
+#### NEXT ACTION
+- next owner: ChatGPT Control Tower
+- tool/model: PR #57 merge 후 `#61` rebase/재검증 담당자
+- 기준 SHA: 이 커밋 SHA
+- exact next task: PR #57을 merge하고 `#61`을 master 기준으로 재검증한 뒤 review 상태로 전환
+
+#### DO NOT ADVANCE UNTIL
+- PR #57이 merge되고 `#61`이 master 기준으로 재검증됨
+- P5.2 native/device gate 독립 검증 전 P6A 시작 금지
+- 디지털 기억상품 실제결제 확인 전 POD 벤더 선투자 금지
+- 실물 배송 개시 전 개인정보·법률 검토 완료
+
+#### PRODUCTION
+- NOT APPLIED — remote mutation·migration·배포·Supabase 조회 없음
+
+---
+
+### 2026-08-15 · [Control Tower / Conversation Bridge V1] canonical direction update
+
+#### PLAN POSITION
+- Phase: P4 / M2 direction update
+- Workstream: Product + Engineering canonicalization
+- Step: Conversation Bridge V1 CORE; 자체 Chat/Messenger DEFERRED
+- Previous Gate: Control Tower explicit decision
+- This Gate: canonical sources aligned; code implementation moves to a separate `origin/master` branch
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-15 Memory Product validation entry — YES
+- MASTER PLAN version / 기준일: Control Tower explicit decision / 2026-08-15
+- Does this task conflict with canonical direction: YES — prior documents treated chat as V1 core
+- If YES, what conflict: Control Tower explicitly supersedes that direction; this entry and canonical edits resolve it
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: Control Tower implementation owner
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `fc35ad0019eed14d41bfbe8bb8a0ee1760c311a1`
+- Old HEAD: `fc35ad0019eed14d41bfbe8bb8a0ee1760c311a1`
+- New HEAD / Reviewed HEAD: this commit (live push verified after commit)
+
+#### CHANGED / REVIEWED
+- `docs/PRODUCT_V3.md`: Conversation Bridge core loop, talk-about lifecycle, V1 scope, deferred self-chat boundary
+- `docs/BUSINESS_MEMORY_ROADMAP_V1.md`: M2, Free Core, and daily-flow wording
+- `docs/ENGINEERING_ROADMAP.md`: P4 ownership; P5.3/P5.4 FROZEN / DEFERRED while preserving P5.5/P6 gates
+- `docs/CURRENT_STATE.md`: PR #59/#60 and migration 041 recorded as active-draft assets, not V1 entry-path work
+- `docs/WORK_LOG.md`: this direction decision and evidence index
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; migration 041 remains an unapplied active-draft asset
+- product semantics: Control Tower direction update only; no implementation claim
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- `git diff --check`: PASS — no whitespace errors
+- live `gh pr view 61`: PASS — branch/head verified before writing
+- `rg` canonical chat/core references: PASS — remaining references identify DEFERRED/frozen historical assets or future review
+- remote Supabase catalog and production migration state: UNVERIFIED
+
+#### REVIEW IMPACT
+- DELTA — canonical product/roadmap/current-state direction changed; prior chat-product direction reviews do not authorize a V1 chat entry path
+
+#### BLOCKERS
+- code: none for the separate Conversation Bridge implementation branch
+- environment: remote Supabase catalog remains UNVERIFIED
+- external/manual: none
+
+#### STOPPED AT
+- exact completed boundary: canonical direction updated; no application or migration files changed on PR #61
+
+#### REMAINING
+- create separate `origin/master`-based code branch and implement Conversation Bridge V1
+
+#### NEXT ACTION
+- next owner: Codex implementation owner
+- tool/model: Terra / High
+- 기준 SHA: current `origin/master`
+- exact next task: extend existing P3 talk-about metadata/list path without using P5.3/P5.4 chat branches
+
+#### DO NOT ADVANCE UNTIL
+- canonical commit is pushed to PR #61
+- new code branch is created from live `origin/master`
+
+#### PRODUCTION
+- NOT APPLIED — no remote mutation, migration, or deployment
+
+---
+
+### 2026-08-15 · [Control Tower / Conversation Bridge V1] private-source privacy clarification
+
+#### PLAN POSITION
+- Phase: P4 / M2
+- Workstream: Product privacy clarification
+- Step: private-source transition exception for Conversation Bridge unavailable state
+- Previous Gate: Conversation Bridge canonical direction update `def18da`
+- This Gate: shared → private removes coordination metadata before the partner can see an unavailable item
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: preceding Conversation Bridge entry — YES
+- Does this task conflict with canonical direction: NO — it resolves an ambiguity in favor of the existing private-record non-disclosure rule
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: Control Tower implementation owner
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `def18da6a5764268262d41dea71ef959470c7f2f`
+- Old HEAD: `def18da6a5764268262d41dea71ef959470c7f2f`
+- New HEAD / Reviewed HEAD: this commit
+
+#### CHANGED / REVIEWED
+- `docs/PRODUCT_V3.md`: a deleted/stale source remains generic unavailable; a shared → private transition removes the metadata so no private-record existence or mark state is disclosed
+- `docs/WORK_LOG.md`: this privacy interpretation index
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged in this documentation commit
+- product semantics: no self-chat or scope expansion
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- `git diff --check`: PASS
+- remote Supabase catalog / production migration state: UNVERIFIED
+
+#### REVIEW IMPACT
+- DELTA — product privacy wording; aligned with private-record non-disclosure invariant
+
+#### BLOCKERS
+- code: implementation is on separate `codex/conversation-bridge-v1` branch
+- environment: remote migration state UNVERIFIED
+- external/manual: none
+
+#### STOPPED AT
+- exact completed boundary: canonical privacy wording clarified; no code or remote action on PR #61
+
+#### REMAINING
+- review and merge decisions remain separate
+
+#### NEXT ACTION
+- next owner: release owner
+- tool/model: Terra / High
+- 기준 SHA: current PR #61 head after commit
+- exact next task: review the separate Conversation Bridge implementation branch
+
+#### DO NOT ADVANCE UNTIL
+- no Production migration without separate authorization
+
+#### PRODUCTION
+- NOT APPLIED
+
+---
+
+### 2026-08-15 · [Control Tower / Core Privacy Foundation V1] canonical integration-gate correction
+
+#### PLAN POSITION
+- Phase: P5.5
+- Workstream: Core Privacy Foundation / P4 Conversation Bridge + P5.1 + P5.2
+- Step: active integration base와 P6 entry gate 정정
+- Previous Gate: Conversation Bridge CORE / chat FROZEN-DEFERRED decision
+- This Gate: chat stack을 V1/P6 필수 선행 조건에서 분리하고, active migration ordering과 native gate를 명시
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-15 Conversation Bridge direction entries — YES
+- MASTER PLAN version / 기준일: Control Tower latest product decision / 2026-08-15
+- Does this task conflict with canonical direction: NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: Control Tower implementation owner
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `006257ae6a737f9db1dae2a5ce5d3635a4783262`
+- Old HEAD: `006257ae6a737f9db1dae2a5ce5d3635a4783262`
+- New HEAD / Reviewed HEAD: this commit; related integration branch `codex/core-privacy-foundation-v1` at `35da04cf739649667c4d405a6c64c522d9e000e3`
+
+#### CHANGED / REVIEWED
+- `docs/ENGINEERING_ROADMAP.md`: P5.5를 P4 + P5.1 + P5.2 Core Privacy Foundation integration gate로 정확히 정정. frozen P5.3/P5.4를 삭제하거나 숨기지 않고 current V1/P6 dependency에서만 제외.
+- `docs/CURRENT_STATE.md`: integration branch, 043/044 migration assets, runtime/local test 사실, master/production 미병합·미적용 상태를 분리해 기록.
+- `docs/WORK_LOG.md`: 이 canonical correction의 source·gate·unverified evidence index.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: PMK/CSK/HRK 규칙과 P5 native gate 변경 없음
+- DB/migration semantics: 이 docs commit은 migration을 적용하거나 SQL을 변경하지 않음
+- product semantics: Conversation Bridge CORE / self-chat DEFERRED 결정을 재확인했을 뿐 새 제품 범위를 추가하지 않음
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: related integration branch `npm run test:p5`
+- PASS: 93 assertions including authenticated unlink actor path and mutation proof; local temporary PostgreSQL only
+- command: related integration branch targeted Vitest (`runtimeSession`, `runtime`, migration contracts)
+- PASS: 115 tests; runtime session guard/verified install and migration latest-function contracts covered
+- command: `git diff --check`
+- PASS: whitespace 오류 없음
+- UNVERIFIED: remote Supabase catalog, production migration history, browser/native E2E, physical iPhone/Android keystore behavior
+
+#### REVIEW IMPACT
+- DELTA — P5.5/P6 dependency wording changed. Earlier chat reviews remain valid only for their frozen draft heads and do not authorize a V1 chat path.
+
+#### BLOCKERS
+- code: merge/review of the Core Privacy Foundation integration branch
+- environment: real-device native validation and remote staging/production catalog evidence
+- external/manual: no Production migration without separate authorization
+
+#### STOPPED AT
+- exact completed boundary: canonical gate corrected; integration branch was pushed separately; no chat or P6 code integrated
+
+#### REMAINING
+- independent review of `35da04c`
+- real iPhone/Android DeviceKeys/LCK validation
+- staging migration/RLS rollout rehearsal for 039/040/043/044
+
+#### NEXT ACTION
+- next owner: security reviewer
+- tool/model: Terra / High
+- 기준 SHA: `35da04cf739649667c4d405a6c64c522d9e000e3`
+- exact next task: review Core Privacy Foundation integration diff, especially session lifecycle and 044 unlink semantics
+
+#### DO NOT ADVANCE UNTIL
+- native device gate and staging actor/RLS rehearsal are evidenced
+- P6 must not reuse frozen migration 042; any restart uses a reviewed 045+ forward migration
+
+#### PRODUCTION
+- NOT APPLIED — no remote mutation, migration, deployment, or Supabase catalog change
+
+---
+
+### 2026-08-17 · [Control Tower / PR #61] canonical governance convergence fix
+
+#### PLAN POSITION
+- Phase: Control Tower canonical convergence
+- Workstream: PR #61 documentation/governance correction
+- Step: R-1~R-5 correction before targeted canonical delta review
+- Previous Gate: Opus final canonical review target `deec2acb53f5f09405422397729a5abf98d5a0e6` returned REQUEST CANONICAL CHANGES; Product/Business/Engineering consistency itself passed, while parallel canonical ownership with #62–#67 was the blocker
+- This Gate: Option A — #61 canonical merge first, then #62–#67 alignment
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES; strategy unchanged
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no business strategy change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: prior PR #61 canonical integration-gate entry — YES
+- Does this task conflict with canonical direction: NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Luna / High
+- Role: PR #61 Canonical Governance Fix Worker
+- PR: #61
+- Branch: `docs/control-tower-governance`
+- Base SHA: `42ac1f307f19e84e8a3891311aa2a3d19179eed1`
+- Old HEAD: `deec2acb53f5f09405422397729a5abf98d5a0e6`
+- New HEAD / Reviewed HEAD: this documentation commit; verify live after push
+
+#### CHANGED / REVIEWED
+- R-1: added one canonical write-owner lock to `AGENTS.md`
+- R-2: recorded live #62–#67 draft stack and the Option A convergence order in `CURRENT_STATE.md`; added development-only, NOT APPLIED / remote UNVERIFIED status for migrations 045/046 while retaining 041/042 frozen/deferred reality
+- R-3: made `CLAUDE.md`, `PRODUCT_V3.md`, and `CURRENT_STATE.md` the README entry path without rewriting historical/general orientation
+- R-4: downgraded `docs/kiro/AI_HANDOFF.md` to structural-traps / historical implementation notes that must be verified against current code and canonical docs
+- R-5: marked the two business/production packet files as local user-supplied, not present in the repository, and not canonical
+- PR #62–#67 branches, commits, migrations, application code, security code, native code, and Production were not changed
+
+#### LIVE STACK
+- #61 `docs/control-tower-governance` @ `deec2acb53f5f09405422397729a5abf98d5a0e6`, base `master` @ `42ac1f3`
+- #62 `codex/device-protection-recovery-v1` @ `c7f9d13b1f8ba10d8be6ee422ed163044a05201b`
+- #63 `codex/notification-reentry-v1` @ `de4eaf63eaad1b2c58aca5e63714b149936c8317`
+- #64 `codex/lv-core-ux-v1` @ `fa68c72a86610e095ff77e322b7703e049972743`
+- #65 `codex/p6-readiness-audit-v1` @ `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5`
+- #66 `codex/sol-integration-audit-v1` @ `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5`
+- #67 `codex/opus-security-blockers-v1` @ `e96a5e68a1639f0eccd125e8986758d1c0246413`
+- All #61–#67 are OPEN / DRAFT; #61 is not merged and the stack is not Production.
+
+#### VERIFICATION
+- command: full Vitest through the repository test runner
+- PASS: 143 test files, 2,147 tests
+- command: `git diff --check`
+- PASS: no whitespace errors
+- command: `scripts/agent/validate.sh docs`
+- NOT RUN: script is absent from this HEAD (`No such file or directory`)
+- checked: no `src/`, `supabase/migrations/`, or native paths changed by this diff
+- checked: local submission packets were not staged
+- remote Supabase catalog / Production migration state: UNVERIFIED; no remote mutation performed
+
+#### REVIEW IMPACT
+- Previous Opus canonical review at `deec2ac` is STALE after this commit.
+- Required next review: targeted canonical delta review of R-1~R-5 only.
+
+#### STOPPED AT
+- exact completed boundary: documentation/governance fixes prepared; no merge, security-stack alignment, migration, native, or Production action
+
+#### REMAINING
+- commit and push the documentation-only delta to PR #61
+- update PR #61 body with the stale-review and targeted-review handoff
+- obtain targeted Opus canonical delta review
+- keep #62–#67 untouched until after #61 canonical merge
+
+#### NEXT ACTION
+- next owner: Opus canonical reviewer
+- exact next task: targeted review of R-1~R-5 against the effective PR #61 diff
+
+#### DO NOT ADVANCE UNTIL
+- targeted canonical delta review is complete
+- do not merge #61 in this task; do not align #62–#67; do not start P6
+
+#### PRODUCTION
+- NOT APPLIED — no remote migration, deployment, or Supabase mutation
 
 ---
 

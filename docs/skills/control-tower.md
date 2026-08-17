@@ -175,31 +175,45 @@ After receiving agent reports (or READY-TO-COPY blocks), the state-sync role:
 
 ### 8.8 Successful report persistence (required step after creating the report file)
 
-After an agent has created its NEW report file under:
-
-    control-tower/reports/<agent>/YYYY-MM-DD_HHMM_<task>_<agent>.md
-
-the agent MUST attempt to persist it in the dedicated memory worktree:
+The agent MUST follow this exact sequence. The report file is created **directly inside the dedicated memory worktree** after a successful sync from origin. Creating the report in any other worktree or branch and expecting it to appear here is forbidden.
 
 1. cd /Users/han-yejun/Desktop/gomsinlog-control-tower-memory
-2. git fetch origin
-3. git checkout docs/shared-ai-control-tower-v1
-4. git pull --ff-only origin/docs/shared-ai-control-tower-v1   # fast-forward only; abort if not clean
-5. git add ONLY the newly-created report file (never add Dashboard.md, Current Gate.md, Decision Log.md, or any other agent's files)
-6. git commit -m "docs(control-tower): add <agent> report <task>"
-7. git push origin docs/shared-ai-control-tower-v1
+2. Verify the worktree is clean:
 
-Rules:
+       git status --porcelain
+
+   If any output appears, STOP. Emit a complete READY-TO-COPY CONTROL-TOWER REPORT. Do not proceed with persistence.
+3. git fetch origin
+4. git checkout docs/shared-ai-control-tower-v1
+5. git pull --ff-only origin/docs/shared-ai-control-tower-v1
+
+   If this cannot complete cleanly, STOP the persistence attempt and emit a complete READY-TO-COPY CONTROL-TOWER REPORT. Do not mark the engineering task failed.
+
+6. ONLY AFTER the sync above has succeeded without error:
+
+   - Create the new report file **directly inside this memory worktree** at the exact path:
+
+       control-tower/reports/<agent>/YYYY-MM-DD_HHMM_<task>_<agent>.md
+
+   - Verify the intended filesystem path is correct and inside the memory worktree.
+
+7. git add -- <exact-report-path>
+8. git commit -m "docs(control-tower): add <agent> report <task>"
+9. git push origin docs/shared-ai-control-tower-v1
+
+Explicit prohibitions:
+- Never create the report file in an implementation worktree/branch and copy or expect it to be picked up here.
 - Never force-push.
 - Never amend or rewrite another agent's report.
-- Normal agents may only commit their own report files.
-- If the remote branch has moved ahead and a clean fast-forward is not possible, or if any step fails safely:
-  - STOP the memory sync attempt.
-  - Emit a complete READY-TO-COPY CONTROL-TOWER REPORT (see 8.5).
-  - Do NOT mark the engineering task as failed.
-  - The Control Tower state-sync owner will reconcile later.
+- Normal agents may only commit their own report files under reports/<their-agent>/.
+- Normal agents MUST NOT modify:
+  - control-tower/Dashboard.md
+  - control-tower/Current Gate.md
+  - control-tower/Decision Log.md
 
-This makes successful report persistence an explicit, auditable step rather than an implicit side-effect.
+If the memory worktree is dirty or a clean fast-forward is not possible, the engineering task itself is not failed. Emit READY-TO-COPY and let the Control Tower state-sync owner reconcile.
+
+This order guarantees that every persisted report is authored against the latest parked state inside the canonical memory location.
 
 ## 9. Obsidian volatile files (gitignore only)
 

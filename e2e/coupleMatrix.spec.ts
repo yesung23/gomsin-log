@@ -29,12 +29,12 @@ type Harness = { context: BrowserContext; page: Page; errors: string[] };
 async function open(browser: import('@playwright/test').Browser, scenario: Scenario, options?: {
   viewport?: { width: number; height: number };
   colorScheme?: 'light' | 'dark';
-}): Promise<Harness & { unrouted: string[] }> {
+}): Promise<Harness & { unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
   const context = await browser.newContext({
     viewport: options?.viewport ?? { width: 390, height: 844 },
     colorScheme: options?.colorScheme ?? 'light',
   });
-  const { unrouted } = await installMockBackend(context, scenario);
+  const { unrouted, dailyRecordWrites } = await installMockBackend(context, scenario);
   /*
    * Make `colorScheme: 'dark'` actually reach the app.
    *
@@ -60,7 +60,7 @@ async function open(browser: import('@playwright/test').Browser, scenario: Scena
     if (message.type() === 'error') errors.push(message.text());
   });
   page.on('pageerror', (error) => errors.push(`PAGEERROR ${error.message}`));
-  return { context, page, errors, unrouted };
+  return { context, page, errors, unrouted, dailyRecordWrites };
 }
 
 /** Settle: the splash resolves and the routed screen has rendered. */
@@ -377,6 +377,49 @@ test('an RLS denial is reported as a permission problem, not as being offline', 
   expect(body).not.toContain('오프라인이에요');
   await context.close();
 });
+
+// ---------------------------------------------------------------------------
+// 11. Connected unprovisioned couple must refuse online save (protection_required)
+// ---------------------------------------------------------------------------
+// A connected couple with no E2EE bootstrap must refuse the write as
+// protection_required. The draft must remain, no plaintext daily_record is
+// written, and the user is guided to Settings. This is the required follow-up
+// coverage identified by the red-team review of 34515b457.
+for (const [label, scenario] of [['creator', CREATOR], ['partner', PARTNER]] as const) {
+  test(`connected ${label} refuses online save as protection_required (no plaintext write)`, async ({ browser }) => {
+    const { context, page, errors, unrouted, dailyRecordWrites } = await open(browser, scenario);
+    await goto(page, '/');
+
+    // Open composer and type a record, exactly as a user would.
+    await page.getByRole('button', { name: '한줄' }).click();
+    await page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?').fill('보호가 필요한 기록');
+
+    // Save must be enabled while online with content.
+    const save = page.getByRole('button', { name: '저장' });
+    await expect(save).toBeEnabled();
+
+    await save.click();
+
+    // A. User state: draft must remain (composer not cleared).
+    await expect(page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?')).toBeVisible({ timeout: 10_000 });
+
+    // B. Security UX: protection_required guidance appears with Settings CTA.
+    await expect(page.getByText('기록 보호 설정이 필요해요', { exact: false })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: '설정 열기' })).toBeVisible();
+
+    // C. No plaintext persist: the application must refuse before writing.
+    // The mock records every POST/PUT daily_records payload for test observation.
+    expect(dailyRecordWrites.length, 'no daily_records write may be attempted for a protection_required connected save').toBe(0);
+
+    // No unexpected errors or unrouted calls.
+    expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);
+    // The protection path is exercised through the normal flow; no stray 500s.
+    const badUnrouted = unrouted.filter((u) => !u.includes('talk_about_marks'));
+    expect(badUnrouted, `unexpected unrouted: ${badUnrouted.join(', ')}`).toEqual([]);
+
+    await context.close();
+  });
+}
 
 test('a genuinely offline device says so, and stores the record it cannot send', async ({ browser }) => {
   const { context, page } = await open(browser, CREATOR);

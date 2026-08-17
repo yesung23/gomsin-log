@@ -193,9 +193,10 @@ export async function installMockRealtime(context: BrowserContext): Promise<void
 
 export async function installMockBackend(
   context: BrowserContext,
-  scenario: Scenario,
-): Promise<{ unrouted: string[] }> {
+  scenario: Scenario
+): Promise<{ unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
   const unrouted: string[] = [];
+  const dailyRecordWrites: Array<Record<string, unknown>> = [];
   await installMockRealtime(context);
 
   // Seed the session BEFORE any app script runs, so the very first
@@ -329,6 +330,11 @@ export async function installMockBackend(
       // Writes echo the payload back, as PostgREST does with `return=representation`.
       const body = request.postDataJSON();
       const payloads = Array.isArray(body) ? body : [body];
+      if (method !== 'GET') {
+        // Test-only observation: prove that a connected protection-required
+        // save never reaches a plaintext daily_records write.
+        for (const p of payloads) dailyRecordWrites.push(p);
+      }
       // Migration 032 supplies this server-side DEFAULT for legacy plaintext
       // inserts, and saveRecordToDB selects it to pin the next CAS revision.
       return rows(route, payloads.map((payload) => ({
@@ -508,5 +514,5 @@ export async function installMockBackend(
     return json(route, { message: `unrouted in mock backend: ${method} ${path}` }, 500);
   });
 
-  return { unrouted };
+  return { unrouted, dailyRecordWrites };
 }

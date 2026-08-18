@@ -19,7 +19,12 @@ import { isVisibleToViewer, type Viewer } from '@/lib/privacy';
  * PRODUCT_V3 §6.4 rules out.
  */
 export interface TalkAboutTopic {
-  record: DailyRecord;
+  /** Exact original id. Never substitute a different record for this id. */
+  recordId: string;
+  /** Present only when the viewer may still read this exact original. */
+  record?: DailyRecord;
+  /** An unavailable source never exposes record-derived content. */
+  unavailable: boolean;
   /** Distinct users who marked this record, newest mark first. */
   markedBy: string[];
   /** Whether the viewer is one of them -- drives 표시 해제 vs 나도 표시. */
@@ -39,11 +44,6 @@ export function buildTalkAboutTopics(
 
   for (const mark of marks) {
     if (!isTalkAboutMarkActive(mark, now)) continue;
-    const record = byId.get(mark.recordId);
-    // Unresolvable, or resolvable but not something this viewer may see.
-    // `isVisibleToViewer` is the same helper every record surface uses, so a
-    // private record can never reach this list through a stale mark.
-    if (!record || !isVisibleToViewer(record, viewer)) continue;
     const bucket = grouped.get(mark.recordId);
     if (bucket) bucket.push(mark);
     else grouped.set(mark.recordId, [mark]);
@@ -51,12 +51,15 @@ export function buildTalkAboutTopics(
 
   const topics: TalkAboutTopic[] = [];
   for (const [recordId, recordMarks] of grouped) {
-    const record = byId.get(recordId)!;
+    const record = byId.get(recordId);
+    const visibleRecord = record && isVisibleToViewer(record, viewer) ? record : undefined;
     const sorted = [...recordMarks].sort(
       (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
     );
     topics.push({
-      record,
+      recordId,
+      record: visibleRecord,
+      unavailable: !visibleRecord,
       markedBy: [...new Set(sorted.map((mark) => mark.actorUserId))],
       markedByViewer: viewer.userId
         ? sorted.some((mark) => mark.actorUserId === viewer.userId)

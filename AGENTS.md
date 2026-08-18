@@ -346,6 +346,12 @@ during convergence.
 | Codebase structural traps / historical implementation notes | `docs/kiro/AI_HANDOFF.md` — verify against current code and canonical docs |
 | Security / RLS coverage | `docs/SECURITY_TEST_PLAN.md`, `docs/rls-test-matrix.md` |
 | Rollback | `docs/operations/rollback-runbook.md` |
+| How to carry out a task (procedures) | `docs/skills/README.md` |
+
+`docs/skills/` holds the tool-neutral procedures that Codex, Kiro, and Claude Code
+all share: session recovery and direction check, feature build, security review,
+migration gate, and release validation. Read the relevant one instead of
+re-deriving the steps, and never fork a tool-specific copy of it.
 
 Repository reality always wins for claims about what is currently implemented.
 A document is not evidence that code exists, and a migration file is not

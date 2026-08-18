@@ -108,4 +108,19 @@ export interface DeviceKeysPlugin {
   getAssurance(options: { handle: string }): Promise<{ assurance: string }>;
 
   hasKey(options: { alias: string }): Promise<{ present: boolean }>;
+
+  /** Native-only LCK capability; no raw AES key crosses the bridge. */
+  lckEnsure(options: LocalKeyBinding): Promise<{ present: boolean }>;
+  lckHas(options: LocalKeyBinding): Promise<{ present: boolean }>;
+  lckSeal(options: LocalKeyBinding & { plaintext: string; aad: string }): Promise<{ nonce: string; ciphertext: string }>;
+  lckOpen(options: LocalKeyBinding & { nonce: string; ciphertext: string; aad: string }): Promise<{ plaintext: string }>;
+  lckDelete(options: LocalKeyBinding): Promise<void>;
+}
+
+export interface LocalKeyBinding {
+  installationId: string;
+  userId: string;
+  deviceId: string;
+  purpose: 'lck';
+  version: 1;
 }

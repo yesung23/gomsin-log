@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import type { AppState } from '@/types';
+import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
+import {
+  clearAllCoupleProtectionRequirements,
+  isCoupleProtectionRequired,
+} from '@/app/e2ee/coupleProtectionBarrier';
 
 type AuthCallback = (event: string, session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } } | null) => void;
 
@@ -55,6 +60,17 @@ const saveCoupleAnniversary = vi.fn().mockResolvedValue(true);
 // workspace. Tests that care about a definite answer set it explicitly.
 const fetchMyCoupleState = vi.fn().mockResolvedValue({ ok: false, reason: 'server' });
 
+const outboxEntries = new Map<string, QueuedRecord>();
+const outboxPersistence: OutboxPersistence = {
+  all: vi.fn(async () => Array.from(outboxEntries.values())),
+  put: vi.fn(async (entry) => { outboxEntries.set(entry.id, entry); }),
+  remove: vi.fn(async (id) => { outboxEntries.delete(id); }),
+};
+
+vi.mock('@/lib/outboxStorage', () => ({
+  createIndexedDbOutbox: () => outboxPersistence,
+}));
+
 vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
   isSupabaseConfigured: true,
@@ -83,8 +99,19 @@ vi.mock('@/lib/sync', () => ({
 
 /** Ordered log of media-related calls, used to assert the two-phase upload flow. */
 const callOrder: string[] = [];
-const saveRecordToDB = vi.fn(async () => {
+let enforceProtectionBarrierInStoreMock = false;
+const saveRecordToDB = vi.fn(async (...args: unknown[]) => {
   callOrder.push('saveRecord');
+  const record = args[0] as { isPrivate?: boolean } | undefined;
+  const coupleId = args[1];
+  const userId = args[2];
+  if (enforceProtectionBarrierInStoreMock
+    && record?.isPrivate === false
+    && typeof userId === 'string'
+    && typeof coupleId === 'string'
+    && isCoupleProtectionRequired(userId, coupleId)) {
+    return { ok: false as const, reason: 'server' as const, protectionRequired: true };
+  }
   return { ok: true as const };
 });
 const uploadRecordMedia = vi.fn(async (file: File) => {
@@ -98,6 +125,7 @@ const removeRecordMedia = vi.fn(async () => {
 const fetchRecordsFromDB = vi.fn(async () => []);
 
 const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
+const activateCoupleProtectionForAuthenticatedSession = vi.fn(async () => 'not_paired' as const);
 
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
@@ -115,6 +143,12 @@ vi.mock('@/lib/records', () => ({
     if (typeof path !== 'string') return false;
     return path.startsWith(`${coupleId}/${recordId}/`);
   },
+}));
+
+vi.mock('@/app/e2ee/runtimeSession', () => ({
+  installE2eeRuntimeForAuthenticatedSession: vi.fn().mockResolvedValue({ status: 'guarded' }),
+  activateCoupleProtectionForAuthenticatedSession: (...args: unknown[]) =>
+    activateCoupleProtectionForAuthenticatedSession(...(args as [])),
 }));
 
 const fetchEventsResultFromDB = vi.fn().mockResolvedValue({ ok: true, events: [] });
@@ -136,11 +170,13 @@ vi.mock('@/lib/trips', () => ({
   reconcileParentTrips: (trips: unknown[]) => trips,
 }));
 
-// Talk-about marks load alongside the other shared slices. Metadata only, and
-// deliberately outside the ok/quarantine gate, so an empty list is the correct
-// default for every scenario in this file.
+const fetchTalkAboutMarksResultFromDB = vi.fn()
+  .mockResolvedValue({ ok: true, marks: [] });
+
+// Talk-about marks load alongside the other shared slices. A failed read keeps
+// the old list; the normal default here is an authoritative empty result.
 vi.mock('@/lib/talkAbout', () => ({
-  fetchTalkAboutMarksFromDB: vi.fn().mockResolvedValue([]),
+  fetchTalkAboutMarksResultFromDB: (...args: unknown[]) => fetchTalkAboutMarksResultFromDB(...args),
   markTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
   unmarkTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
   resolveTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
@@ -148,13 +184,32 @@ vi.mock('@/lib/talkAbout', () => ({
 
 const { StoreProvider } = await import('@/lib/store');
 const { useStore } = await import('@/lib/useStore');
+const { setOutboxLocalCacheKey } = await import('@/lib/outbox');
+const { registerE2eeRuntimeTeardown } = await import('@/app/e2ee/runtimeLifecycle');
 const { fetchTripsResultFromDB: fetchTripsResultFromDBMock } = await import('@/lib/trips') as unknown as { fetchTripsResultFromDB: ReturnType<typeof vi.fn> };
 const STORE_KEY = 'gomsinlog.state.v2';
 
 let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
+let lastFlushResult: { delivered: number; requeued: number; blocked: number } | null = null;
 
 function Probe({ files = [] as File[] }: { files?: File[] }) {
-  const { state, isReady, authSyncUnavailable, sharedSyncStatus, signOut, disconnect, updateProfile, addRecordWithMedia, addEvent, reloadEvents } = useStore();
+  const {
+    state,
+    isReady,
+    authSyncUnavailable,
+    sharedSyncStatus,
+    signOut,
+    disconnect,
+    updateProfile,
+    addRecordWithMedia,
+    queueRecordForLater,
+    flushOutbox,
+    refreshCoupleLifecycle,
+    outboxWaiting,
+    outboxBlocked,
+    addEvent,
+    reloadEvents,
+  } = useStore();
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
@@ -169,6 +224,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
       <span data-testid="events">{state.events.map((event) => event.id).join(',')}</span>
       <span data-testid="trips">{state.trips.map((trip) => trip.id).join(',')}</span>
+      <span data-testid="talkAboutMarks">{(state.talkAboutMarks ?? []).map((mark) => mark.id).join(',')}</span>
       <span data-testid="attachments">
         {state.records
           .flatMap((r) => r.attachments || [])
@@ -176,6 +232,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
           .join(',')}
       </span>
       <span data-testid="logs">{state.records.map((r) => r.log).join('|')}</span>
+      <span data-testid="outbox">{outboxWaiting}:{outboxBlocked}</span>
       <button
         onClick={() => {
           void addRecordWithMedia(
@@ -194,6 +251,19 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       >
         post
       </button>
+      <button onClick={() => {
+        void queueRecordForLater({
+          date: '2026-08-16',
+          time: '12:00',
+          authorRole: 'gomsin',
+          log: 'queued old couple record',
+          isPrivate: false,
+        }, []);
+      }}>queue</button>
+      <button onClick={() => {
+        void flushOutbox().then((result) => { lastFlushResult = result; });
+      }}>flush</button>
+      <button onClick={() => void refreshCoupleLifecycle()}>refresh-lifecycle</button>
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
       <button onClick={() => void updateProfile({ myName: 'updated-name' })}>update-profile</button>
@@ -241,6 +311,11 @@ describe('StoreProvider auth lifecycle', () => {
     authCallbacks.length = 0;
     createdChannels.length = 0;
     localStorage.clear();
+    outboxEntries.clear();
+    clearAllCoupleProtectionRequirements();
+    enforceProtectionBarrierInStoreMock = false;
+    setOutboxLocalCacheKey(null);
+    lastFlushResult = null;
     fetchFullStateFromDB.mockReset();
     mockSupabase.profileUpdateError = null;
     mockSupabase.profileUpdateMatched = true;
@@ -259,9 +334,11 @@ describe('StoreProvider auth lifecycle', () => {
     // `vi.restoreAllMocks()` strips this too. Default: the lifecycle RPC could
     // not answer, which by contract must leave local couple state untouched.
     fetchMyCoupleState.mockReset().mockResolvedValue({ ok: false, reason: 'server' });
+    activateCoupleProtectionForAuthenticatedSession.mockReset().mockResolvedValue('not_paired');
     disconnectCoupleFromDB.mockReset().mockResolvedValue(true);
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
     fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });
+    fetchTalkAboutMarksResultFromDB.mockReset().mockResolvedValue({ ok: true, marks: [] });
     saveEventToDB.mockReset().mockResolvedValue(null);
     updateEventInDB.mockReset().mockResolvedValue(null);
     deleteEventFromDB.mockReset().mockResolvedValue(true);
@@ -271,6 +348,131 @@ describe('StoreProvider auth lifecycle', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    setOutboxLocalCacheKey(null);
+  });
+
+  it('clears module-level E2EE capabilities when the provider unmounts', async () => {
+    const teardown = vi.fn();
+    registerE2eeRuntimeTeardown(teardown);
+    const view = render(<StoreProvider><Probe /></StoreProvider>);
+
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('loading'));
+    view.unmount();
+
+    expect(teardown).toHaveBeenCalledOnce();
+  });
+
+  it('blocks an old-couple outbox entry before opening or sending it after re-pairing', async () => {
+    let remoteCoupleId = 'couple-old';
+    fetchFullStateFromDB.mockImplementation(async () => serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: {
+          coupleId: remoteCoupleId,
+          partnerName: '몽룡',
+          coupleCode: '',
+          connected: true,
+          status: 'active',
+        },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+    const open = vi.fn(async () => new Uint8Array());
+    setOutboxLocalCacheKey({
+      binding: {
+        installationId: 'test',
+        userId: 'user-a',
+        deviceId: 'device-a',
+        purpose: 'lck',
+        version: 1,
+      },
+      has: async () => true,
+      seal: async () => ({ nonce: new Uint8Array(12), ciphertext: new Uint8Array([1]) }),
+      open,
+      delete: async () => {},
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-old'));
+    await act(async () => { screen.getByText('queue').click(); });
+    await waitFor(() => expect(outboxEntries.size).toBe(1));
+    expect(Array.from(outboxEntries.values())[0].sealedRecord).toBeDefined();
+
+    remoteCoupleId = 'couple-new';
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-new'));
+    saveRecordToDB.mockClear();
+    await act(async () => { screen.getByText('flush').click(); });
+    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 1 }));
+
+    expect(open).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(Array.from(outboxEntries.values())[0].blocked?.reason).toBe('couple_changed');
+  });
+
+  it('rechecks the queued couple after payload open before the first replay mutation', async () => {
+    let remoteCoupleId = 'couple-old';
+    fetchFullStateFromDB.mockImplementation(async () => serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: {
+          coupleId: remoteCoupleId,
+          partnerName: '몽룡',
+          coupleCode: '',
+          connected: true,
+          status: 'active',
+        },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+    let resolveOpen!: (plaintext: Uint8Array) => void;
+    const open = vi.fn(() => new Promise<Uint8Array>((resolve) => { resolveOpen = resolve; }));
+    setOutboxLocalCacheKey({
+      binding: {
+        installationId: 'test',
+        userId: 'user-a',
+        deviceId: 'device-a',
+        purpose: 'lck',
+        version: 1,
+      },
+      has: async () => true,
+      seal: async () => ({ nonce: new Uint8Array(12), ciphertext: new Uint8Array([1]) }),
+      open,
+      delete: async () => {},
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-old'));
+    await act(async () => { screen.getByText('queue').click(); });
+    await waitFor(() => expect(outboxEntries.size).toBe(1));
+
+    saveRecordToDB.mockClear();
+    screen.getByText('flush').click();
+    await waitFor(() => expect(open).toHaveBeenCalledOnce());
+    remoteCoupleId = 'couple-new';
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-new'));
+    await act(async () => resolveOpen(new TextEncoder().encode(JSON.stringify({
+      record: {
+        date: '2026-08-16',
+        time: '12:00',
+        authorRole: 'gomsin',
+        log: 'queued old couple record',
+        isPrivate: false,
+      },
+    }))));
+    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 1 }));
+
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(Array.from(outboxEntries.values())[0].blocked?.reason).toBe('couple_changed');
   });
 
   it('becomes ready after a session is restored', async () => {
@@ -325,6 +527,7 @@ describe('StoreProvider auth lifecycle', () => {
       userId === 'user-a'
         ? serverState({
             records: [{ id: 'rec-a', date: '2026-07-31', time: '10:00', authorRole: 'gomsin', log: 'A', isPrivate: false, createdAt: 'x' }] as never,
+            talkAboutMarks: [{ id: 'mark-a', recordId: 'rec-a', coupleId: 'couple-a', actorUserId: 'user-a', createdAt: 'x', isCompleted: false }],
             profile: { myName: 'A', role: 'gomsin', couple: { partnerName: '', coupleCode: '', connected: false, status: 'pending' }, military: {} as never, contact: {} as never } as never,
           })
         : null,
@@ -341,6 +544,7 @@ describe('StoreProvider auth lifecycle', () => {
       emitAuth('SIGNED_IN', 'user-a');
     });
     await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('rec-a'));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-a');
 
     // Account B has no profile row yet; account A's cached records must not survive.
     await act(async () => {
@@ -349,6 +553,7 @@ describe('StoreProvider auth lifecycle', () => {
 
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-b'));
     expect(screen.getByTestId('records')).toHaveTextContent('');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
     expect(screen.getByTestId('name')).toHaveTextContent('');
   });
 
@@ -801,6 +1006,78 @@ describe('StoreProvider auth lifecycle', () => {
     // A second save patches the row with the attachment metadata.
     expect(callOrder.filter((c) => c === 'saveRecord')).toHaveLength(2);
     expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
+  });
+
+  it('blocks an immediate shared save while connected couple protection is pending', async () => {
+    lastMediaResult = null;
+    enforceProtectionBarrierInStoreMock = true;
+    let resolveActivation!: (outcome: 'activated' | 'unavailable') => void;
+    const activationPending = new Promise<'activated' | 'unavailable'>((resolve) => {
+      resolveActivation = resolve;
+    });
+    activateCoupleProtectionForAuthenticatedSession.mockImplementationOnce(
+      async () => activationPending,
+    );
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+    fetchMyCoupleState.mockResolvedValue({
+      ok: true,
+      state: {
+        coupleId: 'couple-1',
+        role: 'gomsin',
+        memberStatus: 'active',
+        partnerPresent: true,
+        invitationActive: false,
+        invitationExpiresAt: null,
+      },
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await waitFor(() => expect(activateCoupleProtectionForAuthenticatedSession).toHaveBeenCalledTimes(1));
+
+    // Repeated connected refreshes reuse the unresolved activation attempt.
+    await act(async () => {
+      screen.getByText('refresh-lifecycle').click();
+      screen.getByText('refresh-lifecycle').click();
+    });
+    expect(activateCoupleProtectionForAuthenticatedSession).toHaveBeenCalledTimes(1);
+
+    // The real records writer is separately covered by records.test.ts; this
+    // store boundary proves the connected state cannot proceed as a plaintext
+    // save while the activation promise is unresolved.
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+    expect(lastMediaResult?.ok).toBe(false);
+    expect(lastMediaResult?.reason).toBe('protection_required');
+    expect(screen.getByTestId('logs')).toHaveTextContent('');
+
+    resolveActivation('unavailable');
+    await waitFor(() => expect(isCoupleProtectionRequired('user-a', 'couple-1')).toBe(true));
+
+    // A failed activation does not clear the barrier. A later connected refresh
+    // may retry, and only that retry's confirmed success can release it.
+    activateCoupleProtectionForAuthenticatedSession.mockImplementationOnce(
+      async () => 'activated' as const,
+    );
+    await act(async () => screen.getByText('refresh-lifecycle').click());
+    await waitFor(() => expect(isCoupleProtectionRequired('user-a', 'couple-1')).toBe(false));
+
+    lastMediaResult = null;
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult?.ok).toBe(true));
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
   });
 
   it('keeps the written text when a media upload fails, and reports the failure', async () => {

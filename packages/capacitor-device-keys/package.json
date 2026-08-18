@@ -11,5 +11,5 @@
     "android": { "src": "android" }
   },
   "peerDependencies": { "@capacitor/core": "^7.0.0" },
-  "files": ["dist/", "ios/", "android/", "GomsinlogDeviceKeys.podspec"]
+  "files": ["dist/", "ios/", "android/", "GomsinlogCapacitorDeviceKeys.podspec"]
 }

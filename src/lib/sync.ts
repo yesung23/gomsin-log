@@ -1,9 +1,10 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { AppState, UserProfile, CoupleInfo, MilitaryInfo, ContactPreferences, DailyRecord, CoupleEvent, Trip, Role } from '@/types';
+import { AppState, UserProfile, CoupleInfo, MilitaryInfo, ContactPreferences, DailyRecord, CoupleEvent, Trip, Role, TalkAboutMark } from '@/types';
 import { fetchRecordsResultFromDB } from '@/lib/records';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { fetchEventsResultFromDB } from '@/lib/events';
 import { fetchTripsResultFromDB } from '@/lib/trips';
+import { fetchTalkAboutMarksResultFromDB } from '@/lib/talkAbout';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 
 export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
@@ -19,6 +20,7 @@ export type AuthSyncStage =
   | 'records'
   | 'events'
   | 'trips'
+  | 'talk-about'
   | 'unexpected'
   | 'timeout';
 
@@ -251,7 +253,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
      * waiting saw their entries vanish on the next load.
      */
     const coupleSpaceId = couple.coupleId;
-    const [recordsResult, eventsResult, tripsResult] = await Promise.all([
+    const [recordsResult, eventsResult, tripsResult, talkAboutResult] = await Promise.all([
       coupleSpaceId
         ? fetchRecordsResultFromDB(coupleSpaceId)
         : Promise.resolve({ ok: true as const, records: [] as DailyRecord[] }),
@@ -261,8 +263,11 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       coupleSpaceId
         ? fetchTripsResultFromDB(coupleSpaceId)
         : Promise.resolve({ ok: true as const, trips: [] as Trip[] }),
+      coupleSpaceId
+        ? fetchTalkAboutMarksResultFromDB(coupleSpaceId)
+        : Promise.resolve({ ok: true as const, marks: [] as TalkAboutMark[] }),
     ]);
-    if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
+    if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok || !talkAboutResult.ok) {
       // Prefer a definite cause over a generic one: `forbidden` from a slice read
       // is a membership answer and must not be reported as a connection failure.
       if (!recordsResult.ok) return syncFailure('records', recordsResult.error);
@@ -280,6 +285,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
           stage: 'trips',
         };
       }
+      if (!talkAboutResult.ok) return syncFailure('talk-about', talkAboutResult.error);
     }
 
     const partnerRole: Role = profile.role === 'gomsin' ? 'soldier' : 'gomsin';
@@ -303,6 +309,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
         records,
         events,
         trips,
+        talkAboutMarks: talkAboutResult.marks,
         setupComplete: !!profileData.onboarding_completed_at,
       },
     };

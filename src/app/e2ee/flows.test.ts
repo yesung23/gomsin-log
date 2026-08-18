@@ -14,11 +14,17 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bytesToUuid, hex, uuidToBytes } from '@/crypto/bytes';
-import { publicKeyFingerprint, randomBytes } from '@/crypto/suite';
+import { generateEphemeralAgreement, publicKeyFingerprint, randomBytes } from '@/crypto/suite';
+import { KEY_DOMAIN, RECIPIENT_KIND } from '@/crypto/domains';
+import { sealScopeKeyForRecipient } from '@/crypto/keyring/scopeKeys';
 import { verifyCertificateChain } from '@/crypto/deviceCertificate';
+import { decodeHeader, splitEnvelope } from '@/crypto/glk2';
 import { buildPairingSide, proposePairing } from '@/crypto/protocol/pairing';
 import { pairingConfirmMessage, partnerAssistConfirmMessage } from '@/crypto/transcripts';
 import { revocationLogGenesis } from '@/crypto/revocation';
+import { createVerifiedRecordCryptoEnvironment } from './runtime';
+import { clearE2eeRuntime } from './runtimeLifecycle';
+import { installE2eeRuntimeForSession } from './runtimeSession';
 import {
   acceptEnrollmentSas,
   approveSecondDeviceEnrollment,
@@ -34,6 +40,7 @@ import {
   recoverWithKit,
   revokeDeviceAndRotate,
   selfNotarizeOwnEnvelopes,
+  markCoupleAuthorityUnlinked,
 } from './useCases';
 import {
   activeScope,
@@ -130,6 +137,8 @@ describe('Scenario A — first device setup', () => {
       userId: alice.userId, recoveryCode: result.recoveryCode, kitAnchor: result.kitAnchor,
     });
     expect(alice.localState.bootstraps.get(alice.userId)!.state).toBe('COMPLETE');
+    expect(alice.localState.bootstraps.get(alice.userId)!.recoverySecret).toBeNull();
+    expect(alice.localState.bootstraps.get(alice.userId)!.recoveryCode).toBeNull();
     expect(server.devices[0].status).toBe('ACTIVE');
   });
 
@@ -203,13 +212,11 @@ describe('Scenario A — first device setup', () => {
     expect(server.devices).toHaveLength(0);
   });
 
-  it('grants no health domain on web', async () => {
+  it('refuses Web as a first or only bootstrap device', async () => {
     const web = createMemoryAccount(server);
-    await bootstrapFirstDevice(web.devices[0].deps, { userId: web.userId, platform: 'web' });
-    expect(server.scopeKeys.filter((k) => k.domain === 'health' && k.scopeId === web.userId))
-      .toHaveLength(0);
-    expect(server.scopeKeys.filter((k) => k.domain === 'personal' && k.scopeId === web.userId))
-      .toHaveLength(1);
+    await expect(bootstrapFirstDevice(web.devices[0].deps, { userId: web.userId, platform: 'web' }))
+      .rejects.toThrow('E_WEB_BOOTSTRAP_RESTRICTED');
+    expect(server.scopeKeys.filter((k) => k.scopeId === web.userId)).toHaveLength(0);
   });
 });
 
@@ -503,6 +510,68 @@ describe('Scenario C — couple pairing', () => {
     expect(scope.ownerCoupleId).toBe(coupleId);
     expect(scope.ownerUserId).toBeNull();
     expect(server.pairings[0].state).toBe('CRYPTO_ACTIVE');
+    const canonicalOwner = [alice.userId, bob.userId].sort()[0];
+    const authority = await alice.localState.loadCoupleAuthority(coupleId);
+    expect(authority?.state).toBe('CRYPTO_ACTIVE');
+    expect(authority?.lowUserId).toBe(canonicalOwner);
+    expect(authority?.highUserId).toBe([alice.userId, bob.userId].sort()[1]);
+    await expect(alice.localState.pinCoupleAuthority({
+      ...authority!,
+      highUserId: crypto.randomUUID(),
+    })).rejects.toThrow(/E_COUPLE_AUTHORITY_PINNED/);
+    for (const envelope of server.envelopes.filter((entry) => entry.scopeKeyId === scope.id)) {
+      expect(bytesToUuid(decodeHeader(splitEnvelope(envelope.envelope).header).ownerUserId)).toBe(canonicalOwner);
+    }
+    await markCoupleAuthorityUnlinked(alice.devices[0].deps, coupleId);
+    expect((await alice.localState.loadCoupleAuthority(coupleId))?.state).toBe('UNLINKED');
+    await expect(alice.localState.pinCoupleAuthority({ ...authority!, state: 'CRYPTO_ACTIVE' }))
+      .rejects.toThrow(/E_COUPLE_AUTHORITY_STATE/);
+  });
+
+  it('activates the couple write floor from the session once a real CSK exists', async () => {
+    const ceremony = await pairAccounts(alice, bob, aliceDeviceId, bobDeviceId, coupleId);
+    await completeCouplePairing(alice.devices[0].deps, {
+      coupleId,
+      ownUserId: alice.userId,
+      partnerUserId: bob.userId,
+      transcriptHash: ceremony.proposed.transcriptHash,
+      ownSide: ceremony.sideA,
+      partnerSide: ceremony.sideB,
+      ownConfirmation: ceremony.confirmationA,
+      partnerConfirmation: ceremony.confirmationB,
+      senderDeviceId: aliceDeviceId,
+      expiresAtMs: BigInt(server.now() + 600_000),
+    });
+
+    const keyPort = {
+      load: async () => null,
+      loadOrCreate: async (binding: {
+        installationId: string; userId: string; deviceId: string; purpose: string; version: number;
+      }) => ({
+        binding,
+        has: async () => true,
+        seal: async () => ({ nonce: new Uint8Array(12), ciphertext: new Uint8Array() }),
+        open: async () => new Uint8Array(),
+        delete: async () => {},
+      }),
+    };
+
+    // This is the defect QUEUE 1B closes: before this, a real paired couple could
+    // keep writing shared records below their floor because nothing in the
+    // product flow ever activated it.
+    const installed = await installE2eeRuntimeForSession({
+      userId: alice.userId,
+      repository: alice.devices[0].deps.repository,
+      localState: alice.localState,
+      deviceKeys: alice.devices[0].deviceKeys,
+      localKeys: keyPort,
+      installationId: 'flows-session',
+      activeCoupleId: coupleId,
+    });
+
+    expect(installed).toMatchObject({ status: 'installed', coupleProtection: 'activated' });
+    expect(server.writeFloors.get(`couple:${coupleId}`)).toBe(1);
+    clearE2eeRuntime();
   });
 
   it('creates no CSK at all without both confirmations', async () => {
@@ -542,6 +611,73 @@ describe('Scenario C — couple pairing', () => {
       senderDeviceId: aliceDeviceId,
       expiresAtMs: BigInt(server.now() + 600_000),
     })).rejects.toThrow(/E_PARTNER_ANCHOR_MISMATCH/);
+  });
+
+  it('rejects a server-added third member before and after lifecycle tampering', async () => {
+    const ceremony = await pairAccounts(alice, bob, aliceDeviceId, bobDeviceId, coupleId);
+    await completeCouplePairing(alice.devices[0].deps, {
+      coupleId,
+      ownUserId: alice.userId,
+      partnerUserId: bob.userId,
+      transcriptHash: ceremony.proposed.transcriptHash,
+      ownSide: ceremony.sideA,
+      partnerSide: ceremony.sideB,
+      ownConfirmation: ceremony.confirmationA,
+      partnerConfirmation: ceremony.confirmationB,
+      senderDeviceId: aliceDeviceId,
+      expiresAtMs: BigInt(server.now() + 600_000),
+    });
+    const charlie = createMemoryAccount(server);
+    const charlieBoot = await bootstrapAccount(charlie);
+    await alice.localState.pinTrustAnchor(charlie.userId, (await charlie.localState.loadTrustAnchor(charlie.userId))!);
+    const scope = activeScope(server, 'couple', coupleId)!;
+    const charlieDevice = server.devices.find((device) => device.id === charlieBoot.result.deviceId)!;
+    const aliceDevice = server.devices.find((device) => device.id === aliceDeviceId)!;
+    const charlieCertificate = server.certificates.find((certificate) => certificate.subjectDeviceId === charlieBoot.result.deviceId)!;
+    const forged = await sealScopeKeyForRecipient({
+      scopeKey: randomBytes(32),
+      recipientKemSpki: aliceDevice.kemSpki,
+      recipientId: uuidToBytes(aliceDeviceId),
+      recipientKind: RECIPIENT_KIND.device,
+      senderDeviceId: uuidToBytes(charlieBoot.result.deviceId),
+      senderSigSpki: charlieDevice.sigSpki,
+      sign: (message) => charlie.devices[0].deviceKeys.sign(`dev_sig:${charlieBoot.result.deviceId}`, message),
+      makeEphemeral: (peer) => generateEphemeralAgreement(peer),
+      header: {
+        domain: KEY_DOMAIN.couple,
+        scopeKeyId: uuidToBytes(scope.id),
+        ownerUserId: uuidToBytes([alice.userId, bob.userId].sort()[0]),
+        scopeId: uuidToBytes(coupleId),
+        epoch: scope.epoch,
+      },
+      nowMs: BigInt(server.now()),
+    });
+    server.envelopes = server.envelopes.filter(
+      (envelope) => !(envelope.scopeKeyId === scope.id && envelope.recipientId === aliceDeviceId),
+    );
+    server.envelopes.push({
+      scopeKeyId: scope.id,
+      recipientKind: 'device',
+      recipientId: aliceDeviceId,
+      senderDeviceId: charlieBoot.result.deviceId,
+      senderCertificateId: charlieCertificate.id,
+      envelope: forged,
+      selfNotarized: false,
+    });
+    const environment = await createVerifiedRecordCryptoEnvironment({
+      userId: alice.userId,
+      deviceId: aliceDeviceId,
+      repository: alice.devices[0].deps.repository,
+      localState: alice.localState,
+      deviceKeys: alice.devices[0].deviceKeys,
+      now: () => server.now(),
+    });
+    server.activeMembers.set(coupleId, [alice.userId, bob.userId, charlie.userId]);
+    await expect(environment.scopeKeyFor('couple', coupleId, scope.epoch))
+      .rejects.toMatchObject({ code: 'E_COUPLE_LIFECYCLE_INVALID' });
+    server.activeMembers.set(coupleId, [alice.userId, bob.userId]);
+    await expect(environment.scopeKeyFor('couple', coupleId, scope.epoch))
+      .rejects.toMatchObject({ code: 'E_SCOPE_SENDER_UNAUTHORIZED' });
   });
 });
 
@@ -737,6 +873,15 @@ describe('Scenario E — kit recovery onto a new device', () => {
 
     expect(recovered.state).toBe('ACTIVE');
     expect(server.devices.find((d) => d.id === recovered.deviceId)!.status).toBe('ACTIVE');
+    // A recovered device must remain installable after the recovery function
+    // returns. Runtime discovery uses protected local bootstrap state rather
+    // than a server-status shortcut.
+    expect(alice.localState.bootstraps.get(alice.userId)).toMatchObject({
+      state: 'COMPLETE',
+      deviceId: recovered.deviceId,
+      recoverySecret: null,
+      recoveryCode: null,
+    });
 
     // A new certificate, rooted at the recovery identity.
     const certificate = server.certificates.find((c) => c.subjectDeviceId === recovered.deviceId)!;

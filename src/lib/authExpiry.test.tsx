@@ -88,6 +88,11 @@ vi.mock('@/lib/records', () => ({
   isCanonicalRecordMediaPath: () => true,
 }));
 
+vi.mock('@/app/e2ee/runtimeSession', () => ({
+  installE2eeRuntimeForAuthenticatedSession: vi.fn().mockResolvedValue({ status: 'guarded' }),
+  activateCoupleProtectionForAuthenticatedSession: vi.fn().mockResolvedValue('not_paired'),
+}));
+
 vi.mock('@/lib/events', () => ({
   fetchEventsFromDB: vi.fn().mockResolvedValue([]),
   fetchEventsResultFromDB: vi.fn().mockResolvedValue({ ok: true, events: [] }),
@@ -318,6 +323,7 @@ describe('on-demand workspace resolution', () => {
       expect.objectContaining({ log: '오늘의 기록' }),
       'couple-9',
       'user-a',
+      { kind: 'create' },
     );
     await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-9'));
     expect(screen.getByTestId('lifecycle')).toHaveTextContent('pending');

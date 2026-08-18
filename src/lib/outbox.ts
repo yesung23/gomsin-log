@@ -1,4 +1,11 @@
 import type { DailyRecord } from '@/types';
+import {
+  isSealedOutboxRecord,
+  openOutboxRecord,
+  sealOutboxRecord,
+  type SealedOutboxRecord,
+  type OutboxLocalKey,
+} from '@/lib/outboxCrypto';
 
 /**
  * A queue for writes the network refused, so they are not lost.
@@ -80,7 +87,22 @@ export type QueuedRecord = {
    * queue so the user can be told, and can retry by hand once the cause is gone.
    */
   blocked?: { reason: string; message: string; at: string };
-  record: Omit<DailyRecord, 'id' | 'createdAt'>;
+  /**
+   * The queued record.
+   *
+   * Present in the clear only for an entry queued before outbox encryption
+   * existed, or on a device with no local cache key. New entries carry
+   * `sealedRecord` instead — see `enqueueRecord`.
+   */
+  record?: Omit<DailyRecord, 'id' | 'createdAt'>;
+  /**
+   * The record, AES-256-GCM sealed under the device's local cache key.
+   *
+   * P4 decision 5: offline queued User Content must be ciphertext. Storing the
+   * diary text as readable JSON in IndexedDB is the defect the chat contract §8
+   * names explicitly, and it is fixed here rather than duplicated into chat.
+   */
+  sealedRecord?: SealedOutboxRecord;
   files: File[];
 };
 
@@ -111,6 +133,17 @@ export async function pendingForAccount(
     .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
 }
 
+/**
+ * Probe only for ciphertext already bound to this account.  Runtime setup uses
+ * this before creating an LCK: replacing a lost LCK would strand that content.
+ */
+export async function hasSealedOutboxForAccount(
+  persistence: OutboxPersistence,
+  userId: string,
+): Promise<boolean> {
+  return (await persistence.all()).some((entry) => entry.userId === userId && !!entry.sealedRecord);
+}
+
 /** The entries a flush should attempt: this account's, not blocked, under the cap. */
 export async function deliverableForAccount(
   persistence: OutboxPersistence,
@@ -139,18 +172,84 @@ export async function countForAccount(
   return { waiting: pending.length - blocked, blocked };
 }
 
+/**
+ * The device's local cache key (LCK), or null where there is none.
+ *
+ * Injected the same way the record crypto environment is, so the queue has no
+ * opinion about the keystore and every branch stays testable. Null means entries
+ * are queued in the clear, which is the pre-P5 behaviour. This is a capability
+ * boundary, not a claim that the current runtime is protected: Device Bootstrap
+ * has not yet installed an LCK, so production currently remains on this legacy
+ * branch. Once an LCK is installed, new entries are sealed and the plaintext is
+ * dropped before persistence. Refusing to queue before that activation would
+ * trade a disk-at-rest exposure for guaranteed data loss, and losing the user's
+ * record is the worse outcome. The entry records which it is, so nothing
+ * downstream has to guess.
+ */
+let localCacheKey: OutboxLocalKey | null = null;
+
+export function setOutboxLocalCacheKey(key: OutboxLocalKey | null): void {
+  localCacheKey = key;
+}
+
+export function getOutboxLocalCacheKey(): OutboxLocalKey | null {
+  return localCacheKey;
+}
+
+/**
+ * Read an entry's record, opening it when it is sealed.
+ *
+ * Throws when a sealed entry cannot be opened. That is deliberate: a queue entry
+ * whose ciphertext fails authentication has been tampered with or the key has
+ * changed, and delivering a guessed payload would write the wrong content to the
+ * server under a real record id.
+ */
+export async function readQueuedRecord(
+  entry: QueuedRecord,
+): Promise<Omit<DailyRecord, 'id' | 'createdAt'>> {
+  if (entry.sealedRecord) {
+    if (!localCacheKey) {
+      throw new Error('Queued record is sealed but no local cache key is available.');
+    }
+    const opened = await openOutboxRecord({
+      localCacheKey,
+      entryId: entry.id,
+      userId: entry.userId,
+      sealed: entry.sealedRecord,
+    });
+    return opened as Omit<DailyRecord, 'id' | 'createdAt'>;
+  }
+  if (entry.record) return entry.record;
+  throw new Error('Queued record carries neither a sealed nor a plaintext payload.');
+}
+
 export async function enqueueRecord(
   persistence: OutboxPersistence,
-  entry: Omit<QueuedRecord, 'attempts' | 'queuedAt'> & { queuedAt?: string },
+  entry: Omit<QueuedRecord, 'attempts' | 'queuedAt' | 'sealedRecord'> & { queuedAt?: string },
 ): Promise<QueuedRecord> {
-  const queued: QueuedRecord = {
-    ...entry,
-    queuedAt: entry.queuedAt ?? new Date().toISOString(),
-    attempts: 0,
-  };
+  const queuedAt = entry.queuedAt ?? new Date().toISOString();
+  let queued: QueuedRecord;
+
+  if (localCacheKey && entry.record) {
+    const sealedRecord = await sealOutboxRecord({
+      localCacheKey,
+      entryId: entry.id,
+      userId: entry.userId,
+      record: entry.record,
+    });
+    // The plaintext is dropped from the stored entry, not kept alongside the
+    // ciphertext. Keeping both would make the encryption decorative.
+    queued = { ...entry, record: undefined, sealedRecord, queuedAt, attempts: 0 };
+    delete queued.record;
+  } else {
+    queued = { ...entry, queuedAt, attempts: 0 };
+  }
+
   await persistence.put(queued);
   return queued;
 }
+
+export { isSealedOutboxRecord };
 
 export type DeliveryOutcome =
   | { ok: true }

@@ -91,6 +91,11 @@ vi.mock('@/lib/records', () => ({
   isCanonicalRecordMediaPath: () => true,
 }));
 
+vi.mock('@/app/e2ee/runtimeSession', () => ({
+  installE2eeRuntimeForAuthenticatedSession: vi.fn().mockResolvedValue({ status: 'guarded' }),
+  activateCoupleProtectionForAuthenticatedSession: vi.fn().mockResolvedValue('not_paired'),
+}));
+
 vi.mock('@/lib/events', () => ({
   fetchEventsFromDB: vi.fn().mockResolvedValue([]),
   fetchEventsResultFromDB: vi.fn().mockResolvedValue({ ok: true, events: [] }),

@@ -63,6 +63,7 @@ function mark(overrides: Partial<TalkAboutMark> = {}): TalkAboutMark {
     coupleId: 'couple-1',
     actorUserId: ME,
     createdAt: new Date().toISOString(),
+    isCompleted: false,
     ...overrides,
   };
 }
@@ -126,13 +127,12 @@ describe('오늘 이야기할 것', () => {
 
   /**
    * The leak case. A mark whose record this client cannot resolve must produce
-   * NO row -- not a placeholder, not a count. Anything visible would announce
-   * that a record exists without being able to show it.
+   * generic unavailable row only. It must never show source-derived content.
    */
-  it('renders nothing at all for a mark whose record is unreachable', () => {
+  it('renders a safe unavailable state for a mark whose record is unreachable', () => {
     renderWidget([], [mark({ recordId: 'rec-not-here' })]);
-    expect(screen.getByText(/아직 표시한 기록이 없어요/)).toBeInTheDocument();
-    expect(screen.queryByText(/1/)).not.toBeInTheDocument();
+    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
+    expect(screen.queryByText('rec-not-here')).not.toBeInTheDocument();
   });
 
   it("never renders a mark pointing at the partner's private record", () => {
@@ -141,7 +141,7 @@ describe('오늘 이야기할 것', () => {
       [mark({ actorUserId: PARTNER })],
     );
     expect(screen.queryByText('비공개 내용')).not.toBeInTheDocument();
-    expect(screen.getByText(/아직 표시한 기록이 없어요/)).toBeInTheDocument();
+    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
   });
 
   it('tapping a topic routes with the durable ?record= id from P2', async () => {

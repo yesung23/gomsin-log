@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Executable proof for the Phase 0 baseline: migrations 028, 029 and 030.
+ * Executable proof for the real fresh active chain through migration 045.
  *
  * The string-level tests next to these migrations prove the SQL text says what
  * we think it says. They cannot prove the policies DENY anything, because a
@@ -10,7 +10,8 @@
  * refused by a real database.
  *
  * So this harness starts a throwaway PostgreSQL 17 cluster, applies the actual
- * migration chain 001..030, and drives the actual policies as actual RLS
+ * active migration chain 001..040 + 043..045 (041/042 are frozen), and drives
+ * the actual policies as actual RLS
  * actors, in the same shape as `scripts/e2ee/p0-harness.mjs`:
  *
  *   A   owner, member of couple 1
@@ -96,6 +97,12 @@ const ORDER = [
   '036_e2ee_device_status_privilege.sql',
   '037_harden_e2ee_account_deletion_survivor_detection.sql',
   '038_bilateral_talk_about_marks.sql',
+  '039_daily_records_content_envelope.sql',
+  '040_e2ee_write_floor_scope_semantics.sql',
+  '043_conversation_bridge_completion.sql',
+  '044_unlink_crypto_pairing_authority.sql',
+  '045_harden_e2ee_write_floor_activation.sql',
+  '046_require_actor_for_device_provisioning.sql',
 ];
 
 /**
@@ -303,7 +310,7 @@ function checkVisible(userId, predicate, expected, message) {
 // Cluster
 // ---------------------------------------------------------------------------
 
-console.log('phase 0 baseline harness — migrations 001..030 on a throwaway PostgreSQL 17\n');
+console.log('active fresh-chain harness — migrations 001..040 + 043..045 on throwaway PostgreSQL 17\n');
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -1120,10 +1127,9 @@ check(
 );
 const ownerMarksPrivate = markAs(A, PRIVATE, COUPLE1);
 check(
-  ownerMarksPrivate.ok,
-  '038 the OWNER can still mark their own private record (it is their own to flag)',
+  ownerMarksPrivate.ok === false,
+  '043 the OWNER CANNOT mark an own-private record; Conversation Bridge is shared-record only',
 );
-mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${PRIVATE}'`, 'tidy private mark');
 
 /**
  * Isolate the policy's own `is_private` clause.
@@ -1142,7 +1148,7 @@ mustSql(
 const partnerMarksPrivateIsolated = markAs(B, PRIVATE, COUPLE1);
 check(
   partnerMarksPrivateIsolated.ok === false,
-  '038 the mark policy refuses a private target ON ITS OWN, even when record RLS would allow the read',
+  '043 the mark policy refuses any private target ON ITS OWN, even when record RLS would allow the read',
 );
 mustSql(
   `DROP POLICY "harness_tmp_all_records" ON public.daily_records`,
@@ -1197,7 +1203,7 @@ check(
   '038 B CANNOT create a mark attributed to A',
 );
 
-// --- Either partner may clear, which is the 이야기했어요 resolution --------
+// --- Either partner may complete, which is the 이야기했어요 resolution -----
 markAs(B, SHARED, COUPLE1);
 const partnerClears = asUser(B, `
   DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}'`);
@@ -1207,10 +1213,48 @@ check(
     `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}'`,
     'cleared',
   )) === 0,
-  '038 either partner may clear the other\'s mark (PRODUCT_V3 §8, 이야기했어요 resolves the topic)',
+  '038 either partner may withdraw the other\'s mark before completion',
 );
 
-// --- Record deletion leaves nothing behind --------------------------------
+mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}'`, 'reset before completion');
+markAs(A, SHARED, COUPLE1);
+markAs(B, SHARED, COUPLE1);
+const partnerCompletes = asUser(B, `
+  UPDATE public.talk_about_marks SET is_completed = true WHERE record_id = '${SHARED}'`);
+check(
+  partnerCompletes.ok
+  && Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND is_completed = true`,
+    'completed',
+  )) === 2,
+  '043 either active partner CAN complete both marks without changing the source record',
+);
+const reopenAttempt = asUser(B, `
+  UPDATE public.talk_about_marks SET is_completed = false WHERE record_id = '${SHARED}'`);
+check(
+  reopenAttempt.ok
+  && Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND is_completed = false`,
+    'completion remains monotonic',
+  )) === 0,
+  '043 a completed topic CANNOT be reopened through the client update path',
+);
+const reMarkCompleted = asUser(A, `
+  DELETE FROM public.talk_about_marks
+  WHERE record_id = '${SHARED}' AND actor_user_id = '${A}' AND is_completed = true`);
+const reMarkAfterCompletion = markAs(A, SHARED, COUPLE1);
+check(
+  reMarkCompleted.ok
+  && reMarkAfterCompletion.ok
+  && Number(mustSql(
+    `SELECT count(*) FROM public.talk_about_marks WHERE record_id = '${SHARED}' AND actor_user_id = '${A}' AND is_completed = false`,
+    're-marked pending item',
+  )) === 1,
+  '043 a user can create one new pending mark after completing their earlier mark',
+);
+mustSql(`DELETE FROM public.talk_about_marks WHERE record_id = '${SHARED}'`, 'tidy completed marks');
+
+// --- Record deletion keeps only the opaque source id -----------------------
 mustSql(`DELETE FROM public.talk_about_marks`, 'reset');
 markAs(A, SHARED, COUPLE1);
 check(
@@ -1219,9 +1263,11 @@ check(
 );
 mustSql(`DELETE FROM public.daily_records WHERE id = '${SHARED}'`, 'delete record');
 check(
-  Number(mustSql(`SELECT count(*) FROM public.talk_about_marks`, 'after')) === 0,
-  '038 deleting the record CASCADES its marks away -- no orphan coordination metadata',
+  Number(mustSql(`SELECT count(*) FROM public.talk_about_marks`, 'after')) === 1
+  && mustSql(`SELECT record_id FROM public.talk_about_marks LIMIT 1`, 'opaque source id') === SHARED,
+  '043 deleting the record retains only its opaque id for a generic unavailable Conversation Bridge item',
 );
+mustSql(`DELETE FROM public.talk_about_marks`, 'tidy deleted-source mark');
 
 // --- Disconnect closes access both ways -----------------------------------
 mustSql(`
@@ -1230,6 +1276,20 @@ mustSql(`
 `, 'reseed shared record');
 markAs(A, OTHER2, COUPLE1);
 check(marksVisibleTo(B) === 1, '038 the partner sees the mark while the couple is active');
+
+mustSql(
+  `UPDATE public.daily_records SET is_private = true WHERE id = '${OTHER2}'`,
+  'make marked record private',
+);
+check(
+  marksVisibleTo(B) === 0,
+  '043 making a previously shared record private removes its marks before they can reveal private-record existence',
+);
+mustSql(
+  `UPDATE public.daily_records SET is_private = false WHERE id = '${OTHER2}'`,
+  'restore shared record for disconnect assertions',
+);
+markAs(A, OTHER2, COUPLE1);
 
 mustSql(
   `UPDATE public.couple_members SET status = 'disconnected' WHERE couple_id = '${COUPLE1}'`,

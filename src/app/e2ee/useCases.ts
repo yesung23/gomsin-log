@@ -20,6 +20,7 @@
  */
 
 import { bytesToUuid, concat, equalBytes, fromBase64, uuidToBytes, utf8, zeroize } from '@/crypto/bytes';
+import { canonicalCoupleOwnerUserId } from '@/crypto/canonicalOwner';
 import {
   ASSURANCE,
   KEY_DOMAIN,
@@ -68,6 +69,7 @@ import { deriveSas } from '@/crypto/sas';
 import {
   encodeRecoveryChallengeTranscript,
   enrollmentTranscriptHash,
+  orderPairingSides,
   partnerAssistConfirmMessage,
   partnerAssistTranscriptHash,
   recoveryBundleFingerprint,
@@ -101,12 +103,14 @@ import {
   verifyDeviceById,
 } from './trust';
 import type {
-  CertificateRecord,
+  ExactPinnedAnchor,
   E2eeFeatureFlag,
   E2eeLocalState,
   E2eeRepository,
   EnvelopeRecord,
   PendingBootstrap,
+  PinnedTrustAnchor,
+  PinnedCoupleAuthority,
   RecoveryIdentityRecord,
   ScopeKeyRecord,
 } from './ports';
@@ -137,6 +141,12 @@ function requireEnabled(deps: UseCaseDeps): void {
   if (!deps.flag.isEnabled()) fail('E_E2EE_DISABLED', 'the E2EE feature flag is off');
 }
 
+function requireNativeCeremony(platform: PlatformName): void {
+  if (platform === 'web') {
+    fail('E_WEB_BOOTSTRAP_RESTRICTED', 'Web cannot perform bootstrap, recovery re-root, or device enrollment');
+  }
+}
+
 /** Handles are derived from the device id, so a resumed flow finds its keys. */
 function sigHandleFor(deviceId: string): string {
   return `dev_sig:${deviceId}`;
@@ -153,10 +163,15 @@ const PARTNER_ASSIST_TTL_MS = 10 * 60 * 1000;
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-function grantsForPlatform(platform: PlatformName): KeyDomainName[] {
+function grantsForPlatform(platform: PlatformName, assurance: string): KeyDomainName[] {
   // Health is off by default on web: a non-extractable key cannot be exported
   // but can be used by same-origin script, so the browser is the weakest class.
-  return platform === 'web' ? ['personal', 'couple'] : ['personal', 'couple', 'health'];
+  // Platform is caller-provided metadata. A native-looking platform must not
+  // receive health capability when the selected key port actually reports the
+  // weak web assurance (for example, a missing native plugin).
+  return platform === 'web' || assurance === ASSURANCE.webNonExtractable
+    ? ['personal', 'couple']
+    : ['personal', 'couple', 'health'];
 }
 
 function domainCode(domain: KeyDomainName) {
@@ -229,13 +244,90 @@ async function publicSpkiFromPkcs8(pkcs8: Uint8Array, kind: 'ECDSA' | 'ECDH'): P
 async function pinnedAnchor(deps: UseCaseDeps, userId: string): Promise<TrustAnchor> {
   const pin = await deps.localState.loadTrustAnchor(userId);
   if (!pin) fail('E_NO_PINNED_ANCHOR', `no trust anchor is pinned for ${userId}`);
+  const serverOriginId = await deps.repository.serverOriginId();
+  if (pin.subjectUserId !== userId || !equalBytes(pin.serverOriginId, serverOriginId)) {
+    fail('E_PINNED_ANCHOR_CONTEXT_MISMATCH', 'the pinned anchor belongs to another user or server origin');
+  }
   return anchorFromPin({
     userId,
-    serverOriginId: await deps.repository.serverOriginId(),
+    serverOriginId,
     rootRecSigSpki: pin.rootRecSigSpki,
     recoveryIdentityId: pin.recoveryIdentityId,
     recoveryVersion: pin.recoveryVersion,
   });
+}
+
+async function pinRecoveryIdentity(
+  deps: UseCaseDeps,
+  userId: string,
+  identity: RecoveryIdentityRecord,
+  pinSource: PinnedTrustAnchor['pinSource'],
+): Promise<void> {
+  await deps.localState.pinTrustAnchor(userId, {
+    subjectUserId: userId,
+    serverOriginId: await deps.repository.serverOriginId(),
+    rootRecSigPubFp: await publicKeyFingerprint(identity.recSigSpki),
+    rootRecSigSpki: identity.recSigSpki,
+    recoveryIdentityId: identity.id,
+    recoveryVersion: identity.recoveryVersion,
+    recoveryBundleFp: identity.recoveryBundleFp,
+    pinSource,
+  });
+}
+
+async function requireCoupleAuthority(
+  deps: UseCaseDeps,
+  coupleId: string,
+  runtimeUserId: string,
+): Promise<PinnedCoupleAuthority> {
+  const authority = await deps.localState.loadCoupleAuthority(coupleId);
+  if (!authority || authority.state !== 'CRYPTO_ACTIVE') {
+    if (authority?.state === 'UNLINKED') fail('E_COUPLE_UNLINKED', 'the couple authority is permanently unlinked');
+    fail('E_COUPLE_AUTHORITY_UNAVAILABLE', 'the SAS-confirmed couple authority is not active');
+  }
+  const canonical = canonicalCoupleOwnerUserId(authority.lowUserId, authority.highUserId);
+  if (canonical !== authority.lowUserId) fail('E_COUPLE_OWNER_INVALID', 'the pinned low user is not canonical');
+  const snapshot = await deps.repository.getCoupleAuthorizationSnapshot(coupleId);
+  const active = [...snapshot.activeUserIds].sort();
+  const expected = [authority.lowUserId, authority.highUserId].sort();
+  if (snapshot.currentUserActiveCoupleId !== coupleId
+    || snapshot.pairingState !== 'CRYPTO_ACTIVE'
+    || active.length !== 2
+    || active.some((userId, index) => userId !== expected[index])) {
+    fail('E_COUPLE_LIFECYCLE_INVALID', 'the server couple snapshot is not the pinned two-party state');
+  }
+  if (runtimeUserId !== authority.lowUserId && runtimeUserId !== authority.highUserId) {
+    fail('E_COUPLE_ACTOR_UNAUTHORIZED', 'the current user is not one of the paired users');
+  }
+  return authority;
+}
+
+async function ownerUserIdBytesForScope(
+  deps: UseCaseDeps,
+  scope: ScopeKeyRecord,
+  runtimeUserId: string,
+): Promise<Uint8Array> {
+  if (scope.domain === 'personal' || scope.domain === 'health') {
+    if (!scope.ownerUserId || scope.ownerCoupleId !== null || scope.scopeId !== scope.ownerUserId
+      || scope.ownerUserId !== runtimeUserId) {
+      fail('E_SCOPE_STRUCTURE_INVALID', 'the user-owned scope has invalid owner structure');
+    }
+    return uuidToBytes(scope.ownerUserId);
+  }
+  const authority = await requireCoupleAuthority(deps, scope.scopeId, runtimeUserId);
+  if (scope.ownerUserId !== null || scope.ownerCoupleId !== scope.scopeId) {
+    fail('E_SCOPE_STRUCTURE_INVALID', 'the couple-owned scope has invalid owner structure');
+  }
+  return uuidToBytes(authority.lowUserId);
+}
+
+/** Local unlink observation is monotonic and never reactivates an old pair. */
+export async function markCoupleAuthorityUnlinked(
+  deps: UseCaseDeps,
+  coupleId: string,
+): Promise<void> {
+  requireEnabled(deps);
+  await deps.localState.markCoupleAuthorityUnlinked(coupleId);
 }
 
 type SenderIdentity = {
@@ -312,41 +404,42 @@ async function createEpoch(
     nowMs: BigInt(deps.now()),
   };
 
-  for (const device of input.recipients.devices) {
-    await deps.repository.insertEnvelope({
-      scopeKeyId,
-      recipientKind: 'device',
-      recipientId: device.deviceId,
-      senderDeviceId: input.sender.deviceId,
-      senderCertificateId: input.sender.certificateId,
-      selfNotarized: input.selfNotarized === true && device.deviceId === input.sender.deviceId,
-      envelope: await sealScopeKeyForRecipient({
-        ...common,
-        recipientKemSpki: device.kemSpki,
-        recipientId: uuidToBytes(device.deviceId),
-        recipientKind: RECIPIENT_KIND.device,
-      }),
-    });
-  }
+  try {
+    for (const device of input.recipients.devices) {
+      await deps.repository.insertEnvelope({
+        scopeKeyId,
+        recipientKind: 'device',
+        recipientId: device.deviceId,
+        senderDeviceId: input.sender.deviceId,
+        senderCertificateId: input.sender.certificateId,
+        selfNotarized: input.selfNotarized === true && device.deviceId === input.sender.deviceId,
+        envelope: await sealScopeKeyForRecipient({
+          ...common,
+          recipientKemSpki: device.kemSpki,
+          recipientId: uuidToBytes(device.deviceId),
+          recipientKind: RECIPIENT_KIND.device,
+        }),
+      });
+    }
 
   // The recovery envelope is what makes a lost device survivable at all. It is
   // written for every epoch, not just the first, which is why a rotation after a
   // device loss does not quietly strand the account's own recovery kit.
-  for (const identity of input.recipients.recoveryIdentities) {
-    await deps.repository.insertEnvelope({
-      scopeKeyId,
-      recipientKind: 'recovery_identity',
-      recipientId: identity.id,
-      senderDeviceId: input.sender.deviceId,
-      senderCertificateId: input.sender.certificateId,
-      envelope: await sealScopeKeyForRecipient({
-        ...common,
-        recipientKemSpki: identity.kemSpki,
-        recipientId: uuidToBytes(identity.id),
-        recipientKind: RECIPIENT_KIND.recoveryIdentity,
-      }),
-    });
-  }
+    for (const identity of input.recipients.recoveryIdentities) {
+      await deps.repository.insertEnvelope({
+        scopeKeyId,
+        recipientKind: 'recovery_identity',
+        recipientId: identity.id,
+        senderDeviceId: input.sender.deviceId,
+        senderCertificateId: input.sender.certificateId,
+        envelope: await sealScopeKeyForRecipient({
+          ...common,
+          recipientKemSpki: identity.kemSpki,
+          recipientId: uuidToBytes(identity.id),
+          recipientKind: RECIPIENT_KIND.recoveryIdentity,
+        }),
+      });
+    }
 
   // Completeness is the SERVER's decision, and `markEpochReady` is where it is
   // made. It cannot be made here: RLS correctly hides the partner's envelope
@@ -358,14 +451,12 @@ async function createEpoch(
   // The RPC raises E2EE_EPOCH_INCOMPLETE when a required recipient is missing, so
   // a genuinely half-built epoch still fails; it is abandoned here so it cannot
   // be mistaken later for a legitimate one, and ABANDONED is terminal.
-  try {
     await deps.repository.markEpochReady(scopeKeyId);
+    await deps.repository.activateEpoch(scopeKeyId);
   } catch (error) {
     await deps.repository.abandonEpoch(scopeKeyId).catch(() => {});
     throw error;
   }
-
-  await deps.repository.activateEpoch(scopeKeyId);
 
   const reloaded = await deps.repository.getScopeKey(scopeKeyId);
   if (!reloaded || reloaded.state !== 'ACTIVE') {
@@ -395,6 +486,18 @@ export type BootstrapResult = {
   resumed: boolean;
 };
 
+async function ensureDeviceProvisioned(deps: UseCaseDeps, deviceId: string): Promise<void> {
+  const device = await deps.repository.getDevice(deviceId);
+  if (!device) fail('E_DEVICE_MISSING', 'the bootstrapped device no longer exists');
+  if (device.status === 'ACTIVE') return;
+  if (device.status === 'PENDING' || device.status === 'RECOVERY_AUTHENTICATED') {
+    await deps.repository.beginDeviceProvisioning(deviceId);
+  } else if (device.status !== 'PROVISIONING') {
+    fail('E_DEVICE_NOT_PROVISIONABLE', `device is in ${device.status}`);
+  }
+  await deps.repository.finalizeDeviceProvisioning(deviceId);
+}
+
 export async function bootstrapState(deps: UseCaseDeps, userId: string) {
   const pending = await deps.localState.loadBootstrap(userId);
   return pending?.state ?? 'NOT_STARTED';
@@ -421,6 +524,7 @@ export async function bootstrapFirstDevice(
   input: { userId: string; platform: PlatformName },
 ): Promise<BootstrapResult> {
   requireEnabled(deps);
+  requireNativeCeremony(input.platform);
 
   const userIdBytes = uuidToBytes(input.userId);
   const serverOriginId = await deps.repository.serverOriginId();
@@ -430,6 +534,12 @@ export async function bootstrapFirstDevice(
   }
 
   const resumed = existing !== null;
+  if (!existing && await deps.repository.getRecoveryIdentity(input.userId)) {
+    fail(
+      'E_EXISTING_CRYPTO_ACCOUNT',
+      'this account already has a recovery identity; use device enrollment or recovery instead',
+    );
+  }
   let pending: PendingBootstrap;
 
   if (existing) {
@@ -461,21 +571,24 @@ export async function bootstrapFirstDevice(
     await deps.localState.saveBootstrap(input.userId, pending);
   }
 
-  const grants = grantsForPlatform(pending.platform);
-
   // 1. Device identity, by handle. `hasKey` is what makes the retry safe: a
   // second `generateSigningKey` on the same alias would replace the key the
   // certificate already commits to.
   let sigSpki: Uint8Array;
   let kemSpki: Uint8Array;
-  if (await deps.deviceKeys.hasKey(pending.sigHandle)) {
+  const hasSig = await deps.deviceKeys.hasKey(pending.sigHandle);
+  const hasKem = await deps.deviceKeys.hasKey(pending.kemHandle);
+  if (hasSig && hasKem) {
     sigSpki = await deps.deviceKeys.getPublicKey(pending.sigHandle);
     kemSpki = await deps.deviceKeys.getPublicKey(pending.kemHandle);
-  } else {
+  } else if (!hasSig && !hasKem) {
     sigSpki = (await deps.deviceKeys.generateSigningKey(pending.sigHandle)).publicKeySpki;
     kemSpki = (await deps.deviceKeys.generateAgreementKey(pending.kemHandle)).publicKeySpki;
+  } else {
+    fail('E_DEVICE_KEY_PAIR_INCOMPLETE', 'only one half of the device identity exists; refusing to mint a conflicting pair');
   }
   const assurance = await deps.deviceKeys.getAssurance(pending.sigHandle);
+  const grants = grantsForPlatform(pending.platform, assurance);
 
   if (!(await deps.repository.getDevice(pending.deviceId))) {
     await deps.repository.insertDevice({
@@ -527,12 +640,7 @@ export async function bootstrapFirstDevice(
 
   // The trust root exists before any scope key does, so there is never a window
   // in which a device is trusted by status alone.
-  await deps.localState.pinTrustAnchor(input.userId, {
-    rootRecSigPubFp: rootRecSigFp,
-    rootRecSigSpki: identity.recSigSpki,
-    recoveryIdentityId: identity.id,
-    recoveryVersion: identity.recoveryVersion,
-  });
+  await pinRecoveryIdentity(deps, input.userId, identity, 'bootstrap');
 
   // 4. The first device certificate, signed by the recovery key. Signing needs
   // the recovery private half, which means unsealing it with the kit secret —
@@ -840,6 +948,14 @@ export async function confirmRecoveryKit(
   if (!pending) fail('E_BOOTSTRAP_INCOMPLETE', 'nothing to confirm yet');
   if (pending.state === 'CREATING') fail('E_BOOTSTRAP_INCOMPLETE', 'bootstrap has not finished creating');
 
+  // A response can be lost after the local state is committed but before the
+  // server finishes provisioning. Retrying must continue the server-side gate,
+  // not return early and leave a device marked complete while still unusable.
+  if (pending.state === 'COMPLETE') {
+    await ensureDeviceProvisioned(deps, pending.deviceId);
+    return { state: 'COMPLETE', alreadyComplete: true };
+  }
+
   const identity = await deps.repository.getRecoveryIdentity(input.userId);
   if (!identity) fail('E_RECOVERY_IDENTITY_MISSING', 'there is no recovery identity to confirm against');
 
@@ -891,26 +1007,22 @@ export async function confirmRecoveryKit(
   const unsealed = await unsealWithCode(identity, input.recoveryCode, userIdBytes);
   zeroize(unsealed.sigPkcs8, unsealed.kemPkcs8);
 
-  if (pending.state === 'COMPLETE') return { state: 'COMPLETE', alreadyComplete: true };
-
-  await deps.localState.saveBootstrap(input.userId, {
-    ...pending,
-    state: 'COMPLETE',
-    recoverySecret: null,
-  });
-  await deps.localState.clearBootstrapSecret(input.userId);
-
   // Operational status follows the evidence, never leads it — and the server is
   // what checks the evidence. The first device already holds its recovery-rooted
   // certificate and a self-notarized envelope for every epoch bootstrap created,
   // so finalization succeeds here; if it somehow does not, the account stays
   // confirmed but the device stays visibly unprovisioned rather than claiming a
   // readiness it cannot back.
-  const device = await deps.repository.getDevice(pending.deviceId);
-  if (device && device.status !== 'ACTIVE') {
-    await deps.repository.beginDeviceProvisioning(pending.deviceId);
-    await deps.repository.finalizeDeviceProvisioning(pending.deviceId);
-  }
+  await ensureDeviceProvisioned(deps, pending.deviceId);
+  await deps.localState.saveBootstrap(input.userId, {
+    ...pending,
+    state: 'COMPLETE',
+    recoverySecret: null,
+    // The display code is also secret material. Keeping only the anchor tag
+    // after confirmation would let a stolen local state file recover the kit.
+    recoveryCode: null,
+  });
+  await deps.localState.clearBootstrapSecret(input.userId);
   return { state: 'COMPLETE', alreadyComplete: false };
 }
 
@@ -959,6 +1071,7 @@ export async function recoverWithKit(
   },
 ): Promise<RecoveryResult> {
   requireEnabled(deps);
+  requireNativeCeremony(input.platform);
 
   const userIdBytes = uuidToBytes(input.userId);
   const serverOriginId = await deps.repository.serverOriginId();
@@ -1022,7 +1135,7 @@ export async function recoverWithKit(
     // device's key fingerprints, so the keys must exist first).
     const sig = await deps.deviceKeys.generateSigningKey(sigHandle);
     const kem = await deps.deviceKeys.generateAgreementKey(kemHandle);
-    const grants = grantsForPlatform(input.platform);
+    const grants = grantsForPlatform(input.platform, sig.assurance);
 
     await deps.repository.insertDevice({
       id: deviceId,
@@ -1136,12 +1249,7 @@ export async function recoverWithKit(
     // direct status write is refused by the database.
     await deps.repository.beginDeviceProvisioning(deviceId);
 
-    await deps.localState.pinTrustAnchor(input.userId, {
-      rootRecSigPubFp: rootRecSigFp,
-      rootRecSigSpki: identity.recSigSpki,
-      recoveryIdentityId: identity.id,
-      recoveryVersion: identity.recoveryVersion,
-    });
+    await pinRecoveryIdentity(deps, input.userId, identity, 'recovery');
 
     const sender: SenderIdentity = {
       deviceId,
@@ -1152,7 +1260,6 @@ export async function recoverWithKit(
 
     // 13-15. Recover every scope through the recovery envelopes, then provision
     // this device into each of those live epochs.
-    const certificates = await deps.repository.listCertificates(input.userId);
     const recoveryEnvelopes = await deps.repository.listEnvelopesForRecoveryIdentity(identity.id);
     const recovered: RecoveryResult['recoveredScopes'] = [];
     const deriveWithRecoveryKem = (peer: Uint8Array) => ecdhWithCryptoKey(recovery.kem.privateKey, peer);
@@ -1164,7 +1271,7 @@ export async function recoverWithKit(
       const rewrapped = await provisionScopeKeyToRecipient({
         ownEnvelope: envelope.envelope,
         ownKemSpki: identity.recKemSpki,
-        ownEnvelopeSenderSigSpki: await verifiedSenderKey(envelope, certificates, anchor, nowMs),
+        ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, scope, envelope, nowMs),
         deriveSecret: deriveWithRecoveryKem,
         recipientKemSpki: kem.publicKeySpki,
         recipientId: uuidToBytes(deviceId),
@@ -1176,7 +1283,7 @@ export async function recoverWithKit(
         header: {
           domain: domainCode(scope.domain),
           scopeKeyId: uuidToBytes(scope.id),
-          ownerUserId: scope.ownerUserId ? uuidToBytes(scope.ownerUserId) : userIdBytes,
+          ownerUserId: await ownerUserIdBytesForScope(deps, scope, input.userId),
           scopeId: uuidToBytes(scope.scopeId),
           epoch: scope.epoch,
         },
@@ -1252,6 +1359,32 @@ export async function recoverWithKit(
     // certificate, the absence of a revocation, and full envelope coverage; a
     // partial recovery cannot reach ACTIVE by asserting that it did.
     await deps.repository.finalizeDeviceProvisioning(deviceId);
+
+    // Runtime installation discovers its own device through protected local
+    // state. Without this durable hand-off recovery could mark a device ACTIVE
+    // on the server, then leave it unable to open any envelope after a restart.
+    // This carries only handles and public identifiers; the kit secret is never
+    // re-persisted on the recovered device.
+    const personalScope = (await deps.repository.listScopeKeys('personal', input.userId))
+      .find((scope) => scope.state === 'ACTIVE')?.id ?? null;
+    const healthScope = (await deps.repository.listScopeKeys('health', input.userId))
+      .find((scope) => scope.state === 'ACTIVE')?.id ?? null;
+    await deps.localState.saveBootstrap(input.userId, {
+      state: 'COMPLETE',
+      deviceId,
+      sigHandle,
+      kemHandle,
+      platform: input.platform,
+      recoverySecret: null,
+      recoveryIdentityId: identity.id,
+      recoveryVersion: identity.recoveryVersion,
+      recoveryAnchorId: anchorId,
+      certificateId,
+      recoveryCode: null,
+      anchorTag: null,
+      personalScopeKeyId: personalScope,
+      healthScopeKeyId: healthScope,
+    });
     return {
       state: 'ACTIVE',
       deviceId,
@@ -1270,22 +1403,78 @@ export async function recoverWithKit(
   }
 }
 
-/** The certified signing key of whoever wrote an envelope. */
-async function verifiedSenderKey(
+function anchorsMatch(a: ExactPinnedAnchor, b: ExactPinnedAnchor): boolean {
+  return a.subjectUserId === b.subjectUserId
+    && a.recoveryIdentityId === b.recoveryIdentityId
+    && a.recoveryVersion === b.recoveryVersion
+    && equalBytes(a.serverOriginId, b.serverOriginId)
+    && equalBytes(a.rootRecSigPubFp, b.rootRecSigPubFp)
+    && equalBytes(a.rootRecSigSpki, b.rootRecSigSpki)
+    && equalBytes(a.recoveryBundleFp, b.recoveryBundleFp);
+}
+
+/** Scope-driven sender verification used before every re-wrap. */
+async function verifiedScopeSenderKey(
+  deps: UseCaseDeps,
+  runtimeUserId: string,
+  scope: ScopeKeyRecord,
   envelope: EnvelopeRecord,
-  certificates: readonly CertificateRecord[],
-  anchor: TrustAnchor,
   atMs: bigint,
 ): Promise<Uint8Array> {
-  const byId = certificatesById(certificates);
-  const senderCertificate = byId.get(envelope.senderCertificateId);
-  if (!senderCertificate) fail('E_UNKNOWN_SENDER_CERT', 'the envelope names a certificate that is not present');
-  const verified = await verifyCertificateChain({
-    chain: buildChain(senderCertificate, byId),
+  const certificate = await deps.repository.getCertificate(envelope.senderCertificateId);
+  if (!certificate || certificate.subjectDeviceId !== envelope.senderDeviceId) {
+    fail('E_ENVELOPE_SENDER_MISMATCH', 'the envelope sender does not match its certificate');
+  }
+  let pin: ExactPinnedAnchor | null = null;
+  if (scope.domain === 'personal' || scope.domain === 'health') {
+    if (!scope.ownerUserId || scope.ownerCoupleId !== null || scope.scopeId !== scope.ownerUserId
+      || scope.ownerUserId !== runtimeUserId || certificate.userId !== scope.ownerUserId) {
+      fail('E_SCOPE_SENDER_UNAUTHORIZED', 'the sender is not authorized for this user scope');
+    }
+    pin = await deps.localState.loadTrustAnchor(scope.ownerUserId);
+  } else {
+    const authority = await requireCoupleAuthority(deps, scope.scopeId, runtimeUserId);
+    if (certificate.userId !== authority.lowUserId && certificate.userId !== authority.highUserId) {
+      fail('E_SCOPE_SENDER_UNAUTHORIZED', 'the sender is not one of the paired users');
+    }
+    const expected = certificate.userId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
+    pin = certificate.userId === runtimeUserId
+      ? await deps.localState.loadTrustAnchor(certificate.userId)
+      : expected;
+    if (!pin || !anchorsMatch(pin, expected)) fail('E_PARTNER_ANCHOR_MISMATCH', 'sender anchor differs from pairing authority');
+  }
+  if (!pin) fail('E_SENDER_ANCHOR_MISSING', 'the sender anchor is not locally pinned');
+  const serverOriginId = await deps.repository.serverOriginId();
+  if (pin.subjectUserId !== certificate.userId || !equalBytes(pin.serverOriginId, serverOriginId)) {
+    fail('E_SENDER_ANCHOR_CONTEXT_MISMATCH', 'the sender anchor has the wrong account or origin');
+  }
+  const certificates = await deps.repository.listCertificates(certificate.userId);
+  const revocations = await loadRevocationSet(
+    deps.repository,
+    certificate.userId,
+    await anchorFromPin({
+      userId: certificate.userId,
+      serverOriginId,
+      rootRecSigSpki: pin.rootRecSigSpki,
+      recoveryIdentityId: pin.recoveryIdentityId,
+      recoveryVersion: pin.recoveryVersion,
+    }),
+    atMs,
+  );
+  const anchor = await anchorFromPin({
+    userId: certificate.userId,
+    serverOriginId,
+    rootRecSigSpki: pin.rootRecSigSpki,
+    recoveryIdentityId: pin.recoveryIdentityId,
+    recoveryVersion: pin.recoveryVersion,
+  });
+  return (await verifyCertificateChain({
+    chain: buildChain(certificate, certificatesById(certificates)),
     anchor,
     atMs,
-  });
-  return verified.sigSpki;
+    requiredDomain: scope.domain,
+    isRevoked: revocations.asLookup(),
+  })).sigSpki;
 }
 
 // ---------------------------------------------------------------------------
@@ -1311,6 +1500,7 @@ export async function beginSecondDeviceEnrollment(
   input: { userId: string; platform: PlatformName; approverDeviceId?: string },
 ): Promise<BeginEnrollmentResult> {
   requireEnabled(deps);
+  requireNativeCeremony(input.platform);
 
   const deviceId = deps.newId();
   const sig = await deps.deviceKeys.generateSigningKey(sigHandleFor(deviceId));
@@ -1331,7 +1521,7 @@ export async function beginSecondDeviceEnrollment(
     newDeviceId: deviceId,
     approverDeviceId: input.approverDeviceId ?? null,
     enrollNonce: randomBytes(32),
-    grantedDomains: grantsToMask(grantsForPlatform(input.platform)),
+    grantedDomains: grantsToMask(grantsForPlatform(input.platform, sig.assurance)),
     expiresAt: new Date(deps.now() + ENROLLMENT_TTL_MS).toISOString(),
   });
 
@@ -1526,12 +1716,7 @@ export async function acceptEnrollmentSas(
   );
   if (!bundleSigOk) fail('E_BUNDLE_SIG_INVALID', 'the served recovery bundle signature does not verify');
 
-  await deps.localState.pinTrustAnchor(input.userId, {
-    rootRecSigPubFp: await publicKeyFingerprint(identity.recSigSpki),
-    rootRecSigSpki: identity.recSigSpki,
-    recoveryIdentityId: identity.id,
-    recoveryVersion: identity.recoveryVersion,
-  });
+  await pinRecoveryIdentity(deps, input.userId, identity, 'device_enrollment');
   return { pinned: true };
 }
 
@@ -1634,8 +1819,6 @@ export async function completeSecondDeviceProvisioning(
   const anchor = await pinnedAnchor(deps, input.userId);
   const nowMs = BigInt(deps.now());
   const revocations = await loadRevocationSet(deps.repository, input.userId, anchor, nowMs);
-  const certificates = await deps.repository.listCertificates(input.userId);
-
   const provisioner = await verifyDeviceById(deps.repository, {
     userId: input.userId, deviceId: input.provisioningDeviceId, anchor, atMs: nowMs, revocations,
   });
@@ -1679,7 +1862,7 @@ export async function completeSecondDeviceProvisioning(
     const rewrapped = await provisionScopeKeyToRecipient({
       ownEnvelope: own.envelope,
       ownKemSpki: provisioner.verified.kemSpki,
-      ownEnvelopeSenderSigSpki: await verifiedSenderKey(own, certificates, anchor, nowMs),
+      ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, active, own, nowMs),
       deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandle, peer),
       recipientKemSpki: target.verified.kemSpki,
       recipientId: target.verified.deviceId,
@@ -1691,7 +1874,7 @@ export async function completeSecondDeviceProvisioning(
       header: {
         domain: domainCode(domain),
         scopeKeyId: uuidToBytes(active.id),
-        ownerUserId: active.ownerUserId ? uuidToBytes(active.ownerUserId) : uuidToBytes(input.userId),
+        ownerUserId: await ownerUserIdBytesForScope(deps, active, input.userId),
         scopeId: uuidToBytes(active.scopeId),
         epoch: active.epoch,
       },
@@ -1713,7 +1896,7 @@ export async function completeSecondDeviceProvisioning(
       const forRecovery = await provisionScopeKeyToRecipient({
         ownEnvelope: own.envelope,
         ownKemSpki: provisioner.verified.kemSpki,
-        ownEnvelopeSenderSigSpki: await verifiedSenderKey(own, certificates, anchor, nowMs),
+        ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, active, own, nowMs),
         deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandle, peer),
         recipientKemSpki: identity.recKemSpki,
         recipientId: uuidToBytes(identity.id),
@@ -1725,7 +1908,7 @@ export async function completeSecondDeviceProvisioning(
         header: {
           domain: domainCode(domain),
           scopeKeyId: uuidToBytes(active.id),
-          ownerUserId: active.ownerUserId ? uuidToBytes(active.ownerUserId) : uuidToBytes(input.userId),
+          ownerUserId: await ownerUserIdBytesForScope(deps, active, input.userId),
           scopeId: uuidToBytes(active.scopeId),
           epoch: active.epoch,
         },
@@ -1766,7 +1949,6 @@ export async function selfNotarizeOwnEnvelopes(
   const self = await verifyDeviceById(deps.repository, {
     userId: input.userId, deviceId: input.deviceId, anchor, atMs: nowMs, revocations,
   });
-  const certificates = await deps.repository.listCertificates(input.userId);
   const envelopes = await deps.repository.listEnvelopesForDevice(input.deviceId);
 
   let notarized = 0;
@@ -1778,7 +1960,7 @@ export async function selfNotarizeOwnEnvelopes(
     const rewrapped = await provisionScopeKeyToRecipient({
       ownEnvelope: envelope.envelope,
       ownKemSpki: self.verified.kemSpki,
-      ownEnvelopeSenderSigSpki: await verifiedSenderKey(envelope, certificates, anchor, nowMs),
+      ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.userId, scope, envelope, nowMs),
       deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandleFor(input.deviceId), peer),
       recipientKemSpki: self.verified.kemSpki,
       recipientId: self.verified.deviceId,
@@ -1790,7 +1972,7 @@ export async function selfNotarizeOwnEnvelopes(
       header: {
         domain: domainCode(scope.domain),
         scopeKeyId: uuidToBytes(scope.id),
-        ownerUserId: scope.ownerUserId ? uuidToBytes(scope.ownerUserId) : uuidToBytes(input.userId),
+        ownerUserId: await ownerUserIdBytesForScope(deps, scope, input.userId),
         scopeId: uuidToBytes(scope.scopeId),
         epoch: scope.epoch,
       },
@@ -1852,7 +2034,28 @@ export async function completeCouplePairing(
   requireEnabled(deps);
   const nowMs = BigInt(deps.now());
 
+  if (bytesToUuid(input.ownSide.userId) !== input.ownUserId
+    || bytesToUuid(input.partnerSide.userId) !== input.partnerUserId) {
+    fail('E_PAIRING_SIDE_ID_MISMATCH', 'the confirmed transcript sides do not match the account ids');
+  }
+  const orderedSides = orderPairingSides(input.ownSide, input.partnerSide);
+  const lowUserId = bytesToUuid(orderedSides.low.userId);
+  const highUserId = bytesToUuid(orderedSides.high.userId);
+  if (canonicalCoupleOwnerUserId(lowUserId, highUserId) !== lowUserId) {
+    fail('E_COUPLE_OWNER_INVALID', 'the confirmed pairing transcript has a non-canonical low user');
+  }
+  const snapshot = await deps.repository.getCoupleAuthorizationSnapshot(input.coupleId);
+  const activeUsers = [...snapshot.activeUserIds].sort();
+  if (snapshot.currentUserActiveCoupleId !== input.coupleId
+    || activeUsers.length !== 2
+    || activeUsers[0] !== [lowUserId, highUserId].sort()[0]
+    || activeUsers[1] !== [lowUserId, highUserId].sort()[1]) {
+    fail('E_COUPLE_LIFECYCLE_INVALID', 'the initial pairing does not have the exact two active users');
+  }
+
   const ownAnchor = await pinnedAnchor(deps, input.ownUserId);
+  const ownPin = await deps.localState.loadTrustAnchor(input.ownUserId);
+  if (!ownPin) fail('E_OWN_ANCHOR_MISSING', 'the local self anchor is not persisted');
   if (!equalBytes(ownAnchor.rootRecSigPubFp, input.ownSide.rootRecSigPubFp)) {
     fail('E_OWN_ANCHOR_MISMATCH', 'the confirmed transcript names a different root for this account');
   }
@@ -1878,6 +2081,26 @@ export async function completeCouplePairing(
     recoveryIdentityId: partnerAnchorRow.recoveryIdentityId,
     recoveryVersion: partnerAnchorRow.recoveryVersion,
   });
+  const partnerPin: ExactPinnedAnchor = {
+    subjectUserId: input.partnerUserId,
+    serverOriginId: ownAnchor.serverOriginId,
+    rootRecSigPubFp: partnerRootFp,
+    rootRecSigSpki: partnerAnchorRow.recSigSpki,
+    recoveryIdentityId: partnerAnchorRow.recoveryIdentityId,
+    recoveryVersion: partnerAnchorRow.recoveryVersion,
+    recoveryBundleFp: partnerAnchorRow.recoveryBundleFp,
+    pinSource: 'pairing',
+  };
+  const authority: PinnedCoupleAuthority = {
+    serverOriginId: ownAnchor.serverOriginId,
+    coupleId: input.coupleId,
+    transcriptHash: input.transcriptHash,
+    lowUserId,
+    highUserId,
+    lowAnchor: lowUserId === input.ownUserId ? ownPin : partnerPin,
+    highAnchor: highUserId === input.ownUserId ? ownPin : partnerPin,
+    state: 'CONFIRMED',
+  };
 
   // Both revocation sets come from persisted signed statements.
   const ownRevocations = await loadRevocationSet(deps.repository, input.ownUserId, ownAnchor, nowMs);
@@ -1907,7 +2130,7 @@ export async function completeCouplePairing(
     fail('E_CONFIRMING_DEVICE_UNTRUSTED', 'the confirming device on the partner side is not certified');
   }
 
-  const ownIsLow = compareUserIds(input.ownSide.userId, input.partnerSide.userId) < 0;
+  const ownIsLow = input.ownUserId === lowUserId;
   const lowConfirmation: Confirmation = {
     device: (ownIsLow ? ownConfirming : partnerConfirming).verified,
     signature: ownIsLow ? input.ownConfirmation.signature : input.partnerConfirmation.signature,
@@ -1929,6 +2152,8 @@ export async function completeCouplePairing(
   });
   // No CSK before CONFIRMED_BOTH. This is the whole point of the flow.
   if (!gate.allowed) fail('E_PAIRING_NOT_CONFIRMED', gate.reason ?? 'pairing is not confirmed');
+
+  await deps.localState.pinCoupleAuthority(authority);
 
   const ownIdentity = await deps.repository.getRecoveryIdentity(input.ownUserId);
   if (!ownIdentity) fail('E_RECOVERY_IDENTITY_MISSING', 'this account has no recovery identity');
@@ -1956,7 +2181,7 @@ export async function completeCouplePairing(
       ownerUserId: null,
       ownerCoupleId: input.coupleId,
       // The low-ordered member, so both sides build identical header bytes.
-      ownerUserIdBytes: ownIsLow ? input.ownSide.userId : input.partnerSide.userId,
+      ownerUserIdBytes: uuidToBytes(authority.lowUserId),
       scopeKey,
       recipients,
       sender: {
@@ -1974,14 +2199,19 @@ export async function completeCouplePairing(
   // the couple key needs a root for the partner's devices, and this — not a
   // fresh server answer — is where it comes from.
   await deps.localState.pinTrustAnchor(input.partnerUserId, {
+    subjectUserId: input.partnerUserId,
+    serverOriginId: await deps.repository.serverOriginId(),
     rootRecSigPubFp: partnerRootFp,
     rootRecSigSpki: partnerAnchorRow.recSigSpki,
     recoveryIdentityId: partnerAnchorRow.recoveryIdentityId,
     recoveryVersion: partnerAnchorRow.recoveryVersion,
+    recoveryBundleFp: partnerAnchorRow.recoveryBundleFp,
+    pinSource: 'pairing',
   });
 
   const pairing = await deps.repository.getPairing(input.coupleId);
   if (pairing) await deps.repository.setPairingState(pairing.id, 'CRYPTO_ACTIVE');
+  await deps.localState.markCoupleAuthorityCryptoActive(input.coupleId);
 
   return {
     scopeKeyId: created.id,
@@ -1991,11 +2221,6 @@ export async function completeCouplePairing(
       recoveryIdentities: recipients.recoveryIdentities.length,
     },
   };
-}
-
-function compareUserIds(a: Uint8Array, b: Uint8Array): number {
-  for (let i = 0; i < 16; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
-  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2046,13 +2271,34 @@ export async function partnerAssistRecoverCouple(
     fail('E_ASSIST_TTL_TOO_LONG', 'the partner-assist window is longer than the protocol allows');
   }
 
+  const authority = await requireCoupleAuthority(deps, input.coupleId, input.ownUserId);
+  if ((input.ownUserId !== authority.lowUserId && input.ownUserId !== authority.highUserId)
+    || (input.partnerUserId !== authority.lowUserId && input.partnerUserId !== authority.highUserId)
+    || input.ownUserId === input.partnerUserId) {
+    fail('E_COUPLE_ACTOR_UNAUTHORIZED', 'the partner-assist users are not the pinned pair');
+  }
+
   // CSK only. Resolved here, from the couple id, with no domain input anywhere.
   const keys = await deps.repository.listScopeKeys('couple', input.coupleId);
   const active = keys.find((key) => key.state === 'ACTIVE');
   if (!active) fail('E_NO_ACTIVE_COUPLE_KEY', 'there is no active couple key to share');
 
-  const ownAnchor = await pinnedAnchor(deps, input.ownUserId);
-  const partnerAnchor = await pinnedAnchor(deps, input.partnerUserId);
+  const ownPin = input.ownUserId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
+  const partnerPin = input.partnerUserId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
+  const ownAnchor = await anchorFromPin({
+    userId: input.ownUserId,
+    serverOriginId: authority.serverOriginId,
+    rootRecSigSpki: ownPin.rootRecSigSpki,
+    recoveryIdentityId: ownPin.recoveryIdentityId,
+    recoveryVersion: ownPin.recoveryVersion,
+  });
+  const partnerAnchor = await anchorFromPin({
+    userId: input.partnerUserId,
+    serverOriginId: authority.serverOriginId,
+    rootRecSigSpki: partnerPin.rootRecSigSpki,
+    recoveryIdentityId: partnerPin.recoveryIdentityId,
+    recoveryVersion: partnerPin.recoveryVersion,
+  });
   const ownRevocations = await loadRevocationSet(deps.repository, input.ownUserId, ownAnchor, nowMs);
   const partnerRevocations = await loadRevocationSet(
     deps.repository, input.partnerUserId, partnerAnchor, nowMs,
@@ -2111,11 +2357,10 @@ export async function partnerAssistRecoverCouple(
     return { scopeKeyId: active.id, epoch: active.epoch, sas: await deriveSas('partner-assist', transcriptHash) };
   }
 
-  const certificates = await deps.repository.listCertificates(input.ownUserId);
   const rewrapped = await provisionScopeKeyToRecipient({
     ownEnvelope: own.envelope,
     ownKemSpki: assisting.verified.kemSpki,
-    ownEnvelopeSenderSigSpki: await verifiedSenderKey(own, certificates, ownAnchor, nowMs),
+    ownEnvelopeSenderSigSpki: await verifiedScopeSenderKey(deps, input.ownUserId, active, own, nowMs),
     deriveSecret: (peer) => deps.deviceKeys.deriveSecret(kemHandleFor(input.assistingDeviceId), peer),
     recipientKemSpki: target.verified.kemSpki,
     recipientId: target.verified.deviceId,
@@ -2127,7 +2372,7 @@ export async function partnerAssistRecoverCouple(
     header: {
       domain: domainCode('couple'),
       scopeKeyId: uuidToBytes(active.id),
-      ownerUserId: active.ownerUserId ? uuidToBytes(active.ownerUserId) : uuidToBytes(input.ownUserId),
+      ownerUserId: await ownerUserIdBytesForScope(deps, active, input.ownUserId),
       scopeId: uuidToBytes(input.coupleId),
       epoch: active.epoch,
     },
@@ -2368,14 +2613,17 @@ async function rotateCoupleScope(
     atMs: bigint;
   },
 ): Promise<{ domain: KeyDomainName; scopeId: string; epoch: bigint }> {
+  const authority = await requireCoupleAuthority(deps, input.coupleId, input.userId);
   const partnerAnchorRow = await deps.repository.getPartnerRecoveryAnchor();
   if (!partnerAnchorRow) fail('E_NO_PARTNER_ANCHOR', 'the partner has no published recovery anchor');
 
-  const partnerUserId = await partnerUserIdFor(deps, partnerAnchorRow.recoveryIdentityId);
-  const pin = await deps.localState.loadTrustAnchor(partnerUserId);
-  if (!pin) fail('E_PARTNER_ANCHOR_NOT_PINNED', 'no confirmed pairing anchor for the partner');
+  const partnerUserId = authority.lowUserId === input.userId ? authority.highUserId : authority.lowUserId;
+  const pin = partnerUserId === authority.lowUserId ? authority.lowAnchor : authority.highAnchor;
   const servedFp = await publicKeyFingerprint(partnerAnchorRow.recSigSpki);
-  if (!equalBytes(servedFp, pin.rootRecSigPubFp)) {
+  if (partnerAnchorRow.recoveryIdentityId !== pin.recoveryIdentityId
+    || partnerAnchorRow.recoveryVersion !== pin.recoveryVersion
+    || !equalBytes(servedFp, pin.rootRecSigPubFp)
+    || !equalBytes(partnerAnchorRow.recoveryBundleFp, pin.recoveryBundleFp)) {
     fail('E_PARTNER_ANCHOR_MISMATCH', 'the served partner root is not the confirmed one');
   }
 
@@ -2405,9 +2653,6 @@ async function rotateCoupleScope(
     revocations: partnerRevocations,
   });
 
-  const previous = await deps.repository.listScopeKeys('couple', input.coupleId);
-  const previousActive = previous.find((key) => key.state === 'ACTIVE');
-
   const scopeKey = generateScopeKeyBytes();
   try {
     const created = await createEpoch(deps, {
@@ -2415,9 +2660,7 @@ async function rotateCoupleScope(
       scopeId: input.coupleId,
       ownerUserId: null,
       ownerCoupleId: input.coupleId,
-      ownerUserIdBytes: previousActive?.ownerUserId
-        ? uuidToBytes(previousActive.ownerUserId)
-        : uuidToBytes(input.userId),
+      ownerUserIdBytes: uuidToBytes(authority.lowUserId),
       scopeKey,
       recipients: {
         devices: [...ownDevices, ...partnerDevices].map((d) => ({
@@ -2436,13 +2679,6 @@ async function rotateCoupleScope(
   } finally {
     zeroize(scopeKey);
   }
-}
-
-/** Which account a recovery identity belongs to, from its published anchor. */
-async function partnerUserIdFor(deps: UseCaseDeps, recoveryIdentityId: string): Promise<string> {
-  const anchor = await deps.repository.getRecoveryAnchorFor(recoveryIdentityId);
-  if (!anchor) fail('E_NO_PARTNER_ANCHOR', 'the partner recovery identity has no public anchor row');
-  return anchor.userId;
 }
 
 export type RevocationOutcome = {

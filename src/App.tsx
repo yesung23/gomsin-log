@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { HomePage } from '@/pages/HomePage';
+import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { AuthSyncStage } from '@/lib/sync';
 
@@ -129,6 +130,7 @@ const AUTH_STAGE_CODES: Record<AuthSyncStage, string> = {
   records: 'RECORDS',
   events: 'EVENTS',
   trips: 'TRIPS',
+  'talk-about': 'TALK_ABOUT',
   unexpected: 'UNEXPECTED',
   timeout: 'TIMEOUT',
 };
@@ -249,31 +251,37 @@ export function App() {
 
   return (
     <Suspense fallback={<PageLoader />}>
-      <Routes>
-        <Route path="/auth/callback" element={<AuthCallbackPage />} />
-        {/* Legal documents must be reachable before sign-in too (store listing requirement). */}
-        <Route path="/legal/:doc" element={<LegalPage />} />
-        {!state.setupComplete ? (
-          <>
-            <Route path="/onboarding" element={<OnboardingPage />} />
-            <Route path="*" element={<OnboardingPage />} />
-          </>
-        ) : (
-          <>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/home" element={<HomePage />} />
-            <Route path="/record" element={<RecordPage />} />
-            <Route path="/schedule" element={<SchedulePage />} />
-            <Route path="/service" element={<ServicePage />} />
-            <Route path="/us" element={<UsPage />} />
-            <Route path="/my" element={<MyPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/trips" element={<TripsPage />} />
-            <Route path="/trips/:id" element={<TripDetailPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </>
-        )}
-      </Routes>
+      <>
+        {/* Cross-route re-entry belongs under the app/store boundary, not inside
+            MobileShell, so shell-level accessibility tests and isolated routes
+            remain usable without a StoreProvider. */}
+        <NotificationReentryBridge />
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          {/* Legal documents must be reachable before sign-in too (store listing requirement). */}
+          <Route path="/legal/:doc" element={<LegalPage />} />
+          {!state.setupComplete ? (
+            <>
+              <Route path="/onboarding" element={<OnboardingPage />} />
+              <Route path="*" element={<OnboardingPage />} />
+            </>
+          ) : (
+            <>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/home" element={<HomePage />} />
+              <Route path="/record" element={<RecordPage />} />
+              <Route path="/schedule" element={<SchedulePage />} />
+              <Route path="/service" element={<ServicePage />} />
+              <Route path="/us" element={<UsPage />} />
+              <Route path="/my" element={<MyPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/trips" element={<TripsPage />} />
+              <Route path="/trips/:id" element={<TripDetailPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </>
+          )}
+        </Routes>
+      </>
     </Suspense>
   );
 }

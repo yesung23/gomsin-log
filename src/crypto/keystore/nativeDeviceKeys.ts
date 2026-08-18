@@ -37,9 +37,10 @@ import {
   type KeyPolicy,
   deviceKeyFail,
 } from './DeviceKeyPort';
+import type { NativeLocalKeyPlugin } from './nativeLocalKey';
 
 /** The shape the native plugin exposes. Base64 in, base64 out. */
-export type NativeDeviceKeysPlugin = {
+export type NativeDeviceKeysPlugin = NativeLocalKeyPlugin & {
   generateKey(options: {
     alias: string;
     kind: 'sign' | 'agree';

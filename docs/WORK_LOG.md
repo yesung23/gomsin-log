@@ -91,6 +91,260 @@
 
 ---
 
+### 2026-08-16 · 세 도구 공용 절차서 통합 (Codex · Kiro · Claude Code)
+
+같은 절차를 도구마다 따로 두면 반드시 갈라지므로, 절차 원본을 `docs/skills/`(도구 중립,
+Git 추적) 한 곳으로 모으고 각 도구는 그 파일을 가리키는 얇은 래퍼만 갖게 했다. 제품
+코드·crypto·migration·Production은 변경하지 않았다.
+
+- `docs/skills/` 신설: `control-tower` `feature-build` `security-review`
+  `migration-gate` `release-validation` + `README.md`(도구별 진입점, 공유되는 사실의
+  소유자, 도구 간 인계 절차).
+- `.claude/skills/*/SKILL.md`를 70줄대 본문에서 **10줄 래퍼**로 축소(frontmatter +
+  "원본을 읽어라"). 내용 중복 제거.
+- `.kiro/steering/shared-procedures.md` 신설 — Kiro가 같은 절차서를 쓰도록 하고, 다른
+  도구가 남긴 작업을 이어받는 절차와 이 저장소에서 실제로 나온 실수 3건을 명시.
+- `.kiro/steering/merge-policy.md` 수정: `kiro/v1-product-excellence-audit`로의 **자동
+  merge 허용을 제거**했다. 그 브랜치는 현재 활성 스택과 무관해졌고(stale), 도구마다 다른
+  merge 권한을 갖는 것 자체가 위험하다. 이제 세 도구 모두 "merge는 사용자만"으로
+  통일된다(Claude Code는 hook으로 `gh pr merge`를 차단). CI가 없을 때 green을 주장하지
+  않는다는 규칙과 정직성 요구사항은 보존했다.
+- `AGENTS.md` §16에 `docs/skills/README.md` 행을 추가하고, **누락돼 있던 business
+  canonical**(`BUSINESS_MEMORY_ROADMAP_V1.md`)을 추가했다.
+- `.gitignore`: `/.codex/` 전체 제외를 유지하면서 `config.toml`과 `agents/`만 예외로
+  추적한다(worktree 체크아웃·캐시·세션 DB는 계속 제외). 이제 새 기기·새 clone에서도
+  subagent 5개 설정이 따라온다.
+- `scripts/claude/` → `scripts/agent/`로 이동. 공용 절차서가 특정 도구 경로를 가리키지
+  않게 했다.
+
+검증: 마크다운 링크 전수 검사 **깨진 링크 0건**, Skill 래퍼 5/5 경로 유효,
+`.codex/` 추적 대상이 정확히 설정 6개(worktree 복사본 제외됨), hook 재확인
+(`gh pr merge` 차단 / `npm test` 통과), `live-state.sh`·`validate.sh` 새 경로에서 동작,
+typecheck·lint PASS, full Vitest **158 files / 2,302 tests PASS**.
+Production **NOT APPLIED**, master merge 없음.
+
+---
+
+### 2026-08-16 · Claude Code 오케스트레이션 레이어 정리 (제품 코드 변경 없음)
+
+반복 지침을 올바른 레이어로 옮겼다. 제품 기능·crypto·migration·Production은 건드리지
+않았다. 설치 버전을 실제로 확인했다: **Claude Code 2.1.220**.
+
+- `CLAUDE.md`: 49 → 63줄. 항상 참인 규칙만 남기고 절차는 Skill로, 결정 가능한 금지는
+  Hook으로 옮겼다. 누락된 business canonical(우선순위 2번)을 추가했고, "이 파일에 넣지
+  않는 것"(휘발성 PR/HEAD/blocker)을 명시했다.
+- `.claude/skills/` 5개 신설: `gomsin-control-tower`(복구·live 검증·DIRECTION CHECK),
+  `gomsin-feature-build`, `gomsin-security-review`, `gomsin-migration-gate`,
+  `gomsin-release-validation`. 각 47–77줄이며 canonical 문서를 복사하지 않고 읽도록
+  지시한다. 모든 description에 "Do not use for…" 경계를 넣어 trigger 범위를 좁혔다.
+- `.claude/hooks/` 2개 신설(PreToolUse, deterministic): 원격 Supabase migration/link,
+  force push, `reset --hard`, `clean -f`, worktree 폐기, master 직접 push, `git merge`,
+  `gh pr merge`, frozen 041/042 조작, secret 읽기, 기존 migration 재작성, credential
+  파일 쓰기. PostToolUse·Stop hook은 **의도적으로 두지 않았다** — 매 저장/종료마다 느린
+  검사를 강제하지 않고 범위별 validation을 쓴다.
+- `scripts/agent/live-state.sh`(read-only 상태 출력), `scripts/agent/validate.sh`
+  (`docs|app|security|migration` 범위별 검증 + unverified 고정 출력). 후자는
+  `package.json`에 실제 있는 script만 호출한다.
+- Agent Teams: **2.1.220에 team/swarm 기능이 없음**을 `claude --help`로 확인. 정책상 OFF.
+- MCP: 연결된 8개(Notion·Gmail·Drive·Slack 등)는 이 프로젝트와 무관. 저장소 작업에서
+  사용하지 않고 GitHub live state는 `gh`로 충분. Production write는 자동 루프에 금지.
+- `.claude/settings.local.json`은 개인 권한 파일이라 `.gitignore`에 추가(공유 레이어만 추적).
+
+검증: hook 차단 8/8 + 파일 5/5 정확, 정상 개발 명령 12건 오탐 **0건**, 쓰기 허용 5/5,
+`claude doctor` OK, JSON/shell 문법 OK, typecheck·lint·build PASS,
+full Vitest **158 files / 2,302 tests PASS**. Production **NOT APPLIED**, master merge 없음.
+
+---
+
+### 2026-08-16 · QUEUE 2–7 — gate 재평가 (환경 전제조건으로 대부분 차단)
+
+QUEUE 1을 닫은 뒤 남은 queue의 진입 조건을 이 checkout에서 재확인했다. 코드를 쓰지 않고
+gate만 판정했으며, 충족되지 않은 단계는 구현하지 않았다.
+
+| Queue | 판정 | 이 checkout에서 확인한 사실 |
+|---|---|---|
+| 2 실기기/두 계정 지원 | PARTIAL — 문서만 진행 | 실기기 없음, `xcodebuild`가 Command Line Tools만 가리켜 iOS native 검증 불가, `deno` 없어 `test:edge` 실행 불가. 자동화 가능한 부분(static/native contract 85 tests)은 이미 통과 상태다. QUEUE 1이 닫은 항목을 검증할 수 있도록 두 계정 체크리스트에 `5-4b` 12항목을 추가했다 |
+| 3 사진 E2EE + CloudKit | BLOCKED | `ios/App/App/App.entitlements`에 iCloud container/ubiquity entitlement가 없고 주석이 명시적으로 `No iCloud storage. Sync is Supabase only.`라고 적혀 있다. CloudKit container 생성은 manual Apple developer configuration이며 사용자 승인·자격증명이 필요하다. 현재 미디어 경로는 `src/lib/records.ts`가 `couple-media` Storage에 직접 업로드한다 |
+| 4 기본 기억 아카이브 | NOT STARTED — QUEUE 3 의존 | 사진 E2EE 기반 이후로 정의된 단계다. 평문 미디어 위에 아카이브를 세우면 나중에 되돌리기 어려운 표면이 생긴다 |
+| 5 온디바이스 AI | NOT STARTED — QUEUE 4 의존 | 정리할 기록 corpus와 아카이브가 선행 조건이다. Apple on-device stack 조사는 실기기·Full Xcode 없이는 성능/열/지연을 측정할 수 없다 |
+| 6 우리의 한 달 MVP | NOT STARTED — 상위 queue 의존 | `ENGINEERING_ROADMAP`의 `P-MP` 단계가 소유하며 M5 축적 기반 이후다. 결제·POD는 법적·비용 경계가 열려 있어 이번에 만들지 않았다 |
+| 7 Limited Validation hardening | NOT STARTED — QUEUE 1 리뷰 선행 | `LV` gate는 QUEUE 1의 보안 수정이 독립 리뷰를 통과한 뒤에 의미가 있다 |
+
+보안 gate를 우회해 후속 기능을 먼저 만들지 않았다. Production·remote Supabase·master
+merge·PR merge는 수행하지 않았다.
+
+---
+
+### 2026-08-16 · QUEUE 1 — P5.5 security blocker closure (1B / 1C / actor binding)
+
+PR #66 감사 HEAD `d1bace6`에서 남은 P5.5 blocker를 실제 코드로 닫았다. Production /
+remote Supabase에는 조회·배포·mutation을 실행하지 않았다.
+
+**1B — Couple Protection Activation (닫힘).** `activateCoupleProtection`은 구현되어
+있었지만 **어떤 제품 경로에서도 호출되지 않았다**(호출자는 Settings 1인 ceremony의
+`activatePersonalProtection`뿐). 실제 커플이 shared record를 floor 아래에서 계속 쓸 수
+있던 gap이다. `runtimeSession.ts`에 server-authoritative 활성화를 추가하고
+`refreshCoupleLifecycle`의 `connected` 판정 한 곳에 연결했다 — 초대자 폴링, 수락자 코드
+입력, hydration, unlink 후 재연결이 모두 지나는 단일 지점이다. 커플은
+`listOwnedCoupleScopeIds()`가 고르고 client state가 고르지 않으며, scope가 정확히 1개가
+아니면 거부한다. 상태를 `activated / not_paired / keys_pending / unavailable`로 분리해
+pending invitation과 "커플은 있으나 CSK 미발급"을 구분한다. 실패는 floor를 켜지 않고
+shared write를 fail closed로 남긴다.
+
+**1C — Kit-Verified 복구 경로 (닫힘).** protected local state는 이미 ciphertext가 있을 때
+대체 키 생성을 거부하고 `E_PROTECTED_STATE_KEY_MISSING`을 던졌지만, **그 오류를 아무도
+처리하지 않았다.** Settings는 `TEMPORARILY_UNAVAILABLE`로, 세션은 조용한 `localState =
+null`로 보고해 사용자가 Recovery Kit 검증에 도달할 수 없었다. 이제 server recovery
+identity가 있을 때 `RECOVERY_REQUIRED`로, 없으면 `SECURE_STORAGE_UNAVAILABLE`로
+보고하고, 세션은 `guarded / recovery_required`를 반환한다. 어느 경로도
+`SETUP_REQUIRED`가 되지 않는다 — 기존 ciphertext에 대한 대체 권한 생성을 막는다.
+
+**1A — Actor-Bound Recovery (부분: 서버 결속 확인 + 046 forward fix).** 감사가 우려한
+actor binding은 상당 부분 이미 존재했다: `verify-recovery` Edge Function이
+`caller.user.id`로 challenge와 device 양쪽 소유를 확인하고 `E_WRONG_ACCOUNT`로 거부하며
+(negative 테스트 3건 존재), `e2ee_commit_recovery_authentication`은 challenge 소비와
+device 전이를 한 트랜잭션에서 수행한다. 반면 `e2ee_begin_device_provisioning`과
+`e2ee_finalize_device_provisioning`은 소유권을 `v_uid IS NOT NULL AND ...`로 비교해
+**`auth.uid()`가 NULL인 실행 컨텍스트에서 소유권 비교를 건너뛰었다.** migration 046이
+045와 동일한 형태로 NULL actor를 먼저 거부하도록 forward 수정했다. revocation 우선순위·
+인증서 요구·envelope coverage·허용 상태·idempotent 반환은 그대로 보존했다.
+
+검증: full Vitest **158 files / 2,299 tests PASS**, write-floor **39 assertions PASS**
+(046 신규 6건: NULL actor·타 계정·anon × begin/finalize), P0 76 · Phase 0 fresh-chain ·
+P5 integrated 93 · rollback PASS, native static 85 PASS, typecheck / lint / build /
+`git diff --check` PASS. 실기기 recovery·cold-start, remote catalog, staging, production은
+**UNVERIFIED / NOT APPLIED**.
+
+남은 1A 범위: recovery는 인증 이후에도 certificate → provisioning → 회전 → finalize가
+여러 요청으로 남아 있다. 각 단계가 서버에서 actor·상태를 재검증하고 실패 시
+`PROVISIONING_FAILED`로 닫히지만, 단일 ceremony RPC로의 통합과 실기기 검증은 남았다.
+ceremony 자체는 `VITE_E2EE_DEVICE_PROTECTION_ENABLED` build flag 뒤에 있어 기본
+빌드에서 노출되지 않는다.
+
+---
+
+### 2026-08-16 · Security Stack Integration Audit & Repair V1
+
+Queue 1–4 통합 HEAD `e97b951`을 기준으로 실제 runtime·outbox·RLS/RPC·migration
+chain·알림·계정/커플 lifecycle을 감사했다. Production/remote Supabase에는
+조회·배포·mutation을 실행하지 않았다.
+
+- migration 045로 write-floor 활성화를 소유 ACTIVE 기기의 인증서와 해당 ACTIVE
+  scope epoch의 self-notarized envelope에 결속했다. PENDING·recovery·provisioning·
+  failed·revoked 기기는 personal/couple 모두 거부한다.
+- 인증 runtime의 첫 await 전 fail-closed guard, 보호 ciphertext가 있을 때 대체 LCK 생성
+  금지, floor/couple-key를 포함한 정직한 보호 상태, account-switch session predicate,
+  provider unmount teardown을 추가했다.
+- outbox를 원래 couple id에 고정해 unlink 후 새 파트너에게 예전 기록이 전송되는
+  경로를 payload open 전과 첫 mutation 전 두 곳에서 차단했다.
+- talk-about read 실패를 빈 성공으로 변환하지 않고 기존 목록을 유지하며, full
+  hydration에서는 `talk-about` unavailable stage로 보고한다. 알림 dedupe는 immutable event
+  id를 사용하고 preference 통과 후에만 소비한다. 백그라운드/native push가 없는
+  현재 범위를 Settings에 `앱이 열려 있을 때`로 표시했다.
+- 탈퇴 복구 marker는 logout 후에도 보존하되, signed-out 사용자를 가두던 in-memory
+  recovery route state는 해제했다. 동일 계정 재로그인 시 marker로 다시 복구한다.
+- P5 actor harness를 `031→032→034→035→036→037→038→039→040→043→044→045`
+  fresh chain으로 교정하고, 예전 032만 훼손하던 mutation test를 최종 040 정의에
+  결속했다.
+- 검증: full Vitest 157 files / 2,294 tests PASS, P0 76·Phase 0 active fresh-chain
+  125·P5 integrated 93·write-floor 33 assertions PASS, rollback(031–036 pre-activation contract) PASS,
+  native static 85 tests PASS, typecheck/lint/build/diff-check PASS. 실기기 recovery/cold-start,
+  remote catalog/staging/production은 **UNVERIFIED / NOT APPLIED**.
+
+P6는 여전히 차단된다. production couple pairing/floor activation 경로, LCK-loss 후 kit-verified
+protected-state replacement, recovery 중 account-switch와 server mutation의 원자적 결속, 실기기
+native/CloudKit gate가 남아 있다.
+
+### 2026-08-16 · Notification & Re-entry V1 — privacy-safe local delivery
+
+`codex/device-protection-recovery-v1`의 Queue 1 완료 커밋 `67b8cb8`을 기준으로
+`codex/notification-reentry-v1`에서 구현했다. 기존 couple realtime 재검증 경로를
+재사용하되, 초기 authoritative refresh가 끝난 뒤 새로 확인된 partner shared record와
+partner talk-about mark만 generic 재진입 이벤트로 만든다. cold load에서 기존 기록을
+새 알림으로 재생하지 않으며, 현재 active couple/session이 아니면 이벤트를 버린다.
+
+- 앱 안 알림과 Settings의 계정별 알림 설정을 추가했다. 시스템 알림은 브라우저
+  `Notification` 권한 adapter만 연결했으며 APNs/FCM/native background delivery는 아직
+  연결하지 않았다.
+- 제목·본문·push data에는 기록 본문, 사진, 일정, 상대방 이름을 넣지 않는다. 전달하는
+  destination은 opaque record id뿐이고, 클릭 시 기존 RecordPage의 현재 authorization과
+  deleted/unavailable surface를 다시 통과한다. 조용한 다른 기록 fallback은 없다.
+- 이벤트 dedupe, disabled preference, unsupported notification API, stale session drop을
+  회귀 테스트로 고정했다. 새 DB 컬럼·migration·remote preference 저장은 추가하지 않았다.
+- 검증: targeted Vitest 91 tests PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run typecheck` PASS, `npm run lint` PASS, `npm run build` PASS,
+  `git diff --check` PASS. 실기기 백그라운드 수신, APNs/FCM, 원격 Supabase 상태는
+  UNVERIFIED / NOT APPLIED.
+
+---
+
+### 2026-08-16 · Limited Validation Ready Core UX — write protection handoff
+
+Queue 2의 완료 HEAD를 기준으로 핵심 사용자 경로를 다시 검증했다. 전체 Vitest를
+실행하면서 두 통합 회귀를 실제로 발견·수정했다: 알림 재진입 bridge를 `MobileShell` 안에
+두어 StoreProvider 없는 shell 단위 테스트가 깨지던 문제는 App/store 경계로 옮겼고,
+Settings가 `src/crypto` 타입·adapter를 직접 가져가던 문제는 application boundary로
+모았다. 그 결과 독립 shell/accessibility 테스트와 E2EE layering 경계가 함께 통과한다.
+
+- write floor에서 device key/epoch가 없을 때 `saveRecordToDB()`가 일반 서버 오류로
+  뭉개지지 않고 `protectionRequired` 증거를 전달한다. Store는 이를
+  `protection_required`로 분류하고, 기록 컴포저는 draft를 유지한 채 Settings로 바로
+  이동할 수 있는 `설정 열기` action을 제공한다. 평문 fallback은 추가하지 않았다.
+- record 작성 탭의 독립 컴포저, 양쪽 role의 `상대방의 오늘`, durable `?record=` 원본
+  라우팅과 offline outbox를 현재 코드·회귀 테스트와 대조해 CURRENT_STATE의 해결 항목을
+  갱신했다.
+- 검증: targeted core tests 73 tests PASS, 전체 Vitest 157 files / 2283 tests PASS,
+  `npm run test:p0` 76 assertions PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run test:write-floor` 18 assertions PASS, `npm run test:rollback` PASS,
+  `npm run typecheck` PASS, `npm run lint` PASS, `npm run build` PASS,
+  `git diff --check` PASS. 실기기 종료·재실행/실제 계정 전환·remote Supabase 상태는
+  UNVERIFIED / MANUAL GATE.
+
+---
+
+### 2026-08-16 · P6 Readiness — entry gates remain closed
+
+Queue 1–3 완료 HEAD `fa68c72`에서 P6를 구현하지 않고 read-only readiness audit만
+수행했다. `ENGINEERING_ROADMAP.md`의 P6는 P0-b와 사진 E2EE 기반을 전제로 하며,
+현재 저장소의 미디어 경로와 native/iCloud 상태는 그 진입 조건을 충족하지 않는다.
+
+| Gate | 저장소에서 확인한 사실 | 판정 |
+|---|---|---|
+| Core Privacy Foundation | `35da04c` integration 위에 Queue 1–3이 순차적으로 쌓였고 local P0/P5 actor harness가 통과했다 | DEVELOPMENT EVIDENCE ONLY |
+| DeviceKeys / LCK | first-party Capacitor plugin의 iOS Podfile·Android Gradle wiring과 static tests는 존재한다. 실제 iPhone에서 setup/restart/logout/recovery/locked-state를 수행하지 않았다 | UNVERIFIED / MANUAL GATE |
+| Active migration chain | 후속 통합 감사에서 local harness를 031→032→034→035→036→037→038→039→040→043→044→045 fresh chain으로 교정했다. migration ledger는 E2EE chain을 신규/어디에도 미적용으로 둔다 | REMOTE UNVERIFIED; NOT APPLIED |
+| CloudKit prerequisite | `ios/App/App/App.entitlements`에 iCloud container/ubiquity entitlement가 없고, native guide도 iCloud container가 없다고 명시한다. CloudKit/CKShare/CKAsset 구현·container identifier·test harness가 없다 | BLOCKED |
+| Current media path | `src/lib/records.ts`가 `File`을 private `couple-media` Storage에 직접 업로드하고 signed URL로 읽는다. media ciphertext/envelope/CloudKit ownership 경계가 없다 | P6 NOT READY |
+| Future migration number | 045는 write-floor 활성화 보안 수정에 사용했다. frozen 042를 재발급하지 않고 P6 재개 시 046 이상 새 forward migration을 사용한다 | RECORDED; DO NOT USE 042 |
+
+`npm run verify:native`는 85 static/native contract tests PASS였지만, 이것은 실제
+서명·기기·CloudKit entitlement 검증이 아니다. 따라서 P6A 구현, media migration,
+CloudKit container 생성, remote mutation은 수행하지 않았다.
+
+---
+
+### 2026-08-16 · Device Protection & Recovery UX V1 — local implementation
+
+`35da04c` Core Privacy Foundation integration을 기준으로 `daily_records` P5 actor/RLS
+harness를 다시 실행했고, 93 assertions가 통과했다. Production·remote Supabase에는
+조회나 변경을 하지 않았다.
+
+- Settings는 runtime과 같은 protected-local-state namespace를 읽고, verified runtime/LCK
+  기준의 `보호됨 / 설정 필요 / 복구 필요 / 보안 저장소 사용 불가 / 일시 확인 불가`를
+  표시한다. 상태를 알 수 없을 때 보호됨으로 표시하지 않는다.
+- 최초 native 설정은 recovery code와 기존 canonical recovery anchor artifact를 명시적으로
+  저장·재입력한 뒤에만 완료한다. 자동 clipboard 복사는 하지 않는다. ceremony는 명시적
+  `VITE_E2EE_DEVICE_PROTECTION_ENABLED=true` build flag가 있어야 시작한다.
+- 실제 결함을 수정했다: Settings가 runtime과 다른 namespace를 읽어 bootstrap을 놓치던
+  문제와, `recoverWithKit`가 server ACTIVE device를 만든 뒤 local runtime-discovery state를
+  저장하지 않던 문제. recovery artifact는 새 crypto format이 아니라 기존 canonical anchor
+  bytes의 display/transport form이다.
+- 검증: targeted Vitest 42 tests PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run typecheck` PASS. Native device/restart/logout/recovery drill, remote catalog,
+  migration deployment은 UNVERIFIED / NOT APPLIED.
+
+---
+
 ### 2026-08-14 · 문서 source-of-truth 정규화
 
 문서 아키텍처를 정리했다. `PROJECT_HANDOFF_2026-08-13.md`를 프로젝트 상태 스냅샷에서
@@ -1134,6 +1388,214 @@ Premium Candidate로 강등, 기계 추론 감정 규칙 확정.
 - NOT APPLIED — no remote migration, deployment, or Supabase mutation
 
 ---
+
+### 2026-08-15 · [P4 / M2] Conversation Bridge V1 implementation
+
+#### PLAN POSITION
+- Phase: P4 / M2
+- Workstream: Conversation Bridge
+- Step: P3 `talk_about_marks` extension — pending list, exact source, completion, unavailable source
+- Previous Gate: Control Tower canonical update `def18da` on PR #61
+- This Gate: local implementation and actor-RLS verification complete; remote migration remains unapplied
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES (Control Tower branch `def18da`)
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES (Control Tower branch `def18da`)
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES (Control Tower branch `def18da`)
+- Current-state checked: `docs/CURRENT_STATE.md` — YES (Control Tower branch `def18da`)
+- Latest relevant Work Log checked: Control Tower Conversation Bridge direction entry — YES
+- MASTER PLAN version / 기준일: Control Tower explicit decision / 2026-08-15
+- Does this task conflict with canonical direction: NO — implemented the explicitly approved Conversation Bridge V1; P5.3/P5.4 were not used
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High
+- Role: implementation owner
+- PR: not opened
+- Branch: `codex/conversation-bridge-v1`
+- Base SHA: `88cb7a9528e31692224d2c71c9fb35c09cef1482` (`origin/master`)
+- Old HEAD: `88cb7a9528e31692224d2c71c9fb35c09cef1482`
+- New HEAD / Reviewed HEAD: this commit (verified after commit)
+
+#### CHANGED / REVIEWED
+- `supabase/migrations/043_conversation_bridge_completion.sql`: adds monotonic `is_completed` coordination metadata, active-couple UPDATE RLS, retains only an opaque source id after record deletion, and removes marks atomically when a shared record becomes private
+- `src/lib/talkAbout.ts`, `talkAboutList.ts`, `store.tsx`, `sync.ts`: pending-only hydration, realtime invalidation, account/workspace guards, exact-source unavailable handling
+- `TalkAboutListWidget.tsx`: Home `오늘 이야기할 것 · N`, author/date/safe preview, explicit original view and completion action
+- regression tests and local actor-RLS harness: updated for completion, unavailable sources, account-switch isolation, duplicate and authorization paths
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics outside `talk_about_marks`: unchanged
+- product semantics: no self-chat, external messenger SDK, share-sheet transfer, media, AI, archive, or redesign
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- targeted Vitest (`store`, `sync`, `talkAboutList`, widget, RecordPage): PASS — 106 tests
+- `node scripts/phase0/storage-authz-harness.mjs`: PASS — 125 actor/RLS assertions on throwaway PostgreSQL
+- `npm run typecheck`: PASS
+- `npm run lint`: PASS
+- `npm run build`: PASS
+- `git diff --check`: PASS
+- remote Supabase catalog / production migration state / physical device: UNVERIFIED
+
+#### REVIEW IMPACT
+- FULL — new RLS-enabled migration and authorization lifecycle path; independent review required for this HEAD
+
+#### BLOCKERS
+- code: none
+- environment: remote migration state is UNVERIFIED
+- external/manual: Production application is intentionally not authorized
+
+#### STOPPED AT
+- exact completed boundary: local code and migration are verified only; no remote mutation or deployment
+
+#### REMAINING
+- independent review result, intentional commit/push/PR handoff
+
+#### NEXT ACTION
+- next owner: reviewer, then release owner
+- tool/model: Terra / High
+- 기준 SHA: this branch HEAD after commit
+- exact next task: review Conversation Bridge migration and lifecycle diff; apply no Production migration without separate approval
+
+#### DO NOT ADVANCE UNTIL
+- independent review has no unresolved security finding
+- migration is separately rehearsed and authorized before any remote application
+
+#### PRODUCTION
+- NOT APPLIED
+
+---
+
+### 2026-08-14 · P5 PR #54 review follow-up — revision/CAS와 unavailable surface 정합화
+
+독립 보안 리뷰의 B1/B2/H1/H2/M2/M3 지적을 실제 코드와 PostgreSQL harness에 대조해
+수정했다. `saveRecordToDB()`는 이제 create/update intent를 명시적으로 받고, create는
+`INSERT`, update는 소유자·커플 조건이 붙은 `UPDATE`를 사용한다. 암호화 행은
+`INSERT=1`, `UPDATE=expectedRevision+1`을 GLE1과 DB CAS 양쪽에 전달하며,
+`content_revision`을 PostgREST 응답에서 다시 읽어 store의 다음 attachment patch와
+후속 편집에 반영한다. `mapRow()`는 legacy plaintext row의 실제 revision도 보존한다.
+
+`상대방의 오늘`은 authorized-but-unreadable row를 빈 clickable row로 렌더링하지 않고
+중립 unavailable 상태로 표시하며, emotion-flow briefing도 동일한 availability gate를
+사용한다. GLK2 scope-key provisioning은 domain/epoch뿐 아니라 scope key id·owner·scope
+까지 비교하도록 강화했다. 이는 새 암호를 추가한 것이 아니라 기존 signed GLK2 header와
+verified certificate-chain 전제를 `RecordCryptoEnvironment` 계약에 명시한 것이다.
+
+실제 PostgreSQL 17 harness에 legacy revision `2 → ciphertext 3`, encrypted
+`1 → 2 → 3`, attachment/metadata patch, stale CAS, lost-response INSERT replay,
+former-partner RLS mutation을 추가했다. H2는 runtime bootstrap이 아직
+`setRecordCryptoEnvironment`/`setOutboxLocalCacheKey`를 호출하지 않는다는 사실을
+`CURRENT_STATE.md`와 코드 주석에 명시했다. P5 migration은 계속 **신규 / 어디에도
+미적용**이며 Production mutation은 없었다.
+
+검증은 최종적으로 `npm run test:p5` 85 assertions PASS(14 mutation boundary 포함),
+`npm run test:p0` 76 PASS, `npm run test:rollback` PASS, targeted E2EE flow 20 PASS,
+`npm test` 149 files / 2243 tests PASS, typecheck PASS, lint PASS, placeholder build
+PASS, `git diff --check` PASS였다. 첫 전체 suite 실행에서는 새 4번째 write-intent 인자를
+반영하기 전 테스트 1건이 실패했고, exact GLK2 owner 보강 직후에는 partner-assist
+flow 1건이 실패했으나 둘 다 원인 수정 후 새 프로세스로 재실행해 통과시켰다. 환경변수
+없는 bare build는 의도대로 `VITE_SUPABASE_URL` 누락으로 중단됐고, 실제 비밀값이 아닌
+CI placeholder로 재실행해 통과했다.
+
+### 2026-08-14 · P5 — `daily_records` E2EE 수직 슬라이스
+
+P4 완료 후 다음 단계인 P5를 구현했다. 시작 시점 `origin/master` HEAD `7c660e6`
+(로컬 `6cc9f72`와 트리 동일 — `7c660e6`은 같은 내용의 머지 커밋).
+
+**구현 전 조사에서 발견한 것 — 032가 남긴 진짜 공백.** 032는 암호화된 행의
+`log_text`·`reaction`·`attachments`·`emotion_flow`·`record_time`을 전부 금지하는데,
+**암호문을 담을 컬럼을 추가하지 않았다.** 즉 032만으로는 암호화된
+`daily_records` 행을 쓸 수 없다 — R4를 지키는 클라이언트는 방금 암호화한 내용을
+넣을 곳이 없다. P5의 중심은 write floor가 아니라 이 공백이었다.
+
+**추가로 발견한 P0 결함 (이미 머지된 032).** `enforce_e2ee_write_floor()`에
+`SECURITY DEFINER`가 없어서 호출자 권한으로 실행되고, 첫 문장이
+`e2ee_floor_for()`를 호출하는데 그 함수는 `authenticated`에게서 EXECUTE가
+회수되어 있다(032:71, 의도된 회수). 따라서 032를 적용하면 **모든 실제 사용자의
+`daily_records` 쓰기가 평문까지 포함해 전부 `42501`로 실패한다.** 기존 P0
+하네스가 `daily_records`에 한 번도 쓰지 않아 드러나지 않았다. 039가
+`ALTER FUNCTION ... SECURITY DEFINER`로 고친다 — 본문을 다시 선언하면 032와
+039에 규칙이 두 벌 생기므로 속성만 바꿨고, 그 사실을 테스트로 고정했다.
+
+| 파일 | 변경 |
+|---|---|
+| `supabase/migrations/039_daily_records_content_envelope.sql` | 신규. `content_envelope BYTEA` + 헤더/라우팅 일치 검증 + 032 P0 수정 |
+| `scripts/e2ee/p5-harness.mjs`, `scripts/e2ee/p5-baseline.sql` | 신규. 실제 PostgreSQL 17 · 실제 RLS 액터 · mutation testing |
+| `src/crypto/recordContent.ts` (+ 테스트) | 신규. 기록 콘텐츠 문서 · PMK/CSK 라우팅 · GLE1 AAD |
+| `src/app/records/contentCrypto.ts` (+ 테스트) | 신규. 유스케이스 — floor/epoch/domain 판단, 평문 fallback 없음 |
+| `src/lib/outboxCrypto.ts` (+ 테스트) | 신규. 오프라인 큐 암호화 (LCK) |
+| `src/lib/records.ts` | 읽기/쓰기 경로가 유스케이스를 통과 |
+| `src/lib/outbox.ts`, `src/lib/store.tsx` | 큐에 암호문 저장, 전송 시점에 개봉 |
+| `src/lib/e2eeLayering.test.ts` | Phase 1A 트립와이어를 P5 범위 불변식으로 전환 (cycle 경로는 그대로 동결) |
+
+**검증.** `test:p5` PASS (74 assertions, mutation 13종), `test:p0` PASS (76),
+`test:rollback` PASS, `npm run test` PASS (2221), typecheck·lint·build PASS.
+
+**하지 않은 것.** 프로덕션 조회·적용 없음. 039는 어디에도 적용되지 않았다.
+실제 두 계정 기기 간 E2E, 키 프로비저닝 UI, 레거시 행 일괄 마이그레이션 실행,
+채팅·미디어·주기는 범위 밖이다.
+
+### 2026-08-14 · P5 master 정합화 및 재검증
+
+최신 `origin/master` `88cb7a9`를 P5 브랜치에 병합했다. 실제 충돌은
+`docs/WORK_LOG.md` 하나였고 `docs/work-log only`로 분류했다. 최신 master의
+PRODUCT_V3·PROJECT_HANDOFF·문서 정규화 내용을 우선 보존하면서 P5 구현 기록을 유지했다.
+코드·migration·E2EE 의미 충돌은 없었다.
+
+재검증 결과: `npm run test:p5` 74 assertions PASS(13 mutation), `npm run test:p0`
+76 assertions PASS, `npm run test:rollback` PASS, `npm test` 148 files / 2235 tests PASS,
+typecheck PASS, lint PASS, build PASS. 최초 전체 테스트는 불완전한 `node_modules`로 iOS
+privacy manifest 2건이 실패했으나 `npm ci` 후 재실행해 통과했다. build는 실제 비밀값 없이
+형식 검증용 Supabase placeholder를 프로세스 환경에만 주입했다. Production Supabase
+migration/deploy는 실행하지 않았다.
+
+---
+
+### 2026-08-16 · Device Protection & Recovery UX V1 — local implementation
+
+`35da04c` Core Privacy Foundation integration을 기준으로 `daily_records` P5 actor/RLS
+harness를 다시 실행했고, 93 assertions가 통과했다. Production·remote Supabase에는
+조회나 변경을 하지 않았다.
+
+- Settings는 runtime과 같은 protected-local-state namespace를 읽고, verified runtime/LCK
+  기준의 `보호됨 / 설정 필요 / 복구 필요 / 보안 저장소 사용 불가 / 일시 확인 불가`를
+  표시한다. 상태를 알 수 없을 때 보호됨으로 표시하지 않는다.
+- 최초 native 설정은 recovery code와 기존 canonical recovery anchor artifact를 명시적으로
+  저장·재입력한 뒤에만 완료한다. 자동 clipboard 복사는 하지 않는다. ceremony는 명시적
+  `VITE_E2EE_DEVICE_PROTECTION_ENABLED=true` build flag가 있어야 시작한다.
+- 실제 결함을 수정했다: Settings가 runtime과 다른 namespace를 읽어 bootstrap을 놓치던
+  문제와, `recoverWithKit`가 server ACTIVE device를 만든 뒤 local runtime-discovery state를
+  저장하지 않던 문제. recovery artifact는 새 crypto format이 아니라 기존 canonical anchor
+  bytes의 display/transport form이다.
+- 검증: targeted Vitest 42 tests PASS, `npm run test:p5` 93 assertions PASS,
+  `npm run typecheck` PASS. Native device/restart/logout/recovery drill, remote catalog,
+  migration deployment은 UNVERIFIED / NOT APPLIED.
+
+---
+
+### 2026-08-16 · PR #67 — independent security delta fix (Codex / Luna / High)
+
+이 기록은 PR #67의 독립 보안 delta 작업 이력이다. `d1bace6` 기반의 R1/R2/R3
+검토에서, 연결된 커플이 write-floor 활성화 중에도 기존 floor=0 경로로 평문 기록을
+시도할 수 있는 경로와, 활성화 결과·계정 전환·복구 상태를 함께 다뤄야 하는 공백을
+확인했다.
+
+원본 security code commit은 `08063a1d3e9e8650484149f5e8cde6fe045e1f8d`이고, 이후
+문서-only handoff commit이 별도로 이어졌다.
+
+- `coupleProtectionBarrier`를 계정·정확한 couple scope에만 묶어 연결 상태가 공개되기
+  전부터 shared write를 fail closed로 만들고, 서버 floor가 실제 활성화된 뒤에만
+  해제했다. runtime/session/store의 single-flight와 teardown도 같은 범위로 정합화했다.
+- `KEY_MISSING`/`UNREADABLE` protected local state는 안전한 kit-verified 교체 프로토콜이
+  정의되지 않았으므로 `SETUP_REQUIRED`나 대체 authority를 만들지 않고 보호 저장소
+  사용 불가로 남겼다. 이 복구 범위는 PARTIAL이며 향후 Architect 결정이 필요하다.
+- PMK/CSK/HRK, GLE1/GLK2, migration 031–046, 제품 방향, P6, Production은 이 delta에서
+  바꾸지 않았다. 원격 Supabase와 Production은 NOT APPLIED다.
+- 당시 기록된 검증은 targeted/full Vitest, write-floor/P0/Phase 0/P5/rollback/native,
+  typecheck/lint/build/diff-check였으며, 실기기·원격 catalog·staging·Production은
+  UNVERIFIED였다. 새 정렬 head에서는 독립 delta 재검토가 필요하다.
 
 ## 유지 규칙
 

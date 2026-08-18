@@ -1,0 +1,105 @@
+import { getDeviceKeyPort, getLocalKeyPort } from '@/crypto/keystore';
+import type { LocalKeyPort } from '@/crypto/keystore/LocalKeyPort';
+import { activatePersonalProtection, installE2eeRuntime } from './runtime';
+import { E2EE_RUNTIME_INSTALLATION_ID } from './runtimeSession';
+import {
+  bootstrapFirstDevice,
+  confirmRecoveryKit,
+  recoverWithKit,
+  type BootstrapResult,
+  type RecoveryResult,
+  type UseCaseDeps,
+} from './useCases';
+import type { RecoveryKitAnchor } from '@/crypto/recoveryCode';
+
+/** Native platforms on which the first-device ceremony is allowed to run. */
+export type DeviceProtectionPlatform = 'ios' | 'android';
+
+/** Resolve the platform key capabilities behind the application boundary. */
+export function getDeviceProtectionPorts() {
+  return {
+    deviceKeys: getDeviceKeyPort(),
+    localKeys: getLocalKeyPort(),
+  };
+}
+
+export type DeviceProtectionFlow = {
+  beginFirstDevice(): Promise<BootstrapResult>;
+  confirmFirstDevice(input: { recoveryCode: string; kitAnchor: RecoveryKitAnchor }): Promise<void>;
+  recover(input: { recoveryCode: string; kitAnchor: RecoveryKitAnchor }): Promise<RecoveryResult>;
+};
+
+/**
+ * Application boundary for the Settings screen. It deliberately owns no React
+ * state and exposes no crypto capability to presentation code.
+ */
+export function createDeviceProtectionFlow(input: {
+  userId: string;
+  platform: DeviceProtectionPlatform;
+  deps: UseCaseDeps;
+  localKeys: LocalKeyPort;
+  /** Account/session ownership captured when the Settings ceremony starts. */
+  isCurrentSession?: () => boolean;
+}): DeviceProtectionFlow {
+  const assertCurrentSession = () => {
+    if (input.isCurrentSession && !input.isCurrentSession()) {
+      throw new Error('E_PROTECTION_SESSION_STALE');
+    }
+  };
+  return {
+    async beginFirstDevice() {
+      assertCurrentSession();
+      const result = await bootstrapFirstDevice(input.deps, {
+        userId: input.userId,
+        platform: input.platform,
+      });
+      assertCurrentSession();
+      return result;
+    },
+    async confirmFirstDevice({ recoveryCode, kitAnchor }) {
+      assertCurrentSession();
+      await confirmRecoveryKit(input.deps, { userId: input.userId, recoveryCode, kitAnchor });
+      assertCurrentSession();
+      const installed = await installE2eeRuntime({
+        userId: input.userId,
+        repository: input.deps.repository,
+        localState: input.deps.localState,
+        deviceKeys: input.deps.deviceKeys,
+        localKeys: input.localKeys,
+        installationId: E2EE_RUNTIME_INSTALLATION_ID,
+        isCurrentSession: input.isCurrentSession,
+      });
+      if (input.isCurrentSession && !input.isCurrentSession()) {
+        installed.close();
+        assertCurrentSession();
+      }
+      // This is the first device, before any protected runtime existed, so it
+      // cannot be replacing an LCK that sealed queued ciphertext. Later session
+      // restoration performs that separate outbox-loss check.
+      await activatePersonalProtection({
+        userId: input.userId,
+        deviceId: installed.deviceId,
+        repository: input.deps.repository,
+        localState: input.deps.localState,
+        environment: installed.environment,
+        isCurrentSession: input.isCurrentSession,
+      });
+      assertCurrentSession();
+    },
+    async recover({ recoveryCode, kitAnchor }) {
+      // Recovery still performs several server-side transitions. These checks
+      // prevent starting from or reporting into another account session, while
+      // the audit keeps the ceremony blocked from production until its server
+      // mutations are actor-bound atomically.
+      assertCurrentSession();
+      const result = await recoverWithKit(input.deps, {
+        userId: input.userId,
+        platform: input.platform,
+        recoveryCode,
+        kitAnchor,
+      });
+      assertCurrentSession();
+      return result;
+    },
+  };
+}

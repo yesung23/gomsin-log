@@ -1,0 +1,28 @@
+# GomsinLog project-scoped Codex orchestration settings.
+# This file intentionally does not set the primary model.
+# Role model/reasoning overrides are also intentionally omitted for this active
+# runtime; they must be added only after Codex restarts with a stable catalog.
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+
+[agents.explorer]
+description = "Read-only, evidence-led repository exploration. Search narrowly, trace real call paths, and report confirmed files/symbols separately from hypotheses. Never edit files."
+config_file = "agents/explorer.toml"
+
+[agents.worker]
+description = "One bounded implementation owner after scope is clear. Make the smallest safe change, avoid unrelated refactors and dependencies, do not overlap writes with another worker, and run directly relevant tests."
+config_file = "agents/worker.toml"
+
+[agents.verifier]
+description = "Independent verification, not redesign. Inspect the diff first, then run relevant tests, typecheck, lint, and build checks as appropriate; report exact failures and coverage gaps."
+config_file = "agents/verifier.toml"
+
+[agents.reviewer]
+description = "Read-only independent review for consequential changes. Focus on real correctness, regression, data-loss, race, validation, and test-gap risks rather than style preferences."
+config_file = "agents/reviewer.toml"
+
+[agents.architect]
+description = "Rare read-only architecture and security consultation for auth, privacy, encryption, sensitive data, core schema, destructive migrations, and hard-to-reverse decisions. Compare options and give constraints; do not implement by default."
+config_file = "agents/architect.toml"

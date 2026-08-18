@@ -1,5 +1,23 @@
 node_modules
 dist
+.DS_Store
+
+# Claude Code: per-developer permission grants. The shared orchestration layer
+# (skills, hooks, settings.json) IS tracked; only local approvals are not.
+.claude/settings.local.json
+/.codex/
+
+# Codex: the shared orchestration layer is tracked so that a new machine or
+# collaborator gets the same roles. Everything else under /.codex/ stays ignored
+# because it holds worktree checkouts (full copies of this repository), caches,
+# session databases, and local snapshots.
+!/.codex/
+/.codex/*
+!/.codex/config.toml
+!/.codex/agents/
+/output/
+/tmp/
+/supabase/.temp/
 .codex-runtime/
 *.local
 .env

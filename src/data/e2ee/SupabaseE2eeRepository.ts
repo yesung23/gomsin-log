@@ -37,6 +37,7 @@ import {
 } from './codec';
 import type {
   CertificateRecord,
+  CoupleAuthorizationSnapshot,
   DeviceRecord,
   E2eeRepository,
   EnrollmentRecord,
@@ -591,6 +592,34 @@ export class SupabaseE2eeRepository implements E2eeRepository {
 
   // --- scope keys ----------------------------------------------------------
 
+  async getWriteFloor(domain: KeyDomainName, scopeId: string): Promise<number> {
+    const scopeKind = domain === 'couple' ? 'couple' : 'user';
+    const row = await maybeRow(
+      'crypto_write_floor.get',
+      this.db.from('crypto_write_floor')
+        .select('min_cipher_format')
+        .eq('scope_kind', scopeKind)
+        .eq('scope_id', scopeId)
+        .maybeSingle(),
+    );
+    return row ? decodeSmallint(row.min_cipher_format, 'crypto_write_floor.min_cipher_format', 1) : 0;
+  }
+
+  async activateWriteFloor(
+    scopeKind: 'user' | 'couple',
+    scopeId: string,
+    deviceId: string,
+  ): Promise<void> {
+    await unwrap(
+      'rpc.activate_e2ee_write_floor',
+      this.db.rpc('activate_e2ee_write_floor', {
+        p_scope_kind: scopeKind,
+        p_scope_id: scopeId,
+        p_device_id: deviceId,
+      }),
+    );
+  }
+
   async listScopeKeys(domain: KeyDomainName, scopeId: string): Promise<ScopeKeyRecord[]> {
     const found = await rows(
       'scope_keys.list',
@@ -783,6 +812,26 @@ export class SupabaseE2eeRepository implements E2eeRepository {
         .maybeSingle(),
     );
     return row ? toPairing(row) : null;
+  }
+
+  async getCoupleAuthorizationSnapshot(coupleId: string): Promise<CoupleAuthorizationSnapshot> {
+    const current = await unwrap(
+      'rpc.get_my_active_couple_id',
+      this.db.rpc('get_my_active_couple_id'),
+    );
+    const members = await rows(
+      'couple_members.authorization_snapshot',
+      this.db.from('couple_members')
+        .select('user_id')
+        .eq('couple_id', coupleId)
+        .eq('status', 'active'),
+    );
+    const pairing = await this.getPairing(coupleId);
+    return {
+      currentUserActiveCoupleId: optionalString(current, 'get_my_active_couple_id'),
+      activeUserIds: members.map((row, index) => requireString(row.user_id, `couple_members[${index}].user_id`)),
+      pairingState: pairing?.state ?? null,
+    };
   }
 
   async setPairingState(pairingId: string, state: string): Promise<void> {

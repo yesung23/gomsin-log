@@ -146,12 +146,15 @@ describe('the iOS required-reason API scan that the privacy manifest rests on', 
   });
 });
 
-describe('the Keychain claim in App.entitlements is measured, not assumed', () => {
-  it('nothing in the compile surface touches the Keychain', () => {
+describe('the Keychain capability is measured, not assumed', () => {
+  it('only the first-party device-key plugin touches the Keychain', () => {
     const hits = corpus
       .filter(({ text }) => /\bSecItem(Add|Copy|Update|Delete)\b|\bkSecClass\b|\bKeychain\b/.test(text))
       .map(({ file }) => file);
-    expect(hits).toEqual([]);
+    expect(hits).toEqual([
+      'packages/capacitor-device-keys/ios/Sources/DeviceKeysPlugin/DeviceKeys.swift',
+      'packages/capacitor-device-keys/ios/Sources/DeviceKeysPlugin/LocalKeys.swift',
+    ]);
   });
 
   it('and no access group is declared, so nothing could share one', () => {

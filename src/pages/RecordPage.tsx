@@ -1166,9 +1166,28 @@ export function RecordPage() {
                 </div>
               ) : (
                 <div className="bg-muted p-4 rounded-xl">
-                  <p className="text-foreground whitespace-pre-wrap text-body break-keep">
-                    {selectedRecord.log || '(내용 없음)'}
-                  </p>
+                  {selectedRecord.contentUnavailable ? (
+                    /*
+                      An encrypted record this device cannot open.
+                      `(내용 없음)` would be a lie: the author DID write something,
+                      and saying otherwise invites them to overwrite content that
+                      is still recoverable once the key arrives. Name the cause
+                      instead, and distinguish "the key may still arrive" from
+                      "this cannot be opened".
+                    */
+                    <p
+                      data-testid="record-content-unavailable"
+                      className="text-muted-foreground text-body break-keep"
+                    >
+                      {selectedRecord.contentUnavailable === 'key_unavailable'
+                        ? '이 기기에서 아직 이 기록을 열 수 없어요. 기기 연결이 끝나면 보여요.'
+                        : '이 기록을 열 수 없어요. 내용은 그대로 있지만 이 기기의 열쇠로는 읽을 수 없어요.'}
+                    </p>
+                  ) : (
+                    <p className="text-foreground whitespace-pre-wrap text-body break-keep">
+                      {selectedRecord.log || '(내용 없음)'}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1321,17 +1340,29 @@ export function RecordPage() {
               )}
 
               {/* Owner-only edit/delete controls. Partner records NEVER show these. */}
-              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
+              {/*
+                Editing is withheld while the content cannot be read.
+                Saving would write `editText` over a record whose original the
+                author never saw, and migration 032's R6 revision CAS means that
+                write would replace the only copy of content that is otherwise
+                still recoverable once the epoch key reaches this device.
+                Deletion stays available: choosing to remove a record you cannot
+                read is a legitimate decision, and it destroys nothing unexpected.
+              */}
+              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role })
+                && !isEditing && !showDeleteConfirm && (
                 <div className="flex gap-2 pt-2 border-t border-border">
-                  <button
-                    onClick={() => {
-                      setEditText(selectedRecord.log || '');
-                      setIsEditing(true);
-                    }}
-                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-label active:scale-95 transition"
-                  >
-                    <Pencil size={13} /> 수정
-                  </button>
+                  {!selectedRecord.contentUnavailable && (
+                    <button
+                      onClick={() => {
+                        setEditText(selectedRecord.log || '');
+                        setIsEditing(true);
+                      }}
+                      className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-label active:scale-95 transition"
+                    >
+                      <Pencil size={13} /> 수정
+                    </button>
+                  )}
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
                     className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-label active:scale-95 transition"

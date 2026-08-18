@@ -67,7 +67,7 @@ canonical `master`가 된 뒤에만 #62–#67을 그 기준에 맞춰 정렬한�
 
 | PR | scope | live branch / HEAD | live base | state |
 |---|---|---|---|---|
-| #61 | canonical governance fix | `docs/control-tower-governance` / `deec2acb53f5f09405422397729a5abf98d5a0e6` | `master` / `42ac1f307f19e84e8a3891311aa2a3d19179eed1` | OPEN / DRAFT; not merged |
+| #61 | canonical governance fix | `docs/control-tower-governance` / `5f1d7b4929a866ac708e84d821251d05857149fd` | `master` / `42ac1f307f19e84e8a3891311aa2a3d19179eed1` | MERGED; resulting master `8a2167073bce4d9c9ef6dbe35f1b40a8122180c6` |
 | #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | OPEN / DRAFT |
 | #63 | notification re-entry | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | OPEN / DRAFT |
 | #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | OPEN / DRAFT |
@@ -119,6 +119,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 |---|---|
 | `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위. 이야기거리 보관함·완료 처리 P4는 integration branch에 있으나 master에는 아직 merge되지 않음 |
 | 알림 | 완전 미구현 |
+| `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |
 | 여행 플래너·공동 할 일 | 동결. 새 투자 없음. 위치 privacy gate는 별도 충족 필요 |

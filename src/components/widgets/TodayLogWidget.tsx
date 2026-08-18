@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
+import { useNavigate } from 'react-router-dom';
 import {
   Camera, Image as ImageIcon, Send, Lock, Unlock, ShieldCheck,
   Mic, Square, X, Film, Music,
@@ -23,6 +24,7 @@ import {
 } from '@/lib/nativePermissions';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
+import type { RecordMutationReason } from '@/lib/storeContext';
 
 /**
  * The author's own one-tap description of their day.
@@ -53,6 +55,7 @@ export interface TodayLogWidgetProps {
 
 export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   const { state, addRecordWithMedia, queueRecordForLater } = useStore();
+  const navigate = useNavigate();
   const partnerName = state.profile.couple.partnerName || '파트너';
   const todayStr = toLocalDateString(localToday());
 
@@ -460,7 +463,13 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     }
 
     setIsSaving(true);
-    let result: { ok: boolean; failedFiles: string[]; error?: string; queued?: boolean };
+    let result: {
+      ok: boolean;
+      failedFiles: string[];
+      error?: string;
+      queued?: boolean;
+      reason?: RecordMutationReason;
+    };
     try {
       result = await addRecordWithMedia(draft, pendingFiles);
     } finally {
@@ -485,7 +494,16 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       // (see serverErrors.ts). The old fallback blamed the internet connection for
       // permission and membership failures, which sent users into an endless retry
       // loop instead of telling them what to fix.
-      toast.error(result.error || '기록을 저장하지 못했어요.');
+      if (result.reason === 'protection_required') {
+        toast.error(result.error || '기록 보호 설정이 필요해요.', {
+          action: {
+            label: '설정 열기',
+            onClick: () => navigate('/settings'),
+          },
+        });
+      } else {
+        toast.error(result.error || '기록을 저장하지 못했어요.');
+      }
       return;
     }
 

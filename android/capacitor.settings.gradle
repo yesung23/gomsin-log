@@ -7,3 +7,6 @@ project(':capacitor-app').projectDir = new File('../node_modules/@capacitor/app/
 
 include ':capacitor-browser'
 project(':capacitor-browser').projectDir = new File('../node_modules/@capacitor/browser/android')
+
+include ':gomsinlog-capacitor-device-keys'
+project(':gomsinlog-capacitor-device-keys').projectDir = new File('../packages/capacitor-device-keys/android')

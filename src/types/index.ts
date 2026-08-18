@@ -135,6 +135,25 @@ export interface DailyRecord {
   emotionFlow?: EmotionFlowItem[];
   emotionAnalysis?: EmotionAnalysis;
   emotionUpdatedAt?: string | null;
+  /**
+   * The server-validated monotonic revision of an ENCRYPTED record.
+   *
+   * Carried from the server for legacy and encrypted rows alike. For encrypted
+   * rows it is bound into GLE1 associated data, so an edit must present exactly
+   * `OLD + 1` (migration 032's R6) and a concurrent write loses rather than
+   * silently overwriting. A legacy row may therefore transition using a revision
+   * greater than 1.
+   */
+  contentRevision?: number;
+  /**
+   * Why this record's content could not be shown.
+   *
+   * Set instead of returning an empty record, because "the author wrote nothing"
+   * and "this device cannot open it" must never look the same. `key_unavailable`
+   * means a device or epoch key is missing and may arrive later;
+   * `undecryptable` means authentication failed or the epoch is gone.
+   */
+  contentUnavailable?: 'key_unavailable' | 'undecryptable';
   createdAt: string;  // ISO
 }
 
@@ -328,6 +347,8 @@ export interface TalkAboutMark {
   coupleId: string;
   actorUserId: string;
   createdAt: string;
+  /** Conversation Bridge completion state; no record content is stored here. */
+  isCompleted: boolean;
 }
 
 export interface CycleSupportSignal {

@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useStore } from '@/lib/useStore';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { classifyServerError } from '@/lib/serverErrors';
@@ -20,6 +21,26 @@ import {
 } from '@/lib/supabase';
 import { useEscapeKey } from '@/lib/hooks';
 import { buildPersonalExport } from '@/lib/dataExport';
+import { DeviceProtectionSection } from '@/components/DeviceProtectionSection';
+import { activeCoupleScopeId, loadSettingsBootstrapFacts } from '@/app/e2ee/settingsFacts';
+import type { DeviceProtectionSnapshot } from '@/app/e2ee/deviceProtectionStatus';
+import { createSupabaseE2eeRepository } from '@/data/e2ee/SupabaseE2eeRepository';
+import { createProtectedE2eeLocalState } from '@/app/e2ee/protectedLocalState';
+import { E2EE_RUNTIME_INSTALLATION_ID } from '@/app/e2ee/runtimeSession';
+import {
+  createDeviceProtectionFlow,
+  getDeviceProtectionPorts,
+  type DeviceProtectionPlatform,
+} from '@/app/e2ee/deviceProtectionFlow';
+import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
+import { formatRecoveryKitArtifact, parseRecoveryKitArtifact } from '@/app/e2ee/recoveryKitArtifact';
+import type { BootstrapResult } from '@/app/e2ee/useCases';
+import { NotificationPreferencesSection } from '@/components/NotificationPreferencesSection';
+
+function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
+  const platform = Capacitor.getPlatform();
+  return platform === 'ios' || platform === 'android' ? platform : null;
+}
 
 export function SettingsPage() {
   const {
@@ -60,6 +81,169 @@ export function SettingsPage() {
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
   const ownRecords = records.filter((record) => record.userId === settingsIdentityKey);
   const hasCoupleSpace = !!profile.couple.coupleId;
+  const protectionCoupleId = activeCoupleScopeId(profile.couple);
+  const [protectionSnapshot, setProtectionSnapshot] = useState<DeviceProtectionSnapshot>({
+    status: 'TEMPORARILY_UNAVAILABLE',
+  });
+  const [isProtectionBusy, setIsProtectionBusy] = useState(false);
+  const [setupResult, setSetupResult] = useState<BootstrapResult | null>(null);
+  const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
+  const [recoveryArtifactInput, setRecoveryArtifactInput] = useState('');
+  const [showProtectionDialog, setShowProtectionDialog] = useState(false);
+  const [protectionDialogMode, setProtectionDialogMode] = useState<'setup' | 'recover'>('setup');
+
+  useEffect(() => {
+    let cancelled = false;
+    setProtectionSnapshot({ status: 'TEMPORARILY_UNAVAILABLE' });
+    const userId = settingsIdentityKey;
+    if (!userId || !supabase) return () => { cancelled = true; };
+    void (async () => {
+      try {
+        const snapshot = await loadSettingsBootstrapFacts({
+          userId,
+          coupleId: protectionCoupleId,
+          supabaseClient: supabase,
+        });
+        if (!cancelled) setProtectionSnapshot(snapshot);
+      } catch {
+        if (!cancelled) setProtectionSnapshot({ status: 'TEMPORARILY_UNAVAILABLE' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [protectionCoupleId, settingsIdentityKey]);
+
+  const loadDeviceProtectionFlow = async (identity = captureIdentity()) => {
+    if (!identity.userId || !supabase || !isCurrentIdentity(identity)) {
+      throw new Error('E_PROTECTION_SESSION');
+    }
+    const platform = nativeProtectionPlatform();
+    if (!platform) throw new Error('E_PROTECTION_NATIVE_REQUIRED');
+    const { deviceKeys, localKeys } = getDeviceProtectionPorts();
+    if (!deviceKeys || !localKeys) throw new Error('E_PROTECTION_STORAGE_UNAVAILABLE');
+    const localState = await createProtectedE2eeLocalState({
+      installationId: E2EE_RUNTIME_INSTALLATION_ID,
+      userId: identity.userId,
+      localKeys,
+    });
+    if (!isCurrentIdentity(identity)) throw new Error('E_PROTECTION_SESSION_STALE');
+    if (!localState) throw new Error('E_PROTECTION_STORAGE_UNAVAILABLE');
+    return createDeviceProtectionFlow({
+      userId: identity.userId,
+      platform,
+      localKeys,
+      isCurrentSession: () => isCurrentIdentity(identity),
+      deps: {
+        repository: createSupabaseE2eeRepository(supabase),
+        localState,
+        deviceKeys,
+        flag: { isEnabled: isDeviceProtectionEnabled },
+        now: () => Date.now(),
+        newId: () => crypto.randomUUID(),
+      },
+    });
+  };
+
+  const refreshProtectionSnapshot = async (identity = captureIdentity()) => {
+    if (!identity.userId || !supabase) return;
+    const snapshot = await loadSettingsBootstrapFacts({
+      userId: identity.userId,
+      coupleId: protectionCoupleId,
+      supabaseClient: supabase,
+    });
+    if (isCurrentIdentity(identity)) setProtectionSnapshot(snapshot);
+  };
+
+  const startProtectionSetup = async () => {
+    if (isProtectionBusy) return;
+    if (!isDeviceProtectionEnabled()) {
+      toast.error('이 빌드에서는 기록 보호 설정이 아직 열려 있지 않아요.');
+      return;
+    }
+    const identity = captureIdentity();
+    setIsProtectionBusy(true);
+    try {
+      const flow = await loadDeviceProtectionFlow(identity);
+      const result = await flow.beginFirstDevice();
+      if (!isCurrentIdentity(identity)) return;
+      setSetupResult(result);
+      setRecoveryCodeInput('');
+      setProtectionDialogMode('setup');
+      setShowProtectionDialog(true);
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      const code = error instanceof Error ? error.message : '';
+      toast.error(code.includes('E_PROTECTION_NATIVE_REQUIRED')
+        ? '기록 보호 설정은 현재 iPhone 또는 Android 앱에서 진행할 수 있어요.'
+        : code.includes('E_PROTECTION_STORAGE_UNAVAILABLE')
+          ? '이 기기에서 필요한 보안 저장소를 사용할 수 없어요.'
+          : '기록 보호 설정을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsProtectionBusy(false);
+    }
+  };
+
+  const confirmProtectionSetup = async () => {
+    if (!setupResult || isProtectionBusy) return;
+    if (recoveryCodeInput.trim() !== setupResult.recoveryCode) {
+      toast.error('저장한 복구 코드를 다시 입력해 주세요.');
+      return;
+    }
+    const identity = captureIdentity();
+    setIsProtectionBusy(true);
+    try {
+      const flow = await loadDeviceProtectionFlow(identity);
+      await flow.confirmFirstDevice({
+        recoveryCode: recoveryCodeInput,
+        kitAnchor: setupResult.kitAnchor,
+      });
+      if (!isCurrentIdentity(identity)) return;
+      setShowProtectionDialog(false);
+      setSetupResult(null);
+      setRecoveryCodeInput('');
+      await refreshProtectionSnapshot(identity);
+      toast.success('이 기기에서 기록 보호를 설정했어요.');
+    } catch {
+      if (isCurrentIdentity(identity)) toast.error('복구 수단을 확인하지 못했어요. 입력한 정보를 다시 확인해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsProtectionBusy(false);
+    }
+  };
+
+  const startProtectionRecovery = () => {
+    setSetupResult(null);
+    setRecoveryCodeInput('');
+    setRecoveryArtifactInput('');
+    setProtectionDialogMode('recover');
+    setShowProtectionDialog(true);
+  };
+
+  const recoverProtection = async () => {
+    if (isProtectionBusy) return;
+    const identity = captureIdentity();
+    setIsProtectionBusy(true);
+    try {
+      const kitAnchor = parseRecoveryKitArtifact(recoveryArtifactInput);
+      const flow = await loadDeviceProtectionFlow(identity);
+      await flow.recover({ recoveryCode: recoveryCodeInput, kitAnchor });
+      if (!isCurrentIdentity(identity)) return;
+      setShowProtectionDialog(false);
+      toast.success('기록 보호를 복구했어요. 안전하게 확인한 뒤 앱을 다시 열어 주세요.');
+    } catch {
+      if (isCurrentIdentity(identity)) toast.error('기록 보호를 복구하지 못했어요. 복구 코드와 복구 정보를 확인해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsProtectionBusy(false);
+    }
+  };
+
+  const copyProtectionText = async (value: string, label: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('E_CLIPBOARD_UNAVAILABLE');
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label}를 복사했어요.`);
+    } catch {
+      toast.error('복사하지 못했어요. 직접 저장해 주세요.');
+    }
+  };
 
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
@@ -335,6 +519,15 @@ export function SettingsPage() {
             </p>
           </div>
         </section>
+
+        <DeviceProtectionSection
+          status={protectionSnapshot.status}
+          onStart={startProtectionSetup}
+          onRecover={startProtectionRecovery}
+          busy={isProtectionBusy}
+        />
+
+        <NotificationPreferencesSection userId={settingsIdentityKey} />
 
         <section className="space-y-2">
           <h2 className="text-heading text-foreground">화면 테마</h2>
@@ -928,6 +1121,100 @@ export function SettingsPage() {
               >
                 확인
               </button>
+            </div>
+          </div>
+        )}
+
+        {showProtectionDialog && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border max-h-[90vh] overflow-y-auto">
+              {protectionDialogMode === 'setup' && setupResult ? (
+                <>
+                  <div className="flex items-center gap-2 text-foreground text-heading">
+                    <Shield size={20} className="text-coral" />
+                    <span id="protection-dialog-title">복구 수단을 안전하게 보관해 주세요</span>
+                  </div>
+                  <p className="text-caption text-muted-foreground leading-relaxed">
+                    이 정보는 새 기기에서 기록 보호를 복구할 때 필요해요. 곰신로그는 이 정보를 대신 보관하거나 다시 보여드릴 수 없어요.
+                  </p>
+                  <div className="space-y-1">
+                    <p className="text-label font-semibold text-foreground">복구 코드</p>
+                    <p className="font-mono text-caption break-all bg-muted p-3 rounded-control select-text">{setupResult.recoveryCode}</p>
+                    <button
+                      type="button"
+                      onClick={() => void copyProtectionText(setupResult.recoveryCode, '복구 코드')}
+                      className="text-caption text-coral font-semibold"
+                    >
+                      복구 코드 복사
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-label font-semibold text-foreground">복구 정보</p>
+                    <p className="font-mono text-caption break-all bg-muted p-3 rounded-control select-text">{formatRecoveryKitArtifact(setupResult.kitAnchor)}</p>
+                    <button
+                      type="button"
+                      onClick={() => void copyProtectionText(formatRecoveryKitArtifact(setupResult.kitAnchor), '복구 정보')}
+                      className="text-caption text-coral font-semibold"
+                    >
+                      복구 정보 복사
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="protection-confirm-code" className="text-label font-semibold text-foreground">
+                      저장한 복구 코드를 다시 입력해 주세요
+                    </label>
+                    <input
+                      id="protection-confirm-code"
+                      value={recoveryCodeInput}
+                      onChange={(event) => setRecoveryCodeInput(event.target.value)}
+                      autoComplete="off"
+                      className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowProtectionDialog(false); setRecoveryCodeInput(''); }}
+                      disabled={isProtectionBusy}
+                      className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
+                    >
+                      나중에 하기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmProtectionSetup}
+                      disabled={isProtectionBusy || !recoveryCodeInput}
+                      className="flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
+                    >
+                      {isProtectionBusy ? '확인 중…' : '저장했고 계속하기'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 text-foreground text-heading">
+                    <Shield size={20} className="text-coral" />
+                    <span id="protection-dialog-title">기록 보호 복구</span>
+                  </div>
+                  <p className="text-caption text-muted-foreground leading-relaxed">
+                    기존 보호 정보를 덮어쓰지 않습니다. 보관한 복구 코드와 복구 정보를 입력해 새 기기에서 확인해 주세요.
+                  </p>
+                  <div className="space-y-2">
+                    <label htmlFor="protection-recovery-code" className="text-label font-semibold text-foreground">복구 코드</label>
+                    <input id="protection-recovery-code" value={recoveryCodeInput} onChange={(event) => setRecoveryCodeInput(event.target.value)} autoComplete="off" className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40" />
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="protection-recovery-artifact" className="text-label font-semibold text-foreground">복구 정보</label>
+                    <textarea id="protection-recovery-artifact" value={recoveryArtifactInput} onChange={(event) => setRecoveryArtifactInput(event.target.value)} autoComplete="off" className="w-full min-h-24 p-3 rounded-control bg-muted border border-border text-caption font-mono text-foreground outline-none focus:ring-2 focus:ring-coral/40" />
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <button type="button" onClick={() => setShowProtectionDialog(false)} disabled={isProtectionBusy} className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]">취소</button>
+                    <button type="button" onClick={recoverProtection} disabled={isProtectionBusy || !recoveryCodeInput || !recoveryArtifactInput} className="flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50">
+                      {isProtectionBusy ? '복구 중…' : '복구하기'}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

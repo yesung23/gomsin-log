@@ -3,6 +3,15 @@
 이 폴더의 `.sql` 파일은 **번호 순서대로** 적용합니다. 파일을 직접 수정하지 말고,
 변경이 필요하면 새 번호의 파일을 추가하세요.
 
+> **042 번호 예약 충돌 (2026-08-15).** active V1에는 이미 043/044가 있고, frozen
+> P6 draft에만 042가 있습니다. 042는 어느 환경에도 적용되지 않은 보존 자산이며,
+> 앞으로 P6를 재개할 때는 그 파일을 적용하지 않습니다. 042의 내용을 재검증해
+> **047 이상의 새 forward migration**으로 다시 발급해야 합니다. 045는
+> write-floor 활성화 보안 수정, 046은 device provisioning actor 결속에
+> 사용했습니다. 기존 환경의
+> `039 → 040 → 043 → 044` 이력과 fresh 환경의 숫자 순서를 섞어 적용하지 마세요.
+> 041 chat migration도 동일하게 frozen/deferred 자산이며 active V1 stack에는 없습니다.
+
 > ⚠️ 이 저장소의 코드만으로는 원격 Supabase 프로젝트의 실제 상태를 알 수 없습니다.
 > 아래 "적용 순서"를 반드시 스테이징 프로젝트에서 먼저 검증하세요.
 
@@ -63,6 +72,69 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `036_e2ee_device_status_privilege.sql` | G2: `devices.status`를 클라이언트가 위조 가능한 커스텀 GUC가 아니라 컬럼 단위 GRANT로 보호 (035가 실제로는 지키지 못했던 방벽을 대체) | **신규 / 어디에도 미적용** (2026-08-13 문서 정리 중 원장 표 누락을 발견해 추가함) |
 | `037_harden_e2ee_account_deletion_survivor_detection.sql` | `e2ee_prepare_account_deletion`이 생존 파트너를 029와 같은 기준(멤버십 row 존재 여부)으로 판정하도록 교체. active만 보던 기존 판정은 disconnected/pending 파트너의 커플 키를 파괴했다 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
 | `038_bilateral_talk_about_marks.sql` | `이따 이야기하기` 양방향 조율용 `talk_about_marks` 테이블. 메타데이터 전용(record_id / couple_id / actor_user_id / created_at)이며 기록 본문·주제·요약을 저장하지 않는다. `daily_records` 쓰기 권한은 그대로 두고 별도 테이블 + RLS로만 해결 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
+| `039_daily_records_content_envelope.sql` | P5. 암호화된 `daily_records` 행이 콘텐츠를 담는 `content_envelope BYTEA`(GLE1 봉투) 추가 + 봉투 헤더의 domain/epoch를 라우팅 컬럼과 대조 + `health` 도메인 거부 + couple 도메인의 active 멤버십 요구. **032의 P0 결함도 함께 고친다** (아래 참고) | **신규 / 어디에도 미적용** |
+| `040_e2ee_write_floor_scope_semantics.sql` | 03A follow-up. `e2ee_floor_for(scope_kind, scope_id)` exact-scope lookup, private=user / shared=couple floor routing, PMK-only personal activation, active-couple-only activation, and forward replacement of the 032 enforcement body while preserving the 039 SECURITY DEFINER correction | **신규 / 어디에도 미적용** |
+| `043_conversation_bridge_completion.sql` | Conversation Bridge V1: `talk_about_marks`에 완료 상태를 추가하고, 삭제된 원본의 opaque record ID만 보존해 generic unavailable 상태를 표시한다. 원문·preview·주제는 저장하지 않으며 완료 UPDATE는 active couple의 `is_completed = true` 단방향 경로로 제한한다 | **Git 추적됨 / 운영 미적용 — 배포 전 read-only 재확인 필요** |
+| `044_unlink_crypto_pairing_authority.sql` | `disconnect_couple()`가 관계 멤버십과 live `crypto_pairings`를 같은 트랜잭션에서 `UNLINKED`로 전환한다. historical key row를 삭제하지 않으며, former partner와 stale local authority가 새 couple scope를 다시 열 수 없도록 하는 forward correction이다 | **Git 추적됨 / 운영 미적용 — 031–040 및 043과 함께 staging actor/RLS 검증 필요** |
+| `045_harden_e2ee_write_floor_activation.sql` | 되돌릴 수 없는 exact-scope write floor 활성화를 소유 ACTIVE 기기 + 기기 인증서 + 해당 ACTIVE epoch의 self-notarized envelope에 결속한다. PENDING·recovery·provisioning·failed·revoked 기기는 거부한다 | **신규 / 어디에도 미적용 — 031→032→034→035→036→037→038→039→040→043→044→045 fresh-chain actor 검증 필요** |
+| `046_require_actor_for_device_provisioning.sql` | `e2ee_begin_device_provisioning`·`e2ee_finalize_device_provisioning`이 `auth.uid()`가 NULL이면 소유권 비교를 건너뛰던 문제를 forward 수정한다. 두 함수 모두 NULL actor를 먼저 거부하고, 소유자 불일치는 `E2EE_DEVICE_WRONG_ACCOUNT`다. revocation 우선순위·인증서·envelope coverage·허용 상태·idempotent 반환은 그대로 보존한다. PostgREST 캐시를 위해 `NOTIFY pgrst`를 포함한다 | **신규 / 어디에도 미적용 — write-floor harness에서 NULL actor·타 계정·anon 거부를 실제 PostgreSQL로 검증함** |
+
+## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
+
+**032 를 아직 어디에도 적용하지 않았다는 사실이 이 결함을 지금까지 무해하게
+유지했습니다.** 적용했다면 즉시 전면 장애였습니다.
+
+`enforce_e2ee_write_floor()` 에는 `SECURITY DEFINER` 가 없어서 **호출자 권한**으로
+실행됩니다. 그 함수의 첫 문장은 `e2ee_floor_for()` 호출인데, 이 함수는
+`authenticated` 에게서 EXECUTE 가 회수되어 있습니다(032:71 — 임의의 user id 를 받는
+함수이므로 회수 자체는 올바릅니다). 결과:
+
+```
+ERROR 42501: permission denied for function e2ee_floor_for
+CONTEXT: PL/pgSQL function enforce_e2ee_write_floor() line 5 at assignment
+```
+
+floor 조회는 어떤 분기보다 **먼저** 실행되므로 암호화 쓰기만이 아니라 **평문
+INSERT/UPDATE 까지 전부** 실패합니다. 즉 032 를 적용한 순간부터 아무도 기록을
+저장할 수 없습니다.
+
+왜 놓쳤는가: `scripts/e2ee/p0-harness.mjs` 는 키 테이블과 RPC 를 실제 액터로
+검증하지만 **`daily_records` 에 행을 한 번도 쓰지 않습니다.** 트리거가 실제
+`authenticated` 세션에서 실행된 적이 없었습니다. 027 과 같은 종류의 실패입니다 —
+plpgsql 은 함수를 만들 때 본문을 검증하지 않으므로 032 는 아무 오류 없이 적용되고,
+실제로 호출되는 순간에만 터집니다.
+
+039 는 `ALTER FUNCTION public.enforce_e2ee_write_floor() SECURITY DEFINER;` 로
+속성만 바꿉니다. **본문을 다시 선언하지 않습니다** — 그러면 032 와 039 에 규칙이
+두 벌 생기고 나중에 실행된 쪽이 이기므로, 이후 032 를 고쳐도 조용히 무효가 됩니다.
+`src/lib/migration039.test.ts` 가 이 두 가지(속성 변경 있음 / 본문 재선언 없음)를
+함께 고정합니다.
+
+## 039 가 추가하는 것 — 암호문을 담을 곳 (2026-08-14)
+
+032 는 암호화된 행의 `log_text`·`reaction`·`attachments`·`emotion_flow`·
+`record_time` 을 전부 금지하면서 **암호문을 담을 컬럼을 추가하지 않았습니다.**
+따라서 032 만으로는 암호화된 행을 실질적으로 쓸 수 없습니다.
+
+039 는 `content_envelope BYTEA` 하나를 추가합니다. 필드마다 봉투를 따로 두지 않는
+이유는 그러면 행마다 92바이트 헤더와 wrapped DEK 가 5개씩 붙는 데다, **한 기록 안에서
+domain 이나 epoch 를 섞어 쓸 수 있게** 되기 때문입니다. 다섯 필드를 하나의 정규
+JSON 문서로 직렬화해 한 번 봉인합니다(`src/crypto/recordContent.ts`).
+
+클라이언트가 보낸 `key_domain`·`key_epoch` 는 **증거로 취급하지 않습니다.** 같은
+클라이언트가 봉투도 보냈으므로 두 값이 서로 맞는다는 것 이상을 증명하지 못합니다.
+039 는 봉투 헤더에서 domain(offset 7)과 epoch(offset 12, big-endian u64)를 직접 읽어
+라우팅 컬럼과 대조합니다. 이것이 막는 구체적 공격: **PMK 로 봉인한 암호문을
+`key_domain = 'couple'` 로 선언하기** — 032 의 모든 검사를 통과하고 파트너는 영원히
+열 수 없는 행을 받게 됩니다.
+
+남는 한계는 정직하게 기록합니다. 헤더와 라우팅 컬럼이 **서로 일치하도록** 위조한
+봉투는 서버가 받아들이며, 그 행은 **복호화에 실패**합니다(GLE1 AAD 가 owner·scope·
+object·revision 을 묶으므로). 서버가 기계적으로 강제할 수 있는 것만 서버에서
+강제하고, 나머지는 AEAD 가 잡습니다.
+
+운영 적용 순서는 **032 → 039 를 한 배포 단위로** 다뤄야 합니다. 032 만 적용하면 위의
+전면 장애가 발생합니다.
 | `033_rollback_e2ee_key_foundation.sql.disabled` | 031 + 032 + 034 전체 롤백. **번호는 순서를 뜻하지 않습니다** — 정방향은 031 → 032 → 034이고 이 파일은 `.disabled`라 실행 순서에 들어가지 않습니다. E2EE가 활성화된 흔적이 하나라도 있으면 트랜잭션 전체를 중단합니다. | **롤백 전용 / 실행되지 않음** |
 
 ## 029 가 보완하는 것 — sole-member couple 개인정보 정리 (2026-08-11)

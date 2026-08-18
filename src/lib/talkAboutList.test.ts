@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildTalkAboutTopics, isMarkedByViewer } from '@/lib/talkAboutList';
-import { isTalkAboutMarkActive, TALK_ABOUT_TTL_DAYS } from '@/lib/talkAbout';
+import { isTalkAboutMarkActive } from '@/lib/talkAbout';
 import type { DailyRecord, TalkAboutMark } from '@/types';
 
 const ME = 'user-me';
@@ -31,6 +31,7 @@ function mark(overrides: Partial<TalkAboutMark> = {}): TalkAboutMark {
     coupleId: COUPLE,
     actorUserId: PARTNER,
     createdAt: '2026-08-13T11:00:00.000Z',
+    isCompleted: false,
     ...overrides,
   };
 }
@@ -42,7 +43,7 @@ describe('buildTalkAboutTopics: the list is a join, not a copy', () => {
     const topics = buildTalkAboutTopics([mark()], [record()], viewer, NOW);
     expect(topics).toHaveLength(1);
     // Everything a person reads comes from the record...
-    expect(topics[0].record.log).toBe('오늘 있었던 일');
+    expect(topics[0].record?.log).toBe('오늘 있었던 일');
     // ...and the mark contributed only attribution and time.
     expect(topics[0].markedBy).toEqual([PARTNER]);
     expect(topics[0].markedByViewer).toBe(false);
@@ -75,26 +76,26 @@ describe('buildTalkAboutTopics: the list is a join, not a copy', () => {
       viewer,
       NOW,
     );
-    expect(topics.map((topic) => topic.record.id)).toEqual(['rec-new', 'rec-old']);
+    expect(topics.map((topic) => topic.recordId)).toEqual(['rec-new', 'rec-old']);
   });
 });
 
 describe('buildTalkAboutTopics: nothing the viewer may not see', () => {
   /**
    * The important one. A stale mark pointing at a record this client cannot
-   * resolve must produce NO entry -- not a placeholder, not a count, not
-   * "1 topic you can't view". Any of those announce that something exists,
-   * which is the hidden-record-existence leak PRODUCT_V3 §6.4 rules out.
+   * resolve must produce a generic unavailable entry only. It must not use a
+   * different record or expose source-derived content.
    */
-  it('drops a mark whose record is not present, revealing nothing', () => {
+  it('keeps an unavailable topic without fabricating source content', () => {
     const topics = buildTalkAboutTopics([mark({ recordId: 'rec-gone' })], [], viewer, NOW);
-    expect(topics).toEqual([]);
+    expect(topics).toHaveLength(1);
+    expect(topics[0]).toMatchObject({ recordId: 'rec-gone', unavailable: true, record: undefined });
   });
 
-  it("drops a mark pointing at the partner's private record", () => {
+  it("keeps a generic unavailable topic for a partner's private record", () => {
     const privateRecord = record({ id: 'rec-1', userId: PARTNER, isPrivate: true });
     const topics = buildTalkAboutTopics([mark()], [privateRecord], viewer, NOW);
-    expect(topics).toEqual([]);
+    expect(topics[0]).toMatchObject({ unavailable: true, record: undefined });
   });
 
   it("still shows the viewer's OWN private record when they marked it themselves", () => {
@@ -103,29 +104,17 @@ describe('buildTalkAboutTopics: nothing the viewer may not see', () => {
     expect(topics).toHaveLength(1);
   });
 
-  it('drops an expired mark', () => {
+  it('keeps a pending mark regardless of its age', () => {
     const stale = mark({ createdAt: '2026-07-01T00:00:00.000Z' });
-    expect(buildTalkAboutTopics([stale], [record()], viewer, NOW)).toEqual([]);
+    expect(buildTalkAboutTopics([stale], [record()], viewer, NOW)).toHaveLength(1);
   });
 });
 
-describe('the 14-day display window', () => {
-  it('keeps a mark inside the window and drops one past it', () => {
-    const dayMs = 24 * 60 * 60 * 1000;
-    const fresh = mark({ createdAt: new Date(NOW.getTime() - dayMs).toISOString() });
-    const edge = mark({
-      createdAt: new Date(NOW.getTime() - (TALK_ABOUT_TTL_DAYS * dayMs) + 1000).toISOString(),
-    });
-    const expired = mark({
-      createdAt: new Date(NOW.getTime() - (TALK_ABOUT_TTL_DAYS + 1) * dayMs).toISOString(),
-    });
-    expect(isTalkAboutMarkActive(fresh, NOW)).toBe(true);
-    expect(isTalkAboutMarkActive(edge, NOW)).toBe(true);
-    expect(isTalkAboutMarkActive(expired, NOW)).toBe(false);
-  });
-
-  it('shows a mark with an unparseable timestamp rather than hiding it', () => {
+describe('completion state', () => {
+  it('hides only completed marks, not old or malformed dates', () => {
+    expect(isTalkAboutMarkActive(mark({ createdAt: '2020-01-01T00:00:00.000Z' }), NOW)).toBe(true);
     expect(isTalkAboutMarkActive(mark({ createdAt: 'not-a-date' }), NOW)).toBe(true);
+    expect(isTalkAboutMarkActive(mark({ isCompleted: true }), NOW)).toBe(false);
   });
 });
 

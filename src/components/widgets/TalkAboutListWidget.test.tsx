@@ -179,3 +179,84 @@ describe('오늘 이야기할 것', () => {
     }
   });
 });
+
+/**
+ * §8 puts every marked topic behind the count on the home widget and rules out a
+ * separate tab, so this widget is the ONLY way to reach 이야기거리. That made the
+ * overflow a real dead end rather than a truncation: the sixth topic onwards was
+ * announced as "외 N개" in inert text, with no control on it and no route to a
+ * fuller list. A pair who marked seven records could not open two of them.
+ */
+describe('every marked topic is reachable, not just the first five', () => {
+  function manyTopics(count: number) {
+    const records = Array.from({ length: count }, (_, i) => record({
+      id: `rec-${String(i).padStart(2, '0')}`,
+      time: `${String(i % 24).padStart(2, '0')}:00`,
+      log: `이야기거리 ${i}`,
+    }));
+    const marks = records.map((r, i) => mark({
+      id: `mark-${i}`,
+      recordId: r.id,
+      // Newest first is the widget's order, so ascending time = descending list.
+      createdAt: new Date(Date.parse(`${TODAY}T00:00:00.000Z`) + i * 60_000).toISOString(),
+    }));
+    return { records, marks };
+  }
+
+  it('counts every topic in the heading even while it shows five', () => {
+    const { records, marks } = manyTopics(7);
+    renderWidget(records, marks);
+    expect(screen.getByText(/오늘 이야기할 것 · 7/)).toBeInTheDocument();
+    expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(5);
+  });
+
+  it('the overflow notice is a control, and it opens the rest', async () => {
+    const user = userEvent.setup();
+    const { records, marks } = manyTopics(7);
+    renderWidget(records, marks);
+
+    const expand = screen.getByTestId('talk-about-expand');
+    expect(expand).toHaveAttribute('aria-expanded', 'false');
+    await user.click(expand);
+
+    expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(7);
+    expect(screen.getByTestId('talk-about-expand')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('a topic revealed by expanding still opens its exact original', async () => {
+    const user = userEvent.setup();
+    const { records, marks } = manyTopics(7);
+    renderWidget(records, marks);
+    await user.click(screen.getByTestId('talk-about-expand'));
+
+    // The oldest mark sorts last, so it is only present once expanded.
+    await user.click(screen.getByText('이야기거리 0'));
+    expect(setHighlightedRecordId).toHaveBeenCalledWith('rec-00');
+    expect(navigate).toHaveBeenCalledWith('/record?record=rec-00');
+  });
+
+  it('collapses again, so a long list cannot permanently take over the home', async () => {
+    const user = userEvent.setup();
+    const { records, marks } = manyTopics(7);
+    renderWidget(records, marks);
+
+    await user.click(screen.getByTestId('talk-about-expand'));
+    await user.click(screen.getByTestId('talk-about-expand'));
+    expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(5);
+  });
+
+  it('offers no control at all when everything already fits', () => {
+    const { records, marks } = manyTopics(3);
+    renderWidget(records, marks);
+    expect(screen.queryByTestId('talk-about-expand')).not.toBeInTheDocument();
+  });
+});
+
+describe('core-flow copy renders as prose, not as source markup', () => {
+  it('the empty state does not show literal backticks around 이따 이야기하기', () => {
+    renderWidget([], []);
+    const empty = screen.getByText(/아직 표시한 기록이 없어요/);
+    expect(empty.textContent).toContain("'이따 이야기하기'");
+    expect(empty.textContent).not.toContain('`');
+  });
+});

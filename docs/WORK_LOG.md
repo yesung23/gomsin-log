@@ -1798,7 +1798,7 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 - command: GitHub Actions on #70 `922938e` — PASS, 14/14 checks, including `Real-browser creator/partner matrix` (run 32164413345, 3m54s). That job is the two-person browser evidence for this HEAD.
 - command: `npx playwright test e2e/coupleMatrix.spec.ts` locally — **UNVERIFIED**. This sandbox cannot download Playwright Chromium (headless shell fetch blocked; the headed binary will not launch here). CI is the authority for browser evidence.
 - what it actually proves: client-side product semantics and copy under jsdom, plus the real production bundle in CI's mocked-backend browser matrix. It proves nothing about RLS, remote Supabase, or physical devices.
-- #71 CI at time of writing: only Vercel checks had reported; the GitHub Actions workflows had not yet completed. **UNVERIFIED** for #71.
+- #71 GitHub Actions: **NONE, structurally.** Every workflow in `.github/workflows/` triggers on exactly one base branch (`master` for master-validation and native-release-validation; three `kiro/*` bases for the others). No workflow triggers on base `codex/lv-readiness-audit-v1`, so a PR stacked there receives zero Actions checks — only Vercel reported. The workflow headers cite `.kiro/steering/merge-policy.md` forbidding a widened trigger, so no workflow was edited. #71's only automated evidence is the local `npm run verify` above; retargeting it to `master` after #70 lands is what makes `master validation` fire.
 
 #### REVIEW IMPACT
 - FULL for #70: the implementation of every accepted finding changed, so the `b5663c7` review is stale.
@@ -1823,7 +1823,7 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 
 #### DO NOT ADVANCE UNTIL
 - an independent review accepts #70's checkpoint semantics.
-- #71's GitHub Actions run is confirmed green on `0903e33`.
+- #71 is retargeted to `master` after #70 lands, so `master validation` actually runs on it. No workflow trigger may be widened to cover the stacked base.
 
 #### PRODUCTION
 - NOT APPLIED

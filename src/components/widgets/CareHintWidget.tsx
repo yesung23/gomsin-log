@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { MessageCircleHeart } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
-import { localToday, toLocalDateString } from '@/lib/utils';
+import { localToday, toLocalDateString, getPartnerDaySince } from '@/lib/utils';
 
 /**
  * "다정한 한마디" — what to actually say when the call comes.
@@ -19,16 +19,21 @@ export function CareHintWidget() {
   const { state } = useStore();
   const { profile } = state;
   const partnerName = profile.couple.partnerName || '상대방';
+  // Align with the same "마지막 확인 이후 놓친 구간" contract (PRODUCT_V3 §6.1–6.5)
+  // used by PartnerDayTimelineWidget, TodayBriefingWidget, and the other
+  // PartnerEmotion* widgets inside CallBriefing. This surface appears in the
+  // call-briefing "더 보기" section which claims context for the partner's day.
+  const since = getPartnerDaySince(state.partnerDayLastCheckedAt);
   const todayStr = toLocalDateString(localToday());
 
   const shared = useMemo(() => {
     const viewer = { userId: profile.id, role: profile.role };
     return visibleRecordsForViewer(state.records, viewer).filter(
-      (record) => record.date === todayStr
+      (record) => (since ? record.date >= since : record.date === todayStr)
         && !isOwnRecord(record, viewer)
         && !record.isPrivate,
     );
-  }, [state.records, profile.id, profile.role, todayStr]);
+  }, [state.records, profile.id, profile.role, since, todayStr]);
 
   // Describes what was actually shared. Deliberately not a score or a bar: an
   // earlier version rendered `sharedRecords.length * 25` as an "energy level",

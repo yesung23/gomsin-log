@@ -7,7 +7,7 @@
 > 이 문서는 default branch reality와 active development checkpoint를 분리한다.
 > active draft PR의 코드가 default branch에 구현된 것으로 보이지 않게 한다.
 
-- 조사 기준: default branch `master`와 GitHub active PR checkpoint, 2026-08-17
+- 조사 기준: default branch `master`와 GitHub live state, 2026-08-18
 - 조사 방식: 저장소와 GitHub PR metadata/body 대조
 - remote Supabase catalog, production migration state, 실제 기기 state: **UNVERIFIED**
 
@@ -28,55 +28,56 @@
 
 | 영역 | master 기준 현실 |
 |---|---|
-| P5.1 daily_records E2EE | PR #54에 구현되어 있으나 아직 merge되지 않음 |
-| Device Bootstrap | PR #58에 active draft로 존재하나 아직 merge되지 않음 |
+| P5.1 daily_records E2EE | Approved security baseline `0660ad277`에 포함되어 PR #68로 master에 landing됨; Production 적용은 NOT APPLIED / 원격 catalog는 UNVERIFIED |
+| Device Bootstrap | Approved security baseline `0660ad277`에 포함되어 PR #68로 master에 landing됨; 실기기 검증은 UNVERIFIED |
 | Chat foundation | PR #59 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
 | Chat product UI | PR #60 active draft에 구현됨; **FROZEN / DEFERRED**, 아직 merge되지 않음 |
-| Core Privacy Foundation integration | `codex/core-privacy-foundation-v1`에 P4 + P5.1 + P5.2를 통합했으나 master에는 아직 merge되지 않음 |
-| active migrations 039/040/043/044 | integration branch에 존재하며 이 문서 작업에서 production 적용을 확인하지 않음 |
+| Core Privacy Foundation integration | Approved baseline `0660ad277`에 통합되어 PR #68로 master에 landing됨; Production 적용은 NOT APPLIED / 원격 catalog는 UNVERIFIED |
+| active migrations 039/040/043/044 | master에 repository artifact로 존재할 수 있으나 원격 Supabase 적용은 UNVERIFIED; migration 파일 존재는 적용 증거가 아님 |
 | ARCH-P6 | architecture decision은 완료, P6 implementation은 시작되지 않음 |
 
-따라서 master만 기준으로 보면 P5 E2EE·Device Bootstrap·chat은 **not merged**다.
-active development를 함께 보면 각 draft branch에 해당 foundation 또는 product
-integration이 존재한다.
+따라서 master 기준 P5.5 approved security stack과 reviewed browser harness는
+landing 완료 상태다. Production/Supabase/native physical-device evidence는 별도
+gate이며 여전히 자동으로 충족되지 않는다. Chat foundation/UI는 여전히
+FROZEN / DEFERRED active draft asset이다.
 
-## 1. Active development checkpoint — 2026-08-15
+## 1. Active development checkpoint — 2026-08-18
 
 아래 PR/HEAD는 live GitHub에서 확인한 volatile checkpoint다. 다음 세션은 작업 전에
 PR state, draft, mergeability, base/head, CI를 다시 확인한다.
 
 | 단계 | active checkpoint | 상태·gate |
 |---|---|---|
-| P5.1 daily_records E2EE | PR #54 / `codex/p5-daily-records-e2ee-slice` / `835cddd16b71686abc5fb296e4ddce3456844ad0` | implemented in active branch, not merged; production unapplied per PR declaration; final independent acceptance pending unless live evidence changes this |
-| P5.2 Device Bootstrap | PR #58 / `codex/03a-device-bootstrap` / `ac81f07f5dc3220b1bc79490e693702add957a0b` | active draft; H-1 duplicate Android registration wiring fix is in the live HEAD; crypto and migration semantics are unchanged by that fix; code-delta review pending |
+| P5.1/P5.2/P5.5 approved stack | PR #68 / `integration/p5.5-approved-stack` / `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7` merge commit; candidate parent `b788c44db39fd57a5f483b3eb3340e1630ce87d5` | MERGED to master; Opus baseline `0660ad277` preserved; Production NOT APPLIED; Supabase/native physical-device state UNVERIFIED |
 | P5.3 Chat Foundation | PR #59 / `codex/04a-chat-e2ee-foundation` / `ce4a1355b2738f898109c2d70b038822996f77e7` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; migration 041 remains unapplied per PR declaration; independent security review pending |
 | P5.4 Chat Product UI | PR #60 / `codex/04b-chat-product-ui` / `c409d92d4fa6e5e4913adb8fef2cf6f1bdacba8a` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; no V1 entry-path integration; real Device Bootstrap runtime integration remains unverified |
 | P5.5 Core Privacy Foundation integration | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | P4 Conversation Bridge + P5.1 + P5.2 integration branch. Session runtime install, floor guard, account-switch teardown, unlink authority tombstone, and forward migration 044 are code/test-verified locally; not merged, production unapplied, and real-device validation remains unverified |
 
-PR #54는 open/non-draft이고 #58/#59/#60은 open draft다 at this checkpoint. PR-specific
-CI 결과는 영구 acceptance가 아니다. PR #58의 remaining environment gates는 missing
-Android SDK, Full Xcode가 필요한 iOS native validation, 그리고 physical iPhone의
-Secure Enclave/LCK/`dev_sig`/`dev_kem` 동작 미검증이다.
+PR #54는 CLOSED이며 #58은 OPEN/DRAFT superseded provenance다. #59/#60은
+FROZEN/DEFERRED draft asset이다. PR #68의 post-merge master validation
+`32095000055`와 native release validation `32095000040`은 GREEN이지만, CI는
+Production 적용이나 실기기 보안 증거를 대신하지 않는다.
 
-### Control Tower canonical convergence checkpoint — 2026-08-17
+### Control Tower canonical convergence checkpoint — 2026-08-18
 
-아래는 live GitHub에서 확인한 현재 stacked development reality다. 모두 `DRAFT`인
-개발 증거이며 `master`가 아니고 Production도 아니다. #62–#67은 이전 engineering
-line에서 이어진 stack이므로 canonical 문서가 #61과 어긋날 수 있다. #61이 새로운
-canonical `master`가 된 뒤에만 #62–#67을 그 기준에 맞춰 정렬한다.
+아래는 P5.5 landing 이후의 live GitHub 상태다. #62–#67은 `0660ad277`에
+통합된 이전 provenance stack의 superseded draft PR이며, 별도 landing 대상이 아니다.
 
 | PR | scope | live branch / HEAD | live base | state |
 |---|---|---|---|---|
-| #61 | canonical governance fix | `docs/control-tower-governance` / `5f1d7b4929a866ac708e84d821251d05857149fd` | `master` / `42ac1f307f19e84e8a3891311aa2a3d19179eed1` | MERGED; resulting master `8a2167073bce4d9c9ef6dbe35f1b40a8122180c6` |
-| #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | OPEN / DRAFT |
-| #63 | notification re-entry | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | `codex/device-protection-recovery-v1` / `c7f9d13b1f8ba10d8be6ee422ed163044a05201b` | OPEN / DRAFT |
-| #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | `codex/notification-reentry-v1` / `de4eaf63eaad1b2c58aca5e63714b149936c8317` | OPEN / DRAFT |
-| #65 | P6 readiness audit | `codex/p6-readiness-audit-v1` / `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5` | `codex/lv-core-ux-v1` / `fa68c72a86610e095ff77e322b7703e049972743` | OPEN / DRAFT |
-| #66 | security stack integration | `codex/sol-integration-audit-v1` / `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5` | `codex/p6-readiness-audit-v1` / `e97b95160cccf65fa9d4f0ae5d71a3695f38c8b5` | OPEN / DRAFT |
-| #67 | security blocker fixes | `codex/opus-security-blockers-v1` / `e96a5e68a1639f0eccd125e8986758d1c0246413` | `codex/sol-integration-audit-v1` / `d1bace6f53f1f071ce8ab2eb9a9fd0cb3efdcbb5` | OPEN / DRAFT |
+| #54 | P5.1 daily-records E2EE | `codex/p5-daily-records-e2ee-slice` / `835cddd16b71686abc5fb296e4ddce3456844ad0` | master | CLOSED; superseded/integrated through approved baseline |
+| #58 | Device Bootstrap | `codex/03a-device-bootstrap` / `ac81f07f5dc3220b1bc79490e693702add957a0b` | #54 branch | OPEN / DRAFT; superseded/integrated provenance |
+| #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `4cfbf7a39220c672e34f046a1265594c83b7978d` | #58 stack | OPEN / DRAFT; superseded/integrated provenance |
+| #63 | notification re-entry | `codex/notification-reentry-v1` / `84d19b49a5bff91b75b84217f2829d44c6ac942a` | #62 stack | OPEN / DRAFT; superseded/integrated provenance |
+| #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `576342688b0e4b165b441f10ac68cbac71aecd7e` | #63 stack | OPEN / DRAFT; superseded/integrated provenance |
+| #65 | P6 readiness audit | `codex/p6-readiness-audit-v1` / `ff8aaca1404ff409f39be2cb2360f5f002e4b170` | #64 stack | OPEN / DRAFT; superseded/integrated provenance; does not authorize P6 |
+| #66 | security stack integration | `codex/sol-integration-audit-v1` / `062b2d8ad6e34ddcdc4de9fadf3460281433c888` | #65 stack | OPEN / DRAFT; superseded/integrated provenance |
+| #67 | security blocker fixes | `codex/opus-security-blockers-v1` / `0660ad277dec0a62be3b315cf3668fadf91c282b` | #66 stack | OPEN / DRAFT; superseded/integrated as approved baseline |
+| #68 | P5.5 landing | `integration/p5.5-approved-stack` / `b788c44db39fd57a5f483b3eb3340e1630ce87d5` | master | MERGED; resulting master `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7` |
 
-Convergence order is **#61 canonical merge first → #62–#67 alignment afterward**.
-This records the order only; #61 is not merged by this change.
+Convergence is complete for P5.5: **approved baseline `0660ad277` → reviewed
+e2e-only harness `b788c44` → master merge `eb2d9a4`**. #54/#58/#62–#67 remain
+historical provenance and must not be independently landed again.
 
 ## 2. Active migration ledger facts
 
@@ -86,22 +87,23 @@ This records the order only; #61 is not merged by this change.
 | 040 | Device Bootstrap/write-floor semantics | active branch only; remote catalog independently UNVERIFIED |
 | 041 | chat messages | absent from master; frozen/deferred active-draft asset; NOT APPLIED per PR #59/#60 declarations; remote catalog independently UNVERIFIED |
 | 042 | media coordination | absent from master; frozen/deferred P6 draft number; implementation not started. It must be reissued as 045+ before P6 resumes because active V1 now has 043/044 |
-| 043 | Conversation Bridge completion | integration branch only; remote catalog independently UNVERIFIED |
-| 044 | unlink crypto pairing authority | integration branch only; remote catalog independently UNVERIFIED |
-| 045 | E2EE write-floor activation hardening | stacked development migration on #66/#67 only; NOT APPLIED; remote catalog independently UNVERIFIED |
-| 046 | device provisioning actor requirement | stacked development migration on #67 only; NOT APPLIED; remote catalog independently UNVERIFIED |
+| 043 | Conversation Bridge completion | present in landed master tree; remote catalog independently UNVERIFIED |
+| 044 | unlink crypto pairing authority | present in landed master tree; remote catalog independently UNVERIFIED |
+| 045 | E2EE write-floor activation hardening | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
+| 046 | device provisioning actor requirement | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
 
 No remote Supabase mutation was performed by this documentation task.
 
 ## 3. Default-branch product/security reality
 
-master에서 active PR 코드를 구현된 것으로 세지 않으면, 사용자 콘텐츠 전체 E2EE는
-아직 달성되지 않았다. P5.1–P5.4는 active branch checkpoint이지 배포 사실이 아니다.
+master에는 approved P5.5 security stack과 reviewed browser harness가 landing되었다.
+그러나 이것은 Production/Supabase 적용이나 실기기 검증 완료를 의미하지 않는다.
+P5.3/P5.4 chat stack은 여전히 FROZEN / DEFERRED다.
 
 | 기대 | master 기준 현재 현실 | 분류 |
 |---|---|---|
-| 사용자 콘텐츠 E2EE | daily_records P5는 active PR에 있으나 unmerged; 일정·여행·주기·미디어는 active P5 stack 밖 | `FUTURE` `PROD` |
-| 기기·복구 UX | P5 capability와 PR #58 foundation이 있으나 master에 merge되지 않았고 실제 기기 gate 미검증 | `FUTURE` `PROD` |
+| 사용자 콘텐츠 E2EE | approved P5.5 stack이 master에 landing되었으나 Production/Supabase 적용과 전체 콘텐츠 범위는 별도 gate | `FUTURE` `PROD` |
+| 기기·복구 UX | approved Device Bootstrap stack이 master에 landing되었으나 실제 기기 gate는 UNVERIFIED | `FUTURE` `PROD` |
 | 자체 채팅 | master에는 not merged; PR #59 foundation과 PR #60 product UI가 active draft에 존재하나 현재 V1은 **FROZEN / DEFERRED** | `FUTURE` |
 | 주기 projection | 서버 평문 건강 데이터 계산 경계는 재설계 필요 | `SEC` `PROD` |
 | 정밀 위치 | 여행 항목에 정밀 위경도 평문 경로가 남아 있음 | `SEC` `BETA` |

@@ -99,3 +99,8 @@ deno.lock
 
 # Playwright artifacts (traces, screenshots, HTML report) -- never tracked.
 e2e/.artifacts/
+
+# Obsidian volatile / machine-specific (shared vault content is tracked)
+control-tower/.obsidian/workspace.json
+control-tower/.obsidian/cache/
+control-tower/.obsidian/workspace-cache/

@@ -89,6 +89,78 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-18 · P5.5 Final Landing 및 Control Tower 동기화
+
+#### PLAN POSITION
+- Phase: P5.5
+- Workstream: landing / documentation state sync
+- Step: final landing 후 canonical 상태 갱신
+- Previous Gate: P5.5 landing preparation READY
+- This Gate: P5.5 CLOSED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — no product change
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md` updated to landed master
+- Latest relevant Work Log checked: yes
+- MASTER PLAN version / 기준일: repository canonical docs / 2026-08-18 live state
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Codex / GitHub CLI
+- Model: Luna-assigned documentation state-sync task
+- Role: Control Tower state sync
+- PR: #68
+- Branch: `master`
+- Base SHA: `8a2167073bce4d9c9ef6dbe35f1b40a8122180c6`
+- Old HEAD: `8a2167073bce4d9c9ef6dbe35f1b40a8122180c6`
+- New/Reviewed HEAD: `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7`
+
+#### CHANGED / REVIEWED
+- file: `docs/CURRENT_STATE.md`, `docs/PROJECT_HANDOFF_2026-08-13.md`, `docs/WORK_LOG.md`
+- file: `control-tower/Dashboard.md`, `control-tower/Current Gate.md`, `control-tower/Decision Log.md`
+- what changed/reviewed: recorded P5.5 CLOSED, landed master and CI, superseded provenance, and parked-memory integration boundary
+- why: remove stale pre-landing state without changing code or product behavior
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no remote migration application
+- product semantics: unchanged
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: live GitHub/Git verification; post-merge `master validation` `32095000055`; post-merge `Native release validation` `32095000040`
+- PASS / FAIL / UNVERIFIED: PASS for repository landing and CI; Production/Supabase/native physical-device gates remain NOT APPLIED or UNVERIFIED
+- what it actually proves: master contains the approved P5.5 candidate and both post-merge workflows completed successfully
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — documentation state only
+- whether an earlier review is stale: pre-landing dashboard/gate snapshots are superseded; security and harness reviews remain attached to their exact SHAs
+
+#### BLOCKERS
+- code: none in this task
+- environment: remote Supabase catalog and physical-device state remain UNVERIFIED
+- external/manual: future Production/Supabase/device gates require separate authorization
+
+#### STOPPED AT
+- exact completed boundary: P5.5 landed at master merge commit `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7`
+
+#### REMAINING
+- no P6 or new feature work authorized by this entry
+
+#### NEXT ACTION
+- next owner: Control Tower / human landing recordkeeper
+- tool/model: future task must re-read current canonical docs and live state
+- 기준 SHA: `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7`
+- exact next task: none; keep P5.5 CLOSED
+
+#### DO NOT ADVANCE UNTIL
+- new Control Tower decision authorizes the next phase
+
+#### PRODUCTION
+- NOT APPLIED
+
 ---
 
 ### 2026-08-16 · 세 도구 공용 절차서 통합 (Codex · Kiro · Claude Code)

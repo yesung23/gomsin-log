@@ -139,3 +139,23 @@ MASTER PLAN을 우선하고, 원문은 삭제하지 않고 역사로 보존한�
 
 특히 과거 저장용량 구독·기능별 유료화·초기 구독 우선·CloudKit 완료 표현·검증되지 않은
 성과 숫자는 현재 사업전략의 근거로 사용하지 않는다.
+
+## 8. P5.5 landing handoff — 2026-08-18
+
+P5.5 landing은 완료되었다. 다음 사실을 현재 기준으로 사용한다.
+
+- Approved production/security baseline: `0660ad277dec0a62be3b315cf3668fadf91c282b`
+- Final reviewed harness: `b788c44db39fd57a5f483b3eb3340e1630ce87d5`
+- Landing merge commit on `master`: `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7`
+- PR #68: MERGED; master now contains the approved baseline plus the Grok 4.6-approved e2e-only harness
+- Post-merge master validation: `32095000055` GREEN
+- Post-merge native release validation: `32095000040` GREEN
+- PR #54/#58/#62–#67: historical superseded/integrated provenance; do not independently land them
+- PR #69: CI-only harness provenance; no separate landing action is required
+
+The landing proves repository integration and CI validation only. Production deployment,
+remote Supabase migration application, remote catalog state, and physical-device security
+behavior remain `NOT APPLIED` or `UNVERIFIED` where not independently verified.
+
+The next session must not start P6 or new feature work from this handoff alone. Re-read
+`CURRENT_STATE.md`, `ENGINEERING_ROADMAP.md`, and the relevant gate before advancing.

@@ -29,6 +29,29 @@ scripts/agent/live-state.sh
 
 문서에 적힌 PR·HEAD·CI는 checkpoint일 뿐이다. 항상 live 값을 다시 확인한다.
 
+
+## 2.5 Shared AI memory recovery (non-canonical)
+
+After canonical recovery + live verification, if a shared AI memory vault is present:
+
+1. Read `control-tower/AI_ENTRYPOINT.md`
+2. Read `control-tower/Dashboard.md`
+3. Read only the task/audit/report files that are directly relevant to the current bounded request.
+
+The shared memory under `control-tower/` is NON-CANONICAL.
+
+It must never override:
+- live Git / GitHub / CI facts
+- repository code
+- canonical documents (PRODUCT_V3, BUSINESS_MEMORY_ROADMAP_V1, ENGINEERING_ROADMAP, CURRENT_STATE, WORK_LOG, PROJECT_HANDOFF, AGENTS.md, skills procedures)
+- security architecture decisions
+- migration ledger
+- production / remote / device state that can be independently verified
+
+This preserves ONE FACT → ONE AUTHORITATIVE HOME.
+
+Obsidian is only a viewer for the parked shared context. It is not an authority.
+
 ## 3. Start checkpoint 보고
 
 확인할 수 없는 항목은 추측하지 않고 `UNVERIFIED`로 남긴다.
@@ -67,3 +90,160 @@ CloudKit 구현 완료 주장 · 음성·영상 완료 주장 · 자체 Chat 재
 
 `docs/WORK_LOG.md`에 항목 하나. 실행한 검증과 실행하지 않은 검증을 구분한다.
 READ-ONLY 리뷰어는 저장소를 수정하지 않고 `READY-TO-COPY WORK_LOG ENTRY`만 출력한다.
+
+## 7. Persistent shared memory worktree (for parked vault access)
+
+The canonical parked vault lives on `origin/docs/shared-ai-control-tower-v1`.
+
+For long-running or cross-branch agent work, a dedicated persistent worktree is recommended:
+
+    git worktree add /Users/han-yejun/Desktop/gomsinlog-control-tower-memory origin/docs/shared-ai-control-tower-v1
+
+This worktree is read-mostly for agents. Only the Control Tower state-sync role writes substantial updates back to the parked branch.
+
+If a worktree is not available, agents may still read the latest memory directly without checking it out:
+
+    git show origin/docs/shared-ai-control-tower-v1:control-tower/AI_ENTRYPOINT.md
+    git show origin/docs/shared-ai-control-tower-v1:control-tower/Dashboard.md
+
+This pattern allows agents on implementation branches (including the harness branch) to read the shared memory without mutating their own working tree.
+
+## 8. Automated agent reporting protocol (required on every substantial task end)
+
+### 8.1 Directory layout (agent-scoped)
+
+control-tower/reports/
+  chatgpt/
+  grok-build/
+  grok-4.6/
+  opus/
+  codex/
+  other/
+
+### 8.2 Naming rule (Asia/Seoul local time)
+
+YYYY-MM-DD_HHMM_<task-slug>_<agent>.md
+
+Example: 2026-08-17_2315_p55-harness-followup_grok-build.md
+
+### 8.3 Who may write what
+
+- Normal agents (chatgpt, grok-build, grok-4.6, opus, codex, other) MUST NOT modify:
+  - control-tower/Dashboard.md
+  - control-tower/Current Gate.md
+  - control-tower/Decision Log.md
+
+- Only the CONTROL TOWER STATE SYNC role may edit the three files above.
+
+### 8.4 Required report structure (every agent)
+
+Every agent report must end with a STOPPED AT block containing at minimum:
+
+STOPPED AT
+- exact HEAD:
+- branch:
+- PR:
+- changed (this delta only):
+- explicitly not changed:
+- tests executed / not executed and why:
+- Production:
+- Supabase:
+- P6:
+- next owner / next action:
+
+### 8.5 Memory write failure fallback (do not fail the engineering task)
+
+If writing the report to the persistent memory worktree or to the parked branch fails for any reason (permissions, network, worktree not present, etc.):
+
+1. Do NOT treat the memory write failure as a task failure.
+2. Immediately emit a complete READY-TO-COPY CONTROL-TOWER REPORT in the exact structure above.
+3. The Control Tower state-sync owner will later incorporate the report into the parked vault.
+
+The engineering artifact (code, tests, docs delta) is considered complete once the canonical verification passes. Memory reporting is best-effort.
+
+### 8.6 When a report must be produced
+
+- Any substantial agent-owned step that changes files, runs verification, or produces an audit/review verdict.
+- Normal "chat only" turns that do not change state may skip, but any bounded task (implementation, review, audit, handoff) must produce one.
+
+### 8.7 Control Tower state-sync responsibilities
+
+After receiving agent reports (or READY-TO-COPY blocks), the state-sync role:
+- merges factual updates into Dashboard.md / Current Gate.md / Decision Log.md when appropriate
+- keeps the three files as single source of "last known non-canonical snapshot"
+- never rewrites agent-authored reports under reports/<agent>/
+
+### 8.8 Successful report persistence (required step after creating the report file)
+
+The agent MUST follow this exact sequence. The report file is created **directly inside the dedicated memory worktree** after a successful sync from origin. Creating the report in any other worktree or branch and expecting it to appear here is forbidden.
+
+1. cd /Users/han-yejun/Desktop/gomsinlog-control-tower-memory
+2. Verify the worktree is clean:
+
+       git status --porcelain
+
+   If any output appears, STOP. Emit a complete READY-TO-COPY CONTROL-TOWER REPORT. Do not proceed with persistence.
+3. git fetch origin
+4. git checkout docs/shared-ai-control-tower-v1
+5. git pull --ff-only origin/docs/shared-ai-control-tower-v1
+
+   If this cannot complete cleanly, STOP the persistence attempt and emit a complete READY-TO-COPY CONTROL-TOWER REPORT. Do not mark the engineering task failed.
+
+6. ONLY AFTER the sync above has succeeded without error:
+
+   - Create the new report file **directly inside this memory worktree** at the exact path:
+
+       control-tower/reports/<agent>/YYYY-MM-DD_HHMM_<task>_<agent>.md
+
+   - Verify the intended filesystem path is correct and inside the memory worktree.
+
+7. git add -- <exact-report-path>
+8. git commit -m "docs(control-tower): add <agent> report <task>"
+9. git push origin docs/shared-ai-control-tower-v1
+
+Explicit prohibitions:
+- Never create the report file in an implementation worktree/branch and copy or expect it to be picked up here.
+- Never force-push.
+- Never amend or rewrite another agent's report.
+- Normal agents may only commit their own report files under reports/<their-agent>/.
+- Normal agents MUST NOT modify:
+  - control-tower/Dashboard.md
+  - control-tower/Current Gate.md
+  - control-tower/Decision Log.md
+
+If the memory worktree is dirty or a clean fast-forward is not possible, the engineering task itself is not failed. Emit READY-TO-COPY and let the Control Tower state-sync owner reconcile.
+
+This order guarantees that every persisted report is authored against the latest parked state inside the canonical memory location.
+
+## 9. Obsidian volatile files (gitignore only)
+
+The Obsidian vault root for the shared Control Tower memory is:
+
+    control-tower/
+
+Machine-specific / volatile Obsidian state under this vault MUST be ignored so that
+the shared Markdown content remains clean across machines.
+
+Add (or keep) the following in .gitignore (scoped to the vault root):
+
+control-tower/.obsidian/workspace.json
+control-tower/.obsidian/cache/
+control-tower/.obsidian/workspace-cache/
+control-tower/.obsidian/plugins/*/data.json   (machine-specific plugin state)
+control-tower/.obsidian/appearance.json       (only if customized per-machine)
+
+Do NOT ignore:
+
+control-tower/**/*.md
+
+All shared Markdown reports, procedures, and documentation must remain tracked.
+
+## 10. Cross-branch memory access summary (for all agents)
+
+Preferred:
+- Dedicated persistent worktree at /Users/han-yejun/Desktop/gomsinlog-control-tower-memory
+
+Fallback (no checkout required):
+- git show origin/docs/shared-ai-control-tower-v1:control-tower/...
+
+Both patterns are explicitly allowed by this procedure. Agents on any branch (including implementation branches) may use them to read the shared non-canonical memory without polluting their own tree.

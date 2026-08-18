@@ -56,16 +56,180 @@ function mediaKinds(attachments: Attachment[] | undefined): Attachment['type'][]
 }
 
 export function PartnerDayTimelineWidget() {
-  const { state, sharedSyncStatus, setHighlightedRecordId } = useStore();
+  const { state, sharedSyncStatus, setHighlightedRecordId, markPartnerDayChecked } = useStore();
   const navigate = useNavigate();
   const { profile } = state;
   const partnerName = profile.couple.partnerName || '상대방';
   const todayStr = toLocalDateString(localToday());
 
+  /**
+   * Device-local read receipt → "since last check" lower bound for partner day.
+   * If absent, fall back to a recent window (7 calendar days incl. today) so
+   * first-time or long-absent users are not shown an empty screen.
+   * This is the client half of PRODUCT_V3 "마지막 확인 이후 놓친 구간".
+   */
+  const sinceDate: string | null = state.partnerDayLastCheckedAt
+    ? toLocalDateString(new Date(state.partnerDayLastCheckedAt))
+    : (() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 6);
+        return toLocalDateString(d);
+      })();
+
   const todays = useMemo(() => {
     const viewer = { userId: profile.id, role: profile.role };
     return visibleRecordsForViewer(state.records, viewer)
-      .filter((record) => record.date === todayStr
+      .filter((record) => {
+        const inWindow = sinceDate ? record.date >= sinceDate : record.date === todayStr;
+        return inWindow && !isOwnRecord(record, viewer) && !record.isPrivate;
+      })
+      .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  }, [state.records, profile.id, profile.role, todayStr, sinceDate]);
+
+  // Mark as checked (device-local receipt) when we render real partner content.
+  // Only when we have something to show; do not mark on 'unavailable'.
+  if ((sharedSyncStatus === 'live' || sharedSyncStatus === 'delayed') && todays.length > 0) {
+    queueMicrotask(() => markPartnerDayChecked());
+  }
+
+  const readableTodays = withReadableContent(todays);
+  const unavailableCount = todays.length - readableTodays.length;
+  const visible = readableTodays.slice(0, PARTNER_DAY_VISIBLE_LIMIT);
+  const hiddenCount = readableTodays.length - visible.length;
+
+  const openRecord = (record: DailyRecord) => {
+    setHighlightedRecordId(record.id);
+    navigate(`/record?record=${record.id}`);
+  };
+
+  if (sharedSyncStatus === 'unavailable') {
+    return (
+      <div data-testid="widget-partner-day" data-state="unconfirmed">
+        <SectionHeader title={`${partnerName}의 오늘`} />
+        <Skeleton
+          label="기록을 확인하는 중이에요."
+          description={`확인되면 ${partnerName}의 오늘을 시간순으로 보여드려요.`}
+          lines={3}
+        />
+      </div>
+    );
+  }
+
+  if (todays.length === 0) {
+    return (
+      <div data-testid="widget-partner-day" data-state="empty">
+        <SectionHeader title={`${partnerName}의 오늘`} />
+        <EmptyState
+          title="아직 표시할 상대방 기록이 없어요."
+          description="상대방이 기록하거나, 마지막 확인 이후 새 기록이 생기면 여기에 나타납니다."
+        />
+      </div>
+    );
+  }
+
+  if (readableTodays.length === 0) {
+    return (
+      <div data-testid="widget-partner-day" data-state="unavailable">
+        <SectionHeader title={`${partnerName}의 오늘`} caption={`기록 ${todays.length}개`} />
+        <EmptyState
+          title="이 기기에서 아직 열 수 없는 기록이 있어요."
+          description="키가 준비되면 내용을 확인할 수 있어요."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="widget-partner-day" data-state="ready">
+      <SectionHeader
+        title={`${partnerName}의 오늘`}
+        caption={`기록 ${todays.length}개${sharedSyncStatus === 'delayed' ? ' · 방금 것이 아직 안 보일 수 있어요' : ''}`}
+        action={
+          hiddenCount > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openRecord(readableTodays[PARTNER_DAY_VISIBLE_LIMIT])}
+            >
+              전체 보기
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {unavailableCount > 0 && (
+        <div
+          data-testid="partner-day-unavailable"
+          className="text-caption text-muted-foreground pb-2"
+        >
+          이 기기에서 아직 열 수 없는 기록이 {unavailableCount}개 있어요.
+        </div>
+      )}
+
+      <RowGroup>
+        {visible.map((record) => (
+          <li key={record.id} data-testid="partner-day-entry" className="list-none">
+            <button
+              type="button"
+              onClick={() => openRecord(record)}
+              aria-label={`${record.time || ''} ${partnerName}의 기록 자세히 보기`}
+              className="w-full text-left min-h-11 flex items-start gap-2 py-2"
+            >
+              <span className="shrink-0 w-11 text-caption text-muted-foreground tabular-nums pt-0.5">
+                {record.time}
+              </span>
+              <span className="flex-1 min-w-0">
+                {mediaKinds(record.attachments).length > 0 && (
+                  <span className="flex items-center gap-1 mb-0.5">
+                    {mediaKinds(record.attachments).map((kind) => {
+                      const Icon = KIND_ICON[kind];
+                      return <Icon key={kind} size={12} className="text-muted-foreground" aria-hidden="true" />;
+                    })}
+                  </span>
+                )}
+                {record.log && (
+                  <span className="block text-body text-foreground break-keep line-clamp-2">
+                    {record.log}
+                  </span>
+                )}
+                {record.reaction && (
+                  <Badge tone="neutral" className="mt-1">
+                    {REACTION_LABELS[record.reaction] || record.reaction}
+                  </Badge>
+                )}
+              </span>
+            </button>
+
+            {record.attachments && record.attachments.length > 0 && (
+              <div className="ml-[52px] pb-2 space-y-1.5">
+                {record.attachments.map((attachment, index) => (
+                  <AttachmentMedia
+                    key={index}
+                    attachment={attachment}
+                    coupleId={profile.couple.coupleId}
+                    recordId={record.id}
+                    variant="compact"
+                  />
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </RowGroup>
+
+      {hiddenCount > 0 && (
+        <Button
+          variant="outline"
+          full
+          onClick={() => openRecord(readableTodays[PARTNER_DAY_VISIBLE_LIMIT])}
+          className="mt-3"
+        >
+          나머지 {hiddenCount}개 보기 →
+        </Button>
+      )}
+    </div>
+  );
+}
         && !isOwnRecord(record, viewer)
         && !record.isPrivate)
       .sort((a, b) => (a.time || '').localeCompare(b.time || ''));

@@ -261,7 +261,7 @@ const DEFAULT_STATE: AppState = {
  */
 function carryOverDevicePrefs(
   prev: AppState,
-): Pick<AppState, 'widgetLayout' | 'soldierWidgetLayout' | 'hasSeenInstallPrompt' | 'theme'> {
+): Pick<AppState, 'widgetLayout' | 'soldierWidgetLayout' | 'hasSeenInstallPrompt' | 'theme' | 'partnerDayLastCheckedAt'> {
   return {
     widgetLayout: prev.widgetLayout,
     // Kept per role: the two people use one app on two devices with opposite
@@ -270,6 +270,10 @@ function carryOverDevicePrefs(
     soldierWidgetLayout: prev.soldierWidgetLayout,
     hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
     theme: prev.theme || 'light',
+    // Per-device read receipt for the partner's day surface. Used to compute
+    // "놓친 하루" window instead of hard-filtering to calendar today.
+    // Not server truth; survives sign-out on this device.
+    partnerDayLastCheckedAt: prev.partnerDayLastCheckedAt,
   };
 }
 
@@ -3193,6 +3197,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
+   * Record that this viewer has now seen the partner's day surface.
+   * Stored as a device-local read receipt so we can compute a "since last check"
+   * window for "놓친 하루" instead of always hard-filtering to calendar today.
+   * This is intentionally NOT server truth and does not affect authorization.
+   */
+  const markPartnerDayChecked = useCallback(() => {
+    const now = new Date().toISOString();
+    updateStateImmediately((prev) => ({ ...prev, partnerDayLastCheckedAt: now }));
+  }, []);
+
+  /**
    * "이따 이야기하기" writes.
    *
    * Each one re-reads the couple's marks from the server afterwards rather
@@ -3330,6 +3345,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         markTalkAbout,
         unmarkTalkAbout,
         resolveTalkAbout,
+        markPartnerDayChecked,
         setAuthenticatedUser,
         setWidgetLayout,
         setHasSeenInstallPrompt,

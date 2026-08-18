@@ -1669,6 +1669,83 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
   typecheck/lint/build/diff-check였으며, 실기기·원격 catalog·staging·Production은
   UNVERIFIED였다. 새 정렬 head에서는 독립 delta 재검토가 필요하다.
 
+---
+
+### 2026-08-18 · LV readiness core-flow audit — missed-day recovery closure
+
+#### PLAN POSITION
+- Phase: LV — Limited Validation Gate / M3 prerequisite
+- Workstream: Core V1 product-flow verification
+- Step: read-only audit, then minimal missed-context repair and regression coverage
+- Previous Gate: P5.5 landing on master `7a83665299a1f0096f2f81da393f28a97142c9ba`
+- This Gate: local core-flow verification complete; independent post-landing security audit remains external
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-16 Limited Validation Ready Core UX entry — YES
+- MASTER PLAN version / 기준일: PRODUCT V3 / 2026-08-15
+- Does this task conflict with canonical direction: NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High requested; local execution model identity is not independently verified
+- Role: implementation verifier + bounded product bug fixer
+- PR: pending draft creation
+- Branch: `codex/lv-readiness-audit-v1`
+- Base SHA: `7a83665299a1f0096f2f81da393f28a97142c9ba`
+- Old HEAD: `8dac249de023c1519494316ef06e944ccbc96aa2`
+- New HEAD / Reviewed HEAD: this commit
+
+#### CHANGED / REVIEWED
+- `PartnerDayTimelineWidget`: replaces calendar-today-only filtering with a device-local last-checked lower bound (or an initial seven-day window), retains exact record routing, and records the checkpoint only after render.
+- `CareHintWidget`: uses the same missed-context window as the partner-day surface.
+- `store` / state types: carries the per-device checkpoint across local-state hydration without treating it as server truth.
+- regression tests: cover initial and checkpoint-based recovery, post-render checkpointing, care-hint alignment, exact original, bilateral talk-about, completion, and private/unavailable source behavior.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: no chat, P6, media, navigation, or visual redesign
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- `npm run verify`: PASS — typecheck, lint, full Vitest, and production build completed locally.
+- targeted account/couple/authoring tests: PASS — 129 tests.
+- targeted privacy/original/talk-about/missed-context tests: PASS — 148 tests.
+- `npm run test:e2e -- e2e/coupleMatrix.spec.ts`: UNVERIFIED — all 37 browser cases stopped before execution because the required Playwright Chromium headless-shell executable is absent locally.
+- remote Supabase catalog, Production migration state, actual devices: UNVERIFIED; no remote query or mutation performed.
+
+#### REVIEW IMPACT
+- DELTA — client-only product-flow and local-state behavior; no authorization, RLS, crypto, schema, native, or migration delta.
+
+#### BLOCKERS
+- code: none after the missed-day recovery fix.
+- environment: local Playwright browser binary is absent; real browser evidence is not refreshed at this HEAD.
+- external/manual: post-landing independent security audit acceptance is outside this task.
+
+#### STOPPED AT
+- exact completed boundary: local audit and bounded client-only fix; draft PR pending normal push.
+
+#### REMAINING
+- Control Tower must accept the parallel post-landing security audit and obtain browser/controlled-pair evidence for this exact HEAD before treating LV as a launch decision.
+
+#### NEXT ACTION
+- next owner: Control Tower
+- tool/model: independent security reviewer, then controlled-pair browser validator
+- 기준 SHA: this commit
+- exact next task: review this client-only delta alongside the accepted security audit, then run the controlled browser pair on an environment with Playwright Chromium.
+
+#### DO NOT ADVANCE UNTIL
+- no outstanding security-audit finding applies to the landed P5.5 baseline.
+- browser and controlled-pair evidence are recorded for the reviewed HEAD.
+
+#### PRODUCTION
+- NOT APPLIED
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

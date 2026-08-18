@@ -3205,7 +3205,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const markPartnerDayChecked = useCallback(() => {
     const now = new Date().toISOString();
     updateStateImmediately((prev) => ({ ...prev, partnerDayLastCheckedAt: now }));
-  }, []);
+  }, [updateStateImmediately]);
 
   /**
    * "이따 이야기하기" writes.

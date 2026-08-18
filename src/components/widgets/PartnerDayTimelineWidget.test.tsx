@@ -31,6 +31,7 @@ const PARTNER = 'user-gomsin';
 const TODAY = '2026-07-31';
 
 const setHighlightedRecordId = vi.fn();
+const markPartnerDayChecked = vi.fn();
 const navigate = vi.fn();
 
 vi.mock('react-router-dom', async () => {
@@ -71,6 +72,7 @@ vi.mock('@/lib/useStore', () => ({
     isReady: true,
     sharedSyncStatus: currentSyncStatus,
     setHighlightedRecordId,
+    markPartnerDayChecked,
   }),
 }));
 
@@ -135,6 +137,7 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   setHighlightedRecordId.mockClear();
   navigate.mockClear();
+  markPartnerDayChecked.mockClear();
   currentSyncStatus = 'live';
   bypassStorePrivacyFilter = false;
 });
@@ -342,13 +345,35 @@ describe('privacy: only what this viewer is entitled to see', () => {
     expect(screen.queryByText('내 기록')).not.toBeInTheDocument();
   });
 
-  it('excludes records from other days', () => {
+  it('recovers shared records from the initial seven-day missed-context window', () => {
     renderWidget([
       record({ id: 'today', log: '오늘 것' }),
       record({ id: 'yesterday', date: '2026-07-30', log: '어제 것' }),
+      record({ id: 'outside-window', date: '2026-07-24', log: '너무 오래된 것' }),
     ]);
 
     expect(screen.getByText('오늘 것')).toBeInTheDocument();
-    expect(screen.queryByText('어제 것')).not.toBeInTheDocument();
+    expect(screen.getByText('어제 것')).toBeInTheDocument();
+    expect(screen.queryByText('너무 오래된 것')).not.toBeInTheDocument();
+  });
+
+  it('uses the device-local checkpoint as the missed-context lower bound', () => {
+    currentState = makeState([
+      record({ id: 'before', date: '2026-07-29', log: '확인 전 기록' }),
+      record({ id: 'at-checkpoint', date: '2026-07-30', log: '확인일 기록' }),
+      record({ id: 'today', log: '오늘 기록' }),
+    ]);
+    currentState.partnerDayLastCheckedAt = '2026-07-30T08:00:00.000Z';
+    vi.setSystemTime(new Date(`${TODAY}T12:00:00.000Z`));
+    render(<MemoryRouter><PartnerDayTimelineWidget /></MemoryRouter>);
+
+    expect(screen.queryByText('확인 전 기록')).not.toBeInTheDocument();
+    expect(screen.getByText('확인일 기록')).toBeInTheDocument();
+    expect(screen.getByText('오늘 기록')).toBeInTheDocument();
+  });
+
+  it('records a checkpoint after confirmed readable content, outside render', () => {
+    renderWidget([record({ log: '확인할 기록' })]);
+    expect(markPartnerDayChecked).toHaveBeenCalledTimes(1);
   });
 });

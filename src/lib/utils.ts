@@ -51,3 +51,21 @@ export function calculateDischargeDate(enlistmentDate: string, branch: string): 
   const m = months[branch] ?? 18;
   return addMonths(enlistmentDate, m);
 }
+
+/**
+ * Compute the inclusive lower-bound date for "partner day / missed context" surfaces.
+ * If a device-local last-checked checkpoint exists, use its calendar date.
+ * Otherwise fall back to a recent 7-day window (PRODUCT_V3 §6.5).
+ * This is the single source for the "마지막 확인 이후 놓친 구간" contract.
+ */
+export function getPartnerDaySince(lastCheckedAt?: string): string | null {
+  if (lastCheckedAt) {
+    const d = new Date(lastCheckedAt);
+    if (!Number.isNaN(d.getTime())) {
+      return toLocalDateString(d);
+    }
+  }
+  const d = new Date();
+  d.setDate(d.getDate() - 6);
+  return toLocalDateString(d);
+}

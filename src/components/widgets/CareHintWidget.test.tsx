@@ -91,6 +91,22 @@ describe('CareHintWidget: no mood claim from silence', () => {
     expect(screen.getByText(/힘든 일이 있었어요/)).toBeInTheDocument();
   });
 
+  it('uses the same last-checked window as 상대방의 오늘', () => {
+    const yesterday = localToday();
+    yesterday.setDate(yesterday.getDate() - 1);
+    currentState = makeState([
+      record({
+        date: toLocalDateString(yesterday),
+        reaction: 'hard',
+        log: '어제 힘들었던 일',
+      }),
+    ]);
+    currentState.partnerDayLastCheckedAt = `${toLocalDateString(yesterday)}T00:00:00+09:00`;
+    render(<CareHintWidget />);
+
+    expect(screen.getByText(/힘든 일이 있었어요/)).toBeInTheDocument();
+  });
+
   it('an explicit good tag is still reported as such', () => {
     renderWidget([record({ reaction: 'good' })]);
     expect(screen.getByText(/기분 좋은 순간을 남겼어요/)).toBeInTheDocument();

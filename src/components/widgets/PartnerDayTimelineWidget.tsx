@@ -123,7 +123,10 @@ export function PartnerDayTimelineWidget() {
    * those fifteen, because every one of them is later than the last confirmed one.
    */
   const acknowledgeVisible = () => {
-    const next = advancePartnerDayCheckpoint(checkpoint, visible);
+    // `missed`, not `readableMissed`: a record this device cannot decrypt yet is
+    // not consumed just because it could not be drawn, and the receipt has to
+    // know it is still outstanding so the date bound does not step over it.
+    const next = advancePartnerDayCheckpoint(checkpoint, visible, missed);
     if (next && writePartnerDayCheckpoint(userId, coupleId, next)) {
       setCheckpoint(next);
     }

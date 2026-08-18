@@ -279,3 +279,34 @@ describe('identity is lifecycle only, never a widget id', () => {
     expect(setWidgetLayout).toHaveBeenCalledWith(['dday'], 'soldier');
   });
 });
+
+describe('switching back to the first identity', () => {
+  it('restores A\'s own receipt after A -> B -> A', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    // A acknowledges its own record, so A has a real receipt on disk.
+    currentState = stateFor('user-a', 'couple-a', [
+      record({ id: 'a-seen', userId: 'partner-a', log: 'A가 확인한 기록' }),
+    ], ['partner_day']);
+    const { rerender } = renderDashboard();
+    await user.click(screen.getByTestId('partner-day-acknowledge'));
+    expect(screen.queryByText('A가 확인한 기록')).not.toBeInTheDocument();
+
+    // Over to B and straight back, all without unmounting the dashboard.
+    currentState = stateFor('user-b', 'couple-b', [
+      record({ id: 'b-rec', userId: 'partner-b', log: 'B의 기록' }),
+    ], ['partner_day']);
+    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    expect(screen.getByText('B의 기록')).toBeInTheDocument();
+
+    currentState = stateFor('user-a', 'couple-a', [
+      record({ id: 'a-seen', userId: 'partner-a', log: 'A가 확인한 기록' }),
+      record({ id: 'a-new', userId: 'partner-a', time: '20:00', log: 'A의 새 기록' }),
+    ], ['partner_day']);
+    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+
+    // A's receipt came back from storage: the confirmed record stays confirmed,
+    // and the one that arrived while A was away is surfaced.
+    expect(screen.queryByText('A가 확인한 기록')).not.toBeInTheDocument();
+    expect(screen.getByText('A의 새 기록')).toBeInTheDocument();
+  });
+});

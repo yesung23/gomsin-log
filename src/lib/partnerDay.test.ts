@@ -181,7 +181,7 @@ describe('advancePartnerDayCheckpoint: only an explicit acknowledgement moves it
     const next = advancePartnerDayCheckpoint(null, [
       record({ id: 'a', date: '2026-08-17' }),
       record({ id: 'b', date: '2026-08-18' }),
-    ], new Date('2026-08-19T10:00:00.000Z'));
+    ], [], new Date('2026-08-19T10:00:00.000Z'));
     expect(next).toEqual({
       confirmedRecordIds: ['a', 'b'],
       confirmedThrough: '2026-08-18',
@@ -195,10 +195,35 @@ describe('advancePartnerDayCheckpoint: only an explicit acknowledgement moves it
     expect(second.confirmedRecordIds.sort()).toEqual(['a', 'b']);
   });
 
-  it('never moves the lower bound backwards', () => {
+  it('lets the bound move back for a late older record, because that direction is safe', () => {
+    // This used to be floored at the previous bound to avoid "reopening a settled
+    // window". That flooring is what could strand unseen records: the days between
+    // the older acknowledgement and the old bound may hold things nobody saw.
+    // Reopening them is harmless -- everything actually acknowledged is held out by
+    // id -- so what comes back is exactly what was never confirmed.
     const first = advancePartnerDayCheckpoint(null, [record({ id: 'a', date: '2026-08-18' })])!;
     const second = advancePartnerDayCheckpoint(first, [record({ id: 'late', date: '2026-08-15' })])!;
-    expect(second.confirmedThrough).toBe('2026-08-18');
+    expect(second.confirmedThrough).toBe('2026-08-15');
+    expect(second.confirmedRecordIds.sort()).toEqual(['a', 'late']);
+
+    // The reopened span surfaces the unseen record and NOT the acknowledged ones.
+    const seen = record({ id: 'a', date: '2026-08-18' });
+    const neverSeen = record({ id: 'unseen', date: '2026-08-16' });
+    expect(ids(missedPartnerRecords([seen, neverSeen], VIEWER, TODAY, second)))
+      .toEqual(['unseen']);
+  });
+
+  it('stops the bound at the earliest record still outstanding', () => {
+    const acknowledged = [record({ id: 'r2', date: '2026-08-16' }), record({ id: 'r3', date: '2026-08-17' })];
+    const window = [record({ id: 'locked', date: '2026-08-15' }), ...acknowledged];
+    const next = advancePartnerDayCheckpoint(null, acknowledged, window)!;
+    expect(next.confirmedThrough).toBe('2026-08-15');
+  });
+
+  it('advances to the newest acknowledged date when nothing is outstanding', () => {
+    const acknowledged = [record({ id: 'r1', date: '2026-08-16' }), record({ id: 'r2', date: '2026-08-17' })];
+    const next = advancePartnerDayCheckpoint(null, acknowledged, acknowledged)!;
+    expect(next.confirmedThrough).toBe('2026-08-17');
   });
 
   /**
@@ -303,5 +328,34 @@ describe('local date semantics', () => {
     const localDate = toLocalDateString(new Date(2026, 7, 19, 23, 30));
     expect(localDate).toBe('2026-08-19');
     expect(partnerDayWindow(null, localDate).since).toBe('2026-08-13');
+  });
+});
+
+describe('a record this device cannot read yet is not consumed by acknowledging around it', () => {
+  it('still shows a locked older record once its key arrives', () => {
+    // The soldier's new device cannot decrypt the 15th yet, so only the 16th and
+    // 17th are drawn and only those can be acknowledged. If the bound advanced to
+    // the 17th, the 15th would be gone for good the moment provisioning completed.
+    const unreadable = record({ id: 'locked', date: '2026-08-15', contentUnavailable: true });
+    const r2 = record({ id: 'r2', date: '2026-08-16' });
+    const r3 = record({ id: 'r3', date: '2026-08-17' });
+
+    // Exactly what the widget passes: the readable prefix, plus the whole window.
+    const next = advancePartnerDayCheckpoint(null, [r2, r3], [unreadable, r2, r3])!;
+    expect(next.confirmedThrough).toBe('2026-08-15');
+
+    const afterProvisioning = [{ ...unreadable, contentUnavailable: false }, r2, r3];
+    const remaining = missedPartnerRecords(afterProvisioning, VIEWER, TODAY, next);
+
+    expect(ids(remaining)).toEqual(['locked']);
+  });
+
+  it('a record arriving later on the confirmed date is still shown', () => {
+    // The late-sync case: an offline record uploaded after the acknowledgement,
+    // dated the same day the bound sits on. The bound is inclusive for this reason.
+    const acked = record({ id: 'acked', date: '2026-08-18', time: '09:00' });
+    const next = advancePartnerDayCheckpoint(null, [acked], [acked])!;
+    const late = record({ id: 'late', date: '2026-08-18', time: '23:00' });
+    expect(ids(missedPartnerRecords([acked, late], VIEWER, TODAY, next))).toEqual(['late']);
   });
 });

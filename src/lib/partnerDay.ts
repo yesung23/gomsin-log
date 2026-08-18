@@ -159,33 +159,56 @@ export function missedPartnerRecords(
 /**
  * Build the receipt for an explicit acknowledgement of `acknowledged`.
  *
- * `acknowledged` must be a chronological PREFIX of the window. That is what makes
- * a single date usable as the next lower bound: everything at or before
- * `confirmedThrough` is in the confirmed set, so raising the bound to it cannot
- * skip a record the viewer never saw. Acknowledging five of twenty visible
- * moments therefore keeps the other fifteen — they are all later than the fifth.
+ * Two things set the next lower bound, and the SMALLER of them wins.
+ *
+ * `acknowledged` is the chronological prefix the viewer actually had on screen,
+ * so its newest date is as far as consumption can honestly be claimed.
+ *
+ * `stillMissed` is everything else in the window -- including records this device
+ * cannot decrypt yet, which is why the caller must pass those rather than only the
+ * readable remainder. An unreadable record is invisible to the prefix but is NOT
+ * consumed, and the bound is date-granular, so advancing past it would hide it for
+ * good the moment its key arrived. Concretely: a locked record on the 15th
+ * followed by readable ones on the 16th and 17th used to push the bound to the
+ * 17th, and the 15th never came back.
+ *
+ * The bound therefore stops at the earliest thing still outstanding. Acknowledged
+ * records are held out by id regardless, so keeping the date back costs at most a
+ * second sighting -- and this module's whole rule is that showing a record twice
+ * is cheaper than losing one that was never seen.
  */
 export function advancePartnerDayCheckpoint(
   previous: PartnerDayCheckpoint | null | undefined,
   acknowledged: DailyRecord[],
+  stillMissed: DailyRecord[] = [],
   now: Date = new Date(),
 ): PartnerDayCheckpoint | null {
   if (acknowledged.length === 0) return null;
-  const newestDate = acknowledged.reduce(
+  const newestAcknowledged = acknowledged.reduce(
     (latest, record) => (record.date > latest ? record.date : latest),
     acknowledged[0].date,
   );
-  const previousThrough = previous?.confirmedThrough;
+  const acknowledgedIds = new Set(acknowledged.map((record) => record.id));
+  const outstanding = stillMissed.filter((record) => !acknowledgedIds.has(record.id));
+  const earliestOutstanding = outstanding.length > 0
+    ? outstanding.reduce(
+      (earliest, record) => (record.date < earliest ? record.date : earliest),
+      outstanding[0].date,
+    )
+    : null;
+
   return {
     confirmedRecordIds: Array.from(new Set([
       ...(previous?.confirmedRecordIds ?? []),
       ...acknowledged.map((record) => record.id),
     ])),
-    // Never move the bound backwards: a late-syncing older record can be
-    // acknowledged after a newer one without reopening a settled window.
-    confirmedThrough: previousThrough && previousThrough > newestDate
-      ? previousThrough
-      : newestDate,
+    // Deliberately NOT floored at the previous bound. Acknowledging a late-arriving
+    // older record does reopen the days it sits in -- but everything already seen
+    // in those days is held out by id, so what comes back is exactly what was never
+    // acknowledged. That is the direction this module is required to fail in.
+    confirmedThrough: earliestOutstanding && earliestOutstanding < newestAcknowledged
+      ? earliestOutstanding
+      : newestAcknowledged,
     confirmedAt: now.toISOString(),
   };
 }

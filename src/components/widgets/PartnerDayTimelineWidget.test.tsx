@@ -511,3 +511,33 @@ describe('a future-dated record is not missed context', () => {
     expect(screen.getAllByTestId('partner-day-entry')).toHaveLength(1);
   });
 });
+
+describe('the window fails open, never closed', () => {
+  it('keeps the records on screen when the receipt cannot be written', async () => {
+    // A full or blocked localStorage must not look like a successful
+    // acknowledgement. Losing the receipt costs a second sighting; pretending it
+    // was stored would hide the records with nothing on disk to justify it.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderWidget([record({ id: 'only', log: '남아 있어야 하는 기록' })]);
+    // Spied only around the write, so this asserts the failure path and not some
+    // unrelated storage use during mount.
+    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      await user.click(screen.getByTestId('partner-day-acknowledge'));
+
+      expect(screen.getByText('남아 있어야 하는 기록')).toBeInTheDocument();
+      expect(screen.getByTestId('widget-partner-day')).toHaveAttribute('data-state', 'ready');
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it('treats a corrupt stored receipt as no receipt at all', () => {
+    localStorage.setItem(partnerDayCheckpointKey(ME, 'couple-1'), '{ not json');
+    renderWidget([record({ id: 'old', date: '2026-07-27', log: '오래된 기록' })]);
+    // Falls back to the seven-day window rather than hiding everything.
+    expect(screen.getByText('오래된 기록')).toBeInTheDocument();
+  });
+});

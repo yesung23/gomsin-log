@@ -121,7 +121,7 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
   talk_about_list: {
     id: 'talk_about_list',
     label: '오늘 이야기할 것',
-    description: '`이따 이야기하기`로 표시해 둔 기록 모아보기',
+    description: "'이따 이야기하기'로 표시해 둔 기록 모아보기",
     component: TalkAboutListWidget,
     // Both roles: either partner marks, either partner reads the list.
   },

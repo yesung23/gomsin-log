@@ -388,10 +388,18 @@ test('an RLS denial is reported as a permission problem, not as being offline', 
 for (const [label, scenario] of [['creator', CREATOR], ['partner', PARTNER]] as const) {
   test(`connected ${label} refuses online save as protection_required (no plaintext write)`, async ({ browser }) => {
     const { context, page, errors, unrouted, dailyRecordWrites } = await open(browser, scenario);
-    await goto(page, '/');
 
-    // Open composer and type a record, exactly as a user would.
-    await page.getByRole('button', { name: '한줄' }).click();
+    if (label === 'creator') {
+      await goto(page, '/');
+      await page.getByRole('button', { name: '한줄' }).click();
+    } else {
+      await goto(page, '/record');
+      await page.getByRole('button', { name: '지금의 마음 남기기' }).click();
+      await expect(page.getByRole('dialog', { name: '지금의 마음 남기기' })).toBeVisible();
+      await page.getByRole('button', { name: '한줄' }).click();
+    }
+
+    // Type the record content. The composer is now open for either role.
     await page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?').fill('보호가 필요한 기록');
 
     // Save must be enabled while online with content.

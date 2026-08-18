@@ -10,6 +10,28 @@ import {
 } from '@/lib/partnerDay';
 
 /**
+ * Makes the receipt write report failure, deterministically.
+ *
+ * Spying on `localStorage.setItem` looked simpler and was not portable: whether
+ * `setItem` is an own property of the storage object or inherited from
+ * `Storage.prototype` differs between jsdom setups, so the spy took effect
+ * locally and silently missed in CI -- where the real write then succeeded and
+ * the test failed for the opposite reason to the one it was written for.
+ * Failing at the module boundary is the same contract without the environment
+ * dependency: everything else keeps real behaviour.
+ */
+let failCheckpointWrite = false;
+vi.mock('@/lib/partnerDay', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/partnerDay')>('@/lib/partnerDay');
+  return {
+    ...actual,
+    writePartnerDayCheckpoint: (
+      ...args: Parameters<typeof actual.writePartnerDayCheckpoint>
+    ) => (failCheckpointWrite ? false : actual.writePartnerDayCheckpoint(...args)),
+  };
+});
+
+/**
  * Bug condition:
  *   isBugCondition(home) = the 군화 home offers no way to see the partner's
  *                          moments themselves, only descriptions of them.
@@ -519,18 +541,16 @@ describe('the window fails open, never closed', () => {
     // was stored would hide the records with nothing on disk to justify it.
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderWidget([record({ id: 'only', log: '남아 있어야 하는 기록' })]);
-    // Spied only around the write, so this asserts the failure path and not some
-    // unrelated storage use during mount.
-    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError');
-    });
+    failCheckpointWrite = true;
     try {
       await user.click(screen.getByTestId('partner-day-acknowledge'));
 
       expect(screen.getByText('남아 있어야 하는 기록')).toBeInTheDocument();
       expect(screen.getByTestId('widget-partner-day')).toHaveAttribute('data-state', 'ready');
+      // Nothing was stored either, so a reload agrees with the screen.
+      expect(readPartnerDayCheckpoint(ME, 'couple-1')).toBeNull();
     } finally {
-      setItem.mockRestore();
+      failCheckpointWrite = false;
     }
   });
 

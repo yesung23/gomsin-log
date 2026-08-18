@@ -197,12 +197,6 @@ export interface StoreContextType {
   markTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
   unmarkTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
   resolveTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
-  /**
-   * Mark that this viewer has now seen the partner's day surface.
-   * Device-local read receipt used to compute the "since last check" window
-   * for 놓친 하루 instead of hard-filtering exclusively to calendar today.
-   */
-  markPartnerDayChecked: () => void;
   setAuthenticatedUser: (user: AuthUser | null) => void;
   /**
    * `role` selects which of the two per-role layouts is written. It defaults to

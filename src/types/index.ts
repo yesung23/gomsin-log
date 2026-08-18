@@ -435,12 +435,6 @@ export interface AppState {
    * whoever arranged theirs last overwrote the other's on a role change.
    */
   soldierWidgetLayout: string[];
-  /**
-   * When this viewer last explicitly or implicitly checked the partner's day
-   * surface. ISO timestamp. Used to surface "놓친 하루" instead of only calendar
-   * today. Persisted per-device per-account as a read receipt (not server truth).
-   */
-  partnerDayLastCheckedAt?: string;
   hasSeenInstallPrompt: boolean;
   theme: 'light' | 'dark';
 }

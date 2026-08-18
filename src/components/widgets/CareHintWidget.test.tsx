@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { AppState, DailyRecord } from '@/types';
 import { localToday, toLocalDateString } from '@/lib/utils';
+import { writePartnerDayCheckpoint } from '@/lib/partnerDay';
 
 /**
  * Bug condition:
@@ -75,6 +76,15 @@ function renderWidget(records: DailyRecord[]) {
   return render(<CareHintWidget />);
 }
 
+function yesterdayStr(): string {
+  const d = localToday();
+  d.setDate(d.getDate() - 1);
+  return toLocalDateString(d);
+}
+
+beforeEach(() => localStorage.clear());
+afterEach(() => localStorage.clear());
+
 describe('CareHintWidget: no mood claim from silence', () => {
   it('never renders the removed calm-inference line', () => {
     renderWidget([record({ reaction: undefined })]);
@@ -91,20 +101,20 @@ describe('CareHintWidget: no mood claim from silence', () => {
     expect(screen.getByText(/힘든 일이 있었어요/)).toBeInTheDocument();
   });
 
-  it('uses the same last-checked window as 상대방의 오늘', () => {
-    const yesterday = localToday();
-    yesterday.setDate(yesterday.getDate() - 1);
-    currentState = makeState([
-      record({
-        date: toLocalDateString(yesterday),
-        reaction: 'hard',
-        log: '어제 힘들었던 일',
-      }),
-    ]);
-    currentState.partnerDayLastCheckedAt = `${toLocalDateString(yesterday)}T00:00:00+09:00`;
-    render(<CareHintWidget />);
-
+  it('uses the same missed-context window as 상대방의 오늘', () => {
+    renderWidget([record({ date: yesterdayStr(), reaction: 'hard', log: '어제 힘들었던 일' })]);
     expect(screen.getByText(/힘든 일이 있었어요/)).toBeInTheDocument();
+  });
+
+  it('honours the stored checkpoint rather than a state field', () => {
+    writePartnerDayCheckpoint(ME, 'couple-1', {
+      confirmedRecordIds: ['rec-1'],
+      confirmedThrough: TODAY,
+      confirmedAt: `${TODAY}T09:00:00.000Z`,
+    });
+    renderWidget([record({ id: 'rec-1', reaction: 'hard' })]);
+    // Already acknowledged, so there is no missed mood left to describe.
+    expect(screen.getByText(/새로 공유된 순간이 아직 없어요/)).toBeInTheDocument();
   });
 
   it('an explicit good tag is still reported as such', () => {
@@ -114,12 +124,57 @@ describe('CareHintWidget: no mood claim from silence', () => {
 
   it('no shared record at all states that honestly, not as a mood', () => {
     renderWidget([]);
-    expect(screen.getByText(/오늘 공유된 순간이 아직 없어요/)).toBeInTheDocument();
+    // Not "오늘 공유된 순간이 없어요": the window it just searched was up to seven
+    // days wide, so a claim scoped to today is not the claim it can make.
+    expect(screen.getByText(/새로 공유된 순간이 아직 없어요/)).toBeInTheDocument();
   });
 
   it('a private record is never used to describe the partner\'s mood', () => {
     renderWidget([record({ isPrivate: true, reaction: 'hard' })]);
-    expect(screen.getByText(/오늘 공유된 순간이 아직 없어요/)).toBeInTheDocument();
+    expect(screen.getByText(/새로 공유된 순간이 아직 없어요/)).toBeInTheDocument();
     expect(screen.queryByText(/힘든 일이 있었어요/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The widget describes a window that can reach back several days, so every
+ * sentence in it has to survive that. Saying "오늘 힘든 순간이 있었으니" about a
+ * record from three days ago is not a rounding error -- it hands the caller a
+ * false premise to open the conversation with.
+ */
+describe('CareHintWidget: temporal accuracy across the missed window', () => {
+  it('does not call an older record today', () => {
+    renderWidget([record({ date: yesterdayStr(), reaction: 'hard', log: '어제 일' })]);
+
+    const hint = screen.getByText(/수고했다고 다정하게 말해주세요/);
+    expect(hint.textContent).not.toContain('오늘');
+    expect(hint.textContent).toContain('그동안');
+  });
+
+  it('keeps the today wording when every record really is from today', () => {
+    renderWidget([record({ reaction: 'hard' })]);
+    expect(screen.getByText(/오늘 힘든 순간이 있었으니/)).toBeInTheDocument();
+  });
+
+  it('does not call an older untagged record today either', () => {
+    renderWidget([record({ date: yesterdayStr(), reaction: undefined })]);
+    expect(screen.getByText(/그동안 순간을 나눴어요/)).toBeInTheDocument();
+    expect(screen.queryByText(/오늘 순간을 나눴어요/)).not.toBeInTheDocument();
+  });
+
+  it('still reports only author-selected tags, never an inferred mood', () => {
+    // Widening the window must not become a licence to interpret it (§6.3, §13).
+    renderWidget([
+      record({ id: 'a', date: yesterdayStr(), reaction: undefined }),
+      record({ id: 'b', reaction: undefined }),
+    ]);
+    expect(screen.queryByText(/평온|힘든|기분 좋은/)).not.toBeInTheDocument();
+  });
+
+  it('excludes a future-dated record from the mood it describes', () => {
+    const tomorrow = localToday();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    renderWidget([record({ date: toLocalDateString(tomorrow), reaction: 'hard' })]);
+    expect(screen.getByText(/새로 공유된 순간이 아직 없어요/)).toBeInTheDocument();
   });
 });

@@ -1,8 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { MessageCircleHeart } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
-import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
-import { localToday, toLocalDateString, getPartnerDaySince } from '@/lib/utils';
+import { localToday, toLocalDateString } from '@/lib/utils';
+import {
+  missedPartnerRecords,
+  readPartnerDayCheckpoint,
+  spansBeforeToday,
+} from '@/lib/partnerDay';
 
 /**
  * "다정한 한마디" — what to actually say when the call comes.
@@ -19,21 +23,25 @@ export function CareHintWidget() {
   const { state } = useStore();
   const { profile } = state;
   const partnerName = profile.couple.partnerName || '상대방';
-  // Align with the same "마지막 확인 이후 놓친 구간" contract (PRODUCT_V3 §6.1–6.5)
-  // used by PartnerDayTimelineWidget, TodayBriefingWidget, and the other
-  // PartnerEmotion* widgets inside CallBriefing. This surface appears in the
-  // call-briefing "더 보기" section which claims context for the partner's day.
-  const since = getPartnerDaySince(state.partnerDayLastCheckedAt);
   const todayStr = toLocalDateString(localToday());
+  const userId = state.authenticatedUser?.id || profile.id || '';
+  const coupleId = profile.couple.coupleId || '';
 
-  const shared = useMemo(() => {
-    const viewer = { userId: profile.id, role: profile.role };
-    return visibleRecordsForViewer(state.records, viewer).filter(
-      (record) => (since ? record.date >= since : record.date === todayStr)
-        && !isOwnRecord(record, viewer)
-        && !record.isPrivate,
-    );
-  }, [state.records, profile.id, profile.role, since, todayStr]);
+  // The same "마지막 확인 이후 놓친 구간" window as 상대방의 오늘 (PRODUCT_V3 §6.1–6.5).
+  // This widget sits in the call-briefing "더 보기" section and claims to describe
+  // the partner's day, so it has to describe the same days that surface shows --
+  // read-only here, because reading a hint is not acknowledging the day.
+  const [checkpoint] = useState(() => readPartnerDayCheckpoint(userId, coupleId));
+
+  const shared = useMemo(
+    () => missedPartnerRecords(
+      state.records,
+      { userId: profile.id, role: profile.role },
+      todayStr,
+      checkpoint,
+    ),
+    [state.records, profile.id, profile.role, todayStr, checkpoint],
+  );
 
   // Describes what was actually shared. Deliberately not a score or a bar: an
   // earlier version rendered `sharedRecords.length * 25` as an "energy level",
@@ -45,20 +53,32 @@ export function CareHintWidget() {
   // calm, it just means nothing was tagged -- author tags are optional
   // (see TodayLogWidget), so no tag at all is the common case, not a signal.
   // The fallback now states only what is actually known: records exist.
+  //
+  // The window can reach back several days, so the copy must not name a day it
+  // cannot vouch for. Calling a record from 8월 15일 "오늘" is simply false, and it
+  // is the kind of false that makes the caller open with the wrong sentence. Where
+  // the window is today-only the today wording is kept -- it is accurate there and
+  // warmer -- and where it reaches further back the same fact is stated without a
+  // day attached. Both branches still describe ONLY an author-selected tag; nothing
+  // here infers a mood, scores the relationship, or reads meaning into silence
+  // (PRODUCT_V3 §6.3, §13).
+  const multiDay = spansBeforeToday(shared, todayStr);
+  const when = multiDay ? '그동안' : '오늘';
+
   const moodLabel = shared.length === 0
-    ? '오늘 공유된 순간이 아직 없어요'
+    ? '새로 공유된 순간이 아직 없어요'
     : shared.some((r) => r.reaction === 'hard')
       ? '조금 힘든 일이 있었어요 🥹'
       : shared.some((r) => r.reaction === 'good' || r.reaction === 'thought_of_you')
         ? '기분 좋은 순간을 남겼어요 😊'
-        : '오늘 순간을 나눴어요';
+        : `${when} 순간을 나눴어요`;
 
   const careHint = shared.some((r) => r.reaction === 'hard')
-    ? '오늘 힘든 순간이 있었으니 수고했다고 다정하게 말해주세요!'
+    ? `${when} 힘든 순간이 있었으니 수고했다고 다정하게 말해주세요!`
     : shared.some((r) => r.reaction === 'thought_of_you')
       ? '네 생각이 났다고 해요! 반갑고 따뜻하게 맞아주세요.'
       : shared.length > 0
-        ? '오늘의 소소한 일상을 듣고 칭찬과 격려를 건네보세요.'
+        ? `${when} 있었던 소소한 일상을 듣고 칭찬과 격려를 건네보세요.`
         : '전화할 때 따뜻한 목소리로 첫 인사를 건네주세요!';
 
   return (

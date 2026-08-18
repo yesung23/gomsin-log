@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AppState, DailyRecord } from '@/types';
+import {
+  partnerDayCheckpointKey,
+  readPartnerDayCheckpoint,
+  writePartnerDayCheckpoint,
+} from '@/lib/partnerDay';
 
 /**
  * Bug condition:
@@ -31,7 +36,6 @@ const PARTNER = 'user-gomsin';
 const TODAY = '2026-07-31';
 
 const setHighlightedRecordId = vi.fn();
-const markPartnerDayChecked = vi.fn();
 const navigate = vi.fn();
 
 vi.mock('react-router-dom', async () => {
@@ -72,7 +76,6 @@ vi.mock('@/lib/useStore', () => ({
     isReady: true,
     sharedSyncStatus: currentSyncStatus,
     setHighlightedRecordId,
-    markPartnerDayChecked,
   }),
 }));
 
@@ -137,7 +140,7 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   setHighlightedRecordId.mockClear();
   navigate.mockClear();
-  markPartnerDayChecked.mockClear();
+  localStorage.clear();
   currentSyncStatus = 'live';
   bypassStorePrivacyFilter = false;
 });
@@ -357,23 +360,154 @@ describe('privacy: only what this viewer is entitled to see', () => {
     expect(screen.queryByText('너무 오래된 것')).not.toBeInTheDocument();
   });
 
-  it('uses the device-local checkpoint as the missed-context lower bound', () => {
-    currentState = makeState([
+  it('uses the stored checkpoint as the missed-context lower bound', () => {
+    writePartnerDayCheckpoint(ME, 'couple-1', {
+      confirmedRecordIds: [],
+      confirmedThrough: '2026-07-30',
+      confirmedAt: '2026-07-30T08:00:00.000Z',
+    });
+    renderWidget([
       record({ id: 'before', date: '2026-07-29', log: '확인 전 기록' }),
       record({ id: 'at-checkpoint', date: '2026-07-30', log: '확인일 기록' }),
       record({ id: 'today', log: '오늘 기록' }),
     ]);
-    currentState.partnerDayLastCheckedAt = '2026-07-30T08:00:00.000Z';
-    vi.setSystemTime(new Date(`${TODAY}T12:00:00.000Z`));
-    render(<MemoryRouter><PartnerDayTimelineWidget /></MemoryRouter>);
 
     expect(screen.queryByText('확인 전 기록')).not.toBeInTheDocument();
     expect(screen.getByText('확인일 기록')).toBeInTheDocument();
     expect(screen.getByText('오늘 기록')).toBeInTheDocument();
   });
+});
 
-  it('records a checkpoint after confirmed readable content, outside render', () => {
+/**
+ * The checkpoint is the mechanism that can LOSE a user's unseen context, so these
+ * exercise the real read/write path rather than a `vi.fn()`. A spy would have
+ * happily reported "advance was called" for the implementation that then deleted
+ * fifteen unread records — the assertion has to be about what survives in storage
+ * and on screen after a real state change, not about a call count.
+ */
+describe('checkpoint: nothing but an explicit acknowledgement advances it', () => {
+  it('mounting with readable partner records writes no checkpoint at all', () => {
     renderWidget([record({ log: '확인할 기록' })]);
-    expect(markPartnerDayChecked).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(partnerDayCheckpointKey(ME, 'couple-1'))).toBeNull();
+  });
+
+  it('a rerender while records are on screen still writes no checkpoint', () => {
+    const { rerender } = renderWidget([record({ id: 'a', log: '첫 기록' })]);
+    currentState = makeState([
+      record({ id: 'a', log: '첫 기록' }),
+      record({ id: 'b', time: '11:00', log: '두번째 기록' }),
+    ]);
+    rerender(<MemoryRouter><PartnerDayTimelineWidget /></MemoryRouter>);
+
+    expect(screen.getByText('두번째 기록')).toBeInTheDocument();
+    expect(readPartnerDayCheckpoint(ME, 'couple-1')).toBeNull();
+  });
+
+  it('the window does not collapse while the user is still reading it', async () => {
+    // The real feedback loop: press the acknowledgement, let the state update land,
+    // and confirm the records the user never reached are still there. The previous
+    // implementation advanced from an effect and the whole window vanished here.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const many = Array.from({ length: 20 }, (_, i) => record({
+      id: `rec-${String(i).padStart(2, '0')}`,
+      time: `${String(i % 24).padStart(2, '0')}:00`,
+      date: '2026-07-30',
+      log: `기록 ${i}`,
+    }));
+    renderWidget(many);
+
+    expect(screen.getAllByTestId('partner-day-entry')).toHaveLength(PARTNER_DAY_VISIBLE_LIMIT);
+    await user.click(screen.getByTestId('partner-day-acknowledge'));
+
+    // 20 - 5 acknowledged = 15 still missed, and the widget still shows a page of them.
+    const stored = readPartnerDayCheckpoint(ME, 'couple-1');
+    expect(stored?.confirmedRecordIds).toHaveLength(PARTNER_DAY_VISIBLE_LIMIT);
+    expect(screen.getAllByTestId('partner-day-entry')).toHaveLength(PARTNER_DAY_VISIBLE_LIMIT);
+    expect(screen.getByText('기록 5')).toBeInTheDocument();
+    expect(screen.queryByText('기록 4')).not.toBeInTheDocument();
+    expect(screen.getByText(/나머지 10개 보기/)).toBeInTheDocument();
+  });
+
+  it('acknowledging a fully visible day empties the window deterministically', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderWidget([record({ id: 'only', log: '하나뿐인 기록' })]);
+
+    await user.click(screen.getByTestId('partner-day-acknowledge'));
+
+    expect(readPartnerDayCheckpoint(ME, 'couple-1')?.confirmedRecordIds).toEqual(['only']);
+    expect(screen.queryByText('하나뿐인 기록')).not.toBeInTheDocument();
+    expect(screen.getByTestId('widget-partner-day')).toHaveAttribute('data-state', 'empty');
+  });
+
+  it("another account's checkpoint on the same device suppresses nothing", () => {
+    writePartnerDayCheckpoint('someone-else', 'couple-1', {
+      confirmedRecordIds: ['hers'],
+      confirmedThrough: TODAY,
+      confirmedAt: `${TODAY}T09:00:00.000Z`,
+    });
+    renderWidget([record({ id: 'hers', log: '내가 못 본 기록' })]);
+    expect(screen.getByText('내가 못 본 기록')).toBeInTheDocument();
+  });
+
+  it('a checkpoint from a previous couple suppresses nothing after relinking', () => {
+    writePartnerDayCheckpoint(ME, 'couple-old', {
+      confirmedRecordIds: ['rec-1'],
+      confirmedThrough: TODAY,
+      confirmedAt: `${TODAY}T09:00:00.000Z`,
+    });
+    renderWidget([record({ id: 'rec-1', log: '새 커플의 기록' })]);
+    expect(screen.getByText('새 커플의 기록')).toBeInTheDocument();
+  });
+});
+
+describe('a multi-day window may not present itself as today', () => {
+  it('titles a window that reaches back as 놓친 하루, not 오늘', () => {
+    renderWidget([
+      record({ id: 'old', date: '2026-07-29', log: '지난 기록' }),
+      record({ id: 'today', log: '오늘 기록' }),
+    ]);
+    expect(screen.getByText('춘향의 놓친 하루')).toBeInTheDocument();
+    expect(screen.queryByText('춘향의 오늘')).not.toBeInTheDocument();
+  });
+
+  it('keeps the today wording when the window in fact holds only today', () => {
+    renderWidget([record({ log: '오늘 기록' })]);
+    expect(screen.getByText('춘향의 오늘')).toBeInTheDocument();
+  });
+
+  it('gives every older row its date, so HH:MM cannot be read as tonight', () => {
+    renderWidget([
+      record({ id: 'old', date: '2026-07-25', time: '14:05', log: '오래된 기록' }),
+      record({ id: 'yesterday', date: '2026-07-30', time: '18:20', log: '어제 기록' }),
+      record({ id: 'today', time: '09:10', log: '오늘 기록' }),
+    ]);
+
+    const entries = screen.getAllByTestId('partner-day-entry');
+    expect(entries[0].textContent).toContain('7월 25일');
+    expect(entries[0].textContent).toContain('14:05');
+    expect(entries[1].textContent).toContain('어제');
+    expect(entries[1].textContent).toContain('18:20');
+    // Today needs no date label; its bare time is not ambiguous.
+    expect(entries[2].textContent).toContain('09:10');
+    expect(entries[2].textContent).not.toContain('월');
+  });
+
+  it('names the date in the accessible label as well as the visible rail', () => {
+    renderWidget([record({ id: 'old', date: '2026-07-30', time: '18:20', log: '어제 기록' })]);
+    expect(screen.getByRole('button', { name: /어제 18:20 춘향의 기록 자세히 보기/ }))
+      .toBeInTheDocument();
+  });
+});
+
+describe('a future-dated record is not missed context', () => {
+  it('never enters the window, and does not sort itself to the top of the day', () => {
+    renderWidget([
+      record({ id: 'today', time: '09:00', log: '오늘 기록' }),
+      record({ id: 'future', date: '2026-08-05', time: '23:00', log: '미래 기록' }),
+    ]);
+
+    expect(screen.getByText('오늘 기록')).toBeInTheDocument();
+    expect(screen.queryByText('미래 기록')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('partner-day-entry')).toHaveLength(1);
   });
 });

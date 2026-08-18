@@ -1,10 +1,17 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Film, Image as ImageIcon, Mic } from 'lucide-react';
+import { Check, Film, Image as ImageIcon, Mic } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
-import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { withReadableContent } from '@/lib/recordAvailability';
 import { localToday, toLocalDateString } from '@/lib/utils';
+import {
+  advancePartnerDayCheckpoint,
+  missedPartnerRecords,
+  partnerDayDateLabel,
+  readPartnerDayCheckpoint,
+  spansBeforeToday,
+  writePartnerDayCheckpoint,
+} from '@/lib/partnerDay';
 import { AttachmentMedia } from '@/components/AttachmentMedia';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -14,13 +21,20 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import type { Attachment, DailyRecord } from '@/types';
 
 /**
- * 상대방의 오늘 — the partner's day, in the order it happened.
+ * 상대방의 오늘 / 놓친 하루 — the partner's day, in the order it happened.
  *
  * README section 1.4 states the point of the 군화 home in one sentence: "폰을
  * 받거나 접속했을 때 상대방의 오늘 순간들을 시간순(사진, 영상, 음성, 텍스트)으로 있는
  * 그대로 감상합니다."
  *
- * Renders as an editorial timeline: time → media → prose.
+ * The subject is not always today. PRODUCT_V3 §6.1: "오래 접속하지 않았다면 (A)의
+ * 대상은 '오늘'이 아니라 마지막 확인 이후 놓친 구간이다." A soldier who could not
+ * reach a phone for three days needs those three days, and hard-filtering to the
+ * calendar date silently threw them away. `partnerDay.ts` owns the window; this
+ * widget owns how it reads, including saying "놓친 하루" instead of "오늘" when the
+ * window really does reach back.
+ *
+ * Renders as an editorial timeline: date → time → media → prose.
  * No wrapper card — surface economy. Structure comes from the time rail and
  * dividers, not from a border per entry.
  */
@@ -56,56 +70,64 @@ function mediaKinds(attachments: Attachment[] | undefined): Attachment['type'][]
 }
 
 export function PartnerDayTimelineWidget() {
-  const { state, sharedSyncStatus, setHighlightedRecordId, markPartnerDayChecked } = useStore();
+  const { state, sharedSyncStatus, setHighlightedRecordId } = useStore();
   const navigate = useNavigate();
   const { profile } = state;
   const partnerName = profile.couple.partnerName || '상대방';
   const todayStr = toLocalDateString(localToday());
+  const userId = state.authenticatedUser?.id || profile.id || '';
+  const coupleId = profile.couple.coupleId || '';
 
   /**
-   * Device-local read receipt → "since last check" lower bound for partner day.
-   * If absent, fall back to a recent window (7 calendar days incl. today) so
-   * first-time or long-absent users are not shown an empty screen.
-   * This is the client half of PRODUCT_V3 "마지막 확인 이후 놓친 구간".
+   * The read receipt is held per viewer AND per couple in `partnerDay.ts`, not in
+   * app state: app state is rebuilt on sign-in, and a checkpoint that rode along
+   * in device preferences let account A's receipt hide account B's unseen day on
+   * the same phone.
+   *
+   * It is read once into local state on mount so that a re-render never re-reads
+   * a value this widget just wrote.
    */
-  const sinceDate: string | null = state.partnerDayLastCheckedAt
-    ? toLocalDateString(new Date(state.partnerDayLastCheckedAt))
-    : (() => {
-        const d = new Date();
-        d.setDate(d.getDate() - 6);
-        return toLocalDateString(d);
-      })();
+  const [checkpoint, setCheckpoint] = useState(
+    () => readPartnerDayCheckpoint(userId, coupleId),
+  );
 
-  const todays = useMemo(() => {
-    const viewer = { userId: profile.id, role: profile.role };
-    return visibleRecordsForViewer(state.records, viewer)
-      .filter((record) => {
-        const inWindow = sinceDate ? record.date >= sinceDate : record.date === todayStr;
-        return inWindow && !isOwnRecord(record, viewer) && !record.isPrivate;
-      })
-      .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
-  }, [state.records, profile.id, profile.role, todayStr, sinceDate]);
+  const missed = useMemo(
+    () => missedPartnerRecords(
+      state.records,
+      { userId: profile.id, role: profile.role },
+      todayStr,
+      checkpoint,
+    ),
+    [state.records, profile.id, profile.role, todayStr, checkpoint],
+  );
 
-  const readableTodays = withReadableContent(todays);
-  const unavailableCount = todays.length - readableTodays.length;
-  const visible = readableTodays.slice(0, PARTNER_DAY_VISIBLE_LIMIT);
-  const hiddenCount = readableTodays.length - visible.length;
+  const readableMissed = withReadableContent(missed);
+  const unavailableCount = missed.length - readableMissed.length;
+  const visible = readableMissed.slice(0, PARTNER_DAY_VISIBLE_LIMIT);
+  const hiddenCount = readableMissed.length - visible.length;
+  const multiDay = spansBeforeToday(missed, todayStr);
+  const heading = multiDay ? `${partnerName}의 놓친 하루` : `${partnerName}의 오늘`;
 
-  // A receipt is a side effect, never render work.  Updating store state during
-  // render would immediately render this widget again while a partner record is
-  // visible.  The date is the contract's granularity, so do this at most once
-  // per local calendar day and only after readable, confirmed content rendered.
-  const checkedToday = state.partnerDayLastCheckedAt
-    && toLocalDateString(new Date(state.partnerDayLastCheckedAt)) === todayStr;
-  useEffect(() => {
-    if (
-      !checkedToday
-      && (sharedSyncStatus === 'live' || sharedSyncStatus === 'delayed')
-      && readableTodays.length > 0
-    ) {
-      markPartnerDayChecked();
+  /**
+   * The ONLY thing that advances the checkpoint.
+   *
+   * Not mount, not a render, not "records finished loading", not a timer. Opening
+   * the home screen is not evidence that anyone read anything, and an earlier
+   * version advanced the checkpoint from an effect the moment one readable record
+   * appeared -- which collapsed the missed window while the user was still looking
+   * at the first five of it, and permanently. Losing unseen context is worse than
+   * showing it twice, so consumption has to be claimed explicitly.
+   *
+   * `visible` is the chronological prefix that is actually on screen, and that is
+   * exactly what gets acknowledged: pressing this with fifteen more below keeps
+   * those fifteen, because every one of them is later than the last confirmed one.
+   */
+  const acknowledgeVisible = () => {
+    const next = advancePartnerDayCheckpoint(checkpoint, visible);
+    if (next && writePartnerDayCheckpoint(userId, coupleId, next)) {
+      setCheckpoint(next);
     }
-  }, [checkedToday, markPartnerDayChecked, readableTodays.length, sharedSyncStatus]);
+  };
 
   const openRecord = (record: DailyRecord) => {
     setHighlightedRecordId(record.id);
@@ -132,22 +154,22 @@ export function PartnerDayTimelineWidget() {
     );
   }
 
-  if (todays.length === 0) {
+  if (missed.length === 0) {
     return (
       <div data-testid="widget-partner-day" data-state="empty">
         <SectionHeader title={`${partnerName}의 오늘`} />
         <EmptyState
-          title="오늘 공유된 순간이 아직 없어요."
+          title="새로 공유된 순간이 아직 없어요."
           description={`${partnerName}이 남기면 시간순으로 이 자리에 쌓여요.`}
         />
       </div>
     );
   }
 
-  if (readableTodays.length === 0) {
+  if (readableMissed.length === 0) {
     return (
       <div data-testid="widget-partner-day" data-state="unavailable">
-        <SectionHeader title={`${partnerName}의 오늘`} caption={`순간 ${todays.length}개`} />
+        <SectionHeader title={heading} caption={`순간 ${missed.length}개`} />
         <EmptyState
           title="이 기기에서 아직 열 수 없는 기록이 있어요."
           description="키가 준비되면 내용을 확인할 수 있어요."
@@ -159,14 +181,14 @@ export function PartnerDayTimelineWidget() {
   return (
     <div data-testid="widget-partner-day" data-state="ready">
       <SectionHeader
-        title={`${partnerName}의 오늘`}
-        caption={`순간 ${todays.length}개${sharedSyncStatus === 'delayed' ? ' · 방금 것이 아직 안 보일 수 있어요' : ''}`}
+        title={heading}
+        caption={`순간 ${missed.length}개${sharedSyncStatus === 'delayed' ? ' · 방금 것이 아직 안 보일 수 있어요' : ''}`}
         action={
           hiddenCount > 0 ? (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => openRecord(readableTodays[PARTNER_DAY_VISIBLE_LIMIT])}
+              onClick={() => openRecord(readableMissed[PARTNER_DAY_VISIBLE_LIMIT])}
             >
               전체 보기
             </Button>
@@ -190,11 +212,20 @@ export function PartnerDayTimelineWidget() {
             <button
               type="button"
               onClick={() => openRecord(record)}
-              aria-label={`${record.time || ''} ${partnerName}의 기록 자세히 보기`}
+              aria-label={`${partnerDayDateLabel(record.date, todayStr) ?? '오늘'} ${record.time || ''} ${partnerName}의 기록 자세히 보기`}
               className="w-full text-left min-h-11 flex items-start gap-2 py-2"
             >
-              {/* Time rail */}
+              {/*
+                Time rail. Across a multi-day window `18:20` on its own is a false
+                statement -- it reads as this evening whichever day it was -- so an
+                older row carries its date above the clock. Today stays bare.
+              */}
               <span className="shrink-0 w-11 text-caption text-muted-foreground tabular-nums pt-0.5">
+                {partnerDayDateLabel(record.date, todayStr) && (
+                  <span className="block font-semibold text-foreground">
+                    {partnerDayDateLabel(record.date, todayStr)}
+                  </span>
+                )}
                 {record.time}
               </span>
               {/* Content */}
@@ -249,12 +280,29 @@ export function PartnerDayTimelineWidget() {
         <Button
           variant="outline"
           full
-          onClick={() => openRecord(readableTodays[PARTNER_DAY_VISIBLE_LIMIT])}
+          onClick={() => openRecord(readableMissed[PARTNER_DAY_VISIBLE_LIMIT])}
           className="mt-3"
         >
           나머지 {hiddenCount}개 보기 →
         </Button>
       )}
+
+      {/*
+        The explicit end of the missed window. Deliberately a plain secondary
+        action and not the screen's `primary` (DESIGN_V2 §3.2) -- the point of this
+        surface is to read the partner's day, not to clear a list, and §8 already
+        rules out making the product a task manager.
+      */}
+      <Button
+        variant="ghost"
+        full
+        onClick={acknowledgeVisible}
+        className="mt-2"
+        data-testid="partner-day-acknowledge"
+      >
+        <Check size={14} aria-hidden="true" />
+        {hiddenCount > 0 ? '여기까지 확인했어요' : '다 확인했어요'}
+      </Button>
     </div>
   );
 }

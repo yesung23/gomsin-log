@@ -258,22 +258,32 @@ const DEFAULT_STATE: AppState = {
 /**
  * Preferences that belong to the device rather than to the signed-in account.
  * These survive sign-out and account switches; everything else must not.
+ *
+ * Exported because it is a privacy boundary, not a convenience list: this is the
+ * exact set that outlives a sign-out or an account deletion, so it is the set a
+ * test has to pin. Asserting on the keys of the PERSISTED blob cannot do that on
+ * its own -- `JSON.stringify` drops `undefined`, so a newly added carry-over
+ * field is invisible to that assertion until someone happens to set it.
+ * See `accountDeletionRecovery.test.tsx`.
  */
-function carryOverDevicePrefs(
-  prev: AppState,
-): Pick<AppState, 'widgetLayout' | 'soldierWidgetLayout' | 'hasSeenInstallPrompt' | 'theme' | 'partnerDayLastCheckedAt'> {
+export const DEVICE_PREF_CARRY_OVER_KEYS = [
+  'hasSeenInstallPrompt',
+  // Kept per role: the two people use one app on two devices with opposite
+  // home screens, and a single shared list meant whoever edited last
+  // overwrote the other's arrangement on role change.
+  'soldierWidgetLayout',
+  'theme',
+  'widgetLayout',
+] as const satisfies readonly (keyof AppState)[];
+
+export type DevicePrefKey = typeof DEVICE_PREF_CARRY_OVER_KEYS[number];
+
+function carryOverDevicePrefs(prev: AppState): Pick<AppState, DevicePrefKey> {
   return {
     widgetLayout: prev.widgetLayout,
-    // Kept per role: the two people use one app on two devices with opposite
-    // home screens, and a single shared list meant whoever edited last
-    // overwrote the other's arrangement on role change.
     soldierWidgetLayout: prev.soldierWidgetLayout,
     hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
     theme: prev.theme || 'light',
-    // Per-device read receipt for the partner's day surface. Used to compute
-    // "놓친 하루" window instead of hard-filtering to calendar today.
-    // Not server truth; survives sign-out on this device.
-    partnerDayLastCheckedAt: prev.partnerDayLastCheckedAt,
   };
 }
 
@@ -3197,17 +3207,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
-   * Record that this viewer has now seen the partner's day surface.
-   * Stored as a device-local read receipt so we can compute a "since last check"
-   * window for "놓친 하루" instead of always hard-filtering to calendar today.
-   * This is intentionally NOT server truth and does not affect authorization.
-   */
-  const markPartnerDayChecked = useCallback(() => {
-    const now = new Date().toISOString();
-    updateStateImmediately((prev) => ({ ...prev, partnerDayLastCheckedAt: now }));
-  }, [updateStateImmediately]);
-
-  /**
    * "이따 이야기하기" writes.
    *
    * Each one re-reads the couple's marks from the server afterwards rather
@@ -3345,7 +3344,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         markTalkAbout,
         unmarkTalkAbout,
         resolveTalkAbout,
-        markPartnerDayChecked,
         setAuthenticatedUser,
         setWidgetLayout,
         setHasSeenInstallPrompt,

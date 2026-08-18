@@ -51,7 +51,7 @@ PR state, draft, mergeability, base/head, CI를 다시 확인한다.
 | P5.1/P5.2/P5.5 approved stack | PR #68 / `integration/p5.5-approved-stack` / `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7` merge commit; candidate parent `b788c44db39fd57a5f483b3eb3340e1630ce87d5` | MERGED to master; Opus baseline `0660ad277` preserved; Production NOT APPLIED; Supabase/native physical-device state UNVERIFIED |
 | P5.3 Chat Foundation | PR #59 / `codex/04a-chat-e2ee-foundation` / `ce4a1355b2738f898109c2d70b038822996f77e7` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; migration 041 remains unapplied per PR declaration; independent security review pending |
 | P5.4 Chat Product UI | PR #60 / `codex/04b-chat-product-ui` / `c409d92d4fa6e5e4913adb8fef2cf6f1bdacba8a` | implemented in active draft, not merged; **FROZEN / DEFERRED** by current V1 product direction; no V1 entry-path integration; real Device Bootstrap runtime integration remains unverified |
-| P5.5 Core Privacy Foundation integration | `codex/core-privacy-foundation-v1` / `35da04cf739649667c4d405a6c64c522d9e000e3` | P4 Conversation Bridge + P5.1 + P5.2 integration branch. Session runtime install, floor guard, account-switch teardown, unlink authority tombstone, and forward migration 044 are code/test-verified locally; not merged, production unapplied, and real-device validation remains unverified |
+| P5.5 Core Privacy Foundation integration | Historical `codex/core-privacy-foundation-v1` branch; its approved stack was superseded by #68 | Landed master contains the approved baseline and reviewed harness; Production unapplied and real-device validation unverified |
 
 PR #54는 CLOSED이며 #58은 OPEN/DRAFT superseded provenance다. #59/#60은
 FROZEN/DEFERRED draft asset이다. PR #68의 post-merge master validation
@@ -66,13 +66,13 @@ Production 적용이나 실기기 보안 증거를 대신하지 않는다.
 | PR | scope | live branch / HEAD | live base | state |
 |---|---|---|---|---|
 | #54 | P5.1 daily-records E2EE | `codex/p5-daily-records-e2ee-slice` / `835cddd16b71686abc5fb296e4ddce3456844ad0` | master | CLOSED; superseded/integrated through approved baseline |
-| #58 | Device Bootstrap | `codex/03a-device-bootstrap` / `ac81f07f5dc3220b1bc79490e693702add957a0b` | #54 branch | OPEN / DRAFT; superseded/integrated provenance |
-| #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `4cfbf7a39220c672e34f046a1265594c83b7978d` | #58 stack | OPEN / DRAFT; superseded/integrated provenance |
-| #63 | notification re-entry | `codex/notification-reentry-v1` / `84d19b49a5bff91b75b84217f2829d44c6ac942a` | #62 stack | OPEN / DRAFT; superseded/integrated provenance |
-| #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `576342688b0e4b165b441f10ac68cbac71aecd7e` | #63 stack | OPEN / DRAFT; superseded/integrated provenance |
-| #65 | P6 readiness audit | `codex/p6-readiness-audit-v1` / `ff8aaca1404ff409f39be2cb2360f5f002e4b170` | #64 stack | OPEN / DRAFT; superseded/integrated provenance; does not authorize P6 |
-| #66 | security stack integration | `codex/sol-integration-audit-v1` / `062b2d8ad6e34ddcdc4de9fadf3460281433c888` | #65 stack | OPEN / DRAFT; superseded/integrated provenance |
-| #67 | security blocker fixes | `codex/opus-security-blockers-v1` / `0660ad277dec0a62be3b315cf3668fadf91c282b` | #66 stack | OPEN / DRAFT; superseded/integrated as approved baseline |
+| #58 | Device Bootstrap | `codex/03a-device-bootstrap` / `ac81f07f5dc3220b1bc79490e693702add957a0b` | #54 branch | CLOSED; superseded/integrated provenance |
+| #62 | device protection recovery UX | `codex/device-protection-recovery-v1` / `4cfbf7a39220c672e34f046a1265594c83b7978d` | #58 stack | CLOSED; superseded/integrated provenance |
+| #63 | notification re-entry | `codex/notification-reentry-v1` / `84d19b49a5bff91b75b84217f2829d44c6ac942a` | #62 stack | CLOSED; superseded/integrated provenance |
+| #64 | LV/core protection UX | `codex/lv-core-ux-v1` / `576342688b0e4b165b441f10ac68cbac71aecd7e` | #63 stack | CLOSED; superseded/integrated provenance |
+| #65 | P6 readiness audit | `codex/p6-readiness-audit-v1` / `ff8aaca1404ff409f39be2cb2360f5f002e4b170` | #64 stack | CLOSED; superseded/integrated provenance; does not authorize P6 |
+| #66 | security stack integration | `codex/sol-integration-audit-v1` / `062b2d8ad6e34ddcdc4de9fadf3460281433c888` | #65 stack | CLOSED; superseded/integrated provenance |
+| #67 | security blocker fixes | `codex/opus-security-blockers-v1` / `0660ad277dec0a62be3b315cf3668fadf91c282b` | #66 stack | CLOSED; superseded/integrated as approved baseline |
 | #68 | P5.5 landing | `integration/p5.5-approved-stack` / `b788c44db39fd57a5f483b3eb3340e1630ce87d5` | master | MERGED; resulting master `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7` |
 
 Convergence is complete for P5.5: **approved baseline `0660ad277` → reviewed

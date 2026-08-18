@@ -260,3 +260,73 @@ describe('core-flow copy renders as prose, not as source markup', () => {
     expect(empty.textContent).not.toContain('`');
   });
 });
+
+describe('the overflow control holds up at the sizes a real couple reaches', () => {
+  function manyTopicsAt(count: number) {
+    const records = Array.from({ length: count }, (_, i) => record({
+      id: `rec-${String(i).padStart(3, '0')}`,
+      log: `이야기거리 ${i}`,
+    }));
+    const marks = records.map((r, i) => mark({
+      id: `mark-${i}`,
+      recordId: r.id,
+      createdAt: new Date(Date.parse(`${TODAY}T00:00:00.000Z`) + i * 60_000).toISOString(),
+    }));
+    return { records, marks };
+  }
+
+  for (const count of [0, 1, 5]) {
+    it(`shows all ${count} with no overflow control`, () => {
+      const { records, marks } = manyTopicsAt(count);
+      renderWidget(records, marks);
+      expect(screen.queryByTestId('talk-about-expand')).not.toBeInTheDocument();
+      if (count > 0) expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(count);
+    });
+  }
+
+  for (const count of [6, 20, 60]) {
+    it(`reaches every one of ${count} once expanded`, async () => {
+      const user = userEvent.setup();
+      const { records, marks } = manyTopicsAt(count);
+      renderWidget(records, marks);
+
+      expect(screen.getByText(new RegExp(`오늘 이야기할 것 · ${count}`))).toBeInTheDocument();
+      expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(5);
+
+      await user.click(screen.getByTestId('talk-about-expand'));
+      expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(count);
+
+      // And it still folds back, so a long list cannot own the home screen.
+      await user.click(screen.getByTestId('talk-about-expand'));
+      expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(5);
+    });
+  }
+
+  it('completes a topic that only exists in the expanded region', async () => {
+    const user = userEvent.setup();
+    const { records, marks } = manyTopicsAt(20);
+    renderWidget(records, marks);
+    await user.click(screen.getByTestId('talk-about-expand'));
+
+    // The oldest mark sorts last, so it is unreachable while collapsed.
+    const rows = screen.getAllByRole('button', { name: '이야기했어요' });
+    expect(rows).toHaveLength(20);
+    await user.click(rows[19]);
+
+    await waitFor(() => expect(resolveTalkAbout).toHaveBeenCalledWith('rec-000'));
+  });
+
+  it('an unreachable source in the expanded region stays generic, never substituted', async () => {
+    const user = userEvent.setup();
+    const { records, marks } = manyTopicsAt(7);
+    // Drop the oldest record so its mark can no longer resolve to a source.
+    const withoutOldest = records.filter((r) => r.id !== 'rec-000');
+    renderWidget(withoutOldest, marks);
+    await user.click(screen.getByTestId('talk-about-expand'));
+
+    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
+    // No other topic's text was borrowed to fill the gap.
+    expect(screen.queryByText('이야기거리 0')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(6);
+  });
+});

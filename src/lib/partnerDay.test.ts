@@ -359,3 +359,27 @@ describe('a record this device cannot read yet is not consumed by acknowledging 
     expect(ids(missedPartnerRecords([acked, late], VIEWER, TODAY, next))).toEqual(['late']);
   });
 });
+
+describe('the id cap can only ever reveal more, never less', () => {
+  it('keeps the newest 500 confirmations and drops the oldest', () => {
+    const many = Array.from({ length: 520 }, (_, i) => record({ id: `r-${String(i).padStart(4, '0')}` }));
+    const next = advancePartnerDayCheckpoint(null, many, many)!;
+    expect(next.confirmedRecordIds).toHaveLength(520);
+
+    // The cap is applied by the storage layer, which is where the quota lives.
+    writePartnerDayCheckpoint('user-a', 'couple-a', next);
+    const stored = readPartnerDayCheckpoint('user-a', 'couple-a')!;
+    expect(stored.confirmedRecordIds).toHaveLength(500);
+    expect(stored.confirmedRecordIds).toContain('r-0519');
+    expect(stored.confirmedRecordIds).not.toContain('r-0000');
+    localStorage.clear();
+  });
+
+  it('an evicted id resurfaces its record rather than hiding it', () => {
+    // Eviction removes an EXCLUSION, so the only possible effect is showing a
+    // record a second time. There is no arrangement of the cap that hides one.
+    const evicted = record({ id: 'evicted' });
+    const cp = checkpoint({ confirmedRecordIds: [], confirmedThrough: TODAY });
+    expect(ids(missedPartnerRecords([evicted], VIEWER, TODAY, cp))).toEqual(['evicted']);
+  });
+});

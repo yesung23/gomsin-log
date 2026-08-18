@@ -1746,6 +1746,89 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 #### PRODUCTION
 - NOT APPLIED
 
+### 2026-08-19 · LV — PR #70 missed-context repair + two-person launch pack
+
+#### PLAN POSITION
+- Phase: LV — Limited Validation Gate / M3 prerequisite
+- Workstream: Core V1 product-flow correctness
+- Step: repair the accepted review findings on #70, then traverse the LV loop as two people
+- Previous Gate: #70 independent review verdict `CHANGES_REQUIRED`
+- This Gate: #70 findings closed; #71 opened for the non-security flow defects found in traversal
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §6.1–6.5, §7.1–7.5, §8 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — client-only product-flow correctness; no customer, BM, pricing, AI-scope, storage or KPI impact
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` §0–1 — YES
+- Latest relevant Work Log checked: 2026-08-18 LV readiness core-flow audit — YES
+- MASTER PLAN version / 기준일: PRODUCT V3 / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: Opus 5
+- Role: implementation owner (NOT reviewer of its own work)
+- PR: #70 (repair) and #71 (two-person launch pack, stacked on #70)
+- Branch: `codex/lv-readiness-audit-v1`, then `claude/lv-two-person-launch-pack-v1`
+- Base SHA: `7a83665299a1f0096f2f81da393f28a97142c9ba`
+- Old HEAD: `b5663c7c8db409ed84b70542eda3b368b8b6799b` (the reviewed HEAD; unmoved by others)
+- New/Reviewed HEAD: #70 `922938eff3e842bc343227b4abb176e57a277891` · #71 `0903e33c6adaaca3ff07161e66b6e36271ba3a52`
+
+#### CHANGED / REVIEWED
+- `src/lib/partnerDay.ts` (new): sole owner of §6.5's window sentence — checkpoint lower bound or 7-day fallback, upper bound today; localStorage receipt keyed `viewer:couple`; prefix-acknowledgement helper; date-label helper.
+- `src/components/widgets/PartnerDayTimelineWidget.tsx`: mount-driven `useEffect` receipt removed; advancement now only via an explicit `여기까지 확인했어요` confirming the rendered chronological prefix; per-row date context; heading becomes `놓친 하루` when the window reaches back.
+- `src/components/widgets/CareHintWidget.tsx`: same window source; copy no longer names a day it cannot vouch for.
+- `src/lib/store.tsx`, `storeContext.ts`, `types/index.ts`, `utils.ts`: `partnerDayLastCheckedAt` and `markPartnerDayChecked` removed; device-preference carry-over set is now the exported `DEVICE_PREF_CARRY_OVER_KEYS`.
+- `src/lib/accountDeletionRecovery.test.tsx`: guard now pins the declared carry-over constant, not only the persisted JSON keys.
+- `src/lib/widgets.tsx`: partner-day catalogue description no longer claims today-only; literal backticks removed from a user-facing string.
+- `src/components/widgets/TalkAboutListWidget.tsx` (#71): `외 N개` becomes the control that opens the remaining 이야기거리.
+- `src/pages/recordAuthoringEntryPoint.test.tsx` (#71, new): §7.1 authoring contract for BOTH roles.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none. No key hierarchy, device trust, recovery authority or write-floor path touched.
+- DB/migration semantics: none. No SQL added or modified.
+- product semantics: no surface renamed, no funnel added, no Home redesign, no chat, no P6.
+- Production: untouched.
+
+#### VERIFICATION
+- command: `npm run verify` on both HEADs — PASS (EXIT=0). #70: 2353 tests / 159 files. #71: 2366 tests / 160 files. Typecheck, lint, both build directions included.
+- command: `git diff --check` — PASS on both.
+- command: mutation checks (applied, observed failing, reverted) — PASS. Restoring the mount effect fails 8 widget tests; dropping the `date <= today` bound fails 3; acknowledging the whole window instead of the visible prefix fails the anti-collapse regression; re-adding `partnerDayLastCheckedAt` to the carry-over set fails the repaired guard.
+- command: GitHub Actions on #70 `922938e` — PASS, 14/14 checks, including `Real-browser creator/partner matrix` (run 32164413345, 3m54s). That job is the two-person browser evidence for this HEAD.
+- command: `npx playwright test e2e/coupleMatrix.spec.ts` locally — **UNVERIFIED**. This sandbox cannot download Playwright Chromium (headless shell fetch blocked; the headed binary will not launch here). CI is the authority for browser evidence.
+- what it actually proves: client-side product semantics and copy under jsdom, plus the real production bundle in CI's mocked-backend browser matrix. It proves nothing about RLS, remote Supabase, or physical devices.
+- #71 CI at time of writing: only Vercel checks had reported; the GitHub Actions workflows had not yet completed. **UNVERIFIED** for #71.
+
+#### REVIEW IMPACT
+- FULL for #70: the implementation of every accepted finding changed, so the `b5663c7` review is stale.
+- FULL for #71: never reviewed.
+
+#### BLOCKERS
+- code: none known.
+- environment: Playwright Chromium unavailable locally (network-blocked). Not a code defect.
+- external/manual: real-device and remote-Supabase evidence remain outside this session.
+
+#### STOPPED AT
+- exact completed boundary: #70 @ `922938e` pushed, 14/14 CI green. #71 @ `0903e33` pushed as a Draft based on #70's branch.
+
+#### REMAINING
+- not completed: independent review of both HEADs. Local browser traversal. Controlled real-couple validation.
+
+#### NEXT ACTION
+- next owner: a fresh independent Claude review session
+- tool/model: Claude Code / Opus 5
+- 기준 SHA: `922938eff3e842bc343227b4abb176e57a277891` then `0903e33c6adaaca3ff07161e66b6e36271ba3a52`
+- exact next task: review #70's checkpoint semantics and scope, then #71's flow fixes. #70 lands before #71.
+
+#### DO NOT ADVANCE UNTIL
+- an independent review accepts #70's checkpoint semantics.
+- #71's GitHub Actions run is confirmed green on `0903e33`.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

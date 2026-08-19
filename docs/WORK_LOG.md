@@ -89,6 +89,121 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-20 · LV · 전 branch consolidation — 흩어진 유효 작업을 master로 회수
+
+#### PLAN POSITION
+- Phase: LV (Limited Validation)
+- Workstream: branch consolidation / minimum-loss master reconstruction
+- Step: remote branch 76개 전수 감사 → 유효 고유 작업만 회수 → master 착지
+- Previous Gate: P5.5 landing (`eb2d9a4`), master `7a83665`
+- This Gate: LV 코어 작업(PartnerDay 상태 기계 + 이야기거리 도달성 + §7.1 authoring)이
+  한 tree에 모이고 `npm run verify`가 통과함
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §6.1/§6.5(놓친 하루), §7.1(기록 진입점),
+  §7.5(원본 동일성), §8(이야기거리는 대화 목록이지 task manager가 아님)
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·BM·가격·저장정책·AI 역할
+  변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: 저장소 코드와 live git/GitHub. 문서의 과거 SHA·PR 서술은
+  근거로 쓰지 않았다
+- Latest relevant Work Log checked: 2026-08-19 두 entry(#70 repair, identity-transition)
+- MASTER PLAN version / 기준일: 2026-08-20
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: —
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: claude-opus-5[1m]
+- Role: Senior Git Integrator + Software Archaeologist (write-capable)
+- PR: 없음. **PR을 만들지 않는 것이 이번 작업의 지시였다**
+- Branch: `consolidation/all-valid-work-v1` (전용 clean worktree에서 작업)
+- Base SHA: 7a83665299a1f0096f2f81da393f28a97142c9ba
+- Old HEAD: 7a83665299a1f0096f2f81da393f28a97142c9ba
+- New/Reviewed HEAD: eadf647f81f9acfa4509a640278cfc88e71cc978 (+1, 아래 STOPPED AT)
+
+#### CHANGED / REVIEWED
+- 판정 근거 전체: `docs/CONSOLIDATION_LEDGER.md` (branch 76개가 각각 정확히 한 번 등장).
+  여기에 그 내용을 복제하지 않는다
+- file: `src/lib/partnerDay.ts` / `partnerDay.test.ts` / `usePartnerDay.ts` /
+  `partnerDaySimulation.test.ts` — PR #72 계보(`609a891`)를 회수. 적용 후 트리가 `609a891`과
+  byte-identical임을 확인
+- file: `TalkAboutListWidget.tsx`/`.test.tsx`, `recordAuthoringEntryPoint.test.tsx`,
+  `src/lib/widgets.tsx` — PR #71 계보의 이야기거리 overflow 수정과 §7.1 계약
+- file: `control-tower/**` — PR #70 계보의 Obsidian vault·LV architecture report.
+  같은 branch의 PartnerDay production code는 회수하지 않았다
+- file: `docs/CONSOLIDATION_LEDGER.md`(신규), `docs/CURRENT_STATE.md`,
+  `docs/WORK_LOG.md`, `control-tower/Current Gate.md`, `Dashboard.md`,
+  `tasks/PartnerDay Checkpoint State Machine.md`
+- why: 유효한 고유 작업이 세 branch에 흩어져 있었고, 그중 하나(PR #70)는 **더 최신
+  HEAD를 가졌지만 더 약한 PartnerDay 구현**을 담고 있었다. 시각이 아니라 의미로 판정했다
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음. E2EE·키·복호화 경로 미접촉. local-only stack의 security
+  파일 6종이 master와 byte-identical임을 blob 단위로 확인
+- DB/migration semantics: 변경 없음. SQL 파일 0건 추가·수정. migration 041/042 미접촉
+- product semantics: chat FROZEN 유지, P6 미착수, 감정 추론·관계 점수·이별 예측·자동
+  중요 기록 선정 부재를 최종 tree에서 재확인
+- Production: 미접촉. Supabase remote mutation 없음
+
+#### VERIFICATION
+- command: `npm ci && npm run verify`
+- PASS — typecheck, lint(0 warnings), **2450 tests / 162 files**, build
+  (build는 CI와 동일한 non-secret placeholder를 프로세스 환경에만 주입해 실행)
+- command: `npm run test:p0` / `test:p5` / `test:rollback` / `test:write-floor` / `test:phase0`
+- PASS — 각각 76 / 93 assertions, rollback 3케이스, 39 assertions, Phase 0 계약 유지
+- command: `npm run verify:native`
+- PASS — 85 tests / 4 files
+- command: PartnerDay·이야기거리·authoring·account deletion·couple lifecycle 표적 실행
+- PASS — 213 tests / 10 files
+- command: `npm run check:edge` / `test:edge`
+- **NOT RUN** — 이 머신에 deno 미설치. 이번 변경은 `supabase/functions/`를 전혀 건드리지
+  않았으므로 위험은 낮지만 실행하지 않았다는 사실은 그대로 남긴다
+- command: 최종 tree 회귀 감사 (금지 기능 부재 + 필수 의미 존재 grep)
+- PASS — 특히 `emotionPipelineSingleSource.test.ts`가 삭제된 두 번째 감정 엔진 파일의
+  **부재를 단언**하며 통과한다. 옛 branch에서 그 파일을 되살렸다면 master 자신의 테스트가
+  깨졌을 것이다
+- what it actually proves: 로컬 저장소 수준의 정확성과 통합 무결성. 실기기·staging·
+  production 증거가 아니며 독립 review도 아니다
+
+#### REVIEW IMPACT
+- FULL — PartnerDay 상태 기계 의미가 master에서 전면 교체되었다
+- whether an earlier review is stale: YES. PR #70 기준의 이전 판정은 이 tree에 적용되지
+  않는다. PR #72 계보에 대한 독립 review는 아직 없다
+
+#### BLOCKERS
+- code: 없음
+- environment: deno 미설치로 edge 검증 미실행
+- external/manual: `git push origin master`가 `.claude/hooks/block-dangerous-bash.sh`의
+  `direct push to master` 규칙에 의해 결정적으로 차단된다. hook 자체가 명시한 예외
+  경로("the user must run it themselves")를 따랐고, hook을 우회하거나 수정하지 않았다
+
+#### STOPPED AT
+- exact completed boundary: 감사·회수·검증·문서화 완료. `consolidation/all-valid-work-v1`을
+  origin에 push했고 local `master`를 `eadf647`로 fast-forward했다. **remote master ref
+  갱신만 남았다.** 이 entry를 담은 commit이 추가되면 최종 SHA는 그만큼 앞선다
+
+#### REMAINING
+- not completed: `git push origin master` (사용자 실행). 독립 review 미실시.
+  remote branch 정리 미실시(이번 pass에서 0개 삭제)
+
+#### NEXT ACTION
+- next owner: 사용자(push), 이후 독립 Reviewer
+- tool/model: Kiro Reviewer 또는 Claude (read-only)
+- 기준 SHA: push 후의 새 origin/master
+- exact next task: 불확정 `OUTSTANDING` 증가에 대한 저장 용량 제품 결정, 그리고 실기기
+  다일차 검증
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 미확인 기록 보존이 저장 용량보다 우선한다는 제품 결정이 확정될 때까지
+  `OUTSTANDING` 상한 관련 구현을 시작하지 않는다. P6는 여전히 NOT AUTHORIZED
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED. remote Supabase catalog UNVERIFIED,
+  실기기 UNVERIFIED
+
+---
+
 ### 2026-08-19 · LV · Partner Day 미확인 기록 소실 — clean replacement
 
 #### PLAN POSITION

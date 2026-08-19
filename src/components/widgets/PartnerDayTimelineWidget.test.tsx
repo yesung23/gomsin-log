@@ -385,6 +385,9 @@ describe('privacy: only what this viewer is entitled to see', () => {
   it('uses the stored checkpoint as the missed-context lower bound', () => {
     writePartnerDayCheckpoint(ME, 'couple-1', {
       confirmedRecordIds: [],
+      // The receipt attests it had already seen the earlier record, which is what
+      // lets the date bound stand as a decision about it.
+      observedRecordIds: ['before'],
       confirmedThrough: '2026-07-30',
       confirmedAt: '2026-07-30T08:00:00.000Z',
     });
@@ -397,6 +400,78 @@ describe('privacy: only what this viewer is entitled to see', () => {
     expect(screen.queryByText('확인 전 기록')).not.toBeInTheDocument();
     expect(screen.getByText('확인일 기록')).toBeInTheDocument();
     expect(screen.getByText('오늘 기록')).toBeInTheDocument();
+  });
+
+  it('surfaces an older record the receipt never saw', async () => {
+    // End to end through the widget: an offline backlog lands carrying a date
+    // behind the bound. Nobody has seen it, so the bound must not bury it.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    writePartnerDayCheckpoint(ME, 'couple-1', {
+      confirmedRecordIds: ['known'],
+      observedRecordIds: ['known'],
+      confirmedThrough: '2026-07-30',
+      confirmedAt: '2026-07-30T08:00:00.000Z',
+    });
+    renderWidget([
+      record({ id: 'known', date: '2026-07-30', log: '이미 확인한 기록' }),
+      record({ id: 'late', date: '2026-07-28', log: '늦게 도착한 기록' }),
+      record({ id: 'today', log: '오늘 기록' }),
+    ]);
+
+    expect(screen.getByText('늦게 도착한 기록')).toBeInTheDocument();
+
+    // Here it IS in the visible prefix, so acknowledging genuinely consumes it.
+    await user.click(screen.getByTestId('partner-day-acknowledge'));
+    const stored = readPartnerDayCheckpoint(ME, 'couple-1');
+    expect(stored?.confirmedRecordIds).toContain('late');
+    expect(screen.queryByText('늦게 도착한 기록')).not.toBeInTheDocument();
+  });
+
+  it('keeps a late older record that could not be drawn when the prefix was acknowledged', async () => {
+    // The interaction that could quietly undo the rescue. `late` is rescued into
+    // the window but cannot be rendered, so it is never part of the prefix the
+    // viewer confirms. Acknowledging the readable records still marks it OBSERVED,
+    // which switches the rescue off -- the date bound has to take over, and does,
+    // because it is held at the earliest outstanding record.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    writePartnerDayCheckpoint(ME, 'couple-1', {
+      confirmedRecordIds: [],
+      observedRecordIds: [],
+      confirmedThrough: '2026-07-30',
+      confirmedAt: '2026-07-30T08:00:00.000Z',
+    });
+    renderWidget([
+      record({ id: 'late', date: '2026-07-28', log: '늦게 도착한 기록', contentUnavailable: true }),
+      record({ id: 'today', log: '오늘 기록' }),
+    ]);
+
+    // Rescued into the window, and reported as present but unreadable.
+    expect(screen.getByTestId('partner-day-unavailable')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('partner-day-acknowledge'));
+
+    const stored = readPartnerDayCheckpoint(ME, 'couple-1');
+    expect(stored?.observedRecordIds).toContain('late');
+    // Observed, but never acknowledged -- nobody could read it.
+    expect(stored?.confirmedRecordIds).not.toContain('late');
+    // So the bound had to stop at it rather than jumping to today.
+    expect(stored?.confirmedThrough).toBe('2026-07-28');
+
+    // It is now the only thing left in the window, which the widget reports as an
+    // unreadable-content state rather than an empty one. Still outstanding, so it
+    // comes back the moment its key arrives.
+    expect(screen.getByTestId('widget-partner-day')).toHaveAttribute('data-state', 'unavailable');
+    expect(screen.getByText(/이 기기에서 아직 열 수 없는 기록이 있어요/)).toBeInTheDocument();
+  });
+
+  it('a receipt predating observation reopens older records instead of hiding them', () => {
+    writePartnerDayCheckpoint(ME, 'couple-1', {
+      confirmedRecordIds: [],
+      confirmedThrough: '2026-07-30',
+      confirmedAt: '2026-07-30T08:00:00.000Z',
+    });
+    renderWidget([record({ id: 'before', date: '2026-07-29', log: '확인 전 기록' })]);
+    expect(screen.getByText('확인 전 기록')).toBeInTheDocument();
   });
 });
 

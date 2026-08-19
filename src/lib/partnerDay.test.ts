@@ -44,13 +44,33 @@ function record(overrides: Partial<DailyRecord> = {}): DailyRecord {
   };
 }
 
+/**
+ * A receipt that HAS observed the ids it is given.
+ *
+ * Most cases below are about the ordinary date window, and the date window only
+ * governs records the receipt can attest were already visible. Tests that want
+ * the late-arrival branch pass `observedRecordIds` explicitly, or omit it via
+ * `legacyCheckpoint` to get the fail-open reading.
+ */
 function checkpoint(overrides: Partial<PartnerDayCheckpoint> = {}): PartnerDayCheckpoint {
   return {
     confirmedRecordIds: [],
+    observedRecordIds: [],
     confirmedThrough: TODAY,
     confirmedAt: `${TODAY}T09:00:00.000Z`,
     ...overrides,
   };
+}
+
+/** A receipt written before observation existed: it cannot attest to anything. */
+function legacyCheckpoint(overrides: Partial<PartnerDayCheckpoint> = {}): PartnerDayCheckpoint {
+  const base = checkpoint(overrides);
+  delete base.observedRecordIds;
+  return base;
+}
+
+function observing(ids: string[], overrides: Partial<PartnerDayCheckpoint> = {}) {
+  return checkpoint({ observedRecordIds: ids, ...overrides });
 }
 
 const ids = (records: DailyRecord[]) => records.map((r) => r.id);
@@ -99,8 +119,41 @@ describe('missedPartnerRecords: which records are in the missed window', () => {
       record({ id: 'yesterday', date: '2026-08-18' }),
       record({ id: 'today', date: TODAY }),
     ];
-    expect(ids(missedPartnerRecords(window, VIEWER, TODAY, checkpoint({ confirmedThrough: '2026-08-18' }))))
-      .toEqual(['yesterday', 'today']);
+    expect(ids(missedPartnerRecords(
+      window,
+      VIEWER,
+      TODAY,
+      observing(['older'], { confirmedThrough: '2026-08-18' }),
+    ))).toEqual(['yesterday', 'today']);
+  });
+
+  it('an older record the receipt never saw is not governed by the date bound', () => {
+    // The late-arrival branch. Same window, same bound -- the only difference is
+    // that this client had no sight of `older` when the bound was set, so the
+    // bound cannot stand as a verdict on it.
+    const window = [
+      record({ id: 'older', date: '2026-08-17' }),
+      record({ id: 'today', date: TODAY }),
+    ];
+    expect(ids(missedPartnerRecords(
+      window,
+      VIEWER,
+      TODAY,
+      observing(['today'], { confirmedThrough: '2026-08-18' }),
+    ))).toEqual(['older', 'today']);
+  });
+
+  it('a receipt with no observation at all reopens older records rather than hiding them', () => {
+    const window = [
+      record({ id: 'older', date: '2026-08-17' }),
+      record({ id: 'today', date: TODAY }),
+    ];
+    expect(ids(missedPartnerRecords(
+      window,
+      VIEWER,
+      TODAY,
+      legacyCheckpoint({ confirmedThrough: '2026-08-18' }),
+    ))).toEqual(['older', 'today']);
   });
 
   it('three-day-old checkpoint: recovers every day since, oldest first', () => {
@@ -181,7 +234,7 @@ describe('advancePartnerDayCheckpoint: only an explicit acknowledgement moves it
     const next = advancePartnerDayCheckpoint(null, [
       record({ id: 'a', date: '2026-08-17' }),
       record({ id: 'b', date: '2026-08-18' }),
-    ], [], new Date('2026-08-19T10:00:00.000Z'));
+    ], [], null, new Date('2026-08-19T10:00:00.000Z'));
     expect(next).toEqual({
       confirmedRecordIds: ['a', 'b'],
       confirmedThrough: '2026-08-18',
@@ -264,6 +317,7 @@ describe('checkpoint storage is scoped to one viewer and one couple', () => {
       .toBe(true);
     expect(readPartnerDayCheckpoint('user-a', 'couple-a')).toEqual({
       confirmedRecordIds: ['x'],
+      observedRecordIds: [],
       confirmedThrough: TODAY,
       confirmedAt: `${TODAY}T09:00:00.000Z`,
     });
@@ -364,9 +418,10 @@ describe('the id cap can only ever reveal more, never less', () => {
   it('keeps the newest 500 confirmations and drops the oldest', () => {
     const many = Array.from({ length: 520 }, (_, i) => record({ id: `r-${String(i).padStart(4, '0')}` }));
     const next = advancePartnerDayCheckpoint(null, many, many)!;
-    expect(next.confirmedRecordIds).toHaveLength(520);
+    // Capped in memory as well as on disk, so this render and a later reload
+    // cannot disagree about what is excluded.
+    expect(next.confirmedRecordIds).toHaveLength(500);
 
-    // The cap is applied by the storage layer, which is where the quota lives.
     writePartnerDayCheckpoint('user-a', 'couple-a', next);
     const stored = readPartnerDayCheckpoint('user-a', 'couple-a')!;
     expect(stored.confirmedRecordIds).toHaveLength(500);
@@ -381,5 +436,149 @@ describe('the id cap can only ever reveal more, never less', () => {
     const evicted = record({ id: 'evicted' });
     const cp = checkpoint({ confirmedRecordIds: [], confirmedThrough: TODAY });
     expect(ids(missedPartnerRecords([evicted], VIEWER, TODAY, cp))).toEqual(['evicted']);
+  });
+});
+
+/**
+ * The late-arrival rescue, which is the reason `observedRecordIds` exists.
+ *
+ * A record can reach this client long after it was written, carrying a date that
+ * sits behind the checkpoint bound. Nobody ever saw it, so nothing may treat the
+ * bound as a decision about it.
+ */
+describe('a record that arrives after the checkpoint, dated before it', () => {
+  it('surfaces an offline backlog flushed days later', () => {
+    // Composed on the 16th while the partner had no signal, delivered on the 19th.
+    // `TodayLogWidget` stamps the compose date, so the row really does say 8/16.
+    const r17 = record({ id: 'r17', date: '2026-08-17' });
+    const r18 = record({ id: 'r18', date: '2026-08-18' });
+    const cp = advancePartnerDayCheckpoint(null, [r17, r18], [r17, r18], {
+      records: [r17, r18],
+      viewer: VIEWER,
+    })!;
+    expect(cp.confirmedThrough).toBe('2026-08-18');
+
+    const late16 = record({ id: 'late16', date: '2026-08-16' });
+    expect(ids(missedPartnerRecords([r17, r18, late16], VIEWER, TODAY, cp)))
+      .toEqual(['late16']);
+  });
+
+  it('surfaces a record that was simply missing from the snapshot at acknowledgement', () => {
+    // Delayed sync rather than offline composition: the row existed server-side
+    // but this client had not received it when the receipt was written.
+    const seen = record({ id: 'seen', date: '2026-08-18' });
+    const cp = advancePartnerDayCheckpoint(null, [seen], [seen], {
+      records: [seen],
+      viewer: VIEWER,
+    })!;
+    const arrivedLate = record({ id: 'arrived-late', date: '2026-08-15' });
+    expect(ids(missedPartnerRecords([seen, arrivedLate], VIEWER, TODAY, cp)))
+      .toEqual(['arrived-late']);
+  });
+
+  it('is unaffected by the viewer device clock being 48 hours out in either direction', () => {
+    // The whole point of keying on ids. `confirmedAt` is this device's wall clock
+    // and `createdAt` is Postgres's; any comparison between them loses records
+    // when the two disagree. Nothing here reads either one.
+    const seen = record({ id: 'seen', date: '2026-08-18' });
+    const late = record({ id: 'late', date: '2026-08-16', createdAt: '2026-08-16T09:00:00.000Z' });
+    const base = new Date('2026-08-18T12:00:00.000Z');
+    const skews = [
+      base,
+      new Date(base.getTime() + 48 * 3600_000),
+      new Date(base.getTime() - 48 * 3600_000),
+    ];
+
+    const results = skews.map((now) => {
+      const cp = advancePartnerDayCheckpoint(
+        null, [seen], [seen], { records: [seen], viewer: VIEWER }, now,
+      )!;
+      return ids(missedPartnerRecords([seen, late], VIEWER, TODAY, cp));
+    });
+
+    expect(results).toEqual([['late'], ['late'], ['late']]);
+    // And the receipts really did differ, so the invariance is not vacuous.
+    expect(new Set(skews.map((d) => d.toISOString())).size).toBe(3);
+  });
+
+  it('keeps a late older record after the viewer acknowledges a newer prefix', () => {
+    // The interaction that could quietly undo the rescue: acknowledging anything
+    // records `late16` as observed, so the rescue path stops applying to it. The
+    // date bound has to take over, which it does because `late16` is outstanding.
+    const late16 = record({ id: 'late16', date: '2026-08-16' });
+    const r19a = record({ id: 'r19a', date: TODAY, time: '09:00' });
+    const r19b = record({ id: 'r19b', date: TODAY, time: '10:00' });
+    const all = [late16, r19a, r19b];
+
+    const window = missedPartnerRecords(all, VIEWER, TODAY, observing(
+      ['r19a', 'r19b'], { confirmedThrough: '2026-08-18' },
+    ));
+    expect(ids(window)).toEqual(['late16', 'r19a', 'r19b']);
+
+    // The viewer acknowledges only the two newest.
+    const next = advancePartnerDayCheckpoint(
+      observing(['r19a', 'r19b'], { confirmedThrough: '2026-08-18' }),
+      [r19a, r19b],
+      window,
+      { records: all, viewer: VIEWER },
+    )!;
+
+    expect(next.observedRecordIds).toContain('late16');
+    // Held back by the outstanding record rather than jumping to the 19th.
+    expect(next.confirmedThrough).toBe('2026-08-16');
+    expect(ids(missedPartnerRecords(all, VIEWER, TODAY, next))).toEqual(['late16']);
+  });
+
+  it('does not rescue a future-dated record however newly it appeared', () => {
+    const cp = observing(['seen'], { confirmedThrough: '2026-08-18' });
+    const future = record({ id: 'future', date: '2026-08-25' });
+    expect(ids(missedPartnerRecords([future], VIEWER, TODAY, cp))).toEqual([]);
+  });
+
+  it('never rescues a private record, and its existence changes no count', () => {
+    const cp = observing([], { confirmedThrough: '2026-08-18' });
+    const secret = record({ id: 'secret', date: '2026-08-16', isPrivate: true });
+    const shared = record({ id: 'shared', date: '2026-08-16' });
+
+    expect(ids(missedPartnerRecords([secret], VIEWER, TODAY, cp))).toEqual([]);
+    expect(missedPartnerRecords([shared, secret], VIEWER, TODAY, cp))
+      .toHaveLength(missedPartnerRecords([shared], VIEWER, TODAY, cp).length);
+  });
+
+  it("never writes a private or own record's id into the observation snapshot", () => {
+    const shared = record({ id: 'shared' });
+    const secret = record({ id: 'secret', isPrivate: true });
+    const mine = record({ id: 'mine', userId: ME, authorRole: 'soldier' });
+    const cp = advancePartnerDayCheckpoint(null, [shared], [shared], {
+      records: [shared, secret, mine],
+      viewer: VIEWER,
+    })!;
+
+    expect(cp.observedRecordIds).toEqual(['shared']);
+    expect(cp.observedRecordIds).not.toContain('secret');
+    expect(cp.observedRecordIds).not.toContain('mine');
+  });
+
+  it('evicting an observed id can only show a record again, never hide one', () => {
+    // The snapshot is capped. An id that falls off is read as "not observed",
+    // which puts its record back in the window -- the safe direction.
+    const many = Array.from({ length: 520 }, (_, i) => record({
+      id: `o-${String(i).padStart(4, '0')}`,
+      date: '2026-08-16',
+    }));
+    const cp = advancePartnerDayCheckpoint(null, [many[519]], many, {
+      records: many,
+      viewer: VIEWER,
+    })!;
+    expect(cp.observedRecordIds).toHaveLength(500);
+    expect(cp.observedRecordIds).not.toContain('o-0000');
+
+    // The evicted one reappears; nothing disappeared.
+    const surfaced = ids(missedPartnerRecords(many, VIEWER, TODAY, {
+      ...cp,
+      confirmedThrough: '2026-08-18',
+    }));
+    expect(surfaced).toContain('o-0000');
+    expect(surfaced).not.toContain(many[519].id);
   });
 });

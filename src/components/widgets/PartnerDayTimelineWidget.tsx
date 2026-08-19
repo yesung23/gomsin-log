@@ -126,7 +126,10 @@ export function PartnerDayTimelineWidget() {
     // `missed`, not `readableMissed`: a record this device cannot decrypt yet is
     // not consumed just because it could not be drawn, and the receipt has to
     // know it is still outstanding so the date bound does not step over it.
-    const next = advancePartnerDayCheckpoint(checkpoint, visible, missed);
+    const next = advancePartnerDayCheckpoint(checkpoint, visible, missed, {
+      records: state.records,
+      viewer: { userId: profile.id, role: profile.role },
+    });
     if (next && writePartnerDayCheckpoint(userId, coupleId, next)) {
       setCheckpoint(next);
     }

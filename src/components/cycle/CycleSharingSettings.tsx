@@ -147,6 +147,13 @@ export function CycleSharingSettings({
         <p className="text-caption text-muted-foreground leading-relaxed">
           위 스위치를 모두 켜도 마찬가지예요. 원본 기록은 나만 볼 수 있어요.
         </p>
+        {/* Pain is the one item that has a door. Saying so HERE, inside the
+            withheld block, is the honest place for it: someone checking what is
+            hidden must not have to find a different section to learn about the
+            exception. */}
+        <p className="text-caption text-muted-foreground leading-relaxed pt-1 border-t border-border/60 mt-1">
+          {preview.painDisclosure}
+        </p>
       </div>
     </div>
   );

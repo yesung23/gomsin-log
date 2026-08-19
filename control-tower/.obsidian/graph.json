@@ -1,0 +1,27 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    { "query": "path:Agents", "color": { "a": 1, "rgb": 14701138 } },
+    { "query": "path:reports", "color": { "a": 1, "rgb": 5431378 } },
+    { "query": "path:tasks", "color": { "a": 1, "rgb": 11621088 } },
+    { "query": "path:audits", "color": { "a": 1, "rgb": 14725458 } }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": -0.8,
+  "nodeSizeMultiplier": 1.4,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.5,
+  "repelStrength": 12,
+  "linkStrength": 1,
+  "linkDistance": 210,
+  "scale": 1,
+  "close": false
+}

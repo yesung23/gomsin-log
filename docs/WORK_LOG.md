@@ -89,6 +89,108 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-19 · LV · Partner Day 미확인 기록 소실 — clean replacement
+
+#### PLAN POSITION
+- Phase: LV (Partner Day 놓친 하루 복구)
+- Workstream: partner-day checkpoint state machine
+- Step: W1–W8 clean replacement (PR #70 코드 patch 아님, 새 설계로 재구현)
+- Previous Gate: 8ce544e (1000-day simulation 복구)
+- This Gate: 미확인 기록이 시간 경과로 사라지지 않음이 테스트로 증명됨
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §6.1, §6.5 (`마지막 확인점 이후, 없으면 최근 7일, 상한 오늘`), §1.11, §7.5
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객/과금/저장정책/AI 역할 변경 없음
+- Engineering source checked: `AGENTS.md` §2 core product contract, §13 scope discipline
+- Current-state checked: 저장소 실제 코드 (`src/lib/partnerDay.ts` at 8ce544e)
+- Latest relevant Work Log checked: 2026-08-18 P5.5 Final Landing
+- MASTER PLAN version / 기준일: 2026-08-19
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: —
+
+§6.5의 "없으면 최근 7일"은 유지되지만 그 의미를 재확인했다. 이는 **첫 접촉 1회의
+discovery 상한**이며 보존 규칙이 아니다. 이전 구현은 이 7일을 memory로 사용해서
+§1.11("놓친 하루의 맥락을 복구")을 위반했다.
+
+#### OWNERSHIP
+- Tool: Codex (desktop)
+- Model: claude-opus-5
+- Role: Worker + self-verification
+- PR: 없음 (현재 branch 작업, PR #70/#71 미수정)
+- Branch: codex/lv-readiness-audit-v1
+- Base SHA: 8ce544e186d7f325bb746ec3acab72335e617fd7
+- Old HEAD: 8ce544e186d7f325bb746ec3acab72335e617fd7
+- New HEAD / Reviewed HEAD: uncommitted working tree
+
+#### CHANGED / REVIEWED
+- file: `src/lib/partnerDay.ts` — 전면 교체. `PartnerDayCheckpoint`가
+  `{version, confirmedRecordIds, outstandingRecordIds, knownRecordIds}`.
+  `observedRecordIds` → `knownRecordIds`, `confirmedAt` 제거.
+  `projectPartnerDay` (first-contact / discovery), `acknowledgePartnerDayRecords`
+  (유일한 CONFIRMED writer) 신규. `missedPartnerRecords`,
+  `advancePartnerDayCheckpoint`, `partnerDayFallbackWindow` 제거.
+- file: `src/lib/usePartnerDay.ts` (신규) — viewer/couple/todayStr을 한 closure에서
+  구성해 eligibility와 persistence가 동일 값을 사용. 저장 실패 시 state 미전진.
+- file: `src/components/widgets/PartnerDayTimelineWidget.tsx` — hook 사용,
+  확인 버튼만 CONFIRMED 기록.
+- file: `src/components/widgets/CareHintWidget.tsx` — 동일 surface를 읽기 전용으로 사용.
+- file: `src/lib/partnerDay.test.ts` (재작성, 56 tests), `src/lib/partnerDaySimulation.test.ts`
+  (신규, 12 tests), 위젯/identity 테스트 signature 갱신.
+- why: 이전 구현은 "surface 되었지만 확인하지 않은" 상태를 저장하지 않았고, 그 역할을
+  rolling 7-day date window가 대신했다. 날짜 window는 잊는다. day 0에 보였고 day 8에
+  사라졌으며 아무도 확인 버튼을 누르지 않았다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음 (E2EE·키·복호화 경로 미접촉)
+- DB/migration semantics: 변경 없음 (SQL·migration·Supabase 미접촉)
+- product semantics: §6.5 첫 접촉 7일 상한, 확인 버튼 UX, 시각 디자인 유지
+- Production: 미접촉
+
+#### VERIFICATION
+- command: `npx vitest run src/lib/partnerDayOutstandingSurvival.test.ts` (at 8ce544e, 임시 파일)
+- FAIL — day 0 `['never-acknowledged']` → day 8 `[]`. 결함 재현 확인 후 파일 삭제, 정식 테스트로 이전.
+- command: `npx vitest run src/lib/partnerDay.test.ts`
+- PASS (56) — day 8 / 30 / 400일 미확인 생존, 확인 버튼만 CONFIRMED 기록, 저장 실패 시 미전진.
+- command: `npx vitest run src/lib/partnerDaySimulation.test.ts`
+- PASS (12) — seed 20260819 / 7 / 991 × diligent · partial · observer.
+  observer(1000일 동안 확인 버튼 0회): surfaced≈2769–2905, survivingOutstanding≈2755–2890,
+  confirmed=0, stranded=0.
+- command: mutation test 1 — surface에 7일 date floor 재도입
+- 22 FAIL (regression 4건 + simulation 9건 전부). 테스트가 vacuous하지 않음을 증명.
+- command: mutation test 2 — `projectPartnerDay`가 outstanding을 CONFIRMED에 자동 기록
+- 14 FAIL (mount 시 CONFIRMED 금지 포함). 복원 확인.
+- command: `npm run verify`
+- PASS — typecheck, lint(0 warnings), 2406 tests / 161 files, build 양방향.
+- what it actually proves: 로컬 저장소 수준의 상태 기계·위젯 경로 정확성. 실제 기기,
+  staging, production 증거는 아님.
+
+#### REVIEW IMPACT
+- FULL — 상태 기계 의미가 전면 교체되었으므로 8ce544e 기준 이전 review는 승계되지 않는다.
+- whether an earlier review is stale: YES. PR #70에 대한 이전 판정은 이 트리에 적용되지 않는다.
+
+#### BLOCKERS
+- code: 없음
+- environment: 없음
+- external/manual: 실제 기기에서 여러 날에 걸친 수동 검증 미실시 (시간 경과가 필요)
+
+#### STOPPED AT
+- exact completed boundary: W1–W8 구현 + 테스트 + `npm run verify` 통과. 커밋하지 않음.
+
+#### REMAINING
+- not completed: commit / push / PR 없음 (지시 범위 외). 독립 review 미실시.
+
+#### NEXT ACTION
+- next owner: 사용자 판단 (커밋 여부), 이후 독립 Reviewer
+- tool/model: Kiro Reviewer 또는 Claude (read-only)
+- 기준 SHA: 커밋 후의 새 HEAD
+- exact next task: OUTSTANDING 무한 성장에 대한 저장 용량 운영 판단 검토
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 미확인 기록 보존이 저장 용량보다 우선한다는 제품 결정 확인
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED
+
 ### 2026-08-18 · P5.5 Final Landing 및 Control Tower 동기화
 
 #### PLAN POSITION

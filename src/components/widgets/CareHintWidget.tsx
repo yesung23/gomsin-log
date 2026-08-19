@@ -1,12 +1,7 @@
-import { useMemo, useState } from 'react';
 import { MessageCircleHeart } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
-import { localToday, toLocalDateString } from '@/lib/utils';
-import {
-  missedPartnerRecords,
-  readPartnerDayCheckpoint,
-  spansBeforeToday,
-} from '@/lib/partnerDay';
+import { spansBeforeToday } from '@/lib/partnerDay';
+import { usePartnerDay } from '@/lib/usePartnerDay';
 
 /**
  * "다정한 한마디" — what to actually say when the call comes.
@@ -23,25 +18,14 @@ export function CareHintWidget() {
   const { state } = useStore();
   const { profile } = state;
   const partnerName = profile.couple.partnerName || '상대방';
-  const todayStr = toLocalDateString(localToday());
-  const userId = state.authenticatedUser?.id || profile.id || '';
-  const coupleId = profile.couple.coupleId || '';
 
-  // The same "마지막 확인 이후 놓친 구간" window as 상대방의 오늘 (PRODUCT_V3 §6.1–6.5).
-  // This widget sits in the call-briefing "더 보기" section and claims to describe
-  // the partner's day, so it has to describe the same days that surface shows --
-  // read-only here, because reading a hint is not acknowledging the day.
-  const [checkpoint] = useState(() => readPartnerDayCheckpoint(userId, coupleId));
-
-  const shared = useMemo(
-    () => missedPartnerRecords(
-      state.records,
-      { userId: profile.id, role: profile.role },
-      todayStr,
-      checkpoint,
-    ),
-    [state.records, profile.id, profile.role, todayStr, checkpoint],
-  );
+  // The same surface as 상대방의 오늘 (PRODUCT_V3 §6.1–6.5). This widget sits in the
+  // call-briefing "더 보기" section and claims to describe the partner's day, so it
+  // has to describe the same records that surface shows.
+  //
+  // `persist` is off and there is no confirm button here: reading a hint is not
+  // confirming the day, and this widget must not be able to retire a record.
+  const { surface: shared, todayStr } = usePartnerDay();
 
   // Describes what was actually shared. Deliberately not a score or a bar: an
   // earlier version rendered `sharedRecords.length * 25` as an "energy level",

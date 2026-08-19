@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, Role } from '@/types';
 import {
+  PARTNER_DAY_CHECKPOINT_VERSION,
   readPartnerDayCheckpoint,
   writePartnerDayCheckpoint,
 } from '@/lib/partnerDay';
@@ -140,11 +141,11 @@ function seedCheckpointA(
   userId = 'user-a',
   coupleId = 'couple-a',
 ) {
-  writePartnerDayCheckpoint(userId, coupleId, {
+  writePartnerDayCheckpoint({ userId, coupleId }, {
+    version: PARTNER_DAY_CHECKPOINT_VERSION,
     confirmedRecordIds: ['a-rec-1', 'a-rec-2'],
     outstandingRecordIds: [],
-    observedRecordIds: ['a-rec-1', 'a-rec-2', ...observedIds],
-    confirmedAt: `${TODAY}T09:00:00.000Z`,
+    knownRecordIds: ['a-rec-1', 'a-rec-2', ...observedIds],
   });
 }
 
@@ -246,15 +247,16 @@ describe('acknowledgement after an identity change writes only the new identity'
 
     await user.click(screen.getByTestId('partner-day-acknowledge'));
 
-    const stored = readPartnerDayCheckpoint('user-b', 'couple-b');
+    const stored = readPartnerDayCheckpoint({ userId: 'user-b', coupleId: 'couple-b' });
     expect(stored?.confirmedRecordIds).toEqual(['b-only']);
-    // The contamination that made the defect durable: A's ids and A's later date
-    // bound being merged into the receipt written under B's key.
+    // The contamination that made the defect durable: A's ids being merged into the
+    // receipt written under B's key.
     expect(stored?.confirmedRecordIds).not.toContain('a-rec-1');
-    expect(stored?.observedRecordIds).toEqual(['b-only']);
+    expect(stored?.knownRecordIds).toEqual(['b-only']);
+    expect(stored?.outstandingRecordIds).toEqual([]);
 
     // A's own receipt is untouched by B's acknowledgement.
-    expect(readPartnerDayCheckpoint('user-a', 'couple-a')?.confirmedRecordIds)
+    expect(readPartnerDayCheckpoint({ userId: 'user-a', coupleId: 'couple-a' })?.confirmedRecordIds)
       .toEqual(['a-rec-1', 'a-rec-2']);
   });
 });

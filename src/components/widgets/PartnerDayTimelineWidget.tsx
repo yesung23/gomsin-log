@@ -1,17 +1,9 @@
-import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, Film, Image as ImageIcon, Mic } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { withReadableContent } from '@/lib/recordAvailability';
-import { localToday, toLocalDateString } from '@/lib/utils';
-import {
-  advancePartnerDayCheckpoint,
-  missedPartnerRecords,
-  partnerDayDateLabel,
-  readPartnerDayCheckpoint,
-  spansBeforeToday,
-  writePartnerDayCheckpoint,
-} from '@/lib/partnerDay';
+import { partnerDayDateLabel, spansBeforeToday } from '@/lib/partnerDay';
+import { usePartnerDay } from '@/lib/usePartnerDay';
 import { AttachmentMedia } from '@/components/AttachmentMedia';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -74,32 +66,16 @@ export function PartnerDayTimelineWidget() {
   const navigate = useNavigate();
   const { profile } = state;
   const partnerName = profile.couple.partnerName || '상대방';
-  const todayStr = toLocalDateString(localToday());
-  const userId = state.authenticatedUser?.id || profile.id || '';
-  const coupleId = profile.couple.coupleId || '';
 
   /**
-   * The read receipt is held per viewer AND per couple in `partnerDay.ts`, not in
-   * app state: app state is rebuilt on sign-in, and a checkpoint that rode along
-   * in device preferences let account A's receipt hide account B's unseen day on
-   * the same phone.
+   * `usePartnerDay` owns the identity triple, the eligibility date, the receipt and
+   * the state machine. This widget owns how the result reads.
    *
-   * It is read once into local state on mount so that a re-render never re-reads
-   * a value this widget just wrote.
+   * `persist: true` makes this widget the single owner of the receipt. It is the
+   * surface with the confirm button, so it is the one that must be able to record
+   * that a record was put in front of the user.
    */
-  const [checkpoint, setCheckpoint] = useState(
-    () => readPartnerDayCheckpoint(userId, coupleId),
-  );
-
-  const missed = useMemo(
-    () => missedPartnerRecords(
-      state.records,
-      { userId: profile.id, role: profile.role },
-      todayStr,
-      checkpoint,
-    ),
-    [state.records, profile.id, profile.role, todayStr, checkpoint],
-  );
+  const { surface: missed, todayStr, acknowledge } = usePartnerDay({ persist: true });
 
   const readableMissed = withReadableContent(missed);
   const unavailableCount = missed.length - readableMissed.length;
@@ -109,34 +85,24 @@ export function PartnerDayTimelineWidget() {
   const heading = multiDay ? `${partnerName}의 놓친 하루` : `${partnerName}의 오늘`;
 
   /**
-   * The ONLY thing that advances the checkpoint.
+   * The ONLY thing that writes CONFIRMED.
    *
-   * Not mount, not a render, not "records finished loading", not a timer. Opening
-   * the home screen is not evidence that anyone read anything, and an earlier
-   * version advanced the checkpoint from an effect the moment one readable record
-   * appeared -- which collapsed the missed window while the user was still looking
-   * at the first five of it, and permanently. Losing unseen context is worse than
-   * showing it twice, so consumption has to be claimed explicitly.
+   * Not mount, not a render, not "records finished loading", not a timer, and not
+   * the passage of time. Opening the home screen is not evidence that anyone read
+   * anything. Records leave the surface here and nowhere else.
    *
    * `visible` is the chronological prefix that is actually on screen, and that is
    * exactly what gets acknowledged: pressing this with fifteen more below keeps
-   * those fifteen, because every one of them is later than the last confirmed one.
+   * those fifteen OUTSTANDING, on their own account and with no date involved.
+   *
+   * `visible` is also the READABLE prefix, so a record this device cannot decrypt
+   * is never confirmed by a press it could not appear in -- it stays outstanding
+   * until its key arrives and someone confirms it.
    */
   const acknowledgeVisible = () => {
-    // `missed`, not `readableMissed`: a record this device cannot decrypt yet is
-    // not consumed just because it could not be drawn. Everything in the window
-    // the viewer did not acknowledge becomes OUTSTANDING and stays reachable on
-    // its own account.
-    const next = advancePartnerDayCheckpoint(checkpoint, visible, missed, {
-      records: state.records,
-      viewer: { userId: profile.id, role: profile.role },
-      // The same viewer-local date the surface above is filtered by, so what this
-      // records as "known" can never range wider than what it could have shown.
-      todayStr,
-    });
-    if (next && writePartnerDayCheckpoint(userId, coupleId, next)) {
-      setCheckpoint(next);
-    }
+    // A failed storage write returns false and advances nothing: the records stay
+    // on screen rather than disappearing with nothing on disk to justify it.
+    acknowledge(visible);
   };
 
   const openRecord = (record: DailyRecord) => {

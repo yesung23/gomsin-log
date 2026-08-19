@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AppState, DailyRecord } from '@/types';
 import {
+  PARTNER_DAY_CHECKPOINT_VERSION,
   partnerDayCheckpointKey,
   readPartnerDayCheckpoint,
   writePartnerDayCheckpoint,
@@ -294,6 +295,17 @@ describe('it never says something it does not know', () => {
     expect(widget.textContent).toContain('아직 없어요');
   });
 
+  it('does not create or persist a receipt while the shared workspace is unconfirmed', () => {
+    // `usePartnerDay`'s persist effect already checks `sharedSyncStatus`, but this
+    // pins the outcome end-to-end: an unconfirmed workspace must not be allowed to
+    // manufacture an empty v2 receipt, which the blocker fix now treats as real
+    // provenance rather than "no receipt at all".
+    currentSyncStatus = 'unavailable';
+    renderWidget([]);
+
+    expect(readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' })).toBeNull();
+  });
+
   it('shows a delayed workspace normally, but admits it may be stale', () => {
     // `delayed` means what is on screen is real, just possibly incomplete. Hiding
     // it would lose information the user already has.
@@ -388,11 +400,11 @@ describe('privacy: only what this viewer is entitled to see', () => {
   });
 
   it('hides a record the receipt already observed and the viewer moved past', () => {
-    writePartnerDayCheckpoint(ME, 'couple-1', {
+    writePartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' }, {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
       confirmedRecordIds: ['before'],
       outstandingRecordIds: [],
-      observedRecordIds: ['before', 'at-checkpoint'],
-      confirmedAt: '2026-07-30T08:00:00.000Z',
+      knownRecordIds: ['before', 'at-checkpoint'],
     });
     renderWidget([
       record({ id: 'before', date: '2026-07-29', log: '확인 전 기록' }),
@@ -400,8 +412,9 @@ describe('privacy: only what this viewer is entitled to see', () => {
       record({ id: 'today', log: '오늘 기록' }),
     ]);
 
-    // `before` is confirmed; `at-checkpoint` was observed but is outstanding-free,
-    // so only the record this receipt never saw comes through.
+    // `before` is CONFIRMED. `at-checkpoint` is KNOWN and was never outstanding, so
+    // it was accounted for without ever being pushed at anyone. Only the record
+    // this device had no knowledge of is discovered and surfaced.
     expect(screen.queryByText('확인 전 기록')).not.toBeInTheDocument();
     expect(screen.queryByText('확인일 기록')).not.toBeInTheDocument();
     expect(screen.getByText('오늘 기록')).toBeInTheDocument();
@@ -411,11 +424,11 @@ describe('privacy: only what this viewer is entitled to see', () => {
     // End to end through the widget: an offline backlog lands carrying a date
     // behind the bound. Nobody has seen it, so the bound must not bury it.
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    writePartnerDayCheckpoint(ME, 'couple-1', {
+    writePartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' }, {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
       confirmedRecordIds: ['known'],
       outstandingRecordIds: [],
-      observedRecordIds: ['known'],
-      confirmedAt: '2026-07-30T08:00:00.000Z',
+      knownRecordIds: ['known'],
     });
     renderWidget([
       record({ id: 'known', date: '2026-07-30', log: '이미 확인한 기록' }),
@@ -427,35 +440,34 @@ describe('privacy: only what this viewer is entitled to see', () => {
 
     // Here it IS in the visible prefix, so acknowledging genuinely consumes it.
     await user.click(screen.getByTestId('partner-day-acknowledge'));
-    const stored = readPartnerDayCheckpoint(ME, 'couple-1');
+    const stored = readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' });
     expect(stored?.confirmedRecordIds).toContain('late');
     expect(screen.queryByText('늦게 도착한 기록')).not.toBeInTheDocument();
   });
 
   it('keeps a late older record that could not be drawn when the prefix was acknowledged', async () => {
-    // The interaction that could quietly undo the rescue. `late` is rescued into
-    // the window but cannot be rendered, so it is never part of the prefix the
-    // viewer confirms. Acknowledging the readable records still marks it OBSERVED,
-    // which switches the rescue off -- the date bound has to take over, and does,
-    // because it is held at the earliest outstanding record.
+    // `late` is discovered into the window but cannot be rendered, so it can never
+    // be part of the prefix the viewer confirms. Acknowledging the readable records
+    // marks it KNOWN, which switches discovery off for it -- and OUTSTANDING, written
+    // at the moment it was surfaced, is what keeps it reachable with no date involved.
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    writePartnerDayCheckpoint(ME, 'couple-1', {
+    writePartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' }, {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
       confirmedRecordIds: ['seen'],
       outstandingRecordIds: [],
-      observedRecordIds: ['seen'],
-      confirmedAt: '2026-07-30T08:00:00.000Z',
+      knownRecordIds: ['seen'],
     });
     renderWidget([
       record({ id: 'late', date: '2026-07-28', log: '늦게 도착한 기록', contentUnavailable: true }),
       record({ id: 'today', log: '오늘 기록' }),
     ]);
 
-    // Rescued into the window, and reported as present but unreadable.
+    // Discovered into the window, and reported as present but unreadable.
     expect(screen.getByTestId('partner-day-unavailable')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('partner-day-acknowledge'));
 
-    const stored = readPartnerDayCheckpoint(ME, 'couple-1');
+    const stored = readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' });
     // Never acknowledged -- nobody could read it -- so it stays OUTSTANDING and
     // remains reachable on its own account, with no date involved.
     expect(stored?.outstandingRecordIds).toContain('late');
@@ -486,13 +498,34 @@ describe('privacy: only what this viewer is entitled to see', () => {
  * fifteen unread records — the assertion has to be about what survives in storage
  * and on screen after a real state change, not about a call count.
  */
-describe('checkpoint: nothing but an explicit acknowledgement advances it', () => {
-  it('mounting with readable partner records writes no checkpoint at all', () => {
-    renderWidget([record({ log: '확인할 기록' })]);
-    expect(localStorage.getItem(partnerDayCheckpointKey(ME, 'couple-1'))).toBeNull();
+describe('checkpoint: nothing but an explicit acknowledgement writes CONFIRMED', () => {
+  /**
+   * THE INVARIANT CHANGED HERE, deliberately, and it is the point of the
+   * replacement.
+   *
+   * The previous version asserted that mounting wrote NOTHING. That is precisely
+   * what made the data loss possible: with nothing written at the moment a record
+   * was put on screen, the only record of "surfaced but not confirmed" was a
+   * seven-day date window, and a date window forgets. Day 0 showed a record; day 8
+   * did not; nobody had confirmed anything.
+   *
+   * So mounting now writes OUTSTANDING and KNOWN -- that IS the memory. What
+   * mounting still may never write is CONFIRMED, because that is the claim that a
+   * person read something. Both halves are asserted.
+   */
+  it('mounting writes OUTSTANDING, so the record cannot be lost to time later', () => {
+    renderWidget([record({ id: 'rec-1', log: '확인할 기록' })]);
+    expect(readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' })?.outstandingRecordIds)
+      .toEqual(['rec-1']);
   });
 
-  it('a rerender while records are on screen still writes no checkpoint', () => {
+  it('mounting writes NO CONFIRMED, because nobody pressed anything', () => {
+    renderWidget([record({ id: 'rec-1', log: '확인할 기록' })]);
+    expect(readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' })?.confirmedRecordIds)
+      .toEqual([]);
+  });
+
+  it('a rerender while records are on screen still confirms nothing', () => {
     const { rerender } = renderWidget([record({ id: 'a', log: '첫 기록' })]);
     currentState = makeState([
       record({ id: 'a', log: '첫 기록' }),
@@ -501,7 +534,11 @@ describe('checkpoint: nothing but an explicit acknowledgement advances it', () =
     rerender(<MemoryRouter><PartnerDayTimelineWidget /></MemoryRouter>);
 
     expect(screen.getByText('두번째 기록')).toBeInTheDocument();
-    expect(readPartnerDayCheckpoint(ME, 'couple-1')).toBeNull();
+    // A re-render can only ever make records MORE reachable: `b` is discovered as
+    // outstanding, and nothing is confirmed.
+    const stored = readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' });
+    expect(stored?.outstandingRecordIds.sort()).toEqual(['a', 'b']);
+    expect(stored?.confirmedRecordIds).toEqual([]);
   });
 
   it('the window does not collapse while the user is still reading it', async () => {
@@ -521,8 +558,9 @@ describe('checkpoint: nothing but an explicit acknowledgement advances it', () =
     await user.click(screen.getByTestId('partner-day-acknowledge'));
 
     // 20 - 5 acknowledged = 15 still missed, and the widget still shows a page of them.
-    const stored = readPartnerDayCheckpoint(ME, 'couple-1');
+    const stored = readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' });
     expect(stored?.confirmedRecordIds).toHaveLength(PARTNER_DAY_VISIBLE_LIMIT);
+    expect(stored?.outstandingRecordIds).toHaveLength(15);
     expect(screen.getAllByTestId('partner-day-entry')).toHaveLength(PARTNER_DAY_VISIBLE_LIMIT);
     expect(screen.getByText('기록 5')).toBeInTheDocument();
     expect(screen.queryByText('기록 4')).not.toBeInTheDocument();
@@ -535,28 +573,29 @@ describe('checkpoint: nothing but an explicit acknowledgement advances it', () =
 
     await user.click(screen.getByTestId('partner-day-acknowledge'));
 
-    expect(readPartnerDayCheckpoint(ME, 'couple-1')?.confirmedRecordIds).toEqual(['only']);
+    expect(readPartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' })?.confirmedRecordIds)
+      .toEqual(['only']);
     expect(screen.queryByText('하나뿐인 기록')).not.toBeInTheDocument();
     expect(screen.getByTestId('widget-partner-day')).toHaveAttribute('data-state', 'empty');
   });
 
   it("another account's checkpoint on the same device suppresses nothing", () => {
-    writePartnerDayCheckpoint('someone-else', 'couple-1', {
+    writePartnerDayCheckpoint({ userId: 'someone-else', coupleId: 'couple-1' }, {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
       confirmedRecordIds: ['hers'],
       outstandingRecordIds: [],
-      observedRecordIds: ['hers'],
-      confirmedAt: `${TODAY}T09:00:00.000Z`,
+      knownRecordIds: ['hers'],
     });
     renderWidget([record({ id: 'hers', log: '내가 못 본 기록' })]);
     expect(screen.getByText('내가 못 본 기록')).toBeInTheDocument();
   });
 
   it('a checkpoint from a previous couple suppresses nothing after relinking', () => {
-    writePartnerDayCheckpoint(ME, 'couple-old', {
+    writePartnerDayCheckpoint({ userId: ME, coupleId: 'couple-old' }, {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
       confirmedRecordIds: ['rec-1'],
       outstandingRecordIds: [],
-      observedRecordIds: ['rec-1'],
-      confirmedAt: `${TODAY}T09:00:00.000Z`,
+      knownRecordIds: ['rec-1'],
     });
     renderWidget([record({ id: 'rec-1', log: '새 커플의 기록' })]);
     expect(screen.getByText('새 커플의 기록')).toBeInTheDocument();

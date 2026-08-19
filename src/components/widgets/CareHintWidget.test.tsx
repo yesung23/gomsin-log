@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { AppState, DailyRecord } from '@/types';
 import { localToday, toLocalDateString } from '@/lib/utils';
-import { writePartnerDayCheckpoint } from '@/lib/partnerDay';
+import { PARTNER_DAY_CHECKPOINT_VERSION, writePartnerDayCheckpoint } from '@/lib/partnerDay';
 
 /**
  * Bug condition:
@@ -107,11 +107,11 @@ describe('CareHintWidget: no mood claim from silence', () => {
   });
 
   it('honours the stored checkpoint rather than a state field', () => {
-    writePartnerDayCheckpoint(ME, 'couple-1', {
+    writePartnerDayCheckpoint({ userId: ME, coupleId: 'couple-1' }, {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
       confirmedRecordIds: ['rec-1'],
       outstandingRecordIds: [],
-      observedRecordIds: ['rec-1'],
-      confirmedAt: `${TODAY}T09:00:00.000Z`,
+      knownRecordIds: ['rec-1'],
     });
     renderWidget([record({ id: 'rec-1', reaction: 'hard' })]);
     // Already acknowledged, so there is no missed mood left to describe.

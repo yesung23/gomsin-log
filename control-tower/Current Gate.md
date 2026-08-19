@@ -1,41 +1,46 @@
 ---
 type: gate
-status: blocked
+status: open
 tags:
   - gate
-  - blocker
 ---
 
 # Current Gate
 
-> Updated 2026-08-19 by [[Claude Opus]] acting as Control Tower, at the user's request.
-> Previously stale: it still described P5.5 as the active gate, two PRs behind reality.
+> Updated 2026-08-20 by [[Claude Opus]] acting as Control Tower, during the branch
+> consolidation that landed every branch's still-valid work on master.
 > Deliberately contains **no SHAs, PR states or CI run ids** — those rot. Run
 > `bash scripts/agent/live-state.sh`.
 
-## Gate: LV — Limited Validation · **BLOCKED**
+## Gate: LV — Limited Validation · **OPEN**
 
 P5.5 is closed (see [[Decision Log]]). The active work is LV readiness.
 
-## What blocks it
+## What blocked it — CLOSED
 
-[[PartnerDay Checkpoint State Machine]] has a known open defect: **a record shown on
-screen and never acknowledged is silently lost.** With no acknowledgement there is no
-persisted checkpoint, so the surface falls back to a rolling seven-day window and the
-record ages out with no user action in between.
+[[PartnerDay Checkpoint State Machine]] had a known open defect: **a record shown on
+screen and never acknowledged is silently lost.** With no acknowledgement there was no
+persisted checkpoint, so the surface fell back to a rolling seven-day window and the
+record aged out with no user action in between.
 
-That violates the product's core promise — 함께하지 못한 하루를 안전하게 이어준다 — so the
-PR cannot land in its current shape.
+That violated the product's core promise — 함께하지 못한 하루를 안전하게 이어준다.
+
+W1–W8 from [[2026-08-19_1100_partnerday-architecture-review_opus]] were implemented as a
+clean replacement on master and landed in the consolidation. `OUTSTANDING` is now
+persisted when a record is **shown**; acknowledgement is the only writer of `CONFIRMED`;
+and membership is decided only by the transitions that add to and remove from the set,
+so no amount of elapsed time can empty it. A corrupt receipt recovers unbounded by date,
+and a receipt this device could not *read* is never written over.
 
 ## What to build next
 
-Items **W1–W8** from [[2026-08-19_1100_partnerday-architecture-review_opus]].
+The gate is no longer blocked on that defect. What stands between here and LV-ready is
+listed under *Known, deferred* below — chiefly that unbounded `OUTSTANDING` growth is a
+storage-capacity product decision nobody has made yet, and that no multi-day run on a
+physical device has happened.
 
-The shape of the fix: persist state when a record is **shown**, not only when it is
-**acknowledged**. Acknowledgement stays the only writer of CONFIRMED.
-
-**Write the repro test first** and confirm it fails on the current HEAD. Seven defects
-here have been found by reproduction and none by reading.
+**Write the repro test first** for anything new on this surface. Eight defects here have
+been found by reproduction and none by reading.
 
 ## Standing constraints
 

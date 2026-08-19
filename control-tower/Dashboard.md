@@ -40,7 +40,8 @@ Do not copy any of these into the vault.
 
 ## Open work
 
-- [[PartnerDay Checkpoint State Machine]] — **open defect, do not merge**
+- [[PartnerDay Checkpoint State Machine]] — landed on master; what remains is a product
+  decision on unbounded `OUTSTANDING` growth, not code
 - [[P5.5 Browser Harness]] — closed
 
 ## Ownership

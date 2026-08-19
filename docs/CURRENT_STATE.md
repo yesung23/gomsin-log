@@ -7,7 +7,8 @@
 > 이 문서는 default branch reality와 active development checkpoint를 분리한다.
 > active draft PR의 코드가 default branch에 구현된 것으로 보이지 않게 한다.
 
-- 조사 기준: default branch `master`와 GitHub live state, 2026-08-18
+- 조사 기준: default branch `master`와 GitHub live state, 2026-08-18. §1의 branch
+  consolidation checkpoint는 2026-08-20 전수 감사 기준이다
 - 조사 방식: 저장소와 GitHub PR metadata/body 대조
 - remote Supabase catalog, production migration state, 실제 기기 state: **UNVERIFIED**
 
@@ -78,6 +79,28 @@ Production 적용이나 실기기 보안 증거를 대신하지 않는다.
 Convergence is complete for P5.5: **approved baseline `0660ad277` → reviewed
 e2e-only harness `b788c44` → master merge `eb2d9a4`**. #54/#58/#62–#67 remain
 historical provenance and must not be independently landed again.
+
+### Branch consolidation checkpoint — 2026-08-20
+
+Every remote branch was audited for work that was still valid and not yet on master,
+and what qualified was landed in one pass. The audit and the per-branch decisions are in
+[`CONSOLIDATION_LEDGER.md`](CONSOLIDATION_LEDGER.md); that file, not this one, is
+authoritative for why a given branch was included or skipped.
+
+What changed in master's product reality:
+
+| 영역 | master 기준 현실 |
+|---|---|
+| PartnerDay missed-context surface | `PR #72` 계보(`609a891`)의 explicit state machine이 landing됨. `CONFIRMED`/`OUTSTANDING`/`KNOWN` 3집합, receipt 4-state(`missing`·`valid`·`corrupt`·`unavailable`), corrupt는 date bound 없이 recovery, `unavailable` read는 절대 write-back하지 않음, `CONFIRMED` writer는 acknowledgement 단 하나 |
+| 이야기거리 overflow | `PR #71` 계보. 여섯 번째 이후 항목이 도달 불가였던 dead end가 닫힘. 별도 탭 없이 홈 위젯의 notice 자체가 control이 됨 (§8 유지) |
+| 기록 작성 진입점 | §7.1 contract가 테스트로 고정됨. 군화·곰신 both roles의 authoring 경로와, 홈을 어떻게 구성하든 진입점이 남는다는 것을 회귀로 잠금 |
+| control-tower Obsidian vault | `PR #70` 계보에서 회수. production code는 회수하지 않음 — 그 계보의 PartnerDay는 `609a891`보다 오래된 구현이다 |
+
+Branch가 아직 삭제되지 않았다는 사실은 그 branch가 landing 대상이라는 뜻이 아니다.
+Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그대로 남아 있다.
+
+여전히 변하지 않은 것: Production은 NOT APPLIED, remote Supabase catalog는 UNVERIFIED,
+실기기 검증은 UNVERIFIED, chat은 FROZEN / DEFERRED, P6는 NOT AUTHORIZED.
 
 ## 2. Active migration ledger facts
 

@@ -55,8 +55,8 @@ export interface PartnerDayCheckpoint {
    * whenever the viewer's device runs ahead of the server. Ids have no clock.
    *
    * Optional. A receipt written before this field existed simply has none, and
-   * absence is read as "nothing is known to have been observed", which shows
-   * more context rather than less.
+   * absence is read as "nothing is known to have been observed" -- the same
+   * reading an empty snapshot gets -- which shows more context rather than less.
    */
   observedRecordIds?: string[];
   /**
@@ -107,10 +107,11 @@ export function readPartnerDayCheckpoint(
       || !isValidDateString(candidate.confirmedThrough)
       || typeof candidate.confirmedAt !== 'string'
       || !Number.isFinite(Date.parse(candidate.confirmedAt))) return null;
-    // Absent or malformed observation is left ABSENT rather than defaulted to an
-    // empty array, and the two are not the same thing: absent means "this receipt
-    // cannot say what was already visible" and reopens old records, while an empty
-    // array is a real snapshot that happened to contain nothing.
+    // Absent or malformed observation is left ABSENT rather than coerced to an
+    // empty array. Both currently read the same way downstream -- neither can
+    // attest to any id, so both reopen old records -- so this is about not
+    // recording a claim the receipt cannot make, rather than about a behavioural
+    // difference that exists today.
     const observed = Array.isArray(candidate.observedRecordIds)
       && candidate.observedRecordIds.every((id) => typeof id === 'string')
       ? Array.from(new Set(candidate.observedRecordIds)).slice(-CHECKPOINT_ID_LIMIT)
@@ -216,6 +217,9 @@ export function missedPartnerRecords(
 ): DailyRecord[] {
   const { since, until } = partnerDayWindow(checkpoint, todayStr);
   const confirmed = new Set(checkpoint?.confirmedRecordIds ?? []);
+  // A receipt with no snapshot attests to nothing, which is the same answer an
+  // empty snapshot gives. Kept as a distinct value only so the absent case reads
+  // as absent at the call site below.
   const observed = checkpoint?.observedRecordIds
     ? new Set(checkpoint.observedRecordIds)
     : null;

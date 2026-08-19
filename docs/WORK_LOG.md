@@ -1746,6 +1746,167 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 #### PRODUCTION
 - NOT APPLIED
 
+### 2026-08-19 · LV — PR #70 missed-context repair + two-person launch pack
+
+#### PLAN POSITION
+- Phase: LV — Limited Validation Gate / M3 prerequisite
+- Workstream: Core V1 product-flow correctness
+- Step: repair the accepted review findings on #70, then traverse the LV loop as two people
+- Previous Gate: #70 independent review verdict `CHANGES_REQUIRED`
+- This Gate: #70 findings closed; #71 opened for the non-security flow defects found in traversal
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §6.1–6.5, §7.1–7.5, §8 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — client-only product-flow correctness; no customer, BM, pricing, AI-scope, storage or KPI impact
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` §0–1 — YES
+- Latest relevant Work Log checked: 2026-08-18 LV readiness core-flow audit — YES
+- MASTER PLAN version / 기준일: PRODUCT V3 / 2026-08-15
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: Opus 5
+- Role: implementation owner (NOT reviewer of its own work)
+- PR: #70 (repair) and #71 (two-person launch pack, stacked on #70)
+- Branch: `codex/lv-readiness-audit-v1`, then `claude/lv-two-person-launch-pack-v1`
+- Base SHA: `7a83665299a1f0096f2f81da393f28a97142c9ba`
+- Old HEAD: `b5663c7c8db409ed84b70542eda3b368b8b6799b` (the reviewed HEAD; unmoved by others)
+- New/Reviewed HEAD: #70 `922938eff3e842bc343227b4abb176e57a277891` · #71 `0903e33c6adaaca3ff07161e66b6e36271ba3a52`
+
+#### CHANGED / REVIEWED
+- `src/lib/partnerDay.ts` (new): sole owner of §6.5's window sentence — checkpoint lower bound or 7-day fallback, upper bound today; localStorage receipt keyed `viewer:couple`; prefix-acknowledgement helper; date-label helper.
+- `src/components/widgets/PartnerDayTimelineWidget.tsx`: mount-driven `useEffect` receipt removed; advancement now only via an explicit `여기까지 확인했어요` confirming the rendered chronological prefix; per-row date context; heading becomes `놓친 하루` when the window reaches back.
+- `src/components/widgets/CareHintWidget.tsx`: same window source; copy no longer names a day it cannot vouch for.
+- `src/lib/store.tsx`, `storeContext.ts`, `types/index.ts`, `utils.ts`: `partnerDayLastCheckedAt` and `markPartnerDayChecked` removed; device-preference carry-over set is now the exported `DEVICE_PREF_CARRY_OVER_KEYS`.
+- `src/lib/accountDeletionRecovery.test.tsx`: guard now pins the declared carry-over constant, not only the persisted JSON keys.
+- `src/lib/widgets.tsx`: partner-day catalogue description no longer claims today-only; literal backticks removed from a user-facing string.
+- `src/components/widgets/TalkAboutListWidget.tsx` (#71): `외 N개` becomes the control that opens the remaining 이야기거리.
+- `src/pages/recordAuthoringEntryPoint.test.tsx` (#71, new): §7.1 authoring contract for BOTH roles.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none. No key hierarchy, device trust, recovery authority or write-floor path touched.
+- DB/migration semantics: none. No SQL added or modified.
+- product semantics: no surface renamed, no funnel added, no Home redesign, no chat, no P6.
+- Production: untouched.
+
+#### VERIFICATION
+- command: `npm run verify` on both HEADs — PASS (EXIT=0). #70: 2353 tests / 159 files. #71: 2366 tests / 160 files. Typecheck, lint, both build directions included.
+- command: `git diff --check` — PASS on both.
+- command: mutation checks (applied, observed failing, reverted) — PASS. Restoring the mount effect fails 8 widget tests; dropping the `date <= today` bound fails 3; acknowledging the whole window instead of the visible prefix fails the anti-collapse regression; re-adding `partnerDayLastCheckedAt` to the carry-over set fails the repaired guard.
+- command: GitHub Actions on #70 `922938e` — PASS, 14/14 checks, including `Real-browser creator/partner matrix` (run 32164413345, 3m54s). That job is the two-person browser evidence for this HEAD.
+- command: `npx playwright test e2e/coupleMatrix.spec.ts` locally — **UNVERIFIED**. This sandbox cannot download Playwright Chromium (headless shell fetch blocked; the headed binary will not launch here). CI is the authority for browser evidence.
+- what it actually proves: client-side product semantics and copy under jsdom, plus the real production bundle in CI's mocked-backend browser matrix. It proves nothing about RLS, remote Supabase, or physical devices.
+- #71 GitHub Actions: **NONE, structurally.** Every workflow in `.github/workflows/` triggers on exactly one base branch (`master` for master-validation and native-release-validation; three `kiro/*` bases for the others). No workflow triggers on base `codex/lv-readiness-audit-v1`, so a PR stacked there receives zero Actions checks — only Vercel reported. The workflow headers cite `.kiro/steering/merge-policy.md` forbidding a widened trigger, so no workflow was edited. #71's only automated evidence is the local `npm run verify` above; retargeting it to `master` after #70 lands is what makes `master validation` fire.
+
+#### REVIEW IMPACT
+- FULL for #70: the implementation of every accepted finding changed, so the `b5663c7` review is stale.
+- FULL for #71: never reviewed.
+
+#### BLOCKERS
+- code: none known.
+- environment: Playwright Chromium unavailable locally (network-blocked). Not a code defect.
+- external/manual: real-device and remote-Supabase evidence remain outside this session.
+
+#### STOPPED AT
+- exact completed boundary: #70 @ `922938e` pushed, 14/14 CI green. #71 @ `0903e33` pushed as a Draft based on #70's branch.
+
+#### REMAINING
+- not completed: independent review of both HEADs. Local browser traversal. Controlled real-couple validation.
+
+#### NEXT ACTION
+- next owner: a fresh independent Claude review session
+- tool/model: Claude Code / Opus 5
+- 기준 SHA: `922938eff3e842bc343227b4abb176e57a277891` then `0903e33c6adaaca3ff07161e66b6e36271ba3a52`
+- exact next task: review #70's checkpoint semantics and scope, then #71's flow fixes. #70 lands before #71.
+
+#### DO NOT ADVANCE UNTIL
+- an independent review accepts #70's checkpoint semantics.
+- #71 is retargeted to `master` after #70 lands, so `master validation` actually runs on it. No workflow trigger may be widened to cover the stacked base.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
+### 2026-08-19 · LV — identity-transition blocker, checkpoint hardening, launch-pack coverage
+
+같은 날 앞선 항목을 대체하지 않고 이어진다. 앞 항목에 적힌 HEAD는 이미 낡았다.
+
+#### PLAN POSITION
+- Phase: LV — Limited Validation Gate / M3 prerequisite
+- Workstream: missed-context correctness + two-person launch pack
+- Step: A5 blocker 수정 → adversarial self-check → #71 검증
+- Previous Gate: #70 self-review verdict `CHANGES_REQUIRED` (A5 identity transition)
+- This Gate: A5 닫힘, #70 CI 14/14 green, #71 검증 완료
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §6.1–6.5, §7.1, §8 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — client-only correctness
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-19 앞 항목 — YES
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: Opus 5
+- Role: implementation owner. **Independent review는 아직 없다** — 지금까지의 모든 review pass는 작성자 본인이 했다.
+- PR: #70, #71
+- Base SHA: `7a83665299a1f0096f2f81da393f28a97142c9ba`
+- #70: `922938e` → `fe7b9f7529ed17e41037e123e5cd0afbd3ff8e9b`
+- #71: `4daed22` → `72d0bd27c0ccefbd81747a79f6676bb9dd473bfb`
+
+#### CHANGED / REVIEWED
+- `src/features/home/WidgetDashboard.tsx` — registry-rendered 위젯에 `${id}:${userId}:${coupleId}` React key. lifecycle identity 전용이며 `id` prop·SortableContext·저장된 layout은 plain registry id를 유지한다. `CallBriefingWidget`이 이미 갖고 있던 key를 전체로 확장한 것이다.
+- `src/lib/partnerDay.ts` — `advancePartnerDayCheckpoint`가 window 전체를 받아 아직 남아 있는 가장 이른 기록에서 bound를 멈춘다. 이 기기가 아직 복호화하지 못하는 기록을 건너뛰지 않기 위함이다. "bound를 뒤로 되돌리지 않는다" 규칙은 제거했다. 되돌리는 쪽이 안전한 방향이기 때문이다.
+- `src/components/widgets/PartnerDayTimelineWidget.tsx` — acknowledgement가 readable prefix와 함께 missed window 전체를 넘긴다.
+- 신규 테스트: `src/features/home/widgetIdentityTransition.test.tsx`, 그리고 partnerDay / PartnerDay / TalkAbout 스위트 보강.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음. key hierarchy·device trust·recovery authority·write floor 미접촉.
+- DB/migration semantics: 없음. SQL 변경 없음.
+- product semantics: surface 이름·funnel·Home 구조 변경 없음. chat 없음. P6 없음.
+- Production: 미접촉.
+
+#### VERIFICATION
+- `npm run verify` — PASS (EXIT=0). #70 `fe7b9f7`: 2369 tests / 160 files. #71 `72d0bd2`: 2374 tests / 160 files. 결합 tree(#71 + 최종 #70): 2382 tests / 161 files, PASS.
+- `git diff --check` — PASS, 양쪽 브랜치.
+- 구 HEAD 실패 증명: identity-transition regression 7개 중 6개가 `922938e`에서 실패하고 수정본에서 전부 통과한다. 나머지 1개는 key가 sortable id로 새는 것을 막는 guard이므로 양쪽에서 통과하는 것이 정상이다.
+- 복호화 불가 기록이 사라지는 문제는 고치기 전에 실패하는 테스트로 재현한 뒤 수정했다.
+- **#70 CI @ `fe7b9f7`: 14/14 PASS**, `Real-browser creator/partner matrix` 포함. 직전 `dc7f1d6`은 Vitest step 2개가 FAIL이었고 원인은 제품 코드가 아니라 테스트였다 — jsdom이 `localStorage.setItem`을 own property로 두는지 prototype에 두는지가 환경마다 달라서 spy가 CI에서 조용히 빗나갔다. 이제 module boundary에서 실패시킨다.
+- **#71 CI: 구조적으로 없음.** 모든 workflow는 정확히 하나의 base branch에서만 trigger하고 `codex/lv-readiness-audit-v1`은 그중에 없다. `.kiro/steering/merge-policy.md`가 trigger 확대를 금지하므로 workflow는 건드리지 않았다. #71의 자동 증거는 로컬 `npm run verify`뿐이다.
+- 로컬 Playwright: **UNVERIFIED**. 이 sandbox에서 Chromium 다운로드가 차단된다. 브라우저 증거는 CI가 authority다.
+- remote Supabase / production / 실기기: **UNVERIFIED, 미접촉.**
+
+#### REVIEW IMPACT
+- FULL, 양쪽. #70의 구현이 다시 바뀌었고 #71은 review된 적이 없다.
+
+#### BLOCKERS
+- code: 없음.
+- environment: 로컬 Playwright 불가. #71은 stacked base 때문에 Actions 없음.
+- external/manual: independent review, 실기기, remote Supabase 증거.
+
+#### STOPPED AT
+- #70 `fe7b9f7` pushed, CI 14/14 green. #71 `72d0bd2` pushed, Draft, base는 #70 branch.
+- #71을 최종 #70과 합치는 통합 commit은 만들지 않았다. `.claude/hooks/block-dangerous-bash.sh`가 해당 명령을 차단하며 이는 user 권한이다. 두 브랜치가 건드리는 파일 집합은 서로 겹치지 않으므로(#71 5개, #70 6개, 교집합 0) conflict가 발생할 수 없고, #70이 master에 들어간 뒤 #71은 깨끗하게 합쳐진다. 결합 tree는 로컬에서 이미 검증했다.
+
+#### REMAINING
+- 양쪽 HEAD에 대한 independent review. #70 landing 후 #71 retarget과 CI. 통제된 실제 커플 검증.
+
+#### NEXT ACTION
+- next owner: fresh independent review session
+- 기준 SHA: `fe7b9f7529ed17e41037e123e5cd0afbd3ff8e9b`, 그다음 `72d0bd27c0ccefbd81747a79f6676bb9dd473bfb`
+- exact next task: #70 review → landing 판단 → #71을 master로 retarget → #71 CI 확보 → #71 review
+
+#### DO NOT ADVANCE UNTIL
+- independent reviewer가 #70의 checkpoint semantics와 identity lifecycle을 승인할 때까지.
+- #71이 master를 base로 실제 CI를 통과할 때까지.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

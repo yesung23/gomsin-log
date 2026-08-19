@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, Check } from 'lucide-react';
+import { MessageCircle, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
@@ -25,6 +25,15 @@ export function TalkAboutListWidget() {
   const navigate = useNavigate();
   const isOffline = !useOnlineStatus();
   const { profile } = state;
+  /**
+   * §8 says the count opens the 보관함 목록. It had nowhere to open TO: the sixth
+   * topic onwards was reported as inert text ("외 N개") with no control on it and
+   * no route to a fuller list, so a couple who marked more than five records
+   * could not reach the rest until they had completed their way down to them.
+   * Expanding in place is the smallest thing that satisfies the contract without
+   * adding the separate tab §8 explicitly rules out.
+   */
+  const [expanded, setExpanded] = useState(false);
 
   const topics = useMemo(
     () => buildTalkAboutTopics(
@@ -35,7 +44,7 @@ export function TalkAboutListWidget() {
     [state.talkAboutMarks, state.records, profile.id, profile.role],
   );
 
-  const visible = topics.slice(0, VISIBLE_LIMIT);
+  const visible = expanded ? topics : topics.slice(0, VISIBLE_LIMIT);
   const hiddenCount = topics.length - visible.length;
 
   return (
@@ -47,7 +56,7 @@ export function TalkAboutListWidget() {
 
       {topics.length === 0 ? (
         <p className="text-caption text-muted-foreground py-2 break-keep">
-          아직 표시한 기록이 없어요. 기록에서 `이따 이야기하기`를 눌러두면 여기 모여요.
+          아직 표시한 기록이 없어요. 기록에서 &apos;이따 이야기하기&apos;를 눌러두면 여기 모여요.
         </p>
       ) : (
         <ul className="divide-y divide-border">
@@ -100,10 +109,19 @@ export function TalkAboutListWidget() {
         </ul>
       )}
 
-      {hiddenCount > 0 && (
-        <p className="text-caption text-muted-foreground pt-1.5">
-          외 {hiddenCount}개
-        </p>
+      {(hiddenCount > 0 || expanded) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((open) => !open)}
+          aria-expanded={expanded}
+          data-testid="talk-about-expand"
+          className="w-full min-h-11 flex items-center justify-center gap-1 text-caption text-muted-foreground"
+        >
+          {expanded ? '접기' : `외 ${hiddenCount}개 모두 보기`}
+          {expanded
+            ? <ChevronUp size={14} aria-hidden="true" />
+            : <ChevronDown size={14} aria-hidden="true" />}
+        </button>
       )}
     </div>
   );

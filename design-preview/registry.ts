@@ -4,6 +4,7 @@ import { RecordComposer, RecordDetail, RecordTimeline } from './screensRecord';
 import { Schedule, ScheduleDetail, TripDetail, Trips } from './screensPlan';
 import { DeleteConfirm, My, Settings, Us } from './screensAccount';
 import { Login, Onboarding, PendingConnect } from './screensAuth';
+import { NewComponents } from './screensNew';
 import type { ScreenState } from './fixtures';
 
 /**
@@ -38,6 +39,7 @@ export const SCREENS: {
   { id: 'my', label: '마이', group: '계정', C: My },
   { id: 'settings', label: '설정', group: '계정', C: Settings },
   { id: 'delete-confirm', label: '삭제 확인', group: '계정', C: DeleteConfirm },
+  { id: 'new-components', label: '마음·주기 표시', group: '컴포넌트', C: NewComponents },
   { id: 'login', label: '로그인', group: '진입', C: Login },
   { id: 'onboarding', label: '온보딩', group: '진입', C: Onboarding },
   { id: 'pending', label: '연결 대기', group: '진입', C: PendingConnect },
@@ -46,6 +48,9 @@ export const SCREENS: {
 export const VIEWPORTS = [
   { name: '390×844', width: 390, height: 844, compact: false },
   { name: '320×568', width: 320, height: 568, compact: true },
+  // 430 is the app's own max width (`MobileShell` caps at 430px), so it is the
+  // widest the layout ever actually renders at.
+  { name: '430×932', width: 430, height: 932, compact: false },
 ] as const;
 
 export const THEMES = ['light', 'dark'] as const;

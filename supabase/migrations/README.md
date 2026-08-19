@@ -87,6 +87,32 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `049_product_events.sql` | §19 허용 목록 안의 최소 계측. LV 진입 조건이다(계측 없는 검증은 연극이다). **이 테이블에는 timestamp 컬럼이 없다** — `occurred_on DATE`뿐이다. 다른 모든 테이블이 갖는 `created_at TIMESTAMPTZ DEFAULT now()`를 여기 두면 누가 언제 앱을 여는지의 분 단위 기록이 되고, 그것이 §19가 금지하는 행동 감시다. 리뷰에서 아무도 의심하지 않을 기본값으로 도착한다는 점이 위험하다. `kind`·`screen`은 CHECK 제약의 닫힌 집합, `subject_id`는 UUID라 제목·본문·파일명이 들어갈 수 없다. RLS는 본인 INSERT/SELECT만이고 **파트너에게는 어떤 read 정책도 없다.** UPDATE·DELETE 정책이 아예 없어 이벤트는 사실로 남는다. `user_id`는 payload가 아니라 `auth.uid()` 기본값에서 온다 | **신규 / 어디에도 미적용 — fresh chain 001→049에 적용, phase0 harness에서 19개 계약을 실제 PostgreSQL 17.10으로 검증. mutation 4건(`created_at` 추가·자유 텍스트 컬럼·파트너 read 허용·금지 이벤트 종류) 전부 실패 확인** |
 | `050_lv_funnel_readout.sql` | 049를 LV 판독 목록과 대조해 찾은 두 격차를 닫는다. **(1) 측정 단위가 없었다** — 전략은 획득 단위가 '연결된 커플 1쌍'이라고 못박는데 `product_events`에는 `user_id`만 있어 커플 단위 지표 2개(주간 기록 커플 비율·4주 재사용률)를 아예 계산할 수 없었다. `couple_id`를 추가하되 `get_my_active_couple_id()` DEFAULT로 **세션에서 파생**한다 — 클라이언트가 보낼 수 없으므로 속한 적 없는 커플로 귀속시킬 수 없다. RLS 범위는 그대로이고 **파트너 read 정책은 여전히 없다.** **(2) 판독이 곧 행 조회였다** — 함수가 없으면 `service_role`이 raw 이벤트 행을 긁어야 하고 그건 한 사람의 개별 행동을 순서대로 보는 것이다. `lv_funnel_readout`은 **집계만**(metric, value) 반환하며 행 반환 경로가 없다. `lv_couple_return_count`는 **몇 커플이 돌아왔는지**를 주고 어느 커플인지는 주지 않는다. 일별 시계열·사용자별 분해·커플 간 순위는 의도적으로 없다 | **신규 / 어디에도 미적용 — fresh chain 001→050에 적용, phase0 harness 197개 중 050이 16개. mutation 5건(클라이언트 위조 가능한 couple_id·service_role gate·커플 대신 계정 집계·재방문이 커플 id 반환·역순 범위 허용) 전부 실패 확인** |
 
+| `047_cycle_pain_care_signal.sql` | `cycle_support_signals.kind` CHECK 어휘를 4개에서 7개로 넓혀 `pain_mild`·`pain_moderate`·`pain_severe`를 허용한다. 컬럼 추가·RLS 정책·함수·GRANT 없음이며 014의 couple-scoped 정책을 그대로 상속한다. 서버는 신호를 파생하지 않고, `cycle_daily_logs`를 읽는 문장이 없다. DOWN은 파일 하단에 있으며 pain row가 남아 있으면 거부하도록 설계했다 | **신규 / 어디에도 미적용 — independent security review 이전에는 master에도 올리지 않는다** |
+
+## 047 이 열지 않는 것 — 통증 공유는 projection 확장이 아니다 (2026-08-20)
+
+Control Tower 제품 결정으로 사용자가 **직접** 통증 정도를 파트너에게 보낼 수 있게
+했습니다. 이 migration이 구현의 전부이며, **열지 않은 것**이 더 중요합니다.
+
+`get_partner_cycle_projection()`은 손대지 않았습니다. projection은 토글이 켜져 있는 동안
+계속 보이는 **상시 창**이고, 그 RPC는 소유자의 원본 테이블을 SECURITY DEFINER로 읽습니다.
+통증을 거기에 넣었다면 RPC가 `cycle_daily_logs.pain_level`을 직접 읽어야 했고, 그것이 이
+기능에서 절대 만들면 안 되는 결합입니다. 상시 창이었다면 아무도 그 생각을 하지 않은 날에도
+통증이 계속 공개됐을 것입니다.
+
+`cycle_support_signals`는 014부터 이미 반대 모양이었습니다. 한 행 = 한 번의 의도적 행위,
+`shared_for_date`는 소유자가 고르고, `expires_at`은 하루, `revoked_at`으로 철회. 통증
+공유에 필요한 성질이 정확히 그 넷이라 **어휘만 넓혔습니다.**
+
+개인 기록의 `pain_level`(`mild`/`moderate`/`severe`)과 신호의
+kind(`pain_mild`/`pain_moderate`/`pain_severe`)는 **의도적으로 다른 문자열**입니다. 값이
+같았다면 `signal.kind = log.painLevel`이 타입 검사를 통과했을 것이고, 그 한 줄이 이 기능의
+유일한 실패 모드입니다. 다리를 놓으려면 리뷰어 눈에 보이는 곳에 직접 써야 합니다.
+
+`cyclePartnerMessage.ts`의 withholding 문장도 같은 커밋에서 고쳤습니다. 이전 문구 "증상,
+출혈량, **통증**, 기분, 메모는 어떤 경우에도 보이지 않아요"는 이 기능이 들어온 순간
+거짓이 되기 때문입니다. 조용히 조건부가 된 절대적 약속은 약속이 없는 것보다 나쁩니다.
+
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 
 **032 를 아직 어디에도 적용하지 않았다는 사실이 이 결함을 지금까지 무해하게

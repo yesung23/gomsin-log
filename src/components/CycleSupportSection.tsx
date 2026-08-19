@@ -5,7 +5,7 @@ import {
   activeCycleSupportSignal,
   createCycleSupportSignalInDB,
   fetchCycleSupportSignalsResultFromDB,
-  isCycleSupportKind,
+  isCycleSignalKind,
   isValidCycleSupportMessage,
   koreaToday,
   revokeCycleSupportSignalFromDB,
@@ -15,17 +15,41 @@ import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
-import type { CycleSupportKind, CycleSupportSignal, Role } from '@/types';
+import { CYCLE_PAIN_SHARE_KINDS } from '@/types';
+import type {
+  CyclePainShareKind,
+  CycleSignalKind,
+  CycleSupportKind,
+  CycleSupportSignal,
+  Role,
+} from '@/types';
 import { Card } from '@/components/ui/Card';
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'disconnected' | CycleFetchFailureReason;
 
+/** The care requests. What would help today. */
 const kindLabels: Record<CycleSupportKind, string> = {
   resting: '오늘은 쉬어가고 싶어요',
   need_space: '조용한 시간이 필요해요',
   would_like_support: '따뜻한 응원을 받고 싶어요',
   check_in_later: '나중에 안부를 물어봐 주세요',
 };
+
+/**
+ * The pain buckets, worded as the owner would say them rather than as a chart.
+ *
+ * `조금 아파요`, not `통증 약함`. The partner is reading a message from someone they
+ * love, not a triage form, and the clinical register would make an intimate
+ * disclosure sound like a symptom report.
+ */
+const painShareLabels: Record<CyclePainShareKind, string> = {
+  pain_mild: '조금 아파요',
+  pain_moderate: '오늘은 좀 힘들어요',
+  pain_severe: '많이 아파요',
+};
+
+/** Every kind a stored signal can be, for rendering one that came back. */
+const signalLabels: Record<CycleSignalKind, string> = { ...kindLabels, ...painShareLabels };
 
 interface CycleSupportSectionProps {
   role: Role;
@@ -83,7 +107,7 @@ export function CycleSupportSection({
   const today = koreaToday(new Date(nowIso));
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [signals, setSignals] = useState<CycleSupportSignal[]>([]);
-  const [kind, setKind] = useState<CycleSupportKind | ''>('');
+  const [kind, setKind] = useState<CycleSignalKind | ''>('');
   const [message, setMessage] = useState('');
   const [mutationPending, setMutationPending] = useState<'share' | 'revoke' | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -253,7 +277,7 @@ export function CycleSupportSection({
       setMutationError('활성 연결에서 본인이 직접 선택한 신호만 공유할 수 있어요.');
       return;
     }
-    if (!kind || !isCycleSupportKind(kind)) {
+    if (!kind || !isCycleSignalKind(kind)) {
       setMutationError('공유할 응원 신호를 선택해 주세요.');
       return;
     }
@@ -386,7 +410,7 @@ export function CycleSupportSection({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-caption font-bold text-mint-foreground">오늘 공유된 신호</p>
-                  <p className="text-heading text-mint-foreground mt-1">{kindLabels[activeSignal.kind]}</p>
+                  <p className="text-heading text-mint-foreground mt-1">{signalLabels[activeSignal.kind]}</p>
                 </div>
                 <Radio className="w-4 h-4 text-mint-foreground shrink-0" />
               </div>
@@ -448,6 +472,81 @@ export function CycleSupportSection({
                   })}
                 </ul>
               </fieldset>
+
+              {/*
+                Pain, kept visibly apart from the care requests above.
+
+                Two fieldsets rather than one list of seven, because these are
+                different disclosures. A care request says what would help; a pain
+                signal says something about a body, and it is the most sensitive
+                thing anyone sends from this screen. Folded together, a thumb
+                reaching for 쉬어가고 싶어요 could land on 많이 아파요.
+
+                Nothing here reads `CycleDailyLog.painLevel`. Today's personal log
+                may already record severe pain and this stays empty until pressed --
+                that IS the design. The two vocabularies are deliberately different
+                strings (`severe` against `pain_severe`) so no assignment between
+                them typechecks, and any bridge would have to be written out where a
+                reviewer sees it.
+              */}
+              <fieldset className="space-y-1.5">
+                <legend className="text-label font-bold text-foreground">
+                  통증 정도 공유 (선택)
+                </legend>
+                <p className="text-caption text-muted-foreground leading-relaxed">
+                  내 기록의 통증은 자동으로 공유되지 않아요. 여기서 직접 고른 것만 오늘 하루 보여요.
+                </p>
+                <ul className="grid gap-1.5" data-testid="pain-share-options">
+                  {CYCLE_PAIN_SHARE_KINDS.map((value) => {
+                    const chosen = kind === value;
+                    return (
+                      <li key={value}>
+                        <button
+                          type="button"
+                          onClick={() => setKind(chosen ? '' : value)}
+                          disabled={mutationPending !== null}
+                          aria-pressed={chosen}
+                          data-testid={`pain-share-${value}`}
+                          className={cn(
+                            'press-response-row w-full text-left min-h-11 px-3 py-2.5 rounded-control border text-label disabled:opacity-50 flex items-center justify-between gap-2',
+                            chosen
+                              ? 'border-coral bg-coral/10 text-foreground font-bold'
+                              : 'border-border bg-card text-foreground',
+                          )}
+                        >
+                          {painShareLabels[value]}
+                          {chosen && <Check className="w-4 h-4 shrink-0 text-coral-strong" aria-hidden="true" />}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </fieldset>
+
+              {/*
+                What the partner will actually read, before it is sent.
+
+                Rendered from the same `signalLabels` the partner's own view uses, so
+                the preview cannot drift from the payload -- which is a failure this
+                surface has had once already, when the cycle preview described
+                sharing that was switched off.
+              */}
+              {kind && (
+                <div
+                  data-testid="signal-send-preview"
+                  className="rounded-surface bg-muted/40 p-3.5 space-y-1"
+                >
+                  <p className="text-caption font-bold text-foreground">군화에게 이렇게 보여요</p>
+                  <p className="text-label text-foreground">{signalLabels[kind]}</p>
+                  {message.trim() && (
+                    <p className="text-caption text-muted-foreground">“{message.trim()}”</p>
+                  )}
+                  <p className="text-caption text-muted-foreground leading-relaxed">
+                    오늘 하루가 지나면 자동으로 사라져요. 그 전에도 언제든 취소할 수 있어요.
+                  </p>
+                </div>
+              )}
+
               <label className="text-label font-bold text-foreground space-y-1 block">
                 <span>파트너에게 보낼 짧은 메시지 (선택, 80자 이하)</span>
                 <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={80} disabled={mutationPending !== null} placeholder="예: 오늘 저녁에 짧게 통화하고 싶어요" className="w-full p-3 rounded-control border border-border bg-card text-body" />

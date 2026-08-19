@@ -10,6 +10,7 @@ import {
   type PartnerDayCheckpoint,
   type PartnerDayContext,
   type PartnerDayProjection,
+  type PartnerDayReceiptStatus,
 } from '@/lib/partnerDay';
 
 /**
@@ -77,9 +78,9 @@ export function usePartnerDay(options: UsePartnerDayOptions = {}): UsePartnerDay
   }), [userId, coupleId, profile.role, todayStr]);
 
   /*
-   * The stored receipt, read once per mount, along with whether its `null` (if
-   * any) means genuine absence or corrupt bytes -- `projectPartnerDay` must not
-   * treat those alike. See `readPartnerDayCheckpointStatus`.
+   * The stored receipt, read once per mount, along with which of the four
+   * `PartnerDayReceiptStatus` states produced it -- `projectPartnerDay` must
+   * not treat them alike. See `readPartnerDayCheckpointStatus`.
    *
    * `WidgetDashboard` keys every widget by `userId:coupleId`, so an account change
    * or a relink remounts this hook and re-reads under the new identity. Without
@@ -88,14 +89,14 @@ export function usePartnerDay(options: UsePartnerDayOptions = {}): UsePartnerDay
    */
   const [receipt, setReceipt] = useState<{
     stored: PartnerDayCheckpoint | null;
-    corrupt: boolean;
+    status: PartnerDayReceiptStatus;
   }>(() => {
-    const status = readPartnerDayCheckpointStatus(context);
-    return { stored: status.checkpoint, corrupt: status.corrupt };
+    const result = readPartnerDayCheckpointStatus(context);
+    return { stored: result.checkpoint, status: result.status };
   });
 
   const projection = useMemo<PartnerDayProjection>(
-    () => projectPartnerDay(context, state.records, receipt.stored, receipt.corrupt),
+    () => projectPartnerDay(context, state.records, receipt.stored, receipt.status),
     [context, state.records, receipt],
   );
 
@@ -113,25 +114,37 @@ export function usePartnerDay(options: UsePartnerDayOptions = {}): UsePartnerDay
    * for authorization reasons rather than empty, and a receipt written from that
    * moment would be a claim about data this device was not being shown.
    *
-   * On a failed write nothing advances. `receipt` keeps its old value -- `corrupt`
+   * Held back, ALSO explicitly, while the receipt status is `unavailable`. This
+   * duplicates a guarantee `projectPartnerDay` already provides structurally --
+   * it forces `changed: false` for that status, so `if (!projection.changed)`
+   * above already skips this write -- but it is repeated here on purpose. This
+   * exact class of bug (an unreadable-but-writable store silently overwriting a
+   * real receipt) has already happened once in this module from a check living
+   * in only one place; a second, independent guard at the call site is cheap
+   * insurance against the invariant being loosened in `projectPartnerDay` later
+   * without this effect being revisited.
+   *
+   * On a failed write nothing advances. `receipt` keeps its old value -- `status`
    * included -- the screen keeps rendering `projection.surface`, and the next
    * change to records, identity or date recomputes and tries again.
    *
-   * `corrupt` is cleared to `false` here, in the SAME update as capturing the
+   * `status` is set to `'valid'` here, in the SAME update as capturing the
    * recovered checkpoint. It has to be: `receipt.stored` becomes a real, valid v2
-   * checkpoint the moment this write succeeds, but if `corrupt` stayed `true`
+   * checkpoint the moment this write succeeds, but if `status` stayed `'corrupt'`
    * `projectPartnerDay` would discard that checkpoint again on the very next
-   * projection (`effectiveStored = corrupt ? null : stored`) and re-run recovery
-   * against a stale `true`, silently dropping anything confirmed in between.
+   * projection (`effectiveStored` is only trusted when `status === 'valid'`) and
+   * re-run recovery against a stale status, silently dropping anything confirmed
+   * in between.
    */
   useEffect(() => {
     if (!persist) return;
+    if (receipt.status === 'unavailable') return;
     if (!projection.changed) return;
     if (sharedSyncStatus === 'unavailable') return;
     if (writePartnerDayCheckpoint(context, projection.checkpoint)) {
-      setReceipt({ stored: projection.checkpoint, corrupt: false });
+      setReceipt({ stored: projection.checkpoint, status: 'valid' });
     }
-  }, [persist, projection, context, sharedSyncStatus]);
+  }, [persist, projection, context, sharedSyncStatus, receipt.status]);
 
   /**
    * The confirm button's handler, and the only writer of CONFIRMED in the app.
@@ -139,19 +152,26 @@ export function usePartnerDay(options: UsePartnerDayOptions = {}): UsePartnerDay
    * Acknowledges against `projection.checkpoint` rather than `receipt.stored`, so
    * a record discovered OR recovered by this same computation can be confirmed in
    * the same press even if its OUTSTANDING entry has not reached disk yet.
+   *
+   * Blocked outright while the receipt status is `unavailable`: storage cannot
+   * currently attest to what is really CONFIRMED, so writing anything here risks
+   * the same silent overwrite the persist effect above guards against, just
+   * triggered by a button press instead of a background write. The record simply
+   * stays on screen -- fail-open, not fail-hidden -- until a later read succeeds.
    */
   const acknowledge = useCallback((records: DailyRecord[]): boolean => {
+    if (receipt.status === 'unavailable') return false;
     const next = acknowledgePartnerDayRecords(projection.checkpoint, records);
     // Nothing consumed: no receipt to write, nothing to advance.
     if (!next) return false;
     // A receipt that could not be stored must not be treated as stored. The
     // records stay on screen, and a reload agrees with the screen.
     if (!writePartnerDayCheckpoint(context, next)) return false;
-    // `next` is itself a fresh, valid v2 checkpoint -- clear `corrupt` for the
-    // same reason the persist effect above does.
-    setReceipt({ stored: next, corrupt: false });
+    // `next` is itself a fresh, valid v2 checkpoint -- record that, for the same
+    // reason the persist effect above does.
+    setReceipt({ stored: next, status: 'valid' });
     return true;
-  }, [projection, context]);
+  }, [projection, context, receipt.status]);
 
   return { surface: projection.surface, todayStr, acknowledge };
 }

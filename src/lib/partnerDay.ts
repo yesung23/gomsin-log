@@ -36,15 +36,21 @@ import { parseLocalDate, toLocalDateString } from '@/lib/utils';
  * record dated after today has not happened yet. Nothing else is a date
  * decision.
  *
- * A receipt can fail two different ways, and they are not the same failure.
- * Genuinely nothing stored is first contact, bounded to a seven-day discovery
- * window by design. A receipt STRING that exists and fails to parse or validate
- * is corrupt: nothing in it can be trusted, including a date bound, so it takes
- * `recovery` instead -- every currently eligible record becomes OUTSTANDING,
- * unbounded by date. Collapsing corrupt into first-contact was itself a launch
- * blocker: it silently entombed an OUTSTANDING record older than seven days the
- * first time a receipt broke. See `readPartnerDayCheckpointStatus` and
- * `projectPartnerDay`.
+ * A receipt read comes back one of four ways, and none of them are the same
+ * failure. Genuinely nothing stored is first contact, bounded to a seven-day
+ * discovery window by design. A receipt STRING that exists and fails to parse
+ * or validate is corrupt: nothing in it can be trusted, including a date
+ * bound, so it takes `recovery` instead -- every currently eligible record
+ * becomes OUTSTANDING, unbounded by date. A read that fails OUTRIGHT
+ * (`localStorage.getItem` throwing) is neither: it proves nothing about
+ * whether a real receipt exists underneath, so it takes the SAME unbounded
+ * surface as `recovery` but may never be written back -- a storage backend
+ * whose reads throw while its writes still succeed would otherwise silently
+ * overwrite a real receipt with one computed as if it never existed.
+ * Collapsing any of these into first-contact was a launch blocker each time:
+ * it silently entombed an OUTSTANDING record older than seven days, or
+ * clobbered a healthy receipt outright. See `readPartnerDayCheckpointStatus`
+ * and `projectPartnerDay`.
  *
  * Deliberately absent, each having been the cause of a real defect:
  *
@@ -140,7 +146,17 @@ export type PartnerDayTransition =
    * date bound, so every currently eligible record becomes OUTSTANDING,
    * unbounded by date -- not just the last seven days. See `projectPartnerDay`.
    */
-  | 'recovery';
+  | 'recovery'
+  /**
+   * The read ITSELF failed (`localStorage.getItem` threw) -- there may be a
+   * perfectly healthy receipt on disk that this device simply could not read
+   * right now. The surface shown is the SAME shape as `recovery` (every
+   * eligible record), but nothing about it may be written back: an
+   * asymmetric storage failure (reads throw, writes still succeed) can
+   * otherwise overwrite a real receipt with a checkpoint computed as if it
+   * did not exist. See `projectPartnerDay` and `usePartnerDay`.
+   */
+  | 'unavailable';
 
 export interface PartnerDayProjection {
   /** The state implied by what this device can now see. */
@@ -171,37 +187,47 @@ function stringArray(value: unknown): string[] | null {
 }
 
 /**
- * `readPartnerDayCheckpoint`'s full answer: the checkpoint, and whether the
- * `null` case is genuine absence or corrupt bytes.
- *
- * `checkpoint: null` alone conflates two situations that `projectPartnerDay`
- * must NOT treat alike (Control Tower cold review, 2026-08-20, invariant I1 NO
+ * The four ways a receipt read can come out, and they are not interchangeable
+ * (Control Tower cold review, 2026-08-20 and 2026-08-21, invariant I1 NO
  * SILENT LOSS):
  *
- *   - nothing is stored, or storage/identity is not ready: genuine first
- *     contact. `corrupt: false`. The bounded seven-day discovery window is the
- *     correct, intentional policy here -- it is not a safety fallback, and
- *     widening it would flood every real first open with two years of history.
+ *   `missing`     nothing is stored, or storage/identity is not ready: genuine
+ *                 first contact. The bounded seven-day discovery window is the
+ *                 correct, intentional policy here -- it is not a safety
+ *                 fallback, and widening it would flood every real first open
+ *                 with two years of history.
  *
- *   - a receipt STRING exists at this key and fails to parse or pass schema
- *     validation: corrupt bytes. `corrupt: true`. Nothing in it can be
- *     trusted, including a date bound, so the bounded window is WRONG here --
- *     it is exactly what silently entombed a healthy 30-day-old OUTSTANDING
- *     record the first time this was reviewed. See `projectPartnerDay`'s
- *     `recovery` transition.
+ *   `valid`       a receipt was read and parses and validates.
  *
- * A failure merely FETCHING the value (`localStorage.getItem` throwing) is
- * deliberately reported as `corrupt: false`, folded into "nothing is stored".
- * It proves nothing about whether bytes exist to be corrupt, and misreading it
- * as corrupt would flood every visit to an environment with blocked storage
- * (private-mode edge cases, a sandboxed iframe) with the unbounded recovery
- * seed on every single open.
+ *   `corrupt`     a receipt STRING exists at this key and fails to parse or
+ *                 pass schema validation. Nothing in it can be trusted,
+ *                 including a date bound, so the bounded window is WRONG here
+ *                 -- it is exactly what silently entombed a healthy 30-day-old
+ *                 OUTSTANDING record the first time this was reviewed. See
+ *                 `projectPartnerDay`'s `recovery` transition.
+ *
+ *   `unavailable` the read ITSELF failed (`localStorage.getItem` threw). This
+ *                 is NOT `missing` and NOT `corrupt`: there may be a perfectly
+ *                 healthy receipt on disk that could not be read right now, and
+ *                 there is no way to tell that apart from genuine absence by
+ *                 reading alone. Reporting it as `missing` was itself a
+ *                 blocker: `projectPartnerDay` would run the bounded
+ *                 first-contact seed exactly as if nothing were stored, and if
+ *                 the SAME storage backend can still WRITE even though it
+ *                 cannot READ -- a real, reproducible asymmetric failure, not a
+ *                 hypothetical -- persisting that seed silently overwrites the
+ *                 real receipt with one computed as if it never existed. See
+ *                 `projectPartnerDay`'s `unavailable` transition and
+ *                 `usePartnerDay`, which additionally refuses to persist or
+ *                 acknowledge anything while this status holds.
  */
+export type PartnerDayReceiptStatus = 'missing' | 'valid' | 'corrupt' | 'unavailable';
+
+/** `readPartnerDayCheckpoint`'s full answer: the checkpoint, and which of the four `PartnerDayReceiptStatus` states produced it. */
 export interface PartnerDayReceiptRead {
-  /** The usable checkpoint, or `null` for both absence and corruption. */
+  /** The usable checkpoint. Non-null only when `status === 'valid'`. */
   checkpoint: PartnerDayCheckpoint | null;
-  /** Whether `checkpoint === null` means corrupt bytes rather than absence. */
-  corrupt: boolean;
+  status: PartnerDayReceiptStatus;
 }
 
 export function readPartnerDayCheckpointStatus(
@@ -209,25 +235,26 @@ export function readPartnerDayCheckpointStatus(
 ): PartnerDayReceiptRead {
   const { userId, coupleId } = context;
   if (typeof localStorage === 'undefined' || !userId || !coupleId) {
-    return { checkpoint: null, corrupt: false };
+    return { checkpoint: null, status: 'missing' };
   }
 
   let value: string | null;
   try {
     value = localStorage.getItem(partnerDayCheckpointKey(userId, coupleId));
   } catch {
-    // `getItem` itself failed: an I/O failure, not proof of corrupt bytes.
-    return { checkpoint: null, corrupt: false };
+    // `getItem` itself failed: this proves nothing about whether a real
+    // receipt exists. NOT `missing` -- see the type doc above.
+    return { checkpoint: null, status: 'unavailable' };
   }
-  if (!value) return { checkpoint: null, corrupt: false };
+  if (!value) return { checkpoint: null, status: 'missing' };
 
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object') return { checkpoint: null, corrupt: true };
+    if (!parsed || typeof parsed !== 'object') return { checkpoint: null, status: 'corrupt' };
     const candidate = parsed as Record<string, unknown>;
 
     const confirmed = stringArray(candidate.confirmedRecordIds);
-    if (!confirmed) return { checkpoint: null, corrupt: true };
+    if (!confirmed) return { checkpoint: null, status: 'corrupt' };
 
     /*
      * v1 receipts called this `observedRecordIds` and meant the same thing this
@@ -250,11 +277,11 @@ export function readPartnerDayCheckpointStatus(
         outstandingRecordIds: stringArray(candidate.outstandingRecordIds) ?? [],
         knownRecordIds: known,
       },
-      corrupt: false,
+      status: 'valid',
     };
   } catch {
     // JSON.parse threw: the bytes are there and are not JSON. Corrupt, not absent.
-    return { checkpoint: null, corrupt: true };
+    return { checkpoint: null, status: 'corrupt' };
   }
 }
 
@@ -416,25 +443,30 @@ export function projectPartnerDay(
   records: DailyRecord[],
   stored: PartnerDayCheckpoint | null | undefined,
   /**
-   * Whether `stored`'s `null` (or, defensively, a non-null value supplied
-   * alongside this anyway) means corrupt bytes rather than genuine absence.
-   * Pass `readPartnerDayCheckpointStatus(...).corrupt` here -- `false` for
-   * every existing caller, so this is additive and every prior call site is
-   * unaffected. See `readPartnerDayCheckpointStatus` and the `recovery`
-   * transition below.
+   * Which of the four `PartnerDayReceiptStatus` states produced `stored`.
+   * Pass `readPartnerDayCheckpointStatus(...).status` here.
+   *
+   * Omitted, it is inferred from `stored` alone (`'valid'` if present,
+   * `'missing'` otherwise) -- exactly the only two states this function
+   * recognized before `corrupt` and `unavailable` existed, so every call site
+   * written before those states existed is unaffected by their addition.
    */
-  corrupt = false,
+  receiptStatus?: PartnerDayReceiptStatus,
 ): PartnerDayProjection {
+  const status: PartnerDayReceiptStatus = receiptStatus ?? (stored ? 'valid' : 'missing');
   const { viewer, todayStr } = context;
   const eligible = eligibleSharedPartnerRecords(records, viewer, todayStr);
 
   /*
-   * A corrupt receipt cannot attest to ANYTHING it appears to contain -- not
-   * CONFIRMED, not OUTSTANDING, not KNOWN. `stored` is discarded here rather
-   * than merely ignored below, so a caller cannot accidentally seed real state
-   * from bytes the read layer has already flagged as untrustworthy.
+   * Only a `valid` read may seed real state. `corrupt` bytes cannot attest to
+   * ANYTHING they appear to contain -- not CONFIRMED, not OUTSTANDING, not
+   * KNOWN. An `unavailable` read has not been read AT ALL -- `stored` here is
+   * necessarily `null` by construction from `readPartnerDayCheckpointStatus`,
+   * but this still discards a caller-supplied `stored` defensively, so nothing
+   * upstream can accidentally seed real state alongside a status that says it
+   * should not be trusted.
    */
-  const effectiveStored = corrupt ? null : stored;
+  const effectiveStored = status === 'valid' ? (stored ?? null) : null;
 
   const confirmed = new Set(effectiveStored?.confirmedRecordIds ?? []);
   const outstanding = new Set(effectiveStored?.outstandingRecordIds ?? []);
@@ -443,19 +475,29 @@ export function projectPartnerDay(
   /*
    * PROVENANCE, not set size, decides first-contact.
    *
-   * `corrupt`: a receipt STRING exists and failed to parse or validate --
-   * `recovery`, below, regardless of what `stored` looks like. This has to be
-   * checked before the first-contact/discovery split, not folded into it: a
-   * corrupt receipt is `!effectiveStored` in exactly the same way a genuinely
-   * absent one is, and the bounded first-contact seed is only correct for the
-   * absent case. Collapsing the two was the second launch blocker this module
-   * had (Control Tower cold review, 2026-08-20): a healthy receipt with a
-   * 30-day-old record OUTSTANDING, corrupted on disk, reopened as first-contact
-   * and lost that record to the seven-day window -- KNOWN but never OUTSTANDING
-   * again, gone, with nobody having confirmed anything.
+   * `unavailable`: the read itself failed -- `unavailable`, below, regardless
+   * of what `stored` looks like. This is checked FIRST, ahead of `corrupt`:
+   * both are read-layer failures rather than content the receipt provably
+   * had, but `unavailable` additionally must never be persisted (see
+   * `usePartnerDay`), which `corrupt` may be, once repaired into a fresh valid
+   * receipt. Reporting an `unavailable` read as `missing` was itself a
+   * blocker (Control Tower cold review, 2026-08-21): a healthy receipt with a
+   * 30-day-old record OUTSTANDING, momentarily unreadable on a backend whose
+   * writes still succeed even though its reads throw, took the bounded
+   * first-contact seed and then PERSISTED it -- silently overwriting the real
+   * receipt with one computed as if it had never existed.
    *
-   * `effectiveStored` absent and NOT corrupt: no receipt exists at all --
-   * first-contact.
+   * `corrupt`: a receipt STRING exists and failed to parse or validate --
+   * `recovery`, below, regardless of what `stored` looks like. A corrupt
+   * receipt is `!effectiveStored` in exactly the same way a genuinely absent
+   * one is, and the bounded first-contact seed is only correct for the absent
+   * case. Collapsing the two was the FIRST launch blocker this module had
+   * (Control Tower cold review, 2026-08-20): the same "KNOWN but never
+   * OUTSTANDING again" loss, caused by corrupt bytes rather than an unreadable
+   * store.
+   *
+   * `effectiveStored` absent and status is `missing`: no receipt exists at
+   * all -- first-contact.
    *
    * `stored.version < PARTNER_DAY_CHECKPOINT_VERSION`: a legacy (v1) receipt.
    * Whether IT attests to anything depends on whether it ever had a KNOWN-shaped
@@ -476,21 +518,29 @@ export function projectPartnerDay(
   const isLegacyWithNoProvenance = !!effectiveStored
     && effectiveStored.version < PARTNER_DAY_CHECKPOINT_VERSION
     && known.size === 0;
-  const transition: PartnerDayTransition = corrupt
-    ? 'recovery'
-    : (!effectiveStored || isLegacyWithNoProvenance) ? 'first-contact' : 'discovery';
+  const transition: PartnerDayTransition =
+    status === 'unavailable' ? 'unavailable'
+      : status === 'corrupt' ? 'recovery'
+        : (!effectiveStored || isLegacyWithNoProvenance) ? 'first-contact' : 'discovery';
 
-  if (transition === 'recovery') {
+  if (transition === 'recovery' || transition === 'unavailable') {
     /*
-     * Fail-open. Nothing in a corrupt receipt can be trusted, including a date
-     * bound, so this is NOT the bounded first-contact seed: every currently
-     * eligible record becomes OUTSTANDING, whatever its date. `confirmed` is
-     * already empty (see `effectiveStored` above) -- CONFIRMED lived only in
-     * the bytes that just failed to parse, and there is nowhere else it could
-     * come from, so it is legitimately empty after recovery, not merely
-     * unpopulated. A record confirmed before the corruption MAY resurface once.
-     * Duplicate resurfacing over silent, permanent loss is the accepted
-     * tradeoff here (Control Tower policy, 2026-08-20), not an oversight.
+     * Fail-open, identically for both: neither a corrupt receipt nor a read
+     * that failed outright can attest to anything, including a date bound, so
+     * this is NOT the bounded first-contact seed -- every currently eligible
+     * record becomes OUTSTANDING, whatever its date. `confirmed` is already
+     * empty (see `effectiveStored` above) -- CONFIRMED lived only in a receipt
+     * this call cannot see, and there is nowhere else it could come from, so
+     * it is legitimately empty here, not merely unpopulated. A record
+     * confirmed before this may resurface once. Duplicate resurfacing over
+     * silent, permanent loss is the accepted tradeoff (Control Tower policy),
+     * not an oversight.
+     *
+     * The two transitions differ only in what `usePartnerDay` is allowed to do
+     * with the result afterward -- `recovery`'s checkpoint may be persisted,
+     * `unavailable`'s must not be, because a `corrupt` read has actually seen
+     * the (broken) bytes while an `unavailable` one has seen nothing at all
+     * and cannot rule out a real receipt sitting untouched underneath.
      */
     for (const record of eligible) {
       outstanding.add(record.id);
@@ -521,11 +571,24 @@ export function projectPartnerDay(
     knownRecordIds: Array.from(known),
   };
 
-  const changed = !effectiveStored
+  /*
+   * `unavailable` is forced to `false` here rather than left to fall out of
+   * the comparison below, and on purpose: `usePartnerDay`'s persist effect
+   * gates purely on `changed`, so this is what makes "never persist an
+   * unavailable read" true by construction rather than by a caller
+   * remembering a separate check. `effectiveStored` is `null` for
+   * `unavailable` exactly like a genuinely missing receipt, so the comparison
+   * below would otherwise report `true` and hand the caller a checkpoint that
+   * looks exactly as safe to write as a real first-contact result -- which is
+   * the overwrite this state exists to prevent.
+   */
+  const changed = transition === 'unavailable' ? false : (
+    !effectiveStored
     || effectiveStored.version !== PARTNER_DAY_CHECKPOINT_VERSION
     || !sameIds(effectiveStored.confirmedRecordIds, checkpoint.confirmedRecordIds)
     || !sameIds(effectiveStored.outstandingRecordIds, checkpoint.outstandingRecordIds)
-    || !sameIds(effectiveStored.knownRecordIds, checkpoint.knownRecordIds);
+    || !sameIds(effectiveStored.knownRecordIds, checkpoint.knownRecordIds)
+  );
 
   /*
    * THE SURFACE. `OUTSTANDING ∩ eligible(today)` and nothing else.

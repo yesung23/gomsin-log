@@ -109,7 +109,8 @@ describe('CareHintWidget: no mood claim from silence', () => {
   it('honours the stored checkpoint rather than a state field', () => {
     writePartnerDayCheckpoint(ME, 'couple-1', {
       confirmedRecordIds: ['rec-1'],
-      confirmedThrough: TODAY,
+      outstandingRecordIds: [],
+      observedRecordIds: ['rec-1'],
       confirmedAt: `${TODAY}T09:00:00.000Z`,
     });
     renderWidget([record({ id: 'rec-1', reaction: 'hard' })]);

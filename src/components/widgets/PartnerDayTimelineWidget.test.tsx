@@ -387,13 +387,11 @@ describe('privacy: only what this viewer is entitled to see', () => {
     expect(screen.queryByText('너무 오래된 것')).not.toBeInTheDocument();
   });
 
-  it('uses the stored checkpoint as the missed-context lower bound', () => {
+  it('hides a record the receipt already observed and the viewer moved past', () => {
     writePartnerDayCheckpoint(ME, 'couple-1', {
-      confirmedRecordIds: [],
-      // The receipt attests it had already seen the earlier record, which is what
-      // lets the date bound stand as a decision about it.
-      observedRecordIds: ['before'],
-      confirmedThrough: '2026-07-30',
+      confirmedRecordIds: ['before'],
+      outstandingRecordIds: [],
+      observedRecordIds: ['before', 'at-checkpoint'],
       confirmedAt: '2026-07-30T08:00:00.000Z',
     });
     renderWidget([
@@ -402,8 +400,10 @@ describe('privacy: only what this viewer is entitled to see', () => {
       record({ id: 'today', log: '오늘 기록' }),
     ]);
 
+    // `before` is confirmed; `at-checkpoint` was observed but is outstanding-free,
+    // so only the record this receipt never saw comes through.
     expect(screen.queryByText('확인 전 기록')).not.toBeInTheDocument();
-    expect(screen.getByText('확인일 기록')).toBeInTheDocument();
+    expect(screen.queryByText('확인일 기록')).not.toBeInTheDocument();
     expect(screen.getByText('오늘 기록')).toBeInTheDocument();
   });
 
@@ -413,8 +413,8 @@ describe('privacy: only what this viewer is entitled to see', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     writePartnerDayCheckpoint(ME, 'couple-1', {
       confirmedRecordIds: ['known'],
+      outstandingRecordIds: [],
       observedRecordIds: ['known'],
-      confirmedThrough: '2026-07-30',
       confirmedAt: '2026-07-30T08:00:00.000Z',
     });
     renderWidget([
@@ -440,9 +440,9 @@ describe('privacy: only what this viewer is entitled to see', () => {
     // because it is held at the earliest outstanding record.
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     writePartnerDayCheckpoint(ME, 'couple-1', {
-      confirmedRecordIds: [],
-      observedRecordIds: [],
-      confirmedThrough: '2026-07-30',
+      confirmedRecordIds: ['seen'],
+      outstandingRecordIds: [],
+      observedRecordIds: ['seen'],
       confirmedAt: '2026-07-30T08:00:00.000Z',
     });
     renderWidget([
@@ -456,11 +456,10 @@ describe('privacy: only what this viewer is entitled to see', () => {
     await user.click(screen.getByTestId('partner-day-acknowledge'));
 
     const stored = readPartnerDayCheckpoint(ME, 'couple-1');
-    expect(stored?.observedRecordIds).toContain('late');
-    // Observed, but never acknowledged -- nobody could read it.
+    // Never acknowledged -- nobody could read it -- so it stays OUTSTANDING and
+    // remains reachable on its own account, with no date involved.
+    expect(stored?.outstandingRecordIds).toContain('late');
     expect(stored?.confirmedRecordIds).not.toContain('late');
-    // So the bound had to stop at it rather than jumping to today.
-    expect(stored?.confirmedThrough).toBe('2026-07-28');
 
     // It is now the only thing left in the window, which the widget reports as an
     // unreadable-content state rather than an empty one. Still outstanding, so it
@@ -470,11 +469,11 @@ describe('privacy: only what this viewer is entitled to see', () => {
   });
 
   it('a receipt predating observation reopens older records instead of hiding them', () => {
-    writePartnerDayCheckpoint(ME, 'couple-1', {
+    localStorage.setItem(partnerDayCheckpointKey(ME, 'couple-1'), JSON.stringify({
       confirmedRecordIds: [],
       confirmedThrough: '2026-07-30',
       confirmedAt: '2026-07-30T08:00:00.000Z',
-    });
+    }));
     renderWidget([record({ id: 'before', date: '2026-07-29', log: '확인 전 기록' })]);
     expect(screen.getByText('확인 전 기록')).toBeInTheDocument();
   });
@@ -544,7 +543,8 @@ describe('checkpoint: nothing but an explicit acknowledgement advances it', () =
   it("another account's checkpoint on the same device suppresses nothing", () => {
     writePartnerDayCheckpoint('someone-else', 'couple-1', {
       confirmedRecordIds: ['hers'],
-      confirmedThrough: TODAY,
+      outstandingRecordIds: [],
+      observedRecordIds: ['hers'],
       confirmedAt: `${TODAY}T09:00:00.000Z`,
     });
     renderWidget([record({ id: 'hers', log: '내가 못 본 기록' })]);
@@ -554,7 +554,8 @@ describe('checkpoint: nothing but an explicit acknowledgement advances it', () =
   it('a checkpoint from a previous couple suppresses nothing after relinking', () => {
     writePartnerDayCheckpoint(ME, 'couple-old', {
       confirmedRecordIds: ['rec-1'],
-      confirmedThrough: TODAY,
+      outstandingRecordIds: [],
+      observedRecordIds: ['rec-1'],
       confirmedAt: `${TODAY}T09:00:00.000Z`,
     });
     renderWidget([record({ id: 'rec-1', log: '새 커플의 기록' })]);

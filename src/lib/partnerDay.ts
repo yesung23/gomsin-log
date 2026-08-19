@@ -30,48 +30,35 @@ export interface PartnerDayCheckpoint {
    */
   confirmedRecordIds: string[];
   /**
-   * Shared partner records this viewer was already entitled to SEE when the
-   * receipt was written. Not acknowledgement, not authorization, not server
-   * truth, and not proof anything was read. It answers exactly one question:
-   * was this record already in front of this client at the last checkpoint, or
-   * did it show up afterwards?
+   * Records that were on the missed surface at the last acknowledgement and were
+   * NOT acknowledged -- the remainder past the visible prefix, and anything this
+   * device could not decrypt and therefore could not show.
    *
-   * That distinction is what rescues a late arrival. A record composed offline
-   * on the 16th and flushed on the 19th carries `date: 2026-08-16`, so a date
-   * bound set to the 18th hides it forever even though nobody ever saw it. The
-   * same shape occurs with no offline involvement at all when the partner's
-   * timezone is behind the viewer's.
-   *
-   * Deliberately NOT solved by comparing `record.createdAt` against
-   * `confirmedAt`: the first is stamped by Postgres and the second by this
-   * device, so the comparison mixes two clocks and silently loses records
-   * whenever the viewer's device runs ahead of the server. Ids have no clock.
-   *
-   * Held EXACTLY, with no cap. Truncating it was a real defect rather than a
-   * tuning choice: an id dropped to save space is indistinguishable from one that
-   * was never seen, so compaction manufactured "never observed" verdicts, the
-   * rescue reopened those records, and the bound was dragged back to the oldest
-   * of them. Past ~500 shared records that fed itself and the surface could no
-   * longer be cleared at all. Local state may therefore grow with the
-   * relationship; if it ever fails to persist, the write reports failure and the
-   * window simply stays open.
-   *
-   * Optional. A receipt written before this field existed simply has none, and
-   * absence is read as "nothing is known to have been observed" -- the same
-   * reading an empty snapshot gets -- which shows more context rather than less.
+   * These stay reachable on their own account. They do not depend on a date, so
+   * nothing about them can be lost by a bound moving.
    */
-  observedRecordIds?: string[];
+  outstandingRecordIds: string[];
   /**
-   * Local date of the newest acknowledged record — the window's inclusive lower
-   * bound. Inclusive rather than exclusive because more records can arrive later
-   * on that same day, and those were never seen.
+   * Every viewer-visible shared partner record this client already knew about
+   * when the receipt was written.
+   *
+   * Not acknowledgement, not authorization, not server truth, not proof anything
+   * was read. It answers one question: was this record already in front of this
+   * client, or did it appear afterwards? That is what tells a genuine late
+   * arrival -- an offline backlog stamped with its compose date, or a partner in
+   * a timezone behind the viewer -- apart from ordinary history.
+   *
+   * Deliberately not solved by comparing `record.createdAt` with `confirmedAt`:
+   * the first is stamped by Postgres and the second by this device, so the
+   * comparison mixes two clocks and loses records whenever the viewer's runs
+   * ahead. Ids have no clock.
    */
-  confirmedThrough: string;
+  observedRecordIds: string[];
   /**
    * When the acknowledgement happened. DIAGNOSTICS AND ORDERING ONLY.
    *
-   * This is a client wall clock and no correctness decision may depend on it.
-   * Nothing in this module compares it against a server-generated timestamp.
+   * A client wall clock. No correctness decision may read it, and nothing here
+   * compares it against a server-generated timestamp.
    */
   confirmedAt: string;
 }
@@ -87,14 +74,9 @@ export function partnerDayCheckpointKey(userId: string, coupleId: string): strin
   return `gomsinlog.partner-day.v1:${userId}:${coupleId}`;
 }
 
-function isValidDateString(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = parseLocalDate(value);
-  if (Number.isNaN(parsed.getTime())) return false;
-  // Round-trip, because `new Date(2026, 12, 45)` does not fail -- it rolls over
-  // to 2027-02-14. A bound that quietly means a different day than it says is
-  // worse than one that is rejected outright.
-  return toLocalDateString(parsed) === value;
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((id) => typeof id === 'string')) return null;
+  return Array.from(new Set(value as string[]));
 }
 
 export function readPartnerDayCheckpoint(
@@ -108,28 +90,27 @@ export function readPartnerDayCheckpoint(
     const parsed: unknown = JSON.parse(value);
     if (!parsed || typeof parsed !== 'object') return null;
     const candidate = parsed as Record<string, unknown>;
-    if (!Array.isArray(candidate.confirmedRecordIds)
-      || !candidate.confirmedRecordIds.every((id) => typeof id === 'string')
-      || !isValidDateString(candidate.confirmedThrough)
+
+    const confirmed = stringArray(candidate.confirmedRecordIds);
+    if (!confirmed
       || typeof candidate.confirmedAt !== 'string'
       || !Number.isFinite(Date.parse(candidate.confirmedAt))) return null;
-    // Absent or malformed observation is left ABSENT rather than coerced to an
-    // empty array. Both currently read the same way downstream -- neither can
-    // attest to any id, so both reopen old records -- so this is about not
-    // recording a claim the receipt cannot make, rather than about a behavioural
-    // difference that exists today.
-    const observed = Array.isArray(candidate.observedRecordIds)
-      && candidate.observedRecordIds.every((id) => typeof id === 'string')
-      ? Array.from(new Set(candidate.observedRecordIds))
-      : undefined;
+
+    /*
+     * A receipt written before this shape existed has no outstanding or observed
+     * set, and there is no honest way to reconstruct them -- so they are left
+     * empty, which `missedPartnerRecords` reads as "attests to nothing" and
+     * reopens everything unconfirmed once. This local state never shipped, so it
+     * gets no migration machinery; it gets the safe direction.
+     */
     return {
-      confirmedRecordIds: Array.from(new Set(candidate.confirmedRecordIds)),
-      ...(observed ? { observedRecordIds: observed } : {}),
-      confirmedThrough: candidate.confirmedThrough,
+      confirmedRecordIds: confirmed,
+      outstandingRecordIds: stringArray(candidate.outstandingRecordIds) ?? [],
+      observedRecordIds: stringArray(candidate.observedRecordIds) ?? [],
       confirmedAt: candidate.confirmedAt,
     };
   } catch {
-    // A corrupt receipt must degrade to "nothing was confirmed", which shows MORE
+    // A corrupt receipt degrades to "nothing was confirmed", which shows MORE
     // context. Failing the other way would hide records the viewer never saw.
     return null;
   }
@@ -143,15 +124,15 @@ export function writePartnerDayCheckpoint(
   if (typeof localStorage === 'undefined'
     || !userId
     || !coupleId
-    || !isValidDateString(checkpoint.confirmedThrough)
+    || !stringArray(checkpoint.confirmedRecordIds)
+    || !stringArray(checkpoint.outstandingRecordIds)
+    || !stringArray(checkpoint.observedRecordIds)
     || !Number.isFinite(Date.parse(checkpoint.confirmedAt))) return false;
   try {
     localStorage.setItem(partnerDayCheckpointKey(userId, coupleId), JSON.stringify({
       confirmedRecordIds: Array.from(new Set(checkpoint.confirmedRecordIds)),
-      ...(checkpoint.observedRecordIds
-        ? { observedRecordIds: Array.from(new Set(checkpoint.observedRecordIds)) }
-        : {}),
-      confirmedThrough: checkpoint.confirmedThrough,
+      outstandingRecordIds: Array.from(new Set(checkpoint.outstandingRecordIds)),
+      observedRecordIds: Array.from(new Set(checkpoint.observedRecordIds)),
       confirmedAt: checkpoint.confirmedAt,
     }));
     return true;
@@ -161,25 +142,16 @@ export function writePartnerDayCheckpoint(
 }
 
 /**
- * The interval, straight from §6.5 rule 2.
+ * The window for a viewer with no usable receipt: §6.5's "없으면 최근 7일, 상한 오늘".
  *
- * The upper bound matters as much as the lower one: a record dated in the future
- * — a wrong device clock, or a hand-edited date — is not missed context, and
- * `date >= since` alone would pull it in and pin it to the top of the window.
+ * This is the ONLY place a date decides what is missed. Once a receipt exists the
+ * decision is made from record ids, because a date bound cannot express the
+ * difference between "already seen this" and "never had the chance" -- and every
+ * attempt to make it do so produced a defect. The last one rolled the bound
+ * backwards to cover an outstanding record and dragged the entire observed history
+ * back onto the screen with it.
  */
-export function partnerDayWindow(
-  checkpoint: PartnerDayCheckpoint | null | undefined,
-  todayStr: string,
-): PartnerDayWindow {
-  if (checkpoint) {
-    // A checkpoint dated after today (clock change, restored backup) would
-    // silently swallow the whole window, so it cannot raise the lower bound
-    // past today.
-    return {
-      since: checkpoint.confirmedThrough > todayStr ? todayStr : checkpoint.confirmedThrough,
-      until: todayStr,
-    };
-  }
+export function partnerDayFallbackWindow(todayStr: string): PartnerDayWindow {
   const start = parseLocalDate(todayStr);
   start.setDate(start.getDate() - (PARTNER_DAY_FALLBACK_DAYS - 1));
   return { since: toLocalDateString(start), until: todayStr };
@@ -203,12 +175,15 @@ export function visibleSharedPartnerRecords(
 }
 
 /**
- * The partner's shared records this viewer has not yet acknowledged, oldest first.
+ * The partner's shared records this viewer has not yet dealt with, oldest first.
  *
- * Privacy stays exactly where it already was: `visibleRecordsForViewer` decides
- * what this viewer may see at all, and own/private records are dropped on top of
- * it. Widening the time window must not widen authorization, so nothing here
- * relaxes a predicate — the only additional filters are subtractive.
+ * Three facts are tracked separately because collapsing them is what kept
+ * producing defects. A record is CONFIRMED (explicitly acknowledged), OUTSTANDING
+ * (already surfaced, not yet acknowledged), or OBSERVED (this client knew of it at
+ * the last receipt). A single date lower bound cannot represent all three, and
+ * each attempt to make it try lost or resurrected something.
+ *
+ * Authorization is settled before any of this, so no classification can widen it.
  */
 export function missedPartnerRecords(
   records: DailyRecord[],
@@ -216,119 +191,92 @@ export function missedPartnerRecords(
   todayStr: string,
   checkpoint?: PartnerDayCheckpoint | null,
 ): DailyRecord[] {
-  const { since, until } = partnerDayWindow(checkpoint, todayStr);
-  const confirmed = new Set(checkpoint?.confirmedRecordIds ?? []);
-  // A receipt with no snapshot attests to nothing, which is the same answer an
-  // empty snapshot gives. Kept as a distinct value only so the absent case reads
-  // as absent at the call site below.
-  const observed = checkpoint?.observedRecordIds
+  const byTime = (a: DailyRecord, b: DailyRecord) =>
+    `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`);
+
+  // §6.5 "상한 오늘", applied before anything else: a future date is not missed
+  // context however it got here, and no later rule may reintroduce one.
+  const eligible = visibleSharedPartnerRecords(records, viewer)
+    .filter((record) => record.date <= todayStr);
+
+  if (!checkpoint) {
+    const { since } = partnerDayFallbackWindow(todayStr);
+    return eligible.filter((record) => record.date >= since).sort(byTime);
+  }
+
+  const confirmed = new Set(checkpoint.confirmedRecordIds);
+  const outstanding = new Set(checkpoint.outstandingRecordIds);
+  // A receipt from before observation existed cannot attest to anything, so it is
+  // read as attesting to nothing: everything unconfirmed comes back once, and the
+  // next acknowledgement writes a real snapshot. Showing too much once is the
+  // acceptable failure; hiding something unseen is not.
+  const observed = checkpoint.observedRecordIds.length > 0
+    || checkpoint.outstandingRecordIds.length > 0
+    || checkpoint.confirmedRecordIds.length > 0
     ? new Set(checkpoint.observedRecordIds)
     : null;
 
-  return visibleSharedPartnerRecords(records, viewer)
+  return eligible
     .filter((record) => {
-      // Acknowledged is acknowledged, whatever its date. Checked first so a
-      // record can never be reopened by the late-arrival path below.
       if (confirmed.has(record.id)) return false;
-      // §6.5 "상한 오늘". Applies to newly observed records too: a future date is
-      // not missed context however recently it appeared.
-      if (record.date > until) return false;
-      if (record.date >= since) return true;
-
-      /*
-       * Older than the bound. Ordinarily that means the viewer already had their
-       * chance at it, but not if it was not there to be had. A record that was
-       * not part of what this client could see at the last checkpoint has never
-       * been in front of anyone, so the bound was set without it in view and must
-       * not be read as a verdict on it.
-       *
-       * With no checkpoint at all the fallback window governs alone -- there is no
-       * observation to compare against, and reaching further back would defeat
-       * §6.5's seven-day rule.
-       */
-      if (!checkpoint) return false;
-      return !observed || !observed.has(record.id);
+      if (outstanding.has(record.id)) return true;
+      if (!observed || !observed.has(record.id)) return true;
+      // Observed before, never outstanding, never confirmed: this viewer has had
+      // it in front of them and moved past it. Nothing may bring it back.
+      return false;
     })
-    .sort((a, b) => `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`));
+    .sort(byTime);
 }
 
 /**
- * Build the receipt for an explicit acknowledgement of `acknowledged`.
+ * The receipt after an explicit acknowledgement. The only transition there is.
  *
- * Two things set the next lower bound, and the SMALLER of them wins.
+ * `acknowledged` is the chronological prefix the viewer actually had on screen;
+ * `currentMissed` is the whole surface it was a prefix of. Everything in the
+ * second that is not in the first stays OUTSTANDING and remains reachable on its
+ * own account -- including records this device could not decrypt, which is why
+ * the caller passes the full window and not just the readable part.
  *
- * `acknowledged` is the chronological prefix the viewer actually had on screen,
- * so its newest date is as far as consumption can honestly be claimed.
- *
- * `stillMissed` is everything else in the window -- including records this device
- * cannot decrypt yet, which is why the caller must pass those rather than only the
- * readable remainder. An unreadable record is invisible to the prefix but is NOT
- * consumed, and the bound is date-granular, so advancing past it would hide it for
- * good the moment its key arrived. Concretely: a locked record on the 15th
- * followed by readable ones on the 16th and 17th used to push the bound to the
- * 17th, and the 15th never came back.
- *
- * The bound therefore stops at the earliest thing still outstanding. Acknowledged
- * records are held out by id regardless, so keeping the date back costs at most a
- * second sighting -- and this module's whole rule is that showing a record twice
- * is cheaper than losing one that was never seen.
+ * An empty acknowledgement returns `null`: nothing was consumed, so there is no
+ * receipt to write. The caller treats a null result as "do not persist, do not
+ * advance", which keeps loading or rendering data from ever standing in for a
+ * person confirming they read it.
  */
 export function advancePartnerDayCheckpoint(
   previous: PartnerDayCheckpoint | null | undefined,
   acknowledged: DailyRecord[],
-  stillMissed: DailyRecord[] = [],
+  currentMissed: DailyRecord[] = [],
   observable: { records: DailyRecord[]; viewer: Viewer } | null = null,
   now: Date = new Date(),
 ): PartnerDayCheckpoint | null {
   if (acknowledged.length === 0) return null;
-  const newestAcknowledged = acknowledged.reduce(
-    (latest, record) => (record.date > latest ? record.date : latest),
-    acknowledged[0].date,
-  );
-  const acknowledgedIds = new Set(acknowledged.map((record) => record.id));
-  const outstanding = stillMissed.filter((record) => !acknowledgedIds.has(record.id));
-  const earliestOutstanding = outstanding.length > 0
-    ? outstanding.reduce(
-      (earliest, record) => (record.date < earliest ? record.date : earliest),
-      outstanding[0].date,
-    )
-    : null;
 
-  /*
-   * Snapshot, not accumulation: what this client can see RIGHT NOW. Filtered
-   * again through the module's own privacy gate rather than trusting the caller,
-   * so a private record's id cannot reach the receipt even by mistake.
-   *
-   * Left undefined when no snapshot is supplied. Absent observation reopens old
-   * records, which is the harmless direction; inventing an empty snapshot would
-   * instead claim nothing was visible, and inventing a full one would claim
-   * everything was.
-   */
-  const observedRecordIds = observable
-    ? Array.from(new Set(
-      visibleSharedPartnerRecords(observable.records, observable.viewer)
-        .sort((a, b) => `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`))
-        .map((record) => record.id),
-    ))
-    : undefined;
+  const acknowledgedIds = new Set(acknowledged.map((record) => record.id));
 
   return {
-    // Uncapped, for the same reason the observation snapshot is. Dropping a
-    // confirmation reopens a record the viewer already dealt with, and on the
-    // inclusive lower-bound date that compounds with the observation cap instead
-    // of settling.
     confirmedRecordIds: Array.from(new Set([
       ...(previous?.confirmedRecordIds ?? []),
-      ...acknowledged.map((record) => record.id),
+      ...acknowledgedIds,
     ])),
-    ...(observedRecordIds ? { observedRecordIds } : {}),
-    // Deliberately NOT floored at the previous bound. Acknowledging a late-arriving
-    // older record does reopen the days it sits in -- but everything already seen
-    // in those days is held out by id, so what comes back is exactly what was never
-    // acknowledged. That is the direction this module is required to fail in.
-    confirmedThrough: earliestOutstanding && earliestOutstanding < newestAcknowledged
-      ? earliestOutstanding
-      : newestAcknowledged,
+    outstandingRecordIds: currentMissed
+      .map((record) => record.id)
+      .filter((id) => !acknowledgedIds.has(id)),
+    /*
+     * A snapshot of what this client can see now, filtered through this module's
+     * own privacy gate rather than trusting the caller -- a private or own record's
+     * id must never reach a receipt.
+     *
+     * Uncapped. Truncating it was a real defect: an id dropped to save space is
+     * indistinguishable from one never seen, so compaction manufactured "never
+     * observed" verdicts and the surface reopened records the viewer had already
+     * dealt with.
+     */
+    observedRecordIds: observable
+      ? Array.from(new Set(
+        visibleSharedPartnerRecords(observable.records, observable.viewer)
+          .map((record) => record.id),
+      ))
+      : [],
     confirmedAt: now.toISOString(),
   };
 }

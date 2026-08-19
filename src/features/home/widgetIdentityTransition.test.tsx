@@ -142,8 +142,8 @@ function seedCheckpointA(
 ) {
   writePartnerDayCheckpoint(userId, coupleId, {
     confirmedRecordIds: ['a-rec-1', 'a-rec-2'],
+    outstandingRecordIds: [],
     observedRecordIds: ['a-rec-1', 'a-rec-2', ...observedIds],
-    confirmedThrough: TODAY,
     confirmedAt: `${TODAY}T09:00:00.000Z`,
   });
 }
@@ -178,7 +178,7 @@ describe('상대방의 오늘 across a live account change', () => {
     ], ['partner_day']);
     rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
 
-    // Under the defect A's `confirmedThrough` (today) hid anything earlier.
+    // Under the defect A's receipt classified B's record as already observed.
     expect(screen.getByText('B가 못 본 기록')).toBeInTheDocument();
   });
 
@@ -251,10 +251,11 @@ describe('acknowledgement after an identity change writes only the new identity'
     // The contamination that made the defect durable: A's ids and A's later date
     // bound being merged into the receipt written under B's key.
     expect(stored?.confirmedRecordIds).not.toContain('a-rec-1');
-    expect(stored?.confirmedThrough).toBe(BEFORE_A_CHECKPOINT);
+    expect(stored?.observedRecordIds).toEqual(['b-only']);
 
     // A's own receipt is untouched by B's acknowledgement.
-    expect(readPartnerDayCheckpoint('user-a', 'couple-a')?.confirmedThrough).toBe(TODAY);
+    expect(readPartnerDayCheckpoint('user-a', 'couple-a')?.confirmedRecordIds)
+      .toEqual(['a-rec-1', 'a-rec-2']);
   });
 });
 

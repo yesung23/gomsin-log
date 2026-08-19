@@ -124,8 +124,9 @@ export function PartnerDayTimelineWidget() {
    */
   const acknowledgeVisible = () => {
     // `missed`, not `readableMissed`: a record this device cannot decrypt yet is
-    // not consumed just because it could not be drawn, and the receipt has to
-    // know it is still outstanding so the date bound does not step over it.
+    // not consumed just because it could not be drawn. Everything in the window
+    // the viewer did not acknowledge becomes OUTSTANDING and stays reachable on
+    // its own account.
     const next = advancePartnerDayCheckpoint(checkpoint, visible, missed, {
       records: state.records,
       viewer: { userId: profile.id, role: profile.role },

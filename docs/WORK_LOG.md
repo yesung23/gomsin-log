@@ -89,6 +89,112 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-20 · LV · 감정 캐릭터·기록 속 마음·주기 시각화, 그리고 통증 공유(미착지)
+
+#### PLAN POSITION
+- Phase: LV (Limited Validation)
+- Workstream: design-preview 기반 UI/UX 완성 + Cycle UX
+- Step: 감정 캐릭터 / 기록 속 마음 / 증상 2종 / 가임·배란 시각화 / 공유 경계 / 배려 신호 UX
+  → master 착지. 통증 공유는 별도 branch에서 구현만.
+- Previous Gate: interaction quality layer (`2184bed`)
+- This Gate: 없음 — LV 진입 조건이 아니다
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` canonical tabs 불변, §13(감정은 author-only 기본),
+  §8(이야기거리는 task manager 아님)
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·BM·가격·KPI 변경 없음
+- Engineering source checked: `ENGINEERING_ROADMAP` §LV
+- Current-state checked: `CURRENT_STATE.md`, live git (`2184bed`)
+- Latest relevant Work Log checked: 바로 아래 interaction-quality entry
+- Abandoned-strategy guard(`AGENTS.md` §17): 해당 없음. AI 자동 감정 확정을 요청 문서가
+  독립적으로 금지했고 구현도 그에 따랐다
+- Does this task conflict with canonical direction? NO
+  (직전 세션의 §L 통증 공유 충돌은 이번에 Control Tower 제품 결정으로 해소되었다)
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: claude-opus-5[1m] / Role: Worker + self-verification
+- PR: 없음
+- Branch: `master` (UI) + `security-review/cycle-pain-care-signal` (통증 공유, **로컬 전용**)
+- Base SHA: 2184bedd7a2a02cb6575aae374a02c4e4a34ad4a
+- New HEAD: `7e0d8a7` (master), `a59da87` (review branch, 미push)
+
+#### CHANGED / REVIEWED
+- file: `src/components/emotion/EmotionCharacter.tsx`(신규) — 6감정 original SVG.
+  silhouette가 1차 신호, 색이 2차, 한글 label이 3차. loop/idle animation 없음
+- file: `src/components/emotion/RecordMoodSection.tsx`(신규) + `RecordPage.tsx` —
+  기록 상세의 **기록 속 마음**. 저장된 감정이 처음부터 선택 상태, 변경은 1탭.
+  기존 `RecordEmotionCorrection`은 다른 질문(어떤 추정을 남길지)이라 그대로 둔다
+- file: `src/styles/index.css` — `--emotion-*` 12종(light/dark)
+- file: `src/types/index.ts`, `cycleFormatting.ts` — 증상 `nausea`·`breast_tenderness`
+- file: `src/lib/cyclePrediction.ts` — `fertilityOccursOnDate`·`ovulationOccursOnDate`
+  (**읽기 전용**. 엔진 산술 미변경)
+- file: `src/components/cycle/CycleDayMarker.tsx`(신규) + `CycleCalendar.tsx` —
+  4상태 color+symbol, 기록=solid / 예상=outline, legend 필수
+- file: `cyclePartnerMessage.ts` + `CycleSharingSettings.tsx` — 공유/비공유 2블록 분리
+- file: `CycleSupportSection.tsx` — 배려 요청 `<select>` → 카드 4종, 기본 선택 없음
+- file: `design-preview/screensNew.tsx`(신규), `registry.ts` — 신규 컴포넌트 갤러리 + 430 뷰포트
+- **미착지**: `supabase/migrations/047_cycle_pain_care_signal.sql`,
+  `CYCLE_PAIN_SHARE_KINDS`, 통증 공유 UI/preview — `security-review/...` branch에만 있다
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: **master에는 변경 없음.** 047은 review branch에만 있고
+  어디에도 적용하지 않았다
+- product semantics: canonical tabs·PartnerDay·§8·§13 불변.
+  `CyclePartnerMessageInput`은 여전히 증상/출혈량/기분/메모를 담을 필드가 없다
+- Production: 미접촉. remote Supabase mutation 없음
+
+#### VERIFICATION
+- command: `npm run verify` (master)
+- PASS — typecheck, lint(0 warnings), **2509 tests / 165 files**, build
+- command: `npm run verify` (review branch)
+- PASS — **2527 tests / 166 files**, build
+- command: `test:p0`/`test:p5`/`test:rollback`/`test:write-floor`/`test:phase0` (review branch,
+  schema를 건드리므로 실행)
+- PASS — 76 / 93 / 3케이스 / 39 assertions / Phase 0 계약 유지
+- command: 빌드 산출물에서 `--emotion-*` light·dark 실착지 확인 — PASS
+- command: **mobile visual check (320/390/430, light/dark)**
+- **NOT DONE** — Playwright 브라우저가 이 머신에 없고 `npx playwright install`이 완료되지
+  않았다(다운로드 624K에서 정지). Chrome extension 경로도 미연결. 스크린샷을 찍지 못했으므로
+  시각 검증은 통과로 적지 않는다. `design-preview`에 갤러리 화면과 430 뷰포트를 추가해
+  두 줄 명령으로 실행 가능한 상태로 남겼다
+- command: `check:edge` / `test:edge`
+- **NOT RUN** — deno 미설치. `supabase/functions/` 미접촉
+- what it actually proves: 토큰·컴포넌트 로직·privacy 경계·migration blast radius의
+  정확성. 실제 화면에서의 시각적 판단과 실기기 터치는 증명하지 않는다
+
+#### REVIEW IMPACT
+- master: DELTA — presentation + 개인 기록 어휘. privacy 경계 변화 없음
+- review branch: **FULL — independent security review 필요.** partner-visible 어휘와
+  migration이 바뀐다
+
+#### BLOCKERS
+- code: 없음
+- environment: Playwright 브라우저 미설치, deno 미설치
+- external/manual: 통증 공유는 security review 전까지 master 금지
+
+#### STOPPED AT
+- exact completed boundary: master에 `7e0d8a7`까지 착지. 통증 공유는 `a59da87`로
+  **로컬 커밋만** 했고 push하지 않았다. patch 사본은 scratchpad에 있다
+
+#### REMAINING
+- not completed: 통증 공유 security review, 시각 검증, 나머지 화면(Home/Schedule/Us/My/
+  onboarding)의 개별 디자인 패스, `ErrorNote` 등 design-preview 원시 컴포넌트 이식
+
+#### NEXT ACTION
+- next owner: independent security reviewer(047), 이후 사용자(시각 검증)
+- 기준 SHA: `7e0d8a7` (master), `a59da87` (review branch)
+- exact next task: 047 review → 통과 시 master 착지 → staging 적용 검증
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 047과 통증 공유 계열은 independent security review 이전에
+  master·remote 어디에도 올리지 않는다. P6는 여전히 NOT AUTHORIZED
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED. 047은 어디에도 미적용
+
+---
+
 ### 2026-08-20 · LV · Apple 수준 interaction quality layer — foundation + core loop
 
 #### PLAN POSITION

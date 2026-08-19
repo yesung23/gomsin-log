@@ -102,20 +102,31 @@ function device(userId = ME, coupleId = COUPLE) {
      * Open the app on `todayStr`. Never writes CONFIRMED.
      *
      * Reads via `readPartnerDayCheckpointStatus` rather than
-     * `readPartnerDayCheckpoint`, and threads `corrupt` into `projectPartnerDay`,
-     * so a test that corrupts storage between opens exercises exactly what
-     * `usePartnerDay` does in production -- not a version of this device that
-     * happens not to notice.
+     * `readPartnerDayCheckpoint`, and threads `status` into `projectPartnerDay`,
+     * so a test that corrupts storage or makes it unreadable between opens
+     * exercises exactly what `usePartnerDay` does in production -- not a version
+     * of this device that happens not to notice. Nothing extra is needed to keep
+     * `unavailable` from persisting: `projectPartnerDay` already forces
+     * `changed: false` for it, so the `if (projection.changed)` guard below
+     * already declines to write, matching the real hook.
      */
     open(records: DailyRecord[], todayStr: string) {
-      const { checkpoint: stored, corrupt } = readPartnerDayCheckpointStatus(key);
-      const projection = projectPartnerDay(context(todayStr, key), records, stored, corrupt);
+      const { checkpoint: stored, status } = readPartnerDayCheckpointStatus(key);
+      const projection = projectPartnerDay(context(todayStr, key), records, stored, status);
       if (projection.changed) writePartnerDayCheckpoint(key, projection.checkpoint);
       return projection;
     },
-    /** Press the confirm button on `records`. The only CONFIRMED writer. */
+    /**
+     * Press the confirm button on `records`. The only CONFIRMED writer.
+     *
+     * Blocked while the receipt is `unavailable`, matching `usePartnerDay`'s
+     * `acknowledge`: storage cannot currently attest to what is really
+     * CONFIRMED, so a write here risks the same silent overwrite the persist
+     * path guards against.
+     */
     confirm(records: DailyRecord[]) {
-      const stored = readPartnerDayCheckpoint(key);
+      const { checkpoint: stored, status } = readPartnerDayCheckpointStatus(key);
+      if (status === 'unavailable') return false;
       const next = acknowledgePartnerDayRecords(stored ?? checkpoint(), records);
       if (!next) return false;
       return writePartnerDayCheckpoint(key, next);
@@ -338,22 +349,20 @@ describe('BLOCKER FIX: first-contact is decided by receipt provenance', () => {
  * Control Tower policy (2026-08-20): missing and corrupt are not the same
  * failure.
  *
- *   MISSING  (readPartnerDayCheckpointStatus: { checkpoint: null,
- *             corrupt: false }) -- unchanged: bounded 7-day first-contact.
+ *   MISSING  (readPartnerDayCheckpointStatus: `{ checkpoint: null,
+ *             status: 'missing' }`) -- unchanged: bounded 7-day first-contact.
  *   VALID    -- unchanged: discovery, per the suite above.
- *   CORRUPT  ({ checkpoint: null, corrupt: true }) -- `recovery`: every
+ *   CORRUPT  (`{ checkpoint: null, status: 'corrupt' }`) -- `recovery`: every
  *             CURRENTLY ELIGIBLE record becomes OUTSTANDING, unbounded by
  *             date. CONFIRMED is not recovered -- it lived only in the bytes
  *             that just failed to parse -- so an already-confirmed record MAY
  *             resurface once. Duplicate resurfacing over silent, permanent
  *             loss is the accepted tradeoff, not an oversight.
  *
- * An I/O failure merely FETCHING the value (`localStorage.getItem` throwing)
- * is deliberately NOT corrupt: it proves nothing about what is or is not
- * stored, and misreading it as corrupt would flood every visit to an
- * environment with blocked storage. It folds into MISSING instead -- the same
- * conservative behavior this module already had for
- * `typeof localStorage === 'undefined'`.
+ * A read that fails OUTRIGHT (`localStorage.getItem` throwing) is a fourth,
+ * separate state -- `unavailable` -- and is NOT tested here. Folding it into
+ * either `missing` or `corrupt` was itself the next blocker found; see
+ * "BLOCKER FIX 3" below.
  */
 describe('BLOCKER FIX 2: a corrupt receipt runs unbounded recovery, not first-contact', () => {
   it('[A] a healthy 30-day-old OUTSTANDING record survives the receipt corrupting and reopening', () => {
@@ -392,7 +401,7 @@ describe('BLOCKER FIX 2: a corrupt receipt runs unbounded recovery, not first-co
     const shared = at('shared', 10, { time: '10:00' });
 
     const { surface, checkpoint: cp, transition } =
-      projectPartnerDay(context(), [secret, mine, future, shared], null, true);
+      projectPartnerDay(context(), [secret, mine, future, shared], null, 'corrupt');
 
     expect(transition).toBe('recovery');
     expect(ids(surface)).toEqual(['shared']);
@@ -402,18 +411,18 @@ describe('BLOCKER FIX 2: a corrupt receipt runs unbounded recovery, not first-co
 
   it('[D] a truly absent receipt keeps the existing bounded first-contact policy', () => {
     const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
-    expect(status).toEqual({ checkpoint: null, corrupt: false });
+    expect(status).toEqual({ checkpoint: null, status: 'missing' });
 
     const old = at('old', 30);
     const recent = at('recent', 2);
-    const { surface, transition } = projectPartnerDay(context(), [old, recent], null, false);
+    const { surface, transition } = projectPartnerDay(context(), [old, recent], null, 'missing');
     expect(transition).toBe('first-contact');
     // Bounded: the 30-day-old record is outside the window and does not show --
     // this is the pre-existing, intentional first-contact policy, unaffected.
     expect(ids(surface)).toEqual(['recent']);
   });
 
-  it('[E] a valid v2 receipt is reported as not corrupt, and keeps discovery semantics', () => {
+  it('[E] a valid v2 receipt is reported as valid, and keeps discovery semantics', () => {
     const cp: PartnerDayCheckpoint = {
       version: PARTNER_DAY_CHECKPOINT_VERSION,
       confirmedRecordIds: ['old-confirmed'],
@@ -423,12 +432,12 @@ describe('BLOCKER FIX 2: a corrupt receipt runs unbounded recovery, not first-co
     writePartnerDayCheckpoint({ userId: ME, coupleId: COUPLE }, cp);
 
     const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
-    expect(status.corrupt).toBe(false);
+    expect(status.status).toBe('valid');
     expect(status.checkpoint).not.toBeNull();
 
     const late = at('late', 90);
     const { transition, surface } = projectPartnerDay(
-      context(), [late], status.checkpoint, status.corrupt,
+      context(), [late], status.checkpoint, status.status,
     );
     expect(transition).toBe('discovery');
     expect(ids(surface)).toEqual(['late']);
@@ -447,7 +456,7 @@ describe('BLOCKER FIX 2: a corrupt receipt runs unbounded recovery, not first-co
     // Recovery changed the checkpoint, so it persisted a VALID v2 receipt --
     // corruption does not recur on the next open.
     const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
-    expect(status.corrupt).toBe(false);
+    expect(status.status).toBe('valid');
     expect(status.checkpoint?.version).toBe(PARTNER_DAY_CHECKPOINT_VERSION);
 
     // Unconfirmed, it is still reachable much later -- the ordinary I1 guarantee,
@@ -471,7 +480,91 @@ describe('BLOCKER FIX 2: a corrupt receipt runs unbounded recovery, not first-co
     expect(phone.open([old], plusDays(TODAY, 400)).surface).toEqual([]);
   });
 
-  it('an I/O failure merely reading storage is reported as absence, not corruption', () => {
+  it('recovery cannot resurrect CONFIRMED -- it lived only in the corrupt bytes', () => {
+    // A record confirmed before the corruption is legitimately gone from
+    // CONFIRMED after recovery: there is nowhere else it could come from. It
+    // resurfaces on the surface instead -- duplicate resurfacing, not loss.
+    localStorage.setItem(partnerDayCheckpointKey(ME, COUPLE), '{ not json');
+    const wasConfirmed = at('was-confirmed', 30);
+    const { checkpoint: cp, surface } =
+      projectPartnerDay(context(), [wasConfirmed], null, 'corrupt');
+    expect(cp.confirmedRecordIds).toEqual([]);
+    expect(ids(surface)).toEqual(['was-confirmed']);
+  });
+
+  it("status: 'corrupt' discards a well-formed stored checkpoint passed alongside it", () => {
+    // Defensive: `projectPartnerDay`'s contract is that a corrupt status wins
+    // over whatever `stored` looks like, so a caller cannot accidentally seed
+    // real CONFIRMED/OUTSTANDING/KNOWN from bytes already flagged untrustworthy.
+    const untrustworthy: PartnerDayCheckpoint = {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
+      confirmedRecordIds: ['should-not-count'],
+      outstandingRecordIds: ['should-not-count'],
+      knownRecordIds: ['should-not-count'],
+    };
+    const eligible = at('eligible', 10);
+    const { checkpoint: cp, surface, transition } =
+      projectPartnerDay(context(), [eligible], untrustworthy, 'corrupt');
+
+    expect(transition).toBe('recovery');
+    expect(cp.confirmedRecordIds).toEqual([]);
+    expect(ids(surface)).toEqual(['eligible']);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* BLOCKER FIX 3: an UNREADABLE receipt must never be treated as MISSING --  */
+/* it may still be on disk, and the write path can still reach it           */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Cold-review blocker (I1 NO SILENT LOSS), found in the fix for BLOCKER FIX 2
+ * itself: `getItem` throwing was folded into `missing`, on the reasoning that
+ * a backend broken enough to fail reads would likely also fail writes, making
+ * the persisted first-contact seed harmless because it could never actually
+ * reach disk.
+ *
+ * That reasoning does not hold. A storage backend can fail reads while writes
+ * still succeed -- this is not hypothetical, it is exactly what the wrapper in
+ * test [A] below constructs, and real asymmetric failures (a corrupted index,
+ * a permissions quirk, certain private-mode edge cases) are plausible in the
+ * same shape. When that happens:
+ *
+ *   1. a healthy receipt with a 30-day-old record OUTSTANDING sits on disk,
+ *   2. a read attempt throws -- reported (before this fix) as `missing`,
+ *   3. `projectPartnerDay` runs the bounded first-contact seed, which does NOT
+ *      include the 30-day-old record (outside the 7-day window),
+ *   4. `usePartnerDay`'s persist effect sees `changed: true` and calls
+ *      `writePartnerDayCheckpoint`, which succeeds,
+ *   5. the real receipt is gone, overwritten by one computed as though it had
+ *      never existed. Reachable when reads later recover? No -- the bytes on
+ *      disk NOW say the record was already accounted for and never surfaced.
+ *
+ * `readPartnerDayCheckpointStatus` reports `unavailable` for this case
+ * (distinct from `missing`). `projectPartnerDay` gives it the SAME unbounded,
+ * fail-open surface as `recovery` -- Control Tower policy is that the SCREEN
+ * must not silently hide a record just because storage cannot currently be
+ * read -- but forces `changed: false`, so nothing computed while `unavailable`
+ * may be persisted. `usePartnerDay` additionally refuses both the persist
+ * effect and `acknowledge` outright while this status holds, as a second,
+ * independent guard at the call site.
+ */
+describe("BLOCKER FIX 3: an unreadable receipt is 'unavailable', not 'missing', and is never persisted", () => {
+  it('[A] a healthy 30-day-old OUTSTANDING receipt is NOT overwritten when reads throw but writes still succeed', () => {
+    const old = at('old-outstanding', 30);
+    // A real, healthy v2 receipt with this record legitimately OUTSTANDING.
+    writePartnerDayCheckpoint({ userId: ME, coupleId: COUPLE }, {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
+      confirmedRecordIds: [],
+      outstandingRecordIds: ['old-outstanding'],
+      knownRecordIds: ['old-outstanding'],
+    });
+    const bytesBefore = localStorage.getItem(partnerDayCheckpointKey(ME, COUPLE));
+    expect(bytesBefore).not.toBeNull();
+
+    // getItem throws; setItem passes straight through to the real store. This
+    // is the exact asymmetric failure the previous version of this fix assumed
+    // could not happen.
     const real = globalThis.localStorage;
     const throwing: Storage = {
       length: 0,
@@ -484,50 +577,160 @@ describe('BLOCKER FIX 2: a corrupt receipt runs unbounded recovery, not first-co
     Object.defineProperty(globalThis, 'localStorage', { value: throwing, configurable: true });
     try {
       const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
-      expect(status).toEqual({ checkpoint: null, corrupt: false });
+      expect(status).toEqual({ checkpoint: null, status: 'unavailable' });
 
-      // Takes the bounded first-contact seed, exactly like true absence -- NOT
-      // the unbounded recovery path. A `getItem` failure proves nothing about
-      // whether bytes exist to be corrupt.
-      const old = at('old', 30);
-      const recent = at('recent', 2);
-      const { transition, surface } =
-        projectPartnerDay(context(), [old, recent], status.checkpoint, status.corrupt);
-      expect(transition).toBe('first-contact');
-      expect(ids(surface)).toEqual(['recent']);
+      const projection = projectPartnerDay(
+        { userId: ME, coupleId: COUPLE, viewer: VIEWER, todayStr: TODAY },
+        [old], status.checkpoint, status.status,
+      );
+      expect(projection.transition).toBe('unavailable');
+      // Persistence must not fire: `usePartnerDay`'s persist effect gates on
+      // `changed`, so this alone is what keeps the write from ever happening.
+      expect(projection.changed).toBe(false);
+      if (projection.changed) writePartnerDayCheckpoint({ userId: ME, coupleId: COUPLE }, projection.checkpoint);
     } finally {
       Object.defineProperty(globalThis, 'localStorage', { value: real, configurable: true });
     }
+
+    const bytesAfter = localStorage.getItem(partnerDayCheckpointKey(ME, COUPLE));
+    expect(bytesAfter).toBe(bytesBefore);
   });
 
-  it('recovery cannot resurrect CONFIRMED -- it lived only in the corrupt bytes', () => {
-    // A record confirmed before the corruption is legitimately gone from
-    // CONFIRMED after recovery: there is nowhere else it could come from. It
-    // resurfaces on the surface instead -- duplicate resurfacing, not loss.
-    localStorage.setItem(partnerDayCheckpointKey(ME, COUPLE), '{ not json');
-    const wasConfirmed = at('was-confirmed', 30);
-    const { checkpoint: cp, surface } = projectPartnerDay(context(), [wasConfirmed], null, true);
-    expect(cp.confirmedRecordIds).toEqual([]);
-    expect(ids(surface)).toEqual(['was-confirmed']);
-  });
-
-  it('corrupt=true discards a well-formed stored checkpoint passed alongside it', () => {
-    // Defensive: `projectPartnerDay`'s contract is that a corrupt signal wins
-    // over whatever `stored` looks like, so a caller cannot accidentally seed
-    // real CONFIRMED/OUTSTANDING/KNOWN from bytes already flagged untrustworthy.
-    const untrustworthy: PartnerDayCheckpoint = {
+  it('[B] the fail-open surface still shows the old eligible record while unavailable, rather than silently hiding it', () => {
+    const old = at('old-outstanding', 30);
+    writePartnerDayCheckpoint({ userId: ME, coupleId: COUPLE }, {
       version: PARTNER_DAY_CHECKPOINT_VERSION,
-      confirmedRecordIds: ['should-not-count'],
-      outstandingRecordIds: ['should-not-count'],
-      knownRecordIds: ['should-not-count'],
-    };
-    const eligible = at('eligible', 10);
-    const { checkpoint: cp, surface, transition } =
-      projectPartnerDay(context(), [eligible], untrustworthy, true);
+      confirmedRecordIds: [],
+      outstandingRecordIds: [],
+      knownRecordIds: [],
+    });
+    const status: { checkpoint: null; status: 'unavailable' } =
+      { checkpoint: null, status: 'unavailable' };
+    const projection = projectPartnerDay(
+      context(), [old], status.checkpoint, status.status,
+    );
+    // Fail-open: the screen shows it, exactly as `recovery` would -- storage
+    // being unreadable is not evidence the record was already dealt with.
+    expect(projection.transition).toBe('unavailable');
+    expect(ids(projection.surface)).toEqual(['old-outstanding']);
+  });
 
-    expect(transition).toBe('recovery');
-    expect(cp.confirmedRecordIds).toEqual([]);
-    expect(ids(surface)).toEqual(['eligible']);
+  it('[C] acknowledging while unavailable writes nothing and confirms nothing', () => {
+    const phone = device();
+    const old = at('old-outstanding', 30);
+    phone.open([old], TODAY);
+
+    const real = globalThis.localStorage;
+    const throwing: Storage = {
+      length: 0,
+      clear: () => {},
+      key: () => null,
+      getItem: () => { throw new Error('SecurityError'); },
+      removeItem: () => {},
+      setItem: (k, v) => real.setItem(k, v),
+    };
+    Object.defineProperty(globalThis, 'localStorage', { value: throwing, configurable: true });
+    try {
+      const opened = phone.open([old], TODAY);
+      expect(opened.transition).toBe('unavailable');
+      expect(ids(opened.surface)).toEqual(['old-outstanding']);
+      // `device().confirm` mirrors `usePartnerDay`'s `acknowledge`: blocked
+      // outright while unavailable.
+      expect(phone.confirm(opened.surface)).toBe(false);
+    } finally {
+      Object.defineProperty(globalThis, 'localStorage', { value: real, configurable: true });
+    }
+
+    // Storage is untouched: still the healthy receipt from before the outage,
+    // and nothing was ever confirmed.
+    const stored = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
+    expect(stored.status).toBe('valid');
+    expect(stored.checkpoint?.confirmedRecordIds).toEqual([]);
+  });
+
+  it('[D] once storage becomes readable again, the old OUTSTANDING record is still reachable', () => {
+    const old = at('old-outstanding', 30);
+    const phone = device();
+    phone.open([], TODAY);
+    const discovered = phone.open([old], TODAY);
+    expect(ids(discovered.surface)).toEqual(['old-outstanding']);
+
+    const real = globalThis.localStorage;
+    const throwing: Storage = {
+      length: 0,
+      clear: () => {},
+      key: () => null,
+      getItem: () => { throw new Error('SecurityError'); },
+      removeItem: () => {},
+      setItem: (k, v) => real.setItem(k, v),
+    };
+    Object.defineProperty(globalThis, 'localStorage', { value: throwing, configurable: true });
+    try {
+      const opened = phone.open([old], TODAY);
+      expect(opened.transition).toBe('unavailable');
+    } finally {
+      Object.defineProperty(globalThis, 'localStorage', { value: real, configurable: true });
+    }
+
+    // Reads recover, and the receipt on disk was never touched during the outage.
+    const recovered = phone.open([old], plusDays(TODAY, 5));
+    expect(recovered.transition).toBe('discovery');
+    expect(ids(recovered.surface)).toEqual(['old-outstanding']);
+  });
+
+  it('[E] a truly missing receipt is unaffected: still bounded first-contact', () => {
+    const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
+    expect(status.status).toBe('missing');
+    const old = at('old', 30);
+    const recent = at('recent', 2);
+    const { transition, surface } =
+      projectPartnerDay(context(), [old, recent], status.checkpoint, status.status);
+    expect(transition).toBe('first-contact');
+    expect(ids(surface)).toEqual(['recent']);
+  });
+
+  it('[F] a corrupt receipt is unaffected: still unbounded recovery, and MAY persist', () => {
+    localStorage.setItem(partnerDayCheckpointKey(ME, COUPLE), '{ not json');
+    const old = at('old', 30);
+    const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
+    expect(status.status).toBe('corrupt');
+    const projection = projectPartnerDay(context(), [old], status.checkpoint, status.status);
+    expect(projection.transition).toBe('recovery');
+    expect(projection.changed).toBe(true);
+    expect(ids(projection.surface)).toEqual(['old']);
+  });
+
+  it('[G] a valid receipt is unaffected: still discovery', () => {
+    const cp: PartnerDayCheckpoint = {
+      version: PARTNER_DAY_CHECKPOINT_VERSION,
+      confirmedRecordIds: [],
+      outstandingRecordIds: [],
+      knownRecordIds: [],
+    };
+    writePartnerDayCheckpoint({ userId: ME, coupleId: COUPLE }, cp);
+    const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
+    expect(status.status).toBe('valid');
+    const late = at('late', 90);
+    const { transition, surface } =
+      projectPartnerDay(context(), [late], status.checkpoint, status.status);
+    expect(transition).toBe('discovery');
+    expect(ids(surface)).toEqual(['late']);
+  });
+
+  it('[H] private, own, and future records never enter the unavailable fail-open surface', () => {
+    const secret = at('secret', 10, { isPrivate: true });
+    const mine = at('mine', 10, { userId: ME, authorRole: 'soldier' });
+    const future = record({ id: 'future', date: plusDays(TODAY, 3) });
+    const shared = at('shared', 10, { time: '10:00' });
+
+    const { surface, checkpoint: cp, transition } = projectPartnerDay(
+      context(), [secret, mine, future, shared], null, 'unavailable',
+    );
+
+    expect(transition).toBe('unavailable');
+    expect(ids(surface)).toEqual(['shared']);
+    expect(cp.knownRecordIds).toEqual(['shared']);
+    expect(cp.outstandingRecordIds).toEqual(['shared']);
   });
 });
 
@@ -1049,23 +1252,25 @@ describe('the stored receipt', () => {
   });
 
   it('readPartnerDayCheckpoint alone cannot tell a corrupt receipt from a missing one', () => {
-    // `readPartnerDayCheckpoint` returns `null` either way -- by design, it is a
-    // thin projection of `readPartnerDayCheckpointStatus` for callers that do not
-    // need the distinction. A caller that DOES need it -- `projectPartnerDay`,
-    // via `usePartnerDay` -- must read the full status instead. See
-    // "BLOCKER FIX 2" above for what that distinction is for: treating a corrupt
-    // receipt as first-contact bounds recovery to seven days and can silently
-    // entomb an older OUTSTANDING record. `readPartnerDayCheckpointStatus`,
-    // reported as `corrupt: true` here, is what lets `projectPartnerDay` avoid
-    // that and take `recovery` instead.
+    // `readPartnerDayCheckpoint` returns `null` for missing, corrupt AND
+    // unavailable alike -- by design, it is a thin projection of
+    // `readPartnerDayCheckpointStatus` for callers that do not need the
+    // distinction. A caller that DOES need it -- `projectPartnerDay`, via
+    // `usePartnerDay` -- must read the full status instead. See
+    // "BLOCKER FIX 2" and "BLOCKER FIX 3" above for what the distinction is
+    // for: treating a corrupt or unreadable receipt as first-contact bounds
+    // recovery to seven days (or, worse, persists over a real receipt) and can
+    // silently entomb or overwrite an older OUTSTANDING record.
+    // `readPartnerDayCheckpointStatus`, reported as `status: 'corrupt'` here,
+    // is what lets `projectPartnerDay` avoid that and take `recovery` instead.
     localStorage.setItem(partnerDayCheckpointKey(ME, COUPLE), '{ not json');
     expect(readPartnerDayCheckpoint({ userId: ME, coupleId: COUPLE })).toBeNull();
 
     const status = readPartnerDayCheckpointStatus({ userId: ME, coupleId: COUPLE });
-    expect(status).toEqual({ checkpoint: null, corrupt: true });
+    expect(status).toEqual({ checkpoint: null, status: 'corrupt' });
 
     const { transition, surface } = projectPartnerDay(
-      context(), [at('recent', 2)], status.checkpoint, status.corrupt,
+      context(), [at('recent', 2)], status.checkpoint, status.status,
     );
     expect(transition).toBe('recovery');
     expect(ids(surface)).toEqual(['recent']);

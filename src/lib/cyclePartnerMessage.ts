@@ -34,17 +34,42 @@ export interface CyclePartnerMessage {
    * blocks, so "shown" and "never shown" stop looking like one list.
    */
   neverShared: string;
+  /**
+   * Pain's status, stated separately because it is no longer unconditional.
+   * Withheld by default; sent only by a deliberate act; expires by itself.
+   */
+  painDisclosure: string;
 }
 
 /**
  * The withholding guarantee, in one place.
  *
- * It is a promise about `CyclePartnerMessageInput`, whose shape is what actually
- * enforces it: there is no field on that type that could carry any of these. If a
- * field is ever added, this sentence has to change in the same commit, and
+ * A promise about `CyclePartnerMessageInput`, whose shape is what enforces it:
+ * there is no field on that type that could carry any of these. If one is ever
+ * added, this sentence has to change in the same commit, and
  * `cyclePartnerMessage.test.ts` is what makes that unavoidable.
+ *
+ * 통증 LEFT THIS LIST on 2026-08-20 and the sentence had to be split, because the
+ * old wording -- "증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도" -- became false the
+ * moment pain could be sent as a care signal. An absolute promise that has quietly
+ * become conditional is worse than no promise: it is the screen telling someone
+ * their pain cannot be seen while a control two sections up offers to send it.
+ *
+ * So the two are now stated separately and truthfully. Everything in
+ * `NEVER_SHARED` is still unconditional and still unrepresentable in the type;
+ * pain is described as what it now is -- withheld by default, sent only by a
+ * deliberate act, and expiring on its own.
  */
-const NEVER_SHARED = '증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요.';
+const NEVER_SHARED = '출혈량, 증상, 기분, 메모는 어떤 경우에도 보이지 않아요.';
+
+/**
+ * Pain's actual status, kept next to the guarantee it is no longer part of.
+ *
+ * Note what this does NOT say: it never claims pain IS shared. The default is
+ * withheld, and the sentence describes the only door that exists rather than
+ * implying anyone has walked through it.
+ */
+const PAIN_DISCLOSURE = '통증은 내가 직접 보낼 때만, 그날 하루만 보여요. 기록한 통증이 저절로 전해지지는 않아요.';
 
 function formatKoreanDate(date: string): string {
   const [, month, day] = date.split('-');
@@ -76,6 +101,7 @@ export function buildCyclePartnerMessage(input: CyclePartnerMessageInput): Cycle
       headline: '현재 파트너에게 공유되는 주기 정보가 없어요.',
       lines: ['공유하고 싶은 항목을 직접 선택할 때만 보여요.'],
       neverShared: NEVER_SHARED,
+      painDisclosure: PAIN_DISCLOSURE,
     };
   }
 
@@ -107,5 +133,6 @@ export function buildCyclePartnerMessage(input: CyclePartnerMessageInput): Cycle
     headline: '군화에게 이렇게 보여요',
     lines,
     neverShared: NEVER_SHARED,
+    painDisclosure: PAIN_DISCLOSURE,
   };
 }

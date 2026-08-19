@@ -44,6 +44,37 @@ export function WidgetDashboard() {
   const role: Role = state.profile.role;
   const storedLayout = role === 'soldier' ? state.soldierWidgetLayout : state.widgetLayout;
 
+  /**
+   * Which person, in which relationship, is looking at this dashboard.
+   *
+   * This is REACT LIFECYCLE IDENTITY, not a widget id: it goes in the `key` only.
+   * The `id` prop, the `SortableContext` items and the persisted layout all stay
+   * the plain widget id, because those are what drag-and-drop and storage mean.
+   *
+   * Widgets that hold relationship-scoped state read it once on mount -- a
+   * checkpoint, a read receipt, a briefing cutoff. The dashboard is NOT unmounted
+   * by an identity change: `purgeSharedAccess` clears `profile.couple.coupleId`
+   * through a state replacement, and signing into an existing account keeps
+   * `setupComplete` true, so `App` never leaves the authenticated route branch. A
+   * widget keyed by its id alone therefore survived
+   *
+   *     Account A / Couple A  ->  Account B / Couple B
+   *
+   * still holding A's checkpoint, and applied A's confirmed set and date bound to
+   * B's records -- hiding context in the new relationship that nobody had seen,
+   * and then persisting A-derived values under B's storage key on the next
+   * acknowledgement. Scoping the STORAGE key by viewer and couple did not help,
+   * because the stale value was already in React state.
+   *
+   * `CallBriefingWidget` below has carried this key since it gained its own
+   * checkpoint. Extending it to every widget closes the same hole for
+   * `partner_day` and `care_hint`, and for anything added later that caches
+   * identity-scoped state on mount.
+   */
+  const viewerUserId = state.authenticatedUser?.id || state.profile.id || '';
+  const coupleId = state.profile.couple.coupleId || '';
+  const viewerIdentity = `${viewerUserId}:${coupleId}`;
+
   // Drop ids that are unknown OR not meant for this role, so a role switch cannot
   // leave "상대방의 마음 흐름" on the screen of the person it describes.
   const activeWidgets = useMemo(() => {
@@ -215,7 +246,7 @@ export function WidgetDashboard() {
           call-prep surface cannot be accidentally deleted or buried. */}
       {role === 'soldier' && state.profile.couple.connected && (
         <div className="px-4 pt-3">
-          <CallBriefingWidget key={`${state.authenticatedUser?.id ?? state.profile.id}:${state.profile.couple.coupleId}`} />
+          <CallBriefingWidget key={viewerIdentity} />
         </div>
       )}
 
@@ -245,7 +276,7 @@ export function WidgetDashboard() {
 
               return (
                 <WidgetWrapper
-                  key={id}
+                  key={`${id}:${viewerIdentity}`}
                   id={id}
                   label={WIDGET_REGISTRY[id]?.label ?? id}
                   isEditMode={isEditMode}

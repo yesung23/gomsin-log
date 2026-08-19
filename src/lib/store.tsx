@@ -258,19 +258,42 @@ const DEFAULT_STATE: AppState = {
 /**
  * Preferences that belong to the device rather than to the signed-in account.
  * These survive sign-out and account switches; everything else must not.
+ *
+ * Exported because it is a privacy boundary, not a convenience list: this is the
+ * exact set that outlives a sign-out or an account deletion, so it is the set a
+ * test has to pin. Asserting on the keys of the PERSISTED blob cannot do that on
+ * its own -- `JSON.stringify` drops `undefined`, so a newly added carry-over
+ * field is invisible to that assertion until someone happens to set it.
+ * See `accountDeletionRecovery.test.tsx`.
  */
-function carryOverDevicePrefs(
-  prev: AppState,
-): Pick<AppState, 'widgetLayout' | 'soldierWidgetLayout' | 'hasSeenInstallPrompt' | 'theme'> {
-  return {
-    widgetLayout: prev.widgetLayout,
-    // Kept per role: the two people use one app on two devices with opposite
-    // home screens, and a single shared list meant whoever edited last
-    // overwrote the other's arrangement on role change.
-    soldierWidgetLayout: prev.soldierWidgetLayout,
-    hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
-    theme: prev.theme || 'light',
-  };
+export const DEVICE_PREF_CARRY_OVER_KEYS = [
+  'hasSeenInstallPrompt',
+  // Kept per role: the two people use one app on two devices with opposite
+  // home screens, and a single shared list meant whoever edited last
+  // overwrote the other's arrangement on role change.
+  'soldierWidgetLayout',
+  'theme',
+  'widgetLayout',
+] as const satisfies readonly (keyof AppState)[];
+
+export type DevicePrefKey = typeof DEVICE_PREF_CARRY_OVER_KEYS[number];
+
+function carryOverDevicePrefs(prev: AppState): Pick<AppState, DevicePrefKey> {
+  /*
+   * Built FROM the allowlist rather than beside it.
+   *
+   * As two separate declarations they could drift, and drift here is invisible in
+   * the obvious place: a key added only to the object literal, holding `undefined`
+   * at purge time -- exactly what an optional field holds -- is erased from the
+   * persisted blob by `JSON.stringify`, so an assertion on the blob's keys stays
+   * green while the field quietly starts surviving sign-out. That is not
+   * hypothetical; it is how `partnerDayLastCheckedAt` once slipped through.
+   * Deriving the object makes the two impossible to disagree.
+   */
+  const carried = Object.fromEntries(
+    DEVICE_PREF_CARRY_OVER_KEYS.map((key) => [key, prev[key]]),
+  ) as Pick<AppState, DevicePrefKey>;
+  return { ...carried, theme: prev.theme || 'light' };
 }
 
 const devicePreferencesRepository = new DevicePreferencesRepository();

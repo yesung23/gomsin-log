@@ -10,26 +10,31 @@ import {
 } from '@/lib/partnerDay';
 
 /**
- * Makes the receipt write report failure, deterministically.
+ * Swap in a Storage that throws on write, for real.
  *
  * Spying on `localStorage.setItem` looked simpler and was not portable: whether
- * `setItem` is an own property of the storage object or inherited from
- * `Storage.prototype` differs between jsdom setups, so the spy took effect
- * locally and silently missed in CI -- where the real write then succeeded and
- * the test failed for the opposite reason to the one it was written for.
- * Failing at the module boundary is the same contract without the environment
- * dependency: everything else keeps real behaviour.
+ * that method is an own property of the storage object or inherited from
+ * `Storage.prototype` differs between jsdom builds, so the spy bound locally and
+ * silently missed in CI -- where the real write then succeeded and the test failed
+ * for the opposite reason to the one it was written for. Replacing the object
+ * wholesale has no such ambiguity, and unlike stubbing the module boundary it
+ * exercises the actual `try/catch` inside `writePartnerDayCheckpoint`.
  */
-let failCheckpointWrite = false;
-vi.mock('@/lib/partnerDay', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/partnerDay')>('@/lib/partnerDay');
-  return {
-    ...actual,
-    writePartnerDayCheckpoint: (
-      ...args: Parameters<typeof actual.writePartnerDayCheckpoint>
-    ) => (failCheckpointWrite ? false : actual.writePartnerDayCheckpoint(...args)),
+function withThrowingStorage(run: () => void | Promise<void>): Promise<void> {
+  const real = globalThis.localStorage;
+  const throwing: Storage = {
+    length: 0,
+    clear: () => {},
+    getItem: (key) => real.getItem(key),
+    key: (index) => real.key(index),
+    removeItem: () => {},
+    setItem: () => { throw new Error('QuotaExceededError'); },
   };
-});
+  Object.defineProperty(globalThis, 'localStorage', { value: throwing, configurable: true });
+  return Promise.resolve(run()).finally(() => {
+    Object.defineProperty(globalThis, 'localStorage', { value: real, configurable: true });
+  });
+}
 
 /**
  * Bug condition:
@@ -616,17 +621,16 @@ describe('the window fails open, never closed', () => {
     // was stored would hide the records with nothing on disk to justify it.
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderWidget([record({ id: 'only', log: '남아 있어야 하는 기록' })]);
-    failCheckpointWrite = true;
-    try {
+
+    await withThrowingStorage(async () => {
       await user.click(screen.getByTestId('partner-day-acknowledge'));
 
       expect(screen.getByText('남아 있어야 하는 기록')).toBeInTheDocument();
       expect(screen.getByTestId('widget-partner-day')).toHaveAttribute('data-state', 'ready');
-      // Nothing was stored either, so a reload agrees with the screen.
-      expect(readPartnerDayCheckpoint(ME, 'couple-1')).toBeNull();
-    } finally {
-      failCheckpointWrite = false;
-    }
+    });
+
+    // Nothing was stored either, so a reload agrees with the screen.
+    expect(readPartnerDayCheckpoint(ME, 'couple-1')).toBeNull();
   });
 
   it('treats a corrupt stored receipt as no receipt at all', () => {

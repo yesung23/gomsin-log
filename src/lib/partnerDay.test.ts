@@ -414,38 +414,6 @@ describe('a record this device cannot read yet is not consumed by acknowledging 
   });
 });
 
-describe('the id cap can only ever reveal more, never less', () => {
-  it('keeps the newest 500 confirmations and drops the oldest', () => {
-    const many = Array.from({ length: 520 }, (_, i) => record({ id: `r-${String(i).padStart(4, '0')}` }));
-    const next = advancePartnerDayCheckpoint(null, many, many)!;
-    // Capped in memory as well as on disk, so this render and a later reload
-    // cannot disagree about what is excluded.
-    expect(next.confirmedRecordIds).toHaveLength(500);
-
-    writePartnerDayCheckpoint('user-a', 'couple-a', next);
-    const stored = readPartnerDayCheckpoint('user-a', 'couple-a')!;
-    expect(stored.confirmedRecordIds).toHaveLength(500);
-    expect(stored.confirmedRecordIds).toContain('r-0519');
-    expect(stored.confirmedRecordIds).not.toContain('r-0000');
-    localStorage.clear();
-  });
-
-  it('an evicted id resurfaces its record rather than hiding it', () => {
-    // Eviction removes an EXCLUSION, so the only possible effect is showing a
-    // record a second time. There is no arrangement of the cap that hides one.
-    const evicted = record({ id: 'evicted' });
-    const cp = checkpoint({ confirmedRecordIds: [], confirmedThrough: TODAY });
-    expect(ids(missedPartnerRecords([evicted], VIEWER, TODAY, cp))).toEqual(['evicted']);
-  });
-});
-
-/**
- * The late-arrival rescue, which is the reason `observedRecordIds` exists.
- *
- * A record can reach this client long after it was written, carrying a date that
- * sits behind the checkpoint bound. Nobody ever saw it, so nothing may treat the
- * bound as a decision about it.
- */
 describe('a record that arrives after the checkpoint, dated before it', () => {
   it('surfaces an offline backlog flushed days later', () => {
     // Composed on the 16th while the partner had no signal, delivered on the 19th.
@@ -559,26 +527,190 @@ describe('a record that arrives after the checkpoint, dated before it', () => {
     expect(cp.observedRecordIds).not.toContain('mine');
   });
 
-  it('evicting an observed id can only show a record again, never hide one', () => {
-    // The snapshot is capped. An id that falls off is read as "not observed",
-    // which puts its record back in the window -- the safe direction.
-    const many = Array.from({ length: 520 }, (_, i) => record({
-      id: `o-${String(i).padStart(4, '0')}`,
-      date: '2026-08-16',
-    }));
-    const cp = advancePartnerDayCheckpoint(null, [many[519]], many, {
-      records: many,
-      viewer: VIEWER,
-    })!;
-    expect(cp.observedRecordIds).toHaveLength(500);
-    expect(cp.observedRecordIds).not.toContain('o-0000');
+});
 
-    // The evicted one reappears; nothing disappeared.
-    const surfaced = ids(missedPartnerRecords(many, VIEWER, TODAY, {
-      ...cp,
-      confirmedThrough: '2026-08-18',
-    }));
-    expect(surfaced).toContain('o-0000');
-    expect(surfaced).not.toContain(many[519].id);
+/**
+ * The receipt has to CONVERGE over the life of a relationship.
+ *
+ * Both id lists used to be truncated at 500. An id dropped to save space is
+ * indistinguishable from one that was never seen, so compaction manufactured
+ * "never observed" verdicts, the late-arrival rescue reopened those records, and
+ * the bound was dragged back to the oldest of them -- which produced still more
+ * evicted ids next pass. Past ~500 shared records the window GREW when the viewer
+ * pressed the acknowledge button, and could never be cleared again.
+ *
+ * These simulate the relationship day by day rather than dropping a pile of
+ * records on a cold checkpoint, because that is the only way the receipt actually
+ * accumulates past the old cap: from a standing start §6.5's seven-day fallback
+ * means barely a week of records ever enters the window, so a bulk fixture
+ * exercises none of this. Dates are distinct for the same reason -- the cascade
+ * needs somewhere for the bound to be dragged back to.
+ */
+describe('a long relationship still drains to nothing', () => {
+  function dayOffset(n: number): string {
+    const d = new Date(Date.UTC(2026, 7, 19));
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Live the relationship one day at a time: records land, the viewer opens the
+   * surface and acknowledges until it is empty, then the next day begins.
+   *
+   * The per-day ceiling is what turns a reopening loop into a deterministic
+   * failure instead of a hung CI job: each pass confirms at least one record, so
+   * no honest day can need more passes than it has records.
+   */
+  function liveRelationship(days: number, perDay = 1) {
+    const all: DailyRecord[] = [];
+    let cp: PartnerDayCheckpoint | null = null;
+    let worstDayWindow = 0;
+    let grewAfterAck = false;
+
+    for (let day = days - 1; day >= 0; day -= 1) {
+      const date = dayOffset(day);
+      for (let k = 0; k < perDay; k += 1) {
+        all.push(record({
+          id: `r-${String(days - day)}-${k}`,
+          date,
+          time: `0${k}:00`,
+          createdAt: `${date}T0${k}:00:00.000Z`,
+        }));
+      }
+
+      /*
+       * Tight on purpose. A day that converges cannot need more passes than it
+       * has records to confirm, plus a little slack; anything beyond that is a
+       * receipt reopening what it just closed. A generous ceiling would still
+       * terminate, but only after quadratic work -- the reopening version of this
+       * code ground for minutes instead of failing, which is the worst way for a
+       * regression to report. Failing here names the cause directly.
+       */
+      const ceiling = perDay + 3;
+      let previous = Infinity;
+      let drained = false;
+      for (let pass = 0; pass < ceiling; pass += 1) {
+        const missed = missedPartnerRecords(all, VIEWER, date, cp);
+        worstDayWindow = Math.max(worstDayWindow, missed.length);
+        if (missed.length > previous) grewAfterAck = true;
+        previous = missed.length;
+        if (missed.length === 0) { drained = true; break; }
+        cp = advancePartnerDayCheckpoint(cp, missed.slice(0, 5), missed, {
+          records: all, viewer: VIEWER,
+        });
+      }
+      if (!drained) {
+        throw new Error(
+          `day ${date} (record ${all.length}) did not drain within ${ceiling} passes; `
+          + `window still ${previous}. The receipt is reopening records it already closed.`,
+        );
+      }
+    }
+
+    return {
+      cp,
+      all,
+      worstDayWindow,
+      grewAfterAck,
+      finalWindow: missedPartnerRecords(all, VIEWER, dayOffset(0), cp).length,
+    };
+  }
+
+  for (const days of [400, 505, 700]) {
+    it(`${days} days of records end with an empty window`, () => {
+      const { finalWindow, grewAfterAck, cp } = liveRelationship(days);
+      expect(finalWindow).toBe(0);
+      // The precise symptom of the old cascade: press the button, get more.
+      expect(grewAfterAck).toBe(false);
+      expect(cp?.confirmedRecordIds).toHaveLength(days);
+    });
+  }
+
+  it('2000 records converge, and the receipt keeps every id exactly', () => {
+    const { finalWindow, cp, grewAfterAck } = liveRelationship(1000, 2);
+    expect(finalWindow).toBe(0);
+    expect(grewAfterAck).toBe(false);
+    expect(cp?.confirmedRecordIds).toHaveLength(2000);
+    expect(cp?.observedRecordIds).toHaveLength(2000);
+    // Nothing was compacted away at either end.
+    expect(cp?.confirmedRecordIds).toContain('r-1-0');
+    expect(cp?.confirmedRecordIds).toContain('r-1000-1');
+
+    // Diagnostic, deliberately NOT an assertion threshold: a browser quota is not
+    // a product invariant and must not become one. Recorded so the real order of
+    // magnitude is on file rather than guessed at.
+    console.log(`[diagnostic] serialized receipt at 2000 records: ${JSON.stringify(cp).length} bytes`);
+  });
+
+  it('a day never reopens the whole relationship', () => {
+    // Under the cap this reached into the hundreds on an ordinary day.
+    const { worstDayWindow } = liveRelationship(700);
+    expect(worstDayWindow).toBeLessThan(20);
+  });
+
+  it('survives a storage round-trip at that size without dropping ids', () => {
+    const { cp, all } = liveRelationship(600);
+    expect(writePartnerDayCheckpoint('user-a', 'couple-a', cp!)).toBe(true);
+    const reloaded = readPartnerDayCheckpoint('user-a', 'couple-a');
+    expect(reloaded?.confirmedRecordIds).toHaveLength(600);
+    expect(reloaded?.observedRecordIds).toHaveLength(600);
+    expect(missedPartnerRecords(all, VIEWER, TODAY, reloaded)).toHaveLength(0);
+    localStorage.clear();
+  });
+});
+
+/**
+ * `writePartnerDayCheckpoint` refuses malformed receipts.
+ *
+ * The read side already rejects them, so a bad write degrades to "no checkpoint"
+ * and shows more -- but a receipt that cannot be read back is indistinguishable
+ * from a lost acknowledgement, and the write is where that is cheapest to stop.
+ * Deleting these guards previously changed no test.
+ */
+describe('writePartnerDayCheckpoint refuses to persist a malformed receipt', () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  const cases: Array<[string, string, string, PartnerDayCheckpoint]> = [
+    ['an empty user id', '', 'couple-a', checkpoint()],
+    ['an empty couple id', 'user-a', '', checkpoint()],
+    ['a non-date confirmedThrough', 'user-a', 'couple-a', checkpoint({ confirmedThrough: 'yesterday' })],
+    ['an empty confirmedThrough', 'user-a', 'couple-a', checkpoint({ confirmedThrough: '' })],
+    ['an impossible calendar date', 'user-a', 'couple-a', checkpoint({ confirmedThrough: '2026-13-45' })],
+    ['a non-parsable confirmedAt', 'user-a', 'couple-a', checkpoint({ confirmedAt: 'just now' })],
+  ];
+
+  for (const [label, userId, coupleId, cp] of cases) {
+    it(`refuses ${label}, and writes nothing`, () => {
+      expect(writePartnerDayCheckpoint(userId, coupleId, cp)).toBe(false);
+      expect(localStorage.length).toBe(0);
+    });
+  }
+
+  it('accepts a well-formed receipt, so the refusals above are not vacuous', () => {
+    expect(writePartnerDayCheckpoint('user-a', 'couple-a', checkpoint())).toBe(true);
+    expect(readPartnerDayCheckpoint('user-a', 'couple-a')).not.toBeNull();
+  });
+
+  it('reports failure when the storage itself throws, and leaves nothing behind', () => {
+    // A real throwing Storage rather than a spy on one method: whether `setItem`
+    // is an own property or inherited differs between jsdom builds, and a spy that
+    // silently misses turns this into a test that proves the opposite of its name.
+    const real = globalThis.localStorage;
+    const throwing: Storage = {
+      length: 0,
+      clear: () => {},
+      getItem: () => null,
+      key: () => null,
+      removeItem: () => {},
+      setItem: () => { throw new Error('QuotaExceededError'); },
+    };
+    Object.defineProperty(globalThis, 'localStorage', { value: throwing, configurable: true });
+    try {
+      expect(writePartnerDayCheckpoint('user-a', 'couple-a', checkpoint())).toBe(false);
+    } finally {
+      Object.defineProperty(globalThis, 'localStorage', { value: real, configurable: true });
+    }
+    expect(readPartnerDayCheckpoint('user-a', 'couple-a')).toBeNull();
   });
 });

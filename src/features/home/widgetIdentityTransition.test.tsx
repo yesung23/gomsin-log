@@ -120,10 +120,29 @@ function stateFor(
   };
 }
 
-/** A checkpoint for account A that would hide anything before today. */
-function seedCheckpointA(userId = 'user-a', coupleId = 'couple-a') {
+/**
+ * A checkpoint for account A that would hide anything before today.
+ *
+ * `observedIds` matters, and getting it wrong once already made four of these
+ * tests vacuous. The window only applies its date bound to records the receipt
+ * can attest were already visible; anything it has not observed is rescued as a
+ * late arrival. A receipt with an empty observation therefore suppresses NOTHING,
+ * so a stale-identity bug hides behind the rescue and the mutation stops biting.
+ *
+ * Callers pass the ids of the records the test will show for account B. Sharing
+ * an id across two relationships is a test device rather than a claim about
+ * production, where ids are server-generated and would not collide -- what it
+ * isolates is the lifecycle question these tests exist for: does a receipt
+ * belonging to one relationship still govern another one's screen?
+ */
+function seedCheckpointA(
+  observedIds: string[],
+  userId = 'user-a',
+  coupleId = 'couple-a',
+) {
   writePartnerDayCheckpoint(userId, coupleId, {
     confirmedRecordIds: ['a-rec-1', 'a-rec-2'],
+    observedRecordIds: ['a-rec-1', 'a-rec-2', ...observedIds],
     confirmedThrough: TODAY,
     confirmedAt: `${TODAY}T09:00:00.000Z`,
   });
@@ -149,7 +168,7 @@ afterEach(() => {
 
 describe('상대방의 오늘 across a live account change', () => {
   it("shows B's older records after A -> B, without any remount", () => {
-    seedCheckpointA();
+    seedCheckpointA(['b-old']);
     currentState = stateFor('user-a', 'couple-a', [], ['partner_day']);
     const { rerender } = renderDashboard();
 
@@ -164,7 +183,7 @@ describe('상대방의 오늘 across a live account change', () => {
   });
 
   it("does not carry A's confirmed ids into B's window", () => {
-    seedCheckpointA();
+    seedCheckpointA([]);
     currentState = stateFor('user-a', 'couple-a', [], ['partner_day']);
     const { rerender } = renderDashboard();
 
@@ -180,7 +199,7 @@ describe('상대방의 오늘 across a live account change', () => {
 
 describe('상대방의 오늘 across unlink and relink', () => {
   it('shows the new couple\'s older records after unlink -> new couple', () => {
-    seedCheckpointA();
+    seedCheckpointA(['b-old']);
     currentState = stateFor('user-a', 'couple-a', [], ['partner_day']);
     const { rerender } = renderDashboard();
 
@@ -200,7 +219,7 @@ describe('상대방의 오늘 across unlink and relink', () => {
   it('same couple id with a different viewer is still a different identity', () => {
     // Two accounts on one device sharing a couple id: B must not inherit A's
     // receipt just because the relationship id matches.
-    seedCheckpointA('user-a', 'couple-shared');
+    seedCheckpointA(['unseen'], 'user-a', 'couple-shared');
     currentState = stateFor('user-a', 'couple-shared', [], ['partner_day']);
     const { rerender } = renderDashboard();
 
@@ -216,7 +235,7 @@ describe('상대방의 오늘 across unlink and relink', () => {
 describe('acknowledgement after an identity change writes only the new identity', () => {
   it("stores B's own state, with no A ids and no A date bound", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    seedCheckpointA();
+    seedCheckpointA(['b-only']);
     currentState = stateFor('user-a', 'couple-a', [], ['partner_day']);
     const { rerender } = renderDashboard();
 
@@ -244,7 +263,7 @@ describe('다정한 한마디 as a standalone widget', () => {
     // CareHint holds the same checkpoint in a `useState` with no setter, so it
     // could never re-read at all. Exercised here OUTSIDE the call briefing,
     // which has always had its own identity key.
-    seedCheckpointA();
+    seedCheckpointA(['b-hard']);
     currentState = stateFor('user-a', 'couple-a', [], ['care_hint']);
     const { rerender } = renderDashboard();
 

@@ -279,12 +279,21 @@ export const DEVICE_PREF_CARRY_OVER_KEYS = [
 export type DevicePrefKey = typeof DEVICE_PREF_CARRY_OVER_KEYS[number];
 
 function carryOverDevicePrefs(prev: AppState): Pick<AppState, DevicePrefKey> {
-  return {
-    widgetLayout: prev.widgetLayout,
-    soldierWidgetLayout: prev.soldierWidgetLayout,
-    hasSeenInstallPrompt: prev.hasSeenInstallPrompt,
-    theme: prev.theme || 'light',
-  };
+  /*
+   * Built FROM the allowlist rather than beside it.
+   *
+   * As two separate declarations they could drift, and drift here is invisible in
+   * the obvious place: a key added only to the object literal, holding `undefined`
+   * at purge time -- exactly what an optional field holds -- is erased from the
+   * persisted blob by `JSON.stringify`, so an assertion on the blob's keys stays
+   * green while the field quietly starts surviving sign-out. That is not
+   * hypothetical; it is how `partnerDayLastCheckedAt` once slipped through.
+   * Deriving the object makes the two impossible to disagree.
+   */
+  const carried = Object.fromEntries(
+    DEVICE_PREF_CARRY_OVER_KEYS.map((key) => [key, prev[key]]),
+  ) as Pick<AppState, DevicePrefKey>;
+  return { ...carried, theme: prev.theme || 'light' };
 }
 
 const devicePreferencesRepository = new DevicePreferencesRepository();

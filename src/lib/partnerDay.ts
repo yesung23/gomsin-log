@@ -22,13 +22,6 @@ import { parseLocalDate, toLocalDateString } from '@/lib/utils';
 /** §6.5: the window when this viewer has no checkpoint at all, today included. */
 export const PARTNER_DAY_FALLBACK_DAYS = 7;
 
-/**
- * How many ids a receipt keeps. Both lists are bounded the same way and both
- * evict oldest-first, which is safe in one direction only -- see the note on
- * `observedRecordIds`.
- */
-export const CHECKPOINT_ID_LIMIT = 500;
-
 export interface PartnerDayCheckpoint {
   /**
    * Records this viewer explicitly acknowledged. Identity is the record id
@@ -53,6 +46,15 @@ export interface PartnerDayCheckpoint {
    * `confirmedAt`: the first is stamped by Postgres and the second by this
    * device, so the comparison mixes two clocks and silently loses records
    * whenever the viewer's device runs ahead of the server. Ids have no clock.
+   *
+   * Held EXACTLY, with no cap. Truncating it was a real defect rather than a
+   * tuning choice: an id dropped to save space is indistinguishable from one that
+   * was never seen, so compaction manufactured "never observed" verdicts, the
+   * rescue reopened those records, and the bound was dragged back to the oldest
+   * of them. Past ~500 shared records that fed itself and the surface could no
+   * longer be cleared at all. Local state may therefore grow with the
+   * relationship; if it ever fails to persist, the write reports failure and the
+   * window simply stays open.
    *
    * Optional. A receipt written before this field existed simply has none, and
    * absence is read as "nothing is known to have been observed" -- the same
@@ -86,9 +88,13 @@ export function partnerDayCheckpointKey(userId: string, coupleId: string): strin
 }
 
 function isValidDateString(value: unknown): value is string {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && !Number.isNaN(parseLocalDate(value).getTime());
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = parseLocalDate(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  // Round-trip, because `new Date(2026, 12, 45)` does not fail -- it rolls over
+  // to 2027-02-14. A bound that quietly means a different day than it says is
+  // worse than one that is rejected outright.
+  return toLocalDateString(parsed) === value;
 }
 
 export function readPartnerDayCheckpoint(
@@ -114,11 +120,10 @@ export function readPartnerDayCheckpoint(
     // difference that exists today.
     const observed = Array.isArray(candidate.observedRecordIds)
       && candidate.observedRecordIds.every((id) => typeof id === 'string')
-      ? Array.from(new Set(candidate.observedRecordIds)).slice(-CHECKPOINT_ID_LIMIT)
+      ? Array.from(new Set(candidate.observedRecordIds))
       : undefined;
     return {
-      confirmedRecordIds: Array.from(new Set(candidate.confirmedRecordIds))
-        .slice(-CHECKPOINT_ID_LIMIT),
+      confirmedRecordIds: Array.from(new Set(candidate.confirmedRecordIds)),
       ...(observed ? { observedRecordIds: observed } : {}),
       confirmedThrough: candidate.confirmedThrough,
       confirmedAt: candidate.confirmedAt,
@@ -142,13 +147,9 @@ export function writePartnerDayCheckpoint(
     || !Number.isFinite(Date.parse(checkpoint.confirmedAt))) return false;
   try {
     localStorage.setItem(partnerDayCheckpointKey(userId, coupleId), JSON.stringify({
-      confirmedRecordIds: Array.from(new Set(checkpoint.confirmedRecordIds))
-        .slice(-CHECKPOINT_ID_LIMIT),
+      confirmedRecordIds: Array.from(new Set(checkpoint.confirmedRecordIds)),
       ...(checkpoint.observedRecordIds
-        ? {
-          observedRecordIds: Array.from(new Set(checkpoint.observedRecordIds))
-            .slice(-CHECKPOINT_ID_LIMIT),
-        }
+        ? { observedRecordIds: Array.from(new Set(checkpoint.observedRecordIds)) }
         : {}),
       confirmedThrough: checkpoint.confirmedThrough,
       confirmedAt: checkpoint.confirmedAt,
@@ -308,18 +309,18 @@ export function advancePartnerDayCheckpoint(
       visibleSharedPartnerRecords(observable.records, observable.viewer)
         .sort((a, b) => `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`))
         .map((record) => record.id),
-    )).slice(-CHECKPOINT_ID_LIMIT)
+    ))
     : undefined;
 
   return {
-    // Capped here as well as on write, so what this render believes and what a
-    // reload would believe cannot drift. Both directions of the cap only ever
-    // drop an EXCLUSION, so eviction can add a second sighting and never remove
-    // a record.
+    // Uncapped, for the same reason the observation snapshot is. Dropping a
+    // confirmation reopens a record the viewer already dealt with, and on the
+    // inclusive lower-bound date that compounds with the observation cap instead
+    // of settling.
     confirmedRecordIds: Array.from(new Set([
       ...(previous?.confirmedRecordIds ?? []),
       ...acknowledged.map((record) => record.id),
-    ])).slice(-CHECKPOINT_ID_LIMIT),
+    ])),
     ...(observedRecordIds ? { observedRecordIds } : {}),
     // Deliberately NOT floored at the previous bound. Acknowledging a late-arriving
     // older record does reopen the days it sits in -- but everything already seen

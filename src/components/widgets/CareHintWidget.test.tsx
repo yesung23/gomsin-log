@@ -178,3 +178,39 @@ describe('CareHintWidget: temporal accuracy across the missed window', () => {
     expect(screen.getByText(/새로 공유된 순간이 아직 없어요/)).toBeInTheDocument();
   });
 });
+
+/**
+ * The empty state is a sentence about NOTHING, and it has to stay one.
+ *
+ * With no records at all there is no author tag, no timestamp and no attachment to
+ * describe, so anything the widget says about the partner's day is invented. This
+ * branch was previously unasserted: swapping it for the exact §6.3 violation the
+ * surrounding comment says was removed -- a calm-mood claim -- left all tests
+ * green.
+ */
+describe('CareHintWidget: the empty state may not describe a day that was not shared', () => {
+  it('says only that nothing has been shared, and suggests nothing about it', () => {
+    renderWidget([]);
+    expect(screen.getByText(/새로 공유된 순간이 아직 없어요/)).toBeInTheDocument();
+    expect(screen.getByText(/전화할 때 따뜻한 목소리로 첫 인사를 건네주세요/)).toBeInTheDocument();
+  });
+
+  it('invents no mood, no activity and no day when there is nothing to describe', () => {
+    renderWidget([]);
+    const widget = screen.getByTestId('widget-care-hint');
+    // Mood claims from silence (§6.3 "침묵으로부터의 추론").
+    expect(widget.textContent).not.toMatch(/평온|편안|잘 지내|괜찮은 하루/);
+    // Claims that something happened.
+    expect(widget.textContent).not.toMatch(/힘든|기분 좋은|순간을 나눴어요|일상을 듣고/);
+    // A day it cannot vouch for.
+    expect(widget.textContent).not.toMatch(/오늘은|그동안은/);
+  });
+
+  it('a window holding only a private record is still the empty state', () => {
+    // The count must not leak through the copy either.
+    renderWidget([record({ isPrivate: true, reaction: 'hard' })]);
+    const widget = screen.getByTestId('widget-care-hint');
+    expect(widget.textContent).toMatch(/새로 공유된 순간이 아직 없어요/);
+    expect(widget.textContent).not.toMatch(/힘든/);
+  });
+});

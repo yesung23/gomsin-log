@@ -326,6 +326,9 @@ describe('Deletion-Recovery Suite', () => {
     // ...and the blob may not contain anything the declaration does not allow.
     expect(Object.keys(persisted).sort())
       .toEqual([...DEVICE_PREF_CARRY_OVER_KEYS].sort());
+    // The function no longer has a literal that could disagree with this list --
+    // it builds its result FROM the list -- so pinning the list pins both.
+    // See `carryOverDevicePrefs`.
 
     // The session is deliberately kept so the deletion can be finished.
     expect(screen.getByTestId('user')).toHaveTextContent('user-a');

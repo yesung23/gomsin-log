@@ -3,7 +3,7 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState } from '@/types';
 import { App } from '@/App';
-import { StoreProvider } from '@/lib/store';
+import { DEVICE_PREF_CARRY_OVER_KEYS, StoreProvider } from '@/lib/store';
 import { useStore } from '@/lib/useStore';
 import { recoveryKeyFor, type AccountDeletionOutcome } from '@/lib/accountDeletion';
 
@@ -311,8 +311,24 @@ describe('Deletion-Recovery Suite', () => {
     // `soldierWidgetLayout` joined it when the 군화 home became rearrangeable: the
     // two roles keep separate layouts, and a layout is a device preference in
     // exactly the same way `widgetLayout` already was -- an array of widget ids.
-    expect(Object.keys(persisted).sort())
+    //
+    // Pinned against the DECLARED carry-over set rather than only against this
+    // blob, because the two can disagree in the dangerous direction. A new
+    // carry-over field that happens to be `undefined` at purge time -- an optional
+    // one, which is exactly what a per-relationship checkpoint would be -- is
+    // erased by `JSON.stringify`, so an assertion on `Object.keys(persisted)`
+    // alone stays green while the field silently starts surviving sign-out. A
+    // real attempt to add `partnerDayLastCheckedAt?: string` to the carry-over set
+    // did pass that assertion untouched. Asserting the constant first makes the
+    // declaration itself the thing under test.
+    expect([...DEVICE_PREF_CARRY_OVER_KEYS].sort())
       .toEqual(['hasSeenInstallPrompt', 'soldierWidgetLayout', 'theme', 'widgetLayout']);
+    // ...and the blob may not contain anything the declaration does not allow.
+    expect(Object.keys(persisted).sort())
+      .toEqual([...DEVICE_PREF_CARRY_OVER_KEYS].sort());
+    // The function no longer has a literal that could disagree with this list --
+    // it builds its result FROM the list -- so pinning the list pins both.
+    // See `carryOverDevicePrefs`.
 
     // The session is deliberately kept so the deletion can be finished.
     expect(screen.getByTestId('user')).toHaveTextContent('user-a');

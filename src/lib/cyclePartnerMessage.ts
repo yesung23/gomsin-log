@@ -24,7 +24,27 @@ export interface CyclePartnerMessage {
   isEmpty: boolean;
   headline: string;
   lines: string[];
+  /**
+   * What is withheld no matter what any toggle says.
+   *
+   * Separate from `lines` rather than appended to it, which is where it used to
+   * sit. As the last of five sentences in one grey block it read as another thing
+   * being shared -- the most reassuring sentence on the screen, formatted
+   * identically to the ones listing disclosures. The UI now renders the two as two
+   * blocks, so "shown" and "never shown" stop looking like one list.
+   */
+  neverShared: string;
 }
+
+/**
+ * The withholding guarantee, in one place.
+ *
+ * It is a promise about `CyclePartnerMessageInput`, whose shape is what actually
+ * enforces it: there is no field on that type that could carry any of these. If a
+ * field is ever added, this sentence has to change in the same commit, and
+ * `cyclePartnerMessage.test.ts` is what makes that unavoidable.
+ */
+const NEVER_SHARED = '증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요.';
 
 function formatKoreanDate(date: string): string {
   const [, month, day] = date.split('-');
@@ -55,6 +75,7 @@ export function buildCyclePartnerMessage(input: CyclePartnerMessageInput): Cycle
       isEmpty: true,
       headline: '현재 파트너에게 공유되는 주기 정보가 없어요.',
       lines: ['공유하고 싶은 항목을 직접 선택할 때만 보여요.'],
+      neverShared: NEVER_SHARED,
     };
   }
 
@@ -81,11 +102,10 @@ export function buildCyclePartnerMessage(input: CyclePartnerMessageInput): Cycle
     lines.push('달력 계산에 따른 추정이며, 피임이나 임신 여부를 알려주지 않아요.');
   }
 
-  lines.push('증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요.');
-
   return {
     isEmpty: false,
     headline: '군화에게 이렇게 보여요',
     lines,
+    neverShared: NEVER_SHARED,
   };
 }

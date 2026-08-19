@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { buildCyclePartnerMessage } from '@/lib/cyclePartnerMessage';
 import type { CyclePrediction } from '@/lib/cyclePrediction';
 import { cn } from '@/lib/utils';
@@ -83,7 +83,7 @@ export function CycleSharingSettings({
                 disabled={pendingKey !== null}
                 onClick={() => onToggle(option.key, !checked)}
                 className={cn(
-                  'shrink-0 min-h-11 min-w-11 w-14 rounded-full border transition',
+                  'press-response shrink-0 min-h-11 min-w-11 w-14 rounded-full border',
                   'flex items-center px-1 disabled:opacity-60',
                   checked ? 'bg-coral/25 border-coral justify-end' : 'bg-muted border-border justify-start',
                 )}
@@ -107,14 +107,45 @@ export function CycleSharingSettings({
 
       {error && <p role="alert" className="text-caption text-destructive">{error}</p>}
 
+      {/*
+        Two blocks, not one list.
+
+        The withholding sentence used to be the last line of the grey box below,
+        formatted exactly like the sentences describing what IS disclosed -- which
+        made the most reassuring statement on the screen look like one more
+        disclosure. Someone scanning for "what can he see" had to read all five
+        lines to work out that four were shares and the fifth was a guarantee.
+
+        Separated now by border and by icon, so "what is shown" and "what is never
+        shown" are two different shapes before they are two different sentences.
+      */}
       <div
         data-testid="cycle-partner-preview"
         className="rounded-surface bg-muted/40 p-3.5 space-y-1.5"
       >
-        <p className="text-caption font-bold text-foreground">{preview.headline}</p>
+        <p className="text-caption font-bold text-foreground flex items-center gap-1.5">
+          <Eye size={13} aria-hidden="true" />
+          {preview.headline}
+        </p>
         {preview.lines.map((line) => (
           <p key={line} className="text-caption text-muted-foreground leading-relaxed">{line}</p>
         ))}
+      </div>
+
+      <div
+        data-testid="cycle-partner-never-shared"
+        className="rounded-surface border border-border p-3.5 space-y-1"
+      >
+        <p className="text-caption font-bold text-foreground flex items-center gap-1.5">
+          <EyeOff size={13} aria-hidden="true" />
+          이건 보이지 않아요
+        </p>
+        <p className="text-caption text-muted-foreground leading-relaxed">
+          {preview.neverShared}
+        </p>
+        <p className="text-caption text-muted-foreground leading-relaxed">
+          위 스위치를 모두 켜도 마찬가지예요. 원본 기록은 나만 볼 수 있어요.
+        </p>
       </div>
     </div>
   );

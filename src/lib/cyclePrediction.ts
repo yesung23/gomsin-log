@@ -254,3 +254,25 @@ export function predictionOccursOnDate(prediction: CyclePrediction, date: string
   if (!prediction.windowStart || !prediction.windowEnd) return false;
   return prediction.windowStart <= date && date <= prediction.windowEnd;
 }
+
+/**
+ * Is `date` inside the estimated fertility window?
+ *
+ * READ-ONLY, and deliberately so. `fertilityWindowStart`/`End` are derived once in
+ * `predictCycle` from the same ovulation estimate the rest of the surface uses;
+ * this only compares against them. Re-deriving the window here would be a second
+ * answer to a question that already has one.
+ *
+ * The window has been computed for as long as the engine has existed, and it
+ * reached the PARTNER projection while never reaching the owner's own calendar --
+ * so the person it describes was the only one who could not see it.
+ */
+export function fertilityOccursOnDate(prediction: CyclePrediction, date: string): boolean {
+  if (!prediction.fertilityWindowStart || !prediction.fertilityWindowEnd) return false;
+  return prediction.fertilityWindowStart <= date && date <= prediction.fertilityWindowEnd;
+}
+
+/** Is `date` the single estimated ovulation day? Read-only, same reasoning as above. */
+export function ovulationOccursOnDate(prediction: CyclePrediction, date: string): boolean {
+  return !!prediction.estimatedOvulationDate && prediction.estimatedOvulationDate === date;
+}

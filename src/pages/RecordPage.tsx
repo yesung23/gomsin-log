@@ -9,6 +9,7 @@ import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
 import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
+import { RecordMoodSection } from '@/components/emotion/RecordMoodSection';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 import { isMarkedByViewer } from '@/lib/talkAboutList';
@@ -1318,6 +1319,34 @@ export function RecordPage() {
                   record here is already sanitised for this viewer, so a
                   partner never sees author-only items in it. */}
               <EmotionFlowInsightCard items={selectedRecord.emotionFlow} variant="detail" />
+
+              {/*
+                기록 속 마음 — author-only, and the fast path.
+
+                The stored feeling arrives already selected, so agreeing with it
+                costs nothing and disagreeing costs one tap. `RecordEmotionCorrection`
+                stays below it: this section answers "which feeling", and that one
+                still answers "which of the machine's guesses do I keep, and what did
+                it read them from" -- a different question, and one that needs the
+                evidence phrases and the remove/restore list to answer.
+              */}
+              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
+                <div className="pt-2 border-t border-border">
+                  <RecordMoodSection
+                    items={selectedRecord.emotionFlow ?? []}
+                    disabled={isOffline}
+                    disabledReason={OFFLINE_READONLY_MESSAGE}
+                    onChange={async (emotionFlow) => {
+                      const result = await updateRecord(selectedRecord.id, {
+                        emotionFlow,
+                        emotionUpdatedAt: new Date().toISOString(),
+                      });
+                      if (!result.ok) toast.error(result.error || '마음을 바꾸지 못했어요.');
+                      return result.ok;
+                    }}
+                  />
+                </div>
+              )}
 
               {/* Author-only: fix a wrong reading after the fact. Before this, a
                   saved flow was permanent, which is the defect the product owner

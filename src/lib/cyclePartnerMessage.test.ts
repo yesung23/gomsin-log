@@ -62,13 +62,30 @@ describe('the partner preview reflects the real preferences', () => {
   });
 
   it('always states that raw health detail is never visible', () => {
+    /*
+     * Asserted on `neverShared`, not on `lines`, and that move is the point. The
+     * guarantee used to be appended as the last of the shared lines -- same grey
+     * block, same type -- so the one sentence saying "he cannot see this" was
+     * formatted identically to the four saying what he could.
+     *
+     * Every combination including all-off: someone who shares nothing still
+     * deserves to be told what sharing would never have included.
+     */
     for (const preferences of [
+      prefs({}),
       prefs({ shareCurrentPeriod: true }),
       prefs({ sharePredictionWindow: true }),
       prefs({ shareFertilityWindow: true }),
+      prefs({ shareCurrentPeriod: true, sharePredictionWindow: true, shareFertilityWindow: true }),
     ]) {
-      const text = buildCyclePartnerMessage({ preferences, periodActive: false }).lines.join(' ');
-      expect(text).toContain('보이지 않아요');
+      const message = buildCyclePartnerMessage({ preferences, periodActive: false });
+      expect(message.neverShared).toContain('보이지 않아요');
+      // Named one by one, so a reader need not trust a summarising word.
+      for (const withheld of ['증상', '출혈량', '통증', '기분', '메모']) {
+        expect(message.neverShared, withheld).toContain(withheld);
+      }
+      // And it stays OUT of the shared list, which is what the split is for.
+      expect(message.lines.join(' ')).not.toContain('보이지 않아요');
     }
   });
 

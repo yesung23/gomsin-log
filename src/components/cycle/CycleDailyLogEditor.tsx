@@ -136,7 +136,7 @@ export function CycleDailyLogEditor({
                   aria-pressed={selected}
                   aria-label={`증상 ${symptomLabels[symptom]}`}
                   className={cn(
-                    'min-h-11 px-3 rounded-full border text-caption transition',
+                    'press-response min-h-11 px-3 rounded-full border text-caption',
                     selected
                       ? 'bg-coral/20 border-coral text-coral-strong font-bold'
                       : 'bg-card border-border text-foreground hover:bg-muted',

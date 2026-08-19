@@ -144,9 +144,7 @@ describe('CycleSupportSection write integrity', () => {
     createSignal.mockResolvedValue({ ok: false, reason: 'forbidden' });
     await renderOwnerWithShareForm();
 
-    fireEvent.change(screen.getByLabelText(/응원 신호 \*/), {
-      target: { value: 'would_like_support' },
-    });
+    fireEvent.click(screen.getByTestId('support-kind-would_like_support'));
     fireEvent.click(screen.getByText('오늘만 공유하기'));
 
     const alert = await screen.findByRole('alert');
@@ -161,9 +159,7 @@ describe('CycleSupportSection write integrity', () => {
     createSignal.mockResolvedValue({ ok: false, reason: 'auth_expired' });
     await renderOwnerWithShareForm();
 
-    fireEvent.change(screen.getByLabelText(/응원 신호 \*/), {
-      target: { value: 'resting' },
-    });
+    fireEvent.click(screen.getByTestId('support-kind-resting'));
     fireEvent.click(screen.getByText('오늘만 공유하기'));
 
     const alert = await screen.findByRole('alert');
@@ -202,12 +198,48 @@ describe('CycleSupportSection write integrity', () => {
     });
     await renderOwnerWithShareForm();
 
-    fireEvent.change(screen.getByLabelText(/응원 신호 \*/), {
-      target: { value: 'would_like_support' },
-    });
+    fireEvent.click(screen.getByTestId('support-kind-would_like_support'));
     fireEvent.click(screen.getByText('오늘만 공유하기'));
 
     expect(await screen.findByText('오늘 공유된 신호')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  describe('the care signal is chosen, never assumed', () => {
+    it('starts with nothing selected, so the app never guesses how today feels', async () => {
+      await renderOwnerWithShareForm();
+      for (const kind of ['resting', 'need_space', 'would_like_support', 'check_in_later']) {
+        expect(screen.getByTestId(`support-kind-${kind}`).getAttribute('aria-pressed')).toBe('false');
+      }
+    });
+
+    it('shows all four options at once rather than behind a picker', async () => {
+      await renderOwnerWithShareForm();
+      expect(screen.getByTestId('support-kind-options').querySelectorAll('button')).toHaveLength(4);
+    });
+
+    it('marks exactly one as chosen, and lets the choice be taken back', async () => {
+      await renderOwnerWithShareForm();
+
+      fireEvent.click(screen.getByTestId('support-kind-resting'));
+      expect(screen.getByTestId('support-kind-resting').getAttribute('aria-pressed')).toBe('true');
+      expect(screen.getByTestId('support-kind-need_space').getAttribute('aria-pressed')).toBe('false');
+
+      // Choosing another moves the selection rather than adding to it.
+      fireEvent.click(screen.getByTestId('support-kind-need_space'));
+      expect(screen.getByTestId('support-kind-resting').getAttribute('aria-pressed')).toBe('false');
+      expect(screen.getByTestId('support-kind-need_space').getAttribute('aria-pressed')).toBe('true');
+
+      // Pressing the chosen one again clears it -- deciding not to send is a decision.
+      fireEvent.click(screen.getByTestId('support-kind-need_space'));
+      expect(screen.getByTestId('support-kind-need_space').getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('refuses to send until something has actually been chosen', async () => {
+      await renderOwnerWithShareForm();
+      fireEvent.click(screen.getByText('오늘만 공유하기'));
+      expect(createSignal).not.toHaveBeenCalled();
+    });
+  });
+
 });

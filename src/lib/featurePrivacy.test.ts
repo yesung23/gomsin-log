@@ -25,6 +25,10 @@ describe('cycle validation and mapping', () => {
       'bloating',
       'mood_changes',
       'backache',
+      // Added 2026-08-20. No migration: `cycle_daily_logs.symptoms` is an
+      // unconstrained TEXT[] (migration 022).
+      'nausea',
+      'breast_tenderness',
     ]);
     expect(CYCLE_SUPPORT_KINDS).toEqual([
       'resting',
@@ -36,6 +40,22 @@ describe('cycle validation and mapping', () => {
     expect(CYCLE_SUPPORT_KINDS.every(isCycleSupportKind)).toBe(true);
     expect(isCycleSymptom('prediction')).toBe(false);
     expect(isCycleSupportKind('cramps')).toBe(false);
+  });
+
+  it('the two vocabularies stay disjoint, so a symptom can never be sent as a signal', () => {
+    /*
+     * This matters more at eight symptoms than it did at six. Symptoms are
+     * PERSONAL; support kinds are PARTNER-VISIBLE. They are the private and the
+     * public halves of one screen, and the only thing stopping a new symptom from
+     * being accepted as a partner-facing kind is that the two lists share no
+     * member. Adding a name to both would publish it without anyone deciding to.
+     */
+    for (const symptom of CYCLE_SYMPTOMS) {
+      expect(isCycleSupportKind(symptom), symptom).toBe(false);
+    }
+    for (const kind of CYCLE_SUPPORT_KINDS) {
+      expect(isCycleSymptom(kind), kind).toBe(false);
+    }
   });
 
   it('maps only allowed symptoms and supports legacy rows', () => {

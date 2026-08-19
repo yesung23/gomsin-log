@@ -237,6 +237,28 @@ export interface CycleSettings {
   averagePeriodLength: number;
 }
 
+/**
+ * What a person may log about their own body.
+ *
+ * PERSONAL ONLY. None of this is ever partner-visible: the partner-facing payload
+ * is `CyclePartnerProjection`, which has no field that could carry a symptom, and
+ * the only other thing a partner sees is a `CycleSupportSignal` the owner chose to
+ * send.
+ *
+ * `nausea` and `breast_tenderness` were added 2026-08-20. Two of the most commonly
+ * reported, and until now the two most likely to end up written into `note` --
+ * which is worse for privacy than a checkbox, because a note is prose and prose is
+ * where identifying detail collects.
+ *
+ * The wording follows the set that was already here: `복부 불편감`, not 생리통;
+ * `허리 불편감`, not 요통. This surface describes discomfort in ordinary words rather
+ * than naming conditions, so `가슴 불편감` joins that pattern instead of `가슴 통증`.
+ *
+ * Extending this needs no migration: `cycle_daily_logs.symptoms` is `TEXT[]` with
+ * no CHECK constraint (migration 022). The legacy `cycle_entries` table does carry
+ * `cycle_entries_symptoms_check`, but nothing under `src/` reads or writes that
+ * table any more, and `cycleV3DataPath.test.tsx` is what keeps it that way.
+ */
 export const CYCLE_SYMPTOMS = [
   'cramps',
   'headache',
@@ -244,6 +266,8 @@ export const CYCLE_SYMPTOMS = [
   'bloating',
   'mood_changes',
   'backache',
+  'nausea',
+  'breast_tenderness',
 ] as const;
 
 export type CycleSymptom = (typeof CYCLE_SYMPTOMS)[number];

@@ -54,6 +54,18 @@
   --color-lilac-foreground: var(--lilac-foreground);
   --color-mint: var(--mint);
   --color-mint-foreground: var(--mint-foreground);
+  --color-emotion-happiness: var(--emotion-happiness);
+  --color-emotion-happiness-surface: var(--emotion-happiness-surface);
+  --color-emotion-surprise: var(--emotion-surprise);
+  --color-emotion-surprise-surface: var(--emotion-surprise-surface);
+  --color-emotion-fear: var(--emotion-fear);
+  --color-emotion-fear-surface: var(--emotion-fear-surface);
+  --color-emotion-disgust: var(--emotion-disgust);
+  --color-emotion-disgust-surface: var(--emotion-disgust-surface);
+  --color-emotion-anger: var(--emotion-anger);
+  --color-emotion-anger-surface: var(--emotion-anger-surface);
+  --color-emotion-sadness: var(--emotion-sadness);
+  --color-emotion-sadness-surface: var(--emotion-sadness-surface);
   --color-cream: var(--cream);
   --color-navy: var(--navy);
   --color-destructive: var(--destructive);
@@ -306,6 +318,38 @@
   --lilac-foreground: var(--navy);
   --mint: oklch(0.93 0.045 155);
   --mint-foreground: var(--navy);
+
+  /*
+   * Emotion accents — one per canonical `BasicEmotion`.
+   *
+   * Six hues far enough apart to be told apart at 40px, and deliberately NOT the
+   * mapping the obvious animated reference uses: that film's palette is the first
+   * thing a viewer would recognise, and recognisable is exactly what this must not
+   * be. What carries the meaning here is the SILHOUETTE (see `EmotionCharacter`);
+   * colour is the second signal, and the label under it is the third, so none of
+   * the three is load-bearing on its own.
+   *
+   * Hue 40 for 분노 rather than the brand's own 12-25: coral is the app's chrome,
+   * and an anger accent inside that hue would read as a UI state rather than as a
+   * feeling. Pushed to a rust that is still hot but unmistakably not the brand.
+   *
+   * `-surface` is the selected-chip background. Kept very light so the character
+   * sits ON it rather than dissolving into it; dark mode inverts the pair, because
+   * a pale tint on a dark card reads as disabled.
+   */
+  --emotion-happiness: oklch(0.76 0.14 75);
+  --emotion-happiness-surface: oklch(0.96 0.04 75);
+  --emotion-surprise: oklch(0.72 0.11 205);
+  --emotion-surprise-surface: oklch(0.96 0.03 205);
+  --emotion-fear: oklch(0.68 0.11 300);
+  --emotion-fear-surface: oklch(0.96 0.03 300);
+  --emotion-disgust: oklch(0.68 0.09 140);
+  --emotion-disgust-surface: oklch(0.96 0.03 140);
+  --emotion-anger: oklch(0.62 0.16 40);
+  --emotion-anger-surface: oklch(0.95 0.04 40);
+  --emotion-sadness: oklch(0.62 0.11 265);
+  --emotion-sadness-surface: oklch(0.96 0.03 265);
+
   --destructive: oklch(0.58 0.19 25);
   --destructive-foreground: oklch(0.99 0.005 85);
   --warning: oklch(0.52 0.11 75);
@@ -356,6 +400,28 @@
   --lilac-foreground: var(--foreground);
   --mint: oklch(0.28 0.045 155);
   --mint-foreground: var(--foreground);
+
+  /*
+   * Emotion accents, dark.
+   *
+   * The accent LIGHTENS and the surface DARKENS, which is the same inversion
+   * `--coral-fill` makes two blocks up and for the same reason: a mid-lightness
+   * accent that reads as vivid on cream reads as muddy on near-black, and a pale
+   * chip background there reads as a disabled control rather than a chosen one.
+   */
+  --emotion-happiness: oklch(0.84 0.13 75);
+  --emotion-happiness-surface: oklch(0.28 0.05 75);
+  --emotion-surprise: oklch(0.82 0.10 205);
+  --emotion-surprise-surface: oklch(0.27 0.04 205);
+  --emotion-fear: oklch(0.79 0.10 300);
+  --emotion-fear-surface: oklch(0.28 0.04 300);
+  --emotion-disgust: oklch(0.79 0.09 140);
+  --emotion-disgust-surface: oklch(0.26 0.04 140);
+  --emotion-anger: oklch(0.76 0.14 40);
+  --emotion-anger-surface: oklch(0.29 0.05 40);
+  --emotion-sadness: oklch(0.76 0.10 265);
+  --emotion-sadness-surface: oklch(0.27 0.04 265);
+
   --destructive: oklch(0.68 0.17 25);
   --destructive-foreground: oklch(0.16 0.016 265);
   --warning: oklch(0.82 0.11 80);

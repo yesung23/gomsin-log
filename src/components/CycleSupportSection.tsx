@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { HeartHandshake, Loader2, Radio, RotateCcw, Send, X } from 'lucide-react';
+import { Check, HeartHandshake, Loader2, Radio, RotateCcw, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   activeCycleSupportSignal,
@@ -12,6 +12,7 @@ import {
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
+import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import type { CycleSupportKind, CycleSupportSignal, Role } from '@/types';
 
@@ -387,13 +388,49 @@ export function CycleSupportSection({
               <div className="p-3 rounded-control bg-muted/30 text-caption text-muted-foreground leading-relaxed">
                 오늘 하루 동안 보일 비의료적 응원 신호만 공유돼요. 선택 메시지는 파트너에게 그대로 보이므로 개인적인 상세 내용은 적지 마세요. 개인 기록은 자동으로 공유되지 않아요.
               </div>
-              <label className="text-label font-bold text-foreground space-y-1 block">
-                <span>응원 신호 *</span>
-                <select value={kind} onChange={(event) => setKind(event.target.value as CycleSupportKind | '')} disabled={mutationPending !== null} className="w-full p-3 rounded-control border border-border bg-card text-body">
-                  <option value="">직접 선택해 주세요</option>
-                  {Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </label>
+              {/*
+                Cards, not a <select>.
+
+                A native picker hides every option behind a tap and then shows the
+                chosen one as a line of text indistinguishable from its own
+                placeholder. On a screen whose entire job is "be clear about what you
+                are sending your partner", that was the least clear thing on it.
+
+                All four are visible, the chosen one is unmistakable, and nothing is
+                chosen for you: `kind` starts empty and there is no default, so the
+                send button stays disabled until a person actually picks. An app that
+                guessed how someone feels today and pre-filled it would be doing the
+                one thing this feature must never do.
+              */}
+              <fieldset className="space-y-1.5">
+                <legend className="text-label font-bold text-foreground">응원 신호 *</legend>
+                <ul className="grid gap-1.5" data-testid="support-kind-options">
+                  {Object.entries(kindLabels).map(([value, label]) => {
+                    const chosen = kind === value;
+                    return (
+                      <li key={value}>
+                        <button
+                          type="button"
+                          onClick={() => setKind(chosen ? '' : (value as CycleSupportKind))}
+                          disabled={mutationPending !== null}
+                          aria-pressed={chosen}
+                          data-testid={`support-kind-${value}`}
+                          className={cn(
+                            'press-response-row w-full text-left min-h-11 px-3 py-2.5 rounded-control border text-label disabled:opacity-50 flex items-center justify-between gap-2',
+                            chosen
+                              ? 'border-coral bg-coral/10 text-foreground font-bold'
+                              : 'border-border bg-card text-foreground',
+                          )}
+                        >
+                          {label}
+                          {/* A second, non-colour signal for the chosen one. */}
+                          {chosen && <Check className="w-4 h-4 shrink-0 text-coral-strong" aria-hidden="true" />}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </fieldset>
               <label className="text-label font-bold text-foreground space-y-1 block">
                 <span>파트너에게 보낼 짧은 메시지 (선택, 80자 이하)</span>
                 <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={80} disabled={mutationPending !== null} placeholder="예: 오늘 저녁에 짧게 통화하고 싶어요" className="w-full p-3 rounded-control border border-border bg-card text-body" />

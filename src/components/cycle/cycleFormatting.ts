@@ -7,6 +7,33 @@ import type { CycleDailyLog, CycleFlow, CycleMood, CyclePainLevel, CycleSymptom 
  * cannot drift into three different words for the same symptom.
  */
 
+/**
+ * What a single calendar day can be marked as.
+ *
+ * Lives here rather than beside the drawing in `CycleDayMarker` so the legend, the
+ * `aria-label` and the glyph cannot drift into three different words for the same
+ * day -- the same reason the symptom labels are here.
+ */
+export type CycleDayMark = 'period' | 'period_predicted' | 'fertile' | 'ovulation';
+
+export const cycleDayMarkLabels: Record<CycleDayMark, string> = {
+  period: '생리 기록',
+  /*
+   * `기간`, not just `예상`. It names a WINDOW rather than a day, which is what the
+   * estimate actually is -- and it is the wording the calendar's accessible name
+   * has always used, pinned by `cycleV3DataPath.test.tsx`. One string for both the
+   * legend and the label, so the two cannot drift.
+   */
+  period_predicted: '생리 예상 기간',
+  /*
+   * `가임 가능성 높게 추정`, and never 안전한 날 or its cousins. This is arithmetic on
+   * past start dates: it knows nothing about this cycle, and any phrasing that
+   * implies a day is safe would be a medical claim the estimate cannot support.
+   */
+  fertile: '가임 가능성 높게 추정',
+  ovulation: '배란 예상일',
+};
+
 export const symptomLabels: Record<CycleSymptom, string> = {
   cramps: '복부 불편감',
   headache: '두통',
@@ -14,6 +41,10 @@ export const symptomLabels: Record<CycleSymptom, string> = {
   bloating: '더부룩함',
   mood_changes: '기분 변화',
   backache: '허리 불편감',
+  nausea: '메스꺼움',
+  // `불편감`, not `통증`, for the same reason as 복부 and 허리 above: this surface
+  // says how a day feels, and naming it as pain reads as a diagnosis.
+  breast_tenderness: '가슴 불편감',
 };
 
 /**

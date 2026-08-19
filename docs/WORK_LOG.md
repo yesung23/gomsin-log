@@ -89,6 +89,121 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-20 · LV · Apple 수준 interaction quality layer — foundation + core loop
+
+#### PLAN POSITION
+- Phase: LV (Limited Validation)
+- Workstream: interaction quality layer (design-preview visual identity 유지)
+- Step: foundation(press response · spring · a11y preference · tracking) + LV core loop 적용
+- Previous Gate: 2026-08-20 branch consolidation (`1a7c55e`)
+- This Gate: 없음 — 이 작업은 LV 진입 조건이 아니다 (아래 DIRECTION CHECK 참조)
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` canonical tabs(홈/기록/일정/우리/마이) 불변, §8 이야기거리는
+  대화 목록이지 task manager가 아님, §7.1 기록 작성 진입점
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·BM·가격·AI 역할·KPI 변경 없음
+- Engineering source checked: `ENGINEERING_ROADMAP` §LV. LV 진입 조건은 기능·안전 기준이며
+  interaction quality는 그 조건이 **아니다**. gate를 전진시키지 않고, 위협하지도 않는다
+- Current-state checked: `CURRENT_STATE.md` §1 consolidation checkpoint
+- Latest relevant Work Log checked: 바로 아래 consolidation entry
+- Abandoned-strategy guard (`AGENTS.md` §17): 해당 없음. 요청 문서가 AI 자동 감정 선정을
+  독립적으로 금지하고 있어 §17과 일치
+- Does this task conflict with canonical direction? **YES — 한 항목**
+- If YES, what conflict: 요청 문서 §L "통증 정도는 선택적으로 공유 가능".
+  `src/lib/cyclePartnerMessage.ts`의 `CyclePartnerMessageInput`은 symptoms·flow·pain·mood·note를
+  **타입 수준에서 담을 수 없게** 만들어 둔 privacy boundary다. 통증 공유를 추가하려면 그 경계를
+  넓혀야 하므로 security review + 제품 결정이 필요하다. **구현하지 않고 사용자에게 보고했다.**
+  같은 문서의 "출혈량은 제외"는 이미 충족되어 있으며, 요청보다 강하게(런타임 검사가 아니라 타입으로)
+  보장되고 있다. "상대방에게 이렇게 보여요" preview도 이미 존재한다
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: claude-opus-5[1m]
+- Role: Worker + self-verification
+- PR: 없음 (사용자 지시로 master 직접 착지)
+- Branch: `master`
+- Base SHA: 1a7c55e65a166f8a09717d0209e19f57db49914c
+- Old HEAD: 1a7c55e65a166f8a09717d0209e19f57db49914c
+- New/Reviewed HEAD: e51269e (아래 STOPPED AT 참조)
+
+#### CHANGED / REVIEWED
+- file: `src/styles/index.css` — `press-response` / `press-response-row` 신규,
+  step별 `--text-*--letter-spacing` 7종 신규,
+  `@media (prefers-reduced-transparency: reduce)` · `@media (prefers-contrast: more)` 신규.
+  미사용 `@keyframes cell-press` 제거
+- file: `src/lib/motion.ts` — `prefersReducedTransparency`/`prefersHighContrast`,
+  closed-form spring(`springStep`·`springAtRest`), `projectMomentum`, `rubberband` 추가.
+  기존 `prefersReducedMotion`/`scrollBehavior` 의미 불변
+- file: `src/lib/useSheetDrag.ts` (신규) — 1:1 추적 · rubberband · velocity handoff ·
+  interruptible spring. `enabled: !busy` 지원
+- file: `src/components/ui/Button.tsx` — `transition active:scale-[0.99]` → `press-response`.
+  앱 전체 버튼에 touch-action/tap-highlight가 한 번에 적용됨
+- file: `MobileShell.tsx`(탭바), `CycleCalendar.tsx`(날짜·월 이동),
+  `CycleSheet.tsx`(drag dismiss + busy 가드), `AddWidgetBottomSheet.tsx`(drag dismiss),
+  `PartnerDayTimelineWidget.tsx`(타임라인 행), `TalkAboutListWidget.tsx`(원본 행·확인·overflow)
+- file: `src/lib/motion.test.ts`(신규 19), `accessibilityInvariants.test.ts`(+6),
+  `typeScale.test.ts`(+2)
+- why: 탭바를 포함한 핵심 컨트롤이 pointer-down이 아니라 navigation/release에 반응했고,
+  `backdrop-blur` 14곳에 대응하는 transparency/contrast 선호 처리가 전무했다
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음 (E2EE·키·복호화 미접촉)
+- DB/migration semantics: 변경 없음 (SQL 0건)
+- product semantics: canonical tabs·PartnerDay 상태 기계·§8·§7.1 의미 불변.
+  `cyclePartnerMessage.ts` 미접촉
+- Production: 미접촉. Supabase remote mutation 없음
+
+#### VERIFICATION
+- command: `npm run verify`
+- PASS — typecheck, lint(0 warnings), **2477 tests / 163 files**, build
+  (build는 CI와 동일한 non-secret placeholder를 프로세스 환경에만 주입)
+- command: 빌드 산출물에서 신규 CSS 실착지 확인
+- PASS — `dist`에 `prefers-reduced-transparency`·`prefers-contrast`·`press-response` 존재.
+  `.text-display{...letter-spacing:var(--tw-tracking,-.02em)}`,
+  `.text-caption{...letter-spacing:var(--tw-tracking,.01em)}` — tracking이 실제로 컴파일됨
+- command: `npx vitest run src/lib/motion.test.ts`
+- PASS (19) — critically damped는 target을 넘지 않음, momentum spring은 넘음,
+  0.1s 1회 = 0.01s 10회(closed form의 timestep 독립성), 250ms stall 후 정상 복귀
+- command: `npm run check:edge` / `npm run test:edge`
+- **NOT RUN** — 이 머신에 deno 미설치. `supabase/functions/` 미접촉이라 위험은 낮으나 실행하지 않았다
+- 실행하지 않음: 실기기 터치 검증, 실제 브라우저에서의 press latency 측정,
+  `prefers-reduced-transparency`를 켠 실제 OS에서의 육안 확인
+- what it actually proves: 토큰·CSS·spring 수학·불변식의 정확성과 빌드 산출물 도달.
+  실제 손가락으로 만졌을 때의 체감은 증명하지 않는다
+
+#### REVIEW IMPACT
+- DELTA — presentation layer에 한정. security/privacy/제품 의미 delta 없음
+- whether an earlier review is stale: NO. consolidation 시점의 판정은 그대로 유효하다
+
+#### BLOCKERS
+- code: 없음
+- environment: deno 미설치
+- external/manual: 실기기 검증 미실시
+
+#### STOPPED AT
+- exact completed boundary: foundation + LV core loop 적용 + 테스트 + `npm run verify` 통과,
+  `e51269e` 커밋. 이 entry를 담은 commit이 추가되면 최종 SHA는 그만큼 앞선다
+
+#### REMAINING
+- not completed: 나머지 화면(12 pages 중 core loop 외), 전체 한글 타이포그래피 육안 검수,
+  material/depth 확장, haptics(Capacitor haptics 의존성 미추가 — 요청 문서가 haptic만을 위한
+  새 의존성 추가를 금지), 독립 review
+
+#### NEXT ACTION
+- next owner: 사용자 판단(적용 범위 확대 여부), 이후 독립 Reviewer
+- tool/model: Kiro Reviewer 또는 Claude (read-only)
+- 기준 SHA: push 후의 새 origin/master
+- exact next task: 실기기에서 탭바·시트 drag 체감 확인, 그리고 §L 통증 공유를 열지 여부의 제품 결정
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: `cyclePartnerMessage.ts`의 타입 수준 privacy boundary를 넓히는 작업은
+  security review 없이 시작하지 않는다. P6는 여전히 NOT AUTHORIZED
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED
+
+---
+
 ### 2026-08-20 · LV · 전 branch consolidation — 흩어진 유효 작업을 master로 회수
 
 #### PLAN POSITION

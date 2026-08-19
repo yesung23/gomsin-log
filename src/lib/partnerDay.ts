@@ -39,12 +39,23 @@ export interface PartnerDayCheckpoint {
    */
   outstandingRecordIds: string[];
   /**
-   * Every viewer-visible shared partner record this client already knew about
-   * when the receipt was written.
+   * Every ELIGIBLE shared partner record this client already knew existed when the
+   * receipt was written -- authorized, not private, not the viewer's own, and not
+   * future-dated.
    *
-   * Not acknowledgement, not authorization, not server truth, not proof anything
-   * was read. It answers one question: was this record already in front of this
-   * client, or did it appear afterwards? That is what tells a genuine late
+   * Read the name carefully: it does NOT mean the viewer saw this record on the
+   * missed surface. A first-ever visit shows only the seven-day fallback, yet a
+   * two-year history that is already in local state is recorded here, and that is
+   * deliberate -- without it, every one of those old records would later look like
+   * a late arrival and flood the surface the moment a receipt existed. What it
+   * claims is narrower and checkable: this client knew of the record.
+   *
+   * The domain matters as much as the meaning. It is built from
+   * `eligibleSharedPartnerRecords`, the same function the surface uses, so it can
+   * never range wider than what could have been shown. It previously applied only
+   * the privacy gate, which let a future-dated record be recorded as known before
+   * it was ever eligible -- and once its date arrived it was unconfirmed, not
+   * outstanding, and observed, which means gone for good. That is what tells a genuine late
    * arrival -- an offline backlog stamped with its compose date, or a partner in
    * a timezone behind the viewer -- apart from ordinary history.
    *
@@ -175,6 +186,37 @@ export function visibleSharedPartnerRecords(
 }
 
 /**
+ * THE eligibility domain: what may appear on this surface, or be recorded as
+ * known to it, on a given day.
+ *
+ * Both `missedPartnerRecords` and the OBSERVED snapshot go through this one
+ * function, and that is the whole point of its existing. When the two computed
+ * their own domains, OBSERVED ranged wider than the surface: it applied only the
+ * privacy gate, so a record withheld for being future-dated was still recorded as
+ * "already known". The day its date arrived it was eligible, unconfirmed, not
+ * outstanding, and observed -- which means hidden, permanently, without anyone
+ * having acknowledged it. Deriving both from one domain makes
+ *
+ *     OBSERVED ⊆ ELIGIBLE
+ *
+ * true by construction rather than by two functions agreeing.
+ *
+ * `todayStr` is passed in, never derived here. It must be the same viewer-local
+ * date the surface is already using; computing it from a clock would put a clock
+ * back into a correctness decision.
+ */
+export function eligibleSharedPartnerRecords(
+  records: DailyRecord[],
+  viewer: Viewer,
+  todayStr: string,
+): DailyRecord[] {
+  // §6.5 "상한 오늘". A date that has not arrived is not missed context, and it is
+  // not something this client can claim to have known about either.
+  return visibleSharedPartnerRecords(records, viewer)
+    .filter((record) => record.date <= todayStr);
+}
+
+/**
  * The partner's shared records this viewer has not yet dealt with, oldest first.
  *
  * Three facts are tracked separately because collapsing them is what kept
@@ -194,10 +236,7 @@ export function missedPartnerRecords(
   const byTime = (a: DailyRecord, b: DailyRecord) =>
     `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`);
 
-  // §6.5 "상한 오늘", applied before anything else: a future date is not missed
-  // context however it got here, and no later rule may reintroduce one.
-  const eligible = visibleSharedPartnerRecords(records, viewer)
-    .filter((record) => record.date <= todayStr);
+  const eligible = eligibleSharedPartnerRecords(records, viewer, todayStr);
 
   if (!checkpoint) {
     const { since } = partnerDayFallbackWindow(todayStr);
@@ -206,21 +245,21 @@ export function missedPartnerRecords(
 
   const confirmed = new Set(checkpoint.confirmedRecordIds);
   const outstanding = new Set(checkpoint.outstandingRecordIds);
-  // A receipt from before observation existed cannot attest to anything, so it is
-  // read as attesting to nothing: everything unconfirmed comes back once, and the
-  // next acknowledgement writes a real snapshot. Showing too much once is the
-  // acceptable failure; hiding something unseen is not.
-  const observed = checkpoint.observedRecordIds.length > 0
-    || checkpoint.outstandingRecordIds.length > 0
-    || checkpoint.confirmedRecordIds.length > 0
-    ? new Set(checkpoint.observedRecordIds)
-    : null;
+  /*
+   * An EMPTY observation attests to nothing, which is exactly the reading a
+   * receipt from before this field existed needs: everything unconfirmed comes
+   * back once and the next acknowledgement writes a real snapshot. No special
+   * case is required for it -- an empty set answers `has()` with false for every
+   * id, so the rescue below fires on its own. An earlier version wrote that
+   * special case out as a null branch; it could never change any answer.
+   */
+  const observed = new Set(checkpoint.observedRecordIds);
 
   return eligible
     .filter((record) => {
       if (confirmed.has(record.id)) return false;
       if (outstanding.has(record.id)) return true;
-      if (!observed || !observed.has(record.id)) return true;
+      if (!observed.has(record.id)) return true;
       // Observed before, never outstanding, never confirmed: this viewer has had
       // it in front of them and moved past it. Nothing may bring it back.
       return false;
@@ -246,7 +285,7 @@ export function advancePartnerDayCheckpoint(
   previous: PartnerDayCheckpoint | null | undefined,
   acknowledged: DailyRecord[],
   currentMissed: DailyRecord[] = [],
-  observable: { records: DailyRecord[]; viewer: Viewer } | null = null,
+  observable: { records: DailyRecord[]; viewer: Viewer; todayStr: string } | null = null,
   now: Date = new Date(),
 ): PartnerDayCheckpoint | null {
   if (acknowledged.length === 0) return null;
@@ -273,7 +312,7 @@ export function advancePartnerDayCheckpoint(
      */
     observedRecordIds: observable
       ? Array.from(new Set(
-        visibleSharedPartnerRecords(observable.records, observable.viewer)
+        eligibleSharedPartnerRecords(observable.records, observable.viewer, observable.todayStr)
           .map((record) => record.id),
       ))
       : [],

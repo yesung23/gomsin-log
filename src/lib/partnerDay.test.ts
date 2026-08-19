@@ -4,6 +4,7 @@ import type { Viewer } from '@/lib/privacy';
 import { parseLocalDate, toLocalDateString } from '@/lib/utils';
 import {
   advancePartnerDayCheckpoint,
+  eligibleSharedPartnerRecords,
   missedPartnerRecords,
   partnerDayCheckpointKey,
   partnerDayDateLabel,
@@ -89,7 +90,7 @@ function drain(all: DailyRecord[], cp: PartnerDayCheckpoint | null, todayStr = T
       return { cp: current, remaining: missed.length, grew, passes: pass };
     }
     current = advancePartnerDayCheckpoint(current, readable.slice(0, 5), missed, {
-      records: all, viewer: VIEWER,
+      records: all, viewer: VIEWER, todayStr,
     });
   }
   return {
@@ -177,7 +178,7 @@ describe('acknowledgement never resurrects history', () => {
 
     const readable = before.filter((r) => !r.contentUnavailable);
     const next = advancePartnerDayCheckpoint(first.cp, readable, before, {
-      records: all, viewer: VIEWER,
+      records: all, viewer: VIEWER, todayStr: TODAY,
     });
     const after = missedPartnerRecords(all, VIEWER, TODAY, next);
 
@@ -196,7 +197,7 @@ describe('acknowledgement never resurrects history', () => {
       const missed = missedPartnerRecords(all, VIEWER, TODAY, cp);
       expect(ids(missed)).toEqual(['locked']);
       // Nothing readable to acknowledge, so nothing may advance.
-      expect(advancePartnerDayCheckpoint(cp, [], missed, { records: all, viewer: VIEWER }))
+      expect(advancePartnerDayCheckpoint(cp, [], missed, { records: all, viewer: VIEWER, todayStr: TODAY }))
         .toBeNull();
       cp = cp!;
     }
@@ -235,7 +236,7 @@ describe('invariant: acknowledgement may not grow the surface', () => {
     }));
     const missed = missedPartnerRecords(all, VIEWER, TODAY, null);
     const next = advancePartnerDayCheckpoint(null, missed.slice(0, 5), missed, {
-      records: all, viewer: VIEWER,
+      records: all, viewer: VIEWER, todayStr: TODAY,
     })!;
     expect(next.outstandingRecordIds).toHaveLength(15);
     expect(ids(missedPartnerRecords(all, VIEWER, TODAY, next))).toEqual(
@@ -274,7 +275,7 @@ describe('late arrivals', () => {
     const a = at('a', 2);
     const b = at('b', 2, { time: '10:00' });
     const missed = missedPartnerRecords([a, b], VIEWER, TODAY, null);
-    const cp = advancePartnerDayCheckpoint(null, [a], missed, { records: [a, b], viewer: VIEWER })!;
+    const cp = advancePartnerDayCheckpoint(null, [a], missed, { records: [a, b], viewer: VIEWER, todayStr: TODAY })!;
     expect(cp.outstandingRecordIds).toEqual(['b']);
 
     // `b` disappears from this client's slice, then comes back.
@@ -290,7 +291,7 @@ describe('the empty acknowledgement contract', () => {
     expect(advancePartnerDayCheckpoint(null, [])).toBeNull();
     expect(advancePartnerDayCheckpoint(observing(['x']), [])).toBeNull();
     expect(advancePartnerDayCheckpoint(observing(['x']), [], [at('y', 1)], {
-      records: [at('y', 1)], viewer: VIEWER,
+      records: [at('y', 1)], viewer: VIEWER, todayStr: TODAY,
     })).toBeNull();
   });
 });
@@ -322,7 +323,7 @@ describe('privacy is settled before any classification', () => {
     const all = [shared, secret, mine];
     const missed = missedPartnerRecords(all, VIEWER, TODAY, null);
     const cp = advancePartnerDayCheckpoint(null, missed, missed, {
-      records: all, viewer: VIEWER,
+      records: all, viewer: VIEWER, todayStr: TODAY,
     })!;
     expect(cp.observedRecordIds).toEqual(['shared']);
     expect(cp.outstandingRecordIds).toEqual([]);
@@ -347,6 +348,140 @@ describe('a receipt from the previous shape fails open', () => {
     const all = [at('old-confirmed', 400), at('ancient', 400, { time: '10:00' })];
     // The confirmed one stays confirmed; everything else comes back once.
     expect(ids(missedPartnerRecords(all, VIEWER, TODAY, legacy))).toEqual(['ancient']);
+  });
+});
+
+/**
+ * The eligibility domain is shared, so OBSERVED can never range wider than the
+ * surface. When the two computed their own domains a future-dated record was
+ * recorded as "already known" while being correctly withheld, and the day its date
+ * arrived it was eligible, unconfirmed, not outstanding, and observed -- gone for
+ * good, with nobody having acknowledged it.
+ */
+describe('a future-dated record is withheld, not entombed', () => {
+  it('surfaces on the day it becomes eligible, having never been acknowledged', () => {
+    const rToday = record({ id: 'rToday', date: '2026-08-19' });
+    const rFuture = record({ id: 'rFuture', date: '2026-08-20' });
+    const all = [rToday, rFuture];
+
+    const missed = missedPartnerRecords(all, VIEWER, '2026-08-19', null);
+    expect(ids(missed)).toEqual(['rToday']);
+
+    const cp = advancePartnerDayCheckpoint(null, missed, missed, {
+      records: all, viewer: VIEWER, todayStr: '2026-08-19',
+    })!;
+    // It was never eligible, so the receipt may not claim to have known it.
+    expect(cp.observedRecordIds).toEqual(['rToday']);
+
+    // The next day. No new sync, no new arrival -- only `todayStr` moved.
+    expect(ids(missedPartnerRecords(all, VIEWER, '2026-08-20', cp))).toEqual(['rFuture']);
+  });
+
+  it('needs no synchronisation event: the record was already in local state', () => {
+    const future = record({ id: 'future', date: '2026-08-22' });
+    const today = record({ id: 'today', date: '2026-08-19' });
+    const all = [today, future];
+    let cp = advancePartnerDayCheckpoint(null, [today], [today], {
+      records: all, viewer: VIEWER, todayStr: '2026-08-19',
+    })!;
+
+    // Two days pass with the same `all` array.
+    expect(missedPartnerRecords(all, VIEWER, '2026-08-20', cp)).toEqual([]);
+    expect(missedPartnerRecords(all, VIEWER, '2026-08-21', cp)).toEqual([]);
+    expect(ids(missedPartnerRecords(all, VIEWER, '2026-08-22', cp))).toEqual(['future']);
+
+    // And only an explicit acknowledgement retires it.
+    const missed = missedPartnerRecords(all, VIEWER, '2026-08-22', cp);
+    cp = advancePartnerDayCheckpoint(cp, missed, missed, {
+      records: all, viewer: VIEWER, todayStr: '2026-08-22',
+    })!;
+    expect(missedPartnerRecords(all, VIEWER, '2026-08-22', cp)).toEqual([]);
+  });
+
+  /**
+   * STATE_MACHINE_LEVEL_ONLY. The record edit form writes only `log`, so a record
+   * cannot be re-dated through the product today. Asserted at this level because
+   * the state machine must not depend on that remaining true.
+   */
+  it('an outstanding record pushed out of eligibility is not silently retired', () => {
+    const a = record({ id: 'a', date: '2026-08-19', time: '09:00' });
+    const b = record({ id: 'b', date: '2026-08-19', time: '10:00' });
+    const missed = missedPartnerRecords([a, b], VIEWER, '2026-08-19', null);
+    let cp = advancePartnerDayCheckpoint(null, [a], missed, {
+      records: [a, b], viewer: VIEWER, todayStr: '2026-08-19',
+    })!;
+    expect(cp.outstandingRecordIds).toEqual(['b']);
+
+    // `b` is re-dated into the future and a further acknowledgement happens.
+    const bFuture = { ...b, date: '2026-08-25' };
+    const later = [a, bFuture];
+    const nowMissed = missedPartnerRecords(later, VIEWER, '2026-08-20', cp);
+    expect(nowMissed).toEqual([]);
+    const c = record({ id: 'c', date: '2026-08-20' });
+    const withC = [a, bFuture, c];
+    const missedWithC = missedPartnerRecords(withC, VIEWER, '2026-08-20', cp);
+    cp = advancePartnerDayCheckpoint(cp, missedWithC, missedWithC, {
+      records: withC, viewer: VIEWER, todayStr: '2026-08-20',
+    })!;
+    // It was out of the domain, so it cannot have been recorded as observed.
+    expect(cp.observedRecordIds).not.toContain('b');
+
+    // When its date arrives it is reachable again, never having been confirmed.
+    expect(ids(missedPartnerRecords(withC, VIEWER, '2026-08-25', cp))).toEqual(['b']);
+  });
+});
+
+describe('historical-known is not the same as a late arrival', () => {
+  it('pre-fallback history stays put, while a genuinely new old record surfaces', () => {
+    // Two years already in local state; the first visit shows only the fallback.
+    const all: DailyRecord[] = [];
+    for (let d = 730; d >= 7; d -= 1) all.push(at(`old-${d}`, d));
+    for (let d = 6; d >= 0; d -= 1) all.push(at(`week-${d}`, d));
+
+    const first = drain(all, null);
+    expect(first.remaining).toBe(0);
+    // The old records ARE recorded as known -- that is what stops them later
+    // masquerading as late arrivals.
+    expect(first.cp!.observedRecordIds).toContain('old-730');
+
+    // oldExisting: present before the receipt, outside the fallback.
+    expect(ids(missedPartnerRecords(all, VIEWER, TODAY, first.cp))).toEqual([]);
+
+    // oldLate: absent at the receipt, arriving now with a date in the same range.
+    const oldLate = at('old-late', 400);
+    expect(ids(missedPartnerRecords([...all, oldLate], VIEWER, TODAY, first.cp)))
+      .toEqual(['old-late']);
+  });
+});
+
+describe('a malformed confirmedAt is rejected on read', () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  for (const bad of [undefined, '', 'just now', 42, null]) {
+    it(`rejects confirmedAt = ${JSON.stringify(bad)}, degrading to no receipt`, () => {
+      localStorage.setItem(partnerDayCheckpointKey('u', 'c'), JSON.stringify({
+        confirmedRecordIds: ['x'],
+        outstandingRecordIds: [],
+        observedRecordIds: ['x'],
+        confirmedAt: bad,
+      }));
+      // No receipt means the fallback window, which shows MORE, not less.
+      expect(readPartnerDayCheckpoint('u', 'c')).toBeNull();
+    });
+  }
+
+  it('accepts a well-formed one, so the rejections above are not vacuous', () => {
+    expect(writePartnerDayCheckpoint('u', 'c', checkpoint())).toBe(true);
+    expect(readPartnerDayCheckpoint('u', 'c')).not.toBeNull();
+  });
+});
+
+describe('an empty observation attests to nothing', () => {
+  it('reopens everything unconfirmed rather than hiding it', () => {
+    const cp = checkpoint({ confirmedRecordIds: ['seen'], observedRecordIds: [] });
+    const all = [at('seen', 300), at('never', 300, { time: '10:00' })];
+    expect(ids(missedPartnerRecords(all, VIEWER, TODAY, cp))).toEqual(['never']);
   });
 });
 
@@ -382,6 +517,24 @@ describe('1000-day seeded relationship simulation', () => {
     let created = 0;
     let grewWithoutArrival = 0;
     let maxWindow = 0;
+    /*
+     * The simulation is only worth its runtime if it actually reaches the states
+     * it claims to cover, and the previous version did not: its late-arrival
+     * generator could only ever emit OLDER dates, so across 2906 records it
+     * produced not one forward-dated record -- exactly the axis on which the
+     * implementation was broken. Counting the categories and failing on a zero
+     * turns "the generator drifted" from a silent pass into a red test.
+     */
+    const seen = {
+      forwardDated: 0,
+      lateOld: 0,
+      unreadableToReadable: 0,
+      partialAck: 0,
+      noOpenGap: 0,
+      deleteReappear: 0,
+      over500: 0,
+      over2000: 0,
+    };
 
     const visibleTo = () => all.filter((r) => !deleted.has(r.id));
 
@@ -404,7 +557,10 @@ describe('1000-day seeded relationship simulation', () => {
         arrivedToday += 1;
       }
 
-      // An offline backlog flushing late, stamped with its compose date.
+      // An offline backlog flushing late, stamped with its compose date. `day()`
+      // counts BACKWARDS from TODAY, so a larger argument is an older date --
+      // getting that backwards is what made the previous generator emit nothing
+      // forward-dated.
       if (rng() < 0.05 && d < DAYS - 30) {
         const back = 1 + Math.floor(rng() * 60);
         created += 1;
@@ -414,7 +570,22 @@ describe('1000-day seeded relationship simulation', () => {
           time: '07:00',
           createdAt: `${today}T09:00:00.000Z`,
         }));
+        seen.lateOld += 1;
         arrivedToday += 1;
+      }
+
+      // A partner whose device is ahead of the viewer's -- a timezone difference,
+      // a fast clock, or a compose landing across the viewer's local midnight.
+      // The record is in local state today but is not eligible until later.
+      if (rng() < 0.04 && d > 3) {
+        created += 1;
+        all.push(record({
+          id: `fwd-${created}`,
+          date: day(d - (1 + Math.floor(rng() * 3))),
+          time: '23:30',
+          createdAt: `${today}T09:00:00.000Z`,
+        }));
+        seen.forwardDated += 1;
       }
 
       // A record the partner deletes, and sometimes restores later.
@@ -425,17 +596,24 @@ describe('1000-day seeded relationship simulation', () => {
       if (rng() < 0.02 && deleted.size > 0) {
         const back = Array.from(deleted)[0];
         deleted.delete(back);
+        seen.deleteReappear += 1;
         arrivedToday += 1;
       }
 
       // A key arrives and unlocks something.
       if (rng() < 0.06) {
         const locked = all.find((r) => r.contentUnavailable);
-        if (locked) locked.contentUnavailable = false;
+        if (locked) {
+          locked.contentUnavailable = false;
+          seen.unreadableToReadable += 1;
+        }
       }
 
+      if (all.length > 500) seen.over500 += 1;
+      if (all.length > 2000) seen.over2000 += 1;
+
       // Some days nobody opens the app.
-      if (rng() < 0.25) continue;
+      if (rng() < 0.25) { seen.noOpenGap += 1; continue; }
 
       const records = visibleTo();
       let previous = missedPartnerRecords(records, VIEWER, today, cp).length;
@@ -447,6 +625,8 @@ describe('1000-day seeded relationship simulation', () => {
         const missed = missedPartnerRecords(records, VIEWER, today, cp);
         const readable = missed.filter((r) => !r.contentUnavailable);
         if (readable.length === 0) break;
+        // A press that cannot clear the window leaves a remainder outstanding.
+        if (readable.length > 5 || missed.length > readable.length) seen.partialAck += 1;
         const next = advancePartnerDayCheckpoint(cp, readable.slice(0, 5), missed, {
           records, viewer: VIEWER,
         });
@@ -463,20 +643,31 @@ describe('1000-day seeded relationship simulation', () => {
     expect(created).toBeGreaterThan(2500);
     expect(grewWithoutArrival).toBe(0);
 
+    // A category that never fired means this run proved nothing about it. Failing
+    // here is the point: it stops a drifting generator from reporting a pass it
+    // did not earn.
+    for (const [category, count] of Object.entries(seen)) {
+      expect(count, `simulation never produced: ${category}`).toBeGreaterThan(0);
+    }
+
     /*
      * Full accounting. Every authorized, non-future, currently-present record must
      * be either confirmed or still reachable -- never in neither state, which is
      * what silent loss looks like.
      */
     const confirmed = new Set(cp!.confirmedRecordIds);
+    // Anything still future-dated on the final day is legitimately not yet missed,
+    // so it is excluded from the accounting rather than counted as stranded.
+    const finalEligible = eligibleSharedPartnerRecords(visibleTo(), VIEWER, day(0));
     const reachable = new Set(ids(missedPartnerRecords(visibleTo(), VIEWER, day(0), cp)));
-    const stranded = visibleTo().filter((r) => !confirmed.has(r.id) && !reachable.has(r.id));
+    const stranded = finalEligible.filter((r) => !confirmed.has(r.id) && !reachable.has(r.id));
 
     console.log(
       `[simulation seed=${SEED}] records=${created} present=${visibleTo().length} `
       + `confirmed=${confirmed.size} reachable=${reachable.size} stranded=${stranded.length} `
       + `maxWindow=${maxWindow} receipt=${JSON.stringify(cp).length}B`,
     );
+    console.log(`[simulation coverage] ${JSON.stringify(seen)}`);
 
     expect(stranded).toEqual([]);
   });
@@ -492,7 +683,7 @@ describe('serialized receipt size', () => {
         id: `1f0a2b3c-4d5e-6f70-8192-${String(i).padStart(12, '0')}`,
         date: TODAY,
       }));
-      const cp = advancePartnerDayCheckpoint(null, all, all, { records: all, viewer: VIEWER })!;
+      const cp = advancePartnerDayCheckpoint(null, all, all, { records: all, viewer: VIEWER, todayStr: TODAY })!;
       console.log(`[storage] ${n} records -> ${JSON.stringify(cp).length} chars`);
       expect(cp.confirmedRecordIds).toHaveLength(n);
     }

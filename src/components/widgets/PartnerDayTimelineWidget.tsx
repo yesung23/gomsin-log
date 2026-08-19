@@ -130,6 +130,9 @@ export function PartnerDayTimelineWidget() {
     const next = advancePartnerDayCheckpoint(checkpoint, visible, missed, {
       records: state.records,
       viewer: { userId: profile.id, role: profile.role },
+      // The same viewer-local date the surface above is filtered by, so what this
+      // records as "known" can never range wider than what it could have shown.
+      todayStr,
     });
     if (next && writePartnerDayCheckpoint(userId, coupleId, next)) {
       setCheckpoint(next);

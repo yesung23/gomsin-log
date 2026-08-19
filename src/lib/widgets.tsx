@@ -108,8 +108,12 @@ export function isWidgetAllowedForRole(id: string, role: Role): boolean {
 export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
   partner_day: {
     id: 'partner_day',
+    // The NAME stays canonical (PRODUCT_V3 §6 titles the surface 상대방의 오늘).
+    // The description does not, because the subject is not always today: §6.1
+    // makes it the missed window when the viewer has been away, and the widget
+    // retitles itself 놓친 하루 in that state.
     label: '상대방의 오늘',
-    description: '오늘 공유된 순간을 시간순으로, 사진·영상·음성까지 그대로',
+    description: '마지막 확인 이후 놓친 순간을 시간순으로, 사진·영상·음성까지 그대로',
     component: PartnerDayTimelineWidget,
     // Both roles: PRODUCT_V3 §5.1 -- the point of the surface is symmetric
     // ("서로의 하루"), not soldier-only. See DEFAULT_LAYOUT_BY_ROLE above.

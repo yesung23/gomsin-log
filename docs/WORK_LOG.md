@@ -89,6 +89,108 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-19 · LV · Partner Day 미확인 기록 소실 — clean replacement
+
+#### PLAN POSITION
+- Phase: LV (Partner Day 놓친 하루 복구)
+- Workstream: partner-day checkpoint state machine
+- Step: W1–W8 clean replacement (PR #70 코드 patch 아님, 새 설계로 재구현)
+- Previous Gate: 8ce544e (1000-day simulation 복구)
+- This Gate: 미확인 기록이 시간 경과로 사라지지 않음이 테스트로 증명됨
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §6.1, §6.5 (`마지막 확인점 이후, 없으면 최근 7일, 상한 오늘`), §1.11, §7.5
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객/과금/저장정책/AI 역할 변경 없음
+- Engineering source checked: `AGENTS.md` §2 core product contract, §13 scope discipline
+- Current-state checked: 저장소 실제 코드 (`src/lib/partnerDay.ts` at 8ce544e)
+- Latest relevant Work Log checked: 2026-08-18 P5.5 Final Landing
+- MASTER PLAN version / 기준일: 2026-08-19
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: —
+
+§6.5의 "없으면 최근 7일"은 유지되지만 그 의미를 재확인했다. 이는 **첫 접촉 1회의
+discovery 상한**이며 보존 규칙이 아니다. 이전 구현은 이 7일을 memory로 사용해서
+§1.11("놓친 하루의 맥락을 복구")을 위반했다.
+
+#### OWNERSHIP
+- Tool: Codex (desktop)
+- Model: claude-opus-5
+- Role: Worker + self-verification
+- PR: 없음 (현재 branch 작업, PR #70/#71 미수정)
+- Branch: codex/lv-readiness-audit-v1
+- Base SHA: 8ce544e186d7f325bb746ec3acab72335e617fd7
+- Old HEAD: 8ce544e186d7f325bb746ec3acab72335e617fd7
+- New HEAD / Reviewed HEAD: uncommitted working tree
+
+#### CHANGED / REVIEWED
+- file: `src/lib/partnerDay.ts` — 전면 교체. `PartnerDayCheckpoint`가
+  `{version, confirmedRecordIds, outstandingRecordIds, knownRecordIds}`.
+  `observedRecordIds` → `knownRecordIds`, `confirmedAt` 제거.
+  `projectPartnerDay` (first-contact / discovery), `acknowledgePartnerDayRecords`
+  (유일한 CONFIRMED writer) 신규. `missedPartnerRecords`,
+  `advancePartnerDayCheckpoint`, `partnerDayFallbackWindow` 제거.
+- file: `src/lib/usePartnerDay.ts` (신규) — viewer/couple/todayStr을 한 closure에서
+  구성해 eligibility와 persistence가 동일 값을 사용. 저장 실패 시 state 미전진.
+- file: `src/components/widgets/PartnerDayTimelineWidget.tsx` — hook 사용,
+  확인 버튼만 CONFIRMED 기록.
+- file: `src/components/widgets/CareHintWidget.tsx` — 동일 surface를 읽기 전용으로 사용.
+- file: `src/lib/partnerDay.test.ts` (재작성, 56 tests), `src/lib/partnerDaySimulation.test.ts`
+  (신규, 12 tests), 위젯/identity 테스트 signature 갱신.
+- why: 이전 구현은 "surface 되었지만 확인하지 않은" 상태를 저장하지 않았고, 그 역할을
+  rolling 7-day date window가 대신했다. 날짜 window는 잊는다. day 0에 보였고 day 8에
+  사라졌으며 아무도 확인 버튼을 누르지 않았다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음 (E2EE·키·복호화 경로 미접촉)
+- DB/migration semantics: 변경 없음 (SQL·migration·Supabase 미접촉)
+- product semantics: §6.5 첫 접촉 7일 상한, 확인 버튼 UX, 시각 디자인 유지
+- Production: 미접촉
+
+#### VERIFICATION
+- command: `npx vitest run src/lib/partnerDayOutstandingSurvival.test.ts` (at 8ce544e, 임시 파일)
+- FAIL — day 0 `['never-acknowledged']` → day 8 `[]`. 결함 재현 확인 후 파일 삭제, 정식 테스트로 이전.
+- command: `npx vitest run src/lib/partnerDay.test.ts`
+- PASS (56) — day 8 / 30 / 400일 미확인 생존, 확인 버튼만 CONFIRMED 기록, 저장 실패 시 미전진.
+- command: `npx vitest run src/lib/partnerDaySimulation.test.ts`
+- PASS (12) — seed 20260819 / 7 / 991 × diligent · partial · observer.
+  observer(1000일 동안 확인 버튼 0회): surfaced≈2769–2905, survivingOutstanding≈2755–2890,
+  confirmed=0, stranded=0.
+- command: mutation test 1 — surface에 7일 date floor 재도입
+- 22 FAIL (regression 4건 + simulation 9건 전부). 테스트가 vacuous하지 않음을 증명.
+- command: mutation test 2 — `projectPartnerDay`가 outstanding을 CONFIRMED에 자동 기록
+- 14 FAIL (mount 시 CONFIRMED 금지 포함). 복원 확인.
+- command: `npm run verify`
+- PASS — typecheck, lint(0 warnings), 2406 tests / 161 files, build 양방향.
+- what it actually proves: 로컬 저장소 수준의 상태 기계·위젯 경로 정확성. 실제 기기,
+  staging, production 증거는 아님.
+
+#### REVIEW IMPACT
+- FULL — 상태 기계 의미가 전면 교체되었으므로 8ce544e 기준 이전 review는 승계되지 않는다.
+- whether an earlier review is stale: YES. PR #70에 대한 이전 판정은 이 트리에 적용되지 않는다.
+
+#### BLOCKERS
+- code: 없음
+- environment: 없음
+- external/manual: 실제 기기에서 여러 날에 걸친 수동 검증 미실시 (시간 경과가 필요)
+
+#### STOPPED AT
+- exact completed boundary: W1–W8 구현 + 테스트 + `npm run verify` 통과. 커밋하지 않음.
+
+#### REMAINING
+- not completed: commit / push / PR 없음 (지시 범위 외). 독립 review 미실시.
+
+#### NEXT ACTION
+- next owner: 사용자 판단 (커밋 여부), 이후 독립 Reviewer
+- tool/model: Kiro Reviewer 또는 Claude (read-only)
+- 기준 SHA: 커밋 후의 새 HEAD
+- exact next task: OUTSTANDING 무한 성장에 대한 저장 용량 운영 판단 검토
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 미확인 기록 보존이 저장 용량보다 우선한다는 제품 결정 확인
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED
+
 ### 2026-08-18 · P5.5 Final Landing 및 Control Tower 동기화
 
 #### PLAN POSITION
@@ -1668,6 +1770,83 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 - 당시 기록된 검증은 targeted/full Vitest, write-floor/P0/Phase 0/P5/rollback/native,
   typecheck/lint/build/diff-check였으며, 실기기·원격 catalog·staging·Production은
   UNVERIFIED였다. 새 정렬 head에서는 독립 delta 재검토가 필요하다.
+
+---
+
+### 2026-08-18 · LV readiness core-flow audit — missed-day recovery closure
+
+#### PLAN POSITION
+- Phase: LV — Limited Validation Gate / M3 prerequisite
+- Workstream: Core V1 product-flow verification
+- Step: read-only audit, then minimal missed-context repair and regression coverage
+- Previous Gate: P5.5 landing on master `7a83665299a1f0096f2f81da393f28a97142c9ba`
+- This Gate: local core-flow verification complete; independent post-landing security audit remains external
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` — YES
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — YES
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-16 Limited Validation Ready Core UX entry — YES
+- MASTER PLAN version / 기준일: PRODUCT V3 / 2026-08-15
+- Does this task conflict with canonical direction: NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: Terra / High requested; local execution model identity is not independently verified
+- Role: implementation verifier + bounded product bug fixer
+- PR: pending draft creation
+- Branch: `codex/lv-readiness-audit-v1`
+- Base SHA: `7a83665299a1f0096f2f81da393f28a97142c9ba`
+- Old HEAD: `8dac249de023c1519494316ef06e944ccbc96aa2`
+- New HEAD / Reviewed HEAD: this commit
+
+#### CHANGED / REVIEWED
+- `PartnerDayTimelineWidget`: replaces calendar-today-only filtering with a device-local last-checked lower bound (or an initial seven-day window), retains exact record routing, and records the checkpoint only after render.
+- `CareHintWidget`: uses the same missed-context window as the partner-day surface.
+- `store` / state types: carries the per-device checkpoint across local-state hydration without treating it as server truth.
+- regression tests: cover initial and checkpoint-based recovery, post-render checkpointing, care-hint alignment, exact original, bilateral talk-about, completion, and private/unavailable source behavior.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: no chat, P6, media, navigation, or visual redesign
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- `npm run verify`: PASS — typecheck, lint, full Vitest, and production build completed locally.
+- targeted account/couple/authoring tests: PASS — 129 tests.
+- targeted privacy/original/talk-about/missed-context tests: PASS — 148 tests.
+- `npm run test:e2e -- e2e/coupleMatrix.spec.ts`: UNVERIFIED — all 37 browser cases stopped before execution because the required Playwright Chromium headless-shell executable is absent locally.
+- remote Supabase catalog, Production migration state, actual devices: UNVERIFIED; no remote query or mutation performed.
+
+#### REVIEW IMPACT
+- DELTA — client-only product-flow and local-state behavior; no authorization, RLS, crypto, schema, native, or migration delta.
+
+#### BLOCKERS
+- code: none after the missed-day recovery fix.
+- environment: local Playwright browser binary is absent; real browser evidence is not refreshed at this HEAD.
+- external/manual: post-landing independent security audit acceptance is outside this task.
+
+#### STOPPED AT
+- exact completed boundary: local audit and bounded client-only fix; draft PR pending normal push.
+
+#### REMAINING
+- Control Tower must accept the parallel post-landing security audit and obtain browser/controlled-pair evidence for this exact HEAD before treating LV as a launch decision.
+
+#### NEXT ACTION
+- next owner: Control Tower
+- tool/model: independent security reviewer, then controlled-pair browser validator
+- 기준 SHA: this commit
+- exact next task: review this client-only delta alongside the accepted security audit, then run the controlled browser pair on an environment with Playwright Chromium.
+
+#### DO NOT ADVANCE UNTIL
+- no outstanding security-audit finding applies to the landed P5.5 baseline.
+- browser and controlled-pair evidence are recorded for the reviewed HEAD.
+
+#### PRODUCTION
+- NOT APPLIED
 
 ## 유지 규칙
 

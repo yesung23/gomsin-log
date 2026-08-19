@@ -1,34 +1,49 @@
-# Control Tower Dashboard (Non-Canonical Snapshot)
+---
+type: moc
+tags:
+  - moc
+---
 
-> Convenience view only. Live Git, GitHub, and canonical docs win.
+# Control Tower Dashboard
 
-## Last Recorded Snapshot
+> **Navigation hub. Not a mirror of repository state.**
+>
+> This file used to restate master SHA, PR numbers, and CI run ids. All of it rotted
+> within a day — it still said "P5.5 CLOSED, PR #68 MERGED" while work had moved two
+> PRs on. Volatile facts now live only where they are authoritative, and this page
+> links to them instead.
 
-- Phase: P5.5 CLOSED
-- master: `eb2d9a4f9eca9742296bfe0d5a2a8e980499f2e7`
-- Approved production/security baseline: `0660ad277dec0a62be3b315cf3668fadf91c282b`
-- Final reviewed harness: `b788c44db39fd57a5f483b3eb3340e1630ce87d5`
-- Landing merge: normal merge commit, no squash/rebase
-- PR #68: MERGED
+## Where the live facts are
 
-## Gate Status
+| Question | Authoritative source |
+|---|---|
+| Branch HEAD, open PRs, migrations | `bash scripts/agent/live-state.sh` |
+| CI conclusions for an exact SHA | `gh pr checks <n>` / `gh run view <id>` |
+| What is implemented right now | repository code, then `docs/CURRENT_STATE.md` |
+| Session history | `docs/WORK_LOG.md` |
+| Product intent | `docs/PRODUCT_V3.md` |
+| Implementation order and gates | `docs/ENGINEERING_ROADMAP.md` |
 
-- P5.5 SECURITY GATE: PASS at `0660ad277`
-- Browser harness gate: PASS; Grok 4.6 final review APPROVED
-- Post-merge master validation `32095000055`: GREEN
-- Post-merge native release validation `32095000040`: GREEN
-- Production: NOT APPLIED
-- Remote Supabase: UNVERIFIED / no mutation performed
-- Physical device: UNVERIFIED
-- P6: NOT AUTHORIZED
+Do not copy any of these into the vault.
 
-## Superseded Provenance
+## Navigation
 
-- #54: CLOSED; superseded/integrated through the approved baseline
-- #58 and #62–#67: historical superseded/integrated provenance; do not independently land
-- #69: CI-only harness provenance; no separate landing action required
+- **[[Start Here]]** — begin here
+- [[Current Gate]] — what is blocked and what to build next
+- [[Decision Log]] — Control Tower decisions only
+- [[AI_ENTRYPOINT]] — authority order and agent rules
+- [[AI_USAGE_POLICY]] — permitted actions
 
-## Parked Memory
+## Agents
 
-- `docs/shared-ai-control-tower-v1` is prepared for safe documentation-only integration into the landed master tree.
-- Normal agents must not edit Dashboard, Current Gate, or Decision Log; Control Tower state-sync owns them.
+[[Claude Opus]] · [[Codex]] · [[Grok Build]] · [[Grok 4.6]] · [[ChatGPT]] · [[Kiro]]
+
+## Open work
+
+- [[PartnerDay Checkpoint State Machine]] — **open defect, do not merge**
+- [[P5.5 Browser Harness]] — closed
+
+## Ownership
+
+Dashboard, [[Current Gate]] and [[Decision Log]] are written by the Control Tower owner
+only. Agents write into `reports/` and `tasks/`.

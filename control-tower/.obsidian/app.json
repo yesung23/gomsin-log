@@ -1,0 +1,12 @@
+{
+  "attachmentFolderPath": "./",
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "useMarkdownLinks": false,
+  "showUnsupportedFiles": true,
+  "defaultViewMode": "preview",
+  "livePreview": true,
+  "readableLineLength": true,
+  "strictLineBreaks": false,
+  "showFrontmatter": true
+}

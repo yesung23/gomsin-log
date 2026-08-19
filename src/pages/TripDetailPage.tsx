@@ -6,6 +6,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { ErrorNote } from '@/components/ui/ErrorNote';
+import { SheetHandle } from '@/components/ui/SheetHandle';
+import { useSheetDrag } from '@/lib/useSheetDrag';
 import { MobileShell } from '@/components/MobileShell';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -115,6 +118,22 @@ export function TripDetailPage() {
   const [itemDraft, setItemDraft] = useState<ItemDraft>(EMPTY_ITEM);
   const [itemError, setItemError] = useState<string | null>(null);
   const [isSavingItem, setIsSavingItem] = useState(false);
+
+  /*
+    Drag-to-dismiss for both sheets.
+
+    Each is disabled while its own save is in flight, for the same reason Escape
+    already is: the sheet is where that write reports back, so a swipe that took it
+    away mid-save would hide the outcome rather than cancel it.
+  */
+  const tripSheet = useSheetDrag({
+    onDismiss: () => setShowTripModal(false),
+    enabled: !isSavingTrip,
+  });
+  const itemSheet = useSheetDrag({
+    onDismiss: () => { setShowItemModal(false); setEditingItemId(null); },
+    enabled: !isSavingItem,
+  });
   const [isReadingScreenshot, setIsReadingScreenshot] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
@@ -631,7 +650,7 @@ export function TripDetailPage() {
       <MobileShell>
         <div className="p-4 mt-16 space-y-3">
           {content}
-          <button type="button" onClick={() => navigate('/trips')} className="block mx-auto text-caption text-muted-foreground underline min-h-11">여행 목록으로</button>
+          <button type="button" onClick={() => navigate('/trips')} className="press-response block mx-auto text-caption text-muted-foreground underline min-h-11">여행 목록으로</button>
         </div>
       </MobileShell>
     );
@@ -643,12 +662,12 @@ export function TripDetailPage() {
         {/* Header */}
         <header className="bg-card border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-2 min-w-0">
-            <button type="button" onClick={() => navigate('/trips')} className="min-w-11 min-h-11 flex items-center justify-center -ml-2 text-muted-foreground" aria-label="여행 목록"><ArrowLeft size={18} /></button>
+            <button type="button" onClick={() => navigate('/trips')} className="press-response min-w-11 min-h-11 flex items-center justify-center -ml-2 text-muted-foreground" aria-label="여행 목록"><ArrowLeft size={18} /></button>
             <h1 className="text-heading text-foreground truncate">{trip.title}</h1>
           </div>
           <div className="flex items-center">
-            <button type="button" onClick={openTripEdit} disabled={isDeletingTrip || isOffline} className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil size={16} /></button>
-            <button type="button" onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip || isOffline} className="min-w-11 min-h-11 flex items-center justify-center text-destructive disabled:opacity-40" aria-label="여행 삭제"><Trash2 size={16} /></button>
+            <button type="button" onClick={openTripEdit} disabled={isDeletingTrip || isOffline} className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil size={16} /></button>
+            <button type="button" onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip || isOffline} className="press-response min-w-11 min-h-11 flex items-center justify-center text-destructive disabled:opacity-40" aria-label="여행 삭제"><Trash2 size={16} /></button>
           </div>
         </header>
 
@@ -661,7 +680,7 @@ export function TripDetailPage() {
           <button
             type="button"
             onClick={() => navigate(`/record?from=${trip.startDate}&to=${trip.endDate}&trip=${trip.id}`)}
-            className="text-caption font-medium text-coral-strong flex items-center gap-1 min-h-11"
+            className="press-response text-caption font-medium text-coral-strong flex items-center gap-1 min-h-11"
           >
             <PenTool size={12} />추억 보기·남기기
           </button>
@@ -721,7 +740,7 @@ export function TripDetailPage() {
                         <ImagePlus size={14} />
                         {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진으로 바로 추가'}
                       </Button>
-                      <button type="button" onClick={openNewItem} disabled={isOffline} className="min-h-11 px-3 text-caption font-medium text-muted-foreground disabled:opacity-40">
+                      <button type="button" onClick={openNewItem} disabled={isOffline} className="press-response min-h-11 px-3 text-caption font-medium text-muted-foreground disabled:opacity-40">
                         직접 입력하기
                       </button>
                     </div>
@@ -747,12 +766,12 @@ export function TripDetailPage() {
                           }
                           trailing={
                             <div className="flex items-center gap-0">
-                              <button type="button" onClick={() => void handleMoveItem(index, -1)} disabled={Boolean(item.startTime) || index === 0 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-20" aria-label="위로 이동"><ArrowUp size={14} /></button>
-                              <button type="button" onClick={() => void handleMoveItem(index, 1)} disabled={Boolean(item.startTime) || index === currentDayItems.length - 1 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-20" aria-label="아래로 이동"><ArrowDown size={14} /></button>
+                              <button type="button" onClick={() => void handleMoveItem(index, -1)} disabled={Boolean(item.startTime) || index === 0 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-20" aria-label="위로 이동"><ArrowUp size={14} /></button>
+                              <button type="button" onClick={() => void handleMoveItem(index, 1)} disabled={Boolean(item.startTime) || index === currentDayItems.length - 1 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-20" aria-label="아래로 이동"><ArrowDown size={14} /></button>
                             </div>
                           }
                         >
-                          <button type="button" onClick={() => openEditItem(item)} disabled={pending || isOffline} className="w-full text-left rounded-control min-h-11 disabled:opacity-50" aria-label={`${item.title} 일정 수정`}>
+                          <button type="button" onClick={() => openEditItem(item)} disabled={pending || isOffline} className="press-response-row w-full text-left rounded-control min-h-11 disabled:opacity-50" aria-label={`${item.title} 일정 수정`}>
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-label font-semibold text-foreground break-keep">{item.title}</span>
                               {categoryLabel && <Badge tone="neutral">{categoryLabel}</Badge>}
@@ -763,7 +782,7 @@ export function TripDetailPage() {
                             {item.source === 'screenshot' && <Badge tone="warning" className="mt-0.5">사진에서 자동 추가 · 눌러서 수정</Badge>}
                           </button>
                           <div className="flex items-center gap-1 mt-1">
-                            <button type="button" onClick={() => void handleDeleteItem(item.id)} disabled={pending || isOffline} className="min-w-11 min-h-11 flex items-center justify-center text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 size={12} /></button>
+                            <button type="button" onClick={() => void handleDeleteItem(item.id)} disabled={pending || isOffline} className="press-response min-w-11 min-h-11 flex items-center justify-center text-destructive disabled:opacity-25" aria-label="일정 삭제"><Trash2 size={12} /></button>
                             {item.url && <a href={item.url} target="_blank" rel="noreferrer" aria-label="저장된 링크 열기" className="min-w-11 min-h-11 inline-flex items-center justify-center text-info"><ExternalLink size={12} /></a>}
                             {mapQuery && <a href={`https://map.naver.com/p/search/${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer" className="ml-auto text-caption font-medium text-foreground bg-success-surface px-2 py-1 rounded-full min-h-[28px] flex items-center">네이버 지도</a>}
                           </div>
@@ -788,7 +807,7 @@ export function TripDetailPage() {
                   <ImagePlus size={16} />
                   {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진으로 일정 추가'}
                 </Button>
-                <button type="button" onClick={openNewItem} disabled={isOffline} className="pointer-events-auto w-12 h-12 shrink-0 bg-card border border-border text-foreground rounded-control flex items-center justify-center disabled:opacity-40" aria-label="직접 일정 입력">
+                <button type="button" onClick={openNewItem} disabled={isOffline} className="press-response pointer-events-auto w-12 h-12 shrink-0 bg-card border border-border text-foreground rounded-control flex items-center justify-center disabled:opacity-40" aria-label="직접 일정 입력">
                   <PenTool size={17} />
                 </button>
               </div>
@@ -810,7 +829,7 @@ export function TripDetailPage() {
                 {isAddingChecklist ? '추가 중' : '추가'}
               </Button>
             </div>
-            {childActionError && <p className="text-caption text-destructive" role="alert">{childActionError}</p>}
+            {childActionError && <ErrorNote>{childActionError}</ErrorNote>}
 
             {checklists.length > 0 ? (
               <RowGroup>
@@ -824,7 +843,7 @@ export function TripDetailPage() {
                           type="button"
                           onClick={() => void handleToggleChecklist(item)}
                           disabled={pending || isOffline}
-                          className="min-w-11 min-h-11 flex items-center justify-center -m-2 text-info disabled:opacity-50"
+                          className="press-response min-w-11 min-h-11 flex items-center justify-center -m-2 text-info disabled:opacity-50"
                           aria-label={`${item.itemName} ${item.completed ? '미완료로 변경' : '완료로 변경'}`}
                         >
                           {item.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
@@ -835,7 +854,7 @@ export function TripDetailPage() {
                           type="button"
                           onClick={() => void handleDeleteChecklist(item.id)}
                           disabled={pending || isOffline}
-                          className="min-w-11 min-h-11 flex items-center justify-center -m-2 text-muted-foreground hover:text-destructive disabled:opacity-40"
+                          className="press-response min-w-11 min-h-11 flex items-center justify-center -m-2 text-muted-foreground hover:text-destructive disabled:opacity-40"
                           aria-label="준비물 삭제"
                         >
                           <Trash2 size={14} />
@@ -857,7 +876,8 @@ export function TripDetailPage() {
         {/* Trip edit modal - z-[60] above tab bar */}
         {showTripModal && (
           <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-            <div role="dialog" aria-modal="true" aria-labelledby="trip-edit-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border">
+            <div ref={tripSheet.sheetRef} role="dialog" aria-modal="true" aria-labelledby="trip-edit-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border">
+              <SheetHandle {...tripSheet.handleProps} />
               <h2 id="trip-edit-title" className="text-heading text-foreground mb-4">여행 정보 수정</h2>
               <div className="space-y-3">
                 <label className="block text-caption font-medium text-muted-foreground">여행 이름<input value={tripDraft.title} onChange={(event) => setTripDraft((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
@@ -866,7 +886,7 @@ export function TripDetailPage() {
                   <label className="flex-1 text-caption font-medium text-muted-foreground">오는 날<input type="date" min={tripDraft.startDate} value={tripDraft.endDate} onChange={(event) => setTripDraft((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-control px-2 py-2 text-body text-foreground min-h-11" /></label>
                 </div>
                 <label className="block text-caption font-medium text-muted-foreground">상태<select value={tripDraft.status} onChange={(event) => setTripDraft((current) => ({ ...current, status: event.target.value as TripStatus }))} className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11">{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-                {tripError && <p className="text-caption text-destructive" role="alert">{tripError}</p>}
+                {tripError && <ErrorNote>{tripError}</ErrorNote>}
               </div>
               <div className="flex gap-2 mt-5">
                 <Button variant="secondary" size="md" full onClick={() => setShowTripModal(false)} disabled={isSavingTrip || isOffline}>취소</Button>
@@ -879,13 +899,14 @@ export function TripDetailPage() {
         {/* Item create/edit modal - z-[60] above tab bar */}
         {showItemModal && (
           <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-            <div role="dialog" aria-modal="true" aria-labelledby="trip-item-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border max-h-[90dvh] overflow-y-auto">
+            <div ref={itemSheet.sheetRef} role="dialog" aria-modal="true" aria-labelledby="trip-item-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 border border-border max-h-[90dvh] overflow-y-auto">
+              <SheetHandle {...itemSheet.handleProps} />
               <h2 id="trip-item-title" className="text-heading text-foreground mb-4">{editingItemId ? '일정 수정' : `${activeDayIndex + 1}일차 일정 추가`}</h2>
               <div className="space-y-3">
                 {!editingItemId && (
                   <div className="rounded-control border border-dashed border-info/40 bg-info-surface p-3">
                     <input ref={screenshotInputRef} type="file" accept="image/*" className="sr-only" onChange={(event) => void handlePlaceScreenshot(event.target.files?.[0])} />
-                    <button type="button" onClick={() => screenshotInputRef.current?.click()} disabled={isReadingScreenshot || isSavingItem} className="w-full min-h-11 flex items-center justify-center gap-2 font-medium text-label text-info disabled:opacity-50">
+                    <button type="button" onClick={() => screenshotInputRef.current?.click()} disabled={isReadingScreenshot || isSavingItem} className="press-response-row w-full min-h-11 flex items-center justify-center gap-2 font-medium text-label text-info disabled:opacity-50">
                       <ImagePlus size={14} />
                       {isReadingScreenshot ? `캡처 읽는 중 ${Math.round(ocrProgress * 100)}%` : '네이버 지도 캡처에서 불러오기'}
                     </button>
@@ -900,7 +921,7 @@ export function TripDetailPage() {
                 <label className="block text-caption font-medium text-muted-foreground">영업시간 (선택)<textarea value={itemDraft.businessHours} onChange={(event) => setItemDraft((current) => ({ ...current, businessHours: event.target.value }))} rows={2} maxLength={500} placeholder="예: 매일 11:00~21:00" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground resize-none" /></label>
                 <label className="block text-caption font-medium text-muted-foreground">함께 볼 메모 (선택)<textarea value={itemDraft.memo} onChange={(event) => setItemDraft((current) => ({ ...current, memo: event.target.value }))} rows={3} placeholder="예: 예약 필요 · 비 오면 다른 곳으로" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground resize-none" /></label>
                 <label className="flex items-center gap-2 rounded-control bg-coral/5 px-3 py-2 font-medium text-label text-coral-strong min-h-11"><input type="checkbox" checked={itemDraft.talkAbout} onChange={(event) => setItemDraft((current) => ({ ...current, talkAbout: event.target.checked }))} className="accent-coral" />통화 때 꼭 얘기</label>
-                {itemError && <p className="text-caption text-destructive" role="alert">{itemError}</p>}
+                {itemError && <ErrorNote>{itemError}</ErrorNote>}
               </div>
               <div className="flex gap-2 mt-5">
                 <Button variant="secondary" size="md" full onClick={() => setShowItemModal(false)} disabled={isSavingItem || isReadingScreenshot || isOffline}>취소</Button>

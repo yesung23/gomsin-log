@@ -55,7 +55,7 @@ export function MyPage() {
           <h1 className="text-title text-foreground">마이</h1>
           <button
             onClick={() => navigate('/settings')}
-            className="p-2.5 rounded-control bg-card border border-border text-foreground hover:bg-muted active:scale-95 transition flex items-center justify-center min-h-[44px] min-w-[44px]"
+            className="press-response p-2.5 rounded-control bg-card border border-border text-foreground hover:bg-muted flex items-center justify-center min-h-[44px] min-w-[44px]"
             aria-label="설정 페이지로 이동"
           >
             <Settings size={20} />

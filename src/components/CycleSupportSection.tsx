@@ -12,6 +12,7 @@ import {
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
+import { ErrorNote } from '@/components/ui/ErrorNote';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import type { CycleSupportKind, CycleSupportSignal, Role } from '@/types';
@@ -436,7 +437,7 @@ export function CycleSupportSection({
                 <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={80} disabled={mutationPending !== null} placeholder="예: 오늘 저녁에 짧게 통화하고 싶어요" className="w-full p-3 rounded-control border border-border bg-card text-body" />
                 <span className="block text-right text-caption text-muted-foreground">{Array.from(message).length}/80</span>
               </label>
-              {mutationError && <p className="text-caption text-destructive" role="alert">{mutationError}</p>}
+              {mutationError && <ErrorNote>{mutationError}</ErrorNote>}
               <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-11">
                 {mutationPending === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {mutationPending === 'share' ? '공유 중' : '오늘만 공유하기'}
@@ -448,7 +449,7 @@ export function CycleSupportSection({
               <p className="text-caption text-muted-foreground">상대가 직접 공유한 경우에만 여기에 표시돼요.</p>
             </div>
           )}
-          {mutationError && activeSignal && <p className="text-caption text-destructive" role="alert">{mutationError}</p>}
+          {mutationError && activeSignal && <ErrorNote>{mutationError}</ErrorNote>}
         </>
       )}
     </section>

@@ -105,14 +105,14 @@ export function UsPage() {
             */}
             <button
               onClick={() => navigate('/schedule')}
-              className="text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-0 before:right-0 before:top-[-6px] before:bottom-[-6px]"
+              className="press-response text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-control flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-0 before:right-0 before:top-[-6px] before:bottom-[-6px]"
             >
               <CalendarDays size={14} />
               <span>일정</span>
             </button>
             <button
               onClick={() => navigate('/trips')}
-              className="text-label font-bold text-coral-strong bg-coral/10 px-3 py-2 rounded-control active:scale-95 transition flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-0 before:right-0 before:top-[-6px] before:bottom-[-6px]"
+              className="press-response text-label font-bold text-coral-strong bg-coral/10 px-3 py-2 rounded-control flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-0 before:right-0 before:top-[-6px] before:bottom-[-6px]"
             >
               <Plane size={14} />
               <span>여행</span>
@@ -170,13 +170,13 @@ export function UsPage() {
         {/* Calendar UI */}
         <section className="rounded-surface bg-card border border-border overflow-hidden p-4">
           <div className="flex items-center justify-between mb-3 px-1">
-            <button onClick={goToPrevMonth} className="p-2 rounded-control hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px]" aria-label="이전 달">
+            <button onClick={goToPrevMonth} className="press-response p-2 rounded-control hover:bg-muted min-h-[44px] min-w-[44px]" aria-label="이전 달">
               <ChevronLeft size={18} />
             </button>
             <h2 className="text-heading text-foreground">
               {viewYear}년 {viewMonth + 1}월
             </h2>
-            <button onClick={goToNextMonth} className="p-2 rounded-control hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px]" aria-label="다음 달">
+            <button onClick={goToNextMonth} className="press-response p-2 rounded-control hover:bg-muted min-h-[44px] min-w-[44px]" aria-label="다음 달">
               <ChevronRight size={18} />
             </button>
           </div>
@@ -252,7 +252,7 @@ export function UsPage() {
                   type="button"
                   onClick={() => navigate(`/trips/${trip.id}`)}
                   aria-label={`${trip.title} 여행 상세 보기`}
-                  className="w-full text-left p-3 min-h-[44px] rounded-surface bg-card border border-border active:scale-[0.98] transition cursor-pointer flex items-center justify-between"
+                  className="press-response-row w-full text-left p-3 min-h-[44px] rounded-surface bg-card border border-border cursor-pointer flex items-center justify-between"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 text-label font-bold text-foreground">
@@ -268,7 +268,7 @@ export function UsPage() {
             <button
               type="button"
               onClick={() => navigate('/trips')}
-              className="w-full p-4 min-h-[44px] rounded-surface bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60 transition"
+              className="press-response-row w-full p-4 min-h-[44px] rounded-surface bg-muted/40 border border-dashed border-border/60 text-center cursor-pointer hover:bg-muted/60"
             >
               <p className="text-label font-bold text-muted-foreground mb-1">+ 새로운 여행 계획하기</p>
             </button>

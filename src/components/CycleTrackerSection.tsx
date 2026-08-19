@@ -21,6 +21,7 @@ import {
   type CycleFetchFailureReason,
 } from '@/lib/cycle';
 import { predictCycle, predictionOccursOnDate } from '@/lib/cyclePrediction';
+import { ErrorNote } from '@/components/ui/ErrorNote';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import {
   grantCycleConsentInDB,
@@ -766,7 +767,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           />
           <span>위 민감정보 수집·이용에 별도로 동의합니다. (선택)</span>
         </label>
-        {consentError && <p role="alert" className="text-caption text-destructive">{consentError}</p>}
+        {consentError && <ErrorNote>{consentError}</ErrorNote>}
         <Button
           variant="primary"
           size="md"

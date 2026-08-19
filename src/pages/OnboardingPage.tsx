@@ -705,7 +705,7 @@ export function OnboardingPage() {
         {/* Step Header (Steps 1~6) */}
         {step > 0 && step < 7 && (
           <header className="flex items-center justify-between px-4 h-14 border-b border-border/40 shrink-0">
-            <button onClick={handleBack} className="p-2 -ml-2 text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="이전 단계">
+            <button onClick={handleBack} className="press-response p-2 -ml-2 text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="이전 단계">
               <ChevronLeft size={24} />
             </button>
             <div className="text-caption font-bold text-muted-foreground">
@@ -761,7 +761,7 @@ export function OnboardingPage() {
                   <button
                     onClick={handleAppleLogin}
                     disabled={isStartingSocialLogin}
-                    className="w-full h-13 py-3.5 rounded-control bg-black text-white font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] disabled:opacity-60"
+                    className="press-response-row w-full h-13 py-3.5 rounded-control bg-black text-white font-bold text-label flex items-center justify-center gap-2 min-h-[48px] disabled:opacity-60"
                   >
                     <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Apple로 계속하기'}</span>
                   </button>
@@ -771,7 +771,7 @@ export function OnboardingPage() {
                   <button
                     onClick={handleGoogleLogin}
                     disabled={isStartingSocialLogin}
-                    className="w-full h-13 py-3.5 rounded-control bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 active:scale-[0.99] transition min-h-[48px] disabled:opacity-60"
+                    className="press-response-row w-full h-13 py-3.5 rounded-control bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 min-h-[48px] disabled:opacity-60"
                   >
                     <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Google로 계속하기'}</span>
                   </button>
@@ -802,7 +802,7 @@ export function OnboardingPage() {
                       }
                       }}
                       disabled={isSendingEmail}
-                      className="w-full h-12 rounded-control bg-navy text-white font-bold text-label disabled:opacity-50"
+                      className="press-response w-full h-12 rounded-control bg-navy text-white font-bold text-label disabled:opacity-50"
                     >
                       {isSendingEmail ? '전송 중...' : '매직링크 받기'}
                     </button>
@@ -879,7 +879,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
+                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -914,7 +914,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={!canAdvanceFromStep}
-                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
+                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
               >
                 다음
               </button>
@@ -970,7 +970,7 @@ export function OnboardingPage() {
                         type="button"
                         onClick={() => void handleRegenerateExistingSpace()}
                         disabled={isGeneratingCode}
-                        className="w-full min-h-[44px] rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
+                        className="press-response w-full min-h-[44px] rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
                       >
                         {isGeneratingCode ? '발급 중...' : '새 코드 발급하기'}
                       </button>
@@ -978,7 +978,7 @@ export function OnboardingPage() {
                         type="button"
                         onClick={handleKeepExistingCode}
                         disabled={isGeneratingCode}
-                        className="w-full min-h-[44px] rounded-control border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
+                        className="press-response-row w-full min-h-[44px] rounded-control border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
                       >
                         이전에 보낸 코드 그대로 쓰기
                       </button>
@@ -1005,7 +1005,7 @@ export function OnboardingPage() {
                           // Icon-only control: `title` alone is not an accessible
                           // name on touch devices, where it never surfaces.
                           aria-label="초대 코드 복사"
-                          className="min-h-[44px] min-w-[44px] flex items-center justify-center text-coral hover:bg-coral/10 rounded-lg transition"
+                          className="press-response min-h-[44px] min-w-[44px] flex items-center justify-center text-coral hover:bg-coral/10 rounded-lg"
                           title="코드 복사"
                         >
                           {copiedCode ? <Check size={20} /> : <Copy size={20} />}
@@ -1056,7 +1056,7 @@ export function OnboardingPage() {
               <button
                 onClick={handleNext}
                 disabled={isGeneratingCode || isVerifyingCode}
-                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
+                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
@@ -1105,7 +1105,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
+                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 {role === 'gomsin' ? '완료' : '다음'}
               </button>
@@ -1197,7 +1197,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
-                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
+                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
               >
                 다음
               </button>
@@ -1257,7 +1257,7 @@ export function OnboardingPage() {
               <div className="space-y-2">
                 <button
                   onClick={handleNext}
-                  className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
+                  className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
                 >
                   완료하기
                 </button>
@@ -1291,7 +1291,7 @@ export function OnboardingPage() {
               <button
                 onClick={finishSetup}
                 disabled={isFinishing}
-                className="w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-60"
+                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-60"
               >
                 {isFinishing
                   ? '저장 중...'

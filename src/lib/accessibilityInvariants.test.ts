@@ -303,3 +303,69 @@ describe('the main composer has a name, not just a placeholder', () => {
     expect(read('src/pages/RecordPage.tsx')).toContain('aria-label="기록 내용 수정"');
   });
 });
+
+describe('every control answers the finger, not the release', () => {
+  const css = read('src/styles/index.css');
+  /** The screens the 2026-08-20 press-response sweep touched. */
+  const SWEPT = [
+    'src/pages/UsPage.tsx', 'src/pages/MyPage.tsx', 'src/pages/ServicePage.tsx',
+    'src/pages/TripsPage.tsx', 'src/pages/TripDetailPage.tsx', 'src/pages/SchedulePage.tsx',
+    'src/pages/OnboardingPage.tsx', 'src/pages/SettingsPage.tsx', 'src/pages/RecordPage.tsx',
+  ];
+
+  it('drops the double-tap wait on all pressables, not only the opted-in ones', () => {
+    /*
+     * `press-response` carried `touch-action: manipulation` for the surfaces that
+     * adopted it, which left roughly a hundred buttons across 일정 · 우리 · 마이 ·
+     * 온보딩 · 설정 · 여행 still paying ~300ms per tap while the browser waited to
+     * see whether a second one was coming. This app has no double-tap gesture
+     * anywhere, so that wait bought nothing.
+     *
+     * Base-layer, so it is not something a screen can forget to opt into.
+     */
+    const base = css.slice(css.indexOf('@layer base'));
+    expect(base).toContain('touch-action: manipulation');
+    expect(base).toContain('-webkit-tap-highlight-color: transparent');
+    expect(base).toMatch(/button,\s*\n\s*\[role='button'\]/);
+  });
+
+  it('still has no double-tap gesture for that rule to break', () => {
+    // The premise, checked rather than assumed. If a double-tap is ever added,
+    // `manipulation` becomes wrong and this fails first.
+    for (const file of SWEPT) {
+      expect(read(file), file).not.toContain('onDoubleClick');
+    }
+  });
+
+  it('lets a drag handle override it, and the widget handle does', () => {
+    // `manipulation` still allows panning, so a drag handle that inherited it would
+    // let a touch-drag scroll the page instead of moving the widget.
+    const wrapper = read('src/components/widgets/WidgetWrapper.tsx');
+    expect(wrapper).toContain("touchAction: 'none'");
+  });
+
+  it('a full-width filled button scales rather than tinting itself grey', () => {
+    /*
+     * `press-response-row` sets the pressed background to `--muted`, which is right
+     * for a row on a card and wrong for a coral CTA -- it would flash grey. The
+     * sweep that added these classified by width alone at first and produced exactly
+     * that on seventeen buttons.
+     */
+    for (const file of SWEPT) {
+      const source = read(file);
+      const rows = source.match(/className="press-response-row [^"]*"/g) ?? [];
+      for (const row of rows) {
+        expect(row, `${file}: ${row}`).not.toMatch(
+          /bg-(coral|navy|destructive|foreground|primary)\b/,
+        );
+      }
+    }
+  });
+
+  it('left no half-stripped class behind', () => {
+    // The first pass ate `active:scale-[0.98]` and left the bracket.
+    for (const file of SWEPT) {
+      expect(read(file), file).not.toMatch(/className="[^"]*\s\]\s/);
+    }
+  });
+});

@@ -445,6 +445,35 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  /*
+   * Touch hygiene, applied to everything the user presses.
+   *
+   * `press-response` carried these two on the surfaces that opted in, which left
+   * roughly a hundred buttons across 일정 · 우리 · 마이 · 온보딩 · 설정 · 여행 still
+   * paying for both. They are not decoration and there is nothing to opt into:
+   *
+   *   `touch-action: manipulation` drops the ~300ms a mobile browser spends after
+   *   a tap waiting to see whether a second one is coming. This app has no
+   *   double-tap gesture anywhere -- verified before writing this -- so on every
+   *   one of those buttons the wait bought nothing and cost a third of a second.
+   *   Panning and pinch-zoom are unaffected, so zoom on CONTENT still works.
+   *
+   *   `-webkit-tap-highlight-color` is the grey box mobile WebKit and Chromium
+   *   paint over a tapped element AFTER deciding the touch was not a scroll. It
+   *   lands late enough to fight a press state rather than reinforce one, and the
+   *   app draws its own.
+   *
+   * Base-layer, so any component that needs different behaviour -- a drag handle
+   * asking for `touch-action: none` -- simply says so and wins.
+   */
+  button,
+  [role='button'],
+  [role='tab'],
+  summary {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
   button { font-family: inherit; cursor: pointer; }
   input, textarea, select { font-family: inherit; }
 

@@ -160,7 +160,7 @@ export function ServicePage() {
           <button
             onClick={() => navigate(-1)}
             aria-label="뒤로가기"
-            className="p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
+            className="press-response p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <ArrowLeft size={20} />
           </button>
@@ -168,7 +168,7 @@ export function ServicePage() {
           <button
             onClick={openEditor}
             aria-label="복무 정보 수정"
-            className="p-2 -mr-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
+            className="press-response p-2 -mr-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <Edit2 size={18} />
           </button>
@@ -227,7 +227,7 @@ export function ServicePage() {
             </div>
             <button
               onClick={openEditor}
-              className="px-4 py-2.5 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold min-h-[44px]"
+              className="press-response px-4 py-2.5 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold min-h-[44px]"
             >
               복무 정보 입력하기
             </button>
@@ -370,14 +370,14 @@ export function ServicePage() {
               <button
                 onClick={() => setIsEditing(false)}
                 disabled={isSaving}
-                className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
+                className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
               >
                 취소
               </button>
               <button
                 onClick={handleSaveEdit}
                 disabled={isSaving}
-                className="flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
+                className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
               >
                 {isSaving ? '저장 중…' : '저장하기'}
               </button>

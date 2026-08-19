@@ -494,7 +494,7 @@ export function SettingsPage() {
         <header className="flex items-center justify-between">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95 transition"
+            className="press-response p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
             aria-label="뒤로가기"
           >
             <ArrowLeft size={20} />
@@ -594,7 +594,7 @@ export function SettingsPage() {
                     }
                   }}
                   aria-label="초대 코드 복사"
-                  className="p-2 text-coral hover:bg-coral/10 rounded-control transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="press-response p-2 text-coral hover:bg-coral/10 rounded-control min-h-[44px] min-w-[44px] flex items-center justify-center"
                 >
                   {copiedInvite ? <Check size={20} /> : <Copy size={20} />}
                 </button>
@@ -624,7 +624,7 @@ export function SettingsPage() {
                 toast.success('새 초대 코드가 발급되었습니다. 이전 코드는 더 이상 사용할 수 없어요.');
               }}
               disabled={isRegenerating}
-              className="w-full h-11 rounded-control border border-coral/40 text-coral-strong text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              className="press-response-row w-full h-11 rounded-control border border-coral/40 text-coral-strong text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <RefreshCw size={15} className={isRegenerating ? 'animate-spin' : undefined} />
               {isRegenerating ? '발급 중...' : '새 초대 코드 발급하기'}
@@ -656,7 +656,7 @@ export function SettingsPage() {
               type="button"
               onClick={handleJoinCouple}
               disabled={isJoiningCouple || inviteCodeInput.length !== 6}
-              className="w-full h-12 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold disabled:opacity-50"
+              className="press-response w-full h-12 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold disabled:opacity-50"
             >
               {isJoiningCouple ? '연결 중...' : '초대 코드로 연결하기'}
             </button>
@@ -673,7 +673,7 @@ export function SettingsPage() {
               type="button"
               onClick={handleCreateCoupleSpace}
               disabled={isCreatingSpace || isJoiningCouple}
-              className="w-full h-11 rounded-control border border-coral/40 text-coral-strong text-label font-bold disabled:opacity-50"
+              className="press-response-row w-full h-11 rounded-control border border-coral/40 text-coral-strong text-label font-bold disabled:opacity-50"
             >
               {isCreatingSpace ? '만드는 중...' : '새 우리 공간 만들기'}
             </button>
@@ -892,14 +892,14 @@ export function SettingsPage() {
                 <button
                   onClick={() => setShowProfileModal(false)}
                   disabled={isSavingProfile}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
+                  className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
                 >
                   취소
                 </button>
                 <button
                   onClick={handleSaveProfile}
                   disabled={isSavingProfile}
-                  className="flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
+                  className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
                 >
                   {isSavingProfile ? '저장 중…' : '저장하기'}
                 </button>
@@ -920,7 +920,7 @@ export function SettingsPage() {
                 <button
                   onClick={() => setShowDisconnectModal(false)}
                   disabled={isDisconnecting}
-                  className="py-2.5 rounded-control border border-border text-label font-semibold min-h-[44px] disabled:opacity-50"
+                  className="press-response py-2.5 rounded-control border border-border text-label font-semibold min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -947,7 +947,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDisconnecting}
-                  className="py-2.5 rounded-control bg-destructive text-destructive-foreground text-label font-semibold min-h-[44px]"
+                  className="press-response py-2.5 rounded-control bg-destructive text-destructive-foreground text-label font-semibold min-h-[44px]"
                 >
                   {isDisconnecting ? '해제 중...' : '해제하기'}
                 </button>
@@ -968,7 +968,7 @@ export function SettingsPage() {
                 <button
                   onClick={() => setShowDeleteRecordsModal(false)}
                   disabled={isDeletingRecords}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px] disabled:opacity-50"
+                  className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px] disabled:opacity-50"
                 >
                   취소
                 </button>
@@ -1000,7 +1000,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDeletingRecords}
-                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-control text-label active:scale-98 min-h-[44px]"
+                  className="press-response flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-control text-label min-h-[44px]"
                 >
                   {isDeletingRecords ? '삭제 중...' : '전체 삭제'}
                 </button>
@@ -1042,7 +1042,7 @@ export function SettingsPage() {
                     setDeleteAccountConfirmation('');
                   }}
                   disabled={isDeletingAccount}
-                  className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px]"
+                  className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px]"
                 >
                   취소
                 </button>
@@ -1094,7 +1094,7 @@ export function SettingsPage() {
                     }
                   }}
                   disabled={isDeletingAccount || deleteAccountConfirmation !== '탈퇴'}
-                  className="flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-control text-label active:scale-98 min-h-[44px] disabled:opacity-50"
+                  className="press-response flex-1 py-3 bg-destructive text-destructive-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
                 >
                   {isDeletingAccount ? '삭제 중...' : '영구 삭제'}
                 </button>
@@ -1117,7 +1117,7 @@ export function SettingsPage() {
               </div>
               <button
                 onClick={() => setShowPWAModal(false)}
-                className="w-full py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label active:scale-[0.99] min-h-[44px]"
+                className="press-response w-full py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px]"
               >
                 확인
               </button>
@@ -1176,7 +1176,7 @@ export function SettingsPage() {
                       type="button"
                       onClick={() => { setShowProtectionDialog(false); setRecoveryCodeInput(''); }}
                       disabled={isProtectionBusy}
-                      className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
+                      className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
                     >
                       나중에 하기
                     </button>
@@ -1184,7 +1184,7 @@ export function SettingsPage() {
                       type="button"
                       onClick={confirmProtectionSetup}
                       disabled={isProtectionBusy || !recoveryCodeInput}
-                      className="flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
+                      className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
                     >
                       {isProtectionBusy ? '확인 중…' : '저장했고 계속하기'}
                     </button>
@@ -1208,8 +1208,8 @@ export function SettingsPage() {
                     <textarea id="protection-recovery-artifact" value={recoveryArtifactInput} onChange={(event) => setRecoveryArtifactInput(event.target.value)} autoComplete="off" className="w-full min-h-24 p-3 rounded-control bg-muted border border-border text-caption font-mono text-foreground outline-none focus:ring-2 focus:ring-coral/40" />
                   </div>
                   <div className="flex gap-2 pt-2">
-                    <button type="button" onClick={() => setShowProtectionDialog(false)} disabled={isProtectionBusy} className="flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]">취소</button>
-                    <button type="button" onClick={recoverProtection} disabled={isProtectionBusy || !recoveryCodeInput || !recoveryArtifactInput} className="flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50">
+                    <button type="button" onClick={() => setShowProtectionDialog(false)} disabled={isProtectionBusy} className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]">취소</button>
+                    <button type="button" onClick={recoverProtection} disabled={isProtectionBusy || !recoveryCodeInput || !recoveryArtifactInput} className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50">
                       {isProtectionBusy ? '복구 중…' : '복구하기'}
                     </button>
                   </div>

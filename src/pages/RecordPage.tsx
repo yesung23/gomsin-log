@@ -25,6 +25,8 @@ import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { AttachmentMedia } from '@/components/AttachmentMedia';
 import { Button } from '@/components/ui/Button';
+import { SheetHandle } from '@/components/ui/SheetHandle';
+import { useSheetDrag } from '@/lib/useSheetDrag';
 import type { DailyRecord } from '@/types';
 
 type MediaFilter = 'all' | 'photo' | 'video' | 'voice' | 'text';
@@ -134,6 +136,27 @@ export function RecordPage() {
   }, []);
   useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
   useEscapeKey(() => setShowComposer(false), showComposer);
+
+  /*
+    Drag-to-dismiss for the two sheets on this screen.
+
+    The composer's is disabled while a save is running, for the reason Escape is:
+    the sheet is where that write reports back.
+
+    The detail sheet's is disabled while EDITING or while the delete confirmation is
+    open. A swipe is a cheap, half-deliberate gesture and both of those states hold
+    something a swipe must not throw away -- unsaved text in the first, and a
+    destructive decision in the second, where an accidental dismissal would leave the
+    user unsure whether they had just deleted a record.
+  */
+  const composerSheet = useSheetDrag({
+    onDismiss: () => setShowComposer(false),
+    enabled: !isSaving,
+  });
+  const detailSheet = useSheetDrag({
+    onDismiss: closeSelectedRecord,
+    enabled: !isEditing && !showDeleteConfirm && !isSaving && !isMediaBusy,
+  });
 
   // Own records + the partner's shared ones, with author-only fragments removed.
   // Uses the shared privacy helper so the rule lives in exactly one place.
@@ -525,7 +548,7 @@ export function RecordPage() {
             <div className="flex items-center justify-between mb-3 px-1">
               <button
                 onClick={goToPrevMonth}
-                className="p-2 rounded-xl hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                className="press-response p-2 rounded-xl hover:bg-muted min-h-[44px] min-w-[44px] flex items-center justify-center"
                 aria-label="이전 달"
               >
                 <ChevronLeft size={20} />
@@ -537,7 +560,7 @@ export function RecordPage() {
                 {!(viewYear === today.getFullYear() && viewMonth === today.getMonth()) && (
                   <button
                     onClick={goToToday}
-                    className="text-caption font-bold text-coral-strong bg-coral/10 px-3 py-1.5 rounded-lg active:scale-95 transition min-h-[36px] flex items-center justify-center"
+                    className="press-response text-caption font-bold text-coral-strong bg-coral/10 px-3 py-1.5 rounded-lg min-h-[36px] flex items-center justify-center"
                   >
                     오늘
                   </button>
@@ -545,7 +568,7 @@ export function RecordPage() {
               </div>
               <button
                 onClick={goToNextMonth}
-                className="p-2 rounded-xl hover:bg-muted active:scale-95 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                className="press-response p-2 rounded-xl hover:bg-muted min-h-[44px] min-w-[44px] flex items-center justify-center"
                 aria-label="다음 달"
               >
                 <ChevronRight size={20} />
@@ -723,7 +746,7 @@ export function RecordPage() {
                  * would make neighbours' hit areas overlap, and the row that receives
                  * a tap near the boundary would stop being predictable.
                  */
-                className="w-full text-left px-2 py-1.5 rounded-control bg-card/60 hover:bg-card transition flex items-center justify-between text-caption text-foreground group active:scale-[0.99] min-h-11"
+                className="press-response-row w-full text-left px-2 py-1.5 rounded-control bg-card/60 hover:bg-card flex items-center justify-between text-caption text-foreground group min-h-11"
               >
                 <span className="leading-snug flex-1 pr-2 break-keep">• {item.text}</span>
                 <ChevronRight size={12} className="text-foreground/30 group-hover:text-foreground shrink-0" />
@@ -861,7 +884,7 @@ export function RecordPage() {
                       onClick={() => setSelectedRecordId(r.id)}
                       aria-hidden="true"
                       tabIndex={-1}
-                      className="shrink-0 flex gap-2 text-left self-stretch rounded-control active:bg-muted/40 transition-colors cursor-pointer"
+                      className="press-response shrink-0 flex gap-2 text-left self-stretch rounded-control active:bg-muted/40 cursor-pointer"
                     >
                       <span className="shrink-0 w-11 text-right text-caption text-muted-foreground tabular-nums pt-0.5 font-medium">
                         {r.time}
@@ -892,7 +915,7 @@ export function RecordPage() {
                         type="button"
                         onClick={() => setSelectedRecordId(r.id)}
                         aria-label={`${author.srAttribution} 자세히 보기`}
-                        className="min-w-0 flex-1 flex flex-col gap-1 text-left rounded-control active:bg-muted/40 transition-colors cursor-pointer"
+                        className="press-response-row min-w-0 flex-1 flex flex-col gap-1 text-left rounded-control active:bg-muted/40 cursor-pointer"
                       >
                         {/* Attribution chip */}
                         <span className="flex items-center gap-1.5 flex-wrap">
@@ -989,14 +1012,16 @@ export function RecordPage() {
             role="dialog"
             aria-modal="true"
             aria-label="지금의 마음 남기기"
+            ref={composerSheet.sheetRef}
             className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-4 shadow-xl max-h-[90vh] overflow-y-auto"
           >
+            <SheetHandle {...composerSheet.handleProps} />
             <div className="flex justify-end mb-1">
               <button
                 type="button"
                 onClick={() => setShowComposer(false)}
                 aria-label="닫기"
-                className="min-h-11 min-w-11 flex items-center justify-center text-muted-foreground"
+                className="press-response min-h-11 min-w-11 flex items-center justify-center text-muted-foreground"
               >
                 <X size={18} aria-hidden="true" />
               </button>
@@ -1016,7 +1041,8 @@ export function RecordPage() {
       */}
       {selectedRecord && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-6 shadow-xl">
+          <div ref={detailSheet.sheetRef} role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-6 shadow-xl">
+            <SheetHandle {...detailSheet.handleProps} />
             <div className="flex justify-between items-center mb-4">
               <div className="min-w-0">
                 <h3 id="record-detail-modal-title" className="text-heading text-card-foreground">
@@ -1046,7 +1072,7 @@ export function RecordPage() {
               </div>
               <button
                 onClick={closeSelectedRecord}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"
+                className="press-response w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"
                 aria-label="닫기"
               >
                 ✕
@@ -1081,13 +1107,13 @@ export function RecordPage() {
                       }
                     }}
                     disabled={isSaving || isOffline}
-                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-label disabled:opacity-50"
+                    className="press-response px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-label disabled:opacity-50"
                   >
                     {isSaving ? '삭제 중...' : '삭제'}
                   </button>
                   <button
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-label"
+                    className="press-response px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-label"
                   >
                     취소
                   </button>
@@ -1124,7 +1150,7 @@ export function RecordPage() {
                         setIsEditing(false);
                         setEditText('');
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-label"
+                      className="press-response px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-label"
                     >
                       취소
                     </button>
@@ -1159,7 +1185,7 @@ export function RecordPage() {
                         }
                       }}
                       disabled={isSaving || !editText.trim() || isOffline}
-                      className="px-3 py-1.5 rounded-lg bg-coral-fill text-coral-fill-foreground font-bold text-label disabled:opacity-50"
+                      className="press-response px-3 py-1.5 rounded-lg bg-coral-fill text-coral-fill-foreground font-bold text-label disabled:opacity-50"
                     >
                       {isSaving ? '저장 중...' : '저장'}
                     </button>
@@ -1219,7 +1245,7 @@ export function RecordPage() {
                               onClick={() => void handleRemoveAttachment(att.path!)}
                               disabled={isMediaBusy || isOffline}
                               aria-label={`첨부 ${att.name} 삭제`}
-                              className="min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-label disabled:opacity-50"
+                              className="press-response min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-label disabled:opacity-50"
                             >
                               <Trash2 size={13} /> 첨부 삭제
                             </button>
@@ -1247,7 +1273,7 @@ export function RecordPage() {
                         type="button"
                         onClick={() => mediaInputRef.current?.click()}
                         disabled={isMediaBusy || isOffline}
-                        className="w-full min-h-[44px] rounded-xl border border-dashed border-border text-label font-bold text-muted-foreground disabled:opacity-50"
+                        className="press-response-row w-full min-h-[44px] rounded-xl border border-dashed border-border text-label font-bold text-muted-foreground disabled:opacity-50"
                       >
                         {isMediaBusy ? '첨부 처리 중...' : '+ 사진 · 영상 · 음성 추가'}
                       </button>
@@ -1387,14 +1413,14 @@ export function RecordPage() {
                         setEditText(selectedRecord.log || '');
                         setIsEditing(true);
                       }}
-                      className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-label active:scale-95 transition"
+                      className="press-response flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-label"
                     >
                       <Pencil size={13} /> 수정
                     </button>
                   )}
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
-                    className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-label active:scale-95 transition"
+                    className="press-response flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-label"
                   >
                     <Trash2 size={13} /> 삭제
                   </button>

@@ -1,5 +1,6 @@
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { buildCyclePartnerMessage } from '@/lib/cyclePartnerMessage';
+import { ErrorNote } from '@/components/ui/ErrorNote';
 import type { CyclePrediction } from '@/lib/cyclePrediction';
 import { cn } from '@/lib/utils';
 import type { CycleSharingPreferences } from '@/types';
@@ -105,7 +106,7 @@ export function CycleSharingSettings({
         })}
       </ul>
 
-      {error && <p role="alert" className="text-caption text-destructive">{error}</p>}
+      {error && <ErrorNote>{error}</ErrorNote>}
 
       {/*
         Two blocks, not one list.

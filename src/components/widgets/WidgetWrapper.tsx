@@ -76,6 +76,20 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
             {...attributes}
             {...listeners}
             aria-label={`${label} 위젯 위치 변경`}
+            /*
+              `touch-action: none`, which this handle never had.
+
+              dnd-kit's `attributes` carry the ARIA and the tabindex but not this,
+              and without it a touch starting on the handle is still a candidate for
+              scrolling -- so on a phone, dragging a widget frequently scrolled the
+              home screen instead of moving anything. `none` hands the gesture to the
+              pointer sensor outright.
+
+              It overrides the base-layer `manipulation` rather than fighting it: a
+              component needing different touch behaviour says so, and being more
+              specific is how it wins.
+            */
+            style={{ touchAction: 'none' }}
             className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 w-14 h-11 bg-card border border-border rounded-full flex items-center justify-center shadow-sm cursor-grab active:cursor-grabbing"
           >
             <GripHorizontal className="w-5 h-5 text-muted-foreground" aria-hidden="true" />

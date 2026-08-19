@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Calendar, ChevronRight, LoaderCircle, Map, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { ErrorNote } from '@/components/ui/ErrorNote';
+import { SheetHandle } from '@/components/ui/SheetHandle';
+import { useSheetDrag } from '@/lib/useSheetDrag';
 import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import { PlanSectionNav } from '@/components/PlanSectionNav';
@@ -34,6 +37,13 @@ export function TripsPage() {
   const [showModal, setShowModal] = useState(false);
   const [newTrip, setNewTrip] = useState({ title: '', startDate: '', endDate: '' });
   const [isCreating, setIsCreating] = useState(false);
+  /* Drag-to-dismiss. Disabled while a create is in flight: the sheet is the only
+     place that write is reported, so letting a swipe take it away mid-save would
+     hide the outcome -- the same reason 취소 is blocked then. */
+  const { sheetRef, handleProps } = useSheetDrag({
+    onDismiss: () => setShowModal(false),
+    enabled: !isCreating,
+  });
   const isOffline = !useOnlineStatus();
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -198,7 +208,7 @@ export function TripsPage() {
             type="button"
             onClick={openCreate}
             disabled={visibleLoadState !== 'ready' || isOffline}
-            className="min-w-11 min-h-11 flex items-center justify-center rounded-control hover:bg-info-surface text-info disabled:opacity-30"
+            className="press-response min-w-11 min-h-11 flex items-center justify-center rounded-control hover:bg-info-surface text-info disabled:opacity-30"
             aria-label="새 여행"
           >
             <Plus size={20} />
@@ -288,7 +298,7 @@ export function TripsPage() {
               type="button"
               onClick={openCreate}
               disabled={visibleLoadState !== 'ready' || isOffline}
-              className="w-full min-h-11 rounded-control border border-dashed border-border text-label font-medium text-muted-foreground disabled:opacity-40"
+              className="press-response-row w-full min-h-11 rounded-control border border-dashed border-border text-label font-medium text-muted-foreground disabled:opacity-40"
             >
               + 여행 추가하기 (지난 여행도 기록할 수 있어요)
             </button>
@@ -299,7 +309,8 @@ export function TripsPage() {
       {/* z-[60] so the tab bar cannot intercept 취소 / 만들기 */}
       {showModal && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center sm:p-5">
-          <div role="dialog" aria-modal="true" aria-labelledby="new-trip-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 animate-in slide-in-from-bottom-4 border border-border">
+          <div ref={sheetRef} role="dialog" aria-modal="true" aria-labelledby="new-trip-title" className="bg-card w-full max-w-md rounded-t-2xl sm:rounded-surface p-4 animate-in slide-in-from-bottom-4 border border-border">
+            <SheetHandle {...handleProps} />
             <h2 id="new-trip-title" className="text-heading text-foreground mb-4">새 여행 만들기</h2>
             <div className="space-y-3">
               <label className="block text-caption font-medium text-muted-foreground">
@@ -333,7 +344,7 @@ export function TripsPage() {
                   />
                 </label>
               </div>
-              {formError && <p className="text-caption text-destructive" role="alert">{formError}</p>}
+              {formError && <ErrorNote>{formError}</ErrorNote>}
             </div>
             <div className="flex gap-2 mt-5">
               <Button variant="secondary" size="md" full onClick={() => setShowModal(false)} disabled={isCreating}>취소</Button>

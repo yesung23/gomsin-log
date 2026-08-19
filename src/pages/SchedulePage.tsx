@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { ErrorNote } from '@/components/ui/ErrorNote';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import { PlanSectionNav } from '@/components/PlanSectionNav';
@@ -498,7 +499,7 @@ export function SchedulePage() {
                     type="button"
                     onClick={() => moveMonth(-1)}
                     aria-label="이전 달"
-                    className="relative min-w-11 min-h-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
+                    className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
                   >
                     <ChevronLeft size={16} />
                   </button>
@@ -506,7 +507,7 @@ export function SchedulePage() {
                     type="button"
                     onClick={() => moveMonth(1)}
                     aria-label="다음 달"
-                    className="relative min-w-11 min-h-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
+                    className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
                   >
                     <ChevronRight size={16} />
                   </button>
@@ -563,7 +564,7 @@ export function SchedulePage() {
                     type="button"
                     onClick={openCreateModal}
                     disabled={!hasCoupleSpace || isOffline}
-                    className="text-caption font-semibold text-info disabled:opacity-40 min-h-11 flex items-center"
+                    className="press-response text-caption font-semibold text-info disabled:opacity-40 min-h-11 flex items-center"
                   >
                     이 날짜에 추가
                   </button>
@@ -635,7 +636,7 @@ export function SchedulePage() {
                             onClick={() => void handleToggleTask(task)}
                             disabled={pending || isOffline}
                             aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`}
-                            className="text-info disabled:opacity-40 min-w-11 min-h-11 flex items-center justify-center -m-2"
+                            className="press-response text-info disabled:opacity-40 min-w-11 min-h-11 flex items-center justify-center -m-2"
                           >
                             {task.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
                           </button>
@@ -647,7 +648,7 @@ export function SchedulePage() {
                               onClick={() => void handleDeleteTask(task)}
                               disabled={pending || isOffline}
                               aria-label={`${task.title} 할 일 삭제`}
-                              className="min-w-11 min-h-11 flex items-center justify-center -m-2 text-muted-foreground hover:text-destructive disabled:opacity-40"
+                              className="press-response min-w-11 min-h-11 flex items-center justify-center -m-2 text-muted-foreground hover:text-destructive disabled:opacity-40"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -685,7 +686,7 @@ export function SchedulePage() {
                                 onClick={() => openEditModal(event)}
                                 disabled={isSaving || deletingEventId !== null || isOffline}
                                 aria-label={`${event.title} 일정 수정`}
-                                className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
+                                className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
                               >
                                 <Pencil size={14} />
                               </button>
@@ -694,7 +695,7 @@ export function SchedulePage() {
                                 onClick={() => void handleDeleteEvent(event)}
                                 disabled={deletingEventId !== null || isSaving || isOffline}
                                 aria-label={`${event.title} 일정 삭제`}
-                                className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
+                                className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -753,7 +754,7 @@ export function SchedulePage() {
                                 onClick={() => openEditModal(event)}
                                 disabled={isSaving || deletingEventId !== null || isOffline}
                                 aria-label={`${event.title} 일정 수정`}
-                                className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
+                                className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
                               >
                                 <Pencil size={14} />
                               </button>
@@ -762,7 +763,7 @@ export function SchedulePage() {
                                 onClick={() => void handleDeleteEvent(event)}
                                 disabled={deletingEventId !== null || isSaving || isOffline}
                                 aria-label={`${event.title} 일정 삭제`}
-                                className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
+                                className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -800,7 +801,7 @@ export function SchedulePage() {
             <div role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="bg-card rounded-surface p-4 max-w-sm w-full space-y-4 border border-border">
               <div className="flex items-center justify-between">
                 <h3 id="event-modal-title" className="text-heading text-foreground">{editingEventId ? '일정 수정' : '새 일정 추가'}</h3>
-                <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} aria-label="닫기" className="min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-40"><X size={18} /></button>
+                <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} aria-label="닫기" className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-40"><X size={18} /></button>
               </div>
               <div className="space-y-3">
                 <div>
@@ -842,7 +843,7 @@ export function SchedulePage() {
                     통화 때 꼭 얘기
                   </label>
                 )}
-                {formError && <p role="alert" className="rounded-control bg-destructive/10 px-3 py-2 text-caption font-medium text-destructive">{formError}</p>}
+                {formError && <ErrorNote>{formError}</ErrorNote>}
               </div>
               <div className="flex gap-2 pt-1">
                 <Button variant="secondary" size="md" full onClick={() => setShowEventModal(false)} disabled={isSaving}>취소</Button>

@@ -208,12 +208,80 @@ describe('motion respects the operating-system preference', () => {
   it('honours the preference for the scrolls CSS cannot reach', () => {
     // `scrollIntoView({ behavior: 'smooth' })` is a JS argument; a CSS
     // `scroll-behavior` declaration does not override it.
+    //
+    // Asserted as "the module calls matchMedia AND names this query" rather than as
+    // one adjacent string. The previous form pinned those two together, so it broke
+    // when the preference readers were given a shared helper -- a refactor that
+    // changed nothing about whether the preference is honoured. What matters is that
+    // the query is read, not the shape of the call site that reads it.
     const motion = read('src/lib/motion.ts');
-    expect(motion).toContain("matchMedia('(prefers-reduced-motion: reduce)')");
+    expect(motion).toContain('window.matchMedia(');
+    expect(motion).toContain("'(prefers-reduced-motion: reduce)'");
     const recordPage = read('src/pages/RecordPage.tsx');
     expect(recordPage).toContain("behavior: scrollBehavior(), block: 'start'");
     expect(recordPage).toContain("behavior: scrollBehavior(), block: 'center'");
     expect(recordPage).not.toContain("behavior: 'smooth'");
+  });
+
+  it('the press response stops moving without going inert', () => {
+    // Reduced motion asks for less movement, not for less feedback. A control that
+    // stops answering the finger entirely reads as broken, and the person who set
+    // this preference is the last one who should have to guess whether a tap landed.
+    const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(block).toContain('.press-response:active');
+    expect(block).toContain('transform: none');
+    // The tint survives; only the scale is dropped.
+    expect(block).toMatch(/\.press-response\s*\{[^}]*background-color/);
+  });
+});
+
+describe('translucency and contrast answer the operating system too', () => {
+  const css = read('src/styles/index.css');
+
+  /*
+   * These two queries had NO handling at all while fourteen surfaces in this app
+   * used `backdrop-blur`. Behind blurred glass, text contrast depends on whatever
+   * happens to be scrolling underneath, which is unknowable at design time and
+   * worst exactly when the content is dense.
+   */
+  it('drops the blur when the user asks for less transparency', () => {
+    expect(css).toContain('@media (prefers-reduced-transparency: reduce)');
+    const block = css.slice(css.indexOf('@media (prefers-reduced-transparency: reduce)'));
+    expect(block).toContain('backdrop-filter: none !important');
+    expect(block).toContain('-webkit-backdrop-filter: none !important');
+  });
+
+  it('also makes the surface opaque, because removing blur alone is not enough', () => {
+    // `bg-card/95` over moving content is still moving content at 5%. The blur was
+    // compensating for the tint, so the two have to change together.
+    const block = css.slice(css.indexOf('@media (prefers-reduced-transparency: reduce)'));
+    expect(block).toContain('background-color: var(--card) !important');
+    expect(block).toContain('background-color: var(--background) !important');
+  });
+
+  it('leaves the modal scrim translucent, which is the one that should stay', () => {
+    // The black wash behind a sheet exists to show you have not left the screen.
+    const block = css.slice(
+      css.indexOf('@media (prefers-reduced-transparency: reduce)'),
+      css.indexOf('@media (prefers-contrast: more)'),
+    );
+    expect(block).not.toContain('bg-black\\/40');
+    expect(block).not.toContain('bg-black\\/50');
+  });
+
+  it('draws a real border when the user asks for more contrast', () => {
+    expect(css).toContain('@media (prefers-contrast: more)');
+    const block = css.slice(css.indexOf('@media (prefers-contrast: more)'));
+    expect(block).toContain('border-color: var(--foreground)');
+  });
+
+  it('never lets an unsupported query throw on first paint', () => {
+    // `prefers-reduced-transparency` is younger than browsers this app still runs
+    // on, and `matchMedia` throws on a query the engine cannot parse.
+    const motion = read('src/lib/motion.ts');
+    expect(motion).toContain("'(prefers-reduced-transparency: reduce)'");
+    expect(motion).toContain("'(prefers-contrast: more)'");
+    expect(motion).toMatch(/try\s*\{[\s\S]*matchMedia[\s\S]*\}\s*catch/);
   });
 
   it('PRESERVATION: the scroll-to-record emphasis still runs', () => {

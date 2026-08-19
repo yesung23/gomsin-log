@@ -99,27 +99,49 @@
    * arbitrary values cannot creep back one file at a time, and
    * e2e/renderedTypeScale.spec.ts measures what the browser actually paints.
    */
+  /*
+   * Tracking is size-specific, and for 한글 it is NOT the Latin curve.
+   *
+   * The usual advice -- tighten large text, leave body alone -- comes from Latin,
+   * where large type opens up optically and wants pulling back. 한글 differs at the
+   * small end: a 12px 글자 is a stack of strokes inside a fixed square, and negative
+   * tracking closes the counters until ㅁ and ㅇ stop being separable at a glance.
+   *
+   * So this curve goes negative only where the type is genuinely large, reaches
+   * zero at body, and turns SLIGHTLY POSITIVE at caption -- the opposite of what
+   * copying an Apple Latin scale would have produced at the bottom of the scale.
+   *
+   * Declared per step, not once on `body`, so a heading and a caption on the same
+   * screen can disagree. That disagreement is the point.
+   */
   --text-display: 1.625rem;
   --text-display--line-height: 2rem;
   --text-display--font-weight: 700;
+  --text-display--letter-spacing: -0.02em;
   --text-title: 1.375rem;
   --text-title--line-height: 1.875rem;
   --text-title--font-weight: 700;
+  --text-title--letter-spacing: -0.015em;
   --text-heading: 1.0625rem;
   --text-heading--line-height: 1.5rem;
   --text-heading--font-weight: 600;
+  --text-heading--letter-spacing: -0.01em;
   --text-emphasis: 1rem;
   --text-emphasis--line-height: 1.5rem;
   --text-emphasis--font-weight: 600;
+  --text-emphasis--letter-spacing: -0.005em;
   --text-body: 0.9375rem;
   --text-body--line-height: 1.375rem;
   --text-body--font-weight: 400;
+  --text-body--letter-spacing: 0em;
   --text-label: 0.8125rem;
   --text-label--line-height: 1.125rem;
   --text-label--font-weight: 500;
+  --text-label--letter-spacing: 0em;
   --text-caption: 0.75rem;
   --text-caption--line-height: 1rem;
   --text-caption--font-weight: 400;
+  --text-caption--letter-spacing: 0.01em;
   /*
    * Radius (DESIGN_V2 정보 밀도와 레이아웃 토큰).
    *
@@ -427,13 +449,6 @@ input[type='range']::-webkit-slider-thumb {
   display: none;
 }
 
-/* Calendar cell press effect */
-@keyframes cell-press {
-  0% { transform: scale(1); }
-  50% { transform: scale(0.92); }
-  100% { transform: scale(1); }
-}
-
 /* Highlight pulse for scroll-to-record */
 @keyframes highlight-pulse {
   0%, 100% { box-shadow: 0 0 0 0 oklch(0.78 0.12 22 / 0.4); }
@@ -521,4 +536,164 @@ input[type='range']::-webkit-slider-thumb {
   html {
     scroll-behavior: auto !important;
   }
+
+  /*
+   * The press response stops MOVING but does not stop RESPONDING.
+   *
+   * Reduced motion is a request for less movement, not for less feedback. A
+   * control that goes completely inert on touch reads as broken, and the person
+   * who asked for reduced motion is the last person who should be left guessing
+   * whether their tap registered. The scale is dropped; the tint stays.
+   */
+  .press-response {
+    transition: background-color 0.12s linear, opacity 0.12s linear;
+  }
+
+  .press-response:active {
+    transform: none;
+  }
+}
+
+/*
+ * Translucency is a legibility cost, and some people cannot pay it.
+ *
+ * This app puts `backdrop-blur` behind the tab bar, the dashboard header, the
+ * install banner, the notification bridge and the sheet scrims. Behind blurred
+ * glass, text contrast depends on whatever happens to be scrolling underneath --
+ * which is unknowable at design time, and worst exactly when the content is
+ * dense. macOS and iOS expose "Reduce transparency" for this; nothing in this app
+ * answered it until now.
+ *
+ * `background-color` is restated alongside `backdrop-filter: none` because
+ * removing the blur alone would leave the SEMI-TRANSPARENT background it was
+ * compensating for -- `bg-card/95` over moving content is still moving content at
+ * 5%. The pair has to change together or the fix makes legibility worse.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  .backdrop-blur-sm,
+  .backdrop-blur,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  .backdrop-blur-xl,
+  .backdrop-blur-2xl {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /*
+   * The translucent surface tints actually used in this app, made opaque.
+   * Scoped to these classes rather than a blanket `[class*="/"]` so that a
+   * deliberately translucent SCRIM -- the black wash behind a sheet, whose whole
+   * job is to let you see you have not left the screen -- is left alone.
+   */
+  .bg-card\/95,
+  .bg-card\/90 {
+    background-color: var(--card) !important;
+  }
+
+  .bg-background\/90,
+  .bg-background\/80 {
+    background-color: var(--background) !important;
+  }
+}
+
+/*
+ * Higher contrast: give every floating surface a real edge.
+ *
+ * The visual language here separates layers with a tint and a soft shadow, which
+ * is enough for most eyes and not enough for all of them. When the OS asks for
+ * more contrast, the separation stops being implied and becomes a drawn border.
+ */
+@media (prefers-contrast: more) {
+  .backdrop-blur-sm,
+  .backdrop-blur,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  .backdrop-blur-xl,
+  .backdrop-blur-2xl {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-color: var(--card);
+  }
+
+  .rounded-surface,
+  .rounded-control {
+    border-color: var(--foreground);
+  }
+}
+
+/*
+ * Touch hygiene.
+ *
+ * `-webkit-tap-highlight-color` is the grey rectangle mobile WebKit and Chromium
+ * paint over a tapped element. It arrives LATE -- after the browser has decided
+ * the touch was not a scroll -- so it fights the press state below instead of
+ * reinforcing it: the element scales down immediately, then a grey box appears
+ * over it a moment later. The app draws its own feedback, so the browser's is
+ * removed.
+ *
+ * `touch-action: manipulation` drops double-tap-to-zoom on controls. This app has
+ * no double-tap gesture anywhere, and the browser cannot know that -- so on every
+ * button it waits ~300ms to find out whether a second tap is coming. That delay
+ * is not animation and cannot be tuned away; it is the browser declining to
+ * commit. Removed here, kept everywhere else, because zoom on CONTENT is an
+ * accessibility feature and must survive.
+ */
+/*
+ * The press state itself.
+ *
+ * Fires on `:active`, which the browser sets on pointer-DOWN, not on click. That
+ * is the whole point: the control answers the finger, not the release.
+ *
+ * 0.97, not the 0.95 used ad hoc elsewhere in this app, and never a bounce. At
+ * tab-bar size 0.95 reads as a flinch; 0.97 reads as the surface taking the
+ * press. `transform` and `opacity` only, so the compositor can do this without
+ * touching layout.
+ *
+ * The in transition is deliberately faster than the out. Arriving at the pressed
+ * state should feel instantaneous; returning from it is the part that wants to
+ * look smooth, and a symmetric curve makes the press feel laggy even when it is
+ * not.
+ */
+.press-response {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  /*
+   * `color` is in this list because the class is UNLAYERED and Tailwind's
+   * utilities are not: an unlayered `transition` shorthand outranks
+   * `transition-colors` and would otherwise silently drop the colour fade a
+   * control already had. One owner for the transition, listing everything it owns.
+   */
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.22s ease-out, color 0.22s ease-out, opacity 0.22s ease-out;
+}
+
+.press-response:active {
+  transform: scale(0.97);
+  transition-duration: 0.06s;
+}
+
+/*
+ * A control that cannot act must not answer as though it can. Without this, a
+ * disabled button still shrank under the finger and so promised something it
+ * would not deliver -- the one case where instant feedback is a lie.
+ */
+.press-response:disabled:active,
+.press-response[aria-disabled='true']:active,
+.press-response-row:disabled:active,
+.press-response-row[aria-disabled='true']:active {
+  transform: none;
+  background-color: inherit;
+}
+
+/* A pressed row should tint rather than shrink; scaling a full-width row bends its edges. */
+.press-response-row {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background-color 0.22s ease-out;
+}
+
+.press-response-row:active {
+  background-color: var(--muted);
+  transition-duration: 0.06s;
 }

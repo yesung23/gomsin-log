@@ -189,7 +189,13 @@ export function PartnerDayTimelineWidget() {
               type="button"
               onClick={() => openRecord(record)}
               aria-label={`${partnerDayDateLabel(record.date, todayStr) ?? '오늘'} ${record.time || ''} ${partnerName}의 기록 자세히 보기`}
-              className="w-full text-left min-h-11 flex items-start gap-2 py-2"
+              /*
+                A tint, not a scale. This row is the way into 정확한 원본 and it sits
+                in a timeline: scaling one row pulls its time rail out of line with
+                the rows above and below, and that column staying straight is what
+                makes the entries read as one day rather than five separate cards.
+              */
+              className="press-response-row w-full text-left min-h-11 flex items-start gap-2 py-2 rounded-control"
             >
               {/*
                 Time rail. Across a multi-day window `18:20` on its own is a false

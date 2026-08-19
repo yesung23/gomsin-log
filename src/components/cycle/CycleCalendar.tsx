@@ -53,7 +53,7 @@ export function CycleCalendar({
         <button
           type="button"
           onClick={() => onMoveMonth(-1)}
-          className="min-h-11 min-w-11 flex items-center justify-center rounded-control hover:bg-muted"
+          className="press-response min-h-11 min-w-11 flex items-center justify-center rounded-control hover:bg-muted"
           aria-label="이전 달"
         >
           <ChevronLeft className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
@@ -62,7 +62,7 @@ export function CycleCalendar({
         <button
           type="button"
           onClick={() => onMoveMonth(1)}
-          className="min-h-11 min-w-11 flex items-center justify-center rounded-control hover:bg-muted"
+          className="press-response min-h-11 min-w-11 flex items-center justify-center rounded-control hover:bg-muted"
           aria-label="다음 달"
         >
           <ChevronRight className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
@@ -113,7 +113,18 @@ export function CycleCalendar({
               aria-pressed={isSelected}
               className={cn(
                 'min-h-11 rounded-control flex flex-col items-center justify-center gap-0.5',
-                'border transition',
+                /*
+                  A calendar day is pressed without looking, so it is the control
+                  where feedback on RELEASE helps least. The bare `transition` here
+                  answered only the selection ring, which lands after the state
+                  round-trip -- on a slow one the cell sat inert under the finger.
+
+                  There was a `@keyframes cell-press` written for this exact cell and
+                  referenced by nothing. It would have been the wrong answer anyway:
+                  a keyframe plays on click, not on pointer-down, and cannot be
+                  interrupted by the next date. Removed with this change.
+                */
+                'press-response border',
                 isActual && 'bg-coral/20 border-coral/40 text-coral-strong font-bold',
                 isPredicted && 'border-dashed border-coral/50 text-coral-strong',
                 !isActual && !isPredicted && 'border-transparent text-foreground hover:bg-muted',

@@ -80,7 +80,26 @@ export function Button({
       type={type}
       className={cn(
         'inline-flex items-center justify-center gap-1.5 rounded-control font-semibold',
-        'transition active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100',
+        /*
+          `press-response` replaces `transition active:scale-[0.99]`, and because
+          this is the one button in the app it fixes two things everywhere at once.
+
+          The scale was 0.99, which is a half-pixel on a 44px control -- present in
+          the stylesheet and invisible on a phone. It is now 0.97: still small, still
+          never a bounce, but actually seen.
+
+          The larger gain is the touch hygiene the class carries.
+          `touch-action: manipulation` drops the ~300ms the browser spends waiting to
+          find out whether a second tap is coming -- this app has no double-tap
+          gesture anywhere, so that wait was pure latency on every button in every
+          screen. And `-webkit-tap-highlight-color: transparent` removes the grey box
+          mobile browsers paint AFTER deciding the touch was not a scroll, which
+          arrived late enough to fight the scale instead of reinforcing it.
+
+          `disabled:opacity-50` stays here; the matching `disabled:active:scale-100`
+          moved into the class, so every adopter gets it rather than only this one.
+        */
+        'press-response disabled:opacity-50',
         VARIANT[variant],
         SIZE[size],
         full && 'w-full',

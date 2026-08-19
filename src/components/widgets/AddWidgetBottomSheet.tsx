@@ -1,5 +1,6 @@
 import { useStore } from '@/lib/useStore';
 import { useEscapeKey } from '@/lib/hooks';
+import { useSheetDrag } from '@/lib/useSheetDrag';
 import { WIDGET_REGISTRY, isWidgetAllowedForRole, widgetsForRole } from '@/lib/widgets';
 import { X, PlusCircle } from 'lucide-react';
 
@@ -15,6 +16,7 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
 
   // Before the early return: a hook may not sit behind a conditional.
   useEscapeKey(onClose, isOpen);
+  const { sheetRef, handleProps } = useSheetDrag({ onDismiss: onClose });
 
   if (!isOpen) return null;
 
@@ -60,17 +62,35 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
         three attributes and calls `useEscapeKey`; this one was the exception.
       */}
       <div
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-widget-sheet-title"
         className="fixed bottom-0 left-0 right-0 z-[60] bg-card rounded-t-2xl p-4 pb-6 shadow-2xl animate-in slide-in-from-bottom-full max-h-[80vh] flex flex-col"
       >
+        {/*
+          Grab handle. Two jobs, and the visible one matters more.
+
+          It is the drag surface, and it is the ONLY drag surface. Not the sheet,
+          because a downward swipe inside the scrolling widget list below has to stay
+          a scroll. Not the header either: the header holds the close button, and a
+          pointer capture taken on an ancestor swallows the `click` that button needs.
+
+          It is also the only reason anyone would guess the sheet can be dragged. A
+          gesture with no affordance is not a feature. It stays `aria-hidden` because
+          it is a shortcut on top of three routes out that already work: the close
+          button, Escape, and the backdrop.
+        */}
+        <div {...handleProps} className="-mt-1 mb-2 pt-2 pb-1 flex justify-center cursor-grab active:cursor-grabbing">
+          <span aria-hidden="true" className="block w-9 h-1 rounded-full bg-border" />
+        </div>
+
         <div className="flex items-center justify-between mb-3">
           <h2 id="add-widget-sheet-title" className="text-heading text-foreground">홈 위젯 추가</h2>
           <button
             onClick={onClose}
             aria-label="위젯 추가 닫기"
-            className="min-w-[44px] min-h-[44px] p-2 rounded-full hover:bg-muted text-muted-foreground flex items-center justify-center"
+            className="press-response min-w-[44px] min-h-[44px] p-2 rounded-full hover:bg-muted text-muted-foreground flex items-center justify-center"
           >
             <X size={24} aria-hidden="true" />
           </button>
@@ -95,7 +115,15 @@ export function AddWidgetBottomSheet({ isOpen, onClose }: AddWidgetBottomSheetPr
                   key={id}
                   type="button"
                   onClick={() => handleAddWidget(id)}
-                  className="w-full text-left flex items-center justify-between p-3 rounded-control border border-border hover:border-coral/50 hover:bg-coral/5 cursor-pointer transition-all active:scale-95"
+                  /*
+                    `press-response-row`, not the `transition-all active:scale-95`
+                    this had. Two reasons. `transition-all` animates every property
+                    including layout ones, so the browser cannot hand this to the
+                    compositor. And a full-width row that scales visibly bows its own
+                    edges away from the rows above and below it -- at this width the
+                    honest press feedback is a tint, not a shrink.
+                  */
+                  className="press-response-row w-full text-left flex items-center justify-between p-3 rounded-control border border-border hover:border-coral/50 hover:bg-coral/5 cursor-pointer"
                 >
                   <div>
                     <div className="text-label font-semibold text-foreground">{widget.label}</div>

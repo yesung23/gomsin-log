@@ -27,15 +27,15 @@ import { resolve, sep } from 'node:path';
  * of progress rather than an aspiration.
  */
 
-/** DESIGN_V2 개정 타이포그래피 (2026-08-08). Seven steps, weights included. */
+/** DESIGN_V2 개정 타이포그래피 (2026-08-08). Seven steps: size, leading, weight, tracking. */
 const SCALE = {
-  display: { size: '1.625rem', px: 26, lineHeight: '2rem', weight: '700' },
-  title: { size: '1.375rem', px: 22, lineHeight: '1.875rem', weight: '700' },
-  heading: { size: '1.0625rem', px: 17, lineHeight: '1.5rem', weight: '600' },
-  emphasis: { size: '1rem', px: 16, lineHeight: '1.5rem', weight: '600' },
-  body: { size: '0.9375rem', px: 15, lineHeight: '1.375rem', weight: '400' },
-  label: { size: '0.8125rem', px: 13, lineHeight: '1.125rem', weight: '500' },
-  caption: { size: '0.75rem', px: 12, lineHeight: '1rem', weight: '400' },
+  display: { size: '1.625rem', px: 26, lineHeight: '2rem', weight: '700', tracking: '-0.02em' },
+  title: { size: '1.375rem', px: 22, lineHeight: '1.875rem', weight: '700', tracking: '-0.015em' },
+  heading: { size: '1.0625rem', px: 17, lineHeight: '1.5rem', weight: '600', tracking: '-0.01em' },
+  emphasis: { size: '1rem', px: 16, lineHeight: '1.5rem', weight: '600', tracking: '-0.005em' },
+  body: { size: '0.9375rem', px: 15, lineHeight: '1.375rem', weight: '400', tracking: '0em' },
+  label: { size: '0.8125rem', px: 13, lineHeight: '1.125rem', weight: '500', tracking: '0em' },
+  caption: { size: '0.75rem', px: 12, lineHeight: '1rem', weight: '400', tracking: '0.01em' },
 } as const;
 
 /**
@@ -157,6 +157,40 @@ describe('C8 - the scale is defined once, in the token file', () => {
     for (const [name, step] of Object.entries(SCALE)) {
       expect(css, name).toContain(`--text-${name}--line-height: ${step.lineHeight};`);
       expect(css, name).toContain(`--text-${name}--font-weight: ${step.weight};`);
+    }
+  });
+
+  it('gives every step its own tracking, so hierarchy is not size and weight alone', () => {
+    for (const [name, step] of Object.entries(SCALE)) {
+      expect(css, name).toContain(`--text-${name}--letter-spacing: ${step.tracking};`);
+    }
+  });
+
+  it('the tracking curve is 한글-shaped, not a copied Latin one', () => {
+    /*
+     * The pin that matters. A Latin scale tightens as it grows and leaves the small
+     * end alone or negative; copying it here would close the counters on 12px 한글
+     * until ㅁ and ㅇ stop being separable at a glance.
+     *
+     * So: negative only where the type is genuinely large, zero at body, and
+     * POSITIVE at caption. If someone later "fixes" caption to a negative value to
+     * match a Latin reference, this fails and says why.
+     */
+    const em = (value: string) => Number.parseFloat(value);
+
+    expect(em(SCALE.caption.tracking)).toBeGreaterThan(0);
+    expect(em(SCALE.body.tracking)).toBe(0);
+    expect(em(SCALE.label.tracking)).toBe(0);
+
+    // Monotonic across the large steps: bigger type, tighter tracking.
+    expect(em(SCALE.display.tracking)).toBeLessThan(em(SCALE.title.tracking));
+    expect(em(SCALE.title.tracking)).toBeLessThan(em(SCALE.heading.tracking));
+    expect(em(SCALE.heading.tracking)).toBeLessThan(em(SCALE.emphasis.tracking));
+    expect(em(SCALE.emphasis.tracking)).toBeLessThan(0);
+
+    // Nothing may go tighter than -0.02em; beyond that 한글 strokes begin to touch.
+    for (const step of Object.values(SCALE)) {
+      expect(em(step.tracking)).toBeGreaterThanOrEqual(-0.02);
     }
   });
 

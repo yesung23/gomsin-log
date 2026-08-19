@@ -188,7 +188,20 @@ export function MobileShell({ children }: { children: ReactNode }) {
                     aria-selected={active}
                     aria-label={t.label}
                     className={cn(
-                      'flex flex-col items-center gap-0.5 py-1 text-center transition-colors duration-200 min-h-11 justify-center relative w-full rounded-control',
+                      /*
+                        `press-response` replaces `transition-colors duration-200`.
+
+                        The tab bar is the most-tapped control in the app and it had
+                        no press state at all: it answered on NAVIGATION, which on a
+                        slow route is far enough after the finger that the tap reads
+                        as dropped and gets repeated. `:active` is set on pointer-DOWN,
+                        so the bar now answers the finger and the route arrives when
+                        it arrives.
+
+                        The class owns the colour transition too -- see its definition
+                        in `index.css` for why it has to.
+                      */
+                      'press-response flex flex-col items-center gap-0.5 py-1 text-center min-h-11 justify-center relative w-full rounded-control',
                       active
                         ? 'text-coral-strong'
                         : 'text-muted-foreground hover:text-foreground'

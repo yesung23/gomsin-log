@@ -69,7 +69,9 @@ export function TalkAboutListWidget() {
                   // Durable addressing from P2, so a reload still lands here.
                   navigate(`/record?record=${topic.recordId}`);
                 }}
-                className="flex-1 min-w-0 text-left min-h-11"
+                /* The row that opens 정확한 원본. Tinted, not scaled -- it shares a line
+                   with the 이야기했어요 control and the two must not move apart. */
+                className="press-response-row flex-1 min-w-0 text-left min-h-11 rounded-control px-1 -mx-1"
               >
                 <span className="block text-body text-foreground break-keep line-clamp-2">
                   {topic.record
@@ -100,7 +102,8 @@ export function TalkAboutListWidget() {
                   toast.success('이야기한 걸로 정리했어요.');
                 }}
                 aria-label="이야기했어요"
-                className="shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground active:scale-95 transition"
+                /* Square and small, so this one scales. 0.95 was a flinch at 44px. */
+                className="press-response shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground"
               >
                 <Check size={16} aria-hidden="true" />
               </button>
@@ -115,7 +118,10 @@ export function TalkAboutListWidget() {
           onClick={() => setExpanded((open) => !open)}
           aria-expanded={expanded}
           data-testid="talk-about-expand"
-          className="w-full min-h-11 flex items-center justify-center gap-1 text-caption text-muted-foreground"
+          /* The overflow control. It is the ONLY route to the topics past the fifth
+             (§8 rules out a separate tab), so of everything in this widget it is the
+             one that must visibly take the press. */
+          className="press-response-row w-full min-h-11 flex items-center justify-center gap-1 text-caption text-muted-foreground rounded-control"
         >
           {expanded ? '접기' : `외 ${hiddenCount}개 모두 보기`}
           {expanded

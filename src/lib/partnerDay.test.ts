@@ -513,7 +513,43 @@ describe('1000-day seeded relationship simulation', () => {
 
     const all: DailyRecord[] = [];
     const deleted = new Set<string>();
+    /*
+     * History the couple accumulated before this window opens.
+     *
+     * Without it the OBSERVED suppression path can never bootstrap: the run
+     * drains the surface most days, so nothing survives long enough to age out of
+     * the seven-day fallback unconfirmed, and every eligible record ends up either
+     * confirmed or outstanding. Pre-existing history is also the real case --
+     * §6.5 caps a receipt-less viewer at seven days, so a couple with two years
+     * behind them has exactly this shape on their first open.
+     */
+    for (let d = 1200; d > DAYS - 1; d -= 1) {
+      all.push(record({
+        id: `pre-${d}`,
+        date: day(d),
+        time: '09:00',
+        createdAt: `${day(d)}T09:00:00.000Z`,
+      }));
+    }
+    const preExisting = new Set(all.map((r) => r.id));
+    /*
+     * The handful of pre-existing records dated within a week of the first
+     * simulated day fall inside that day's seven-day fallback, so they are
+     * legitimately missed and SHOULD surface. Only history comfortably outside
+     * any first-open fallback is expected never to appear.
+     */
+    const preDeep = new Set(
+      [...preExisting].filter((id) => Number(id.slice(4)) >= DAYS + 10),
+    );
     let cp: PartnerDayCheckpoint | null = null;
+    /** Every id that was ever genuinely on the missed surface. */
+    const everMissed = new Set<string>();
+    /**
+     * Records that left this client's slice at some point. A restored record is
+     * absent from the snapshot taken while it was gone, so it correctly returns as
+     * a new arrival -- the safe direction, and not a leak of settled history.
+     */
+    const everDeleted = new Set<string>();
     let created = 0;
     let grewWithoutArrival = 0;
     let maxWindow = 0;
@@ -534,13 +570,24 @@ describe('1000-day seeded relationship simulation', () => {
       deleteReappear: 0,
       over500: 0,
       over2000: 0,
+      /*
+       * Not a scenario counter -- a proof that the mechanism under test was
+       * actually running. The whole point of this simulation is the OBSERVED
+       * suppression path, and a fixture that leaves the snapshot empty for 1000
+       * days exercises none of it while still satisfying every other assertion
+       * here by algebra. That happened: the observable was constructed without
+       * `todayStr`, so `record.date <= undefined` was false for every record and
+       * OBSERVED stayed empty for the entire run.
+       */
+      observedSnapshotNonEmpty: 0,
+      observedSuppressed: 0,
     };
+    let maxObservedIds = 0;
 
     const visibleTo = () => all.filter((r) => !deleted.has(r.id));
 
     for (let d = DAYS - 1; d >= 0; d -= 1) {
       const today = day(d);
-      let arrivedToday = 0;
 
       // Ordinary records, occasionally a burst.
       const count = rng() < 0.08 ? 5 + Math.floor(rng() * 5) : 1 + Math.floor(rng() * 4);
@@ -554,7 +601,6 @@ describe('1000-day seeded relationship simulation', () => {
           // Some records cannot be decrypted when they land.
           contentUnavailable: rng() < 0.04,
         }));
-        arrivedToday += 1;
       }
 
       // An offline backlog flushing late, stamped with its compose date. `day()`
@@ -571,7 +617,6 @@ describe('1000-day seeded relationship simulation', () => {
           createdAt: `${today}T09:00:00.000Z`,
         }));
         seen.lateOld += 1;
-        arrivedToday += 1;
       }
 
       // A partner whose device is ahead of the viewer's -- a timezone difference,
@@ -592,12 +637,12 @@ describe('1000-day seeded relationship simulation', () => {
       if (rng() < 0.03 && all.length > 10) {
         const victim = all[Math.floor(rng() * all.length)];
         deleted.add(victim.id);
+        everDeleted.add(victim.id);
       }
       if (rng() < 0.02 && deleted.size > 0) {
         const back = Array.from(deleted)[0];
         deleted.delete(back);
         seen.deleteReappear += 1;
-        arrivedToday += 1;
       }
 
       // A key arrives and unlocks something.
@@ -616,21 +661,41 @@ describe('1000-day seeded relationship simulation', () => {
       if (rng() < 0.25) { seen.noOpenGap += 1; continue; }
 
       const records = visibleTo();
-      let previous = missedPartnerRecords(records, VIEWER, today, cp).length;
+      const opening = missedPartnerRecords(records, VIEWER, today, cp);
+      for (const r of opening) everMissed.add(r.id);
+      let previous = opening.length;
       maxWindow = Math.max(maxWindow, previous);
 
       // One or two presses, so a remainder is routinely left outstanding.
       const presses = rng() < 0.5 ? 1 : 2;
       for (let press = 0; press < presses; press += 1) {
         const missed = missedPartnerRecords(records, VIEWER, today, cp);
+        for (const r of missed) everMissed.add(r.id);
         const readable = missed.filter((r) => !r.contentUnavailable);
         if (readable.length === 0) break;
         // A press that cannot clear the window leaves a remainder outstanding.
         if (readable.length > 5 || missed.length > readable.length) seen.partialAck += 1;
         const next = advancePartnerDayCheckpoint(cp, readable.slice(0, 5), missed, {
-          records, viewer: VIEWER,
+          // The SAME simulated viewer-local day the surface above was filtered by.
+          // Omitting it made `record.date <= undefined` false for every record, so
+          // the snapshot stayed empty for all 1000 days and the run proved nothing
+          // about the mechanism it exists to test.
+          records, viewer: VIEWER, todayStr: today,
         });
         if (next) cp = next;
+        if (cp && cp.observedRecordIds.length > 0) {
+          seen.observedSnapshotNonEmpty += 1;
+          maxObservedIds = Math.max(maxObservedIds, cp.observedRecordIds.length);
+          // Records the snapshot actively holds back: eligible, unconfirmed, and
+          // not outstanding. This is the suppression the run exists to exercise.
+          const confirmedNow = new Set(cp.confirmedRecordIds);
+          const outstandingNow = new Set(cp.outstandingRecordIds);
+          const suppressed = eligibleSharedPartnerRecords(records, VIEWER, today)
+            .filter((r) => !confirmedNow.has(r.id)
+              && !outstandingNow.has(r.id)
+              && cp!.observedRecordIds.includes(r.id));
+          if (suppressed.length > 0) seen.observedSuppressed += 1;
+        }
 
         const after = missedPartnerRecords(records, VIEWER, today, cp).length;
         // Nothing new arrived between these two measurements, so the surface must
@@ -656,20 +721,36 @@ describe('1000-day seeded relationship simulation', () => {
      * what silent loss looks like.
      */
     const confirmed = new Set(cp!.confirmedRecordIds);
-    // Anything still future-dated on the final day is legitimately not yet missed,
-    // so it is excluded from the accounting rather than counted as stranded.
-    const finalEligible = eligibleSharedPartnerRecords(visibleTo(), VIEWER, day(0));
+    /*
+     * The accounting ranges over records that were LEGITIMATELY MISSED at some
+     * point, not over everything eligible. Two kinds of record are correctly in
+     * neither state: one still future-dated on the final day, and pre-fallback
+     * history that §6.5 puts out of scope for a receipt-less viewer. Counting
+     * those as stranded would assert the opposite of the product rule.
+     */
+    const present = new Set(visibleTo().map((r) => r.id));
     const reachable = new Set(ids(missedPartnerRecords(visibleTo(), VIEWER, day(0), cp)));
-    const stranded = finalEligible.filter((r) => !confirmed.has(r.id) && !reachable.has(r.id));
+    const stranded = [...everMissed]
+      .filter((id) => present.has(id) && !confirmed.has(id) && !reachable.has(id));
 
     console.log(
-      `[simulation seed=${SEED}] records=${created} present=${visibleTo().length} `
+      `[simulation seed=${SEED}] records=${created} preExisting=${preExisting.size} `
+      + `present=${visibleTo().length} everMissed=${everMissed.size} `
       + `confirmed=${confirmed.size} reachable=${reachable.size} stranded=${stranded.length} `
-      + `maxWindow=${maxWindow} receipt=${JSON.stringify(cp).length}B`,
+      + `maxWindow=${maxWindow} maxObservedIds=${maxObservedIds} `
+      + `receipt=${JSON.stringify(cp).length}B`,
     );
     console.log(`[simulation coverage] ${JSON.stringify(seen)}`);
 
     expect(stranded).toEqual([]);
+
+    // Pre-fallback history was recorded as known and never masqueraded as a late
+    // arrival. If any of it had leaked onto the surface it would be in everMissed.
+    const preLeaked = [...everMissed]
+      .filter((id) => preDeep.has(id) && !everDeleted.has(id));
+    expect(preLeaked).toEqual([]);
+    expect(preDeep.size).toBeGreaterThan(100);
+    expect([...preExisting].every((id) => cp!.observedRecordIds.includes(id))).toBe(true);
   });
 });
 

@@ -89,6 +89,93 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-20 · LV · 나머지 화면 마감 — touch hygiene 전역화, ErrorNote, sheet drag 확대
+
+#### PLAN POSITION
+- Phase: LV (Limited Validation)
+- Workstream: design-preview 기반 UI/UX 완성 — 나머지 화면
+- Step: 일정·우리·마이·온보딩·설정·여행·기록의 press response / 실패 표면 / sheet 통일
+- Previous Gate: `73f62b7`
+- This Gate: 없음 — LV 진입 조건이 아니다
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` canonical tabs 불변. 화면 구조·기능 변경 없음
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `ENGINEERING_ROADMAP` §LV
+- Current-state checked: live git `73f62b7`
+- Latest relevant Work Log checked: 바로 아래 항목
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: claude-opus-5[1m] / Role: Worker + self-verification
+- PR: 없음 / Branch: `master`
+- Base SHA: 73f62b7c4332522b2692ea611826ec7648653b12
+- New HEAD: `91709ed`
+
+#### CHANGED / REVIEWED
+- file: `src/styles/index.css` — `touch-action: manipulation` + tap-highlight 제거를
+  `@layer base`의 `button`/`[role=button]`/`[role=tab]`/`summary`로 **전역화**.
+  opt-in class에 얹혀 있어서 미적용 화면 100여 개 버튼이 탭마다 ~300ms를 계속 지불하고
+  있었다. 앱에 double-tap 제스처가 없음을 확인하고 넣었고, 그 전제를 테스트로 고정했다
+- file: `src/components/widgets/WidgetWrapper.tsx` — drag handle에 `touchAction: 'none'`.
+  dnd-kit `attributes`가 이 값을 주지 않아 실제로는 위젯을 끌면 홈이 스크롤됐다
+- file: 9개 화면 — `press-response` / `press-response-row` **86개 버튼**.
+  filled CTA 17개는 row tint(→`--muted`)면 coral 버튼이 회색으로 번쩍이므로 scale로 재분류.
+  strip regex가 `active:scale-[0.98]`의 `]`를 5곳에 남긴 것도 정정
+- file: `src/components/ui/ErrorNote.tsx`(신규) — 실패 표면 단일화. cause / kept / retry를
+  **별도 prop**으로 분리(한 문자열이면 다시 "연결을 확인" 한 문장으로 붕괴한다).
+  `kept`는 `role="alert"` **내부**에 둬서 스크린리더가 읽게 했다. 10개 사이트 전환
+- file: `src/components/ui/SheetHandle.tsx`(신규) + TripsPage / TripDetailPage(2) /
+  RecordPage(2) — sheet drag 확대(2 → 7). 각 sheet는 자기 write 진행 중 비활성,
+  기록 상세는 편집 중·삭제 확인 중에도 비활성
+- file: `accessibilityInvariants.test.ts`(+5), `ErrorNote.test.tsx`(신규 9)
+
+#### EXPLICITLY NOT CHANGED
+- crypto / DB / migration semantics: 변경 없음. SQL 0건
+- product semantics: 화면 구조·탭·기능·문구 의미 불변. presentation과 실패 표면만
+- Production: 미접촉
+
+#### VERIFICATION
+- command: `npm run verify`
+- PASS — typecheck, lint(0 warnings), **2523 tests / 166 files**, build
+- command: 빌드 산출물에서 `touch-action:manipulation`·tap-highlight 실착지 확인 — PASS
+- command: **mobile visual check (320/390/430, light/dark, 양 역할)**
+- **NOT DONE** — 이전 세션과 동일. Playwright 브라우저 미설치, 설치 미완료,
+  Chrome extension 미연결. 스크린샷을 찍지 않았으므로 통과로 적지 않는다
+- command: `check:edge` / `test:edge`
+- **NOT RUN** — deno 미설치. `supabase/functions/` 미접촉
+- what it actually proves: 클래스·토큰·불변식의 정확성과 번들 도달. 실제 기기에서의
+  체감 지연 감소와 시각적 판단은 증명하지 않는다
+
+#### REVIEW IMPACT
+- DELTA — presentation + 실패 표면. security/privacy/제품 의미 delta 없음
+
+#### BLOCKERS
+- code: 없음
+- environment: Playwright 브라우저 미설치, deno 미설치
+
+#### STOPPED AT
+- exact completed boundary: `91709ed`까지 master 착지
+
+#### REMAINING
+- not completed: 시각 검증, 통증 공유 security review(`security-review/cycle-pain-care-signal`,
+  로컬 전용), 화면별 빈/로딩 상태 보강(우리·온보딩·서비스는 아직 shared ui primitive 미사용),
+  `EmptyState`/`Skeleton` 채택 확대
+
+#### NEXT ACTION
+- next owner: 사용자(시각 검증), independent security reviewer(047)
+- 기준 SHA: `91709ed`
+- exact next task: 실기기에서 탭 반응·sheet drag 체감 확인
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 047 계열은 independent security review 전까지 master 금지.
+  P6는 NOT AUTHORIZED
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED
+
+---
+
 ### 2026-08-20 · LV · 감정 캐릭터·기록 속 마음·주기 시각화, 그리고 통증 공유(미착지)
 
 #### PLAN POSITION

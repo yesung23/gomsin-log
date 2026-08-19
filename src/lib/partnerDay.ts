@@ -36,6 +36,16 @@ import { parseLocalDate, toLocalDateString } from '@/lib/utils';
  * record dated after today has not happened yet. Nothing else is a date
  * decision.
  *
+ * A receipt can fail two different ways, and they are not the same failure.
+ * Genuinely nothing stored is first contact, bounded to a seven-day discovery
+ * window by design. A receipt STRING that exists and fails to parse or validate
+ * is corrupt: nothing in it can be trusted, including a date bound, so it takes
+ * `recovery` instead -- every currently eligible record becomes OUTSTANDING,
+ * unbounded by date. Collapsing corrupt into first-contact was itself a launch
+ * blocker: it silently entombed an OUTSTANDING record older than seven days the
+ * first time a receipt broke. See `readPartnerDayCheckpointStatus` and
+ * `projectPartnerDay`.
+ *
  * Deliberately absent, each having been the cause of a real defect:
  *
  *   - a date cursor or `confirmedThrough`
@@ -123,7 +133,14 @@ export type PartnerDayTransition =
   /** No usable receipt: seed OUTSTANDING from the discovery window. */
   | 'first-contact'
   /** A receipt that can attest to what this device knew: additive discovery. */
-  | 'discovery';
+  | 'discovery'
+  /**
+   * A receipt STRING exists and failed to parse or validate. Distinct from
+   * `first-contact`: nothing in a corrupt receipt can be trusted, including a
+   * date bound, so every currently eligible record becomes OUTSTANDING,
+   * unbounded by date -- not just the last seven days. See `projectPartnerDay`.
+   */
+  | 'recovery';
 
 export interface PartnerDayProjection {
   /** The state implied by what this device can now see. */
@@ -154,27 +171,63 @@ function stringArray(value: unknown): string[] | null {
 }
 
 /**
- * Read the stored receipt, or `null` when there is not a usable one.
+ * `readPartnerDayCheckpoint`'s full answer: the checkpoint, and whether the
+ * `null` case is genuine absence or corrupt bytes.
  *
- * `null` means first contact, which shows the discovery window -- MORE context,
- * not less. Every rejection path here therefore fails towards showing the user
- * something they may already have seen, never towards hiding something they have
- * not.
+ * `checkpoint: null` alone conflates two situations that `projectPartnerDay`
+ * must NOT treat alike (Control Tower cold review, 2026-08-20, invariant I1 NO
+ * SILENT LOSS):
+ *
+ *   - nothing is stored, or storage/identity is not ready: genuine first
+ *     contact. `corrupt: false`. The bounded seven-day discovery window is the
+ *     correct, intentional policy here -- it is not a safety fallback, and
+ *     widening it would flood every real first open with two years of history.
+ *
+ *   - a receipt STRING exists at this key and fails to parse or pass schema
+ *     validation: corrupt bytes. `corrupt: true`. Nothing in it can be
+ *     trusted, including a date bound, so the bounded window is WRONG here --
+ *     it is exactly what silently entombed a healthy 30-day-old OUTSTANDING
+ *     record the first time this was reviewed. See `projectPartnerDay`'s
+ *     `recovery` transition.
+ *
+ * A failure merely FETCHING the value (`localStorage.getItem` throwing) is
+ * deliberately reported as `corrupt: false`, folded into "nothing is stored".
+ * It proves nothing about whether bytes exist to be corrupt, and misreading it
+ * as corrupt would flood every visit to an environment with blocked storage
+ * (private-mode edge cases, a sandboxed iframe) with the unbounded recovery
+ * seed on every single open.
  */
-export function readPartnerDayCheckpoint(
+export interface PartnerDayReceiptRead {
+  /** The usable checkpoint, or `null` for both absence and corruption. */
+  checkpoint: PartnerDayCheckpoint | null;
+  /** Whether `checkpoint === null` means corrupt bytes rather than absence. */
+  corrupt: boolean;
+}
+
+export function readPartnerDayCheckpointStatus(
   context: Pick<PartnerDayContext, 'userId' | 'coupleId'>,
-): PartnerDayCheckpoint | null {
+): PartnerDayReceiptRead {
   const { userId, coupleId } = context;
-  if (typeof localStorage === 'undefined' || !userId || !coupleId) return null;
+  if (typeof localStorage === 'undefined' || !userId || !coupleId) {
+    return { checkpoint: null, corrupt: false };
+  }
+
+  let value: string | null;
   try {
-    const value = localStorage.getItem(partnerDayCheckpointKey(userId, coupleId));
-    if (!value) return null;
+    value = localStorage.getItem(partnerDayCheckpointKey(userId, coupleId));
+  } catch {
+    // `getItem` itself failed: an I/O failure, not proof of corrupt bytes.
+    return { checkpoint: null, corrupt: false };
+  }
+  if (!value) return { checkpoint: null, corrupt: false };
+
+  try {
     const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object') return { checkpoint: null, corrupt: true };
     const candidate = parsed as Record<string, unknown>;
 
     const confirmed = stringArray(candidate.confirmedRecordIds);
-    if (!confirmed) return null;
+    if (!confirmed) return { checkpoint: null, corrupt: true };
 
     /*
      * v1 receipts called this `observedRecordIds` and meant the same thing this
@@ -191,15 +244,32 @@ export function readPartnerDayCheckpoint(
       ?? [];
 
     return {
-      version: typeof candidate.version === 'number' ? candidate.version : 1,
-      confirmedRecordIds: confirmed,
-      outstandingRecordIds: stringArray(candidate.outstandingRecordIds) ?? [],
-      knownRecordIds: known,
+      checkpoint: {
+        version: typeof candidate.version === 'number' ? candidate.version : 1,
+        confirmedRecordIds: confirmed,
+        outstandingRecordIds: stringArray(candidate.outstandingRecordIds) ?? [],
+        knownRecordIds: known,
+      },
+      corrupt: false,
     };
   } catch {
-    // Corrupt receipt: treat as first contact, which shows more.
-    return null;
+    // JSON.parse threw: the bytes are there and are not JSON. Corrupt, not absent.
+    return { checkpoint: null, corrupt: true };
   }
+}
+
+/**
+ * Read the stored receipt, or `null` when there is not a usable one.
+ *
+ * A thin projection of `readPartnerDayCheckpointStatus` for callers -- and the
+ * many existing tests -- that only need the checkpoint and do not need to tell
+ * absence from corruption apart. `projectPartnerDay` needs that distinction and
+ * takes `readPartnerDayCheckpointStatus`'s full result instead.
+ */
+export function readPartnerDayCheckpoint(
+  context: Pick<PartnerDayContext, 'userId' | 'coupleId'>,
+): PartnerDayCheckpoint | null {
+  return readPartnerDayCheckpointStatus(context).checkpoint;
 }
 
 export function writePartnerDayCheckpoint(
@@ -345,18 +415,47 @@ export function projectPartnerDay(
   context: PartnerDayContext,
   records: DailyRecord[],
   stored: PartnerDayCheckpoint | null | undefined,
+  /**
+   * Whether `stored`'s `null` (or, defensively, a non-null value supplied
+   * alongside this anyway) means corrupt bytes rather than genuine absence.
+   * Pass `readPartnerDayCheckpointStatus(...).corrupt` here -- `false` for
+   * every existing caller, so this is additive and every prior call site is
+   * unaffected. See `readPartnerDayCheckpointStatus` and the `recovery`
+   * transition below.
+   */
+  corrupt = false,
 ): PartnerDayProjection {
   const { viewer, todayStr } = context;
   const eligible = eligibleSharedPartnerRecords(records, viewer, todayStr);
 
-  const confirmed = new Set(stored?.confirmedRecordIds ?? []);
-  const outstanding = new Set(stored?.outstandingRecordIds ?? []);
-  const known = new Set(stored?.knownRecordIds ?? []);
+  /*
+   * A corrupt receipt cannot attest to ANYTHING it appears to contain -- not
+   * CONFIRMED, not OUTSTANDING, not KNOWN. `stored` is discarded here rather
+   * than merely ignored below, so a caller cannot accidentally seed real state
+   * from bytes the read layer has already flagged as untrustworthy.
+   */
+  const effectiveStored = corrupt ? null : stored;
+
+  const confirmed = new Set(effectiveStored?.confirmedRecordIds ?? []);
+  const outstanding = new Set(effectiveStored?.outstandingRecordIds ?? []);
+  const known = new Set(effectiveStored?.knownRecordIds ?? []);
 
   /*
    * PROVENANCE, not set size, decides first-contact.
    *
-   * `stored` absent: no receipt exists at all -- first-contact.
+   * `corrupt`: a receipt STRING exists and failed to parse or validate --
+   * `recovery`, below, regardless of what `stored` looks like. This has to be
+   * checked before the first-contact/discovery split, not folded into it: a
+   * corrupt receipt is `!effectiveStored` in exactly the same way a genuinely
+   * absent one is, and the bounded first-contact seed is only correct for the
+   * absent case. Collapsing the two was the second launch blocker this module
+   * had (Control Tower cold review, 2026-08-20): a healthy receipt with a
+   * 30-day-old record OUTSTANDING, corrupted on disk, reopened as first-contact
+   * and lost that record to the seven-day window -- KNOWN but never OUTSTANDING
+   * again, gone, with nobody having confirmed anything.
+   *
+   * `effectiveStored` absent and NOT corrupt: no receipt exists at all --
+   * first-contact.
    *
    * `stored.version < PARTNER_DAY_CHECKPOINT_VERSION`: a legacy (v1) receipt.
    * Whether IT attests to anything depends on whether it ever had a KNOWN-shaped
@@ -374,13 +473,30 @@ export function projectPartnerDay(
    * was eligible when this was written", not "attests to nothing". This is the
    * fix: discovery, never first-contact, regardless of set size.
    */
-  const isLegacyWithNoProvenance = !!stored
-    && stored.version < PARTNER_DAY_CHECKPOINT_VERSION
+  const isLegacyWithNoProvenance = !!effectiveStored
+    && effectiveStored.version < PARTNER_DAY_CHECKPOINT_VERSION
     && known.size === 0;
-  const transition: PartnerDayTransition =
-    (!stored || isLegacyWithNoProvenance) ? 'first-contact' : 'discovery';
+  const transition: PartnerDayTransition = corrupt
+    ? 'recovery'
+    : (!effectiveStored || isLegacyWithNoProvenance) ? 'first-contact' : 'discovery';
 
-  if (transition === 'first-contact') {
+  if (transition === 'recovery') {
+    /*
+     * Fail-open. Nothing in a corrupt receipt can be trusted, including a date
+     * bound, so this is NOT the bounded first-contact seed: every currently
+     * eligible record becomes OUTSTANDING, whatever its date. `confirmed` is
+     * already empty (see `effectiveStored` above) -- CONFIRMED lived only in
+     * the bytes that just failed to parse, and there is nowhere else it could
+     * come from, so it is legitimately empty after recovery, not merely
+     * unpopulated. A record confirmed before the corruption MAY resurface once.
+     * Duplicate resurfacing over silent, permanent loss is the accepted
+     * tradeoff here (Control Tower policy, 2026-08-20), not an oversight.
+     */
+    for (const record of eligible) {
+      outstanding.add(record.id);
+      known.add(record.id);
+    }
+  } else if (transition === 'first-contact') {
     const { since } = partnerDayDiscoveryWindow(todayStr);
     for (const record of eligible) {
       if (record.date >= since && !confirmed.has(record.id)) outstanding.add(record.id);
@@ -405,11 +521,11 @@ export function projectPartnerDay(
     knownRecordIds: Array.from(known),
   };
 
-  const changed = !stored
-    || stored.version !== PARTNER_DAY_CHECKPOINT_VERSION
-    || !sameIds(stored.confirmedRecordIds, checkpoint.confirmedRecordIds)
-    || !sameIds(stored.outstandingRecordIds, checkpoint.outstandingRecordIds)
-    || !sameIds(stored.knownRecordIds, checkpoint.knownRecordIds);
+  const changed = !effectiveStored
+    || effectiveStored.version !== PARTNER_DAY_CHECKPOINT_VERSION
+    || !sameIds(effectiveStored.confirmedRecordIds, checkpoint.confirmedRecordIds)
+    || !sameIds(effectiveStored.outstandingRecordIds, checkpoint.outstandingRecordIds)
+    || !sameIds(effectiveStored.knownRecordIds, checkpoint.knownRecordIds);
 
   /*
    * THE SURFACE. `OUTSTANDING ∩ eligible(today)` and nothing else.

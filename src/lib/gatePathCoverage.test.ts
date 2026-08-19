@@ -66,6 +66,14 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     validateCycleSettings: 'Pure utility: validates settings fields locally',
     isCycleSymptom: 'Pure utility: type guard',
     isCycleSupportKind: 'Pure utility: type guard',
+    isCyclePainShareKind:
+      'Pure utility: type guard over the three coarse pain buckets. Reads no row and '
+      + 'reaches no network, and deliberately does NOT accept a CycleDailyLog pain '
+      + 'level, so it cannot be used to turn a personal log into a partner signal.',
+    isCycleSignalKind:
+      'Pure utility: type guard over both signal vocabularies. Used where the kind '
+      + 'column is written and where a stored row is mapped back, so a pain signal '
+      + 'is not silently dropped on read.',
     isValidCycleSupportMessage: 'Pure utility: validates message length',
     mapCycleEntryRow: 'Pure utility: maps DB row to domain type',
     mapCycleSupportSignalRow: 'Pure utility: maps DB row to domain type',

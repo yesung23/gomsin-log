@@ -20,6 +20,7 @@ import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
 import { emotionFlowForStorage } from '@/lib/privacy';
 import {
   DEFAULT_LAYOUT_BY_ROLE,
+  HOME_CORE_BY_ROLE,
   WIDGET_REGISTRY,
   isWidgetAllowedForRole,
   widgetsForRole,
@@ -368,16 +369,26 @@ describe('role-aware home widgets', () => {
      * useful once the thing it describes is on the screen -- which is why
      * `partner_day` was moved in front of them.
      */
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['partner_day', 'talk_about_list', 'dday']);
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier[0]).toBe('partner_day');
+    /*
+     * THIRD MOVE, and the last one that can happen to this assertion: the ordering
+     * it protects is no longer a default that a user can rearrange away. The
+     * surfaces are PINNED (`HOME_CORE_BY_ROLE`), so 군화's home leads with the
+     * briefing (§6.1's 요약 층) and then the day itself (원본 층) whatever anyone
+     * does to their widgets. The arrangeable layer below is now just D-Day.
+     */
+    expect(HOME_CORE_BY_ROLE.soldier).toEqual([
+      'call_briefing', 'partner_day', 'talk_about_list', 'today_word',
+    ]);
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['dday']);
     // `talk_about_list` joined in P3. It is not another DESCRIPTION of the
     // day -- it is the couple's own explicit marks on records already on this
     // screen, which is the next step of the loop rather than a restatement of
     // the previous one. The rule this test protects (the day itself leads,
     // descriptions do not crowd it) is unchanged.
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('partner_emotion_flow');
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('partner_emotion_summary');
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('care_hint');
+    for (const description of ['partner_emotion_flow', 'partner_emotion_summary', 'care_hint']) {
+      expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain(description);
+      expect(HOME_CORE_BY_ROLE.soldier).not.toContain(description);
+    }
   });
 
   it('keeps every demoted widget available rather than deleting it', () => {
@@ -387,12 +398,29 @@ describe('role-aware home widgets', () => {
       'partner_emotion_flow',
       'partner_emotion_summary',
       'care_hint',
-      'today_word',
       'upcoming_schedule',
     ]) {
       expect(WIDGET_REGISTRY[id], `${id} must still exist`).toBeTruthy();
       expect(isWidgetAllowedForRole(id, 'soldier'), `${id} must still be offerable`).toBe(true);
       expect(widgetsForRole('soldier').map((w) => w.id), id).toContain(id);
+    }
+  });
+
+  /**
+   * A pinned surface is withheld from the add sheet, and that is not a deletion.
+   *
+   * `today_word` left this list because it is no longer arrangeable for either
+   * role -- it is pinned. Offering it in the sheet would let someone add a second
+   * composer under the one already on their home.
+   */
+  it('withholds pinned surfaces from the add sheet, for both roles', () => {
+    for (const role of ['gomsin', 'soldier'] as const) {
+      const offered = widgetsForRole(role).map((widget) => widget.id);
+      for (const pinned of HOME_CORE_BY_ROLE[role]) {
+        expect(offered, `${pinned} must not be addable for ${role}`).not.toContain(pinned);
+      }
+      // Still registered, still rendered -- just not as something to arrange.
+      if (WIDGET_REGISTRY.today_word) expect(HOME_CORE_BY_ROLE[role]).toContain('today_word');
     }
   });
 
@@ -446,17 +474,23 @@ describe('role-aware home widgets', () => {
     expect(widgetsForRole('gomsin').map((w) => w.id)).not.toContain('partner_emotion_flow');
   });
 
-  it('offers partner_day to BOTH roles -- PRODUCT_V3 §5.1, the surface is symmetric', () => {
-    // `partner_day` is the raw evidence timeline, not commentary, and the
-    // north star is "서로의 하루" (each other's day) -- not one-directional.
-    // It used to be soldier-only, which meant 곰신 had a compose surface but
-    // no evidence surface of her own: the exact asymmetry this widget exists
-    // to fix, just pointed the other way.
+  it('pins partner_day for BOTH roles -- PRODUCT_V3 §5.1, the surface is symmetric', () => {
+    /*
+     * `partner_day` is the raw evidence timeline, not commentary, and the north
+     * star is "서로의 하루" -- not one-directional. It used to be soldier-only,
+     * which meant 곰신 had a compose surface but no evidence surface of her own:
+     * the exact asymmetry this widget exists to fix, pointed the other way.
+     *
+     * The guarantee got STRONGER rather than moving. It is no longer "offered to
+     * both roles" -- something offered can be declined, and a 곰신 who tidied her
+     * home could end up without it again. It is pinned for both, so the symmetry
+     * survives any arrangement. That is also why it is absent from `widgetsForRole`
+     * now: it is not a thing to add, it is already there.
+     */
     expect(isWidgetAllowedForRole('partner_day', 'soldier')).toBe(true);
     expect(isWidgetAllowedForRole('partner_day', 'gomsin')).toBe(true);
-    expect(widgetsForRole('gomsin').map((w) => w.id)).toContain('partner_day');
-    expect(widgetsForRole('soldier').map((w) => w.id)).toContain('partner_day');
-    expect(DEFAULT_LAYOUT_BY_ROLE.gomsin).toContain('partner_day');
+    expect(HOME_CORE_BY_ROLE.gomsin).toContain('partner_day');
+    expect(HOME_CORE_BY_ROLE.soldier).toContain('partner_day');
   });
 
   it('gives both roles a default layout made only of widgets they may use', () => {

@@ -70,9 +70,48 @@ export type WidgetDef = {
  * `partner_day` was written to fix on the other side. Order follows §5.1's stated
  * default for the side that writes more often: 기록 시작 → 상대방의 오늘 → 보조.
  */
+/**
+ * The surfaces the home screen pins, in the order that role reads them.
+ *
+ * These are NOT widgets. They cannot be removed, reordered or added, they render
+ * without the drag chrome, and they sit above the widget layer -- because the two
+ * roles are doing opposite jobs and the screen should say which one you are here
+ * for before it offers you anything to arrange.
+ *
+ *  - 곰신 records their day. The composer is first, and what came back is under it.
+ *  - 군화 catches up. PRODUCT_V3 §6.1's two layers in order -- the briefing that
+ *    compresses (판단 화면), then the timeline that evidences it (근거 화면) -- then
+ *    the bridge to the call.
+ *
+ * `today_word` is in BOTH, and that is §5.1: the record entry point exists for
+ * both roles. The soldier default layout did not include it, so the person with
+ * the scarce phone window had no composer on their home unless they went and
+ * added one.
+ *
+ * `call_briefing` has no registry entry on purpose. It was never arrangeable --
+ * it was pinned by the home screen outside the widget list -- and making it a
+ * widget now would be offering to remove the one thing that screen is for.
+ */
+export const HOME_CORE_BY_ROLE: Record<Role, readonly string[]> = {
+  gomsin: ['today_word', 'partner_day', 'talk_about_list'],
+  soldier: ['call_briefing', 'partner_day', 'talk_about_list', 'today_word'],
+};
+
+export function isHomeCore(id: string, role: Role): boolean {
+  return HOME_CORE_BY_ROLE[role].includes(id);
+}
+
+/**
+ * What the widget layer starts with, now that the core is pinned above it.
+ *
+ * Both roles previously defaulted to a list whose first three entries are now
+ * core. A stored layout that still names them is filtered at render rather than
+ * rewritten -- a layout is a user's arrangement, and silently editing it to match
+ * a structural change is not ours to do.
+ */
 export const DEFAULT_LAYOUT_BY_ROLE: Record<Role, string[]> = {
-  soldier: ['partner_day', 'talk_about_list', 'dday'],
-  gomsin: ['today_word', 'partner_day', 'talk_about_list', 'dday'],
+  soldier: ['dday'],
+  gomsin: ['dday'],
 };
 
 const LEGACY_GOMSIN_DEFAULT = ['today_briefing', 'today_word', 'dday'];
@@ -92,10 +131,15 @@ export function migrateWidgetLayout(layout: string[], role: Role): string[] {
   return layout;
 }
 
-/** Widgets this role is allowed to see, used by the add sheet and the renderer. */
+/**
+ * Widgets this role may arrange, used by the add sheet and the renderer.
+ *
+ * Excludes the pinned core. Without that the add sheet would offer 상대방의 오늘
+ * to someone whose home already shows it, and accepting would render it twice.
+ */
 export function widgetsForRole(role: Role): WidgetDef[] {
   return Object.values(WIDGET_REGISTRY).filter(
-    (widget) => !widget.roles || widget.roles.includes(role),
+    (widget) => (!widget.roles || widget.roles.includes(role)) && !isHomeCore(widget.id, role),
   );
 }
 

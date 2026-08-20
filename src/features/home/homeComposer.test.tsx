@@ -78,7 +78,7 @@ vi.mock('@/lib/useStore', () => ({
   }),
 }));
 
-const { WidgetDashboard } = await import('@/features/home/WidgetDashboard');
+const { RoleHome } = await import('@/features/home/RoleHome');
 
 function renderIn(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
@@ -95,7 +95,7 @@ describe('composer availability by role', () => {
 
   it('gives 곰신 a composer on the routed home dashboard', () => {
     currentRole = 'gomsin';
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     expect(screen.getByText('오늘의 기록')).toBeInTheDocument();
     expect(screen.getByText('지금찍기')).toBeInTheDocument();
@@ -110,7 +110,7 @@ describe('composer availability by role', () => {
    */
   it('gives 군화 the same composer (this dashboard used to be read-only)', () => {
     currentRole = 'soldier';
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     expect(screen.getByText('오늘의 기록')).toBeInTheDocument();
     expect(screen.getByText('지금찍기')).toBeInTheDocument();
@@ -121,7 +121,7 @@ describe('composer availability by role', () => {
   it('records the author role of whoever is writing', async () => {
     currentRole = 'soldier';
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
@@ -147,7 +147,7 @@ describe('composer attachment handling', () => {
 
   it('accepts an allowed image and passes it to the upload flow', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -165,7 +165,7 @@ describe('composer attachment handling', () => {
 
   it('rejects a disallowed file type instead of attaching it', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -179,7 +179,7 @@ describe('composer attachment handling', () => {
 
   it('lets the author remove a chosen attachment before saving', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -192,7 +192,7 @@ describe('composer attachment handling', () => {
 
   it('refuses to save an entirely empty record', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     await user.click(screen.getByText('저장'));
@@ -212,7 +212,7 @@ describe('composer attachment handling', () => {
   it('keeps a failed attachment in the composer instead of destroying it', async () => {
     addRecordWithMedia.mockResolvedValueOnce({ ok: true, failedFiles: ['목소리.webm'] });
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -235,7 +235,7 @@ describe('composer attachment handling', () => {
   it('clears the composer completely when every attachment succeeded', async () => {
     addRecordWithMedia.mockResolvedValueOnce({ ok: true, failedFiles: [] });
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -258,7 +258,7 @@ describe('composer attachment handling', () => {
       error: '권한이 없어요. 커플 공간 연결 상태를 확인해 주세요.',
     } as never);
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const textarea = screen.getByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
@@ -280,7 +280,7 @@ describe('composer attachment handling', () => {
    */
   it('disables 저장 while there is nothing to save', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     expect(screen.getByText('저장')).toBeDisabled();
@@ -288,7 +288,7 @@ describe('composer attachment handling', () => {
 
   it('keeps 저장 disabled for whitespace-only text', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
@@ -300,7 +300,7 @@ describe('composer attachment handling', () => {
 
   it('enables 저장 as soon as there is real text', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
@@ -311,7 +311,7 @@ describe('composer attachment handling', () => {
 
   it('enables 저장 for an attachment alone, with no text at all', async () => {
     const user = userEvent.setup();
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -341,7 +341,7 @@ describe('composer emotion review (suggested, then answered)', () => {
    * not produced. See `lib/onDeviceInference.ts`.
    */
   async function openWith(user: ReturnType<typeof userEvent.setup>, text: string) {
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
     await user.click(screen.getByText('한줄'));
     const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
     await user.type(textarea, text);
@@ -548,7 +548,7 @@ describe('composer emotion review (suggested, then answered)', () => {
    */
   it('does not read the entry while it is still being typed', async () => {
     const user = userEvent.setup({ delay: null });
-    renderIn(<WidgetDashboard />);
+    renderIn(<RoleHome />);
     await user.click(screen.getByText('한줄'));
     const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
     await user.type(textarea, LOG_TEXT);

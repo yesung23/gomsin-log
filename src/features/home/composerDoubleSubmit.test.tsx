@@ -77,7 +77,7 @@ vi.mock('@/lib/useStore', () => ({
   }),
 }));
 
-const { WidgetDashboard } = await import('@/features/home/WidgetDashboard');
+const { RoleHome } = await import('@/features/home/RoleHome');
 
 function renderIn(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
@@ -93,7 +93,7 @@ function saveButton(): HTMLButtonElement {
 
 async function composeText(text: string) {
   const user = userEvent.setup();
-  renderIn(<WidgetDashboard />);
+  renderIn(<RoleHome />);
   await user.click(screen.getByText('한줄'));
   const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
   await user.type(textarea, text);

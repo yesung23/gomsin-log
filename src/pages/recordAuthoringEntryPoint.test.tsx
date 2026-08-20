@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AppState, DailyRecord, Role } from '@/types';
-import { DEFAULT_LAYOUT_BY_ROLE } from '@/lib/widgets';
+import { DEFAULT_LAYOUT_BY_ROLE, HOME_CORE_BY_ROLE } from '@/lib/widgets';
 
 /**
  * PRODUCT_V3 §7.1, stated as a contract rather than a preference:
@@ -135,12 +135,27 @@ describe('§7.1 the 기록 tab authoring entry point exists for BOTH roles', () 
     });
   }
 
-  it('the 군화 default home carries no composer, which is why the tab must', () => {
-    // Pins the premise of this whole file. If a composer is ever added to the
-    // soldier default this stays true anyway -- §7.1 says the home is an
-    // ADDITIONAL path -- but the assertion documents why the tab is load-bearing.
+  /**
+   * The premise of this file changed, and the requirement did not.
+   *
+   * This used to assert that 군화's default home carried NO composer -- which was
+   * true, and was the defect rather than the reason. §5.1 says the record entry
+   * exists for both roles, and the soldier default simply omitted it, so the
+   * person with the scarce phone window had to go and add one.
+   *
+   * The home now PINS a composer for both roles. §7.1 is unaffected: the home was
+   * always an additional path, and the 기록 tab's entry is load-bearing precisely
+   * because a home can be rearranged and this one cannot be relied upon to be
+   * where someone left it. Every other test in this file is what proves that, and
+   * they run with the home stripped to nothing.
+   */
+  it('pins a composer on the home for BOTH roles, which the tab does not depend on', () => {
+    expect(HOME_CORE_BY_ROLE.soldier).toContain('today_word');
+    expect(HOME_CORE_BY_ROLE.gomsin).toContain('today_word');
+    // ...and it is no longer in either arrangeable layer, so it cannot be removed
+    // from the home at all.
     expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('today_word');
-    expect(DEFAULT_LAYOUT_BY_ROLE.gomsin).toContain('today_word');
+    expect(DEFAULT_LAYOUT_BY_ROLE.gomsin).not.toContain('today_word');
   });
 
   it('survives a home stripped to nothing, for either role', () => {

@@ -274,7 +274,7 @@ const ALL_UI_SOURCES = [
   'src/components/SharedSyncBanner.tsx',
   'src/components/widgets/DDayWidget.tsx',
   'src/components/widgets/UpcomingScheduleWidget.tsx',
-  'src/features/home/WidgetDashboard.tsx',
+  'src/features/home/RoleHome.tsx',
   'src/components/widgets/PartnerEmotionWidgets.tsx',
   'src/components/widgets/CareHintWidget.tsx',
   'src/components/EmotionChipEditor.tsx',

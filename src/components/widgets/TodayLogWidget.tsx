@@ -8,6 +8,7 @@ import {
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { toLocalDateString, localToday } from '@/lib/utils';
+import { isOwnRecord } from '@/lib/privacy';
 import { EmotionSuggestionReview } from '@/components/emotion/EmotionSuggestionReview';
 import { useEmotionCandidatesAtBoundary } from '@/lib/useEmotionCandidates';
 import {
@@ -528,9 +529,24 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     toast.success(isPrivate ? '나에게만 남겼어요.' : `${partnerName}에게 전했어요.`);
   };
 
-  // Filter today's records
+  /**
+   * What I have left today. Mine only.
+   *
+   * This filtered by DATE alone, so it listed both people's records -- and once
+   * the composer became a pinned home surface for both roles, that made it repeat
+   * the partner-day timeline sitting directly above it on the receiver's home.
+   * PRODUCT_V3 §6 is explicit that two surfaces must not say the same thing.
+   *
+   * Own-only is also what this list is FOR. It is the answer to "did that land?",
+   * which is the question the person writing all day actually has, and the one
+   * the app answers without a read receipt (§5.1 -- no surveillance).
+   *
+   * `state.records` is already narrowed by `visibleRecordsForViewer` at every sync
+   * boundary, so this is a product filter rather than a privacy one.
+   */
   const todayRecords = state.records
-    .filter((r) => r.date === todayStr)
+    .filter((r) => r.date === todayStr
+      && isOwnRecord(r, { userId: state.profile.id, role: state.profile.role }))
     .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime());
     
   return (

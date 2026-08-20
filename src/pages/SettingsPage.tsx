@@ -10,7 +10,7 @@ import {
   Shield, Unlink, Trash2, User, FileText,
   Clock, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
-  CalendarDays, Plane,
+  CalendarDays, Plane, LayoutGrid, MessagesSquare,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -53,6 +53,7 @@ export function SettingsPage() {
     signOut,
     deleteRecord,
     setTheme,
+    setHomeStyle,
     invitationExpiresAt,
     refreshCoupleLifecycle,
     recoverExpiredSession,
@@ -549,6 +550,44 @@ export function SettingsPage() {
               다크
             </button>
           </div>
+        </section>
+
+        {/*
+          Home shape, next to theme because it is the same kind of setting: a way
+          this device draws the same content, stored per device rather than per
+          account. The two people read at opposite times of day and want opposite
+          things from the screen -- the one catching up on a backlog is doing
+          something different from the one writing through it.
+        */}
+        <section className="space-y-2">
+          <h2 className="text-heading text-foreground">홈 화면</h2>
+          <div className="grid grid-cols-2 gap-2 rounded-surface bg-muted p-1.5">
+            <button
+              type="button"
+              onClick={() => setHomeStyle('widgets')}
+              aria-pressed={(state.homeStyle || 'widgets') === 'widgets'}
+              data-testid="home-style-widgets"
+              className={`press-response h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 ${ (state.homeStyle || 'widgets') === 'widgets' ? 'bg-card text-coral' : 'text-muted-foreground' }`}
+            >
+              <LayoutGrid size={16} aria-hidden="true" />
+              위젯
+            </button>
+            <button
+              type="button"
+              onClick={() => setHomeStyle('conversation')}
+              aria-pressed={state.homeStyle === 'conversation'}
+              data-testid="home-style-conversation"
+              className={`press-response h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 ${ state.homeStyle === 'conversation' ? 'bg-card text-coral' : 'text-muted-foreground' }`}
+            >
+              <MessagesSquare size={16} aria-hidden="true" />
+              대화
+            </button>
+          </div>
+          <p className="text-caption text-muted-foreground leading-relaxed">
+            {state.homeStyle === 'conversation'
+              ? '주고받은 기록을 시간 순서대로 이어서 보여줘요. 위젯은 표시되지 않아요.'
+              : '홈에 원하는 위젯을 골라 배치해요.'}
+          </p>
         </section>
 
         {/* Invite code for the space creator, until the partner actually joins. */}

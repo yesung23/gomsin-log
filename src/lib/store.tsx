@@ -253,6 +253,7 @@ const DEFAULT_STATE: AppState = {
   soldierWidgetLayout: DEFAULT_LAYOUT_BY_ROLE.soldier,
   hasSeenInstallPrompt: false,
   theme: 'light',
+  homeStyle: 'widgets',
 };
 
 /**
@@ -268,6 +269,10 @@ const DEFAULT_STATE: AppState = {
  */
 export const DEVICE_PREF_CARRY_OVER_KEYS = [
   'hasSeenInstallPrompt',
+  // Which shape the home screen takes. A device preference like `theme`: the two
+  // people run the app on two phones and read at opposite times of day, so this
+  // must not travel with the account.
+  'homeStyle',
   // Kept per role: the two people use one app on two devices with opposite
   // home screens, and a single shared list meant whoever edited last
   // overwrote the other's arrangement on role change.
@@ -918,6 +923,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ? stored.hasSeenInstallPrompt
             : DEFAULT_STATE.hasSeenInstallPrompt,
           theme,
+          // Validated by value rather than trusted, for the reason `theme` is: a
+          // blob written by an older or a tampered build must not put the home
+          // screen into a shape this build has no renderer for.
+          homeStyle: stored.homeStyle === 'conversation' || stored.homeStyle === 'widgets'
+            ? stored.homeStyle
+            : DEFAULT_STATE.homeStyle,
         };
         // Older releases could persist complete sample-account content here.
         // Retain only harmless device preferences and drop all profile,
@@ -3292,6 +3303,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, hasSeenInstallPrompt: seen }));
   };
 
+  const setHomeStyle = (homeStyle: 'widgets' | 'conversation') => {
+    updateStateImmediately((prev) => ({ ...prev, homeStyle }));
+  };
+
   const setTheme = (theme: 'light' | 'dark') => {
     updateStateImmediately((prev) => ({ ...prev, theme }));
   };
@@ -3356,6 +3371,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setAuthenticatedUser,
         setWidgetLayout,
         setHasSeenInstallPrompt,
+        setHomeStyle,
         setTheme,
       }}
     >

@@ -308,6 +308,12 @@ describe('Deletion-Recovery Suite', () => {
     // code. It is an exact list so a new field cannot be added to the persisted
     // blob without a deliberate decision here.
     //
+    // `homeStyle` joined it for the same reason `theme` is on the list: it says how
+    // THIS DEVICE draws the home screen, not anything about the account. The two
+    // people read at opposite times of day and want opposite shapes, so carrying it
+    // with the account would let whoever signed in last impose their reading on the
+    // other. It holds no record, no name and no relationship.
+    //
     // `soldierWidgetLayout` joined it when the 군화 home became rearrangeable: the
     // two roles keep separate layouts, and a layout is a device preference in
     // exactly the same way `widgetLayout` already was -- an array of widget ids.
@@ -322,7 +328,7 @@ describe('Deletion-Recovery Suite', () => {
     // did pass that assertion untouched. Asserting the constant first makes the
     // declaration itself the thing under test.
     expect([...DEVICE_PREF_CARRY_OVER_KEYS].sort())
-      .toEqual(['hasSeenInstallPrompt', 'soldierWidgetLayout', 'theme', 'widgetLayout']);
+      .toEqual(['hasSeenInstallPrompt', 'homeStyle', 'soldierWidgetLayout', 'theme', 'widgetLayout']);
     // ...and the blob may not contain anything the declaration does not allow.
     expect(Object.keys(persisted).sort())
       .toEqual([...DEVICE_PREF_CARRY_OVER_KEYS].sort());

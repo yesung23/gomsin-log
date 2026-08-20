@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { AUTH_CALLBACK_TIMEOUT_MS, withTimeout } from '@/lib/async';
+import { ErrorNote } from '@/components/ui/ErrorNote';
 
 /**
  * Reads a parameter from either the query string or the URL fragment.
@@ -149,8 +150,24 @@ export function AuthCallbackPage() {
         <div className="w-12 h-12 border-4 border-coral border-t-transparent rounded-full animate-spin mx-auto" />
         <h2 className="text-heading text-foreground">인증 정보를 확인하는 중입니다...</h2>
         <p className="text-caption text-muted-foreground">잠시만 기다려주세요.</p>
+        {/*
+          The failure someone is most likely to hit and least able to interpret: a
+          sign-in that did not complete, on a screen with no navigation. It was a
+          bare red caption -- the same words the rest of the app now says inside
+          `ErrorNote`, but with neither the border that makes a failure findable nor
+          the `role="alert"` that announces it.
+
+          `kept` earns its place here more than almost anywhere else: the account is
+          fine and only this attempt failed, and someone watching a sign-in fail
+          assumes the worse of those two.
+        */}
         {errorMsg && (
-          <p className="text-caption text-destructive font-medium pt-2">{errorMsg}</p>
+          <ErrorNote
+            className="text-left"
+            kept="계정은 그대로예요. 다시 로그인하면 이어서 사용할 수 있어요."
+          >
+            {errorMsg}
+          </ErrorNote>
         )}
       </div>
     </div>

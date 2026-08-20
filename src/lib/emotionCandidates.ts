@@ -165,42 +165,72 @@ export function extractEmotionCandidates(logText: string): EmotionCandidate[] {
   }));
 }
 
+export interface CandidateFlowOptions {
+  isPrivate: boolean;
+  shareWithPartner: boolean;
+  /**
+   * The candidates the author actually ANSWERED -- tapped to confirm, or changed
+   * to a different feeling. Everything not in this set is still the machine's
+   * guess, no matter how long it sat on screen unopposed.
+   */
+  confirmedIds: ReadonlySet<string>;
+  editedIds?: ReadonlySet<string>;
+}
+
 /**
- * Turn the candidates the user LEFT IN PLACE into what gets stored.
+ * Turn reviewed candidates into what gets stored.
  *
  * `evidence` is dropped here, which is the single point where the display-only
  * phrase is prevented from reaching the database.
  *
- * `visibility` is NOT simply "not private, so shared". PRODUCT_V3 §13 is
- * explicit: machine-inferred emotion is private to the author by default, and
- * becoming partner-visible requires an affirmative author action -- not
- * merely failing to remove a suggestion the app pre-filled. `shareWithPartner`
- * is that action, gathered from a control the author has to actively engage
- * (see `EmotionChipEditor`'s share toggle). Leaving every candidate in place
- * and never touching that toggle keeps the whole flow `author_only`, even on
- * a record the author otherwise chose to share -- the record can be shared
- * while the machine's read of it stays private.
+ * ## Provenance is not a formality
  *
- * On a private record `shareWithPartner` is moot: nobody but the author can
- * read the record at all, so visibility is forced `author_only` regardless.
+ * This function used to stamp EVERY surviving candidate `user_confirmed`. Since
+ * candidates arrive pre-included, someone who wrote an entry and pressed save
+ * without ever looking at the feelings row had the machine's guess recorded as
+ * their own confirmed feeling -- and `emotionFlowForStorage`, whose entire job is
+ * to drop anything that is not `user_confirmed`, could not tell the difference
+ * because the only writer in the app lied to it.
+ *
+ * `source` now reports what actually happened:
+ *
+ *   answered by a person  -> `user_confirmed`
+ *   not answered          -> `rule_suggested`
+ *
+ * ## Why `shareWithPartner` alone cannot publish a feeling
+ *
+ * PRODUCT_V3 §13 requires an affirmative author action before a machine reading
+ * reaches the partner, and toggling one switch above a list of guesses the author
+ * never read is not agreement with each of them. So `shared` requires BOTH the
+ * per-item confirmation and the share switch. An unanswered suggestion cannot be
+ * made partner-visible by any combination of the other flags, which is why the
+ * check is here rather than in the UI: a future screen cannot forget it.
+ *
+ * On a private record `shareWithPartner` is moot -- nobody but the author can read
+ * the record at all -- so visibility stays `author_only` regardless.
  */
 export function candidatesToFlowItems(
   candidates: EmotionCandidate[],
-  options: { isPrivate: boolean; shareWithPartner: boolean; editedIds?: ReadonlySet<string> },
+  options: CandidateFlowOptions,
 ): EmotionFlowItem[] {
-  const visibility: EmotionVisibility = (!options.isPrivate && options.shareWithPartner)
-    ? 'shared'
-    : 'author_only';
-  return candidates.map((candidate, index) => ({
-    id: candidate.id,
-    sequence: index + 1,
-    basic: candidate.basic,
-    group: GROUP_BY_BASIC[candidate.basic],
-    displayLabel: BASIC_EMOTION_LABEL[candidate.basic],
-    source: 'user_confirmed' as const,
-    visibility,
-    userEdited: options.editedIds?.has(candidate.id) ?? false,
-  }));
+  return candidates.map((candidate, index) => {
+    // Fails CLOSED. A caller that forgets to say what was answered gets
+    // "nothing was", which stores a suggestion as a suggestion -- the safe
+    // reading. The opposite default is the bug this function was fixed for.
+    const confirmed = options.confirmedIds?.has(candidate.id) ?? false;
+    const visibility: EmotionVisibility =
+      confirmed && !options.isPrivate && options.shareWithPartner ? 'shared' : 'author_only';
+    return {
+      id: candidate.id,
+      sequence: index + 1,
+      basic: candidate.basic,
+      group: GROUP_BY_BASIC[candidate.basic],
+      displayLabel: BASIC_EMOTION_LABEL[candidate.basic],
+      source: confirmed ? ('user_confirmed' as const) : ('rule_suggested' as const),
+      visibility,
+      userEdited: options.editedIds?.has(candidate.id) ?? false,
+    };
+  });
 }
 
 /** Read a stored flow back into editable candidates, for correcting later. */

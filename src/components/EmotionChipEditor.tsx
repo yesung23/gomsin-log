@@ -1,11 +1,11 @@
 import { ChevronDown, ChevronUp, Heart, RotateCcw, X } from 'lucide-react';
 import {
-  BASIC_EMOTION_EMOJI,
   BASIC_EMOTION_LABEL,
   BASIC_EMOTION_ORDER,
   stepBasicEmotion,
   type BasicEmotion,
 } from '@/lib/basicEmotions';
+import { EmotionCharacter } from '@/components/emotion/EmotionCharacter';
 import type { EmotionCandidate } from '@/lib/emotionCandidates';
 
 /**
@@ -121,7 +121,10 @@ export function EmotionChipEditor({
 
                 <div className="min-w-0 flex-1">
                   <p className="text-label font-bold text-foreground flex items-center gap-1">
-                    <span aria-hidden="true">{BASIC_EMOTION_EMOJI[candidate.basic]}</span>
+                    {/* The app's own character, not a system emoji: the OS draws
+                        😣 differently on each phone, so the two people in a couple
+                        were seeing different pictures of the same feeling. */}
+                    <EmotionCharacter emotion={candidate.basic} selected size={20} />
                     <span data-testid={`emotion-chip-label-${candidate.id}`}>{label}</span>
                   </p>
                   {/* WHY the app said this. Display-only: the phrase comes from the

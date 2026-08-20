@@ -1,40 +1,42 @@
--- 047: Let a coarse pain state be sent as an explicit, expiring care signal.
+-- 047: Add one care-signal kind — `feeling_unwell`, "오늘은 몸이 힘들어요".
 --
--- Product decision (Control Tower, 2026-08-20): a person may choose to tell their
--- partner that today hurts. Until now they could not -- `cycle_support_signals`
--- accepted four care requests and nothing about pain, and the standing
--- `get_partner_cycle_projection()` window deliberately has no field for it.
+-- Product decision (V1_LAUNCH_DECISIONS_2026-08-20 §5): a person may choose to tell
+-- their partner that today is physically hard. The approved shape is ONE new kind in
+-- the existing care-signal vocabulary — not a graded pain scale. An earlier draft of
+-- this migration shipped `pain_mild`/`pain_moderate`/`pain_severe`; the independent
+-- security review (2026-08-21) returned CHANGES_REQUIRED because that graded
+-- vocabulary mirrors the personal HRK pain levels one-to-one inside a server-visible
+-- `kind` column, and no canonical document approves it. PRODUCT_V3 §21's sentence —
+-- "증상·출혈량·통증·기분·메모는 어떤 설정에서도 공유되지 않는다" — stays true:
+-- `feeling_unwell` is not a pain record, carries no severity, and is never derived
+-- from one.
 --
 -- WHY THIS TABLE AND NOT THE PROJECTION
 --
 -- The projection is a continuous window: flip `share_current_period` on and the
 -- partner sees the value on every load, derived from the owner's raw tables under
 -- SECURITY DEFINER. That is the right shape for "am I on my period" and the wrong
--- shape for pain, which is a moment and the most sensitive thing on the screen. A
--- standing toggle would keep publishing it on days nobody thought about it, and
--- widening the projection would mean the RPC reading `cycle_daily_logs.pain_level`
--- directly -- exactly the coupling that must not exist.
+-- shape for a bad day, which is a moment. A standing toggle would keep publishing it
+-- on days nobody thought about it, and widening the projection would mean the RPC
+-- reading `cycle_daily_logs` directly — exactly the coupling that must not exist.
 --
 -- This table already has the four properties an explicit disclosure needs, and has
 -- had them since 014: one row per deliberate act, `shared_for_date` chosen by the
 -- owner, `expires_at` defaulting a day out, and `revoked_at` for taking it back.
--- So the change is a wider vocabulary and nothing else.
+-- So the change is one more vocabulary value and nothing else.
 --
 -- WHAT THIS MIGRATION DOES NOT DO
 --
--- No column is added. No RLS policy is written, altered or relaxed -- the existing
+-- No column is added. No RLS policy is written, altered or relaxed — the existing
 -- couple-scoped policies from 014 already govern who may insert, read and revoke a
 -- row here, and a new `kind` value inherits them unchanged. No function is created
--- or replaced. No projection RPC is touched. `cycle_daily_logs.pain_level` is not
--- read by anything this migration adds, and nothing here can copy it: the server
--- never derives a signal, the client writes one only from an explicit press.
---
--- The three values are buckets, not a scale. There is no numeric column, so the
--- partner learns that today is hard and cannot reconstruct a health record from it.
+-- or replaced. No projection RPC is touched. `cycle_daily_logs` is not read by
+-- anything this migration adds, and nothing here can copy it: the server never
+-- derives a signal, the client writes one only from an explicit press.
 --
 -- Reversible: the DOWN direction at the bottom restores the 014 vocabulary. It will
--- fail if pain rows exist, which is correct -- silently deleting a person's
--- disclosures to satisfy a constraint would be worse than refusing.
+-- fail if `feeling_unwell` rows exist, which is correct — silently deleting a
+-- person's disclosures to satisfy a constraint would be worse than refusing.
 
 BEGIN;
 
@@ -68,27 +70,25 @@ ALTER TABLE public.cycle_support_signals
       'need_space',
       'would_like_support',
       'check_in_later',
-      -- Coarse pain, added 2026-08-20. Buckets, never a number.
-      'pain_mild',
-      'pain_moderate',
-      'pain_severe'
+      -- Added 2026-08-21. One kind, no grade: "오늘은 몸이 힘들어요."
+      'feeling_unwell'
     )
   );
 
 COMMENT ON COLUMN public.cycle_support_signals.kind IS
-  'Explicit opt-in care request or coarse pain bucket. Never derived from cycle_daily_logs; written only from a deliberate user action, and expiring/revocable like every other signal.';
+  'Explicit opt-in care request. Never derived from cycle_daily_logs; written only from a deliberate user action, and expiring/revocable like every other signal. Deliberately carries no pain grade.';
 
 COMMIT;
 
 -- ---------------------------------------------------------------------------
 -- DOWN (manual, not run by the migration runner)
 -- ---------------------------------------------------------------------------
--- Refuses rather than destroys if anyone has already shared pain. Run the SELECT
--- first; if it returns rows, decide deliberately what happens to them.
+-- Refuses rather than destroys if anyone has already shared the new kind. Run the
+-- SELECT first; if it returns rows, decide deliberately what happens to them.
 --
 --   SELECT id, owner_id, shared_for_date
 --     FROM public.cycle_support_signals
---    WHERE kind LIKE 'pain_%';
+--    WHERE kind = 'feeling_unwell';
 --
 --   BEGIN;
 --   ALTER TABLE public.cycle_support_signals

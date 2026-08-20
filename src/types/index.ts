@@ -348,57 +348,28 @@ export interface CycleEntry {
   symptoms: CycleSymptom[];
 }
 
+/**
+ * The care-signal vocabulary. One row per deliberate act (migration 014), with
+ * `shared_for_date` chosen by the owner, `expires_at` a day out, `revoked_at` for
+ * taking it back.
+ *
+ * `feeling_unwell` ("오늘은 몸이 힘들어요") is the one body-state kind, added
+ * 2026-08-21 per V1_LAUNCH_DECISIONS §5. It is deliberately a single ungraded
+ * value: an earlier draft carried `pain_mild`/`pain_moderate`/`pain_severe`, and
+ * the independent security review refused it — a graded scale mirrors the personal
+ * HRK pain levels inside a server-visible `kind` column, which PRODUCT_V3 §21
+ * forbids sharing under any setting. The signal says today is hard; it never says
+ * how much, and it is never derived from `CycleDailyLog.painLevel`.
+ */
 export const CYCLE_SUPPORT_KINDS = [
   'resting',
   'need_space',
   'would_like_support',
   'check_in_later',
+  'feeling_unwell',
 ] as const;
 
 export type CycleSupportKind = (typeof CYCLE_SUPPORT_KINDS)[number];
-
-/**
- * Coarse pain states a person may CHOOSE to send their partner.
- *
- * ## Why these live on the signal and not on the projection
- *
- * `CyclePartnerProjection` is a standing window: once a toggle is on, the partner
- * sees the value continuously, derived from the owner's raw tables by an RPC. That
- * is the right shape for "am I on my period" and the wrong shape for pain. Pain is
- * a moment, it is the most sensitive thing on this screen, and a standing toggle
- * would keep publishing it on days nobody thought about it.
- *
- * `CycleSupportSignal` is already the opposite shape and has been since migration
- * 014: one row per deliberate act, `shared_for_date` chosen by the owner,
- * `expires_at` defaulting to a day out, `revoked_at` for taking it back. Pain
- * sharing needs exactly those four properties, so it reuses them rather than
- * growing a fifth mechanism.
- *
- * ## What is NOT here
- *
- * There is no numeric scale, no free-text, no daily-log id and no date beyond the
- * one the owner picked. Three buckets and nothing else -- the partner learns that
- * today is hard, which is the entire point, and learns nothing that would let them
- * reconstruct a health record.
- *
- * ## The rule that makes this safe
- *
- * `CycleDailyLog.painLevel` is PERSONAL and is never read to produce one of these.
- * The two are deliberately different vocabularies -- `mild`/`moderate`/`severe`
- * against `pain_mild`/`pain_moderate`/`pain_severe` -- so no assignment between
- * them typechecks, and copying one to the other has to be written out on purpose
- * where a reviewer can see it.
- */
-export const CYCLE_PAIN_SHARE_KINDS = [
-  'pain_mild',
-  'pain_moderate',
-  'pain_severe',
-] as const;
-
-export type CyclePainShareKind = (typeof CYCLE_PAIN_SHARE_KINDS)[number];
-
-/** Everything `cycle_support_signals.kind` may hold. */
-export type CycleSignalKind = CycleSupportKind | CyclePainShareKind;
 
 /**
  * "이따 이야기하기" — a metadata-only flag that a shared record is worth
@@ -422,8 +393,7 @@ export interface CycleSupportSignal {
   id: string;
   coupleId: string;
   ownerId: string;
-  /** A care request or a coarse pain state. Never anything with a number in it. */
-  kind: CycleSignalKind;
+  kind: CycleSupportKind;
   message?: string;
   sharedForDate: string; // YYYY-MM-DD, explicitly selected by the owner
   expiresAt: string;

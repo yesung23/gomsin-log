@@ -227,6 +227,69 @@ describe('the app never decides the feeling', () => {
   });
 });
 
+/**
+ * The second ask.
+ *
+ * The composer asks about a feeling when composition settles. Someone who writes
+ * and saves in one motion never answers it, and an unanswered reading is
+ * correctly never stored -- so before this the fast path ended with no feeling on
+ * the record and nowhere left to add one. Asking again here, where re-reading the
+ * entry makes it easy to answer, closes that without ever storing a guess.
+ *
+ * The reading is computed by the CALLER and arrives as a prop, which is what lets
+ * the import guard above stay true: this surface still cannot produce a feeling.
+ */
+describe('a record with no answered feeling asks once more', () => {
+  const suggestion = [item({ sequence: 1, basic: 'anger', group: 'anger', source: 'rule_suggested' })];
+
+  it('offers the reading as a question, not as an answer', () => {
+    render(<RecordMoodSection items={[]} suggested={suggestion} onChange={() => true} />);
+    expect(screen.getByTestId('record-mood-suggestion')).toBeTruthy();
+    expect(screen.getByText('이렇게 느꼈나요?')).toBeTruthy();
+    // Still nothing chosen: the picker below must not pre-select the guess.
+    expect(selectedOption()).toBeNull();
+  });
+
+  it('writes it only when pressed, and as the author\'s own answer', async () => {
+    const onChange = vi.fn(() => true);
+    render(<RecordMoodSection items={[]} suggested={suggestion} onChange={onChange} />);
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('record-mood-suggestion-confirm'));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    const written = onChange.mock.calls[0][0] as unknown as EmotionFlowItem[];
+    expect(written).toHaveLength(1);
+    expect(written[0].source).toBe('user_confirmed');
+    expect(written[0].basic).toBe('anger');
+  });
+
+  it('confirming is not sharing -- §13 keeps those two decisions apart', () => {
+    const onChange = vi.fn(() => true);
+    render(<RecordMoodSection items={[]} suggested={suggestion} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId('record-mood-suggestion-confirm'));
+    const written = onChange.mock.calls[0][0] as unknown as EmotionFlowItem[];
+    expect(written[0].visibility).toBe('author_only');
+  });
+
+  it('is withheld once something is answered, because the question is settled', () => {
+    render(
+      <RecordMoodSection
+        items={[item({ sequence: 1, basic: 'happiness' })]}
+        suggested={suggestion}
+        onChange={() => true}
+      />,
+    );
+    expect(screen.queryByTestId('record-mood-suggestion')).toBeNull();
+  });
+
+  it('says the plain thing when there is no reading to offer', () => {
+    render(<RecordMoodSection items={[]} onChange={() => true} />);
+    expect(screen.queryByTestId('record-mood-suggestion')).toBeNull();
+    expect(screen.getByText('이 기록에는 아직 마음이 없어요. 눌러서 골라 주세요.')).toBeTruthy();
+  });
+});
+
 function readSource(): string {
   return readFileSync(
     resolve(process.cwd(), 'src/components/emotion/RecordMoodSection.tsx'),

@@ -47,6 +47,20 @@ export interface RecordMoodSectionProps {
   items: EmotionFlowItem[];
   /** Persist a changed flow. Returning false leaves the previous selection shown. */
   onChange: (next: EmotionFlowItem[]) => Promise<boolean> | boolean;
+  /**
+   * What the app reads in this record's own text, offered again here.
+   *
+   * The composer asks once, at the composition boundary. Someone who writes and
+   * saves in one motion never answers it, and since an unanswered reading is
+   * correctly never stored, that path used to end with no feeling on the record
+   * and no second chance to add one -- the question was asked while the user was
+   * still typing and then never again.
+   *
+   * So the record asks a second time, where re-reading the entry makes it easy to
+   * answer. Still a suggestion: it is drawn unselected, nothing is written until a
+   * press, and it is withheld entirely once anything is confirmed.
+   */
+  suggested?: EmotionFlowItem[];
   /** Author-only surface; the caller gates on ownership. */
   disabled?: boolean;
   disabledReason?: string;
@@ -74,11 +88,14 @@ function newItem(basic: BasicEmotion, sequence: number): EmotionFlowItem {
 export function RecordMoodSection({
   items,
   onChange,
+  suggested,
   disabled = false,
   disabledReason,
 }: RecordMoodSectionProps) {
   const confirmed = items.filter((item) => item.source === 'user_confirmed');
   const ordered = [...confirmed].sort((a, b) => a.sequence - b.sequence);
+  /** Offered only when nothing has been answered; an answer replaces the question. */
+  const offer = ordered.length === 0 ? (suggested ?? []) : [];
 
   /** Which item in the sequence the picker is editing. Defaults to the last. */
   const [editingSequence, setEditingSequence] = useState<number | null>(null);
@@ -123,9 +140,59 @@ export function RecordMoodSection({
 
       <p className="text-caption text-muted-foreground leading-tight">
         {ordered.length === 0
-          ? '이 기록에는 아직 마음이 없어요. 눌러서 골라 주세요.'
+          ? offer.length > 0
+            ? '글에서 읽어본 거예요. 눌러서 확인해야 저장돼요.'
+            : '이 기록에는 아직 마음이 없어요. 눌러서 골라 주세요.'
           : '다르면 눌러서 바꿀 수 있어요.'}
       </p>
+
+      {/*
+        The second ask.
+
+        Drawn UNSELECTED and labelled as a reading, so it never looks like an
+        answer already given -- the whole point of `rule_suggested` is that the
+        app has not been told this is right. One press writes it, and the block
+        disappears because there is then something confirmed to show instead.
+      */}
+      {offer.length > 0 && (
+        <div
+          data-testid="record-mood-suggestion"
+          className="rounded-control border border-dashed border-border bg-card/60 p-2.5 space-y-2"
+        >
+          <div className="flex items-center gap-2">
+            {offer.map((item, index) => (
+              <span key={item.id ?? index} className="flex items-center gap-1">
+                {index > 0 && (
+                  <span className="text-caption text-muted-foreground" aria-hidden="true">→</span>
+                )}
+                <EmotionCharacter emotion={basicEmotionOf(item)} size={26} />
+                <span className="text-caption text-muted-foreground">
+                  {BASIC_EMOTION_LABEL[basicEmotionOf(item)]}
+                </span>
+              </span>
+            ))}
+            <span className="text-label font-bold text-foreground ml-0.5">이렇게 느꼈나요?</span>
+          </div>
+          <button
+            type="button"
+            disabled={disabled}
+            data-testid="record-mood-suggestion-confirm"
+            onClick={() => void onChange(
+              offer.map((item, index) => ({
+                ...item,
+                sequence: index + 1,
+                source: 'user_confirmed' as const,
+                // Confirming a reading is not sharing it. §13 keeps those separate,
+                // and the sharing decision belongs to the composer, not to this tap.
+                visibility: 'author_only' as const,
+              })),
+            )}
+            className="press-response-row w-full min-h-11 rounded-control border border-coral/40 bg-coral/10 text-label font-bold text-coral-strong disabled:opacity-50"
+          >
+            맞아요
+          </button>
+        </div>
+      )}
 
       {/*
         The sequence, shown only when there is more than one feeling. With a single

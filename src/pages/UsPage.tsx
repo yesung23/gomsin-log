@@ -1,38 +1,29 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
+import { visibleRecordsForViewer } from '@/lib/privacy';
+import { buildMonthTexture, monthsWithContent } from '@/features/us/monthTexture';
+import { MonthGrid } from '@/features/us/MonthGrid';
 import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { AppBar } from '@/components/ui/AppBar';
-import { Heart, CalendarDays, Plane, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
+import { Heart, CalendarDays, Plane, ChevronRight, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { cn, toLocalDateString, localToday, daysBetweenLocal } from '@/lib/utils';
+import { toLocalDateString, localToday, daysBetweenLocal } from '@/lib/utils';
 
-function buildCalendarGrid(year: number, month: number) {
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const startDow = firstDay.getDay(); 
-  const totalDays = lastDay.getDate();
+/*
+  `buildCalendarGrid` and `WEEKDAYS` used to live here.
 
-  const cells: { date: Date; inMonth: boolean }[] = [];
-  for (let i = startDow - 1; i >= 0; i--) {
-    cells.push({ date: new Date(year, month, -i), inMonth: false });
-  }
-  for (let d = 1; d <= totalDays; d++) {
-    cells.push({ date: new Date(year, month, d), inMonth: true });
-  }
-  const remainder = cells.length % 7;
-  if (remainder > 0) {
-    const fill = 7 - remainder;
-    for (let i = 1; i <= fill; i++) {
-      cells.push({ date: new Date(year, month + 1, i), inMonth: false });
-    }
-  }
-  return cells;
-}
+  우리 rendered a weekday-aligned month calendar that showed events and trips and
+  nothing else -- so the screen meant to hold everything this couple has built
+  showed neither their records nor their photographs, and duplicated the calendar
+  `SchedulePage` already owns.
 
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+  일정 owns the future and therefore the calendar. 우리 owns the past, and its grid
+  is a texture (`features/us/monthTexture.ts`): one cell per day, packed in date
+  order, never weekday-aligned.
+*/
 
 export function UsPage() {
   const { state, coupleLifecycle } = useStore();
@@ -47,46 +38,71 @@ export function UsPage() {
    * `기념일 미설정` in that case; this surface now agrees with it.
    */
   const anniversaryDate = state.profile.couple.anniversaryDate || undefined;
-  const trips = state.trips || [];
-  const events = state.events || [];
+  /*
+    Memoised because they feed `useMemo` dependency lists below. `state.trips || []`
+    allocates a fresh array on every render, so the texture for every visible month
+    was being rebuilt on each one -- lint caught it, and at three months of cells
+    that is real work.
+  */
+  const trips = useMemo(() => state.trips || [], [state.trips]);
+  const events = useMemo(() => state.events || [], [state.events]);
 
   const today = localToday();
-  const [viewYear, setViewYear] = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth());
-
-  const calendarCells = useMemo(() => buildCalendarGrid(viewYear, viewMonth), [viewYear, viewMonth]);
   const todayStr = toLocalDateString(today);
 
   const diffDays = anniversaryDate
     ? daysBetweenLocal(anniversaryDate, todayStr) + 1
     : null;
 
-  const goToPrevMonth = () => {
-    if (viewMonth === 0) {
-      setViewYear((y) => y - 1);
-      setViewMonth(11);
-    } else {
-      setViewMonth((m) => m - 1);
-    }
-  };
+  /**
+   * What this viewer may see. Not re-implemented here and never to be: this is
+   * the function that keeps a private record and an author-only feeling out of a
+   * partner's client, and a second copy of that rule is a second place for it to
+   * go wrong.
+   */
+  const viewer = useMemo(
+    () => ({ userId: state.profile.id, role: state.profile.role }),
+    [state.profile.id, state.profile.role],
+  );
+  const visibleRecords = useMemo(
+    () => visibleRecordsForViewer(state.records || [], viewer),
+    [state.records, viewer],
+  );
 
-  const goToNextMonth = () => {
-    if (viewMonth === 11) {
-      setViewYear((y) => y + 1);
-      setViewMonth(0);
-    } else {
-      setViewMonth((m) => m + 1);
-    }
-  };
+  const months = useMemo(
+    () => monthsWithContent({
+      records: visibleRecords,
+      events,
+      trips,
+      today: todayStr,
+      anniversary: anniversaryDate,
+    }),
+    [visibleRecords, events, trips, todayStr, anniversaryDate],
+  );
 
-  const hasEventOrTrip = (dateStr: string) => {
-    const hasEvent = events.some(e => {
-      const eventEndDate = e.endDate || e.startDate;
-      return e.startDate <= dateStr && eventEndDate >= dateStr;
-    });
-    const hasTrip = trips.some(t => t.startDate <= dateStr && t.endDate >= dateStr);
-    return { hasEvent, hasTrip };
-  };
+  /**
+   * How many months are drawn.
+   *
+   * Three to start, because a phone shows about that much before the fold and a
+   * relationship two years old would otherwise mount seven hundred cells to
+   * render the twenty a person is about to look at.
+   */
+  const [visibleMonthCount, setVisibleMonthCount] = useState(3);
+  const shownMonths = useMemo(
+    () => months.slice(0, visibleMonthCount).map((m) => buildMonthTexture({
+      year: m.year,
+      month: m.month,
+      records: visibleRecords,
+      events,
+      trips,
+      today: todayStr,
+      anniversary: anniversaryDate,
+    })),
+    [months, visibleMonthCount, visibleRecords, events, trips, todayStr, anniversaryDate],
+  );
+
+  /** A day leads to that day's records. The exact ones, never an approximation. */
+  const openDay = (date: string) => navigate(`/record?date=${date}`);
 
   return (
     <MobileShell>
@@ -169,60 +185,53 @@ export function UsPage() {
 
         <CoupleStatusBanner />
 
-        {/* Calendar UI */}
-        <section className="rounded-surface bg-card border border-border overflow-hidden p-4">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <button onClick={goToPrevMonth} className="press-response p-2 rounded-control hover:bg-muted min-h-[44px] min-w-[44px]" aria-label="이전 달">
-              <ChevronLeft size={18} />
-            </button>
-            <h2 className="text-heading text-foreground">
-              {viewYear}년 {viewMonth + 1}월
-            </h2>
-            <button onClick={goToNextMonth} className="press-response p-2 rounded-control hover:bg-muted min-h-[44px] min-w-[44px]" aria-label="다음 달">
-              <ChevronRight size={18} />
-            </button>
-          </div>
+        {/*
+          The months, newest first.
 
-          <div className="grid grid-cols-7 border-b border-border/40 pb-2 mb-2">
-            {WEEKDAYS.map((day, i) => (
-              <div key={day} className={cn("text-center text-caption font-bold", i === 0 ? 'text-destructive' : i === 6 ? 'text-info' : 'text-muted-foreground')}>
-                {day}
+          This replaced a weekday-aligned calendar that showed only events and
+          trips -- so the screen holding everything this couple has built showed
+          neither their records nor their photographs, and duplicated the calendar
+          `SchedulePage` owns. 일정 owns the future and the calendar grammar with
+          it; 우리 owns the past, and the past is a texture.
+        */}
+        <section className="space-y-5" aria-label="달마다 쌓인 기록">
+          {shownMonths.map((month) => (
+            <div key={month.key} className="space-y-2">
+              <div className="flex items-baseline justify-between gap-2 px-1">
+                <h3 className="text-heading text-foreground">
+                  {month.year}년 {month.month}월
+                </h3>
+                {month.recordCount > 0 && (
+                  <p className="text-caption text-muted-foreground tabular-nums">
+                    기록 {month.recordCount}
+                    {month.photoCount > 0 && ` · 사진 ${month.photoCount}`}
+                    {/*
+                      Days BOTH of them wrote. The most meaningful number this
+                      relationship produces, and the one a count of records alone
+                      cannot say.
+                    */}
+                    {month.togetherCount > 0 && ` · 함께 ${month.togetherCount}일`}
+                  </p>
+                )}
               </div>
-            ))}
-          </div>
 
-          <div className="grid grid-cols-7 gap-y-2">
-            {calendarCells.map((cell, idx) => {
-              const dateStr = toLocalDateString(cell.date);
-              const isToday = dateStr === todayStr;
-              const dow = cell.date.getDay();
-              const { hasEvent, hasTrip } = hasEventOrTrip(dateStr);
+              <MonthGrid
+                data={month}
+                coupleId={state.profile.couple.coupleId || undefined}
+                onOpenDay={openDay}
+              />
+            </div>
+          ))}
 
-              return (
-                <div key={idx} className={cn('relative flex flex-col items-center justify-start h-10', !cell.inMonth && 'opacity-30')}>
-                  <span className={cn(
-                    'text-label font-semibold leading-none w-6 h-6 flex items-center justify-center rounded-full',
-                    isToday ? 'bg-coral-strong text-coral-strong-foreground' : '',
-                    !isToday && dow === 0 ? 'text-destructive' : '',
-                    !isToday && dow === 6 ? 'text-info' : '',
-                    !isToday && cell.inMonth && dow !== 0 && dow !== 6 ? 'text-foreground' : ''
-                  )}>
-                    {cell.date.getDate()}
-                  </span>
-                  
-                  <div className="flex gap-1 mt-1">
-                    {hasTrip && <span className="w-1.5 h-1.5 rounded-full bg-info" />}
-                    {hasEvent && <span className="w-1.5 h-1.5 rounded-full bg-coral" />}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          
-          <div className="flex justify-end gap-3 mt-4 text-caption font-bold text-muted-foreground px-2">
-            <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-info" />여행</div>
-            <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-coral" />일정</div>
-          </div>
+          {visibleMonthCount < months.length && (
+            <button
+              type="button"
+              onClick={() => setVisibleMonthCount((count) => count + 6)}
+              className="press-response-row w-full min-h-11 rounded-control border border-border bg-card text-label font-bold text-foreground"
+            >
+              이전 달 더 보기
+            </button>
+          )}
         </section>
 
         {/* Travel Planner & Events */}

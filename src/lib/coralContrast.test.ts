@@ -96,12 +96,13 @@ const DECORATIVE_CORAL_FILLS: Array<{ file: string; anchor: string; occurrences:
       + 'so no text is ever laid over this surface.',
   },
   {
-    file: 'src/pages/UsPage.tsx',
-    anchor: 'w-1.5 h-1.5 rounded-full bg-coral',
-    occurrences: 2,
-    reason: 'Schedule marker dot under a calendar day and the same dot in the '
-      + 'legend below the grid. Both sit on the page surface, outside the day '
-      + 'cell that can be filled.',
+    file: 'src/features/us/MonthGrid.tsx',
+    anchor: 'rounded-full bg-coral',
+    occurrences: 1,
+    reason: 'Activity dot inside a day cell of the 우리 texture. It replaced the '
+      + 'two calendar dots that used to live in UsPage, and like those it carries '
+      + 'no text -- the day number sits above it, on the cell surface rather than '
+      + 'on the dot.',
   },
 ];
 

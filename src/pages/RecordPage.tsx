@@ -84,7 +84,7 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 
 export function RecordPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     state,
     setHighlightedRecordId,
@@ -139,7 +139,18 @@ export function RecordPage() {
    * cannot be removed by any widget-layout choice because it lives on this
    * page, not in the widget system.
    */
-  const [showComposer, setShowComposer] = useState(false);
+  /**
+   * Open with the composer already up when arrived at from the shell's compose
+   * button, so writing from any tab is ONE tap rather than "go to 기록, then
+   * find the button". PRODUCT_V3 §7.1 wants 30 seconds end to end, and three of
+   * those were being spent on navigation.
+   *
+   * Read from the URL rather than from router state so the entry is addressable
+   * -- §7.5 asks the same of a record, and for the same reason: a target that
+   * only exists in volatile app state cannot be reached by a reload, a deep link
+   * or a notification.
+   */
+  const [showComposer, setShowComposer] = useState(() => searchParams.get('compose') === '1');
 
   const closeSelectedRecord = useCallback(() => {
     setSelectedRecordId(null);
@@ -147,8 +158,25 @@ export function RecordPage() {
     setEditText('');
     setShowDeleteConfirm(false);
   }, []);
+
+  /**
+   * Close the composer AND drop `?compose=1`.
+   *
+   * Without the second half the flag outlives the sheet: closing it left the URL
+   * still saying the composer is open, so a reload -- or Back from a record the
+   * user opened next -- reopened it over the timeline they had gone there to read.
+   */
+  const closeComposer = useCallback(() => {
+    setShowComposer(false);
+    if (searchParams.get('compose') === '1') {
+      const next = new URLSearchParams(searchParams);
+      next.delete('compose');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
-  useEscapeKey(() => setShowComposer(false), showComposer);
+  useEscapeKey(closeComposer, showComposer);
 
   /*
     Drag-to-dismiss for the two sheets on this screen.
@@ -163,7 +191,7 @@ export function RecordPage() {
     user unsure whether they had just deleted a record.
   */
   const composerSheet = useSheetDrag({
-    onDismiss: () => setShowComposer(false),
+    onDismiss: closeComposer,
     enabled: !isSaving,
   });
   const detailSheet = useSheetDrag({
@@ -1084,7 +1112,7 @@ export function RecordPage() {
             className="shadow-md"
           >
             <span aria-hidden="true">+</span>
-            <span>지금의 마음 남기기</span>
+            <span>기록 남기기</span>
           </Button>
         </div>
       )}
@@ -1100,7 +1128,7 @@ export function RecordPage() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="지금의 마음 남기기"
+            aria-label="기록 남기기"
             ref={composerSheet.sheetRef}
             className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-4 shadow-xl max-h-[90vh] overflow-y-auto"
           >
@@ -1108,14 +1136,14 @@ export function RecordPage() {
             <div className="flex justify-end mb-1">
               <button
                 type="button"
-                onClick={() => setShowComposer(false)}
+                onClick={closeComposer}
                 aria-label="닫기"
                 className="press-response min-h-11 min-w-11 flex items-center justify-center text-muted-foreground"
               >
                 <X size={18} aria-hidden="true" />
               </button>
             </div>
-            <TodayLogWidget onSaved={() => setShowComposer(false)} />
+            <TodayLogWidget onSaved={closeComposer} />
           </div>
         </div>
       )}

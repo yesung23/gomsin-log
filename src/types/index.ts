@@ -461,21 +461,6 @@ export interface AppState {
   soldierWidgetLayout: string[];
   hasSeenInstallPrompt: boolean;
   theme: 'light' | 'dark';
-  /**
-   * Which shape the home screen takes. A device preference, exactly like `theme`.
-   *
-   * `widgets` is the arrangeable dashboard. `conversation` renders the same shared
-   * records as a running exchange, oldest first, the way people already catch up
-   * on a backlog -- which is what the partner with the scarce phone window is
-   * actually doing when they open the app.
-   *
-   * It is a PRESENTATION, not a feature. There is no message table, no send path
-   * and no delivery state behind it: every bubble is a `DailyRecord` that already
-   * existed, and the bottom bar is the same 기록 남기기 action as everywhere else.
-   * PRODUCT_V3 §12.1 freezes in-app chat for V1, and drawing existing records in a
-   * familiar shape is not unfreezing it.
-   */
-  homeStyle: 'widgets' | 'conversation';
 }
 
 export interface AuthUser {

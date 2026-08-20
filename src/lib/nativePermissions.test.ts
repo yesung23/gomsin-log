@@ -78,7 +78,7 @@ describe('microphoneUnsupportedMessage', () => {
 });
 
 describe('MICROPHONE_RATIONALE', () => {
-  it('is the in-app justification for RECORD_AUDIO / NSMicrophoneUsageDescription', () => {
+  it('remains the parked in-app justification for the mic permissions P6 will re-declare', () => {
     expect(MICROPHONE_RATIONALE).toContain('마이크');
     expect(MICROPHONE_RATIONALE).toContain('음성');
   });

@@ -93,18 +93,14 @@
             Normal (install-time) permission: no runtime prompt, no user-visible
             dialog, no data leaves the device because of it.
 
-        RECORD_AUDIO + MODIFY_AUDIO_SETTINGS
-            src/components/widgets/TodayLogWidget.tsx calls
-            navigator.mediaDevices.getUserMedia({ audio: true }) and feeds it to
-            MediaRecorder (the web capture path, not a Capacitor plugin). In a
-            WebView that surfaces as WebChromeClient.onPermissionRequest with
-            RESOURCE_AUDIO_CAPTURE. Capacitor's BridgeWebChromeClient already
-            implements that callback (node_modules/@capacitor/android/capacitor/
-            src/main/java/com/getcapacitor/BridgeWebChromeClient.java:102-124)
-            and requests BOTH RECORD_AUDIO and MODIFY_AUDIO_SETTINGS before it
-            calls request.grant(). An undeclared runtime permission is denied
-            without ever prompting, so both must be declared here or voice
-            recording fails silently.
+        NOT declared since 2026-08-21: RECORD_AUDIO + MODIFY_AUDIO_SETTINGS
+            The voice recorder left the composer with the PRODUCT_V3 §12.4
+            upload gate (photo-only until the P6 encrypted media foundation), so
+            no code calls getUserMedia({ audio }) any more. A declared
+            microphone permission with no feature behind it is exactly what a
+            store reviewer and a privacy audit flag; both return together when
+            P6 re-admits voice, alongside src/lib/nativePermissions.ts, which
+            keeps the rationale copy parked for that day.
 
         NOT declared: android.permission.CAMERA
             TodayLogWidget's "지금찍기" button sets capture="environment" on the
@@ -124,6 +120,4 @@
     -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 </manifest>

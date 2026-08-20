@@ -121,7 +121,7 @@ describe('the deep-link scheme agrees everywhere it is registered', () => {
   it('iOS registers the one scheme and nothing else', () => {
     const urlTypes = infoPlist.slice(
       infoPlist.indexOf('<key>CFBundleURLTypes</key>'),
-      infoPlist.indexOf('<key>NSMicrophoneUsageDescription</key>'),
+      infoPlist.indexOf('<key>NSCameraUsageDescription</key>'),
     );
     const schemes = [...urlTypes.matchAll(/<string>([^<]+)<\/string>/g)].map((m) => m[1]);
     expect(schemes).toContain('gomsinlog');
@@ -242,12 +242,14 @@ describe('Android: the permission set is exactly what the code proves', () => {
     (m) => m[1],
   );
 
-  it('declares INTERNET plus the two the WebView needs for RECORD_AUDIO', () => {
+  it('declares INTERNET and ACCESS_NETWORK_STATE, and nothing else', () => {
+    // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS left with the voice recorder
+    // (§12.4 upload gate, 2026-08-21): no code calls getUserMedia({ audio }),
+    // and a microphone permission with no feature behind it is a review flag.
+    // They return together when P6 re-admits voice.
     expect([...declared].sort()).toEqual([
       'android.permission.ACCESS_NETWORK_STATE',
       'android.permission.INTERNET',
-      'android.permission.MODIFY_AUDIO_SETTINGS',
-      'android.permission.RECORD_AUDIO',
     ]);
   });
 
@@ -288,6 +290,8 @@ describe('Android: the permission set is exactly what the code proves', () => {
   it('declares no contacts, location, tracking, advertising or media permission', () => {
     for (const forbidden of [
       'android.permission.CAMERA',
+      'android.permission.RECORD_AUDIO',
+      'android.permission.MODIFY_AUDIO_SETTINGS',
       'android.permission.ACCESS_FINE_LOCATION',
       'android.permission.ACCESS_COARSE_LOCATION',
       'android.permission.ACCESS_BACKGROUND_LOCATION',
@@ -306,11 +310,16 @@ describe('Android: the permission set is exactly what the code proves', () => {
     }
   });
 
-  it('RECORD_AUDIO is paired with an in-app Korean rationale, not just a manifest line', () => {
+  it('keeps the microphone rationale parked, not wired: no recorder, no permission, no dangling UI', () => {
+    // The rationale module survives for P6 (the copy problem it solves returns
+    // unchanged), but nothing in the product may reference it while nothing
+    // records -- a microphone explanation without a microphone feature is
+    // itself misleading UI.
     const rationale = read('src/lib/nativePermissions.ts');
     expect(rationale).toContain('MICROPHONE_RATIONALE');
-    expect(rationale).toMatch(/[\uAC00-\uD7A3]/);
-    expect(read('src/components/widgets/TodayLogWidget.tsx')).toContain('MICROPHONE_RATIONALE');
+    expect(rationale).toContain('PARKED');
+    expect(read('src/components/widgets/TodayLogWidget.tsx')).not.toContain('MICROPHONE_RATIONALE');
+    expect(read('src/components/widgets/TodayLogWidget.tsx')).not.toContain('getUserMedia');
   });
 
   it('every component declares android:exported explicitly', () => {
@@ -387,13 +396,17 @@ describe('iOS: bundle identity, ATS and usage descriptions', () => {
     expect(infoPlist).not.toContain('NSExceptionAllowsInsecureHTTPLoads');
   });
 
-  it('asks for the microphone in Korean and for nothing it does not use', () => {
-    const microphone = plistString(infoPlist, 'NSMicrophoneUsageDescription');
-    expect(microphone).toBeTruthy();
-    expect(microphone!).toMatch(/[\uAC00-\uD7A3]/);
-    expect(microphone!.length).toBeGreaterThan(20);
+  it('asks for the camera in Korean and for nothing it does not use', () => {
+    // NSMicrophoneUsageDescription left with the voice recorder (§12.4 gate,
+    // 2026-08-21): nothing calls getUserMedia({ audio }), so the mic string is
+    // now in the not-used list below and returns only with P6 voice.
+    const camera = plistString(infoPlist, 'NSCameraUsageDescription');
+    expect(camera).toBeTruthy();
+    expect(camera!).toMatch(/[\uAC00-\uD7A3]/);
+    expect(camera!.length).toBeGreaterThan(20);
 
     for (const key of [
+      'NSMicrophoneUsageDescription',
       'NSPhotoLibraryUsageDescription',
       'NSPhotoLibraryAddUsageDescription',
       'NSUserTrackingUsageDescription',

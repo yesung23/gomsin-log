@@ -3,6 +3,14 @@ import { isNativePlatform } from '@/lib/platform';
 /**
  * Copy for the OS permissions the media paths need.
  *
+ * PARKED SINCE 2026-08-21: nothing in the product currently records. The voice
+ * recorder left the composer with the §12.4 upload gate (photo-only until the
+ * P6 encrypted media foundation), so these strings have no caller and the
+ * microphone permissions were removed from both manifests. The module stays
+ * because the copy problem it solves — web says "browser settings", native says
+ * "system settings" — returns unchanged when P6 re-admits voice, and re-deriving
+ * these sentences then would lose the reasoning below.
+ *
  * The same bundle runs as a PWA and inside the two Capacitor shells, and the
  * remedy a user has to perform is different in each: a browser has a site
  * permission panel, a native app has an entry in the system settings app.
@@ -10,10 +18,10 @@ import { isNativePlatform } from '@/lib/platform';
  * a screen that does not exist, which is how a recoverable permission denial
  * turns into an abandoned feature.
  *
- * The rationale strings are also the in-app justification for the declared
- * permission: `RECORD_AUDIO` in AndroidManifest.xml and
- * `NSMicrophoneUsageDescription` in Info.plist both promise the mic is used only
- * for voice records, and this is where the app keeps that promise visible.
+ * When voice returns, the rationale strings are the in-app justification for
+ * re-declaring `RECORD_AUDIO` in AndroidManifest.xml and
+ * `NSMicrophoneUsageDescription` in Info.plist: both promise the mic is used
+ * only for voice records, and this is where the app keeps that promise visible.
  */
 
 /**

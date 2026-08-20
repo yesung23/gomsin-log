@@ -615,7 +615,26 @@ export const MAX_BYTES: Record<Attachment['type'], number> = {
   voice: 20 * 1024 * 1024,
 };
 
-export const MEDIA_ACCEPT = Object.keys(MIME_MAP).join(',');
+/**
+ * What a NEW upload may be. Photos only.
+ *
+ * PRODUCT_V3 §12.3 places audio and video after the encrypted media foundation
+ * (P6), and §12.4 forbids a quiet plaintext video path before Full User-Content
+ * E2EE — this is that gate's option C, executed (approved 2026-08-21,
+ * PRODUCT_STRATEGY_REDESIGN §1.4). The gate lives here, in the one classifier
+ * every accept path crosses — pickers, the detail-edit add button, and outbox
+ * replay — so no surface can offer what the app will not upload.
+ *
+ * EXISTING video/voice attachments still render: this constrains uploads, not
+ * reads. `MIME_MAP` keeps the full vocabulary because a refused-by-policy file
+ * deserves a policy message, not "unsupported format". When P6 lands, kinds are
+ * re-admitted here — and only here.
+ */
+const UPLOADABLE_KINDS: ReadonlySet<Attachment['type']> = new Set(['photo']);
+
+export const MEDIA_ACCEPT = Object.keys(MIME_MAP)
+  .filter((mime) => UPLOADABLE_KINDS.has(MIME_MAP[mime].type))
+  .join(',');
 
 export type MediaKind = Attachment['type'];
 
@@ -626,7 +645,10 @@ export function classifyMediaFile(
   // rather than guessing, so we never upload an unclassifiable blob.
   const match = MIME_MAP[file.type?.toLowerCase?.() ?? ''];
   if (!match) {
-    return { error: '지원하지 않는 파일 형식이에요. 사진, 영상 또는 음성 파일을 선택해 주세요.' };
+    return { error: '지원하지 않는 파일 형식이에요. 사진 파일을 선택해 주세요.' };
+  }
+  if (!UPLOADABLE_KINDS.has(match.type)) {
+    return { error: '영상·음성 첨부는 암호화 보관이 준비된 뒤에 열려요. 지금은 사진만 첨부할 수 있어요.' };
   }
   if (file.size <= 0) {
     return { error: '빈 파일은 첨부할 수 없어요.' };

@@ -1444,7 +1444,7 @@ export function RecordPage() {
                         disabled={isMediaBusy || isOffline}
                         className="press-response-row w-full min-h-[44px] rounded-xl border border-dashed border-border text-label font-bold text-muted-foreground disabled:opacity-50"
                       >
-                        {isMediaBusy ? '첨부 처리 중...' : '+ 사진 · 영상 · 음성 추가'}
+                        {isMediaBusy ? '첨부 처리 중...' : '+ 사진 추가'}
                       </button>
                       {isOffline && (
                         <p className="text-caption text-muted-foreground text-center">

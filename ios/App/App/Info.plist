@@ -70,14 +70,12 @@
 		a Korean-speaking user, and specific about what the data is used for:
 		a vague string is a review rejection.
 
-		NSMicrophoneUsageDescription
-			src/components/widgets/TodayLogWidget.tsx calls
-			navigator.mediaDevices.getUserMedia({ audio: true }). In WKWebView
-			that reaches
-			webView(_:requestMediaCapturePermissionFor:initiatedByFrame:type:decisionHandler:),
-			which @capacitor/ios grants
-			(node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift:50-60);
-			the OS still requires this string or the process is terminated.
+		DELIBERATELY ABSENT since 2026-08-21: NSMicrophoneUsageDescription
+			The voice recorder left the composer with the PRODUCT_V3 §12.4
+			upload gate (photo-only until the P6 encrypted media foundation), so
+			nothing calls getUserMedia({ audio }) and a usage string for an
+			unused sensor would itself be a review flag. Returns with voice at
+			P6, alongside the parked rationale in src/lib/nativePermissions.ts.
 
 		NSCameraUsageDescription
 			The "지금찍기" button sets capture="environment" on the file input.
@@ -100,8 +98,6 @@
 			iOS pods it links (@capacitor/ios, @capacitor/app,
 			@capacitor/browser).
 	-->
-	<key>NSMicrophoneUsageDescription</key>
-	<string>음성으로 오늘의 기록을 남길 때에만 마이크를 사용해요. 녹음한 소리는 내 기록에 첨부되고, 공유하지 않으면 상대방에게 전달되지 않아요.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>‘지금찍기’로 오늘의 순간을 바로 촬영할 때에만 카메라를 사용해요. 찍은 사진은 내가 저장을 눌렀을 때만 기록에 첨부돼요.</string>
 

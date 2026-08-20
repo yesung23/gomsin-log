@@ -49,11 +49,7 @@ export function PlanSectionNav({ active }: { active: 'schedule' | 'trips' }) {
             aria-selected={isActive}
             aria-label={item.ariaLabel}
             onClick={() => !isActive && navigate(item.to)}
-            className={`flex-1 min-h-11 rounded-control text-label font-semibold flex items-center justify-center gap-1.5 transition ${
-              isActive
-                ? 'bg-card text-foreground'
-                : 'text-muted-foreground active:scale-95'
-            }`}
+            className={`press-response-row flex-1 min-h-11 rounded-control text-label font-semibold flex items-center justify-center gap-1.5 ${ isActive ? 'bg-card text-foreground' : 'text-muted-foreground active:scale-95' }`}
           >
             <Icon size={14} aria-hidden="true" />
             {item.label}

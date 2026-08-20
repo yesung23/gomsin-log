@@ -807,14 +807,22 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
             type="button"
             onClick={() => setSheet({ kind: 'settings' })}
             aria-label="내 몸의 리듬 설정"
-            className="min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
+            className="press-response min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
           >
             <Settings2 className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
       </header>
 
-      {loadState === 'loading' && (
+      {/*
+        First load only. A refresh keeps the calendar the user is looking at.
+
+        The realtime invalidation re-runs the load and sets `loading` again, which
+        used to swap a month view for this one line and back. `periods.length === 0`
+        makes it a first-load state; the `error` branch below still hides content on
+        a genuine failure, which is a different decision and stays.
+      */}
+      {loadState === 'loading' && periods.length === 0 && (
         <div
           className="py-6 flex items-center justify-center gap-2 text-caption text-muted-foreground"
           role="status"
@@ -834,7 +842,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
             <button
               type="button"
               onClick={() => void load()}
-              className="min-h-11 px-4 rounded-control bg-foreground text-background text-label font-bold"
+              className="press-response min-h-11 px-4 rounded-control bg-foreground text-background text-label font-bold"
             >
               다시 시도
             </button>
@@ -842,7 +850,9 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
         </div>
       )}
 
-      {loadState === 'ready' && (
+      {(loadState === 'ready'
+        // Keep the calendar up through a refresh that already has data.
+        || (loadState === 'loading' && periods.length > 0)) && (
         <>
           <CycleStatusHero
             activePeriod={activePeriod}

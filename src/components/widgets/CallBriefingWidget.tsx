@@ -122,7 +122,7 @@ export function CallBriefingWidget() {
                 <button
                   type="button"
                   onClick={() => openRecord(topic.recordId)}
-                  className="w-full min-h-11 flex items-start gap-2 text-left py-2 active:bg-muted/40 rounded-control transition"
+                  className="press-response-row w-full min-h-11 flex items-start gap-2 text-left py-2 active:bg-muted/40 rounded-control"
                 >
                   <span className="shrink-0 text-caption text-muted-foreground tabular-nums pt-0.5 w-10">
                     {shortDate(topic.date)} {topic.time || ''}
@@ -180,7 +180,7 @@ export function CallBriefingWidget() {
               onClick={() => setShowMore((open) => !open)}
               aria-expanded={showMore}
               aria-controls="call-briefing-more"
-              className="w-full min-h-11 flex items-center justify-center gap-1 text-caption text-muted-foreground"
+              className="press-response-row w-full min-h-11 flex items-center justify-center gap-1 text-caption text-muted-foreground"
             >
               {showMore ? '접기' : '첫마디와 마음 흐름 더 보기'}
               {showMore

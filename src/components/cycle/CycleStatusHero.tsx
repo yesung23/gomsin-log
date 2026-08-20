@@ -130,7 +130,7 @@ export function CycleStatusHero({
           onClick={activePeriod ? onEndPeriod : onStartPeriod}
           disabled={pending}
           className={cn(
-            'w-full min-h-11 py-3 px-4 rounded-full text-label font-bold transition',
+            'press-response-row w-full min-h-11 py-3 px-4 rounded-full text-label font-bold',
             'flex items-center justify-center gap-2 active:scale-98 disabled:opacity-60',
             activePeriod
               ? 'bg-card border border-coral text-coral-strong'

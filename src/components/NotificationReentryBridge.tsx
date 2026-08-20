@@ -50,12 +50,12 @@ export function NotificationReentryBridge() {
       {visibleItems.map((item) => (
         <div key={item.id} className="flex items-center gap-2 rounded-surface border border-border bg-card/95 p-3 shadow-lg backdrop-blur-sm" role="status">
           <Bell size={17} className="shrink-0 text-coral" aria-hidden="true" />
-          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => open(item)}>
+          <button type="button" className="press-response-row min-w-0 flex-1 text-left rounded-control" onClick={() => open(item)}>
             <span className="block text-label font-bold text-foreground">{item.title}</span>
             <span className="block text-caption text-muted-foreground">{item.body}</span>
             <span className="block text-caption text-coral mt-0.5">원본 확인하기</span>
           </button>
-          <button type="button" className="min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground" aria-label="알림 닫기" onClick={() => setItems((current) => current.filter((candidate) => candidate.id !== item.id))}>
+          <button type="button" className="press-response min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground" aria-label="알림 닫기" onClick={() => setItems((current) => current.filter((candidate) => candidate.id !== item.id))}>
             <X size={16} aria-hidden="true" />
           </button>
         </div>

@@ -98,7 +98,7 @@ export function InstallPromptBanner() {
         </div>
         <button
           onClick={handleDismiss}
-          className="text-muted-foreground hover:text-foreground p-1 bg-muted rounded-full active:scale-95 transition"
+          className="press-response text-muted-foreground hover:text-foreground p-1 bg-muted rounded-full"
         >
           <X size={16} />
         </button>

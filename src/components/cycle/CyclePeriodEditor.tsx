@@ -77,7 +77,7 @@ export function CyclePeriodEditor({
                 type="button"
                 onClick={() => setConfirmingDelete(false)}
                 disabled={busy}
-                className="flex-1 min-h-11 rounded-control border border-border text-label font-medium"
+                className="press-response-row flex-1 min-h-11 rounded-control border border-border text-label font-medium"
               >
                 취소
               </button>
@@ -85,7 +85,7 @@ export function CyclePeriodEditor({
                 type="button"
                 onClick={() => onDelete(period)}
                 disabled={busy}
-                className="flex-1 min-h-11 rounded-control bg-destructive text-destructive-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                className="press-response flex-1 min-h-11 rounded-control bg-destructive text-destructive-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
               >
                 {deletePending && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
                 삭제
@@ -99,7 +99,7 @@ export function CyclePeriodEditor({
               onClick={() => setConfirmingDelete(true)}
               disabled={busy}
               aria-label="이 생리 기록 삭제"
-              className="min-h-11 px-3 rounded-control border border-destructive/30 text-destructive disabled:opacity-50 flex items-center justify-center"
+              className="press-response min-h-11 px-3 rounded-control border border-destructive/30 text-destructive disabled:opacity-50 flex items-center justify-center"
             >
               <Trash2 className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -108,7 +108,7 @@ export function CyclePeriodEditor({
               onClick={() => onSave(draft)}
               disabled={busy}
               aria-label="생리 기간 저장"
-              className="flex-1 min-h-11 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+              className="press-response flex-1 min-h-11 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
               {pending && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
               {pending ? '저장 중' : '저장'}

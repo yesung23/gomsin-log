@@ -54,7 +54,7 @@ const WidgetCard = ({
         type="button"
         onClick={onClick}
         aria-label={ariaLabel || title}
-        className="w-full text-left bg-card p-4 rounded-2xl border border-border shadow-sm active:scale-[0.99] transition"
+        className="press-response-row w-full text-left bg-card p-4 rounded-2xl border border-border shadow-sm"
       >
         {content}
       </button>
@@ -116,7 +116,7 @@ export const RecordShortcutWidget = () => {
     <button
       type="button"
       onClick={() => navigate('/record')}
-      className="w-full bg-coral/10 p-4 rounded-2xl border border-coral/20 flex flex-col items-center justify-center min-h-[100px] gap-1.5 active:scale-[0.99] transition"
+      className="press-response w-full bg-coral/10 p-4 rounded-2xl border border-coral/20 flex flex-col items-center justify-center min-h-[100px] gap-1.5"
     >
       <PenLine size={20} className="text-coral" />
       <span className="text-coral-strong font-bold text-label">기록 모아보기</span>

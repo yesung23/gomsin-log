@@ -44,7 +44,7 @@ export function DDayWidget() {
           onClick={() => navigate('/settings')}
           aria-label="사귄 날짜 설정하기"
           data-testid="dday-connection-card"
-          className="w-full text-left min-h-11 flex items-center gap-2 py-2 active:bg-muted/40 rounded-control transition"
+          className="press-response-row w-full text-left min-h-11 flex items-center gap-2 py-2 active:bg-muted/40 rounded-control"
         >
           <Clock className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden="true" />
           {/*
@@ -67,7 +67,7 @@ export function DDayWidget() {
         type="button"
         onClick={() => navigate('/service')}
         aria-label="복무 현황과 전역 D-Day 보기"
-        className="w-full text-left min-h-11 flex items-center gap-3 py-2 active:bg-muted/40 rounded-control transition"
+        className="press-response-row w-full text-left min-h-11 flex items-center gap-3 py-2 active:bg-muted/40 rounded-control"
       >
         <div className="w-8 h-8 bg-navy rounded-full flex items-center justify-center text-primary-foreground shrink-0">
           <Shield className="w-4 h-4" />

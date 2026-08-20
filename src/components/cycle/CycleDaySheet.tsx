@@ -56,7 +56,7 @@ export function CycleDaySheet({
               <button
                 type="button"
                 onClick={() => onEditPeriod(period)}
-                className="min-h-11 px-2 -mr-2 text-caption font-medium text-info flex items-center gap-1"
+                className="press-response min-h-11 px-2 -mr-2 text-caption font-medium text-info flex items-center gap-1"
               >
                 <Pencil className="w-3 h-3" aria-hidden="true" />
                 기간 수정
@@ -94,7 +94,7 @@ export function CycleDaySheet({
         <button
           type="button"
           onClick={onEditDailyLog}
-          className="w-full min-h-11 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold"
+          className="press-response w-full min-h-11 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold"
         >
           {dailyLog ? '컨디션 수정하기' : '컨디션 기록하기'}
         </button>

@@ -74,7 +74,7 @@ export function CycleSettingsSheet({
         <button
           type="button"
           onClick={() => setPane('root')}
-          className="min-h-11 -ml-1 flex items-center gap-1 text-caption font-medium text-muted-foreground"
+          className="press-response min-h-11 -ml-1 flex items-center gap-1 text-caption font-medium text-muted-foreground"
         >
           <ChevronLeft className="w-4 h-4" aria-hidden="true" />
           설정으로 돌아가기
@@ -95,7 +95,7 @@ export function CycleSettingsSheet({
               <button
                 type="button"
                 onClick={() => setPane(target)}
-                className="w-full min-h-11 py-3 flex items-center justify-between gap-3 text-left"
+                className="press-response-row w-full min-h-11 py-3 flex items-center justify-between gap-3 text-left"
               >
                 <span className="min-w-0">
                   <span className="block text-label font-medium text-foreground">{label}</span>
@@ -151,7 +151,7 @@ export function CycleSettingsSheet({
             type="button"
             onClick={() => onSaveLengths(cycleDraft, periodDraft)}
             disabled={settingsPending}
-            className="w-full min-h-11 rounded-control bg-foreground text-background text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+            className="press-response w-full min-h-11 rounded-control bg-foreground text-background text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
           >
             {settingsPending && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
             {settingsPending ? '저장 중' : '저장'}
@@ -195,7 +195,7 @@ export function CycleSettingsSheet({
                   type="button"
                   onClick={() => setConfirmingRevoke(false)}
                   disabled={consentPending}
-                  className="flex-1 min-h-11 rounded-control border border-border text-label font-medium"
+                  className="press-response-row flex-1 min-h-11 rounded-control border border-border text-label font-medium"
                 >
                   취소
                 </button>
@@ -203,7 +203,7 @@ export function CycleSettingsSheet({
                   type="button"
                   onClick={onRevokeConsent}
                   disabled={consentPending}
-                  className="flex-1 min-h-11 rounded-control bg-destructive text-destructive-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  className="press-response flex-1 min-h-11 rounded-control bg-destructive text-destructive-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
                   {consentPending && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
                   철회
@@ -214,7 +214,7 @@ export function CycleSettingsSheet({
             <button
               type="button"
               onClick={() => setConfirmingRevoke(true)}
-              className="min-h-11 text-caption font-medium text-destructive underline underline-offset-2"
+              className="press-response min-h-11 text-caption font-medium text-destructive underline underline-offset-2"
             >
               민감정보 동의 철회
             </button>

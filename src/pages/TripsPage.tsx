@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, ChevronRight, LoaderCircle, Map, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
+import { Calendar, ChevronRight, Map, Plus, RefreshCw, ShieldAlert, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { ErrorNote } from '@/components/ui/ErrorNote';
@@ -12,6 +12,7 @@ import { PlanSectionNav } from '@/components/PlanSectionNav';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { PressableRow, RowGroup, SectionHeader } from '@/components/ui/List';
 import {
   TRIP_PHASE_LABEL,
@@ -217,10 +218,25 @@ export function TripsPage() {
 
         <PlanSectionNav active="trips" />
 
-        {visibleLoadState === 'loading' ? (
-          <div className="py-16 flex justify-center">
-            <LoaderCircle className="w-6 h-6 animate-spin text-info" aria-label="여행 불러오는 중" />
-          </div>
+        {/*
+          A first load gets a skeleton. A REFRESH keeps what is already on screen.
+
+          `loadTrips` sets `loading` every time it runs, including on the realtime
+          invalidation that fires when the other person edits a trip -- so the list
+          was being replaced by a centred spinner and then reappearing, on a screen
+          the user was already reading. `&& totalTrips === 0` is what makes this a
+          FIRST-load state rather than a refresh flicker.
+
+          The skeleton replaces the bare spinner because it says what is coming and
+          in roughly what shape. `Skeleton` requires a label for the same reason: a
+          shimmer alone tells a screen reader nothing about the subject.
+        */}
+        {visibleLoadState === 'loading' && totalTrips === 0 ? (
+          <Skeleton
+            label="여행을 불러오고 있어요"
+            description="두 사람이 함께 만든 여행 계획을 확인하는 중이에요."
+            lines={3}
+          />
         ) : visibleLoadState === 'error' ? (
           <EmptyState
             icon={<RefreshCw size={20} className="text-muted-foreground" />}

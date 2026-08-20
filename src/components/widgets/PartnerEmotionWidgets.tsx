@@ -82,7 +82,7 @@ export function PartnerEmotionFlowWidget() {
         navigate(firstRecordId ? `/record?record=${firstRecordId}` : '/record');
       }}
       data-testid="widget-partner-emotion-flow"
-      className="w-full text-left"
+      className="press-response-row w-full text-left"
     >
       <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
         <Sparkles size={14} className="text-coral" aria-hidden="true" />
@@ -153,7 +153,7 @@ export function PartnerEmotionSummaryWidget() {
             if (target) setHighlightedRecordId(target);
             navigate(target ? `/record?record=${target}` : '/record');
           }}
-          className="w-full text-left"
+          className="press-response-row w-full text-left"
         >
           <p className="text-body text-foreground break-keep">{headline}</p>
           <span className="text-caption text-coral-strong font-bold mt-1 inline-block">기록으로 이동 →</span>

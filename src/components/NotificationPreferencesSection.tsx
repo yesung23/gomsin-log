@@ -58,7 +58,7 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
         ) : permission === 'denied' ? (
           <p className="text-caption text-muted-foreground">브라우저 알림이 차단되어 있어요. 기기 설정에서 허용하면 사용할 수 있어요.</p>
         ) : (
-          <button type="button" onClick={() => void request()} disabled={permission === 'granted'} className="w-full min-h-11 rounded-control border border-border text-label font-semibold text-foreground disabled:opacity-60">
+          <button type="button" onClick={() => void request()} disabled={permission === 'granted'} className="press-response-row w-full min-h-11 rounded-control border border-border text-label font-semibold text-foreground disabled:opacity-60">
             {permission === 'granted' ? '앱이 열려 있을 때 브라우저 알림 사용' : '앞에서 보여줄 브라우저 알림 허용'}
           </button>
         )}

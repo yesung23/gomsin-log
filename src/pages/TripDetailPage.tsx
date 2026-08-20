@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckCircle2, Circle, ExternalLink, LoaderCircle,
-  ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, RefreshCw, ShieldAlert, Trash2, Unlink,
+  ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckCircle2, Circle, ExternalLink, ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, RefreshCw, ShieldAlert, Trash2, Unlink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
@@ -13,6 +12,7 @@ import { MobileShell } from '@/components/MobileShell';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { ListRow, RowGroup } from '@/components/ui/List';
 import { supabase } from '@/lib/supabase';
 import { classifyServerError } from '@/lib/serverErrors';
@@ -636,9 +636,17 @@ export function TripDetailPage() {
   const visibleParentState: ParentState = !userId ? 'forbidden' : !activeCouple ? 'disconnected' : parentState;
 
 
-  if (visibleParentState !== 'ready' || !trip) {
+  /*
+    `|| !trip` is what keeps a refresh from blanking this page.
+
+    `loadParent` sets `loading` on every run, including the realtime invalidation
+    that fires when the other person edits the trip. Gating only on the state
+    replaced a trip the user was reading with a centred spinner; gating on "we have
+    no trip to show" makes the placeholder a first-load state instead.
+  */
+  if ((visibleParentState !== 'ready' && !trip) || !trip) {
     const content = visibleParentState === 'loading'
-      ? <LoaderCircle className="w-6 h-6 animate-spin text-coral mx-auto" aria-label="여행 불러오는 중" />
+      ? <Skeleton label="여행을 불러오고 있어요" description="일정과 준비물을 함께 확인하는 중이에요." lines={3} />
       : visibleParentState === 'not-found'
         ? <EmptyState icon={<MapPin size={20} className="text-muted-foreground" />} title="여행을 찾을 수 없어요" description="삭제되었거나 존재하지 않는 여행이에요." />
         : visibleParentState === 'disconnected'
@@ -688,14 +696,15 @@ export function TripDetailPage() {
 
         {/* Tab switcher */}
         <div className="flex border-b border-border bg-card">
-          <button type="button" onClick={() => setActiveTab('schedule')} className={`flex-1 min-h-11 text-label font-semibold border-b-2 transition ${activeTab === 'schedule' ? 'border-info text-info' : 'border-transparent text-muted-foreground'}`}>일정 ({items.length})</button>
-          <button type="button" onClick={() => setActiveTab('checklist')} className={`flex-1 min-h-11 text-label font-semibold border-b-2 transition ${activeTab === 'checklist' ? 'border-info text-info' : 'border-transparent text-muted-foreground'}`}>준비물 ({checklists.length})</button>
+          <button type="button" onClick={() => setActiveTab('schedule')} className={`press-response-row flex-1 min-h-11 text-label font-semibold border-b-2 ${activeTab === 'schedule' ? 'border-info text-info' : 'border-transparent text-muted-foreground'}`}>일정 ({items.length})</button>
+          <button type="button" onClick={() => setActiveTab('checklist')} className={`press-response-row flex-1 min-h-11 text-label font-semibold border-b-2 ${activeTab === 'checklist' ? 'border-info text-info' : 'border-transparent text-muted-foreground'}`}>준비물 ({checklists.length})</button>
         </div>
 
-        {childState !== 'ready' ? (
-          <div className="p-6 text-center space-y-3">
+        {/* Same rule as the parent: a refresh keeps the rows it already has. */}
+        {childState !== 'ready' && items.length === 0 && checklists.length === 0 ? (
+          <div className="p-6 space-y-3">
             {childState === 'loading'
-              ? <LoaderCircle className="w-6 h-6 animate-spin text-info mx-auto" />
+              ? <Skeleton label="일정과 준비물을 불러오고 있어요" lines={2} />
               : <EmptyState title={childState === 'forbidden' ? '일정과 준비물을 볼 권한이 없어요.' : '일정과 준비물을 불러오지 못했어요.'} action={<Button size="sm" variant="primary" onClick={() => void loadChildren()}>다시 시도</Button>} />
             }
           </div>
@@ -708,7 +717,7 @@ export function TripDetailPage() {
                   key={date}
                   type="button"
                   onClick={() => setActiveDayIndex(index)}
-                  className={`px-3 min-h-11 text-label font-medium whitespace-nowrap border-b-2 transition ${activeDayIndex === index ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground'}`}
+                  className={`press-response px-3 min-h-11 text-label font-medium whitespace-nowrap border-b-2 ${activeDayIndex === index ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground'}`}
                 >
                   {index + 1}일차 <span className="font-normal text-caption">({date.slice(5)})</span>
                 </button>
@@ -915,7 +924,7 @@ export function TripDetailPage() {
                 )}
                 <label className="block text-caption font-medium text-muted-foreground">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
                 <label className="block text-caption font-medium text-muted-foreground">방문 시간 (선택)<input type="time" value={itemDraft.startTime} onChange={(event) => setItemDraft((current) => ({ ...current, startTime: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
-                <fieldset><legend className="text-caption font-medium text-muted-foreground mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`min-h-9 rounded-control border text-label font-medium ${itemDraft.category === option.value ? 'bg-info text-coral-strong-foreground border-info' : 'border-border text-foreground'}`}>{option.label}</button>)}</div></fieldset>
+                <fieldset><legend className="text-caption font-medium text-muted-foreground mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`press-response min-h-9 rounded-control border text-label font-medium ${itemDraft.category === option.value ? 'bg-info text-coral-strong-foreground border-info' : 'border-border text-foreground'}`}>{option.label}</button>)}</div></fieldset>
                 <label className="block text-caption font-medium text-muted-foreground">링크 (선택)<input type="url" value={itemDraft.url} onChange={(event) => setItemDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
                 <label className="block text-caption font-medium text-muted-foreground">주소 (선택)<input value={itemDraft.address} onChange={(event) => setItemDraft((current) => ({ ...current, address: event.target.value, source: current.source === 'screenshot' ? 'screenshot' : 'manual' }))} placeholder="예: 서울 마포구 연남로 1" maxLength={300} className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
                 <label className="block text-caption font-medium text-muted-foreground">영업시간 (선택)<textarea value={itemDraft.businessHours} onChange={(event) => setItemDraft((current) => ({ ...current, businessHours: event.target.value }))} rows={2} maxLength={500} placeholder="예: 매일 11:00~21:00" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground resize-none" /></label>

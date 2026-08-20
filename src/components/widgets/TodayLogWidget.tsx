@@ -549,7 +549,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       <div className="flex items-center gap-2">
         <button
           onClick={() => handleOpenInput('instant')}
-          className="relative flex items-center gap-1 px-3 rounded-control bg-coral/10 border border-coral/20 text-coral-strong text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+          className="press-response relative flex items-center gap-1 px-3 rounded-control bg-coral/10 border border-coral/20 text-coral-strong text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
           <Camera size={16} aria-hidden="true" />
           <span>지금찍기</span>
@@ -557,7 +557,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
         <button
           onClick={() => handleOpenInput('photo')}
-          className="relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+          className="press-response relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
           <ImageIcon size={16} className="text-muted-foreground" aria-hidden="true" />
           <span>사진·영상</span>
@@ -566,11 +566,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
         <button
           onClick={isRecording ? handleStopRecording : handleStartRecording}
           aria-pressed={isRecording}
-          className={`relative flex items-center gap-1 px-3 rounded-control border text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] ${
-            isRecording
-              ? 'bg-destructive/10 border-destructive/30 text-destructive'
-              : 'bg-muted border-border text-foreground'
-          }`}
+          className={`press-response relative flex items-center gap-1 px-3 rounded-control border text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] ${ isRecording ? 'bg-destructive/10 border-destructive/30 text-destructive' : 'bg-muted border-border text-foreground' }`}
         >
           {isRecording ? <Square size={16} aria-hidden="true" /> : <Mic size={16} className="text-muted-foreground" aria-hidden="true" />}
           <span>
@@ -582,7 +578,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
         <button
           onClick={() => handleOpenInput('text')}
-          className="relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 active:scale-95 transition before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
+          className="press-response relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
           <Send size={16} className="text-muted-foreground" aria-hidden="true" />
           <span>한줄</span>
@@ -603,7 +599,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
         <button
           type="button"
           onClick={() => setShowInputCard(true)}
-          className="mt-2 w-full text-left text-caption text-muted-foreground min-h-11 flex items-center"
+          className="press-response-row mt-2 w-full text-left text-caption text-muted-foreground min-h-11 flex items-center"
         >
           이어 쓰던 글이 있어요 <span className="ml-auto text-coral-strong font-semibold">이어쓰기 ›</span>
         </button>
@@ -616,7 +612,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
             <span className="text-caption font-semibold text-muted-foreground">순간 남기기</span>
             <button
               onClick={() => setShowInputCard(false)}
-              className="min-h-11 min-w-11 flex items-center justify-center text-caption text-muted-foreground"
+              className="press-response min-h-11 min-w-11 flex items-center justify-center text-caption text-muted-foreground"
             >
               닫기
             </button>
@@ -650,11 +646,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                   type="button"
                   onClick={() => setReaction(selected ? undefined : tag.value)}
                   aria-pressed={selected}
-                  className={`min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 border active:scale-95 transition ${
-                    selected
-                      ? 'bg-coral/10 border-coral/30 text-coral-strong'
-                      : 'bg-muted border-border text-muted-foreground'
-                  }`}
+                  className={`press-response min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 border ${ selected ? 'bg-coral/10 border-coral/30 text-coral-strong' : 'bg-muted border-border text-muted-foreground' }`}
                 >
                   <span aria-hidden="true">{tag.emoji}</span>
                   {tag.label}
@@ -680,7 +672,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
               <button
                 type="button"
                 onClick={handleStopRecording}
-                className="ml-auto px-2 py-1 rounded-control bg-destructive text-destructive-foreground font-bold"
+                className="press-response ml-auto px-2 py-1 rounded-control bg-destructive text-destructive-foreground font-bold"
               >
                 녹음 종료
               </button>
@@ -703,7 +695,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                     >
                       {kind === 'photo' && <ImageIcon size={13} className="text-coral shrink-0" />}
                       {kind === 'video' && <Film size={13} className="text-info shrink-0" />}
-                      {kind === 'voice' && <Music size={13} className="text-coral shrink-0" />}
+                      {kind === 'voice' && <Music size={13} className="press-response text-coral shrink-0" />}
                       <span className="truncate max-w-[130px]">{file.name}</span>
                       <button
                         type="button"
@@ -752,9 +744,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
           <div className="pt-2 flex items-center justify-between gap-2">
             <button
               onClick={() => setIsPrivate(!isPrivate)}
-              className={`min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 ${
-                isPrivate ? 'bg-warning-surface text-warning-foreground' : 'bg-muted text-muted-foreground'
-              }`}
+              className={`press-response min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 ${ isPrivate ? 'bg-warning-surface text-warning-foreground' : 'bg-muted text-muted-foreground' }`}
             >
               {isPrivate ? <Lock size={12} /> : <Unlock size={12} />}
               {isPrivate ? '나만 보기' : '공유하기'}
@@ -770,7 +760,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
             <button
               onClick={handlePost}
               disabled={isSaving || (!isRecording && !hasContentToSave)}
-              className="min-h-11 px-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-label active:scale-95 transition disabled:opacity-50"
+              className="press-response min-h-11 px-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
             >
               {isSaving ? '저장 중...' : '저장'}
             </button>

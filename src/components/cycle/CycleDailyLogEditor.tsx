@@ -50,7 +50,7 @@ function OptionRow<T extends string>({
               aria-pressed={selected}
               aria-label={`${legend} ${labels[option]}`}
               className={cn(
-                'min-h-11 px-1 rounded-control border text-caption transition',
+                'press-response min-h-11 px-1 rounded-control border text-caption',
                 selected
                   ? 'bg-coral/20 border-coral text-coral-strong font-bold'
                   : 'bg-card border-border text-foreground hover:bg-muted',
@@ -172,7 +172,7 @@ export function CycleDailyLogEditor({
               onClick={() => onDelete(existingLog)}
               disabled={busy}
               aria-label="이 날의 컨디션 기록 삭제"
-              className="min-h-11 px-3 rounded-control border border-destructive/30 text-destructive disabled:opacity-50 flex items-center justify-center"
+              className="press-response min-h-11 px-3 rounded-control border border-destructive/30 text-destructive disabled:opacity-50 flex items-center justify-center"
             >
               {deletePending
                 ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
@@ -184,7 +184,7 @@ export function CycleDailyLogEditor({
             onClick={() => onSave(draft)}
             disabled={busy}
             aria-label="컨디션 저장"
-            className="flex-1 min-h-11 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+            className="press-response flex-1 min-h-11 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
           >
             {pending && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
             {pending ? '저장 중' : '저장'}

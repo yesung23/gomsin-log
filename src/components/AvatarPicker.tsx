@@ -152,7 +152,7 @@ export function AvatarPicker({
         aria-label={dataUrl ? `${label} 바꾸기 또는 지우기` : `${label} 고르기`}
         aria-expanded={dataUrl ? revealed : undefined}
         className={cn(
-          'relative block w-full h-full rounded-full overflow-hidden',
+          'press-response-row relative block w-full h-full rounded-full overflow-hidden',
           'border border-border bg-muted',
           'active:scale-95 transition disabled:opacity-60',
         )}
@@ -221,7 +221,7 @@ export function AvatarPicker({
             onClick={handleRemove}
             aria-label={`${label} 지우고 기본 그림으로`}
             className={cn(
-              'absolute -top-1 -right-1 rounded-full bg-card border border-border',
+              'press-response absolute -top-1 -right-1 rounded-full bg-card border border-border',
               'text-muted-foreground hover:text-destructive',
               'flex items-center justify-center w-6 h-6 active:scale-95 transition',
               "before:absolute before:-inset-2.5 before:content-['']",

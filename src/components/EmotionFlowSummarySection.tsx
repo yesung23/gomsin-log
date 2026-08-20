@@ -124,7 +124,7 @@ export function EmotionFlowSummarySection({
           <button
             type="button"
             onClick={onRetry}
-            className="mt-3 min-h-[44px] w-full rounded-xl border border-border px-4 text-label font-bold text-foreground"
+            className="press-response-row mt-3 min-h-[44px] w-full rounded-xl border border-border px-4 text-label font-bold text-foreground"
           >
             다시 시도
           </button>

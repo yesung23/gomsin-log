@@ -120,7 +120,7 @@ export function CoupleStatusBanner() {
           type="button"
           onClick={() => void handleRetry()}
           disabled={busy}
-          className="min-h-[44px] w-full rounded-control border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
+          className="press-response-row min-h-[44px] w-full rounded-control border border-border px-4 text-label font-bold text-foreground disabled:opacity-50"
         >
           {busy ? '확인 중...' : '다시 확인'}
         </button>
@@ -201,7 +201,7 @@ export function CoupleStatusBanner() {
               type="button"
               onClick={() => void handleCopy()}
               aria-label="초대 코드 복사"
-              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-coral"
+              className="press-response min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-coral"
             >
               {copied ? <Check size={20} /> : <Copy size={20} />}
             </button>

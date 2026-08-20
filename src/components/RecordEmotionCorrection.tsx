@@ -57,7 +57,7 @@ export function RecordEmotionCorrection({
         type="button"
         onClick={() => setIsOpen(true)}
         data-testid="open-emotion-correction"
-        className="flex items-center justify-center gap-1.5 px-4 min-h-[44px] rounded-lg bg-muted text-foreground font-bold text-label active:scale-95 transition w-full"
+        className="press-response-row flex items-center justify-center gap-1.5 px-4 min-h-[44px] rounded-lg bg-muted text-foreground font-bold text-label w-full"
       >
         <Sparkles size={13} aria-hidden="true" /> 마음 고치기
       </button>
@@ -93,7 +93,7 @@ export function RecordEmotionCorrection({
             setIsOpen(false);
           }}
           disabled={isSaving}
-          className="flex-1 min-h-[44px] rounded-lg bg-muted text-muted-foreground font-bold text-label disabled:opacity-50"
+          className="press-response-row flex-1 min-h-[44px] rounded-lg bg-muted text-muted-foreground font-bold text-label disabled:opacity-50"
         >
           취소
         </button>
@@ -124,7 +124,7 @@ export function RecordEmotionCorrection({
             }
           }}
           disabled={isSaving || disabled}
-          className="flex-1 min-h-[44px] rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
+          className="press-response flex-1 min-h-[44px] rounded-lg bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
         >
           {isSaving ? '저장 중...' : '이대로 저장'}
         </button>

@@ -97,7 +97,7 @@ function AccountDeletionRecovery() {
           type="button"
           onClick={() => void onRetry()}
           disabled={busy !== null}
-          className="w-full min-h-[44px] rounded-xl bg-coral-fill px-4 py-3 text-label font-bold text-coral-fill-foreground disabled:opacity-60"
+          className="press-response w-full min-h-[44px] rounded-xl bg-coral-fill px-4 py-3 text-label font-bold text-coral-fill-foreground disabled:opacity-60"
         >
           {busy === 'retry' ? '처리 중...' : '탈퇴 다시 시도'}
         </button>
@@ -105,7 +105,7 @@ function AccountDeletionRecovery() {
           type="button"
           onClick={() => void onLogout()}
           disabled={busy !== null}
-          className="w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-label font-bold text-foreground disabled:opacity-60"
+          className="press-response-row w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-label font-bold text-foreground disabled:opacity-60"
         >
           로그아웃
         </button>
@@ -174,7 +174,7 @@ function AuthSyncUnavailable({
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="w-full min-h-[44px] rounded-xl bg-coral-fill px-4 py-3 text-label font-bold text-coral-fill-foreground"
+          className="press-response w-full min-h-[44px] rounded-xl bg-coral-fill px-4 py-3 text-label font-bold text-coral-fill-foreground"
         >
           {isSessionProblem ? '다시 로그인' : '다시 시도'}
         </button>
@@ -185,7 +185,7 @@ function AuthSyncUnavailable({
             setBusy(true);
             void signOut().finally(() => setBusy(false));
           }}
-          className="w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-label font-bold text-foreground disabled:opacity-60"
+          className="press-response-row w-full min-h-[44px] rounded-xl border border-border px-4 py-3 text-label font-bold text-foreground disabled:opacity-60"
         >
           {busy ? '처리 중...' : '로그아웃'}
         </button>

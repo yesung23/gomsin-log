@@ -218,7 +218,7 @@ export function LegalPage() {
     <MobileShell>
       <div className="px-5 pt-8 pb-28 space-y-5">
         <header className="flex items-center justify-between">
-          <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] flex items-center justify-center active:scale-95 transition" aria-label="뒤로가기">
+          <button onClick={() => navigate(-1)} className="press-response p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] flex items-center justify-center" aria-label="뒤로가기">
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-heading text-foreground">{title}</h1>

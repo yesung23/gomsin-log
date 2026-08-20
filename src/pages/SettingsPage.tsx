@@ -537,11 +537,7 @@ export function SettingsPage() {
               type="button"
               onClick={() => setTheme('light')}
               aria-pressed={(state.theme || 'light') === 'light'}
-              className={`h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 transition ${
-                (state.theme || 'light') === 'light'
-                  ? 'bg-card text-coral'
-                  : 'text-muted-foreground'
-              }`}
+              className={`press-response h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 ${ (state.theme || 'light') === 'light' ? 'bg-card text-coral' : 'text-muted-foreground' }`}
             >
               <Sun size={16} />
               라이트
@@ -550,11 +546,7 @@ export function SettingsPage() {
               type="button"
               onClick={() => setTheme('dark')}
               aria-pressed={state.theme === 'dark'}
-              className={`h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 transition ${
-                state.theme === 'dark'
-                  ? 'bg-card text-coral'
-                  : 'text-muted-foreground'
-              }`}
+              className={`press-response h-11 rounded-control text-label font-bold flex items-center justify-center gap-2 ${ state.theme === 'dark' ? 'bg-card text-coral' : 'text-muted-foreground' }`}
             >
               <Moon size={16} />
               다크
@@ -1137,7 +1129,7 @@ export function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => void copyProtectionText(setupResult.recoveryCode, '복구 코드')}
-                      className="text-caption text-coral font-semibold"
+                      className="press-response text-caption text-coral font-semibold"
                     >
                       복구 코드 복사
                     </button>
@@ -1148,7 +1140,7 @@ export function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => void copyProtectionText(formatRecoveryKitArtifact(setupResult.kitAnchor), '복구 정보')}
-                      className="text-caption text-coral font-semibold"
+                      className="press-response text-caption text-coral font-semibold"
                     >
                       복구 정보 복사
                     </button>

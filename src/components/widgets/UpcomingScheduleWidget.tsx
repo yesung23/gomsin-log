@@ -30,7 +30,7 @@ export function UpcomingScheduleWidget() {
         {/* min-h/-w: without them this rendered a 58x16 tap target. */}
         <button
           onClick={() => navigate('/schedule')}
-          className="text-label text-coral-strong font-bold flex items-center justify-end min-h-[44px] min-w-[44px] -mr-2 px-2"
+          className="press-response text-label text-coral-strong font-bold flex items-center justify-end min-h-[44px] min-w-[44px] -mr-2 px-2"
         >
           <Plus className="w-3 h-3 mr-0.5" />
           일정 추가
@@ -67,7 +67,7 @@ export function UpcomingScheduleWidget() {
 
       <button 
         onClick={() => navigate('/trips')}
-        className="mt-1 w-full bg-info-surface text-info font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-transform text-label flex items-center justify-center gap-2"
+        className="press-response mt-1 w-full bg-info-surface text-info font-bold py-3.5 rounded-2xl transition-transform text-label flex items-center justify-center gap-2"
       >
         <Plane className="w-4 h-4" />
         여행 플래너

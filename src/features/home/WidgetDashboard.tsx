@@ -187,7 +187,7 @@ export function WidgetDashboard() {
           {isEditMode ? (
             <button
               onClick={() => setIsEditMode(false)}
-              className="bg-coral-fill text-coral-fill-foreground text-label font-bold px-4 py-2 rounded-control active:scale-95 transition-all"
+              className="press-response bg-coral-fill text-coral-fill-foreground text-label font-bold px-4 py-2 rounded-control"
               aria-label="편집 완료"
             >
               완료
@@ -204,7 +204,7 @@ export function WidgetDashboard() {
                 icon-only `+`, so this name is read by assistive tech only.
               */}
               <button
-                className="w-11 h-11 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted/40 active:scale-95 transition-all"
+                className="press-response w-11 h-11 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted/40"
                 aria-label="새 항목 추가"
                 onClick={() => setIsAddWidgetOpen(true)}
               >
@@ -224,7 +224,7 @@ export function WidgetDashboard() {
               */}
               <button
                 onClick={() => setIsEditMode(true)}
-                className="w-11 h-11 flex items-center justify-center text-muted-foreground hover:bg-muted/40 rounded-full active:scale-95 transition-all"
+                className="press-response w-11 h-11 flex items-center justify-center text-muted-foreground hover:bg-muted/40 rounded-full"
                 aria-label="위젯 편집"
               >
                 <LayoutGrid size={20} strokeWidth={1.5} />
@@ -292,7 +292,7 @@ export function WidgetDashboard() {
         {isEditMode && activeWidgets.length < widgetsForRole(role).length && (
           <button
             onClick={() => setIsAddWidgetOpen(true)}
-            className="w-full py-3 rounded-surface border-2 border-dashed border-border text-muted-foreground text-label font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral transition-colors"
+            className="press-response-row w-full py-3 rounded-surface border-2 border-dashed border-border text-muted-foreground text-label font-bold flex flex-col items-center gap-1 hover:bg-muted hover:border-coral hover:text-coral"
           >
             <Plus size={20} />
             위젯 추가

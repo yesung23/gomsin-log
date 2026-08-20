@@ -329,7 +329,20 @@ export function CycleSupportSection({
         <span className="text-caption text-muted-foreground font-medium">직접 선택할 때만 공유</span>
       </div>
 
-      {loadState === 'loading' && (
+      {/*
+        Shown only when there is nothing on screen yet.
+
+        A realtime invalidation re-runs `load()` and sets `loading` again, so a
+        refresh used to pull the current signal away and replace it with this line
+        while the round-trip completed -- on a card whose whole job is to say
+        whether a signal is live right now.
+
+        This does NOT weaken the security rule one state over: a FAILED
+        verification is `error`, not `loading`, and that branch still hides the
+        previous content deliberately. Keeping a signal visible while a refresh is
+        in flight is different from keeping one whose verification just failed.
+      */}
+      {loadState === 'loading' && signals.length === 0 && (
         <div className="py-6 flex items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
           <Loader2 className="w-4 h-4 animate-spin" /> 응원 신호를 확인하는 중이에요.
         </div>
@@ -349,19 +362,21 @@ export function CycleSupportSection({
         <div className="p-4 rounded-surface bg-muted/40 border border-border text-center space-y-3" role="alert">
           <p className="text-caption text-muted-foreground">{failureMessage(loadState)}</p>
           {loadState === 'error' && (
-            <button type="button" onClick={() => void load(true)} className="px-4 py-2 rounded-control bg-foreground text-background text-label font-bold">
+            <button type="button" onClick={() => void load(true)} className="press-response px-4 py-2 rounded-control bg-foreground text-background text-label font-bold">
               다시 시도
             </button>
           )}
         </div>
       )}
 
-      {(loadState === 'ready' || loadState === 'empty') && (
+      {(loadState === 'ready' || loadState === 'empty'
+        // Keep the card up through a refresh that already has something to show.
+        || (loadState === 'loading' && signals.length > 0)) && (
         <>
           {realtimeDisconnected && (
             <div className="flex items-center justify-between gap-2 p-3 rounded-control bg-warning-surface border border-warning/30 text-caption text-warning-foreground" role="status">
               <span>실시간 확인이 중단됐어요. 최신 상태를 다시 확인해 주세요.</span>
-              <button type="button" onClick={() => void load(true)} className="p-1" aria-label="응원 신호 다시 확인"><RotateCcw className="w-3.5 h-3.5" /></button>
+              <button type="button" onClick={() => void load(true)} className="press-response p-1 min-h-11 min-w-11 flex items-center justify-center" aria-label="응원 신호 다시 확인"><RotateCcw className="w-3.5 h-3.5" /></button>
             </div>
           )}
 
@@ -378,7 +393,7 @@ export function CycleSupportSection({
                 <p className="text-body text-mint-foreground bg-card/60 rounded-control p-3">{activeSignal.message}</p>
               )}
               {owner && (
-                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control border border-mint-foreground/20 text-mint-foreground text-label font-bold disabled:opacity-50 min-h-11">
+                <button type="button" onClick={() => void revoke()} disabled={mutationPending !== null} className="press-response-row w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control border border-mint-foreground/20 text-mint-foreground text-label font-bold disabled:opacity-50 min-h-11">
                   {mutationPending === 'revoke' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
                   {mutationPending === 'revoke' ? '공유 취소 중' : '공유 취소'}
                 </button>
@@ -438,7 +453,7 @@ export function CycleSupportSection({
                 <span className="block text-right text-caption text-muted-foreground">{Array.from(message).length}/80</span>
               </label>
               {mutationError && <ErrorNote>{mutationError}</ErrorNote>}
-              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-11">
+              <button type="button" onClick={() => void share()} disabled={mutationPending !== null} className="press-response w-full flex items-center justify-center gap-1.5 py-2.5 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50 min-h-11">
                 {mutationPending === 'share' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {mutationPending === 'share' ? '공유 중' : '오늘만 공유하기'}
               </button>

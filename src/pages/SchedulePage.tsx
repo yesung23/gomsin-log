@@ -532,13 +532,7 @@ export function SchedulePage() {
                       onClick={() => setSelectedDate(date)}
                       aria-label={`${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
                       aria-pressed={isSelected}
-                      className={`min-h-11 min-w-[44px] rounded-control flex flex-col items-center justify-center text-label transition ${
-                        isSelected
-                          ? 'ring-2 ring-coral bg-coral/10 text-coral font-semibold'
-                          : isToday
-                            ? 'bg-coral-strong text-coral-strong-foreground font-bold'
-                            : 'hover:bg-muted/50 text-foreground'
-                      }`}
+                      className={`press-response min-h-11 min-w-[44px] rounded-control flex flex-col items-center justify-center text-label ${ isSelected ? 'ring-2 ring-coral bg-coral/10 text-coral font-semibold' : isToday ? 'bg-coral-strong text-coral-strong-foreground font-bold' : 'hover:bg-muted/50 text-foreground' }`}
                     >
                       <span>{day}</span>
                       {(dayEvents.length > 0 || dayTasks.length > 0) && (

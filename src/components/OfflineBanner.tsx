@@ -124,7 +124,7 @@ export function OfflineBanner() {
             type="button"
             onClick={() => { void retryBlockedRecords(); }}
             disabled={!online}
-            className="mt-1.5 w-full min-h-[44px] rounded-lg border border-warning/50 font-bold disabled:opacity-50"
+            className="press-response-row mt-1.5 w-full min-h-[44px] rounded-lg border border-warning/50 font-bold disabled:opacity-50"
           >
             다시 시도
           </button>

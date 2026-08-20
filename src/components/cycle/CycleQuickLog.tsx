@@ -48,7 +48,7 @@ export function CycleQuickLog({
               disabled={pendingSymptom !== null}
               aria-pressed={selected}
               className={cn(
-                'min-h-11 px-3.5 rounded-full text-caption transition border',
+                'press-response min-h-11 px-3.5 rounded-full text-caption border',
                 'flex items-center gap-1.5 active:scale-95 disabled:opacity-60',
                 selected
                   ? 'bg-coral/20 border-coral text-coral-strong font-bold'
@@ -65,7 +65,7 @@ export function CycleQuickLog({
       <button
         type="button"
         onClick={onOpenDetail}
-        className="min-h-11 text-caption font-medium text-info underline underline-offset-2"
+        className="press-response min-h-11 text-caption font-medium text-info underline underline-offset-2"
       >
         자세히 기록하기
       </button>

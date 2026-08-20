@@ -142,7 +142,7 @@ export function EmotionChipEditor({
                     onClick={() => onChangeEmotion(candidate.id, stepBasicEmotion(candidate.basic, -1))}
                     disabled={atTop}
                     aria-label={`${label} 대신 더 긍정적인 감정으로 바꾸기`}
-                    className="min-h-[22px] min-w-[44px] flex items-center justify-center text-muted-foreground disabled:opacity-30 active:scale-95 transition"
+                    className="press-response min-h-[22px] min-w-[44px] flex items-center justify-center text-muted-foreground disabled:opacity-30"
                   >
                     <ChevronUp size={16} aria-hidden="true" />
                   </button>
@@ -151,7 +151,7 @@ export function EmotionChipEditor({
                     onClick={() => onChangeEmotion(candidate.id, stepBasicEmotion(candidate.basic, 1))}
                     disabled={atEnd}
                     aria-label={`${label} 대신 더 부정적인 감정으로 바꾸기`}
-                    className="min-h-[22px] min-w-[44px] flex items-center justify-center text-muted-foreground disabled:opacity-30 active:scale-95 transition"
+                    className="press-response min-h-[22px] min-w-[44px] flex items-center justify-center text-muted-foreground disabled:opacity-30"
                   >
                     <ChevronDown size={16} aria-hidden="true" />
                   </button>
@@ -161,7 +161,7 @@ export function EmotionChipEditor({
                   type="button"
                   onClick={() => onRemove(candidate.id)}
                   aria-label={`${label} 빼기`}
-                  className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive active:scale-95 transition shrink-0"
+                  className="press-response min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive shrink-0"
                 >
                   <X size={16} aria-hidden="true" />
                 </button>
@@ -181,7 +181,7 @@ export function EmotionChipEditor({
                 type="button"
                 onClick={() => onRestore(candidate.id)}
                 aria-label={`${BASIC_EMOTION_LABEL[candidate.basic]} 다시 넣기`}
-                className="min-h-[44px] px-3 rounded-control bg-muted text-muted-foreground border border-border text-caption font-bold flex items-center gap-1 active:scale-95 transition"
+                className="press-response min-h-[44px] px-3 rounded-control bg-muted text-muted-foreground border border-border text-caption font-bold flex items-center gap-1"
               >
                 <RotateCcw size={12} aria-hidden="true" />
                 {BASIC_EMOTION_LABEL[candidate.basic]}

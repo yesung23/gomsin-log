@@ -61,7 +61,7 @@ export function SharedSyncBanner() {
         type="button"
         onClick={() => void retry()}
         disabled={retrying}
-        className="shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg disabled:opacity-50"
+        className="press-response shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg disabled:opacity-50"
         aria-label="공유 정보 다시 확인"
       >
         {retrying

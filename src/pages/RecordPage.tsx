@@ -508,7 +508,7 @@ export function RecordPage() {
           <button
             onClick={() => setShowCalendar(!showCalendar)}
             className={cn(
-              'p-2.5 rounded-2xl transition active:scale-95 flex items-center justify-center min-h-[44px] min-w-[44px]',
+              'press-response p-2.5 rounded-2xl flex items-center justify-center min-h-[44px] min-w-[44px]',
               showCalendar
                 ? 'bg-coral-fill text-coral-fill-foreground shadow-sm'
                 : 'bg-card border border-border text-foreground hover:bg-muted'
@@ -622,7 +622,7 @@ export function RecordPage() {
                   disabled={!cell.inMonth || isOutsideTripPeriod}
                   aria-label={ariaLabel}
                   className={cn(
-                    'relative flex flex-col items-center justify-center py-1.5 min-h-[44px] transition-colors',
+                    'press-response relative flex flex-col items-center justify-center py-1.5 min-h-[44px]',
                     (!cell.inMonth || isOutsideTripPeriod) && 'opacity-30 pointer-events-none',
                     cell.inMonth && !isSelected && 'hover:bg-muted/50 active:bg-muted',
                     isSelected && 'bg-coral-fill text-coral-fill-foreground',
@@ -763,6 +763,7 @@ export function RecordPage() {
                 key={f.key}
                 onClick={() => setMediaFilter(f.key)}
                 className={cn(
+                  'press-response',
                   /*
                    * The media filter chips paint at 28px tall and 30-41px wide, and
                    * they stay that size: a row of five has to fit across 390px, and
@@ -1314,7 +1315,7 @@ export function RecordPage() {
                     }}
                     aria-pressed={isMarkedByViewer(state.talkAboutMarks ?? [], selectedRecord.id, profile.id)}
                     className={cn(
-                      'w-full flex items-center justify-center gap-1.5 px-4 min-h-[44px] rounded-lg font-bold text-label active:scale-95 transition',
+                      'press-response-row w-full flex items-center justify-center gap-1.5 px-4 min-h-[44px] rounded-lg font-bold text-label',
                       isMarkedByViewer(state.talkAboutMarks ?? [], selectedRecord.id, profile.id)
                         ? 'bg-coral/10 text-coral-strong border border-coral/30'
                         : 'bg-muted text-foreground',

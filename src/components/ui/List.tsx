@@ -161,7 +161,7 @@ export function PressableRow({
       <button
         type={type}
         className={cn(
-          'w-full flex items-center gap-3 min-h-11 text-left',
+          'press-response-row w-full flex items-center gap-3 min-h-11 text-left',
           'transition active:bg-muted/60 rounded-control',
           density === 'tight' ? 'py-1.5' : 'py-2.5',
           className,

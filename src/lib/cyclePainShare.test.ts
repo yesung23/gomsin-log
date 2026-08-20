@@ -1,30 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {
-  buildCycleSupportPayload,
-  isCyclePainShareKind,
-  isCycleSignalKind,
-  isCycleSupportKind,
-} from '@/lib/cycle';
-import {
-  CYCLE_PAIN_LEVELS,
-  CYCLE_PAIN_SHARE_KINDS,
-  CYCLE_SUPPORT_KINDS,
-  CYCLE_SYMPTOMS,
-} from '@/types';
+import { buildCycleSupportPayload, isCycleSupportKind } from '@/lib/cycle';
+import { CYCLE_PAIN_LEVELS, CYCLE_SUPPORT_KINDS, CYCLE_SYMPTOMS } from '@/types';
 
 /**
- * Pain as a care signal.
+ * The pain boundary around the care signal.
  *
- * The product decision was that a person MAY tell their partner today hurts. Every
- * test here is about the word "may": that it takes a deliberate act, that it ends
- * on its own, that it can be taken back, and above all that the personal log is
- * never the thing that sends it.
+ * The approved decision (V1_LAUNCH_DECISIONS §5, upheld by the 2026-08-21
+ * independent review) is ONE ungraded kind — `feeling_unwell` — and nothing that
+ * restates the personal pain scale. Every test here holds that line: no graded
+ * vocabulary, no path from the personal log to a signal, and a signal that takes a
+ * deliberate act, ends on its own, and can be taken back.
  */
 
 const migration = readFileSync(
-  resolve(process.cwd(), 'supabase/migrations/047_cycle_pain_care_signal.sql'),
+  resolve(process.cwd(), 'supabase/migrations/047_care_signal_feeling_unwell.sql'),
   'utf8',
 );
 
@@ -39,72 +30,57 @@ function code(path: string): string {
     .replace(/^\s*\/\/.*$/gm, '');
 }
 
-describe('the personal log and the partner signal are separate vocabularies', () => {
-  it('shares no value between the pain a person records and the pain they send', () => {
+describe('the signal vocabulary carries no pain grade', () => {
+  it('contains feeling_unwell and no graded pain kind', () => {
+    expect(CYCLE_SUPPORT_KINDS).toContain('feeling_unwell');
     /*
-     * `severe` vs `pain_severe`, deliberately. Identical strings would make
-     * `signal.kind = log.painLevel` compile, and that one line is the entire
-     * failure mode this feature has to avoid. Different strings mean a bridge has
-     * to be written out where a reviewer would see it.
+     * The refused draft's kinds, by name and by shape. `pain_mild` restated the
+     * personal `mild` inside a server-visible column; if any kind ever encodes a
+     * level again, this is the test that has to be argued with first.
      */
-    for (const level of CYCLE_PAIN_LEVELS) {
-      expect(isCyclePainShareKind(level), level).toBe(false);
-      expect(isCycleSignalKind(level), level).toBe(false);
-    }
-    for (const kind of CYCLE_PAIN_SHARE_KINDS) {
-      expect((CYCLE_PAIN_LEVELS as readonly string[]).includes(kind), kind).toBe(false);
+    for (const kind of CYCLE_SUPPORT_KINDS) {
+      expect(kind, kind).not.toMatch(/^pain_/);
+      expect(kind, kind).not.toMatch(/mild|moderate|severe/);
+      expect(kind, kind).not.toMatch(/\d/);
     }
   });
 
-  it('keeps care requests and pain distinguishable at the type level', () => {
-    // A care-only path that starts accepting pain has to change a predicate to do
-    // it, rather than silently widening.
-    for (const kind of CYCLE_PAIN_SHARE_KINDS) {
-      expect(isCycleSupportKind(kind), kind).toBe(false);
-      expect(isCycleSignalKind(kind), kind).toBe(true);
-    }
-    for (const kind of CYCLE_SUPPORT_KINDS) {
-      expect(isCyclePainShareKind(kind), kind).toBe(false);
-      expect(isCycleSignalKind(kind), kind).toBe(true);
+  it('shares no value with the personal pain scale', () => {
+    // `severe` must never validate as a signal kind: `signal.kind = log.painLevel`
+    // must not typecheck AND must not pass the runtime guard.
+    for (const level of CYCLE_PAIN_LEVELS) {
+      expect(isCycleSupportKind(level), level).toBe(false);
     }
   });
 
   it('never lets a symptom become a signal', () => {
     for (const symptom of CYCLE_SYMPTOMS) {
-      expect(isCycleSignalKind(symptom), symptom).toBe(false);
-    }
-  });
-
-  it('carries three buckets and no scale', () => {
-    expect(CYCLE_PAIN_SHARE_KINDS).toEqual(['pain_mild', 'pain_moderate', 'pain_severe']);
-    // Nothing numeric: a partner learns today is hard, not a measurement.
-    for (const kind of CYCLE_PAIN_SHARE_KINDS) {
-      expect(kind).not.toMatch(/\d/);
+      expect(isCycleSupportKind(symptom), symptom).toBe(false);
     }
   });
 });
 
-describe('a pain signal is built like every other signal', () => {
+describe('feeling_unwell is built like every other signal', () => {
   const base = {
     coupleId: 'couple-1',
     sharedForDate: '2026-08-20',
   };
   const now = new Date('2026-08-20T09:00:00.000Z');
 
-  it('accepts a pain kind and produces the same shaped row', () => {
+  it('accepts the kind and produces the same shaped row', () => {
     const payload = buildCycleSupportPayload(
-      { ...base, kind: 'pain_severe' },
+      { ...base, kind: 'feeling_unwell' },
       'owner-1',
       now,
     );
     expect(payload).not.toBeNull();
-    expect(payload!.kind).toBe('pain_severe');
+    expect(payload!.kind).toBe('feeling_unwell');
     expect(payload!.owner_id).toBe('owner-1');
     expect(payload!.shared_for_date).toBe('2026-08-20');
   });
 
   it('expires within a day, so a hard morning does not follow someone all week', () => {
-    const payload = buildCycleSupportPayload({ ...base, kind: 'pain_moderate' }, 'owner-1', now);
+    const payload = buildCycleSupportPayload({ ...base, kind: 'feeling_unwell' }, 'owner-1', now);
     const expiry = Date.parse(payload!.expires_at);
     expect(expiry).toBeGreaterThan(now.getTime());
     expect(expiry).toBeLessThanOrEqual(now.getTime() + 24 * 60 * 60 * 1000);
@@ -112,7 +88,7 @@ describe('a pain signal is built like every other signal', () => {
 
   it('refuses an expiry further out than a day, even if asked', () => {
     const payload = buildCycleSupportPayload(
-      { ...base, kind: 'pain_severe', expiresAt: '2026-09-30T00:00:00.000Z' },
+      { ...base, kind: 'feeling_unwell', expiresAt: '2026-09-30T00:00:00.000Z' },
       'owner-1',
       now,
     );
@@ -120,23 +96,28 @@ describe('a pain signal is built like every other signal', () => {
   });
 
   it('carries no field that could hold a log id, a date or a symptom', () => {
-    const payload = buildCycleSupportPayload({ ...base, kind: 'pain_mild' }, 'owner-1', now);
+    const payload = buildCycleSupportPayload({ ...base, kind: 'feeling_unwell' }, 'owner-1', now);
     expect(Object.keys(payload!).sort()).toEqual(
       ['couple_id', 'expires_at', 'kind', 'message', 'owner_id', 'shared_for_date'].sort(),
     );
   });
 
-  it('still rejects an invented kind', () => {
-    expect(buildCycleSupportPayload({ ...base, kind: 'pain_extreme' as never }, 'o', now)).toBeNull();
+  it('rejects the refused graded kinds and every other invented one', () => {
+    // The refused draft's vocabulary must fail like any unknown string — a client
+    // holding a stale build cannot write a graded kind through this path.
+    expect(buildCycleSupportPayload({ ...base, kind: 'pain_severe' as never }, 'o', now)).toBeNull();
+    expect(buildCycleSupportPayload({ ...base, kind: 'pain_mild' as never }, 'o', now)).toBeNull();
     expect(buildCycleSupportPayload({ ...base, kind: 'severe' as never }, 'o', now)).toBeNull();
+    expect(buildCycleSupportPayload({ ...base, kind: 'unwell' as never }, 'o', now)).toBeNull();
   });
 });
 
-describe('migration 047 widens a vocabulary and nothing else', () => {
-  it('adds the three pain kinds and keeps the four care kinds', () => {
-    for (const kind of [...CYCLE_SUPPORT_KINDS, ...CYCLE_PAIN_SHARE_KINDS]) {
+describe('migration 047 widens a vocabulary by one and nothing else', () => {
+  it('carries all five kinds and no graded kind', () => {
+    for (const kind of CYCLE_SUPPORT_KINDS) {
       expect(migration, kind).toContain(`'${kind}'`);
     }
+    expect(executable).not.toContain("'pain_");
   });
 
   it('touches no RLS policy, no function and no column', () => {

@@ -2,7 +2,6 @@ import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 import {
-  CYCLE_PAIN_SHARE_KINDS,
   CYCLE_SUPPORT_KINDS,
   CYCLE_SYMPTOMS,
   CYCLE_FLOWS,
@@ -17,8 +16,6 @@ import {
   CycleMood,
   CycleEntry,
   CycleSettings,
-  CyclePainShareKind,
-  CycleSignalKind,
   CycleSupportKind,
   CycleSupportSignal,
   CycleSymptom,
@@ -63,7 +60,6 @@ export function mapCycleDailyLogRow(row: any): CycleDailyLog {
 }
 const cycleSymptomSet = new Set<string>(CYCLE_SYMPTOMS);
 const cycleSupportKindSet = new Set<string>(CYCLE_SUPPORT_KINDS);
-const cyclePainShareKindSet = new Set<string>(CYCLE_PAIN_SHARE_KINDS);
 export const CYCLE_SUPPORT_MESSAGE_MAX_LENGTH = 80;
 export const CYCLE_LENGTH_MIN = 15;
 export const CYCLE_LENGTH_MAX = 60;
@@ -155,8 +151,7 @@ export interface CycleRangeMatch {
 
 export interface CreateCycleSupportSignalInput {
   coupleId: string;
-  /** A care request or a coarse pain bucket, both written only from a press. */
-  kind: CycleSignalKind;
+  kind: CycleSupportKind;
   sharedForDate: string;
   message?: string;
   expiresAt?: string;
@@ -165,7 +160,7 @@ export interface CreateCycleSupportSignalInput {
 export interface CycleSupportInsertPayload {
   couple_id: string;
   owner_id: string;
-  kind: CycleSignalKind;
+  kind: CycleSupportKind;
   message: string | null;
   shared_for_date: string;
   expires_at: string;
@@ -473,23 +468,6 @@ export function isCycleSupportKind(value: unknown): value is CycleSupportKind {
   return typeof value === 'string' && cycleSupportKindSet.has(value);
 }
 
-/**
- * A coarse pain bucket the owner chose to send.
- *
- * Separate from `isCycleSupportKind` rather than folded into it, because the two
- * are different disclosures: a care request says what would help, a pain signal
- * says something about a body. Keeping the predicates apart means every call site
- * has to state which of the two it means, and a reviewer can see when a care-only
- * path starts accepting pain.
- */
-export function isCyclePainShareKind(value: unknown): value is CyclePainShareKind {
-  return typeof value === 'string' && cyclePainShareKindSet.has(value);
-}
-
-/** Either vocabulary. What the `kind` column may hold, and what a row may map to. */
-export function isCycleSignalKind(value: unknown): value is CycleSignalKind {
-  return isCycleSupportKind(value) || isCyclePainShareKind(value);
-}
 
 export function isValidCycleSupportMessage(message?: string): boolean {
   return message === undefined || Array.from(message).length <= CYCLE_SUPPORT_MESSAGE_MAX_LENGTH;
@@ -511,7 +489,7 @@ export function mapCycleSupportSignalRow(row: any): CycleSupportSignal {
     id: row.id,
     coupleId: row.couple_id,
     ownerId: row.owner_id,
-    kind: row.kind as CycleSignalKind,
+    kind: row.kind as CycleSupportKind,
     message: row.message || undefined,
     sharedForDate: row.shared_for_date,
     expiresAt: row.expires_at,
@@ -528,7 +506,7 @@ export function buildCycleSupportPayload(
 ): CycleSupportInsertPayload | null {
   const message = input.message?.trim() || undefined;
   if (!ownerId || !input.coupleId || !isCalendarDate(input.sharedForDate)) return null;
-  if (!isCycleSignalKind(input.kind) || !isValidCycleSupportMessage(message)) return null;
+  if (!isCycleSupportKind(input.kind) || !isValidCycleSupportMessage(message)) return null;
   const defaultExpiryTime = now.getTime() + 24 * 60 * 60 * 1000;
   const expiryTime = input.expiresAt ? Date.parse(input.expiresAt) : defaultExpiryTime;
   if (!Number.isFinite(expiryTime) || expiryTime <= now.getTime() || expiryTime > defaultExpiryTime) {
@@ -761,10 +739,7 @@ export async function fetchCycleSupportSignalsResultFromDB(
   return {
     ok: true,
     signals: (data || [])
-      // Either vocabulary. Filtering on care kinds alone would silently drop
-      // every pain signal on read -- the row would exist and never be shown, so
-      // the owner could not see, or revoke, something their partner could.
-      .filter((row: any) => isCycleSignalKind(row.kind))
+      .filter((row: any) => isCycleSupportKind(row.kind))
       .map(mapCycleSupportSignalRow),
   };
 }

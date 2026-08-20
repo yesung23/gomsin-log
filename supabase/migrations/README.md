@@ -78,32 +78,31 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `044_unlink_crypto_pairing_authority.sql` | `disconnect_couple()`가 관계 멤버십과 live `crypto_pairings`를 같은 트랜잭션에서 `UNLINKED`로 전환한다. historical key row를 삭제하지 않으며, former partner와 stale local authority가 새 couple scope를 다시 열 수 없도록 하는 forward correction이다 | **Git 추적됨 / 운영 미적용 — 031–040 및 043과 함께 staging actor/RLS 검증 필요** |
 | `045_harden_e2ee_write_floor_activation.sql` | 되돌릴 수 없는 exact-scope write floor 활성화를 소유 ACTIVE 기기 + 기기 인증서 + 해당 ACTIVE epoch의 self-notarized envelope에 결속한다. PENDING·recovery·provisioning·failed·revoked 기기는 거부한다 | **신규 / 어디에도 미적용 — 031→032→034→035→036→037→038→039→040→043→044→045 fresh-chain actor 검증 필요** |
 | `046_require_actor_for_device_provisioning.sql` | `e2ee_begin_device_provisioning`·`e2ee_finalize_device_provisioning`이 `auth.uid()`가 NULL이면 소유권 비교를 건너뛰던 문제를 forward 수정한다. 두 함수 모두 NULL actor를 먼저 거부하고, 소유자 불일치는 `E2EE_DEVICE_WRONG_ACCOUNT`다. revocation 우선순위·인증서·envelope coverage·허용 상태·idempotent 반환은 그대로 보존한다. PostgREST 캐시를 위해 `NOTIFY pgrst`를 포함한다 | **신규 / 어디에도 미적용 — write-floor harness에서 NULL actor·타 계정·anon 거부를 실제 PostgreSQL로 검증함** |
+| `047_care_signal_feeling_unwell.sql` | `cycle_support_signals.kind` CHECK 어휘에 `feeling_unwell`("오늘은 몸이 힘들어요") **한 종류**를 추가한다(4→5). 컬럼 추가·RLS 정책·함수·GRANT 없음이며 014의 couple-scoped 정책을 그대로 상속한다. 서버는 신호를 파생하지 않고, `cycle_daily_logs`를 읽는 문장이 없다. DOWN은 파일 하단에 있으며 해당 kind의 row가 남아 있으면 거부한다 | **신규 / 어디에도 미적용 — phase0 fresh-chain harness(001→047)에 포함** |
 
-| `047_cycle_pain_care_signal.sql` | `cycle_support_signals.kind` CHECK 어휘를 4개에서 7개로 넓혀 `pain_mild`·`pain_moderate`·`pain_severe`를 허용한다. 컬럼 추가·RLS 정책·함수·GRANT 없음이며 014의 couple-scoped 정책을 그대로 상속한다. 서버는 신호를 파생하지 않고, `cycle_daily_logs`를 읽는 문장이 없다. DOWN은 파일 하단에 있으며 pain row가 남아 있으면 거부하도록 설계했다 | **신규 / 어디에도 미적용 — independent security review 이전에는 master에도 올리지 않는다** |
+## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
-## 047 이 열지 않는 것 — 통증 공유는 projection 확장이 아니다 (2026-08-20)
+V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
+있게 하는 것이며, 승인된 형태는 기존 배려 신호 어휘에 **한 종류를 추가**하는 것입니다.
 
-Control Tower 제품 결정으로 사용자가 **직접** 통증 정도를 파트너에게 보낼 수 있게
-했습니다. 이 migration이 구현의 전부이며, **열지 않은 것**이 더 중요합니다.
+2026-08-20 초안은 `pain_mild`·`pain_moderate`·`pain_severe` 3단계 어휘를 담았고,
+2026-08-21 independent security review가 **CHANGES_REQUIRED**로 반려했습니다. 서버 가시
+`kind` 컬럼의 등급 어휘는 개인 HRK 통증 단계(`mild`/`moderate`/`severe`)를 1:1로
+재서술하며, 어떤 canonical 문서도 이를 승인하지 않았기 때문입니다. 현재 파일은 반려
+사유를 반영해 `feeling_unwell` 하나만 추가합니다.
 
 `get_partner_cycle_projection()`은 손대지 않았습니다. projection은 토글이 켜져 있는 동안
 계속 보이는 **상시 창**이고, 그 RPC는 소유자의 원본 테이블을 SECURITY DEFINER로 읽습니다.
-통증을 거기에 넣었다면 RPC가 `cycle_daily_logs.pain_level`을 직접 읽어야 했고, 그것이 이
-기능에서 절대 만들면 안 되는 결합입니다. 상시 창이었다면 아무도 그 생각을 하지 않은 날에도
-통증이 계속 공개됐을 것입니다.
+이 신호를 거기에 넣었다면 RPC가 `cycle_daily_logs`를 직접 읽어야 했고, 그것이 이 기능에서
+절대 만들면 안 되는 결합입니다.
 
-`cycle_support_signals`는 014부터 이미 반대 모양이었습니다. 한 행 = 한 번의 의도적 행위,
-`shared_for_date`는 소유자가 고르고, `expires_at`은 하루, `revoked_at`으로 철회. 통증
-공유에 필요한 성질이 정확히 그 넷이라 **어휘만 넓혔습니다.**
+`cycle_support_signals`는 014부터 이미 맞는 모양이었습니다. 한 행 = 한 번의 의도적 행위,
+`shared_for_date`는 소유자가 고르고, `expires_at`은 하루, `revoked_at`으로 철회. 그래서
+**어휘 한 값만 넓혔습니다.**
 
-개인 기록의 `pain_level`(`mild`/`moderate`/`severe`)과 신호의
-kind(`pain_mild`/`pain_moderate`/`pain_severe`)는 **의도적으로 다른 문자열**입니다. 값이
-같았다면 `signal.kind = log.painLevel`이 타입 검사를 통과했을 것이고, 그 한 줄이 이 기능의
-유일한 실패 모드입니다. 다리를 놓으려면 리뷰어 눈에 보이는 곳에 직접 써야 합니다.
-
-`cyclePartnerMessage.ts`의 withholding 문장도 같은 커밋에서 고쳤습니다. 이전 문구 "증상,
-출혈량, **통증**, 기분, 메모는 어떤 경우에도 보이지 않아요"는 이 기능이 들어온 순간
-거짓이 되기 때문입니다. 조용히 조건부가 된 절대적 약속은 약속이 없는 것보다 나쁩니다.
+`cyclePartnerMessage.ts`의 withholding 문장 "증상, 출혈량, 통증, 기분, 메모는 어떤
+경우에도 보이지 않아요"는 **그대로 참**입니다. `feeling_unwell`은 기록된 통증 값이
+아니고, 등급이 없으며, 개인 기록에서 파생되지 않는 독립 opt-in 신호이기 때문입니다.
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 

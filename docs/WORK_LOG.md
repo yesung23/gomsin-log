@@ -114,6 +114,35 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-21 · LV · migration 047 delta re-review — APPROVED WITH NOTES (독립 READ-ONLY)
+
+> reviewer가 남긴 READY-TO-COPY 판정의 반영이다. 대상: `claude/047-cycle-pain-gated`
+> HEAD **`d0e2c0a`** (= PR #76 head, live 확인). 판정은 이 커밋에만 결속된다.
+
+- **평결: APPROVED WITH NOTES** — PR #74(`9b0d4b3`) 이후 PR #76의 master landing에 대해.
+  운영 적용은 별도 후속 게이트이며 047은 여전히 어디에도 NOT APPLIED.
+- **선행 finding 마감 전부 확인**: F1 CLOSED(`CYCLE_SUPPORT_KINDS` 정확히 5종,
+  `feeling_unwell` 단일 추가, CHECK 일치, `pain_*`는 부정 픽스처·이력 주석에만 존재,
+  `PRODUCT_V3` §21 무개정 판단에 동의 — §21 하위 절이 이 메커니즘을 그대로 서술한다,
+  NEVER_SHARED 절대문 복원·사실 참) · F2 CLOSED(harness ORDER 포함) · F3 CLOSED
+  (`비의료적` src 0건) · F4 CLOSED(원장 표 + 개정 이력).
+- §21/§13 회귀 없음: 컴포저는 daily-log 데이터에 구조적으로 도달 불가, 모든 `setKind`는
+  press에서만, preview=파트너 렌더 동일 map, 반려된 `pain_*` 문자열은 payload guard에서
+  거부, kind별 알림·분석 문자열 0.
+- in-place migration 정정의 정당성 확인: `9680a1b`를 포함한 branch는 이 PR의 branch뿐,
+  master에 `047_*` 없음, 원장 기준 적용된 곳 없음.
+- **reviewer가 직접 실행**: d0e2c0a export에서 phase0 harness — 실제 PostgreSQL 17.10,
+  45 migration 적용, **125 assertions 전부 PASS**, exit 0 / targeted vitest 5파일
+  **99/99 PASS** / 전체 정적 diff·grep·branch containment / PR #74·#76 live CI 확인.
+- 실행하지 않음: 전체 Vitest·typecheck·lint·build 로컬 실행(PR #76 CI PASS 관찰만),
+  원격 Supabase 조회.
+- **NOTE 2건과 처분**: (N1·MEDIUM) PR #73 branch에 반려된
+  `047_cycle_pain_care_signal.sql`이 잔존 — 이후 merge되면 master에 두 번째 `047_*`가
+  생긴다 → **#73을 즉시 CLOSED 처리함**(branch는 역사 보존). (N2·LOW) harness
+  머리말/배너의 "through 045" 문구가 047 체인과 불일치(선행 결함) → **#76 merge 후
+  후속으로 수정**, 승인된 head를 stale하게 만들지 않는다.
+- code/migration/production 변경: 없음 (READ-ONLY).
+
 ### 2026-08-21 · LV · 047 review 반영 — 어휘를 승인된 한 종류로 축소, 실제 DB 증거 확보
 
 #### PLAN POSITION

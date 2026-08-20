@@ -113,7 +113,7 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 |---|---|
 | PR #74 `release/v1-gate1-gate2` @ `9b0d4b3` | **landing 계보.** 역할별 홈·우리 하루 격자·감정 provenance·시각 기반·온보딩 첫 화면 + CI 수리(stale e2e locator 2건, 문서 trailing whitespace). CI 14/14 GREEN. **master merge는 사용자 실행 대기** — `.claude/hooks`가 PR merge를 사용자에게 예약한다 |
 | PR #73 `claude/v1-launch-readiness` | superseded. #74 merge 후 닫는다. **HEAD가 더 최신이라는 것은 계보 선택의 근거가 아니다** (#70 vs #72와 같은 규칙) |
-| 047 care-signal delta | `claude/047-cycle-pain-gated`(PR #76)로 분리. independent review가 3단계 통증 어휘를 `CHANGES_REQUIRED`로 반려 → `d0e2c0a`에서 승인된 `feeling_unwell` 한 종류로 축소, phase0 fresh-chain(001→047)을 실제 PostgreSQL로 검증. **delta re-review 통과 전 merge 금지** |
+| 047 care-signal delta | `claude/047-cycle-pain-gated`(PR #76, ready)로 분리. independent review가 3단계 통증 어휘를 `CHANGES_REQUIRED`로 반려 → `d0e2c0a`에서 승인된 `feeling_unwell` 한 종류로 축소, phase0 fresh-chain(001→047)을 실제 PostgreSQL로 양측(구현자·재심사자) 검증 → **delta re-review `APPROVED WITH NOTES`**. merge 순서는 #74 이후. N1에 따라 반려 어휘를 담은 PR #73은 CLOSED |
 | canonical 개정 (2026-08-21 승인분) | `claude/canon-amendments-2026-08-21`에 반영: PRODUCT_V3 §5.2·§6.1·§7.6·§8 통화 모드·§10 하루 격자·§14.3 알림 정책·§14.5 E2EE 표현 계약, ENGINEERING_ROADMAP ARCH-P6 개정·LV 계측 조건, BUSINESS §9.2 전역 가설 |
 
 이 checkpoint 이후에도 변하지 않은 것: Production NOT APPLIED, remote catalog UNVERIFIED,

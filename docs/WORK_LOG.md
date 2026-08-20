@@ -114,6 +114,58 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-21 · Phase 0 · 전략 승인 집행 — 두 계보 수렴과 canonical 개정 반영
+
+같은 날 아래 전략 검토 항목의 승인("승인한다") 이후 이어진 집행 세션이다.
+
+#### PLAN POSITION
+- Phase: Phase 0 — 마감과 정합 (전략 문서 §8)
+- Workstream: 두 계보 수렴 선결 + canonical 개정 + 047 분리
+- Step: #74 CI 수리 → green → canon 반영 → 047 gated branch → #73 처분 준비
+- Previous Gate: 전략 검토 승인 (사용자, 2026-08-21)
+- This Gate: **#74 master merge는 사용자 실행 대기** — `.claude/hooks/block-dangerous-bash.sh`가 PR merge를 사용자에게 예약한다
+
+#### DIRECTION CHECK
+- Product/Business/Engineering/Current-state/Work Log: 같은 세션에서 전수 복구 완료 (아래 항목)
+- Does this task conflict with canonical direction? NO — §11 충돌 항목은 사용자 승인으로 해소되었고, 이 세션이 canonical에 반영했다
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Fable 5 / Role: integrator + docs writer (047 내용은 리뷰하지 않음 — independent reviewer 별도)
+- PR/Branch: #74 `release/v1-gate1-gate2` @ `9b0d4b3` (CI 수리) · `claude/canon-amendments-2026-08-21` (canonical 개정 + 전략 문서) · `claude/047-cycle-pain-gated` (047 분리)
+
+#### CHANGED / REVIEWED
+- `e2e/coupleMatrix.spec.ts`·`e2e/realUsability.spec.ts` — 한 이름 통일(`기록 남기기`) 이후 stale locator 2건 수정. `e2e/mediaGallery.spec.ts` 주석 정합. `docs/PHASE_NEXT_ARCHITECTURE_2026-08-20.md` box mockup trailing whitespace 제거 → **#74 CI 14/14 GREEN**
+- canonical 3문서 개정 (승인분): `PRODUCT_V3` §5.2 역할별 홈·§6.1 역할 해석·§7.6 연결 전 기록 사후 공유·§8 통화 모드·§10 하루 격자·§14.3 알림 정책(행위만·하루 1회·단일 문구·토큰 무효화)·§14.5 E2EE 단계별 표현 계약 / `ENGINEERING_ROADMAP` ARCH-P6 개정(공유=중립 암호문 저장, 개인 클라우드=선택 보존 계층, Android deferred 폐기)·LV 진입 조건 2건(계측·표현 일치) / `BUSINESS` §9.2 전역 1순위 가설
+- `CURRENT_STATE` 2026-08-21 convergence checkpoint 추가
+- 047 delta를 `claude/047-cycle-pain-gated`로 분리 (내용 불변 이동)
+
+#### EXPLICITLY NOT CHANGED
+- crypto·DB·migration semantics: 없음. 047은 기존 commit의 branch 이동일 뿐 내용 불변
+- product 코드: e2e 테스트 파일 외 0줄
+- Production: 미접촉
+
+#### VERIFICATION
+- 실행함: 실패했던 e2e 3건을 로컬 실제 Chrome + production build로 PASS (creator/partner protection_required, primary-action sweep) / `typecheck`·`lint` PASS / doc-guard 62 tests PASS / `git diff --check` clean / #74 CI 재실행 **14/14 GREEN** @ `9b0d4b3`
+- 실행하지 않음: full unit suite(이 docs branch에서는 CI가 실행) / remote Supabase / 실기기
+- 047 independent security review: 이 세션이 별도 read-only reviewer로 실행 — 결과는 047 PR에 기록
+
+#### BLOCKERS
+- external/manual: ① #74 master merge (사용자) ② merge 후 canon PR·#73 닫기 ③ 047 review 승인
+
+#### STOPPED AT
+- #74 green·merge 대기. canon branch와 047 branch push + PR 생성까지
+
+#### NEXT ACTION
+- next owner: 사용자 — #74 merge → canon PR merge → #73 close. 이후 Worker가 Phase 0 UI 결함 목록(전략 문서 §8 Phase 0) 착수
+- 기준 SHA: #74 `9b0d4b3`
+
+#### DO NOT ADVANCE UNTIL
+- #74가 master에 merge되기 전에 canon PR·047 PR을 merge하지 않는다
+- 047은 independent security review 승인 전 merge 금지
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-21 · Strategy · CPO 제품 전략 종합 검토 — 검증 부채 판정과 로드맵 재고정
 
 #### PLAN POSITION

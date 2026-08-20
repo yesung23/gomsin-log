@@ -470,6 +470,11 @@ Function은 콘텐츠 접근 권한 자체가 없다 · 연결 해제·로그아
 | 8 | 전역 1순위 마일스톤 (가설) | `BUSINESS_MEMORY_ROADMAP` §9.2 | 가설 표기 유지 |
 | 9 | E2EE 단계별 표현 계약 | `CURRENT_STATE` 또는 신규 | §5.4 표의 명문화 |
 
+> **2026-08-21 승인·반영됨.** 사용자 승인 후 1–8은 canonical 문서에 반영되었고
+> (1–5·9 → `PRODUCT_V3` §5.2·§6.1·§7.6·§8·§10·§14.3·§14.5, 6–7 → `ENGINEERING_ROADMAP`,
+> 8 → `BUSINESS_MEMORY_ROADMAP` §9.2), 저장소 현실 갱신은 `CURRENT_STATE`의
+> 2026-08-21 convergence checkpoint가 소유한다.
+
 ---
 
 ## 12. 이 문서의 지위

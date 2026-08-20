@@ -114,6 +114,71 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-21 · Strategy · CPO 제품 전략 종합 검토 — 검증 부채 판정과 로드맵 재고정
+
+#### PLAN POSITION
+- Phase: LV 진입 전 전략 검토 (구현 없음)
+- Workstream: 제품 전략·실행 로드맵 재설계 검토 (사용자 요청: 전 영역 first-principles 재검토)
+- Step: canonical 전체 복구 → 저장소 구조·UI 감사(서브에이전트 2) → live GitHub 검증 → 결정 제안 문서
+- Previous Gate: Gate 1·2 구현 완료(`d45c760`), 047 independent security review 대기
+- This Gate: 없음 — 분석·제안만. canonical 개정은 사용자 승인 대기
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` 전체 — YES
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1.md` 전체 — YES (BM·AI·저장·미디어·KPI 전 영역 검토이므로 필수)
+- Engineering source checked: `ENGINEERING_ROADMAP.md`, `AGENTS.md` — YES
+- Current-state checked: `CURRENT_STATE.md` + live git/GitHub (`master` `21e7dfb`, PR #59–#74, CI) — YES
+- Latest relevant Work Log checked: 2026-08-20 전 세션 + 2026-08-20 결정 문서군 5종 — YES
+- MASTER PLAN version / 기준일: PRODUCT V3 / 2026-08-15
+- Does this task conflict with canonical direction? NO (분석 자체는 충돌 없음). 제안 중 canonical 개정이 필요한 항목은 문서 §11에 분리했고 승인 전 미적용
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Fable 5 / Role: CPO-level 전략 검토자 (docs-only writer)
+- PR: #73 브랜치 위 docs-only commit / Branch: `claude/v1-launch-readiness`
+- Base SHA: `d45c760` → New HEAD: 이 commit
+
+#### CHANGED / REVIEWED
+- new: `docs/PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` — 제품 코어·여정·IA·AI·프라이버시·리텐션·수익화·Phase 0–4 로드맵·아키텍처 리뷰·최종 결정 + canonical 개정 목록(§11)
+- 코드 감사에서 확인한 문서-코드 격차: E2EE feature flag 기본 OFF(`VITE_E2EE_DEVICE_PROTECTION_ENABLED` 미설정) · 커플 키 페어링/2기기/복구의 UI 호출자 0(`useCases.ts` 도달 불가) · 컴포저에 평문 영상·음성 캡처 칩 활성(§12.3와 불일치) · §19 계측 0줄 · iOS `Pods/` 부재(이 트리에서 빌드된 적 없음) · Android `capacitor.plugins.json` stale
+- live 발견: PR #74(`release/v1-gate1-gate2`, non-draft)는 이 브랜치 18 commit 중 047 commit 하나만 뺀 동일 내용 재작성 계보. 실패 check 3건(Boundary/diff · Real-browser matrix · Capacitor sync reproducibility)
+- 핵심 결정(제안): LV를 유일 최상위 목표로 고정 / LV는 E2EE flag OFF + 사진만(영상·음성 칩 비활성) + 신규 Supabase 프로젝트 / 계측을 LV 선행 조건으로 / ARCH-P6를 "공유=플랫폼 중립 암호문 저장, 개인 클라우드=선택 보존 계층"으로 개정 채택 / #74를 landing 계보로 확정하고 #73은 047+문서로 축소
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음 / DB·migration semantics: 없음 (코드 0줄, SQL 0줄)
+- product semantics: canonical 문서 미수정. 모든 개정은 §11 승인 대기
+- Production: 미접촉. 원격 조회·변경 없음
+
+#### VERIFICATION
+- 실행함: `scripts/agent/live-state.sh`, `git`/`gh` live 조회(master tip·branch delta·PR #74 CI), 서브에이전트 감사 2건(src 구조 92k LOC 맵 / UI 스크린샷 112장 검토)
+- 실행하지 않음: `npm run verify`/test 일체(docs-only 변경), remote Supabase catalog 조회, 실기기 검증
+- what it actually proves: 저장소·GitHub의 현재 사실만. 운영·실기기 상태는 UNVERIFIED 유지
+
+#### REVIEW IMPACT
+- NONE — 코드 무변경. 기존 review 유효성에 영향 없음
+
+#### BLOCKERS
+- code: 없음 / environment: 없음
+- external/manual: §11 canonical 개정에 대한 사용자 승인, 047 independent security review
+
+#### STOPPED AT
+- 전략 문서 + 이 원장 항목 commit까지. push는 하지 않았다
+
+#### REMAINING
+- §10 방향·§11 개정의 사용자 승인 → Phase 0 착수(PR #74 실패 check 3건 수리 → landing → #73 축소 → UI 결함 마감 목록)
+
+#### NEXT ACTION
+- next owner: 사용자(승인) → Worker(Phase 0)
+- 기준 SHA: 이 commit
+- exact next task: 문서 §10·§11 승인 여부 결정. 승인 시 Phase 0의 선결 항목(두 계보 수렴)부터
+
+#### DO NOT ADVANCE UNTIL
+- 047 review 전 #73 전체를 master로 merge하지 않는다(기존 규칙 유지)
+- §11 항목은 canonical 개정 전에 구현하지 않는다
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-20 · LV · 감정 provenance·추론 시점 + 세 갈래 작업 통합
 
 #### PLAN POSITION

@@ -114,6 +114,66 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-21 · LV · 047 review 반영 — 어휘를 승인된 한 종류로 축소, 실제 DB 증거 확보
+
+#### PLAN POSITION
+- Phase: LV / Workstream: 배려 신호 (migration 047)
+- Step: independent review `CHANGES_REQUIRED` 반영 → delta re-review 대기
+- Previous Gate: 아래 항목의 review verdict (F1 HIGH · F2 MEDIUM)
+- This Gate: delta re-review 통과 전 PR #76 merge 금지
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §21(불변 유지 확인), `V1_LAUNCH_DECISIONS` §5(feeling_unwell 한 종류) — YES
+- Business source: NOT APPLICABLE / Engineering source: `AGENTS` §19, `docs/skills/migration-gate.md` §3 — YES
+- Does this task conflict with canonical direction? NO — 충돌하던 것은 반려된 3단계 어휘였고, 이 작업이 canonical에 맞춘다. canonical 개정 불요(§21 그대로 참)
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Fable 5 / Role: Worker (review 반영; 재심사는 별도 independent delta reviewer)
+- PR: #76 / Branch: `claude/047-cycle-pain-gated` / `9680a1b` → **`d0e2c0a`**
+
+#### CHANGED / REVIEWED
+- **F1(HIGH) 해소 — 어휘 축소.** `pain_mild/moderate/severe` 3단계 제거, `CYCLE_SUPPORT_KINDS`에 `feeling_unwell`("오늘은 몸이 힘들어요") 하나 추가(4→5). 별도 pain fieldset·`CYCLE_PAIN_SHARE_KINDS`·`CyclePainShareKind`·`CycleSignalKind`·predicate 2종 전부 삭제 — 배려 신호는 다시 한 개념이다. 전송 전 preview는 유지(별도 승인된 D4 수정). `cyclePartnerMessage`의 절대 문구("증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요") 복원 — feeling_unwell은 기록값·등급이 없는 독립 opt-in이므로 이 문장은 참이다
+- migration을 `047_care_signal_feeling_unwell.sql`로 개명·정정(5값 CHECK). **적용된 곳도 merge된 곳도 없는 파일이므로 in-place 정정이 정당한 유일한 시점**이며, DOWN은 해당 kind row 존재 시 거부 유지. 반려된 `pain_*` 문자열은 payload guard에서 unknown으로 거부됨을 negative test로 고정
+- **F2(MEDIUM) 해소.** `scripts/phase0/storage-authz-harness.mjs` ORDER에 047 추가, **실제 PostgreSQL 17로 실행 — 001→047 fresh chain 적용 + 전 baseline contract PASS**
+- F3: 컴포저의 "비의료적" 절대 수식어 제거 / F4: ledger 표 결합 + 초안→개정 이력 명기
+- 테스트: `cyclePainShare.test.ts` 전면 재작성(등급 kind 영구 금지 — `/^pain_/`·`mild|moderate|severe` 매칭 kind는 실패), `featurePrivacy`·`CycleSupportSection`·`cyclePartnerMessage` guard를 5-kind 어휘로 갱신
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음 / RLS·GRANT·함수: 없음(047은 여전히 CHECK 어휘만)
+- product semantics: preview·당일 만료·철회·기본 꺼짐 불변
+- Production: 미접촉. 047은 여전히 어디에도 NOT APPLIED
+
+#### VERIFICATION
+- 실행함: `typecheck` PASS · `lint --max-warnings 0` PASS · **full Vitest 2636/2636 PASS** · `build` PASS · `node scripts/phase0/storage-authz-harness.mjs` PASS(실제 PostgreSQL 17, 001→047)
+- 실행하지 않음: e2e(이 delta는 cycle 화면 한정, CI가 실행) · 원격 Supabase 조회 · 실기기
+
+#### REVIEW IMPACT
+- DELTA — 원 review가 "어휘 변경 시 DELTA로 충분"이라 명시. independent delta reviewer에게 `d0e2c0a` 재심사 요청함
+
+#### BLOCKERS / STOPPED AT / NEXT ACTION
+- external: delta re-review 판정 대기 → 통과 시 #74 merge 후 #76 merge 가능
+- STOPPED AT: `d0e2c0a` pushed, PR #76 본문 갱신
+- next owner: independent delta reviewer → 사용자(merge)
+
+#### DO NOT ADVANCE UNTIL
+- delta re-review 승인 전 #76 merge 금지 · #74보다 먼저 merge 금지
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-21 · LV · migration 047 delta — independent READ-ONLY security review (원 3단계 어휘에 대한 판정)
+
+> reviewer가 남긴 READY-TO-COPY 판정의 반영이다. 판정 대상은 **개정 전** tree
+> `709a11b`(delta `aeccca2` = `9680a1b`)이며, 위 항목의 `d0e2c0a`가 이 판정의 시정이다.
+
+- **VERDICT: CHANGES_REQUIRED.** 메커니즘(파생 금지·독립 opt-in·당일 만료·철회·RLS 상속)은 §21을 양방향으로 지키며 negative test로 고정되어 있다. 차단 사유는 어휘와 증거.
+- F1(HIGH): 구현 어휘 `pain_mild/moderate/severe`(3단계)가 결정 기록과 다르다. `V1_LAUNCH_DECISIONS` §5는 `feeling_unwell` **한 종류**를 승인했고, `PRODUCT_V3` §21은 개정되지 않았다. 개인 HRK 어휘와 1:1 등급 대응이며 §20상 kind는 서버 가시 metadata다.
+- F2(MEDIUM): 047이 어떤 harness 체인에도 없어 live PostgreSQL 증거 0 — migration-gate §3 위반.
+- F3(LOW-MED): "비의료적 응원 신호만" 문구가 같은 화면의 통증 선택기와 모순. F4(LOW): ledger 표 분리. F5(INFO): CURRENT_STATE 미기재(→ #75 convergence checkpoint가 소유).
+- 이상 없음 확인: RLS·GRANT·trigger 상속 안전(anon·전 파트너·NULL actor 거부는 014 정책 원문으로 확인), invalidation payload에 kind 없음, 알림 전용 문구 pre-commit 없음, `CyclePartnerProjection` 건강 필드 0, preview=파트너 렌더 동일 map, 기본 꺼짐·당일 만료·철회 보존, log→signal 다리 없음.
+- 검증 실행함: tree `709a11b`를 scratchpad로 export 후 targeted vitest **102/102 PASS** + git 정적 검증 전체. 실행하지 않음: 전체 suite·e2e·모든 live PostgreSQL 검증·원격 catalog("RLS verified" 주장 없음).
+- 판정은 tree `709a11b`에 결속되며 HEAD 변경 시 승계되지 않는다(AGENTS §19).
+
 ### 2026-08-21 · Phase 0 · 전략 승인 집행 — 두 계보 수렴과 canonical 개정 반영
 
 같은 날 아래 전략 검토 항목의 승인("승인한다") 이후 이어진 집행 세션이다.

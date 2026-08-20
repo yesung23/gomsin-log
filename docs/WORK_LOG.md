@@ -50,6 +50,31 @@
 - what changed/reviewed:
 - why:
 
+- **`68959db` → `2365d0b`로 전량 revert.** 홈에 대화형(인스타 채팅형) 표현을 추가했다가
+  **실제로 렌더해 보고** 되돌렸다. 문제 둘 다 미관이 아니었다 — 요약 카드가 바로 아래
+  말풍선을 그대로 반복했고(§6 위반), 기록 2건짜리 하루는 화면 위 1/3에 몰리고 아래가
+  비었다. **하루에 기록 몇 건인 제품에, 화면이 빌 일 없는 앱의 문법을 가져온 것이
+  전제부터 틀렸다.** 반복하지 말 것: 대화 문법은 밀린 backlog가 있어야 값을 한다.
+  `homeStyle`·`ConversationHome`·설정 토글 제거, device-pref 허용목록과 간격 사다리도
+  함께 원복(둘 다 이것 때문에만 바뀌었다).
+- `44d410b` **개인 클라우드 검토 — Google 경로 포함**
+  (`PERSONAL_CLOUD_EVALUATION_2026-08-20.md`, 제안서만). 두 가지를 분리했다:
+  Google Drive `appDataFolder`(사용자 소유, iCloud 대응물) vs Google Cloud Storage
+  (회사 소유 — §12가 완화하려는 비용 곡선이 이름만 바뀐다).
+  **핵심 발견: 개인 클라우드는 어느 벤더에서도 공유를 나르지 못한다.** CloudKit엔
+  `CKShare`가 있으나 Drive `appDataFolder`엔 사용자 간 공유가 없다. 따라서 ARCH-P6의
+  `CKShare read-only partner`는 iPhone+Galaxy 커플에서 동작하지 않으며, 이는 Android
+  출시 시점이 아니라 **혼합 커플 가입 첫날의 문제**다.
+- `7a3d256` **온보딩 첫 화면.** 로그인 버튼이 준비된 것처럼 보이는데 동의 없이 누르면
+  가장자리 토스트만 떴다 — 첫 실행에서 **앱이 고장난 걸로 읽힌다.** 동의를 버튼 위로
+  올리고 미충족 시 `aria-disabled` + 이유를 실제 요소로 노출했다. `disabled`가 아닌
+  이유: 진짜 disabled는 탭 순서에서 빠져 키보드·스크린리더 사용자에게 왜인지조차
+  전달되지 않는다. hero는 카테고리가 아니라 문제를 말하고, 번호 3줄로 **상대가 필요하다는
+  사실을 로그인 전에** 알린다(전에는 step 3에서야 알았다). 이메일 로그인 제거.
+  **브라우저로 보고 2건을 더 고쳤다**: 보조 버튼이 화면에서 가장 무거워 위계가 뒤집혀
+  있었고, `justify-between`이 짧아진 콘텐츠를 늘려 가운데를 비웠다(revert한 대화형 홈과
+  같은 결함이 온보딩에도 있었다).
+
 #### EXPLICITLY NOT CHANGED
 - crypto semantics:
 - DB/migration semantics:
@@ -113,7 +138,8 @@
 - Tool: Claude Code / Model: claude-opus-5 / Role: Worker + integrator
 - PR: 없음 / Branch: `claude/v1-launch-readiness`
 - Base SHA: `21e7dfb146985547150736a7efe3d5d50b6306b2`
-- New HEAD: `56fec01` (`4d071ab` → `b9b7459` → `aeccca2` → `7eeaa49` → `a35a23d` → `56fec01`)
+- New HEAD: `7a3d256` (`4d071ab` → `b9b7459` → `aeccca2` → `a35a23d` → `56fec01` →
+  `68959db` → **`2365d0b` revert** → `44d410b` → `7a3d256`)
 
 #### 시작 시 발견한 것 — 잘못된 계보에서 작업할 뻔했다
 세션은 `codex/lv-readiness-audit-v1`(PR #70) worktree에서 시작했다. 그 계보는
@@ -182,9 +208,12 @@
 
 #### VERIFICATION
 - 실행함: `npm run typecheck` PASS / `npm run lint` PASS (`--max-warnings 0`) /
-  `npm test` **PASS — 171 files, 2610 tests** / `npm run build` PASS.
+  `npm test` **PASS — 172 files, 2618 tests** / `npm run build` PASS.
+- **실제 브라우저 검증 실행함** (온보딩 첫 화면 320/390). `playwright install`은 이
+  환경에서 실패하지만 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`로 로컬 Chrome을 쓰면 돈다.
+  **이 확인으로 결함 2건을 잡았다** — 추론만으로는 나오지 않았을 것들이다(아래).
 - 증가분: 2544(기준선) → 2576(시각 재설계) → 2594(감정 + 통증) → 2605(한 탭 작성)
-  → 2610(다시 묻기). **회귀 0건.**
+  → 2610(다시 묻기) → 2618(온보딩 게이트). **회귀 0건.**
 - 실행하지 않음: `npm run test:e2e` — 이 세션에서 직접 돌리지 않았다. 시각 재설계 세션이
   로컬 Chrome으로 85 passed / 0 failed를 보고했으나 그것은 `aeccca2` 이전 트리에 대한
   결과이며, cherry-pick 이후로는 **UNVERIFIED**다.
@@ -203,21 +232,25 @@
 - external/manual: `047`의 independent security review.
 
 #### STOPPED AT
-- 세 갈래 작업이 `claude/v1-launch-readiness` `aeccca2`에 통합되고 전체 검증 green.
+- `claude/v1-launch-readiness` `7a3d256`. 전체 검증 green (2618 tests).
 
 #### REMAINING
-- 요청 7항목 중 미완: **온보딩 재설계**, **크로스플랫폼 저장 제안서**(P6 gate),
-  **320/390/430 실기기 폭 검증**(cherry-pick 이후 UNVERIFIED).
+- 요청 7항목 전부 착수. 아래는 남는다.
+- **`047` independent security review** — 미수행. 이 branch의 master merge 선행 조건.
+- **실기기 검증**(실제 iPhone/Android 단말) — 미수행. 브라우저 확인은 대체가 아니다.
+- **ARCH-P6 개정** — `CKShare` 공유가 혼합 커플에서 불가하다는 발견의 로드맵 반영은
+  P6 gate 소관이며 이번 세션이 하지 않았다.
 - 홈이 여전히 위젯 대시보드다. §6은 홈을 "상대방의 오늘" 한 표면으로 정의하고
   "무관한 카드의 대시보드로 만들지 않는다"고 명시하므로, 이것은 스타일 문제가 아니라
   canonical과의 불일치다. 위젯 시스템 제거는 기능 제거라 별도 제품 판단이 필요하다.
+  **대화형이 답이 아니라는 것은 이번에 확인했다**(위 revert).
 - 기록 상세에 감정 편집기가 둘(`RecordMoodSection` 캐릭터 + `RecordEmotionCorrection`
   chip) 공존한다. 후자의 정당화는 "근거 문구를 보여준다"인데 근거 문구는 저장되지
   않으므로 이미 사실이 아니다. 통합 후보.
 
 #### NEXT ACTION
 - next owner: independent security reviewer (047), 그다음 Worker
-- 기준 SHA: `aeccca2`
+- 기준 SHA: `7a3d256`
 - exact next task: `047` security review → 통과 시에만 master 경로 검토.
 
 #### DO NOT ADVANCE UNTIL

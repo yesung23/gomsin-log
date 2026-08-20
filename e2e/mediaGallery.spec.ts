@@ -246,7 +246,7 @@ test('a photo opens full-screen, and Escape closes it', async ({ browser }) => {
       /*
        * Clicked near the top-left of the photo rather than at its centre.
        * A 4:5 photo is taller than the space between the app bar and the
-       * floating `지금의 마음 남기기` CTA, so the geometric centre of the overlay
+       * floating `기록 남기기` CTA, so the geometric centre of the overlay
        * can sit underneath that fixed layer and Playwright's actionability check
        * correctly refuses. A person taps the part of the picture they can see.
        */

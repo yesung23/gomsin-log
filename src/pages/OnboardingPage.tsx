@@ -927,17 +927,57 @@ export function OnboardingPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-label font-semibold text-muted-foreground">내 닉네임 (2~12자)</label>
+                  {/*
+                    `htmlFor`/`id`, which this pair did not have.
+
+                    The label was floating text next to a field, so a screen reader
+                    announced an unnamed edit box -- on the only step of the wizard
+                    that asks the user to type something. Tapping the label did
+                    nothing either.
+                  */}
+                  <label htmlFor="onboarding-nickname" className="text-label font-semibold text-muted-foreground">
+                    내 닉네임 (2~12자)
+                  </label>
                   <input
+                    id="onboarding-nickname"
                     type="text"
                     value={nickname}
                     onChange={(e) => setNickname(e.target.value)}
+                    /*
+                      This step has exactly one field and nothing else to decide, so
+                      arriving with it unfocused costs a tap and a keyboard-open
+                      before anyone can answer. Focusing it also raises the keyboard,
+                      which is what fills the gap this step otherwise leaves between
+                      the field and the button.
+                    */
+                    autoFocus
+                    /*
+                      The phone keyboard's action key now says 다음 and does what it
+                      says. Without this it read 완료 and did nothing at all, so the
+                      keyboard had to be dismissed before the real button was
+                      reachable.
+                    */
+                    enterKeyHint="next"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && canAdvanceFromStep) {
+                        e.preventDefault();
+                        void handleNext();
+                      }
+                    }}
+                    aria-invalid={nickname.trim().length > 0 && nickname.trim().length < 2}
+                    aria-describedby={
+                      nickname.trim().length > 0 && nickname.trim().length < 2
+                        ? 'onboarding-nickname-error'
+                        : undefined
+                    }
                     placeholder={role === 'gomsin' ? '예) 춘향' : '예) 몽룡'}
                     maxLength={12}
                     className="w-full h-13 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
                   {nickname.trim().length > 0 && nickname.trim().length < 2 && (
-                    <p className="text-caption text-destructive font-medium">닉네임은 2자 이상 입력해주세요.</p>
+                    <p id="onboarding-nickname-error" className="text-caption text-destructive font-medium">
+                      닉네임은 2자 이상 입력해주세요.
+                    </p>
                   )}
                 </div>
               </div>
@@ -1070,6 +1110,20 @@ export function OnboardingPage() {
                         inputMode="numeric"
                         autoComplete="one-time-code"
                         maxLength={6}
+                        /*
+                          Six digits and then done. The keyboard's action key
+                          submits rather than sitting over the button the user then
+                          has to dismiss it to reach -- and a six-digit code is
+                          exactly the case where someone types the last digit and
+                          expects it to go.
+                        */
+                        enterKeyHint="done"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !isGeneratingCode && !isVerifyingCode) {
+                            e.preventDefault();
+                            void handleNext();
+                          }
+                        }}
                         placeholder="숫자 6자리 초대 코드"
                         aria-label="숫자 6자리 초대 코드"
                         className="w-full h-12 px-4 rounded-control bg-card border border-border text-foreground font-mono text-center text-title tracking-widest outline-none focus:ring-2 focus:ring-coral/40"

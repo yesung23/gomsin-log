@@ -108,7 +108,7 @@ describe('§7.1 the 기록 tab authoring entry point exists for BOTH roles', () 
   for (const role of ['gomsin', 'soldier'] as const) {
     it(`${role} finds the composer entry point on the 기록 tab`, () => {
       renderPage(role);
-      expect(screen.getByRole('button', { name: /지금의 마음 남기기/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: /기록 남기기/ })).toBeEnabled();
     });
 
     it(`${role} completes a one-line record from the 기록 tab, end to end`, async () => {
@@ -119,8 +119,8 @@ describe('§7.1 the 기록 tab authoring entry point exists for BOTH roles', () 
       const user = userEvent.setup();
       renderPage(role);
 
-      await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
-      expect(await screen.findByRole('dialog', { name: '지금의 마음 남기기' }))
+      await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
+      expect(await screen.findByRole('dialog', { name: '기록 남기기' }))
         .toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /한줄/ }));
@@ -147,7 +147,7 @@ describe('§7.1 the 기록 tab authoring entry point exists for BOTH roles', () 
     // "사용자가 홈을 어떻게 구성하든 기록을 남길 수 있어야 한다."
     for (const role of ['gomsin', 'soldier'] as const) {
       const { unmount } = renderPage(role, []);
-      expect(screen.getByRole('button', { name: /지금의 마음 남기기/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: /기록 남기기/ })).toBeEnabled();
       unmount();
     }
   });
@@ -155,7 +155,7 @@ describe('§7.1 the 기록 tab authoring entry point exists for BOTH roles', () 
   it('survives a home rearranged to widgets that cannot author', () => {
     for (const role of ['gomsin', 'soldier'] as const) {
       const { unmount } = renderPage(role, ['dday', 'partner_day']);
-      expect(screen.getByRole('button', { name: /지금의 마음 남기기/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: /기록 남기기/ })).toBeEnabled();
       unmount();
     }
   });

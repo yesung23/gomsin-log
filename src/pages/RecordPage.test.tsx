@@ -577,9 +577,9 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
     const user = userEvent.setup({ delay: null });
     renderPage([]);
 
-    expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
-    expect(screen.getByRole('dialog', { name: '지금의 마음 남기기' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
+    expect(screen.getByRole('dialog', { name: '기록 남기기' })).toBeInTheDocument();
   });
 
   it('is present regardless of the stored widget layout -- it does not read widgetLayout at all', async () => {
@@ -588,8 +588,8 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
     // does not consult that list, so it is unaffected.
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
-    const dialog = await screen.findByRole('dialog', { name: '지금의 마음 남기기' });
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
+    const dialog = await screen.findByRole('dialog', { name: '기록 남기기' });
     expect(dialog).toBeInTheDocument();
     // TodayLogWidget's own capture launcher, present the instant the sheet
     // opens -- before any type is chosen.
@@ -599,7 +599,7 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
   it('saving from the sheet calls the same store write TodayLogWidget always used', async () => {
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
     await user.click(screen.getByRole('button', { name: /한줄/ }));
     await user.type(await screen.findByLabelText('오늘의 기록'), '기록 탭에서 바로 씀');
     await user.click(screen.getByRole('button', { name: /남기기|저장/ }));
@@ -611,21 +611,21 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
   it('closes itself after a successful save', async () => {
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
     await user.click(screen.getByRole('button', { name: /한줄/ }));
     await user.type(await screen.findByLabelText('오늘의 기록'), '닫혀야 함');
     await user.click(screen.getByRole('button', { name: /남기기|저장/ }));
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument());
   });
 
   it('the X button closes the sheet without saving', async () => {
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
     await user.click(screen.getByRole('button', { name: '닫기' }));
 
-    expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument();
     expect(addRecordWithMedia).not.toHaveBeenCalled();
   });
 });

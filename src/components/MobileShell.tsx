@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, BookOpen, CalendarDays, Heart, User } from 'lucide-react';
+import { Home, BookOpen, CalendarDays, Heart, User, Plus } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { routeAnnouncement } from '@/lib/routeAnnouncement';
@@ -52,6 +52,23 @@ const TABS = [
     matchPrefixes: ['/my', '/settings'],
   },
 ] as const;
+
+/**
+ * Whether this screen already pins a primary action of its own.
+ *
+ * The shell's compose button is withheld on these so two floating controls never
+ * share a corner. `/record`'s CTA opens the very composer this button routes to,
+ * and a trip DETAIL pins its own pair.
+ *
+ * Written as a predicate rather than a prefix list because the trip screens split:
+ * `/trips/:id` pins two buttons, `/trips` pins none. A prefix would have taken the
+ * list with it and made the one screen people browse while remembering something
+ * the one screen with no way to record it.
+ */
+function ownsPrimaryAction(pathname: string): boolean {
+  if (pathname === '/record' || pathname.startsWith('/record/')) return true;
+  return pathname.startsWith('/trips/');
+}
 
 export function MobileShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
@@ -169,6 +186,34 @@ export function MobileShell({ children }: { children: ReactNode }) {
           <SharedSyncBanner />
           {children}
         </main>
+
+        {/*
+          Write from anywhere, in one tap.
+
+          The composer lived on `/record` behind its own floating CTA, and on Home
+          inside a widget the user is free to delete. From 일정, 우리 or 마이 --
+          and from Home with that widget removed -- capturing a thought meant
+          navigating first. PRODUCT_V3 §7.1 asks for thirty seconds end to end and
+          three of them were going to travel.
+
+          Not a sixth tab. §5 fixes the five, and this is an ACTION rather than a
+          place, so it is a button floating over the bar rather than a peer of it.
+          It sits bottom-right because that is the easiest corner for a thumb, and
+          it clears the measured bar height for the reason the banner does.
+
+          Withheld on the two screens that already own a primary floating action,
+          so the user never sees two competing round buttons: `/record`, whose CTA
+          opens this same composer, and a trip detail with its own pinned pair.
+        */}
+        {!ownsPrimaryAction(pathname) && (
+          <Link
+            to="/record?compose=1"
+            aria-label="기록 남기기"
+            className="press-response fixed right-[max(calc(50%-215px+16px),16px)] bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+12px)] z-40 w-14 h-14 rounded-full bg-coral-strong text-coral-strong-foreground shadow-lg flex items-center justify-center"
+          >
+            <Plus size={26} strokeWidth={2.4} aria-hidden="true" />
+          </Link>
+        )}
 
         {/* iOS Safari Standalone Install Banner Prompt */}
         <InstallPromptBanner />

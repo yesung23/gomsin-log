@@ -7,6 +7,7 @@ import {
 } from '@/lib/cycle';
 import { formatKoreanDate } from '@/components/cycle/cycleFormatting';
 import type { CyclePartnerProjection } from '@/types';
+import { Card } from '@/components/ui/Card';
 
 /**
  * What the partner sees of the owner's cycle.
@@ -105,18 +106,18 @@ export function CyclePartnerCard({ authenticated, userId, connected }: CyclePart
 
   if (loadState === 'loading') {
     return (
-      <section className="bg-card rounded-surface p-4 border border-border">
+      <Card>
         <div className="py-2 flex items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
           <Loader2 className="w-4 h-4 animate-spin" /> 확인하는 중이에요.
         </div>
-      </section>
+      </Card>
     );
   }
 
   if (!projection) return null;
 
   return (
-    <section className="bg-card rounded-surface p-4 border border-border space-y-3">
+    <Card className="space-y-3">
       <div className="flex items-center gap-2">
         <HeartHandshake className="w-5 h-5 text-coral" aria-hidden="true" />
         <h3 className="text-heading text-foreground">함께 알아두면 좋은 것</h3>
@@ -168,6 +169,6 @@ export function CyclePartnerCard({ authenticated, userId, connected }: CyclePart
       <p className="text-caption text-muted-foreground">
         상대가 직접 켠 항목만 보여요. 언제든 상대가 공유를 끌 수 있어요.
       </p>
-    </section>
+    </Card>
   );
 }

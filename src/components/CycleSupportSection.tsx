@@ -16,6 +16,7 @@ import { ErrorNote } from '@/components/ui/ErrorNote';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import type { CycleSupportKind, CycleSupportSignal, Role } from '@/types';
+import { Card } from '@/components/ui/Card';
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'disconnected' | CycleFetchFailureReason;
 
@@ -320,7 +321,7 @@ export function CycleSupportSection({
   };
 
   return (
-    <section className="bg-card rounded-surface p-4 border border-border space-y-4">
+    <Card className="space-y-4">
       <div className="flex items-center justify-between border-b border-border/40 pb-3 gap-2">
         <div className="flex items-center gap-2">
           <HeartHandshake className="w-5 h-5 text-coral" />
@@ -467,6 +468,6 @@ export function CycleSupportSection({
           {mutationError && activeSignal && <ErrorNote>{mutationError}</ErrorNote>}
         </>
       )}
-    </section>
+    </Card>
   );
 }

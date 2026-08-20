@@ -46,6 +46,7 @@ import { CycleSettingsSheet } from '@/components/cycle/CycleSettingsSheet';
 import { CycleStatusHero } from '@/components/cycle/CycleStatusHero';
 import { CycleSummary } from '@/components/cycle/CycleSummary';
 import { formatKoreanDate } from '@/components/cycle/cycleFormatting';
+import { Card } from '@/components/ui/Card';
 
 type LoadState = 'loading' | 'ready' | CycleFetchFailureReason;
 type ShareKey = 'shareCurrentPeriod' | 'sharePredictionWindow' | 'shareFertilityWindow';
@@ -719,17 +720,17 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
 
   if (!userId) {
     return (
-      <section className="bg-card rounded-surface p-4 border border-border">
+      <Card>
         <p className="text-caption text-muted-foreground text-center">
           {failureMessage('unauthenticated')}
         </p>
-      </section>
+      </Card>
     );
   }
 
   if (consentChecking) {
     return (
-      <section className="bg-card rounded-surface p-4 border border-border">
+      <Card>
         <div
           className="py-6 flex items-center justify-center gap-2 text-caption text-muted-foreground"
           role="status"
@@ -737,16 +738,13 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
           동의 상태를 확인하는 중이에요.
         </div>
-      </section>
+      </Card>
     );
   }
 
   if (!consentGranted) {
     return (
-      <section
-        className="bg-card rounded-surface p-4 border border-border space-y-4"
-        aria-labelledby="cycle-consent-title"
-      >
+      <Card className="space-y-4" aria-labelledby="cycle-consent-title">
         <div className="flex items-center gap-2 border-b border-border/40 pb-3">
           <HeartPulse className="w-5 h-5 text-coral" aria-hidden="true" />
           <h3 id="cycle-consent-title" className="text-heading text-foreground">내 몸의 리듬 시작하기</h3>
@@ -783,7 +781,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
         >
           개인정보 처리방침 보기
         </a>
-      </section>
+      </Card>
     );
   }
 
@@ -793,7 +791,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   ) || null;
 
   return (
-    <section className="bg-card rounded-surface border border-border p-4 space-y-6">
+    <Card className="space-y-6">
       <header className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <HeartPulse className="w-5 h-5 text-coral" aria-hidden="true" />
@@ -965,6 +963,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           }}
         />
       )}
-    </section>
+    </Card>
   );
 }

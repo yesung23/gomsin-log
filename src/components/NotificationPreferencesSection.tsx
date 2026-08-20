@@ -9,6 +9,7 @@ import {
   type NotificationPermission,
   type NotificationPreferences,
 } from '@/lib/notifications';
+import { Card } from '@/components/ui/Card';
 
 export function NotificationPreferencesSection({ userId }: { userId: string }) {
   const [preferences, setPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
@@ -37,7 +38,7 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
   return (
     <section className="space-y-2" data-testid="notification-preferences">
       <h2 className="text-heading text-foreground">알림과 다시 들어오기</h2>
-      <div className="rounded-surface bg-card border border-border p-4 space-y-3">
+      <Card className="space-y-3">
         <p className="text-caption text-muted-foreground leading-relaxed">
           알림에는 기록 본문이나 사진이 들어가지 않아요. 현재는 앱이 열려 있을 때만 알려주며, 누르면 현재 권한으로 확인할 수 있는 정확한 원본으로 이동해요.
         </p>
@@ -62,7 +63,7 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
             {permission === 'granted' ? '앱이 열려 있을 때 브라우저 알림 사용' : '앞에서 보여줄 브라우저 알림 허용'}
           </button>
         )}
-      </div>
+      </Card>
     </section>
   );
 }

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { regenerateCoupleInvitation } from '@/lib/supabase';
 import { invitationExpiryLabel, isInvitationExpired } from '@/lib/coupleLifecycle';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { Card } from '@/components/ui/Card';
 
 /**
  * The couple lifecycle, rendered wherever the user actually is.
@@ -103,12 +104,7 @@ export function CoupleStatusBanner() {
 
   if (coupleLifecycle === 'unknown') {
     return (
-      <section
-        aria-live="polite"
-        data-testid="couple-status-banner"
-        data-lifecycle="unknown"
-        className="rounded-surface border border-border bg-card p-4 space-y-2"
-      >
+      <Card aria-live="polite" data-testid="couple-status-banner" data-lifecycle="unknown" className="space-y-2">
         <div className="flex items-center gap-2 text-label font-bold text-foreground">
           <HelpCircle size={14} className="text-muted-foreground" />
           <span>커플 공간 상태를 확인하고 있어요</span>
@@ -124,17 +120,13 @@ export function CoupleStatusBanner() {
         >
           {busy ? '확인 중...' : '다시 확인'}
         </button>
-      </section>
+      </Card>
     );
   }
 
   if (coupleLifecycle === 'personal') {
     return (
-      <section
-        data-testid="couple-status-banner"
-        data-lifecycle="personal"
-        className="rounded-surface border border-border bg-card p-4 space-y-2"
-      >
+      <Card data-testid="couple-status-banner" data-lifecycle="personal" className="space-y-2">
         <p className="text-label font-bold text-foreground">
           우리 공간을 만들거나 초대 코드를 입력해 보세요
         </p>
@@ -145,17 +137,13 @@ export function CoupleStatusBanner() {
                 onClick={() => navigate('/settings')}>
           커플 공간 설정으로 가기
         </Button>
-      </section>
+      </Card>
     );
   }
 
   if (coupleLifecycle === 'disconnected') {
     return (
-      <section
-        data-testid="couple-status-banner"
-        data-lifecycle="disconnected"
-        className="rounded-surface border border-border bg-card p-4 space-y-2"
-      >
+      <Card data-testid="couple-status-banner" data-lifecycle="disconnected" className="space-y-2">
         <div className="flex items-center gap-2 text-label font-bold text-foreground">
           <Link2Off size={14} className="text-muted-foreground" />
           <span>커플 공간 연결이 해제되었어요</span>
@@ -168,7 +156,7 @@ export function CoupleStatusBanner() {
                 onClick={() => navigate('/settings')}>
           다시 연결하기
         </Button>
-      </section>
+      </Card>
     );
   }
 

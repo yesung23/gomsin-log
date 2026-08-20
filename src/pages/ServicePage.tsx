@@ -9,6 +9,7 @@ import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
 import { ArrowLeft, Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Branch, MilitaryStatus, DischargeDateSource } from '@/types';
+import { Card } from '@/components/ui/Card';
 
 /** Standard service length by branch, in months. */
 const SERVICE_MONTHS: Record<Branch, number> = {
@@ -234,7 +235,7 @@ export function ServicePage() {
         )}
 
         {/* Contact window, from the soldier's saved preferences. */}
-        <div className="bg-card rounded-surface p-4 border border-border">
+        <Card>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-lilac/30 rounded-full flex items-center justify-center text-foreground shrink-0">
               <Phone className="w-5 h-5" />
@@ -247,10 +248,10 @@ export function ServicePage() {
               </div>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* Next leave / visit, read from real events. */}
-        <div className="bg-card rounded-surface p-4 border border-border space-y-3">
+        <Card className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-heading text-foreground">다음 휴가·면회</h2>
             <button
@@ -280,7 +281,7 @@ export function ServicePage() {
               등록된 휴가나 면회 일정이 없어요. 일정을 추가하면 여기와 홈 화면에 함께 표시됩니다.
             </p>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Edit Modal */}

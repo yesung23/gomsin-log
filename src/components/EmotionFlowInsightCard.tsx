@@ -1,5 +1,6 @@
 import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
 import type { EmotionFlowItem } from '@/types';
+import { Card } from '@/components/ui/Card';
 
 /**
  * Renders the shape of one record's confirmed emotions.
@@ -41,11 +42,7 @@ export function EmotionFlowInsightCard({
   }));
 
   return (
-    <div
-      role="group"
-      aria-label={summary}
-      className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
-    >
+    <Card role="group" aria-label={summary} className={`${className ?? ''}`}>
       <p className="text-caption font-semibold text-muted-foreground mb-2">마음의 흐름</p>
 
       <p className="text-body font-medium text-foreground">
@@ -83,6 +80,6 @@ export function EmotionFlowInsightCard({
           미리보기예요. 이 정리는 저장되지 않아요.
         </p>
       )}
-    </div>
+    </Card>
   );
 }

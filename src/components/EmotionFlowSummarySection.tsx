@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
 import type { DailyRecord, EmotionFlowItem } from '@/types';
+import { Card } from '@/components/ui/Card';
 
 /**
  * Aggregated emotion flow for the records currently on screen.
@@ -91,12 +92,7 @@ export function EmotionFlowSummarySection({
 
   if (isLoading) {
     return (
-      <section
-        data-testid="emotion-flow-summary"
-        data-state="loading"
-        aria-busy="true"
-        className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
-      >
+      <Card data-testid="emotion-flow-summary" data-state="loading" aria-busy="true" className={`${className ?? ''}`}>
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         {/*
           Says the period is not confirmed YET. The empty state's
@@ -106,18 +102,13 @@ export function EmotionFlowSummarySection({
         <p className="text-caption text-muted-foreground mt-2">
           기록을 확인하는 중이에요. 확인되면 마음 흐름을 보여드려요.
         </p>
-      </section>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <section
-        data-testid="emotion-flow-summary"
-        data-state="error"
-        role="alert"
-        className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
-      >
+      <Card data-testid="emotion-flow-summary" data-state="error" role="alert" className={`${className ?? ''}`}>
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         <p className="text-caption text-muted-foreground mt-2">{error}</p>
         {onRetry && (
@@ -129,33 +120,23 @@ export function EmotionFlowSummarySection({
             다시 시도
           </button>
         )}
-      </section>
+      </Card>
     );
   }
 
   if (!analysis) {
     return (
-      <section
-        data-testid="emotion-flow-summary"
-        data-state="empty"
-        className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
-      >
+      <Card data-testid="emotion-flow-summary" data-state="empty" className={`${className ?? ''}`}>
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         <p className="text-caption text-muted-foreground mt-2">아직 오늘의 마음이 없어요</p>
-      </section>
+      </Card>
     );
   }
 
   const { points, startState, endState, summary } = analysis;
 
   return (
-    <section
-      data-testid="emotion-flow-summary"
-      data-state="ready"
-      data-shape={analysis.shape}
-      aria-label={`${periodLabel} 마음 흐름: ${summary}`}
-      className={`bg-card border border-border rounded-surface p-4 ${className ?? ''}`}
-    >
+    <Card data-testid="emotion-flow-summary" data-state="ready" data-shape={analysis.shape} aria-label={`${periodLabel} 마음 흐름: ${summary}`} className={`${className ?? ''}`}>
       <div className="flex items-baseline justify-between">
         <p className="text-caption font-semibold text-muted-foreground">기간 마음 흐름</p>
         <p className="text-caption text-muted-foreground">{periodLabel}</p>
@@ -181,6 +162,6 @@ export function EmotionFlowSummarySection({
       <p data-testid="summary-counts" className="text-caption text-muted-foreground mt-3">
         기록 {recordCount}개 · 마음 {points.length}개
       </p>
-    </section>
+    </Card>
   );
 }

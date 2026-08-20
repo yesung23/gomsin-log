@@ -89,6 +89,333 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-20 · LV · 감정 provenance·추론 시점 + 세 갈래 작업 통합
+
+#### PLAN POSITION
+- Phase: LV (Limited Validation)
+- Workstream: 감정 파이프라인 정직성 + 온디바이스 추론 정책 + 병렬 세션 통합
+- Step: 감사 → 결정기록 → 감정 구현 → 시각 재설계 통합 → 통증 배려신호 cherry-pick
+- Previous Gate: `21e7dfb`
+- This Gate: 없음 — LV 진입 조건이 아니다. 047은 **security review gate 대기 중**
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §6.2 결정성·LLM 금지, §13 감정·기계추론, §16 비목표, §19 행동감시 금지, §20 데이터 분류, §21 주기 공유
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1` §7 AI 역할·온디바이스, §8 개인 클라우드, §17 전략 가드 — AI 역할·저장 전략에 닿는 작업이므로 필수였다
+- Engineering source checked: `ENGINEERING_ROADMAP` §2·§2.5(LV)·§3, `AGENTS.md` §1·§7·§13·§17
+- Current-state checked: live git `21e7dfb`, `CONSOLIDATION_LEDGER`
+- Latest relevant Work Log checked: 2026-08-19 LV PartnerDay clean replacement
+- Does this task conflict with canonical direction? NO — 단, 요청 하나를 그대로 구현하지 않았다.
+  사용자의 "통증은 명시적 선택 시 공유"는 §21의 "통증은 어떤 설정에서도 공유되지 않는다"와
+  문자 그대로는 충돌한다. HRK projection 확장 대신 배려 신호로 구현해 §21을 건드리지 않고
+  같은 의도를 달성했다. 근거는 `V1_LAUNCH_DECISIONS_2026-08-20.md` §5.
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: claude-opus-5 / Role: Worker + integrator
+- PR: 없음 / Branch: `claude/v1-launch-readiness`
+- Base SHA: `21e7dfb146985547150736a7efe3d5d50b6306b2`
+- New HEAD: `aeccca2` (3 commits: `4d071ab` → `b9b7459` → `aeccca2`)
+
+#### 시작 시 발견한 것 — 잘못된 계보에서 작업할 뻔했다
+세션은 `codex/lv-readiness-audit-v1`(PR #70) worktree에서 시작했다. 그 계보는
+2026-08-20 consolidation에서 **탈락한 쪽**이다 — `partnerDay.ts`의
+`unavailable`/`corrupt` 출현이 1회(master는 35회)이고 master보다 21 commit 뒤처져
+있었다. `CONSOLIDATION_LEDGER`로 확인한 뒤 master 기준으로 branch를 다시 만들었다.
+**HEAD가 더 최신이라는 것은 그 계보가 옳다는 증거가 아니다.**
+
+#### CHANGED / REVIEWED
+- new: `docs/V1_LAUNCH_DECISIONS_2026-08-20.md` — 이번 작업의 결정 기록. 감사에서 확인한
+  "이미 되어 있던 것 9개"와 "실제 결함 4개"를 분리하고, 추론 시점 6후보를 UX·배터리·
+  발열·latency·privacy·정확도로 비교했다.
+- new: `src/lib/onDeviceInference.ts` (+ test 13) — 추론 시점 정책, 기기 tier, 내용 해시 memo.
+- new: `src/components/emotion/EmotionSuggestionReview.tsx` — 단정이 아니라 질문하는 표면.
+- file: `src/lib/emotionCandidates.ts` — `candidatesToFlowItems`가 `source: 'user_confirmed'`를
+  하드코딩하던 것을 실제 provenance로 교체. `confirmedIds` 누락 시 fail closed.
+- file: `src/lib/useEmotionCandidates.ts` — `useEmotionCandidatesAtBoundary` 추가. 타이핑
+  디바운스 기반 훅을 대체한다. 저장된 기록을 다시 여는 경로는 이미 확인된 항목을
+  pre-answered로 seed해 교정 세션이 확정 감정을 제안으로 강등시키지 않게 했다.
+- file: `src/lib/basicEmotions.ts` — `BASIC_EMOTION_EMOJI` 삭제. OS가 그리는 이모지는
+  두 사람이 같은 감정을 볼 때 서로 다른 그림을 보게 만든다.
+- file: `TodayLogWidget.tsx` / `EmotionChipEditor.tsx` / `PartnerEmotionWidgets.tsx` — 감정
+  시각언어를 오리지널 캐릭터로 통일.
+- **통합**: 같은 worktree에서 병렬로 진행된 시각 재설계 세션의 미커밋 작업(33 파일)을
+  검증하고 `4d071ab`로 커밋했다. 그 세션은 내 미커밋 변경이 만든 실제 결함
+  (`onBlur` settle → review 렌더 → 저장 버튼이 손가락 밑에서 밀림 → 첫 탭 무시)을
+  추적해 고쳤다. 두 작업의 파일이 겹쳐 완전한 분리는 불가능했고, 분리 기준은
+  "무엇을 바꿨는가"로 정했다.
+- **cherry-pick**: `security-review/cycle-pain-care-signal`의 `a59da87` → `aeccca2`.
+  그 branch는 master보다 10 commit 뒤처진 `d1d3c1a` 위의 단일 commit이라 **merge하면
+  master의 최신 작업이 되돌아간다.** cherry-pick이 맞는 연산이었다. import 충돌 1건
+  (`Card` vs 통증 타입) 수동 해결.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음. 키 계층·device trust·recovery·write floor 미접촉.
+- DB/migration semantics: `047`이 저장소에 들어왔으나 **어디에도 적용하지 않았다.**
+  원격 Supabase 호출 없음. `cycle_support_signals.kind` CHECK 어휘 확장 하나이며
+  컬럼·정책·함수·GRANT 추가 없음.
+- product semantics: 5탭·`확인했어요`/`이야기했어요` 의미·PartnerDay state·원본 이동 계약 불변.
+- privacy semantics: **강화 방향으로만** 바뀌었다. 미확인 기계 추론은 이제 저장되지도
+  공유되지도 않는다. `visibleRecordsForViewer`·`emotionFlowForStorage`의 계약 자체는 그대로다.
+- Production: 미접촉.
+
+#### VERIFICATION
+- 실행함: `npm run typecheck` PASS / `npm run lint` PASS (`--max-warnings 0`) /
+  `npm test` **PASS — 170 files, 2594 tests** / `npm run build` PASS.
+- 증가분: 2544(기준선) → 2576(시각 재설계) → 2594(감정 + 통증). **회귀 0건.**
+- 실행하지 않음: `npm run test:e2e` — 이 세션에서 직접 돌리지 않았다. 시각 재설계 세션이
+  로컬 Chrome으로 85 passed / 0 failed를 보고했으나 그것은 `aeccca2` 이전 트리에 대한
+  결과이며, cherry-pick 이후로는 **UNVERIFIED**다.
+- 실행하지 않음: `check:edge`/`test:edge` — deno 없음. edge function 미접촉.
+- 실행하지 않음: 실기기 검증, 원격 Supabase catalog 조회.
+
+#### REVIEW IMPACT
+- **FULL — `047`에 대해.** migration + 파트너 가시 어휘 확장이므로 `AGENTS.md` §19의
+  분류 C에 해당한다. 원 commit이 스스로 independent security review를 요구했고 그 요구는
+  cherry-pick으로 사라지지 않는다.
+- 감정·시각 변경은 DELTA. 프라이버시 경계를 넓히지 않고 좁혔다.
+
+#### BLOCKERS
+- code: 없음.
+- environment: playwright 브라우저 설치가 이 환경에서 실패한다(stale `__dirlock`).
+- external/manual: `047`의 independent security review.
+
+#### STOPPED AT
+- 세 갈래 작업이 `claude/v1-launch-readiness` `aeccca2`에 통합되고 전체 검증 green.
+
+#### REMAINING
+- 요청 7항목 중 미완: 온보딩 재설계, 크로스플랫폼 저장 제안서(P6 gate), 320/390/430
+  실기기 폭 검증, 기록 상세에서 미확인 기록에 제안을 다시 묻는 경로(`record-opened`
+  boundary는 선언했으나 아직 배선하지 않음).
+- 기록 상세에 감정 편집기가 둘(`RecordMoodSection` 캐릭터 + `RecordEmotionCorrection`
+  chip) 공존한다. 후자의 근거 문구는 저장되지 않으므로 그 정당화는 이미 사실이 아니다.
+
+#### NEXT ACTION
+- next owner: independent security reviewer (047), 그다음 Worker
+- 기준 SHA: `aeccca2`
+- exact next task: `047` security review → 통과 시에만 master 경로 검토.
+
+#### DO NOT ADVANCE UNTIL
+- **이 branch는 `047` review 이전에 master로 merge하지 않는다.** review 대기 작업이
+  올라타 있어 merge하면 gate를 우회하게 된다.
+
+#### PRODUCTION
+- NOT APPLIED. 원격 mutation 없음.
+
+### 2026-08-20 · LV · Instagram 문법의 시각 재설계 — Astryx 기반 + 미디어 우선
+
+#### PLAN POSITION
+- Phase: LV (Limited Validation)
+- Workstream: 시각 재설계 — 컴포넌트 기반 교체와 미디어 표현
+- Step: Astryx foundation → 미디어 갤러리 → 사진 아카이브 → AppBar 전역화
+- Previous Gate: `21e7dfb`
+- This Gate: 없음 — LV 진입 조건이 아니다
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §5 5탭 불변, §12.2 사진은 V1 코어, §16 비목표
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — BM·가격·저장 미접촉
+- Engineering source checked: `AGENTS.md`, `ENGINEERING_ROADMAP` §LV
+- Current-state checked: live git `21e7dfb`
+- Latest relevant Work Log checked: 바로 아래 항목
+- Does this task conflict with canonical direction? NO — 단, 경계를 하나 명시했다.
+  Instagram에서 가져온 것은 **시각 문법뿐**이다. 좋아요·팔로워·공개 피드·알고리즘 정렬·
+  연속 기록·무한 스크롤·광고는 §16 비목표이며 도입하지 않았다. 근거는 `DESIGN_V2` 2026-08-20 절.
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: claude-opus-5[1m] / Role: Worker + self-verification
+- PR: 없음 / Branch: `claude/v1-launch-readiness`
+- Base SHA: `21e7dfb146985547150736a7efe3d5d50b6306b2`
+- New HEAD: 커밋하지 않음 — working tree 변경으로 남겨 둔다(아래 STOPPED AT)
+
+#### CHANGED / REVIEWED
+- new: `src/styles/astryx-gomsin.css` — Astryx의 토큰을 이 앱의 OKLCH 토큰으로 가리키는
+  단방향 매핑. 모든 값이 `var()`이라 dark 블록이 없다. `[data-astryx-theme='gomsin']`으로
+  scope되며 Astryx 자체 theme 패키지와 같은 방식이다.
+- file: `src/styles/index.css` — `@import "tailwindcss"`를 3분할하고 그 사이에
+  `astryx-base` / `astryx-theme` layer를 끼웠다. `base` 뒤·`utilities` 앞이라는 위치가
+  전부다. **`tailwind-theme.css`와 `reset.css`는 의도적으로 import하지 않았다** — 전자는
+  `--color-card`/`--color-muted`/`--color-border`/`--color-primary`를 재선언해 앱 전체
+  `bg-card`를 조용히 Astryx 회색으로 바꾸고, 후자는 두 번째 전역 Preflight다.
+- new: `src/lib/astryxFoundation.test.ts` (12) — 위 두 negative import, layer 순서,
+  "theme 파일에 색 리터럴 없음", 두 frame의 `data-astryx-theme` 존재를 고정.
+- new: `src/components/media/RecordMediaGallery.tsx` — 미디어를 68px 열에서 본문 폭
+  4:5로 옮긴다. 2장 이상은 Astryx `Carousel`(snap), 사진 탭은 `Lightbox`(zoom).
+  영상은 인라인 재생, 음성은 carousel 밖. 확대 버튼은 미디어의 **형제**다 —
+  `[data-testid="record-attachment"]`가 `<button>` 조상을 가지면 안 되기 때문.
+- new: `src/components/media/MediaArchiveGrid.tsx` — 기간 전체 사진 3열 그리드.
+- new: `src/components/ui/AppBar.tsx` + `AppBarAction` — 열두 화면이 각자 손으로 쓴 헤더를
+  대체. 기록·마이·우리·일정·여행·복무·약관 7개 화면 적용.
+- file: `src/pages/RecordPage.tsx` — 타임라인 행 재구성(미디어를 본문 아래 전체 폭으로),
+  `타임라인 | 사진` 렌즈 토글(Astryx `SegmentedControl`), 상세 시트의 첨부를 갤러리 +
+  소유자 전용 삭제 목록으로 분리. 삭제 버튼이 스와이프되는 갤러리 안에 있으면 안 된다.
+- file: `src/components/widgets/PartnerDayTimelineWidget.tsx` — `상대방의 오늘`도 같은 갤러리.
+- file: `src/pages/SettingsPage.tsx`, `src/pages/TripDetailPage.tsx` — AppBar 적용으로
+  롤아웃 완료. 손으로 쓴 헤더가 있던 9개 화면 전부가 이제 같은 컴포넌트를 쓴다.
+  `LegalPage`·`SettingsPage`의 `<div className="w-8" />` 중앙정렬 hack도 함께 사라졌다.
+- file: `src/pages/RecordPage.tsx` — `사진` 렌즈는 **기간에 사진이 하나라도 있을 때만**
+  나타난다. 갈 곳이 빈 화면뿐인 토글은 빈 화면이 가져야 할 단 하나의 다음 행동과
+  경쟁한다(`FEATURE_SPEC` §11). 조건은 선택한 날이 아니라 기간 기준이다 — 사진이 있는
+  달에서 사진 없는 날을 보고 있을 때가 바로 그리드가 필요한 순간이기 때문이다.
+  함께 `showTimeline = lens === 'timeline' || !periodHasVisualMedia`로 바꿔
+  **타임라인을 기본값이 아니라 fallback으로** 만들었다. `lens`는 state이고
+  "이 기간에 사진이 있나"는 파생값이라 둘이 어긋날 수 있다 — 사진 렌즈에서 사진 없는 달로
+  넘기면 되돌아갈 토글 자체가 사라지고, fallback이 없으면 두 뷰 모두 렌더되지 않는다.
+  **mutation으로 검증했다**: `|| !periodHasVisualMedia`를 빼면 그 회귀 테스트가 실패한다.
+- file: `src/lib/themeTokens.test.ts` — C6 hit-target guard에 `via` 개념 추가. 공유
+  컴포넌트가 대신 선언하는 경우 그 컴포넌트를 검사하고, 화면이 실제로 그것을 import하는지도
+  확인한다. ±400자 근접 스캔은 컴포넌트 추출에 반대할 근거가 없다. **mutation으로 검증했다** —
+  `AppBar`의 44px을 줄이면 2건이 실패하고 되돌리면 통과한다.
+- file: `src/components/widgets/TodayLogWidget.tsx` — `저장` 버튼에 `onMouseDown`
+  preventDefault **한 줄**. 미커밋 감정 작업이 만든 "첫 탭이 먹히지 않는" 결함의 수정이며,
+  커밋을 나눌 때 이 줄은 시각 재설계가 아니라 감정 작업 쪽에 속한다(아래 STOPPED AT).
+- file: `e2e/emotionRedesign.spec.ts`, `e2e/completeness.spec.ts` — stale spec 재작성.
+- file: `src/components/AttachmentMedia.tsx` — 주석만. 이 pass 이후 **production 경로에
+  없다**는 사실을 파일에 남겼다(아래 REMAINING).
+- new: `src/components/media/RecordMediaGallery.test.tsx` (14) — "player가 button 안에
+  들어가지 않는다", "음성은 swipe 집합에 없다", 그리드의 정렬·비공개 표시·voice 제외.
+- file: `src/test/setup.ts` — `ResizeObserver` no-op stub. **이것을 쓰다가 실제 결함을
+  찾았다**: Astryx `Carousel`은 mount에서 `ResizeObserver`를 무조건 생성하는데 jsdom에는
+  없어서, 사진 2장 이상인 기록은 render에서 `ResizeObserver is not defined`로 throw했다.
+  기존 스위트에 그 경우를 렌더하는 테스트가 하나도 없어서 2556건이 전부 green인 채로
+  multi-photo 경로가 통째로 테스트 불가능한 상태였다. 이 앱 자신의 코드는
+  (`MobileShell`) `typeof ResizeObserver === 'undefined'`를 이미 방어하고 있었다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음. key hierarchy·device trust·recovery·write floor 미접촉.
+- DB/migration semantics: 없음. SQL 변경 없음.
+- privacy semantics: 없음. `visibleRecordsForViewer` / `emotionFlowForStorage` /
+  §13 감정 노출 규칙 미접촉. 갤러리·그리드 모두 caller가 이미 필터한 기록만 받는다.
+- product semantics: 5탭·화면 이름·funnel·기능 추가 없음. 렌즈 토글은 같은 데이터의 두 번째
+  시점이지 새 기능이 아니다. chat 없음. P6 없음.
+- 감정 캐릭터: 미접촉. 여섯 SVG와 `--emotion-*` 토큰 그대로다.
+- Production: 미접촉.
+
+#### VERIFICATION
+- 실행함: `npm run typecheck` PASS / `npm run lint` PASS (`--max-warnings 0`) /
+  `npm test` **PASS — 169 files, 2576 tests** / `npm run build` PASS.
+- 기준선 대조: 작업 시작 시 `21e7dfb`에서 167 files / 2544 tests PASS를 먼저 확보했다.
+  증가분 32 = `astryxFoundation.test.ts` 12 + `RecordMediaGallery.test.tsx` 16 +
+  `RecordPage.test.tsx`의 렌즈 4건.
+  **기존 2544건 중 회귀 0건.**
+- **실제 브라우저 검증 실행함.** `npx playwright install`은 이 환경에서 계속 실패하지만
+  (stale `__dirlock`, 부분 추출), `playwright.config.ts`가 이미 제공하는
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`로 로컬 Chrome을 쓰면 전체 suite가 돈다.
+  `npm run test:e2e` 상당: **78 passed / 5 failed**.
+- **최종: 85 passed / 0 failed.** 아래 "제품 결함 1건"을 고친 뒤의 수치다.
+- 처음에는 5건이 실패했고 **그것이 이 세션의 것이 아님을 먼저 증명했다**: `HEAD`(`21e7dfb`)
+  worktree에 이 세션 이전부터 있던 감정 작업 파일 12개만 복사하고 돌리면 정확히 같은 5건이
+  실패한다. 깨끗한 HEAD에서는 50/50 통과한다. 원인은 미커밋 감정 작업이었다.
+  그 5건을 이 세션에서 끝까지 추적해 고쳤다(아래).
+- guard mutation 1건 실제 수행(위 C6): `AppBar`의 44px을 줄이면 2건 실패, 되돌리면 통과.
+
+#### 이 세션이 실제로 만든 회귀 1건 — 발견하고 고침
+- `e2e/realUsability.spec.ts`(8개 route의 모든 조작 44px 실측)가 `/record :: 타임라인
+  176x24`, `사진 176x24`로 실패했다. Astryx의 control 높이는 28/32/36px이고 이 앱의
+  하한은 44px이다. **Astryx control을 그대로 쓰면 구조적으로 접근성 위반**이라는 뜻이다.
+- 고침: `astryx-gomsin.css`에서 `--size-element-*`를 48/48/52로 올렸다. 44가 아니라 48인
+  이유는 `SegmentedControlItem`이 `calc(var(--size-element-sm) - 4px)`이기 때문이다 —
+  44를 넣으면 40px이 되어 여전히 실패한다. 48이면 가장 작은 Astryx control이 정확히
+  44px이 되므로 caller가 어떤 `size`를 넘기든 하한이 유지된다.
+
+#### 제품 결함 1건 — 미커밋 감정 작업이 만든 것, 추적해서 고침
+- **증상: `저장`을 처음 누르면 아무 일도 일어나지 않는다.** toast도, 네트워크 요청도 없다.
+  두 번째로 누르면 저장된다. 사용자 입장에서 최악의 형태다 — 앱이 기록을 흘린 게 아니라
+  자기가 잘못 눌렀다고 읽힌다.
+- **원인**: textarea가 blur에서 composition을 settle하고(`onBlur={settleComposition}`),
+  settle하면 `EmotionSuggestionReview`가 **action row 바로 위에** 렌더된다. `저장`을 누르면
+  → field가 blur → review가 나타남 → 버튼이 손가락 밑에서 밀려남 → click이 전달되지 않음.
+  제거된 300ms debounce가 그동안 이 문제를 가리고 있었다.
+- **격리 방법**: 클릭 전에 textarea를 먼저 blur시키면 첫 클릭이 정상 저장된다. 그 대조가
+  reflow가 원인임을 확정했다. 그 전까지는 `runPost`의 조용한 early return을 의심했는데,
+  버튼이 `저장 중...`으로 바뀌지 않고 `disabled`도 되지 않는다는 관측으로 배제했다.
+- **고침**: `저장` 버튼에 `onMouseDown={(e) => e.preventDefault()}`. focus 이동을 막아
+  reflow 자체를 없애면서 click은 그대로 전달된다. 키보드 사용자는 영향 없다(Tab으로 도달,
+  Enter/Space는 mousedown을 거치지 않는다). 이 경로에서 분석을 건너뛰는 비용은 0이다 —
+  저장되는 것은 **확인된** 마음뿐이고 미확인 제안은 payload에 아무것도 넣지 않는다.
+- **mutation으로 검증했다**: `onMouseDown`을 지우면 새 회귀 테스트가 실패하고, 되돌리면 통과.
+
+#### stale e2e 3개 재작성 — 규약이 바뀐 것이지 테스트가 틀린 게 아니다
+- `emotionRedesign.spec.ts`의 `분노 → 행복 with no tap required`는 **전제가 뒤집혔다.**
+  §13은 기계의 읽기가 작성자의 마음이 되려면 명시적 행위를 요구하며, 거부하지 않은 것은
+  그 행위가 아니다. 그래서 같은 자리를 정반대 규약으로 다시 썼다: 읽기는 보이되
+  `data-answered="false"`이고, 확인된 항목만 먹는 flow preview는 **아직 존재하면 안 된다.**
+- 새로 추가: `answering the readings is what produces the flow` — 확인해야 비로소 flow가
+  생긴다는 것을 브라우저에서 고정한다. 그리고 위 저장 회귀 1건.
+- ▲▼ stepper는 사라졌으므로 `다른 마음` → 6개 picker 경로로 다시 썼다. 44px 실측은 유지.
+- `completeness.spec.ts`의 draft 회귀는 `emotion-chip-list`를 **동기화 지점으로만** 쓰고
+  있었다. 무관한 서브시스템에 결합돼 있었던 것이라, 이 테스트가 실제로 필요로 하는
+  "field가 draft를 들고 있다"로 바꿔 결합을 끊었다.
+
+#### 브라우저에서만 드러난 결함 3건 (유닛이 구조적으로 못 봄)
+1. **Astryx carousel slide가 폭 0으로 붕괴.** Astryx는 슬라이드를 `flex-shrink:0`에
+   **폭 없이** 감싼다. `w-full`은 폭 없는 부모에 대해 100%라 붕괴하고, `AspectRatio`는
+   "definite width를 가진 조상"을 요구한다. `@container` + `w-[100cqw]`로 고쳤고,
+   `e2e/mediaGallery.spec.ts`가 슬라이드 폭 > track 폭 × 0.7을 실측한다.
+2. **그리드 마지막 줄의 빈 칸이 border 색으로 채워짐.** 1px gutter를 컨테이너
+   `bg-border`로 만들었더니 3열에 4장일 때 마지막 줄 빈 트랙 2칸이 통짜 색 블록으로
+   그려졌다. gutter를 페이지 배경이 비치는 방식으로 바꿨다.
+3. **e2e fixture가 미디어를 표현할 수 없었다.** 아래 별도 항목.
+
+#### e2e fixture 결함 2건 — 고침 (제품 결함 아님)
+- `e2e/fixtures/mockBackend.ts`의 signed-URL stub이 **`createSignedUrl`(단수)의 shape**을
+  돌려주는데 앱은 **`createSignedUrls`(복수)**를 쓴다. 복수형은 배열을 요구하므로
+  supabase-js가 `data.map is not a function`으로 throw했고, 그것이 StorageError가 아니라
+  rethrow되어 기록 로드를 중단시켰다 — 화면에는 전체 화면 `계정 정보를 확인하지 못했어요 /
+  UNEXPECTED-UNKNOWN`이 떴다. 두 shape을 모두 답하도록 고쳤다.
+- 같은 stub의 `signedURL`이 `/storage/v1/...`로 시작해서, supabase-js가 자기 storage
+  base를 앞에 붙이면 `/storage/v1/storage/v1/...`가 되어 404였다. `/object/...`로 고쳤다.
+- **두 결함 모두 3년치 fixture에서 한 번도 드러난 적이 없다.** `e2e/scenarios.ts`의 모든
+  기록이 `attachments: []`라 signing 분기가 단 한 번도 실행되지 않았기 때문이다.
+  미디어는 브라우저 suite에서 **구조적으로 검증 불가능한 상태**였다.
+
+#### 새 브라우저 커버리지
+- `e2e/mediaGallery.spec.ts` (6, 전부 PASS): carousel 슬라이드 실측 폭, **사진이 실제로
+  decode되었는지**(`naturalWidth > 0`), 단일 사진이 자기 row를 벗어나지 않는지,
+  사진 그리드 개수, Lightbox 열림/Escape 닫힘, **320px 두 렌즈 모두 가로 오버플로 0**,
+  `상대방의 오늘`의 파트너 사진.
+- 이 spec을 쓰면서 스스로 만든 함정 하나를 기록해 둔다: 손으로 적은 base64 PNG가
+  유효하지 않아서 Chromium이 200 `image/png`로 응답해도 `<img>`가 `error`를 냈고,
+  갤러리는 정상적으로 `이 파일을 열 수 없어요`로 degrade했다. 그동안 모든 geometry
+  assertion은 **빈 aspect box 위에서 통과**했다. `naturalWidth` 검사를 넣은 이유다.
+
+#### 캡처
+- `ui-audit-results/after/` — 5탭 × 2역할 × 2테마 + 로딩/빈/저하/오류/서브화면 36장,
+  그리고 미디어 6장(carousel 390, grid 390/320, lightbox 390, timeline 320, partner-day).
+
+#### REVIEW IMPACT
+- FULL. 시각 기반을 교체했고 독립 review는 없다.
+
+#### BLOCKERS
+- code: 없음.
+- environment: `npx playwright install`이 이 환경에서 실패한다. 로컬 Chrome을
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`로 지정하면 우회된다 — config가 이미 지원한다.
+- external/manual: independent review, 실기기, remote Supabase 증거, 실제 커플 사용 평가.
+
+#### STOPPED AT
+- 커밋하지 않았다. 이 tree에는 이 세션 이전부터 감정 시스템의 미커밋 작업이 섞여 있다.
+  그쪽이 깨뜨렸던 e2e 5건은 이 세션에서 전부 해소했지만(85/0), 두 작업을 한 커밋으로 합치면
+  어느 쪽도 독립적으로 되돌릴 수 없다. 분리는 소유자 판단이다.
+  주의: `TodayLogWidget.tsx`의 `onMouseDown` 한 줄은 **감정 작업 쪽 커밋**에 속한다 —
+  그 파일의 blur 경계가 만든 결함의 수정이지 시각 재설계가 아니다.
+- `ui-audit-results/`는 이 세션 이전에 생긴 untracked 디렉터리이며 `.gitignore`에 없다.
+
+#### REMAINING
+- `AttachmentMedia.tsx`는 production 경로에서 빠졌다. 삭제 여부는 별도 결정이며,
+  삭제하면 `AttachmentMedia.test.tsx`(12건)와 `lintGateStrictness.test.ts`의 참조도
+  함께 정리해야 한다.
+- 감정 작업과 시각 작업의 커밋 분리.
+- 실기기(iOS/Android WebView)에서의 carousel 스와이프 감각과 Lightbox 제스처.
+
+#### NEXT ACTION
+- next owner: 커밋 분리 + 감정 작업 e2e 수정
+- 기준 SHA: `21e7dfb146985547150736a7efe3d5d50b6306b2` + 이 working tree
+- exact next task: 시각 재설계 파일만 골라 커밋 → 감정 작업 + `onMouseDown` 수정 + 재작성한 e2e를 별도 커밋
+
+#### DO NOT ADVANCE UNTIL
+- 커밋을 분리하기 전까지 이 tree 전체를 하나로 landing하지 않는다. 시각 재설계와 감정 작업은
+  독립적으로 되돌릴 수 있어야 한다.
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-20 · LV · 나머지 화면 마감 — touch hygiene 전역화, ErrorNote, sheet drag 확대
 
 #### PLAN POSITION

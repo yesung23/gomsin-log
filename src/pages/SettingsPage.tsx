@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useStore } from '@/lib/useStore';
+import { Button } from '@/components/ui/Button';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
@@ -652,14 +653,11 @@ export function SettingsPage() {
               aria-label="6자리 초대 코드"
               className="w-full h-11 px-4 rounded-control bg-background border border-border text-body tracking-[0.3em] outline-none focus:ring-2 focus:ring-coral/40"
             />
-            <button
-              type="button"
-              onClick={handleJoinCouple}
-              disabled={isJoiningCouple || inviteCodeInput.length !== 6}
-              className="press-response w-full h-12 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold disabled:opacity-50"
-            >
+            <Button variant="primary" size="lg" full
+                onClick={handleJoinCouple}
+              disabled={isJoiningCouple || inviteCodeInput.length !== 6}>
               {isJoiningCouple ? '연결 중...' : '초대 코드로 연결하기'}
-            </button>
+            </Button>
 
             <div className="flex items-center gap-3 pt-1">
               <span className="h-px flex-1 bg-border" />
@@ -896,13 +894,11 @@ export function SettingsPage() {
                 >
                   취소
                 </button>
-                <button
-                  onClick={handleSaveProfile}
-                  disabled={isSavingProfile}
-                  className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
-                >
+                <Button variant="primary" className="flex-1"
+                onClick={handleSaveProfile}
+                  disabled={isSavingProfile}>
                   {isSavingProfile ? '저장 중…' : '저장하기'}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1115,12 +1111,10 @@ export function SettingsPage() {
                 <p>• <b>iPhone Safari:</b> 하단 공유 아이콘 탭 → '홈 화면에 추가'</p>
                 <p>• <b>Android Chrome:</b> 우측 상단 메뉴 탭 → '앱 설치' 또는 '홈 화면에 추가'</p>
               </div>
-              <button
-                onClick={() => setShowPWAModal(false)}
-                className="press-response w-full py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px]"
-              >
+              <Button variant="primary" full
+                onClick={() => setShowPWAModal(false)}>
                 확인
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -1180,14 +1174,11 @@ export function SettingsPage() {
                     >
                       나중에 하기
                     </button>
-                    <button
-                      type="button"
-                      onClick={confirmProtectionSetup}
-                      disabled={isProtectionBusy || !recoveryCodeInput}
-                      className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
-                    >
+                    <Button variant="primary" className="flex-1"
+                onClick={confirmProtectionSetup}
+                      disabled={isProtectionBusy || !recoveryCodeInput}>
                       {isProtectionBusy ? '확인 중…' : '저장했고 계속하기'}
-                    </button>
+                    </Button>
                   </div>
                 </>
               ) : (
@@ -1209,9 +1200,10 @@ export function SettingsPage() {
                   </div>
                   <div className="flex gap-2 pt-2">
                     <button type="button" onClick={() => setShowProtectionDialog(false)} disabled={isProtectionBusy} className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]">취소</button>
-                    <button type="button" onClick={recoverProtection} disabled={isProtectionBusy || !recoveryCodeInput || !recoveryArtifactInput} className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50">
+                    <Button variant="primary" className="flex-1"
+                onClick={recoverProtection} disabled={isProtectionBusy || !recoveryCodeInput || !recoveryArtifactInput}>
                       {isProtectionBusy ? '복구 중…' : '복구하기'}
-                    </button>
+                    </Button>
                   </div>
                 </>
               )}

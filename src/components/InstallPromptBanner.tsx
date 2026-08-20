@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Share, PlusSquare, X, Smartphone, Download } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
+import { Button } from '@/components/ui/Button';
 import { isNativePlatform } from '@/lib/platform';
 
 /**
@@ -117,13 +118,11 @@ export function InstallPromptBanner() {
       )}
 
       {platform === 'android' && deferredPrompt && (
-        <button 
-          onClick={handleInstallClick}
-          className="w-full mt-2 bg-coral-fill text-coral-fill-foreground font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
-        >
+        <Button variant="primary" full className="mt-2"
+                onClick={handleInstallClick}>
           <Download size={18} />
           앱 설치하기
-        </button>
+        </Button>
       )}
 
       {platform === 'android' && !deferredPrompt && (

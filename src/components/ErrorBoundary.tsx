@@ -36,10 +36,23 @@ export class ErrorBoundary extends Component<Props, State> {
           <p className="text-body text-muted-foreground mb-6">
             앱을 다시 시작합니다
           </p>
+          {/*
+            A plain <button> on purpose, unlike every other primary CTA in the app.
+
+            This is the boundary that catches a render crash. Whatever it draws has
+            already survived the failure below it, so the one control that gets the
+            user out should depend on as little as possible -- importing a component
+            here to gain a shared class list would put a second thing between the
+            user and a reload.
+
+            The geometry is copied from `Button` `md` rather than shared: 44px tall,
+            `rounded-control`, the measured `--coral-fill` pair. `press-response`
+            comes from the base layer, which is CSS and cannot throw.
+          */}
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="px-5 py-2.5 rounded-xl bg-coral-fill text-coral-fill-foreground text-label font-semibold shadow-sm active:scale-95 transition-transform"
+            className="press-response min-h-11 px-5 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-semibold"
           >
             새로고침
           </button>

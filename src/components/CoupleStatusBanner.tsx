@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Copy, Check, RefreshCw, Link2Off, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
+import { Button } from '@/components/ui/Button';
 import { regenerateCoupleInvitation } from '@/lib/supabase';
 import { invitationExpiryLabel, isInvitationExpired } from '@/lib/coupleLifecycle';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
@@ -140,13 +141,10 @@ export function CoupleStatusBanner() {
         <p className="text-caption text-muted-foreground">
           공간을 만들면 초대 코드가 생기고, 상대방이 그 코드를 입력하면 연결돼요.
         </p>
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          className="min-h-[44px] w-full rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground"
-        >
+        <Button variant="primary" full
+                onClick={() => navigate('/settings')}>
           커플 공간 설정으로 가기
-        </button>
+        </Button>
       </section>
     );
   }
@@ -166,13 +164,10 @@ export function CoupleStatusBanner() {
           내가 남긴 비공개 기록은 그대로 있어요. 다시 연결하려면 새 공간을 만들거나
           상대방의 초대 코드를 입력해 주세요.
         </p>
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          className="min-h-[44px] w-full rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground"
-        >
+        <Button variant="primary" full
+                onClick={() => navigate('/settings')}>
           다시 연결하기
-        </button>
+        </Button>
       </section>
     );
   }
@@ -227,15 +222,12 @@ export function CoupleStatusBanner() {
             이전 코드는 더 이상 사용할 수 없어요. 새 코드를 발급해 상대방에게 다시
             전달해 주세요.
           </p>
-          <button
-            type="button"
-            onClick={() => void handleRegenerate()}
-            disabled={busy || !isOnline}
-            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
-          >
+          <Button variant="primary" full
+                onClick={() => void handleRegenerate()}
+            disabled={busy || !isOnline}>
             <RefreshCw size={14} />
             {busy ? '발급 중...' : '새 코드 발급'}
-          </button>
+          </Button>
           {!isOnline && (
             <p className="text-caption text-muted-foreground">
               {OFFLINE_READONLY_MESSAGE}
@@ -254,15 +246,12 @@ export function CoupleStatusBanner() {
             보안을 위해 서버에는 코드가 저장되지 않아요. 새 코드를 발급하면 이전 코드는
             사용할 수 없어요.
           </p>
-          <button
-            type="button"
-            onClick={() => void handleRegenerate()}
-            disabled={busy || !isOnline}
-            className="min-h-[44px] w-full inline-flex items-center justify-center gap-1.5 rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
-          >
+          <Button variant="primary" full
+                onClick={() => void handleRegenerate()}
+            disabled={busy || !isOnline}>
             <RefreshCw size={14} />
             {busy ? '발급 중...' : '새 코드 발급'}
-          </button>
+          </Button>
           {!isOnline && (
             <p className="text-caption text-muted-foreground">
               {OFFLINE_READONLY_MESSAGE}

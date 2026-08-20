@@ -1154,8 +1154,8 @@ export function RecordPage() {
                     >
                       취소
                     </button>
-                    <button
-                      onClick={async () => {
+                    <Button variant="primary" size="sm"
+                onClick={async () => {
                         if (!editText.trim()) {
                           toast.error('빈 내용은 저장할 수 없어요.');
                           return;
@@ -1184,11 +1184,9 @@ export function RecordPage() {
                           setIsSaving(false);
                         }
                       }}
-                      disabled={isSaving || !editText.trim() || isOffline}
-                      className="press-response px-3 py-1.5 rounded-lg bg-coral-fill text-coral-fill-foreground font-bold text-label disabled:opacity-50"
-                    >
+                      disabled={isSaving || !editText.trim() || isOffline}>
                       {isSaving ? '저장 중...' : '저장'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (

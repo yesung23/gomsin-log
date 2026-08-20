@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
+import { Button } from '@/components/ui/Button';
 import { useStore } from '@/lib/useStore';
 import { useEscapeKey } from '@/lib/hooks';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
@@ -225,12 +226,10 @@ export function ServicePage() {
                 입대일과 예상 전역일을 입력하면 남은 날짜와 복무율을 계산해 드려요.
               </p>
             </div>
-            <button
-              onClick={openEditor}
-              className="press-response px-4 py-2.5 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold min-h-[44px]"
-            >
+            <Button variant="primary" size="sm"
+                onClick={openEditor}>
               복무 정보 입력하기
-            </button>
+            </Button>
           </div>
         )}
 
@@ -374,13 +373,11 @@ export function ServicePage() {
               >
                 취소
               </button>
-              <button
+              <Button variant="primary" className="flex-1"
                 onClick={handleSaveEdit}
-                disabled={isSaving}
-                className="press-response flex-1 py-3 bg-coral-fill text-coral-fill-foreground font-bold rounded-control text-label min-h-[44px] disabled:opacity-50"
-              >
+                disabled={isSaving}>
                 {isSaving ? '저장 중…' : '저장하기'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

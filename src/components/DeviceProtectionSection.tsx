@@ -1,5 +1,6 @@
 import { Shield, ChevronRight, AlertTriangle } from 'lucide-react';
 import type { DeviceProtectionStatus } from '@/app/e2ee/deviceProtectionStatus';
+import { Button } from '@/components/ui/Button';
 
 export type DeviceProtectionSectionProps = {
   status: DeviceProtectionStatus;
@@ -48,26 +49,20 @@ export function DeviceProtectionSection({
         </div>
       </div>
       {setupRequired && onStart && (
-        <button
-          type="button"
-          onClick={onStart}
-          disabled={busy}
-          className="w-full h-11 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
-        >
+        <Button variant="primary" full
+                onClick={onStart}
+          disabled={busy}>
           {busy ? '준비 중...' : '보호 설정 시작'}
           {!busy && <ChevronRight size={16} aria-hidden="true" />}
-        </button>
+        </Button>
       )}
       {recoveryRequired && onRecover && (
-        <button
-          type="button"
-          onClick={onRecover}
-          disabled={busy}
-          className="w-full h-11 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
-        >
+        <Button variant="primary" full
+                onClick={onRecover}
+          disabled={busy}>
           {busy ? '준비 중...' : '기록 보호 복구'}
           {!busy && <ChevronRight size={16} aria-hidden="true" />}
-        </button>
+        </Button>
       )}
     </section>
   );

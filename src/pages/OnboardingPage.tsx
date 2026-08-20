@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { Button } from '@/components/ui/Button';
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { clearAuthErrorFromUrl, readAuthErrorFromUrl } from '@/lib/authErrorFromUrl';
 import { useStore } from '@/lib/useStore';
@@ -877,12 +878,10 @@ export function OnboardingPage() {
                 </div>
               </div>
 
-              <button
-                onClick={handleNext}
-                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
-              >
+              <Button variant="primary" size="lg" full
+                onClick={handleNext}>
                 다음
-              </button>
+              </Button>
             </div>
           )}
 
@@ -911,13 +910,11 @@ export function OnboardingPage() {
                 </div>
               </div>
 
-              <button
+              <Button variant="primary" size="lg" full
                 onClick={handleNext}
-                disabled={!canAdvanceFromStep}
-                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50"
-              >
+                disabled={!canAdvanceFromStep}>
                 다음
-              </button>
+              </Button>
             </div>
           )}
 
@@ -966,14 +963,11 @@ export function OnboardingPage() {
                         보여줄 수 없어요. 새 코드를 발급하면 이전에 보낸 코드는 사용할 수
                         없게 돼요.
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => void handleRegenerateExistingSpace()}
-                        disabled={isGeneratingCode}
-                        className="press-response w-full min-h-[44px] rounded-control bg-coral-fill px-4 text-label font-bold text-coral-fill-foreground disabled:opacity-50"
-                      >
+                      <Button variant="primary" full
+                onClick={() => void handleRegenerateExistingSpace()}
+                        disabled={isGeneratingCode}>
                         {isGeneratingCode ? '발급 중...' : '새 코드 발급하기'}
-                      </button>
+                      </Button>
                       <button
                         type="button"
                         onClick={handleKeepExistingCode}
@@ -1053,11 +1047,9 @@ export function OnboardingPage() {
                 </div>
               </div>
 
-              <button
+              <Button variant="primary" size="lg" full
                 onClick={handleNext}
-                disabled={isGeneratingCode || isVerifyingCode}
-                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-50 flex items-center justify-center gap-2"
-              >
+                disabled={isGeneratingCode || isVerifyingCode}>
                 {isGeneratingCode || isVerifyingCode ? (
                   <>
                     <div className="w-5 h-5 border-2 border-coral-foreground border-t-transparent rounded-full animate-spin" />
@@ -1066,7 +1058,7 @@ export function OnboardingPage() {
                 ) : (
                   <span>다음</span>
                 )}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1103,12 +1095,10 @@ export function OnboardingPage() {
                 </button>
               </div>
 
-              <button
-                onClick={handleNext}
-                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
-              >
+              <Button variant="primary" size="lg" full
+                onClick={handleNext}>
                 {role === 'gomsin' ? '완료' : '다음'}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1195,12 +1185,10 @@ export function OnboardingPage() {
                 </div>
               </div>
 
-              <button
-                onClick={handleNext}
-                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
-              >
+              <Button variant="primary" size="lg" full
+                onClick={handleNext}>
                 다음
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1255,12 +1243,10 @@ export function OnboardingPage() {
               </div>
 
               <div className="space-y-2">
-                <button
-                  onClick={handleNext}
-                  className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px]"
-                >
+                <Button variant="primary" size="lg" full
+                onClick={handleNext}>
                   완료하기
-                </button>
+                </Button>
                 <button
                   onClick={handleNext}
                   className="w-full py-3 text-label text-muted-foreground font-medium text-center min-h-[36px]"
@@ -1288,17 +1274,15 @@ export function OnboardingPage() {
                 </p>
               </div>
 
-              <button
+              <Button variant="primary" size="lg" full
                 onClick={finishSetup}
-                disabled={isFinishing}
-                className="press-response w-full py-4 rounded-control bg-coral-fill text-coral-fill-foreground font-bold text-body min-h-[48px] disabled:opacity-60"
-              >
+                disabled={isFinishing}>
                 {isFinishing
                   ? '저장 중...'
                   : role === 'gomsin'
                     ? '오늘의 첫 순간 남기기'
                     : '오늘의 로그 기다리기'}
-              </button>
+              </Button>
             </div>
           )}
 

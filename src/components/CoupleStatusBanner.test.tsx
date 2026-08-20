@@ -222,10 +222,22 @@ describe('CoupleStatusBanner', () => {
       const controls = Array.from(document.querySelectorAll('button'));
       expect(controls.length).toBeGreaterThan(0);
       for (const control of controls) {
+        /*
+         * Either spelling of the same 44px.
+         *
+         * `min-h-[44px]` is the arbitrary value this component used to write by
+         * hand. `min-h-11` is the scale token `Button` emits -- 2.75rem, the
+         * identical height -- and `min-h-12` is its `lg` size at 48px, which clears
+         * the minimum by more.
+         *
+         * What is being guarded is the tap target, not the class syntax. When these
+         * CTAs moved onto the shared primitive the rendered pixels did not change
+         * and this still failed, which meant the assertion was pinning a spelling.
+         */
         expect(
           control.className,
           `${lifecycle}: control "${control.textContent}" must declare a 44px tap target`,
-        ).toMatch(/min-h-\[44px\]/);
+        ).toMatch(/min-h-\[44px\]|min-h-11|min-h-12/);
       }
       unmount();
     }

@@ -703,16 +703,48 @@ export function OnboardingPage() {
     <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
       <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
         
-        {/* Step Header (Steps 1~6) */}
+        {/*
+          Step Header (Steps 1~6).
+
+          The fraction stays, and a bar joins it. "4 / 6" is precise and it is also
+          arithmetic: it tells you where you are only after you work out how much is
+          left. On the app's very first screens -- where someone is still deciding
+          whether this is worth finishing -- how much further to go is the question
+          being asked, and a filled bar answers it without being read.
+
+          The two are not redundant. The bar is `aria-hidden` and the fraction is
+          the accessible text, so a screen reader hears the exact position rather
+          than a percentage, and `role="progressbar"` carries the same numbers for
+          anything that prefers them.
+
+          The counts are already role-correct: `totalSteps` is 4 for 곰신, who skip
+          복무 정보 and 연락 시간, and 6 for 군화.
+        */}
         {step > 0 && step < 7 && (
-          <header className="flex items-center justify-between px-4 h-14 border-b border-border/40 shrink-0">
-            <button onClick={handleBack} className="press-response p-2 -ml-2 text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="이전 단계">
-              <ChevronLeft size={24} />
-            </button>
-            <div className="text-caption font-bold text-muted-foreground">
-              {Math.min(step, totalSteps)} / {totalSteps}
+          <header className="border-b border-border/40 shrink-0">
+            <div className="flex items-center justify-between px-4 h-14">
+              <button onClick={handleBack} className="press-response p-2 -ml-2 text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="이전 단계">
+                <ChevronLeft size={24} />
+              </button>
+              <div className="text-caption font-bold text-muted-foreground">
+                {Math.min(step, totalSteps)} / {totalSteps}
+              </div>
+              <div className="w-10" />
             </div>
-            <div className="w-10" />
+            <div
+              role="progressbar"
+              aria-valuenow={Math.min(step, totalSteps)}
+              aria-valuemin={1}
+              aria-valuemax={totalSteps}
+              aria-label="온보딩 진행률"
+              className="h-1 w-full bg-muted"
+            >
+              <div
+                aria-hidden="true"
+                className="onboarding-progress h-full bg-coral-strong"
+                style={{ width: `${(Math.min(step, totalSteps) / totalSteps) * 100}%` }}
+              />
+            </div>
           </header>
         )}
 
@@ -848,7 +880,7 @@ export function OnboardingPage() {
                 <div className="space-y-3">
                   <button
                     onClick={() => setRole('gomsin')}
-                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[80px] ${
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[80px] ${
                       role === 'gomsin'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -863,7 +895,7 @@ export function OnboardingPage() {
 
                   <button
                     onClick={() => setRole('soldier')}
-                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[80px] ${
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[80px] ${
                       role === 'soldier'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -930,7 +962,7 @@ export function OnboardingPage() {
                 <div className="space-y-3">
                   <button
                     onClick={() => setSpaceMode('create')}
-                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[72px] ${
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[72px] ${
                       spaceMode === 'create'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -1013,7 +1045,7 @@ export function OnboardingPage() {
 
                   <button
                     onClick={() => setSpaceMode('join')}
-                    className={`w-full p-5 rounded-surface border text-left flex items-start gap-4 transition min-h-[72px] ${
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[72px] ${
                       spaceMode === 'join'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
@@ -1089,7 +1121,7 @@ export function OnboardingPage() {
 
                 <button
                   onClick={() => setSkipAnniversary(!skipAnniversary)}
-                  className="text-label text-coral-strong font-semibold underline min-h-[36px]"
+                  className="press-response text-label text-coral-strong font-semibold underline min-h-[36px]"
                 >
                   {skipAnniversary ? '사귄 날짜 입력하기' : '아직 정확히 기억나지 않아요'}
                 </button>
@@ -1125,7 +1157,7 @@ export function OnboardingPage() {
                         <button
                           key={st.key}
                           onClick={() => setMilitaryStatus(st.key as MilitaryStatus)}
-                          className={`py-2 px-2 rounded-control text-label font-semibold border transition min-h-11 ${
+                          className={`press-response py-2 px-2 rounded-control text-label font-semibold border transition min-h-11 ${
                             militaryStatus === st.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
@@ -1151,7 +1183,7 @@ export function OnboardingPage() {
                         <button
                           key={b.key}
                           onClick={() => handleBranchChange(b.key as Branch)}
-                          className={`py-2 px-1 rounded-control text-label font-semibold border transition min-h-11 ${
+                          className={`press-response py-2 px-1 rounded-control text-label font-semibold border transition min-h-11 ${
                             branch === b.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
                         >
@@ -1249,7 +1281,7 @@ export function OnboardingPage() {
                 </Button>
                 <button
                   onClick={handleNext}
-                  className="w-full py-3 text-label text-muted-foreground font-medium text-center min-h-[36px]"
+                  className="press-response-row w-full py-3 text-label text-muted-foreground font-medium text-center min-h-[36px]"
                 >
                   지금은 설정하지 않을래요
                 </button>

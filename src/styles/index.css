@@ -781,6 +781,33 @@ input[type='range']::-webkit-slider-thumb {
   background-color: inherit;
 }
 
+/*
+ * The onboarding progress fill.
+ *
+ * `width` is not a compositor property, so this is the one place in the app that
+ * deliberately animates layout. It is affordable exactly here: a 1px-tall bar on a
+ * screen with nothing else moving, once per step, and the alternative -- a
+ * transform-scaled bar -- would need a wrapper and would still round to the same
+ * pixels at this height.
+ *
+ * Eased out, not linear: the fill should look like it has arrived rather than like
+ * it stopped.
+ */
+.onboarding-progress {
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * The bar still MOVES -- it just gets there at once. Removing the transition is
+   * the right answer here rather than shortening it, because the position is the
+   * information and there is no entrance to preserve.
+   */
+  .onboarding-progress {
+    transition: none;
+  }
+}
+
 /* A pressed row should tint rather than shrink; scaling a full-width row bends its edges. */
 .press-response-row {
   -webkit-tap-highlight-color: transparent;

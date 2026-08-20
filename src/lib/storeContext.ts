@@ -205,8 +205,6 @@ export interface StoreContextType {
   setWidgetLayout: (layout: string[], role?: Role) => void;
   setHasSeenInstallPrompt: (seen: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
-  /** Which shape the home screen takes. A device preference, like `theme`. */
-  setHomeStyle: (style: 'widgets' | 'conversation') => void;
 }
 
 export const StoreContext = createContext<StoreContextType | null>(null);

@@ -1,7 +1,5 @@
 import { MobileShell } from '@/components/MobileShell';
-import { useStore } from '@/lib/useStore';
 import { WidgetDashboard } from '@/features/home/WidgetDashboard';
-import { ConversationHome } from '@/features/home/ConversationHome';
 
 /**
  * One home for both roles.
@@ -17,20 +15,9 @@ import { ConversationHome } from '@/features/home/ConversationHome';
  * became `care_hint`, and the service card is the existing `service_progress`.
  */
 export function HomePage() {
-  /*
-    Two shapes for the same home, chosen the way `theme` is.
-
-    `conversation` is a presentation of the SAME records, not a second product:
-    both read through `visibleRecordsForViewer`, both derive their summary from
-    the same deterministic `generateDailySummary`, and neither can send anything.
-    Being a device preference rather than an account one matters -- the two people
-    use two phones at opposite times of day, and the one catching up on a backlog
-    does not want to impose that reading on the one writing through it.
-  */
-  const { state } = useStore();
   return (
     <MobileShell>
-      {state.homeStyle === 'conversation' ? <ConversationHome /> : <WidgetDashboard />}
+      <WidgetDashboard />
     </MobileShell>
   );
 }

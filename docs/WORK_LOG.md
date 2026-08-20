@@ -113,7 +113,7 @@
 - Tool: Claude Code / Model: claude-opus-5 / Role: Worker + integrator
 - PR: 없음 / Branch: `claude/v1-launch-readiness`
 - Base SHA: `21e7dfb146985547150736a7efe3d5d50b6306b2`
-- New HEAD: `aeccca2` (3 commits: `4d071ab` → `b9b7459` → `aeccca2`)
+- New HEAD: `56fec01` (`4d071ab` → `b9b7459` → `aeccca2` → `7eeaa49` → `a35a23d` → `56fec01`)
 
 #### 시작 시 발견한 것 — 잘못된 계보에서 작업할 뻔했다
 세션은 `codex/lv-readiness-audit-v1`(PR #70) worktree에서 시작했다. 그 계보는
@@ -147,6 +147,29 @@
   master의 최신 작업이 되돌아간다.** cherry-pick이 맞는 연산이었다. import 충돌 1건
   (`Card` vs 통증 타입) 수동 해결.
 
+#### 이어서 — 통합 이후 추가 작업 (`a35a23d`, `56fec01`)
+- `a35a23d` **어디서든 한 탭 작성.** 컴포저는 `/record`의 floating CTA와 홈 위젯(삭제
+  가능)에만 있었다. 일정·우리·마이에서, 그리고 위젯을 지운 홈에서 기록은 이동부터
+  시작했다. §7.1이 요구하는 30초 중 3초가 이동이었다. **6번째 탭이 아니다** — §5가 5탭을
+  고정하므로 장소가 아니라 행동으로서 바 위에 뜬다.
+  - `ownsPrimaryAction`을 prefix 목록이 아니라 predicate로 쓴 이유는 여행 화면이
+    갈라지기 때문이다. `/trips/:id`는 자기 CTA 쌍을 고정하고 `/trips`는 아무것도 고정하지
+    않는다. prefix가 목록까지 삼켜서, **여행을 되돌아보며 기억이 떠오르기 가장 쉬운
+    화면이 그것을 남길 방법이 없는 유일한 화면**이 됐었다. 반대를 가정한 테스트가 실패해서 잡았다.
+  - 목적지는 router state가 아니라 `?compose=1`이다. §7.5가 기록에 요구하는 것과 같은
+    이유 — 새로고침·딥링크·알림이 도달할 수 있어야 한다. 닫으면 flag를 제거한다.
+  - **한 동작에 이름 하나.** CTA는 `지금의 마음 남기기`, 새 버튼은 `기록 남기기`였다.
+    한 화면에서 배운 컨트롤을 다음 화면에서 못 알아보게 만든다. 감정이 저장 이후 별도로
+    묻는 질문이 된 지금 `마음`은 기록의 정의와도 어긋난다. 셋 다 `기록 남기기`로 통일하고
+    guard test로 고정했다.
+- `56fec01` **기록 상세에서 감정을 다시 묻는다.** 컴포저는 composition boundary에서 한 번
+  묻는다. 쓰고 바로 저장하는 사람은 답하지 않고, 미확인 읽기는 저장되지 않으므로,
+  그 경로는 감정 없이 끝나고 추가할 곳도 없었다 — **내가 만든 회귀이며 이전보다 나빴다.**
+  `onDeviceInference.ts`가 선언만 해두고 아무도 쓰지 않던 `record-opened` boundary를
+  `RecordPage`가 소유한다. 읽기는 **caller가 계산해 prop으로 전달**하므로
+  `RecordMoodSection`의 기존 import guard("스스로 감정을 만들 수 없다")가 그대로 유지된다.
+  확인은 공유가 아니다 — `author_only`로 쓴다.
+
 #### EXPLICITLY NOT CHANGED
 - crypto semantics: 없음. 키 계층·device trust·recovery·write floor 미접촉.
 - DB/migration semantics: `047`이 저장소에 들어왔으나 **어디에도 적용하지 않았다.**
@@ -159,8 +182,9 @@
 
 #### VERIFICATION
 - 실행함: `npm run typecheck` PASS / `npm run lint` PASS (`--max-warnings 0`) /
-  `npm test` **PASS — 170 files, 2594 tests** / `npm run build` PASS.
-- 증가분: 2544(기준선) → 2576(시각 재설계) → 2594(감정 + 통증). **회귀 0건.**
+  `npm test` **PASS — 171 files, 2610 tests** / `npm run build` PASS.
+- 증가분: 2544(기준선) → 2576(시각 재설계) → 2594(감정 + 통증) → 2605(한 탭 작성)
+  → 2610(다시 묻기). **회귀 0건.**
 - 실행하지 않음: `npm run test:e2e` — 이 세션에서 직접 돌리지 않았다. 시각 재설계 세션이
   로컬 Chrome으로 85 passed / 0 failed를 보고했으나 그것은 `aeccca2` 이전 트리에 대한
   결과이며, cherry-pick 이후로는 **UNVERIFIED**다.
@@ -182,11 +206,14 @@
 - 세 갈래 작업이 `claude/v1-launch-readiness` `aeccca2`에 통합되고 전체 검증 green.
 
 #### REMAINING
-- 요청 7항목 중 미완: 온보딩 재설계, 크로스플랫폼 저장 제안서(P6 gate), 320/390/430
-  실기기 폭 검증, 기록 상세에서 미확인 기록에 제안을 다시 묻는 경로(`record-opened`
-  boundary는 선언했으나 아직 배선하지 않음).
+- 요청 7항목 중 미완: **온보딩 재설계**, **크로스플랫폼 저장 제안서**(P6 gate),
+  **320/390/430 실기기 폭 검증**(cherry-pick 이후 UNVERIFIED).
+- 홈이 여전히 위젯 대시보드다. §6은 홈을 "상대방의 오늘" 한 표면으로 정의하고
+  "무관한 카드의 대시보드로 만들지 않는다"고 명시하므로, 이것은 스타일 문제가 아니라
+  canonical과의 불일치다. 위젯 시스템 제거는 기능 제거라 별도 제품 판단이 필요하다.
 - 기록 상세에 감정 편집기가 둘(`RecordMoodSection` 캐릭터 + `RecordEmotionCorrection`
-  chip) 공존한다. 후자의 근거 문구는 저장되지 않으므로 그 정당화는 이미 사실이 아니다.
+  chip) 공존한다. 후자의 정당화는 "근거 문구를 보여준다"인데 근거 문구는 저장되지
+  않으므로 이미 사실이 아니다. 통합 후보.
 
 #### NEXT ACTION
 - next owner: independent security reviewer (047), 그다음 Worker

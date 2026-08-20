@@ -183,9 +183,15 @@ describe('extractEmotionCandidates', () => {
 // ---------------------------------------------------------------------------
 describe('what actually gets stored', () => {
   const candidates = extractEmotionCandidates('짜증났는데 기분이 나아졌어');
+  /** Every reading answered by a person. The composer's "다 맞아요" outcome. */
+  const allAnswered = new Set(candidates.map((candidate) => candidate.id));
+  /** Nothing answered: the app read the entry and the author never replied. */
+  const noneAnswered: ReadonlySet<string> = new Set();
 
   it('never persists the evidence phrase taken from the diary body', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.length).toBeGreaterThan(0);
     for (const item of items) {
       expect(item).not.toHaveProperty('evidence');
@@ -196,50 +202,104 @@ describe('what actually gets stored', () => {
     expect(JSON.stringify(items)).not.toContain('나아짐');
   });
 
-  it('marks everything the author left in place as user_confirmed', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+  /**
+   * The inversion this pipeline was rebuilt for.
+   *
+   * `candidatesToFlowItems` used to stamp every surviving candidate
+   * `user_confirmed`, so an entry written and saved without ever opening the
+   * feelings row recorded the machine's guess as the author's own answer --
+   * and `emotionFlowForStorage`, whose whole job is to drop anything that is
+   * not confirmed, could not tell, because its only caller lied to it.
+   */
+  it('leaving a suggestion in place is not confirming it', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: noneAnswered,
+    });
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((item) => item.source === 'rule_suggested')).toBe(true);
+    // ...and therefore none of it survives the write-path filter.
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
+  });
+
+  it('an answered suggestion becomes user_confirmed and survives the write path', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.source === 'user_confirmed')).toBe(true);
-    // ...which is what lets it survive the write-path filter.
     const stored = emotionFlowForStorage({ isPrivate: false, emotionFlow: items });
     expect(stored).toHaveLength(items.length);
   });
 
+  it('answers each reading separately, so a partly reviewed flow stores only the part reviewed', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false,
+      shareWithPartner: true,
+      confirmedIds: new Set([candidates[0].id]),
+    });
+    expect(items[0].source).toBe('user_confirmed');
+    expect(items[1].source).toBe('rule_suggested');
+    const stored = emotionFlowForStorage({ isPrivate: false, emotionFlow: items });
+    expect(stored).toHaveLength(1);
+    expect(stored[0].basic).toBe(candidates[0].basic);
+  });
+
+  /**
+   * PRODUCT_V3 §13 requires an affirmative author action before a machine
+   * reading reaches the partner. One switch above a list of guesses the author
+   * never read is not agreement with each of them, so the switch alone cannot
+   * publish anything -- the per-item answer is a second, independent condition.
+   */
+  it('the share toggle cannot publish a reading the author never answered', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: noneAnswered,
+    });
+    expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
+  });
+
   it('keeps a private record author-only regardless of the share toggle', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: true, shareWithPartner: true });
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: true, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
     // An author-only item must not reach a shared row.
     expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
   });
 
-  /**
-   * PRODUCT_V3 §13: machine-inferred emotion is private to the author by
-   * default. Leaving suggested chips in place is not an explicit share
-   * action, so a SHARED record's emotion must stay out of what the partner's
-   * RLS-readable row actually contains -- not merely hidden by client UI.
-   */
   it('a shared record with the share toggle OFF never persists emotion for the partner to read', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: false });
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: false, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
     expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
   });
 
-  it('a shared record with the share toggle ON persists emotion for the partner to read', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+  it('a shared record with the share toggle ON persists the answered emotion for the partner to read', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.visibility === 'shared')).toBe(true);
     expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toHaveLength(items.length);
   });
 
   it('omitting shareWithPartner defaults to author-only, not shared', () => {
     // @ts-expect-error -- exercising a caller that forgets the now-required flag
-    const items = candidatesToFlowItems(candidates, { isPrivate: false });
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, confirmedIds: allAnswered });
     expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
+  });
+
+  it('omitting confirmedIds fails closed: nothing is treated as answered', () => {
+    // @ts-expect-error -- exercising a caller that forgets the now-required set
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+    expect(items.every((item) => item.source === 'rule_suggested')).toBe(true);
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
   });
 
   it('records which items a human corrected, and which it did not', () => {
     const edited = new Set([candidates[0].id]);
-    const items = candidatesToFlowItems(
-      candidates, { isPrivate: false, shareWithPartner: true, editedIds: edited },
-    );
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered, editedIds: edited,
+    });
     expect(items[0].userEdited).toBe(true);
     expect(items[1].userEdited).toBe(false);
   });
@@ -248,12 +308,18 @@ describe('what actually gets stored', () => {
     // The reported defect: the label could be fixed while the drawn line stayed
     // wrong. 분노 → 행복 rises; 행복 → 행복 is flat.
     const rising = analyzeEmotionFlow(
-      candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true }),
+      candidatesToFlowItems(candidates, {
+        isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+      }),
     );
-    const corrected = candidatesToFlowItems(
-      candidates.map((candidate) => ({ ...candidate, basic: 'happiness' as BasicEmotion })),
-      { isPrivate: false, shareWithPartner: true },
+    const correctedCandidates = candidates.map(
+      (candidate) => ({ ...candidate, basic: 'happiness' as BasicEmotion }),
     );
+    const corrected = candidatesToFlowItems(correctedCandidates, {
+      isPrivate: false,
+      shareWithPartner: true,
+      confirmedIds: new Set(correctedCandidates.map((candidate) => candidate.id)),
+    });
     const flat = analyzeEmotionFlow(corrected);
     expect(rising?.shape).not.toBe(flat?.shape);
     expect(flat?.shape).toBe('calm');

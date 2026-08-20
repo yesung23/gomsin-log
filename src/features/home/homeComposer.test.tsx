@@ -327,19 +327,39 @@ describe('composer attachment handling', () => {
  * the derivation itself must never be persisted. `LOG_TEXT` is chosen so the
  * rule engine yields 속상함 (sadness) then 행복 (joy) -- a recovery flow.
  */
-describe('composer emotion review (opt-out)', () => {
+describe('composer emotion review (suggested, then answered)', () => {
   const LOG_TEXT = '오늘은 많이 속상했어. 그래도 저녁에는 기분이 좋아졌어.';
   /** The literal case the product owner reported. */
   const REPORTED_TEXT = '일하느라 ㅈ같았는데, 손님이 먹을 것을 줘서 기분이 나아졌어';
 
-  /** Open the composer and type text, then wait for the review list. */
+  /**
+   * Open the composer, write, and reach the composition boundary.
+   *
+   * The `tab()` is load-bearing. The analyser no longer runs on a typing
+   * debounce -- it runs when the field is left or when save is pressed -- so a
+   * helper that only typed would wait forever for a list the app has correctly
+   * not produced. See `lib/onDeviceInference.ts`.
+   */
   async function openWith(user: ReturnType<typeof userEvent.setup>, text: string) {
     renderIn(<WidgetDashboard />);
     await user.click(screen.getByText('한줄'));
     const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
     await user.type(textarea, text);
-    // Extraction is debounced by 300ms.
-    return waitFor(() => expect(screen.getByTestId('emotion-chip-list')).toBeInTheDocument());
+    await user.tab();
+    return waitFor(() => expect(screen.getByTestId('emotion-suggestion-list')).toBeInTheDocument());
+  }
+
+  /** Answer every reading, which is what turns a suggestion into a stored feeling. */
+  async function answerAll(user: ReturnType<typeof userEvent.setup>) {
+    const confirmAll = screen.queryByTestId('emotion-suggestion-confirm-all');
+    if (confirmAll) {
+      await user.click(confirmAll);
+      return;
+    }
+    const buttons = screen
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('data-testid')?.startsWith('emotion-suggestion-confirm-'));
+    for (const button of buttons) await user.click(button);
   }
 
   beforeEach(() => {
@@ -352,18 +372,24 @@ describe('composer emotion review (opt-out)', () => {
   });
 
   /**
-   * The core inversion. Nothing is tapped, and the flow is already there.
+   * The reading is offered without any tap. Storing it still takes one.
    *
-   * Under the old opt-in chips the ordinary path -- write, save -- stored no
-   * feeling at all, so the partner's flow was empty for most entries.
+   * The suggestion appears on its own -- writing an entry should not cost an
+   * extra step to find out what the app made of it -- but the preview of what
+   * WILL BE SAVED stays empty until a person agrees, because until then the
+   * honest answer is that nothing will be.
    */
-  it('includes the feelings it read without any tap, and previews the flow', async () => {
+  it('shows what it read without any tap, and previews only what was answered', async () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
 
     expect(screen.getByText('슬픔')).toBeInTheDocument();
     expect(screen.getByText('행복')).toBeInTheDocument();
-    // The preview card is present immediately, not only after selection.
+    // Nothing answered yet, so there is no flow to preview.
+    expect(screen.queryByText('슬픔 → 행복')).not.toBeInTheDocument();
+
+    await answerAll(user);
+
     expect(await screen.findByText('마음의 흐름')).toBeInTheDocument();
     expect(screen.getByText('슬픔 → 행복')).toBeInTheDocument();
     expect(screen.getByText('미리보기예요. 이 정리는 저장되지 않아요.')).toBeInTheDocument();
@@ -382,6 +408,7 @@ describe('composer emotion review (opt-out)', () => {
     // The user can see WHY, not just what.
     expect(screen.getByText('“ㅈ같음”에서 읽었어요')).toBeInTheDocument();
     expect(screen.getByText('“기분이 나아짐”에서 읽었어요')).toBeInTheDocument();
+    await answerAll(user);
     expect(await screen.findByText('분노 → 행복')).toBeInTheDocument();
   });
 
@@ -396,41 +423,53 @@ describe('composer emotion review (opt-out)', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('슬픔 다시 넣기')).toBeInTheDocument();
     });
-    const keptList = screen.getByTestId('emotion-chip-list');
+    const keptList = screen.getByTestId('emotion-suggestion-list');
     expect(keptList.textContent).not.toContain('슬픔');
     expect(keptList.textContent).toContain('행복');
     // Removal is reversible: a mis-tap must not cost the user their reading.
-    expect(screen.getByTestId('emotion-chip-removed')).toBeInTheDocument();
+    expect(screen.getByTestId('emotion-suggestion-removed')).toBeInTheDocument();
 
     await user.click(screen.getByLabelText('슬픔 다시 넣기'));
     await waitFor(() => {
-      expect(screen.getByTestId('emotion-chip-list').textContent).toContain('슬픔');
+      expect(screen.getByTestId('emotion-suggestion-list').textContent).toContain('슬픔');
     });
   });
 
-  it('▲▼ corrects a wrong reading, and the saved item follows the correction', async () => {
+  /**
+   * Correcting a reading IS answering it.
+   *
+   * Someone who replaces 슬픔 with 분노 has said more about what they felt than
+   * someone who tapped 맞아요, so a correction must not also require a separate
+   * confirmation before it can be stored.
+   */
+  it('picking a different feeling corrects it, counts as the answer, and is what gets saved', async () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
 
-    // 슬픔 is the most negative, so ▲ walks it toward the positive end.
-    await user.click(screen.getByLabelText('슬픔 대신 더 긍정적인 감정으로 바꾸기'));
-    await waitFor(() => expect(screen.getByText('분노')).toBeInTheDocument());
+    const firstRow = screen.getByTestId('emotion-suggestion-list').querySelector('li');
+    const candidateId = firstRow?.getAttribute('data-testid')?.replace('emotion-suggestion-', '');
+    expect(candidateId).toBeTruthy();
 
+    await user.click(screen.getByTestId(`emotion-suggestion-change-${candidateId}`));
+    await user.click(screen.getByTestId(`emotion-suggestion-option-${candidateId}-anger`));
+
+    // The second reading is still unanswered, so only the corrected one is saved.
     await user.click(screen.getByText('저장'));
     await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
     const [record] = addRecordWithMedia.mock.calls[0] as unknown as [
       { emotionFlow: EmotionFlowItem[] },
     ];
-    expect(record.emotionFlow.map((item) => item.basic)).toEqual(['anger', 'happiness']);
-    expect(record.emotionFlow.map((item) => item.displayLabel)).toEqual(['분노', '행복']);
+    expect(record.emotionFlow.map((item) => item.basic)).toEqual(['anger']);
+    expect(record.emotionFlow.map((item) => item.displayLabel)).toEqual(['분노']);
     // A human overrode the machine, and that is recorded.
     expect(record.emotionFlow[0].userEdited).toBe(true);
-    expect(record.emotionFlow[1].userEdited).toBe(false);
+    expect(record.emotionFlow[0].source).toBe('user_confirmed');
   });
 
-  it('saves only user_confirmed items, with no diary text and no analysis field', async () => {
+  it('saves only answered items, with no diary text and no analysis field', async () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
+    await answerAll(user);
     await user.click(screen.getByText('저장'));
 
     await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
@@ -453,13 +492,26 @@ describe('composer emotion review (opt-out)', () => {
     expect(JSON.stringify(record.emotionFlow)).not.toContain('좋아졌어');
   });
 
+  /** Writing and saving without engaging the question stores no feeling. */
+  it('saves nothing when the author never answers the suggestion', async () => {
+    const user = userEvent.setup({ delay: null });
+    await openWith(user, LOG_TEXT);
+
+    await user.click(screen.getByText('저장'));
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
+    const [record] = addRecordWithMedia.mock.calls[0] as unknown as [
+      { emotionFlow: EmotionFlowItem[] },
+    ];
+    expect(record.emotionFlow).toEqual([]);
+  });
+
   it('saves nothing when the author removes every feeling', async () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
 
     await user.click(screen.getByLabelText('슬픔 빼기'));
     await user.click(screen.getByLabelText('행복 빼기'));
-    expect(await screen.findByTestId('emotion-chip-editor-empty')).toBeInTheDocument();
+    expect(await screen.findByTestId('emotion-suggestion-empty')).toBeInTheDocument();
 
     await user.click(screen.getByText('저장'));
     await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
@@ -472,6 +524,7 @@ describe('composer emotion review (opt-out)', () => {
   it('marks every saved item author_only when 나만 보기 is on', async () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
+    await answerAll(user);
 
     await user.click(screen.getByText('공유하기'));
     await waitFor(() => expect(screen.getByText('나만 보기')).toBeInTheDocument());
@@ -484,5 +537,25 @@ describe('composer emotion review (opt-out)', () => {
     expect(record.isPrivate).toBe(true);
     expect(record.emotionFlow).toHaveLength(2);
     expect(record.emotionFlow.every((i) => i.visibility === 'author_only')).toBe(true);
+  });
+
+  /**
+   * The timing rule, asserted where it is observable.
+   *
+   * Typing must not produce a reading. Only leaving the field does. Without this
+   * the analyser could quietly be moved back onto a debounce and every other
+   * test here would still pass, because they all blur before asserting.
+   */
+  it('does not read the entry while it is still being typed', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderIn(<WidgetDashboard />);
+    await user.click(screen.getByText('한줄'));
+    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    await user.type(textarea, LOG_TEXT);
+
+    expect(screen.queryByTestId('emotion-suggestion-review')).not.toBeInTheDocument();
+
+    await user.tab();
+    expect(await screen.findByTestId('emotion-suggestion-review')).toBeInTheDocument();
   });
 });

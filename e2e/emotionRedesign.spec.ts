@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installMockBackend } from './fixtures/mockBackend';
-import { CREATOR, PARTNER, record, TODAY } from './scenarios';
+import { CREATOR, CREATOR_PENDING, PARTNER, record, TODAY } from './scenarios';
 
 /**
  * Real-browser coverage for the emotion redesign, the 군화 widget home and the
@@ -15,10 +15,30 @@ async function openComposer(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: '한줄' }).click();
   const textarea = page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?');
   await textarea.fill(REPORTED);
-  await expect(page.getByTestId('emotion-chip-list')).toBeVisible({ timeout: 15_000 });
+  /*
+   * Blur, because analysis runs at a COMPOSITION BOUNDARY and not on every
+   * keystroke (`onDeviceInference.ts`: `isInferenceAllowedAt('typing') === false`).
+   * The old version of this helper filled the field and waited, which worked only
+   * while a 300ms debounce existed to do the same job less deliberately.
+   */
+  await textarea.blur();
+  await expect(page.getByTestId('emotion-suggestion-review')).toBeVisible({ timeout: 15_000 });
 }
 
-test('the reported sentence reads as 분노 → 행복 with no tap required', async ({ browser }) => {
+/** A reading's row, addressed by the feeling rather than by a generated id. */
+function row(page: import('@playwright/test').Page, basic: string) {
+  return page.getByTestId('emotion-suggestion-list').locator(`[data-basic="${basic}"]`);
+}
+
+test('the reading is offered as a question, and answers nothing on its own', async ({ browser }) => {
+  /*
+   * Replaces "reads as 분노 → 행복 with no tap required", whose premise the
+   * privacy redesign deliberately inverted. PRODUCT_V3 §13: a machine reading is
+   * the author's private business until an affirmative act makes it theirs, and
+   * the absence of a refusal is not that act. So what this now protects is the
+   * opposite of what it used to: the readings are VISIBLE and UNANSWERED, and the
+   * flow preview -- which is fed only by confirmed items -- must not exist yet.
+   */
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
@@ -27,15 +47,36 @@ test('the reported sentence reads as 분노 → 행복 with no tap required', as
 
   await openComposer(page);
 
-  const list = page.getByTestId('emotion-chip-list');
+  const list = page.getByTestId('emotion-suggestion-list');
   await expect(list).toContainText('분노');
   await expect(list).toContainText('행복');
-  // The evidence phrase explains WHY, which is what makes opt-out fair.
+  // The evidence phrase explains WHY, which is what makes the question fair.
   await expect(list).toContainText('“ㅈ같음”에서 읽었어요');
-  // The flow preview is already there, before any interaction.
-  await expect(page.getByText('분노 → 행복').first()).toBeVisible();
+
+  // Every row is unanswered, and says so in the attribute the store reads.
+  await expect(row(page, 'anger')).toHaveAttribute('data-answered', 'false');
+  await expect(row(page, 'happiness')).toHaveAttribute('data-answered', 'false');
+
+  // Nothing is confirmed, so there is no flow to preview.
+  await expect(page.getByText('분노 → 행복')).toHaveCount(0);
 
   expect(errors).toEqual([]);
+  await context.close();
+});
+
+test('answering the readings is what produces the flow', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await installMockBackend(context, CREATOR);
+  const page = await context.newPage();
+  await openComposer(page);
+
+  await page.getByTestId('emotion-suggestion-confirm-all').click();
+
+  await expect(row(page, 'anger')).toHaveAttribute('data-answered', 'true');
+  await expect(row(page, 'happiness')).toHaveAttribute('data-answered', 'true');
+  // Only now does the sequence exist to be shown back.
+  await expect(page.getByText('분노 → 행복').first()).toBeVisible();
+
   await context.close();
 });
 
@@ -46,24 +87,37 @@ test('✕ removes a feeling and it can be restored, all with real clicks', async
   await openComposer(page);
 
   await page.getByLabel('분노 빼기').click();
-  await expect(page.getByTestId('emotion-chip-list')).not.toContainText('분노');
-  await expect(page.getByTestId('emotion-chip-removed')).toBeVisible();
+  await expect(page.getByTestId('emotion-suggestion-list')).not.toContainText('분노');
+  await expect(page.getByTestId('emotion-suggestion-removed')).toBeVisible();
 
   await page.getByLabel('분노 다시 넣기').click();
-  await expect(page.getByTestId('emotion-chip-list')).toContainText('분노');
+  await expect(page.getByTestId('emotion-suggestion-list')).toContainText('분노');
   await context.close();
 });
 
-test('▲▼ corrects a wrong reading, and every control is a 44px target', async ({ browser }) => {
+test('다른 마음 corrects a wrong reading, and every control is a 44px target', async ({ browser }) => {
+  /*
+   * The ▲▼ stepper this used to drive is gone. Walking a valence-ordered wheel
+   * one press at a time made the six feelings feel ranked, so correcting is now
+   * "open the six, pick one" -- and picking is itself an answer, because someone
+   * who bothered to correct a reading has plainly engaged with it.
+   */
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
   await openComposer(page);
 
-  // 분노 -> ▲ -> 혐오 (one step toward the positive end of the wheel).
-  await page.getByLabel('분노 대신 더 긍정적인 감정으로 바꾸기').click();
-  await expect(page.getByTestId('emotion-chip-list')).toContainText('혐오');
-  await expect(page.getByText('혐오 → 행복').first()).toBeVisible();
+  const angerRow = row(page, 'anger');
+  const id = await angerRow.getAttribute('data-testid');
+  const candidateId = id!.replace('emotion-suggestion-', '');
+
+  await page.getByTestId(`emotion-suggestion-change-${candidateId}`).click();
+  await expect(page.getByTestId(`emotion-suggestion-picker-${candidateId}`)).toBeVisible();
+  await page.getByTestId(`emotion-suggestion-option-${candidateId}-disgust`).click();
+
+  await expect(page.getByTestId('emotion-suggestion-list')).toContainText('혐오');
+  // Correcting counts as answering, so this row is now settled.
+  await expect(row(page, 'disgust')).toHaveAttribute('data-answered', 'true');
 
   // The remove control has to be thumb-reachable, and actually hit-testable.
   const remove = page.getByLabel('혐오 빼기');
@@ -75,6 +129,39 @@ test('▲▼ corrects a wrong reading, and every control is a 44px target', asyn
     [box!.x + box!.width / 2, box!.y + box!.height / 2],
   );
   expect(reached).toBe(true);
+  await context.close();
+});
+
+test('one tap on 저장 saves, even though the tap itself reveals the reading', async ({ browser }) => {
+  /*
+   * The defect: the textarea settles the composition on blur, and settling
+   * renders the review directly ABOVE the action row. Pressing 저장 blurred the
+   * field, the review appeared, the button moved out from under the finger, and
+   * the click was never delivered -- no toast, no request, nothing. A second tap
+   * worked, which is the worst shape for this bug: it looks like the user
+   * mis-tapped rather than like the app dropped their entry.
+   *
+   * Deliberately does NOT blur first. Blurring first is what made this pass while
+   * broken, so a test that pre-blurs cannot see it.
+   */
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await installMockBackend(context, CREATOR_PENDING);
+  const page = await context.newPage();
+
+  await page.goto('/');
+  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: '한줄' }).click();
+  await page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?').fill(REPORTED);
+
+  const write = page.waitForRequest(
+    (request) => request.method() === 'POST' && request.url().includes('/rest/v1/daily_records'),
+    { timeout: 15_000 },
+  );
+  await page.getByRole('button', { name: '저장' }).click();
+  await write;
+
+  // And the composer really did hand the entry off.
+  await expect(page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?')).toHaveCount(0);
   await context.close();
 });
 

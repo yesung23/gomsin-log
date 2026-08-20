@@ -8,8 +8,8 @@ import {
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { toLocalDateString, localToday } from '@/lib/utils';
-import { EmotionChipEditor } from '@/components/EmotionChipEditor';
-import { useEmotionCandidatesForText } from '@/lib/useEmotionCandidates';
+import { EmotionSuggestionReview } from '@/components/emotion/EmotionSuggestionReview';
+import { useEmotionCandidatesAtBoundary } from '@/lib/useEmotionCandidates';
 import {
   clearComposerDraft,
   readComposerDraft,
@@ -116,16 +116,6 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     pendingFilesRef.current = pendingFiles;
   }, [pendingFiles]);
 
-  const [debouncedLog, setDebouncedLog] = useState('');
-
-  // Debounce typing by 300ms to eliminate input lag on older mobile devices
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedLog(log);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [log]);
-
   /**
    * Keep the in-memory stash in step with the composer.
    *
@@ -138,34 +128,41 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   }, [draftUserId, log, isPrivate, reaction]);
 
   /**
-   * Feelings read out of the text, included by default and removable.
+   * Feelings read out of the text, offered as a question rather than as a verdict.
    *
-   * Replaces the opt-in chip list. Nothing was recorded before unless the user
-   * tapped a chip, so the ordinary path -- write, save -- stored no feeling and
-   * the partner's flow stayed empty. Now the app commits to a reading, shows the
-   * phrase it came from, and lets the user delete or correct it.
+   * The analyser runs only when `analyse` is called, and it is called at exactly
+   * two moments: the text field loses focus, and save is pressed. It used to run
+   * 300 ms after every pause in typing, which re-scanned the whole body dozens of
+   * times per entry, read unfinished sentences, and narrated the writer's mood
+   * back at them mid-sentence. See `lib/onDeviceInference.ts`.
    */
-  const review = useEmotionCandidatesForText(debouncedLog);
+  const review = useEmotionCandidatesAtBoundary();
+  const analyseLog = review.analyse;
+  const settleComposition = React.useCallback(() => {
+    analyseLog(log);
+  }, [analyseLog, log]);
 
-  // The exact array that will be persisted. The preview card below reads this
-  // same value, so what the user sees can never disagree with what is saved.
-  //
-  // The rule engine marks sensitive emotion groups as `author_only` by default.
-  // That default only applies to *suggestions*: tapping a chip on a record the
-  // author is sharing is explicit consent to share that tag. On a private
-  // record everything stays author-only. This keeps author-only items out of
-  // shared rows (see lib/privacy.ts) without silently discarding a selection.
   /**
-   * The exact array that will be persisted. The preview card below reads this
-   * same value, so what the user sees can never disagree with what is saved.
+   * The emotion array handed to save.
+   *
+   * Carries both answered and unanswered readings, each tagged with what it
+   * actually is. `emotionFlowForStorage` then keeps only `user_confirmed` items,
+   * so an unanswered guess reaches neither the row nor the partner -- the filter
+   * is real now that the writer no longer stamps everything as confirmed.
    *
    * `candidatesToFlowItems` drops the `evidence` phrase, which is the single point
    * where the display-only text taken from the diary body is stopped from reaching
    * the database -- the same guarantee `matchedText` always had.
    */
-  const userConfirmedFlow: EmotionFlowItem[] = useMemo(
+  const reviewedFlow: EmotionFlowItem[] = useMemo(
     () => review.toFlowItems(isPrivate, shareEmotion),
     [review, isPrivate, shareEmotion],
+  );
+
+  /** What will actually survive the save, which is what the preview must show. */
+  const userConfirmedFlow: EmotionFlowItem[] = useMemo(
+    () => reviewedFlow.filter((item) => item.source === 'user_confirmed'),
+    [reviewedFlow],
   );
 
   const MAX_ATTACHMENTS = 4;
@@ -626,6 +623,12 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
           <textarea
             value={log}
             onChange={(e) => setLog(e.target.value)}
+            /*
+              Leaving the field is the composition boundary the analyser waits for.
+              A blur means a thought is finished, which a 300 ms pause does not --
+              and it is the difference between reading `무서운` and `무서운 영화 봤어`.
+            */
+            onBlur={settleComposition}
             aria-label="오늘의 기록"
             placeholder="지금 이 순간, 어떤 생각을 하고 있나요?"
             className="w-full h-20 bg-muted rounded-control p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
@@ -718,18 +721,24 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
             </div>
           )}
 
-          {/* Opt-out review: included by default, ✕ to remove, ▲▼ to correct. */}
-          <EmotionChipEditor
+          {/*
+            Suggestions, not decisions. Every reading here is unanswered until it
+            is pressed, and only an answered one is stored or shared.
+          */}
+          <EmotionSuggestionReview
             candidates={review.candidates}
             removed={review.removed}
+            confirmedIds={review.confirmedIds}
+            onConfirm={review.confirm}
+            onConfirmAll={review.confirmAll}
+            onChangeEmotion={review.changeEmotion}
             onRemove={review.remove}
             onRestore={review.restore}
-            onChangeEmotion={review.changeEmotion}
             visibilityNote={
               isPrivate
-                ? '🔒 나만 보기 기록이라 이 마음도 나만 볼 수 있어요.'
+                ? '🔒 나만 보기 기록이라 확인한 마음도 나만 볼 수 있어요.'
                 : shareEmotion
-                  ? `이 마음은 ${partnerName}에게도 함께 보여요.`
+                  ? `확인한 마음은 ${partnerName}에게도 함께 보여요. 확인하지 않은 건 보이지 않아요.`
                   : `기록은 공유해도 이 마음은 나만 볼 수 있어요. ${partnerName}에게도 보여주려면 아래에서 켜주세요.`
             }
             shareWithPartner={isPrivate ? undefined : shareEmotion}
@@ -759,6 +768,28 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
             <button
               onClick={handlePost}
+              /*
+                Do not let pressing 저장 blur the textarea.
+
+                The textarea settles the composition on blur, and settling renders
+                `EmotionSuggestionReview` directly above this row. So the first tap
+                on 저장 blurred the field, the review appeared, this button moved
+                out from under the finger, and the click was never delivered --
+                silently, with no toast and no request. A second tap worked,
+                because by then the review was already on screen.
+
+                Measured in a real browser: with the field blurred first, one tap
+                saves; without, the first tap does nothing
+                (`e2e/coupleMatrix.spec.ts` D-05 is the regression).
+
+                `preventDefault` on mousedown suppresses the focus change and
+                therefore the reflow, while still delivering the click. Keyboard
+                users are unaffected -- they arrive by Tab, and Enter/Space do not
+                go through mousedown. Skipping the analysis on this path costs
+                nothing: only CONFIRMED readings are ever saved, and an unanswered
+                suggestion contributes nothing to the payload.
+              */
+              onMouseDown={(event) => event.preventDefault()}
               disabled={isSaving || (!isRecording && !hasContentToSave)}
               className="press-response min-h-11 px-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
             >

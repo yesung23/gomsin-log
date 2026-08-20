@@ -10,6 +10,9 @@ import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { RecordMoodSection } from '@/components/emotion/RecordMoodSection';
+import { candidatesToFlowItems, extractEmotionCandidates } from '@/lib/emotionCandidates';
+import { InferenceMemo } from '@/lib/onDeviceInference';
+import type { EmotionFlowItem } from '@/types';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 import { isMarkedByViewer } from '@/lib/talkAboutList';
@@ -214,6 +217,38 @@ export function RecordPage() {
     () => visibleRecords.find((r) => r.id === selectedRecordId) ?? null,
     [visibleRecords, selectedRecordId],
   );
+
+  /**
+   * The `record-opened` boundary: read this entry's own text, once, on open.
+   *
+   * The composer asks about a feeling when composition settles. Someone who
+   * writes and saves in one motion never answers, and an unanswered reading is
+   * correctly never stored -- so that path ended with no feeling on the record
+   * and nowhere left to add one, which is worse than what it replaced.
+   *
+   * Computed only when there is something to ask ABOUT and nothing already
+   * answered, so opening a record whose feeling is settled costs nothing, and
+   * memoised on the normalised body so paging between records and back does not
+   * re-read the same text. See `lib/onDeviceInference.ts`.
+   */
+  const suggestionMemo = useRef(new InferenceMemo<EmotionFlowItem[]>());
+  const openedRecordSuggestion = useMemo(() => {
+    if (!selectedRecord) return undefined;
+    if (!isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role })) return undefined;
+    if ((selectedRecord.emotionFlow ?? []).some((item) => item.source === 'user_confirmed')) {
+      return undefined;
+    }
+    const body = selectedRecord.log?.trim();
+    if (!body) return undefined;
+    return suggestionMemo.current.read(body, (normalized) =>
+      candidatesToFlowItems(extractEmotionCandidates(normalized), {
+        isPrivate: selectedRecord.isPrivate,
+        // Nothing is being shared or confirmed here; this is the QUESTION.
+        shareWithPartner: false,
+        confirmedIds: new Set(),
+      }),
+    );
+  }, [selectedRecord, profile.id, profile.role]);
 
   // The record went away (deleted here, or revoked by its author): close up.
   useEffect(() => {
@@ -1494,6 +1529,7 @@ export function RecordPage() {
                 <div className="pt-2 border-t border-border">
                   <RecordMoodSection
                     items={selectedRecord.emotionFlow ?? []}
+                    suggested={openedRecordSuggestion}
                     disabled={isOffline}
                     disabledReason={OFFLINE_READONLY_MESSAGE}
                     onChange={async (emotionFlow) => {

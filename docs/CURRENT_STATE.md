@@ -102,6 +102,24 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 여전히 변하지 않은 것: Production은 NOT APPLIED, remote Supabase catalog는 UNVERIFIED,
 실기기 검증은 UNVERIFIED, chat은 FROZEN / DEFERRED, P6는 NOT AUTHORIZED.
 
+### Two-lineage convergence checkpoint — 2026-08-21
+
+`claude/v1-launch-readiness`(PR #73)와 `release/v1-gate1-gate2`(PR #74)는 같은 작업의
+재작성 중복 계보였다(차이는 047 cycle-pain delta 하나). 사용자 승인
+([`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md`](PRODUCT_STRATEGY_REDESIGN_2026-08-21.md))에
+따라 다음으로 수렴한다.
+
+| 계보 | 처분 |
+|---|---|
+| PR #74 `release/v1-gate1-gate2` @ `9b0d4b3` | **landing 계보.** 역할별 홈·우리 하루 격자·감정 provenance·시각 기반·온보딩 첫 화면 + CI 수리(stale e2e locator 2건, 문서 trailing whitespace). CI 14/14 GREEN. **master merge는 사용자 실행 대기** — `.claude/hooks`가 PR merge를 사용자에게 예약한다 |
+| PR #73 `claude/v1-launch-readiness` | superseded. #74 merge 후 닫는다. **HEAD가 더 최신이라는 것은 계보 선택의 근거가 아니다** (#70 vs #72와 같은 규칙) |
+| 047 cycle-pain delta | `claude/047-cycle-pain-gated`로 분리. independent security review 통과 전 merge 금지 |
+| canonical 개정 (2026-08-21 승인분) | `claude/canon-amendments-2026-08-21`에 반영: PRODUCT_V3 §5.2·§6.1·§7.6·§8 통화 모드·§10 하루 격자·§14.3 알림 정책·§14.5 E2EE 표현 계약, ENGINEERING_ROADMAP ARCH-P6 개정·LV 계측 조건, BUSINESS §9.2 전역 가설 |
+
+이 checkpoint 이후에도 변하지 않은 것: Production NOT APPLIED, remote catalog UNVERIFIED,
+실기기 UNVERIFIED, chat FROZEN / DEFERRED, P6 NOT AUTHORIZED(개정된 ARCH-P6 기준으로도
+구현 미착수), push 알림 미구현, §19 계측 미구현.
+
 ## 2. Active migration ledger facts
 
 | migration | scope | production state for this docs task |

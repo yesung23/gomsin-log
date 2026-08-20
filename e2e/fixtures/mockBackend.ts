@@ -77,6 +77,22 @@ export type RecordRow = {
   created_at?: string;
 };
 
+/**
+ * The path a signed-URL stub must return.
+ *
+ * Deliberately does NOT start with `/storage/v1`. supabase-js concatenates its
+ * own storage base onto whatever `signedURL` it is given, so the previous stub's
+ * `/storage/v1/object/signed-stub` came back out as
+ * `https://…/storage/v1/storage/v1/object/signed-stub` -- a 404 in the mock,
+ * which the app faithfully reported as `이 파일을 열 수 없어요`.
+ *
+ * That was invisible for as long as it existed because no scenario had an
+ * attachment, so nothing ever followed a signed URL.
+ */
+function signedStub(path?: string) {
+  return path ? `/object/signed-stub?p=${encodeURIComponent(path)}` : '/object/signed-stub';
+}
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
     status,
@@ -495,8 +511,36 @@ export async function installMockBackend(
     }
 
     // ---- Storage ---------------------------------------------------------
+    /*
+     * `createSignedUrls` (plural) and `createSignedUrl` (singular) are the same
+     * endpoint with two different response SHAPES, and this stub only spoke the
+     * singular one: `{ signedURL }`.
+     *
+     * The app uses the plural form (`records.ts signValidatedAttachments`), whose
+     * response must be an ARRAY of `{ path, signedUrl, error }`. supabase-js calls
+     * `.map()` on it, so an object came back as `data.map is not a function` -- a
+     * TypeError, which is not a StorageError, so supabase-js rethrows it instead
+     * of returning `{ error }`. It escaped `signValidatedAttachments` (which
+     * handles `error` but not a throw), aborted the record load, and surfaced as
+     * the full-screen `계정 정보를 확인하지 못했어요 / UNEXPECTED-UNKNOWN` screen.
+     *
+     * Nothing caught it because no scenario in `e2e/scenarios.ts` had a single
+     * attachment: every record ships `attachments: []`, so this branch had never
+     * once run. Media was structurally untestable in the browser suite.
+     *
+     * The singular shape is kept for any caller that asks for one path, so both
+     * forms are answered correctly rather than one being traded for the other.
+     */
     if (path.startsWith('/storage/v1/object/sign/')) {
-      return json(route, { signedURL: `/storage/v1/object/signed-stub` });
+      const body = request.postDataJSON?.() as { paths?: unknown[]; expiresIn?: number } | null;
+      const paths = Array.isArray(body?.paths) ? (body!.paths as string[]) : null;
+      if (paths) {
+        return json(
+          route,
+          paths.map((p) => ({ path: p, signedURL: signedStub(p), error: null })),
+        );
+      }
+      return json(route, { signedURL: signedStub() });
     }
     if (path.startsWith('/storage/v1/object/')) {
       const failure = failureFor(scenario, 'storage_upload');

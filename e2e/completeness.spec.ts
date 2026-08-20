@@ -124,8 +124,18 @@ test('an unsent draft survives a tab round-trip and is never written to storage'
 
   const DRAFT = '오늘 진짜 힘들었는데 네 생각하니까 나아졌어';
   await page.getByRole('button', { name: '한줄' }).click();
-  await page.getByPlaceholder(PLACEHOLDER).fill(DRAFT);
-  await expect(page.getByTestId('emotion-chip-list')).toBeVisible({ timeout: 15_000 });
+  const field = page.getByPlaceholder(PLACEHOLDER);
+  await field.fill(DRAFT);
+  /*
+   * Synchronise on the draft itself, not on the emotion reader.
+   *
+   * This used to wait for `emotion-chip-list`, which coupled a draft-persistence
+   * regression to an unrelated subsystem: when the reader became
+   * `emotion-suggestion-review` and moved to a composition boundary, this test
+   * failed for a reason it was never written to detect. What it actually needs is
+   * that the field holds the draft before navigating away.
+   */
+  await expect(field).toHaveValue(DRAFT);
 
   const tab = (name: string) =>
     page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });

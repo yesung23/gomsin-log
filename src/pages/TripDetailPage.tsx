@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Calendar, CheckCircle2, Circle, ExternalLink, ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, RefreshCw, ShieldAlert, Trash2, Unlink,
+  ArrowDown, ArrowUp, Calendar, CheckCircle2, Circle, ExternalLink, ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, RefreshCw, ShieldAlert, Trash2, Unlink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
@@ -9,6 +9,7 @@ import { ErrorNote } from '@/components/ui/ErrorNote';
 import { SheetHandle } from '@/components/ui/SheetHandle';
 import { useSheetDrag } from '@/lib/useSheetDrag';
 import { MobileShell } from '@/components/MobileShell';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -668,16 +669,37 @@ export function TripDetailPage() {
     <MobileShell>
       <div className="pb-28">
         {/* Header */}
-        <header className="bg-card border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-30">
-          <div className="flex items-center gap-2 min-w-0">
-            <button type="button" onClick={() => navigate('/trips')} className="press-response min-w-11 min-h-11 flex items-center justify-center -ml-2 text-muted-foreground" aria-label="여행 목록"><ArrowLeft size={18} /></button>
-            <h1 className="text-heading text-foreground truncate">{trip.title}</h1>
-          </div>
-          <div className="flex items-center">
-            <button type="button" onClick={openTripEdit} disabled={isDeletingTrip || isOffline} className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-40" aria-label="여행 수정"><Pencil size={16} /></button>
-            <button type="button" onClick={() => void handleDeleteTrip()} disabled={isDeletingTrip || isOffline} className="press-response min-w-11 min-h-11 flex items-center justify-center text-destructive disabled:opacity-40" aria-label="여행 삭제"><Trash2 size={16} /></button>
-          </div>
-        </header>
+        <AppBar
+          title={trip.title}
+          onBack={() => navigate('/trips')}
+          backLabel="여행 목록"
+          actions={
+            <>
+              <AppBarAction
+                onClick={openTripEdit}
+                disabled={isDeletingTrip || isOffline}
+                className="text-muted-foreground disabled:opacity-40"
+                aria-label="여행 수정"
+              >
+                <Pencil size={18} aria-hidden="true" />
+              </AppBarAction>
+              {/*
+                Destructive, so it keeps `destructive` ink rather than the bar's
+                default. DESIGN_V2 §3.4 forbids an icon-only control for a
+                destructive action -- the confirmation dialog this opens is what
+                carries the words.
+              */}
+              <AppBarAction
+                onClick={() => void handleDeleteTrip()}
+                disabled={isDeletingTrip || isOffline}
+                className="text-destructive disabled:opacity-40"
+                aria-label="여행 삭제"
+              >
+                <Trash2 size={18} aria-hidden="true" />
+              </AppBarAction>
+            </>
+          }
+        />
 
         {/* Trip meta - compact info bar */}
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">

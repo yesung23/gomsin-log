@@ -3,6 +3,7 @@ import { ChevronRight, Settings } from 'lucide-react';
 import { MobileShell } from '@/components/MobileShell';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
 import { CyclePartnerCard } from '@/components/cycle/CyclePartnerCard';
@@ -50,17 +51,15 @@ export function MyPage() {
 
   return (
     <MobileShell>
-      <div className="p-4 pb-28 space-y-5">
-        <div className="flex items-center justify-between px-1 pt-4 pb-1">
-          <h1 className="text-title text-foreground">마이</h1>
-          <button
-            onClick={() => navigate('/settings')}
-            className="press-response p-2.5 rounded-control bg-card border border-border text-foreground hover:bg-muted flex items-center justify-center min-h-[44px] min-w-[44px]"
-            aria-label="설정 페이지로 이동"
-          >
-            <Settings size={20} />
-          </button>
-        </div>
+      <AppBar
+        title="마이"
+        actions={
+          <AppBarAction onClick={() => navigate('/settings')} aria-label="설정 페이지로 이동">
+            <Settings size={20} aria-hidden="true" />
+          </AppBarAction>
+        }
+      />
+      <div className="px-4 pt-4 pb-28 space-y-5">
 
         <div className="flex items-center gap-3 py-2">
           {/*

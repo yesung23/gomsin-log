@@ -113,7 +113,7 @@
 - Tool: Claude Code / Model: claude-opus-5 / Role: Worker + integrator
 - PR: 없음 / Branch: `claude/v1-launch-readiness`
 - Base SHA: `21e7dfb146985547150736a7efe3d5d50b6306b2`
-- New HEAD: `56fec01` (`4d071ab` → `b9b7459` → `aeccca2` → `7eeaa49` → `a35a23d` → `56fec01`)
+- New HEAD: `68959db` (`4d071ab` → `b9b7459` → `aeccca2` → `a35a23d` → `56fec01` → `68959db`)
 
 #### 시작 시 발견한 것 — 잘못된 계보에서 작업할 뻔했다
 세션은 `codex/lv-readiness-audit-v1`(PR #70) worktree에서 시작했다. 그 계보는
@@ -170,6 +170,25 @@
   `RecordMoodSection`의 기존 import guard("스스로 감정을 만들 수 없다")가 그대로 유지된다.
   확인은 공유가 아니다 — `author_only`로 쓴다.
 
+- `68959db` **홈에 대화형 표현 추가 (`homeStyle`, 다크모드와 같은 기기 선호).**
+  곰신은 하루 종일 쓰고, 군화는 짧은 시간에 **밀린 것을 따라잡는다** — 사람들이 이미
+  메신저에서 하는 행동이다. 대시보드는 그걸 카드에서 조립하라고 요구했다.
+  - **기능이 아니라 표현이다.** 같은 행, 같은 `visibleRecordsForViewer`, 같은 결정적
+    `generateDailySummary`. message 테이블·전송 경로·전달/읽음 상태 **없음**. §12.1이
+    자체 채팅을 V1에서 동결하고 §16이 범용 메신저를 비목표로 두므로, 이 선을 넘으면
+    동결 해제가 된다. **채팅 모양은 답장창을 부르므로** 그 부재를 source 수준 테스트로
+    고정했다. 답장 수단은 이미 있다 — 반응, 이따 이야기하기.
+  - 요약은 대화 **위에** 고정한다. 대화에 대한 읽기이지 둘 중 하나가 한 말이 아니다.
+  - guard 2건이 실제 결함을 잡았다: bubble 전체를 `<button>`으로 감싸면 미디어 갤러리가
+    button 조상 안에 들어가 player가 깨진다(`RecordMediaGallery.test.tsx`가 금지) →
+    `<article>`로 바꾸고 chevron을 항상 두어 미디어 전용 기록도 열린다.
+    `summaryTargetRecordId`는 "요약 전체가 가리키는 곳"을 답하므로 줄마다 자기 근거를
+    가져야 하는 목록에는 틀렸다(§6.2) → 줄 단위 source로 교체.
+  - `homeStyle`이 device-pref 허용목록에 추가되며 **프라이버시 경계 테스트가 정상적으로
+    실패**했다. `theme`과 같은 이유로 목록에 속한다(기기가 어떻게 그리는지일 뿐,
+    계정에 대해 아무것도 말하지 않는다). 계정에 실으면 나중에 로그인한 사람이 상대에게
+    자기 화면을 강요하게 된다.
+
 #### EXPLICITLY NOT CHANGED
 - crypto semantics: 없음. 키 계층·device trust·recovery·write floor 미접촉.
 - DB/migration semantics: `047`이 저장소에 들어왔으나 **어디에도 적용하지 않았다.**
@@ -182,9 +201,9 @@
 
 #### VERIFICATION
 - 실행함: `npm run typecheck` PASS / `npm run lint` PASS (`--max-warnings 0`) /
-  `npm test` **PASS — 171 files, 2610 tests** / `npm run build` PASS.
+  `npm test` **PASS — 172 files, 2618 tests** / `npm run build` PASS.
 - 증가분: 2544(기준선) → 2576(시각 재설계) → 2594(감정 + 통증) → 2605(한 탭 작성)
-  → 2610(다시 묻기). **회귀 0건.**
+  → 2610(다시 묻기) → 2618(대화형 홈). **회귀 0건.**
 - 실행하지 않음: `npm run test:e2e` — 이 세션에서 직접 돌리지 않았다. 시각 재설계 세션이
   로컬 Chrome으로 85 passed / 0 failed를 보고했으나 그것은 `aeccca2` 이전 트리에 대한
   결과이며, cherry-pick 이후로는 **UNVERIFIED**다.
@@ -208,9 +227,9 @@
 #### REMAINING
 - 요청 7항목 중 미완: **온보딩 재설계**, **크로스플랫폼 저장 제안서**(P6 gate),
   **320/390/430 실기기 폭 검증**(cherry-pick 이후 UNVERIFIED).
-- 홈이 여전히 위젯 대시보드다. §6은 홈을 "상대방의 오늘" 한 표면으로 정의하고
-  "무관한 카드의 대시보드로 만들지 않는다"고 명시하므로, 이것은 스타일 문제가 아니라
-  canonical과의 불일치다. 위젯 시스템 제거는 기능 제거라 별도 제품 판단이 필요하다.
+- 대화형은 베타 검증용 **선택지**로 추가했고 기본값은 여전히 위젯이다. §6의 "홈을
+  무관한 카드의 대시보드로 만들지 않는다"와 위젯 대시보드의 불일치는 남아 있으며,
+  어느 쪽을 기본값으로 삼을지는 베타 사용 데이터로 판단할 제품 결정이다.
 - 기록 상세에 감정 편집기가 둘(`RecordMoodSection` 캐릭터 + `RecordEmotionCorrection`
   chip) 공존한다. 후자의 정당화는 "근거 문구를 보여준다"인데 근거 문구는 저장되지
   않으므로 이미 사실이 아니다. 통합 후보.

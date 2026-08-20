@@ -122,6 +122,18 @@ export function MobileShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
       <div
+        /*
+          Astryx components read their colour, type and spacing from tokens that
+          `src/styles/astryx-gomsin.css` scopes to this attribute. It sits on the
+          frame rather than on <html> so the mapping travels with the phone
+          surface, and so a screen rendered outside the shell cannot pick up
+          component theming it has no frame for.
+
+          OnboardingPage hand-copies this frame (it must not show a tab bar) and
+          therefore carries the same attribute; the two are checked against each
+          other by `src/lib/astryxFoundation.test.ts`.
+        */
+        data-astryx-theme="gomsin"
         className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
         style={
           tabBarHeight > 0

@@ -21,6 +21,7 @@ import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
+import { AppBar } from '@/components/ui/AppBar';
 import { PlanSectionNav } from '@/components/PlanSectionNav';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -411,18 +412,22 @@ export function SchedulePage() {
   return (
     <MobileShell>
       <div className="pb-28 px-4 pt-5 space-y-5">
-        <header className="flex items-center justify-between gap-3">
-          <h1 className="text-title text-foreground">우리의 계획</h1>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={openCreateModal}
-            disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
-          >
-            <Plus size={14} aria-hidden="true" />
-            <span>일정 추가</span>
-          </Button>
-        </header>
+        <AppBar
+          sticky={false}
+          className="px-0 pt-0"
+          title="우리의 계획"
+          actions={
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={openCreateModal}
+              disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
+            >
+              <Plus size={14} aria-hidden="true" />
+              <span>일정 추가</span>
+            </Button>
+          }
+        />
 
         <PlanSectionNav active="schedule" />
 

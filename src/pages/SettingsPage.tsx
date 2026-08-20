@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/Button';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
+import { AppBar } from '@/components/ui/AppBar';
 import {
-  ArrowLeft, Shield, Unlink, Trash2, User, FileText,
+  Shield, Unlink, Trash2, User, FileText,
   Clock, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
   CalendarDays, Plane,
@@ -492,17 +493,13 @@ export function SettingsPage() {
     <MobileShell>
       <div className="pb-28 px-5 pt-8 space-y-6">
         {/* Header with Back Button */}
-        <header className="flex items-center justify-between">
-          <button
-            onClick={() => navigate(-1)}
-            className="press-response p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
-            aria-label="뒤로가기"
-          >
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="text-title text-foreground">설정</h1>
-          <div className="w-8" />
-        </header>
+        <AppBar
+          sticky={false}
+          className="px-0 pt-0"
+          title="설정"
+          onBack={() => navigate(-1)}
+          backLabel="뒤로가기"
+        />
 
         {/* User Profile Overview */}
         <section className="flex items-center gap-3 py-2">

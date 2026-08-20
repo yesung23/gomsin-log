@@ -1,0 +1,319 @@
+/**
+ * The 곰신로그 Astryx theme.
+ *
+ * ## What this file is
+ *
+ * Astryx components read their colour, type, radius and spacing from a fixed set
+ * of `--color-*` / `--font-*` / `--radius-*` / `--spacing-*` custom properties.
+ * This file points every one of them at a token this app already owns, so an
+ * Astryx `<BottomSheet>` and a hand-written `<Card>` are the same object drawn by
+ * two different files rather than two design systems sharing a screen.
+ *
+ * ## Why the mapping runs this direction
+ *
+ * Astryx ships `@astryxdesign/core/tailwind-theme.css`, which maps its tokens
+ * ONTO Tailwind utilities. Importing it here would be a silent catastrophe: it
+ * declares `--color-card`, `--color-muted`, `--color-border` and `--color-primary`
+ * -- four names `src/styles/index.css` already owns -- so every `bg-card`,
+ * `bg-muted`, `border-border` and `text-primary` in 344 files would quietly
+ * repoint at Astryx's greys and the whole app would lose its colour without a
+ * single test failing. That bridge is deliberately NOT imported. This file is the
+ * inverse of it: Tailwind stays the authority, and Astryx is what gets translated.
+ *
+ * ## Why there is no dark block
+ *
+ * Every value below is a `var()` onto a token that `index.css` already redefines
+ * under `[data-theme='dark']`. Dark mode therefore costs nothing here and cannot
+ * drift: there is no second copy of these values to keep in sync. Adding a literal
+ * colour to this file would break that property, which is the one rule it has.
+ *
+ * ## Scope
+ *
+ * `[data-astryx-theme='gomsin']` is set once, on the app frame in `MobileShell`
+ * and on `OnboardingPage`'s hand-copied frame. Astryx's own theme packages scope
+ * themselves the same way (`@scope ([data-astryx-theme="neutral"])`), so nothing
+ * here can leak into a subtree that did not ask for it.
+ */
+
+[data-astryx-theme='gomsin'] {
+  /*
+   * Astryx's own defaults are written as `light-dark(...)`, which reads
+   * `color-scheme` and NOT this app's `[data-theme]` attribute. Every token this
+   * file overrides is immune to that, but a token added by a future Astryx
+   * version would resolve to its light value on a dark screen. Declaring
+   * `color-scheme` costs nothing and closes that gap in advance.
+   *
+   * Scoped to the frame rather than `:root` on purpose: `color-scheme` also
+   * repaints native scrollbars and date pickers, and that is a real visual
+   * change this app has not opted into globally.
+   */
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------- text --
+   * `text-accent` is `--coral-strong`, NOT `--coral-fill`. The two coral
+   * tokens are split precisely because one is ink and one is a fill, and
+   * getting this backwards puts 2.09:1 pink text on a white card.
+   */
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-text-disabled: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+  --color-text-accent: var(--coral-strong);
+
+  /* ---------------------------------------------------------- backgrounds --
+   * `surface`, `card` and `popover` all resolve to `--card`. Astryx separates
+   * them so a theme can lift interactive surfaces above the canvas; this app
+   * lifts with a border instead (DESIGN_V2 §3.6 -- no shadow on cards), so the
+   * three collapse onto one value and the distinction is carried by the border.
+   */
+  --color-background-body: var(--background);
+  --color-background-surface: var(--card);
+  --color-background-card: var(--card);
+  --color-background-popover: var(--card);
+  --color-background-muted: var(--muted);
+  --color-background-inverted: var(--foreground);
+
+  /* --------------------------------------------------------- interactive --
+   * The accent is the filled-CTA coral, so an Astryx primary button and this
+   * app's own `<Button variant="primary">` land on the same pink with the same
+   * measured 5.78:1 label.
+   */
+  --color-accent: var(--coral-fill);
+  --color-on-accent: var(--coral-fill-foreground);
+  --color-accent-muted: color-mix(in oklch, var(--coral) 22%, transparent);
+  --color-neutral: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --color-tint-hover: var(--foreground);
+  --color-overlay-hover: color-mix(in oklch, var(--foreground) 5%, transparent);
+  --color-overlay-pressed: color-mix(in oklch, var(--foreground) 10%, transparent);
+  --color-overlay: color-mix(in oklch, var(--navy) 55%, transparent);
+
+  /* -------------------------------------------------------------- borders --
+   * `border-emphasized` is mixed from the ink rather than being a second stored
+   * token, so it tracks the hairline hue automatically in both themes.
+   */
+  --color-border: var(--border);
+  --color-border-emphasized: color-mix(in oklch, var(--foreground) 22%, transparent);
+
+  /* --------------------------------------------------------------- status */
+  --color-success: var(--success);
+  --color-success-muted: var(--success-surface);
+  --color-on-success: var(--primary-foreground);
+  --color-error: var(--destructive);
+  --color-error-muted: color-mix(in oklch, var(--destructive) 16%, transparent);
+  --color-on-error: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-surface);
+  --color-on-warning: var(--warning-foreground);
+
+  /* ---------------------------------------------------------------- icons */
+  --color-icon-primary: var(--foreground);
+  --color-icon-secondary: var(--muted-foreground);
+  --color-icon-accent: var(--coral-strong);
+  --color-icon-disabled: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+
+  /* ----------------------------------------------------------- incidental */
+  --color-skeleton: var(--muted);
+  --color-shadow: color-mix(in oklch, var(--navy) 18%, transparent);
+  --color-on-light: var(--navy);
+  --color-on-dark: var(--primary-foreground);
+
+  /* ----------------------------------------------------------- hue family --
+   * Astryx exposes ten named hues for `Badge`, `Token` and `StatusDot`. Left
+   * unmapped they fall back to Astryx's own categorical palette, which is a
+   * second, foreign set of colours one prop away from any screen. Each is
+   * pointed at a colour this app already uses -- semantic where one exists,
+   * otherwise the emotion accent of the matching hue -- so there is no route
+   * through the component API that reaches a colour the design system does not
+   * own.
+   */
+  --color-background-red: color-mix(in oklch, var(--destructive) 14%, transparent);
+  --color-border-red: color-mix(in oklch, var(--destructive) 34%, transparent);
+  --color-icon-red: var(--destructive);
+  --color-text-red: var(--destructive);
+
+  --color-background-pink: color-mix(in oklch, var(--coral) 24%, transparent);
+  --color-border-pink: color-mix(in oklch, var(--coral) 52%, transparent);
+  --color-icon-pink: var(--coral-strong);
+  --color-text-pink: var(--coral-strong);
+
+  --color-background-orange: var(--emotion-anger-surface);
+  --color-border-orange: color-mix(in oklch, var(--emotion-anger) 40%, transparent);
+  --color-icon-orange: var(--emotion-anger);
+  --color-text-orange: var(--emotion-anger);
+
+  --color-background-yellow: var(--warning-surface);
+  --color-border-yellow: color-mix(in oklch, var(--warning) 34%, transparent);
+  --color-icon-yellow: var(--warning);
+  --color-text-yellow: var(--warning-foreground);
+
+  --color-background-green: var(--success-surface);
+  --color-border-green: color-mix(in oklch, var(--success) 34%, transparent);
+  --color-icon-green: var(--success);
+  --color-text-green: var(--success);
+
+  --color-background-teal: var(--emotion-disgust-surface);
+  --color-border-teal: color-mix(in oklch, var(--emotion-disgust) 40%, transparent);
+  --color-icon-teal: var(--emotion-disgust);
+  --color-text-teal: var(--emotion-disgust);
+
+  --color-background-cyan: var(--emotion-surprise-surface);
+  --color-border-cyan: color-mix(in oklch, var(--emotion-surprise) 40%, transparent);
+  --color-icon-cyan: var(--emotion-surprise);
+  --color-text-cyan: var(--emotion-surprise);
+
+  --color-background-blue: var(--info-surface);
+  --color-border-blue: color-mix(in oklch, var(--info) 34%, transparent);
+  --color-icon-blue: var(--info);
+  --color-text-blue: var(--info-foreground);
+
+  --color-background-purple: var(--emotion-fear-surface);
+  --color-border-purple: color-mix(in oklch, var(--emotion-fear) 40%, transparent);
+  --color-icon-purple: var(--emotion-fear);
+  --color-text-purple: var(--emotion-fear);
+
+  --color-background-gray: var(--muted);
+  --color-border-gray: var(--border);
+  --color-icon-gray: var(--muted-foreground);
+  --color-text-gray: var(--muted-foreground);
+
+  /* ----------------------------------------------------------- typography --
+   * The stack is written out rather than pointing at `--font-sans`, because
+   * `@theme inline` inlines its values into utilities and a runtime `var()`
+   * onto it is not guaranteed to resolve. Pretendard is self-hosted; naming a
+   * webfont here would be blocked by the CSP in `public/_headers` and caught by
+   * `src/lib/cspExternalResources.test.ts`.
+   *
+   * Sizes are pinned to this app's seven-step scale (DESIGN_V2 §3.3) instead of
+   * Astryx's base-14/ratio-1.2 ramp, so an Astryx `<Text>` and a `text-body`
+   * span are the same 15px. The ramp is wider than seven steps, so the ends are
+   * extrapolated on the same rhythm rather than invented.
+   */
+  --font-family-body:
+    'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont,
+    'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  --font-family-heading: var(--font-family-body);
+  --font-family-code: ui-monospace, 'SF Mono', Monaco, Consolas, monospace;
+
+  --font-size-4xs: 0.6875rem; /* 11 — tab labels */
+  --font-size-3xs: 0.75rem; /* 12 — caption */
+  --font-size-2xs: 0.75rem; /* 12 — caption */
+  --font-size-xs: 0.8125rem; /* 13 — label */
+  --font-size-sm: 0.8125rem; /* 13 — label */
+  --font-size-base: 0.9375rem; /* 15 — body */
+  --font-size-lg: 1rem; /* 16 — emphasis */
+  --font-size-xl: 1.0625rem; /* 17 — heading */
+  --font-size-2xl: 1.375rem; /* 22 — title */
+  --font-size-3xl: 1.625rem; /* 26 — display */
+  --font-size-4xl: 1.625rem; /* 26 — display is the ceiling; §3.3 allows one per screen */
+  --font-size-5xl: 1.625rem;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* --------------------------------------------------------------- radius */
+  --radius-none: 0px;
+  --radius-inner: 0.5rem; /* 8 */
+  --radius-element: var(--radius-control); /* 14 */
+  --radius-container: var(--radius-surface); /* 20 */
+  --radius-page: var(--radius-surface);
+  --radius-chat: var(--radius-surface);
+  --radius-full: 9999px;
+
+  /* -------------------------------------------------------------- spacing --
+   * Astryx's numeric spacing scale is already the 4px ladder this app uses, so
+   * these are a restatement rather than a translation. They are declared
+   * explicitly so an Astryx default can never reintroduce a step off the
+   * 4/8/12/16/20/24 rhythm that `src/lib/typeScale.test.ts` guards.
+   */
+  --spacing-0: 0px;
+  --spacing-0-5: 2px;
+  --spacing-1: 4px;
+  --spacing-1-5: 6px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-7: 28px;
+  --spacing-8: 32px;
+  --spacing-9: 36px;
+  --spacing-10: 40px;
+  --spacing-11: 44px;
+  --spacing-12: 48px;
+
+  /* --------------------------------------------------------------- shadow --
+   * `--shadow-low` is `none` on purpose. It is what Astryx `<Card>` uses, and
+   * DESIGN_V2 §3.6 reserves shadow for layers that actually float. Cards here
+   * are separated by a 1px border and whitespace; giving them a shadow is the
+   * single fastest way to make this app look like a generic component gallery.
+   */
+  --shadow-low: none;
+  --shadow-med: 0 4px 16px -6px var(--color-shadow);
+  --shadow-high: 0 12px 40px -12px var(--color-shadow);
+
+  --border-width: 1px;
+
+  /* ---------------------------------------------------------- hit targets --
+   * Astryx's control heights are 28 / 32 / 36px. This app's floor is 44px for
+   * EVERY operable control -- `DESIGN_V2` §3.5, and `e2e/realUsability.spec.ts`
+   * measures the effective target of every button, link and checkbox on eight
+   * routes and fails on a single offender. An Astryx control dropped in unchanged
+   * is therefore an accessibility regression by construction, not by accident:
+   * the first one added measured 176x24.
+   *
+   * So the floor is set here rather than per-component, and it is set to 48
+   * rather than 44 on purpose: several Astryx components inset the control
+   * inside the token, e.g. `SegmentedControlItem` is
+   * `calc(var(--size-element-sm) - 4px)`. A token of 44 therefore yields a 40px
+   * item and still fails. 48 makes the SMALLEST Astryx control land on exactly
+   * 44, so the floor holds no matter which `size` a caller passes -- which is
+   * the point of putting it here instead of remembering it per call site.
+   */
+  --size-element-sm: 48px;
+  --size-element-md: 48px;
+  --size-element-lg: 52px;
+
+  /* --------------------------------------------------------------- motion --
+   * Matched to the app's existing press grammar in `index.css` (0.22s out,
+   * 0.06s in) so Astryx transitions and `.press-response` do not beat at
+   * different tempos on the same screen.
+   */
+  --duration-fast-min: 60ms;
+  --duration-fast: 120ms;
+  --duration-fast-max: 160ms;
+  --duration-medium-min: 180ms;
+  --duration-medium: 220ms;
+  --duration-medium-max: 280ms;
+  --duration-slow-min: 320ms;
+  --duration-slow: 420ms;
+  --duration-slow-max: 560ms;
+}
+
+[data-theme='dark'] [data-astryx-theme='gomsin'] {
+  color-scheme: dark;
+}
+
+/*
+ * Astryx animates on its own duration tokens, which `prefers-reduced-motion`
+ * in `index.css` cannot reach because that block targets this app's own class
+ * names. Collapsing the tokens themselves turns off every Astryx transition at
+ * the source, including ones in components this app has not adopted yet.
+ *
+ * 1ms rather than 0s, for the same reason index.css uses 1ms: a zero-length
+ * transition never fires `transitionend`, and components that wait for it to
+ * unmount would hang open.
+ */
+@media (prefers-reduced-motion: reduce) {
+  [data-astryx-theme='gomsin'] {
+    --duration-fast-min: 1ms;
+    --duration-fast: 1ms;
+    --duration-fast-max: 1ms;
+    --duration-medium-min: 1ms;
+    --duration-medium: 1ms;
+    --duration-medium-max: 1ms;
+    --duration-slow-min: 1ms;
+    --duration-slow: 1ms;
+    --duration-slow-max: 1ms;
+  }
+}

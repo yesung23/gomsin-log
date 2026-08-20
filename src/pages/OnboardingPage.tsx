@@ -701,7 +701,17 @@ export function OnboardingPage() {
 
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
-      <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
+      {/*
+        This frame is a deliberate copy of `MobileShell`'s -- onboarding must not
+        render a tab bar -- so it also carries the Astryx theme attribute. Without
+        it, every Astryx component on the wizard would fall back to Astryx's own
+        blue-and-grey defaults while the rest of the app is coral, and onboarding
+        is the first screen anyone sees.
+      */}
+      <div
+        data-astryx-theme="gomsin"
+        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+      >
         
         {/*
           Step Header (Steps 1~6).

@@ -4,6 +4,7 @@ import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
+import { AppBar } from '@/components/ui/AppBar';
 import { Heart, CalendarDays, Plane, ChevronRight, MapPin, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn, toLocalDateString, localToday, daysBetweenLocal } from '@/lib/utils';
@@ -89,9 +90,9 @@ export function UsPage() {
 
   return (
     <MobileShell>
-      <div className="pb-28 px-5 pt-8 space-y-5">
-        <div className="flex items-center justify-between px-1">
-          <h1 className="text-title tracking-tight text-foreground">우리</h1>
+      <AppBar
+        title="우리"
+        actions={
           <div className="flex items-center gap-2">
             {/* /schedule had no entry point anywhere in the UI before this. */}
             {/*
@@ -118,8 +119,9 @@ export function UsPage() {
               <span>여행</span>
             </button>
           </div>
-        </div>
-
+        }
+      />
+      <div className="pb-28 px-5 pt-4 space-y-5">
         {/* Profile */}
         <section className="flex flex-col items-center text-center py-3 space-y-2">
           {/*

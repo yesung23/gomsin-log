@@ -24,9 +24,84 @@
 6. **색상 토큰 전면 이관은 이 작업 범위가 아니다.** 별도 PR로 분리한다.
 7. **구현하지 않는 것:** 통화 후 결정 캡처, 홈 컴포저 바텀시트화. 둘은 파일럿 검증 항목으로만 남긴다.
 
-## 확정된 시각 개정 (2026-08-08) — 최우선
+## 확정된 시각 개정 (2026-08-20) — Astryx 컴포넌트 기반 + 미디어 우선 — 최우선
+
+이 절은 컴포넌트 기반과 미디어 표현에 관해 이 문서의 다른 모든 절보다 우선한다.
+기능·권한·데이터 계약은 바꾸지 않는다.
+
+### 컴포넌트 기반: Astryx
+
+컴포넌트 기반은 **Meta의 Astryx**(`@astryxdesign/core`)다. 단, **토큰의 주인은 바뀌지
+않는다.** Astryx가 이 앱의 토큰을 읽도록 매핑하며, 그 반대가 아니다.
+
+- `src/styles/astryx-gomsin.css`가 Astryx의 `--color-*` / `--font-*` / `--radius-*` /
+  `--spacing-*`를 이 앱의 OKLCH 토큰으로 가리킨다. 모든 값이 `var()`이므로 dark 블록이
+  없고, 있을 수도 없다 — 색을 복사하는 순간 light에서는 맞고 dark에서는 틀리는 두 번째
+  사본이 생긴다.
+- `@astryxdesign/core/tailwind-theme.css`는 **가져오지 않는다.** 그 파일은
+  `--color-card` `--color-muted` `--color-border` `--color-primary`를 선언하는데,
+  이는 `index.css`가 이미 소유한 이름이다. import하면 앱 전체의 `bg-card`가 조용히
+  Astryx 회색을 가리키게 되고, 아무 테스트도 실패하지 않는다.
+- `@astryxdesign/core/reset.css`도 **가져오지 않는다.** Tailwind Preflight와 같은 일을
+  전역으로 한 번 더 하는 파일이다.
+- layer 순서는 `theme, base, astryx-base, astryx-theme, components, utilities`다.
+  `base` 뒤라서 Astryx가 Preflight를 이기고, `utilities` 앞이라서 Tailwind 클래스가
+  Astryx 컴포넌트를 이긴다.
+- 위 네 가지는 `src/lib/astryxFoundation.test.ts`가 강제한다.
+
+Astryx는 이 앱이 손으로 만들지 않은 것만 가져온다 — `Carousel` `Lightbox`
+`AspectRatio` `SegmentedControl`. `Card` `Button` `List` `Badge`는 이 앱 것을 유지한다.
+
+### 미디어가 주인공이다
+
+기존 에디토리얼 타임라인은 미디어에 **68px(≥360px에서 76px) 고정 열**을 줬다. 그 열은
+실제 버그의 수정이었지만(절대 배치된 미디어가 높이를 만들지 못해 아래 기록 위로 그려졌다),
+사진을 행에서 가장 작은 것으로 만들어 §3.1의 content-first hierarchy를 뒤집었다.
+
+`src/components/media/RecordMediaGallery.tsx`가 이를 대체한다.
+
+| 규칙 | 내용 |
+|---|---|
+| 폭 | 본문 열 전체. 68px 열은 폐기한다 |
+| 비율 | 4:5 세로. 390px에서 다음 기록의 존재가 보이는 가장 긴 크롭 |
+| 여러 장 | Astryx `Carousel` + snap. 한 제스처에 한 장 |
+| 전체 화면 | Astryx `Lightbox` + zoom. **사진만** |
+| 영상 | 인라인 재생. lightbox 오버레이를 씌우지 않는다 — 재생 탭을 먹는다 |
+| 음성 | carousel에 넣지 않는다. 사진을 넘기다 소리가 끊긴다 |
+
+**깨면 안 되는 두 규칙.** `[data-testid="record-attachment"]`는 `<button>` 조상을 가질 수
+없고(`<video controls>`가 button 안에 있으면 무효 HTML이며 카드 핸들러가 컨트롤 탭을
+삼킨다), 확대 버튼은 미디어의 **형제**여야 한다.
+
+### 사진 아카이브 (기록 탭)
+
+기록 탭은 이제 두 개의 렌즈를 갖는다. `타임라인`은 하루를 순서대로 읽고, `사진`은
+기간 전체를 훑는다(`MediaArchiveGrid`, 3열 정사각형, 최신 우선). 같은 기록에 대한 두
+시점이며 한쪽이 다른 쪽을 숨기지 않는다. §16의 공개 소셜 프로필이 되지 않도록:
+개수·랭킹·인기 없음, 정렬은 시간뿐, 본인의 비공개 사진은 표시하되 자물쇠로 표시한다.
+
+### 상단 바
+
+`src/components/ui/AppBar.tsx`. 열두 화면이 각자 손으로 쓴 헤더를 대체한다 —
+같은 마크업이 화면마다 다른 padding과 다른 radius로 흩어져 있었다.
+
+### Instagram에서 가져온 것과 가져오지 않은 것
+
+시각 문법만 가져온다: 미디어 우선, 스와이프, 전체 화면 뷰어, 그리드 아카이브,
+낮은 chrome, 반투명 상단 바.
+
+**가져오지 않는다** — §16 비목표이며 개정 없이는 도입하지 않는다:
+좋아요·조회수·팔로워·공개 피드·알고리즘 정렬·연속 기록·"읽음" 표시·무한 스크롤·광고.
+이 앱의 링과 배지는 관계를 점수화하지 않으며, 사진이 커진 것은 사용자의 사진이
+앱의 카피보다 중요하기 때문이지 체류 시간을 늘리기 위해서가 아니다(§제품원칙 11).
+
+---
+
+## 확정된 시각 개정 (2026-08-08)
 
 이 절은 색상·타이포그래피·간격·표면·기록 표현에 관해 아래의 이전 절보다 우선한다. 기능 구조·권한·데이터 계약은 바꾸지 않고 **presentation layer와 interaction density**만 개정한다.
+
+> 미디어 표현(68px 열)에 관한 이 절의 서술은 위 2026-08-20 절이 대체한다.
 
 ### 디자인 포지셔닝
 

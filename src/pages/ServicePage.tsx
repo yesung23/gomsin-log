@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { Button } from '@/components/ui/Button';
 import { useStore } from '@/lib/useStore';
 import { useEscapeKey } from '@/lib/hooks';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
 import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
-import { ArrowLeft, Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';
+import { Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { Card } from '@/components/ui/Card';
@@ -158,23 +159,18 @@ export function ServicePage() {
   return (
     <MobileShell>
       <div className="p-4 space-y-5 pb-28">
-        <header className="flex items-center justify-between pt-2">
-          <button
-            onClick={() => navigate(-1)}
-            aria-label="뒤로가기"
-            className="press-response p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
-          >
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="text-heading text-foreground">{soldierName}의 복무 현황</h1>
-          <button
-            onClick={openEditor}
-            aria-label="복무 정보 수정"
-            className="press-response p-2 -mr-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
-          >
-            <Edit2 size={18} />
-          </button>
-        </header>
+        <AppBar
+          sticky={false}
+          className="px-0 pt-0"
+          title={`${soldierName}의 복무 현황`}
+          onBack={() => navigate(-1)}
+          backLabel="뒤로가기"
+          actions={
+            <AppBarAction onClick={openEditor} aria-label="복무 정보 수정">
+              <Edit2 size={18} aria-hidden="true" />
+            </AppBarAction>
+          }
+        />
 
         {/* D-Day / progress. Shown only when real dates exist. */}
         {progress ? (

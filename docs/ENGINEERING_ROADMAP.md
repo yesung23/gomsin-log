@@ -132,6 +132,31 @@ normalization + 새 forward migration(045 이상; frozen 042를 재사용하지 
 `P6C Photo Product Integration` → `P6D Two Apple IDs / real devices / quota / unlink /
 account-switch / security hardening`이다.
 
+> **이 결정의 미디어 저장 위치·파트너 공유 부분은 2026-08-21 개정(아래)으로 대체되었다.**
+> 나머지 항목(PMK/CSK 라우팅, GME1, EXIF strip, HRK forbidden, fail-closed unlink,
+> 평문 durable storage 금지, 042 재발급 규칙)은 그대로 유효하다.
+
+### ARCH-P6 개정 — 공유와 보존의 분리 (2026-08-21)
+
+`CKShare`는 Apple 계정 간에만 동작하므로, 원결정의 `CKShare read-only partner`는
+iPhone+Galaxy 커플에서 **가입 첫날부터** 동작하지 않는다
+([`PERSONAL_CLOUD_EVALUATION_2026-08-20.md`](PERSONAL_CLOUD_EVALUATION_2026-08-20.md)).
+사용자 승인(2026-08-21,
+[`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md`](PRODUCT_STRATEGY_REDESIGN_2026-08-21.md) §5.2)에
+따라 다음과 같이 개정한다.
+
+- **공유 경로는 하나뿐이고 플랫폼 중립이다.** 미디어 암호문(GME1)은 회사가 조달하는
+  중립 blob 저장소(예: Supabase Storage)에 두고, Supabase가 조율 메타데이터를 소유한다.
+  iPhone+iPhone / Galaxy+Galaxy / 혼합 — 세 조합이 같은 경로를 쓴다.
+- **개인 클라우드(iCloud/CloudKit, Google Drive `appDataFolder`)는 선택적 보존 계층으로
+  강등한다.** 자기 암호문의 백업·복구 보조이며, 파트너 접근 경로가 아니고, 키 자료를
+  절대 싣지 않으며, 없어도 제품이 완결된다. 벤더 선택은 M5 PoC가 결정한다.
+- `Android boundary intentionally deferred`는 폐기한다. 혼합 커플은 출시 첫날의 현실이므로
+  공유 경로는 처음부터 크로스플랫폼이어야 한다.
+- 저장소가 콘텐츠를 이해해야 하는 기능(서버측 썸네일·트랜스코딩·검색)은 이 구조를
+  깨뜨리므로 도입하지 않는다. 썸네일은 기기에서 생성해 암호화한다.
+- P6A–P6D의 단계 구분은 유지하되, 대상 저장소를 이 개정에 맞춰 읽는다.
+
 ### P6 entry conditions
 
 다음 조건을 모두 만족하기 전에는 P6A를 시작하지 않는다.
@@ -191,6 +216,12 @@ LV 진입 조건은 다음이며, 검증 대상 흐름에 한정한다.
 - 외부 사용자 범위가 통제된 소규모이며 참가자에게 검증 단계임을 고지한다
 - 데이터 손실·오류에 대한 rollback·지원 경로가 정해져 있다
 - 검증 중 수집·보관하는 데이터 범위와 종료 후 처리가 정해져 있다
+- **(2026-08-21 추가)** [`PRODUCT_V3.md`](PRODUCT_V3.md) §19 허용 목록 안의 최소 계측이
+  구현되어, 검증 대상 흐름의 이벤트가 실제로 수집됨을 확인했다. **계측 없는 검증은
+  시작하지 않는다**
+- **(2026-08-21 추가)** 검증 빌드의 보안 표현이 [`PRODUCT_V3.md`](PRODUCT_V3.md) §14.5의
+  LV 단계 문장과 일치한다 — device protection flag OFF 상태 고지, 영상·음성 캡처 비활성,
+  사진 평문 저장 고지
 
 LV가 명시적으로 뜻하지 않는 것:
 
@@ -288,6 +319,10 @@ E2EE보다 제품 작업을 먼저 하더라도 다음을 어기지 않는다.
 ---
 
 ## 3.5 ARCH-P6 — iCloud Media Architecture
+
+> **2026-08-21 개정 적용.** 이 절의 검증 목록 중 미디어 저장 위치·`CKShare` 파트너 공유
+> 항목은 §2의 「ARCH-P6 개정 — 공유와 보존의 분리」를 따른다. 개인 클라우드 항목은
+> 선택적 보존 계층의 검증 목록으로 읽는다.
 
 P5 이후, 실제 P6 구현 전에 다음을 read-only architecture decision으로 검증한다.
 이 단계에서는 새 암호 프로토콜을 발명하지 않으며, 필요한 경우 Architect decision을

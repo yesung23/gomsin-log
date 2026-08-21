@@ -100,6 +100,11 @@ deno.lock
 # Playwright artifacts (traces, screenshots, HTML report) -- never tracked.
 e2e/.artifacts/
 
+# UI audit output. Screenshots are evidence for one review and go stale the moment
+# a surface changes, so they are never tracked; the conclusions they support belong
+# in the review document that cites them, not in a folder of PNGs nobody can date.
+/ui-audit-results/
+
 # Obsidian volatile / machine-specific (shared vault content is tracked)
 control-tower/.obsidian/workspace.json
 control-tower/.obsidian/cache/

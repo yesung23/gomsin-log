@@ -180,12 +180,19 @@ it('emits every kind the union declares', () => {
     }
   });
 
-  it('counts the kill metric only when something is turned OFF', () => {
-    // Turning notifications back on is not the signal. Counting both transitions
-    // would blur the one reading this event exists to produce.
-    const text = source('src/components/NotificationPreferencesSection.tsx');
-    expect(text).toContain('preferences[key] === true && next[key] === false');
-  });
+  /*
+    The kill metric's OFF-only rule was asserted here as a source string, and the
+    audit that moved the emit broke it -- correctly, but for the wrong reason. A
+    substring check passes for any code that merely CONTAINS the expression, so
+    it would also have passed while the emit sat in a function that fires after a
+    DENIED permission request: a user pressing "allow" counted as a user opting
+    out, with this test green.
+
+    It now lives in `notificationPreferencesSection.test.tsx`, which renders the
+    component and clicks the toggles. Both mutations -- moving the emit back, and
+    inverting the OFF test -- fail there.
+  */
+
 
   it('measures composing only after the save succeeded', () => {
     /*

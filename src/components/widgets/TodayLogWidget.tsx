@@ -52,6 +52,18 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   const { state, addRecordWithMedia, queueRecordForLater } = useStore();
   const navigate = useNavigate();
   const partnerName = state.profile.couple.partnerName || '파트너';
+  /**
+   * Whether there is anyone on the other side yet.
+   *
+   * During the waiting period a couple space exists -- an invite code has been
+   * created -- but nobody has joined it. PRODUCT_V3 §7.6: a record left before
+   * the connection is NOT shared automatically when the partner arrives.
+   * Exposure is an explicit act, never a default, and "I ticked 공유하기 on a day
+   * when nobody could read it" is not that act.
+   */
+  const hasPartner = Boolean(
+    state.profile.couple.connected && state.profile.couple.status === 'active',
+  );
   const todayStr = toLocalDateString(localToday());
 
   /**
@@ -265,14 +277,27 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    /*
+      §7.6 enforced on the WRITE, not only in the UI.
+
+      Hiding the toggle is copy; this is the contract. Without a partner the
+      record is stored private regardless of what any restored draft, stale state
+      or future caller says -- a draft written while connected and saved after an
+      unlink would otherwise carry `isPrivate: false` into a space where the
+      person it was meant for is gone.
+
+      When the partner arrives, §7.6's question is what turns any of this shared.
+      Nothing does it automatically.
+    */
+    const effectivePrivate = hasPartner ? isPrivate : true;
     const draft = {
       date: todayStr,
       time: timeStr,
       authorRole: state.profile.role,
       log,
       reaction,
-      isPrivate,
-      talkAbout: !isPrivate && talkAbout,
+      isPrivate: effectivePrivate,
+      talkAbout: !effectivePrivate && talkAbout,
       emotionFlow: userConfirmedFlow,
       emotionUpdatedAt: userConfirmedFlow.length > 0 ? now.toISOString() : null,
     };
@@ -390,7 +415,13 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     setPendingFiles([]);
     setShowInputCard(false);
     onSaved?.();
-    toast.success(isPrivate ? '나에게만 남겼어요.' : `${partnerName}에게 전했어요.`);
+    // Says what actually happened. Telling someone their words were delivered to
+    // a partner who has not joined would be the app reporting a fact it made up.
+    toast.success(
+      !hasPartner
+        ? '나에게만 남겼어요. 연결되면 보여줄지 물어볼게요.'
+        : isPrivate ? '나에게만 남겼어요.' : `${partnerName}에게 전했어요.`,
+    );
   };
 
   /**
@@ -599,7 +630,29 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
               persisted, and computed from the same array as the save payload. */}
           <EmotionFlowInsightCard items={userConfirmedFlow} variant="composer" />
 
+          {/*
+            §7.6, before the partner exists.
+
+            A visibility toggle here would be offering a choice the app cannot
+            honour: there is nobody to share with, and a record ticked 공유하기
+            today would become readable the instant someone joins -- which is the
+            automatic exposure §7.6 forbids by name.
+
+            So the control is replaced by a statement of fact. Writing alone is
+            the point of the waiting period, not a degraded mode.
+          */}
+          {!hasPartner && (
+            <p
+              data-testid="composer-waiting-notice"
+              className="pt-2 text-caption text-muted-foreground break-keep leading-relaxed"
+            >
+              아직 연결된 상대가 없어요. 지금 남기는 기록은 나만 볼 수 있고,
+              연결되면 어떤 걸 보여줄지 그때 물어볼게요.
+            </p>
+          )}
+
           <div className="pt-2 flex items-center justify-between gap-2">
+            {hasPartner && (
             <button
               onClick={() => setIsPrivate(!isPrivate)}
               className={`press-response min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 ${ isPrivate ? 'bg-warning-surface text-warning-foreground' : 'bg-muted text-muted-foreground' }`}
@@ -607,8 +660,9 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
               {isPrivate ? <Lock size={12} /> : <Unlock size={12} />}
               {isPrivate ? '나만 보기' : '공유하기'}
             </button>
+            )}
 
-            {!isPrivate && (
+            {hasPartner && !isPrivate && (
               <label className="min-h-11 px-3 rounded-control bg-coral/10 text-coral-strong text-label font-semibold flex items-center gap-1 cursor-pointer">
                 <input type="checkbox" checked={talkAbout} onChange={(event) => setTalkAbout(event.target.checked)} className="accent-coral" />
                 통화 때 꼭 얘기

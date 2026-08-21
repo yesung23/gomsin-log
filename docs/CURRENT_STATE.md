@@ -108,6 +108,7 @@ active branch가 존재한다. **master에는 아직 없다.**
 | Gate 3 push 서버 | `claude/phase1-gate3-push`. migration 048 + `send-push`. 실제 PostgreSQL로 검증됨 |
 | Gate 3 push 클라이언트 | 완료. 토큰 lifecycle은 이 저장소가 다른 클라이언트 동작을 검증하는 방식으로 검증 가능했고(§14.3이 negative test를 명시적으로 요구한다), 실기기가 필요한 것은 실제 전달뿐이다 |
 | `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
+| S4 §7.6 대기 구간 | 자동 노출 결함은 닫혔다 — 파트너가 없으면 저장 자체가 비공개다. **§7.6이 요구하는 "한 번 묻기"는 미완**이며, 대기 중 기록을 식별할 방법(합류 시각 조회 또는 device-local 목록)에 대한 판단이 선행되어야 한다 |
 
 Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은
 001의 SELECT 정책 때문에 파트너에게 읽히고, 그것은 곧 읽음 표시(§14.3 절대 금지)다. 전용 테이블로

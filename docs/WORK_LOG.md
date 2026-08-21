@@ -3061,6 +3061,69 @@ Phase 0(같은 날 앞 항목)을 잇는다. 앞 항목의 HEAD는 이미 낡았
 - NOT APPLIED
 
 
+### 2026-08-21 · Phase 1 — S4 대기 구간의 자동 노출 결함 (§7.6)
+
+같은 날 앞 항목들을 잇는다.
+
+#### PLAN POSITION
+- Phase: Phase 1 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8)
+- Workstream: ⟨대기⟩ 구간 (S4) — §7.6 연결 전 기록의 사후 공유
+- Previous Gate: Gate 3 양쪽 절반 완료, PR #79 CI 14/14 green
+- This Gate: 자동 노출 결함을 닫음. §7.6의 "묻기"는 미완
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §7.6(2026-08-21 신설) · §13 · §14.2 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `ENGINEERING_ROADMAP`, `AGENTS.md` — YES
+- Current-state checked: YES / Latest Work Log checked: YES
+- Does this task conflict with canonical direction? NO
+
+#### CHANGED / REVIEWED
+- `src/components/widgets/TodayLogWidget.tsx` — 파트너가 없으면
+  (1) 공개/비공개 토글을 감추고 사실을 문장으로 말하며,
+  (2) **저장 자체를 비공개로 강제하고**,
+  (3) 성공 토스트가 "전했어요"라고 거짓말하지 않는다.
+- `src/features/home/waitingPeriodPrivacy.test.tsx` 신규 — 6 specs.
+
+#### 왜 이것이 결함이었나
+기록의 기본 공개 범위는 **공유**다. 커플 공간은 초대 코드를 만든 순간 존재하므로,
+파트너가 합류하기 며칠 전부터 기록이 그 공간에 쌓인다. 그 기록들은 누군가 합류하는
+**순간 전부 읽을 수 있게 된다.** §7.6이 이름을 붙여 금지하는 바로 그 자동 노출이며,
+"아무도 읽을 수 없던 날 공유하기를 눌렀다"는 것은 §7.6이 요구하는 명시적 노출 행위가 아니다.
+
+UI에서 토글을 감추는 것만으로는 부족하다 — 그건 문구이고, 저장되는 값이 계약이다.
+연결 상태에서 쓴 draft가 연결 해제 후 저장되면 `isPrivate: false`를 그대로 들고 간다.
+mutation 검증에서 "UI만 숨기고 쓰기는 그대로" 변형이 정확히 잡히는 것이 그 증거다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto · migration · Production: 미접촉.
+- 이미 저장된 기존 기록: 건드리지 않았다. 이 변경은 앞으로의 쓰기에만 적용된다.
+
+#### VERIFICATION
+- 6 specs, mutation 3건 전부 실패 확인(쓰기 강제 제거 · 대기 중 토글 노출 · 연결 후에도 강제 비공개).
+- `npm run verify` — PASS (EXIT=0).
+- **첫 실행은 EXIT=1이었고 그 이유를 남긴다.** 테스트 6개가 전부 "통과"했는데도 verify가 실패했다.
+  내 mock이 `addRecordWithMedia`의 성공 형태를 `{ ok: true }`로만 만들었는데 실제로는
+  `failedFiles`도 반환하고, `runPost`가 저장 직후 `result.failedFiles.length`를 읽는다.
+  각 테스트가 **assertion을 마친 뒤에** unhandled rejection이 났으므로 스위트는 초록이고
+  프로세스는 실패했다. 부분 mock이 통과하는 테스트를 만든 사례이며, verify를 돌리지 않았다면
+  CI에서야 드러났을 것이다.
+
+#### REMAINING — §7.6의 나머지 절반
+- **"연결 전에 남긴 기록을 보여줄까요?" 질문은 아직 없다.** 지금은 대기 중 기록이 비공개로
+  남고 사용자가 기록 상세에서 개별 전환할 수 있을 뿐이다. 노출은 여전히 명시적 행위이므로
+  §7.6의 프라이버시 규칙은 지켜지지만, 명세가 요구하는 **한 번 묻기**는 빠져 있다.
+- 그 질문을 구현하려면 "대기 중 작성한 기록"을 식별해야 하고, 두 경로 모두 이 세션의
+  범위를 넘는다: (a) 파트너 합류 시각(`couple_members.joined_at`) 조회 추가, 또는
+  (b) device-local 목록 — 후자는 `saveState`의 엄격한 whitelist를 넓혀야 하는데
+  그 목록은 **계정 삭제 후 잔존을 막으려고** 테스트로 정확히 고정돼 있다. 넓히는 것은
+  별도 판단이 필요하다.
+- 양 역할 `ContactPreferences`도 미착수.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

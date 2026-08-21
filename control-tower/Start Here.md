@@ -34,7 +34,19 @@ bash scripts/agent/claim.sh <agent> "<한 줄>"
 bash scripts/agent/claim.sh --release <agent>
 ```
 
-## 3. 어떤 AI가 무엇을 했나
+## 3. 그 AI에게 어떤 파일을 주나
+
+→ **[[Context Packs]]**. 공통 팩 + 지금 작업에 직접 관련된 파일 3~8개.
+**파일 20개를 매번 다 던지지 않는다.**
+
+```bash
+bash scripts/agent/context-pack.sh --list
+bash scripts/agent/context-pack.sh release
+```
+
+경로가 실재하는지·git이 추적하는지까지 검사해서 낸다.
+
+## 4. 어떤 AI가 무엇을 했나
 
 | AI | 역할 | 진입점 |
 |---|---|---|
@@ -52,7 +64,7 @@ bash scripts/agent/claim.sh --release <agent>
 
 저장소를 못 읽는 웹 챗(ChatGPT·Claude.ai·Grok)은 [[Chat AI Bootstrap]]을 붙여넣는다.
 
-## 4. 새 작업을 마쳤을 때
+## 5. 새 작업을 마쳤을 때
 
 `reports/<agent>/YYYY-MM-DD_HHMM_<task>_<agent>.md` 로 [[Agent Report]] 템플릿을 써서 남긴다.
 frontmatter의 `agent`, `date`, `status`, `tags`를 반드시 채운다 — 그게 없으면
@@ -66,13 +78,17 @@ bash scripts/agent/ct-sync.sh push "ct: <agent> <요약>"
 
 `control-tower/`와 `docs/WORK_LOG.md`만 커밋된다. 코드 변경은 휩쓸려 가지 않는다.
 
-## 5. Live 상태는 어디서 보나
+## 6. Live 상태는 어디서 보나
 
 vault가 아니라 저장소에서 본다. `session-start.sh`가 그것을 포함해 출력한다.
 **이 값들을 vault에 복사하지 않는다.** 그렇게 해서 이 vault가 한 번 썩었다.
 
-## 6. 지도
+## 7. 지도
 
+- [[Context Packs]] — 어떤 작업에 어떤 파일을 주는가
+- [[Canonical Source Map]] — 이 질문의 authoritative home은 어디인가
+- [[Do Not Build]] — 짓기 전에 멈추는 곳
+- [[Cycle · Care Canon]] — 주기·배려 작업에서 빠뜨리면 안 되는 질문
 - [[Now]] — 지금 누가 무엇을 잡고 있나
 - [[Dashboard]] — 링크 허브
 - [[Decision Log]] — Control Tower 결정만

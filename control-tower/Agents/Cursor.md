@@ -18,6 +18,20 @@ IDE 안에서의 구현과 리팩터. 파일 단위 작업에 강하다.
 |---|---|---|---|---|
 | _(아직 없음)_ | | | | |
 
+## 이 AI에게 줄 컨텍스트
+
+IDE 안 구현·리팩터 작업이면 아래 팩 + **지금 작업에 직접 관련된 파일 3~8개.**
+파일 20개를 매번 다 던지지 않는다.
+
+- [[Context Packs#COMMON — 모든 구현 AI의 부팅 순서]]
+- [[Context Packs#UI · UX]]
+
+```bash
+bash scripts/agent/context-pack.sh ui
+```
+
+목록을 이 페이지에 복사하지 않는다 — 정의의 집은 [[Context Packs]] 하나다.
+
 ## 이 AI의 작업이 authoritative한 곳
 
 - 세션 이력: `docs/WORK_LOG.md`

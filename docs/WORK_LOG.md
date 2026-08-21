@@ -4010,6 +4010,37 @@ git이 추적하는 저장소 하위 폴더다. GitHub이 그대로 전송로다
 건드리지 않았다. `ct-sync.sh push`는 실제 push 경로를 이번에 밟지 않았다(status·add·
 stray 검출까지만 확인).
 
+
+#### 이어서 — Context Pack (Control Tower 지시)
+
+문서를 vault에 복사하는 대신 **어떤 작업에 어떤 파일을 주는지**를 정리했다.
+`control-tower/Context Packs.md`가 팩 정의의 유일한 집이고,
+`scripts/agent/context-pack.sh`가 **그 파일을 파싱해서** 낸다 — 스크립트는 자체 목록을
+갖지 않으므로 두 곳이 어긋날 수 없고, 경로가 사라지면 `❌ 없음`으로 드러난다.
+팩 6개: `common`(부팅 8개) · `release`(+감사 인계·migration README) · `strategy` ·
+`security` · `ui` · `cycle`. 각 `Agents/*.md`에는 목록을 복사하지 않고 팩 링크만 두었다.
+
+**Control Tower 지시에서 두 곳을 고쳤다.**
+
+- `PROJECT_HANDOFF.md`는 **존재하지 않는다.** 실재 경로는
+  `docs/PROJECT_HANDOFF_2026-08-13.md`이며 팩에는 이쪽을 넣었다.
+- `docs/FABLE_PRODUCT_STRATEGY_AUDIT_2026-08-21.md`가 **git에 추적되지 않고 있었다.**
+  그대로 두면 `release`·`strategy` 두 팩이 이 기기에서만 성립한다. 커밋했다.
+  NON-CANONICAL 배너는 문서가 이미 갖고 있어 손대지 않았다.
+
+**Cycle/Care Canon은 지시대로 결정 8개를 옮겨 적지 않았다.** 그 결정들은 이미
+`docs/PRODUCT_V3.md` §13(감정·기계 추론) · §20(데이터 분류) · §21(주기 공유 정책)이
+소유한다 — 확인했고 절 번호도 대조했다. 복사하면 두 번째 source of truth가 되고
+정책이 바뀔 때 vault만 옛말로 남는다. 대신 **답이 아니라 질문 12개**를 표로 두고 각각
+답이 있는 절로 링크했다. 빠뜨림 방지라는 실익은 그대로 얻고 중복은 만들지 않는다.
+`Canonical Source Map.md`와 `Do Not Build.md`도 같은 이유로 링크만 담는다 —
+비목표 목록은 `PRODUCT_V3` §16이, 열린 제약은 `Current Gate`가, 결정적 차단은
+`.claude/hooks/`가 이미 소유한다.
+
+검증: 팩 6개 전부 해석되고 실재하지 않는 경로 0건 · vault wikilink는 **노트와 제목
+앵커까지** 전수 검사해 깨진 링크 0 · `PRODUCT_V3` 절 번호 §13/§16/§20/§21/§22 대조.
+앱 검증은 실행하지 않았다 — 제품 코드 무변경.
+
 #### PRODUCTION
 - NOT APPLIED. Supabase 조회·변경 없음. 제품 코드 무변경.
 

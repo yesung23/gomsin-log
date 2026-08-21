@@ -2934,6 +2934,112 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 - NOT APPLIED
 
 
+### 2026-08-21 · Phase 1 — Gate 4 통화 모드 + Gate 3 push의 서버 절반
+
+Phase 0(같은 날 앞 항목)을 잇는다. 앞 항목의 HEAD는 이미 낡았다.
+
+#### PLAN POSITION
+- Phase: Phase 1 — 루프의 물리적 완결 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8)
+- Workstream: Gate 4 통화 모드(완료) · Gate 3 push(서버 절반 완료, 클라이언트 미착수)
+- Step: 루프의 마지막 화살표 → 첫 화살표의 DB·발송자
+- Previous Gate: Phase 0 PR #77 CI 14/14 green
+- This Gate: PR #78 CI 14/14 green. Gate 3는 migration + Edge Function까지
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §8 통화 모드(2026-08-21 개정) · §14.3 알림 정책 · §19 계측 허용목록 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 수익화·시장 무관
+- Engineering source checked: `ENGINEERING_ROADMAP`, `AGENTS.md`, `docs/skills/migration-gate.md`, `docs/skills/security-review.md` — YES
+- Current-state checked: `CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 같은 날 Phase 0 항목 — YES
+- MASTER PLAN version / 기준일: Fable 전략 2026-08-21 (사용자 승인)
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Opus 5
+- Role: implementation owner. **independent review 없음**
+- PR: #78 (Gate 4), Gate 3는 아래 STOPPED AT
+- Branch: `claude/phase1-call-mode-v2` → `claude/phase1-gate3-push`
+
+#### CHANGED / REVIEWED
+
+**Gate 4 — 통화 모드 (PR #78, CI 14/14 green)**
+- `src/pages/CallModePage.tsx` 신규 + 라우트 `/call` + `TalkAboutListWidget` 진입점.
+- §8 개정판의 금지 세 가지를 구조로 고정했다: 전화 걸지 않음(`tel:` 없음) · 통화 관련 기록 0 ·
+  `다음`은 쓰기 없는 건너뛰기. 끝까지 건너뛰면 **완료 화면에 도달하지 않는다** — 전부 미완인데
+  완료했다고 말하는 것은 앱이 관찰할 수 없는 대화에 대해 거짓을 주장하는 것이다(§3.2).
+- 각 `이야기했어요`는 독립 쓰기다. 통화는 갑자기 끊기므로 마지막에 일괄 저장하면 가장 흔한
+  종료 방식이 세션 전체를 버린다.
+- 가장 미묘한 부분: **완료가 인덱스를 전진시키지 않는다.** 항목이 목록에서 빠지므로 같은 위치가
+  이미 다음을 가리킨다. 함께 전진시키면 아무도 못 본 항목을 건너뛴다.
+
+**Gate 3 — push의 서버 절반**
+- `supabase/migrations/048_push_delivery_metadata.sql` 신규.
+- **승인된 계획을 하나 뒤집었다.** 전략은 `couple_members.has_unseen`을 지정했으나, 001의 SELECT
+  정책이 활성 파트너에게 상대 행 전부를 보여준다. 그 자리의 `has_unseen`은 "아직 안 열어봤다"이고
+  이는 **읽음 표시**다 — §14.3이 절대 금지한다. RLS는 row 단위라 컬럼 하나만 가릴 수 없다.
+  전용 테이블 `push_delivery_state`로 옮겨 파트너에게 **읽을 정책 자체가 없게** 했다.
+- **가장 중요한 한 줄:** 비공개 기록은 아무 플래그도 올리지 않는다. `나만 보기` 기록으로 알림이
+  가면 그 설정이 숨기려던 단 하나의 사실 — 무언가 쓰였다는 것 — 이 샌다.
+- 보안 리뷰에서 **기기 이양 결함**을 찾아 고쳤다. APNs·FCM은 재설치·기기 이양 시 같은 토큰을
+  넘겨주는데, 평범한 INSERT는 UNIQUE에 걸려 새 계정이 알림을 못 받고 **떠난 계정이 그 기기
+  알림을 계속 받는다**(§14.3 위반). `register_push_token()`이 기존 소유자 행을 먼저 지운다.
+- 발송자는 `service_role`만 호출 가능하며 029와 같은 in-body gate를 둔다. 하루 1회 상한과 연락
+  가능 시간은 발송자가 아니라 **DB가** 강제하므로 Edge Function을 다시 써도 두 번 보내거나
+  새벽에 보낼 수 없다.
+- `supabase/functions/send-push/` 신규 — 순수 `handler.ts` + 얇은 `index.ts`. 문구는 상수 import이며
+  `deliver`의 인자가 아니다. 이벤트 종류별 문구가 들어갈 자리가 코드에 없다.
+- **실패한 전송은 전달된 것으로 처리하지 않는다.** 시도 시점에 표시하면 네트워크 1분 장애가
+  "이 사람은 들었다"가 되고 하루 상한 때문에 내일까지 못 듣는다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음. key hierarchy · device trust · write floor 미접촉.
+- `disconnect_couple`은 재작성했으나 crypto pairing 전이와 멤버십 전이는 **한 글자도 바뀌지 않았다**.
+  p5 · write-floor · rollback harness 전부 통과가 그 증거다.
+- product semantics: 탭 구조 무변경. chat 없음. P6 없음.
+- Production / remote Supabase: **미접촉, 조회조차 하지 않음.**
+
+#### VERIFICATION
+- `npm run verify` — PASS (EXIT=0).
+- **실제 PostgreSQL 17.10**: fresh chain 001→048(45개) 적용, phase0 harness **161 assertions**
+  (048이 37개). `test:p5` 93 · `test:write-floor` 39 · `test:rollback` PASS.
+- **mutation 6건 전부 실패 확인**(적용 → 실패 관찰 → 복원): 비공개 누출 · 하루 1회 상한 ·
+  연락 가능 시간 · NULL actor · 기기 이양 · service_role in-body gate.
+  **1건은 통과했고 그 이유를 주석에 남겼다** — 플랫폼 검증은 테이블 CHECK가 이미 막으므로
+  함수 쪽은 에러 메시지용이다.
+- Gate 4: 14 + 3 specs, mutation 5건 전부 실패 확인. **테스트 1개는 mutation이 살아남아 다시 썼다** —
+  store를 stub하면 성공/실패가 화면상 구별되지 않아 vacuous했다.
+- **Deno: 로컬 미실행.** 이 기기에 deno 툴체인이 없다. CI의 `Deno Edge Function validation`이 authority.
+- **브라우저: 로컬 미실행.** headless shell 부재 + headed SIGABRT. CI가 authority.
+- **실제 알림 전달: UNVERIFIED.** APNs/FCM 자격증명과 실기기가 필요하며 둘 다 외부 게이트다.
+
+#### REVIEW IMPACT
+- FULL. Gate 3는 review된 적이 없다. Gate 4도 마찬가지다.
+
+#### BLOCKERS
+- code: 없음.
+- environment: 로컬 Deno·브라우저 없음. Android SDK 없음(JVM 테스트는 CI가 authority).
+- external/manual: **PR 병합은 user 권한** · APNs/FCM 자격증명 · 실기기 2대 · 원격 Supabase 적용.
+
+#### STOPPED AT
+- Gate 3의 **서버 절반까지**. migration 048과 발송자가 검증된 상태로 존재한다.
+- **클라이언트 절반은 미착수**: `@capacitor/push-notifications` 통합, 토큰 등록/해제 호출,
+  연결 직후 알림 권한 요청. 이것들은 실기기 없이 의미 있게 검증할 수 없다.
+
+#### REMAINING
+- Gate 3 클라이언트 절반 · S4 대기 구간 · 최소 계측 · LV 환경 · 실기기 빌드 부채.
+- `briefings` drop: **파괴적 변경이라 착수하지 않았다.** migration-gate §4가 명시적 승인을 요구한다.
+
+#### NEXT ACTION
+- next owner: 사용자(병합 결정), 그다음 independent review
+- exact next task: #74 → #75 → #76 → #77 → #78 순서 병합 → Gate 3 PR 검토 → 클라이언트 절반
+
+#### DO NOT ADVANCE UNTIL
+- 048이 independent security review를 통과할 때까지. 원격 적용은 그 이후에도 별도 게이트다.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

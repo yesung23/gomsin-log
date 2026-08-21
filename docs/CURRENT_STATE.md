@@ -100,6 +100,19 @@ active branch가 존재한다. **master에는 아직 없다.**
 
 이 branch의 CI는 base `master` PR에서만 돈다. stacked base에서는 어떤 workflow도 trigger되지 않는다.
 
+### Phase 1 checkpoint — 2026-08-21
+
+| 항목 | 상태 |
+|---|---|
+| Gate 4 통화 모드 | `claude/phase1-call-mode-v2` / PR #78, **CI 14/14 green**. 전화 걸지 않음 · 통화 기록 0 · `다음`은 쓰기 없는 건너뛰기 |
+| Gate 3 push 서버 | `claude/phase1-gate3-push`. migration 048 + `send-push`. 실제 PostgreSQL로 검증됨 |
+| Gate 3 push 클라이언트 | **미착수.** 실기기 없이 의미 있게 검증 불가 |
+| `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
+
+Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은
+001의 SELECT 정책 때문에 파트너에게 읽히고, 그것은 곧 읽음 표시(§14.3 절대 금지)다. 전용 테이블로
+옮겼고 근거는 048 파일과 migration README가 소유한다.
+
 ### Branch consolidation checkpoint — 2026-08-20
 
 Every remote branch was audited for work that was still valid and not yet on master,
@@ -134,6 +147,8 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 | 044 | unlink crypto pairing authority | present in landed master tree; remote catalog independently UNVERIFIED |
 | 045 | E2EE write-floor activation hardening | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
 | 046 | device provisioning actor requirement | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
+| 047 | care signal `feeling_unwell` | **PR #76이 소유하며 master에도 이 branch에도 없다.** Production NOT APPLIED |
+| 048 | push delivery metadata (Gate 3) | active branch only. fresh chain 001→048에서 실제 PostgreSQL 17.10으로 37개 계약 검증, mutation 6건 확인. Production NOT APPLIED; 047과 결합한 체인은 **아직 한 번도 실행되지 않았다** |
 
 No remote Supabase mutation was performed by this documentation task.
 
@@ -163,7 +178,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 | 기능 | 현재 상태 |
 |---|---|
 | `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위. 이야기거리 보관함·완료 처리 P4는 integration branch에 있으나 master에는 아직 merge되지 않음 |
-| 알림 | 완전 미구현 |
+| 알림 | **서버 절반만.** migration 048(전용 `push_delivery_state` 테이블 · 비공개 기록은 아무것도 올리지 않음 · 하루 1회와 연락 가능 시간을 DB가 강제 · 기기 이양 시 토큰 회수)과 `send-push` Edge Function이 active branch에 있고 검증됐다. **클라이언트 절반은 미착수**이며(`@capacitor/push-notifications`, 토큰 등록/해제 호출, 권한 요청) 실제 전달은 APNs/FCM 자격증명과 실기기가 필요한 외부 게이트다 |
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |

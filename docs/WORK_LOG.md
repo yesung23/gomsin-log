@@ -4266,6 +4266,22 @@ user가 opencode zen(`opencode/x-preview-f-free`)으로 돌린 전체 감사 보
 **ox-alpha가 놓친 것도 기록한다.** 같은 tree 안의 `prosecdef`/`proconfig` 공백은
 그쪽 C 목록에 없다. 두 검토가 서로를 대체하지 않는다는 증거다.
 
+#### C8 수정 — 증명된 하나만 고쳤다
+
+`src/lib/pushNotifications.test.ts`의 배선 게이트를 주석 제거 + 호출 형태 regex로
+바꿨다. 헬퍼는 발명하지 않고 `productEvents.test.ts:155`의 것을 **그대로 복사**했다 —
+그 파일에 이미 같은 probe 기록이 있다("commenting out the real `recordProductEvent`
+calls … left every test here green"). 이 부류의 **세 번째** 발생이다.
+
+| 무엇 | 수정 전 | 수정 후 |
+|---|---|---|
+| `store.tsx:1036`의 호출을 주석 처리 | **19/19 통과** | **2건 실패** |
+
+ox-alpha가 함께 지목한 `gatePathCoverage.test.ts`·`authorRoleAndGateAudit.test.ts`는
+**고치지 않았다.** 소스를 raw로 읽는 것은 확인했으나(`:315`·`:439`·`:456`·`:552`)
+각각을 mutation으로 증명하지 않았고, 증명 없이 고치는 것은 지금 비판하고 있는 바로 그
+행동이다. 별도 작업으로 남긴다.
+
 #### 함께 넣은 것 — 훅은 Claude Code 밖에서 작동하지 않는다
 
 `docs/AI_SESSION_PROTOCOL.md`에 경고를 못박았다. `.claude/hooks/`는

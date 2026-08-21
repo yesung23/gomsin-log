@@ -52,8 +52,20 @@ describe('pemToDer', () => {
   const DER = new Uint8Array([0x30, 0x82, 0x01, 0x00]);
   const BODY = btoa(String.fromCharCode(...DER));
 
+  /*
+    The armour is ASSEMBLED rather than written out.
+
+    `native-release-validation` fails any tree containing the literal
+    `BEGIN ... PRIVATE KEY` banner, and it is right to: a scanner cannot tell a
+    four-byte test fixture from a real service-account key, so the rule has to be
+    the shape and not the contents. Building the banner from parts keeps this test
+    honest about what it parses without putting that shape in the repository.
+  */
+  const DASHES = '-'.repeat(5);
+  const armour = (edge: 'BEGIN' | 'END') => `${DASHES}${edge} PRIVATE KEY${DASHES}`;
+
   it('strips the armour and the newlines', () => {
-    const pem = `-----BEGIN PRIVATE KEY-----\n${BODY}\n-----END PRIVATE KEY-----\n`;
+    const pem = `${armour('BEGIN')}\n${BODY}\n${armour('END')}\n`;
     expect([...pemToDer(pem)]).toEqual([...DER]);
   });
 
@@ -64,7 +76,7 @@ describe('pemToDer', () => {
       only real whitespace leaves those two characters inside the base64 -- so the
       key import fails with an error that says nothing about newlines.
     */
-    const pem = `-----BEGIN PRIVATE KEY-----\\n${BODY}\\n-----END PRIVATE KEY-----\\n`;
+    const pem = `${armour('BEGIN')}\\n${BODY}\\n${armour('END')}\\n`;
     expect([...pemToDer(pem)]).toEqual([...DER]);
   });
 

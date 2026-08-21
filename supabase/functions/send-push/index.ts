@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { JWT } from 'npm:google-auth-library@9';
+import { fetchAccessToken, type ServiceAccount } from './googleAuth.ts';
 import {
   NOTIFICATION_BODY,
   NOTIFICATION_ROUTE,
@@ -32,40 +32,17 @@ import {
  * cost is a Firebase project as an iOS prerequisite -- a setup step, not an
  * architectural commitment.
  *
- * The OAuth exchange uses `google-auth-library` rather than hand-rolled JWT
- * signing. Writing RS256 signing by hand here would be unverifiable in this
- * environment, and a subtly wrong signature fails in a way that looks like a
- * configuration problem.
- *
- * DENO RUNTIME: UNEXECUTED. No Deno toolchain runs in this environment, and no
- * push credential exists here. Delivery itself is verified on real devices,
- * which is an external gate this code cannot satisfy on its own.
+ * DENO RUNTIME: type-checked, UNEXECUTED. No push credential exists in this
+ * environment, so delivery itself is verified on real devices -- an external
+ * gate this code cannot satisfy on its own.
  */
 
 const FCM_ENDPOINT = 'https://fcm.googleapis.com/v1/projects';
-const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 
 /** FCM verdicts meaning "this token is dead", as opposed to "try again later". */
 const DEAD_TOKEN_CODES = new Set(['UNREGISTERED', 'INVALID_ARGUMENT']);
 
-interface ServiceAccount {
-  client_email: string;
-  private_key: string;
-  project_id?: string;
-}
-
-async function authorize(account: ServiceAccount): Promise<string> {
-  const client = new JWT({
-    email: account.client_email,
-    key: account.private_key,
-    scopes: [FCM_SCOPE],
-  });
-  const { access_token: accessToken } = await client.authorize();
-  if (!accessToken) throw new Error('E_PUSH_AUTH_FAILED');
-  return accessToken;
-}
-
-Deno.serve(async (request) => {
+Deno.serve(async (request: Request) => {
   // Scheduler-only. No CORS surface, because no browser is meant to reach this.
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'E_METHOD_NOT_ALLOWED' }), { status: 405 });
@@ -85,7 +62,7 @@ Deno.serve(async (request) => {
     const account = JSON.parse(raw) as ServiceAccount;
     projectId = Deno.env.get('FCM_PROJECT_ID') ?? account.project_id ?? '';
     if (!projectId) throw new Error('E_PUSH_NOT_CONFIGURED');
-    bearer = await authorize(account);
+    bearer = await fetchAccessToken(account, Math.floor(Date.now() / 1000));
   } catch (error) {
     /*
       Fail closed, and name which failure it was. A misconfigured sender must not

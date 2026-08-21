@@ -3006,9 +3006,14 @@ Phase 0(같은 날 앞 항목)을 잇는다. 앞 항목의 HEAD는 이미 낡았
   연락 가능 시간 · NULL actor · 기기 이양 · service_role in-body gate.
   **1건은 통과했고 그 이유를 주석에 남겼다** — 플랫폼 검증은 테이블 CHECK가 이미 막으므로
   함수 쪽은 에러 메시지용이다.
-- Gate 4: 14 + 3 specs, mutation 5건 전부 실패 확인. **테스트 1개는 mutation이 살아남아 다시 썼다** —
+- Gate 4: 14 + 3 specs, mutation 5건 전부 실패 확인. FCM OAuth 인코딩 10 specs, mutation 3건 확인(base64url 치환·이스케이프 개행·`aud` 오지정). **테스트 1개는 mutation이 살아남아 다시 썼다** —
   store를 stub하면 성공/실패가 화면상 구별되지 않아 vacuous했다.
-- **Deno: 로컬 미실행.** 이 기기에 deno 툴체인이 없다. CI의 `Deno Edge Function validation`이 authority.
+- **Deno: 로컬 실행됨.** 세션 중 CI가 `npm:google-auth-library` 미해석으로 실패하는 것을 잡았고
+  (Deno는 npm specifier를 node_modules에서 찾는데 이 저장소에 없다), 그 의존성을 package.json에
+  추가하는 것은 **잘못된 해법**이라 판단했다 — 브라우저 번들의 의존성 그래프에 서버 전용 Google
+  SDK가 들어가고, 이 저장소는 외부 SDK 0을 지킨다. Web Crypto로 직접 구현하고 인코딩 헬퍼를
+  분리해 테스트했다. 그리고 **deno를 로컬에 설치**해 이제 `check:edge`가 여기서 돈다 —
+  13개 edge 모듈 전부 통과.
 - **브라우저: 로컬 미실행.** headless shell 부재 + headed SIGABRT. CI가 authority.
 - **실제 알림 전달: UNVERIFIED.** APNs/FCM 자격증명과 실기기가 필요하며 둘 다 외부 게이트다.
 
@@ -3017,7 +3022,7 @@ Phase 0(같은 날 앞 항목)을 잇는다. 앞 항목의 HEAD는 이미 낡았
 
 #### BLOCKERS
 - code: 없음.
-- environment: 로컬 Deno·브라우저 없음. Android SDK 없음(JVM 테스트는 CI가 authority).
+- environment: 로컬 브라우저 없음(headless shell 부재 + headed SIGABRT). Android SDK 없음(JVM 테스트는 CI가 authority). **Deno는 이제 있다.**
 - external/manual: **PR 병합은 user 권한** · APNs/FCM 자격증명 · 실기기 2대 · 원격 Supabase 적용.
 
 #### STOPPED AT

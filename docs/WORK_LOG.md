@@ -3684,6 +3684,123 @@ pending이라는 사실만 담고 어떤 행위인지·언제인지는 담지 �
 저장소 감사 완료. **Codex 독립 감사는 시작하지 않았다.** 그 앞에 user 전용 게이트가 있다:
 **PR #80 병합**. hook이 병합 명령을 결정적으로 차단하며, 이 세션에서 시도했다가 막혔다.
 
+### 2026-08-21 — 4차 감사: 053이 만든 컬럼이 다시 위조 가능했고, 클라이언트에 두 결함이 더 있었다
+
+`release/phase1-gate3-clean-history` (PR #80) 전수 재감사. 이전 보고를 사실로 믿지 않고
+live 상태를 다시 확인한 뒤(PR #80 OPEN / HEAD `a53b4c1` / CI 15개 전부 green) 저장소
+전체를 다시 공격했다. **PR #80은 병합하지 않았다.**
+
+방법은 지난번과 같다 — 실제 PostgreSQL 17.10에 전체 체인을 적용하고 RLS 실행 주체로
+함수를 구동한다. SQL 문자열 대조로는 아래 어느 것도 찾을 수 없었다.
+
+#### HIGH — `daily_records.shared_at`을 클라이언트가 쓸 수 있었다 (→ `054`)
+
+053은 취소 규칙 전체를 이 컬럼에 의존시켜 놓고 컬럼을 서버 전용으로 만들지 않았다.
+`authenticated`는 012의 **테이블 단위** UPDATE 권한을 갖고, RLS는 row 단위라 컬럼 하나를
+가릴 수 없으며, 053의 스탬프 트리거는 `BEFORE INSERT OR UPDATE OF is_private`였다.
+`is_private`를 적지 않은 UPDATE는 트리거를 아예 돌리지 않았고, **값을 바꾸지 않고 적기만
+한** UPDATE는 아무것도 대입하지 않는 분기로 들어갔다.
+
+기록 소유자로서 RLS를 통과해 재현했다: 오래된 기록의 `shared_at`을 미래로 밀어두면
+유일한 새 행위를 철회해도 파트너 플래그가 **유지된다**(측정값 `t`, 053만으로는 `f`).
+`push_delivery_candidates()`는 `has_unseen`만 읽으므로 그것은 **행위 없는 알림**이다 —
+051 §3·052·053이 각각 지우려 했던 바로 그 거짓 초대가, 053이 그것을 지우려고 추가한
+컬럼을 통해 되돌아왔다.
+
+**051 §2와 같은 부류다.** 서버의 정확성이 걸린 컬럼을, 작성자가 떠올린 경로만 덮는
+장치로 지켰다. 거기서는 DEFAULT가 컬럼을 생략할 때만 적용됐고, 여기서는 트리거가
+`is_private`를 적을 때만 돌았다.
+
+수정은 들어오는 값을 어느 경로에서도 입력으로 취급하지 않는 것이다 — 트리거를 모든
+INSERT/UPDATE로 넓히고 **모든 분기가 대입하게** 했다(전이 없음 → `OLD.shared_at` 복원).
+053의 제품 의미는 그대로다: 공유는 찍고, 철회는 지우고, 공유 중 편집은 다시 찍지 않는다.
+
+#### MEDIUM — 파트너 기록이 화면에서 사라진 상태에서 초대를 내렸다
+
+`clear_my_unseen()`은 053 이후 `notified_through`까지 옮긴다. 그래서 파트너 기록이 화면에
+**없을 때** 호출하면 알림 하나를 건너뛰는 게 아니라, 그 이전에 공유된 모든 행위가 영구히
+pending에서 빠진다. 파트너가 **새로** 쓰기 전까지 플래그는 다시 올라가지 않는다.
+
+`quarantineSharedAccess`가 정확히 그 상태를 만든다. realtime이 끊기면 공유 워크스페이스를
+재인가할 수 없어 `records`를 비우고 `sharedSyncStatus`를 `unavailable`로 둔다. 그런데 clear
+effect는 `coupleLifecycle === 'connected'`만 봤다.
+
+이 조합은 이 제품의 네트워크에서 예외가 아니라 평범한 경우다 — RPC는 평범한 HTTPS라
+WebSocket이 막힌 곳에서도 계속 되므로, **내용이 도착하지 않았을 때 정확히 clear가 성공한다.**
+스토어를 렌더하고 실제 subscribe 콜백을 CHANNEL_ERROR로 몰아 재현했다. `delayed`는 계속
+clear를 허용한다 — 기록은 화면에 있고 신선도만 불확실하다.
+
+#### MEDIUM — §19 계측 배선 게이트가 무는 척만 하고 있었다
+
+인계 문서가 `productEvents.test.ts`의 source-string 검사를 "인스턴스가 아니라 부류"로 보라고
+했고, 실제로 살아 있었다. `store.tsx`와 `CallBriefingWidget.tsx`의 진짜
+`recordProductEvent` 호출을 주석 처리해 §19가 그 두 종류를 아예 발신하지 않게 만들어도
+**22개 테스트가 전부 초록이었다.** 주석에 그 단어가 남아 있기 때문이다.
+
+이 브랜치에서 push 모듈 export 게이트가 이미 같은 것에 당했고, **두 번째 자리에서 살아
+있었다.** §19 계측 착지는 LV 진입 조건이므로, 못 무는 게이트는 없느니만 못하다 — 어느
+쪽이든 "파이프 연결됨"이라고 보고한다. 주석을 걷어내고(이미 `gatePathCoverage.test.ts`에
+있는 방식), 언급이 아니라 **호출**을 요구하게 했다.
+
+#### 오프라인 큐 flush — 지난 세션이 못 만든 회귀 테스트를 만들었다
+
+인계 문서가 이 브랜치에서 유일한 미검증으로 기록한 항목이다. 세 번의 시도가 실패한 이유도
+적혀 있었다: 전부 flush만이 도달하는 곳이 아닌 것을 단언했다.
+
+없던 것은 **outbox fixture**였다. `createIndexedDbOutbox`가 jsdom이 못 넘는 유일한 경계이므로
+그 모듈만 in-memory port로 바꾸면 `outbox.ts`의 모든 판단은 실제로 돈다(`@/lib/outbox`는
+일부러 mock하지 않았다). 관측 대상은 `saveRecordToDB` — 실제 배달 시도만이 도달한다.
+
+mutation 4건 전부 잡힌다. 그중 **리스너는 그대로 두고 cold-launch 호출만 없애는** 것이
+지난 시도가 살아남았던 바로 그 형태다.
+
+#### 독립 검토를 못 받았던 영역을 행위로 확인했다
+
+인계 문서가 "저자만 확인했다"고 남긴 것들을 실제 DB에서 구동했다.
+
+- **051 §1** — 약한 2-arg recovery 오버로드는 죽어 있다. `e2ee_commit_recovery_authentication`은
+  4-arg 한 서명뿐이다
+- **051 §2** — `product_events` 위조 4종(타 커플 id·NULL·타 user_id·정상 생략) 전부 정책이
+  거절하거나 세션에서 파생한다
+- **051 §5** — NULL 범위는 숫자가 아니라 예외를 낸다
+- **`disconnect_couple`** — 한 명이 호출하면 토큰 2개 삭제·플래그 2개 하강·pairing
+  `CRYPTO_ACTIVE`→`UNLINKED`·양쪽 membership `disconnected`가 한 트랜잭션에서 끝난다.
+  anon은 GRANT가, 외부인과 무인증은 함수 본문이 막는다. 두 번째 호출은 거절된다.
+  끊긴 멤버는 플래그를 강제로 올려도 candidate가 되지 않는다(0)
+- **텔레메트리** — 판독 2종은 authenticated·anon에 permission denied, service_role에만
+  집계 10행. 파트너는 상대 이벤트를 0행 읽고, product_events에 UPDATE/DELETE 권한이 없다
+- **카탈로그 전수** — SECURITY DEFINER 중 search_path 미고정 0건, 애플리케이션 함수 오버로드
+  0건(pgcrypto 제외), RLS 미적용 public 테이블 0건, 정책 없는 두 테이블은 GRANT도 0
+
+#### 고치지 않고 남긴 것
+
+- **`send-push`의 배달-표시 레이스.** candidate 조회와 `mark_push_delivered` 사이에 공유된
+  행위는 삼켜진다(플래그가 내려가고 경계가 그 위를 지난다). **거짓 알림이 아니라 누락**이고,
+  창은 1초 미만이며, APNs/FCM 자격증명이 없어 현재 도달 불가능하다. 배달 코어를 릴리스
+  브랜치에서 건드릴 값어치가 없다고 판단했다. Codex가 다시 볼 항목으로 남긴다
+- 인계 문서 §"수정하지 않고 남긴 것"의 프론트엔드 항목 8종은 이번에도 손대지 않았다
+
+#### VERIFICATION
+
+| 무엇 | 결과 |
+|---|---|
+| `npm run verify` | **EXIT=0** — 188 files / 2837 tests, unhandled rejection 0 |
+| `npm run test:phase0` | **52 migrations (001..054) / 243 assertions** |
+| `test:p5` · `test:write-floor` · `test:rollback` | PASS (93 · 39 · PASS) |
+| `check:edge` · `test:edge` | PASS · 3/3 |
+| `npm audit` | 취약점 0 |
+| `git diff --check` | clean |
+| mutation | **11건** — 054 3건(체인 제거·else 분기·트리거 범위), outbox 4건, quarantine 4건. 전부 실패 확인 |
+
+**실행하지 않은 것:** 로컬 브라우저 · Android SDK · iOS 빌드 · 실제 알림 전달 · 원격 Supabase.
+
+#### PRODUCTION
+- NOT APPLIED. 047~054 어느 것도 원격에 적용되지 않았고 조회하지 않았다.
+
+#### 정확한 중단 지점
+저장소 감사 완료, 안전하게 조치 가능한 내부 blocker 없음. 다음은 여전히 **user 전용 게이트인
+PR #80 병합**이고, 그다음이 Codex 독립 감사다.
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

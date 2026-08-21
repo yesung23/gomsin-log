@@ -47,6 +47,8 @@
 5. **§7.6 부분 실패의 정직성** — 5개 중 2개 실패 시 사용자에게 하는 말이 실제 상태와 맞는가
 6. **source-string 대조 테스트** — `productEvents.test.ts`에 남아 있다. H3가 정확히 그
    부류에 당했다. 전부 통과하므로 감사 규칙에 따라 두었지만 **부류로 봐야 한다**
+   → **4차 감사에서 그 배선 게이트가 실제로 무는 척만 하고 있었음을 확인하고 고쳤다.**
+   같은 파일의 나머지 source-string 검사(union 어휘·필드 모양·emit 순서)는 그대로다
 7. **partial mock / 기본 매개변수 함정** — 이 저장소에서 각각 여러 번 발생했다
 8. **unhandled rejection** — vitest가 실제로 잡는 것은 probe로 확인했다(`Tests passed /
    Errors 1 / EXIT=1`). 잡히지 않는 경로가 있는가
@@ -54,6 +56,9 @@
    플래그 하강이 파트너의 다른 기록을 삼키지 않는가
 
 ### 저자가 검증하지 못한 것 — 이 브랜치에서 유일하다
+
+> **2026-08-21 4차 감사에서 닫혔다.** 아래는 그때까지의 기록이며, 무엇이 왜 어려웠는지가
+> 여전히 읽을 값어치가 있어 남긴다. 현재 커버리지는 `src/lib/store-outbox-flush.test.tsx`다.
 
 **오프라인 큐 flush 수정(`store.tsx`)에는 회귀 테스트가 없다.** 세 번 시도했고 셋 다 지웠다.
 
@@ -130,6 +135,69 @@ user가 구체적 시퀀스를 지목했고, **재현되었다.**
 > **감사자에게:** 053은 이 결함을 user가 지목해서 나왔다. 저자가 두 차례 감사에서 048·051·052를
 > 훑고도 못 봤다는 뜻이며, 세 migration 모두 "shared 상태"와 "통지 안 된 행위"를 같은 것으로
 > 다뤘다. 같은 혼동이 남아 있는 곳이 더 없는지가 이 영역의 첫 질문이다.
+
+### 4차: 053이 만든 컬럼이 다시 위조 가능했다 (054), 그리고 클라이언트 결함 둘
+
+같은 트리를 다시 감사했다. 이전 보고를 사실로 믿지 않고 live 상태를 재확인한 뒤 실제
+PostgreSQL 17.10에 전체 체인을 적용하고 RLS 실행 주체로 함수를 구동했다.
+
+| 심각도 | 무엇 | 어디서 닫혔나 |
+|---|---|---|
+| HIGH | **`daily_records.shared_at`을 클라이언트가 쓸 수 있었다.** 053의 취소 규칙 전체가 이 컬럼에 걸려 있는데, 스탬프 트리거가 `UPDATE OF is_private`에만 걸려 있어 그 컬럼을 적지 않은 UPDATE는 트리거를 돌리지 않았고, 값을 바꾸지 않고 적기만 한 UPDATE는 아무것도 대입하지 않는 분기로 들어갔다 | `054` |
+| MEDIUM | 파트너 기록이 quarantine돼 화면에 없는 상태에서 `clear_my_unseen()`을 불러 053의 경계를 영구히 밀어버렸다 | `store.tsx` |
+| MEDIUM | §19 배선 게이트가 **주석 처리된 호출을 호출로 셌다** — 진짜 emit 둘을 주석 처리해도 22개가 전부 초록이었다 | `productEvents.test.ts` |
+| LOW | `App.entitlements`의 `aps-environment` 항목이 둘이고 하나가 Gate 3 이전의 거짓 진술 | `App.entitlements` |
+
+**HIGH의 재현.** 기록 소유자로서 RLS를 통과해:
+오래된 기록의 `shared_at`을 미래로 밀어두면 → 유일한 새 행위를 공유하고 철회해도 →
+파트너 플래그가 **유지된다**(측정값 `t`, 053만으로는 `f`). `push_delivery_candidates()`는
+`has_unseen`만 읽으므로 그것은 행위 없는 알림이다.
+
+> **감사자에게, 그리고 이것이 이 문서에서 가장 중요한 문장이다.**
+> 이것은 **051 §2와 완전히 같은 부류**다. 서버의 정확성이 걸린 컬럼을, 작성자가 떠올린
+> 경로만 덮는 장치로 지켰다. 051에서는 DEFAULT가 컬럼을 **생략할 때만** 적용됐고, 여기서는
+> 트리거가 `is_private`를 **적을 때만** 돌았다. 저자는 051에서 이 부류를 직접 진단하고
+> 한 migration을 통째로 거기 썼는데, **두 migration 뒤에 같은 실수를 다시 했다.**
+> 진단이 다음번을 막지 못했다는 뜻이므로, **"서버 상태인데 클라이언트가 쓸 수 있는 컬럼"을
+> 저장소 전체에서 다시 세는 것이 이 영역의 첫 질문이다.**
+>
+> 그 세기를 이번에 한 번 돌렸고, 결과는 아래다. **전수 보증이 아니라 한 번의 통과이며,
+> Codex가 독립적으로 다시 세야 한다.**
+>
+> - `authenticated`가 UPDATE할 수 있는 public 테이블은 20개다
+> - `couple_members`는 그중에 **없다.** §7.6의 창을 계산하는 `joined_at`이 클라이언트
+>   손에 없다는 뜻이고, 이 감사에서 가장 걱정했던 항목이었다
+> - `push_delivery_state`·`device_push_tokens`·`product_events`는 UPDATE 권한 자체가
+>   없다(각각 SELECT 전용, SELECT 전용, INSERT 전용)
+> - `crypto_pairings`는 UPDATE가 되지만 정책이 `get_my_active_couple_id()`에 걸려 있어
+>   **UNLINKED를 되살릴 수 없다** — 끊긴 뒤에는 그 함수가 NULL을 주므로 행이 매치되지
+>   않는다. 실제로 시도해 확인했다
+> - `key_envelopes`·`device_enrollments`·`migration_ledger`는 전부 row 소유자 범위이고,
+>   민감 컬럼은 032/040/045의 write-floor 트리거가 지킨다
+> - `daily_records`의 나머지 서버 관리 컬럼(`content_revision`·`cipher_format`·
+>   `key_domain`·`key_epoch`·`content_envelope`)은 write-floor 트리거가
+>   **조건 없는 `BEFORE INSERT OR UPDATE`**로 걸려 있다 — 054가 `shared_at`을 옮겨 놓은
+>   바로 그 모양이다
+>
+> 즉 048~054 표면에서 이 부류의 인스턴스는 `shared_at` **하나뿐이었다.** 그러나 위 목록은
+> 카탈로그 훑기와 표적 재현으로 만든 것이지 전수 증명이 아니다.
+
+**오프라인 큐 flush는 더 이상 미검증이 아니다.** 지난 세션이 세 번 실패한 그 항목이다.
+없던 것은 outbox fixture였고, `createIndexedDbOutbox`만 in-memory port로 바꾸면
+`outbox.ts`의 판단은 전부 실제로 돈다. 관측 대상은 `saveRecordToDB` — 실제 배달 시도만이
+도달한다. mutation 4건 전부 잡히며, 그중 **리스너는 두고 cold-launch 호출만 없애는** 것이
+지난 시도가 살아남았던 형태다.
+
+**저자만 확인했다고 적혀 있던 것들을 행위로 재확인했다.** 051 §1(약한 recovery 오버로드
+부재 · 4-arg 한 서명), 051 §2(위조 4종 전부 거절), 051 §5(NULL 범위 예외), `disconnect_couple`
+(한 호출로 토큰·플래그·pairing·membership 전부 전이, 인가 4종, 재호출 거절, 끊긴 멤버
+candidate 0), 텔레메트리 판독 권한, 카탈로그 전수(search_path 미고정 0 · 앱 함수 오버로드 0 ·
+RLS 미적용 0).
+
+**고치지 않고 남긴 것 — Codex가 다시 볼 것.** `send-push`의 배달-표시 레이스: candidate
+조회와 `mark_push_delivered` 사이에 공유된 행위는 삼켜진다. **거짓 알림이 아니라 누락**이고,
+창은 1초 미만이며, 자격증명 부재로 현재 도달 불가능하다. 배달 코어를 릴리스 브랜치에서
+건드릴 값어치가 없다고 판단했다. 판단 자체가 재검토 대상이다.
 
 ### 결함이 아니라 설계 선택인 것 — 리뷰어가 지적했으나 유지
 

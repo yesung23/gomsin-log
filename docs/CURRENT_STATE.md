@@ -151,9 +151,29 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 | MEDIUM/LOW | 4건 수정. 나머지는 범위 밖으로 인계 문서에 기록 |
 | 새 migration | **051, 052, 053** (전부 운영 미적용) |
 | 검증 | verify EXIT=0 / 2829 tests · 51 migrations / 234 assertions · p5 93 · write-floor 39 · rollback PASS · 취약점 0 |
-| 회귀 테스트를 못 만든 것 | **1건** — 오프라인 큐 flush. 단독 통과, 전체 스위트에서 간섭. 이 수정만 "읽어서 확인" |
+| 회귀 테스트를 못 만든 것 | **1건** — 오프라인 큐 flush. → **2026-08-21 4차 감사에서 닫혔다**(아래) |
 
 **#80은 아직 병합되지 않았다.** 기본 브랜치 tip은 `f73ebfe`이며 병합은 user 전용 게이트다.
+
+### 4차 전수 감사 checkpoint — 2026-08-21
+
+같은 트리(PR #80)를 다시, 이전 보고를 사실로 믿지 않고 감사했다. live 재확인 후 실제
+PostgreSQL 17.10에 전체 체인을 적용하고 RLS 실행 주체로 함수를 구동했다. 상세와 원장은
+`WORK_LOG.md` 같은 날 마지막 항목이 소유한다.
+
+| 항목 | 결과 |
+|---|---|
+| HIGH | 1건 — **`daily_records.shared_at`이 클라이언트 위조 가능**했고, 그것으로 053의 취소를 무력화해 행위 없는 알림을 남길 수 있었다. → `054` |
+| MEDIUM | 2건 — 파트너 기록이 quarantine된 상태에서 초대를 내려 053의 경계를 영구히 밀어버림(`store.tsx`); §19 계측 배선 게이트가 주석 처리된 호출을 호출로 셈(`productEvents.test.ts`) |
+| LOW | 1건 — `App.entitlements`에 `aps-environment` 항목이 둘이고 하나가 Gate 3 이전의 거짓 진술 |
+| 새 migration | **054** (운영 미적용) |
+| 닫힌 미검증 | **오프라인 큐 flush** — outbox fixture를 만들어 배달 시도를 관측한다. mutation 4건 전부 잡힘 |
+| 행위로 재확인 | 051 §1·§2·§5, `disconnect_couple` 전체 효과와 인가, 텔레메트리 판독 권한, 카탈로그 전수 |
+| 검증 | verify EXIT=0 / **188 files · 2837 tests** · **52 migrations / 243 assertions** · p5 93 · write-floor 39 · rollback PASS · edge PASS·3/3 · 취약점 0 |
+| mutation | **11건** 전부 실패 확인 |
+| 고치지 않은 것 | `send-push`의 배달-표시 레이스(누락이지 거짓 알림이 아니며, 자격증명 부재로 현재 도달 불가) |
+
+**#80은 여전히 병합되지 않았다. 병합은 user 전용 게이트다.**
 
 ### 저자 감사 checkpoint — 2026-08-21
 
@@ -221,6 +241,11 @@ Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저�
 | 048 | push delivery metadata (Gate 3) | active branch only. fresh chain 001→048에서 실제 PostgreSQL 17.10으로 37개 계약 검증, mutation 6건 확인. Production NOT APPLIED; 047과 결합한 체인은 **아직 한 번도 실행되지 않았다** |
 | 049 | §19 최소 계측 (LV 진입 조건) | active branch only. **timestamp 컬럼이 없다** — 날짜 버킷만. 파트너 read 정책 없음, UPDATE/DELETE 정책 없음. fresh chain 001→049에서 19개 계약 검증, mutation 4건 확인. Production NOT APPLIED |
 | 050 | LV 판독 (couple 축 + 집계 함수) | active branch only. `couple_id`는 세션에서 파생되고 파트너 read는 여전히 없다. 판독은 `(metric, value)` 집계만 반환하며 행 반환 경로가 없다. fresh chain 001→050에서 16개 계약 검증, mutation 5건 확인. Production NOT APPLIED |
+
+| 051 | audit closure (recovery 오버로드 제거 · `couple_id` 위조 차단 · 회수/공유 전환 플래그 · NULL 판독 범위) | active branch only. Production NOT APPLIED |
+| 052 | 공유 기록 삭제·계정 탈퇴 시 플래그 하강 | active branch only. Production NOT APPLIED |
+| 053 | 알림 플래그가 "pending act"를 뜻하게 함 (`notified_through` + `shared_at`) | active branch only. Production NOT APPLIED |
+| 054 | `shared_at`을 서버 전용 상태로 만든다 — 053이 남긴 클라이언트 쓰기 경로를 닫는다 | active branch only. fresh chain 001→054(52개)에서 243 assertions, mutation 3건 확인. Production NOT APPLIED |
 
 No remote Supabase mutation was performed by this documentation task.
 

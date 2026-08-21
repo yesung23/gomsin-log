@@ -54,6 +54,7 @@ bash scripts/agent/context-pack.sh release
 | [[Codex]] | 아키텍처 + state sync | `AGENTS.md` |
 | [[Cursor]] | IDE 안 구현·리팩터 | `.cursor/rules/control-tower.mdc` |
 | [[Antigravity]] | 에이전트 우선 IDE | `.agents/rules/control-tower.md` |
+| [[Ox Alpha]] | 독립 감사·red-team | `--agent plan` 필수 (아래 주의) |
 | [[Grok Build]] | 환경 복구, CI, harness | — |
 | [[Grok 4.6]] | red-team, 최종 harness 리뷰 | — |
 | [[ChatGPT]] | 기획·논의 | [[Chat AI Bootstrap]] |

@@ -4242,6 +4242,37 @@ migration·문서 무변경. 원격 Supabase 조회·변경 없음.
 만들 수 없다. DB 시계가 튀어야 하며, `notified_through`가 **이미** 같은 성질을 갖고
 있었다. 새 위험 종류가 아니므로 고치지 않고 이름만 남긴다.
 
+#### 이어서 — ox-alpha 감사를 원장에 넣고, 그 판정을 재검증했다
+
+user가 opencode zen(`opencode/x-preview-f-free`)으로 돌린 전체 감사 보고서를 받았다.
+**액면 그대로 받지 않고 검증 가능한 주장 7건을 직접 확인했다.**
+
+| 주장 | 판정 |
+|---|---|
+| 002 중복이 LV fresh chain을 막는다 | **참** — `_recursion:11`이 DROP 없이 정책 재생성. `_and_rpc:32`에는 DROP이 있다. README:376-391 경고 |
+| send-push 인바운드 인증 없음 | **참** — 유일한 `Authorization`은 `:90`의 FCM 아웃바운드 |
+| `briefings` 평문 테이블 생존 | **참, 단 심각도 하향** — GRANT가 SELECT뿐이고 쓰기 경로 0건. 행 존재는 UNVERIFIED |
+| 032 단독 = 쓰기 불능 | **참** — 039 헤더가 스스로 문서화하고 있다 |
+| C7 quarantine 거짓 공백 | **참** — 세 표면이 `sharedSyncStatus` 각 0회 참조, 올바른 패턴은 PartnerDay에 8회 |
+| C9 Edge Function 무테스트 | **참** |
+| C8 배선 게이트가 무용 | **참, 단 결과 과장** — 아래 |
+
+**C8은 측정해서 정정했다.** `store.tsx:1036`의 호출을 줄 전체 주석 처리하면 전용
+배선 테스트는 **19/19 통과**하지만 `npm run typecheck`가 **TS6133로 실패**한다. 즉
+"테스트는 green"은 전체 스위트 기준 거짓이고 CI가 막는다. 다만 그 방어는 우연이다 —
+호출부가 하나뿐이라 import가 미사용이 되어 걸린 것이고, 그 심볼을 참조하는 줄이
+하나만 더 생기면 사라진다. 게이트 자체는 여전히 아무것도 지키지 않는다.
+
+**ox-alpha가 놓친 것도 기록한다.** 같은 tree 안의 `prosecdef`/`proconfig` 공백은
+그쪽 C 목록에 없다. 두 검토가 서로를 대체하지 않는다는 증거다.
+
+#### 함께 넣은 것 — 훅은 Claude Code 밖에서 작동하지 않는다
+
+`docs/AI_SESSION_PROTOCOL.md`에 경고를 못박았다. `.claude/hooks/`는
+`.claude/settings.json`의 Claude Code 설정이고 opencode·Cursor·Antigravity는 그 파일을
+읽지 않는다. 오늘 밤 나를 여섯 번 막은 가드가 **그쪽에는 하나도 없다.** ox-alpha는
+`--agent plan`(저장소 쓰기 `deny`, 원문 확인)으로만 부른다.
+
 #### PRODUCTION
 - NOT APPLIED. 047~055는 여전히 어디에도 미적용. merge 하지 않았다.
 

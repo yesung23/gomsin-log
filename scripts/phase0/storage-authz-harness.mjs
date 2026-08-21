@@ -109,6 +109,7 @@ const ORDER = [
   '050_lv_funnel_readout.sql',
   '051_audit_closure_overload_and_forgeable_couple.sql',
   '052_unseen_flag_survives_no_record.sql',
+  '053_pending_acts_not_shared_history.sql',
 ];
 
 /**
@@ -2082,6 +2083,116 @@ check(
   appOverloads === 'none',
   `051 NO application function in public is overloaded, so no dropped signature came back (found: ${appOverloads})`,
 );
+
+// ---------------------------------------------------------------------------
+// 053 -- the flag means "an act is pending", not "shared records exist"
+// ---------------------------------------------------------------------------
+/*
+  051 and 052 lowered the flag only when NO other shared record of the author's
+  remained. Measured against the real chain, that failed the sequence it most
+  needed: an OLD shared record predating the recipient's last clear kept the flag
+  up after the only NEW act was withdrawn.
+
+  Each case below drives the real paths -- `clear_my_unseen()` as the recipient,
+  `mark_push_delivered()` as service_role -- rather than writing the state by
+  hand, because the boundary those two functions move is the whole mechanism.
+*/
+function resetPendingFixture(label) {
+  mustSql(`UPDATE public.couple_members SET status = 'active'
+           WHERE couple_id = '${COUPLE3}' AND user_id IN ('${D}', '${E}')`, `${label} membership`);
+  mustSql(`DELETE FROM public.daily_records WHERE couple_id = '${COUPLE3}'`, `${label} records`);
+  mustSql(`DELETE FROM public.push_delivery_state WHERE user_id IN ('${D}', '${E}')`, `${label} state`);
+}
+function shareRecord(id, note, label) {
+  mustSql(`INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+           VALUES ('${id}', '${D}', '${COUPLE3}', CURRENT_DATE, '${note}', false)`, label);
+}
+function clearAsRecipient(label) {
+  const r = asUser(E, 'SELECT public.clear_my_unseen()');
+  if (!r.ok) throw new Error(`${label} clear failed:\n${r.stderr}`);
+}
+
+// --- case 1: old shared R1 + clear + R2 + retract ---------------------------
+resetPendingFixture('053-1');
+shareRecord('e5300000-0000-4000-8000-000000000001', 'R1 old', '053-1 R1');
+clearAsRecipient('053-1');
+check(unseenOf(E) === 'f', '053 the real clear path lowers the flag');
+shareRecord('e5300000-0000-4000-8000-000000000002', 'R2 new', '053-1 R2');
+check(unseenOf(E) === 't', '053 a new shared act raises it again');
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'e5300000-0000-4000-8000-000000000002'`, '053-1 retract');
+check(
+  unseenOf(E) === 'f',
+  '053 RETRACTING the only new act cancels it, even though an older shared record remains',
+);
+
+// --- case 2: same, by deletion ---------------------------------------------
+resetPendingFixture('053-2');
+shareRecord('e5300000-0000-4000-8000-000000000003', 'R1 old', '053-2 R1');
+clearAsRecipient('053-2');
+shareRecord('e5300000-0000-4000-8000-000000000004', 'R2 new', '053-2 R2');
+check(unseenOf(E) === 't', '053 (delete case) the new act raises the flag');
+mustSql(`DELETE FROM public.daily_records
+         WHERE id = 'e5300000-0000-4000-8000-000000000004'`, '053-2 delete');
+check(
+  unseenOf(E) === 'f',
+  '053 DELETING the only new act cancels it, even though an older shared record remains',
+);
+
+// --- case 3: two genuinely pending acts, one withdrawn ----------------------
+resetPendingFixture('053-3');
+clearAsRecipient('053-3');
+shareRecord('e5300000-0000-4000-8000-000000000005', 'P1', '053-3 P1');
+shareRecord('e5300000-0000-4000-8000-000000000006', 'P2', '053-3 P2');
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'e5300000-0000-4000-8000-000000000006'`, '053-3 withdraw one');
+check(
+  unseenOf(E) === 't',
+  '053 withdrawing ONE of two pending acts leaves the flag up, because the other is still owed',
+);
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'e5300000-0000-4000-8000-000000000005'`, '053-3 withdraw other');
+check(unseenOf(E) === 'f', '053 withdrawing the second one finally cancels it');
+
+// --- case 4: the recipient looks BETWEEN two acts ---------------------------
+resetPendingFixture('053-4');
+shareRecord('e5300000-0000-4000-8000-000000000007', 'A1', '053-4 A1');
+clearAsRecipient('053-4 first look');
+shareRecord('e5300000-0000-4000-8000-000000000008', 'A2', '053-4 A2');
+clearAsRecipient('053-4 second look');
+check(unseenOf(E) === 'f', '053 a clear between acts accounts for both');
+shareRecord('e5300000-0000-4000-8000-000000000009', 'A3', '053-4 A3');
+check(unseenOf(E) === 't', '053 an act after the second look is still pending');
+mustSql(`DELETE FROM public.daily_records
+         WHERE id = 'e5300000-0000-4000-8000-000000000009'`, '053-4 withdraw A3');
+check(
+  unseenOf(E) === 'f',
+  '053 withdrawing it cancels, with TWO older shared records present',
+);
+
+// --- case 5: a delivery lands between two acts ------------------------------
+resetPendingFixture('053-5');
+shareRecord('e5300000-0000-4000-8000-00000000000a', 'B1', '053-5 B1');
+check(unseenOf(E) === 't', '053 (delivery case) the first act raises the flag');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}')`, '053-5 deliver');
+check(unseenOf(E) === 'f', '053 delivery lowers the flag');
+shareRecord('e5300000-0000-4000-8000-00000000000b', 'B2', '053-5 B2');
+check(unseenOf(E) === 't', '053 an act after delivery is pending again');
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'e5300000-0000-4000-8000-00000000000b'`, '053-5 withdraw B2');
+check(
+  unseenOf(E) === 'f',
+  '053 withdrawing it cancels, because delivery moved the boundary past B1',
+);
+
+// --- the boundary is the recipient's own, and stays invisible ---------------
+const partnerReadsBoundary = asUser(D,
+  `SELECT count(*) FROM public.push_delivery_state WHERE user_id = '${E}'`);
+check(
+  !partnerReadsBoundary.ok || partnerReadsBoundary.stdout.trim() === '0',
+  '053 the author CANNOT read the recipient\'s boundary, so it is not a read receipt',
+);
+resetPendingFixture('053-cleanup');
 
 // ---------------------------------------------------------------------------
 // 052 -- account closure. LAST, because it deletes an actor the rest of this

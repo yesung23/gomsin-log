@@ -39,7 +39,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -320,7 +320,11 @@ function checkVisible(userId, predicate, expected, message) {
 // Cluster
 // ---------------------------------------------------------------------------
 
-console.log('active fresh-chain harness — migrations 001..040 + 043..050 on throwaway PostgreSQL 17\n');
+// Derived from ORDER rather than typed, because the typed version was already
+// wrong: it still said 043..050 with 051 in the chain, and had said 043..045
+// long after that stopped being true.
+const chainSpan = `${ORDER[0].slice(0, 3)}..${ORDER[ORDER.length - 1].slice(0, 3)}`;
+console.log(`active fresh-chain harness — ${ORDER.length} migrations (${chainSpan}, 041/042 frozen) on throwaway PostgreSQL 17\n`);
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -331,7 +335,27 @@ execFileSync('pg_ctl', ['-D', dataDir, '-o', `-k ${socketDir} -h ''`, '-w', 'sta
 started = true;
 execFileSync('createdb', ['-h', socketDir, '-U', 'postgres', DB], { stdio: 'ignore', env: PG_ENV });
 
-const stub = psql(['-f', '/dev/stdin'], { input: SUPABASE_STUB });
+/*
+  Scripts reach psql through a scratch FILE, not `-f /dev/stdin`.
+
+  The stdin form worked on the author's machine and failed the first time this
+  harness ran on a Linux CI runner: `psql: error: /dev/stdin: No such device or
+  address`. `spawnSync`'s `input` is a pipe, and psql reopens the path it is
+  given rather than reading the descriptor it already has -- so on a runner where
+  /dev/stdin resolves through /proc to a pipe that is no longer openable, the
+  read fails. A real file has no such ambiguity on any platform.
+
+  Worth stating plainly: this bug was invisible for as long as nothing but a
+  developer's laptop ever ran these harnesses. It surfaced within minutes of the
+  CI job existing.
+*/
+const scratchSql = join(dir, 'harness-input.sql');
+function psqlScript(text) {
+  writeFileSync(scratchSql, text);
+  return psql(['-f', scratchSql]);
+}
+
+const stub = psqlScript(SUPABASE_STUB);
 if (!stub.ok) throw new Error(`Supabase stub failed:\n${stub.stderr}`);
 
 for (const file of ORDER) {
@@ -339,7 +363,7 @@ for (const file of ORDER) {
     const pre = psql(['-c', PRE_002_RECURSION_DROPS]);
     if (!pre.ok) throw new Error(`002 pre-drop failed:\n${pre.stderr}`);
   }
-  const applied = psql(['-f', '/dev/stdin'], { input: readFileSync(join(MIGRATIONS, file), 'utf8') });
+  const applied = psqlScript(readFileSync(join(MIGRATIONS, file), 'utf8'));
   if (!applied.ok) {
     console.error(`MIGRATION FAILED: ${file}\n${applied.stderr}`);
     process.exit(1);

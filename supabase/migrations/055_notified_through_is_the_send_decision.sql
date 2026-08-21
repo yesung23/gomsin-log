@@ -178,6 +178,15 @@ BEGIN
     and writing `p_decided_at` flat would drag it backwards -- re-pending acts
     they have already looked at, and notifying them tomorrow about something they
     read today. Their own look always outranks our record of a send.
+
+    `last_notified_at` also becomes the DECISION instant, which changes the daily
+    cap in one narrow case worth naming rather than leaving to be found: a send
+    decided at 23:59 and marked at 00:01 now stamps the FIRST day, not the
+    second. That is the honest reading -- the notification was chosen and
+    delivered on day one, and the cap counts sends, not bookkeeping. It does mean
+    such a recipient can be due again later on day two. Reaching it requires the
+    decision and the mark to straddle midnight, while the default contact window
+    closes at 21:00.
   */
   INSERT INTO public.push_delivery_state (user_id, has_unseen, last_notified_at, notified_through)
   VALUES (p_user_id, FALSE, p_decided_at, p_decided_at)

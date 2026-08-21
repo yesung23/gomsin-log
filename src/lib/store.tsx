@@ -51,6 +51,7 @@ import {
 } from '@/lib/talkAbout';
 import { revokeOwnPushTokens } from '@/lib/pushTokens';
 import { setUpPushNotifications } from '@/lib/pushNotifications';
+import { recordProductEvent } from '@/lib/productEvents';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   applyDeliveryOutcome,
@@ -973,6 +974,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (coupleLifecycle !== 'connected') return;
     void setUpPushNotifications();
+    /*
+      The activation funnel's one step that decides everything after it. §19
+      permits the event kind; nothing identifying the partner is sent, and the
+      row is scoped to the account that emitted it, so this cannot be assembled
+      into a view of the other person.
+    */
+    void recordProductEvent({ kind: 'couple_connected' });
   }, [coupleLifecycle]);
 
   useEffect(() => {

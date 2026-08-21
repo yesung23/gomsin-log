@@ -3124,6 +3124,59 @@ mutation 검증에서 "UI만 숨기고 쓰기는 그대로" 변형이 정확히 
 - NOT APPLIED
 
 
+### 2026-08-21 · Phase 1 — §19 최소 계측 (LV 진입 조건)
+
+#### PLAN POSITION
+- Phase: Phase 1 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8, 리텐션 루프 ⑥)
+- Workstream: 최소 계측 — `ENGINEERING_ROADMAP`이 2026-08-21에 LV 진입 조건으로 추가한 항목
+- This Gate: migration 049 + 클라이언트 emitter + 네 지점 연결
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §19 허용/금지 표와 그 아래 네 원칙 — YES
+- Engineering source checked: `ENGINEERING_ROADMAP` LV 진입 조건(2026-08-21 추가) — YES
+- Does this task conflict with canonical direction? NO
+
+#### CHANGED / REVIEWED
+- `supabase/migrations/049_product_events.sql` 신규
+- `src/lib/productEvents.ts` + test 신규 (16 specs)
+- 연결: 컴포저 `record_composed` · 통화 모드 `call_mode_opened`/`talk_about_resolved` ·
+  이야기거리 목록 `talk_about_resolved` · store `couple_connected`
+
+#### 설계의 핵심 — 금지 항목이 들어갈 자리를 없앤다
+계측 계층은 이 제품에서 **거부하기로 한 것을 가장 쉽게 만들 수 있는 자리**다. 그래서 목표를
+"조심히 수집한다"가 아니라 "금지된 컬럼이 갈 곳이 없다"로 잡았다.
+
+- **이 테이블에는 timestamp 컬럼이 아예 없다.** `occurred_on DATE`뿐이다. 다른 모든 테이블이
+  갖는 `created_at TIMESTAMPTZ DEFAULT now()`를 여기 두면 누가 언제 앱을 여는지의 분 단위
+  기록이 되고, 그게 §19가 금지하는 행동 감시다. **리뷰에서 아무도 의심하지 않을 기본값으로
+  도착한다**는 점이 가장 위험하다. mutation으로 그 컬럼을 추가하면 harness가 실패한다.
+- `kind`·`screen`은 CHECK 제약의 닫힌 집합. 이벤트 추가는 migration이고 곧 리뷰다.
+- `subject_id`는 UUID. 기록 id는 들어가고 기록의 첫 줄은 못 들어간다.
+- 파트너에게 **read 정책이 아예 없다.** §19는 건강 도메인에서 불리언조차 파트너 축 집계를
+  금지하는데, 이 테이블은 건강 종류가 없고 파트너 read도 없어 더 강한 형태로 같은 규칙을 만족한다.
+- UPDATE·DELETE 정책이 없다. 이벤트는 사실이고, 세션이 탈취돼도 자기 활동 기록을 고쳐 쓸 수 없다.
+
+**의도적으로 없는 것:** session/dwell 이벤트(체류시간은 §19가 이름으로 금지) · 기록 개수 ·
+연속 사용일수(§19가 성공 지표로 금지, §16의 불안 엔진) · read/seen 이벤트(반대편에서 본
+읽음 표시) · 감정 종류(§19가 라벨과 개수를 함께 금지).
+
+#### VERIFICATION
+- 실제 PostgreSQL 17.10: fresh chain 001→049, phase0 harness **180 assertions**(049가 19개).
+- mutation 4건 전부 실패 확인: `created_at` 추가 · 자유 텍스트 컬럼 · 파트너 read 허용 ·
+  금지 이벤트 종류 추가.
+- 클라이언트 16 specs, mutation 2건 확인(계측 미연결 · 절대 시각 전송).
+- 연결 검증은 **호출자를 센다** — emitter에 호출자가 없으면 emitter에 대한 모든 테스트가
+  통과하기 때문이다. LV 조건은 "계측이 존재한다"가 아니라 "이벤트가 착지한다"이다.
+
+#### REMAINING
+- 미연결 이벤트 3종: `briefing_opened` · `briefing_to_original` · `talk_about_marked` ·
+  `notifications_disabled`. 종류는 정의됐고 DB가 받지만 아직 emit 지점이 없다.
+- 이벤트 조회·집계 도구 없음. LV 리드아웃 시점에 필요하다.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

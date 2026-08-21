@@ -104,6 +104,7 @@ const ORDER = [
   '045_harden_e2ee_write_floor_activation.sql',
   '046_require_actor_for_device_provisioning.sql',
   '048_push_delivery_metadata.sql',
+  '049_product_events.sql',
 ];
 
 /**
@@ -278,6 +279,11 @@ function asServiceRole(text) {
   ]);
 }
 
+/** Whether a statement succeeded, for cases where failure IS the assertion. */
+function mustSqlOk(text) {
+  return sql(text).ok;
+}
+
 function mustAsServiceRole(text, label) {
   const result = asServiceRole(text);
   if (!result.ok) throw new Error(`${label} failed:\n${result.stderr.trim()}`);
@@ -311,7 +317,7 @@ function checkVisible(userId, predicate, expected, message) {
 // Cluster
 // ---------------------------------------------------------------------------
 
-console.log('active fresh-chain harness — migrations 001..040 + 043..046 + 048 on throwaway PostgreSQL 17\n');
+console.log('active fresh-chain harness — migrations 001..040 + 043..046 + 048..049 on throwaway PostgreSQL 17\n');
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -1590,6 +1596,104 @@ check(
     `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id IN ('${D}', '${E}')`,
     'candidates after unlink') === '0',
   '048 a disconnected relationship produces no delivery candidates',
+);
+
+// ---------------------------------------------------------------------------
+// 049 — the measurement pipe, and what it structurally cannot become
+//
+// §19 permits a date bucket and forbids precise times; it forbids content,
+// emotion labels, health of any kind, and behavioural surveillance. The
+// assertions below are mostly about ABSENCE, because that is what the rules
+// actually require.
+// ---------------------------------------------------------------------------
+
+// The one that matters most: no column can hold a time of day.
+const timeCols = mustSql(`
+  SELECT count(*) FROM information_schema.columns
+  WHERE table_name = 'product_events'
+    AND data_type IN ('timestamp with time zone', 'timestamp without time zone', 'time without time zone')`,
+  '049 time columns');
+check(
+  timeCols === '0',
+  '049 the table has NO timestamp column, so it cannot log when someone opens the app',
+);
+check(
+  mustSql(`SELECT data_type FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'occurred_on'`, '049 bucket type') === 'date',
+  '049 the only temporal column is a DATE bucket',
+);
+
+// No column could hold content even if a caller tried.
+const textCols = mustSql(`
+  SELECT COALESCE(string_agg(column_name, ',' ORDER BY column_name), '')
+  FROM information_schema.columns
+  WHERE table_name = 'product_events' AND data_type IN ('text', 'character varying')`,
+  '049 text columns');
+check(
+  textCols === 'error_code,kind,screen',
+  `049 the only text columns are the three closed/bounded ones (got: ${textCols})`,
+);
+check(
+  mustSql(`SELECT data_type FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'subject_id'`, '049 subject type') === 'uuid',
+  '049 the subject is a UUID, so a record id fits and a record\'s text does not',
+);
+
+// The vocabulary is closed, and names nothing forbidden.
+const kinds = mustSql(`
+  SELECT pg_get_constraintdef(oid) FROM pg_constraint
+  WHERE conrelid = 'public.product_events'::regclass AND conname LIKE '%kind%'`,
+  '049 kind constraint');
+check(kinds.includes('record_composed'), '049 the event vocabulary is a CHECK constraint, not free text');
+for (const forbidden of ['cycle', 'health', 'emotion', 'mood', 'dwell', 'session', 'streak']) {
+  check(
+    !kinds.includes(forbidden),
+    `049 no event kind names anything §19 forbids (${forbidden})`,
+  );
+}
+
+// Ownership, in both directions.
+mustSql(`
+  INSERT INTO public.product_events (user_id, kind, occurred_on)
+  VALUES ('${D}', 'record_composed', CURRENT_DATE), ('${E}', 'briefing_opened', CURRENT_DATE)`,
+  '049 fixture');
+
+const partnerReadsEvents = asUser(D, `SELECT count(*) FROM public.product_events WHERE user_id = '${E}'`);
+check(
+  !partnerReadsEvents.ok || partnerReadsEvents.stdout.trim() === '0',
+  '049 the partner CANNOT read the other side\'s activity',
+);
+check(
+  asUser(D, `SELECT count(*) FROM public.product_events WHERE user_id = '${D}'`).stdout.trim() === '1',
+  '049 an account can read its own',
+);
+check(
+  !asUser(D, `INSERT INTO public.product_events (user_id, kind, occurred_on)
+              VALUES ('${E}', 'record_composed', CURRENT_DATE)`).ok,
+  '049 nobody can attribute an event to another account',
+);
+check(!asAnon('SELECT count(*) FROM public.product_events').ok
+  || asAnon('SELECT count(*) FROM public.product_events').stdout.trim() === '0',
+  '049 anon sees nothing');
+
+// An event is a fact. Nobody edits or erases one.
+check(
+  !asUser(D, `UPDATE public.product_events SET kind = 'briefing_opened' WHERE user_id = '${D}'`).ok
+    || mustSql(`SELECT count(*) FROM public.product_events WHERE user_id = '${D}' AND kind = 'record_composed'`,
+      '049 unchanged') === '1',
+  '049 events cannot be rewritten, not even one\'s own',
+);
+check(
+  !asUser(D, `DELETE FROM public.product_events WHERE user_id = '${D}'`).ok
+    || mustSql(`SELECT count(*) FROM public.product_events WHERE user_id = '${D}'`, '049 still there') === '1',
+  '049 events cannot be deleted by the session that wrote them',
+);
+
+// The vocabulary refuses anything outside it.
+check(
+  !mustSqlOk(`INSERT INTO public.product_events (user_id, kind, occurred_on)
+              VALUES ('${D}', 'partner_read_my_record', CURRENT_DATE)`),
+  '049 an event kind outside the closed set is refused by the database',
 );
 
 // ---------------------------------------------------------------------------

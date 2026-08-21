@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { recordProductEvent } from '@/lib/productEvents';
 import { toLocalDateString, localToday } from '@/lib/utils';
 import { isOwnRecord } from '@/lib/privacy';
 import { EmotionSuggestionReview } from '@/components/emotion/EmotionSuggestionReview';
@@ -95,6 +96,18 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   // Reopen the card when there is something waiting, so a restored draft is not
   // invisible behind a collapsed composer.
   const [showInputCard, setShowInputCard] = useState(!!restoredDraft);
+  /**
+   * When the composer opened, for the one duration §19 permits us to measure.
+   *
+   * The strategy's target is a 30-second entry, and there is no way to know
+   * whether that holds without timing it. A ref rather than state: this must not
+   * cause a render, and it must not reset when the text changes.
+   *
+   * An ELAPSED time, never a wall-clock one. §19 allows the former and forbids
+   * the latter, and only the difference between two of these ever leaves the
+   * device.
+   */
+  const composerOpenedAt = React.useRef<number | null>(restoredDraft ? Date.now() : null);
   const [isSaving, setIsSaving] = useState(false);
   const isOffline = !useOnlineStatus();
 
@@ -176,7 +189,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   });
 
   const handleOpenInput = (type: 'text' | 'photo' | 'instant') => {
-    setShowInputCard(true);
+    openComposer();
     if (type === 'text') return;
 
     // `input.click()` MUST run in the same task as the tap that triggered it.
@@ -188,7 +201,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     // there the picker simply never appeared. The delay was never necessary: the
     // file input is rendered unconditionally, OUTSIDE the `showInputCard` block,
     // so `fileInputRef.current` is already attached when this runs. React
-    // flushes the `setShowInputCard(true)` above after this handler returns, so
+    // flushes the `openComposer()` above after this handler returns, so
     // the render-then-open ordering the UI wants is unchanged.
     const input = fileInputRef.current;
     if (!input) {
@@ -266,6 +279,12 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       // Released even on failure, so a deliberate retry still works.
       saveInFlightRef.current = false;
     }
+  };
+
+  /** Opening the composer starts the one timer §19 permits. */
+  const openComposer = () => {
+    if (composerOpenedAt.current === null) composerOpenedAt.current = Date.now();
+    setShowInputCard(true);
   };
 
   const runPost = async () => {
@@ -394,6 +413,27 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       return;
     }
 
+    /*
+      §19 measurement, on the one path that actually completed.
+
+      Emitted AFTER the save succeeded, so a failed write is not counted as an
+      entry. The value is an elapsed duration and nothing else -- no text, no
+      length, no visibility, no emotion. The strategy wants to know whether a
+      30-second entry is real; that question needs a number and no more of one
+      than this.
+
+      Fire-and-forget: the emitter swallows its own failures, so an offline
+      analytics insert cannot make a successful save look unsuccessful.
+    */
+    if (composerOpenedAt.current !== null) {
+      void recordProductEvent({
+        kind: 'record_composed',
+        screen: 'home',
+        durationMs: Date.now() - composerOpenedAt.current,
+      });
+      composerOpenedAt.current = null;
+    }
+
     clearComposer();
 
     if (result.failedFiles.length > 0) {
@@ -499,7 +539,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       {!showInputCard && restoredDraft && restoredDraft.log && (
         <button
           type="button"
-          onClick={() => setShowInputCard(true)}
+          onClick={() => openComposer()}
           className="press-response-row mt-2 w-full text-left text-caption text-muted-foreground min-h-11 flex items-center"
         >
           이어 쓰던 글이 있어요 <span className="ml-auto text-coral-strong font-semibold">이어쓰기 ›</span>

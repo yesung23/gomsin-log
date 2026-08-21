@@ -109,6 +109,7 @@ active branch가 존재한다. **master에는 아직 없다.**
 | Gate 3 push 클라이언트 | 완료. 토큰 lifecycle은 이 저장소가 다른 클라이언트 동작을 검증하는 방식으로 검증 가능했고(§14.3이 negative test를 명시적으로 요구한다), 실기기가 필요한 것은 실제 전달뿐이다 |
 | `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
 | S4 §7.6 대기 구간 | 자동 노출 결함은 닫혔다 — 파트너가 없으면 저장 자체가 비공개다. **§7.6이 요구하는 "한 번 묻기"는 미완**이며, 대기 중 기록을 식별할 방법(합류 시각 조회 또는 device-local 목록)에 대한 판단이 선행되어야 한다 |
+| §19 계측 | migration 049와 emitter가 있고 네 지점(작성·통화 모드 진입·이야기했어요 2곳·커플 연결)에 연결됐다. `briefing_opened`·`briefing_to_original`·`talk_about_marked`·`notifications_disabled`는 종류만 정의되고 **emit 지점이 아직 없다**. 이벤트 집계 도구도 없다 |
 
 Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은
 001의 SELECT 정책 때문에 파트너에게 읽히고, 그것은 곧 읽음 표시(§14.3 절대 금지)다. 전용 테이블로
@@ -150,6 +151,7 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 | 046 | device provisioning actor requirement | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
 | 047 | care signal `feeling_unwell` | **PR #76이 소유하며 master에도 이 branch에도 없다.** Production NOT APPLIED |
 | 048 | push delivery metadata (Gate 3) | active branch only. fresh chain 001→048에서 실제 PostgreSQL 17.10으로 37개 계약 검증, mutation 6건 확인. Production NOT APPLIED; 047과 결합한 체인은 **아직 한 번도 실행되지 않았다** |
+| 049 | §19 최소 계측 (LV 진입 조건) | active branch only. **timestamp 컬럼이 없다** — 날짜 버킷만. 파트너 read 정책 없음, UPDATE/DELETE 정책 없음. fresh chain 001→049에서 19개 계약 검증, mutation 4건 확인. Production NOT APPLIED |
 
 No remote Supabase mutation was performed by this documentation task.
 

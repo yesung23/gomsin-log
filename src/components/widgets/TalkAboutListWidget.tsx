@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageCircle, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { MessageCircle, Check, ChevronDown, ChevronUp, Phone } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
@@ -110,6 +110,29 @@ export function TalkAboutListWidget() {
             </li>
           ))}
         </ul>
+      )}
+
+      {/*
+        The way into 통화 모드.
+
+        Hidden at zero, per §8: an entry point to a screen that would open on
+        "nothing to talk about" is worse than no entry point, and this widget
+        already says the list is empty right above it.
+
+        It sits below the list rather than in the heading because the list is
+        what someone came here to read; this is what they do next, and only
+        sometimes.
+      */}
+      {topics.length > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate('/call')}
+          data-testid="talk-about-call-mode"
+          className="press-response-row w-full min-h-11 mt-1 flex items-center justify-center gap-1.5 rounded-control border border-coral/30 bg-coral/5 text-label font-bold text-coral-strong"
+        >
+          <Phone size={14} aria-hidden="true" />
+          통화하면서 보기
+        </button>
       )}
 
       {(hiddenCount > 0 || expanded) && (

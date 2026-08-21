@@ -29,6 +29,15 @@ export type Scenario = {
   partnerName?: string;
   anniversaryDate?: string;
   records?: RecordRow[];
+  /**
+   * Rows for `talk_about_marks`.
+   *
+   * Left unseeded these scenarios returned an empty list unconditionally, which
+   * meant no browser test could reach any surface built on a mark -- the list
+   * widget's populated state, or 통화 모드 at all. Empty stays the DEFAULT, so
+   * every existing scenario behaves exactly as before.
+   */
+  talkAboutMarks?: unknown[];
   events?: unknown[];
   coupleTasks?: unknown[];
   trips?: unknown[];
@@ -369,9 +378,11 @@ export async function installMockBackend(
       const failure = failureFor(scenario, 'talk_about_marks');
       if (failure) return json(route, failure, failure.status);
       // `fetchTalkAboutMarksResultFromDB` selects pending metadata rows for the
-      // active couple. These scenarios seed no marks, so the real empty result is
-      // an empty array; no record content or security authority is fabricated.
-      return rows(route, []);
+      // active couple. A scenario that seeds none gets the real empty result; no
+      // record content or security authority is fabricated either way, because a
+      // mark carries only coordination metadata and the client still resolves the
+      // record itself through the normal, authorized path.
+      return rows(route, scenario.talkAboutMarks ?? []);
     }
     if (path === '/rest/v1/trip_items' || path === '/rest/v1/trip_checklists') {
       const failure = failureFor(scenario, path.replace('/rest/v1/', ''));

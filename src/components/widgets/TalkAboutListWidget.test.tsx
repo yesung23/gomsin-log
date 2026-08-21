@@ -330,3 +330,32 @@ describe('the overflow control holds up at the sizes a real couple reaches', () 
     expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(6);
   });
 });
+
+/**
+ * The way into 통화 모드.
+ *
+ * §8 hides the entry point at zero. An entry to a screen that would open on
+ * "nothing to talk about" is worse than no entry, and this widget already says
+ * the list is empty directly above where the control would sit.
+ */
+describe('통화 모드 진입점', () => {
+  it('offers the call screen when there is something to talk about', async () => {
+    const user = userEvent.setup();
+    renderWidget([record()], [mark()]);
+
+    await user.click(screen.getByTestId('talk-about-call-mode'));
+    expect(navigate).toHaveBeenCalledWith('/call');
+  });
+
+  it('is hidden when nothing is marked', () => {
+    renderWidget([record()], []);
+    expect(screen.queryByTestId('talk-about-call-mode')).toBeNull();
+  });
+
+  it('is offered even when the only topic is an unreachable original', () => {
+    // The coordination state survives the record (§8), so the pair may still want
+    // to talk it through. Hiding the entry would strand it.
+    renderWidget([], [mark({ recordId: 'rec-gone' })]);
+    expect(screen.getByTestId('talk-about-call-mode')).toBeInTheDocument();
+  });
+});

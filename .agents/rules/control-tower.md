@@ -1,0 +1,54 @@
+> **Antigravity Workspace Rule.** IDE의 Rules 패널에서 이 규칙의 활성화 방식을
+> **Always On**으로 설정한다 — 파일 안에서 지정하는 문법은 공식 문서에 없다.
+> 원본 절차는 `docs/AI_SESSION_PROTOCOL.md`이며 이 파일은 그것을 가리키는 포인터다.
+
+# GomsinLog Control Tower — Antigravity 진입점
+
+이 저장소는 여러 AI(Claude Code · Codex · Cursor · Antigravity · ChatGPT · Kiro · Grok)가
+번갈아 작업한다. **대화 기억은 source of truth가 아니다.**
+
+## 시작하기 전에 반드시
+
+```bash
+bash scripts/agent/session-start.sh
+```
+
+live 브랜치/HEAD/PR · 다음에 만들 것 · **지금 다른 AI가 무엇을 잡고 있는지** · 최근
+세션과 리포트가 한 번에 나온다. 이 출력이 시작 체크포인트다.
+
+## 비사소한 작업이면 점유한다
+
+```bash
+bash scripts/agent/claim.sh antigravity "<무엇을 하는지 한 줄>"
+bash scripts/agent/claim.sh --release antigravity   # 끝나면
+```
+
+겹치면 스크립트가 막는다. 막히면 그 AI의 리포트를 먼저 읽는다.
+
+## 끝낼 때
+
+`docs/WORK_LOG.md`에 표준 세션 항목, `control-tower/reports/antigravity/`에 리포트
+(`control-tower/templates/Agent Report.md` 형식). 그 다음:
+
+```bash
+bash scripts/agent/ct-sync.sh push "ct: antigravity <요약>"
+```
+
+## 절차와 계약의 원본
+
+| 무엇 | 어디 |
+|---|---|
+| 도구 간 세션 절차 (이 파일의 원본) | `docs/AI_SESSION_PROTOCOL.md` |
+| 엔지니어링 계약 | `AGENTS.md` |
+| 제품 의도 | `docs/PRODUCT_V3.md` |
+| 구현 순서·게이트 | `docs/ENGINEERING_ROADMAP.md` |
+| 현재 결함·미구현 | 저장소 코드, 그 다음 `docs/CURRENT_STATE.md` |
+| 권한 순서 | `control-tower/AI_ENTRYPOINT.md` |
+
+절차를 고칠 때는 `docs/AI_SESSION_PROTOCOL.md`만 고친다. 이 파일은 포인터다.
+
+## 금지
+
+- SHA · PR 번호 · CI 결과를 문서나 vault에 복사한다 (항상 live로 다시 읽는다)
+- master에 직접 push · production 변경 · 적용된 migration 재작성
+- 검증하지 않은 것을 검증했다고 적는다

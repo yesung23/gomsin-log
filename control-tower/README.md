@@ -13,7 +13,11 @@ pick up without re-reading every chat.
 ## What this is not
 
 Not canonical. Live Git, GitHub, and the `docs/` documents win over anything here.
-Authority order is in [[AI_ENTRYPOINT]].
+Authority order is in [[AI_ENTRYPOINT]]. 도구 간 세션 절차는 `docs/AI_SESSION_PROTOCOL.md`가 소유한다.
+
+세션은 `bash scripts/agent/session-start.sh` 로 시작하고, 공유는
+`bash scripts/agent/ct-sync.sh push "<msg>"` 로 한다. **Obsidian Git 플러그인은 쓰지 않는다** —
+이 vault는 코드 저장소의 하위 폴더라 플러그인이 저장소 전체를 자동 커밋한다.
 
 **Never copy volatile facts into this vault** — SHAs, PR numbers, CI run ids. That is
 exactly what made it rot the first time. Run `bash scripts/agent/live-state.sh` instead.
@@ -22,6 +26,7 @@ exactly what made it rot the first time. Run `bash scripts/agent/live-state.sh` 
 
 ```
 Start Here.md      entry point
+Now.md             작업 점유 보드 (claim.sh 가 쓴다 — 손으로 고치지 않는다)
 Dashboard.md       navigation hub
 Current Gate.md    what is blocked, what to build next
 Decision Log.md    Control Tower decisions only
@@ -30,6 +35,7 @@ reports/<agent>/   individual agent reports
 tasks/             work units
 audits/            audits
 templates/         Agent Report template
+Chat AI Bootstrap.md  저장소를 못 읽는 웹 챗에게 붙여넣는 프롬프트
 .obsidian/         vault config (committed; workspace and caches are gitignored)
 ```
 

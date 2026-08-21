@@ -1,5 +1,22 @@
 # GomsinLog Engineering Contract
 
+## 0. 세션 시작 — 모든 AI 공통
+
+이 저장소는 여러 AI(Claude Code · Codex · Cursor · Antigravity · ChatGPT · Kiro · Grok)가
+번갈아 작업한다. **대화 기억은 source of truth가 아니다.**
+
+```bash
+bash scripts/agent/session-start.sh                 # 시작: live 상태 · 다음 작업 · 다른 AI의 점유
+bash scripts/agent/claim.sh <agent> "<한 줄>"        # 비사소한 작업 전에 잡는다
+bash scripts/agent/claim.sh --release <agent>       # 끝나면 놓는다
+bash scripts/agent/ct-sync.sh push "ct: <agent> <요약>"   # 공유 기억만 커밋·push
+```
+
+세션을 마치면 `docs/WORK_LOG.md`에 표준 항목과
+`control-tower/reports/<agent>/`에 리포트를 남긴다. 절차 원본은
+[`docs/AI_SESSION_PROTOCOL.md`](docs/AI_SESSION_PROTOCOL.md)이고, 이 계약은 그것을
+가리킬 뿐 복제하지 않는다.
+
 ## 1. Workstream Boundary
 
 A separate Claude Design workstream owns the visual redesign.

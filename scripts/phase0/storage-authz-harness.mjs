@@ -107,6 +107,7 @@ const ORDER = [
   '048_push_delivery_metadata.sql',
   '049_product_events.sql',
   '050_lv_funnel_readout.sql',
+  '051_audit_closure_overload_and_forgeable_couple.sql',
 ];
 
 /**
@@ -1487,6 +1488,37 @@ check(
   '048 a PRIVATE record raises NOTHING, so the notification cannot leak that it exists',
 );
 
+/*
+  051 -- and retracting a shared record takes the invitation back with it.
+
+  048 attached its trigger to AFTER INSERT only, so the guard it calls "the
+  single most important line in the file" held at insert and not across the
+  flip. Post, change your mind, make it private: the partner is still summoned,
+  and arrives to nothing. The payload is generic, so no content leaks -- but the
+  bit that does leak is the one the privacy switch exists to withhold, that
+  something was written.
+
+  The second case is why the fix is conditional. Another shared record of the
+  author's is still a real thing the partner has not been told about, and
+  clearing the flag would swallow it.
+*/
+mustSql(`UPDATE public.push_delivery_state SET has_unseen = FALSE WHERE user_id IN ('${D}', '${E}')`, 'reset 2');
+mustSql(`UPDATE public.daily_records SET is_private = false
+         WHERE id = 'd0000000-0000-4000-8000-000000000002'`, '051 share it');
+check(unseenOf(E) === 't', '051 sharing a previously private record raises the flag');
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'd0000000-0000-4000-8000-000000000001'`, '051 retract the other');
+check(
+  unseenOf(E) === 't',
+  '051 retracting ONE record leaves the flag up, because another is still shared',
+);
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'd0000000-0000-4000-8000-000000000002'`, '051 retract the last');
+check(
+  unseenOf(E) === 'f',
+  '051 retracting the LAST shared record lowers it, so nobody is summoned to nothing',
+);
+
 // --- the partner cannot observe the flag ------------------------------------
 // `has_unseen` is delivery state, not a read receipt. A read receipt is defined
 // by the PARTNER learning something, so the test is that they cannot.
@@ -1782,11 +1814,26 @@ check(
            WHERE table_name = 'product_events' AND column_name = 'couple_id'`, '050 col') === '1',
   '050 events can be grouped by couple, which is the unit LV measures',
 );
+/*
+  This assertion used to read the column's DEFAULT expression and check that the
+  text contained `get_my_active_couple_id`. It passed. It also could not fail:
+  a DEFAULT applies only when the column is OMITTED, and 049's INSERT policy
+  constrained `user_id` alone, so any authenticated account could name any
+  couple_id it liked and the catalogue string never changed.
+
+  The `user_id` case ten lines above was always tested the right way -- by having
+  a second real actor attempt the forgery. This is now that test, for the column
+  it was actually missing on. 051 is the policy that makes it pass.
+*/
 check(
-  mustSql(`SELECT column_default FROM information_schema.columns
-           WHERE table_name = 'product_events' AND column_name = 'couple_id'`, '050 default')
-    .includes('get_my_active_couple_id'),
-  '050 the couple comes from the session, so a client cannot attribute events elsewhere',
+  !asUser(D, `INSERT INTO public.product_events (kind, occurred_on, couple_id)
+              VALUES ('record_composed', CURRENT_DATE, '11111111-1111-1111-1111-111111111111')`).ok,
+  '051 an account CANNOT attribute its events to a couple it does not belong to',
+);
+check(
+  asUser(D, `INSERT INTO public.product_events (kind, occurred_on)
+             VALUES ('briefing_opened', CURRENT_DATE)`).ok,
+  '051 omitting the couple still works, so the pre-connection funnel is not blocked',
 );
 
 // Still no partner axis: the RLS scope is unchanged.
@@ -1877,6 +1924,57 @@ check(retentionShape === 'metric,value',
   '050 retention never returns WHICH couples came back');
 check(!asUser(D, `SELECT * FROM public.lv_couple_return_count(DATE '2026-07-01', DATE '2026-07-01', DATE '2026-07-02', DATE '2026-07-02')`).ok,
   '050 an authenticated user CANNOT run the retention read-out');
+
+// ---------------------------------------------------------------------------
+// 051 -- three things a full-chain read found that no single migration showed
+// ---------------------------------------------------------------------------
+
+/*
+  A dropped function came back as an overload.
+
+  031 created `e2ee_commit_recovery_authentication(UUID, UUID)`. 034 DROPPED that
+  signature and replaced it with a four-argument form carrying the identity,
+  device and downgrade checks. 035 then ran CREATE OR REPLACE on the TWO-argument
+  signature -- it was editing 031's body and did not know 034 had deleted it --
+  so PostgreSQL overloaded instead of replacing, and re-granted EXECUTE.
+
+  Counting overloads is the assertion, because that is the failure: not a wrong
+  body, but a second body nobody meant to still exist. The write-floor harness
+  already guards `e2ee_floor_for` this exact way; this function never got the
+  same line.
+*/
+check(
+  mustSql(`SELECT count(*) FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname = 'public'
+             AND p.proname = 'e2ee_commit_recovery_authentication'`,
+    '051 recovery overloads') === '1',
+  '051 the weak two-argument recovery commit is gone, leaving exactly one hardened form',
+);
+check(
+  mustSql(`SELECT p.pronargs::text FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname = 'public'
+             AND p.proname = 'e2ee_commit_recovery_authentication'`,
+    '051 recovery survivor') === '4',
+  '051 and the one that survived is the four-argument form 034 wrote',
+);
+
+/*
+  A NULL range used to be answered rather than refused. `NULL < NULL` is NULL, so
+  the order check passed and both windows matched nothing -- reporting zero
+  retention as a measurement.
+*/
+/*
+  Run AS service_role on purpose. The first version of this used the superuser
+  helper, where the function refuses on the role check before it ever reaches the
+  range check -- so it passed against a build with no NULL guard at all. It was
+  testing the wrong refusal.
+*/
+check(
+  !asServiceRole(`SELECT * FROM public.lv_couple_return_count(NULL::DATE, NULL::DATE, NULL::DATE, NULL::DATE)`).ok,
+  '051 a NULL read-out range is refused rather than answered with zero',
+);
 
 // ---------------------------------------------------------------------------
 // Report

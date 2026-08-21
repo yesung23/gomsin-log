@@ -138,8 +138,25 @@ describe('the vocabulary names nothing §19 forbids', () => {
  * same defect class the security-review procedure names first.
  */
 describe('the measured flow is wired, not merely available', () => {
+  /**
+   * Comments are stripped before anything is matched.
+   *
+   * The first version of this gate matched the bare kind string anywhere in the
+   * file, and a probe showed what that is worth: commenting out the real
+   * `recordProductEvent` calls in `store.tsx` and `CallBriefingWidget.tsx` --
+   * so §19 emitted nothing at all -- left every test here green, because the
+   * kind was still spelled in the comment that replaced the call.
+   *
+   * That is the same defect the push-module export gate was caught on earlier in
+   * this branch, surviving in a second place. §19 instrumentation landing is an
+   * LV entry condition, so a gate that cannot fail is worse than no gate: it
+   * reports a connected pipe either way.
+   */
+  const stripComments = (text: string) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+
   function source(path: string) {
-    return readFileSync(resolve(process.cwd(), path), 'utf8');
+    return stripComments(readFileSync(resolve(process.cwd(), path), 'utf8'));
   }
 
   const CALLERS: Array<[string, string]> = [
@@ -158,7 +175,14 @@ describe('the measured flow is wired, not merely available', () => {
   it.each(CALLERS)('%s emits %s', (path, kind) => {
     const text = source(path);
     expect(text).toContain("from '@/lib/productEvents'");
-    expect(text).toContain(kind);
+    // A CALL, not a mention. `recordProductEvent({ kind: 'x'` across either
+    // formatting the codebase uses -- inline or with the object broken over
+    // lines -- so the assertion fails when the call is removed rather than
+    // when the word is.
+    expect(
+      text,
+      `${path} names ${kind} but never passes it to recordProductEvent()`,
+    ).toMatch(new RegExp(`recordProductEvent\\(\\s*\\{\\s*kind:\\s*'${kind}'`));
   });
 
 it('emits every kind the union declares', () => {

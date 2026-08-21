@@ -1372,6 +1372,67 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+// 047 — the care-signal vocabulary, asserted against the database
+//
+// 047 was reviewed and its client-side vocabulary is pinned in
+// `featurePrivacy.test.ts`, but nothing checked the CHECK itself against a real
+// database. It joined the chain as "applies cleanly", which is a different claim
+// from "accepts one kind and refuses the graded ones".
+//
+// That gap matters more in the COMBINED tree than it did alone: 048-050 run
+// after 047 here for the first time, and a later migration that redefined this
+// constraint would have gone unnoticed.
+// ---------------------------------------------------------------------------
+
+const kindCheck = mustSql(`
+  SELECT pg_get_constraintdef(oid) FROM pg_constraint
+  WHERE conrelid = 'public.cycle_support_signals'::regclass
+    AND conname = 'cycle_support_signals_kind_check'`, '047 constraint');
+
+check(
+  kindCheck.includes('feeling_unwell'),
+  '047 the approved kind survives every migration that runs after it',
+);
+for (const refused of ['pain_mild', 'pain_moderate', 'pain_severe']) {
+  check(
+    !kindCheck.includes(refused),
+    `047 the graded pain vocabulary the review refused is absent (${refused})`,
+  );
+}
+check(
+  (kindCheck.match(/'/g) ?? []).length / 2 === 5,
+  `047 the vocabulary is exactly five kinds (got: ${kindCheck})`,
+);
+
+// And the constraint actually behaves, rather than merely reading correctly.
+/*
+  Inserted as the OWNER, the way the product does it.
+
+  A superuser insert is refused by 014's workspace trigger ("Support signal is
+  outside the active couple workspace"), which is the correct behaviour and is
+  itself worth having crossed: the vocabulary check is not the only thing standing
+  between a caller and this table.
+*/
+check(
+  asUser(A, `
+    INSERT INTO public.cycle_support_signals (couple_id, owner_id, shared_for_date, kind)
+    VALUES ('${COUPLE1}', '${A}', CURRENT_DATE, 'feeling_unwell')`).ok,
+  '047 the owner can actually send the approved kind',
+);
+check(
+  !asUser(A, `
+    INSERT INTO public.cycle_support_signals (couple_id, owner_id, shared_for_date, kind)
+    VALUES ('${COUPLE1}', '${A}', CURRENT_DATE - 1, 'pain_severe')`).ok,
+  '047 a graded pain kind is refused by the database, not merely by the client',
+);
+check(
+  !asUser(B, `
+    INSERT INTO public.cycle_support_signals (couple_id, owner_id, shared_for_date, kind)
+    VALUES ('${COUPLE1}', '${A}', CURRENT_DATE - 2, 'feeling_unwell')`).ok,
+  '047 the partner cannot send a care signal ON THE OWNER\'S BEHALF',
+);
+
+// ---------------------------------------------------------------------------
 // 048 — push delivery metadata
 //
 // The rule this section exists for is the negative one. A `나만 보기` record is

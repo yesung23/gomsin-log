@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
+import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 
 /**
  * 연락 가능 시간 — the window a person is willing to be reached in.
@@ -33,6 +34,7 @@ import { useStore } from '@/lib/useStore';
  */
 export function ContactHoursSection() {
   const { state, updateProfile } = useStore();
+  const isOffline = !useOnlineStatus();
   const { contact, role } = state.profile;
 
   const [editing, setEditing] = useState(false);
@@ -45,6 +47,11 @@ export function ContactHoursSection() {
   });
 
   const save = async () => {
+    // Same guard shape as the reveal card and call mode. The button is disabled
+    // too, but `disabled` is applied on the next render and a guard here is what
+    // actually holds -- a lesson from a mutation that survived a disabled-only
+    // check earlier in this branch.
+    if (saving) return;
     /*
       An end before a start is not a window, it is silence. The database would
       accept it and `push_delivery_candidates()` would simply never match, so the
@@ -53,6 +60,18 @@ export function ContactHoursSection() {
     */
     if (draft.weekdayEnd <= draft.weekdayStart || draft.weekendEnd <= draft.weekendStart) {
       toast.error('끝나는 시간이 시작 시간보다 늦어야 해요.');
+      return;
+    }
+    /*
+      Named, the way the call screen and the reveal card name it.
+
+      Without this the failure surfaces as "잠시 후 다시 시도해 주세요", which is
+      true of a great many things and tells someone with no signal nothing they
+      can act on. `serverErrorCopy` exists because this app kept reporting causes
+      it had not established; reporting one it HAS is the other half of that.
+    */
+    if (isOffline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
       return;
     }
 
@@ -134,7 +153,8 @@ export function ContactHoursSection() {
             <button
               type="button"
               onClick={() => void save()}
-              disabled={saving}
+              disabled={saving || isOffline}
+              title={isOffline ? OFFLINE_READONLY_MESSAGE : undefined}
               className="press-response flex-1 min-h-11 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold disabled:opacity-50"
             >
               {saving ? '저장 중...' : '저장'}

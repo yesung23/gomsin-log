@@ -74,23 +74,46 @@ export async function setUpPushNotifications(): Promise<PushSetupResult> {
       `register()` resolves as soon as the OS request is made, not when the token
       arrives -- the token comes back on the `registration` event. So the promise
       is what waits, and it resolves from the listener.
+
+      Both listeners and the timer are torn down on the way out. This function
+      runs on every transition into `connected` -- a reconnect, a relaunch -- and
+      leaving them behind would accumulate native bridge handles for a promise
+      that has already settled and can never resolve again.
     */
     const token = await new Promise<string | null>((resolve) => {
       let settled = false;
+      const handles: Array<{ remove: () => Promise<void> }> = [];
+
       const finish = (value: string | null) => {
         if (settled) return;
         settled = true;
+        // `timer` is declared below and assigned before any listener can fire,
+        // so it is always initialised by the time this runs.
+        clearTimeout(timer);
+        // Fire-and-forget: removal is cleanup, and a failure to remove must not
+        // turn a successful registration into a rejected promise.
+        for (const handle of handles) void handle.remove().catch(() => {});
         resolve(value);
       };
 
-      void PushNotifications.addListener('registration', (t) => finish(t.value));
-      void PushNotifications.addListener('registrationError', () => finish(null));
+      void PushNotifications.addListener('registration', (t) => finish(t.value))
+        .then((handle) => {
+          // The listener may resolve AFTER the event it was waiting for, in which
+          // case there is nothing left to remove later -- so remove it now.
+          if (settled) void handle.remove().catch(() => {});
+          else handles.push(handle);
+        });
+      void PushNotifications.addListener('registrationError', () => finish(null))
+        .then((handle) => {
+          if (settled) void handle.remove().catch(() => {});
+          else handles.push(handle);
+        });
       void PushNotifications.register();
 
       // A device with no network gets neither event. Giving up quietly is right:
       // the next launch calls this again, and blocking the connection flow on a
       // notification token would be the wrong thing to make someone wait for.
-      setTimeout(() => finish(null), 10_000);
+      const timer = setTimeout(() => finish(null), 10_000);
     });
 
     if (!token) return { registered: false, reason: 'failed' };
@@ -115,19 +138,28 @@ export async function setUpPushNotifications(): Promise<PushSetupResult> {
  * the payload ever carried something else, this would be the one place that
  * decided whether to honour it.
  */
-export async function listenForPushTaps(navigate: (path: string) => void): Promise<void> {
-  if (!pushSupported()) return;
+export async function listenForPushTaps(
+  navigate: (path: string) => void,
+): Promise<(() => void) | undefined> {
+  if (!pushSupported()) return undefined;
 
   try {
     const { PushNotifications } = await import('@capacitor/push-notifications');
-    await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      const route = action.notification.data?.route;
-      // Only a route this app recognises. An unexpected value goes home rather
-      // than being passed to the router, which is what stops a payload from
-      // choosing a destination.
-      navigate(route === '/' ? '/' : '/');
-    });
+    const handle = await PushNotifications.addListener(
+      'pushNotificationActionPerformed',
+      (action) => {
+        const route = action.notification.data?.route;
+        // Only a route this app recognises. An unexpected value goes home rather
+        // than being passed to the router, which is what stops a payload from
+        // choosing a destination.
+        navigate(route === '/' ? '/' : '/');
+      },
+    );
+    // Returned so the caller can tear it down. Without this the listener
+    // outlives whatever installed it, and a second install routes one tap twice.
+    return () => { void handle.remove().catch(() => {}); };
   } catch (error) {
     console.warn('[gomsinlog] Push tap listener failed', error);
+    return undefined;
   }
 }

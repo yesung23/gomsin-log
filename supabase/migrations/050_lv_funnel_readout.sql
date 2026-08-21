@@ -32,10 +32,18 @@
 --   There is no row-returning path, no user id in the output, and no way to ask
 --   it about one person.
 --
--- What is still absent, deliberately: no per-day series (a series of daily counts
--- for a five-couple cohort is a behavioural timeline), no per-user breakdown, no
--- ordering of one couple against another, and nothing about health, emotion,
--- content, or time of day.
+-- What is still absent, deliberately: no per-user breakdown, no ordering of one
+-- couple against another, and nothing about health, emotion, content, or time of
+-- day. There is no time of day to report -- §19 permits a date bucket and the
+-- table stores nothing finer.
+--
+-- One honest limit, stated rather than implied. This function does not RETURN a
+-- daily series, but a caller may assemble one by calling it once per day. §19
+-- permits date-bucket granularity, so that is not a violation -- but it is not
+-- something the function prevents either, and a comment claiming "no per-day
+-- series" would be describing a guarantee that is not here. What keeps a
+-- five-couple cohort from becoming a behavioural timeline is LV operating
+-- discipline, not this SQL.
 
 BEGIN;
 

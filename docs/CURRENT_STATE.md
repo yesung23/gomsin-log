@@ -154,7 +154,13 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 
 이 checkpoint 이후에도 변하지 않은 것: Production NOT APPLIED, remote catalog UNVERIFIED,
 실기기 UNVERIFIED, chat FROZEN / DEFERRED, P6 NOT AUTHORIZED(개정된 ARCH-P6 기준으로도
-구현 미착수), push 알림 미구현, §19 계측 미구현.
+구현 미착수).
+
+> **2026-08-21 정정.** 위 문단은 원래 "push 알림 미구현, §19 계측 미구현"으로 끝났다.
+> 그 문장은 이 checkpoint가 작성된 시점에는 참이었고 **결합 트리에서는 거짓이다** —
+> 둘 다 PR #79에서 구현됐다(migration 048~050). landing 순서상 이 checkpoint(#75)가
+> 먼저 오고 구현(#79)이 나중이므로, 두 계보가 합쳐지는 지점에서 이 문장이 낡는다.
+> 저자 감사에서 발견해 정정했다.
 
 ### LV 진입 조건 대비 현황 — 2026-08-21
 

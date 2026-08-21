@@ -28,6 +28,9 @@ const MyPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 );
+const CallModePage = lazy(() =>
+  import('@/pages/CallModePage').then((m) => ({ default: m.CallModePage })),
+);
 const TripsPage = lazy(() =>
   import('@/pages/TripsPage').then((m) => ({ default: m.TripsPage })),
 );
@@ -290,6 +293,11 @@ export function App() {
               <Route path="/us" element={<UsPage />} />
               <Route path="/my" element={<MyPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              {/* 통화 모드. Draws no tab bar on purpose: this screen is used
+                  one-handed with a phone against an ear, and a row of navigation
+                  targets along the bottom edge is the wrong thing to have under a
+                  thumb that is aiming for 이야기했어요. */}
+              <Route path="/call" element={<CallModePage />} />
               <Route path="/trips" element={<TripsPage />} />
               <Route path="/trips/:id" element={<TripDetailPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

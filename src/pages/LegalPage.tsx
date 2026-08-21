@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
-import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { AppBar } from '@/components/ui/AppBar';
+import { ExternalLink } from 'lucide-react';
 
 const LAST_UPDATED = '2026-08-09';
 const EFFECTIVE_DATE = '2026-08-09';
@@ -217,13 +218,18 @@ export function LegalPage() {
   return (
     <MobileShell>
       <div className="px-5 pt-8 pb-28 space-y-5">
-        <header className="flex items-center justify-between">
-          <button onClick={() => navigate(-1)} className="press-response p-2 -ml-2 rounded-control hover:bg-muted text-muted-foreground min-h-[44px] flex items-center justify-center" aria-label="뒤로가기">
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="text-heading text-foreground">{title}</h1>
-          <div className="w-8" />
-        </header>
+        {/*
+          The centring spacer this replaced (`<div className="w-8" />`) only
+          balanced a back button of one particular width; AppBar left-aligns the
+          title after the control instead, so there is nothing left to balance.
+        */}
+        <AppBar
+          sticky={false}
+          className="px-0 pt-0"
+          title={title}
+          onBack={() => navigate(-1)}
+          backLabel="뒤로가기"
+        />
 
         <div className="rounded-control border border-border bg-muted/40 px-3 py-2 text-caption text-muted-foreground leading-relaxed">
           최종 개정일: {LAST_UPDATED} · 시행일: {EFFECTIVE_DATE}

@@ -86,7 +86,7 @@ describe('a route change is announced and moves focus', () => {
 });
 
 describe('widget editing is reachable without a pointer', () => {
-  const dashboard = read('src/features/home/WidgetDashboard.tsx');
+  const dashboard = read('src/features/home/RoleHome.tsx');
 
   it('offers a real button that enters edit mode', () => {
     expect(dashboard).toContain('aria-label="위젯 편집"');

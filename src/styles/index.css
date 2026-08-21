@@ -1,4 +1,34 @@
-@import "tailwindcss";
+/**
+ * The cascade layer order for the whole app. This statement has to come first,
+ * because a later `@layer` can only append names, never reorder the ones already
+ * declared.
+ *
+ * `@import "tailwindcss"` -- which is what this used to be -- expands to exactly
+ * `theme, base, components, utilities` plus the three sub-imports below. It is
+ * spelled out here only so `astryx-base` and `astryx-theme` can be slotted
+ * BETWEEN `base` and `utilities`. That position is the whole point:
+ *
+ *   - after `base`, so Astryx component styling beats Preflight;
+ *   - before `utilities`, so a Tailwind class on an Astryx component still wins.
+ *     Without this, `<Card className="p-0">` would silently lose to Astryx's own
+ *     padding and every override in the app would need `!`.
+ *
+ * `@astryxdesign/core/reset.css` is deliberately NOT imported. It is a second,
+ * unscoped Preflight -- same job, applied globally to bare elements -- and this
+ * app already has Tailwind's. Loading both would restyle 344 files' worth of
+ * headings, lists and form controls to settle a conflict that only exists
+ * because the reset was imported.
+ *
+ * `@astryxdesign/core/tailwind-theme.css` is NOT imported either, for a sharper
+ * reason -- see the header of `astryx-gomsin.css`.
+ */
+@layer theme, base, astryx-base, astryx-theme, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "@astryxdesign/core/astryx.css";
+@import "./astryx-gomsin.css" layer(astryx-theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 
 /**
  * Pretendard is self-hosted from the pinned `pretendard` package, NOT from a CDN.

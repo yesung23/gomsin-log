@@ -258,7 +258,7 @@ describe('H-4: the entry point survives the conditions that caused the stranding
   it('documents that settings itself is always reachable', () => {
     // The whole fix depends on this, so it is asserted rather than assumed.
     const dashboard = readFileSync(
-      resolve(process.cwd(), 'src/features/home/WidgetDashboard.tsx'),
+      resolve(process.cwd(), 'src/features/home/RoleHome.tsx'),
       'utf8',
     );
     const dday = readFileSync(

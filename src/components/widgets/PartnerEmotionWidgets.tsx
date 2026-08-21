@@ -4,7 +4,8 @@ import { ArrowRight, Sparkles } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
-import { BASIC_EMOTION_EMOJI, basicEmotionOf } from '@/lib/basicEmotions';
+import { basicEmotionOf } from '@/lib/basicEmotions';
+import { EmotionCharacter } from '@/components/emotion/EmotionCharacter';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { generateDailySummary, summaryTargetRecordId } from '@/lib/briefing';
 import { localToday, toLocalDateString } from '@/lib/utils';
@@ -99,11 +100,19 @@ export function PartnerEmotionFlowWidget() {
             data-testid="partner-flow-chain"
             className="flex items-center gap-1.5 flex-wrap"
           >
+            {/*
+              The 곰신로그 characters, not a system emoji.
+
+              An emoji is drawn by the OS, so 😣 is a different creature on the
+              partner's phone than on the author's -- which made the one surface
+              where the two people look at the SAME feeling the one surface where
+              they saw different pictures of it. The characters ship with the app.
+            */}
             {items.map((item, index) => (
               <span key={item.id || index} className="flex items-center gap-1.5">
                 {index > 0 && <ArrowRight size={12} className="text-muted-foreground" aria-hidden="true" />}
-                <span className="px-2 py-1 rounded-lg bg-muted text-label font-bold text-foreground">
-                  <span aria-hidden="true">{BASIC_EMOTION_EMOJI[basicEmotionOf(item)]}</span>{' '}
+                <span className="pl-1 pr-2 py-1 rounded-lg bg-muted text-label font-bold text-foreground flex items-center gap-1">
+                  <EmotionCharacter emotion={basicEmotionOf(item)} selected size={22} />
                   {item.displayLabel}
                 </span>
               </span>

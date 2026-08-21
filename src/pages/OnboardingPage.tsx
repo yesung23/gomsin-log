@@ -113,10 +113,8 @@ export function OnboardingPage() {
   }, [step]);
 
   // Form State
-  const [emailInput, setEmailInput] = useState('');
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [legalAccepted, setLegalAccepted] = useState(false);
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [isStartingSocialLogin, setIsStartingSocialLogin] = useState(false);
   const socialLoginInFlightRef = useRef(false);
   const [role, setRole] = useState<Role>('gomsin');
@@ -387,7 +385,7 @@ export function OnboardingPage() {
   const handleNext = async () => {
     // Auth gate: step 0 cannot advance without a verified account.
     if (step === 0 && !state.authenticatedUser) {
-      toast.error('Google 또는 이메일로 로그인해 주세요.');
+      toast.error('Google로 로그인해 주세요.');
       return;
     }
 
@@ -701,7 +699,17 @@ export function OnboardingPage() {
 
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
-      <div className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]">
+      {/*
+        This frame is a deliberate copy of `MobileShell`'s -- onboarding must not
+        render a tab bar -- so it also carries the Astryx theme attribute. Without
+        it, every Astryx component on the wizard would fall back to Astryx's own
+        blue-and-grey defaults while the rest of the app is coral, and onboarding
+        is the first screen anyone sees.
+      */}
+      <div
+        data-astryx-theme="gomsin"
+        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+      >
         
         {/*
           Step Header (Steps 1~6).
@@ -752,21 +760,64 @@ export function OnboardingPage() {
           
           {/* STEP 0: Landing / Login Selection */}
           {step === 0 && (
-            <div className="flex-1 flex flex-col justify-between py-6">
-              <div className="text-center pt-8 space-y-3">
+            /*
+              Centred, not spread.
+
+              `justify-between` was right when this screen carried three sign-in
+              routes and a magic-link field. With one route left it pushed the
+              wordmark to the ceiling and the consent box to the floor with a hand's
+              width of nothing between them -- the same void that made a two-record
+              conversation read as broken. The content is short now, so it should
+              look short rather than stretched to fill.
+            */
+            <div className="flex-1 flex flex-col justify-center gap-8 py-6">
+              {/*
+                One sentence, and it names the PROBLEM rather than the category.
+
+                This opened with two lines that said roughly the same thing, and the
+                one doing the work -- "답장이 늦어도" -- was the subtitle. "군화와
+                곰신, 둘만의 하루를 사진과 짧은 기록으로 남겨요" describes a diary
+                app; every couple app could print it. What someone recognises
+                themselves in is the asymmetry: one person can reply now and the
+                other cannot, so the day gets lost between them. That is the line
+                that belongs at the top.
+              */}
+              <div className="text-center space-y-3">
                 <div className="flex justify-center mb-3">
                   <CoupleAvatar size={84} />
                 </div>
                 <h1 className="text-display tracking-tight text-foreground">곰신로그</h1>
-                <p className="text-muted-foreground text-body font-medium whitespace-pre-line leading-relaxed">
-                  {"답장이 늦어도, 오늘의 순간은 놓치지 않도록."}
+                <p className="text-muted-foreground text-body font-medium leading-relaxed break-keep">
+                  답장이 늦어도, 서로의 하루는 놓치지 않도록.
                 </p>
-                <p className="text-caption text-muted-foreground font-normal">
-                  군화와 곰신, 둘만의 하루를 사진과 짧은 기록으로 남겨요.
-                </p>
+
+                {/*
+                  What signing in actually commits you to.
+
+                  A first-run visitor could not tell from this screen that the app
+                  needs a PARTNER -- they signed in, met a role picker, and only
+                  discovered at step 3 that the thing is unusable alone. Three lines
+                  is enough to set that expectation before the decision, and it is a
+                  real sequence, so it is numbered.
+                */}
+                <ol className="pt-2 mx-auto w-fit text-left space-y-1.5">
+                  {['역할과 닉네임을 고르고', '상대를 초대하면', '둘만의 공간이 열려요'].map(
+                    (line, index) => (
+                      <li key={line} className="flex items-center gap-2 text-caption text-muted-foreground">
+                        <span
+                          aria-hidden="true"
+                          className="w-5 h-5 shrink-0 rounded-full bg-muted text-foreground font-bold flex items-center justify-center tabular-nums"
+                        >
+                          {index + 1}
+                        </span>
+                        {line}
+                      </li>
+                    ),
+                  )}
+                </ol>
               </div>
 
-              <div className="space-y-3 my-6">
+              <div className="space-y-3">
                 {/*
                   A failed Google sign-in lands HERE, not on /auth/callback.
 
@@ -789,65 +840,18 @@ export function OnboardingPage() {
                   </div>
                 ) : null}
 
-                {/* Primary Auth CTAs */}
-                {isIOS && authProviders.apple && (
-                  <button
-                    onClick={handleAppleLogin}
-                    disabled={isStartingSocialLogin}
-                    className="press-response-row w-full h-13 py-3.5 rounded-control bg-black text-white font-bold text-label flex items-center justify-center gap-2 min-h-[48px] disabled:opacity-60"
-                  >
-                    <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Apple로 계속하기'}</span>
-                  </button>
-                )}
+                {/*
+                  Consent BEFORE the buttons, not under them.
 
-                {authProviders.google && (
-                  <button
-                    onClick={handleGoogleLogin}
-                    disabled={isStartingSocialLogin}
-                    className="press-response-row w-full h-13 py-3.5 rounded-control bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 min-h-[48px] disabled:opacity-60"
-                  >
-                    <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Google로 계속하기'}</span>
-                  </button>
-                )}
-
-                {/* Passwordless email login */}
-                {authProviders.email && (
-                  <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-border">
-                    <p className="text-caption text-muted-foreground text-center font-bold">이메일로 로그인</p>
-                    <input
-                      type="email"
-                      value={emailInput}
-                      onChange={(e) => setEmailInput(e.target.value)}
-                      placeholder="이메일 주소 입력"
-                      className="w-full h-12 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
-                    />
-                    <button
-                      onClick={async () => {
-                      if (!emailInput.includes('@')) return toast.error('유효한 이메일을 입력하세요.');
-                      if (!requireLegalGate()) return;
-                      setIsSendingEmail(true);
-                      try {
-                        const res = await authRepository.signInWithEmail(emailInput);
-                        if (res.error) toast.error(res.error);
-                        else toast.success('이메일로 매직링크를 보냈어요. 메일함을 확인해 주세요.');
-                      } finally {
-                        setIsSendingEmail(false);
-                      }
-                      }}
-                      disabled={isSendingEmail}
-                      className="press-response w-full h-12 rounded-control bg-navy text-white font-bold text-label disabled:opacity-50"
-                    >
-                      {isSendingEmail ? '전송 중...' : '매직링크 받기'}
-                    </button>
-                  </div>
-                )}
-
-                {!authProviders.google && !authProviders.apple && !authProviders.email && (
-                  <p role="alert" className="text-caption text-destructive text-center font-semibold">
-                    현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.
-                  </p>
-                )}
-
+                  Korean law requires the age check and the terms agreement before an
+                  account exists, so this cannot be deferred -- but it used to sit
+                  BELOW three enabled-looking sign-in buttons. Tapping one with the
+                  boxes unticked did nothing except raise a toast at the edge of the
+                  screen, which on a first run reads as the app being broken rather
+                  than as a step being missed. Putting the requirement first, and
+                  marking the buttons while it is unmet, means the control never
+                  claims it will do something it will not.
+                */}
                 <div className="rounded-control border border-border bg-muted/40 p-3 space-y-2">
                   <label className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
                     <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-1 accent-coral" />
@@ -864,6 +868,57 @@ export function OnboardingPage() {
                     </span>
                   </label>
                 </div>
+
+                {/*
+                  `aria-disabled`, not `disabled`.
+
+                  A truly disabled button drops out of the tab order, so a keyboard or
+                  screen-reader user meets a control that is simply absent and is told
+                  nothing about why. This one stays reachable and still fires, and the
+                  handler's existing gate raises the message naming which box is
+                  missing -- so the explanation is available to everyone by the same
+                  action, rather than only to people who can see it greyed out.
+                */}
+                {!legalGatePassed && (
+                  <p id="legal-gate-reason" className="text-caption text-muted-foreground text-center break-keep">
+                    위 두 항목에 동의하면 로그인할 수 있어요.
+                  </p>
+                )}
+
+                {/* Primary Auth CTAs */}
+                {isIOS && authProviders.apple && (
+                  <button
+                    onClick={handleAppleLogin}
+                    disabled={isStartingSocialLogin}
+                    aria-disabled={!legalGatePassed}
+                    aria-describedby={legalGatePassed ? undefined : 'legal-gate-reason'}
+                    className={`press-response-row w-full h-13 py-3.5 rounded-control bg-black text-white font-bold text-label flex items-center justify-center gap-2 min-h-[48px] disabled:opacity-60 ${legalGatePassed ? '' : 'opacity-50'}`}
+                  >
+                    <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Apple로 계속하기'}</span>
+                  </button>
+                )}
+
+                {authProviders.google && (
+                  <button
+                    onClick={handleGoogleLogin}
+                    disabled={isStartingSocialLogin}
+                    aria-disabled={!legalGatePassed}
+                    aria-describedby={legalGatePassed ? undefined : 'legal-gate-reason'}
+                    className={`press-response-row w-full h-13 py-3.5 rounded-control bg-card border border-border text-foreground font-bold text-label flex items-center justify-center gap-2 min-h-[48px] disabled:opacity-60 ${legalGatePassed ? '' : 'opacity-50'}`}
+                  >
+                    <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Google로 계속하기'}</span>
+                  </button>
+                )}
+
+                {/* `email` is deliberately absent: a provider the screen does not
+                    offer must not count as a way in, or a project configured for
+                    email alone would show no button and no explanation either. */}
+                {!authProviders.google && !authProviders.apple && (
+                  <p role="alert" className="text-caption text-destructive text-center font-semibold">
+                    현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.
+                  </p>
+                )}
+
               </div>
             </div>
           )}

@@ -10,6 +10,9 @@ import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { RecordMoodSection } from '@/components/emotion/RecordMoodSection';
+import { candidatesToFlowItems, extractEmotionCandidates } from '@/lib/emotionCandidates';
+import { InferenceMemo } from '@/lib/onDeviceInference';
+import type { EmotionFlowItem } from '@/types';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 import { isMarkedByViewer } from '@/lib/talkAboutList';
@@ -23,7 +26,11 @@ import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
 import { toast } from 'sonner';
 import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
-import { AttachmentMedia } from '@/components/AttachmentMedia';
+import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
+import { MediaArchiveGrid } from '@/components/media/MediaArchiveGrid';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
+import { SegmentedControl } from '@astryxdesign/core/SegmentedControl';
+import { SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
 import { Button } from '@/components/ui/Button';
 import { SheetHandle } from '@/components/ui/SheetHandle';
 import { useSheetDrag } from '@/lib/useSheetDrag';
@@ -80,7 +87,7 @@ const FILTERS: { key: MediaFilter; label: string }[] = [
 
 export function RecordPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     state,
     setHighlightedRecordId,
@@ -108,6 +115,15 @@ export function RecordPage() {
   const [viewMonth, setViewMonth] = useState(() => Number((tripPeriod?.from || todayStr).slice(5, 7)) - 1);
   const [selectedDate, setSelectedDate] = useState(tripPeriod?.from || todayStr);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
+  /*
+   * Which lens is up: read one day in order, or scan the period's photos.
+   *
+   * Deliberately NOT persisted. The timeline answers "what happened", which is
+   * what someone opening 기록 almost always wants; making 사진 sticky means a
+   * single trip through the grid silently changes what this tab is on every
+   * later visit.
+   */
+  const [lens, setLens] = useState<'timeline' | 'photos'>('timeline');
   // Hold the id, not a snapshot: the modal must re-read the record from the
   // store after an edit, otherwise it keeps showing pre-save content.
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
@@ -126,7 +142,18 @@ export function RecordPage() {
    * cannot be removed by any widget-layout choice because it lives on this
    * page, not in the widget system.
    */
-  const [showComposer, setShowComposer] = useState(false);
+  /**
+   * Open with the composer already up when arrived at from the shell's compose
+   * button, so writing from any tab is ONE tap rather than "go to 기록, then
+   * find the button". PRODUCT_V3 §7.1 wants 30 seconds end to end, and three of
+   * those were being spent on navigation.
+   *
+   * Read from the URL rather than from router state so the entry is addressable
+   * -- §7.5 asks the same of a record, and for the same reason: a target that
+   * only exists in volatile app state cannot be reached by a reload, a deep link
+   * or a notification.
+   */
+  const [showComposer, setShowComposer] = useState(() => searchParams.get('compose') === '1');
 
   const closeSelectedRecord = useCallback(() => {
     setSelectedRecordId(null);
@@ -134,8 +161,25 @@ export function RecordPage() {
     setEditText('');
     setShowDeleteConfirm(false);
   }, []);
+
+  /**
+   * Close the composer AND drop `?compose=1`.
+   *
+   * Without the second half the flag outlives the sheet: closing it left the URL
+   * still saying the composer is open, so a reload -- or Back from a record the
+   * user opened next -- reopened it over the timeline they had gone there to read.
+   */
+  const closeComposer = useCallback(() => {
+    setShowComposer(false);
+    if (searchParams.get('compose') === '1') {
+      const next = new URLSearchParams(searchParams);
+      next.delete('compose');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
-  useEscapeKey(() => setShowComposer(false), showComposer);
+  useEscapeKey(closeComposer, showComposer);
 
   /*
     Drag-to-dismiss for the two sheets on this screen.
@@ -150,7 +194,7 @@ export function RecordPage() {
     user unsure whether they had just deleted a record.
   */
   const composerSheet = useSheetDrag({
-    onDismiss: () => setShowComposer(false),
+    onDismiss: closeComposer,
     enabled: !isSaving,
   });
   const detailSheet = useSheetDrag({
@@ -173,6 +217,38 @@ export function RecordPage() {
     () => visibleRecords.find((r) => r.id === selectedRecordId) ?? null,
     [visibleRecords, selectedRecordId],
   );
+
+  /**
+   * The `record-opened` boundary: read this entry's own text, once, on open.
+   *
+   * The composer asks about a feeling when composition settles. Someone who
+   * writes and saves in one motion never answers, and an unanswered reading is
+   * correctly never stored -- so that path ended with no feeling on the record
+   * and nowhere left to add one, which is worse than what it replaced.
+   *
+   * Computed only when there is something to ask ABOUT and nothing already
+   * answered, so opening a record whose feeling is settled costs nothing, and
+   * memoised on the normalised body so paging between records and back does not
+   * re-read the same text. See `lib/onDeviceInference.ts`.
+   */
+  const suggestionMemo = useRef(new InferenceMemo<EmotionFlowItem[]>());
+  const openedRecordSuggestion = useMemo(() => {
+    if (!selectedRecord) return undefined;
+    if (!isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role })) return undefined;
+    if ((selectedRecord.emotionFlow ?? []).some((item) => item.source === 'user_confirmed')) {
+      return undefined;
+    }
+    const body = selectedRecord.log?.trim();
+    if (!body) return undefined;
+    return suggestionMemo.current.read(body, (normalized) =>
+      candidatesToFlowItems(extractEmotionCandidates(normalized), {
+        isPrivate: selectedRecord.isPrivate,
+        // Nothing is being shared or confirmed here; this is the QUESTION.
+        shareWithPartner: false,
+        confirmedIds: new Set(),
+      }),
+    );
+  }, [selectedRecord, profile.id, profile.role]);
 
   // The record went away (deleted here, or revoked by its author): close up.
   useEffect(() => {
@@ -301,6 +377,37 @@ export function RecordPage() {
         }),
     [tripPeriod, visibleRecords, viewYear, viewMonth],
   );
+
+  /**
+   * Whether the 사진 lens has anything to show.
+   *
+   * The toggle used to render unconditionally, so a period with no photographs
+   * offered a second view whose only possible content was an empty state -- an
+   * extra control competing with the one next action an empty screen is supposed
+   * to have (`FEATURE_SPEC` §11).
+   *
+   * Scoped to the PERIOD, not the selected day, on purpose: a day with no photos
+   * inside a month that has them is exactly when someone wants the grid.
+   */
+  const periodHasVisualMedia = useMemo(
+    () =>
+      periodSummaryRecords.some((record) =>
+        (record.attachments ?? []).some((attachment) => attachment.type !== 'voice'),
+      ),
+    [periodSummaryRecords],
+  );
+
+  /**
+   * The timeline is the fallback, not merely the default.
+   *
+   * `lens` is state and `periodHasVisualMedia` is derived, so they can disagree:
+   * switch to 사진, then page the calendar to a month with no photographs, and
+   * the toggle that would switch back has itself just disappeared. Deriving the
+   * timeline's visibility from BOTH means there is no reachable combination that
+   * renders neither view -- which is a blank screen, and the one outcome a lens
+   * switch must never produce.
+   */
+  const showTimeline = lens === 'timeline' || !periodHasVisualMedia;
 
   const periodSummaryLabel = tripPeriod
     ? periodTrip
@@ -501,23 +608,20 @@ export function RecordPage() {
 
   return (
     <MobileShell>
-      <div className="p-4 pb-28 relative min-h-screen">
-        {/* Top Header with Title and Calendar Toggle Button */}
-        <div className="flex items-center justify-between px-1 pt-4 pb-3">
-          <h1 className="text-title tracking-tight text-foreground">기록</h1>
-          <button
+      <AppBar
+        title="기록"
+        actions={
+          <AppBarAction
             onClick={() => setShowCalendar(!showCalendar)}
-            className={cn(
-              'press-response p-2.5 rounded-2xl flex items-center justify-center min-h-[44px] min-w-[44px]',
-              showCalendar
-                ? 'bg-coral-fill text-coral-fill-foreground shadow-sm'
-                : 'bg-card border border-border text-foreground hover:bg-muted'
-            )}
+            active={showCalendar}
+            aria-pressed={showCalendar}
             aria-label="달력 보기"
           >
-            <Calendar size={20} />
-          </button>
-        </div>
+            <Calendar size={20} aria-hidden="true" />
+          </AppBarAction>
+        }
+      />
+      <div className="px-4 pt-4 pb-28 relative min-h-screen">
 
         {tripPeriod ? (
           <div className="mb-4 rounded-2xl border border-coral/30 bg-coral/10 p-4 flex items-start justify-between gap-3">
@@ -755,8 +859,42 @@ export function RecordPage() {
           </div>
         )}
 
+        {/*
+          Two lenses on the same records: 타임라인 reads the selected day in
+          order, 사진 scans every photo of the period. Not two features -- the
+          grid shows nothing the timeline hides, it just makes a picture findable
+          without opening days until it appears (PRODUCT_V3 §17, 기억 탐색 개선).
+        */}
+        {/*
+          `data-testid` because `사진` is not a unique name on this screen: the
+          media filter chips below use the same word, so a by-name query matches
+          two different controls.
+        */}
+        {periodHasVisualMedia && (
+        <div className="mb-3" data-testid="record-lens">
+          <SegmentedControl
+            label="기록 보기 방식"
+            value={lens}
+            onChange={(next) => setLens(next as 'timeline' | 'photos')}
+            size="sm"
+            layout="fill"
+          >
+            <SegmentedControlItem value="timeline" label="타임라인" />
+            <SegmentedControlItem value="photos" label="사진" />
+          </SegmentedControl>
+        </div>
+        )}
+
+        {lens === 'photos' && periodHasVisualMedia && (
+          <MediaArchiveGrid
+            records={periodSummaryRecords}
+            coupleId={state.profile.couple.coupleId}
+            emptyDescription={`${periodSummaryLabel}에 남긴 사진이 아직 없어요.`}
+          />
+        )}
+
         {/* Media Filter Chips */}
-        {selectedDayAllRecords.length > 0 && (
+        {showTimeline && selectedDayAllRecords.length > 0 && (
           <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-hide pb-0.5">
             {FILTERS.map((f) => (
               <button
@@ -798,6 +936,7 @@ export function RecordPage() {
         )}
 
         {/* Day Timeline — editorial layout */}
+        {showTimeline && (
         <ul className="space-y-0">
           {selectedDayRecords.length === 0 ? (
             <li className="list-none rounded-surface bg-card border border-border/60 p-6 text-center text-muted-foreground">
@@ -896,22 +1035,25 @@ export function RecordPage() {
                       </span>
                     </button>
 
-                    {/* Media + prose share the remaining width and set the row height */}
-                    <div className="min-w-0 flex-1 flex gap-2">
-                      {hasMedia && (
-                        <div className="shrink-0 w-[68px] min-[360px]:w-[76px] space-y-1">
-                          {r.attachments!.map((att, i) => (
-                            <AttachmentMedia
-                              key={i}
-                              attachment={att}
-                              coupleId={state.profile.couple.coupleId}
-                              recordId={r.id}
-                              variant="timeline"
-                            />
-                          ))}
-                        </div>
-                      )}
+                    {/*
+                      Prose first, then media at the FULL width of the content
+                      column.
 
+                      Media used to be a 68px (76px at >=360px) column beside the
+                      prose. That column was the fix for a real bug -- absolutely
+                      positioned media contributed no height and drew over the
+                      record below -- but it settled the layout by making the
+                      photograph the smallest thing in the row, which inverts
+                      DESIGN_V2 §3.1's content-first hierarchy. Stacking keeps the
+                      normal-flow height contract that fixed the overlap and gives
+                      the photo the width it should always have had.
+
+                      It stays OUTSIDE the opener button: `<video controls>` and
+                      `<audio controls>` cannot live inside a `<button>`, which is
+                      what `keyboardOperableCards.test.tsx` asserts by walking up
+                      from `[data-testid="record-attachment"]`.
+                    */}
+                    <div className="min-w-0 flex-1 flex flex-col gap-2">
                       <button
                         type="button"
                         onClick={() => setSelectedRecordId(r.id)}
@@ -973,6 +1115,14 @@ export function RecordPage() {
                           )}
                         </span>
                       </button>
+
+                      {hasMedia && (
+                        <RecordMediaGallery
+                          attachments={r.attachments!}
+                          coupleId={state.profile.couple.coupleId}
+                          recordId={r.id}
+                        />
+                      )}
                     </div>
                   </div>
                 </li>
@@ -980,6 +1130,7 @@ export function RecordPage() {
             })
           )}
         </ul>
+        )}
 
       {/* Floating CTA — the one primary action. 48px via Button size="lg".
           Positioned off the measured bottom chrome so it never overlaps the
@@ -996,7 +1147,7 @@ export function RecordPage() {
             className="shadow-md"
           >
             <span aria-hidden="true">+</span>
-            <span>지금의 마음 남기기</span>
+            <span>기록 남기기</span>
           </Button>
         </div>
       )}
@@ -1012,7 +1163,7 @@ export function RecordPage() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="지금의 마음 남기기"
+            aria-label="기록 남기기"
             ref={composerSheet.sheetRef}
             className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-4 shadow-xl max-h-[90vh] overflow-y-auto"
           >
@@ -1020,14 +1171,14 @@ export function RecordPage() {
             <div className="flex justify-end mb-1">
               <button
                 type="button"
-                onClick={() => setShowComposer(false)}
+                onClick={closeComposer}
                 aria-label="닫기"
                 className="press-response min-h-11 min-w-11 flex items-center justify-center text-muted-foreground"
               >
                 <X size={18} aria-hidden="true" />
               </button>
             </div>
-            <TodayLogWidget onSaved={() => setShowComposer(false)} />
+            <TodayLogWidget onSaved={closeComposer} />
           </div>
         </div>
       )}
@@ -1226,19 +1377,38 @@ export function RecordPage() {
               {((selectedRecord.attachments && selectedRecord.attachments.length > 0) || canEditMedia) && (
                 <div className="space-y-2">
                   <h4 className="text-caption font-bold text-muted-foreground">첨부 파일</h4>
-                  {(selectedRecord.attachments || []).map((att, idx) => (
-                    <AttachmentMedia
-                      key={idx}
-                      attachment={att}
+
+                  {/*
+                    Viewing and managing are separated here, where the timeline
+                    only has to view.
+
+                    The delete control used to hang under each photo as that
+                    photo's `footer`. That put a destructive button inside the
+                    swipeable set once media became a gallery -- a swipe that
+                    lands slightly short leaves a finger over 첨부 삭제 -- and it
+                    made every attachment carry a control most viewings do not
+                    want. So the record's media reads as one gallery, and removal
+                    moves to an explicit owner-only list underneath it.
+                  */}
+                  {selectedRecord.attachments && selectedRecord.attachments.length > 0 && (
+                    <RecordMediaGallery
+                      attachments={selectedRecord.attachments}
                       coupleId={state.profile.couple.coupleId}
                       recordId={selectedRecord.id}
-                      variant="detail"
-                      footer={
+                    />
+                  )}
+
+                  {canEditMedia && (selectedRecord.attachments || []).some((att) => att.path) && (
+                    <ul className="space-y-1 pt-1">
+                      {(selectedRecord.attachments || []).map((att, idx) =>
                         /* Removal needs the durable storage path. A legacy
                            attachment without one cannot be addressed in Storage,
                            so no delete control is offered for it. */
-                        canEditMedia && att.path ? (
-                          <div className="flex justify-end px-3 pb-2 pt-1">
+                        att.path ? (
+                          <li key={idx} className="flex items-center gap-2 min-h-11">
+                            <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
+                              {att.name}
+                            </span>
                             <button
                               type="button"
                               onClick={() => void handleRemoveAttachment(att.path!)}
@@ -1246,13 +1416,13 @@ export function RecordPage() {
                               aria-label={`첨부 ${att.name} 삭제`}
                               className="press-response min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-label disabled:opacity-50"
                             >
-                              <Trash2 size={13} /> 첨부 삭제
+                              <Trash2 size={13} aria-hidden="true" /> 첨부 삭제
                             </button>
-                          </div>
-                        ) : undefined
-                      }
-                    />
-                  ))}
+                          </li>
+                        ) : null,
+                      )}
+                    </ul>
+                  )}
 
                   {canEditMedia && (
                     <div className="pt-1 space-y-2">
@@ -1359,6 +1529,7 @@ export function RecordPage() {
                 <div className="pt-2 border-t border-border">
                   <RecordMoodSection
                     items={selectedRecord.emotionFlow ?? []}
+                    suggested={openedRecordSuggestion}
                     disabled={isOffline}
                     disabledReason={OFFLINE_READONLY_MESSAGE}
                     onChange={async (emotionFlow) => {

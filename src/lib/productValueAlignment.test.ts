@@ -1,13 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_LAYOUT_BY_ROLE, migrateWidgetLayout } from '@/lib/widgets';
+import { DEFAULT_LAYOUT_BY_ROLE, HOME_CORE_BY_ROLE, migrateWidgetLayout } from '@/lib/widgets';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('product value alignment', () => {
   it('puts lightweight capture first on the waiting partner home', () => {
-    expect(DEFAULT_LAYOUT_BY_ROLE.gomsin[0]).toBe('today_word');
+    // Moved from the default layer to the pinned one, which makes the guarantee
+    // stronger: capture leads 곰신's home whatever she does to her widgets, rather
+    // than only until she rearranges them.
+    expect(HOME_CORE_BY_ROLE.gomsin[0]).toBe('today_word');
   });
 
   it('migrates only the untouched legacy default and preserves customization', () => {

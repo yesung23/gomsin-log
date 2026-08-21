@@ -19,7 +19,9 @@ import {
 import { WidgetWrapper } from '@/components/widgets/WidgetWrapper';
 import {
   DEFAULT_LAYOUT_BY_ROLE,
+  HOME_CORE_BY_ROLE,
   WIDGET_REGISTRY,
+  isHomeCore,
   isWidgetAllowedForRole,
   widgetsForRole,
 } from '@/lib/widgets';
@@ -28,7 +30,29 @@ import { AddWidgetBottomSheet } from '@/components/widgets/AddWidgetBottomSheet'
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { CallBriefingWidget } from '@/components/widgets/CallBriefingWidget';
 
-export function WidgetDashboard() {
+/**
+ * The home screen, shaped by what this person came here to do.
+ *
+ * ## Why two shapes and not one arrangeable board
+ *
+ * The two roles have opposite jobs. 곰신 has their phone all day and is CAPTURING;
+ * 군화 gets a short window and is CATCHING UP, usually just before a call. One
+ * dashboard with different default cards treated that as a preference. It is not
+ * a preference -- it is what the screen is for, and PRODUCT_V3 §6 says so
+ * directly: 홈을 무관한 카드의 대시보드로 만들지 않는다.
+ *
+ * So the surfaces that answer that question are PINNED (`HOME_CORE_BY_ROLE`):
+ * above the widgets, in role order, without drag chrome, and not removable. The
+ * widget layer is kept underneath, because being able to arrange the rest is
+ * real and taking it away would be removing something people have.
+ *
+ * The lesson from `SoldierDashboard`'s removal was misread once already. It was
+ * not "a home must be customisable" -- it was "that screen was bad". Two purposes
+ * were then merged into one engine, which is how the person with the scarce phone
+ * window ended up with no composer on their home at all (§5.1 requires one for
+ * both roles; the soldier default simply omitted it).
+ */
+export function RoleHome() {
   const { state, setWidgetLayout } = useStore();
   const [isEditMode, setIsEditMode] = useState(false);
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
@@ -75,14 +99,39 @@ export function WidgetDashboard() {
   const coupleId = state.profile.couple.coupleId || '';
   const viewerIdentity = `${viewerUserId}:${coupleId}`;
 
-  // Drop ids that are unknown OR not meant for this role, so a role switch cannot
-  // leave "상대방의 마음 흐름" on the screen of the person it describes.
+  /**
+   * The arrangeable layer.
+   *
+   * Drops ids that are unknown OR not meant for this role, so a role switch cannot
+   * leave "상대방의 마음 흐름" on the screen of the person it describes -- and now
+   * also drops anything the core already pins, so a layout saved before the core
+   * existed does not render 상대방의 오늘 twice. Filtered rather than rewritten:
+   * a layout is the user's arrangement, and quietly editing it to match a
+   * structural change is not ours to do.
+   */
   const activeWidgets = useMemo(() => {
-    const filtered = (storedLayout ?? []).filter(
+    const usable = (storedLayout ?? []).filter(
       (id: string) => WIDGET_REGISTRY[id] && isWidgetAllowedForRole(id, role),
     );
-    return filtered.length > 0 ? filtered : DEFAULT_LAYOUT_BY_ROLE[role];
+    const base = usable.length > 0 ? usable : DEFAULT_LAYOUT_BY_ROLE[role];
+    return base.filter((id: string) => !isHomeCore(id, role));
   }, [storedLayout, role]);
+
+  /** The pinned surfaces, in the order this role reads them. */
+  const coreSurfaces = useMemo(
+    () => HOME_CORE_BY_ROLE[role]
+      .map((id) => ({
+        id,
+        // `call_briefing` is deliberately outside the registry -- it was never
+        // arrangeable, and giving it an entry would offer to remove it.
+        Component: id === 'call_briefing'
+          ? CallBriefingWidget
+          : WIDGET_REGISTRY[id]?.component,
+      }))
+      .filter((entry): entry is { id: string; Component: NonNullable<typeof entry.Component> } =>
+        Boolean(entry.Component)),
+    [role],
+  );
 
   const persist = (layout: string[]) => setWidgetLayout(layout, role);
 
@@ -241,18 +290,33 @@ export function WidgetDashboard() {
         <CoupleStatusBanner />
       </div>
 
-      {/* The soldier's scarce phone window has one non-removable job: regain the
-          shared context before the call. Custom widgets remain below, but this
-          call-prep surface cannot be accidentally deleted or buried. */}
-      {role === 'soldier' && state.profile.couple.connected && (
-        <div className="px-4 pt-3">
-          <CallBriefingWidget key={viewerIdentity} />
-        </div>
-      )}
+      {/*
+        The core. What this role came here to do, in the order they do it.
+
+        Rendered WITHOUT `WidgetWrapper`: no drag handle, no delete, no edit-mode
+        wiggle. Outside edit mode the wrapper is a bare `<div>`, so this is the
+        same picture it was -- what changed is that these surfaces can no longer
+        be removed, reordered, or arrive in an order that contradicts the job.
+
+        Keyed by `viewerIdentity` for the reason the widgets are: a surface that
+        caches relationship-scoped state on mount must not survive an account or
+        couple change holding the previous one.
+      */}
+      <div className="px-4 pt-3 space-y-5" data-testid="home-core">
+        {coreSurfaces.map(({ id, Component }) => {
+          // 통화 전 60초 has nothing to brief before there is a partner.
+          if (id === 'call_briefing' && !state.profile.couple.connected) return null;
+          return (
+            <section key={`${id}:${viewerIdentity}`} data-core-surface={id}>
+              <Component />
+            </section>
+          );
+        })}
+      </div>
 
       {/* Widget Container */}
       <div
-        className="px-4 pt-4 space-y-5 min-h-[200px]"
+        className="px-4 pt-6 space-y-5"
         onTouchStart={!isEditMode ? handleTouchStart : undefined}
         onTouchEnd={!isEditMode ? handleTouchEnd : undefined}
         onTouchMove={!isEditMode ? handleTouchEnd : undefined}
@@ -260,6 +324,18 @@ export function WidgetDashboard() {
         onMouseUp={!isEditMode ? handleTouchEnd : undefined}
         onMouseLeave={!isEditMode ? handleTouchEnd : undefined}
       >
+        {/*
+          A quiet line, so the boundary is legible.
+
+          Without it the pinned surfaces and the arrangeable ones are one
+          undifferentiated stack, and a person who long-presses to reorder finds
+          that some of it moves and some of it will not, with nothing on screen
+          having said which.
+        */}
+        {(activeWidgets.length > 0 || isEditMode) && (
+          <p className="text-caption text-muted-foreground px-1">내가 고른 위젯</p>
+        )}
+
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -300,9 +376,15 @@ export function WidgetDashboard() {
         )}
       </div>
 
+      {/*
+        The hint used to say the edit button changes "홈 순서". It no longer does --
+        it changes the widget layer, and the core above it is fixed. Saying
+        otherwise would send someone into edit mode to move something that will
+        not move.
+      */}
       {!isEditMode && (
         <div className="text-center mt-4 text-caption text-muted-foreground">
-          오른쪽 위 편집 버튼에서 홈 순서를 바꿀 수 있어요
+          오른쪽 위 편집 버튼에서 위젯을 더하거나 순서를 바꿀 수 있어요
         </div>
       )}
 

@@ -136,6 +136,37 @@ if (!('matchMedia' in window)) {
   });
 }
 
+/**
+ * jsdom has no `ResizeObserver`, and Astryx components construct one at mount.
+ *
+ * This app's own code guards for its absence (`MobileShell` publishes the tab bar
+ * height only `if (typeof ResizeObserver !== 'undefined')`), so nothing needed a
+ * stub until `@astryxdesign/core`'s `Carousel` arrived -- it constructs one
+ * unconditionally, and a record with two or more photos threw
+ * `ResizeObserver is not defined` on render. No existing test happened to render
+ * that case, so the whole suite stayed green while the multi-photo path could not
+ * be tested at all.
+ *
+ * A no-op is the honest stub: it reports no size changes, which is exactly true
+ * of a layout engine that does not lay anything out. Anything that depends on a
+ * real measurement is not assertable in jsdom and belongs in the Playwright
+ * suite.
+ */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  for (const target of [window, globalThis]) {
+    Object.defineProperty(target, 'ResizeObserver', {
+      writable: true,
+      configurable: true,
+      value: ResizeObserverStub,
+    });
+  }
+}
+
 if (!('crypto' in globalThis) || typeof globalThis.crypto.randomUUID !== 'function') {
   Object.defineProperty(globalThis, 'crypto', {
     writable: true,

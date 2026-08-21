@@ -54,8 +54,16 @@ vi.mock('@/lib/useStore', () => ({
     setHighlightedRecordId,
   }),
 }));
+/*
+ * `MEDIA_ACCEPT` and `classifyMediaFile` joined this mock when the composer became
+ * a PINNED home surface rather than a widget in the default layout. These tests
+ * never asked for a composer and still do not, but the home now always has one,
+ * so a partial mock of `@/lib/records` has to carry what it imports.
+ */
 vi.mock('@/lib/records', () => ({
   resolveAttachmentUrls: vi.fn(async (attachments: unknown[]) => attachments),
+  MEDIA_ACCEPT: 'image/*',
+  classifyMediaFile: vi.fn(() => ({ type: 'photo' })),
 }));
 /*
  * The call briefing is rendered by this dashboard too, and it carries its own
@@ -70,7 +78,7 @@ vi.mock('@/components/CoupleStatusBanner', () => ({
   CoupleStatusBanner: () => null,
 }));
 
-const { WidgetDashboard } = await import('@/features/home/WidgetDashboard');
+const { RoleHome } = await import('@/features/home/RoleHome');
 
 function record(overrides: Partial<DailyRecord> & { id: string; userId: string }): DailyRecord {
   return {
@@ -150,7 +158,7 @@ function seedCheckpointA(
 }
 
 function renderDashboard() {
-  return render(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+  return render(<MemoryRouter><RoleHome /></MemoryRouter>);
 }
 
 beforeEach(() => {
@@ -177,7 +185,7 @@ describe('상대방의 오늘 across a live account change', () => {
     currentState = stateFor('user-b', 'couple-b', [
       record({ id: 'b-old', userId: 'partner-b', date: BEFORE_A_CHECKPOINT, log: 'B가 못 본 기록' }),
     ], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     // Under the defect A's receipt classified B's record as already observed.
     expect(screen.getByText('B가 못 본 기록')).toBeInTheDocument();
@@ -192,7 +200,7 @@ describe('상대방의 오늘 across a live account change', () => {
     currentState = stateFor('user-b', 'couple-b', [
       record({ id: 'a-rec-1', userId: 'partner-b', log: 'B의 기록' }),
     ], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     expect(screen.getByText('B의 기록')).toBeInTheDocument();
   });
@@ -206,13 +214,13 @@ describe('상대방의 오늘 across unlink and relink', () => {
 
     // `purgeSharedAccess`: same account, couple cleared, records dropped.
     currentState = stateFor('user-a', undefined, [], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     // Relinked with someone else. Same account, new couple, still no remount.
     currentState = stateFor('user-a', 'couple-b', [
       record({ id: 'b-old', userId: 'partner-b', date: BEFORE_A_CHECKPOINT, log: '새 커플의 기록' }),
     ], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     expect(screen.getByText('새 커플의 기록')).toBeInTheDocument();
   });
@@ -227,7 +235,7 @@ describe('상대방의 오늘 across unlink and relink', () => {
     currentState = stateFor('user-b', 'couple-shared', [
       record({ id: 'unseen', userId: 'partner-x', date: BEFORE_A_CHECKPOINT, log: 'B는 못 봤다' }),
     ], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     expect(screen.getByText('B는 못 봤다')).toBeInTheDocument();
   });
@@ -243,7 +251,7 @@ describe('acknowledgement after an identity change writes only the new identity'
     currentState = stateFor('user-b', 'couple-b', [
       record({ id: 'b-only', userId: 'partner-b', date: BEFORE_A_CHECKPOINT, log: 'B의 유일한 기록' }),
     ], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     await user.click(screen.getByTestId('partner-day-acknowledge'));
 
@@ -279,7 +287,7 @@ describe('다정한 한마디 as a standalone widget', () => {
         log: '힘들었던 하루',
       }),
     ], ['care_hint']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     expect(screen.getByText(/힘든 일이 있었어요/)).toBeInTheDocument();
     expect(screen.queryByText(/새로 공유된 순간이 아직 없어요/)).not.toBeInTheDocument();
@@ -288,15 +296,21 @@ describe('다정한 한마디 as a standalone widget', () => {
 
 describe('identity is lifecycle only, never a widget id', () => {
   it('persists the plain registry id, so a saved layout survives an account change', async () => {
-    // If the compound key had leaked into the `id` prop, removal would persist
-    // `partner_day:user-a:couple-a` and the stored layout would stop matching the
-    // registry for every other identity. The key must be lifecycle only.
+    /*
+     * If the compound key had leaked into the `id` prop, removal would persist
+     * `care_hint:user-a:couple-a` and the stored layout would stop matching the
+     * registry for every other identity. The key must be lifecycle only.
+     *
+     * Uses `care_hint` rather than `partner_day`, which is now PINNED and
+     * therefore has no delete button at all -- the claim under test is about the
+     * id a removal persists, so it needs a widget that can still be removed.
+     */
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    currentState = stateFor('user-a', 'couple-a', [], ['partner_day', 'dday']);
+    currentState = stateFor('user-a', 'couple-a', [], ['care_hint', 'dday']);
     renderDashboard();
 
     await user.click(screen.getByRole('button', { name: '위젯 편집' }));
-    await user.click(screen.getByRole('button', { name: '상대방의 오늘 위젯 삭제' }));
+    await user.click(screen.getByRole('button', { name: '다정한 한마디 위젯 삭제' }));
 
     expect(setWidgetLayout).toHaveBeenCalledWith(['dday'], 'soldier');
   });
@@ -317,14 +331,14 @@ describe('switching back to the first identity', () => {
     currentState = stateFor('user-b', 'couple-b', [
       record({ id: 'b-rec', userId: 'partner-b', log: 'B의 기록' }),
     ], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
     expect(screen.getByText('B의 기록')).toBeInTheDocument();
 
     currentState = stateFor('user-a', 'couple-a', [
       record({ id: 'a-seen', userId: 'partner-a', log: 'A가 확인한 기록' }),
       record({ id: 'a-new', userId: 'partner-a', time: '20:00', log: 'A의 새 기록' }),
     ], ['partner_day']);
-    rerender(<MemoryRouter><WidgetDashboard /></MemoryRouter>);
+    rerender(<MemoryRouter><RoleHome /></MemoryRouter>);
 
     // A's receipt came back from storage: the confirmed record stays confirmed,
     // and the one that arrived while A was away is surfaced.

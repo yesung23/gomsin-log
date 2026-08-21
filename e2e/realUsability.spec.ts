@@ -107,10 +107,11 @@ test('the primary action on each core screen is present and enabled for a real c
    * workspace. For a signed-in, connected couple these must all be live.
    */
   const checks: Array<{ route: string; name: RegExp; what: string }> = [
-    // `지금의 마음 남기기`, not `오늘 기록하기`: the floating CTA was renamed, and
-    // matching the old label made this report the record screen as having no way to
-    // write -- a false alarm about the app's single most important action.
-    { route: '/record', name: /지금의 마음 남기기|기록하기/, what: '기록 작성' },
+    // `기록 남기기` is the one name the authoring action carries everywhere
+    // (CTA, tab-bar action, sheet) since the one-tap-everywhere unification.
+    // Matching a stale label here reports the record screen as having no way
+    // to write -- a false alarm about the app's single most important action.
+    { route: '/record', name: /기록 남기기/, what: '기록 작성' },
     { route: '/schedule', name: /일정 추가/, what: '일정 추가' },
     { route: '/trips', name: /여행|계획/, what: '여행 만들기' },
   ];

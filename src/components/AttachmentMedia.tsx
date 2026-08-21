@@ -60,6 +60,16 @@ type Props = {
 /**
  * Render one attachment so it can actually be consumed.
  *
+ * NOT ON A PRODUCTION PATH as of the 2026-08-20 Astryx/Instagram visual pass.
+ * Every screen that used to render this -- the 기록 timeline, the record detail
+ * sheet, and 상대방의 오늘 -- now renders `components/media/RecordMediaGallery`,
+ * which gives media the full content width, swipes a multi-photo record, and
+ * opens a fullscreen viewer. This file is kept rather than deleted because it is
+ * still the only single-attachment renderer with the three size variants, and
+ * because `AttachmentMedia.test.tsx` and `lib/lintGateStrictness.test.ts` pin
+ * behaviour that is worth keeping provable. Deleting it is a separate decision
+ * from the redesign, and is recorded as such in `docs/WORK_LOG.md`.
+ *
  * Bug condition this closes: a voice or video attachment rendered as a filename
  * chip with no player. The app records audio with `MediaRecorder`, accepts video
  * files, uploads both to Storage and signs URLs for them -- and then offered no

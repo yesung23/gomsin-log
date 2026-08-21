@@ -20,6 +20,7 @@ import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
 import { emotionFlowForStorage } from '@/lib/privacy';
 import {
   DEFAULT_LAYOUT_BY_ROLE,
+  HOME_CORE_BY_ROLE,
   WIDGET_REGISTRY,
   isWidgetAllowedForRole,
   widgetsForRole,
@@ -183,9 +184,15 @@ describe('extractEmotionCandidates', () => {
 // ---------------------------------------------------------------------------
 describe('what actually gets stored', () => {
   const candidates = extractEmotionCandidates('짜증났는데 기분이 나아졌어');
+  /** Every reading answered by a person. The composer's "다 맞아요" outcome. */
+  const allAnswered = new Set(candidates.map((candidate) => candidate.id));
+  /** Nothing answered: the app read the entry and the author never replied. */
+  const noneAnswered: ReadonlySet<string> = new Set();
 
   it('never persists the evidence phrase taken from the diary body', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.length).toBeGreaterThan(0);
     for (const item of items) {
       expect(item).not.toHaveProperty('evidence');
@@ -196,50 +203,104 @@ describe('what actually gets stored', () => {
     expect(JSON.stringify(items)).not.toContain('나아짐');
   });
 
-  it('marks everything the author left in place as user_confirmed', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+  /**
+   * The inversion this pipeline was rebuilt for.
+   *
+   * `candidatesToFlowItems` used to stamp every surviving candidate
+   * `user_confirmed`, so an entry written and saved without ever opening the
+   * feelings row recorded the machine's guess as the author's own answer --
+   * and `emotionFlowForStorage`, whose whole job is to drop anything that is
+   * not confirmed, could not tell, because its only caller lied to it.
+   */
+  it('leaving a suggestion in place is not confirming it', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: noneAnswered,
+    });
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((item) => item.source === 'rule_suggested')).toBe(true);
+    // ...and therefore none of it survives the write-path filter.
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
+  });
+
+  it('an answered suggestion becomes user_confirmed and survives the write path', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.source === 'user_confirmed')).toBe(true);
-    // ...which is what lets it survive the write-path filter.
     const stored = emotionFlowForStorage({ isPrivate: false, emotionFlow: items });
     expect(stored).toHaveLength(items.length);
   });
 
+  it('answers each reading separately, so a partly reviewed flow stores only the part reviewed', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false,
+      shareWithPartner: true,
+      confirmedIds: new Set([candidates[0].id]),
+    });
+    expect(items[0].source).toBe('user_confirmed');
+    expect(items[1].source).toBe('rule_suggested');
+    const stored = emotionFlowForStorage({ isPrivate: false, emotionFlow: items });
+    expect(stored).toHaveLength(1);
+    expect(stored[0].basic).toBe(candidates[0].basic);
+  });
+
+  /**
+   * PRODUCT_V3 §13 requires an affirmative author action before a machine
+   * reading reaches the partner. One switch above a list of guesses the author
+   * never read is not agreement with each of them, so the switch alone cannot
+   * publish anything -- the per-item answer is a second, independent condition.
+   */
+  it('the share toggle cannot publish a reading the author never answered', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: noneAnswered,
+    });
+    expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
+  });
+
   it('keeps a private record author-only regardless of the share toggle', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: true, shareWithPartner: true });
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: true, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
     // An author-only item must not reach a shared row.
     expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
   });
 
-  /**
-   * PRODUCT_V3 §13: machine-inferred emotion is private to the author by
-   * default. Leaving suggested chips in place is not an explicit share
-   * action, so a SHARED record's emotion must stay out of what the partner's
-   * RLS-readable row actually contains -- not merely hidden by client UI.
-   */
   it('a shared record with the share toggle OFF never persists emotion for the partner to read', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: false });
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: false, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
     expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
   });
 
-  it('a shared record with the share toggle ON persists emotion for the partner to read', () => {
-    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+  it('a shared record with the share toggle ON persists the answered emotion for the partner to read', () => {
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+    });
     expect(items.every((item) => item.visibility === 'shared')).toBe(true);
     expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toHaveLength(items.length);
   });
 
   it('omitting shareWithPartner defaults to author-only, not shared', () => {
     // @ts-expect-error -- exercising a caller that forgets the now-required flag
-    const items = candidatesToFlowItems(candidates, { isPrivate: false });
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, confirmedIds: allAnswered });
     expect(items.every((item) => item.visibility === 'author_only')).toBe(true);
+  });
+
+  it('omitting confirmedIds fails closed: nothing is treated as answered', () => {
+    // @ts-expect-error -- exercising a caller that forgets the now-required set
+    const items = candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true });
+    expect(items.every((item) => item.source === 'rule_suggested')).toBe(true);
+    expect(emotionFlowForStorage({ isPrivate: false, emotionFlow: items })).toEqual([]);
   });
 
   it('records which items a human corrected, and which it did not', () => {
     const edited = new Set([candidates[0].id]);
-    const items = candidatesToFlowItems(
-      candidates, { isPrivate: false, shareWithPartner: true, editedIds: edited },
-    );
+    const items = candidatesToFlowItems(candidates, {
+      isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered, editedIds: edited,
+    });
     expect(items[0].userEdited).toBe(true);
     expect(items[1].userEdited).toBe(false);
   });
@@ -248,12 +309,18 @@ describe('what actually gets stored', () => {
     // The reported defect: the label could be fixed while the drawn line stayed
     // wrong. 분노 → 행복 rises; 행복 → 행복 is flat.
     const rising = analyzeEmotionFlow(
-      candidatesToFlowItems(candidates, { isPrivate: false, shareWithPartner: true }),
+      candidatesToFlowItems(candidates, {
+        isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
+      }),
     );
-    const corrected = candidatesToFlowItems(
-      candidates.map((candidate) => ({ ...candidate, basic: 'happiness' as BasicEmotion })),
-      { isPrivate: false, shareWithPartner: true },
+    const correctedCandidates = candidates.map(
+      (candidate) => ({ ...candidate, basic: 'happiness' as BasicEmotion }),
     );
+    const corrected = candidatesToFlowItems(correctedCandidates, {
+      isPrivate: false,
+      shareWithPartner: true,
+      confirmedIds: new Set(correctedCandidates.map((candidate) => candidate.id)),
+    });
     const flat = analyzeEmotionFlow(corrected);
     expect(rising?.shape).not.toBe(flat?.shape);
     expect(flat?.shape).toBe('calm');
@@ -302,16 +369,26 @@ describe('role-aware home widgets', () => {
      * useful once the thing it describes is on the screen -- which is why
      * `partner_day` was moved in front of them.
      */
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['partner_day', 'talk_about_list', 'dday']);
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier[0]).toBe('partner_day');
+    /*
+     * THIRD MOVE, and the last one that can happen to this assertion: the ordering
+     * it protects is no longer a default that a user can rearrange away. The
+     * surfaces are PINNED (`HOME_CORE_BY_ROLE`), so 군화's home leads with the
+     * briefing (§6.1's 요약 층) and then the day itself (원본 층) whatever anyone
+     * does to their widgets. The arrangeable layer below is now just D-Day.
+     */
+    expect(HOME_CORE_BY_ROLE.soldier).toEqual([
+      'call_briefing', 'partner_day', 'talk_about_list', 'today_word',
+    ]);
+    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['dday']);
     // `talk_about_list` joined in P3. It is not another DESCRIPTION of the
     // day -- it is the couple's own explicit marks on records already on this
     // screen, which is the next step of the loop rather than a restatement of
     // the previous one. The rule this test protects (the day itself leads,
     // descriptions do not crowd it) is unchanged.
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('partner_emotion_flow');
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('partner_emotion_summary');
-    expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain('care_hint');
+    for (const description of ['partner_emotion_flow', 'partner_emotion_summary', 'care_hint']) {
+      expect(DEFAULT_LAYOUT_BY_ROLE.soldier).not.toContain(description);
+      expect(HOME_CORE_BY_ROLE.soldier).not.toContain(description);
+    }
   });
 
   it('keeps every demoted widget available rather than deleting it', () => {
@@ -321,12 +398,29 @@ describe('role-aware home widgets', () => {
       'partner_emotion_flow',
       'partner_emotion_summary',
       'care_hint',
-      'today_word',
       'upcoming_schedule',
     ]) {
       expect(WIDGET_REGISTRY[id], `${id} must still exist`).toBeTruthy();
       expect(isWidgetAllowedForRole(id, 'soldier'), `${id} must still be offerable`).toBe(true);
       expect(widgetsForRole('soldier').map((w) => w.id), id).toContain(id);
+    }
+  });
+
+  /**
+   * A pinned surface is withheld from the add sheet, and that is not a deletion.
+   *
+   * `today_word` left this list because it is no longer arrangeable for either
+   * role -- it is pinned. Offering it in the sheet would let someone add a second
+   * composer under the one already on their home.
+   */
+  it('withholds pinned surfaces from the add sheet, for both roles', () => {
+    for (const role of ['gomsin', 'soldier'] as const) {
+      const offered = widgetsForRole(role).map((widget) => widget.id);
+      for (const pinned of HOME_CORE_BY_ROLE[role]) {
+        expect(offered, `${pinned} must not be addable for ${role}`).not.toContain(pinned);
+      }
+      // Still registered, still rendered -- just not as something to arrange.
+      if (WIDGET_REGISTRY.today_word) expect(HOME_CORE_BY_ROLE[role]).toContain('today_word');
     }
   });
 
@@ -380,17 +474,23 @@ describe('role-aware home widgets', () => {
     expect(widgetsForRole('gomsin').map((w) => w.id)).not.toContain('partner_emotion_flow');
   });
 
-  it('offers partner_day to BOTH roles -- PRODUCT_V3 §5.1, the surface is symmetric', () => {
-    // `partner_day` is the raw evidence timeline, not commentary, and the
-    // north star is "서로의 하루" (each other's day) -- not one-directional.
-    // It used to be soldier-only, which meant 곰신 had a compose surface but
-    // no evidence surface of her own: the exact asymmetry this widget exists
-    // to fix, just pointed the other way.
+  it('pins partner_day for BOTH roles -- PRODUCT_V3 §5.1, the surface is symmetric', () => {
+    /*
+     * `partner_day` is the raw evidence timeline, not commentary, and the north
+     * star is "서로의 하루" -- not one-directional. It used to be soldier-only,
+     * which meant 곰신 had a compose surface but no evidence surface of her own:
+     * the exact asymmetry this widget exists to fix, pointed the other way.
+     *
+     * The guarantee got STRONGER rather than moving. It is no longer "offered to
+     * both roles" -- something offered can be declined, and a 곰신 who tidied her
+     * home could end up without it again. It is pinned for both, so the symmetry
+     * survives any arrangement. That is also why it is absent from `widgetsForRole`
+     * now: it is not a thing to add, it is already there.
+     */
     expect(isWidgetAllowedForRole('partner_day', 'soldier')).toBe(true);
     expect(isWidgetAllowedForRole('partner_day', 'gomsin')).toBe(true);
-    expect(widgetsForRole('gomsin').map((w) => w.id)).toContain('partner_day');
-    expect(widgetsForRole('soldier').map((w) => w.id)).toContain('partner_day');
-    expect(DEFAULT_LAYOUT_BY_ROLE.gomsin).toContain('partner_day');
+    expect(HOME_CORE_BY_ROLE.gomsin).toContain('partner_day');
+    expect(HOME_CORE_BY_ROLE.soldier).toContain('partner_day');
   });
 
   it('gives both roles a default layout made only of widgets they may use', () => {

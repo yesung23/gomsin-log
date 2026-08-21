@@ -394,8 +394,8 @@ for (const [label, scenario] of [['creator', CREATOR], ['partner', PARTNER]] as 
       await page.getByRole('button', { name: '한줄' }).click();
     } else {
       await goto(page, '/record');
-      await page.getByRole('button', { name: '지금의 마음 남기기' }).click();
-      await expect(page.getByRole('dialog', { name: '지금의 마음 남기기' })).toBeVisible();
+      await page.getByRole('button', { name: '기록 남기기' }).click();
+      await expect(page.getByRole('dialog', { name: '기록 남기기' })).toBeVisible();
       await page.getByRole('button', { name: '한줄' }).click();
     }
 

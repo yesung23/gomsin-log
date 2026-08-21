@@ -577,9 +577,9 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
     const user = userEvent.setup({ delay: null });
     renderPage([]);
 
-    expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
-    expect(screen.getByRole('dialog', { name: '지금의 마음 남기기' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
+    expect(screen.getByRole('dialog', { name: '기록 남기기' })).toBeInTheDocument();
   });
 
   it('is present regardless of the stored widget layout -- it does not read widgetLayout at all', async () => {
@@ -588,8 +588,8 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
     // does not consult that list, so it is unaffected.
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
-    const dialog = await screen.findByRole('dialog', { name: '지금의 마음 남기기' });
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
+    const dialog = await screen.findByRole('dialog', { name: '기록 남기기' });
     expect(dialog).toBeInTheDocument();
     // TodayLogWidget's own capture launcher, present the instant the sheet
     // opens -- before any type is chosen.
@@ -599,7 +599,7 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
   it('saving from the sheet calls the same store write TodayLogWidget always used', async () => {
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
     await user.click(screen.getByRole('button', { name: /한줄/ }));
     await user.type(await screen.findByLabelText('오늘의 기록'), '기록 탭에서 바로 씀');
     await user.click(screen.getByRole('button', { name: /남기기|저장/ }));
@@ -611,21 +611,21 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
   it('closes itself after a successful save', async () => {
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
     await user.click(screen.getByRole('button', { name: /한줄/ }));
     await user.type(await screen.findByLabelText('오늘의 기록'), '닫혀야 함');
     await user.click(screen.getByRole('button', { name: /남기기|저장/ }));
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument());
   });
 
   it('the X button closes the sheet without saving', async () => {
     const user = userEvent.setup({ delay: null });
     renderPage([]);
-    await user.click(screen.getByRole('button', { name: /지금의 마음 남기기/ }));
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
     await user.click(screen.getByRole('button', { name: '닫기' }));
 
-    expect(screen.queryByRole('dialog', { name: '지금의 마음 남기기' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument();
     expect(addRecordWithMedia).not.toHaveBeenCalled();
   });
 });
@@ -782,5 +782,65 @@ describe('RecordPage: 이따 이야기하기 on a record', () => {
     expect(await screen.findByText(/몽룡도 이 기록을 표시했어요/)).toBeInTheDocument();
     // The viewer has not marked it themselves, so the control still invites them to.
     expect(screen.getByRole('button', { name: /^이따 이야기하기$/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
+/**
+ * The 사진 lens is a second view of the same period, so it has to earn its place
+ * and it must never be able to leave the screen showing nothing.
+ */
+describe('the 타임라인 / 사진 lens', () => {
+  const PHOTO = { type: 'photo' as const, name: 'a.jpg', path: 'couple-1/rec-mine/a.jpg' };
+
+  it('is not offered when the period has no photograph to show', () => {
+    // A toggle whose only possible destination is an empty state is an extra
+    // control competing with the one next action an empty screen should have.
+    renderPage([record()]);
+    expect(screen.queryByTestId('record-lens')).not.toBeInTheDocument();
+  });
+
+  it('is not offered when the only attachment is a voice memo', () => {
+    // Voice has no frame, so it never appears in the grid.
+    renderPage([
+      record({ attachments: [{ type: 'voice', name: 'v.webm', path: 'couple-1/rec-mine/v.webm' }] }),
+    ]);
+    expect(screen.queryByTestId('record-lens')).not.toBeInTheDocument();
+  });
+
+  it('appears as soon as one photograph exists in the period', async () => {
+    renderPage([record({ attachments: [PHOTO] })]);
+    expect(await screen.findByTestId('record-lens')).toBeInTheDocument();
+  });
+
+  it('keeps the timeline reachable when the lens disappears under it', async () => {
+    /*
+     * `lens` is state and "does this period have photos" is derived, so they can
+     * disagree: switch to 사진, page to a month with none, and the control that
+     * would switch back has itself just gone. Without the timeline being the
+     * fallback rather than merely the default, that renders neither view.
+     */
+    const user = userEvent.setup({ delay: null });
+    renderPage([record({ attachments: [PHOTO] })]);
+
+    await user.click(await screen.findByRole('radio', { name: '사진' }));
+    // Grid is up: the timeline's prose is gone.
+    await waitFor(() => expect(screen.queryByTestId('record-log')).not.toBeInTheDocument());
+
+    // Page to a month with no records at all. The calendar is collapsed by
+    // default, so it has to be opened before the month arrows exist.
+    await user.click(screen.getByRole('button', { name: '달력 보기' }));
+    await user.click(await screen.findByLabelText('이전 달'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('record-lens')).not.toBeInTheDocument();
+    });
+    /*
+     * The timeline is back without anyone asking for it, which is the whole
+     * point: `lens` is still `'photos'`. Paging the calendar moves the visible
+     * MONTH, not `selectedDate`, so the selected day still holds its record --
+     * and that record reappearing is the proof the fallback rendered rather than
+     * the screen going blank.
+     */
+    expect(await screen.findByTestId('record-log')).toBeInTheDocument();
   });
 });

@@ -41,14 +41,15 @@ export const BASIC_EMOTION_LABEL: Record<BasicEmotion, string> = {
   sadness: '슬픔',
 };
 
-export const BASIC_EMOTION_EMOJI: Record<BasicEmotion, string> = {
-  happiness: '😊',
-  surprise: '😮',
-  fear: '😨',
-  disgust: '😣',
-  anger: '😡',
-  sadness: '😢',
-};
+/*
+ * `BASIC_EMOTION_EMOJI` used to live here and is deliberately gone.
+ *
+ * A system emoji is drawn by the OS, so 😣 was a different creature on an iPhone
+ * than on a Galaxy -- which made the surfaces where two people look at the SAME
+ * feeling the surfaces where they saw different pictures of it. Every emotion is
+ * now drawn by `components/emotion/EmotionCharacter.tsx`, which ships with the
+ * app and therefore looks the same on both phones.
+ */
 
 /**
  * Valence per basic emotion, reused by the flow analysis so a corrected item

@@ -4,7 +4,7 @@ import { useStore } from '@/lib/useStore';
 import { withReadableContent } from '@/lib/recordAvailability';
 import { partnerDayDateLabel, spansBeforeToday } from '@/lib/partnerDay';
 import { usePartnerDay } from '@/lib/usePartnerDay';
-import { AttachmentMedia } from '@/components/AttachmentMedia';
+import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -242,16 +242,17 @@ export function PartnerDayTimelineWidget() {
               away instead.
             */}
             {record.attachments && record.attachments.length > 0 && (
-              <div className="ml-[52px] pb-2 space-y-1.5">
-                {record.attachments.map((attachment, index) => (
-                  <AttachmentMedia
-                    key={index}
-                    attachment={attachment}
-                    coupleId={profile.couple.coupleId}
-                    recordId={record.id}
-                    variant="compact"
-                  />
-                ))}
+              /*
+                Indented to the time rail (44px + 8px gap) so the photo starts
+                where the partner's sentence starts, and the clock column stays
+                straight down the whole day.
+              */
+              <div className="ml-[52px] pb-2">
+                <RecordMediaGallery
+                  attachments={record.attachments}
+                  coupleId={profile.couple.coupleId}
+                  recordId={record.id}
+                />
               </div>
             )}
           </li>

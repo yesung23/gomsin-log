@@ -8,6 +8,7 @@ import { SheetHandle } from '@/components/ui/SheetHandle';
 import { useSheetDrag } from '@/lib/useSheetDrag';
 import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { PlanSectionNav } from '@/components/PlanSectionNav';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -203,18 +204,21 @@ export function TripsPage() {
   return (
     <MobileShell>
       <div className="px-4 pt-5 pb-24 space-y-5">
-        <header className="flex items-center justify-between gap-3">
-          <h1 className="text-title text-foreground">우리의 여행</h1>
-          <button
-            type="button"
-            onClick={openCreate}
-            disabled={visibleLoadState !== 'ready' || isOffline}
-            className="press-response min-w-11 min-h-11 flex items-center justify-center rounded-control hover:bg-info-surface text-info disabled:opacity-30"
-            aria-label="새 여행"
-          >
-            <Plus size={20} />
-          </button>
-        </header>
+        <AppBar
+          sticky={false}
+          className="px-0 pt-0"
+          title="우리의 여행"
+          actions={
+            <AppBarAction
+              onClick={openCreate}
+              disabled={visibleLoadState !== 'ready' || isOffline}
+              className="text-info disabled:opacity-30"
+              aria-label="새 여행"
+            >
+              <Plus size={20} aria-hidden="true" />
+            </AppBarAction>
+          }
+        />
 
         <PlanSectionNav active="trips" />
 

@@ -3535,6 +3535,19 @@ cherry-pick이 실제 landing에서도 발생할 충돌을 미리 드러냈다.
 9. **dead state 제거.** `authSyncCode`는 진단 코드 화면 표시를 없애면서 소비자가 0이 됐다.
    state·context에서 빼고 실패 지점의 `console.warn`으로 옮겼다 — 정보는 남고 죽은 인터페이스만 사라진다.
 
+10. **§19 kill metric이 권한 거부를 opt-out으로 셌다.** 열 개 중 **유일하게 숫자를 틀리게 만드는**
+    결함이다. emit이 preference를 쓰는 함수 안에 있었고 그 함수에는 호출자가 둘이다. 권한 요청이
+    denied로 돌아오면 `systemEnabled: false`를 쓰는데, OS 설정에서 나중에 취소된 grant의 `true`가
+    저장돼 있었다면 그것이 OFF 전이다. **"허용"을 누른 사람이 opt-out한 사람으로 기록됐다.**
+    "설계가 실패했다"를 뜻하는 유일한 지표가 사용자가 알림을 *더* 원한 순간에 올라간다.
+    emit을 사람이 실제로 조작하는 토글에 붙였다.
+
+    이 규칙에는 테스트가 있었지만 **소스 문자열 대조**였다. 그런 검사는 코드가 그 표현을
+    *포함하기만* 하면 통과하므로 결함이 존재한 내내 초록이었고, 버그가 아니라 **수정에서**
+    깨졌다. 실패 방향이 거꾸로다. 렌더·클릭하는 5개 동작 테스트로 옮겼고 mutation 2종
+    (emit을 되돌리기, OFF 비교 뒤집기) 모두 실패한다. `productEvents.test.ts`에는 같은 모양이
+    더 있다 — 전부 통과하므로 감사 규칙에 따라 두었지만 **인스턴스가 아니라 부류**다.
+
 #### 확인했고 문제 없던 것
 - **unhandled rejection 0건, Errors 0건.** 지시된 최우선 클래스가 결합 트리에서 깨끗하다.
 - 기본 매개변수 전수 조사: `error = null` 류는 "없음"이 테스트 케이스가 아니라 무해하다.
@@ -3544,8 +3557,32 @@ cherry-pick이 실제 landing에서도 발생할 충돌을 미리 드러냈다.
 - 접근성: 새 표면 전부 44px 터치 타깃과 aria 라벨을 갖췄다.
 - React: 새 컴포넌트가 `useMemo`를 쓰고, join 시각 조회는 연결 전이당 1회다.
 
+#### VERIFICATION
+
+| 무엇 | 어디서 | 결과 |
+|---|---|---|
+| `npm run verify` | 결합 트리 | **EXIT=0** — 185 files / 2808 tests |
+| `npm run verify` | #79 최종 | **EXIT=0** — 185 files / 2796 tests, Errors 0 |
+| `npm run test:phase0` | 결합 트리 | **48 migrations / 205 assertions** |
+| `npm run test:phase0` | #79 최종 | 47 migrations / 197 assertions |
+| `test:p5` · `test:write-floor` · `test:rollback` | 결합 트리 | PASS (93 · 39 · PASS) |
+| `npm audit --omit=dev` | — | 취약점 0 |
+| CI | #79 `a9f7dc0` | 14/14 |
+| mutation | 이번 감사에서만 6종 | 전부 실패 확인 후 복원 |
+
+**실행하지 않은 것:** 로컬 브라우저(CI가 authority) · Android SDK · iOS 빌드(Xcode 부재) ·
+실제 알림 전달(자격증명·기기 없음) · 원격 Supabase 조회.
+
+vitest의 unhandled-rejection 탐지가 살아 있는지 probe로 확인했다: assertion은 통과하되
+rejection을 남기는 테스트를 넣으면 `Tests 1 passed / Errors 1 error / EXIT=1`이 된다.
+지시받은 최우선 클래스를 잡는 장치가 실제로 작동한다는 뜻이다.
+
 #### PRODUCTION
 - NOT APPLIED. 047·048·049·050 모두 어느 원격에도 적용되지 않았고 조회조차 하지 않았다.
+
+#### 정확한 중단 지점
+저자 측 감사 완료. **다음은 Codex의 독립 감사이며 그 역할은 시작하지 않았다.**
+그 앞에 user 전용 게이트가 하나 있다: #74→#75→#76→#77→#78→#79 순서 병합.
 
 
 ## 유지 규칙

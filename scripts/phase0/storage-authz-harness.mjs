@@ -2606,22 +2606,43 @@ function functionContract(schemaName, functionName) {
             || ' ;; ' || COALESCE(string_agg(pg_get_function_identity_arguments(p.oid), ' | ' ORDER BY p.oid), '')
             || ' ;; ' || COALESCE(string_agg(p.pronargdefaults::text, ' | ' ORDER BY p.oid), '')
             || ' ;; ' || COALESCE(string_agg(pg_get_function_result(p.oid), ' | ' ORDER BY p.oid), '')
+            || ' ;; ' || COALESCE(string_agg(p.prosecdef::text, ' | ' ORDER BY p.oid), '')
+            || ' ;; ' || COALESCE(string_agg(COALESCE(array_to_string(p.proconfig, ','), 'UNPINNED'), ' | ' ORDER BY p.oid), '')
        FROM pg_proc p
        JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = '${schemaName}' AND p.proname = '${functionName}'`,
     `contract ${functionName}`);
 }
 
+/*
+  `prosecdef` and `proconfig` are in the compared string for a reason found by
+  mutation, not by reading: with only signature, arity, defaults and result type
+  in it, DELETING `SET search_path = public, pg_temp` from `mark_push_delivered`
+  left this entire harness green. That is the same shape of hole this comparison
+  was written to close -- a SECURITY DEFINER function whose search_path is not
+  pinned is the escalation path migration 030 exists for, and 030's assertions
+  cover `create_invitation` ALONE. Nothing anywhere asserted it for either push
+  function.
+
+  `COALESCE(..., 'UNPINNED')` rather than letting NULL swallow the row: an
+  unpinned function has `proconfig IS NULL`, and without the COALESCE the whole
+  concatenation would go NULL and compare unequal for the right reason by
+  accident. It says the word instead.
+*/
+const SECURE = 'true ;; search_path=public, pg_temp';
 const CANDIDATES_CONTRACT =
   '1 ;; p_now timestamp with time zone ;; 1 ;; '
-  + 'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone)';
+  + 'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone)'
+  + ' ;; ' + SECURE;
 const MARK_CONTRACT =
-  '1 ;; p_user_id uuid, p_decided_at timestamp with time zone ;; 0 ;; void';
+  '1 ;; p_user_id uuid, p_decided_at timestamp with time zone ;; 0 ;; void'
+  + ' ;; ' + SECURE;
 
 const candidatesContract = functionContract('public', 'push_delivery_candidates');
 check(
   candidatesContract === CANDIDATES_CONTRACT,
-  `055 push_delivery_candidates has EXACTLY one signature, one defaulted argument and that exact result type`
+  `055 push_delivery_candidates has EXACTLY one signature, one defaulted argument, that exact result type,`
+    + ` and is SECURITY DEFINER with a pinned search_path`
     + ` -- so an extra OUT column or a stale overload is a failure, not a shrug (got: ${candidatesContract})`,
 );
 
@@ -2643,7 +2664,8 @@ check(
 const markContract = functionContract('public', 'mark_push_delivered');
 check(
   markContract === MARK_CONTRACT,
-  `055 mark_push_delivered has EXACTLY one signature, ZERO defaulted arguments and returns void`
+  `055 mark_push_delivered has EXACTLY one signature, ZERO defaulted arguments, returns void,`
+    + ` and is SECURITY DEFINER with a pinned search_path`
     + ` -- pronargdefaults = 0 is the whole point: a caller that forgets the decision instant must FAIL,`
     + ` not silently receive now() (got: ${markContract})`,
 );
@@ -2663,8 +2685,8 @@ check(
   next reader does not mistake it for coverage.
 */
 check(
-  candidatesContract.endsWith(
-    'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone)'),
+  candidatesContract.includes(
+    ' ;; TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone) ;; '),
   `055 the sender's view gains a clock reading and NOTHING else -- compared whole, so a column`
     + ` nobody thought to forbid fails too (got: ${candidatesContract})`,
 );

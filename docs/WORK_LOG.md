@@ -4176,6 +4176,75 @@ master에 올라갔다. 남은 것: **Codex 재검토**(승급 후로 밀렸다)
 배포 체크리스트 §6-1의 스케줄러 확인 5항목(사람이 배포 환경에서), APNs/FCM 자격증명,
 실기기 2대.
 
+### 2026-08-22 · 내가 고친 계약 검사가 같은 종류의 구멍을 갖고 있었다
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비 · Workstream: Gate 3 push
+- Step: PR #80 병합 후, 건너뛴 독립 재검토를 대신하는 적대적 자기검토
+- This Gate: 없음 — 게이트를 옮기지 않는다
+
+#### DIRECTION CHECK
+- Product source checked: NOT APPLICABLE (제품 동작 무변경)
+- Business source checked: NOT APPLICABLE
+- Engineering source checked: `AGENTS.md`, migration 030(search_path 고정의 근거)
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-22 PR #80 HOLD 3건 마감
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code · Model: Opus 5 · Role: 자기 작업의 적대적 리뷰어
+- Branch: `fix/push-function-contract-search-path`, base `master` (`191df31`)
+
+#### 무엇이 문제였나
+
+바로 앞 세션에서 Codex Finding 2를 고치며 카탈로그 계약 검사를 "전량 비교"로 바꿨다.
+그 문자열에 담은 것은 schema 한정 `count(*)` · identity arguments · `pronargdefaults` ·
+`pg_get_function_result` 넷이었다. **`prosecdef`와 `proconfig`가 없었다.**
+
+그리고 harness 전체에서 그 둘을 검사하는 곳은 `create_invitation`(030) **하나뿐**이다.
+`mark_push_delivered`도 `push_delivery_candidates`도, SECURITY DEFINER인지도
+search_path가 고정됐는지도 **아무도 확인하지 않고 있었다.**
+
+측정으로 확인했다: `mark_push_delivered`에서 `SET search_path = public, pg_temp`를
+지우고 phase0을 돌리면 **282개가 전부 초록이고 EXIT=0이다.**
+
+`SECURITY DEFINER` 함수의 search_path를 고정하지 않는 것은 migration 030이 존재하는
+바로 그 권한 상승 경로다. Codex가 지적한 것이 "mutation이 살아남는 검사"였는데,
+그 지적을 고치며 만든 검사가 **같은 종류의 구멍**을 갖고 있었다.
+
+#### CHANGED
+
+`scripts/phase0/storage-authz-harness.mjs` — 계약 문자열에 `prosecdef`와
+`array_to_string(proconfig, ',')`를 추가한다. 고정되지 않은 함수는 `proconfig IS NULL`이라
+비교 전체가 NULL로 삼켜지므로 `COALESCE(..., 'UNPINNED')`로 **말로 적히게** 했다.
+같은 커밋에서 `endsWith`로 result type을 보던 assertion을 구분자로 둘러싼 `includes`로
+바꿨다 — 문자열 끝이 바뀌자 그 검사가 실제로 깨졌고, 끝에 의존하는 검사는 다음에도 깨진다.
+
+#### VERIFICATION
+
+| 무엇 | 결과 |
+|---|---|
+| `npm run test:phase0` | **282 assertions / 0 FAIL**, 53 migrations (001..055) |
+| mutation: `mark_push_delivered`의 `SET search_path` 제거 | **FAIL** — 계약이 `... ;; true ;; UNPINNED`로 어긋난다. **수정 전에는 통과하던 것** |
+| mutation: `push_delivery_candidates`를 `SECURITY INVOKER`로 강등 | exit≠0으로 잡히지만 `FAIL` 줄 0개 — **계약 검사가 아니라 앞의 동작 테스트가 예외로 먼저 터졌다.** 내 검사가 잡았다고 말하지 않는다 |
+| `git diff --check` | clean |
+
+**실행하지 않은 것:** 앱 검증 — 이 커밋은 harness 파일 하나만 바꾼다. 제품 코드·
+migration·문서 무변경. 원격 Supabase 조회·변경 없음.
+
+#### 결함이 아니라고 판정한 것
+
+단조 가드는 잘못된 값도 영구히 고착시킨다 — 미래 시각이 한 번 `last_notified_at`에
+박히면 그날이 지날 때까지 상한이 닫힌 채 남고, 수정 전에는 다음 mark가 덮어써서
+스스로 나았다. **도달 경로를 확인했다:** `send-push/index.ts:82`가
+`push_delivery_candidates`를 **인자 없이** 호출하므로 `p_now`는 DB의 `now()`이고,
+`decidedAt`은 그 행에서 그대로 되돌아온다(`index.ts:125-136`). 발송자가 미래 시각을
+만들 수 없다. DB 시계가 튀어야 하며, `notified_through`가 **이미** 같은 성질을 갖고
+있었다. 새 위험 종류가 아니므로 고치지 않고 이름만 남긴다.
+
+#### PRODUCTION
+- NOT APPLIED. 047~055는 여전히 어디에도 미적용. merge 하지 않았다.
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

@@ -156,6 +156,51 @@ describe('Android: identity, label and store metadata', () => {
  * failed the Android build, which is not runnable in this sandbox (no SDK), so
  * nothing else would have caught it. Cheap guard, real bug.
  */
+/**
+ * Every OTHER XML the app ships, held to the same rule.
+ *
+ * The Android guard below was written after a `--` inside a comment broke a
+ * manifest. It covered manifests only, so the identical mistake was free to
+ * happen in the iOS plist files -- and did, twice in one session, while
+ * documenting why an entitlement is deliberately absent. A guard that catches a
+ * bug class in one file and not its neighbour is half a guard.
+ *
+ * `Info.plist` and `App.entitlements` are plists, so a malformed one is not a
+ * cosmetic problem: the build embeds the file, and a parse failure there is a
+ * failure to declare a usage description or a data-protection class.
+ */
+describe('the iOS property lists are well-formed XML', () => {
+  const IOS_PLISTS = [
+    'ios/App/App/Info.plist',
+    'ios/App/App/App.entitlements',
+    'ios/App/App/PrivacyInfo.xcprivacy',
+  ];
+
+  it('covers every plist the app ships (soundness)', () => {
+    expect(IOS_PLISTS.length).toBeGreaterThan(0);
+    for (const path of IOS_PLISTS) {
+      expect(() => read(path), path).not.toThrow();
+    }
+  });
+
+  it.each(IOS_PLISTS)('%s parses', (path) => {
+    const parsed = new DOMParser().parseFromString(read(path), 'application/xml');
+    expect(parsed.getElementsByTagName('parsererror')[0]?.textContent ?? null, path).toBeNull();
+    expect(parsed.documentElement.tagName, path).toBe('plist');
+  });
+
+  it.each(IOS_PLISTS)("%s has no '--' inside a comment", (path) => {
+    /*
+      The exact rule XML gives comments, and the one people break while writing a
+      rationale: `--` may not appear inside `<!-- -->` at all. An em dash reads the
+      same and is legal; so does a full stop.
+    */
+    for (const comment of read(path).match(/<!--[\s\S]*?-->/g) ?? []) {
+      expect(comment.slice(4, -3), path).not.toContain('--');
+    }
+  });
+});
+
 describe('the Android manifests are well-formed XML', () => {
   /**
    * Manifests that are COMMITTED, and are therefore the ones a reviewer reads and
@@ -250,6 +295,8 @@ describe('Android: the permission set is exactly what the code proves', () => {
     expect([...declared].sort()).toEqual([
       'android.permission.ACCESS_NETWORK_STATE',
       'android.permission.INTERNET',
+      // Gate 3. A runtime prompt, asked when a couple connects.
+      'android.permission.POST_NOTIFICATIONS',
     ]);
   });
 
@@ -569,7 +616,9 @@ describe('both platforms are installed and reproducible from the lockfile', () =
   it('every pod is a local path reference, so Podfile.lock is a pure function of npm', () => {
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
-    expect(pods.length).toBe(5);
+    // The count is what keeps the loop below from passing vacuously on a regex
+    // that stopped matching. Six since Gate 3 added CapacitorPushNotifications.
+    expect(pods.length).toBe(6);
     for (const [, , path] of pods) {
       expect(path.startsWith('../../node_modules/') || path === '../../packages/capacitor-device-keys').toBe(true);
     }

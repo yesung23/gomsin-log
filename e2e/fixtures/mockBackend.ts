@@ -371,6 +371,16 @@ export async function installMockBackend(
       })));
     }
 
+    /*
+      §19 measurement. Accepted and discarded.
+
+      The app emits these on the real product paths, so without this route every
+      scenario logged a 500 to the browser console -- and several tests assert
+      there are none, correctly. Returning an empty array rather than echoing the
+      row is deliberate: nothing reads these back, and a fixture that stored them
+      would invite a test to assert on analytics instead of on behaviour.
+    */
+    if (path === '/rest/v1/product_events') return rows(route, []);
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
     if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);

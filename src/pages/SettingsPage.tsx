@@ -7,14 +7,14 @@ import { classifyServerError } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
 import { AppBar } from '@/components/ui/AppBar';
 import {
-  Shield, Unlink, Trash2, User, FileText,
-  Clock, LogOut, Smartphone, AlertTriangle, ChevronRight,
+  Shield, Unlink, Trash2, User, FileText, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
   CalendarDays, Plane,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
+import { ContactHoursSection } from '@/components/ContactHoursSection';
 import {
   consumeCoupleInvitation,
   createCoupleInvitation,
@@ -739,23 +739,16 @@ export function SettingsPage() {
           </RowGroup>
         </section>
 
-        {/* Contact Hours */}
-        {profile.role === 'soldier' && (
-          <section className="rounded-surface bg-card border border-border p-4 space-y-1">
-            <div className="flex items-center justify-between text-label font-bold text-foreground">
-              <div className="flex items-center gap-2">
-                <Clock size={16} className="text-coral" />
-                <span>연락 가능 시간</span>
-              </div>
-              <span className="text-caption text-coral-strong font-bold">
-                {profile.contact.weekdayStart} ~ {profile.contact.weekdayEnd}
-              </span>
-            </div>
-            <p className="text-caption text-muted-foreground">
-              평일 저녁 연락 가능 시간을 등록하면 브리핑 추천에 반영돼요.
-            </p>
-          </section>
-        )}
+        {/*
+          Both roles, and editable.
+
+          This was 군화-only, read-only, and described as feeding briefing
+          recommendations. Migration 048 made two of those three wrong: it now
+          decides when each person's own notification is allowed to arrive, so a
+          role that could not see it had no control over being interrupted, and a
+          value nobody can change is a preference in name only.
+        */}
+        <ContactHoursSection />
 
         {/* Couple & Data Management */}
         <section className="space-y-2">

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { recordProductEvent } from '@/lib/productEvents';
 
 /**
  * "오늘 이야기할 것" — the short list the marks add up to.
@@ -99,6 +100,11 @@ export function TalkAboutListWidget() {
                     toast.error(result.error || '처리하지 못했어요.');
                     return;
                   }
+                  void recordProductEvent({
+                    kind: 'talk_about_resolved',
+                    screen: 'home',
+                    subjectId: topic.recordId,
+                  });
                   toast.success('이야기한 걸로 정리했어요.');
                 }}
                 aria-label="이야기했어요"

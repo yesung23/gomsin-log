@@ -663,6 +663,55 @@ describe('StoreProvider auth lifecycle', () => {
     }
   });
 
+  /**
+   * The ORDER of the sign-out steps, which is the part a database cannot enforce.
+   *
+   * §14.3 requires a push token to be invalidated on sign-out. The RPC that does
+   * it reads `auth.uid()`, so it has to run while the session is still valid.
+   * Called after `authRepository.signOut()` it would look identical at the call
+   * site, return without complaint, and never actually revoke anything -- the
+   * failure would surface months later as a signed-out phone still buzzing.
+   */
+  it('releases the push tokens BEFORE the session is torn down', async () => {
+    const { authRepository } = await import('@/lib/supabase');
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => { emitAuth('SIGNED_IN', 'user-a'); });
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-a'));
+
+    await act(async () => { screen.getByText('signout').click(); });
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'));
+
+    const revoke = mockSupabase.rpc.mock.calls.findIndex(
+      (call) => call[0] === 'revoke_my_push_tokens',
+    );
+    expect(revoke, 'sign-out must ask the server to drop this device').toBeGreaterThanOrEqual(0);
+
+    // Invocation order across two different spies, which is what actually pins
+    // the sequence: comparing call counts would pass either way round.
+    const revokeOrder = mockSupabase.rpc.mock.invocationCallOrder[revoke];
+    const signOutOrder = vi.mocked(authRepository.signOut).mock.invocationCallOrder[0];
+    expect(signOutOrder, 'the auth sign-out must have happened').toBeDefined();
+    expect(revokeOrder).toBeLessThan(signOutOrder);
+  });
+
+  it('signs out even when the token revocation is refused', async () => {
+    // A notification cleanup must never be able to trap someone in a session.
+    mockSupabase.rpc.mockImplementation(async (name: string) => (
+      name === 'revoke_my_push_tokens'
+        ? { data: null, error: { message: 'refused' } }
+        : { data: null, error: null }
+    ));
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => { emitAuth('SIGNED_IN', 'user-a'); });
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-a'));
+
+    await act(async () => { screen.getByText('signout').click(); });
+
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'));
+  });
+
   it('clears the couple id and shared state, then tears down realtime after disconnect', async () => {
     fetchFullStateFromDB.mockResolvedValue(
       serverState({

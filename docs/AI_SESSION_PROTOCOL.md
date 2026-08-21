@@ -22,6 +22,18 @@ bash scripts/agent/session-start.sh
 
 이 출력이 시작 체크포인트다. 대화 기억이나 문서에 적힌 SHA로 대체하지 않는다.
 
+## 1.5 무엇을 읽힐지 고른다
+
+저장소 전체를 던지지 않는다. **공통 팩 + 지금 작업에 직접 관련된 파일 3~8개.**
+
+```bash
+bash scripts/agent/context-pack.sh --list
+bash scripts/agent/context-pack.sh security
+```
+
+팩 정의의 집은 `control-tower/Context Packs.md` 하나다. 스크립트는 그 파일을 읽을 뿐
+자체 목록을 갖지 않으므로, 경로가 사라지면 `❌ 없음`으로 드러난다.
+
 ## 2. 작업 점유 — 비사소한 작업 전
 
 ```bash

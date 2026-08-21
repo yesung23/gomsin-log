@@ -23,6 +23,7 @@ tags:
 | What is implemented right now | repository code, then `docs/CURRENT_STATE.md` |
 | Session history | `docs/WORK_LOG.md` |
 | 도구 간 세션 절차 | `docs/AI_SESSION_PROTOCOL.md` |
+| 어떤 작업에 어떤 파일을 주나 | [[Context Packs]] |
 | Product intent | `docs/PRODUCT_V3.md` |
 | Implementation order and gates | `docs/ENGINEERING_ROADMAP.md` |
 
@@ -31,6 +32,10 @@ Do not copy any of these into the vault.
 ## Navigation
 
 - **[[Start Here]]** — begin here
+- [[Context Packs]] — 작업별 파일 목록 (정의의 유일한 집)
+- [[Canonical Source Map]] — 질문 → authoritative home (링크만)
+- [[Do Not Build]] — 제품 비목표 · 열린 제약 · hook이 막는 것
+- [[Cycle · Care Canon]] — 주기·배려 작업의 질문 목록
 - [[Now]] — 지금 누가 무엇을 잡고 있나 (작업 점유)
 - [[Current Gate]] — what is blocked and what to build next
 - [[Decision Log]] — Control Tower decisions only

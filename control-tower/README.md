@@ -26,6 +26,10 @@ exactly what made it rot the first time. Run `bash scripts/agent/live-state.sh` 
 
 ```
 Start Here.md      entry point
+Context Packs.md   작업별 파일 목록 — context-pack.sh 가 이 파일을 읽는다
+Canonical Source Map.md  질문 → authoritative home (사실 없음, 링크만)
+Do Not Build.md    짓기 전에 멈추는 곳 (금지 목록을 복제하지 않는다)
+Cycle · Care Canon.md    주기·배려 작업에서 물어야 할 것
 Now.md             작업 점유 보드 (claim.sh 가 쓴다 — 손으로 고치지 않는다)
 Dashboard.md       navigation hub
 Current Gate.md    what is blocked, what to build next

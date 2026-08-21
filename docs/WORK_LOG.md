@@ -2828,6 +2828,112 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 - NOT APPLIED
 
 
+### 2026-08-21 · Phase 0 — 결함 마감과 정합 (Fable 전략 §8 Phase 0)
+
+#### PLAN POSITION
+- Phase: Phase 0 — 마감과 정합 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8)
+- Workstream: UI 결함 마감 · S6 편집기 통합 · 죽은 코드 제거
+- Step: Phase 0 결함 목록 전수 마감 → Phase 1 진입 준비
+- Previous Gate: #74/#75/#76 세 PR 모두 CI 14/14 green, #76 delta 재검토 APPROVED WITH NOTES
+- This Gate: Phase 0 결함 목록 소진 + `npm run verify` green. **landing은 미완 — 병합은 user 권한**
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §3.1(원본이 주인공) · §3.6(불안 금지) · §8 · §13 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 결함 마감이며 사업 범위·BM 무변경
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `AGENTS.md` — YES
+- Current-state checked: `docs/CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 2026-08-19 · 2026-08-20 항목 — YES
+- MASTER PLAN version / 기준일: `PRODUCT_STRATEGY_REDESIGN_2026-08-21` (Fable, 사용자 승인)
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: Opus 5
+- Role: implementation owner. **independent review 없음** — 이 세션의 모든 검증은 작성자 본인이 했다
+- PR: 신규 (아래 STOPPED AT)
+- Branch: `claude/phase0-defect-closure`
+- Base SHA: `9b0d4b3` (= PR #74 head, 승인된 landing 계보)
+- Old HEAD: `27b2384`
+- New HEAD: 아래 STOPPED AT
+
+#### CHANGED / REVIEWED
+- `src/lib/records.ts` · `records.test.ts` · `RecordPage.test.tsx` — 영상·음성 gate가 남긴 stale
+  spec 6개가 실패 중이었다. 새 계약으로 교체하고 `MEDIA_POLICY_REFUSAL`을 export해 "정책 거부"와
+  "읽을 수 없는 형식"이 한 문장으로 합쳐지지 못하게 고정했다. 크기 검사보다 정책 검사가 먼저이므로
+  작은 영상도 큰 영상과 동일하게 거부됨을 assert한다.
+- `RecordMoodSection.tsx` · `RecordPage.tsx` · `RecordEmotionCorrection.tsx` **삭제** — S6.
+  두 번째 편집기의 존재 이유(근거 문구 표시)가 코드에서 거짓임을 먼저 확인했다
+  (`emotionCandidates.ts:246` — `evidence: ''`, "the phrase was never saved"). 유일한 고유 기능인
+  항목 제거를 `RecordMoodSection`으로 옮긴 뒤 제거했다. sequence 연속 재번호와 미확인 추정치
+  비승격이 핵심이며 둘 다 mutation으로 검증했다.
+- `AttachmentMedia.tsx` + test **삭제**, `src/lib/useMediaAttachment.test.tsx` **신규** —
+  삭제 전에 발견한 함정: 이 죽은 컴포넌트의 suite가 `useMediaAttachment`의 **유일한** 커버리지였고,
+  그 훅은 live 컴포넌트 3곳(`RecordMediaGallery`·`MediaArchiveGrid`·`MonthGrid`)이 쓴다. 예정대로
+  지웠다면 서명 URL 복구 로직의 증명이 조용히 사라졌을 것이다. 훅으로 먼저 이관한 뒤 삭제했다.
+- `CycleTrackerSection.tsx` — 마이 탭 동의 카드 재구성. PIPA §23 고지 4항목과 거부권 문장은 전부
+  유지하고 순서·비중만 뒤집었다(제안 먼저, 고지 다음). 순서 회귀와 항목 누락을 각각 테스트가 잡는다.
+- `RecordPage.tsx` — `EmotionFlowSummarySection`을 타임라인 **아래**로 이동(§3.1 위반 해소).
+  빈 하루 empty state가 공간을 차지하도록 변경(약 420px 공백 해소).
+- `monthTexture.ts` · `UsPage.tsx` — 건너뛴 달의 조용한 표시(`조용히 지나간 N개월`). 연도 경계에서
+  음수가 나오지 않도록 순수 함수로 분리했다.
+- `e2e/phase0Layout.spec.ts` **신규** — 위 레이아웃 결함 3건의 실브라우저 기하 검증.
+- `.gitignore` — `ui-audit-results/` 제외.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음. key hierarchy · device trust · recovery authority · write floor 미접촉.
+- DB/migration semantics: 없음. SQL 파일 한 줄도 바뀌지 않았다.
+- product semantics: 탭 구조 · funnel · surface 이름 무변경. chat 없음. P6 없음.
+- Production / remote Supabase: **미접촉, 조회조차 하지 않음.**
+
+#### VERIFICATION
+- `npm run verify` — **PASS (EXIT=0)**. 172 files / 2633 tests. 세션 시작 시 baseline은
+  172 files / 2617 tests 중 **6 failing**이었고(직전 commit `27b2384`가 남긴 stale spec), 그것을
+  가장 먼저 닫았다.
+- `npm run typecheck` · `npm run lint` — PASS.
+- mutation 검증(적용 → 실패 확인 → 복원): 감정 항목 제거의 재번호·비승격 2건, 훅의 loop guard ·
+  unchanged-URL · coupleId guard · upstream-supersedes 4건, 동의 카드의 순서 · 필수 고지 2건.
+  **총 8건 전부 의도한 테스트만 실패시켰다.** `disabled` 내부 guard 1건은 mutation이 통과했다 —
+  버튼이 DOM `disabled`라 핸들러가 애초에 실행되지 않기 때문이며, 테스트는 사용자에게 보이는
+  계약(버튼 비활성 + 쓰기 없음)을 지킨다.
+- **로컬 브라우저: UNVERIFIED.** 이 기기에 headed Chromium은 있으나 headless shell이 없고
+  headed 바이너리는 실행 시 SIGABRT로 죽는다. 2026-08-19 기록과 동일한 제약이며 코드 결함이 아니다.
+  `e2e/phase0Layout.spec.ts`의 3개 assertion은 **CI가 authority**다.
+- **CI: 이 HEAD에서 아직 실행되지 않음.** PR 생성 후에만 돈다.
+- remote Supabase / production / 실기기: **UNVERIFIED, 미접촉.**
+
+#### REVIEW IMPACT
+- FULL. 이 branch는 review된 적이 없다.
+
+#### BLOCKERS
+- code: 없음.
+- environment: 로컬 Playwright 실행 불가(headless shell 부재 + headed SIGABRT).
+- external/manual: **PR 병합은 user 권한이다.** `.claude/hooks/block-dangerous-bash.sh`가 해당
+  명령들을 결정적으로 차단한다("master merge and PR merge are reserved for the user").
+  #74 → #75 → #76 순서로 사용자가 직접 병합해야 Phase 0이 landing된다.
+
+#### STOPPED AT
+- Phase 0 결함 목록은 소진했고 `npm run verify`는 green이다. **master는 아직 `21e7dfb`에 그대로 있다.**
+
+#### REMAINING
+- 미해결로 남긴 것 하나: **빈 홈 화면의 약 390px 공백**(`30-home-empty` 스크린샷). 기록 탭 쪽은
+  단일 메시지 아래 공백이라 고쳤지만, 홈의 공백은 위젯이 적어서 생기는 **구조적 희소함**이다.
+  내용을 만들어 채우는 것은 2026-08-20에 되돌린 "대화형 홈"이 정확히 그 이유로 실패한 방향이므로
+  하지 않았다. 디자인 결정 + 육안 확인이 필요한 항목으로 남긴다.
+- `Lightbox 레이어링`은 **현재 트리에서 결함이 아니다.** Astryx `Lightbox`는 `dialog.showModal()`을
+  쓰므로 브라우저 top layer로 올라가고, 어떤 z-index stacking context보다 위에 그려진다. 조사만 하고
+  코드는 바꾸지 않았다.
+
+#### NEXT ACTION
+- next owner: 사용자(병합), 그다음 independent review
+- exact next task: 이 branch CI green 확인 → #74 landing → 이 branch retarget → Phase 1 Gate 4(통화 모드)
+
+#### DO NOT ADVANCE UNTIL
+- 이 HEAD가 base `master` PR에서 실제 CI를 통과할 때까지. stacked base에서는 어떤 workflow도 돌지 않는다.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

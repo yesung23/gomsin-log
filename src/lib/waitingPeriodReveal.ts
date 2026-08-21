@@ -68,12 +68,29 @@ export function buildRevealOffer(input: {
   /** Absent before the profile has an id; nothing is offered without one. */
   viewerUserId: string | undefined;
   partnerJoinedAt: string | undefined;
+  /**
+   * Whether a partner is there RIGHT NOW.
+   *
+   * Required rather than inferred from `partnerJoinedAt`, because a join time is
+   * a fact about the past and this question is about the present. After an unlink
+   * the store rebuilds the couple object without the join time, so in practice it
+   * disappears -- but that is an accident of how the reset is written, and a
+   * future field added to that rebuild would restore it silently.
+   *
+   * What the accident would cost: the card offering to show entries to a partner
+   * who is gone, and anything picked becoming visible to the NEXT person the
+   * account connects with. Someone choosing what to show 몽룡 did not choose to
+   * show it to whoever comes after.
+   */
+  connected: boolean;
   now?: Date;
 }): RevealOffer {
-  const { records, viewerUserId, partnerJoinedAt } = input;
+  const { records, viewerUserId, partnerJoinedAt, connected } = input;
   const now = input.now ?? new Date();
 
-  if (!partnerJoinedAt || !viewerUserId) return { offered: false, candidates: [] };
+  if (!connected || !partnerJoinedAt || !viewerUserId) {
+    return { offered: false, candidates: [] };
+  }
 
   const joined = Date.parse(partnerJoinedAt);
   if (!Number.isFinite(joined)) return { offered: false, candidates: [] };

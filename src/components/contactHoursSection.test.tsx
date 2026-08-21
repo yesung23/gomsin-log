@@ -21,6 +21,12 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
 
+let online = true;
+vi.mock('@/lib/useOnlineStatus', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
+  return { ...actual, useOnlineStatus: () => online };
+});
+
 let currentState: AppState;
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({ state: currentState, isReady: true, updateProfile }),
@@ -59,6 +65,7 @@ function renderSection(role: Role) {
 }
 
 beforeEach(() => {
+  online = true;
   updateProfile.mockClear().mockResolvedValue(true);
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
@@ -155,5 +162,27 @@ describe('what the copy promises', () => {
     const copy = screen.getByTestId('contact-hours').textContent ?? '';
     expect(copy).toContain('하루에 한 번');
     expect(copy).toContain('기록 내용이 담기지 않아요');
+  });
+});
+
+describe('offline says which failure it is', () => {
+  it('refuses the save and names the cause', async () => {
+    /*
+      Without this the failure reads "잠시 후 다시 시도해 주세요", which is true of
+      a great many things and tells someone with no signal nothing actionable.
+      The call screen and the reveal card both name it; this is the third.
+    */
+    const user = userEvent.setup();
+    online = false;
+    renderSection('gomsin');
+    await user.click(screen.getByText('바꾸기'));
+
+    // The button says so too, but the guard is what actually holds -- `disabled`
+    // lands a render later, and a mutation survived a disabled-only check
+    // earlier in this branch.
+    expect(screen.getByText('저장')).toBeDisabled();
+    await user.click(screen.getByText('저장'), { pointerEventsCheck: 0 });
+
+    expect(updateProfile).not.toHaveBeenCalled();
   });
 });

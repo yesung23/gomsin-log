@@ -49,8 +49,15 @@ export function WaitingPeriodRevealCard() {
       records: state.records,
       viewerUserId: profile.id,
       partnerJoinedAt: profile.couple.partnerJoinedAt,
+      connected: Boolean(profile.couple.connected && profile.couple.status === 'active'),
     }),
-    [state.records, profile.id, profile.couple.partnerJoinedAt],
+    [
+      state.records,
+      profile.id,
+      profile.couple.partnerJoinedAt,
+      profile.couple.connected,
+      profile.couple.status,
+    ],
   );
 
   if (!offer.offered || dismissed) return null;

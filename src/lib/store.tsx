@@ -385,7 +385,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const [authSyncReason, setAuthSyncReason] = useState<ServerErrorKind | null>(null);
   const [authSyncStage, setAuthSyncStage] = useState<AuthSyncStage | null>(null);
-  const [authSyncCode, setAuthSyncCode] = useState<string | null>(null);
   /**
    * Server-authoritative couple lifecycle, starting at `unknown` because nothing
    * has been asked yet. It is never initialised to `personal`: that would render
@@ -1043,7 +1042,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setAuthSyncUnavailable(false);
         setAuthSyncReason(null);
         setAuthSyncStage(null);
-        setAuthSyncCode(null);
         hydratedUserIdRef.current = null;
         // The couple lifecycle and the invitation expiry belong to the account
         // that is leaving. Nobody has asked the question for the incoming
@@ -1202,7 +1200,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               return previous === 'auth_expired' ? previous : hydration.reason;
             });
             setAuthSyncStage(hydration.ok ? null : hydration.stage);
-            setAuthSyncCode(hydration.ok ? null : hydration.code ?? null);
+            /*
+              The backend's own code goes to the console, not to state.
+
+              It used to be held so the failure screen could print it, and that
+              display was removed: nobody outside this repository can act on a
+              PostgREST code, and the screen it appeared on renders before anyone
+              has authenticated. Keeping the state after removing its only reader
+              left a field the context exported and nothing consumed.
+
+              Here it is still useful -- a developer reading a console has the
+              context to use it -- and it reaches no user.
+            */
+            if (!hydration.ok && hydration.code) {
+              console.warn('[gomsinlog] Account hydration failed:', hydration.stage, hydration.code);
+            }
             if (syncUnavailable) {
               // A failed hydration answers nothing about the couple space, so the
               // lifecycle must go to `unknown` -- never to `personal`.
@@ -3409,7 +3421,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         authSyncUnavailable,
         authSyncReason,
         authSyncStage,
-        authSyncCode,
         sharedSyncStatus,
         coupleLifecycle,
         invitationExpiresAt,

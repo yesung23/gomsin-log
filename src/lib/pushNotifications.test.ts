@@ -24,9 +24,10 @@ const checkPermissions = vi.fn();
 const requestPermissions = vi.fn();
 const register = vi.fn(async () => {});
 const listeners = new Map<string, (payload: never) => void>();
+const removed: string[] = [];
 const addListener = vi.fn(async (event: string, cb: (payload: never) => void) => {
   listeners.set(event, cb);
-  return { remove: async () => {} };
+  return { remove: async () => { removed.push(event); } };
 });
 
 vi.mock('@capacitor/push-notifications', () => ({
@@ -49,6 +50,7 @@ function emitToken(value: string) {
 beforeEach(() => {
   native = true;
   listeners.clear();
+  removed.length = 0;
   registerPushToken.mockClear().mockResolvedValue({ ok: true });
   checkPermissions.mockReset().mockResolvedValue({ receive: 'granted' });
   requestPermissions.mockReset().mockResolvedValue({ receive: 'granted' });
@@ -209,5 +211,70 @@ describe('the setup is actually reachable from the product', () => {
       store.indexOf('setUpPushNotifications()') + 100,
     );
     expect(effect).toContain("coupleLifecycle !== 'connected'");
+  });
+});
+
+/**
+ * Resource teardown.
+ *
+ * `setUpPushNotifications` runs on every transition into `connected` -- a
+ * reconnect, a relaunch. Leaving its listeners and its timer behind accumulates
+ * native bridge handles for a promise that has already settled and can never
+ * resolve again. The tap listener has the same problem in reverse: installed
+ * twice, it routes one tap twice.
+ */
+describe('nothing is left running', () => {
+  it('removes both registration listeners once a token arrives', async () => {
+    const pending = setUpPushNotifications();
+    await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
+    emitToken('t');
+    await pending;
+
+    await vi.waitFor(() => {
+      expect(removed).toContain('registration');
+      expect(removed).toContain('registrationError');
+    });
+  });
+
+  it('removes them on the give-up path too', async () => {
+    vi.useFakeTimers();
+    const pending = setUpPushNotifications();
+    await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+    vi.useRealTimers();
+
+    await vi.waitFor(() => expect(removed).toContain('registration'));
+  });
+
+  it('clears the timeout when a token arrives, so nothing fires later', async () => {
+    /*
+      A stuck timer is harmless here only because `finish` is idempotent. Relying
+      on that is the kind of thing that stops being true when someone adds a
+      retry, so the timer is cleared rather than out-raced.
+    */
+    vi.useFakeTimers();
+    const pending = setUpPushNotifications();
+    await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
+    emitToken('t');
+    await expect(pending).resolves.toEqual({ registered: true });
+
+    const pendingTimers = vi.getTimerCount();
+    vi.useRealTimers();
+    expect(pendingTimers).toBe(0);
+  });
+
+  it('hands back a teardown for the tap listener', async () => {
+    const dispose = await listenForPushTaps(vi.fn());
+    expect(typeof dispose).toBe('function');
+
+    dispose?.();
+    await vi.waitFor(() => expect(removed).toContain('pushNotificationActionPerformed'));
+  });
+
+  it('returns nothing to tear down on web, where nothing was installed', async () => {
+    native = false;
+    await expect(listenForPushTaps(vi.fn())).resolves.toBeUndefined();
+    expect(addListener).not.toHaveBeenCalled();
   });
 });

@@ -38,11 +38,12 @@ function record(over: Partial<DailyRecord> & { id: string }): DailyRecord {
   was `useMediaAttachment.test.tsx`, whose original suite carried a comment
   warning about exactly it.
 */
-function offerAt(records: DailyRecord[], now: string, joinedAt?: string) {
+function offerAt(records: DailyRecord[], now: string, joinedAt?: string, connected = true) {
   return buildRevealOffer({
     records,
     viewerUserId: ME,
     partnerJoinedAt: joinedAt,
+    connected,
     now: new Date(now),
   });
 }
@@ -150,5 +151,30 @@ describe('"once", expressed as a window rather than as stored state', () => {
     expect(source).not.toMatch(/hasAsked|wasDismissed|promptShown|alreadyPrompted/);
     // Pure: the record type is the only import, so there is nowhere to persist to.
     expect(source.match(/^import /gm) ?? []).toHaveLength(1);
+  });
+});
+
+describe('a partner who is gone is not a partner to show things to', () => {
+  it('offers nothing after an unlink, even inside the window', () => {
+    /*
+      The join time is a fact about the past; this question is about the present.
+      In practice the store rebuilds the couple object on unlink and the join time
+      goes with it -- but that is an accident of how the reset is written, and a
+      field added to that rebuild later would restore it silently.
+
+      What the accident would cost: offering to show entries to someone who left,
+      and anything picked becoming visible to the NEXT person this account
+      connects with. Choosing what to show 몽룡 is not choosing to show it to
+      whoever comes after.
+    */
+    const offer = offerAt([record({ id: 'rec' })], '2026-08-20T13:00:00.000Z', JOINED, false);
+    expect(offer.offered).toBe(false);
+    expect(offer.candidates).toEqual([]);
+  });
+
+  it('requires the caller to state it, rather than inferring from the join time', () => {
+    // Both present, so only the explicit flag can distinguish the two cases.
+    expect(offerAt([record({ id: 'r' })], '2026-08-20T13:00:00.000Z', JOINED, true).offered).toBe(true);
+    expect(offerAt([record({ id: 'r' })], '2026-08-20T13:00:00.000Z', JOINED, false).offered).toBe(false);
   });
 });

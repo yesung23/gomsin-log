@@ -3196,6 +3196,83 @@ mutation 검증에서 "UI만 숨기고 쓰기는 그대로" 변형이 정확히 
 - NOT APPLIED
 
 
+### 2026-08-21 · Phase 1 마감 — §7.6 사후 공개 · 양 역할 알림 시간 · §19 판독
+
+Codex의 전수 감사 직전 상태다. **안전하게 구현 가능한 로드맵 항목을 모두 소진했다.**
+
+#### PLAN POSITION
+- Phase: Phase 1 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8) — 내부 구현 경계까지
+- This Gate: 세 항목 완료. 남은 것은 전부 외부 게이트이거나 사용자 승인 대기
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §7.6 · §13 · §14.2 · §14.3 · §19 — YES
+- Engineering source checked: `ENGINEERING_ROADMAP` LV 진입 조건, `docs/skills/migration-gate.md` — YES
+- Does this task conflict with canonical direction? NO
+
+#### 1. §7.6 — 연결 전 기록의 사후 공개
+- `src/lib/waitingPeriodReveal.ts` (순수) + `WaitingPeriodRevealCard.tsx` + `coupleTimeline.ts`
+- **"한 번"을 저장하지 않는다.** 그것이 이 설계의 핵심이다. "물었음"을 기억하려면 새 영속 사실이
+  필요하고, device-preference whitelist는 **계정 삭제 후 잔존을 막으려고** 테스트로 고정돼 있다.
+  대신 `couple_members.joined_at`(001부터 canonical, 활성 멤버가 파트너 행을 읽을 수 있음)에서
+  **창(7일)** 을 계산한다. 아무것도 쓰지 않고 "한 번"이 성립한다.
+- 창이 지나도 기록은 그대로 비공개이며 기록 상세에서 개별 전환할 수 있다. 창은 **묻지 않은 질문**을
+  제한하는 것이지 답할 권리를 제한하지 않는다.
+- 자동 공개는 어떤 경로로도 없다. 카드를 닫든, 무시하든, 못 보든 전부 그대로 비공개다.
+- 부분 실패를 부분 실패로 보고한다. 5개 중 2개가 실패하면 3개는 **이미 파트너에게 보인다** —
+  일괄 실패로 보고하면 공개된 기록을 비공개로 믿게 되고, 그게 §7.6이 막으려는 오류가
+  막으려는 장치를 통해 발생하는 것이다.
+
+#### 2. 양 역할 알림 시간
+- `ContactHoursSection.tsx` 신규. 설정에서 **양 역할 모두 편집 가능**.
+- 이전에는 군화 전용 + 읽기 전용 + 설명이 "브리핑 추천에 반영"이었다. 048 이후 셋 중 둘이 틀렸다 —
+  이 값이 **각자의 알림 발송 시간**을 정한다.
+- 끝이 시작보다 이르면 저장 전에 거부한다. DB는 받아들이고 `push_delivery_candidates`가 영영
+  매치하지 않아 **화면에 아무 설명 없이 알림이 끊긴다.**
+- 주말 시간도 표시한다. 저장되고 사용되는데 보이지 않았다.
+
+#### 3. §19 판독 — migration 050
+현재 파이프가 LV 퍼널을 측정하기에 **충분하지 않았다.** 두 격차:
+- **측정 단위 부재.** 전략은 획득 단위가 "연결된 커플 1쌍"이라고 못박는데 `product_events`에는
+  `user_id`만 있었다. 한 커플의 두 사람과 남남 두 사람이 구별되지 않아 커플 단위 지표 2개를
+  아예 계산할 수 없었다. `couple_id`를 `get_my_active_couple_id()` DEFAULT로 추가했다 —
+  세션에서 파생되므로 클라이언트가 위조할 수 없다. **파트너 축은 생기지 않는다**: RLS 범위 불변,
+  파트너 read 정책 여전히 없음, 커플로 묶을 수 있는 것은 숫자만 반환하는 집계 함수뿐이다.
+- **판독이 곧 행 조회.** 함수가 없으면 `service_role`이 raw 행을 긁고, 그건 한 사람의 개별 행동을
+  순서대로 보는 것이다 — §19가 금지하는 형태가 "숫자가 필요하다"는 뒷문으로 도착한다.
+  `lv_funnel_readout`은 `(metric, value)`만 반환하며 행 반환 경로가 없다.
+  `lv_couple_return_count`는 **몇 커플이** 돌아왔는지를 주고 어느 커플인지는 주지 않는다.
+- 의도적으로 없는 것: 일별 시계열(5쌍 코호트의 일별 카운트는 행동 타임라인이다) · 사용자별 분해 ·
+  커플 간 순위 · 건강/감정/콘텐츠/시각.
+
+#### EXPLICITLY NOT CHANGED
+- crypto · write floor · Production · remote Supabase: 미접촉.
+- `briefings` drop: **하지 않았다.** 파괴적 변경이며 migration-gate §4의 명시적 승인이 필요하다.
+
+#### VERIFICATION
+- 실제 PostgreSQL 17.10: fresh chain 001→050(47개), phase0 harness **197 assertions**(050이 16개).
+- `test:p5` 93 · `test:write-floor` 39 · `test:rollback` PASS.
+- mutation: 050에서 5건(클라이언트 위조 couple_id · service_role gate · 커플 대신 계정 집계 ·
+  재방문이 커플 id 반환 · 역순 범위 허용) 전부 실패 확인. §7.6에서 5건, ContactHours 포함 총 10건+.
+- `npm run verify` — 아래 STOPPED AT.
+- **같은 실수를 세 번 했다.** 테스트 헬퍼의 기본 매개변수가 명시적 `undefined`를 삼켜
+  "값이 없을 때" 케이스가 아무것도 검증하지 않았다(`useMediaAttachment` · `waitingPeriodReveal` ·
+  `waitingPeriodRevealCard`). 첫 파일의 원래 suite에 이미 경고 주석이 있었다. 셋 다 고쳤다.
+- **`verify`가 결함 하나를 더 잡았다.** 테스트 2778개가 전부 통과했는데 EXIT=1이었다 —
+  `fetchPartnerJoinedAt`이 `{ error }`는 처리하면서 **throw는 처리하지 않았다.** 이 함수는
+  `useEffect` 안에서 불리므로 rejection이 곧 unhandled rejection이다. `recordProductEvent`는
+  이미 그 형태를 갖고 있었는데 이건 아니었다. **부가 조회가 앱을 깨뜨릴 수 있으면 안 된다** —
+  이 조회가 실패하면 §7.6 프롬프트가 안 뜰 뿐이고, 프롬프트는 스스로 아무것도 공개하지 않으므로
+  안 뜨는 쪽이 항상 보수적이다. try/catch를 넣고 6개 spec으로 고정했다.
+
+#### REMAINING — 전부 외부 게이트이거나 승인 대기
+- PR 병합(user) · APNs/FCM 자격증명 · `aps-environment` entitlement · 실기기 2대 ·
+  iOS `pod install`(Xcode 부재) · LV 전용 Supabase 환경 · `briefings` drop 승인 ·
+  §14.5 문장 대조 · **independent review 전무**
+
+#### PRODUCTION
+- NOT APPLIED. 048 · 049 · 050 모두 어느 원격에도 적용되지 않았고 조회조차 하지 않았다.
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

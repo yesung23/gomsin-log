@@ -105,6 +105,7 @@ const ORDER = [
   '046_require_actor_for_device_provisioning.sql',
   '048_push_delivery_metadata.sql',
   '049_product_events.sql',
+  '050_lv_funnel_readout.sql',
 ];
 
 /**
@@ -317,7 +318,7 @@ function checkVisible(userId, predicate, expected, message) {
 // Cluster
 // ---------------------------------------------------------------------------
 
-console.log('active fresh-chain harness — migrations 001..040 + 043..046 + 048..049 on throwaway PostgreSQL 17\n');
+console.log('active fresh-chain harness — migrations 001..040 + 043..046 + 048..050 on throwaway PostgreSQL 17\n');
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -1708,6 +1709,112 @@ check(
   partnerJoin.ok && partnerJoin.stdout.trim() === '1',
   '§7.6 an active member CAN read the partner\'s joined_at, so the reveal prompt is not blocked on new SQL',
 );
+
+// ---------------------------------------------------------------------------
+// 050 — the LV read-out, and what it refuses to return
+// ---------------------------------------------------------------------------
+
+// The couple axis exists, and is not client-supplied.
+check(
+  mustSql(`SELECT count(*) FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'couple_id'`, '050 col') === '1',
+  '050 events can be grouped by couple, which is the unit LV measures',
+);
+check(
+  mustSql(`SELECT column_default FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'couple_id'`, '050 default')
+    .includes('get_my_active_couple_id'),
+  '050 the couple comes from the session, so a client cannot attribute events elsewhere',
+);
+
+// Still no partner axis: the RLS scope is unchanged.
+/*
+  Dated into a window of its own.
+
+  049's fixture writes at CURRENT_DATE, and an overlapping range would have this
+  section asserting on both sets at once -- which is how a read-out test starts
+  measuring the fixture instead of the function.
+*/
+mustSql(`
+  INSERT INTO public.product_events (user_id, couple_id, kind, occurred_on) VALUES
+    ('${D}', '${COUPLE3}', 'couple_connected', DATE '2026-07-01'),
+    ('${D}', '${COUPLE3}', 'record_composed',  DATE '2026-07-01'),
+    ('${E}', '${COUPLE3}', 'record_composed',  DATE '2026-07-02'),
+    ('${D}', '${COUPLE3}', 'briefing_opened',  DATE '2026-07-02'),
+    ('${D}', '${COUPLE3}', 'briefing_to_original', DATE '2026-07-02')`,
+  '050 fixture');
+const partnerReadsCoupleEvents = asUser(D, `
+  SELECT count(*) FROM public.product_events WHERE user_id = '${E}'`);
+check(
+  !partnerReadsCoupleEvents.ok || partnerReadsCoupleEvents.stdout.trim() === '0',
+  '050 adding the couple axis did NOT give the partner a read',
+);
+
+// Who may run a read-out.
+check(!asUser(D, `SELECT * FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`).ok,
+  '050 an authenticated user CANNOT run the read-out');
+check(!asAnon(`SELECT * FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`).ok,
+  '050 anon CANNOT run the read-out');
+check(!psql(['-At',
+  '-c', 'GRANT EXECUTE ON FUNCTION public.lv_funnel_readout(DATE, DATE) TO authenticated',
+  '-c', 'SET ROLE authenticated',
+  '-c', `SELECT * FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`]).ok,
+  '050 EXECUTE without the service_role claim is refused in the body');
+mustSql('REVOKE EXECUTE ON FUNCTION public.lv_funnel_readout(DATE, DATE) FROM authenticated', 'restore');
+
+// What it returns: numbers, never rows about a person.
+const readoutShape = mustAsServiceRole(
+  // OUT columns of a RETURNS TABLE function live in proargnames/proargmodes,
+  // not in a pg_class row -- there is no composite type to inspect.
+  `SELECT string_agg(name, ',' ORDER BY ord) FROM (
+     SELECT unnest(p.proargnames) AS name,
+            generate_subscripts(p.proargnames, 1) AS ord,
+            unnest(p.proargmodes) AS mode
+     FROM pg_proc p WHERE p.proname = 'lv_funnel_readout'
+   ) x WHERE mode = 't'`, '050 shape');
+check(
+  readoutShape === 'metric,value',
+  `050 the read-out returns a metric and a number, never a row about a person (got: ${readoutShape})`,
+);
+
+const readout = mustAsServiceRole(
+  `SELECT string_agg(metric || '=' || value, ',' ORDER BY metric)
+   FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`, '050 readout');
+check(readout.includes('couples_connected=1'), '050 counts connected couples');
+check(readout.includes('couples_writing=1'),
+  '050 counts the COUPLE that wrote, not the two accounts in it');
+check(readout.includes('records_composed=2'), `050 still counts the records themselves (got: ${readout})`);
+check(readout.includes('briefing_to_original_ratio=1.0000'),
+  `050 reports the summary-to-original RATE (got: ${readout})`);
+
+check(
+  mustAsServiceRole(
+    `SELECT string_agg(metric || '=' || value, ',' ORDER BY metric)
+     FROM public.lv_funnel_readout(DATE '2026-06-01', DATE '2026-06-30')`, '050 empty window')
+    .includes('briefing_to_original_ratio=0'),
+  '050 an empty window divides by nothing instead of failing',
+);
+check(!asServiceRole(`SELECT * FROM public.lv_funnel_readout(DATE '2026-07-31', DATE '2026-07-01')`).ok,
+  '050 a reversed range is refused rather than silently returning zero');
+
+// Retention as a count, not a list of who came back.
+const retention = mustAsServiceRole(
+  `SELECT string_agg(metric || '=' || value, ',' ORDER BY metric)
+   FROM public.lv_couple_return_count(DATE '2026-07-01', DATE '2026-07-01', DATE '2026-07-02', DATE '2026-07-02')`,
+  '050 retention');
+check(retention.includes('couples_active_first=1') && retention.includes('couples_returned=1'),
+  '050 retention answers HOW MANY couples returned');
+const retentionShape = mustAsServiceRole(
+  `SELECT string_agg(name, ',' ORDER BY ord) FROM (
+     SELECT unnest(p.proargnames) AS name,
+            generate_subscripts(p.proargnames, 1) AS ord,
+            unnest(p.proargmodes) AS mode
+     FROM pg_proc p WHERE p.proname = 'lv_couple_return_count'
+   ) x WHERE mode = 't'`, '050 retention shape');
+check(retentionShape === 'metric,value',
+  '050 retention never returns WHICH couples came back');
+check(!asUser(D, `SELECT * FROM public.lv_couple_return_count(DATE '2026-07-01', DATE '2026-07-01', DATE '2026-07-02', DATE '2026-07-02')`).ok,
+  '050 an authenticated user CANNOT run the retention read-out');
 
 // ---------------------------------------------------------------------------
 // Report

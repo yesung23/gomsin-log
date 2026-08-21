@@ -108,9 +108,9 @@ active branch가 존재한다. **master에는 아직 없다.**
 | Gate 3 push 서버 | `claude/phase1-gate3-push`. migration 048 + `send-push`. 실제 PostgreSQL로 검증됨 |
 | Gate 3 push 클라이언트 | 완료. 토큰 lifecycle은 이 저장소가 다른 클라이언트 동작을 검증하는 방식으로 검증 가능했고(§14.3이 negative test를 명시적으로 요구한다), 실기기가 필요한 것은 실제 전달뿐이다 |
 | `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
-| S4 §7.6 대기 구간 | 자동 노출 결함은 닫혔다 — 파트너가 없으면 저장 자체가 비공개다. **"한 번 묻기"는 미완.** 합류 시각은 이미 읽을 수 있으므로(harness가 실측) 새 SQL은 필요 없고, 남은 것은 "한 번"을 기억할 상태 설계다 — device-local 플래그는 `saveState` whitelist를 넓혀야 하는데 그 목록은 계정 삭제 후 잔존 방지를 위해 고정돼 있다 |
-| §19 계측 | migration 049와 emitter가 있고 **선언된 8종 전부**에 emit 지점이 있다 — 테스트가 union을 파싱해 호출자 없는 종류를 잡는다. `briefing_opened`가 분모라 요약→원본 **이동률**이 나오고, `notifications_disabled`는 OFF 전이에서만 발생하는 kill metric이다. **이벤트 조회·집계 도구는 없다** — LV 리드아웃 시점에 필요하다 |
-| 연락 가능 시간 | **양 역할 모두에게 묻는다.** 곰신이 이 단계를 건너뛰고 있었고, migration 048이 각자 선언한 시간창 안에서만 발송하므로 곰신은 군인용 기본값을 물려받았을 것이다. 곰신 5단계, 군화 6단계 |
+| S4 §7.6 대기 구간 | **완료.** 자동 노출 없음(저장 시 비공개 강제) + 연결 직후 창(7일) 안에서 묻는 카드. **"한 번"을 저장하지 않는다** — `couple_members.joined_at`에서 창을 계산하므로 새 영속 사실이 없다. 창이 지나도 기록은 그대로 비공개이며 개별 전환 가능 |
+| §19 계측·판독 | **완료.** 선언된 8종 전부에 emit 지점이 있고, 050이 커플 축과 집계 판독을 더했다. 현재 파이프로 LV 퍼널의 **주요 지표를 실제로 계산할 수 있다** — 커플 단위 지표 2개는 050 이전에는 계산 자체가 불가능했다. 여전히 없는 것: 3분 합류 실측 · 감정 확인율 · 위젯 사용률 |
+| 연락 가능 시간 | **완료.** 온보딩에서 양 역할에게 묻고, 설정에서 양 역할이 편집한다. 끝이 시작보다 이른 창은 저장 전에 거부한다 — DB는 받아들이고 발송이 영영 매치하지 않아 설명 없이 알림이 끊긴다 |
 
 Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은
 001의 SELECT 정책 때문에 파트너에게 읽히고, 그것은 곧 읽음 표시(§14.3 절대 금지)다. 전용 테이블로
@@ -167,6 +167,7 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 | 047 | care signal `feeling_unwell` | **PR #76이 소유하며 master에도 이 branch에도 없다.** Production NOT APPLIED |
 | 048 | push delivery metadata (Gate 3) | active branch only. fresh chain 001→048에서 실제 PostgreSQL 17.10으로 37개 계약 검증, mutation 6건 확인. Production NOT APPLIED; 047과 결합한 체인은 **아직 한 번도 실행되지 않았다** |
 | 049 | §19 최소 계측 (LV 진입 조건) | active branch only. **timestamp 컬럼이 없다** — 날짜 버킷만. 파트너 read 정책 없음, UPDATE/DELETE 정책 없음. fresh chain 001→049에서 19개 계약 검증, mutation 4건 확인. Production NOT APPLIED |
+| 050 | LV 판독 (couple 축 + 집계 함수) | active branch only. `couple_id`는 세션에서 파생되고 파트너 read는 여전히 없다. 판독은 `(metric, value)` 집계만 반환하며 행 반환 경로가 없다. fresh chain 001→050에서 16개 계약 검증, mutation 5건 확인. Production NOT APPLIED |
 
 No remote Supabase mutation was performed by this documentation task.
 

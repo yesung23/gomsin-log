@@ -2690,6 +2690,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * single-flighted inside it, so overlapping with the realtime listener costs
    * one pass.
    */
+  /*
+    NOT COVERED BY A REGRESSION TEST, and three attempts say why.
+
+    `all()` is reached by the queue-count effect as well as by a flush, so
+    asserting on it passes with this effect gutted. An `online` listener exists
+    regardless, because `useOnlineStatus` registers one. And the pair written
+    inside `store.test.tsx` passed alone while failing in the full suite through
+    interference elsewhere in that file.
+
+    Each attempt was deleted rather than tuned until green. Proving this needs a
+    real queued entry and an assertion that delivery was ATTEMPTED — an outbox
+    fixture no current test file has — and building one on a release branch to
+    cover a fix this small is the wrong trade. It is recorded as unverified in
+    the handoff instead of being counted as tested.
+  */
   useEffect(() => {
     if (!isAuthChecked || !authUserId) return;
 

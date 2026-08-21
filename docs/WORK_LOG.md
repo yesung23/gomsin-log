@@ -3929,6 +3929,100 @@ mutation 4건 전부 잡힌다. 그중 **리스너는 그대로 두고 cold-laun
 저장소 감사 완료, 안전하게 조치 가능한 내부 blocker 없음. 다음은 여전히 **user 전용 게이트인
 PR #80 병합**이고, 그다음이 Codex 독립 감사다.
 
+### 2026-08-22 · 도구 간 세션 프로토콜 — 옵시디언이 낡은 vault를 열고 있었다
+
+#### PLAN POSITION
+- Phase: LV 준비 (변경 없음)
+- Workstream: 협업 인프라 (제품 코드 아님)
+- Step: 여러 AI의 상태 동기화
+- Previous Gate: 해당 없음
+- This Gate: 해당 없음 — 게이트를 옮기지 않는다
+
+#### DIRECTION CHECK
+- Product source checked: NOT APPLICABLE (제품 동작 무변경)
+- Business source checked: NOT APPLICABLE
+- Engineering source checked: `AGENTS.md`, `CLAUDE.md`
+- Current-state checked: `control-tower/Current Gate.md` (읽기만)
+- Latest relevant Work Log checked: 2026-08-21 4차 감사
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code · Model: Opus 5 · Role: Control Tower
+- Branch: `chore/ai-session-protocol`, base `release/phase1-gate3-clean-history`
+- PR: 릴리스 PR #80 **위에 쌓았다.** #80에 커밋을 추가하면 리뷰가 stale해지고,
+  master에서 갈라내면 `.gitignore`·`WORK_LOG.md`가 충돌한다(#80이 이미 둘 다 고쳤다).
+  #80이 병합·삭제되면 GitHub이 이 PR의 base를 master로 자동 재지정한다
+
+#### 무엇이 문제였나
+
+Obsidian이 등록하고 있던 vault는 `Desktop/gomsinlog-control-tower-memory/control-tower`,
+즉 **8월 17일자 낡은 사본**이었다. 저장소 안의 진짜 vault(`곰신로그/control-tower`)에만 있던
+것: `Agents/` 8개 페이지 전부, `Start Here.md`, `README.md`, opus 리포트 3건,
+PartnerDay 과제 노트, 그리고 2,449바이트짜리 현행 `Current Gate.md`(낡은 쪽은 547바이트).
+**AI 기억을 보러 vault를 열면 닷새 전 상태가 보이고 있었다.**
+
+#### CHANGED
+
+| 파일 | 무엇 |
+|---|---|
+| `docs/AI_SESSION_PROTOCOL.md` | 신규 — 도구 간 절차의 유일한 원본 |
+| `scripts/agent/session-start.sh` | 신규 — live 상태·다음 작업·타 AI 점유·최근 세션을 한 번에 |
+| `scripts/agent/claim.sh` | 신규 — 작업 점유. 겹치면 exit 1 (토큰 겹침 휴리스틱, 24h 후 STALE) |
+| `scripts/agent/ct-sync.sh` | 신규 — `control-tower/`·WORK_LOG·프로토콜만 커밋. 그 밖이 stage되면 중단·되돌림 |
+| `scripts/agent/obsidian-open-vault.sh` | 신규 — vault 등록 교정. Obsidian 실행 중이면 거부(종료 시 덮어쓰므로) |
+| `control-tower/Now.md` | 신규 — 점유 보드. `CLAIMS` 블록은 스크립트만 쓴다 |
+| `control-tower/Chat AI Bootstrap.md` | 신규 — 저장소를 못 읽는 웹 챗용 붙여넣기 프롬프트 |
+| `control-tower/Agents/{Cursor,Antigravity}.md` | 신규 — 리포트 디렉터리 포함 |
+| `.cursor/rules/control-tower.mdc` | 신규 — alwaysApply 포인터 |
+| `.agents/rules/control-tower.md` | 신규 — Antigravity workspace rule 포인터 |
+| `CLAUDE.md` · `AGENTS.md` | 프로토콜 포인터와 claim 절차 추가 |
+| `control-tower/{Start Here,Dashboard,README,AI_ENTRYPOINT}.md` | Now·session-start·신규 에이전트 반영 |
+| `control-tower/.obsidian/` | Templater만 이관, 잡음 core plugin 끔 |
+| `.gitignore` | `.obsidian/plugins/`, `.makemd/`, `.space/` 제외 |
+
+절차는 `docs/AI_SESSION_PROTOCOL.md` 한 곳에만 있고 나머지는 전부 포인터다.
+
+#### 판단하여 하지 않은 것
+
+블로그(hospital82.tistory.com/186)의 NAS + CouchDB + Gitea 3단계는 **채택하지 않았다.**
+그 구성은 저장소가 없는 개인 vault를 여러 기기에서 맞추는 방법이고, 이 vault는 이미
+git이 추적하는 저장소 하위 폴더다. GitHub이 그대로 전송로다. user가 모바일 접근이
+불필요하다고 확정했다.
+
+**Obsidian Git 플러그인도 쓰지 않는다.** 이 vault는 코드 저장소의 하위 폴더라 플러그인이
+저장소 전체를 auto-commit 한다. 경로가 좁혀진 `ct-sync.sh`가 그 자리를 대신한다.
+낡은 vault에 설치돼 있던 make-md·livesync·calendar·periodic-notes·quickadd·linter도
+가져오지 않았다(설정이 비어 있어 보존할 사용자 작업이 없었고, make-md는 저장소에
+`.makemd/`·`.space/` 부산물을 뿌린다). 블로그가 끄라는 graph view는 **켠 채로 뒀다** —
+어떤 AI가 무엇을 했는지가 그것으로 보인다.
+
+#### VERIFICATION
+
+| 무엇 | 결과 |
+|---|---|
+| `claim.sh` 잡기·겹침 거부·`--list`·`--release` | PASS (겹침 시 exit 1 확인) |
+| `session-start.sh` 6개 섹션 전체 출력 | PASS |
+| `ct-sync.sh status` — 기억 밖 변경 분리 | PASS (`.DS_Store`를 기억 밖으로 정확히 분류) |
+| vault wikilink 32개 노트 전수 | 깨진 링크 없음 (템플릿 placeholder 3개 제외, 기존부터 의도된 것) |
+| clone 2개의 로컬 브랜치 tip 커밋이 메인 저장소에 존재하는지 | 전부 존재 확인 후 삭제 |
+
+**실행하지 않은 것:** `npm run verify` 등 앱 검증 — 제품 코드와 마이그레이션을 한 줄도
+건드리지 않았다. `ct-sync.sh push`는 실제 push 경로를 이번에 밟지 않았다(status·add·
+stray 검출까지만 확인).
+
+#### PRODUCTION
+- NOT APPLIED. Supabase 조회·변경 없음. 제품 코드 무변경.
+
+#### 정확한 중단 지점
+
+`Desktop/gomsin-log-consolidation`과 `Desktop/gomsinlog-control-tower-memory` 두 clone은
+user 승인 후 삭제했다(모든 커밋이 메인 저장소에 존재함을 먼저 확인). **남은 수동 단계
+하나:** Obsidian을 ⌘Q로 완전히 종료한 뒤
+`bash scripts/agent/obsidian-open-vault.sh` — 실행 중에는 스크립트가 거부한다.
+
+별개 사안: 메인 저장소의 로컬 브랜치 8개에 원격에 없는 커밋 66건이 있다. 이번 작업과
+무관하며 손대지 않았다.
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

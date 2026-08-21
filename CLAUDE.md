@@ -15,14 +15,19 @@
 > | migration 작성·검증 | `gomsin-migration-gate` | `docs/skills/migration-gate.md` |
 > | 종료 전 검증 | `gomsin-release-validation` | `docs/skills/release-validation.md` |
 >
+> 여러 AI(Codex·Cursor·Antigravity·ChatGPT·Kiro·Grok)와 상태를 맞추는 절차는
+> [`docs/AI_SESSION_PROTOCOL.md`](docs/AI_SESSION_PROTOCOL.md)가 소유한다.
+> 세션은 `bash scripts/agent/session-start.sh` 하나로 시작한다.
+>
 > 절차의 원본은 [`docs/skills/`](docs/skills/README.md)이며 Codex·Kiro와 공유한다.
 > Skill은 그 파일을 가리키는 얇은 래퍼다. 절차를 고칠 때는 원본만 고친다.
 
 ## Control Tower session protocol
 
 대화 기억은 source of truth가 아니다. 새 채팅을 포함한 모든 비사소한 작업은
-다음 순서로 현재 상태를 복구한다.
+다음 순서로 현재 상태를 복구한다. 0번은 명령 하나로 1·5·6의 live 부분을 대신한다.
 
+0. `bash scripts/agent/session-start.sh` — live 상태 · 다음 작업 · **다른 AI의 점유** · 최근 세션
 1. 이 문서
 2. [`docs/PRODUCT_V3.md`](docs/PRODUCT_V3.md)
 3. [`docs/BUSINESS_MEMORY_ROADMAP_V1.md`](docs/BUSINESS_MEMORY_ROADMAP_V1.md) (사업·고객·BM·AI·미디어·기억·시장·KPI에 영향이 있는 경우)
@@ -68,6 +73,18 @@ Business source는 고객, 문제정의, 제품 범위, AI 역할, 수익화, �
 미디어, Memory Product, KPI, 시장확장에 영향을 주는 작업에서 필수다. 단순한 저수준
 버그 수정은 관련 없는 사업 문서를 억지로 읽지 않는다.
 
+### 다른 AI와 겹치지 않기
+
+비사소한 작업 전에 잡고, 끝나면 놓는다. 겹치면 스크립트가 막는다.
+
+```bash
+bash scripts/agent/claim.sh opus "<한 줄>"
+bash scripts/agent/claim.sh --release opus
+```
+
+점유는 예의이지 잠금이 아니다 — 실제 충돌은 git이 판정한다. 보드는
+`control-tower/Now.md`이며 **손으로 고치지 않는다.**
+
 ### Volatile fact rule
 
 다음은 문서의 과거 기록을 그대로 믿지 말고 작업 시점에 live 확인한다.
@@ -88,6 +105,7 @@ Business source는 고객, 문제정의, 제품 범위, AI 역할, 수익화, �
 | 구현 순서·단계·gate | `docs/ENGINEERING_ROADMAP.md` |
 | 현재 구현 현실·blocker | 저장소 코드, 그 다음 `docs/CURRENT_STATE.md` |
 | 세션 작업 이력 | `docs/WORK_LOG.md` |
+| 도구 간 세션 절차 · 작업 점유 | `docs/AI_SESSION_PROTOCOL.md` |
 | 새 AI의 지도·복구 방법 | `docs/PROJECT_HANDOFF_2026-08-13.md` |
 | migration 적용 원장 | `supabase/migrations/README.md` |
 
@@ -104,7 +122,8 @@ ONE FACT → ONE AUTHORITATIVE HOME을 지킨다. 지도와 작업 로그에는 
 
 ### Session end checkpoint
 
-세션 종료 시 `WORK_LOG.md`에 표준 원장 형식으로 다음을 남긴다. 실제 실행한 검증과
+세션 종료 시 `WORK_LOG.md`에 표준 원장 형식으로 다음을 남기고,
+`bash scripts/agent/ct-sync.sh push "ct: opus <요약>"`로 다른 AI에게 공유한다. 실제 실행한 검증과
 실행하지 않은 검증, code/migration/production 변경 여부, 정확한 중단 지점과 다음
 작업을 구분한다. READ-ONLY reviewer는 저장소를 수정하지 않고 `READY-TO-COPY
 WORK_LOG ENTRY`만 출력한다. Control Tower 또는 write-capable Worker가 이를

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { WaitingPeriodRevealCard } from '@/components/WaitingPeriodRevealCard';
 import { useStore } from '@/lib/useStore';
 import { Plus, LayoutGrid } from 'lucide-react';
 import {
@@ -302,6 +303,19 @@ export function RoleHome() {
         caches relationship-scoped state on mount must not survive an account or
         couple change holding the previous one.
       */}
+      {/*
+        §7.6's question, above the pinned core for the days it is offered.
+
+        Placed here rather than inside the widget layer because it is not a
+        widget: it cannot be reordered away, it appears only in the window after
+        connecting, and it disappears on its own. `WaitingPeriodRevealCard`
+        renders nothing when there is nothing to ask about, so this costs an
+        empty component on every other day.
+      */}
+      <div className="px-4 pt-3">
+        <WaitingPeriodRevealCard />
+      </div>
+
       <div className="px-4 pt-3 space-y-5" data-testid="home-core">
         {coreSurfaces.map(({ id, Component }) => {
           // 통화 전 60초 has nothing to brief before there is a partner.

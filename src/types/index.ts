@@ -420,6 +420,18 @@ export interface CoupleInfo {
   coupleCode: string;
   connected: boolean;
   status: CoupleStatus;
+  /**
+   * When the partner's membership became active, from `couple_members.joined_at`.
+   *
+   * Canonical since migration 001 and readable by an active member. §7.6 uses it
+   * to tell which records predate the partner, which is what makes the one-time
+   * reveal prompt possible WITHOUT storing "already asked" anywhere.
+   *
+   * Absent while the fetch is in flight, and on rows old enough to lack it. The
+   * prompt treats absence as "do not ask": guessing would mean offering to
+   * reveal entries written after the partner arrived.
+   */
+  partnerJoinedAt?: string;
 }
 
 export interface UserProfile {

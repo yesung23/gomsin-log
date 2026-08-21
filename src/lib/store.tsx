@@ -52,6 +52,7 @@ import {
 import { revokeOwnPushTokens } from '@/lib/pushTokens';
 import { setUpPushNotifications } from '@/lib/pushNotifications';
 import { recordProductEvent } from '@/lib/productEvents';
+import { fetchPartnerJoinedAt } from '@/lib/coupleTimeline';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   applyDeliveryOutcome,
@@ -974,6 +975,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (coupleLifecycle !== 'connected') return;
     void setUpPushNotifications();
+
+    /*
+      §7.6 needs to know which records predate the partner, and the only fact
+      that answers it is when they joined. Fetched once on connection rather than
+      carried in the main state fetch, so a failure here degrades to "do not
+      offer the prompt" instead of degrading the whole hydration.
+    */
+    const identity = captureActiveIdentity();
+    const coupleId = stateRef.current.profile.couple.coupleId;
+    if (identity && coupleId) {
+      void fetchPartnerJoinedAt(coupleId, identity.userId).then((joinedAt) => {
+        if (!joinedAt || !isCurrentIdentity(identity)) return;
+        updateStateImmediately((prev) => (
+          prev.profile.couple.partnerJoinedAt === joinedAt ? prev : {
+            ...prev,
+            profile: {
+              ...prev.profile,
+              couple: { ...prev.profile.couple, partnerJoinedAt: joinedAt },
+            },
+          }
+        ));
+      });
+    }
     /*
       The activation funnel's one step that decides everything after it. §19
       permits the event kind; nothing identifying the partner is sent, and the
@@ -981,6 +1005,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       into a view of the other person.
     */
     void recordProductEvent({ kind: 'couple_connected' });
+    /*
+      Keyed on the lifecycle transition alone, deliberately.
+
+      The three helpers this reads are stable per render but not referentially
+      stable, so listing them would re-run this on every state change: a second
+      permission prompt, a duplicate `couple_connected` event, and a join-time
+      fetch on every keystroke. The transition into `connected` is the event; the
+      helpers are how it is handled.
+    */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coupleLifecycle]);
 
   useEffect(() => {

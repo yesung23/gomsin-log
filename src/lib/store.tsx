@@ -49,7 +49,7 @@ import {
   unmarkTalkAboutInDB,
   resolveTalkAboutInDB,
 } from '@/lib/talkAbout';
-import { revokeOwnPushTokens } from '@/lib/pushTokens';
+import { revokeOwnPushTokens, clearOwnUnseen } from '@/lib/pushTokens';
 import { setUpPushNotifications } from '@/lib/pushNotifications';
 import { recordProductEvent } from '@/lib/productEvents';
 import { fetchPartnerJoinedAt } from '@/lib/coupleTimeline';
@@ -971,6 +971,42 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * anything the couple is trying to do next, and awaiting it here would put a
    * network round trip in front of the screen that just said they are connected.
    */
+  /**
+   * Put the invitation down once someone is here.
+   *
+   * `clear_my_unseen()` shipped in 048 with a client wrapper, a test, and no
+   * caller — the second unconnected function in `pushTokens.ts`, found the same
+   * way as the first. Without it the flag only ever went down when the SENDER
+   * lowered it after delivery, so opening the app, reading everything and
+   * closing it changed nothing: the next contact window produced another
+   * notification, and the one after that, for as long as the record existed.
+   *
+   * The daily cap meant it was one a day rather than a storm, which is probably
+   * why nobody noticed. It was still an app asking someone to come back to the
+   * thing they had just finished looking at.
+   *
+   * Why this is not a read receipt, restated because it is the obvious worry:
+   * the row is the CALLER'S OWN, and the partner has no policy that selects it.
+   * A read receipt is defined by the other side learning something. Nothing
+   * here reaches them, and nothing records when it happened.
+   *
+   * Foregrounding counts as being here. The alternative -- waiting for a
+   * specific record to be opened -- would mean tracking which ones were, which
+   * is the thing §14.3 forbids existing.
+   */
+  useEffect(() => {
+    if (coupleLifecycle !== 'connected') return;
+
+    const clear = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void clearOwnUnseen();
+    };
+
+    clear();
+    document.addEventListener('visibilitychange', clear);
+    return () => document.removeEventListener('visibilitychange', clear);
+  }, [coupleLifecycle]);
+
   useEffect(() => {
     if (coupleLifecycle !== 'connected') return;
     void setUpPushNotifications();

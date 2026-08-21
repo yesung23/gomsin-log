@@ -108,6 +108,7 @@ const ORDER = [
   '049_product_events.sql',
   '050_lv_funnel_readout.sql',
   '051_audit_closure_overload_and_forgeable_couple.sql',
+  '052_unseen_flag_survives_no_record.sql',
 ];
 
 /**
@@ -1542,6 +1543,51 @@ check(
   unseenOf(E) === 'f',
   '051 retracting the LAST shared record lowers it, so nobody is summoned to nothing',
 );
+
+/*
+  052 -- and the same is true when the record stops existing.
+
+  048 and 051 both reasoned about `is_private` changing and neither about the row
+  going away. Deleting a shared record left the partner summoned to a couple
+  space with nothing in it.
+
+  The instance that matters is not deletion by hand. `daily_records.user_id` is
+  ON DELETE CASCADE from `auth.users`, so closing an account deletes everything
+  that account wrote -- and the surviving partner was then told, in their next
+  contact window, that their partner had ACTED. What happened is that they left.
+*/
+mustSql(`UPDATE public.push_delivery_state SET has_unseen = FALSE WHERE user_id IN ('${D}', '${E}')`, 'reset 3');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('d0000000-0000-4000-8000-000000000003', '${D}', '${COUPLE3}', CURRENT_DATE, 'first', false),
+         ('d0000000-0000-4000-8000-000000000004', '${D}', '${COUPLE3}', CURRENT_DATE, 'second', false)`,
+  '052 two shared');
+check(unseenOf(E) === 't', '052 two shared records raise the flag');
+mustSql(`DELETE FROM public.daily_records WHERE id = 'd0000000-0000-4000-8000-000000000003'`, '052 delete one');
+check(
+  unseenOf(E) === 't',
+  '052 deleting ONE leaves the flag up, because another is still shared',
+);
+mustSql(`DELETE FROM public.daily_records WHERE id = 'd0000000-0000-4000-8000-000000000004'`, '052 delete last');
+check(
+  unseenOf(E) === 'f',
+  '052 deleting the LAST shared record lowers it, on the path 051 did not cover',
+);
+
+// A private record never raised anything, so removing it must not lower a flag
+// that something else put up.
+mustSql(`INSERT INTO public.push_delivery_state (user_id, has_unseen) VALUES ('${E}', TRUE)
+     ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE`, '052 raise by hand');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('d0000000-0000-4000-8000-000000000005', '${D}', '${COUPLE3}', CURRENT_DATE, 'private', true)`,
+  '052 private insert');
+mustSql(`DELETE FROM public.daily_records WHERE id = 'd0000000-0000-4000-8000-000000000005'`, '052 delete private');
+check(
+  unseenOf(E) === 't',
+  '052 removing a PRIVATE record lowers nothing, because it never raised anything',
+);
+mustSql(`UPDATE public.push_delivery_state SET has_unseen = FALSE WHERE user_id = '${E}'`, 'reset 4');
 
 // --- the partner cannot observe the flag ------------------------------------
 // `has_unseen` is delivery state, not a read receipt. A read receipt is defined

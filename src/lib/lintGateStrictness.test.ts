@@ -114,3 +114,70 @@ describe('the Deno type-check gate covers every edge function', () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe('the push client has no function that only its own tests call', () => {
+  /*
+    Third time for this shape, so it gets a gate.
+
+      - `listenForPushTaps` was written, tested, and never wired. Tapping a
+        notification did nothing.
+      - `clearOwnUnseen` was written, tested, and never wired. Reading everything
+        in the app did not stop tomorrow's notification about it.
+      - `EmotionChipEditor` was rendered nowhere and kept alive by a theme-token
+        list, still carrying the §13 violation its replacement was written to fix.
+
+    All three passed every gate this repository has, because a suite that imports
+    a function proves the function works, never that anything calls it. The push
+    client is scoped here rather than the whole tree: every export in these two
+    modules exists to be invoked at a specific moment in a lifecycle, so one with
+    no production caller is a moment that silently does not happen.
+  */
+  const MODULES = ['src/lib/pushTokens.ts', 'src/lib/pushNotifications.ts']
+
+  const sources = execFileSync('git', ['ls-files', 'src'], { encoding: 'utf8', cwd: process.cwd() })
+    .split('\n')
+    .filter((file) => (file.endsWith('.ts') || file.endsWith('.tsx'))
+      && !file.includes('.test.')
+      && !file.startsWith('src/test/'))
+
+  for (const module of MODULES) {
+    const exported = [...read(module).matchAll(/^export (?:async )?function (\w+)/gm)].map((m) => m[1])
+
+    it(`finds exports to check in ${module}`, () => {
+      // Guards the assertion below: an empty list would make it vacuous, and a
+      // renamed export keyword is exactly how that would happen unnoticed.
+      expect(exported.length).toBeGreaterThan(0)
+    })
+
+    it(`every export of ${module} is called from production code`, () => {
+      /*
+        The module's own file counts, minus its definitions.
+
+        The first version excluded it, and immediately flagged `pushSupported` --
+        which is called twice inside the module and is simply not part of the
+        public surface. That is a different thing from "nothing calls this", and
+        conflating them would have made the gate a nuisance that gets deleted.
+
+        An import alone is not a call either: requiring the name followed by `(`
+        is what separates wiring from a type-only or re-export reference.
+      */
+      const unwired = exported.filter((name) => !sources.some((file) => {
+        /*
+          Comments are stripped first. Without that, commenting a call OUT still
+          satisfied the gate -- verified by mutation, where disconnecting
+          `clearOwnUnseen` left this green. A check that a disabled call
+          satisfies is checking that someone typed the name, which is the class
+          of test this file exists to argue against.
+        */
+        const stripped = read(file)
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/^\s*\/\/.*$/gm, '');
+        const text = file === module
+          ? stripped.replace(new RegExp(`export (?:async )?function ${name}\\b`, 'g'), '')
+          : stripped
+        return new RegExp(`\\b${name}\\s*\\(`).test(text)
+      }))
+      expect(unwired).toEqual([])
+    })
+  }
+})

@@ -50,7 +50,7 @@ export interface TodayLogWidgetProps {
 }
 
 export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
-  const { state, addRecordWithMedia, queueRecordForLater } = useStore();
+  const { state, sharedSyncStatus, addRecordWithMedia, queueRecordForLater } = useStore();
   const navigate = useNavigate();
   const partnerName = state.profile.couple.partnerName || '파트너';
   /**
@@ -755,7 +755,17 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
         
         {todayRecords.length === 0 ? (
           <p className="text-caption text-muted-foreground py-3">
-            아직 남겨진 기록이 없어요. 소중한 순간을 남겨보세요.
+            /*
+              Quarantine empties `records` -- one's OWN records included (store.tsx, the
+              `nextState` that sets `records: []`). A surface that reads only the length
+              therefore says "nothing here" when the truth is "we could not confirm what
+              is here", and §4.2 forbids exactly that: an empty state must mean empty,
+              not unreachable. `PartnerDayTimelineWidget` already draws this distinction;
+              these three did not.
+            */
+            {sharedSyncStatus === 'unavailable'
+              ? '기록을 확인하는 중이에요.'
+              : '아직 남겨진 기록이 없어요. 소중한 순간을 남겨보세요.'}
           </p>
         ) : (
           <div className="divide-y divide-border">

@@ -22,7 +22,7 @@ import { recordProductEvent } from '@/lib/productEvents';
 const VISIBLE_LIMIT = 5;
 
 export function TalkAboutListWidget() {
-  const { state, resolveTalkAbout, setHighlightedRecordId } = useStore();
+  const { state, sharedSyncStatus, resolveTalkAbout, setHighlightedRecordId } = useStore();
   const navigate = useNavigate();
   const isOffline = !useOnlineStatus();
   const { profile } = state;
@@ -57,7 +57,17 @@ export function TalkAboutListWidget() {
 
       {topics.length === 0 ? (
         <p className="text-caption text-muted-foreground py-2 break-keep">
-          아직 표시한 기록이 없어요. 기록에서 &apos;이따 이야기하기&apos;를 눌러두면 여기 모여요.
+          /*
+            Quarantine empties `records` -- one's OWN records included (store.tsx, the
+            `nextState` that sets `records: []`). A surface that reads only the length
+            therefore says "nothing here" when the truth is "we could not confirm what
+            is here", and §4.2 forbids exactly that: an empty state must mean empty,
+            not unreachable. `PartnerDayTimelineWidget` already draws this distinction;
+            these three did not.
+          */
+          {sharedSyncStatus === 'unavailable'
+            ? '기록을 확인하는 중이에요.'
+            : <>아직 표시한 기록이 없어요. 기록에서 &apos;이따 이야기하기&apos;를 눌러두면 여기 모여요.</>}
         </p>
       ) : (
         <ul className="divide-y divide-border">

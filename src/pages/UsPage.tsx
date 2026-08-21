@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
-import { buildMonthTexture, monthsWithContent } from '@/features/us/monthTexture';
+import { buildMonthTexture, monthsMissingBetween, monthsWithContent } from '@/features/us/monthTexture';
 import { MonthGrid } from '@/features/us/MonthGrid';
 import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
@@ -195,8 +195,31 @@ export function UsPage() {
           it; 우리 owns the past, and the past is a texture.
         */}
         <section className="space-y-5" aria-label="달마다 쌓인 기록">
-          {shownMonths.map((month) => (
+          {shownMonths.map((month, index) => (
             <div key={month.key} className="space-y-2">
+              {/*
+                Months holding nothing are not drawn -- a grid of 31 identical
+                empty squares says "this relationship had nothing in it". But
+                dropping them silently makes the months that remain look adjacent,
+                so a couple who wrote in March and again in August would see the
+                five months between them vanish.
+
+                우리 is the evidence of time spent apart, and time that passed
+                quietly still passed. So it is stated, once, in the quietest
+                grammar the surface has: one muted line, no card, no icon, no
+                count of what was missed. It says a number of months went by, not
+                that anyone failed to fill them -- §3.6, this app does not make
+                anyone anxious, and a gap in the record is not a verdict on a
+                relationship.
+              */}
+              {index > 0 && monthsMissingBetween(shownMonths[index - 1], month) > 0 && (
+                <p
+                  data-testid="us-month-gap"
+                  className="px-1 pt-1 text-caption text-muted-foreground"
+                >
+                  조용히 지나간 {monthsMissingBetween(shownMonths[index - 1], month)}개월
+                </p>
+              )}
               <div className="flex items-baseline justify-between gap-2 px-1">
                 <h3 className="text-heading text-foreground">
                   {month.year}년 {month.month}월

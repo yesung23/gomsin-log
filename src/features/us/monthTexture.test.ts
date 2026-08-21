@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildMonthTexture, monthsWithContent } from '@/features/us/monthTexture';
+import { buildMonthTexture, monthsWithContent , monthsMissingBetween} from '@/features/us/monthTexture';
 import type { CoupleEvent, DailyRecord, Trip } from '@/types';
 
 /**
@@ -242,5 +242,42 @@ describe('which months exist', () => {
   it('stays bounded for a very long relationship', () => {
     const months = monthsWithContent({ ...base, records: [record({ id: 'a', date: '2010-01-01' })] });
     expect(months.length).toBeLessThanOrEqual(60);
+  });
+});
+
+/**
+ * The gap between two rendered months.
+ *
+ * `monthsWithContent` drops months holding nothing, which is right. This is what
+ * keeps the drop from being silent: 우리 exists to show time spent apart, and a
+ * quiet stretch is still time that passed.
+ */
+describe('monthsMissingBetween', () => {
+  it('counts the months skipped between two rendered ones', () => {
+    // March then August: April, May, June, July went by.
+    expect(monthsMissingBetween({ year: 2026, month: 8 }, { year: 2026, month: 3 })).toBe(4);
+  });
+
+  it('counts nothing between adjacent months', () => {
+    expect(monthsMissingBetween({ year: 2026, month: 8 }, { year: 2026, month: 7 })).toBe(0);
+  });
+
+  it('counts nothing for the same month', () => {
+    expect(monthsMissingBetween({ year: 2026, month: 8 }, { year: 2026, month: 8 })).toBe(0);
+  });
+
+  it('crosses a year boundary, where a naive month subtraction goes negative', () => {
+    // 2026-01 back to 2025-10: November and December went by.
+    expect(monthsMissingBetween({ year: 2026, month: 1 }, { year: 2025, month: 10 })).toBe(2);
+  });
+
+  it('counts a gap spanning whole years', () => {
+    expect(monthsMissingBetween({ year: 2027, month: 3 }, { year: 2026, month: 3 })).toBe(11);
+  });
+
+  it('degrades to nothing when the pair arrives in the wrong order', () => {
+    // The caller renders nothing for 0, so a reversed pair shows today's
+    // behaviour rather than a negative month count on screen.
+    expect(monthsMissingBetween({ year: 2026, month: 3 }, { year: 2026, month: 8 })).toBe(0);
   });
 });

@@ -238,3 +238,30 @@ export function monthsWithContent(input: {
 
   return out;
 }
+
+/**
+ * How many months sit between two rendered months, holding nothing.
+ *
+ * `monthsWithContent` returns only months that hold something, which is right --
+ * a month rendered as 31 identical empty squares says "this relationship had
+ * nothing in it", which is both untrue and unkind. But dropping those months
+ * silently makes the ones that remain look adjacent, so a couple who wrote in
+ * March and again in August sees two blocks touching and five months of waiting
+ * disappear.
+ *
+ * 우리 is the evidence of time spent apart. Time that passed quietly still
+ * passed, and this is what lets the surface say so instead of editing it out.
+ *
+ * `newer` and `older` are `{ year, month }` with a 1-based month, in the order
+ * the list renders them (newest first). Returns 0 when they are adjacent, when
+ * they are the same month, or when they arrive in the wrong order -- the caller
+ * renders nothing for 0, so a bad pair degrades to today's behaviour.
+ */
+export function monthsMissingBetween(
+  newer: { year: number; month: number },
+  older: { year: number; month: number },
+): number {
+  const distance =
+    (newer.year - older.year) * 12 + (newer.month - older.month);
+  return distance > 1 ? distance - 1 : 0;
+}

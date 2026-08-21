@@ -51,6 +51,20 @@ export interface TodayLogWidgetProps {
 
 export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   const { state, sharedSyncStatus, addRecordWithMedia, queueRecordForLater } = useStore();
+  /*
+    Quarantine empties `records` -- one's OWN records included (`store.tsx`, the
+    `nextState` that assigns `records: []`). A surface that reads only the length
+    therefore says "nothing here" when the truth is "we could not confirm what is
+    here", and §4.2 forbids exactly that. `PartnerDayTimelineWidget` already drew
+    the distinction; this one did not.
+
+    Written HERE and not beside the JSX, because the first attempt put it inside
+    the element and JSX renders a bare block comment as TEXT. It shipped to CI
+    with the explanation printed on screen, backticks and all -- caught by the
+    literal-backtick test that exists because this exact thing happened once
+    before.
+  */
+
   const navigate = useNavigate();
   const partnerName = state.profile.couple.partnerName || '파트너';
   /**
@@ -755,14 +769,6 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
         
         {todayRecords.length === 0 ? (
           <p className="text-caption text-muted-foreground py-3">
-            /*
-              Quarantine empties `records` -- one's OWN records included (store.tsx, the
-              `nextState` that sets `records: []`). A surface that reads only the length
-              therefore says "nothing here" when the truth is "we could not confirm what
-              is here", and §4.2 forbids exactly that: an empty state must mean empty,
-              not unreachable. `PartnerDayTimelineWidget` already draws this distinction;
-              these three did not.
-            */
             {sharedSyncStatus === 'unavailable'
               ? '기록을 확인하는 중이에요.'
               : '아직 남겨진 기록이 없어요. 소중한 순간을 남겨보세요.'}

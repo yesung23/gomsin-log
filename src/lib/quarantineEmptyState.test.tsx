@@ -71,8 +71,23 @@ vi.mock('@/lib/productEvents', () => ({ recordProductEvent: vi.fn() }));
 const { TodayBriefingWidget } = await import('@/lib/widgetComponents');
 const { TalkAboutListWidget } = await import('@/components/widgets/TalkAboutListWidget');
 
-const draw = (node: React.ReactElement) =>
-  render(<MemoryRouter>{node}</MemoryRouter>).container.textContent ?? '';
+const draw = (node: React.ReactElement) => {
+  const text = render(<MemoryRouter>{node}</MemoryRouter>).container.textContent ?? '';
+  /*
+    Every render goes through this, and that is the point.
+    The first version of this fix put its explanation inside the JSX, where a
+    bare block comment is not a comment at all -- React renders it as text. The
+    branch assertions below all passed while the surface printed its own block
+    comment to the user, backticks and all, because they only asked which
+    SENTENCE appeared. CI caught it on the literal-backtick test that exists
+    because this happened once before.
+    So: no source markup ever reaches the screen, checked on every case.
+  */
+  expect(text).not.toContain('/*');
+  expect(text).not.toContain('*' + '/');
+  expect(text).not.toContain('`');
+  return text;
+};
 
 describe('§4.2: quarantine must not be rendered as emptiness', () => {
   beforeEach(() => { sharedSyncStatus = 'live'; });

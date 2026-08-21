@@ -18,7 +18,7 @@
 | 3 | #76 | `claude/047-cycle-pain-gated` | `d0e2c0a` | 14/14 |
 | 4 | #77 | `claude/phase0-defect-closure` | `e1ea756` | 14/14 |
 | 5 | #78 | `claude/phase1-call-mode-v2` | `ab01035` | 14/14 |
-| 6 | #79 | `claude/phase1-gate3-push` | **`a9f7dc0`** | 이 HEAD는 CI 진행 중 |
+| 6 | #79 | `claude/phase1-gate3-push` | **`c40d69d`** | `a9f7dc0`에서 14/14, 이 HEAD는 진행 중 |
 
 각 PR은 앞선 것을 **포함**한다(#75·#76은 #74를, #77은 #74를, #78은 #77을, #79는 #78을).
 순서대로 landing하면 뒤의 것은 자기 커밋만 남기고 줄어든다.
@@ -62,7 +62,7 @@
 
 | 무엇 | 결과 |
 |---|---|
-| `npm run verify` (#79) | **PASS (EXIT=0)** — 184 files / 2792 tests, unhandled rejection 0 |
+| `npm run verify` (#79) | **PASS (EXIT=0)** — 185 files / 2796 tests, unhandled rejection 0 |
 | `npm run verify` (결합) | **PASS (EXIT=0)** — 185 files / 2808 tests |
 | `npm run test:phase0` (#79) | **47 migrations / 197 assertions** (048이 37개, 049가 19개, 050이 16개) |
 | `npm run test:phase0` (결합) | **48 migrations / 205 assertions** — 047 포함 fresh chain, 첫 실행 |
@@ -148,9 +148,22 @@ PostgreSQL 17.10에 순서대로 적용되고 205 assertions 통과. 겹치는 �
 | 7 | 같은 곳의 재진입 가드도 `disabled`뿐이었다 | 〃 |
 | 8 | `authSyncCode`가 죽은 상태로 남아 있었다 | `store.tsx` |
 | 9 | 문서 두 곳이 HEAD와 어긋나 있었다 | 이 문서, `CURRENT_STATE.md` |
+| 10 | **§19 kill metric이 권한 거부를 opt-out으로 셌다** | `NotificationPreferencesSection.tsx` |
 
 6과 7은 이 브랜치 앞부분에서 **똑같은 모양의 mutation이 살아남은 적이 있는데도** 남아
 있던 것이다. `disabled`는 다음 렌더에 적용되므로 핸들러 안의 가드가 실제로 버티는 것이다.
+
+10은 이 중 유일하게 **숫자를 틀리게 만드는** 결함이었다. emit이 preference를 쓰는 함수 안에
+있었고 그 함수에는 호출자가 둘이다. 권한 요청이 denied로 돌아오면 `systemEnabled: false`를
+쓰는데, OS 설정에서 나중에 취소된 grant의 `true`가 저장돼 있었다면 그것이 OFF 전이다.
+**"허용"을 누른 사람이 opt-out한 사람으로 기록됐다** — 설계 실패를 뜻하는 지표가, 사용자가
+알림을 더 원한 순간에 올라간 것이다.
+
+> **감사자가 알아야 할 부류 하나.** 이 규칙은 테스트가 있었지만 **소스 문자열 대조**였다.
+> 그런 검사는 코드가 그 표현을 *포함하기만* 하면 통과하므로 결함이 존재한 내내 초록이었고,
+> 버그가 아니라 **수정에서** 깨졌다. 테스트가 실패하는 방향이 거꾸로다.
+> `src/lib/productEvents.test.ts`에는 같은 모양이 더 있다. 지금 전부 통과하므로 감사 규칙에
+> 따라 건드리지 않았지만, **인스턴스가 아니라 부류**로 봐야 한다.
 
 ## 6. 독립 리뷰를 받은 적 없는 것
 

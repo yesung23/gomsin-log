@@ -99,8 +99,10 @@ describe('composer availability by role', () => {
 
     expect(screen.getByText('오늘의 기록')).toBeInTheDocument();
     expect(screen.getByText('지금찍기')).toBeInTheDocument();
-    expect(screen.getByText('사진·영상')).toBeInTheDocument();
-    expect(screen.getByText('음성')).toBeInTheDocument();
+    expect(screen.getByText('사진')).toBeInTheDocument();
+    // §12.4 upload gate: no 음성 recorder, no 영상 in the picker label, until P6.
+    expect(screen.queryByText('음성')).not.toBeInTheDocument();
+    expect(screen.queryByText('사진·영상')).not.toBeInTheDocument();
   });
 
   /**
@@ -114,8 +116,10 @@ describe('composer availability by role', () => {
 
     expect(screen.getByText('오늘의 기록')).toBeInTheDocument();
     expect(screen.getByText('지금찍기')).toBeInTheDocument();
-    expect(screen.getByText('사진·영상')).toBeInTheDocument();
-    expect(screen.getByText('음성')).toBeInTheDocument();
+    expect(screen.getByText('사진')).toBeInTheDocument();
+    // §12.4 upload gate: no 음성 recorder, no 영상 in the picker label, until P6.
+    expect(screen.queryByText('음성')).not.toBeInTheDocument();
+    expect(screen.queryByText('사진·영상')).not.toBeInTheDocument();
   });
 
   it('records the author role of whoever is writing', async () => {
@@ -210,26 +214,47 @@ describe('composer attachment handling', () => {
    * disk, so there was no "다시 첨부" the user could actually perform.
    */
   it('keeps a failed attachment in the composer instead of destroying it', async () => {
-    addRecordWithMedia.mockResolvedValueOnce({ ok: true, failedFiles: ['목소리.webm'] });
+    // Both fixtures are photos: the §12.4 gate refuses video/audio at selection,
+    // so a non-photo can no longer reach the pending list at all.
+    addRecordWithMedia.mockResolvedValueOnce({ ok: true, failedFiles: ['dawn.jpg'] });
     const user = userEvent.setup();
     renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(input, [
-      new File(['x'], '목소리.webm', { type: 'audio/webm' }),
+      new File(['x'], 'dawn.jpg', { type: 'image/jpeg' }),
       new File(['x'], 'sunset.png', { type: 'image/png' }),
     ]);
-    expect(await screen.findByText('목소리.webm')).toBeInTheDocument();
+    expect(await screen.findByText('dawn.jpg')).toBeInTheDocument();
 
     await user.click(screen.getByText('저장'));
     await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
 
     // The one that failed is still attached and still retryable...
-    expect(await screen.findByText('목소리.webm')).toBeInTheDocument();
+    expect(await screen.findByText('dawn.jpg')).toBeInTheDocument();
     // ...and the one that succeeded is not offered again, so a retry cannot
     // silently duplicate it.
     await waitFor(() => expect(screen.queryByText('sunset.png')).not.toBeInTheDocument());
+  });
+
+  it('refuses a video or voice file at selection, with the policy reason', async () => {
+    // §12.4: no new plaintext video/voice upload path before the P6 encrypted
+    // media foundation. The refusal names the policy, not "unsupported format".
+    const user = userEvent.setup();
+    renderIn(<RoleHome />);
+
+    await user.click(screen.getByText('한줄'));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [
+      new File(['x'], 'clip.mp4', { type: 'video/mp4' }),
+      new File(['x'], 'memo.webm', { type: 'audio/webm' }),
+    ]);
+
+    // Neither file may become a pending chip. (The policy wording itself is
+    // pinned in recordsMediaPolicy.test.ts, at the classifier that owns it.)
+    expect(screen.queryByText('clip.mp4')).not.toBeInTheDocument();
+    expect(screen.queryByText('memo.webm')).not.toBeInTheDocument();
   });
 
   it('clears the composer completely when every attachment succeeded', async () => {

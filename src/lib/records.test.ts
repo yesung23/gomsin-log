@@ -4,6 +4,7 @@ import {
   buildMediaPath,
   MAX_BYTES,
   MEDIA_ACCEPT,
+  MEDIA_POLICY_REFUSAL,
   isCanonicalRecordMediaPath,
   deleteRecordFromDB,
   saveRecordToDB,
@@ -36,20 +37,36 @@ describe('classifyMediaFile', () => {
     }
   });
 
-  it('classifies allowed video types', () => {
+  // PRODUCT_V3 §12.3/§12.4, executed 2026-08-21: video and voice uploads stay shut
+  // until the encrypted media foundation (P6). The refusal is a decision, so it
+  // must not borrow the sentence that means "we could not read this file" — one
+  // reads as a policy, the other as a bug the user should retry around.
+  it('refuses video types by policy rather than calling them unsupported', () => {
     for (const mime of ['video/mp4', 'video/quicktime', 'video/webm']) {
       const result = classifyMediaFile({ type: mime, size: 1024 });
-      expect(result, mime).not.toHaveProperty('error');
-      expect((result as { type: string }).type).toBe('video');
+      expect(result, mime).toHaveProperty('error');
+      expect((result as { error: string }).error, mime).toBe(MEDIA_POLICY_REFUSAL);
     }
   });
 
-  it('classifies allowed audio types as voice', () => {
+  it('refuses audio types by policy rather than calling them unsupported', () => {
     for (const mime of ['audio/mp4', 'audio/mpeg', 'audio/webm', 'audio/ogg', 'audio/wav']) {
       const result = classifyMediaFile({ type: mime, size: 1024 });
-      expect(result, mime).not.toHaveProperty('error');
-      expect((result as { type: string }).type).toBe('voice');
+      expect(result, mime).toHaveProperty('error');
+      expect((result as { error: string }).error, mime).toBe(MEDIA_POLICY_REFUSAL);
     }
+  });
+
+  // The two refusals must stay distinguishable. If they ever collapse into one
+  // string, the gate above silently becomes indistinguishable from a parse
+  // failure and this assertion is what notices.
+  it('separates a policy refusal from an unreadable format', () => {
+    const byPolicy = classifyMediaFile({ type: 'video/mp4', size: 1024 });
+    const unsupported = classifyMediaFile({ type: 'application/zip', size: 1024 });
+
+    expect((byPolicy as { error: string }).error).not.toBe(
+      (unsupported as { error: string }).error,
+    );
   });
 
   it('rejects types that are not on the allowlist', () => {
@@ -82,17 +99,20 @@ describe('classifyMediaFile', () => {
       classifyMediaFile({ type: 'image/png', size: MAX_BYTES.photo }),
     ).not.toHaveProperty('error');
 
+    // MAX_BYTES still carries video and voice ceilings for the P6 re-admission,
+    // but no size makes those kinds acceptable today: the policy gate runs first,
+    // so both a tiny and an oversized video come back with the same sentence.
+    // Asserting that keeps a future size-check refactor from quietly reordering
+    // the two and letting a small video through.
+    for (const size of [1024, MAX_BYTES.photo + 1, MAX_BYTES.video + 1]) {
+      expect((classifyMediaFile({ type: 'video/mp4', size }) as { error: string }).error).toBe(
+        MEDIA_POLICY_REFUSAL,
+      );
+    }
     expect(
-      classifyMediaFile({ type: 'video/mp4', size: MAX_BYTES.video + 1 }),
-    ).toHaveProperty('error');
-    // A video that would be too large as a photo is still fine as a video.
-    expect(
-      classifyMediaFile({ type: 'video/mp4', size: MAX_BYTES.photo + 1 }),
-    ).not.toHaveProperty('error');
-
-    expect(
-      classifyMediaFile({ type: 'audio/webm', size: MAX_BYTES.voice + 1 }),
-    ).toHaveProperty('error');
+      (classifyMediaFile({ type: 'audio/webm', size: MAX_BYTES.voice + 1 }) as { error: string })
+        .error,
+    ).toBe(MEDIA_POLICY_REFUSAL);
   });
 
   it('returns a Korean, user-facing message on rejection', () => {
@@ -124,10 +144,19 @@ describe('buildMediaPath', () => {
 });
 
 describe('MEDIA_ACCEPT', () => {
-  it('covers photo, video and audio so the file picker shows all three', () => {
+  // The picker must not offer what the next step refuses. Being handed a file
+  // chooser that lists videos and then being told videos are closed is the
+  // worst of both: the app looks broken instead of deliberate.
+  it('offers only what classifyMediaFile will accept', () => {
     expect(MEDIA_ACCEPT).toContain('image/');
-    expect(MEDIA_ACCEPT).toContain('video/');
-    expect(MEDIA_ACCEPT).toContain('audio/');
+    expect(MEDIA_ACCEPT).not.toContain('video/');
+    expect(MEDIA_ACCEPT).not.toContain('audio/');
+  });
+
+  it('keeps every offered MIME type actually acceptable', () => {
+    for (const mime of MEDIA_ACCEPT.split(',')) {
+      expect(classifyMediaFile({ type: mime, size: 1024 }), mime).not.toHaveProperty('error');
+    }
   });
 });
 

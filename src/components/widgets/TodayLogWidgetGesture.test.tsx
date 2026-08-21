@@ -135,9 +135,9 @@ describe('H-3: the picker opens in the same task as the tap', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('clicks the input synchronously for 사진·영상 too', () => {
+  it('clicks the input synchronously for 사진 too', () => {
     renderWidget();
-    fireEvent.click(screen.getByText('사진·영상'));
+    fireEvent.click(screen.getByText('사진'));
     expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -199,47 +199,34 @@ describe('H-2: 지금찍기 asks for a photo, not a camcorder', () => {
     expect(input.accept).not.toContain('video/');
   });
 
-  it('PRESERVATION: 사진·영상 still opens the full picker with no capture', () => {
+  it('사진 opens the picker with no capture, offering photos only', () => {
+    // §12.4 upload gate: MEDIA_ACCEPT carries no video/audio MIME until the P6
+    // encrypted media foundation, so the OS picker cannot offer what the
+    // classifier would refuse.
     renderWidget();
-    fireEvent.click(screen.getByText('사진·영상'));
+    fireEvent.click(screen.getByText('사진'));
     const input = fileInput();
     expect(input.hasAttribute('capture')).toBe(false);
     expect(input.accept).toContain('image/');
-    expect(input.accept).toContain('video/');
-    expect(input.accept).toContain('audio/');
+    expect(input.accept).not.toContain('video/');
+    expect(input.accept).not.toContain('audio/');
   });
 
-  it('clears capture again when switching from 지금찍기 to 사진·영상', () => {
+  it('clears capture again when switching from 지금찍기 to 사진', () => {
     renderWidget();
     fireEvent.click(screen.getByText('지금찍기'));
     expect(fileInput().getAttribute('capture')).toBe('environment');
-    fireEvent.click(screen.getByText('사진·영상'));
+    fireEvent.click(screen.getByText('사진'));
     expect(fileInput().hasAttribute('capture')).toBe(false);
   });
 });
 
-describe('C-2: the microphone rationale is shown in-app on native only', () => {
-  beforeEach(() => {
-    isNativePlatformMock.mockReset();
-    isNativePlatformMock.mockReturnValue(false);
-  });
-
-  it('appears in the composer inside the native shell', () => {
-    isNativePlatformMock.mockReturnValue(true);
+describe('C-2 (retired with the recorder): no microphone surface in the composer', () => {
+  it('renders no microphone rationale anywhere, because nothing records', () => {
+    // The voice recorder left with the §12.4 upload gate. A microphone
+    // explanation with no microphone feature would itself be misleading UI.
     renderWidget();
     fireEvent.click(screen.getByText('한줄'));
-    expect(screen.getByText(MICROPHONE_RATIONALE)).toBeInTheDocument();
-  });
-
-  it('is not shown on the web, where the browser names the origin itself', () => {
-    renderWidget();
-    fireEvent.click(screen.getByText('한줄'));
-    expect(screen.queryByText(MICROPHONE_RATIONALE)).toBeNull();
-  });
-
-  it('is not shown before the composer is open, so it is not permanent furniture', () => {
-    isNativePlatformMock.mockReturnValue(true);
-    renderWidget();
     expect(screen.queryByText(MICROPHONE_RATIONALE)).toBeNull();
   });
 });

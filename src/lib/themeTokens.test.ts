@@ -278,7 +278,6 @@ const ALL_UI_SOURCES = [
   'src/components/widgets/PartnerEmotionWidgets.tsx',
   'src/components/widgets/CareHintWidget.tsx',
   'src/components/EmotionChipEditor.tsx',
-  'src/components/RecordEmotionCorrection.tsx',
   'src/components/PlanSectionNav.tsx',
   'src/lib/recordAuthor.ts',
   'src/pages/MyPage.tsx',

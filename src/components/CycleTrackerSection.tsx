@@ -744,12 +744,41 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
 
   if (!consentGranted) {
     return (
+      /*
+        Order matters here, and it is the whole point of this layout.
+
+        This card is the FIRST thing a 곰신 who has not consented sees on 마이 --
+        above their cycle, above 복무와 일정, above settings. It used to open with
+        the four-field disclosure block in a filled, coral-bordered box, so the
+        first impression of the tab was a legal form and the thing being offered
+        was never stated in words anyone would choose to read.
+
+        Nothing legally required was removed to fix that: PIPA §23 needs separate,
+        informed consent for 민감정보, so all four items and the refusal-rights
+        sentence are still here and still visible without a tap. What changed is
+        that the offer is stated first and the disclosure is drawn as reference
+        text underneath it rather than as the loudest element on the screen.
+      */
       <Card className="space-y-4" aria-labelledby="cycle-consent-title">
-        <div className="flex items-center gap-2 border-b border-border/40 pb-3">
+        <div className="flex items-center gap-2">
           <HeartPulse className="w-5 h-5 text-coral" aria-hidden="true" />
           <h3 id="cycle-consent-title" className="text-heading text-foreground">내 몸의 리듬 시작하기</h3>
         </div>
-        <div className="rounded-control border border-coral/30 bg-coral/5 p-3 space-y-2 text-caption text-muted-foreground leading-relaxed">
+
+        <div data-testid="cycle-consent-offer" className="space-y-1.5 border-b border-border/40 pb-3">
+          <p className="text-label text-foreground leading-relaxed">
+            생리 주기를 기록하면 다음 예상 범위를 볼 수 있어요.
+          </p>
+          <p className="text-caption text-muted-foreground leading-relaxed">
+            기록은 나만 봐요. 상대방에게는 내가 직접 고른 것만 전해지고, 원본은 전해지지 않아요.
+          </p>
+        </div>
+
+        <div
+          data-testid="cycle-consent-disclosure"
+          className="rounded-control border border-border bg-muted/40 p-3 space-y-2 text-caption text-muted-foreground leading-relaxed"
+        >
+          <p className="text-label font-bold text-foreground">동의 전에 확인해 주세요</p>
           <p><strong className="text-foreground">수집 항목:</strong> 생리 시작·종료일, 일별 컨디션(증상·출혈량·통증·기분·메모), 평균 주기 설정</p>
           <p><strong className="text-foreground">이용 목적:</strong> 본인 주기 기록과 예상 범위 표시</p>
           <p><strong className="text-foreground">파트너 공유:</strong> 직접 선택한 항목만. 원본 기록은 공유되지 않아요.</p>

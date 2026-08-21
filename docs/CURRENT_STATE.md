@@ -80,6 +80,26 @@ Convergence is complete for P5.5: **approved baseline `0660ad277` → reviewed
 e2e-only harness `b788c44` → master merge `eb2d9a4`**. #54/#58/#62–#67 remain
 historical provenance and must not be independently landed again.
 
+### Phase 0 defect-closure checkpoint — 2026-08-21
+
+Fable 전략(`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md`) §8 Phase 0의 결함 목록을 소진한
+active branch가 존재한다. **master에는 아직 없다.**
+
+| 항목 | 상태 |
+|---|---|
+| branch | `claude/phase0-defect-closure`, base는 `9b0d4b3`(= PR #74 head) |
+| 검증 | `npm run verify` PASS (EXIT=0), 172 files / 2633 tests |
+| S6 감정 편집기 이중화 | 해소. `RecordEmotionCorrection` 제거, 항목 제거 기능은 `RecordMoodSection`으로 이관 |
+| `AttachmentMedia` | 삭제. 단, 그 suite가 `useMediaAttachment`의 유일한 커버리지였으므로 훅 테스트로 먼저 이관했다 |
+| 마이 탭 동의 카드 | 재구성. PIPA §23 고지 항목은 전부 유지 |
+| 기록 탭 §3.1 위반 | 해소. 파생 요약이 원본 아래로 이동 |
+| 우리 달 간격 | `조용히 지나간 N개월`로 표시 |
+| 영상·음성 업로드 | 정책 거부로 닫힘 |
+| Lightbox 레이어링 | **결함 아님으로 판정.** `dialog.showModal()`이라 브라우저 top layer에 그려진다 |
+| 빈 홈 화면 공백 | **미해결.** 위젯이 적어 생기는 구조적 희소함이며, 내용을 만들어 채우는 것은 2026-08-20에 되돌린 방향이다. 디자인 결정 대기 |
+
+이 branch의 CI는 base `master` PR에서만 돈다. stacked base에서는 어떤 workflow도 trigger되지 않는다.
+
 ### Branch consolidation checkpoint — 2026-08-20
 
 Every remote branch was audited for work that was still valid and not yet on master,
@@ -148,7 +168,7 @@ P5.3/P5.4 chat stack은 여전히 FROZEN / DEFERRED다.
 | 자체 채팅 | master에는 not merged; PR #59 foundation과 PR #60 product UI가 active draft에 존재하나 현재 V1은 **FROZEN / DEFERRED** | `FUTURE` |
 | 주기 projection | 서버 평문 건강 데이터 계산 경계는 재설계 필요 | `SEC` `PROD` |
 | 정밀 위치 | 여행 항목에 정밀 위경도 평문 경로가 남아 있음 | `SEC` `BETA` |
-| 평문 영상 | 기존 평문 첨부 경로가 존재하며 Full User-Content E2EE 전에는 해소 필요 | `PRODUCT` `BETA` |
+| 평문 영상 | **신규 업로드 경로는 닫혔다** — `classifyMediaFile`이 영상·음성을 정책으로 거부하고 컴포저에서 캡처 칩이 제거됐다(§12.4 선택지 C, 2026-08-21). 이미 저장된 첨부는 계속 재생된다. 쓰기만 막았고 읽기는 그대로이므로 기존 평문 데이터 자체의 해소는 여전히 P6 과제다. 이 변경은 아직 active branch에만 있다 | `PRODUCT` `BETA` |
 | 레거시 건강 평문 | 레거시 주기 테이블·백업 데이터가 남아 있음 | `LEGACY` |
 | `briefings` 레거시 스키마 | 평문 요약 캐시 테이블이 스키마에 남아 있다. `master`의 `src/**`에 read/write 경로가 없어 **동작하는 평문 요약 파이프라인은 아니다**. 삭제하는 migration도 없어 스키마 정리 대상으로 남는다 | `LEGACY` |
 | 연결 해제와 pairing 상태 | master에는 `disconnect_couple`이 `couple_members`만 갱신하는 상태다. integration branch의 044가 pairing도 `UNLINKED`로 전이하며 local tombstone을 함께 처리한다. 아직 merge·원격 적용 전이다 | `FUTURE` `PROD` |

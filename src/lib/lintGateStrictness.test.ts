@@ -53,12 +53,26 @@ describe('the lint gate can actually fail', () => {
     expect(read('eslint.config.js')).not.toContain('reportUnusedDisableDirectives');
   });
 
-  it('leaves no blanket suppression behind in the two files it cleaned', () => {
+  it('leaves no blanket suppression behind in the file it cleaned', () => {
     expect(read('src/components/widgets/PartnerDayTimelineWidget.tsx'))
       .not.toContain('eslint-disable');
-    // The helper stays in the component file but is no longer exported, so the
-    // module exports components only and Fast Refresh works again.
-    expect(read('src/components/AttachmentMedia.tsx'))
+  });
+
+  it('keeps the react-refresh rule the second warning came from', () => {
+    /*
+      The other file this suite cleaned was `AttachmentMedia.tsx`, deleted in
+      Phase 0 once it had been out of every production path for some time. Its
+      assertion went with it, so what is pinned here now is the RULE rather than
+      one file's compliance with it: as long as react-refresh is configured and
+      lint fails on the first warning (asserted above), a module that exports both
+      a component and a plain helper cannot land again.
+
+      `RecordMediaGallery` is the surface that inherited the deleted component's
+      job, and it keeps `attachmentUnavailableCopy` module-private for exactly
+      this reason.
+    */
+    expect(read('eslint.config.js')).toContain('react-refresh');
+    expect(read('src/components/media/RecordMediaGallery.tsx'))
       .not.toContain('export function attachmentUnavailableCopy');
   });
 });

@@ -350,6 +350,8 @@ jobs:
             android.permission.READ_MEDIA_VIDEO \
             android.permission.READ_EXTERNAL_STORAGE \
             android.permission.WRITE_EXTERNAL_STORAGE \
+            android.permission.RECORD_AUDIO \
+            android.permission.MODIFY_AUDIO_SETTINGS \
             com.google.android.gms.permission.AD_ID
           do
             if printf '%s' "${body}" | grep -F "\"${forbidden}\"" > /dev/null; then
@@ -358,9 +360,14 @@ jobs:
             fi
           done
 
+          # RECORD_AUDIO and MODIFY_AUDIO_SETTINGS moved from REQUIRED to FORBIDDEN
+          # above on 2026-08-21. Closing video and audio uploads until the
+          # encrypted media foundation removed the composer's recorder, so no code
+          # asks for a microphone -- and this job checks the MERGED manifest
+          # precisely because a dependency can inject a permission at merge time.
+          # A plugin that re-adds audio now fails here instead of shipping quietly.
           printf '%s' "${body}" | grep -F 'android:allowBackup="false"'
           printf '%s' "${body}" | grep -F 'android:usesCleartextTraffic="false"'
-          printf '%s' "${body}" | grep -F 'android:name="android.permission.RECORD_AUDIO"'
           printf '%s' "${body}" | grep -F 'android:scheme="gomsinlog"'
           printf '%s' "${body}" | grep -F 'android:host="auth"'
           printf '%s' "${body}" | grep -F 'android:path="/callback"'
@@ -498,8 +505,18 @@ jobs:
             exit 1
           fi
 
-          # Usage descriptions: microphone yes, photo library no, tracking no.
-          test -n "$(read_key NSMicrophoneUsageDescription)"
+          # Usage descriptions: camera yes, microphone no, photo library no,
+          # tracking no.
+          #
+          # NSMicrophoneUsageDescription became FORBIDDEN on 2026-08-21. The
+          # composer's voice recorder was removed when video and audio uploads
+          # were closed until the encrypted media foundation, so the app no longer
+          # touches the microphone -- and shipping a usage string for a capability
+          # the binary never exercises is something App Review asks about. This
+          # assertion flipped rather than being deleted, so re-adding the key
+          # without re-opening the feature fails here.
+          test -n "$(read_key NSCameraUsageDescription)"
+          missing NSMicrophoneUsageDescription
           missing NSPhotoLibraryUsageDescription
           missing NSPhotoLibraryAddUsageDescription
           missing NSUserTrackingUsageDescription

@@ -10,10 +10,16 @@ import type { AppState, Attachment, DailyRecord } from '@/types';
  *   isBugCondition(page) = RecordPage renders a voice or video attachment with no
  *                          element that can play it.
  *
- * `AttachmentMedia.test.tsx` pins the component. This pins the WIRING: both
- * surfaces that show attachments -- the day timeline and the record detail sheet
- * -- have to use it. They were two separate copies of the same filename-chip
- * markup, so fixing one and forgetting the other was the likely failure mode.
+ * `RecordMediaGallery.test.tsx` pins the component and
+ * `useMediaAttachment.test.tsx` pins the signed-URL recovery. This pins the
+ * WIRING: both surfaces that show attachments -- the day timeline and the record
+ * detail sheet -- have to use it. They were two separate copies of the same
+ * filename-chip markup, so fixing one and forgetting the other was the likely
+ * failure mode.
+ *
+ * These assertions matter more since the video/voice UPLOAD gate landed: new
+ * captures are refused until P6, but everything already stored must still play.
+ * This is the suite that proves the gate constrained writes and not reads.
  */
 
 const ME = 'user-me';

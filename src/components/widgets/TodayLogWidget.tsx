@@ -3,7 +3,7 @@ import { useStore } from '@/lib/useStore';
 import { useNavigate } from 'react-router-dom';
 import {
   Camera, Image as ImageIcon, Send, Lock, Unlock, ShieldCheck,
-  Mic, Square, X, Film, Music,
+  X, Film, Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
@@ -17,12 +17,6 @@ import {
   writeComposerDraft,
 } from '@/lib/composerDraft';
 import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
-import { isNativePlatform } from '@/lib/platform';
-import {
-  MICROPHONE_RATIONALE,
-  microphoneDeniedMessage,
-  microphoneUnsupportedMessage,
-} from '@/lib/nativePermissions';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 import type { RecordMutationReason } from '@/lib/storeContext';
@@ -91,16 +85,11 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   const [showInputCard, setShowInputCard] = useState(!!restoredDraft);
   const [isSaving, setIsSaving] = useState(false);
   const isOffline = !useOnlineStatus();
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordSeconds, setRecordSeconds] = useState(0);
 
   // State for rule-suggested confirmed IDs
 
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = React.useRef<Blob[]>([]);
-  const recordTimerRef = React.useRef<number | null>(null);
   /**
    * Live mirror of `pendingFiles`.
    *
@@ -168,21 +157,6 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
   const MAX_ATTACHMENTS = 4;
 
-  /**
-   * Native builds surface the microphone rationale in-app.
-   *
-   * `RECORD_AUDIO` / `NSMicrophoneUsageDescription` are declared because this
-   * widget records voice notes, and a store reviewer -- and more importantly the
-   * user -- should be able to read why before the OS prompt appears. It hides
-   * once a voice note is attached, so it is a first-use explanation rather than
-   * permanent furniture. On the web the browser's own permission chip already
-   * names the origin, so nothing extra is shown.
-   */
-  const isNative = useMemo(() => isNativePlatform(), []);
-  const hasVoiceAttachment = pendingFiles.some((file) => {
-    const classified = classifyMediaFile(file);
-    return !('error' in classified) && classified.type === 'voice';
-  });
   const hasVisualAttachment = pendingFiles.some((file) => {
     const classified = classifyMediaFile(file);
     return !('error' in classified)
@@ -213,7 +187,8 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     }
 
     // 'instant' captures a new photo; 'photo' opens the picker for existing
-    // photos, videos and audio.
+    // photos. (Video/audio are refused by the §12.4 upload gate in
+    // `classifyMediaFile`, and MEDIA_ACCEPT no longer offers them.)
     //
     // `image/*` only, deliberately. Capacitor's BridgeWebChromeClient reads the
     // accept list to decide WHICH capture intent to launch: with `video/*` also
@@ -255,113 +230,6 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  /** Pick a recording MIME type this browser actually supports. */
-  const pickAudioMimeType = (): string | undefined => {
-    if (typeof MediaRecorder === 'undefined') return undefined;
-    const candidates = ['audio/webm', 'audio/mp4', 'audio/ogg'];
-    return candidates.find((type) => MediaRecorder.isTypeSupported(type));
-  };
-
-  const stopRecordingTimer = () => {
-    if (recordTimerRef.current !== null) {
-      window.clearInterval(recordTimerRef.current);
-      recordTimerRef.current = null;
-    }
-  };
-
-  const handleStartRecording = async () => {
-    if (isRecording) return;
-    if (typeof navigator.mediaDevices?.getUserMedia !== 'function' || typeof MediaRecorder === 'undefined') {
-      toast.error(microphoneUnsupportedMessage());
-      return;
-    }
-
-    const mimeType = pickAudioMimeType();
-    if (!mimeType) {
-      toast.error(microphoneUnsupportedMessage());
-      return;
-    }
-
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (error) {
-      console.error('[gomsinlog] Microphone permission denied:', error);
-      // Native builds have no "browser settings" to open. See
-      // lib/nativePermissions.ts.
-      toast.error(microphoneDeniedMessage());
-      return;
-    }
-
-    recordedChunksRef.current = [];
-    const recorder = new MediaRecorder(stream, { mimeType });
-    mediaRecorderRef.current = recorder;
-
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) recordedChunksRef.current.push(event.data);
-    };
-
-    recorder.onstop = () => {
-      stopRecordingTimer();
-      // Always release the microphone, even if the blob turns out unusable.
-      stream.getTracks().forEach((track) => track.stop());
-      setIsRecording(false);
-
-      const blob = new Blob(recordedChunksRef.current, { type: mimeType });
-      recordedChunksRef.current = [];
-      if (blob.size === 0) {
-        toast.error('녹음된 소리가 없어요. 다시 시도해 주세요.');
-        return;
-      }
-
-      const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
-      const file = new File([blob], `음성기록-${Date.now()}.${ext}`, { type: mimeType });
-      const classified = classifyMediaFile(file);
-      if ('error' in classified) {
-        toast.error(classified.error);
-        return;
-      }
-      // The success toast used to fire unconditionally, so a recording dropped
-      // for hitting the attachment cap was announced as added. Report what
-      // actually happened, matching the file-select path's overflow behaviour.
-      if (pendingFilesRef.current.length >= MAX_ATTACHMENTS) {
-        toast.info(`첨부는 한 번에 ${MAX_ATTACHMENTS}개까지 가능해요.`);
-        return;
-      }
-      setPendingFiles((prev) => [...prev, file]);
-      toast.success('음성 기록이 추가되었어요.');
-    };
-
-    recorder.start();
-    setIsRecording(true);
-    setRecordSeconds(0);
-    setShowInputCard(true);
-    recordTimerRef.current = window.setInterval(() => {
-      setRecordSeconds((s) => {
-        // Hard stop at 3 minutes so a forgotten recording cannot grow unbounded.
-        if (s + 1 >= 180) {
-          if (recorder.state !== 'inactive') recorder.stop();
-          return 180;
-        }
-        return s + 1;
-      });
-    }, 1000);
-  };
-
-  const handleStopRecording = () => {
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') recorder.stop();
-  };
-
-  // Release the microphone and timer if the widget unmounts mid-recording.
-  React.useEffect(() => {
-    return () => {
-      stopRecordingTimer();
-      const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state !== 'inactive') recorder.stop();
-    };
-  }, []);
-
   /**
    * Is there anything a save could actually persist?
    *
@@ -390,10 +258,6 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
   const runPost = async () => {
     if (isSaving) return;
-    if (isRecording) {
-      toast.info('녹음을 먼저 마쳐주세요.');
-      return;
-    }
     if (!log.trim() && pendingFiles.length === 0 && !reaction) {
       toast.error('내용, 첨부파일, 또는 리액션을 선택해주세요.');
       return;
@@ -554,18 +418,24 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       <h2 className="text-heading text-foreground mb-2">오늘의 기록</h2>
 
       {/*
-        Compact capture launcher — one row, four type controls.
+        Compact capture launcher — one row, three type controls.
         Design v2.1 §5.3: "Replace the four big tiles with one compact row of type
         controls." Visual footprint is 36px per control, hit target 44px via padding.
         Progressive disclosure: no text area on first paint.
+
+        Three, not four: the 음성 recorder left with the §12.4 upload gate
+        (photo-only until the P6 encrypted media foundation), and 사진·영상 became
+        사진 for the same reason. `whitespace-nowrap` on each label because the
+        audited failure mode was chips wrapping mid-word (「사진·영/상」) at 390px —
+        a label may never break inside itself; the row wraps whole chips instead.
       */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={() => handleOpenInput('instant')}
           className="press-response relative flex items-center gap-1 px-3 rounded-control bg-coral/10 border border-coral/20 text-coral-strong text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
           <Camera size={16} aria-hidden="true" />
-          <span>지금찍기</span>
+          <span className="whitespace-nowrap">지금찍기</span>
         </button>
 
         <button
@@ -573,20 +443,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
           className="press-response relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
           <ImageIcon size={16} className="text-muted-foreground" aria-hidden="true" />
-          <span>사진·영상</span>
-        </button>
-
-        <button
-          onClick={isRecording ? handleStopRecording : handleStartRecording}
-          aria-pressed={isRecording}
-          className={`press-response relative flex items-center gap-1 px-3 rounded-control border text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] ${ isRecording ? 'bg-destructive/10 border-destructive/30 text-destructive' : 'bg-muted border-border text-foreground' }`}
-        >
-          {isRecording ? <Square size={16} aria-hidden="true" /> : <Mic size={16} className="text-muted-foreground" aria-hidden="true" />}
-          <span>
-            {isRecording
-              ? `${String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:${String(recordSeconds % 60).padStart(2, '0')}`
-              : '음성'}
-          </span>
+          <span className="whitespace-nowrap">사진</span>
         </button>
 
         <button
@@ -594,7 +451,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
           className="press-response relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
           <Send size={16} className="text-muted-foreground" aria-hidden="true" />
-          <span>한줄</span>
+          <span className="whitespace-nowrap">한줄</span>
         </button>
       </div>
 
@@ -673,30 +530,6 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
               );
             })}
           </div>
-
-          {isNative && !hasVoiceAttachment && (
-            <p className="flex items-start gap-1.5 text-caption text-muted-foreground leading-tight break-keep">
-              <Mic size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
-              <span>{MICROPHONE_RATIONALE}</span>
-            </p>
-          )}
-
-          {isRecording && (
-            <div className="flex items-center gap-2 text-caption font-bold text-destructive bg-destructive/10 border border-destructive/30 rounded-control px-3 py-2">
-              <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
-              <span>
-                녹음 중 {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:
-                {String(recordSeconds % 60).padStart(2, '0')}
-              </span>
-              <button
-                type="button"
-                onClick={handleStopRecording}
-                className="press-response ml-auto px-2 py-1 rounded-control bg-destructive text-destructive-foreground font-bold"
-              >
-                녹음 종료
-              </button>
-            </div>
-          )}
 
           {pendingFiles.length > 0 && (
             <div className="space-y-1.5">
@@ -806,7 +639,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                 suggestion contributes nothing to the payload.
               */
               onMouseDown={(event) => event.preventDefault()}
-              disabled={isSaving || (!isRecording && !hasContentToSave)}
+              disabled={isSaving || !hasContentToSave}
               className="press-response min-h-11 px-4 rounded-control bg-coral-strong text-coral-strong-foreground font-bold text-label disabled:opacity-50"
             >
               {isSaving ? '저장 중...' : '저장'}

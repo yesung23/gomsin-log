@@ -149,8 +149,8 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 | CRITICAL | 2건 — 035의 recovery 오버로드 부활, iOS APNs 토큰 브리지 부재. **둘 다 수정** |
 | HIGH | 3건 — `couple_id` 위조, CI가 DB harness 미실행, 오프라인 큐 미전송. **전부 수정** |
 | MEDIUM/LOW | 4건 수정. 나머지는 범위 밖으로 인계 문서에 기록 |
-| 새 migration | **051** (운영 미적용) |
-| 검증 | verify EXIT=0 / 2822 tests · 49 migrations / 212 assertions · p5 93 · write-floor 39 · rollback PASS · 취약점 0 |
+| 새 migration | **051, 052** (둘 다 운영 미적용) |
+| 검증 | verify EXIT=0 / 2827 tests · 50 migrations / 216 assertions · p5 93 · write-floor 39 · rollback PASS · 취약점 0 |
 | 회귀 테스트를 못 만든 것 | **1건** — 오프라인 큐 flush. 단독 통과, 전체 스위트에서 간섭. 이 수정만 "읽어서 확인" |
 
 **#80은 아직 병합되지 않았다.** 기본 브랜치 tip은 `f73ebfe`이며 병합은 user 전용 게이트다.

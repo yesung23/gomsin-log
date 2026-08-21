@@ -3634,15 +3634,22 @@ service_role 컨텍스트로 고친 뒤에야 실제로 문다.
   곰신이 파트너 복무 정보를 볼 수 없음, 우리 탭의 date 파라미터를 아무도 읽지 않음,
   기록 N+1, 모달 포커스 트랩 부재, 온보딩 라벨 누락 등)은 **수정하지 않았다.** 승인된 범위
   밖이거나 새 기능이 필요하다. 전부 인계 문서에 남겼다.
-- 독립 리뷰어 2개(048 푸시 가드·토큰 lifecycle, §7.6·`disconnect_couple`)는 이 기록을 쓰는
-  시점까지 결과를 내지 않았다.
+- 독립 리뷰어 재시도: **048 푸시 가드·토큰 lifecycle은 검토받았다.** 실제 DB에서 재현한
+  발견 둘을 더 닫았다 — 공유 기록 **삭제**(계정 탈퇴의 CASCADE 포함) 시 플래그 잔존,
+  그리고 `clearOwnUnseen`에 프로덕션 호출자 0. 전자는 `052`, 후자는 store 연결 + 두 push
+  모듈 export 전부에 대한 게이트로 닫았다.
+- **§7.6·`disconnect_couple`, 그리고 051·052 자체는 끝내 독립 검토를 받지 못했다.**
+  재시도가 세션 한도로 중단됐다. 저자만 확인한 영역이다.
+- 반증 검증자들도 같은 한도로 죽어, 위 발견들은 **반증 과정을 거치지 않았다.** 저자가 직접
+  재현했다. 워크플로우가 "폐기됨"으로 분류한 항목은 실제로는 "검증되지 못한 것"이며,
+  그 오분류는 내 스크립트가 투표 0건을 폐기로 처리한 탓이다.
 
 #### VERIFICATION
 
 | 무엇 | 결과 |
 |---|---|
-| `npm run verify` | **EXIT=0** — 186 files / 2822 tests |
-| `npm run test:phase0` | **49 migrations / 212 assertions** |
+| `npm run verify` | **EXIT=0** — 186 files / 2827 tests |
+| `npm run test:phase0` | **50 migrations / 216 assertions** |
 | `test:p5` · `test:write-floor` · `test:rollback` | PASS (93 · 39 · PASS) |
 | `check:edge` · `test:edge` | PASS · 3/3 |
 | `npm audit --omit=dev` | 취약점 0 |

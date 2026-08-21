@@ -71,8 +71,6 @@
 		com.apple.developer.icloud-container-identifiers / ubiquity-*
 			No iCloud storage. Sync is Supabase only.
 
-		aps-environment
-			No push notifications in v1.
 	-->
 </dict>
 </plist>

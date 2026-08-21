@@ -190,8 +190,11 @@ Fable 전략 감사가 지적한 `우리` 날짜 셀 결함도 코드로 재현�
 때도 통화 모드 고정 진입점을 두라"고 제안한다. `PRODUCT_V3.md` 통화 모드 절은
 **"남은 항목이 0이면 진입점을 숨긴다"**고 명시한다. canonical이 이긴다 — 구현하지 않았다.
 
-| 검증 | verify EXIT=0 / **189 files · 2847 tests** · **53 migrations / 272 assertions**(+ 업그레이드 경로 별도 DB) · p5 93 · write-floor 39 · rollback PASS · edge PASS·3/3 · 취약점 0 |
+| 항목 | 결과 |
 |---|---|
+| 검증 | verify EXIT=0 / **189 files · 2847 tests** · **53 migrations / 272 assertions**(+ 업그레이드 경로 전용 DB) · p5 93 · write-floor 39 · rollback PASS · edge PASS·3/3 · 취약점 0 |
+| mutation | **7건** 전부 실패 확인 (054 원래 순서 3 · 055 재계산 제거 3 · 055 `GREATEST` 제거 2 · `?date=` 가드 제거 1) |
+| 남은 것 | 054 재리뷰 + 055 독립 리뷰. 실제 전달은 여전히 외부 게이트(자격증명·기기) |
 
 ### 저자 감사 checkpoint — 2026-08-21
 

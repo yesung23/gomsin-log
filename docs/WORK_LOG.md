@@ -3140,6 +3140,456 @@ harness를 다시 실행했고, 93 assertions가 통과했다. Production·remot
 - NOT APPLIED
 
 
+### 2026-08-21 · Phase 1 — Gate 4 통화 모드 + Gate 3 push의 서버 절반
+
+Phase 0(같은 날 앞 항목)을 잇는다. 앞 항목의 HEAD는 이미 낡았다.
+
+#### PLAN POSITION
+- Phase: Phase 1 — 루프의 물리적 완결 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8)
+- Workstream: Gate 4 통화 모드(완료) · Gate 3 push(서버 절반 완료, 클라이언트 미착수)
+- Step: 루프의 마지막 화살표 → 첫 화살표의 DB·발송자
+- Previous Gate: Phase 0 PR #77 CI 14/14 green
+- This Gate: PR #78 CI 14/14 green. Gate 3는 migration + Edge Function까지
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §8 통화 모드(2026-08-21 개정) · §14.3 알림 정책 · §19 계측 허용목록 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 수익화·시장 무관
+- Engineering source checked: `ENGINEERING_ROADMAP`, `AGENTS.md`, `docs/skills/migration-gate.md`, `docs/skills/security-review.md` — YES
+- Current-state checked: `CURRENT_STATE.md` — YES
+- Latest relevant Work Log checked: 같은 날 Phase 0 항목 — YES
+- MASTER PLAN version / 기준일: Fable 전략 2026-08-21 (사용자 승인)
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Opus 5
+- Role: implementation owner. **independent review 없음**
+- PR: #78 (Gate 4), Gate 3는 아래 STOPPED AT
+- Branch: `claude/phase1-call-mode-v2` → `claude/phase1-gate3-push`
+
+#### CHANGED / REVIEWED
+
+**Gate 4 — 통화 모드 (PR #78, CI 14/14 green)**
+- `src/pages/CallModePage.tsx` 신규 + 라우트 `/call` + `TalkAboutListWidget` 진입점.
+- §8 개정판의 금지 세 가지를 구조로 고정했다: 전화 걸지 않음(`tel:` 없음) · 통화 관련 기록 0 ·
+  `다음`은 쓰기 없는 건너뛰기. 끝까지 건너뛰면 **완료 화면에 도달하지 않는다** — 전부 미완인데
+  완료했다고 말하는 것은 앱이 관찰할 수 없는 대화에 대해 거짓을 주장하는 것이다(§3.2).
+- 각 `이야기했어요`는 독립 쓰기다. 통화는 갑자기 끊기므로 마지막에 일괄 저장하면 가장 흔한
+  종료 방식이 세션 전체를 버린다.
+- 가장 미묘한 부분: **완료가 인덱스를 전진시키지 않는다.** 항목이 목록에서 빠지므로 같은 위치가
+  이미 다음을 가리킨다. 함께 전진시키면 아무도 못 본 항목을 건너뛴다.
+
+**Gate 3 — push의 서버 절반**
+- `supabase/migrations/048_push_delivery_metadata.sql` 신규.
+- **승인된 계획을 하나 뒤집었다.** 전략은 `couple_members.has_unseen`을 지정했으나, 001의 SELECT
+  정책이 활성 파트너에게 상대 행 전부를 보여준다. 그 자리의 `has_unseen`은 "아직 안 열어봤다"이고
+  이는 **읽음 표시**다 — §14.3이 절대 금지한다. RLS는 row 단위라 컬럼 하나만 가릴 수 없다.
+  전용 테이블 `push_delivery_state`로 옮겨 파트너에게 **읽을 정책 자체가 없게** 했다.
+- **가장 중요한 한 줄:** 비공개 기록은 아무 플래그도 올리지 않는다. `나만 보기` 기록으로 알림이
+  가면 그 설정이 숨기려던 단 하나의 사실 — 무언가 쓰였다는 것 — 이 샌다.
+- 보안 리뷰에서 **기기 이양 결함**을 찾아 고쳤다. APNs·FCM은 재설치·기기 이양 시 같은 토큰을
+  넘겨주는데, 평범한 INSERT는 UNIQUE에 걸려 새 계정이 알림을 못 받고 **떠난 계정이 그 기기
+  알림을 계속 받는다**(§14.3 위반). `register_push_token()`이 기존 소유자 행을 먼저 지운다.
+- 발송자는 `service_role`만 호출 가능하며 029와 같은 in-body gate를 둔다. 하루 1회 상한과 연락
+  가능 시간은 발송자가 아니라 **DB가** 강제하므로 Edge Function을 다시 써도 두 번 보내거나
+  새벽에 보낼 수 없다.
+- `supabase/functions/send-push/` 신규 — 순수 `handler.ts` + 얇은 `index.ts`. 문구는 상수 import이며
+  `deliver`의 인자가 아니다. 이벤트 종류별 문구가 들어갈 자리가 코드에 없다.
+- **실패한 전송은 전달된 것으로 처리하지 않는다.** 시도 시점에 표시하면 네트워크 1분 장애가
+  "이 사람은 들었다"가 되고 하루 상한 때문에 내일까지 못 듣는다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음. key hierarchy · device trust · write floor 미접촉.
+- `disconnect_couple`은 재작성했으나 crypto pairing 전이와 멤버십 전이는 **한 글자도 바뀌지 않았다**.
+  p5 · write-floor · rollback harness 전부 통과가 그 증거다.
+- product semantics: 탭 구조 무변경. chat 없음. P6 없음.
+- Production / remote Supabase: **미접촉, 조회조차 하지 않음.**
+
+#### VERIFICATION
+- `npm run verify` — PASS (EXIT=0).
+- **실제 PostgreSQL 17.10**: fresh chain 001→048(45개) 적용, phase0 harness **161 assertions**
+  (048이 37개). `test:p5` 93 · `test:write-floor` 39 · `test:rollback` PASS.
+- **mutation 6건 전부 실패 확인**(적용 → 실패 관찰 → 복원): 비공개 누출 · 하루 1회 상한 ·
+  연락 가능 시간 · NULL actor · 기기 이양 · service_role in-body gate.
+  **1건은 통과했고 그 이유를 주석에 남겼다** — 플랫폼 검증은 테이블 CHECK가 이미 막으므로
+  함수 쪽은 에러 메시지용이다.
+- Gate 4: 14 + 3 specs, mutation 5건 전부 실패 확인. FCM OAuth 인코딩 10 specs, mutation 3건 확인(base64url 치환·이스케이프 개행·`aud` 오지정). **테스트 1개는 mutation이 살아남아 다시 썼다** —
+  store를 stub하면 성공/실패가 화면상 구별되지 않아 vacuous했다.
+- **Deno: 로컬 실행됨.** 세션 중 CI가 `npm:google-auth-library` 미해석으로 실패하는 것을 잡았고
+  (Deno는 npm specifier를 node_modules에서 찾는데 이 저장소에 없다), 그 의존성을 package.json에
+  추가하는 것은 **잘못된 해법**이라 판단했다 — 브라우저 번들의 의존성 그래프에 서버 전용 Google
+  SDK가 들어가고, 이 저장소는 외부 SDK 0을 지킨다. Web Crypto로 직접 구현하고 인코딩 헬퍼를
+  분리해 테스트했다. 그리고 **deno를 로컬에 설치**해 이제 `check:edge`가 여기서 돈다 —
+  13개 edge 모듈 전부 통과.
+- **브라우저: 로컬 미실행.** headless shell 부재 + headed SIGABRT. CI가 authority.
+- **실제 알림 전달: UNVERIFIED.** APNs/FCM 자격증명과 실기기가 필요하며 둘 다 외부 게이트다.
+
+#### REVIEW IMPACT
+- FULL. Gate 3는 review된 적이 없다. Gate 4도 마찬가지다.
+
+#### BLOCKERS
+- code: 없음.
+- environment: 로컬 브라우저 없음(headless shell 부재 + headed SIGABRT). Android SDK 없음(JVM 테스트는 CI가 authority). **Deno는 이제 있다.**
+- external/manual: **PR 병합은 user 권한** · APNs/FCM 자격증명 · 실기기 2대 · 원격 Supabase 적용.
+
+#### STOPPED AT
+- Gate 3의 서버 절반과 **클라이언트 절반 모두**. 앞서 "실기기 없이 검증 불가"로 판단해 미착수로
+  두었던 것을 **재검토해 뒤집었다** — 토큰 lifecycle은 이 저장소가 다른 모든 클라이언트 동작을
+  검증하는 방식 그대로 검증 가능하고, §14.3이 명시적으로 negative test를 요구하는 부분이다.
+  실기기가 필요한 것은 **실제 전달뿐**이다.
+- `@capacitor/push-notifications@7.0.7` 설치, `cap sync android` 완료, Podfile/Podfile.lock 갱신.
+- **iOS `pod install`은 실패했다** — 이 기기에 Xcode가 없고 Command Line Tools만 있다.
+  Podfile.lock은 SPEC/PODFILE checksum 모두 일관되게 갱신됐으므로(CocoaPods가 해결까지는 마쳤고
+  실패는 이후 Xcode 프로젝트 통합 단계) 커밋은 안전하다. 실제 iOS 빌드는 CI가 authority.
+- **`aps-environment` entitlement는 의도적으로 추가하지 않았다.** 서명과 분리 불가능하며 Apple
+  Developer portal에서 실제 자격증명으로 capability를 켜야 한다. 프로파일 없이 키만 넣으면
+  기기 서명이 실패하고, 시뮬레이터 빌드는 entitlement를 무시하므로 CI도 그 불일치를 못 잡는다.
+  TestFlight 설정 시 portal capability와 **함께** 추가해야 한다 — entitlements 파일에 명시했다.
+
+#### REMAINING
+- S4 대기 구간 · 최소 계측 · LV 환경 · TestFlight.
+- 연결 직후 권한 요청은 **이 세션에서 닫았다.** 처음에는 호출자 0인 채로 두었는데, 그것이 바로
+  security-review §1이 이 저장소의 최빈 결함으로 지목하는 "미연결 구현"이라 그대로 둘 수 없었다.
+  `coupleLifecycle`이 `connected`가 될 때 등록한다 — 파트너 합류를 감지하는 폴링 지점에 걸지
+  않은 이유는 그 폴링이 **초대한 쪽 기기에서, 합류가 일어난 그 한 번만** 돌기 때문이다.
+  거기 걸었다면 합류한 쪽은 영원히 미등록이고 초대한 쪽도 재설치 후 미등록이 된다.
+  함수에 호출자가 없으면 그 함수에 대한 모든 테스트가 통과하므로, 소스에서 호출자를 세는
+  테스트를 따로 뒀다.
+- `briefings` drop: **파괴적 변경이라 착수하지 않았다.** migration-gate §4가 명시적 승인을 요구한다.
+
+#### NEXT ACTION
+- next owner: 사용자(병합 결정), 그다음 independent review
+- exact next task: #74 → #75 → #76 → #77 → #78 순서 병합 → Gate 3 PR 검토 → 클라이언트 절반
+
+#### DO NOT ADVANCE UNTIL
+- 048이 independent security review를 통과할 때까지. 원격 적용은 그 이후에도 별도 게이트다.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
+### 2026-08-21 · Phase 1 — S4 대기 구간의 자동 노출 결함 (§7.6)
+
+같은 날 앞 항목들을 잇는다.
+
+#### PLAN POSITION
+- Phase: Phase 1 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8)
+- Workstream: ⟨대기⟩ 구간 (S4) — §7.6 연결 전 기록의 사후 공유
+- Previous Gate: Gate 3 양쪽 절반 완료, PR #79 CI 14/14 green
+- This Gate: 자동 노출 결함을 닫음. §7.6의 "묻기"는 미완
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §7.6(2026-08-21 신설) · §13 · §14.2 — YES
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `ENGINEERING_ROADMAP`, `AGENTS.md` — YES
+- Current-state checked: YES / Latest Work Log checked: YES
+- Does this task conflict with canonical direction? NO
+
+#### CHANGED / REVIEWED
+- `src/components/widgets/TodayLogWidget.tsx` — 파트너가 없으면
+  (1) 공개/비공개 토글을 감추고 사실을 문장으로 말하며,
+  (2) **저장 자체를 비공개로 강제하고**,
+  (3) 성공 토스트가 "전했어요"라고 거짓말하지 않는다.
+- `src/features/home/waitingPeriodPrivacy.test.tsx` 신규 — 6 specs.
+
+#### 왜 이것이 결함이었나
+기록의 기본 공개 범위는 **공유**다. 커플 공간은 초대 코드를 만든 순간 존재하므로,
+파트너가 합류하기 며칠 전부터 기록이 그 공간에 쌓인다. 그 기록들은 누군가 합류하는
+**순간 전부 읽을 수 있게 된다.** §7.6이 이름을 붙여 금지하는 바로 그 자동 노출이며,
+"아무도 읽을 수 없던 날 공유하기를 눌렀다"는 것은 §7.6이 요구하는 명시적 노출 행위가 아니다.
+
+UI에서 토글을 감추는 것만으로는 부족하다 — 그건 문구이고, 저장되는 값이 계약이다.
+연결 상태에서 쓴 draft가 연결 해제 후 저장되면 `isPrivate: false`를 그대로 들고 간다.
+mutation 검증에서 "UI만 숨기고 쓰기는 그대로" 변형이 정확히 잡히는 것이 그 증거다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto · migration · Production: 미접촉.
+- 이미 저장된 기존 기록: 건드리지 않았다. 이 변경은 앞으로의 쓰기에만 적용된다.
+
+#### VERIFICATION
+- 6 specs, mutation 3건 전부 실패 확인(쓰기 강제 제거 · 대기 중 토글 노출 · 연결 후에도 강제 비공개).
+- `npm run verify` — PASS (EXIT=0).
+- **첫 실행은 EXIT=1이었고 그 이유를 남긴다.** 테스트 6개가 전부 "통과"했는데도 verify가 실패했다.
+  내 mock이 `addRecordWithMedia`의 성공 형태를 `{ ok: true }`로만 만들었는데 실제로는
+  `failedFiles`도 반환하고, `runPost`가 저장 직후 `result.failedFiles.length`를 읽는다.
+  각 테스트가 **assertion을 마친 뒤에** unhandled rejection이 났으므로 스위트는 초록이고
+  프로세스는 실패했다. 부분 mock이 통과하는 테스트를 만든 사례이며, verify를 돌리지 않았다면
+  CI에서야 드러났을 것이다.
+
+#### REMAINING — §7.6의 나머지 절반
+- **"연결 전에 남긴 기록을 보여줄까요?" 질문은 아직 없다.** 지금은 대기 중 기록이 비공개로
+  남고 사용자가 기록 상세에서 개별 전환할 수 있을 뿐이다. 노출은 여전히 명시적 행위이므로
+  §7.6의 프라이버시 규칙은 지켜지지만, 명세가 요구하는 **한 번 묻기**는 빠져 있다.
+- **"막혀 있다"고 적었던 앞선 판단을 정정한다.** 파트너 합류 시각이 필요한데 조회 경로가
+  없다고 썼으나, 확인해 보니 `couple_members.joined_at`은 이미 존재하고 001의 SELECT 정책이
+  활성 파트너에게 그 행을 읽게 한다. harness에 실측 assertion을 추가해 확인했다
+  (`§7.6 an active member CAN read the partner's joined_at`). **새 SQL은 필요 없다.**
+- 실제로 남은 설계 문제는 다른 것이다: §7.6은 "**한 번** 묻는다"고 명시하는데, 그 "한 번"을
+  기억할 상태가 없다. 후보(합류 이전 본인 비공개 기록)는 사용자가 아무것도 고르지 않으면
+  그대로 남으므로 다음 실행에서 또 후보가 된다. device-local 플래그로 풀 수 있지만
+  `saveState`의 whitelist를 넓혀야 하고, 그 목록은 **계정 삭제 후 잔존을 막으려고** 테스트로
+  정확히 고정돼 있다. 넓히는 것은 별도 판단이다.
+- 또 하나: 후보 집합은 "의도적으로 비공개로 남긴 기록"과 "대기 중이라 비공개가 된 기록"을
+  구별하지 못한다. §7.6이 요구하는 것은 명시적 선택이므로 둘 다 보여주고 고르게 하는 것이
+  안전한 방향이지만, 문구가 그 사실을 정확히 말해야 한다.
+- 양 역할 `ContactPreferences`는 **이 세션에서 닫았다.** 곰신은 복무 정보와 연락 시간을
+  **둘 다** 건너뛰고 있었다. 알림이 없던 동안에는 무해했지만 migration 048과 함께 무해하지
+  않게 됐다 — 발송은 **각 수신자 본인이 선언한 시간창 안에서** 일어나므로(§14.3: 전송 시각은
+  사용자가 직접 입력한 시간만 쓴다), 한 번도 묻지 않은 곰신은 **군인의 하루를 전제로 쓰인
+  스키마 기본값**을 물려받았을 것이다. 이제 곰신은 5단계이고 복무 정보만 건너뛴다.
+- 문구는 역할별로 다르다. 같은 값을 저장하지만 묻는 것이 다르기 때문이다 — 군화에게는
+  제약(폰이 닿는 시간)이고, 곰신에게는 선호(앱이 방해해도 되는 시간)다.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
+### 2026-08-21 · Phase 1 — §19 최소 계측 (LV 진입 조건)
+
+#### PLAN POSITION
+- Phase: Phase 1 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8, 리텐션 루프 ⑥)
+- Workstream: 최소 계측 — `ENGINEERING_ROADMAP`이 2026-08-21에 LV 진입 조건으로 추가한 항목
+- This Gate: migration 049 + 클라이언트 emitter + 네 지점 연결
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §19 허용/금지 표와 그 아래 네 원칙 — YES
+- Engineering source checked: `ENGINEERING_ROADMAP` LV 진입 조건(2026-08-21 추가) — YES
+- Does this task conflict with canonical direction? NO
+
+#### CHANGED / REVIEWED
+- `supabase/migrations/049_product_events.sql` 신규
+- `src/lib/productEvents.ts` + test 신규 (16 specs)
+- 연결: 컴포저 `record_composed` · 통화 모드 `call_mode_opened`/`talk_about_resolved` ·
+  이야기거리 목록 `talk_about_resolved` · store `couple_connected`
+
+#### 설계의 핵심 — 금지 항목이 들어갈 자리를 없앤다
+계측 계층은 이 제품에서 **거부하기로 한 것을 가장 쉽게 만들 수 있는 자리**다. 그래서 목표를
+"조심히 수집한다"가 아니라 "금지된 컬럼이 갈 곳이 없다"로 잡았다.
+
+- **이 테이블에는 timestamp 컬럼이 아예 없다.** `occurred_on DATE`뿐이다. 다른 모든 테이블이
+  갖는 `created_at TIMESTAMPTZ DEFAULT now()`를 여기 두면 누가 언제 앱을 여는지의 분 단위
+  기록이 되고, 그게 §19가 금지하는 행동 감시다. **리뷰에서 아무도 의심하지 않을 기본값으로
+  도착한다**는 점이 가장 위험하다. mutation으로 그 컬럼을 추가하면 harness가 실패한다.
+- `kind`·`screen`은 CHECK 제약의 닫힌 집합. 이벤트 추가는 migration이고 곧 리뷰다.
+- `subject_id`는 UUID. 기록 id는 들어가고 기록의 첫 줄은 못 들어간다.
+- 파트너에게 **read 정책이 아예 없다.** §19는 건강 도메인에서 불리언조차 파트너 축 집계를
+  금지하는데, 이 테이블은 건강 종류가 없고 파트너 read도 없어 더 강한 형태로 같은 규칙을 만족한다.
+- UPDATE·DELETE 정책이 없다. 이벤트는 사실이고, 세션이 탈취돼도 자기 활동 기록을 고쳐 쓸 수 없다.
+
+**의도적으로 없는 것:** session/dwell 이벤트(체류시간은 §19가 이름으로 금지) · 기록 개수 ·
+연속 사용일수(§19가 성공 지표로 금지, §16의 불안 엔진) · read/seen 이벤트(반대편에서 본
+읽음 표시) · 감정 종류(§19가 라벨과 개수를 함께 금지).
+
+#### VERIFICATION
+- 실제 PostgreSQL 17.10: fresh chain 001→049, phase0 harness **180 assertions**(049가 19개).
+- mutation 4건 전부 실패 확인: `created_at` 추가 · 자유 텍스트 컬럼 · 파트너 read 허용 ·
+  금지 이벤트 종류 추가.
+- 클라이언트 16 specs, mutation 2건 확인(계측 미연결 · 절대 시각 전송).
+- 연결 검증은 **호출자를 센다** — emitter에 호출자가 없으면 emitter에 대한 모든 테스트가
+  통과하기 때문이다. LV 조건은 "계측이 존재한다"가 아니라 "이벤트가 착지한다"이다.
+
+#### REMAINING
+- **선언된 8종 전부에 emit 지점이 생겼다.** 처음엔 4종만 연결하고 나머지를 남기려 했으나,
+  선언만 되고 emit되지 않는 종류는 LV 리드아웃 시점에 빈 칸으로 드러나고 그때는 늦다.
+  테스트가 union을 파싱해 **모든 종류에 호출자가 있는지** 검사한다.
+  - `briefing_opened`는 분모다. `briefing_to_original`만으로는 개수일 뿐이고, 나누어야
+    전략이 실제로 묻는 "요약→원본 이동률"이 된다. 브리핑에 내용이 있을 때만 mount당 한 번
+    발생한다 — 빈 위젯은 전환에 실패한 브리핑이 아니므로 세면 비율이 왜곡된다.
+  - `notifications_disabled`는 **kill metric**이며 OFF 전이에서만 발생한다. 다시 켜는 것은
+    신호가 아니고, 둘 다 세면 이 이벤트가 만들려는 단 하나의 판독이 흐려진다.
+- 이벤트 조회·집계 도구는 여전히 없다. LV 리드아웃 시점에 필요하다.
+
+#### PRODUCTION
+- NOT APPLIED
+
+
+### 2026-08-21 · Phase 1 마감 — §7.6 사후 공개 · 양 역할 알림 시간 · §19 판독
+
+Codex의 전수 감사 직전 상태다. **안전하게 구현 가능한 로드맵 항목을 모두 소진했다.**
+
+#### PLAN POSITION
+- Phase: Phase 1 (`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` §8) — 내부 구현 경계까지
+- This Gate: 세 항목 완료. 남은 것은 전부 외부 게이트이거나 사용자 승인 대기
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §7.6 · §13 · §14.2 · §14.3 · §19 — YES
+- Engineering source checked: `ENGINEERING_ROADMAP` LV 진입 조건, `docs/skills/migration-gate.md` — YES
+- Does this task conflict with canonical direction? NO
+
+#### 1. §7.6 — 연결 전 기록의 사후 공개
+- `src/lib/waitingPeriodReveal.ts` (순수) + `WaitingPeriodRevealCard.tsx` + `coupleTimeline.ts`
+- **"한 번"을 저장하지 않는다.** 그것이 이 설계의 핵심이다. "물었음"을 기억하려면 새 영속 사실이
+  필요하고, device-preference whitelist는 **계정 삭제 후 잔존을 막으려고** 테스트로 고정돼 있다.
+  대신 `couple_members.joined_at`(001부터 canonical, 활성 멤버가 파트너 행을 읽을 수 있음)에서
+  **창(7일)** 을 계산한다. 아무것도 쓰지 않고 "한 번"이 성립한다.
+- 창이 지나도 기록은 그대로 비공개이며 기록 상세에서 개별 전환할 수 있다. 창은 **묻지 않은 질문**을
+  제한하는 것이지 답할 권리를 제한하지 않는다.
+- 자동 공개는 어떤 경로로도 없다. 카드를 닫든, 무시하든, 못 보든 전부 그대로 비공개다.
+- 부분 실패를 부분 실패로 보고한다. 5개 중 2개가 실패하면 3개는 **이미 파트너에게 보인다** —
+  일괄 실패로 보고하면 공개된 기록을 비공개로 믿게 되고, 그게 §7.6이 막으려는 오류가
+  막으려는 장치를 통해 발생하는 것이다.
+
+#### 2. 양 역할 알림 시간
+- `ContactHoursSection.tsx` 신규. 설정에서 **양 역할 모두 편집 가능**.
+- 이전에는 군화 전용 + 읽기 전용 + 설명이 "브리핑 추천에 반영"이었다. 048 이후 셋 중 둘이 틀렸다 —
+  이 값이 **각자의 알림 발송 시간**을 정한다.
+- 끝이 시작보다 이르면 저장 전에 거부한다. DB는 받아들이고 `push_delivery_candidates`가 영영
+  매치하지 않아 **화면에 아무 설명 없이 알림이 끊긴다.**
+- 주말 시간도 표시한다. 저장되고 사용되는데 보이지 않았다.
+
+#### 3. §19 판독 — migration 050
+현재 파이프가 LV 퍼널을 측정하기에 **충분하지 않았다.** 두 격차:
+- **측정 단위 부재.** 전략은 획득 단위가 "연결된 커플 1쌍"이라고 못박는데 `product_events`에는
+  `user_id`만 있었다. 한 커플의 두 사람과 남남 두 사람이 구별되지 않아 커플 단위 지표 2개를
+  아예 계산할 수 없었다. `couple_id`를 `get_my_active_couple_id()` DEFAULT로 추가했다 —
+  세션에서 파생되므로 클라이언트가 위조할 수 없다. **파트너 축은 생기지 않는다**: RLS 범위 불변,
+  파트너 read 정책 여전히 없음, 커플로 묶을 수 있는 것은 숫자만 반환하는 집계 함수뿐이다.
+- **판독이 곧 행 조회.** 함수가 없으면 `service_role`이 raw 행을 긁고, 그건 한 사람의 개별 행동을
+  순서대로 보는 것이다 — §19가 금지하는 형태가 "숫자가 필요하다"는 뒷문으로 도착한다.
+  `lv_funnel_readout`은 `(metric, value)`만 반환하며 행 반환 경로가 없다.
+  `lv_couple_return_count`는 **몇 커플이** 돌아왔는지를 주고 어느 커플인지는 주지 않는다.
+- 의도적으로 없는 것: 일별 시계열(5쌍 코호트의 일별 카운트는 행동 타임라인이다) · 사용자별 분해 ·
+  커플 간 순위 · 건강/감정/콘텐츠/시각.
+
+#### EXPLICITLY NOT CHANGED
+- crypto · write floor · Production · remote Supabase: 미접촉.
+- `briefings` drop: **하지 않았다.** 파괴적 변경이며 migration-gate §4의 명시적 승인이 필요하다.
+
+#### VERIFICATION
+- 실제 PostgreSQL 17.10: fresh chain 001→050(47개), phase0 harness **197 assertions**(050이 16개).
+- `test:p5` 93 · `test:write-floor` 39 · `test:rollback` PASS.
+- mutation: 050에서 5건(클라이언트 위조 couple_id · service_role gate · 커플 대신 계정 집계 ·
+  재방문이 커플 id 반환 · 역순 범위 허용) 전부 실패 확인. §7.6에서 5건, ContactHours 포함 총 10건+.
+- `npm run verify` — 아래 STOPPED AT.
+- **같은 실수를 세 번 했다.** 테스트 헬퍼의 기본 매개변수가 명시적 `undefined`를 삼켜
+  "값이 없을 때" 케이스가 아무것도 검증하지 않았다(`useMediaAttachment` · `waitingPeriodReveal` ·
+  `waitingPeriodRevealCard`). 첫 파일의 원래 suite에 이미 경고 주석이 있었다. 셋 다 고쳤다.
+- **`verify`가 결함 하나를 더 잡았다.** 테스트 2778개가 전부 통과했는데 EXIT=1이었다 —
+  `fetchPartnerJoinedAt`이 `{ error }`는 처리하면서 **throw는 처리하지 않았다.** 이 함수는
+  `useEffect` 안에서 불리므로 rejection이 곧 unhandled rejection이다. `recordProductEvent`는
+  이미 그 형태를 갖고 있었는데 이건 아니었다. **부가 조회가 앱을 깨뜨릴 수 있으면 안 된다** —
+  이 조회가 실패하면 §7.6 프롬프트가 안 뜰 뿐이고, 프롬프트는 스스로 아무것도 공개하지 않으므로
+  안 뜨는 쪽이 항상 보수적이다. try/catch를 넣고 6개 spec으로 고정했다.
+
+#### REMAINING — 전부 외부 게이트이거나 승인 대기
+- PR 병합(user) · APNs/FCM 자격증명 · `aps-environment` entitlement · 실기기 2대 ·
+  iOS `pod install`(Xcode 부재) · LV 전용 Supabase 환경 · `briefings` drop 승인 ·
+  §14.5 문장 대조 · **independent review 전무**
+
+#### PRODUCTION
+- NOT APPLIED. 048 · 049 · 050 모두 어느 원격에도 적용되지 않았고 조회조차 하지 않았다.
+
+
+### 2026-08-21 · 저자 측 전수 감사 — 결합 트리 (#74→#79)
+
+Codex 독립 감사 직전의 마지막 저자 패스다. **새 기능 없음. 투기적 리팩터 없음.**
+
+#### PLAN POSITION
+- Phase: 감사·최적화 (제품 설계 단계 아님)
+- 감사 대상: **결합 트리** — #79 단독이 아니라 #74→#75→#76→#77→#78→#79를 합친 상태
+- 방법: PR 병합 없이 로컬 scratch 브랜치 `audit/combined-scratch`에 #75·#76을 cherry-pick
+
+#### 필수 첫 검사 — 001→047→048→049→050
+**PASS.** 48개 migration이 빈 PostgreSQL 17.10에 순서대로 적용되고 **205 assertions** 통과.
+이 결합 체인은 이 감사 전까지 **한 번도 실행된 적이 없었다.** 릴리스 블로커 아님.
+
+> 이 실행은 `audit/combined-scratch` 브랜치(`d5471f3`)에서 했다. 047은 PR #76이 소유하므로
+> **이 브랜치(#79)에는 없고**, 여기서는 47개 / 197 assertions가 정상이다. 결합 전용 산출물
+> (harness의 047 ORDER 항목과 8개 assertion, 원장의 047 행, CURRENT_STATE의 #75 정정)은
+> scratch 브랜치에 있으며 landing 후 적용된다.
+
+#### 결합 과정에서 드러난 것 — 문서 충돌 2건
+cherry-pick이 실제 landing에서도 발생할 충돌을 미리 드러냈다.
+- `docs/CURRENT_STATE.md`: #75의 convergence checkpoint와 #79의 LV 조건표가 같은 자리를 놓고
+  충돌. 둘 다 유지하는 것이 맞고, 해결본을 결합 트리에 반영했다.
+- `supabase/migrations/README.md` · `storage-authz-harness.mjs`: 047 행/ORDER 항목이 048~050과
+  충돌. **번호 순서(047 → 048)로 해결**하는 것이 유일하게 옳다.
+
+#### 발견하고 고친 결함
+
+1. **047의 DB 계약이 검증되지 않았다.** 047은 harness 체인에 "적용된다"만 확인됐고, CHECK 어휘가
+   무엇을 받고 무엇을 거부하는지는 실제 DB에서 검증된 적이 없었다. 결합 트리에서는 048~050이
+   **047 뒤에 처음 실행**되므로, 후속 migration이 그 제약을 재정의했어도 아무도 몰랐을 것이다.
+   8개 assertion 추가. 그 과정에서 014의 workspace 트리거도 함께 건넜다 — 어휘 검사만이
+   이 테이블 앞을 지키는 것이 아니다.
+
+2. **푸시 리스너·타이머 누수.** `setUpPushNotifications`는 연결 전이마다 실행되는데
+   `registration`/`registrationError` 리스너와 10초 타이머를 정리하지 않았다. 이미 settled된
+   promise를 위한 네이티브 브리지 핸들이 재연결·재실행마다 쌓인다.
+
+3. **`listenForPushTaps`의 호출자가 0이었다.** 알림을 탭해도 아무 일도 일어나지 않았다.
+   "미연결 구현"을 경계한다고 적어놓고 같은 것을 남겼다. `App`에 연결하고 teardown을 반환하게 했다.
+
+4. **§7.6이 연결 상태를 보지 않았다.** 해제 후에도 `partnerJoinedAt`이 남아 있으면 **없는
+   파트너에게 보여주자고 제안**하고, 고른 기록은 **재연결 시 다음 사람에게 보인다.** 실제로는
+   store가 couple 객체를 재구성하며 그 키를 함께 버리지만 그건 **우연한 방어**다 — 그 재구성에
+   필드가 하나 추가되면 조용히 되살아난다. 순수 함수에 `connected`를 필수 인자로 넣었다.
+
+5. **050의 주석이 코드가 보장하지 않는 것을 주장했다.** "일별 시계열 없음"이라고 썼지만 호출자가
+   하루짜리 창을 반복 호출하면 만들 수 있다. §19가 날짜 버킷을 허용하므로 위반은 아니지만
+   **함수가 막는 것도 아니다.** 주석을 정직하게 고쳤다 — 그 구분은 LV 운영 규율이 진다.
+
+6. **문서 divergence 2건.** #75가 남긴 "push 알림 미구현, §19 계측 미구현"이 결합 트리에서 거짓.
+   PR #79 설명이 §7.6과 readout을 "없다"고 서술. 둘 다 정정.
+
+7. **오프라인 일관성.** `ContactHoursSection`만 오프라인 가드가 없어 실패 원인을 정확히 말하지
+   못했다. 다른 두 표면과 같은 패턴으로 맞췄다.
+
+8. **중복 제출 가드 일관성.** 같은 컴포넌트만 진입부 가드가 없고 `disabled`에만 의존했다 —
+   이 브랜치에서 이미 mutation이 살아남은 적 있는 패턴이다.
+
+9. **dead state 제거.** `authSyncCode`는 진단 코드 화면 표시를 없애면서 소비자가 0이 됐다.
+   state·context에서 빼고 실패 지점의 `console.warn`으로 옮겼다 — 정보는 남고 죽은 인터페이스만 사라진다.
+
+10. **§19 kill metric이 권한 거부를 opt-out으로 셌다.** 열 개 중 **유일하게 숫자를 틀리게 만드는**
+    결함이다. emit이 preference를 쓰는 함수 안에 있었고 그 함수에는 호출자가 둘이다. 권한 요청이
+    denied로 돌아오면 `systemEnabled: false`를 쓰는데, OS 설정에서 나중에 취소된 grant의 `true`가
+    저장돼 있었다면 그것이 OFF 전이다. **"허용"을 누른 사람이 opt-out한 사람으로 기록됐다.**
+    "설계가 실패했다"를 뜻하는 유일한 지표가 사용자가 알림을 *더* 원한 순간에 올라간다.
+    emit을 사람이 실제로 조작하는 토글에 붙였다.
+
+    이 규칙에는 테스트가 있었지만 **소스 문자열 대조**였다. 그런 검사는 코드가 그 표현을
+    *포함하기만* 하면 통과하므로 결함이 존재한 내내 초록이었고, 버그가 아니라 **수정에서**
+    깨졌다. 실패 방향이 거꾸로다. 렌더·클릭하는 5개 동작 테스트로 옮겼고 mutation 2종
+    (emit을 되돌리기, OFF 비교 뒤집기) 모두 실패한다. `productEvents.test.ts`에는 같은 모양이
+    더 있다 — 전부 통과하므로 감사 규칙에 따라 두었지만 **인스턴스가 아니라 부류**다.
+
+#### 확인했고 문제 없던 것
+- **unhandled rejection 0건, Errors 0건.** 지시된 최우선 클래스가 결합 트리에서 깨끗하다.
+- 기본 매개변수 전수 조사: `error = null` 류는 "없음"이 테스트 케이스가 아니라 무해하다.
+- tesseract.js는 `await import()`로 lazy-load되며 번들에 없다(전략 §1.4 확인 요구사항).
+- 네이티브: Android 권한 3개(INTERNET·ACCESS_NETWORK_STATE·POST_NOTIFICATIONS),
+  iOS usage 키는 카메라 하나뿐, 마이크·추적 없음, `NSPrivacyTracking = false`.
+- 접근성: 새 표면 전부 44px 터치 타깃과 aria 라벨을 갖췄다.
+- React: 새 컴포넌트가 `useMemo`를 쓰고, join 시각 조회는 연결 전이당 1회다.
+
+#### VERIFICATION
+
+| 무엇 | 어디서 | 결과 |
+|---|---|---|
+| `npm run verify` | 결합 트리 | **EXIT=0** — 185 files / 2808 tests |
+| `npm run verify` | #79 최종 | **EXIT=0** — 185 files / 2796 tests, Errors 0 |
+| `npm run test:phase0` | 결합 트리 | **48 migrations / 205 assertions** |
+| `npm run test:phase0` | #79 최종 | 47 migrations / 197 assertions |
+| `test:p5` · `test:write-floor` · `test:rollback` | 결합 트리 | PASS (93 · 39 · PASS) |
+| `npm audit --omit=dev` | — | 취약점 0 |
+| CI | #79 `a9f7dc0` | 14/14 |
+| mutation | 이번 감사에서만 6종 | 전부 실패 확인 후 복원 |
+
+**실행하지 않은 것:** 로컬 브라우저(CI가 authority) · Android SDK · iOS 빌드(Xcode 부재) ·
+실제 알림 전달(자격증명·기기 없음) · 원격 Supabase 조회.
+
+vitest의 unhandled-rejection 탐지가 살아 있는지 probe로 확인했다: assertion은 통과하되
+rejection을 남기는 테스트를 넣으면 `Tests 1 passed / Errors 1 error / EXIT=1`이 된다.
+지시받은 최우선 클래스를 잡는 장치가 실제로 작동한다는 뜻이다.
+
+#### PRODUCTION
+- NOT APPLIED. 047·048·049·050 모두 어느 원격에도 적용되지 않았고 조회조차 하지 않았다.
+
+#### 정확한 중단 지점
+저자 측 감사 완료. **다음은 Codex의 독립 감사이며 그 역할은 시작하지 않았다.**
+그 앞에 user 전용 게이트가 하나 있다: #74→#75→#76→#77→#78→#79 순서 병합.
+
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

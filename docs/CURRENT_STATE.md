@@ -100,6 +100,22 @@ active branch가 존재한다. **master에는 아직 없다.**
 
 이 branch의 CI는 base `master` PR에서만 돈다. stacked base에서는 어떤 workflow도 trigger되지 않는다.
 
+### Phase 1 checkpoint — 2026-08-21
+
+| 항목 | 상태 |
+|---|---|
+| Gate 4 통화 모드 | `claude/phase1-call-mode-v2` / PR #78, **CI 14/14 green**. 전화 걸지 않음 · 통화 기록 0 · `다음`은 쓰기 없는 건너뛰기 |
+| Gate 3 push 서버 | `claude/phase1-gate3-push`. migration 048 + `send-push`. 실제 PostgreSQL로 검증됨 |
+| Gate 3 push 클라이언트 | 완료. 토큰 lifecycle은 이 저장소가 다른 클라이언트 동작을 검증하는 방식으로 검증 가능했고(§14.3이 negative test를 명시적으로 요구한다), 실기기가 필요한 것은 실제 전달뿐이다 |
+| `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
+| S4 §7.6 대기 구간 | **완료.** 자동 노출 없음(저장 시 비공개 강제) + 연결 직후 창(7일) 안에서 묻는 카드. **"한 번"을 저장하지 않는다** — `couple_members.joined_at`에서 창을 계산하므로 새 영속 사실이 없다. 창이 지나도 기록은 그대로 비공개이며 개별 전환 가능 |
+| §19 계측·판독 | **완료.** 선언된 8종 전부에 emit 지점이 있고, 050이 커플 축과 집계 판독을 더했다. 현재 파이프로 LV 퍼널의 **주요 지표를 실제로 계산할 수 있다** — 커플 단위 지표 2개는 050 이전에는 계산 자체가 불가능했다. 여전히 없는 것: 3분 합류 실측 · 감정 확인율 · 위젯 사용률 |
+| 연락 가능 시간 | **완료.** 온보딩에서 양 역할에게 묻고, 설정에서 양 역할이 편집한다. 끝이 시작보다 이른 창은 저장 전에 거부한다 — DB는 받아들이고 발송이 영영 매치하지 않아 설명 없이 알림이 끊긴다 |
+
+Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은
+001의 SELECT 정책 때문에 파트너에게 읽히고, 그것은 곧 읽음 표시(§14.3 절대 금지)다. 전용 테이블로
+옮겼고 근거는 048 파일과 migration README가 소유한다.
+
 ### Branch consolidation checkpoint — 2026-08-20
 
 Every remote branch was audited for work that was still valid and not yet on master,
@@ -122,6 +138,32 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 여전히 변하지 않은 것: Production은 NOT APPLIED, remote Supabase catalog는 UNVERIFIED,
 실기기 검증은 UNVERIFIED, chat은 FROZEN / DEFERRED, P6는 NOT AUTHORIZED.
 
+### 저자 감사 checkpoint — 2026-08-21
+
+Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저자 측 전수 감사를 했다.
+결합은 `audit/combined-scratch` 브랜치(`d5471f3`)에서 PR 병합 없이 cherry-pick으로 구성했다.
+
+| 항목 | 결과 |
+|---|---|
+| **001→047→048→049→050 결합 체인** | **PASS** — 48개 migration, 205 assertions. 이 조합은 그전까지 한 번도 실행되지 않았다 |
+| 발견·수정한 결함 | 10건. 상세는 `WORK_LOG.md` 2026-08-21 감사 항목 |
+| 그중 숫자를 틀리게 만든 것 | 1건 — §19 kill metric이 권한 거부를 opt-out으로 셌다 |
+| unhandled rejection / Errors | **0건** |
+| 결합 전용 산출물 | harness의 047 ORDER + 8개 assertion, 원장 047 행, #75 낡은 주장 정정 — **landing 후 적용** |
+
+### LV 진입 조건 대비 현황 — 2026-08-21
+
+`ENGINEERING_ROADMAP` §LV의 조건별로, **active branch 기준**이다. master는 아직 `21e7dfb`다.
+
+| LV 조건 | 상태 |
+|---|---|
+| 계정·커플 연결·세션 복구 | 기존 스택 유지. 이 세션에서 약화시킨 것 없음 |
+| 기록 → 상대방의 오늘 → 원본 → 대화 준비 | 루프의 **첫 화살표(push)와 마지막 화살표(통화 모드)**가 코드로 존재한다. 실제 전달만 외부 게이트 |
+| 검증 범위의 프라이버시·보안 보호 | §7.6 자동 노출, 읽음 표시가 될 뻔한 컬럼 위치, 기기 이양 누출 — 셋 다 닫힘 |
+| 알려진 critical authorization/privacy blocker 없음 | 이 세션에서 발견한 것은 전부 닫았다. **independent review는 아직 없다** |
+| §19 허용 목록 계측 착지 | 코드로는 착지한다. **실제 이벤트가 쌓이는지는 LV 환경이 있어야 확인된다** |
+| 검증 빌드의 보안 표현이 §14.5 LV 행과 일치 | **미확인.** 온보딩·설정의 문장을 §14.5 LV 행과 대조한 적이 없다 |
+| 외부 사용자 범위·고지·rollback·데이터 처리 | **미착수.** LV 환경(전용 Supabase 프로젝트)이 없다 |
 ### Two-lineage convergence checkpoint — 2026-08-21
 
 `claude/v1-launch-readiness`(PR #73)와 `release/v1-gate1-gate2`(PR #74)는 같은 작업의
@@ -140,6 +182,12 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 실기기 UNVERIFIED, chat FROZEN / DEFERRED, P6 NOT AUTHORIZED(개정된 ARCH-P6 기준으로도
 구현 미착수), push 알림 미구현, §19 계측 미구현.
 
+> **2026-08-21 정정.** 위 문단은 원래 "push 알림 미구현, §19 계측 미구현"으로 끝났다.
+> 그 문장은 이 checkpoint가 작성된 시점에는 참이었고 **결합 트리에서는 거짓이다** —
+> 둘 다 PR #79에서 구현됐다(migration 048~050). landing 순서상 이 checkpoint(#75)가
+> 먼저 오고 구현(#79)이 나중에 오므로, 두 계보가 합쳐지는 지점에서 이 문장이 낡는다.
+> 저자 감사에서 발견해 정정했다.
+
 ## 2. Active migration ledger facts
 
 | migration | scope | production state for this docs task |
@@ -152,6 +200,10 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 | 044 | unlink crypto pairing authority | present in landed master tree; remote catalog independently UNVERIFIED |
 | 045 | E2EE write-floor activation hardening | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
 | 046 | device provisioning actor requirement | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
+| 047 | care signal `feeling_unwell` | **PR #76이 소유하며 master에도 이 branch에도 없다.** Production NOT APPLIED |
+| 048 | push delivery metadata (Gate 3) | active branch only. fresh chain 001→048에서 실제 PostgreSQL 17.10으로 37개 계약 검증, mutation 6건 확인. Production NOT APPLIED; 047과 결합한 체인은 **아직 한 번도 실행되지 않았다** |
+| 049 | §19 최소 계측 (LV 진입 조건) | active branch only. **timestamp 컬럼이 없다** — 날짜 버킷만. 파트너 read 정책 없음, UPDATE/DELETE 정책 없음. fresh chain 001→049에서 19개 계약 검증, mutation 4건 확인. Production NOT APPLIED |
+| 050 | LV 판독 (couple 축 + 집계 함수) | active branch only. `couple_id`는 세션에서 파생되고 파트너 read는 여전히 없다. 판독은 `(metric, value)` 집계만 반환하며 행 반환 경로가 없다. fresh chain 001→050에서 16개 계약 검증, mutation 5건 확인. Production NOT APPLIED |
 
 No remote Supabase mutation was performed by this documentation task.
 
@@ -181,7 +233,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 | 기능 | 현재 상태 |
 |---|---|
 | `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위. 이야기거리 보관함·완료 처리 P4는 integration branch에 있으나 master에는 아직 merge되지 않음 |
-| 알림 | 완전 미구현 |
+| 알림 | **코드는 양쪽 다 있다.** 서버: migration 048(전용 `push_delivery_state` 테이블 · 비공개 기록은 아무것도 올리지 않음 · 하루 1회와 연락 가능 시간을 DB가 강제 · 기기 이양 시 토큰 회수)과 `send-push` Edge Function. 클라이언트: `@capacitor/push-notifications` 통합 · 커플 연결 시 권한 요청과 토큰 등록 · 로그아웃 시 회수 · 탭 착지는 홈 고정. 전부 active branch에 있고 검증됐다. **남은 것은 전부 외부 게이트다** — APNs/FCM 자격증명, `aps-environment` entitlement(Apple portal capability와 함께 추가해야 함), 실기기 2대. 이 기기에서는 Xcode 부재로 `pod install`도 완료할 수 없다 |
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |

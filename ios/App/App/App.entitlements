@@ -13,8 +13,12 @@
 		rather than the "someone has the backup" path.
 
 		The app does no background work (no background fetch, no background
-		URLSession, no notifications), so nothing needs to read the container
-		while locked.
+		URLSession). Push notifications arrived with Gate 3 and do NOT change
+		that: the payload is one fixed sentence rendered by the system, this app
+		registers no handler that runs while the device is locked, and nothing in
+		the notification path reads the container. A future notification that
+		wanted to show anything about a record would need container access on a
+		locked device, and this protection class is what would stop it.
 
 		REQUIRES the "Data Protection" capability on the App ID in the Apple
 		Developer portal (Complete Protection). Without it, signing fails with a
@@ -28,6 +32,19 @@
 
 	<!--
 		DELIBERATELY ABSENT ENTITLEMENTS
+
+		aps-environment
+			Gate 3 ships the push CLIENT: permission, token registration, and the
+			tap handler. The entitlement that lets APNs actually deliver is NOT
+			added here, because it is inseparable from signing. It has to match
+			a provisioning profile whose App ID has the Push Notifications
+			capability enabled, and that is an Apple Developer portal action
+			performed with real credentials. Adding the key without that profile
+			makes device signing fail rather than making delivery work.
+			Simulator builds ignore entitlements, so CI would not have caught the
+			mismatch either. Add this together with the portal capability when
+			TestFlight distribution is set up; see
+			docs/kiro/NATIVE_RELEASE_GUIDE.md.
 
 		com.apple.developer.applesignin
 			`signInWithApple()` (src/lib/supabase.ts) calls

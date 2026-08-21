@@ -10,6 +10,7 @@ import {
   type NotificationPreferences,
 } from '@/lib/notifications';
 import { Card } from '@/components/ui/Card';
+import { recordProductEvent } from '@/lib/productEvents';
 
 export function NotificationPreferencesSection({ userId }: { userId: string }) {
   const [preferences, setPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
@@ -28,6 +29,35 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
     saveNotificationPreferences(userId, next);
   };
 
+  /*
+    The kill metric, and the one thing it must not count.
+
+    The strategy names this measure explicitly: if people turn notifications off,
+    the design failed, and no other number says so as directly. So it is emitted
+    only on the OFF transition -- turning something back on is not the signal,
+    and counting both would blur the single reading this exists to produce.
+
+    It lives here rather than in `update` because `update` has a second caller.
+    When a permission request comes back `denied`, `request()` writes
+    `systemEnabled: false` -- and if a stored `true` survived from a grant the
+    user later revoked in OS settings, that write is an OFF transition. Emitting
+    there would count someone who just pressed "allow" as someone who opted out:
+    the kill metric moving in the direction of "the design failed" at the exact
+    moment a user asked for more notification, not less.
+
+    §19: the event kind and nothing else. Which toggle it was is not sent,
+    because the question is whether someone opted out of being contacted, not
+    which switch they used to do it.
+  */
+  const toggle = (patch: Partial<NotificationPreferences>) => {
+    const turnedSomethingOff = (Object.keys(patch) as Array<keyof NotificationPreferences>)
+      .some((key) => preferences[key] === true && patch[key] === false);
+    update(patch);
+    if (turnedSomethingOff) {
+      void recordProductEvent({ kind: 'notifications_disabled', screen: 'settings' });
+    }
+  };
+
   const request = async () => {
     const nextPermission = await requestNotificationPermission();
     setPermission(nextPermission);
@@ -44,15 +74,15 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
         </p>
         <label className="flex items-center justify-between gap-3 min-h-11">
           <span className="flex items-center gap-2 text-label font-semibold text-foreground"><Bell size={16} className="text-coral" />앱 안에서 다시 알려주기</span>
-          <input type="checkbox" checked={preferences.inAppEnabled} onChange={(event) => update({ inAppEnabled: event.target.checked })} className="h-5 w-5 accent-coral" />
+          <input type="checkbox" checked={preferences.inAppEnabled} onChange={(event) => toggle({ inAppEnabled: event.target.checked })} className="h-5 w-5 accent-coral" />
         </label>
         <label className="flex items-center justify-between gap-3 min-h-11">
           <span className="flex items-center gap-2 text-label font-semibold text-foreground"><BellOff size={16} className="text-coral" />새로운 하루 알림</span>
-          <input type="checkbox" checked={preferences.sharedRecordEnabled} onChange={(event) => update({ sharedRecordEnabled: event.target.checked })} className="h-5 w-5 accent-coral" />
+          <input type="checkbox" checked={preferences.sharedRecordEnabled} onChange={(event) => toggle({ sharedRecordEnabled: event.target.checked })} className="h-5 w-5 accent-coral" />
         </label>
         <label className="flex items-center justify-between gap-3 min-h-11">
           <span className="flex items-center gap-2 text-label font-semibold text-foreground"><BellOff size={16} className="text-coral" />이야기할 것 알림</span>
-          <input type="checkbox" checked={preferences.talkAboutEnabled} onChange={(event) => update({ talkAboutEnabled: event.target.checked })} className="h-5 w-5 accent-coral" />
+          <input type="checkbox" checked={preferences.talkAboutEnabled} onChange={(event) => toggle({ talkAboutEnabled: event.target.checked })} className="h-5 w-5 accent-coral" />
         </label>
         {permission === 'unsupported' ? (
           <p className="text-caption text-muted-foreground">이 기기에서는 앱이 열려 있을 때 보여주는 안내만 사용할 수 있어요.</p>

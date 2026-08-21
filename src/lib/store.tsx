@@ -49,6 +49,10 @@ import {
   unmarkTalkAboutInDB,
   resolveTalkAboutInDB,
 } from '@/lib/talkAbout';
+import { revokeOwnPushTokens } from '@/lib/pushTokens';
+import { setUpPushNotifications } from '@/lib/pushNotifications';
+import { recordProductEvent } from '@/lib/productEvents';
+import { fetchPartnerJoinedAt } from '@/lib/coupleTimeline';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   applyDeliveryOutcome,
@@ -381,7 +385,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const [authSyncReason, setAuthSyncReason] = useState<ServerErrorKind | null>(null);
   const [authSyncStage, setAuthSyncStage] = useState<AuthSyncStage | null>(null);
-  const [authSyncCode, setAuthSyncCode] = useState<string | null>(null);
   /**
    * Server-authoritative couple lifecycle, starting at `unknown` because nothing
    * has been asked yet. It is never initialised to `personal`: that would render
@@ -945,6 +948,74 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => registerServerCallGate(null);
   }, [ensureNotPendingBeforeServerCall]);
 
+  /**
+   * Register this device for notifications once a couple exists.
+   *
+   * Keyed on the lifecycle rather than hung off the invitation-poll that first
+   * observes a partner joining. That poll only runs on the INVITER's device, and
+   * only on the one launch where the join happens -- so hooking it there would
+   * leave the joining partner unregistered forever, and the inviter unregistered
+   * after any reinstall.
+   *
+   * Asking here also gets the timing §2 of the strategy asks for: at connection,
+   * not at first launch. Before there is a partner the app cannot deliver
+   * anything worth a prompt, and iOS grants exactly one chance to ask.
+   *
+   * Re-running on every transition into `connected` is correct rather than merely
+   * harmless. APNs and FCM reissue tokens without telling the app, and
+   * `register_push_token` removes any previous holder before claiming, so a
+   * repeat call is either a no-op or the repair. The permission prompt is not
+   * repeated: the adapter checks the existing decision first.
+   *
+   * Fire-and-forget by design. A notification token is not a precondition for
+   * anything the couple is trying to do next, and awaiting it here would put a
+   * network round trip in front of the screen that just said they are connected.
+   */
+  useEffect(() => {
+    if (coupleLifecycle !== 'connected') return;
+    void setUpPushNotifications();
+
+    /*
+      §7.6 needs to know which records predate the partner, and the only fact
+      that answers it is when they joined. Fetched once on connection rather than
+      carried in the main state fetch, so a failure here degrades to "do not
+      offer the prompt" instead of degrading the whole hydration.
+    */
+    const identity = captureActiveIdentity();
+    const coupleId = stateRef.current.profile.couple.coupleId;
+    if (identity && coupleId) {
+      void fetchPartnerJoinedAt(coupleId, identity.userId).then((joinedAt) => {
+        if (!joinedAt || !isCurrentIdentity(identity)) return;
+        updateStateImmediately((prev) => (
+          prev.profile.couple.partnerJoinedAt === joinedAt ? prev : {
+            ...prev,
+            profile: {
+              ...prev.profile,
+              couple: { ...prev.profile.couple, partnerJoinedAt: joinedAt },
+            },
+          }
+        ));
+      });
+    }
+    /*
+      The activation funnel's one step that decides everything after it. §19
+      permits the event kind; nothing identifying the partner is sent, and the
+      row is scoped to the account that emitted it, so this cannot be assembled
+      into a view of the other person.
+    */
+    void recordProductEvent({ kind: 'couple_connected' });
+    /*
+      Keyed on the lifecycle transition alone, deliberately.
+
+      The three helpers this reads are stable per render but not referentially
+      stable, so listing them would re-run this on every state change: a second
+      permission prompt, a duplicate `couple_connected` event, and a join-time
+      fetch on every keystroke. The transition into `connected` is the event; the
+      helpers are how it is handled.
+    */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coupleLifecycle]);
+
   useEffect(() => {
     if (!supabase || !isHydrated) return;
     let disposed = false;
@@ -971,7 +1042,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setAuthSyncUnavailable(false);
         setAuthSyncReason(null);
         setAuthSyncStage(null);
-        setAuthSyncCode(null);
         hydratedUserIdRef.current = null;
         // The couple lifecycle and the invitation expiry belong to the account
         // that is leaving. Nobody has asked the question for the incoming
@@ -1130,7 +1200,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               return previous === 'auth_expired' ? previous : hydration.reason;
             });
             setAuthSyncStage(hydration.ok ? null : hydration.stage);
-            setAuthSyncCode(hydration.ok ? null : hydration.code ?? null);
+            /*
+              The backend's own code goes to the console, not to state.
+
+              It used to be held so the failure screen could print it, and that
+              display was removed: nobody outside this repository can act on a
+              PostgREST code, and the screen it appeared on renders before anyone
+              has authenticated. Keeping the state after removing its only reader
+              left a field the context exported and nothing consumed.
+
+              Here it is still useful -- a developer reading a console has the
+              context to use it -- and it reaches no user.
+            */
+            if (!hydration.ok && hydration.code) {
+              console.warn('[gomsinlog] Account hydration failed:', hydration.stage, hydration.code);
+            }
             if (syncUnavailable) {
               // A failed hydration answers nothing about the couple space, so the
               // lifecycle must go to `unknown` -- never to `personal`.
@@ -3127,6 +3211,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    /*
+      Release the push tokens FIRST, while the session still authenticates.
+
+      The order is not arbitrary and not interchangeable with the two lines
+      below: `revoke_my_push_tokens()` reads `auth.uid()`, so after the session is
+      gone it has no actor and refuses. Doing this after `authRepository.signOut()`
+      would look identical and silently never work.
+
+      Awaited, but its result is ignored. Refusing to sign someone out because a
+      notification cleanup failed would be the wrong trade in every direction, and
+      the outcome §14.3 actually forbids -- a departed account receiving a device's
+      notifications -- is prevented by migration 048's handover DELETE regardless
+      of whether this call succeeds.
+    */
+    await revokeOwnPushTokens();
     // Purge locally first: even if the network call fails, this device must not
     // keep the previous account's records readable.
     purgeLocalAccountData();
@@ -3250,7 +3349,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
     const result = await markTalkAboutInDB(recordId, coupleId, userId);
-    if (result.ok) await refreshTalkAboutMarks(workspace);
+    if (result.ok) {
+      // Conversation intent. Paired with `talk_about_resolved`, the two say
+      // whether marking something leads to talking about it -- which is the
+      // question the whole 이따 이야기하기 feature exists to answer.
+      void recordProductEvent({ kind: 'talk_about_marked', subjectId: recordId });
+      await refreshTalkAboutMarks(workspace);
+    }
     return result;
   };
 
@@ -3316,7 +3421,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         authSyncUnavailable,
         authSyncReason,
         authSyncStage,
-        authSyncCode,
         sharedSyncStatus,
         coupleLifecycle,
         invitationExpiresAt,

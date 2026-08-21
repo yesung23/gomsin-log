@@ -104,6 +104,9 @@ const ORDER = [
   '045_harden_e2ee_write_floor_activation.sql',
   '046_require_actor_for_device_provisioning.sql',
   '047_care_signal_feeling_unwell.sql',
+  '048_push_delivery_metadata.sql',
+  '049_product_events.sql',
+  '050_lv_funnel_readout.sql',
 ];
 
 /**
@@ -278,6 +281,11 @@ function asServiceRole(text) {
   ]);
 }
 
+/** Whether a statement succeeded, for cases where failure IS the assertion. */
+function mustSqlOk(text) {
+  return sql(text).ok;
+}
+
 function mustAsServiceRole(text, label) {
   const result = asServiceRole(text);
   if (!result.ok) throw new Error(`${label} failed:\n${result.stderr.trim()}`);
@@ -311,7 +319,7 @@ function checkVisible(userId, predicate, expected, message) {
 // Cluster
 // ---------------------------------------------------------------------------
 
-console.log('active fresh-chain harness — migrations 001..040 + 043..045 on throwaway PostgreSQL 17\n');
+console.log('active fresh-chain harness — migrations 001..040 + 043..050 on throwaway PostgreSQL 17\n');
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -1362,6 +1370,513 @@ check(
   )) === 1,
   '038 the partner STILL cannot write the author\'s daily_records row',
 );
+
+// ---------------------------------------------------------------------------
+// 047 — the care-signal vocabulary, asserted against the database
+//
+// 047 was reviewed and its client-side vocabulary is pinned in
+// `featurePrivacy.test.ts`, but nothing checked the CHECK itself against a real
+// database. It joined the chain as "applies cleanly", which is a different claim
+// from "accepts one kind and refuses the graded ones".
+//
+// That gap matters more in the COMBINED tree than it did alone: 048-050 run
+// after 047 here for the first time, and a later migration that redefined this
+// constraint would have gone unnoticed.
+// ---------------------------------------------------------------------------
+
+const kindCheck = mustSql(`
+  SELECT pg_get_constraintdef(oid) FROM pg_constraint
+  WHERE conrelid = 'public.cycle_support_signals'::regclass
+    AND conname = 'cycle_support_signals_kind_check'`, '047 constraint');
+
+check(
+  kindCheck.includes('feeling_unwell'),
+  '047 the approved kind survives every migration that runs after it',
+);
+for (const refused of ['pain_mild', 'pain_moderate', 'pain_severe']) {
+  check(
+    !kindCheck.includes(refused),
+    `047 the graded pain vocabulary the review refused is absent (${refused})`,
+  );
+}
+check(
+  (kindCheck.match(/'/g) ?? []).length / 2 === 5,
+  `047 the vocabulary is exactly five kinds (got: ${kindCheck})`,
+);
+
+// And the constraint actually behaves, rather than merely reading correctly.
+/*
+  Inserted as the OWNER, the way the product does it.
+
+  A superuser insert is refused by 014's workspace trigger ("Support signal is
+  outside the active couple workspace"), which is the correct behaviour and
+  is itself worth having crossed: the vocabulary check is not the only thing
+  standing between a caller and this table.
+*/
+check(
+  asUser(A, `
+    INSERT INTO public.cycle_support_signals (couple_id, owner_id, shared_for_date, kind)
+    VALUES ('${COUPLE1}', '${A}', CURRENT_DATE, 'feeling_unwell')`).ok,
+  '047 the owner can actually send the approved kind',
+);
+check(
+  !asUser(A, `
+    INSERT INTO public.cycle_support_signals (couple_id, owner_id, shared_for_date, kind)
+    VALUES ('${COUPLE1}', '${A}', CURRENT_DATE - 1, 'pain_severe')`).ok,
+  '047 a graded pain kind is refused by the database, not merely by the client',
+);
+check(
+  !asUser(B, `
+    INSERT INTO public.cycle_support_signals (couple_id, owner_id, shared_for_date, kind)
+    VALUES ('${COUPLE1}', '${A}', CURRENT_DATE - 2, 'feeling_unwell')`).ok,
+  '047 the partner cannot send a care signal ON THE OWNER\'S BEHALF',
+);
+
+// ---------------------------------------------------------------------------
+// 048 — push delivery metadata
+//
+// The rule this section exists for is the negative one. A `나만 보기` record is
+// invisible to the partner, so notifying them about it would leak the single fact
+// the privacy setting exists to hide: that anything was written at all. Everything
+// else here is ordinary authorization; that one is the product.
+// ---------------------------------------------------------------------------
+
+const D = 'dddddddd-0000-4000-8000-00000000000d';
+const E = 'eeeeeeee-0000-4000-8000-00000000000e';
+const COUPLE3 = '33333333-0000-4000-8000-000000000003';
+
+mustSql(`
+  INSERT INTO auth.users (id, email) VALUES
+    ('${D}', 'd@example.test'), ('${E}', 'e@example.test');
+  INSERT INTO public.profiles (id, display_name, role) VALUES
+    ('${D}', 'D', 'gomsin'), ('${E}', 'E', 'soldier');
+  INSERT INTO public.couples (id) VALUES ('${COUPLE3}');
+  INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES
+    ('${COUPLE3}', '${D}', 'gomsin', 'active'),
+    ('${COUPLE3}', '${E}', 'soldier', 'active');
+`, '048 fixture');
+
+function unseenOf(userId) {
+  // COALESCE, because "no row yet" and "row saying false" are the same fact: this
+  // person has nothing waiting. A missing row is the normal state before the first
+  // act, not an error.
+  return mustSql(
+    `SELECT COALESCE((SELECT has_unseen FROM public.push_delivery_state WHERE user_id = '${userId}'), FALSE)`,
+    'read has_unseen',
+  );
+}
+
+// --- the flag is raised by an act, and only by a visible one ----------------
+
+check(unseenOf(E) === 'f', '048 a fresh membership starts with nothing to be invited back for');
+
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('d0000000-0000-4000-8000-000000000001', '${D}', '${COUPLE3}', CURRENT_DATE, 'shared', false)`,
+  '048 shared insert');
+check(unseenOf(E) === 't', '048 a SHARED record raises the partner\'s merged flag');
+check(unseenOf(D) === 'f', '048 the author is never notified about their own act');
+
+mustSql(`UPDATE public.push_delivery_state SET has_unseen = FALSE WHERE user_id IN ('${D}', '${E}')`, 'reset');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('d0000000-0000-4000-8000-000000000002', '${D}', '${COUPLE3}', CURRENT_DATE, 'private', true)`,
+  '048 private insert');
+check(
+  unseenOf(E) === 'f',
+  '048 a PRIVATE record raises NOTHING, so the notification cannot leak that it exists',
+);
+
+// --- the partner cannot observe the flag ------------------------------------
+// `has_unseen` is delivery state, not a read receipt. A read receipt is defined
+// by the PARTNER learning something, so the test is that they cannot.
+
+mustSql(`INSERT INTO public.push_delivery_state (user_id, has_unseen) VALUES ('${E}', TRUE)
+     ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE`, 'raise');
+const partnerReadsFlag = asUser(D, `
+  SELECT count(*) FROM public.push_delivery_state WHERE user_id = '${E}' AND has_unseen IS TRUE`);
+check(
+  !partnerReadsFlag.ok || partnerReadsFlag.stdout.trim() === '0',
+  '048 the partner CANNOT read the other side\'s delivery flag',
+);
+
+// --- who may ask who to notify ----------------------------------------------
+// The Edge Function's whole view of the world. If `authenticated` could call it,
+// any account could enumerate every couple's delivery schedule.
+
+check(asUser(E, `SELECT public.register_push_token('ios', 'token-e')`).ok
+  && asUser(D, `SELECT public.register_push_token('android', 'token-d')`).ok,
+  '048 an account can register its own device');
+check(!asUser(D, `SELECT public.register_push_token('desktop', 'token-x')`).ok,
+  '048 an unsupported platform is refused');
+check(!asUser(D, `SELECT public.register_push_token('ios', '   ')`).ok,
+  '048 an empty token is refused');
+check(!psql(['-At', '-c', 'SET ROLE authenticated', '-c', `SELECT public.register_push_token('ios', 'token-null')`]).ok,
+  '048 a NULL actor CANNOT register a token');
+
+// The device-handover case, which a plain INSERT could not express: the token
+// UNIQUE would reject the arriving account and the DEPARTED one would keep
+// receiving that phone's notifications.
+check(asUser(D, `SELECT public.register_push_token('ios', 'token-e')`).ok,
+  '048 a handed-over device can be claimed by the account now using it');
+check(mustSql(`SELECT user_id FROM public.device_push_tokens WHERE token = 'token-e'`, 'handover') === D,
+  '048 claiming a token TAKES it, so the previous account stops receiving that device',
+);
+check(mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE token = 'token-e'`, 'no dup') === '1',
+  '048 a handover leaves exactly one owner, never two');
+
+// Put E back on its own device for the delivery tests below.
+mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e'`, 'reset handover');
+check(asUser(E, `SELECT public.register_push_token('ios', 'token-e')`).ok, '048 re-registered');
+
+check(!asUser(D, 'SELECT * FROM public.push_delivery_candidates()').ok,
+  '048 an authenticated user CANNOT ask who is due a notification');
+// The grant is not the only gate (029's shape): EXECUTE without the service_role
+// claim is still refused, so a mis-issued GRANT cannot expose the schedule.
+check(!psql(['-At',
+  '-c', 'GRANT EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) TO authenticated',
+  '-c', 'SET ROLE authenticated',
+  '-c', 'SELECT * FROM public.push_delivery_candidates()']).ok,
+  '048 EXECUTE without the service_role claim is refused in the body');
+mustSql('REVOKE EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) FROM authenticated', 'restore grant');
+check(!asAnon('SELECT * FROM public.push_delivery_candidates()').ok,
+  '048 anon CANNOT ask who is due a notification');
+
+// 20:00 KST on a Wednesday sits inside the migration-001 weekday default window.
+const INSIDE = `TIMESTAMPTZ '2026-08-19 20:00+09'`;
+const OUTSIDE = `TIMESTAMPTZ '2026-08-19 03:00+09'`;
+
+const dueInside = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+  '048 candidates inside window');
+check(dueInside === '1', '048 service_role CAN ask, and a raised flag inside contact hours is due');
+
+const dueOutside = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates(${OUTSIDE}) WHERE user_id = '${E}'`,
+  '048 candidates outside window');
+check(dueOutside === '0', '048 nobody is notified outside the hours they typed in');
+
+// --- the sender learns nothing about what happened ---------------------------
+// Three columns, none of them content, no event kind and no count. `3개` is a
+// debt; the payload the device builds says 새로운 소식 for every kind alike.
+const shape = mustAsServiceRole(
+  `SELECT string_agg(a.attname, ',' ORDER BY a.attnum)
+   FROM pg_proc p
+   JOIN pg_type t ON t.oid = p.prorettype
+   JOIN pg_class c ON c.reltype = t.oid
+   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
+   WHERE p.proname = 'push_delivery_candidates'`,
+  '048 candidate shape');
+check(
+  shape === '' || shape === null || !/log_text|content|emotion|count/i.test(shape),
+  '048 the sender\'s view carries no content, no event kind and no count',
+);
+
+// --- at most one send per recipient per day ---------------------------------
+
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '048 mark delivered');
+check(unseenOf(E) === 'f', '048 delivering lowers the flag');
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+    '048 second look') === '0',
+  '048 a delivered recipient is not due again',
+);
+
+// Raised again the same day -- a second act -- still does not earn a second send.
+mustSql(`UPDATE public.push_delivery_state SET has_unseen = TRUE WHERE user_id = '${E}'`, 'raise again');
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-19 21:00+09') WHERE user_id = '${E}'`,
+    '048 same day') === '0',
+  '048 a SECOND act on the same day earns no second notification',
+);
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-20 20:00+09') WHERE user_id = '${E}'`,
+    '048 next day') === '1',
+  '048 the next Korean-local day starts a new allowance',
+);
+
+// --- clearing one's own flag -------------------------------------------------
+
+const clearedByOther = asUser(D, 'SELECT public.clear_my_unseen()');
+check(clearedByOther.ok && unseenOf(E) === 't',
+  '048 clearing acts on the caller\'s own row, never on the partner\'s');
+check(asUser(E, 'SELECT public.clear_my_unseen()').ok && unseenOf(E) === 'f',
+  '048 someone already in the app can stop being invited back to it');
+check(!psql(['-At', '-c', 'SET ROLE authenticated', '-c', 'SELECT public.clear_my_unseen()']).ok,
+  '048 a NULL actor CANNOT clear anything');
+check(!asAnon('SELECT public.clear_my_unseen()').ok, '048 anon CANNOT clear anything');
+
+// --- token ownership ---------------------------------------------------------
+
+const partnerCountsTokens = asUser(D, `SELECT count(*) FROM public.device_push_tokens WHERE user_id = '${E}'`);
+check(
+  // Either the grant is absent (query fails) or RLS filters every row away. Both
+  // are denials; asserting only on the count would pass vacuously on an error.
+  !partnerCountsTokens.ok || partnerCountsTokens.stdout.trim() === '0',
+  '048 a partner CANNOT see how many devices the other carries',
+);
+check(!asUser(D, `INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES ('${E}', 'ios', 'forged')`).ok,
+  '048 nobody can write the token table directly, for any account including their own');
+check(!asAnon('SELECT count(*) FROM public.device_push_tokens').ok
+  || asAnon('SELECT count(*) FROM public.device_push_tokens').stdout.trim() === '0',
+  '048 anon sees no tokens');
+
+check(!psql(['-At', '-c', 'SET ROLE authenticated', '-c', 'SELECT public.revoke_my_push_tokens()']).ok,
+  '048 a NULL actor CANNOT revoke tokens');
+check(asUser(E, 'SELECT public.revoke_my_push_tokens()').ok
+  && mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE user_id = '${E}'`, 'after revoke') === '0'
+  && mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE user_id = '${D}'`, 'others intact') === '1',
+  '048 signing out revokes only the caller\'s own tokens',
+);
+
+// --- unlink ends delivery, on both sides ------------------------------------
+// §14.4: an ended relationship must not be able to notify. Both the tokens and
+// the flags go, so a later reconnection cannot fire a notification left standing
+// from the previous relationship.
+
+mustSql(`
+  INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES ('${E}', 'ios', 'token-e2');
+  INSERT INTO public.push_delivery_state (user_id, has_unseen) VALUES ('${D}', TRUE), ('${E}', TRUE)
+    ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE`, '048 pre-unlink');
+check(asUser(D, 'SELECT public.disconnect_couple()').ok, '048 unlink succeeds');
+check(
+  mustSql(
+    `SELECT count(*) FROM public.device_push_tokens WHERE user_id IN ('${D}', '${E}')`,
+    'tokens after unlink') === '0',
+  '048 unlink revokes the push tokens of BOTH members',
+);
+check(
+  mustSql(
+    `SELECT count(*) FROM public.push_delivery_state WHERE user_id IN ('${D}', '${E}') AND has_unseen IS TRUE`,
+    'flags after unlink') === '0',
+  '048 unlink lowers both merged flags, so reconnecting cannot fire a stale one',
+);
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id IN ('${D}', '${E}')`,
+    'candidates after unlink') === '0',
+  '048 a disconnected relationship produces no delivery candidates',
+);
+
+// ---------------------------------------------------------------------------
+// 049 — the measurement pipe, and what it structurally cannot become
+//
+// §19 permits a date bucket and forbids precise times; it forbids content,
+// emotion labels, health of any kind, and behavioural surveillance. The
+// assertions below are mostly about ABSENCE, because that is what the rules
+// actually require.
+// ---------------------------------------------------------------------------
+
+// The one that matters most: no column can hold a time of day.
+const timeCols = mustSql(`
+  SELECT count(*) FROM information_schema.columns
+  WHERE table_name = 'product_events'
+    AND data_type IN ('timestamp with time zone', 'timestamp without time zone', 'time without time zone')`,
+  '049 time columns');
+check(
+  timeCols === '0',
+  '049 the table has NO timestamp column, so it cannot log when someone opens the app',
+);
+check(
+  mustSql(`SELECT data_type FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'occurred_on'`, '049 bucket type') === 'date',
+  '049 the only temporal column is a DATE bucket',
+);
+
+// No column could hold content even if a caller tried.
+const textCols = mustSql(`
+  SELECT COALESCE(string_agg(column_name, ',' ORDER BY column_name), '')
+  FROM information_schema.columns
+  WHERE table_name = 'product_events' AND data_type IN ('text', 'character varying')`,
+  '049 text columns');
+check(
+  textCols === 'error_code,kind,screen',
+  `049 the only text columns are the three closed/bounded ones (got: ${textCols})`,
+);
+check(
+  mustSql(`SELECT data_type FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'subject_id'`, '049 subject type') === 'uuid',
+  '049 the subject is a UUID, so a record id fits and a record\'s text does not',
+);
+
+// The vocabulary is closed, and names nothing forbidden.
+const kinds = mustSql(`
+  SELECT pg_get_constraintdef(oid) FROM pg_constraint
+  WHERE conrelid = 'public.product_events'::regclass AND conname LIKE '%kind%'`,
+  '049 kind constraint');
+check(kinds.includes('record_composed'), '049 the event vocabulary is a CHECK constraint, not free text');
+for (const forbidden of ['cycle', 'health', 'emotion', 'mood', 'dwell', 'session', 'streak']) {
+  check(
+    !kinds.includes(forbidden),
+    `049 no event kind names anything §19 forbids (${forbidden})`,
+  );
+}
+
+// Ownership, in both directions.
+mustSql(`
+  INSERT INTO public.product_events (user_id, kind, occurred_on)
+  VALUES ('${D}', 'record_composed', CURRENT_DATE), ('${E}', 'briefing_opened', CURRENT_DATE)`,
+  '049 fixture');
+
+const partnerReadsEvents = asUser(D, `SELECT count(*) FROM public.product_events WHERE user_id = '${E}'`);
+check(
+  !partnerReadsEvents.ok || partnerReadsEvents.stdout.trim() === '0',
+  '049 the partner CANNOT read the other side\'s activity',
+);
+check(
+  asUser(D, `SELECT count(*) FROM public.product_events WHERE user_id = '${D}'`).stdout.trim() === '1',
+  '049 an account can read its own',
+);
+check(
+  !asUser(D, `INSERT INTO public.product_events (user_id, kind, occurred_on)
+              VALUES ('${E}', 'record_composed', CURRENT_DATE)`).ok,
+  '049 nobody can attribute an event to another account',
+);
+check(!asAnon('SELECT count(*) FROM public.product_events').ok
+  || asAnon('SELECT count(*) FROM public.product_events').stdout.trim() === '0',
+  '049 anon sees nothing');
+
+// An event is a fact. Nobody edits or erases one.
+check(
+  !asUser(D, `UPDATE public.product_events SET kind = 'briefing_opened' WHERE user_id = '${D}'`).ok
+    || mustSql(`SELECT count(*) FROM public.product_events WHERE user_id = '${D}' AND kind = 'record_composed'`,
+      '049 unchanged') === '1',
+  '049 events cannot be rewritten, not even one\'s own',
+);
+check(
+  !asUser(D, `DELETE FROM public.product_events WHERE user_id = '${D}'`).ok
+    || mustSql(`SELECT count(*) FROM public.product_events WHERE user_id = '${D}'`, '049 still there') === '1',
+  '049 events cannot be deleted by the session that wrote them',
+);
+
+// The vocabulary refuses anything outside it.
+check(
+  !mustSqlOk(`INSERT INTO public.product_events (user_id, kind, occurred_on)
+              VALUES ('${D}', 'partner_read_my_record', CURRENT_DATE)`),
+  '049 an event kind outside the closed set is refused by the database',
+);
+
+// --- §7.6 feasibility: can a client learn when the partner joined? ----------
+// Not a contract this branch relies on. Recorded because the work log claimed
+// the "show them what you wrote before?" question was blocked on fetching a
+// join time, and that claim should be true or corrected rather than repeated.
+
+const partnerJoin = asUser(A, `
+  SELECT count(*) FROM public.couple_members
+  WHERE couple_id = '${COUPLE1}' AND user_id = '${B}' AND joined_at IS NOT NULL`);
+check(
+  partnerJoin.ok && partnerJoin.stdout.trim() === '1',
+  '§7.6 an active member CAN read the partner\'s joined_at, so the reveal prompt is not blocked on new SQL',
+);
+
+// ---------------------------------------------------------------------------
+// 050 — the LV read-out, and what it refuses to return
+// ---------------------------------------------------------------------------
+
+// The couple axis exists, and is not client-supplied.
+check(
+  mustSql(`SELECT count(*) FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'couple_id'`, '050 col') === '1',
+  '050 events can be grouped by couple, which is the unit LV measures',
+);
+check(
+  mustSql(`SELECT column_default FROM information_schema.columns
+           WHERE table_name = 'product_events' AND column_name = 'couple_id'`, '050 default')
+    .includes('get_my_active_couple_id'),
+  '050 the couple comes from the session, so a client cannot attribute events elsewhere',
+);
+
+// Still no partner axis: the RLS scope is unchanged.
+/*
+  Dated into a window of its own.
+
+  049's fixture writes at CURRENT_DATE, and an overlapping range would have this
+  section asserting on both sets at once -- which is how a read-out test starts
+  measuring the fixture instead of the function.
+*/
+mustSql(`
+  INSERT INTO public.product_events (user_id, couple_id, kind, occurred_on) VALUES
+    ('${D}', '${COUPLE3}', 'couple_connected', DATE '2026-07-01'),
+    ('${D}', '${COUPLE3}', 'record_composed',  DATE '2026-07-01'),
+    ('${E}', '${COUPLE3}', 'record_composed',  DATE '2026-07-02'),
+    ('${D}', '${COUPLE3}', 'briefing_opened',  DATE '2026-07-02'),
+    ('${D}', '${COUPLE3}', 'briefing_to_original', DATE '2026-07-02')`,
+  '050 fixture');
+const partnerReadsCoupleEvents = asUser(D, `
+  SELECT count(*) FROM public.product_events WHERE user_id = '${E}'`);
+check(
+  !partnerReadsCoupleEvents.ok || partnerReadsCoupleEvents.stdout.trim() === '0',
+  '050 adding the couple axis did NOT give the partner a read',
+);
+
+// Who may run a read-out.
+check(!asUser(D, `SELECT * FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`).ok,
+  '050 an authenticated user CANNOT run the read-out');
+check(!asAnon(`SELECT * FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`).ok,
+  '050 anon CANNOT run the read-out');
+check(!psql(['-At',
+  '-c', 'GRANT EXECUTE ON FUNCTION public.lv_funnel_readout(DATE, DATE) TO authenticated',
+  '-c', 'SET ROLE authenticated',
+  '-c', `SELECT * FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`]).ok,
+  '050 EXECUTE without the service_role claim is refused in the body');
+mustSql('REVOKE EXECUTE ON FUNCTION public.lv_funnel_readout(DATE, DATE) FROM authenticated', 'restore');
+
+// What it returns: numbers, never rows about a person.
+const readoutShape = mustAsServiceRole(
+  // OUT columns of a RETURNS TABLE function live in proargnames/proargmodes,
+  // not in a pg_class row -- there is no composite type to inspect.
+  `SELECT string_agg(name, ',' ORDER BY ord) FROM (
+     SELECT unnest(p.proargnames) AS name,
+            generate_subscripts(p.proargnames, 1) AS ord,
+            unnest(p.proargmodes) AS mode
+     FROM pg_proc p WHERE p.proname = 'lv_funnel_readout'
+   ) x WHERE mode = 't'`, '050 shape');
+check(
+  readoutShape === 'metric,value',
+  `050 the read-out returns a metric and a number, never a row about a person (got: ${readoutShape})`,
+);
+
+const readout = mustAsServiceRole(
+  `SELECT string_agg(metric || '=' || value, ',' ORDER BY metric)
+   FROM public.lv_funnel_readout(DATE '2026-07-01', DATE '2026-07-31')`, '050 readout');
+check(readout.includes('couples_connected=1'), '050 counts connected couples');
+check(readout.includes('couples_writing=1'),
+  '050 counts the COUPLE that wrote, not the two accounts in it');
+check(readout.includes('records_composed=2'), `050 still counts the records themselves (got: ${readout})`);
+check(readout.includes('briefing_to_original_ratio=1.0000'),
+  `050 reports the summary-to-original RATE (got: ${readout})`);
+
+check(
+  mustAsServiceRole(
+    `SELECT string_agg(metric || '=' || value, ',' ORDER BY metric)
+     FROM public.lv_funnel_readout(DATE '2026-06-01', DATE '2026-06-30')`, '050 empty window')
+    .includes('briefing_to_original_ratio=0'),
+  '050 an empty window divides by nothing instead of failing',
+);
+check(!asServiceRole(`SELECT * FROM public.lv_funnel_readout(DATE '2026-07-31', DATE '2026-07-01')`).ok,
+  '050 a reversed range is refused rather than silently returning zero');
+
+// Retention as a count, not a list of who came back.
+const retention = mustAsServiceRole(
+  `SELECT string_agg(metric || '=' || value, ',' ORDER BY metric)
+   FROM public.lv_couple_return_count(DATE '2026-07-01', DATE '2026-07-01', DATE '2026-07-02', DATE '2026-07-02')`,
+  '050 retention');
+check(retention.includes('couples_active_first=1') && retention.includes('couples_returned=1'),
+  '050 retention answers HOW MANY couples returned');
+const retentionShape = mustAsServiceRole(
+  `SELECT string_agg(name, ',' ORDER BY ord) FROM (
+     SELECT unnest(p.proargnames) AS name,
+            generate_subscripts(p.proargnames, 1) AS ord,
+            unnest(p.proargmodes) AS mode
+     FROM pg_proc p WHERE p.proname = 'lv_couple_return_count'
+   ) x WHERE mode = 't'`, '050 retention shape');
+check(retentionShape === 'metric,value',
+  '050 retention never returns WHICH couples came back');
+check(!asUser(D, `SELECT * FROM public.lv_couple_return_count(DATE '2026-07-01', DATE '2026-07-01', DATE '2026-07-02', DATE '2026-07-02')`).ok,
+  '050 an authenticated user CANNOT run the retention read-out');
 
 // ---------------------------------------------------------------------------
 // Report

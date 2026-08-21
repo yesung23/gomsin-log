@@ -366,6 +366,9 @@ jobs:
           # asks for a microphone -- and this job checks the MERGED manifest
           # precisely because a dependency can inject a permission at merge time.
           # A plugin that re-adds audio now fails here instead of shipping quietly.
+          # Gate 3's one permission, asserted present so a plugin change that drops
+          # it fails here rather than silently ending delivery on Android 13+.
+          printf '%s' "${body}" | grep -F 'android:name="android.permission.POST_NOTIFICATIONS"'
           printf '%s' "${body}" | grep -F 'android:allowBackup="false"'
           printf '%s' "${body}" | grep -F 'android:usesCleartextTraffic="false"'
           printf '%s' "${body}" | grep -F 'android:scheme="gomsinlog"'

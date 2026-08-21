@@ -138,6 +138,23 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 여전히 변하지 않은 것: Production은 NOT APPLIED, remote Supabase catalog는 UNVERIFIED,
 실기기 검증은 UNVERIFIED, chat은 FROZEN / DEFERRED, P6는 NOT AUTHORIZED.
 
+### 전수 저장소 감사 checkpoint — 2026-08-21 (최종)
+
+앞선 저자 감사 이후, **최종 릴리스 트리 전체**를 대상으로 독립 리뷰어 6개를 병렬로 돌린
+감사. 상세는 `WORK_LOG.md` 같은 날 마지막 항목.
+
+| 항목 | 결과 |
+|---|---|
+| 감사 대상 | `release/phase1-gate3-clean-history` (PR #80), tree `8dade09` = #79 최종 tree |
+| CRITICAL | 2건 — 035의 recovery 오버로드 부활, iOS APNs 토큰 브리지 부재. **둘 다 수정** |
+| HIGH | 3건 — `couple_id` 위조, CI가 DB harness 미실행, 오프라인 큐 미전송. **전부 수정** |
+| MEDIUM/LOW | 4건 수정. 나머지는 범위 밖으로 인계 문서에 기록 |
+| 새 migration | **051** (운영 미적용) |
+| 검증 | verify EXIT=0 / 2822 tests · 49 migrations / 212 assertions · p5 93 · write-floor 39 · rollback PASS · 취약점 0 |
+| 회귀 테스트를 못 만든 것 | **1건** — 오프라인 큐 flush. 단독 통과, 전체 스위트에서 간섭. 이 수정만 "읽어서 확인" |
+
+**#80은 아직 병합되지 않았다.** 기본 브랜치 tip은 `f73ebfe`이며 병합은 user 전용 게이트다.
+
 ### 저자 감사 checkpoint — 2026-08-21
 
 Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저자 측 전수 감사를 했다.

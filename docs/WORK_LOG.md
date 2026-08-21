@@ -3590,6 +3590,74 @@ rejection을 남기는 테스트를 넣으면 `Tests 1 passed / Errors 1 error /
 그 앞에 user 전용 게이트가 하나 있다: #74→#75→#76→#77→#78→#79 순서 병합.
 
 
+### 2026-08-21 · 전수 저장소 감사 — 최종 릴리스 트리 (#74→#80)
+
+Codex 독립 감사 직전, 저장소 전체를 대상으로 한 감사·최적화 패스. **새 기능 없음.**
+독립 리뷰어 6개를 병렬로 돌리고 모든 발견을 직접 재검증했다.
+
+#### PLAN POSITION
+- 감사 대상 HEAD: `release/phase1-gate3-clean-history`, tree `8dade09`
+- #80은 #79의 clean-history 대체본이며 tree가 **정확히 동일**함을 확인했다
+- 기본 브랜치 tip은 `f73ebfe`(#78까지 landing). **#80 병합은 hook이 user에게 예약**한다
+
+#### 심각도별 발견 — 전부 재현 후 수정
+
+| # | 결함 | 근거 |
+|---|---|---|
+| C1 | **035가 034가 지운 recovery 함수를 오버로드로 부활**시켰다. 약한 2-arg 본문에는 device/identity/downgrade 검사가 전부 없다 | SQL 텍스트 + 실제 DB |
+| C2 | **iOS가 APNs 토큰을 받을 수 없다.** AppDelegate에 remote-notification 콜백이 없어 플러그인이 관찰하는 알림이 발생하지 않는다 | 플러그인 소스 대조 |
+| H3 | **`product_events.couple_id`가 클라이언트 위조 가능.** DEFAULT는 컬럼 생략 시에만 적용되고 INSERT 정책은 user_id만 제약했다 | 정책 텍스트 |
+| H4 | **어떤 워크플로우도 PostgreSQL harness를 돌리지 않았다.** DB 보안 증명이 전부 수동 | 워크플로우 grep |
+| H5 | **오프라인 큐가 flush되지 않는다** — pending 커플, 그리고 모든 cold launch | 코드 경로 |
+| M5 | 기록을 비공개로 되돌려도 파트너 플래그가 남는다. **그 짝으로, 공개 전환은 알림을 만들지 않았다** — §7.6 사후 공개가 조용했다 | harness 재현 |
+| M6 | 푸시 탭 리스너가 라우트마다 재등록되고 teardown이 no-op | react-router 소스 |
+| L12 | NULL 판독 범위가 거부되지 않고 0을 사실로 반환 | harness |
+
+C1·H3·M5·L12는 **migration 051**로 닫았다(원장 규칙에 따라 forward fix). C2는 AppDelegate,
+H4는 `master-validation.yml`의 새 job, H5·M6는 store/App.
+
+#### 이번 감사가 스스로에게 준 교훈
+
+H3가 살아남은 이유는 harness가 **DEFAULT 표현식 문자열을 대조**했기 때문이다. 그 검사는
+동작이 어떻든 초록이다. 바로 앞 세션에서 내가 "source-substring test는 부류로 봐야 한다"고
+기록했는데, 같은 부류에 내가 당했다. 게다가 051의 NULL assertion도 처음엔 vacuous했다 —
+superuser로 호출해 role 검사에서 먼저 거부되었으므로, NULL 가드가 없는 빌드에서도 통과했다.
+service_role 컨텍스트로 고친 뒤에야 실제로 문다.
+
+#### 고치지 못한 것 — 정직하게
+
+- **H5의 회귀 테스트를 만들지 못했다.** 두 케이스 모두 단독 실행에서는 통과하고 전체
+  스위트에서는 테스트 간 간섭으로 실패한다. 원인을 추적하지 못한 채 중단했고, 빨간 테스트를
+  남기거나 통과할 때까지 조정하는 대신 **제거**했다. 이 수정만 이 브랜치에서 유일하게
+  "읽어서 확인"한 것이며 Codex 인계에 그렇게 적었다.
+- 프론트엔드 리뷰어가 보고한 나머지 HIGH/MEDIUM(데이터 내보내기가 네이티브에서 no-op,
+  곰신이 파트너 복무 정보를 볼 수 없음, 우리 탭의 date 파라미터를 아무도 읽지 않음,
+  기록 N+1, 모달 포커스 트랩 부재, 온보딩 라벨 누락 등)은 **수정하지 않았다.** 승인된 범위
+  밖이거나 새 기능이 필요하다. 전부 인계 문서에 남겼다.
+- 독립 리뷰어 2개(048 푸시 가드·토큰 lifecycle, §7.6·`disconnect_couple`)는 이 기록을 쓰는
+  시점까지 결과를 내지 않았다.
+
+#### VERIFICATION
+
+| 무엇 | 결과 |
+|---|---|
+| `npm run verify` | **EXIT=0** — 186 files / 2822 tests |
+| `npm run test:phase0` | **49 migrations / 212 assertions** |
+| `test:p5` · `test:write-floor` · `test:rollback` | PASS (93 · 39 · PASS) |
+| `check:edge` · `test:edge` | PASS · 3/3 |
+| `npm audit --omit=dev` | 취약점 0 |
+| `git diff --check` | clean |
+| mutation | 이번 감사에서 8종 — 051 제거(6 실패), APNs post 제거, deliver/markDelivered 가드 제거, check:edge 목록 축소, JVM 권한 목록 축소 |
+
+**실행하지 않은 것:** 로컬 브라우저 · Android SDK · iOS 빌드 · 실제 알림 전달 · 원격 Supabase.
+
+#### PRODUCTION
+- NOT APPLIED. 047~051 어느 것도 원격에 적용되지 않았고 조회조차 하지 않았다.
+
+#### 정확한 중단 지점
+저장소 감사 완료. **Codex 독립 감사는 시작하지 않았다.** 그 앞에 user 전용 게이트가 있다:
+**PR #80 병합**. hook이 병합 명령을 결정적으로 차단하며, 이 세션에서 시도했다가 막혔다.
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

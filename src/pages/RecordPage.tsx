@@ -8,7 +8,6 @@ import { scrollBehavior } from '@/lib/motion';
 import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
 import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
-import { RecordEmotionCorrection } from '@/components/RecordEmotionCorrection';
 import { RecordMoodSection } from '@/components/emotion/RecordMoodSection';
 import { candidatesToFlowItems, extractEmotionCandidates } from '@/lib/emotionCandidates';
 import { InferenceMemo } from '@/lib/onDeviceInference';
@@ -1516,14 +1515,14 @@ export function RecordPage() {
               <EmotionFlowInsightCard items={selectedRecord.emotionFlow} variant="detail" />
 
               {/*
-                기록 속 마음 — author-only, and the fast path.
+                기록 속 마음 — author-only, and the only emotion editor on this record.
 
                 The stored feeling arrives already selected, so agreeing with it
-                costs nothing and disagreeing costs one tap. `RecordEmotionCorrection`
-                stays below it: this section answers "which feeling", and that one
-                still answers "which of the machine's guesses do I keep, and what did
-                it read them from" -- a different question, and one that needs the
-                evidence phrases and the remove/restore list to answer.
+                costs nothing and disagreeing costs one tap. A second editor used to
+                sit below this one, justified by showing the evidence phrase behind
+                each machine guess; saved records store no evidence phrase, so it was
+                answering a question it could not answer. Its one unique capability,
+                removing a feeling outright, moved into this section.
               */}
               {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
                 <div className="pt-2 border-t border-border">
@@ -1539,26 +1538,6 @@ export function RecordPage() {
                       });
                       if (!result.ok) toast.error(result.error || '마음을 바꾸지 못했어요.');
                       return result.ok;
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* Author-only: fix a wrong reading after the fact. Before this, a
-                  saved flow was permanent, which is the defect the product owner
-                  named as the app's biggest problem. */}
-              {isOwnRecord(selectedRecord, { userId: profile.id, role: profile.role }) && !isEditing && !showDeleteConfirm && (
-                <div className="pt-2 border-t border-border">
-                  <RecordEmotionCorrection
-                    record={selectedRecord}
-                    disabled={isOffline}
-                    disabledReason={OFFLINE_READONLY_MESSAGE}
-                    onSave={async (emotionFlow) => {
-                      const result = await updateRecord(selectedRecord.id, {
-                        emotionFlow,
-                        emotionUpdatedAt: new Date().toISOString(),
-                      });
-                      return result.ok ? { ok: true } : { ok: false, error: result.error };
                     }}
                   />
                 </div>

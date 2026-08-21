@@ -191,13 +191,32 @@ test('a saved record can have its emotion flow corrected afterwards', async ({ b
   await entry.click();
   await expect(page.locator('[role="dialog"]')).toHaveCount(1);
 
-  // This affordance did not exist: a saved flow was permanent.
-  await page.getByTestId('open-emotion-correction').click();
-  await expect(page.getByTestId('emotion-correction-panel')).toBeVisible();
+  /*
+   * Correcting a saved flow used to mean: find a collapsed button, open a second
+   * editor, step through the six-emotion wheel with ▲▼, then save. That editor is
+   * retired -- it justified itself by showing the evidence phrase behind each
+   * machine guess, and saved records store no evidence phrase. What is left is one
+   * section, already open, where the correction is a single press.
+   */
+  const mood = page.getByTestId('record-mood-section');
+  await expect(mood).toBeVisible();
 
-  await page.getByLabel('행복 대신 더 부정적인 감정으로 바꾸기').click();
-  await expect(page.getByTestId('emotion-chip-list')).toContainText('놀람');
-  await expect(page.getByTestId('save-emotion-correction')).toBeEnabled();
+  // Two feelings, so the sequence row is shown and the picker targets the last.
+  await expect(page.getByTestId('record-mood-sequence')).toBeVisible();
+  await expect(page.getByTestId('record-mood-option-sadness')).toHaveAttribute(
+    'data-selected',
+    'true',
+  );
+
+  // One press replaces it. No confirm step: the record is the author's own.
+  await page.getByTestId('record-mood-option-anger').click();
+  await expect(page.getByTestId('record-mood-option-anger')).toHaveAttribute(
+    'data-selected',
+    'true',
+  );
+
+  // And the capability the retired editor uniquely had came with it.
+  await expect(page.getByTestId('record-mood-remove')).toBeEnabled();
   await context.close();
 });
 

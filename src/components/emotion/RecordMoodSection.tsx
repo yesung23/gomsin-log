@@ -40,6 +40,17 @@ import { EmotionCharacter } from '@/components/emotion/EmotionCharacter';
  * small characters and the picker edits whichever one is chosen -- the last by
  * default, because when a single feeling is wanted from a whole entry, where the
  * day ENDED is the more useful answer than where it started.
+ *
+ * ## Removal
+ *
+ * Removing a feeling outright is the one thing the retired `RecordEmotionCorrection`
+ * could do and this section could not, so it moved here rather than being lost with
+ * it. That editor justified its own existence by showing the evidence phrase behind
+ * each machine guess, but a saved record has no evidence to show -- `flowItemsToCandidates`
+ * stores `evidence: ''` by design -- so the second editor was answering a question it
+ * could not actually answer. Removing the last feeling returns the record to having
+ * none, which re-offers the reading: that is the same state as an entry nobody ever
+ * answered, and it should look like one.
  */
 
 export interface RecordMoodSectionProps {
@@ -121,6 +132,29 @@ export function RecordMoodSection({
     // On failure the pending choice is dropped, so the row falls back to what is
     // actually stored rather than showing a change that did not survive.
     if (!ok) setPending(null);
+  };
+
+  const removeTarget = async () => {
+    if (disabled || !target) return;
+
+    /*
+      Sequences are renumbered to stay contiguous. `sequence` is what orders the
+      flow and what `choose` matches on, so leaving a hole (1, 3) would make the
+      next correction target the wrong item. Only confirmed items are renumbered;
+      anything unconfirmed is not part of the answered flow and is dropped with it
+      rather than being promoted into one by a removal.
+    */
+    const next = items
+      .filter((item) => item.source === 'user_confirmed' && item.sequence !== target.sequence)
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((item, index) => ({ ...item, sequence: index + 1 }));
+
+    // Cleared before the write, not after: the removed item is already gone from
+    // the row being pointed at, so holding a selection for it would highlight a
+    // feeling that is no longer there.
+    setEditingSequence(null);
+    setPending(null);
+    await onChange(next);
   };
 
   return (
@@ -277,6 +311,26 @@ export function RecordMoodSection({
           );
         })}
       </ul>
+
+      {/*
+        Removal is deliberately the quietest control here. Correcting a feeling is
+        the common act and costs one tap; deciding the entry carries no feeling at
+        all is rare, and a destructive control drawn at the same weight as the six
+        characters would invite the wrong one.
+      */}
+      {ordered.length > 0 && target && (
+        <button
+          type="button"
+          disabled={disabled}
+          data-testid="record-mood-remove"
+          onClick={() => void removeTarget()}
+          title={disabled ? disabledReason : undefined}
+          aria-label={`${BASIC_EMOTION_LABEL[basicEmotionOf(target)]} 지우기`}
+          className="press-response-row min-h-11 w-full rounded-control text-caption text-muted-foreground disabled:opacity-50"
+        >
+          {ordered.length > 1 ? '고른 마음 지우기' : '이 기록에 마음 없음으로 두기'}
+        </button>
+      )}
 
       {disabled && disabledReason && (
         <p className="text-caption text-muted-foreground">{disabledReason}</p>

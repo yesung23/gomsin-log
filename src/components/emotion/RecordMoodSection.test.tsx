@@ -296,3 +296,117 @@ function readSource(): string {
     'utf8',
   );
 }
+
+/**
+ * Removal — the one capability inherited from the retired `RecordEmotionCorrection`.
+ *
+ * It has to be here because it exists nowhere else now. The resequencing assertion
+ * is the one that actually protects something: `choose` matches items by `sequence`,
+ * so a removal that leaves a hole (1, 3) makes the NEXT correction edit the wrong
+ * feeling -- a silent wrong write, not a visible bug.
+ */
+describe('removing a feeling', () => {
+  it('drops the targeted feeling and renumbers the rest contiguously', async () => {
+    const onChange = vi.fn(() => true);
+    render(
+      <RecordMoodSection
+        items={[
+          item({ id: 'a', sequence: 1, basic: 'anger', group: 'anger' }),
+          item({ id: 'b', sequence: 2, basic: 'happiness' }),
+          item({ id: 'c', sequence: 3, basic: 'sadness', group: 'sadness' }),
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    // The picker targets the last item by default, so that is what is removed.
+    fireEvent.click(screen.getByTestId('record-mood-remove'));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ id: 'a', sequence: 1 }),
+      expect.objectContaining({ id: 'b', sequence: 2 }),
+    ]);
+  });
+
+  it('removes the feeling the sequence row points at, not always the last', async () => {
+    const onChange = vi.fn(() => true);
+    render(
+      <RecordMoodSection
+        items={[
+          item({ id: 'a', sequence: 1, basic: 'anger', group: 'anger' }),
+          item({ id: 'b', sequence: 2, basic: 'sadness', group: 'sadness' }),
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('1번째 마음 분노 고르기'));
+    fireEvent.click(screen.getByTestId('record-mood-remove'));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ id: 'b', sequence: 1 }),
+    ]);
+  });
+
+  it('lets the last feeling go, leaving the record with none', async () => {
+    const onChange = vi.fn(() => true);
+    render(
+      <RecordMoodSection items={[item({ id: 'only', sequence: 1 })]} onChange={onChange} />,
+    );
+
+    // Worded as a state the entry is left in, not as a deletion, because that is
+    // what it is: an entry carrying no feeling is a normal outcome.
+    fireEvent.click(screen.getByText('이 기록에 마음 없음으로 두기'));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange.mock.calls[0][0]).toEqual([]);
+  });
+
+  it('drops unconfirmed guesses with the removal instead of promoting them', async () => {
+    // A `rule_suggested` item is not part of the answered flow. Renumbering it into
+    // the survivors would turn a machine guess into a stored answer, which §6.2
+    // forbids and which no press ever authorised.
+    const onChange = vi.fn(() => true);
+    render(
+      <RecordMoodSection
+        items={[
+          item({ id: 'kept', sequence: 1, basic: 'anger', group: 'anger' }),
+          item({ id: 'guess', sequence: 2, basic: 'fear', group: 'fear', source: 'rule_suggested' }),
+          item({ id: 'gone', sequence: 3, basic: 'sadness', group: 'sadness' }),
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('record-mood-remove'));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ id: 'kept', sequence: 1 }),
+    ]);
+  });
+
+  it('offers nothing to remove when there is no confirmed feeling', () => {
+    render(<RecordMoodSection items={[]} onChange={() => true} />);
+    expect(screen.queryByTestId('record-mood-remove')).toBeNull();
+  });
+
+  it('cannot remove while the record is read-only', () => {
+    const onChange = vi.fn(() => true);
+    render(
+      <RecordMoodSection
+        items={[item({ sequence: 1 })]}
+        onChange={onChange}
+        disabled
+        disabledReason="오프라인이에요."
+      />,
+    );
+
+    const remove = screen.getByTestId('record-mood-remove');
+    expect(remove).toBeDisabled();
+    fireEvent.click(remove);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

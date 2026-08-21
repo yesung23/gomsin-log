@@ -162,6 +162,19 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 > 먼저 오고 구현(#79)이 나중이므로, 두 계보가 합쳐지는 지점에서 이 문장이 낡는다.
 > 저자 감사에서 발견해 정정했다.
 
+### 저자 감사 checkpoint — 2026-08-21
+
+Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저자 측 전수 감사를 했다.
+결합은 이 브랜치(`audit/combined-scratch`)에서 PR 병합 없이 cherry-pick으로 구성했다.
+
+| 항목 | 결과 |
+|---|---|
+| **001→047→048→049→050 결합 체인** | **PASS** — 48개 migration, 205 assertions. 이 조합은 그전까지 한 번도 실행되지 않았다 |
+| 발견·수정한 결함 | 10건. 상세는 `WORK_LOG.md` 2026-08-21 감사 항목 |
+| 그중 숫자를 틀리게 만든 것 | 1건 — §19 kill metric이 권한 거부를 opt-out으로 셌다 |
+| unhandled rejection / Errors | **0건** |
+| 결합 전용 산출물 | harness의 047 ORDER + 8개 assertion, 원장 047 행, #75 낡은 주장 정정 — **landing 후 적용** |
+
 ### LV 진입 조건 대비 현황 — 2026-08-21
 
 `ENGINEERING_ROADMAP` §LV의 조건별로, **active branch 기준**이다. master는 아직 `21e7dfb`다.

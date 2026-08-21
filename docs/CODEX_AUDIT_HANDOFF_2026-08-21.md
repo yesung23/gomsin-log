@@ -18,10 +18,14 @@
 | 3 | #76 | `claude/047-cycle-pain-gated` | `d0e2c0a` | 14/14 |
 | 4 | #77 | `claude/phase0-defect-closure` | `e1ea756` | 14/14 |
 | 5 | #78 | `claude/phase1-call-mode-v2` | `ab01035` | 14/14 |
-| 6 | #79 | `claude/phase1-gate3-push` | **`cf80099`** | 14/14 |
+| 6 | #79 | `claude/phase1-gate3-push` | **`c40d69d`** | `a9f7dc0`에서 14/14, 이 HEAD는 진행 중 |
 
 각 PR은 앞선 것을 **포함**한다(#75·#76은 #74를, #77은 #74를, #78은 #77을, #79는 #78을).
 순서대로 landing하면 뒤의 것은 자기 커밋만 남기고 줄어든다.
+
+**결합 트리는 `audit/combined-scratch`(`d5471f3`)에 있다.** #79에 #75·#76을 cherry-pick한
+것으로, landing 대상이 아니라 **검증 대상**이다. 병합 없이 최종 트리를 실행해 보기 위해
+만들었고, 아래 §3의 결합 체인 결과는 거기서 나왔다. landing 후 이 브랜치는 버린다.
 
 **PR 병합은 user 전용이다.** `.claude/hooks/block-dangerous-bash.sh`가 해당 명령들을 결정적으로
 차단한다. 감사자도 병합하지 않는다.
@@ -58,8 +62,10 @@
 
 | 무엇 | 결과 |
 |---|---|
-| `npm run verify` | **PASS (EXIT=0)** — 184 files / 2784 tests |
-| `npm run test:phase0` | **197 assertions** (048이 37개, 049가 19개, 050이 16개) |
+| `npm run verify` (#79) | **PASS (EXIT=0)** — 185 files / 2796 tests, unhandled rejection 0 |
+| `npm run verify` (결합) | **PASS (EXIT=0)** — 185 files / 2808 tests |
+| `npm run test:phase0` (#79) | **47 migrations / 197 assertions** (048이 37개, 049가 19개, 050이 16개) |
+| `npm run test:phase0` (결합) | **48 migrations / 205 assertions** — 047 포함 fresh chain, 첫 실행 |
 | `npm run test:p5` | PASS (93) |
 | `npm run test:write-floor` | PASS (39) |
 | `npm run test:rollback` | PASS |
@@ -93,8 +99,19 @@
 
 **원격 Supabase는 조회조차 하지 않았다.** 원장은 `supabase/migrations/README.md`가 소유한다.
 
-⚠️ **047과 048~050을 합친 fresh chain은 한 번도 실행되지 않았다.** 047은 PR #76에, 048~050은
-PR #79에 있고 두 계보가 아직 만나지 않았다. 겹치는 객체는 없지만 결합 체인 실행은 남은 검증이다.
+~~⚠️ 047과 048~050을 합친 fresh chain은 한 번도 실행되지 않았다~~ → **2026-08-21 저자 감사에서
+실행했고 통과했다.** `audit/combined-scratch`에서 001→…→047→048→049→050 48개가 빈
+PostgreSQL 17.10에 순서대로 적용되고 205 assertions 통과. 겹치는 객체는 없었다.
+
+그 실행에서 landing 시 재현될 충돌 세 가지가 드러났다. 원장과 harness ORDER 모두 047이
+048 앞에 와야 하고(번호 순서가 유일한 정답), `CURRENT_STATE.md`는 #75의 수렴 checkpoint와
+#79의 LV 조건표가 **둘 다 남아야 한다**(서로 다른 것을 서술하며 둘 다 참이다).
+
+또한 047의 CHECK를 실제 DB에 대고 확인한 적이 없다는 것도 그때 드러났다. "적용된다"와
+"승인된 종류를 받고 등급화된 종류를 거부한다"는 다른 주장이다. 8개 assertion을 추가했고,
+그중 둘은 DB만 답할 수 있는 것이다 — 소유자가 승인된 종류를 보낼 수 있는가, 등급화된
+통증 종류를 **클라이언트가 아니라 서버가** 거부하는가. 이 assertion들은 047이 있는
+결합 트리에서만 의미가 있으므로 scratch에 있고, landing 후 적용된다.
 
 ---
 
@@ -113,6 +130,40 @@ PR #79에 있고 두 계보가 아직 만나지 않았다. 겹치는 객체는 �
 - **§14.5 문장 대조** — 검증 빌드의 보안 표현을 LV 행과 맞춰본 적이 없다
 
 ---
+
+## 5-1. 저자 감사에서 스스로 찾아 고친 것 (2026-08-21)
+
+감사자가 "이건 이미 봤나"를 묻지 않아도 되도록 남긴다. 아래 아홉 가지는 **감사자가 아니라
+저자가** 찾았고 이미 고쳐져 있다. 같은 자리를 다시 파는 것은 감사자의 자유지만, 적어도
+새로 발견되기를 기대하고 있던 것은 아니다.
+
+| # | 무엇 | 어디 |
+|---|---|---|
+| 1 | 047의 DB 계약이 검증된 적 없었다 | harness (결합 전용) |
+| 2 | push 등록 promise가 리스너 2개와 타이머를 버렸다 | `pushNotifications.ts` |
+| 3 | `listenForPushTaps`에 **호출자가 없었다** — 알림을 눌러도 아무 일도 안 났다 | `App.tsx` |
+| 4 | §7.6이 연결 여부를 안 물었다 — 끊긴 뒤에도 공개를 제안할 수 있었다 | `waitingPeriodReveal.ts` |
+| 5 | 050 주석이 코드가 안 하는 보장을 한다고 적혀 있었다 | `050`, 원장 |
+| 6 | ContactHours의 오프라인 가드가 `disabled`뿐이었다 | `ContactHoursSection.tsx` |
+| 7 | 같은 곳의 재진입 가드도 `disabled`뿐이었다 | 〃 |
+| 8 | `authSyncCode`가 죽은 상태로 남아 있었다 | `store.tsx` |
+| 9 | 문서 두 곳이 HEAD와 어긋나 있었다 | 이 문서, `CURRENT_STATE.md` |
+| 10 | **§19 kill metric이 권한 거부를 opt-out으로 셌다** | `NotificationPreferencesSection.tsx` |
+
+6과 7은 이 브랜치 앞부분에서 **똑같은 모양의 mutation이 살아남은 적이 있는데도** 남아
+있던 것이다. `disabled`는 다음 렌더에 적용되므로 핸들러 안의 가드가 실제로 버티는 것이다.
+
+10은 이 중 유일하게 **숫자를 틀리게 만드는** 결함이었다. emit이 preference를 쓰는 함수 안에
+있었고 그 함수에는 호출자가 둘이다. 권한 요청이 denied로 돌아오면 `systemEnabled: false`를
+쓰는데, OS 설정에서 나중에 취소된 grant의 `true`가 저장돼 있었다면 그것이 OFF 전이다.
+**"허용"을 누른 사람이 opt-out한 사람으로 기록됐다** — 설계 실패를 뜻하는 지표가, 사용자가
+알림을 더 원한 순간에 올라간 것이다.
+
+> **감사자가 알아야 할 부류 하나.** 이 규칙은 테스트가 있었지만 **소스 문자열 대조**였다.
+> 그런 검사는 코드가 그 표현을 *포함하기만* 하면 통과하므로 결함이 존재한 내내 초록이었고,
+> 버그가 아니라 **수정에서** 깨졌다. 테스트가 실패하는 방향이 거꾸로다.
+> `src/lib/productEvents.test.ts`에는 같은 모양이 더 있다. 지금 전부 통과하므로 감사 규칙에
+> 따라 건드리지 않았지만, **인스턴스가 아니라 부류**로 봐야 한다.
 
 ## 6. 독립 리뷰를 받은 적 없는 것
 
@@ -136,8 +187,6 @@ PR #79에 있고 두 계보가 아직 만나지 않았다. 겹치는 객체는 �
   측정 목록에 있으나 emit 지점이 없다
 - **빈 홈 화면의 약 390px 공백** — 위젯이 적어 생기는 구조적 희소함. 내용을 만들어 채우는 것은
   2026-08-20에 되돌린 방향이라 하지 않았다. 디자인 결정이 필요하다
-- **`authSyncCode`** — store에 설정되지만 이제 아무도 읽지 않는다. store 인터페이스 변경이라
-  Phase 0 범위 밖으로 남겼다
 - **Android 권한 이중 선언** — TypeScript와 JVM 두 곳에서 같은 집합을 검사한다. 이 세션에서
   반대 방향으로 두 번 드리프트했으므로 **중복 자체가 결함**이지만, 통합은 별도 작업이다
 
@@ -148,5 +197,22 @@ PR #79에 있고 두 계보가 아직 만나지 않았다. 겹치는 객체는 �
 1. `docs/CURRENT_STATE.md`의 2026-08-21 항목들과 LV 진입 조건 대비표
 2. `supabase/migrations/README.md`의 047~050 행
 3. `docs/WORK_LOG.md`의 2026-08-21 항목 네 개
-4. 그다음 `scripts/phase0/storage-authz-harness.mjs`를 직접 실행 — 197개 assertion이
-   실제 PostgreSQL에서 무엇을 증명하는지 보는 것이 이 브랜치를 가장 빨리 이해하는 길이다
+4. 그다음 `scripts/phase0/storage-authz-harness.mjs`를 직접 실행 — assertion들이 실제
+   PostgreSQL에서 무엇을 증명하는지 보는 것이 이 브랜치를 가장 빨리 이해하는 길이다.
+   #79에서는 197개, `audit/combined-scratch`에서는 047을 포함해 205개다
+
+### 저자가 감사자에게 특히 권하는 다섯 곳
+
+저자 감사가 이미 훑은 곳이 아니라, **저자가 자기 눈을 못 믿는 곳**이다.
+
+1. **`048`의 `raise_partner_unseen()`** — `is_private` 가드가 전부다. 이 한 줄이 틀리면
+   비공개 기록이 알림을 만든다. trigger가 붙은 테이블 전부에서 이 가드가 유효한가
+2. **`disconnect_couple` 재작성** — p5·write-floor·rollback harness가 통과하지만
+   그것은 crypto pairing이 안 깨졌다는 증거이지 재작성이 옳다는 증거가 아니다
+3. **`050`이 개인을 식별할 수 없다는 주장** — 5커플 코호트에서 `COUNT(DISTINCT couple_id)`
+   조합으로 개인이 복원되는 경로가 정말 없는가. 저자는 없다고 판단했고, 그 판단은
+   리뷰되지 않았다
+4. **§7.6 부분 실패 경로** — 5개 중 2개가 실패하면 3개는 이미 공개된 상태다. 그 사실을
+   사용자에게 전하는 문구가 실제 상태와 어긋나는 경우가 있는가
+5. **push 토큰 기기 이양** — 같은 토큰이 다른 계정에 재발급될 때 `DELETE … WHERE token`이
+   먼저 도는 것에 의존한다. 동시성 하에서 그 순서가 깨지는 경로

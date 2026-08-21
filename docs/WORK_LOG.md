@@ -114,6 +114,134 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-21 · LV · PR #80 마지막 pre-merge blocker 3건 — 전부 재현 후 최소 수정
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비
+- Workstream: Gate 3 (push) + 축적 표면
+- Step: #80 병합 전 blocker 소진
+- Previous Gate: 4차 전수 감사 (같은 날, 위 항목들)
+- This Gate: 지정된 blocker 3건만 — 재현된 것만 수정
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` §4.2/§10(정확한 날짜), 통화 모드 절
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE (저수준 결함 수정)
+- Engineering source checked: `supabase/migrations/README.md`(적용 원장), `AGENTS.md`
+- Current-state checked: `CURRENT_STATE.md` — "고치지 않은 것"에 이번 레이스가 그대로 있었다
+- Latest relevant Work Log checked: 같은 날 4차 감사 항목
+- Does this task conflict with canonical direction? **YES (1건, 폐기함)**
+- If YES, what conflict: Fable 감사 §4 결함 2가 "이야기거리 0개에도 통화 모드 고정
+  진입점"을 제안하나, `PRODUCT_V3.md`는 **"남은 항목이 0이면 진입점을 숨긴다"**고 명시.
+  canonical이 이기므로 **구현하지 않았다.**
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: Opus 5
+- Role: write-capable Worker
+- PR: #80 (OPEN, MERGEABLE, 병합하지 않음)
+- Branch: `release/phase1-gate3-clean-history`
+- Base SHA: master `f73ebfe`
+- Old HEAD: `a0dcc29` (live 재확인 — remote ref와 일치)
+- New/Reviewed HEAD: 아래 commit
+
+#### CHANGED / REVIEWED
+
+**1. `054` repair가 자기 트리거에 무효화되고 있었다 (재현됨).**
+파일은 트리거를 먼저 설치하고 그 아래에서 이미 왜곡된 행을 UPDATE로 고치려 했다.
+repair 대상은 전부 `is_private = FALSE`이고 그대로 유지되므로, 그 UPDATE는 트리거의
+무전이 분기 `NEW.shared_at := OLD.shared_at` — **054가 추가한 바로 그 분기** — 로 들어가
+지우려던 위조값을 되돌려놓았다. 두 문장 다 실행되고 행 수도 보고했으나 아무것도 바뀌지
+않았다. fresh chain 테스트가 이걸 못 잡은 이유가 핵심이다: **빈 클러스터에는 고칠 행이
+없어서 repair가 영원히 아무것도 보고하지 않는다.** 끝 상태만 증명하는 테스트의 사각지대.
+측정: 001→053 적용 → 소유자가 RLS를 통과해 `now() + 100 years`로 위조 → 054 적용 →
+**두 행 모두 2126년 그대로.** 수정은 repair를 트리거가 붙지 않은 구간(DROP 이후 CREATE
+이전)에서 실행하는 것. DROP이 ACCESS EXCLUSIVE를 잡고 전체가 한 트랜잭션이라 클라이언트가
+쓸 수 있는 틈은 없다. **어디에도 적용되지 않은 파일이라 새 번호 대신 054를 직접 고쳤다.**
+
+**2. `055` — push 배달-표시 레이스. 누락이 아니라 소실이었다 (재현됨).**
+`mark_push_delivered()`가 `notified_through`를 자기 시계로 찍었는데, 발송 결정은 그보다
+앞선 `push_delivery_candidates()`에서 났다. 그 사이에 공유된 기록은 **자기를 담을 수
+없었던 알림이 그은 경계 뒤로** 넘어갔다. 결정적 재현(sleep·스레드 없음): R1 공유 →
+후보 선정(23:48:00.566) → R2 공유(23:48:00.588) → mark(23:48:00.610) →
+**`has_unseen = f`, `partner_has_pending_act = f`.** R2는 지연된 게 아니라 **사라졌다** —
+플래그가 내려가 다시 선정되지 않고, 스탬프가 경계 뒤라 영원히 세어지지 않는다.
+`CURRENT_STATE`가 이걸 "누락이지 거짓 알림이 아니"라고 적어둔 것은 **절반만 맞았다**:
+누락이 맞지만 일시적 누락이 아니라 영구 소실이다. 수정: 경계를 결정 시각으로 긋고
+(`push_delivery_candidates`가 `decided_at`을 반환 — 발송자는 **자기가 물어본 시각** 하나만
+더 알게 된다), `GREATEST`로 뒤로는 못 가게 하고(그 사이 앱을 연 사람의 자기 경계가 우선),
+`has_unseen`은 FALSE로 대입하지 않고 053의 `partner_has_pending_act()`로 **재계산**한다.
+`p_decided_at`에 **DEFAULT를 두지 않은 것이 핵심** — `p_now DEFAULT now()`가 이 버그를
+조용하게 만든 장본인이므로, 잊은 호출자는 첫 실행에서 즉시 실패해야 한다.
+
+**3. `우리` 날짜 셀 → 정확한 날짜 (Fable 주장, 코드로 재현됨 — 사실이었다).**
+`UsPage.tsx:105`가 `/record?date=…`로 이동하는데 `RecordPage`는 `date`를 **어디서도 읽지
+않았다** — 읽는 파라미터는 `trip`·`from`·`to`·`compose`·`record` 5개뿐이고, 날짜는
+`useState(tripPeriod?.from || todayStr)`로 초기화됐다. 즉 격자에서 고른 과거 날짜는 항상
+'오늘'을 열었다. 양쪽이 개별적으로는 옳아서(우리는 계약대로 URL을 만들고, 기록은 자기
+선택일을 충실히 렌더) 아무 테스트도 그 사이를 건너지 않았다. 수정은 `?date=`를 읽되
+trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는 어긋난다 — 정규식만으로는
+`2026-13-99`가 통과한다). trip period는 여전히 우선한다.
+
+- file: `supabase/migrations/054_shared_at_is_server_state.sql` (repair 순서),
+  `supabase/migrations/055_notified_through_is_the_send_decision.sql` (신규),
+  `supabase/functions/send-push/handler.ts` · `index.ts` (`decided_at` 전달),
+  `src/pages/RecordPage.tsx` · `src/lib/trips.ts` (`?date=`),
+  `scripts/phase0/storage-authz-harness.mjs` (055 22개 + 054 업그레이드 경로 7개),
+  `src/lib/sendPushHandler.test.ts` (+5), `src/pages/recordOpensRequestedDate.test.tsx` (신규 5),
+  `src/lib/gatePathCoverage.test.ts` (`isCalendarDate` exemption),
+  `supabase/migrations/README.md` · `docs/CURRENT_STATE.md`
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 053의 제품 의미(공유=스탬프, 철회=삭제, 편집=무변) 그대로.
+  하루 1회 상한·연락 가능 시간은 `push_delivery_candidates`에 그대로 두었다
+- product semantics: 통화 모드 진입점 규칙 **변경 없음**(canonical 유지). 이벤트 이력
+  테이블·pending count·debt UI·읽음 표시·파트너 가시 관찰 상태 전부 추가하지 않았다
+- Production: **NOT APPLIED.** 원격 Supabase에 어떤 문장도 실행하지 않았다
+
+#### VERIFICATION
+- command: `npm run verify` / phase0 / p5 / write-floor / rollback / check:edge /
+  test:edge / `npm audit --omit=dev` / `git diff --check`
+- PASS / FAIL / UNVERIFIED: **전부 PASS.** verify EXIT=0 · 189 files · 2847 tests ·
+  phase0 **272 assertions / 53 migrations** (+ 업그레이드 경로 전용 DB) · p5 93 ·
+  write-floor 39 · rollback PASS · edge 3/3 · 취약점 0 · whitespace 오류 0
+- what it actually proves: 세 결함 모두 **수정 전 재현**하고 **수정 후 통과**했으며,
+  mutation 7건(054 원래 순서 → 3 FAIL / 055 재계산 제거 → 3 FAIL / 055 `GREATEST` 제거 →
+  2 FAIL / `?date=` 검증 가드 제거 → 1 FAIL)이 전부 잡혔다. harness에는 **영구 negative
+  proof**가 들어 있다 — mark 시각으로 경계를 그으면 여전히 행위가 소실된다는 것을 매번
+  재확인하므로, 통과 assertion이 동어반복이 아님이 계속 증명된다.
+  **증명하지 못하는 것:** 실제 APNs/FCM 전달, 실기기 동작 — 자격증명·기기 외부 게이트.
+  Deno 런타임 실행은 `test:edge`가 delete-account entrypoint만 덮는다.
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: **DELTA.** 054를 고쳤고 055가 새로 생겼으므로, 054에 대한 이전
+  independent review는 **stale**이다. 055는 아직 독립 리뷰를 받지 않았다
+
+#### BLOCKERS
+- code: 없음
+- environment: 없음
+- external/manual: APNs/FCM 자격증명, `aps-environment` entitlement, 실기기 2대, Xcode
+
+#### STOPPED AT
+- exact completed boundary: 세 blocker 수정 + 회귀 테스트 + mutation 증명 + 문서 갱신
+  까지. **PR #80은 병합하지 않았다** (user 전용 게이트)
+
+#### REMAINING
+- not completed: 055에 대한 독립 security review, 054 재리뷰
+
+#### NEXT ACTION
+- next owner: user (병합 판단) 또는 독립 reviewer
+- tool/model: —
+- 기준 SHA: 아래 새 HEAD
+- exact next task: 054 delta + 055 독립 리뷰 → 그 뒤 #80 병합 판단
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 055가 독립 리뷰를 통과할 것. 원격 적용은 001→055 전체를
+  스테이징에 먼저 적용해 검증할 것
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: **NOT APPLIED** (047~055 전부 원격 미적용)
+
 ### 2026-08-21 · LV · migration 047 delta re-review — APPROVED WITH NOTES (독립 READ-ONLY)
 
 > reviewer가 남긴 READY-TO-COPY 판정의 반영이다. 대상: `claude/047-cycle-pain-gated`

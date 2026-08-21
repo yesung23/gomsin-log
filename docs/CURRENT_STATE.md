@@ -166,14 +166,32 @@ PostgreSQL 17.10에 전체 체인을 적용하고 RLS 실행 주체로 함수를
 | HIGH | 1건 — **`daily_records.shared_at`이 클라이언트 위조 가능**했고, 그것으로 053의 취소를 무력화해 행위 없는 알림을 남길 수 있었다. → `054` |
 | MEDIUM | 2건 — 파트너 기록이 quarantine된 상태에서 초대를 내려 053의 경계를 영구히 밀어버림(`store.tsx`); §19 계측 배선 게이트가 주석 처리된 호출을 호출로 셈(`productEvents.test.ts`) |
 | LOW | 1건 — `App.entitlements`에 `aps-environment` 항목이 둘이고 하나가 Gate 3 이전의 거짓 진술 |
-| 새 migration | **054** (운영 미적용) |
+| 새 migration | **054**, 그리고 후속으로 **055** (둘 다 운영 미적용) |
 | 닫힌 미검증 | **오프라인 큐 flush** — outbox fixture를 만들어 배달 시도를 관측한다. mutation 4건 전부 잡힘 |
 | 행위로 재확인 | 051 §1·§2·§5, `disconnect_couple` 전체 효과와 인가, 텔레메트리 판독 권한, 카탈로그 전수 |
 | 검증 | verify EXIT=0 / **188 files · 2837 tests** · **52 migrations / 243 assertions** · p5 93 · write-floor 39 · rollback PASS · edge PASS·3/3 · 취약점 0 |
 | mutation | **11건** 전부 실패 확인 |
-| 고치지 않은 것 | `send-push`의 배달-표시 레이스(누락이지 거짓 알림이 아니며, 자격증명 부재로 현재 도달 불가) |
+| 고치지 않은 것 | (없음 — 아래 2026-08-21 후속 참조) |
 
 **#80은 여전히 병합되지 않았다. 병합은 user 전용 게이트다.**
+
+### 2026-08-21 후속 — 위 감사가 남긴 두 항목을 실제로 닫았다
+
+위 표의 "고치지 않은 것"과, 054가 스스로 실행하지 못하던 repair를 각각 재현하고 고쳤다.
+Fable 전략 감사가 지적한 `우리` 날짜 셀 결함도 코드로 재현해 함께 닫았다.
+
+| 항목 | BEFORE (측정값) | 수정 | mutation |
+|---|---|---|---|
+| **054 repair가 무효였다** | 001→053 적용 후 소유자가 RLS로 `shared_at`을 위조하고 054를 적용해도 **두 행 모두 2126년 그대로**. 트리거를 먼저 설치한 탓에 repair UPDATE가 무전이 분기(`NEW.shared_at := OLD.shared_at`)로 들어가 자기가 지우려던 값을 되돌려놓았다 | 054 직접 수정(어디에도 미적용). repair를 트리거가 붙지 않은 구간에서 실행 | 원본 순서로 되돌리면 3개 assertion FAIL |
+| **push 배달-표시 레이스 — 누락이 아니라 소실이었다** | 후보 선정(23:48:00.566) → R2 공유(23:48:00.588) → mark(23:48:00.610) 후 **`has_unseen = f`, `partner_has_pending_act = f`.** R2는 지연이 아니라 **영구 소실** — 플래그가 내려가 다시 선정되지 않고 스탬프가 경계 뒤라 영원히 세어지지 않는다 | `055`. 경계를 **발송 결정 시각**으로 긋고(`push_delivery_candidates`가 `decided_at` 반환), `has_unseen`은 053의 `partner_has_pending_act()`로 **재계산**. `p_decided_at`에 DEFAULT 없음 | 재계산 제거 → 3 FAIL / `GREATEST` 제거 → 2 FAIL |
+| **`우리` 날짜 셀이 항상 오늘을 열었다** | `UsPage`는 `/record?date=…`로 이동하는데 `RecordPage`가 `date`를 **어디서도 읽지 않았다**(읽는 것은 `trip`·`from`·`to`·`compose`·`record` 5개). §4.2/§10 "정확한 날짜, 근사치 금지" 위반 | `RecordPage`가 `?date=`를 읽는다. `isCalendarDate`로 검증(trip 범위와 같은 규칙), trip period가 여전히 우선 | 검증 가드 제거 → 1 FAIL |
+
+**하지 않은 것 — canonical과 충돌하는 Fable 제안.** Fable 감사 §4 결함 2는 "이야기거리 0개일
+때도 통화 모드 고정 진입점을 두라"고 제안한다. `PRODUCT_V3.md` 통화 모드 절은
+**"남은 항목이 0이면 진입점을 숨긴다"**고 명시한다. canonical이 이긴다 — 구현하지 않았다.
+
+| 검증 | verify EXIT=0 / **189 files · 2847 tests** · **53 migrations / 272 assertions**(+ 업그레이드 경로 별도 DB) · p5 93 · write-floor 39 · rollback PASS · edge PASS·3/3 · 취약점 0 |
+|---|---|
 
 ### 저자 감사 checkpoint — 2026-08-21
 
@@ -245,7 +263,8 @@ Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저�
 | 051 | audit closure (recovery 오버로드 제거 · `couple_id` 위조 차단 · 회수/공유 전환 플래그 · NULL 판독 범위) | active branch only. Production NOT APPLIED |
 | 052 | 공유 기록 삭제·계정 탈퇴 시 플래그 하강 | active branch only. Production NOT APPLIED |
 | 053 | 알림 플래그가 "pending act"를 뜻하게 함 (`notified_through` + `shared_at`) | active branch only. Production NOT APPLIED |
-| 054 | `shared_at`을 서버 전용 상태로 만든다 — 053이 남긴 클라이언트 쓰기 경로를 닫는다 | active branch only. fresh chain 001→054(52개)에서 243 assertions, mutation 3건 확인. Production NOT APPLIED |
+| 054 | `shared_at`을 서버 전용 상태로 만든다 — 053이 남긴 클라이언트 쓰기 경로를 닫는다 | active branch only. fresh chain 001→055(53개)에서 272 assertions, mutation 4건 확인. **2026-08-21 정정: repair 문장이 무효였고 파일을 직접 고쳤다**(미적용 파일). Production NOT APPLIED |
+| 055 | 알림 경계(`notified_through`)를 **발송 결정 시각**으로 긋는다 — 결정과 표시 사이에 공유된 행위가 소실되던 레이스를 닫는다 | active branch only. fresh chain 001→055에서 055가 22 assertions(A·B·C·D·E 전 시나리오 + 영구 negative proof), mutation 2건 확인. Production NOT APPLIED |
 
 No remote Supabase mutation was performed by this documentation task.
 

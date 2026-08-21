@@ -36,6 +36,7 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     validateTripDraft: 'Pure utility: validates draft fields locally',
     validateTripRangeAgainstItems: 'Pure utility: validates date range locally',
     validateTripItemUrl: 'Pure utility: validates URL format locally',
+    isCalendarDate: 'Pure utility: validates a YYYY-MM-DD string locally, no I/O',
     inclusiveTripDates: 'Pure utility: generates date range array',
     recordsInInclusiveRange: 'Pure utility: filters records in memory',
     parseTripPeriodParams: 'Pure utility: parses URL search params',

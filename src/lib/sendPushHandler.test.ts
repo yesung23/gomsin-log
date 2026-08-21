@@ -16,8 +16,13 @@ import {
  * a test whose failure means the product rule broke, not that a detail changed.
  */
 
+/** The instant `push_delivery_candidates()` chose the batch. See migration 055. */
+const DECIDED_AT = '2026-08-21T12:00:00.000Z';
+
 function candidate(over: Partial<PushCandidate> = {}): PushCandidate {
-  return { user_id: 'user-a', platform: 'ios', token: 'token-a', ...over };
+  return {
+    user_id: 'user-a', platform: 'ios', token: 'token-a', decided_at: DECIDED_AT, ...over,
+  };
 }
 
 function deps(over: Partial<SendPushDeps> = {}): SendPushDeps {
@@ -203,7 +208,7 @@ describe('one recipient failing does not silence the rest of the batch', () => {
       markDelivered,
     }));
 
-    expect(markDelivered).toHaveBeenCalledWith('second');
+    expect(markDelivered).toHaveBeenCalledWith('second', DECIDED_AT);
     expect(markDelivered).toHaveBeenCalledTimes(1);
     expect(result.body).toMatchObject({ considered: 2, delivered: 1, failed: 1 });
   });
@@ -239,7 +244,7 @@ describe('one recipient failing does not silence the rest of the batch', () => {
       markDelivered,
     }));
 
-    expect(markDelivered).toHaveBeenCalledWith('second');
+    expect(markDelivered).toHaveBeenCalledWith('second', DECIDED_AT);
     expect(result.body).toMatchObject({ considered: 2, delivered: 1, tokensDropped: 0 });
   });
 
@@ -247,6 +252,90 @@ describe('one recipient failing does not silence the rest of the batch', () => {
     const markDelivered = vi.fn(async () => {});
     await handleSendPush(deps({
       deliver: async () => { throw new Error('ECONNRESET'); },
+      markDelivered,
+    }));
+
+    expect(markDelivered).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The boundary is drawn where the send was DECIDED.
+ *
+ * Migration 055 has the reproduction: an act shared between
+ * `push_delivery_candidates()` and `mark_push_delivered()` used to fall behind a
+ * boundary stamped at mark time -- a notification that could not have contained
+ * it, silently marking it delivered. The flag went down and the stamp went back,
+ * so the act was not delayed, it was erased.
+ *
+ * The database half of the fix is proven in the phase 0 harness against a real
+ * PostgreSQL cluster, where the timestamps are real. What the handler owes is
+ * narrower and is what these tests hold: the decision instant must reach
+ * `markDelivered` UNCHANGED, from the batch, on every path that marks at all.
+ */
+describe('the send decision is what reaches the mark', () => {
+  it('marks against the batch decision time, not a clock read at mark time', async () => {
+    const markDelivered = vi.fn(async () => {});
+    await handleSendPush(deps({ markDelivered }));
+
+    expect(markDelivered).toHaveBeenCalledWith('user-a', DECIDED_AT);
+  });
+
+  it('passes the value through untouched, whatever it is', async () => {
+    /*
+      A guard against a well-meaning `new Date(...)` round trip appearing here
+      later. The value is the DATABASE's clock; reformatting it through this
+      runtime is how the same bug returns as clock skew, and a normalising step
+      would also quietly truncate the microseconds the boundary compares on.
+    */
+    const odd = '2026-08-21T12:00:00.123456+09:00';
+    const markDelivered = vi.fn(async () => {});
+    await handleSendPush(deps({
+      listCandidates: async () => [candidate({ decided_at: odd })],
+      markDelivered,
+    }));
+
+    expect(markDelivered).toHaveBeenCalledWith('user-a', odd);
+  });
+
+  it('sends one mark per person across several devices, with one decision time', async () => {
+    // Case C. Three devices are one notification arriving in three places, so
+    // there is one boundary to draw and it is the batch's -- not one per device,
+    // which would mark the same person three times and stamp the last one last.
+    const markDelivered = vi.fn(async () => {});
+    await handleSendPush(deps({
+      listCandidates: async () => [
+        candidate({ user_id: 'multi', token: 'phone' }),
+        candidate({ user_id: 'multi', token: 'tablet' }),
+        candidate({ user_id: 'multi', token: 'watch' }),
+      ],
+      markDelivered,
+    }));
+
+    expect(markDelivered).toHaveBeenCalledTimes(1);
+    expect(markDelivered).toHaveBeenCalledWith('multi', DECIDED_AT);
+  });
+
+  it('leaves the boundary alone when the mark itself fails', async () => {
+    /*
+      Case B. A failed mark must not advance anything: the flag stays raised and
+      the day is unstamped, so the next run retries. The handler's part is simply
+      that it does not swallow the failure -- it counts the person as failed
+      rather than delivered, which is what keeps the retry honest.
+    */
+    const result = await handleSendPush(deps({
+      markDelivered: async () => { throw new Error('E_DB_WRITE_FAILED'); },
+    }));
+
+    expect(result.body).toMatchObject({ considered: 1, delivered: 0, failed: 1 });
+  });
+
+  it('never marks anyone when nothing was delivered', async () => {
+    // No delivery, no boundary. The act stays pending for the next run rather
+    // than being recorded against a notification that never left the building.
+    const markDelivered = vi.fn(async () => {});
+    await handleSendPush(deps({
+      deliver: async () => ({ ok: false }),
       markDelivered,
     }));
 

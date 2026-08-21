@@ -122,8 +122,18 @@ Deno.serve(async (request: Request) => {
         };
       },
 
-      markDelivered: async (userId) => {
-        const { error } = await admin.rpc('mark_push_delivered', { p_user_id: userId });
+      markDelivered: async (userId, decidedAt) => {
+        /*
+          `p_decided_at` is the instant `push_delivery_candidates()` chose this
+          batch, carried back unchanged. Passing this runtime's clock instead --
+          or letting SQL default it to its own `now()`, which is what shipped
+          before 055 -- draws the boundary after the decision and erases anything
+          shared in between. See migration 055.
+        */
+        const { error } = await admin.rpc('mark_push_delivered', {
+          p_user_id: userId,
+          p_decided_at: decidedAt,
+        });
         if (error) throw new Error('E_DB_WRITE_FAILED');
       },
 

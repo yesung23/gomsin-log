@@ -66,6 +66,21 @@ export interface PushCandidate {
   user_id: string;
   platform: 'ios' | 'android';
   token: string;
+  /**
+   * When the database DECIDED this send, not when it is recorded.
+   *
+   * Identical on every row of one batch -- it is `push_delivery_candidates()`'s
+   * own `now()`, handed back so the mark can be written against the instant the
+   * notification was actually about. Migration 055 explains why the alternative
+   * loses acts; the short version is that anything shared between the decision
+   * and the mark falls behind a boundary drawn by a notification that could not
+   * have contained it.
+   *
+   * It comes from the DATABASE clock rather than this runtime's. A sender
+   * running a few minutes fast would otherwise draw the boundary into the future
+   * and swallow every act written in between -- the same bug, sourced from skew.
+   */
+  decided_at: string;
 }
 
 export interface SendResult {
@@ -79,8 +94,14 @@ export interface SendPushDeps {
   listCandidates: () => Promise<PushCandidate[]>;
   /** Deliver one notification. The body is not a parameter -- see rule 2. */
   deliver: (candidate: PushCandidate) => Promise<SendResult>;
-  /** `mark_push_delivered()`. Lowers the flag and stamps the day. */
-  markDelivered: (userId: string) => Promise<void>;
+  /**
+   * `mark_push_delivered()`. Stamps the day and moves the boundary.
+   *
+   * `decidedAt` is required rather than defaulted, here and in SQL, because the
+   * default is exactly what went wrong: a call that omitted it looked correct
+   * and silently erased any act shared during the send.
+   */
+  markDelivered: (userId: string, decidedAt: string) => Promise<void>;
   /** Drop a token the push service has declared dead. */
   dropToken: (token: string) => Promise<void>;
   /** Ids and outcomes only. Never a token, never user content. */
@@ -184,7 +205,12 @@ export async function handleSendPush(deps: SendPushDeps): Promise<SendPushOutcom
     */
     if (reachedSomewhere) {
       try {
-        await deps.markDelivered(userId);
+        /*
+          Every device in this bucket carries the same `decided_at` -- it is one
+          value per batch, not per row -- so the first one is the batch's, and
+          the boundary is drawn where the decision was made rather than here.
+        */
+        await deps.markDelivered(userId, devices[0].decided_at);
         delivered += 1;
       } catch {
         failed += 1;

@@ -22,8 +22,16 @@
 > 실제보다 좁게 말하는** 방향으로 낡았습니다 — ONE FACT → ONE AUTHORITATIVE HOME 규칙에서
 > 가장 나쁜 방향입니다.
 >
-> 현재 사실: 001→…→047→048→049→050→051→052→053→054가 한 체인이고, 빈 PostgreSQL 17.10에 52개가
-> 순서대로 적용되며 243개 assertion이 통과합니다.
+> 현재 사실: 001→…→047→048→049→050→051→052→053→054→055가 한 체인이고, 빈 PostgreSQL 17.10에 53개가
+> 순서대로 적용되며 272개 assertion이 통과합니다.
+>
+> **업그레이드 경로는 별도 데이터베이스에서 따로 검증합니다 (2026-08-21).** 빈 클러스터에
+> 체인을 한 번에 적용하면 **끝 상태(end state)만** 증명됩니다. repair 문장은 끝 상태가
+> 아니라 적용 도중 한 번 일어나는 일이므로, 고칠 행이 하나도 없는 fresh chain에서는
+> 영원히 아무것도 보고하지 않습니다. 실제로 054의 repair가 그 사각지대에서 무효였습니다
+> (아래 054 항목). phase0 harness는 이제 두 번째 DB `phase0_upgrade`에 001→053을 적용하고,
+> **RLS를 통과한 기록 소유자로** `shared_at`을 위조한 뒤 054를 적용해 repair가 실제로
+> 동작하는지 확인합니다.
 
 ## 상태 표기의 의미
 
@@ -95,7 +103,8 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `051_audit_closure_overload_and_forgeable_couple.sql` | 전수 감사 마감: 034가 지운 recovery 오버로드 제거, `product_events.couple_id` 위조 차단, 기록 회수/공유 전환 시 알림 플래그, NULL 판독 범위 거부 | **운영 미적용** |
 | `052_unseen_flag_survives_no_record.sql` | 공유 기록이 **삭제**될 때(계정 탈퇴의 CASCADE 포함) 파트너의 알림 플래그를 내린다 — 048/051이 다루지 않은 경로. **두 가지 정정:** ① 헤더가 계정 탈퇴에서 cascade 순서 때문에 동작하지 않을 수 있다고 얼버무리지만, PostgreSQL 17 실측 결과 **플래그는 내려간다**(harness가 `f`로 고정). ② 헤더의 하강 조건("다른 공유 기록이 없으면")은 **053이 대체**했다 — 오래된 공유 기록이 새 행위의 취소를 막는 결함이 있었다 | **운영 미적용** |
 | `053_pending_acts_not_shared_history.sql` | 알림 플래그가 "공유 기록이 있다"가 아니라 **"아직 알리지 않은 행위가 있다"**를 뜻하게 한다. 수신자 경계(`notified_through`) + 기록별 공개 시각(`shared_at`) | **운영 미적용** |
-| `054_shared_at_is_server_state.sql` | 053이 취소 규칙 전체를 `daily_records.shared_at`에 의존시켜 놓고 **그 컬럼을 클라이언트가 쓸 수 있게 남겼다.** `authenticated`는 012의 테이블 단위 UPDATE 권한을 갖고, RLS는 row 단위라 컬럼 하나를 가릴 수 없으며, 053의 스탬프 트리거는 `BEFORE INSERT OR UPDATE OF is_private`였다 — `is_private`를 적지 않은 UPDATE는 트리거를 아예 돌리지 않았고, **값을 바꾸지 않고 적기만 한** UPDATE는 아무것도 대입하지 않는 분기로 들어갔다. 실제 체인에서 기록 소유자가 RLS를 통과해 재현했다: 오래된 기록의 `shared_at`을 미래로 밀어두면 유일한 새 행위를 철회해도 파트너 플래그가 **유지된다**(측정값 `t`, 053만으로는 `f`). 트리거를 모든 INSERT/UPDATE로 넓히고 **모든 분기가 대입하게** 해서(전이 없음 → `OLD.shared_at` 복원) 컬럼을 서버 전용으로 만든다. 051 §2와 같은 부류 — 서버가 의존하는 컬럼을, 작성자가 떠올린 경로만 덮는 장치로 지킨 것 | **운영 미적용 — fresh chain 001→054(52개)에 적용, phase0 harness 243개 중 054가 10개. mutation 3건(054 제거·else 분기 제거·트리거를 `OF is_private`로 되돌림) 전부 실패 확인** |
+| `054_shared_at_is_server_state.sql` | 053이 취소 규칙 전체를 `daily_records.shared_at`에 의존시켜 놓고 **그 컬럼을 클라이언트가 쓸 수 있게 남겼다.** `authenticated`는 012의 테이블 단위 UPDATE 권한을 갖고, RLS는 row 단위라 컬럼 하나를 가릴 수 없으며, 053의 스탬프 트리거는 `BEFORE INSERT OR UPDATE OF is_private`였다 — `is_private`를 적지 않은 UPDATE는 트리거를 아예 돌리지 않았고, **값을 바꾸지 않고 적기만 한** UPDATE는 아무것도 대입하지 않는 분기로 들어갔다. 실제 체인에서 기록 소유자가 RLS를 통과해 재현했다: 오래된 기록의 `shared_at`을 미래로 밀어두면 유일한 새 행위를 철회해도 파트너 플래그가 **유지된다**(측정값 `t`, 053만으로는 `f`). 트리거를 모든 INSERT/UPDATE로 넓히고 **모든 분기가 대입하게** 해서(전이 없음 → `OLD.shared_at` 복원) 컬럼을 서버 전용으로 만든다. 051 §2와 같은 부류 — 서버가 의존하는 컬럼을, 작성자가 떠올린 경로만 덮는 장치로 지킨 것 **2026-08-21 정정 — repair 문장이 무효였다.** 파일은 트리거를 먼저 설치하고 그 아래에서 이미 왜곡된 행을 UPDATE로 고치려 했다. 그런데 repair 대상은 전부 `is_private = FALSE`이고 그대로 유지되므로, 그 UPDATE는 트리거의 무전이 분기 `NEW.shared_at := OLD.shared_at`로 들어갔고 **트리거가 지우려던 위조값을 그대로 되돌려놓았다.** 두 문장 모두 실행되고 행 수도 보고했지만 아무것도 바뀌지 않았다. 실제 업그레이드 경로에서 측정: 001→053 적용 → 소유자가 RLS를 통과해 `now() + 100 years`로 위조 → 054 적용 → **두 행 모두 2126년 그대로.** 이 파일 자신의 논지가 세 번째로 반복된 것이다(작성자가 떠올린 경로만 덮는 장치). 어디에도 적용되지 않은 파일이므로 새 번호 대신 **054를 직접 수정**했다: repair를 트리거가 붙어 있지 않은 상태에서(DROP TRIGGER 이후, CREATE TRIGGER 이전) 실행한다. DROP은 ACCESS EXCLUSIVE를 잡고 전체가 한 트랜잭션이라 클라이언트가 쓸 수 있는 틈은 생기지 않는다 | **운영 미적용 — fresh chain 001→055(53개)에 적용, phase0 harness 272개 중 054가 10개 + 업그레이드 경로 7개. mutation 4건(054 제거·else 분기 제거·트리거를 `OF is_private`로 되돌림·repair를 트리거 뒤로 되돌림) 전부 실패 확인** |
+| `055_notified_through_is_the_send_decision.sql` | 알림이 덮는 범위는 **결정된 시점**의 행위들인데 경계가 그렇게 말하지 않았다. `mark_push_delivered()`가 `notified_through`를 자기 시계(`p_now DEFAULT now()`)로 찍었고, Edge Function은 인자 없이 호출했다. 발송 결정은 그보다 앞선 `push_delivery_candidates()`에서 났으므로 **그 사이에 공유된 기록은 자기를 담을 수 없었던 알림이 그은 경계 뒤로 넘어갔다.** 실제 체인에서 결정적으로 재현(sleep·스레드 없음): R1 공유 → 후보 선정(23:48:00.566) → R2 공유(23:48:00.588) → mark(23:48:00.610) → **`has_unseen = f`, `partner_has_pending_act = f`.** R2는 지연된 게 아니라 **사라졌다** — 플래그가 내려가 다시 선정되지 않고, 스탬프가 경계 뒤라 영원히 세어지지 않는다. 048/051/052/053이 "행위 없는 알림"을 지웠다면 이것은 "알림 없는 행위"를 지운 반대편이다. 수정: `push_delivery_candidates`가 `decided_at`을 함께 돌려주고(발송자는 **자기가 물어본 시각** 하나만 더 알게 된다), `mark_push_delivered(p_user_id, p_decided_at)`가 그 시각으로 경계를 긋되 `GREATEST`로 **뒤로는 절대 못 간다**(그 사이 앱을 연 사람의 자기 경계가 우선). `has_unseen`은 FALSE로 **대입하지 않고** 053의 `partner_has_pending_act()`로 **재계산**한다. `p_decided_at`에 **DEFAULT를 두지 않은 것이 핵심** — 잊은 호출자는 조용히 행위를 지우는 대신 첫 실행에서 즉시 실패한다. 추가하지 않은 것: 이벤트 이력 테이블·알림별 행·pending count·읽음 표시·파트너 가시 상태 없음. 하루 1회 상한과 재시도 안전성은 그대로 | **신규 / 어디에도 미적용 — fresh chain 001→055(53개)에 적용, phase0 harness 272개 중 055가 22개(A·B·C·D·E 5개 시나리오 전부 + 영구 negative proof 1개). mutation 2건(재계산 제거·`GREATEST` 제거) 전부 실패 확인** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수

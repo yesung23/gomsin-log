@@ -111,6 +111,7 @@ const ORDER = [
   '052_unseen_flag_survives_no_record.sql',
   '053_pending_acts_not_shared_history.sql',
   '054_shared_at_is_server_state.sql',
+  '055_notified_through_is_the_send_decision.sql',
 ];
 
 /**
@@ -2175,7 +2176,9 @@ check(
 resetPendingFixture('053-5');
 shareRecord('e5300000-0000-4000-8000-00000000000a', 'B1', '053-5 B1');
 check(unseenOf(E) === 't', '053 (delivery case) the first act raises the flag');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}')`, '053-5 deliver');
+// 055 made the decision time a required argument. `now()` is the honest value
+// here: nothing is shared between this line and the previous one.
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now())`, '053-5 deliver');
 check(unseenOf(E) === 'f', '053 delivery lowers the flag');
 shareRecord('e5300000-0000-4000-8000-00000000000b', 'B2', '053-5 B2');
 check(unseenOf(E) === 't', '053 an act after delivery is pending again');
@@ -2296,6 +2299,220 @@ check(
 resetPendingFixture('054-cleanup');
 
 // ---------------------------------------------------------------------------
+// 055 -- a notification covers what existed when it was DECIDED
+// ---------------------------------------------------------------------------
+
+/*
+  053 gave the recipient a boundary and `mark_push_delivered()` set it to its OWN
+  clock. The send was decided earlier, at `push_delivery_candidates()`, so every
+  act shared in between fell behind a boundary drawn by a notification that could
+  not have contained it -- flag down, stamp behind the line, never selected
+  again. Not a delayed notification: a deleted one.
+
+  Timestamps here are FIXED rather than `now()` wherever an assertion depends on
+  the Korean-local clock. An earlier draft used `now()` for the daily-cap case
+  and passed on a laptop at 23:52 KST for the wrong reason -- the recipient was
+  outside their contact window, so the cap was never the thing being measured.
+
+  `INSIDE` is 20:00 KST on Wednesday 2026-08-19, inside the migration-001 weekday
+  default. Records created by `shareRecord` are stamped by the server at real
+  `now()`, which is necessarily LATER than that fixed instant -- so "shared after
+  the decision" is a property of the fixture, not of when this file is run.
+*/
+
+/*
+  E has NO device token at this point, and that is not incidental: the 048
+  section ends by calling `disconnect_couple()`, which revokes both sides'
+  tokens. `push_delivery_candidates` inner-joins `device_push_tokens`, so every
+  candidate assertion below would have counted zero and passed for the wrong
+  reason -- "not due" is indistinguishable from "has no phone". The 053 section
+  never noticed because it only ever called `mark_push_delivered`.
+*/
+check(asUser(E, `SELECT public.register_push_token('ios', 'token-e-055')`).ok,
+  '055 the recipient has a device again, so a zero candidate count means NOT DUE');
+
+const INSIDE_LATER = `TIMESTAMPTZ '2026-08-19 20:30+09'`;
+const NEXT_DAY = `TIMESTAMPTZ '2026-08-20 20:00+09'`;
+const boundaryOf = (userId) =>
+  mustSql(`SELECT COALESCE(notified_through::text, 'NULL') FROM public.push_delivery_state
+            WHERE user_id = '${userId}'`, 'boundary');
+const dueAt = (whenSql) => mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates(${whenSql}) WHERE user_id = '${E}'`,
+  '055 due');
+
+// --- the decision instant comes back with the batch --------------------------
+resetPendingFixture('055-0');
+shareRecord('e5500000-0000-4000-8000-000000000001', 'D0', '055-0 D0');
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE})
+      WHERE user_id = '${E}' AND decided_at = ${INSIDE}`, '055-0 decided_at') === '1',
+  '055 push_delivery_candidates hands back the instant it decided',
+);
+
+// --- case A: candidate -> new act -> successful mark -------------------------
+resetPendingFixture('055-A');
+shareRecord('e5500000-0000-4000-8000-00000000000a', 'R1', '055-A R1');
+check(unseenOf(E) === 't', '055 (case A) the first act raises the flag');
+// The send is decided HERE. R2 is shared after it, so no notification issued
+// from this decision could have been about R2.
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-A mark');
+check(
+  unseenOf(E) === 't',
+  '055 (case A) an act shared after the send decision SURVIVES the mark',
+);
+check(
+  boundaryOf(E) !== 'NULL' && mustSql(
+    `SELECT notified_through = ${INSIDE} FROM public.push_delivery_state
+      WHERE user_id = '${E}'`, '055-A boundary') === 't',
+  '055 (case A) the boundary is the decision instant, not the mark instant',
+);
+
+/*
+  NEGATIVE PROOF, and the reason the check above is not a tautology.
+
+  Same fixture, same order, one difference: the mark is taken against the clock
+  AT MARK TIME -- which is precisely what shipped before 055, and what the Edge
+  Function got for free from `p_now DEFAULT now()`. The act must be lost. If this
+  ever passes with the flag still up, the assertion above has stopped
+  discriminating and is measuring nothing.
+*/
+resetPendingFixture('055-A-neg');
+shareRecord('e5500000-0000-4000-8000-00000000000b', 'R1', '055-A-neg R1');
+const negDecision = mustSql('SELECT now()', '055-A-neg decide');
+shareRecord('e5500000-0000-4000-8000-00000000000c', 'R2', '055-A-neg R2');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now())`, '055-A-neg mark');
+check(
+  unseenOf(E) === 'f' && negDecision !== '',
+  '055 NEGATIVE PROOF: marking against the MARK-time clock still loses the racing act',
+);
+
+// --- case E: the daily cap and the race, together ----------------------------
+resetPendingFixture('055-E');
+shareRecord('e5500000-0000-4000-8000-00000000000e', 'R2 racing', '055-E R2');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-E mark');
+check(unseenOf(E) === 't', '055 (case E) the racing act leaves the flag raised');
+check(
+  dueAt(INSIDE_LATER) === '0',
+  '055 (case E) the raised flag does NOT buy a second send the same day -- the cap holds',
+);
+check(
+  dueAt(NEXT_DAY) === '1',
+  '055 (case E) and the act is delivered on the NEXT run, which is the point: it waits, it is not erased',
+);
+
+// --- case D: the racing act is withdrawn during delivery ---------------------
+resetPendingFixture('055-D');
+shareRecord('e5500000-0000-4000-8000-0000000000d1', 'retracted', '055-D R');
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'e5500000-0000-4000-8000-0000000000d1'`, '055-D retract');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-D mark');
+check(
+  unseenOf(E) === 'f',
+  '055 (case D) an act RETRACTED before the mark leaves nothing pending, so no invitation to nothing',
+);
+
+resetPendingFixture('055-D2');
+shareRecord('e5500000-0000-4000-8000-0000000000d2', 'deleted', '055-D2 R');
+mustSql(`DELETE FROM public.daily_records
+          WHERE id = 'e5500000-0000-4000-8000-0000000000d2'`, '055-D2 delete');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-D2 mark');
+check(
+  unseenOf(E) === 'f',
+  '055 (case D) and the same when it is DELETED rather than retracted',
+);
+
+// --- case B: the mark fails, so nothing is recorded --------------------------
+/*
+  A failed mark is a mark that never ran -- the handler only calls it when a
+  device took the notification, and counts the person failed if it throws. What
+  the database owes is that the un-marked state is still a due state.
+*/
+resetPendingFixture('055-B');
+shareRecord('e5500000-0000-4000-8000-0000000000b1', 'R1', '055-B R1');
+check(
+  boundaryOf(E) === 'NULL'
+    && mustSql(`SELECT last_notified_at IS NULL FROM public.push_delivery_state
+                 WHERE user_id = '${E}'`, '055-B stamp') === 't',
+  '055 (case B) a send that was never marked stamps neither the day nor the boundary',
+);
+check(dueAt(INSIDE) === '1', '055 (case B) so the next run still owes them -- delivery failure is retry-safe');
+
+// --- case C: several devices, one decision, one mark -------------------------
+resetPendingFixture('055-C');
+shareRecord('e5500000-0000-4000-8000-0000000000c1', 'R1', '055-C R1');
+check(asUser(E, `SELECT public.register_push_token('android', 'token-e-2')`).ok,
+  '055 (case C) a second device registers');
+const perDevice = mustAsServiceRole(
+  `SELECT count(*)::text || '/' || count(DISTINCT decided_at)::text
+     FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`, '055-C rows');
+check(
+  perDevice === '2/1',
+  '055 (case C) two devices are two rows carrying ONE decision instant, so the boundary cannot differ per device',
+);
+mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e-2'`, '055-C cleanup');
+
+// --- the recipient's own look outranks a late mark ---------------------------
+/*
+  `GREATEST` in the upsert, and it is not decoration. Someone who opened the app
+  between the decision and the mark already has a LATER boundary from
+  `clear_my_unseen()`. Writing the decision flat would drag it backwards and
+  re-pend acts they have already read -- notifying them tomorrow about what they
+  looked at today.
+*/
+resetPendingFixture('055-G');
+shareRecord('e5500000-0000-4000-8000-0000000000g1'.replace(/g/g, '9'), 'R1', '055-G R1');
+clearAsRecipient('055-G');
+const lookedAt = boundaryOf(E);
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-G late mark');
+check(
+  boundaryOf(E) === lookedAt,
+  '055 a recipient\'s own look outranks a late mark: the boundary never moves backwards',
+);
+check(unseenOf(E) === 'f', '055 and nothing they already read is re-pended by that mark');
+
+// --- what the sender still cannot do -----------------------------------------
+check(
+  !asUser(D, `SELECT public.mark_push_delivered('${E}', now())`).ok,
+  '055 an authenticated account still CANNOT mark anyone delivered',
+);
+check(
+  !asAnon(`SELECT public.mark_push_delivered('${E}', now())`).ok,
+  '055 and neither can anon',
+);
+check(
+  mustSql(`SELECT count(*) FROM pg_proc WHERE proname = 'mark_push_delivered'`, '055 overload') === '1'
+  && mustSql(`SELECT count(*) FROM pg_proc WHERE proname = 'push_delivery_candidates'`, '055 overload2') === '1',
+  '055 each function has exactly ONE signature, so the pre-055 form is gone rather than shadowed',
+);
+check(
+  mustSql(`SELECT count(*) FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name LIKE '%notification%'`, '055 no history') === '0',
+  '055 no notification-history table was added to fix this',
+);
+/*
+  Read through `pg_get_function_result`, NOT by joining `pg_proc` to `pg_class`
+  the way the 048 shape check does. A `RETURNS TABLE` function has `prorettype`
+  = the `record` pseudo-type, which owns no `pg_class` row, so that join yields
+  NOTHING -- and 048's check tolerates the empty string, which means it has been
+  passing vacuously since the day it was written. It would not have noticed a
+  `log_text` column arriving in the sender's view. Left in place rather than
+  rewritten here, since fixing it is not this change's business; named so the
+  next reader does not mistake it for coverage.
+*/
+const senderView = mustSql(
+  `SELECT pg_get_function_result(oid) FROM pg_proc WHERE proname = 'push_delivery_candidates'`,
+  '055 sender view');
+check(
+  /decided_at timestamp with time zone/.test(senderView)
+    && !/log_text|content|emotion|count|kind/i.test(senderView),
+  `055 the sender's view gains a clock reading and nothing else (got: ${senderView})`,
+);
+
+mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e-055'`, '055 token cleanup');
+resetPendingFixture('055-cleanup');
+
+// ---------------------------------------------------------------------------
 // 052 -- account closure. LAST, because it deletes an actor the rest of this
 // file uses. Placed here after an earlier version ran mid-file and took every
 // subsequent assertion down with it.
@@ -2347,6 +2564,140 @@ mustSql(`DELETE FROM auth.users WHERE id = '${D}'`, '052 close the account');
 check(
   unseenOf(E) === 'f',
   '052 closing an account lowers the surviving partner\'s flag, so nobody is told that a departure was an act',
+);
+
+// ---------------------------------------------------------------------------
+// 054 -- the UPGRADE PATH, on a second database
+// ---------------------------------------------------------------------------
+
+/*
+  Everything above runs against a chain applied in one go, which can only ever
+  prove what the END STATE does. A repair statement is not part of the end state:
+  it is a thing that happens once, while the chain is being applied, to rows that
+  are already wrong. Applying 001..055 to an empty cluster runs 054's repair over
+  zero skewed rows and reports nothing, forever.
+
+  That gap hid a real defect. 054 installed its stamping trigger and THEN issued
+  the repair, and every row the repair targets is `is_private = FALSE` and stays
+  that way -- so each UPDATE entered the trigger's no-transition branch,
+  `NEW.shared_at := OLD.shared_at`, and the trigger restored the exact forged
+  value the statement existed to erase. Both statements ran. Both reported rows
+  updated. Neither changed anything, and the end-state tests above stayed green
+  throughout because a fresh database has nothing to repair.
+
+  So this runs the migration the way an existing deployment would meet it: apply
+  001..053, forge `shared_at` into the future as the record's own author THROUGH
+  RLS -- not as superuser, or the forge would prove nothing about what a client
+  can do -- and only then apply 054.
+*/
+
+const UPGRADE_DB = 'phase0_upgrade';
+execFileSync('createdb', ['-h', socketDir, '-U', 'postgres', UPGRADE_DB], { stdio: 'ignore', env: PG_ENV });
+
+const upgradeScratch = join(dir, 'upgrade-input.sql');
+function upgradePsql(args, { input } = {}) {
+  const result = spawnSync(
+    'psql',
+    ['-h', socketDir, '-U', 'postgres', '-d', UPGRADE_DB, '-v', 'ON_ERROR_STOP=1', '-X', '-q', ...args],
+    { encoding: 'utf8', input, env: PG_ENV },
+  );
+  return { ok: result.status === 0, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+}
+function upgradeScript(text) {
+  writeFileSync(upgradeScratch, text);
+  return upgradePsql(['-f', upgradeScratch]);
+}
+function upgradeSql(text, label) {
+  const result = upgradePsql(['-At', '-c', text]);
+  if (!result.ok) throw new Error(`${label} failed:\n${result.stderr.trim()}`);
+  return result.stdout.trim();
+}
+function upgradeAsUser(userId, text) {
+  return upgradePsql([
+    '-At',
+    '-c', 'SET ROLE authenticated',
+    '-c', `DO $harness$ BEGIN PERFORM set_config('request.jwt.claim.sub', '${userId}', false); END $harness$`,
+    '-c', text,
+  ]);
+}
+function applyTo(file) {
+  if (file === '002_fix_rls_recursion.sql') upgradePsql(['-c', PRE_002_RECURSION_DROPS]);
+  const applied = upgradeScript(readFileSync(join(MIGRATIONS, file), 'utf8'));
+  if (!applied.ok) throw new Error(`upgrade-path migration ${file} failed:\n${applied.stderr}`);
+}
+
+const REPAIRED_BY = '054_shared_at_is_server_state.sql';
+const beforeRepair = ORDER.slice(0, ORDER.indexOf(REPAIRED_BY));
+const fromRepair = ORDER.slice(ORDER.indexOf(REPAIRED_BY));
+
+const upgradeStub = upgradeScript(SUPABASE_STUB);
+if (!upgradeStub.ok) throw new Error(`upgrade stub failed:\n${upgradeStub.stderr}`);
+for (const file of beforeRepair) applyTo(file);
+
+const UA = 'aaaaaaaa-0000-4000-8000-0000000000a1';
+const UB = 'bbbbbbbb-0000-4000-8000-0000000000b1';
+const UCOUPLE = '44444444-0000-4000-8000-000000000004';
+const UP_FORGED = 'f0f0f0f0-0000-4000-8000-000000000001';
+const UP_RETRACTED = 'f0f0f0f0-0000-4000-8000-000000000002';
+
+upgradeSql(`
+  INSERT INTO auth.users (id, email) VALUES ('${UA}', 'ua@example.test'), ('${UB}', 'ub@example.test');
+  INSERT INTO public.profiles (id, display_name, role) VALUES ('${UA}', 'UA', 'gomsin'), ('${UB}', 'UB', 'soldier');
+  INSERT INTO public.couples (id) VALUES ('${UCOUPLE}');
+  INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES
+    ('${UCOUPLE}', '${UA}', 'gomsin', 'active'), ('${UCOUPLE}', '${UB}', 'soldier', 'active');
+`, 'upgrade fixture');
+
+// Shared through the real path, so 053's trigger stamps them the way production would.
+const shared = upgradeAsUser(UA, `
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private) VALUES
+    ('${UP_FORGED}',    '${UA}', '${UCOUPLE}', CURRENT_DATE,     'skewed forward', false),
+    ('${UP_RETRACTED}', '${UA}', '${UCOUPLE}', CURRENT_DATE - 1, 'private but stamped', false)`);
+check(shared.ok, '054/upgrade the author can share records on the pre-054 chain');
+
+// The forge, as the record's own author, through RLS -- the exact statement
+// 054's header says a client could issue against 053.
+const forge = upgradeAsUser(UA,
+  `UPDATE public.daily_records SET shared_at = now() + interval '100 years'
+    WHERE id IN ('${UP_FORGED}', '${UP_RETRACTED}')`);
+check(forge.ok, '054/upgrade the forge is ACCEPTED on the 053 chain (so the next check measures a repair, not a denial)');
+check(
+  upgradeSql(`SELECT count(*) FROM public.daily_records
+               WHERE shared_at > GREATEST(updated_at, created_at)`, 'upgrade skew') === '2',
+  '054/upgrade both rows carry a future shared_at before 054 runs',
+);
+
+// A private row holding a stamp, which the second repair statement owns.
+upgradeAsUser(UA, `UPDATE public.daily_records SET is_private = true WHERE id = '${UP_RETRACTED}'`);
+upgradeSql(`UPDATE public.daily_records SET shared_at = now() + interval '100 years'
+             WHERE id = '${UP_RETRACTED}'`, 'upgrade private stamp');
+
+// --- and now the migration under test meets those rows ----------------------
+for (const file of fromRepair) applyTo(file);
+
+check(
+  upgradeSql(`SELECT count(*) FROM public.daily_records
+               WHERE is_private = FALSE AND shared_at IS NOT NULL
+                 AND shared_at > GREATEST(updated_at, created_at)`, 'upgrade repaired') === '0',
+  '054/upgrade applying 054 to an ALREADY-SKEWED database actually repairs it',
+);
+check(
+  upgradeSql(`SELECT COALESCE(shared_at::text, 'NULL') FROM public.daily_records
+               WHERE id = '${UP_RETRACTED}'`, 'upgrade private') === 'NULL',
+  '054/upgrade a private row keeps no stamp, so no history of changing one\'s mind survives the upgrade',
+);
+check(
+  upgradeSql(`SELECT shared_at <= GREATEST(updated_at, created_at) FROM public.daily_records
+               WHERE id = '${UP_FORGED}'`, 'upgrade honest') === 't',
+  '054/upgrade the repaired stamp is the honest one: no later than the row was last touched',
+);
+// The trigger has to survive the reordering that made the repair run at all.
+const postForge = upgradeAsUser(UA,
+  `UPDATE public.daily_records SET shared_at = now() + interval '100 years' WHERE id = '${UP_FORGED}'`);
+check(
+  postForge.ok && upgradeSql(`SELECT shared_at > now() + interval '50 years'
+                                FROM public.daily_records WHERE id = '${UP_FORGED}'`, 'upgrade reforge') === 'f',
+  '054/upgrade the column is still unwritable AFTER the upgrade, so repairing it did not cost the guard',
 );
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ import {
   Pencil, Trash2, X, MessageCircle,
 } from 'lucide-react';
 import { cn, formatLocalDate, toLocalDateString, localToday } from '@/lib/utils';
-import { parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
+import { isCalendarDate, parseTripPeriodParams, recordsInInclusiveRange } from '@/lib/trips';
 import { toast } from 'sonner';
 import { MEDIA_ACCEPT, classifyMediaFile } from '@/lib/records';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
@@ -108,11 +108,37 @@ export function RecordPage() {
     ? state.trips.find((trip) => trip.id === tripPeriod.tripId) || null
     : null;
 
+  /**
+   * The day 우리 asked for.
+   *
+   * `UsPage` navigates to `/record?date=YYYY-MM-DD` under a comment reading "A
+   * day leads to that day's records. The exact ones, never an approximation" --
+   * and this page read `trip`, `from`, `to`, `compose` and `record`, but never
+   * `date`. Every past day tapped in 우리 opened TODAY instead, silently: the
+   * link was well formed and nothing was listening. PRODUCT_V3 §4.2/§10 asks for
+   * the exact date, so this is that contract's only reader.
+   *
+   * Validated with the same `isCalendarDate` the trip range uses, not a looser
+   * regex: an unparseable value must fall back to today rather than reach
+   * `new Date(NaN)` in the header below.
+   */
+  const requestedDate = useMemo(() => {
+    const raw = searchParams.get('date');
+    return raw && isCalendarDate(raw) ? raw : null;
+  }, [searchParams]);
+
+  /*
+    A trip period still wins. `?trip=&from=&to=` is a different entry point with
+    its own contract -- it opens a RANGE, and its first day is where that range
+    starts -- so the ordering here leaves that path exactly as it was.
+  */
+  const initialDate = tripPeriod?.from || requestedDate || todayStr;
+
   // Calendar state
   const [showCalendar, setShowCalendar] = useState(false);
-  const [viewYear, setViewYear] = useState(() => Number((tripPeriod?.from || todayStr).slice(0, 4)));
-  const [viewMonth, setViewMonth] = useState(() => Number((tripPeriod?.from || todayStr).slice(5, 7)) - 1);
-  const [selectedDate, setSelectedDate] = useState(tripPeriod?.from || todayStr);
+  const [viewYear, setViewYear] = useState(() => Number(initialDate.slice(0, 4)));
+  const [viewMonth, setViewMonth] = useState(() => Number(initialDate.slice(5, 7)) - 1);
+  const [selectedDate, setSelectedDate] = useState(initialDate);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all');
   /*
    * Which lens is up: read one day in order, or scan the period's photos.

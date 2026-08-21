@@ -83,18 +83,37 @@ $$;
 
 REVOKE ALL ON FUNCTION public.stamp_record_shared_at() FROM PUBLIC, anon, authenticated;
 
--- `UPDATE` rather than `UPDATE OF is_private`. Narrowing it to that column is
--- precisely what left the other update paths unstamped, and the body is a few
--- comparisons -- cheaper than the row write it rides along with.
+-- The repair runs with NO stamping trigger attached, and that ordering is the
+-- whole of this block.
+--
+-- The first draft installed the trigger above and repaired below it. Every row
+-- the repair targets is `is_private = FALSE` and stays that way, so the UPDATE
+-- landed in the no-transition branch -- `NEW.shared_at := OLD.shared_at` -- and
+-- the trigger put back the exact value the statement existed to erase. Two
+-- statements ran, both reported rows updated, and neither changed anything.
+--
+-- Measured on the real upgrade path rather than argued: apply 001..053, forge
+-- `shared_at` to `now() + 100 years` as the record's own author through RLS,
+-- then apply 054. Both forged rows still read year 2126 afterwards. The fix
+-- above was sound and the migration carrying it was inert on the only path that
+-- needed it -- which is this file's own thesis a third time, a guard that
+-- covers the path its author pictured and not the one in front of it.
+--
+-- Dropping the trigger first opens no window a client can use: the DROP takes
+-- ACCESS EXCLUSIVE on the table and this is one transaction, so no other
+-- session touches `daily_records` between here and COMMIT.
 DROP TRIGGER IF EXISTS trg_daily_records_shared_at ON public.daily_records;
-CREATE TRIGGER trg_daily_records_shared_at
-  BEFORE INSERT OR UPDATE ON public.daily_records
-  FOR EACH ROW
-  EXECUTE FUNCTION public.stamp_record_shared_at();
 
--- Repair: any row that a client already skewed is restored to the honest value.
--- A shared record became visible no later than it was last touched, and the
--- backfill 053 used for history is the same rule.
+-- Any row a client already skewed is restored to the honest value. A shared
+-- record became visible no later than it was last touched, and the backfill 053
+-- used for history is the same rule.
+--
+-- This bounds the stamp from ABOVE only, deliberately. A stamp forged into the
+-- PAST is not recoverable from anything the row still knows, and it fails in the
+-- safe direction: it drops the author's own record behind the recipient's
+-- boundary, costing that author a notification for their own act, rather than
+-- summoning the recipient to something that is not there. Suppressing your own
+-- act is a thing you can already do by retracting it.
 UPDATE public.daily_records
    SET shared_at = LEAST(shared_at, GREATEST(updated_at, created_at))
  WHERE is_private = FALSE
@@ -102,6 +121,14 @@ UPDATE public.daily_records
    AND shared_at > GREATEST(updated_at, created_at);
 
 UPDATE public.daily_records SET shared_at = NULL WHERE is_private = TRUE AND shared_at IS NOT NULL;
+
+-- `UPDATE` rather than `UPDATE OF is_private`. Narrowing it to that column is
+-- precisely what left the other update paths unstamped, and the body is a few
+-- comparisons -- cheaper than the row write it rides along with.
+CREATE TRIGGER trg_daily_records_shared_at
+  BEFORE INSERT OR UPDATE ON public.daily_records
+  FOR EACH ROW
+  EXECUTE FUNCTION public.stamp_record_shared_at();
 
 COMMIT;
 

@@ -88,6 +88,62 @@ beforeEach(() => {
   grantCycleSensitiveConsent('user-b');
 });
 
+/**
+ * What the consent card leads with.
+ *
+ * This card is the first thing a 곰신 who has not consented sees on 마이. It used
+ * to open with the disclosure block, so the tab's first impression was a legal
+ * form. The fix reordered it; these assertions are what stop it reordering back,
+ * and what stop the reorder being "fixed" by deleting disclosure PIPA §23 requires.
+ */
+describe('the consent card offers before it discloses', () => {
+  async function renderUnconsented(userId: string) {
+    revokeCycleSensitiveConsent(userId);
+    syncConsent.mockResolvedValue({ ok: true, granted: false });
+    const view = render(<CycleTrackerSection userId={userId} />);
+    await screen.findByText('내 몸의 리듬 시작하기');
+    return view;
+  }
+
+  it('states what the feature is for above the disclosure block', async () => {
+    const { container } = await renderUnconsented('user-order');
+
+    const offer = container.querySelector('[data-testid="cycle-consent-offer"]');
+    const disclosure = container.querySelector('[data-testid="cycle-consent-disclosure"]');
+    expect(offer).not.toBeNull();
+    expect(disclosure).not.toBeNull();
+
+    // DOCUMENT_POSITION_FOLLOWING: the disclosure comes after the offer, which is
+    // both the reading order and the accessibility-tree order.
+    expect(offer!.compareDocumentPosition(disclosure!))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(offer!.textContent).toContain('다음 예상 범위');
+  });
+
+  it('still discloses every item PIPA §23 requires, without a tap', async () => {
+    const { container } = await renderUnconsented('user-pipa');
+    const disclosure = container.querySelector('[data-testid="cycle-consent-disclosure"]');
+
+    // Visible in the card itself -- not behind a disclosure widget, not on another
+    // screen. Demoting the block visually must never turn into hiding it.
+    for (const required of ['수집 항목', '이용 목적', '파트너 공유', '보유 기간']) {
+      expect(disclosure!.textContent, required).toContain(required);
+    }
+    expect(disclosure!.textContent).toContain('거부해도');
+  });
+
+  it('keeps consent separate and opt-in, never pre-checked', async () => {
+    await renderUnconsented('user-optin');
+
+    const box = screen.getByRole('checkbox');
+    expect(box).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '동의하고 시작하기' })).toBeDisabled();
+
+    fireEvent.click(box);
+    expect(screen.getByRole('button', { name: '동의하고 시작하기' })).toBeEnabled();
+  });
+});
+
 describe('CycleTrackerSection sensitive-information gate', () => {
   it('does not retrieve cycle data before separate explicit consent', async () => {
     revokeCycleSensitiveConsent('user-c');

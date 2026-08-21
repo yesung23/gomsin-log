@@ -18,7 +18,12 @@
 | 3 | #76 | `claude/047-cycle-pain-gated` | `d0e2c0a` | 14/14 |
 | 4 | #77 | `claude/phase0-defect-closure` | `e1ea756` | 14/14 |
 | 5 | #78 | `claude/phase1-call-mode-v2` | `ab01035` | 14/14 |
-| 6 | #79 | `claude/phase1-gate3-push` | **`c40d69d`** | `a9f7dc0`에서 14/14, 이 HEAD는 진행 중 |
+| 6 | #79 | `claude/phase1-gate3-push` | **브랜치 tip** | `a9f7dc0`에서 14/14 |
+
+#79의 HEAD만 SHA 대신 브랜치로 적는다. 이 문서가 그 브랜치 위에 커밋되므로, 여기 적는
+어떤 SHA도 **그것을 적는 커밋에 의해 곧바로 낡는다.** `CLAUDE.md`의 volatile fact 규칙이
+같은 것을 말한다 — 문서의 PR·SHA는 checkpoint일 뿐이고 작업 시점에 live 확인한다.
+나머지 다섯 개는 이 세션에서 움직이지 않았으므로 SHA가 유효하다.
 
 각 PR은 앞선 것을 **포함**한다(#75·#76은 #74를, #77은 #74를, #78은 #77을, #79는 #78을).
 순서대로 landing하면 뒤의 것은 자기 커밋만 남기고 줄어든다.

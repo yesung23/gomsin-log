@@ -999,13 +999,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const clear = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      /*
+        Not while shared access is quarantined.
+
+        `unavailable` means `quarantineSharedAccess` emptied `records`: realtime
+        went down, the couple workspace could not be re-authorized, and the
+        partner's entries are OFF THE SCREEN. Foregrounding into that is not
+        seeing them.
+
+        Clearing here would cost more than one notification. Since 053,
+        `clear_my_unseen()` also moves `notified_through`, so every act shared
+        before this moment stops being pending -- permanently. Nothing raises the
+        flag again until the partner writes something NEW, and the entries that
+        were withheld are never announced at all.
+
+        The combination is ordinary rather than exotic on this product's
+        networks: the RPC is plain HTTPS and keeps working while the realtime
+        WebSocket is blocked, so the clear succeeds precisely when the content
+        did not arrive. Reproduced in `storeUnseenFlag.test.tsx` by failing the
+        channel and foregrounding.
+
+        `delayed` is deliberately still allowed to clear: the records are on
+        screen, only their freshness is uncertain.
+      */
+      if (sharedSyncStatus === 'unavailable') return;
       void clearOwnUnseen();
     };
 
     clear();
     document.addEventListener('visibilitychange', clear);
     return () => document.removeEventListener('visibilitychange', clear);
-  }, [coupleLifecycle]);
+  }, [coupleLifecycle, sharedSyncStatus]);
 
   useEffect(() => {
     if (coupleLifecycle !== 'connected') return;

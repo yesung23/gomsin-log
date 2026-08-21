@@ -108,7 +108,7 @@ active branch가 존재한다. **master에는 아직 없다.**
 | Gate 3 push 서버 | `claude/phase1-gate3-push`. migration 048 + `send-push`. 실제 PostgreSQL로 검증됨 |
 | Gate 3 push 클라이언트 | 완료. 토큰 lifecycle은 이 저장소가 다른 클라이언트 동작을 검증하는 방식으로 검증 가능했고(§14.3이 negative test를 명시적으로 요구한다), 실기기가 필요한 것은 실제 전달뿐이다 |
 | `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
-| S4 §7.6 대기 구간 | 자동 노출 결함은 닫혔다 — 파트너가 없으면 저장 자체가 비공개다. **§7.6이 요구하는 "한 번 묻기"는 미완**이며, 대기 중 기록을 식별할 방법(합류 시각 조회 또는 device-local 목록)에 대한 판단이 선행되어야 한다 |
+| S4 §7.6 대기 구간 | 자동 노출 결함은 닫혔다 — 파트너가 없으면 저장 자체가 비공개다. **"한 번 묻기"는 미완.** 합류 시각은 이미 읽을 수 있으므로(harness가 실측) 새 SQL은 필요 없고, 남은 것은 "한 번"을 기억할 상태 설계다 — device-local 플래그는 `saveState` whitelist를 넓혀야 하는데 그 목록은 계정 삭제 후 잔존 방지를 위해 고정돼 있다 |
 | §19 계측 | migration 049와 emitter가 있고 **선언된 8종 전부**에 emit 지점이 있다 — 테스트가 union을 파싱해 호출자 없는 종류를 잡는다. `briefing_opened`가 분모라 요약→원본 **이동률**이 나오고, `notifications_disabled`는 OFF 전이에서만 발생하는 kill metric이다. **이벤트 조회·집계 도구는 없다** — LV 리드아웃 시점에 필요하다 |
 
 Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은

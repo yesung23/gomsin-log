@@ -1696,6 +1696,19 @@ check(
   '049 an event kind outside the closed set is refused by the database',
 );
 
+// --- §7.6 feasibility: can a client learn when the partner joined? ----------
+// Not a contract this branch relies on. Recorded because the work log claimed
+// the "show them what you wrote before?" question was blocked on fetching a
+// join time, and that claim should be true or corrected rather than repeated.
+
+const partnerJoin = asUser(A, `
+  SELECT count(*) FROM public.couple_members
+  WHERE couple_id = '${COUPLE1}' AND user_id = '${B}' AND joined_at IS NOT NULL`);
+check(
+  partnerJoin.ok && partnerJoin.stdout.trim() === '1',
+  '§7.6 an active member CAN read the partner\'s joined_at, so the reveal prompt is not blocked on new SQL',
+);
+
 // ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------

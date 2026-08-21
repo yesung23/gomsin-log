@@ -20,11 +20,21 @@ import { Card } from '@/components/ui/Card';
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'disconnected' | CycleFetchFailureReason;
 
+/**
+ * The care requests, `feeling_unwell` among them.
+ *
+ * One vocabulary on purpose. An earlier draft carried a separate graded pain
+ * fieldset (`조금 아파요`/`많이 아파요`); the independent review refused it because a
+ * severity scale in a server-visible column restates the personal HRK pain levels.
+ * "오늘은 몸이 힘들어요" says today is hard without saying how much — which is all a
+ * care signal needs to say, and exactly what V1_LAUNCH_DECISIONS §5 approved.
+ */
 const kindLabels: Record<CycleSupportKind, string> = {
   resting: '오늘은 쉬어가고 싶어요',
   need_space: '조용한 시간이 필요해요',
   would_like_support: '따뜻한 응원을 받고 싶어요',
   check_in_later: '나중에 안부를 물어봐 주세요',
+  feeling_unwell: '오늘은 몸이 힘들어요',
 };
 
 interface CycleSupportSectionProps {
@@ -403,7 +413,7 @@ export function CycleSupportSection({
           ) : owner ? (
             <div className="space-y-3">
               <div className="p-3 rounded-control bg-muted/30 text-caption text-muted-foreground leading-relaxed">
-                오늘 하루 동안 보일 비의료적 응원 신호만 공유돼요. 선택 메시지는 파트너에게 그대로 보이므로 개인적인 상세 내용은 적지 마세요. 개인 기록은 자동으로 공유되지 않아요.
+                오늘 하루 동안 보일 응원 신호만 공유돼요. 선택 메시지는 파트너에게 그대로 보이므로 개인적인 상세 내용은 적지 마세요. 주기·증상 등 개인 기록은 자동으로 공유되지 않아요.
               </div>
               {/*
                 Cards, not a <select>.
@@ -413,7 +423,7 @@ export function CycleSupportSection({
                 placeholder. On a screen whose entire job is "be clear about what you
                 are sending your partner", that was the least clear thing on it.
 
-                All four are visible, the chosen one is unmistakable, and nothing is
+                All five are visible, the chosen one is unmistakable, and nothing is
                 chosen for you: `kind` starts empty and there is no default, so the
                 send button stays disabled until a person actually picks. An app that
                 guessed how someone feels today and pre-filled it would be doing the
@@ -448,6 +458,32 @@ export function CycleSupportSection({
                   })}
                 </ul>
               </fieldset>
+
+
+              {/*
+                What the partner will actually read, before it is sent.
+
+                Rendered from the same `kindLabels` the partner's own view uses, so
+                the preview cannot drift from the payload -- which is a failure this
+                surface has had once already, when the cycle preview described
+                sharing that was switched off.
+              */}
+              {kind && (
+                <div
+                  data-testid="signal-send-preview"
+                  className="rounded-surface bg-muted/40 p-3.5 space-y-1"
+                >
+                  <p className="text-caption font-bold text-foreground">군화에게 이렇게 보여요</p>
+                  <p className="text-label text-foreground">{kindLabels[kind]}</p>
+                  {message.trim() && (
+                    <p className="text-caption text-muted-foreground">“{message.trim()}”</p>
+                  )}
+                  <p className="text-caption text-muted-foreground leading-relaxed">
+                    오늘 하루가 지나면 자동으로 사라져요. 그 전에도 언제든 취소할 수 있어요.
+                  </p>
+                </div>
+              )}
+
               <label className="text-label font-bold text-foreground space-y-1 block">
                 <span>파트너에게 보낼 짧은 메시지 (선택, 80자 이하)</span>
                 <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={80} disabled={mutationPending !== null} placeholder="예: 오늘 저녁에 짧게 통화하고 싶어요" className="w-full p-3 rounded-control border border-border bg-card text-body" />

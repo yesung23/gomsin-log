@@ -164,6 +164,29 @@ Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저�
 | §19 허용 목록 계측 착지 | 코드로는 착지한다. **실제 이벤트가 쌓이는지는 LV 환경이 있어야 확인된다** |
 | 검증 빌드의 보안 표현이 §14.5 LV 행과 일치 | **미확인.** 온보딩·설정의 문장을 §14.5 LV 행과 대조한 적이 없다 |
 | 외부 사용자 범위·고지·rollback·데이터 처리 | **미착수.** LV 환경(전용 Supabase 프로젝트)이 없다 |
+### Two-lineage convergence checkpoint — 2026-08-21
+
+`claude/v1-launch-readiness`(PR #73)와 `release/v1-gate1-gate2`(PR #74)는 같은 작업의
+재작성 중복 계보였다(차이는 047 cycle-pain delta 하나). 사용자 승인
+([`PRODUCT_STRATEGY_REDESIGN_2026-08-21.md`](PRODUCT_STRATEGY_REDESIGN_2026-08-21.md))에
+따라 다음으로 수렴한다.
+
+| 계보 | 처분 |
+|---|---|
+| PR #74 `release/v1-gate1-gate2` @ `9b0d4b3` | **landing 계보.** 역할별 홈·우리 하루 격자·감정 provenance·시각 기반·온보딩 첫 화면 + CI 수리(stale e2e locator 2건, 문서 trailing whitespace). CI 14/14 GREEN. **master merge는 사용자 실행 대기** — `.claude/hooks`가 PR merge를 사용자에게 예약한다 |
+| PR #73 `claude/v1-launch-readiness` | superseded. #74 merge 후 닫는다. **HEAD가 더 최신이라는 것은 계보 선택의 근거가 아니다** (#70 vs #72와 같은 규칙) |
+| 047 care-signal delta | `claude/047-cycle-pain-gated`(PR #76, ready)로 분리. independent review가 3단계 통증 어휘를 `CHANGES_REQUIRED`로 반려 → `d0e2c0a`에서 승인된 `feeling_unwell` 한 종류로 축소, phase0 fresh-chain(001→047)을 실제 PostgreSQL로 양측(구현자·재심사자) 검증 → **delta re-review `APPROVED WITH NOTES`**. merge 순서는 #74 이후. N1에 따라 반려 어휘를 담은 PR #73은 CLOSED |
+| canonical 개정 (2026-08-21 승인분) | `claude/canon-amendments-2026-08-21`에 반영: PRODUCT_V3 §5.2·§6.1·§7.6·§8 통화 모드·§10 하루 격자·§14.3 알림 정책·§14.5 E2EE 표현 계약, ENGINEERING_ROADMAP ARCH-P6 개정·LV 계측 조건, BUSINESS §9.2 전역 가설 |
+
+이 checkpoint 이후에도 변하지 않은 것: Production NOT APPLIED, remote catalog UNVERIFIED,
+실기기 UNVERIFIED, chat FROZEN / DEFERRED, P6 NOT AUTHORIZED(개정된 ARCH-P6 기준으로도
+구현 미착수), push 알림 미구현, §19 계측 미구현.
+
+> **2026-08-21 정정.** 위 문단은 원래 "push 알림 미구현, §19 계측 미구현"으로 끝났다.
+> 그 문장은 이 checkpoint가 작성된 시점에는 참이었고 **결합 트리에서는 거짓이다** —
+> 둘 다 PR #79에서 구현됐다(migration 048~050). landing 순서상 이 checkpoint(#75)가
+> 먼저 오고 구현(#79)이 나중에 오므로, 두 계보가 합쳐지는 지점에서 이 문장이 낡는다.
+> 저자 감사에서 발견해 정정했다.
 
 ## 2. Active migration ledger facts
 

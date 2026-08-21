@@ -208,14 +208,14 @@ describe('CycleSupportSection write integrity', () => {
   describe('the care signal is chosen, never assumed', () => {
     it('starts with nothing selected, so the app never guesses how today feels', async () => {
       await renderOwnerWithShareForm();
-      for (const kind of ['resting', 'need_space', 'would_like_support', 'check_in_later']) {
+      for (const kind of ['resting', 'need_space', 'would_like_support', 'check_in_later', 'feeling_unwell']) {
         expect(screen.getByTestId(`support-kind-${kind}`).getAttribute('aria-pressed')).toBe('false');
       }
     });
 
-    it('shows all four options at once rather than behind a picker', async () => {
+    it('shows all five options at once rather than behind a picker', async () => {
       await renderOwnerWithShareForm();
-      expect(screen.getByTestId('support-kind-options').querySelectorAll('button')).toHaveLength(4);
+      expect(screen.getByTestId('support-kind-options').querySelectorAll('button')).toHaveLength(5);
     });
 
     it('marks exactly one as chosen, and lets the choice be taken back', async () => {

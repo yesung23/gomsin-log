@@ -348,11 +348,25 @@ export interface CycleEntry {
   symptoms: CycleSymptom[];
 }
 
+/**
+ * The care-signal vocabulary. One row per deliberate act (migration 014), with
+ * `shared_for_date` chosen by the owner, `expires_at` a day out, `revoked_at` for
+ * taking it back.
+ *
+ * `feeling_unwell` ("오늘은 몸이 힘들어요") is the one body-state kind, added
+ * 2026-08-21 per V1_LAUNCH_DECISIONS §5. It is deliberately a single ungraded
+ * value: an earlier draft carried `pain_mild`/`pain_moderate`/`pain_severe`, and
+ * the independent security review refused it — a graded scale mirrors the personal
+ * HRK pain levels inside a server-visible `kind` column, which PRODUCT_V3 §21
+ * forbids sharing under any setting. The signal says today is hard; it never says
+ * how much, and it is never derived from `CycleDailyLog.painLevel`.
+ */
 export const CYCLE_SUPPORT_KINDS = [
   'resting',
   'need_space',
   'would_like_support',
   'check_in_later',
+  'feeling_unwell',
 ] as const;
 
 export type CycleSupportKind = (typeof CYCLE_SUPPORT_KINDS)[number];

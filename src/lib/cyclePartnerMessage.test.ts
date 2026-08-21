@@ -80,13 +80,26 @@ describe('the partner preview reflects the real preferences', () => {
     ]) {
       const message = buildCyclePartnerMessage({ preferences, periodActive: false });
       expect(message.neverShared).toContain('보이지 않아요');
-      // Named one by one, so a reader need not trust a summarising word.
+      /*
+       * Named one by one, so a reader need not trust a summarising word. 통증 is
+       * in this list ON PURPOSE: a 2026-08-20 draft removed it to make room for
+       * graded pain sharing, and the independent review refused that vocabulary.
+       * The recorded pain level is unconditionally withheld; the `feeling_unwell`
+       * care signal is an independent message, not an exception to this sentence.
+       */
       for (const withheld of ['증상', '출혈량', '통증', '기분', '메모']) {
         expect(message.neverShared, withheld).toContain(withheld);
       }
       // And it stays OUT of the shared list, which is what the split is for.
       expect(message.lines.join(' ')).not.toContain('보이지 않아요');
     }
+  });
+
+  it('never describes pain as something the toggles could share', () => {
+    // No share-line mentions 통증 under any preference combination: there is no
+    // toggle that shares it, so no sentence may imply one.
+    const message = buildCyclePartnerMessage({ preferences: prefs({}), periodActive: false });
+    expect(message.lines.join(' ')).not.toContain('통증');
   });
 
   it('never attributes mood or behaviour to the cycle', () => {

@@ -83,9 +83,33 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `044_unlink_crypto_pairing_authority.sql` | `disconnect_couple()`가 관계 멤버십과 live `crypto_pairings`를 같은 트랜잭션에서 `UNLINKED`로 전환한다. historical key row를 삭제하지 않으며, former partner와 stale local authority가 새 couple scope를 다시 열 수 없도록 하는 forward correction이다 | **Git 추적됨 / 운영 미적용 — 031–040 및 043과 함께 staging actor/RLS 검증 필요** |
 | `045_harden_e2ee_write_floor_activation.sql` | 되돌릴 수 없는 exact-scope write floor 활성화를 소유 ACTIVE 기기 + 기기 인증서 + 해당 ACTIVE epoch의 self-notarized envelope에 결속한다. PENDING·recovery·provisioning·failed·revoked 기기는 거부한다 | **신규 / 어디에도 미적용 — 031→032→034→035→036→037→038→039→040→043→044→045 fresh-chain actor 검증 필요** |
 | `046_require_actor_for_device_provisioning.sql` | `e2ee_begin_device_provisioning`·`e2ee_finalize_device_provisioning`이 `auth.uid()`가 NULL이면 소유권 비교를 건너뛰던 문제를 forward 수정한다. 두 함수 모두 NULL actor를 먼저 거부하고, 소유자 불일치는 `E2EE_DEVICE_WRONG_ACCOUNT`다. revocation 우선순위·인증서·envelope coverage·허용 상태·idempotent 반환은 그대로 보존한다. PostgREST 캐시를 위해 `NOTIFY pgrst`를 포함한다 | **신규 / 어디에도 미적용 — write-floor harness에서 NULL actor·타 계정·anon 거부를 실제 PostgreSQL로 검증함** |
+| `047_care_signal_feeling_unwell.sql` | `cycle_support_signals.kind` CHECK 어휘에 `feeling_unwell`("오늘은 몸이 힘들어요") **한 종류**를 추가한다(4→5). 컬럼 추가·RLS 정책·함수·GRANT 없음이며 014의 couple-scoped 정책을 그대로 상속한다. 서버는 신호를 파생하지 않고, `cycle_daily_logs`를 읽는 문장이 없다. DOWN은 파일 하단에 있으며 해당 kind의 row가 남아 있으면 거부한다 | **신규 / 어디에도 미적용 — phase0 fresh-chain harness에 포함. 048~050과 결합한 001→050 체인도 실행됨(아래 결합 검증 참조)** |
 | `048_push_delivery_metadata.sql` | Gate 3 push의 **유일한** 서버 상태. `device_push_tokens`(본인만, 토큰 UNIQUE로 기기 이양 처리) + `push_delivery_state`(수신자별 병합 플래그 하나, **본인만 SELECT**) + 발송 후보 조회·기록·본인 플래그 해제·토큰 회수 함수. `daily_records` AFTER INSERT 트리거가 플래그를 올리되 **`is_private` 기록은 아무것도 올리지 않는다** — 비공개 기록에 알림이 가면 '무언가 썼다'는 사실 자체가 새기 때문이다. **전략은 `couple_members.has_unseen`을 지정했으나 구현·검증 결과 그것이 틀렸다**: 001의 SELECT 정책이 활성 파트너에게 상대 행 전부를 보여주므로 그 자리의 플래그는 곧 읽음 표시가 되고, RLS는 row 단위라 컬럼 하나만 가릴 수 없다. 그래서 전용 테이블로 옮겼다. 토큰 등록은 `register_push_token()`으로만 하며, **같은 토큰을 들고 있던 계정의 행을 먼저 삭제**한다 — APNs·FCM이 재설치·기기 이양 시 같은 토큰을 넘겨주므로, 평범한 INSERT는 UNIQUE에 걸려 새 계정은 알림을 못 받고 **떠난 계정이 그 기기 알림을 계속 받는** 상태가 된다(§14.3 위반). 발송자(Edge Function)는 `service_role`만 호출 가능하며 콘텐츠·이벤트 종류·개수를 볼 수 없다. 029와 같은 in-body gate를 두어 GRANT가 잘못 나가도 본문에서 거부한다. 하루 1회 상한과 연락 가능 시간은 발송자가 아니라 DB가 강제한다. `disconnect_couple`은 양쪽 토큰을 삭제하고 양쪽 플래그를 내린다 | **신규 / 어디에도 미적용 — fresh chain(001→046→048, 45개)에 적용하고 phase0 harness에서 37개 계약을 실제 PostgreSQL 17.10으로 검증함. mutation 6건(비공개 누출·하루 1회·연락 시간·NULL actor·기기 이양·service_role gate) 전부 실패 확인. 플랫폼 검증 mutation 1건은 통과했는데, 테이블 CHECK가 이미 막고 있어 함수 검증은 에러 메시지용이기 때문** |
 | `049_product_events.sql` | §19 허용 목록 안의 최소 계측. LV 진입 조건이다(계측 없는 검증은 연극이다). **이 테이블에는 timestamp 컬럼이 없다** — `occurred_on DATE`뿐이다. 다른 모든 테이블이 갖는 `created_at TIMESTAMPTZ DEFAULT now()`를 여기 두면 누가 언제 앱을 여는지의 분 단위 기록이 되고, 그것이 §19가 금지하는 행동 감시다. 리뷰에서 아무도 의심하지 않을 기본값으로 도착한다는 점이 위험하다. `kind`·`screen`은 CHECK 제약의 닫힌 집합, `subject_id`는 UUID라 제목·본문·파일명이 들어갈 수 없다. RLS는 본인 INSERT/SELECT만이고 **파트너에게는 어떤 read 정책도 없다.** UPDATE·DELETE 정책이 아예 없어 이벤트는 사실로 남는다. `user_id`는 payload가 아니라 `auth.uid()` 기본값에서 온다 | **신규 / 어디에도 미적용 — fresh chain 001→049에 적용, phase0 harness에서 19개 계약을 실제 PostgreSQL 17.10으로 검증. mutation 4건(`created_at` 추가·자유 텍스트 컬럼·파트너 read 허용·금지 이벤트 종류) 전부 실패 확인** |
 | `050_lv_funnel_readout.sql` | 049를 LV 판독 목록과 대조해 찾은 두 격차를 닫는다. **(1) 측정 단위가 없었다** — 전략은 획득 단위가 '연결된 커플 1쌍'이라고 못박는데 `product_events`에는 `user_id`만 있어 커플 단위 지표 2개(주간 기록 커플 비율·4주 재사용률)를 아예 계산할 수 없었다. `couple_id`를 추가하되 `get_my_active_couple_id()` DEFAULT로 **세션에서 파생**한다 — 클라이언트가 보낼 수 없으므로 속한 적 없는 커플로 귀속시킬 수 없다. RLS 범위는 그대로이고 **파트너 read 정책은 여전히 없다.** **(2) 판독이 곧 행 조회였다** — 함수가 없으면 `service_role`이 raw 이벤트 행을 긁어야 하고 그건 한 사람의 개별 행동을 순서대로 보는 것이다. `lv_funnel_readout`은 **집계만**(metric, value) 반환하며 행 반환 경로가 없다. `lv_couple_return_count`는 **몇 커플이 돌아왔는지**를 주고 어느 커플인지는 주지 않는다. 사용자별 분해·커플 간 순위는 의도적으로 없다. **일별 시계열은 함수가 반환하지 않을 뿐 호출자가 하루짜리 창을 반복 호출해 만들 수 있다** — §19가 날짜 버킷을 허용하므로 위반은 아니지만 함수가 막는 것도 아니며, 그 구분은 LV 운영 규율이 진다 | **신규 / 어디에도 미적용 — fresh chain 001→050에 적용, phase0 harness 197개 중 050이 16개. mutation 5건(클라이언트 위조 가능한 couple_id·service_role gate·커플 대신 계정 집계·재방문이 커플 id 반환·역순 범위 허용) 전부 실패 확인** |
+## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
+
+V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
+있게 하는 것이며, 승인된 형태는 기존 배려 신호 어휘에 **한 종류를 추가**하는 것입니다.
+
+2026-08-20 초안은 `pain_mild`·`pain_moderate`·`pain_severe` 3단계 어휘를 담았고,
+2026-08-21 independent security review가 **CHANGES_REQUIRED**로 반려했습니다. 서버 가시
+`kind` 컬럼의 등급 어휘는 개인 HRK 통증 단계(`mild`/`moderate`/`severe`)를 1:1로
+재서술하며, 어떤 canonical 문서도 이를 승인하지 않았기 때문입니다. 현재 파일은 반려
+사유를 반영해 `feeling_unwell` 하나만 추가합니다.
+
+`get_partner_cycle_projection()`은 손대지 않았습니다. projection은 토글이 켜져 있는 동안
+계속 보이는 **상시 창**이고, 그 RPC는 소유자의 원본 테이블을 SECURITY DEFINER로 읽습니다.
+이 신호를 거기에 넣었다면 RPC가 `cycle_daily_logs`를 직접 읽어야 했고, 그것이 이 기능에서
+절대 만들면 안 되는 결합입니다.
+
+`cycle_support_signals`는 014부터 이미 맞는 모양이었습니다. 한 행 = 한 번의 의도적 행위,
+`shared_for_date`는 소유자가 고르고, `expires_at`은 하루, `revoked_at`으로 철회. 그래서
+**어휘 한 값만 넓혔습니다.**
+
+`cyclePartnerMessage.ts`의 withholding 문장 "증상, 출혈량, 통증, 기분, 메모는 어떤
+경우에도 보이지 않아요"는 **그대로 참**입니다. `feeling_unwell`은 기록된 통증 값이
+아니고, 등급이 없으며, 개인 기록에서 파생되지 않는 독립 opt-in 신호이기 때문입니다.
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 

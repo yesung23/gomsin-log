@@ -114,6 +114,212 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-21 · LV · migration 047 delta re-review — APPROVED WITH NOTES (독립 READ-ONLY)
+
+> reviewer가 남긴 READY-TO-COPY 판정의 반영이다. 대상: `claude/047-cycle-pain-gated`
+> HEAD **`d0e2c0a`** (= PR #76 head, live 확인). 판정은 이 커밋에만 결속된다.
+
+- **평결: APPROVED WITH NOTES** — PR #74(`9b0d4b3`) 이후 PR #76의 master landing에 대해.
+  운영 적용은 별도 후속 게이트이며 047은 여전히 어디에도 NOT APPLIED.
+- **선행 finding 마감 전부 확인**: F1 CLOSED(`CYCLE_SUPPORT_KINDS` 정확히 5종,
+  `feeling_unwell` 단일 추가, CHECK 일치, `pain_*`는 부정 픽스처·이력 주석에만 존재,
+  `PRODUCT_V3` §21 무개정 판단에 동의 — §21 하위 절이 이 메커니즘을 그대로 서술한다,
+  NEVER_SHARED 절대문 복원·사실 참) · F2 CLOSED(harness ORDER 포함) · F3 CLOSED
+  (`비의료적` src 0건) · F4 CLOSED(원장 표 + 개정 이력).
+- §21/§13 회귀 없음: 컴포저는 daily-log 데이터에 구조적으로 도달 불가, 모든 `setKind`는
+  press에서만, preview=파트너 렌더 동일 map, 반려된 `pain_*` 문자열은 payload guard에서
+  거부, kind별 알림·분석 문자열 0.
+- in-place migration 정정의 정당성 확인: `9680a1b`를 포함한 branch는 이 PR의 branch뿐,
+  master에 `047_*` 없음, 원장 기준 적용된 곳 없음.
+- **reviewer가 직접 실행**: d0e2c0a export에서 phase0 harness — 실제 PostgreSQL 17.10,
+  45 migration 적용, **125 assertions 전부 PASS**, exit 0 / targeted vitest 5파일
+  **99/99 PASS** / 전체 정적 diff·grep·branch containment / PR #74·#76 live CI 확인.
+- 실행하지 않음: 전체 Vitest·typecheck·lint·build 로컬 실행(PR #76 CI PASS 관찰만),
+  원격 Supabase 조회.
+- **NOTE 2건과 처분**: (N1·MEDIUM) PR #73 branch에 반려된
+  `047_cycle_pain_care_signal.sql`이 잔존 — 이후 merge되면 master에 두 번째 `047_*`가
+  생긴다 → **#73을 즉시 CLOSED 처리함**(branch는 역사 보존). (N2·LOW) harness
+  머리말/배너의 "through 045" 문구가 047 체인과 불일치(선행 결함) → **#76 merge 후
+  후속으로 수정**, 승인된 head를 stale하게 만들지 않는다.
+- code/migration/production 변경: 없음 (READ-ONLY).
+
+### 2026-08-21 · LV · 047 review 반영 — 어휘를 승인된 한 종류로 축소, 실제 DB 증거 확보
+
+#### PLAN POSITION
+- Phase: LV / Workstream: 배려 신호 (migration 047)
+- Step: independent review `CHANGES_REQUIRED` 반영 → delta re-review 대기
+- Previous Gate: 아래 항목의 review verdict (F1 HIGH · F2 MEDIUM)
+- This Gate: delta re-review 통과 전 PR #76 merge 금지
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3` §21(불변 유지 확인), `V1_LAUNCH_DECISIONS` §5(feeling_unwell 한 종류) — YES
+- Business source: NOT APPLICABLE / Engineering source: `AGENTS` §19, `docs/skills/migration-gate.md` §3 — YES
+- Does this task conflict with canonical direction? NO — 충돌하던 것은 반려된 3단계 어휘였고, 이 작업이 canonical에 맞춘다. canonical 개정 불요(§21 그대로 참)
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Fable 5 / Role: Worker (review 반영; 재심사는 별도 independent delta reviewer)
+- PR: #76 / Branch: `claude/047-cycle-pain-gated` / `9680a1b` → **`d0e2c0a`**
+
+#### CHANGED / REVIEWED
+- **F1(HIGH) 해소 — 어휘 축소.** `pain_mild/moderate/severe` 3단계 제거, `CYCLE_SUPPORT_KINDS`에 `feeling_unwell`("오늘은 몸이 힘들어요") 하나 추가(4→5). 별도 pain fieldset·`CYCLE_PAIN_SHARE_KINDS`·`CyclePainShareKind`·`CycleSignalKind`·predicate 2종 전부 삭제 — 배려 신호는 다시 한 개념이다. 전송 전 preview는 유지(별도 승인된 D4 수정). `cyclePartnerMessage`의 절대 문구("증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요") 복원 — feeling_unwell은 기록값·등급이 없는 독립 opt-in이므로 이 문장은 참이다
+- migration을 `047_care_signal_feeling_unwell.sql`로 개명·정정(5값 CHECK). **적용된 곳도 merge된 곳도 없는 파일이므로 in-place 정정이 정당한 유일한 시점**이며, DOWN은 해당 kind row 존재 시 거부 유지. 반려된 `pain_*` 문자열은 payload guard에서 unknown으로 거부됨을 negative test로 고정
+- **F2(MEDIUM) 해소.** `scripts/phase0/storage-authz-harness.mjs` ORDER에 047 추가, **실제 PostgreSQL 17로 실행 — 001→047 fresh chain 적용 + 전 baseline contract PASS**
+- F3: 컴포저의 "비의료적" 절대 수식어 제거 / F4: ledger 표 결합 + 초안→개정 이력 명기
+- 테스트: `cyclePainShare.test.ts` 전면 재작성(등급 kind 영구 금지 — `/^pain_/`·`mild|moderate|severe` 매칭 kind는 실패), `featurePrivacy`·`CycleSupportSection`·`cyclePartnerMessage` guard를 5-kind 어휘로 갱신
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음 / RLS·GRANT·함수: 없음(047은 여전히 CHECK 어휘만)
+- product semantics: preview·당일 만료·철회·기본 꺼짐 불변
+- Production: 미접촉. 047은 여전히 어디에도 NOT APPLIED
+
+#### VERIFICATION
+- 실행함: `typecheck` PASS · `lint --max-warnings 0` PASS · **full Vitest 2636/2636 PASS** · `build` PASS · `node scripts/phase0/storage-authz-harness.mjs` PASS(실제 PostgreSQL 17, 001→047)
+- 실행하지 않음: e2e(이 delta는 cycle 화면 한정, CI가 실행) · 원격 Supabase 조회 · 실기기
+
+#### REVIEW IMPACT
+- DELTA — 원 review가 "어휘 변경 시 DELTA로 충분"이라 명시. independent delta reviewer에게 `d0e2c0a` 재심사 요청함
+
+#### BLOCKERS / STOPPED AT / NEXT ACTION
+- external: delta re-review 판정 대기 → 통과 시 #74 merge 후 #76 merge 가능
+- STOPPED AT: `d0e2c0a` pushed, PR #76 본문 갱신
+- next owner: independent delta reviewer → 사용자(merge)
+
+#### DO NOT ADVANCE UNTIL
+- delta re-review 승인 전 #76 merge 금지 · #74보다 먼저 merge 금지
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-21 · LV · migration 047 delta — independent READ-ONLY security review (원 3단계 어휘에 대한 판정)
+
+> reviewer가 남긴 READY-TO-COPY 판정의 반영이다. 판정 대상은 **개정 전** tree
+> `709a11b`(delta `aeccca2` = `9680a1b`)이며, 위 항목의 `d0e2c0a`가 이 판정의 시정이다.
+
+- **VERDICT: CHANGES_REQUIRED.** 메커니즘(파생 금지·독립 opt-in·당일 만료·철회·RLS 상속)은 §21을 양방향으로 지키며 negative test로 고정되어 있다. 차단 사유는 어휘와 증거.
+- F1(HIGH): 구현 어휘 `pain_mild/moderate/severe`(3단계)가 결정 기록과 다르다. `V1_LAUNCH_DECISIONS` §5는 `feeling_unwell` **한 종류**를 승인했고, `PRODUCT_V3` §21은 개정되지 않았다. 개인 HRK 어휘와 1:1 등급 대응이며 §20상 kind는 서버 가시 metadata다.
+- F2(MEDIUM): 047이 어떤 harness 체인에도 없어 live PostgreSQL 증거 0 — migration-gate §3 위반.
+- F3(LOW-MED): "비의료적 응원 신호만" 문구가 같은 화면의 통증 선택기와 모순. F4(LOW): ledger 표 분리. F5(INFO): CURRENT_STATE 미기재(→ #75 convergence checkpoint가 소유).
+- 이상 없음 확인: RLS·GRANT·trigger 상속 안전(anon·전 파트너·NULL actor 거부는 014 정책 원문으로 확인), invalidation payload에 kind 없음, 알림 전용 문구 pre-commit 없음, `CyclePartnerProjection` 건강 필드 0, preview=파트너 렌더 동일 map, 기본 꺼짐·당일 만료·철회 보존, log→signal 다리 없음.
+- 검증 실행함: tree `709a11b`를 scratchpad로 export 후 targeted vitest **102/102 PASS** + git 정적 검증 전체. 실행하지 않음: 전체 suite·e2e·모든 live PostgreSQL 검증·원격 catalog("RLS verified" 주장 없음).
+- 판정은 tree `709a11b`에 결속되며 HEAD 변경 시 승계되지 않는다(AGENTS §19).
+
+### 2026-08-21 · Phase 0 · 전략 승인 집행 — 두 계보 수렴과 canonical 개정 반영
+
+같은 날 아래 전략 검토 항목의 승인("승인한다") 이후 이어진 집행 세션이다.
+
+#### PLAN POSITION
+- Phase: Phase 0 — 마감과 정합 (전략 문서 §8)
+- Workstream: 두 계보 수렴 선결 + canonical 개정 + 047 분리
+- Step: #74 CI 수리 → green → canon 반영 → 047 gated branch → #73 처분 준비
+- Previous Gate: 전략 검토 승인 (사용자, 2026-08-21)
+- This Gate: **#74 master merge는 사용자 실행 대기** — `.claude/hooks/block-dangerous-bash.sh`가 PR merge를 사용자에게 예약한다
+
+#### DIRECTION CHECK
+- Product/Business/Engineering/Current-state/Work Log: 같은 세션에서 전수 복구 완료 (아래 항목)
+- Does this task conflict with canonical direction? NO — §11 충돌 항목은 사용자 승인으로 해소되었고, 이 세션이 canonical에 반영했다
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Fable 5 / Role: integrator + docs writer (047 내용은 리뷰하지 않음 — independent reviewer 별도)
+- PR/Branch: #74 `release/v1-gate1-gate2` @ `9b0d4b3` (CI 수리) · `claude/canon-amendments-2026-08-21` (canonical 개정 + 전략 문서) · `claude/047-cycle-pain-gated` (047 분리)
+
+#### CHANGED / REVIEWED
+- `e2e/coupleMatrix.spec.ts`·`e2e/realUsability.spec.ts` — 한 이름 통일(`기록 남기기`) 이후 stale locator 2건 수정. `e2e/mediaGallery.spec.ts` 주석 정합. `docs/PHASE_NEXT_ARCHITECTURE_2026-08-20.md` box mockup trailing whitespace 제거 → **#74 CI 14/14 GREEN**
+- canonical 3문서 개정 (승인분): `PRODUCT_V3` §5.2 역할별 홈·§6.1 역할 해석·§7.6 연결 전 기록 사후 공유·§8 통화 모드·§10 하루 격자·§14.3 알림 정책(행위만·하루 1회·단일 문구·토큰 무효화)·§14.5 E2EE 단계별 표현 계약 / `ENGINEERING_ROADMAP` ARCH-P6 개정(공유=중립 암호문 저장, 개인 클라우드=선택 보존 계층, Android deferred 폐기)·LV 진입 조건 2건(계측·표현 일치) / `BUSINESS` §9.2 전역 1순위 가설
+- `CURRENT_STATE` 2026-08-21 convergence checkpoint 추가
+- 047 delta를 `claude/047-cycle-pain-gated`로 분리 (내용 불변 이동)
+
+#### EXPLICITLY NOT CHANGED
+- crypto·DB·migration semantics: 없음. 047은 기존 commit의 branch 이동일 뿐 내용 불변
+- product 코드: e2e 테스트 파일 외 0줄
+- Production: 미접촉
+
+#### VERIFICATION
+- 실행함: 실패했던 e2e 3건을 로컬 실제 Chrome + production build로 PASS (creator/partner protection_required, primary-action sweep) / `typecheck`·`lint` PASS / doc-guard 62 tests PASS / `git diff --check` clean / #74 CI 재실행 **14/14 GREEN** @ `9b0d4b3`
+- 실행하지 않음: full unit suite(이 docs branch에서는 CI가 실행) / remote Supabase / 실기기
+- 047 independent security review: 이 세션이 별도 read-only reviewer로 실행 — 결과는 047 PR에 기록
+
+#### BLOCKERS
+- external/manual: ① #74 master merge (사용자) ② merge 후 canon PR·#73 닫기 ③ 047 review 승인
+
+#### STOPPED AT
+- #74 green·merge 대기. canon branch와 047 branch push + PR 생성까지
+
+#### NEXT ACTION
+- next owner: 사용자 — #74 merge → canon PR merge → #73 close. 이후 Worker가 Phase 0 UI 결함 목록(전략 문서 §8 Phase 0) 착수
+- 기준 SHA: #74 `9b0d4b3`
+
+#### DO NOT ADVANCE UNTIL
+- #74가 master에 merge되기 전에 canon PR·047 PR을 merge하지 않는다
+- 047은 independent security review 승인 전 merge 금지
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-21 · Strategy · CPO 제품 전략 종합 검토 — 검증 부채 판정과 로드맵 재고정
+
+#### PLAN POSITION
+- Phase: LV 진입 전 전략 검토 (구현 없음)
+- Workstream: 제품 전략·실행 로드맵 재설계 검토 (사용자 요청: 전 영역 first-principles 재검토)
+- Step: canonical 전체 복구 → 저장소 구조·UI 감사(서브에이전트 2) → live GitHub 검증 → 결정 제안 문서
+- Previous Gate: Gate 1·2 구현 완료(`d45c760`), 047 independent security review 대기
+- This Gate: 없음 — 분석·제안만. canonical 개정은 사용자 승인 대기
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` 전체 — YES
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1.md` 전체 — YES (BM·AI·저장·미디어·KPI 전 영역 검토이므로 필수)
+- Engineering source checked: `ENGINEERING_ROADMAP.md`, `AGENTS.md` — YES
+- Current-state checked: `CURRENT_STATE.md` + live git/GitHub (`master` `21e7dfb`, PR #59–#74, CI) — YES
+- Latest relevant Work Log checked: 2026-08-20 전 세션 + 2026-08-20 결정 문서군 5종 — YES
+- MASTER PLAN version / 기준일: PRODUCT V3 / 2026-08-15
+- Does this task conflict with canonical direction? NO (분석 자체는 충돌 없음). 제안 중 canonical 개정이 필요한 항목은 문서 §11에 분리했고 승인 전 미적용
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Fable 5 / Role: CPO-level 전략 검토자 (docs-only writer)
+- PR: #73 브랜치 위 docs-only commit / Branch: `claude/v1-launch-readiness`
+- Base SHA: `d45c760` → New HEAD: 이 commit
+
+#### CHANGED / REVIEWED
+- new: `docs/PRODUCT_STRATEGY_REDESIGN_2026-08-21.md` — 제품 코어·여정·IA·AI·프라이버시·리텐션·수익화·Phase 0–4 로드맵·아키텍처 리뷰·최종 결정 + canonical 개정 목록(§11)
+- 코드 감사에서 확인한 문서-코드 격차: E2EE feature flag 기본 OFF(`VITE_E2EE_DEVICE_PROTECTION_ENABLED` 미설정) · 커플 키 페어링/2기기/복구의 UI 호출자 0(`useCases.ts` 도달 불가) · 컴포저에 평문 영상·음성 캡처 칩 활성(§12.3와 불일치) · §19 계측 0줄 · iOS `Pods/` 부재(이 트리에서 빌드된 적 없음) · Android `capacitor.plugins.json` stale
+- live 발견: PR #74(`release/v1-gate1-gate2`, non-draft)는 이 브랜치 18 commit 중 047 commit 하나만 뺀 동일 내용 재작성 계보. 실패 check 3건(Boundary/diff · Real-browser matrix · Capacitor sync reproducibility)
+- 핵심 결정(제안): LV를 유일 최상위 목표로 고정 / LV는 E2EE flag OFF + 사진만(영상·음성 칩 비활성) + 신규 Supabase 프로젝트 / 계측을 LV 선행 조건으로 / ARCH-P6를 "공유=플랫폼 중립 암호문 저장, 개인 클라우드=선택 보존 계층"으로 개정 채택 / #74를 landing 계보로 확정하고 #73은 047+문서로 축소
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 없음 / DB·migration semantics: 없음 (코드 0줄, SQL 0줄)
+- product semantics: canonical 문서 미수정. 모든 개정은 §11 승인 대기
+- Production: 미접촉. 원격 조회·변경 없음
+
+#### VERIFICATION
+- 실행함: `scripts/agent/live-state.sh`, `git`/`gh` live 조회(master tip·branch delta·PR #74 CI), 서브에이전트 감사 2건(src 구조 92k LOC 맵 / UI 스크린샷 112장 검토)
+- 실행하지 않음: `npm run verify`/test 일체(docs-only 변경), remote Supabase catalog 조회, 실기기 검증
+- what it actually proves: 저장소·GitHub의 현재 사실만. 운영·실기기 상태는 UNVERIFIED 유지
+
+#### REVIEW IMPACT
+- NONE — 코드 무변경. 기존 review 유효성에 영향 없음
+
+#### BLOCKERS
+- code: 없음 / environment: 없음
+- external/manual: §11 canonical 개정에 대한 사용자 승인, 047 independent security review
+
+#### STOPPED AT
+- 전략 문서 + 이 원장 항목 commit까지. push는 하지 않았다
+
+#### REMAINING
+- §10 방향·§11 개정의 사용자 승인 → Phase 0 착수(PR #74 실패 check 3건 수리 → landing → #73 축소 → UI 결함 마감 목록)
+
+#### NEXT ACTION
+- next owner: 사용자(승인) → Worker(Phase 0)
+- 기준 SHA: 이 commit
+- exact next task: 문서 §10·§11 승인 여부 결정. 승인 시 Phase 0의 선결 항목(두 계보 수렴)부터
+
+#### DO NOT ADVANCE UNTIL
+- 047 review 전 #73 전체를 master로 merge하지 않는다(기존 규칙 유지)
+- §11 항목은 canonical 개정 전에 구현하지 않는다
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-20 · LV · 감정 provenance·추론 시점 + 세 갈래 작업 통합
 
 #### PLAN POSITION

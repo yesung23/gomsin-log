@@ -81,6 +81,49 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 
+    /// The APNs token, handed to the plugin that is waiting for it.
+    ///
+    /// Without these two methods iOS push cannot work at all, and it fails in the
+    /// worst available way: silently. UIKit delivers the device token to the app
+    /// delegate and nowhere else, and `PushNotificationsPlugin` learns of it only
+    /// by observing `.capacitorDidRegisterForRemoteNotifications`
+    /// (node_modules/@capacitor/push-notifications/.../PushNotificationsPlugin.swift).
+    /// `CAPApplicationDelegateProxy` does not forward remote-notification
+    /// callbacks -- it handles `openURL` and universal links -- so an app delegate
+    /// that omits these bridges every registration into a void.
+    ///
+    /// What that looked like: `register()` resolves, the token arrives here and is
+    /// dropped, neither the `registration` nor the `registrationError` listener in
+    /// `src/lib/pushNotifications.ts` ever fires, and the ten-second timeout wins.
+    /// The app reports "failed" with no reason, forever, on every iOS device --
+    /// and no credential, entitlement or physical device would have fixed it,
+    /// because the token never reaches the JavaScript layer to be stored.
+    ///
+    /// `nativeConfig.test.ts` pins both methods so the next AppDelegate edit
+    /// cannot quietly drop them again.
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        NotificationCenter.default.post(
+            name: .capacitorDidRegisterForRemoteNotifications,
+            object: deviceToken
+        )
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        // Posted rather than swallowed: the JavaScript side turns this into a
+        // named refusal, and a refusal a user can be told about is worth more
+        // than a ten-second wait that ends in nothing.
+        NotificationCenter.default.post(
+            name: .capacitorDidFailToRegisterForRemoteNotifications,
+            object: error
+        )
+    }
+
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         // Called when the app was launched with a url. Feel free to add additional processing here,
         // but if you want the App API to support tracking app url opens, make sure to keep this call

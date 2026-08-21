@@ -178,3 +178,78 @@ describe('nothing to do', () => {
     expect(result.body).toMatchObject({ considered: 0, delivered: 0 });
   });
 });
+
+describe('one recipient failing does not silence the rest of the batch', () => {
+  /*
+    Every dependency here can REJECT, not merely resolve unsuccessfully: `fetch`
+    throws on a dropped connection and an RPC throws when the database refuses.
+    Before these tests the loop had no guard, so the first rejection ended it --
+    turning one bad row into a batch-wide outage whose victims were decided by
+    map iteration order, and which looks exactly like a quiet day with nobody to
+    notify.
+  */
+
+  it('keeps going when delivery to one person throws', async () => {
+    const markDelivered = vi.fn(async () => {});
+    const result = await handleSendPush(deps({
+      listCandidates: async () => [
+        candidate({ user_id: 'first', token: 'boom' }),
+        candidate({ user_id: 'second', token: 'fine' }),
+      ],
+      deliver: async (c) => {
+        if (c.token === 'boom') throw new Error('ECONNRESET');
+        return { ok: true };
+      },
+      markDelivered,
+    }));
+
+    expect(markDelivered).toHaveBeenCalledWith('second');
+    expect(markDelivered).toHaveBeenCalledTimes(1);
+    expect(result.body).toMatchObject({ considered: 2, delivered: 1, failed: 1 });
+  });
+
+  it('keeps going when lowering one person’s flag throws', async () => {
+    const delivered: string[] = [];
+    const result = await handleSendPush(deps({
+      listCandidates: async () => [
+        candidate({ user_id: 'first' }),
+        candidate({ user_id: 'second' }),
+      ],
+      markDelivered: async (userId) => {
+        if (userId === 'first') throw new Error('E_DB_WRITE_FAILED');
+        delivered.push(userId);
+      },
+    }));
+
+    expect(delivered).toEqual(['second']);
+    // The first person's send landed, but their turn did not complete: the flag
+    // is still raised, so they are counted as failed rather than told.
+    expect(result.body).toMatchObject({ considered: 2, delivered: 1, failed: 1 });
+  });
+
+  it('keeps going when dropping a dead token throws', async () => {
+    const markDelivered = vi.fn(async () => {});
+    const result = await handleSendPush(deps({
+      listCandidates: async () => [
+        candidate({ user_id: 'first', token: 'dead' }),
+        candidate({ user_id: 'second', token: 'fine' }),
+      ],
+      deliver: async (c) => (c.token === 'dead' ? { ok: false, tokenGone: true } : { ok: true }),
+      dropToken: async () => { throw new Error('E_DB_WRITE_FAILED'); },
+      markDelivered,
+    }));
+
+    expect(markDelivered).toHaveBeenCalledWith('second');
+    expect(result.body).toMatchObject({ considered: 2, delivered: 1, tokensDropped: 0 });
+  });
+
+  it('does not mark a person delivered when their only device threw', async () => {
+    const markDelivered = vi.fn(async () => {});
+    await handleSendPush(deps({
+      deliver: async () => { throw new Error('ECONNRESET'); },
+      markDelivered,
+    }));
+
+    expect(markDelivered).not.toHaveBeenCalled();
+  });
+});

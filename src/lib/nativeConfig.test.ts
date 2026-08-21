@@ -300,6 +300,36 @@ describe('Android: the permission set is exactly what the code proves', () => {
     ]);
   });
 
+  it('agrees with the JVM copy of the same list', () => {
+    /*
+      The permission set is checked twice, on purpose: here, and again in
+      `NativeConfigTest.java`. Two independent witnesses reading the same
+      manifest is worth more than one, because a single check can be relaxed in
+      the same commit that relaxes the thing it guards.
+
+      The cost is drift, and it has happened twice. Both times the JVM copy was
+      the one left behind, because the Android CI job is the ONLY thing that
+      reads it -- and that job needs an SDK nobody has locally. The drift
+      therefore survives every local run and surfaces minutes later in CI, on a
+      machine, in a language the person who caused it was not working in.
+
+      This assertion does not merge the two lists. It checks that they say the
+      same thing, here, where it costs a second to find out.
+    */
+    const jvm = read('android/app/src/test/java/app/gomsinlog/NativeConfigTest.java');
+    const expectedBlock = jvm.slice(
+      jvm.indexOf('List<String> expected = Arrays.asList('),
+      jvm.indexOf('assertEquals(expected, declared);'),
+    );
+    expect(expectedBlock).not.toBe('');
+
+    const jvmPermissions = [...expectedBlock.matchAll(/"(android\.permission\.[A-Z_]+)"/g)]
+      .map((m) => m[1])
+      .sort();
+
+    expect(jvmPermissions).toEqual([...declared].sort());
+  });
+
   /**
    * PRIORITY 1, the native half.
    *
@@ -483,6 +513,48 @@ describe('iOS: bundle identity, ATS and usage descriptions', () => {
 
   it('disables the Safari Web Inspector in the shipped configuration', () => {
     expect(capacitorConfig).toMatch(/ios:[\s\S]*?webContentsDebuggingEnabled: false/);
+  });
+});
+
+describe('iOS: the APNs token can actually reach the plugin waiting for it', () => {
+  /*
+    The bug this pins was invisible in every gate the repository has.
+
+    UIKit hands the device token to the app delegate and to nothing else.
+    `PushNotificationsPlugin` learns of it only by observing
+    `.capacitorDidRegisterForRemoteNotifications`, and `CAPApplicationDelegateProxy`
+    does not forward remote-notification callbacks -- it forwards `openURL` and
+    universal links. So an AppDelegate without these two methods drops every token
+    on the floor.
+
+    Nothing caught it: the Swift compiles, the simulator build succeeds, the
+    entitlement checks pass, and the JavaScript side reports a timeout rather than
+    an error. It would have surfaced as "push does not work on iOS" on a physical
+    device, after credentials, after an entitlement, after TestFlight -- with three
+    external gates to blame before this file.
+  */
+  const appDelegate = read('ios/App/App/AppDelegate.swift');
+
+  it('forwards a successful registration', () => {
+    expect(appDelegate).toContain('didRegisterForRemoteNotificationsWithDeviceToken');
+    expect(appDelegate).toContain('.capacitorDidRegisterForRemoteNotifications');
+  });
+
+  it('forwards a failed registration, so a refusal can be named', () => {
+    expect(appDelegate).toContain('didFailToRegisterForRemoteNotificationsWithError');
+    expect(appDelegate).toContain('.capacitorDidFailToRegisterForRemoteNotifications');
+  });
+
+  it('posts them, rather than merely mentioning the names in a comment', () => {
+    // The assertions above are substring checks, which a comment would satisfy.
+    // These require the posting call itself, next to each name.
+    const posts = [...appDelegate.matchAll(
+      /NotificationCenter\.default\.post\(\s*name:\s*\.(capacitorDid\w+)/g,
+    )].map((m) => m[1]).sort();
+    expect(posts).toEqual([
+      'capacitorDidFailToRegisterForRemoteNotifications',
+      'capacitorDidRegisterForRemoteNotifications',
+    ]);
   });
 });
 

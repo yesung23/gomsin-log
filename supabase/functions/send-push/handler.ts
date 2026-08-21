@@ -31,10 +31,20 @@
  *     this file cannot produce a second send or a 03:00 delivery, because it
  *     never had the authority to.
  *
- *  4. **It records nothing.** `mark_push_delivered` lowers a flag and stamps a
- *     day boundary. There is no delivery log, no receipt and no history, because
- *     §19 forbids precise timestamps as analytics and a delivery history is the
- *     surveillance surface §16 rules out.
+ *  4. **It persists no history.** `mark_push_delivered` lowers a flag and stamps
+ *     a day boundary. No table gains a row per notification, because §19 forbids
+ *     precise timestamps as analytics and a delivery history is the surveillance
+ *     surface §16 rules out.
+ *
+ *     One honest qualification, because "records nothing" would be too strong.
+ *     `logEvent` writes a recipient id and an outcome to the platform log, and a
+ *     platform log is timestamped by the platform. For as long as that log is
+ *     retained, it can answer "was this person notified, and roughly when" --
+ *     and since a notification only fires when their partner acted, it can be
+ *     read backwards. That is an operations surface, not a product feature: no
+ *     client can reach it, nothing in the app queries it, and it holds no
+ *     content. It is named here rather than left for someone to find, because
+ *     retention of that log is a deployment decision this file cannot make.
  *
  * DENO RUNTIME: UNEXECUTED. No Deno toolchain is available in this environment.
  */
@@ -107,18 +117,46 @@ export async function handleSendPush(deps: SendPushDeps): Promise<SendPushOutcom
   let failed = 0;
   let tokensDropped = 0;
 
+  /*
+    One recipient's bad minute is not everyone else's.
+
+    Every await below can reject, not merely resolve `{ ok: false }`: `fetch`
+    throws on a dropped connection, and an RPC throws when the database refuses.
+    Unguarded, the first such rejection ends the whole loop -- so a single failing
+    row silently cancels the notification for every person after it in the batch,
+    and the larger the batch the more people it takes down. The daily cap then
+    ensures they are not retried until the next scheduled run.
+
+    Worse, it is order-dependent: the people already processed keep their
+    notification, the rest lose theirs, and which group someone lands in is
+    decided by map iteration order. That is an outage that looks like a quiet day.
+  */
   for (const [userId, devices] of byUser) {
     let reachedSomewhere = false;
 
     for (const device of devices) {
-      const result = await deps.deliver(device);
+      let result: SendResult;
+      try {
+        result = await deps.deliver(device);
+      } catch {
+        // A transport that threw is a transport that failed. Same meaning as
+        // `{ ok: false }`, and the next run retries it.
+        failed += 1;
+        continue;
+      }
 
       if (result.tokenGone) {
         // A dead token is not a failure to retry; it is a device that is gone.
         // Leaving it would make this person permanently "failed" and, worse,
         // would keep a stale token addressable if the account ever changed.
-        await deps.dropToken(device.token);
-        tokensDropped += 1;
+        try {
+          await deps.dropToken(device.token);
+          tokensDropped += 1;
+        } catch {
+          // The token stays; the next run tries to drop it again. Not being able
+          // to delete a row must not cost this person their notification.
+          failed += 1;
+        }
         continue;
       }
 
@@ -134,10 +172,23 @@ export async function handleSendPush(deps: SendPushDeps): Promise<SendPushOutcom
       they are not told again until tomorrow. Failing loudly and retrying on the
       next run is the honest direction: at worst the notification arrives later
       in the same contact window.
+
+      When the send lands but the flag will not lower, this counts as FAILED
+      rather than delivered, and the count is the honest one: the person's turn
+      did not complete. It also names the one duplicate this design permits --
+      they were notified, `has_unseen` is still raised, and the next run may
+      notify them again because the daily cap is stamped by the write that just
+      failed. Delivering twice is the lesser error than the alternative, which is
+      marking before sending and telling someone they were notified when nothing
+      left the building.
     */
     if (reachedSomewhere) {
-      await deps.markDelivered(userId);
-      delivered += 1;
+      try {
+        await deps.markDelivered(userId);
+        delivered += 1;
+      } catch {
+        failed += 1;
+      }
     }
 
     deps.logEvent?.('push_attempt', {

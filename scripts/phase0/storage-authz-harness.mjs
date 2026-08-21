@@ -2471,6 +2471,101 @@ check(
 );
 check(unseenOf(E) === 'f', '055 and nothing they already read is re-pended by that mark');
 
+// --- a DELAYED OLDER mark must not reopen a day already spent ----------------
+/*
+  `notified_through` moves forward only. `last_notified_at` did not, and the two
+  are load-bearing for different things: the boundary decides what a notification
+  covered, the stamp decides whether today's single send has been spent.
+
+  Two senders, reverse order -- which is not exotic, it is what a retry queue and
+  a re-invoked scheduler produce between them:
+
+    W1 decides on D1, its mark is delayed
+    W2 decides on D2, its mark lands FIRST   -> last_notified_at = D2
+    a new act arrives on D2                  -> has_unseen = t
+    W1's delayed mark finally lands (D1)     -> last_notified_at = D1  <-- backwards
+
+  The recipient's D2 send is now un-spent. The next run sees a stamp dated D1,
+  reads the cap as open, and sends them a SECOND notification on D2. The daily
+  cap is the one promise this surface makes to someone's lock screen, and it is
+  broken by bookkeeping arriving out of order rather than by anything the user or
+  the author did.
+
+  `notified_through` is unaffected either way -- its GREATEST already refuses to
+  go backwards -- which is exactly why this survived: every boundary assertion in
+  this file kept passing while the stamp beside it went backwards.
+*/
+const D1_DECISION = INSIDE;                                   // 2026-08-19 20:00 KST
+const D2_DECISION = NEXT_DAY;                                 // 2026-08-20 20:00 KST
+const D2_LATER = `TIMESTAMPTZ '2026-08-20 20:30+09'`;
+const stampOf = (userId) =>
+  mustSql(`SELECT COALESCE(last_notified_at::text, 'NULL') FROM public.push_delivery_state
+            WHERE user_id = '${userId}'`, 'stamp');
+
+resetPendingFixture('055-H');
+shareRecord('e5500000-0000-4000-8000-0000000000h1'.replace(/h/g, '8'), 'R1', '055-H R1');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H W2 mark');
+const stampAfterD2 = mustSql(
+  `SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
+    WHERE user_id = '${E}'`, '055-H D2 stamp');
+shareRecord('e5500000-0000-4000-8000-0000000000h2'.replace(/h/g, '8'), 'R2 on D2', '055-H R2');
+check(unseenOf(E) === 't', '055 (case H) the D2 act raises the flag, so a second D2 send is only barred by the cap');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H W1 delayed mark');
+
+check(
+  stampAfterD2 === 't'
+    && mustSql(`SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
+                 WHERE user_id = '${E}'`, '055-H stamp holds') === 't',
+  `055 (case H) a DELAYED OLDER mark does not drag last_notified_at backwards (stamp now ${stampOf(E)})`,
+);
+check(
+  dueAt(D2_LATER) === '0',
+  '055 (case H) so the day it already spent stays spent: no SECOND notification on D2',
+);
+check(
+  mustSql(`SELECT notified_through >= ${D2_DECISION} FROM public.push_delivery_state
+            WHERE user_id = '${E}'`, '055-H boundary') === 't',
+  '055 (case H) and the boundary is still the forward-most one, as GREATEST already guaranteed',
+);
+
+/*
+  The control. Monotonicity must bar only BACKWARD movement -- if it also barred
+  the ordinary case, the cap would jam shut and nobody would ever be notified
+  twice because nobody would be notified again at all.
+*/
+resetPendingFixture('055-H2');
+shareRecord('e5500000-0000-4000-8000-0000000000h3'.replace(/h/g, '8'), 'R1', '055-H2 R1');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H2 D1 mark');
+check(dueAt(INSIDE_LATER) === '0', '055 (case H) a normal D1 send still spends D1');
+check(
+  dueAt(D2_DECISION) === '1',
+  '055 (case H) and D1 -> D2 still opens exactly one D2 batch, so the guard bars only BACKWARD movement',
+);
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H2 D2 mark');
+check(
+  mustSql(`SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
+            WHERE user_id = '${E}'`, '055-H2 forward') === 't',
+  '055 (case H) a NEWER mark still moves the stamp forward',
+);
+
+/*
+  And the recipient's own look, against a late mark, measured on the STAMP as
+  well as the boundary. 055-G proved the boundary; the stamp was never asserted
+  there, which is the gap this case closes from the other side.
+*/
+resetPendingFixture('055-H3');
+shareRecord('e5500000-0000-4000-8000-0000000000h4'.replace(/h/g, '8'), 'R1', '055-H3 R1');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H3 D2 mark');
+clearAsRecipient('055-H3');
+const boundaryAfterLook = boundaryOf(E);
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H3 late D1 mark');
+check(
+  boundaryOf(E) === boundaryAfterLook
+    && mustSql(`SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
+                 WHERE user_id = '${E}'`, '055-H3 stamp') === 't',
+  '055 (case H) a look followed by a late mark moves NEITHER the boundary nor the stamp backwards',
+);
+
 // --- what the sender still cannot do -----------------------------------------
 check(
   !asUser(D, `SELECT public.mark_push_delivered('${E}', now())`).ok,
@@ -2480,10 +2575,77 @@ check(
   !asAnon(`SELECT public.mark_push_delivered('${E}', now())`).ok,
   '055 and neither can anon',
 );
+/*
+  THE FUNCTION CONTRACT, read out of the catalog whole rather than sampled.
+
+  What stood here counted rows in `pg_proc WHERE proname = ...` and, below,
+  matched the result type with a regular expression. Both passed under mutation:
+  giving `p_decided_at` back its `DEFAULT now()` left the count at one, and
+  adding an `extra_meta TEXT` column to the sender's view left
+  `/decided_at timestamp with time zone/` matching and none of the forbidden
+  words present. A test that a mutation survives is not coverage; it is a
+  sentence about coverage.
+
+  So compare the whole identity in one string: how many functions of that name
+  live in `public`, their exact identity arguments, how many of those arguments
+  are DEFAULTED, and the complete result type. `count(*)` is inside the compared
+  value on purpose -- a dropped function yields `0 ;; ;; ;;`, which matches no
+  expectation, so this cannot pass vacuously the way a bare `string_agg` over an
+  empty set would.
+
+  `pronargdefaults` is not incidental. It is the entire load-bearing claim of
+  055 for `mark_push_delivered`: a caller that forgets the decision instant must
+  fail loudly rather than silently receive `now()` and erase an act. And the two
+  functions differ here -- `push_delivery_candidates(p_now DEFAULT now())` is
+  MEANT to have one default -- so a single shared expectation would have to be
+  loose enough to accept both, which is how this hole was dug the first time.
+*/
+function functionContract(schemaName, functionName) {
+  return mustSql(
+    `SELECT count(*)::text
+            || ' ;; ' || COALESCE(string_agg(pg_get_function_identity_arguments(p.oid), ' | ' ORDER BY p.oid), '')
+            || ' ;; ' || COALESCE(string_agg(p.pronargdefaults::text, ' | ' ORDER BY p.oid), '')
+            || ' ;; ' || COALESCE(string_agg(pg_get_function_result(p.oid), ' | ' ORDER BY p.oid), '')
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = '${schemaName}' AND p.proname = '${functionName}'`,
+    `contract ${functionName}`);
+}
+
+const CANDIDATES_CONTRACT =
+  '1 ;; p_now timestamp with time zone ;; 1 ;; '
+  + 'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone)';
+const MARK_CONTRACT =
+  '1 ;; p_user_id uuid, p_decided_at timestamp with time zone ;; 0 ;; void';
+
+const candidatesContract = functionContract('public', 'push_delivery_candidates');
 check(
-  mustSql(`SELECT count(*) FROM pg_proc WHERE proname = 'mark_push_delivered'`, '055 overload') === '1'
-  && mustSql(`SELECT count(*) FROM pg_proc WHERE proname = 'push_delivery_candidates'`, '055 overload2') === '1',
-  '055 each function has exactly ONE signature, so the pre-055 form is gone rather than shadowed',
+  candidatesContract === CANDIDATES_CONTRACT,
+  `055 push_delivery_candidates has EXACTLY one signature, one defaulted argument and that exact result type`
+    + ` -- so an extra OUT column or a stale overload is a failure, not a shrug (got: ${candidatesContract})`,
+);
+
+/*
+  And the vacuity guard, asserted rather than argued. `count(*)` sits inside the
+  compared string precisely so that a DROPPED function cannot slip through: the
+  reader returns a leading `0` for a name that does not exist, and no expectation
+  in this file begins with `0`. Written against a name that is deliberately
+  absent, so it keeps holding whatever happens to the two real functions.
+*/
+const absentContract = functionContract('public', 'mark_push_delivered_absent_by_design');
+check(
+  absentContract.startsWith('0 ;;') && absentContract !== CANDIDATES_CONTRACT
+    && absentContract !== MARK_CONTRACT,
+  `055 the contract reader reports ABSENCE as a leading 0, so a dropped function fails this`
+    + ` check instead of passing it on an empty result (got: ${absentContract})`,
+);
+
+const markContract = functionContract('public', 'mark_push_delivered');
+check(
+  markContract === MARK_CONTRACT,
+  `055 mark_push_delivered has EXACTLY one signature, ZERO defaulted arguments and returns void`
+    + ` -- pronargdefaults = 0 is the whole point: a caller that forgets the decision instant must FAIL,`
+    + ` not silently receive now() (got: ${markContract})`,
 );
 check(
   mustSql(`SELECT count(*) FROM information_schema.tables
@@ -2500,13 +2662,11 @@ check(
   rewritten here, since fixing it is not this change's business; named so the
   next reader does not mistake it for coverage.
 */
-const senderView = mustSql(
-  `SELECT pg_get_function_result(oid) FROM pg_proc WHERE proname = 'push_delivery_candidates'`,
-  '055 sender view');
 check(
-  /decided_at timestamp with time zone/.test(senderView)
-    && !/log_text|content|emotion|count|kind/i.test(senderView),
-  `055 the sender's view gains a clock reading and nothing else (got: ${senderView})`,
+  candidatesContract.endsWith(
+    'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone)'),
+  `055 the sender's view gains a clock reading and NOTHING else -- compared whole, so a column`
+    + ` nobody thought to forbid fails too (got: ${candidatesContract})`,
 );
 
 mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e-055'`, '055 token cleanup');

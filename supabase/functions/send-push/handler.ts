@@ -31,6 +31,16 @@
  *     this file cannot produce a second send or a 03:00 delivery, because it
  *     never had the authority to.
  *
+ *     That is a claim about REWRITING this file, and it does not extend to
+ *     RUNNING it twice at once. The cap is judged when candidates are selected
+ *     and only closed when `mark_push_delivered` lands, so two overlapping
+ *     invocations can each select the same recipient before either has marked,
+ *     and each will send. There is no row lock and no advisory lock on that
+ *     path: **the database does not prevent concurrent workers.** For LV the
+ *     risk is accepted operationally -- exactly one scheduler, no overlapping
+ *     invocation -- and the conditions and the evidence they require are owned
+ *     by `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` §6-1, not by this file.
+ *
  *  4. **It persists no history.** `mark_push_delivered` lowers a flag and stamps
  *     a day boundary. No table gains a row per notification, because §19 forbids
  *     precise timestamps as analytics and a delivery history is the surveillance

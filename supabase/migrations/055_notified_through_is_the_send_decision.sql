@@ -187,12 +187,44 @@ BEGIN
     such a recipient can be due again later on day two. Reaching it requires the
     decision and the mark to straddle midnight, while the default contact window
     closes at 21:00.
+
+    And so `last_notified_at` needs the SAME guard, for a reason the boundary's
+    version does not cover. The first draft of this migration wrote it flat, and
+    the whole of this file's reasoning about `GREATEST` sat two lines above it.
+
+    Two senders, marks arriving in the reverse of the order they were decided --
+    which is not exotic, it is what a retry queue and a re-invoked scheduler
+    produce between them:
+
+      W1 decides on day one, its mark is delayed
+      W2 decides on day two, its mark lands FIRST   -> stamp = day two
+      an act arrives on day two                     -> has_unseen = t
+      W1's delayed mark finally lands (day one)     -> stamp = day one
+
+    The day-two send is now un-spent. The next run reads a stamp dated day one,
+    finds the cap open, and sends a SECOND notification the same day. The cap is
+    the one promise this surface makes to somebody's lock screen, and it would be
+    broken by bookkeeping arriving out of order rather than by anything the user
+    or the author did.
+
+    `notified_through` is unharmed in that sequence -- its GREATEST already
+    refuses to go backwards -- which is exactly why it survived review: the
+    boundary assertions all kept passing while the stamp beside them moved back.
+    Two values, one direction, one guard each.
+
+    `GREATEST` already ignores NULL in PostgreSQL, so the first mark on a fresh
+    row still stamps. The COALESCE is there to say so out loud, matching the
+    line below rather than relying on a reader knowing which way this database
+    resolves it.
   */
   INSERT INTO public.push_delivery_state (user_id, has_unseen, last_notified_at, notified_through)
   VALUES (p_user_id, FALSE, p_decided_at, p_decided_at)
   ON CONFLICT (user_id) DO UPDATE
     SET has_unseen = FALSE,
-        last_notified_at = p_decided_at,
+        last_notified_at = GREATEST(
+          COALESCE(push_delivery_state.last_notified_at, p_decided_at),
+          p_decided_at
+        ),
         notified_through = GREATEST(
           COALESCE(push_delivery_state.notified_through, p_decided_at),
           p_decided_at

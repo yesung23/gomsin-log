@@ -3929,6 +3929,115 @@ mutation 4건 전부 잡힌다. 그중 **리스너는 그대로 두고 cold-laun
 저장소 감사 완료, 안전하게 조치 가능한 내부 blocker 없음. 다음은 여전히 **user 전용 게이트인
 PR #80 병합**이고, 그다음이 Codex 독립 감사다.
 
+### 2026-08-22 · PR #80 — Codex FINAL review HOLD 3건 마감
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비
+- Workstream: Gate 3 push
+- Step: Codex final release review가 반환한 HOLD 처리
+- Previous Gate: 4차 감사 (2026-08-21)
+- This Gate: Codex 재검토
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` §14.3 (알림 정책), §16 (비목표)
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 제품 범위·수익화 무변경
+- Engineering source checked: `AGENTS.md`, `supabase/migrations/README.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-21 4차 감사
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code · Model: Opus 5 · Role: Worker
+- PR: #80 · Branch: `release/phase1-gate3-clean-history`
+- Base SHA / Old HEAD: `e0f1771` (PR #80 head와 일치, live 확인)
+
+#### FINDING 1 — 지연된 이전 mark가 하루 상한을 다시 열었다 (HIGH)
+
+**고치기 전에 재현했다.** 055는 `notified_through`에만 `GREATEST`를 걸었고
+`last_notified_at`은 flat 대입이었다. 두 sender의 mark가 **결정의 역순**으로 도착하면
+— 재시도 큐와 재기동된 스케줄러가 함께 만드는 순서다 — 늦게 온 **더 이른** mark가
+스탬프를 뒤로 끈다.
+
+실제 체인 측정: D2 mark → D2 새 행위 → 지연된 D1 mark →
+스탬프 `2026-08-19 20:00:00+09`, `push_delivery_candidates`가 D2에 **후보를 다시 반환**.
+같은 날 알림 2건. **경계 assertion은 전부 통과하는 채로 그 옆에서 벌어졌다** — 이 결함이
+리뷰를 통과한 이유가 그것이다.
+
+**최소 수정:** 스탬프에도 같은 `GREATEST`. 값 두 개, 방향 하나, 가드 각각 하나.
+`GREATEST`는 PostgreSQL에서 NULL을 무시하므로 첫 mark는 그대로 찍힌다. 어디에도
+적용되지 않은 파일이라 054의 기록된 선례대로 **055를 직접 수정**했다(user 명시 승인).
+
+**회귀 증명 8개** (case H): 후퇴 금지 · D2 두 번째 발송 없음 · 경계는 여전히 전방 최대 ·
+정상 D1 소진 · D1→D2는 여전히 1회 허용 · 새 mark는 전진 · 열람 후 늦은 mark는 경계와
+스탬프 **둘 다** 후퇴 금지.
+
+#### FINDING 2 — 055 카탈로그 계약 테스트가 너무 약했다 (HIGH)
+
+`pg_proc` 행 수 세기와 result type 정규식이었다. Codex가 증명한 대로 두 mutation이
+**모두 통과했다** — `DEFAULT now()` 복구와 `extra_meta TEXT` OUT 컬럼 추가.
+
+**수정:** schema 한정 `count(*)` · `pg_get_function_identity_arguments` ·
+`pronargdefaults` · `pg_get_function_result`를 **한 문자열로 전량 비교**한다.
+`count(*)`를 비교 대상 안에 넣은 것이 핵심 — 함수가 없으면 선두가 `0`이라 빈 결과로
+우연히 통과할 수 없고, 그 사실 자체를 별도 assertion으로 고정했다. 두 함수의
+`pronargdefaults` 기대값이 다르다(`candidates`는 1, `mark`는 0)는 점도 분리했다 —
+공유 기대값으로 뭉쳤던 것이 이 구멍을 판 방식이다.
+
+#### FINDING 3 — 동시 worker의 수용 조건이 어디에도 없었다 (MEDIUM, 릴리스 blocker)
+
+DB 동시성 장치를 새로 만들지 않았다. 배포 체크리스트에 **LV 진입 전 게이트**를 넣었다
+(`docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` §6-1): 스케줄러 등록 정확히 1개 ·
+중복 cron 0건을 목록에서 확인 · 호출 간격 > 관측된 최대 실행 시간 · 증거를 LV 운영
+기록에 남김 · 보장 불가 시 **LV HOLD**. `마지막 확인`에도 5항목 추가.
+
+**암묵적 안전 서술 2건을 정정했다.** `CURRENT_STATE.md`의 "남은 것은 전부 외부
+게이트다"(자격증명·기기만 열거)와 `send-push/handler.ts` 규칙 3의 "이 파일을 다시 써도
+두 번째 발송은 만들 수 없다". 후자는 *rewrite*에 대한 주장이라 *동시 실행*에는 해당하지
+않는다. 둘 다 **데이터베이스는 동시 worker를 막지 않는다**고 명시하도록 고쳤다.
+
+#### MUTATION
+
+| mutation | 결과 |
+|---|---|
+| `last_notified_at` 단조성 제거 | **3 FAIL** |
+| `mark_push_delivered`에 `DEFAULT now()` 복구 | **1 FAIL** (`pronargdefaults` 1로 검출) |
+| `candidates`에 `extra_meta TEXT` OUT 컬럼 | **2 FAIL** |
+| 1-인자 stale overload 추가 | **2 FAIL** (051 overload 가드 + 055 계약) |
+
+함수 삭제는 별도 mutation 대신 **영구 assertion**으로 고정했다 — 존재하지 않는 이름의
+계약을 읽으면 선두가 `0`이고, 이 파일의 어떤 기대값도 `0`으로 시작하지 않는다.
+
+#### VERIFICATION
+
+| 무엇 | 결과 |
+|---|---|
+| `npm run verify` | **EXIT=0** — 189 files / **2,847 tests** / typecheck · lint · build |
+| `npm run test:phase0` | **282 assertions / 0 FAIL**, fresh chain **53 migrations (001..055)** — 그중 055가 **32개** (baseline 272에서 +10) |
+| 053→054 업그레이드 경로 | PASS (phase0 안에 포함, 7 assertions) |
+| `test:p5` · `test:write-floor` · `test:rollback` | PASS (93 · 39 · 3/3) |
+| `check:edge` · `test:edge` | PASS · 3 passed / 0 failed |
+| `npm audit --omit=dev` | 취약점 **0** |
+| `git diff --check` | clean |
+| mutation 4건 | 전부 **FAIL 확인** (위 표) |
+
+**BEFORE 재현을 먼저 했다.** 수정 전 case H는 3 FAIL —
+스탬프 `2026-08-19 20:00:00+09`, D2 후보 재반환. 대조군(정상 D1→D2 1회 허용,
+경계 `GREATEST`)은 그때도 통과했으므로 테스트가 판별력을 가진다.
+
+**실행하지 않은 것:** 원격 Supabase 조회 · 실기기 · Playwright · Android SDK ·
+iOS 빌드 · 실제 알림 전달. 배포 체크리스트 §6-1의 스케줄러 확인은 **배포 환경에서
+사람이 해야 하는 항목**이며 이 세션에서 수행하지 않았다.
+
+#### PRODUCTION
+- NOT APPLIED. 원격 Supabase 조회·변경 없음. 047~055는 여전히 **어디에도 미적용**.
+- merge 하지 않았다.
+
+#### 정확한 중단 지점
+
+Codex HOLD 3건 마감, PR #80 브랜치에 push 완료. 다음은 **Codex 재검토**다.
+LV 진입 전에 남은 것: 배포 체크리스트 §6-1의 스케줄러 확인 5항목(사람이 배포
+환경에서), APNs/FCM 자격증명, 실기기 2대.
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

@@ -144,16 +144,47 @@ describe('the measured flow is wired, not merely available', () => {
 
   const CALLERS: Array<[string, string]> = [
     ['src/components/widgets/TodayLogWidget.tsx', 'record_composed'],
+    ['src/components/widgets/CallBriefingWidget.tsx', 'briefing_opened'],
+    ['src/components/widgets/CallBriefingWidget.tsx', 'briefing_to_original'],
+    ['src/components/widgets/PartnerDayTimelineWidget.tsx', 'briefing_to_original'],
     ['src/pages/CallModePage.tsx', 'call_mode_opened'],
     ['src/pages/CallModePage.tsx', 'talk_about_resolved'],
     ['src/components/widgets/TalkAboutListWidget.tsx', 'talk_about_resolved'],
+    ['src/lib/store.tsx', 'talk_about_marked'],
     ['src/lib/store.tsx', 'couple_connected'],
+    ['src/components/NotificationPreferencesSection.tsx', 'notifications_disabled'],
   ];
 
   it.each(CALLERS)('%s emits %s', (path, kind) => {
     const text = source(path);
     expect(text).toContain("from '@/lib/productEvents'");
     expect(text).toContain(kind);
+  });
+
+it('emits every kind the union declares', () => {
+    /*
+      Soundness for the list above. A kind that exists but is never emitted is a
+      column that will be empty at LV read-out, and finding that out then is
+      finding it out too late.
+    */
+    const union = SOURCE.slice(
+      SOURCE.indexOf('export type ProductEventKind'),
+      SOURCE.indexOf('export type ProductEventScreen'),
+    );
+    const declared = [...union.matchAll(/'(\w+)'/g)].map((m) => m[1]);
+    const wired = new Set(CALLERS.map(([, kind]) => kind));
+
+    expect(declared.length).toBeGreaterThan(0);
+    for (const kind of declared) {
+      expect(wired.has(kind), `${kind} is declared but nothing emits it`).toBe(true);
+    }
+  });
+
+  it('counts the kill metric only when something is turned OFF', () => {
+    // Turning notifications back on is not the signal. Counting both transitions
+    // would blur the one reading this event exists to produce.
+    const text = source('src/components/NotificationPreferencesSection.tsx');
+    expect(text).toContain('preferences[key] === true && next[key] === false');
   });
 
   it('measures composing only after the save succeeded', () => {

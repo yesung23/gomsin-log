@@ -3169,9 +3169,15 @@ mutation 검증에서 "UI만 숨기고 쓰기는 그대로" 변형이 정확히 
   통과하기 때문이다. LV 조건은 "계측이 존재한다"가 아니라 "이벤트가 착지한다"이다.
 
 #### REMAINING
-- 미연결 이벤트 3종: `briefing_opened` · `briefing_to_original` · `talk_about_marked` ·
-  `notifications_disabled`. 종류는 정의됐고 DB가 받지만 아직 emit 지점이 없다.
-- 이벤트 조회·집계 도구 없음. LV 리드아웃 시점에 필요하다.
+- **선언된 8종 전부에 emit 지점이 생겼다.** 처음엔 4종만 연결하고 나머지를 남기려 했으나,
+  선언만 되고 emit되지 않는 종류는 LV 리드아웃 시점에 빈 칸으로 드러나고 그때는 늦다.
+  테스트가 union을 파싱해 **모든 종류에 호출자가 있는지** 검사한다.
+  - `briefing_opened`는 분모다. `briefing_to_original`만으로는 개수일 뿐이고, 나누어야
+    전략이 실제로 묻는 "요약→원본 이동률"이 된다. 브리핑에 내용이 있을 때만 mount당 한 번
+    발생한다 — 빈 위젯은 전환에 실패한 브리핑이 아니므로 세면 비율이 왜곡된다.
+  - `notifications_disabled`는 **kill metric**이며 OFF 전이에서만 발생한다. 다시 켜는 것은
+    신호가 아니고, 둘 다 세면 이 이벤트가 만들려는 단 하나의 판독이 흐려진다.
+- 이벤트 조회·집계 도구는 여전히 없다. LV 리드아웃 시점에 필요하다.
 
 #### PRODUCTION
 - NOT APPLIED

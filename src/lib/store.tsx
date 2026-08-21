@@ -3303,7 +3303,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
     const result = await markTalkAboutInDB(recordId, coupleId, userId);
-    if (result.ok) await refreshTalkAboutMarks(workspace);
+    if (result.ok) {
+      // Conversation intent. Paired with `talk_about_resolved`, the two say
+      // whether marking something leads to talking about it -- which is the
+      // question the whole 이따 이야기하기 feature exists to answer.
+      void recordProductEvent({ kind: 'talk_about_marked', subjectId: recordId });
+      await refreshTalkAboutMarks(workspace);
+    }
     return result;
   };
 

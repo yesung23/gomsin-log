@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { recordProductEvent } from '@/lib/productEvents';
 import { Check, Film, Image as ImageIcon, Mic } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { withReadableContent } from '@/lib/recordAvailability';
@@ -106,6 +107,12 @@ export function PartnerDayTimelineWidget() {
   };
 
   const openRecord = (record: DailyRecord) => {
+    // The same measurement as the briefing widget: summary to exact original.
+    void recordProductEvent({
+      kind: 'briefing_to_original',
+      screen: 'home',
+      subjectId: record.id,
+    });
     setHighlightedRecordId(record.id);
     navigate(`/record?record=${record.id}`);
   };

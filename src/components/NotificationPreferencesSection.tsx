@@ -10,6 +10,7 @@ import {
   type NotificationPreferences,
 } from '@/lib/notifications';
 import { Card } from '@/components/ui/Card';
+import { recordProductEvent } from '@/lib/productEvents';
 
 export function NotificationPreferencesSection({ userId }: { userId: string }) {
   const [preferences, setPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
@@ -26,6 +27,24 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
     const next = { ...preferences, ...patch };
     setPreferences(next);
     saveNotificationPreferences(userId, next);
+
+    /*
+      The kill metric.
+
+      The strategy names this one explicitly: if people turn notifications off,
+      the design failed, and no other number will say so as directly. Emitted
+      only on the OFF transition -- turning something back on is not the signal,
+      and counting both would blur the one reading this exists to produce.
+
+      §19: the event kind and nothing else. Which toggle it was is not sent,
+      because the question is whether someone opted out of being contacted, not
+      which switch they used to do it.
+    */
+    const turnedSomethingOff = (Object.keys(patch) as Array<keyof NotificationPreferences>)
+      .some((key) => preferences[key] === true && next[key] === false);
+    if (turnedSomethingOff) {
+      void recordProductEvent({ kind: 'notifications_disabled', screen: 'settings' });
+    }
   };
 
   const request = async () => {

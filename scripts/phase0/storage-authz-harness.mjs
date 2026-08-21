@@ -110,6 +110,7 @@ const ORDER = [
   '051_audit_closure_overload_and_forgeable_couple.sql',
   '052_unseen_flag_survives_no_record.sql',
   '053_pending_acts_not_shared_history.sql',
+  '054_shared_at_is_server_state.sql',
 ];
 
 /**
@@ -2193,6 +2194,106 @@ check(
   '053 the author CANNOT read the recipient\'s boundary, so it is not a read receipt',
 );
 resetPendingFixture('053-cleanup');
+
+// ---------------------------------------------------------------------------
+// 054 -- `shared_at` is server state, and a client cannot write it
+// ---------------------------------------------------------------------------
+/*
+  053 made the entire cancellation rule depend on `daily_records.shared_at`, and
+  left it writable. `authenticated` holds a table-level UPDATE grant (012), RLS
+  is row-level and cannot withhold one column, and 053's stamping trigger fired
+  only `BEFORE INSERT OR UPDATE OF is_private` -- so an UPDATE that did not name
+  that column never ran it, and one that named it at an unchanged value ran it
+  into a branch that assigned nothing.
+
+  These drive the forge as the record's OWN AUTHOR through RLS, which is the
+  only actor who can reach the row at all, and then assert the product outcome
+  rather than the column: a false invitation left standing after the only new
+  act was withdrawn. Before 054 the last check below measured `t`.
+*/
+const FORGED = "now() + interval '100 years'";
+
+// --- the column cannot be written on any of the three paths ----------------
+resetPendingFixture('054-1');
+shareRecord('e5400000-0000-4000-8000-000000000001', 'F1', '054-1 F1');
+
+const forgeBare = asUser(D,
+  `UPDATE public.daily_records SET shared_at = ${FORGED}
+    WHERE id = 'e5400000-0000-4000-8000-000000000001'`);
+check(
+  forgeBare.ok,
+  '054 the author CAN issue the update (so the next check measures the trigger, not a denial)',
+);
+check(
+  mustSql(`SELECT shared_at > now() + interval '90 years'
+             FROM public.daily_records
+            WHERE id = 'e5400000-0000-4000-8000-000000000001'`, '054 bare forge') === 'f',
+  '054 an UPDATE that does not name is_private cannot set shared_at',
+);
+
+asUser(D,
+  `UPDATE public.daily_records SET is_private = false, shared_at = ${FORGED}
+    WHERE id = 'e5400000-0000-4000-8000-000000000001'`);
+check(
+  mustSql(`SELECT shared_at > now() + interval '90 years'
+             FROM public.daily_records
+            WHERE id = 'e5400000-0000-4000-8000-000000000001'`, '054 named forge') === 'f',
+  '054 naming is_private at an UNCHANGED value cannot set shared_at either',
+);
+
+asUser(D,
+  `INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private, shared_at)
+   VALUES ('e5400000-0000-4000-8000-000000000002', '${D}', '${COUPLE3}', CURRENT_DATE, 'F2', false, ${FORGED})`);
+check(
+  mustSql(`SELECT COALESCE(max((shared_at > now() + interval '90 years')::text), 'absent')
+             FROM public.daily_records
+            WHERE id = 'e5400000-0000-4000-8000-000000000002'`, '054 insert forge') !== 't',
+  '054 a submitted shared_at is discarded at INSERT too',
+);
+
+// --- the product outcome: the forge cannot manufacture an invitation --------
+resetPendingFixture('054-2');
+shareRecord('e5400000-0000-4000-8000-000000000003', 'old R1', '054-2 R1');
+clearAsRecipient('054-2');
+asUser(D,
+  `UPDATE public.daily_records SET shared_at = ${FORGED}
+    WHERE id = 'e5400000-0000-4000-8000-000000000003'`);
+shareRecord('e5400000-0000-4000-8000-000000000004', 'new R2', '054-2 R2');
+check(unseenOf(E) === 't', '054 the new act raises the flag');
+mustSql(`UPDATE public.daily_records SET is_private = true
+         WHERE id = 'e5400000-0000-4000-8000-000000000004'`, '054-2 withdraw R2');
+check(
+  unseenOf(E) === 'f',
+  '054 withdrawing the only new act still cancels it, even after the author skewed an older record\'s shared_at',
+);
+
+// --- 053's semantics are unchanged by the widened trigger -------------------
+resetPendingFixture('054-3');
+shareRecord('e5400000-0000-4000-8000-000000000005', 'v1', '054-3 v1');
+const stampBefore = mustSql(`SELECT shared_at FROM public.daily_records
+                              WHERE id = 'e5400000-0000-4000-8000-000000000005'`, '054-3 before');
+mustSql(`UPDATE public.daily_records SET log_text = 'v2'
+          WHERE id = 'e5400000-0000-4000-8000-000000000005'`, '054-3 edit');
+check(
+  mustSql(`SELECT shared_at FROM public.daily_records
+            WHERE id = 'e5400000-0000-4000-8000-000000000005'`, '054-3 after') === stampBefore,
+  '054 editing a still-shared record does NOT restamp it, so an edit is not an act',
+);
+mustSql(`UPDATE public.daily_records SET is_private = true
+          WHERE id = 'e5400000-0000-4000-8000-000000000005'`, '054-3 retract');
+check(
+  mustSql(`SELECT COALESCE(shared_at::text, 'NULL') FROM public.daily_records
+            WHERE id = 'e5400000-0000-4000-8000-000000000005'`, '054-3 retracted') === 'NULL',
+  '054 retracting still erases the stamp, so no history of changing one\'s mind survives',
+);
+mustSql(`UPDATE public.daily_records SET is_private = false
+          WHERE id = 'e5400000-0000-4000-8000-000000000005'`, '054-3 reshare');
+check(
+  mustSql(`SELECT shared_at > '${stampBefore}'::timestamptz FROM public.daily_records
+            WHERE id = 'e5400000-0000-4000-8000-000000000005'`, '054-3 reshared') === 't',
+  '054 re-sharing restamps, so it is a new act',
+);
+resetPendingFixture('054-cleanup');
 
 // ---------------------------------------------------------------------------
 // 052 -- account closure. LAST, because it deletes an actor the rest of this

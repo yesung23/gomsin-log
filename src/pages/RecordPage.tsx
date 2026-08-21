@@ -785,21 +785,6 @@ export function RecordPage() {
           </div>
         )}
 
-        {/* Aggregated emotion flow for the period on screen. Purely derived from
-            the already-loaded, already-sanitised visible records, so a record edit
-            or delete changes it on the next render with nothing to invalidate. */}
-        <EmotionFlowSummarySection
-          records={periodSummaryRecords}
-          periodLabel={periodSummaryLabel}
-          // `unavailable` means the shared workspace is hidden pending an
-          // authoritative membership re-check, so `periodSummaryRecords` is empty
-          // for a reason that is NOT "no emotions". Reporting an empty period here
-          // contradicted the SharedSyncBanner immediately above. `delayed` is
-          // different: the data on screen is real, only possibly stale.
-          isLoading={sharedSyncStatus === 'unavailable'}
-          className="mb-3"
-        />
-
         {/* Selected Day Summary Bar */}
         <div ref={timelineRef} className="mb-3">
           <div className="flex items-center justify-between px-1 mb-1">
@@ -938,7 +923,28 @@ export function RecordPage() {
         {showTimeline && (
         <ul className="space-y-0">
           {selectedDayRecords.length === 0 ? (
-            <li className="list-none rounded-surface bg-card border border-border/60 p-6 text-center text-muted-foreground">
+            /*
+              An empty day gives the message the space instead of leaving it.
+
+              This card used to be content-height, so a day with nothing in it
+              rendered a small box near the top and roughly 420px of bare
+              background between it and the floating CTA -- measured at 390x844 in
+              the 2026-08-21 UI audit. That reads as a screen that failed to
+              finish loading rather than a day nobody wrote on.
+
+              The fix is presence, not filler. This product has days with two
+              entries and days with none, and a previous attempt to borrow the
+              grammar of an app whose screen is never empty was reverted for
+              exactly that reason. So nothing was invented to fill the space: the
+              existing message simply owns it and sits where the eye lands.
+
+              `min-h` rather than a fixed height, so a filtered-empty day inside a
+              long month still scrolls normally.
+            */
+            <li
+              data-testid="record-day-empty"
+              className="list-none rounded-surface bg-card border border-border/60 p-6 text-center text-muted-foreground min-h-[38vh] flex flex-col items-center justify-center"
+            >
               <p className="text-body font-semibold">
                 {selectedDayAllRecords.length === 0
                   ? '이 날은 남긴 순간이 없어요'
@@ -1130,6 +1136,33 @@ export function RecordPage() {
           )}
         </ul>
         )}
+
+        {/*
+          Aggregated emotion flow for the period on screen, BELOW the records it
+          aggregates.
+
+          PRODUCT_V3 §3.1: 원본이 주인공이다 -- the app's summaries and derived
+          values are always subordinate to the sentences and photos a person left.
+          This card used to open the 기록 tab, so on a 320px screen the first thing
+          the tab showed was the app's reading of the period and the person's own
+          entries began below the fold. It is derived from those entries; it cannot
+          precede them.
+
+          Purely derived from the already-loaded, already-sanitised visible records,
+          so a record edit or delete changes it on the next render with nothing to
+          invalidate.
+        */}
+        <EmotionFlowSummarySection
+          records={periodSummaryRecords}
+          periodLabel={periodSummaryLabel}
+          // `unavailable` means the shared workspace is hidden pending an
+          // authoritative membership re-check, so `periodSummaryRecords` is empty
+          // for a reason that is NOT "no emotions". Reporting an empty period here
+          // contradicted the SharedSyncBanner would-be claim. `delayed` is
+          // different: the data on screen is real, only possibly stale.
+          isLoading={sharedSyncStatus === 'unavailable'}
+          className="mt-3"
+        />
 
       {/* Floating CTA — the one primary action. 48px via Button size="lg".
           Positioned off the measured bottom chrome so it never overlaps the

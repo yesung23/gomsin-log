@@ -350,6 +350,8 @@ jobs:
             android.permission.READ_MEDIA_VIDEO \
             android.permission.READ_EXTERNAL_STORAGE \
             android.permission.WRITE_EXTERNAL_STORAGE \
+            android.permission.RECORD_AUDIO \
+            android.permission.MODIFY_AUDIO_SETTINGS \
             com.google.android.gms.permission.AD_ID
           do
             if printf '%s' "${body}" | grep -F "\"${forbidden}\"" > /dev/null; then
@@ -358,9 +360,14 @@ jobs:
             fi
           done
 
+          # RECORD_AUDIO and MODIFY_AUDIO_SETTINGS moved from REQUIRED to FORBIDDEN
+          # above on 2026-08-21. Closing video and audio uploads until the
+          # encrypted media foundation removed the composer's recorder, so no code
+          # asks for a microphone -- and this job checks the MERGED manifest
+          # precisely because a dependency can inject a permission at merge time.
+          # A plugin that re-adds audio now fails here instead of shipping quietly.
           printf '%s' "${body}" | grep -F 'android:allowBackup="false"'
           printf '%s' "${body}" | grep -F 'android:usesCleartextTraffic="false"'
-          printf '%s' "${body}" | grep -F 'android:name="android.permission.RECORD_AUDIO"'
           printf '%s' "${body}" | grep -F 'android:scheme="gomsinlog"'
           printf '%s' "${body}" | grep -F 'android:host="auth"'
           printf '%s' "${body}" | grep -F 'android:path="/callback"'

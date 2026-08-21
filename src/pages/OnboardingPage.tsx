@@ -217,7 +217,16 @@ export function OnboardingPage() {
   }, [hasIdentity]);
 
   // Total steps based on role
-  const totalSteps = role === 'gomsin' ? 4 : 6;
+  /*
+    곰신 skips 복무 정보 (step 5) but NOT 연락 시간 (step 6).
+
+    It used to skip both, which meant only 군화 ever supplied contact hours --
+    and migration 048 sends each person's notification inside THEIR OWN declared
+    window (§14.3: delivery time comes from hours the user typed in, never from
+    a learned pattern). A 곰신 who was never asked would fall back to the
+    schema default, which was written for a soldier's day.
+  */
+  const totalSteps = role === 'gomsin' ? 5 : 6;
 
   // Handle Google OAuth Login
   const handleGoogleLogin = async () => {
@@ -506,16 +515,17 @@ export function OnboardingPage() {
       if (mintedCodeToShow) return;
     }
 
-    // If Gomshin reaches Step 4 (Anniversary), skip Steps 5 & 6 and jump directly to Step 7 (Completion)!
+    // 곰신 skips 복무 정보 (step 5) only. Step 6 asks when they want to hear
+    // from the app, which is a question for both roles.
     if (role === 'gomsin' && step === 4) {
-      setStep(7);
+      setStep(6);
       return;
     }
     setStep((s) => s + 1);
   };
 
   const handleBack = () => {
-    if (role === 'gomsin' && step === 7) {
+    if (role === 'gomsin' && step === 6) {
       setStep(4);
       return;
     }
@@ -1334,12 +1344,31 @@ export function OnboardingPage() {
           )}
 
           {/* STEP 6: Contact Hours (Soldier ONLY) */}
-          {step === 6 && role === 'soldier' && (
+          {step === 6 && (
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-title">주로 언제 오늘의 로그를 확인할 수 있나요?</h2>
-                  <p className="text-body text-muted-foreground mt-1">상대의 로그 표시 및 부드러운 확인 안내용입니다.</p>
+                  {/*
+                    Different question per role, same stored value.
+
+                    For 군화 it is a constraint: there are hours when a phone is
+                    reachable and hours when it is not. For 곰신 it is a
+                    preference: they can look any time, so what this decides is
+                    when the app is allowed to interrupt them.
+
+                    Both end up in `contact_preferences`, and migration 048 sends
+                    each person's notification inside their own window.
+                  */}
+                  <h2 className="text-title">
+                    {role === 'soldier'
+                      ? '주로 언제 오늘의 로그를 확인할 수 있나요?'
+                      : '언제 알려드리면 좋을까요?'}
+                  </h2>
+                  <p className="text-body text-muted-foreground mt-1">
+                    {role === 'soldier'
+                      ? '이 시간에만 알림을 보내드려요. 상대의 로그 표시에도 함께 쓰여요.'
+                      : '이 시간 밖에서는 알리지 않아요. 하루에 한 번을 넘지 않고, 내용은 담기지 않아요.'}
+                  </p>
                 </div>
 
                 <div className="space-y-4">

@@ -44,26 +44,28 @@ test('a newly signed-in account starts the wizard, not the sign-in screen again'
   await expect(page.getByText('Google로 계속하기')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '곰신로그를 어떻게 사용할까요?' }))
     .toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('1 / 4')).toBeVisible();
+  await expect(page.getByText('1 / 5')).toBeVisible();
 
   expect(errors).toEqual([]);
   expect(unrouted).toEqual([]);
   await context.close();
 });
 
-test('the whole wizard completes: role, nickname, space with a code, anniversary', async ({ browser }) => {
+test('the whole wizard completes: role, nickname, space with a code, anniversary, contact hours', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, NEW_ACCOUNT);
   const page = await context.newPage();
   await page.goto('/');
   await settle(page);
 
-  // 1 role
-  await expect(page.getByText('1 / 4')).toBeVisible({ timeout: 20_000 });
+  // 1 role. Five steps for 곰신 since contact hours became a question for both
+  // roles -- migration 048 sends each person inside their OWN declared window,
+  // so a 곰신 who was never asked would inherit a soldier's default day.
+  await expect(page.getByText('1 / 5')).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: '다음' }).click();
 
   // 2 nickname
-  await expect(page.getByText('2 / 4')).toBeVisible();
+  await expect(page.getByText('2 / 5')).toBeVisible();
   const next = page.getByRole('button', { name: '다음' });
   // D-4: the button must not invite a tap it will refuse.
   await expect(next).toBeDisabled();
@@ -72,14 +74,23 @@ test('the whole wizard completes: role, nickname, space with a code, anniversary
   await next.click();
 
   // 3 couple space -- minting a code keeps the user here so they can read it
-  await expect(page.getByText('3 / 4')).toBeVisible();
+  await expect(page.getByText('3 / 5')).toBeVisible();
   await page.getByRole('button', { name: '다음' }).click();
   await expect(page.getByText('내 초대 코드 (24시간 유효)')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('text=/^\\d{6}$/').first()).toBeVisible();
 
-  // 4 anniversary, then finish
+  // 4 anniversary
   await page.getByRole('button', { name: '다음' }).click();
-  await expect(page.getByText('4 / 4')).toBeVisible();
+  await expect(page.getByText('4 / 5')).toBeVisible();
+
+  // 5 contact hours -- asked of 곰신 too, and phrased as what it decides for them
+  await page.getByRole('button', { name: '다음' }).click();
+  await expect(page.getByText('언제 알려드리면 좋을까요?')).toBeVisible();
+  // Not the soldier's framing: a 곰신 can look any time, so the question is when
+  // the app may interrupt, not when a phone is reachable.
+  await expect(page.getByText('주로 언제 오늘의 로그를 확인할 수 있나요?')).toHaveCount(0);
+
+  await page.getByRole('button', { name: '다음' }).click();
   await expect(page.getByRole('button', { name: '완료' })).toBeVisible();
   await context.close();
 });

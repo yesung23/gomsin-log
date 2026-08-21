@@ -120,4 +120,17 @@
     -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+        POST_NOTIFICATIONS (Android 13+), declared with the Gate 3 push work.
+
+        A runtime permission, so the user is asked. The app asks at the moment a
+        couple connects rather than at first launch: before there is a partner,
+        the app cannot deliver anything worth a prompt.
+
+        What it can carry is fixed by the server, not by this declaration. Every
+        notification is the same sentence with no count, no event kind and no
+        record id, because a lock screen is read over a shoulder. See
+        PRODUCT_V3 §14.3 and supabase/migrations/048.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

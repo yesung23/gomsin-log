@@ -49,6 +49,8 @@ import {
   unmarkTalkAboutInDB,
   resolveTalkAboutInDB,
 } from '@/lib/talkAbout';
+import { revokeOwnPushTokens } from '@/lib/pushTokens';
+import { setUpPushNotifications } from '@/lib/pushNotifications';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   applyDeliveryOutcome,
@@ -944,6 +946,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     registerServerCallGate(ensureNotPendingBeforeServerCall);
     return () => registerServerCallGate(null);
   }, [ensureNotPendingBeforeServerCall]);
+
+  /**
+   * Register this device for notifications once a couple exists.
+   *
+   * Keyed on the lifecycle rather than hung off the invitation-poll that first
+   * observes a partner joining. That poll only runs on the INVITER's device, and
+   * only on the one launch where the join happens -- so hooking it there would
+   * leave the joining partner unregistered forever, and the inviter unregistered
+   * after any reinstall.
+   *
+   * Asking here also gets the timing §2 of the strategy asks for: at connection,
+   * not at first launch. Before there is a partner the app cannot deliver
+   * anything worth a prompt, and iOS grants exactly one chance to ask.
+   *
+   * Re-running on every transition into `connected` is correct rather than merely
+   * harmless. APNs and FCM reissue tokens without telling the app, and
+   * `register_push_token` removes any previous holder before claiming, so a
+   * repeat call is either a no-op or the repair. The permission prompt is not
+   * repeated: the adapter checks the existing decision first.
+   *
+   * Fire-and-forget by design. A notification token is not a precondition for
+   * anything the couple is trying to do next, and awaiting it here would put a
+   * network round trip in front of the screen that just said they are connected.
+   */
+  useEffect(() => {
+    if (coupleLifecycle !== 'connected') return;
+    void setUpPushNotifications();
+  }, [coupleLifecycle]);
 
   useEffect(() => {
     if (!supabase || !isHydrated) return;
@@ -3127,6 +3157,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    /*
+      Release the push tokens FIRST, while the session still authenticates.
+
+      The order is not arbitrary and not interchangeable with the two lines
+      below: `revoke_my_push_tokens()` reads `auth.uid()`, so after the session is
+      gone it has no actor and refuses. Doing this after `authRepository.signOut()`
+      would look identical and silently never work.
+
+      Awaited, but its result is ignored. Refusing to sign someone out because a
+      notification cleanup failed would be the wrong trade in every direction, and
+      the outcome §14.3 actually forbids -- a departed account receiving a device's
+      notifications -- is prevented by migration 048's handover DELETE regardless
+      of whether this call succeeds.
+    */
+    await revokeOwnPushTokens();
     // Purge locally first: even if the network call fails, this device must not
     // keep the previous account's records readable.
     purgeLocalAccountData();

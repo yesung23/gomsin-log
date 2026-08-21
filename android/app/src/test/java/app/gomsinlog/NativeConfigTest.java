@@ -76,9 +76,14 @@ public class NativeConfigTest {
         // exactly what this test exists to catch. The drift ran the other way this
         // time: the manifest and the TypeScript twin were updated, this JVM copy
         // was not, and the Android job is the only thing that reads it.
+        // POST_NOTIFICATIONS arrived with Gate 3. It is the one permission the
+        // push work needs, and it is a runtime prompt rather than an install-time
+        // grant -- the app asks when a couple connects, because before that there
+        // is nothing it could deliver.
         List<String> expected = Arrays.asList(
             "android.permission.ACCESS_NETWORK_STATE",
-            "android.permission.INTERNET"
+            "android.permission.INTERNET",
+            "android.permission.POST_NOTIFICATIONS"
         );
         assertEquals(expected, declared);
     }

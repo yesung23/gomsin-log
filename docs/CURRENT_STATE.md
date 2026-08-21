@@ -106,7 +106,7 @@ active branch가 존재한다. **master에는 아직 없다.**
 |---|---|
 | Gate 4 통화 모드 | `claude/phase1-call-mode-v2` / PR #78, **CI 14/14 green**. 전화 걸지 않음 · 통화 기록 0 · `다음`은 쓰기 없는 건너뛰기 |
 | Gate 3 push 서버 | `claude/phase1-gate3-push`. migration 048 + `send-push`. 실제 PostgreSQL로 검증됨 |
-| Gate 3 push 클라이언트 | **미착수.** 실기기 없이 의미 있게 검증 불가 |
+| Gate 3 push 클라이언트 | 완료. 토큰 lifecycle은 이 저장소가 다른 클라이언트 동작을 검증하는 방식으로 검증 가능했고(§14.3이 negative test를 명시적으로 요구한다), 실기기가 필요한 것은 실제 전달뿐이다 |
 | `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
 
 Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은
@@ -178,7 +178,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 | 기능 | 현재 상태 |
 |---|---|
 | `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위. 이야기거리 보관함·완료 처리 P4는 integration branch에 있으나 master에는 아직 merge되지 않음 |
-| 알림 | **서버 절반만.** migration 048(전용 `push_delivery_state` 테이블 · 비공개 기록은 아무것도 올리지 않음 · 하루 1회와 연락 가능 시간을 DB가 강제 · 기기 이양 시 토큰 회수)과 `send-push` Edge Function이 active branch에 있고 검증됐다. **클라이언트 절반은 미착수**이며(`@capacitor/push-notifications`, 토큰 등록/해제 호출, 권한 요청) 실제 전달은 APNs/FCM 자격증명과 실기기가 필요한 외부 게이트다 |
+| 알림 | **코드는 양쪽 다 있다.** 서버: migration 048(전용 `push_delivery_state` 테이블 · 비공개 기록은 아무것도 올리지 않음 · 하루 1회와 연락 가능 시간을 DB가 강제 · 기기 이양 시 토큰 회수)과 `send-push` Edge Function. 클라이언트: `@capacitor/push-notifications` 통합 · 커플 연결 시 권한 요청과 토큰 등록 · 로그아웃 시 회수 · 탭 착지는 홈 고정. 전부 active branch에 있고 검증됐다. **남은 것은 전부 외부 게이트다** — APNs/FCM 자격증명, `aps-environment` entitlement(Apple portal capability와 함께 추가해야 함), 실기기 2대. 이 기기에서는 Xcode 부재로 `pod install`도 완료할 수 없다 |
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |

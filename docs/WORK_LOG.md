@@ -3026,12 +3026,28 @@ Phase 0(같은 날 앞 항목)을 잇는다. 앞 항목의 HEAD는 이미 낡았
 - external/manual: **PR 병합은 user 권한** · APNs/FCM 자격증명 · 실기기 2대 · 원격 Supabase 적용.
 
 #### STOPPED AT
-- Gate 3의 **서버 절반까지**. migration 048과 발송자가 검증된 상태로 존재한다.
-- **클라이언트 절반은 미착수**: `@capacitor/push-notifications` 통합, 토큰 등록/해제 호출,
-  연결 직후 알림 권한 요청. 이것들은 실기기 없이 의미 있게 검증할 수 없다.
+- Gate 3의 서버 절반과 **클라이언트 절반 모두**. 앞서 "실기기 없이 검증 불가"로 판단해 미착수로
+  두었던 것을 **재검토해 뒤집었다** — 토큰 lifecycle은 이 저장소가 다른 모든 클라이언트 동작을
+  검증하는 방식 그대로 검증 가능하고, §14.3이 명시적으로 negative test를 요구하는 부분이다.
+  실기기가 필요한 것은 **실제 전달뿐**이다.
+- `@capacitor/push-notifications@7.0.7` 설치, `cap sync android` 완료, Podfile/Podfile.lock 갱신.
+- **iOS `pod install`은 실패했다** — 이 기기에 Xcode가 없고 Command Line Tools만 있다.
+  Podfile.lock은 SPEC/PODFILE checksum 모두 일관되게 갱신됐으므로(CocoaPods가 해결까지는 마쳤고
+  실패는 이후 Xcode 프로젝트 통합 단계) 커밋은 안전하다. 실제 iOS 빌드는 CI가 authority.
+- **`aps-environment` entitlement는 의도적으로 추가하지 않았다.** 서명과 분리 불가능하며 Apple
+  Developer portal에서 실제 자격증명으로 capability를 켜야 한다. 프로파일 없이 키만 넣으면
+  기기 서명이 실패하고, 시뮬레이터 빌드는 entitlement를 무시하므로 CI도 그 불일치를 못 잡는다.
+  TestFlight 설정 시 portal capability와 **함께** 추가해야 한다 — entitlements 파일에 명시했다.
 
 #### REMAINING
-- Gate 3 클라이언트 절반 · S4 대기 구간 · 최소 계측 · LV 환경 · 실기기 빌드 부채.
+- S4 대기 구간 · 최소 계측 · LV 환경 · TestFlight.
+- 연결 직후 권한 요청은 **이 세션에서 닫았다.** 처음에는 호출자 0인 채로 두었는데, 그것이 바로
+  security-review §1이 이 저장소의 최빈 결함으로 지목하는 "미연결 구현"이라 그대로 둘 수 없었다.
+  `coupleLifecycle`이 `connected`가 될 때 등록한다 — 파트너 합류를 감지하는 폴링 지점에 걸지
+  않은 이유는 그 폴링이 **초대한 쪽 기기에서, 합류가 일어난 그 한 번만** 돌기 때문이다.
+  거기 걸었다면 합류한 쪽은 영원히 미등록이고 초대한 쪽도 재설치 후 미등록이 된다.
+  함수에 호출자가 없으면 그 함수에 대한 모든 테스트가 통과하므로, 소스에서 호출자를 세는
+  테스트를 따로 뒀다.
 - `briefings` drop: **파괴적 변경이라 착수하지 않았다.** migration-gate §4가 명시적 승인을 요구한다.
 
 #### NEXT ACTION

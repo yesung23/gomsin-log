@@ -461,7 +461,7 @@ describe('RecordPage media editing', () => {
     renderPage([record()]);
     await openRecord(user, '10:00');
 
-    expect(await screen.findByText('+ 사진 · 영상 · 음성 추가')).toBeInTheDocument();
+    expect(await screen.findByText('+ 사진 추가')).toBeInTheDocument();
   });
 
   it('never offers media controls on the partner\'s record', async () => {
@@ -481,7 +481,7 @@ describe('RecordPage media editing', () => {
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(screen.queryByLabelText('첨부 theirs.jpg 삭제')).toBeNull();
-    expect(screen.queryByText('+ 사진 · 영상 · 음성 추가')).toBeNull();
+    expect(screen.queryByText('+ 사진 추가')).toBeNull();
   });
 
   it('offers no removal control for a legacy attachment with no storage path', async () => {
@@ -511,7 +511,7 @@ describe('RecordPage media editing', () => {
     await openRecord(user, '10:00');
 
     expect(await screen.findByLabelText('첨부 img.jpg 삭제')).toBeDisabled();
-    expect(screen.getByText('+ 사진 · 영상 · 음성 추가')).toBeDisabled();
+    expect(screen.getByText('+ 사진 추가')).toBeDisabled();
   });
 
   it('reports the store\'s cause-specific message verbatim on failure', async () => {

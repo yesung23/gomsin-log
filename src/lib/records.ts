@@ -632,6 +632,16 @@ export const MAX_BYTES: Record<Attachment['type'], number> = {
  */
 const UPLOADABLE_KINDS: ReadonlySet<Attachment['type']> = new Set(['photo']);
 
+/**
+ * What a policy refusal says, as opposed to what an unreadable file says.
+ *
+ * Exported so the gate's tests assert against this value rather than a copy of
+ * the sentence: a reworded refusal should not need a test edit, but a refusal
+ * that collapses into the "unsupported format" message must fail.
+ */
+export const MEDIA_POLICY_REFUSAL =
+  '영상·음성 첨부는 암호화 보관이 준비된 뒤에 열려요. 지금은 사진만 첨부할 수 있어요.';
+
 export const MEDIA_ACCEPT = Object.keys(MIME_MAP)
   .filter((mime) => UPLOADABLE_KINDS.has(MIME_MAP[mime].type))
   .join(',');
@@ -648,7 +658,7 @@ export function classifyMediaFile(
     return { error: '지원하지 않는 파일 형식이에요. 사진 파일을 선택해 주세요.' };
   }
   if (!UPLOADABLE_KINDS.has(match.type)) {
-    return { error: '영상·음성 첨부는 암호화 보관이 준비된 뒤에 열려요. 지금은 사진만 첨부할 수 있어요.' };
+    return { error: MEDIA_POLICY_REFUSAL };
   }
   if (file.size <= 0) {
     return { error: '빈 파일은 첨부할 수 없어요.' };

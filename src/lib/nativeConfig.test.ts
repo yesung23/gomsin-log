@@ -156,6 +156,51 @@ describe('Android: identity, label and store metadata', () => {
  * failed the Android build, which is not runnable in this sandbox (no SDK), so
  * nothing else would have caught it. Cheap guard, real bug.
  */
+/**
+ * Every OTHER XML the app ships, held to the same rule.
+ *
+ * The Android guard below was written after a `--` inside a comment broke a
+ * manifest. It covered manifests only, so the identical mistake was free to
+ * happen in the iOS plist files -- and did, twice in one session, while
+ * documenting why an entitlement is deliberately absent. A guard that catches a
+ * bug class in one file and not its neighbour is half a guard.
+ *
+ * `Info.plist` and `App.entitlements` are plists, so a malformed one is not a
+ * cosmetic problem: the build embeds the file, and a parse failure there is a
+ * failure to declare a usage description or a data-protection class.
+ */
+describe('the iOS property lists are well-formed XML', () => {
+  const IOS_PLISTS = [
+    'ios/App/App/Info.plist',
+    'ios/App/App/App.entitlements',
+    'ios/App/App/PrivacyInfo.xcprivacy',
+  ];
+
+  it('covers every plist the app ships (soundness)', () => {
+    expect(IOS_PLISTS.length).toBeGreaterThan(0);
+    for (const path of IOS_PLISTS) {
+      expect(() => read(path), path).not.toThrow();
+    }
+  });
+
+  it.each(IOS_PLISTS)('%s parses', (path) => {
+    const parsed = new DOMParser().parseFromString(read(path), 'application/xml');
+    expect(parsed.getElementsByTagName('parsererror')[0]?.textContent ?? null, path).toBeNull();
+    expect(parsed.documentElement.tagName, path).toBe('plist');
+  });
+
+  it.each(IOS_PLISTS)("%s has no '--' inside a comment", (path) => {
+    /*
+      The exact rule XML gives comments, and the one people break while writing a
+      rationale: `--` may not appear inside `<!-- -->` at all. An em dash reads the
+      same and is legal; so does a full stop.
+    */
+    for (const comment of read(path).match(/<!--[\s\S]*?-->/g) ?? []) {
+      expect(comment.slice(4, -3), path).not.toContain('--');
+    }
+  });
+});
+
 describe('the Android manifests are well-formed XML', () => {
   /**
    * Manifests that are COMMITTED, and are therefore the ones a reviewer reads and
@@ -250,7 +295,39 @@ describe('Android: the permission set is exactly what the code proves', () => {
     expect([...declared].sort()).toEqual([
       'android.permission.ACCESS_NETWORK_STATE',
       'android.permission.INTERNET',
+      // Gate 3. A runtime prompt, asked when a couple connects.
+      'android.permission.POST_NOTIFICATIONS',
     ]);
+  });
+
+  it('agrees with the JVM copy of the same list', () => {
+    /*
+      The permission set is checked twice, on purpose: here, and again in
+      `NativeConfigTest.java`. Two independent witnesses reading the same
+      manifest is worth more than one, because a single check can be relaxed in
+      the same commit that relaxes the thing it guards.
+
+      The cost is drift, and it has happened twice. Both times the JVM copy was
+      the one left behind, because the Android CI job is the ONLY thing that
+      reads it -- and that job needs an SDK nobody has locally. The drift
+      therefore survives every local run and surfaces minutes later in CI, on a
+      machine, in a language the person who caused it was not working in.
+
+      This assertion does not merge the two lists. It checks that they say the
+      same thing, here, where it costs a second to find out.
+    */
+    const jvm = read('android/app/src/test/java/app/gomsinlog/NativeConfigTest.java');
+    const expectedBlock = jvm.slice(
+      jvm.indexOf('List<String> expected = Arrays.asList('),
+      jvm.indexOf('assertEquals(expected, declared);'),
+    );
+    expect(expectedBlock).not.toBe('');
+
+    const jvmPermissions = [...expectedBlock.matchAll(/"(android\.permission\.[A-Z_]+)"/g)]
+      .map((m) => m[1])
+      .sort();
+
+    expect(jvmPermissions).toEqual([...declared].sort());
   });
 
   /**
@@ -439,6 +516,48 @@ describe('iOS: bundle identity, ATS and usage descriptions', () => {
   });
 });
 
+describe('iOS: the APNs token can actually reach the plugin waiting for it', () => {
+  /*
+    The bug this pins was invisible in every gate the repository has.
+
+    UIKit hands the device token to the app delegate and to nothing else.
+    `PushNotificationsPlugin` learns of it only by observing
+    `.capacitorDidRegisterForRemoteNotifications`, and `CAPApplicationDelegateProxy`
+    does not forward remote-notification callbacks -- it forwards `openURL` and
+    universal links. So an AppDelegate without these two methods drops every token
+    on the floor.
+
+    Nothing caught it: the Swift compiles, the simulator build succeeds, the
+    entitlement checks pass, and the JavaScript side reports a timeout rather than
+    an error. It would have surfaced as "push does not work on iOS" on a physical
+    device, after credentials, after an entitlement, after TestFlight -- with three
+    external gates to blame before this file.
+  */
+  const appDelegate = read('ios/App/App/AppDelegate.swift');
+
+  it('forwards a successful registration', () => {
+    expect(appDelegate).toContain('didRegisterForRemoteNotificationsWithDeviceToken');
+    expect(appDelegate).toContain('.capacitorDidRegisterForRemoteNotifications');
+  });
+
+  it('forwards a failed registration, so a refusal can be named', () => {
+    expect(appDelegate).toContain('didFailToRegisterForRemoteNotificationsWithError');
+    expect(appDelegate).toContain('.capacitorDidFailToRegisterForRemoteNotifications');
+  });
+
+  it('posts them, rather than merely mentioning the names in a comment', () => {
+    // The assertions above are substring checks, which a comment would satisfy.
+    // These require the posting call itself, next to each name.
+    const posts = [...appDelegate.matchAll(
+      /NotificationCenter\.default\.post\(\s*name:\s*\.(capacitorDid\w+)/g,
+    )].map((m) => m[1]).sort();
+    expect(posts).toEqual([
+      'capacitorDidFailToRegisterForRemoteNotifications',
+      'capacitorDidRegisterForRemoteNotifications',
+    ]);
+  });
+});
+
 describe('iOS: local data is protected and stays out of iCloud and backups', () => {
   it('chooses the file-protection class explicitly instead of inheriting one', () => {
     expect(entitlements).toContain('com.apple.developer.default-data-protection');
@@ -569,7 +688,9 @@ describe('both platforms are installed and reproducible from the lockfile', () =
   it('every pod is a local path reference, so Podfile.lock is a pure function of npm', () => {
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
-    expect(pods.length).toBe(5);
+    // The count is what keeps the loop below from passing vacuously on a regex
+    // that stopped matching. Six since Gate 3 added CapacitorPushNotifications.
+    expect(pods.length).toBe(6);
     for (const [, , path] of pods) {
       expect(path.startsWith('../../node_modules/') || path === '../../packages/capacitor-device-keys').toBe(true);
     }

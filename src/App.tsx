@@ -1,5 +1,6 @@
-import { lazy, Suspense, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { listenForPushTaps } from '@/lib/pushNotifications';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { HomePage } from '@/pages/HomePage';
 import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
@@ -181,10 +182,10 @@ function AuthSyncUnavailable({
           needs, and they name no vendor. The raw code stays where it is useful --
           the server's own logs.
 
-          `authSyncCode` is still set on the store and is now read by nothing.
-          Removing it is a store-interface change, which is outside what Phase 0
-          allows itself to touch; it is left as a cleanup rather than smuggled in
-          here.
+          The store no longer carries the raw code either. It was held only so
+          this line could print it, so once that stopped it was a field the
+          context exported and nothing read. It now goes to the console at the
+          point of failure, where a developer has the context to use it.
         */}
         {stage && (
           <p className="text-caption text-muted-foreground" aria-label="오류 진단 코드">
@@ -223,6 +224,51 @@ export function App() {
     authSyncStage,
     accountDeletionRecovery,
   } = useStore();
+  const navigate = useNavigate();
+
+  /*
+    A tapped notification has to land somewhere.
+
+    Registered here rather than in the store because it needs the router, and
+    once per app rather than per connection: the handler is stateless and a second
+    registration would route the same tap twice.
+
+    It lands on home and only home -- `listenForPushTaps` refuses any other route,
+    because a payload that can choose a destination is a payload that has already
+    said which record it was about (IA §3.1).
+
+    Above the early returns so the listener is installed even while the app is
+    showing a loader or a recovery screen: a notification tapped during either is
+    still a tap that has to go somewhere.
+  */
+  /*
+    Two ways the first version of this failed to be "once per app".
+
+    `navigate` is not stable. `App` renders above `<Routes>`, so react-router
+    hands back `useNavigateUnstable`, whose identity changes with the current
+    pathname -- and a dependency array containing it tore the listener down and
+    put a new one up on EVERY navigation.
+
+    And the teardown could not run. `dispose` was assigned inside `.then()`, so a
+    cleanup firing before the registration promise resolved returned `undefined?.()`
+    -- a no-op -- while the listener it was meant to cancel arrived a tick later
+    and stayed forever. Native only, and it accumulated: one tap, N routes.
+
+    A ref for the callback and an empty dependency array fix the first. A
+    `disposed` flag that the late resolver checks fixes the second.
+  */
+  const navigateRef = useRef(navigate);
+  useEffect(() => { navigateRef.current = navigate; }, [navigate]);
+
+  useEffect(() => {
+    let disposed = false;
+    let dispose: (() => void) | undefined;
+    void listenForPushTaps((path) => navigateRef.current(path)).then((remove) => {
+      if (disposed) { remove?.(); return; }
+      dispose = remove;
+    });
+    return () => { disposed = true; dispose?.(); };
+  }, []);
 
   if (!isReady) {
     return (

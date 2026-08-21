@@ -100,6 +100,22 @@ active branch가 존재한다. **master에는 아직 없다.**
 
 이 branch의 CI는 base `master` PR에서만 돈다. stacked base에서는 어떤 workflow도 trigger되지 않는다.
 
+### Phase 1 checkpoint — 2026-08-21
+
+| 항목 | 상태 |
+|---|---|
+| Gate 4 통화 모드 | `claude/phase1-call-mode-v2` / PR #78, **CI 14/14 green**. 전화 걸지 않음 · 통화 기록 0 · `다음`은 쓰기 없는 건너뛰기 |
+| Gate 3 push 서버 | `claude/phase1-gate3-push`. migration 048 + `send-push`. 실제 PostgreSQL로 검증됨 |
+| Gate 3 push 클라이언트 | 완료. 토큰 lifecycle은 이 저장소가 다른 클라이언트 동작을 검증하는 방식으로 검증 가능했고(§14.3이 negative test를 명시적으로 요구한다), 실기기가 필요한 것은 실제 전달뿐이다 |
+| `briefings` drop | **미착수.** 파괴적 변경이라 migration-gate §4의 명시적 승인이 필요하다 |
+| S4 §7.6 대기 구간 | **완료.** 자동 노출 없음(저장 시 비공개 강제) + 연결 직후 창(7일) 안에서 묻는 카드. **"한 번"을 저장하지 않는다** — `couple_members.joined_at`에서 창을 계산하므로 새 영속 사실이 없다. 창이 지나도 기록은 그대로 비공개이며 개별 전환 가능 |
+| §19 계측·판독 | **완료.** 선언된 8종 전부에 emit 지점이 있고, 050이 커플 축과 집계 판독을 더했다. 현재 파이프로 LV 퍼널의 **주요 지표를 실제로 계산할 수 있다** — 커플 단위 지표 2개는 050 이전에는 계산 자체가 불가능했다. 여전히 없는 것: 3분 합류 실측 · 감정 확인율 · 위젯 사용률 |
+| 연락 가능 시간 | **완료.** 온보딩에서 양 역할에게 묻고, 설정에서 양 역할이 편집한다. 끝이 시작보다 이른 창은 저장 전에 거부한다 — DB는 받아들이고 발송이 영영 매치하지 않아 설명 없이 알림이 끊긴다 |
+
+Gate 3에서 승인된 계획 하나가 구현 중에 반증됐다: 전략이 지정한 `couple_members.has_unseen`은
+001의 SELECT 정책 때문에 파트너에게 읽히고, 그것은 곧 읽음 표시(§14.3 절대 금지)다. 전용 테이블로
+옮겼고 근거는 048 파일과 migration README가 소유한다.
+
 ### Branch consolidation checkpoint — 2026-08-20
 
 Every remote branch was audited for work that was still valid and not yet on master,
@@ -122,6 +138,90 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 여전히 변하지 않은 것: Production은 NOT APPLIED, remote Supabase catalog는 UNVERIFIED,
 실기기 검증은 UNVERIFIED, chat은 FROZEN / DEFERRED, P6는 NOT AUTHORIZED.
 
+### 전수 저장소 감사 checkpoint — 2026-08-21 (최종)
+
+앞선 저자 감사 이후, **최종 릴리스 트리 전체**를 대상으로 독립 리뷰어 6개를 병렬로 돌린
+감사. 상세는 `WORK_LOG.md` 같은 날 마지막 항목.
+
+| 항목 | 결과 |
+|---|---|
+| 감사 대상 | `release/phase1-gate3-clean-history` (PR #80), tree `8dade09` = #79 최종 tree |
+| CRITICAL | 2건 — 035의 recovery 오버로드 부활, iOS APNs 토큰 브리지 부재. **둘 다 수정** |
+| HIGH | 3건 — `couple_id` 위조, CI가 DB harness 미실행, 오프라인 큐 미전송. **전부 수정** |
+| MEDIUM/LOW | 4건 수정. 나머지는 범위 밖으로 인계 문서에 기록 |
+| 새 migration | **051, 052, 053** (전부 운영 미적용) |
+| 검증 | verify EXIT=0 / 2829 tests · 51 migrations / 234 assertions · p5 93 · write-floor 39 · rollback PASS · 취약점 0 |
+| 회귀 테스트를 못 만든 것 | **1건** — 오프라인 큐 flush. → **2026-08-21 4차 감사에서 닫혔다**(아래) |
+
+**#80은 아직 병합되지 않았다.** 기본 브랜치 tip은 `f73ebfe`이며 병합은 user 전용 게이트다.
+
+### 4차 전수 감사 checkpoint — 2026-08-21
+
+같은 트리(PR #80)를 다시, 이전 보고를 사실로 믿지 않고 감사했다. live 재확인 후 실제
+PostgreSQL 17.10에 전체 체인을 적용하고 RLS 실행 주체로 함수를 구동했다. 상세와 원장은
+`WORK_LOG.md` 같은 날 마지막 항목이 소유한다.
+
+| 항목 | 결과 |
+|---|---|
+| HIGH | 1건 — **`daily_records.shared_at`이 클라이언트 위조 가능**했고, 그것으로 053의 취소를 무력화해 행위 없는 알림을 남길 수 있었다. → `054` |
+| MEDIUM | 2건 — 파트너 기록이 quarantine된 상태에서 초대를 내려 053의 경계를 영구히 밀어버림(`store.tsx`); §19 계측 배선 게이트가 주석 처리된 호출을 호출로 셈(`productEvents.test.ts`) |
+| LOW | 1건 — `App.entitlements`에 `aps-environment` 항목이 둘이고 하나가 Gate 3 이전의 거짓 진술 |
+| 새 migration | **054**, 그리고 후속으로 **055** (둘 다 운영 미적용) |
+| 닫힌 미검증 | **오프라인 큐 flush** — outbox fixture를 만들어 배달 시도를 관측한다. mutation 4건 전부 잡힘 |
+| 행위로 재확인 | 051 §1·§2·§5, `disconnect_couple` 전체 효과와 인가, 텔레메트리 판독 권한, 카탈로그 전수 |
+| 검증 | verify EXIT=0 / **188 files · 2837 tests** · **52 migrations / 243 assertions** · p5 93 · write-floor 39 · rollback PASS · edge PASS·3/3 · 취약점 0 |
+| mutation | **11건** 전부 실패 확인 |
+| 고치지 않은 것 | (없음 — 아래 2026-08-21 후속 참조) |
+
+**#80은 여전히 병합되지 않았다. 병합은 user 전용 게이트다.**
+
+### 2026-08-21 후속 — 위 감사가 남긴 두 항목을 실제로 닫았다
+
+위 표의 "고치지 않은 것"과, 054가 스스로 실행하지 못하던 repair를 각각 재현하고 고쳤다.
+Fable 전략 감사가 지적한 `우리` 날짜 셀 결함도 코드로 재현해 함께 닫았다.
+
+| 항목 | BEFORE (측정값) | 수정 | mutation |
+|---|---|---|---|
+| **054 repair가 무효였다** | 001→053 적용 후 소유자가 RLS로 `shared_at`을 위조하고 054를 적용해도 **두 행 모두 2126년 그대로**. 트리거를 먼저 설치한 탓에 repair UPDATE가 무전이 분기(`NEW.shared_at := OLD.shared_at`)로 들어가 자기가 지우려던 값을 되돌려놓았다 | 054 직접 수정(어디에도 미적용). repair를 트리거가 붙지 않은 구간에서 실행 | 원본 순서로 되돌리면 3개 assertion FAIL |
+| **push 배달-표시 레이스 — 누락이 아니라 소실이었다** | 후보 선정(23:48:00.566) → R2 공유(23:48:00.588) → mark(23:48:00.610) 후 **`has_unseen = f`, `partner_has_pending_act = f`.** R2는 지연이 아니라 **영구 소실** — 플래그가 내려가 다시 선정되지 않고 스탬프가 경계 뒤라 영원히 세어지지 않는다 | `055`. 경계를 **발송 결정 시각**으로 긋고(`push_delivery_candidates`가 `decided_at` 반환), `has_unseen`은 053의 `partner_has_pending_act()`로 **재계산**. `p_decided_at`에 DEFAULT 없음 | 재계산 제거 → 3 FAIL / 경계 `GREATEST` 제거 → 2 FAIL / **스탬프 `GREATEST` 제거 → 3 FAIL** |
+| **`우리` 날짜 셀이 항상 오늘을 열었다** | `UsPage`는 `/record?date=…`로 이동하는데 `RecordPage`가 `date`를 **어디서도 읽지 않았다**(읽는 것은 `trip`·`from`·`to`·`compose`·`record` 5개). §4.2/§10 "정확한 날짜, 근사치 금지" 위반 | `RecordPage`가 `?date=`를 읽는다. `isCalendarDate`로 검증(trip 범위와 같은 규칙), trip period가 여전히 우선 | 검증 가드 제거 → 1 FAIL |
+
+**하지 않은 것 — canonical과 충돌하는 Fable 제안.** Fable 감사 §4 결함 2는 "이야기거리 0개일
+때도 통화 모드 고정 진입점을 두라"고 제안한다. `PRODUCT_V3.md` 통화 모드 절은
+**"남은 항목이 0이면 진입점을 숨긴다"**고 명시한다. canonical이 이긴다 — 구현하지 않았다.
+
+| 항목 | 결과 |
+|---|---|
+| 검증 | verify EXIT=0 / **189 files · 2847 tests** · **53 migrations / 272 assertions**(+ 업그레이드 경로 전용 DB) · p5 93 · write-floor 39 · rollback PASS · edge PASS·3/3 · 취약점 0 |
+| mutation | **7건** 전부 실패 확인 (054 원래 순서 3 · 055 재계산 제거 3 · 055 `GREATEST` 제거 2 · `?date=` 가드 제거 1) |
+| 남은 것 | 054 재리뷰 + 055 독립 리뷰. 실제 전달은 여전히 외부 게이트(자격증명·기기) |
+
+### 저자 감사 checkpoint — 2026-08-21
+
+Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저자 측 전수 감사를 했다.
+결합은 `audit/combined-scratch` 브랜치(`d5471f3`)에서 PR 병합 없이 cherry-pick으로 구성했다.
+
+| 항목 | 결과 |
+|---|---|
+| **001→047→048→049→050 결합 체인** | **PASS** — 48개 migration, 205 assertions. 이 조합은 그전까지 한 번도 실행되지 않았다 |
+| 발견·수정한 결함 | 10건. 상세는 `WORK_LOG.md` 2026-08-21 감사 항목 |
+| 그중 숫자를 틀리게 만든 것 | 1건 — §19 kill metric이 권한 거부를 opt-out으로 셌다 |
+| unhandled rejection / Errors | **0건** |
+| 결합 전용 산출물 | harness의 047 ORDER + 8개 assertion, 원장 047 행, #75 낡은 주장 정정 — **landing 후 적용** |
+
+### LV 진입 조건 대비 현황 — 2026-08-21
+
+`ENGINEERING_ROADMAP` §LV의 조건별로, **active branch 기준**이다. master는 아직 `21e7dfb`다.
+
+| LV 조건 | 상태 |
+|---|---|
+| 계정·커플 연결·세션 복구 | 기존 스택 유지. 이 세션에서 약화시킨 것 없음 |
+| 기록 → 상대방의 오늘 → 원본 → 대화 준비 | 루프의 **첫 화살표(push)와 마지막 화살표(통화 모드)**가 코드로 존재한다. 실제 전달만 외부 게이트 |
+| 검증 범위의 프라이버시·보안 보호 | §7.6 자동 노출, 읽음 표시가 될 뻔한 컬럼 위치, 기기 이양 누출 — 셋 다 닫힘 |
+| 알려진 critical authorization/privacy blocker 없음 | 이 세션에서 발견한 것은 전부 닫았다. **independent review는 아직 없다** |
+| §19 허용 목록 계측 착지 | 코드로는 착지한다. **실제 이벤트가 쌓이는지는 LV 환경이 있어야 확인된다** |
+| 검증 빌드의 보안 표현이 §14.5 LV 행과 일치 | **미확인.** 온보딩·설정의 문장을 §14.5 LV 행과 대조한 적이 없다 |
+| 외부 사용자 범위·고지·rollback·데이터 처리 | **미착수.** LV 환경(전용 Supabase 프로젝트)이 없다 |
 ### Two-lineage convergence checkpoint — 2026-08-21
 
 `claude/v1-launch-readiness`(PR #73)와 `release/v1-gate1-gate2`(PR #74)는 같은 작업의
@@ -140,6 +240,12 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 실기기 UNVERIFIED, chat FROZEN / DEFERRED, P6 NOT AUTHORIZED(개정된 ARCH-P6 기준으로도
 구현 미착수), push 알림 미구현, §19 계측 미구현.
 
+> **2026-08-21 정정.** 위 문단은 원래 "push 알림 미구현, §19 계측 미구현"으로 끝났다.
+> 그 문장은 이 checkpoint가 작성된 시점에는 참이었고 **결합 트리에서는 거짓이다** —
+> 둘 다 PR #79에서 구현됐다(migration 048~050). landing 순서상 이 checkpoint(#75)가
+> 먼저 오고 구현(#79)이 나중에 오므로, 두 계보가 합쳐지는 지점에서 이 문장이 낡는다.
+> 저자 감사에서 발견해 정정했다.
+
 ## 2. Active migration ledger facts
 
 | migration | scope | production state for this docs task |
@@ -152,6 +258,16 @@ Consolidation 이후에도 모든 remote branch는 history 보존을 위해 그�
 | 044 | unlink crypto pairing authority | present in landed master tree; remote catalog independently UNVERIFIED |
 | 045 | E2EE write-floor activation hardening | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
 | 046 | device provisioning actor requirement | present in landed master tree; Production NOT APPLIED; remote catalog independently UNVERIFIED |
+| 047 | care signal `feeling_unwell` | **PR #76이 소유하며 master에도 이 branch에도 없다.** Production NOT APPLIED |
+| 048 | push delivery metadata (Gate 3) | active branch only. fresh chain 001→048에서 실제 PostgreSQL 17.10으로 37개 계약 검증, mutation 6건 확인. Production NOT APPLIED; 047과 결합한 체인은 **아직 한 번도 실행되지 않았다** |
+| 049 | §19 최소 계측 (LV 진입 조건) | active branch only. **timestamp 컬럼이 없다** — 날짜 버킷만. 파트너 read 정책 없음, UPDATE/DELETE 정책 없음. fresh chain 001→049에서 19개 계약 검증, mutation 4건 확인. Production NOT APPLIED |
+| 050 | LV 판독 (couple 축 + 집계 함수) | active branch only. `couple_id`는 세션에서 파생되고 파트너 read는 여전히 없다. 판독은 `(metric, value)` 집계만 반환하며 행 반환 경로가 없다. fresh chain 001→050에서 16개 계약 검증, mutation 5건 확인. Production NOT APPLIED |
+
+| 051 | audit closure (recovery 오버로드 제거 · `couple_id` 위조 차단 · 회수/공유 전환 플래그 · NULL 판독 범위) | active branch only. Production NOT APPLIED |
+| 052 | 공유 기록 삭제·계정 탈퇴 시 플래그 하강 | active branch only. Production NOT APPLIED |
+| 053 | 알림 플래그가 "pending act"를 뜻하게 함 (`notified_through` + `shared_at`) | active branch only. Production NOT APPLIED |
+| 054 | `shared_at`을 서버 전용 상태로 만든다 — 053이 남긴 클라이언트 쓰기 경로를 닫는다 | active branch only. fresh chain 001→055(53개)에서 272 assertions, mutation 4건 확인. **2026-08-21 정정: repair 문장이 무효였고 파일을 직접 고쳤다**(미적용 파일). Production NOT APPLIED |
+| 055 | 알림 경계(`notified_through`)를 **발송 결정 시각**으로 긋는다 — 결정과 표시 사이에 공유된 행위가 소실되던 레이스를 닫는다. **2026-08-22 보강:** `last_notified_at`도 같은 단조 보장을 받는다 — 경계만 `GREATEST`였고 스탬프는 flat이라, 늦게 도착한 **더 이른** mark가 스탬프를 뒤로 끌어 이미 쓴 하루 상한을 다시 열었다(같은 날 알림 2건). 경계 assertion은 전부 통과하는 채로 그 옆에서 벌어졌다 | active branch only. fresh chain 001→055에서 055가 32 assertions(A·B·C·D·E·G·H 전 시나리오 + 영구 negative proof + 카탈로그 계약 전수 비교), mutation 5건 확인. Production NOT APPLIED |
 
 No remote Supabase mutation was performed by this documentation task.
 
@@ -181,7 +297,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 | 기능 | 현재 상태 |
 |---|---|
 | `상대방의 오늘` → 정확한 원본 → Conversation Bridge | P0–P3은 merge된 범위. 이야기거리 보관함·완료 처리 P4는 integration branch에 있으나 master에는 아직 merge되지 않음 |
-| 알림 | 완전 미구현 |
+| 알림 | **코드는 양쪽 다 있다.** 서버: migration 048(전용 `push_delivery_state` 테이블 · 비공개 기록은 아무것도 올리지 않음 · 하루 1회와 연락 가능 시간을 DB가 강제 · 기기 이양 시 토큰 회수)과 `send-push` Edge Function. 클라이언트: `@capacitor/push-notifications` 통합 · 커플 연결 시 권한 요청과 토큰 등록 · 로그아웃 시 회수 · 탭 착지는 홈 고정. 전부 active branch에 있고 검증됐다. **남은 것은 외부 게이트와 운영 조건 하나다** — APNs/FCM 자격증명, `aps-environment` entitlement(Apple portal capability와 함께 추가해야 함), 실기기 2대, 그리고 **`send-push` 스케줄러의 single-flight 보장.** 마지막 항목은 자격증명이 아니라 배포 설정이다: 하루 1회 상한은 후보 선정 시점에 판정되고 `mark_push_delivered()`에서야 닫히므로, 두 스케줄러가 겹쳐 돌면 같은 수신자를 각자 고르고 같은 날 알림 2건이 나간다. **데이터베이스는 이것을 막지 않는다** — 행 잠금도 advisory lock도 없다. LV 범위에서는 운영 조건으로만 수용하며, 통과 조건과 증거 요건은 `docs/kiro/SUPABASE_DEPLOYMENT_CHECKLIST.md` §6-1이 소유한다. 보장할 수 없으면 LV는 HOLD다. 이 기기에서는 Xcode 부재로 `pod install`도 완료할 수 없다 |
 | `외박` / `외출` 일정 종류 | 미구현. `기타`로 표현됨 |
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |

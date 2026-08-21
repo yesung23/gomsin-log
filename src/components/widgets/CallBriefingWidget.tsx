@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { recordProductEvent } from '@/lib/productEvents';
 import { Check, ChevronDown, ChevronRight, ChevronUp, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
@@ -49,7 +50,38 @@ export function CallBriefingWidget() {
   );
   const partnerName = state.profile.couple.partnerName || '연인';
 
+  /*
+    The denominator.
+
+    `briefing_to_original` alone is a count; divided by this it becomes the rate
+    the strategy actually asks for -- of the briefings someone saw, how many led
+    to the exact original.
+
+    Fired once per mount, and only when there is a briefing to see: an empty
+    widget is not a briefing that failed to convert, and counting it would drag
+    the rate down with days nobody wrote on.
+  */
+  useEffect(() => {
+    if (briefing.topics.length === 0) return;
+    void recordProductEvent({ kind: 'briefing_opened', screen: 'home' });
+    // Mount-scoped on purpose: re-firing as the list changes would inflate the
+    // denominator every time a record arrived.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const openRecord = (recordId: string) => {
+    /*
+      The loop's middle step, and the strategy's headline number: did the
+      briefing actually lead someone to the exact original?
+
+      §19 permits the event kind and an opaque id. The record's text is not read
+      here and there is no field it could travel in.
+    */
+    void recordProductEvent({
+      kind: 'briefing_to_original',
+      screen: 'home',
+      subjectId: recordId,
+    });
     setHighlightedRecordId(recordId);
     navigate(`/record?record=${recordId}`);
   };

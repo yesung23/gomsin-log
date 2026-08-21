@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronRight, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
+import { recordProductEvent } from '@/lib/productEvents';
 
 /**
  * 통화 모드 — the last arrow of the daily loop.
@@ -63,6 +64,19 @@ export function CallModePage() {
   const [position, setPosition] = useState(0);
   const [pending, setPending] = useState(false);
 
+  /*
+    Opening the call screen, once per visit. This is the step the strategy needs
+    to distinguish "marked something" from "actually got on a call about it" --
+    the two numbers together are what say whether the loop closes.
+
+    Nothing about the call is recorded: not when it started, not how long it
+    lasted, not whether one happened at all. §8 forbids that and this event does
+    not imply it -- it says a screen was opened.
+  */
+  useEffect(() => {
+    void recordProductEvent({ kind: 'call_mode_opened', screen: 'call' });
+  }, []);
+
   const current = topics[position];
   /** Skipped past the end with topics still unfinished -- not the same as done. */
   const wrapped = !current && topics.length > 0;
@@ -89,6 +103,15 @@ export function CallModePage() {
         position already points at the next one. Advancing as well would step over
         a topic nobody saw.
       */
+      /*
+        The loop's last arrow, measured. §19 permits the event kind and an opaque
+        id; the record's text is not read here and has no field to travel in.
+      */
+      void recordProductEvent({
+        kind: 'talk_about_resolved',
+        screen: 'call',
+        subjectId: current.recordId,
+      });
       toast.success('이야기한 걸로 정리했어요.');
     } finally {
       setPending(false);

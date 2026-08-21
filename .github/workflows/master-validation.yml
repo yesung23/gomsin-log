@@ -248,6 +248,62 @@ jobs:
       - name: Run the real-Deno Edge Function tests
         run: npm run test:edge
 
+  database-contracts:
+    # Every executable proof of this database's security properties lived in
+    # `scripts/` and was run by hand. No workflow invoked `test:phase0`,
+    # `test:p5`, `test:write-floor` or `test:rollback`, so the RLS policies,
+    # SECURITY DEFINER guards, write floors and rollback contracts were verified
+    # exactly as often as someone remembered to verify them.
+    #
+    # That is how migration 035 was able to re-create a two-argument recovery
+    # function 034 had deliberately dropped -- restoring, as an overload, a body
+    # missing the device, identity and downgrade checks -- and sit in the tree
+    # through every green run since Phase 1A.
+    #
+    # The harnesses fail closed: no PostgreSQL on PATH exits 2 with "MISSING
+    # VERIFICATION, not a pass", so this job cannot go green by finding nothing
+    # to run.
+    name: PostgreSQL security contracts on a fresh chain
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out without write credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install the locked dependency graph
+        run: npm ci
+
+      - name: Put the runner's PostgreSQL binaries on PATH
+        # The runner ships the server but not on PATH. Highest version present,
+        # and a hard failure if there is none -- an absent database must not read
+        # as a passing security check.
+        run: |
+          bindir="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$bindir" ]; then
+            echo "No PostgreSQL server binaries on this runner." >&2
+            exit 1
+          fi
+          echo "$bindir" >> "$GITHUB_PATH"
+
+      - name: Fresh migration chain, RLS and authorization contracts
+        run: npm run test:phase0
+
+      - name: E2EE pairing and partner-visibility contracts
+        run: npm run test:p5
+
+      - name: Write-floor scope contracts
+        run: npm run test:write-floor
+
+      - name: Rollback contracts
+        run: npm run test:rollback
+
   dependency-policy:
     name: Audit allowlist and brace-expansion topology
     runs-on: ubuntu-latest

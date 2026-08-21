@@ -371,6 +371,27 @@ export async function installMockBackend(
       })));
     }
 
+    /*
+      §19 measurement. Accepted and discarded.
+
+      The app emits these on the real product paths, so without this route every
+      scenario logged a 500 to the browser console -- and several tests assert
+      there are none, correctly. Returning an empty array rather than echoing the
+      row is deliberate: nothing reads these back, and a fixture that stored them
+      would invite a test to assert on analytics instead of on behaviour.
+    */
+    if (path === '/rest/v1/product_events') return rows(route, []);
+    /*
+      `clear_my_unseen` lowers the caller's own delivery flag when the app comes
+      into view, and it runs in a browser exactly as it does on a device. Unrouted
+      it 404s, `clearOwnUnseen` logs the failure, and the layout matrix -- which
+      asserts a clean console on purpose -- goes red across every viewport.
+
+      Accepted and discarded, like `product_events` above. The flag is server
+      state with no client-visible effect, so echoing anything back would invite a
+      test to assert on delivery bookkeeping instead of on what the person sees.
+    */
+    if (path === '/rest/v1/rpc/clear_my_unseen') return json(route, null);
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
     if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);

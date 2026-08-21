@@ -3645,12 +3645,30 @@ service_role 컨텍스트로 고친 뒤에야 실제로 문다.
   재현했다. 워크플로우가 "폐기됨"으로 분류한 항목은 실제로는 "검증되지 못한 것"이며,
   그 오분류는 내 스크립트가 투표 0건을 폐기로 처리한 탓이다.
 
+#### 3차 — 알림 상태 모델 (053)
+
+user가 지목한 시퀀스가 **재현되었다.** 오래된 공유 기록 R1이 있으면, B가 확인한 뒤 A가
+새로 공유한 R2를 철회·삭제해도 플래그가 내려가지 않는다. 051/052의 하강 조건이 "작성자의
+다른 공유 기록이 없으면"이었는데, R1은 B의 마지막 확인보다 오래됐으므로 pending act가
+아니다. 유일한 새 행위가 철회됐는데 B는 여전히 소환된다.
+
+**하나의 boolean으로는 올바른 취소가 불가능하다는 것을 명시했다.** `has_unseen`은 무언가
+pending이라는 사실만 담고 어떤 행위인지·언제인지는 담지 않는다. 수신자 경계
+(`push_delivery_state.notified_through`, 파트너 비가시)와 기록별 공개 시각
+(`daily_records.shared_at`, `updated_at`이 이미 드러내던 것)을 추가했다. **이벤트 테이블이
+아니다** — 개수도 목록도 이력도 없고, 클라이언트는 여전히 `has_unseen` 하나만 읽는다.
+
+회귀 5종을 실제 함수 경로로 구동했고, 053을 체인에서 빼면 **취소 4건이 실패한다.**
+
+이 결함은 **저자가 두 차례 감사에서 못 본 것**이다. 048·051·052 셋 다 "shared 상태"와
+"통지 안 된 행위"를 같은 것으로 다뤘다.
+
 #### VERIFICATION
 
 | 무엇 | 결과 |
 |---|---|
-| `npm run verify` | **EXIT=0** — 186 files / 2827 tests |
-| `npm run test:phase0` | **50 migrations / 216 assertions** |
+| `npm run verify` | **EXIT=0** — 186 files / 2829 tests |
+| `npm run test:phase0` | **51 migrations / 234 assertions** |
 | `test:p5` · `test:write-floor` · `test:rollback` | PASS (93 · 39 · PASS) |
 | `check:edge` · `test:edge` | PASS · 3/3 |
 | `npm audit --omit=dev` | 취약점 0 |

@@ -1589,6 +1589,8 @@ check(
 );
 mustSql(`UPDATE public.push_delivery_state SET has_unseen = FALSE WHERE user_id = '${E}'`, 'reset 4');
 
+
+
 // --- the partner cannot observe the flag ------------------------------------
 // `has_unseen` is delivery state, not a read receipt. A read receipt is defined
 // by the PARTNER learning something, so the test is that they cannot.
@@ -2044,6 +2046,95 @@ check(
 check(
   !asServiceRole(`SELECT * FROM public.lv_couple_return_count(NULL::DATE, NULL::DATE, NULL::DATE, NULL::DATE)`).ok,
   '051 a NULL read-out range is refused rather than answered with zero',
+);
+
+/*
+  The general form of what 051 §1 fixed.
+
+  Counting one function's overloads catches that function. What made C1 possible
+  was the shape: a migration DROPPING a signature, and a later one running
+  CREATE OR REPLACE on it without knowing, so PostgreSQL overloads instead of
+  replacing and both bodies ship. Nothing prevents that happening to the next
+  function, and nothing would have reported it.
+
+  Extension functions are excluded by `pg_depend.deptype = 'e'` -- pgcrypto
+  legitimately ships a dozen overloaded pairs, and asserting zero without that
+  filter would be a test that fails for a correct tree.
+
+  Verified once by probe over the whole chain: after this filter the count is
+  ZERO. Every application function in `public` has exactly one signature, so any
+  future overload is either deliberate -- and this line is where the author says
+  so -- or the bug 051 spent a section on.
+*/
+const appOverloads = mustSql(`
+  SELECT COALESCE(string_agg(x.line, ', '), 'none') FROM (
+    SELECT p.proname || ' (' || count(*)::text || ')' AS line
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
+       )
+     GROUP BY p.proname HAVING count(*) > 1
+     ORDER BY p.proname
+  ) x`, '051 overload sweep');
+check(
+  appOverloads === 'none',
+  `051 NO application function in public is overloaded, so no dropped signature came back (found: ${appOverloads})`,
+);
+
+// ---------------------------------------------------------------------------
+// 052 -- account closure. LAST, because it deletes an actor the rest of this
+// file uses. Placed here after an earlier version ran mid-file and took every
+// subsequent assertion down with it.
+// ---------------------------------------------------------------------------
+
+/*
+  052's stated limit, measured rather than assumed.
+
+  The header says account closure depends on the CASCADE reaching
+  `daily_records` while the departing member's `couple_members` row still
+  exists, and that PostgreSQL does not order cascaded deletes between tables.
+  That is a claim about this database's behaviour, so it gets an assertion
+  instead of a hedge -- if it turns out to hold reliably, the comment is too
+  pessimistic; if it does not, the harness says so out loud.
+*/
+/*
+  Self-contained on purpose. An earlier version leaned on the INSERT trigger to
+  raise the flag, and by this point in the file the couple's membership has been
+  moved around by other sections, so the raise did not happen and the test failed
+  for a reason that had nothing to do with what it measures.
+
+  Membership is restored explicitly, the flag is set directly rather than through
+  a trigger, and what is under test is the ONE thing 052 added: closing an account
+  takes the invitation down with the records.
+*/
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE3}' AND user_id IN ('${D}', '${E}')`, '052 restore membership');
+mustSql(`DELETE FROM public.daily_records WHERE couple_id = '${COUPLE3}'`, '052 clear records');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('d0000000-0000-4000-8000-000000000006', '${D}', '${COUPLE3}', CURRENT_DATE, 'last words', false)`,
+  '052 closure fixture');
+mustSql(`INSERT INTO public.push_delivery_state (user_id, has_unseen) VALUES ('${E}', TRUE)
+     ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE`, '052 raise directly');
+check(unseenOf(E) === 't', '052 closure fixture leaves the flag up before the account closes');
+mustSql(`DELETE FROM auth.users WHERE id = '${D}'`, '052 close the account');
+/*
+  Measured: the flag DOES come down. On PostgreSQL 17 the cascade reaches
+  `daily_records` while the departing `couple_members` row is still there, so
+  the trigger finds the partner and lowers it.
+
+  Asserted as `f` rather than "either value". An assertion that accepts both
+  outcomes measures nothing -- it is the shape this audit spent a migration
+  correcting -- so the observed behaviour is pinned. If a future PostgreSQL
+  orders the cascade differently this goes red, which is the report worth
+  having: 052's header says that case is possible, and this is what would tell
+  us it arrived.
+*/
+check(
+  unseenOf(E) === 'f',
+  '052 closing an account lowers the surviving partner\'s flag, so nobody is told that a departure was an act',
 );
 
 // ---------------------------------------------------------------------------

@@ -35,6 +35,28 @@ import type { DailyRecord } from '@/types';
  */
 
 /** How long after connecting the app offers the prompt without being asked. */
+/*
+  What this function CANNOT check, and who checks it instead.
+
+  A candidate is decided by author, privacy and write time. Not by couple --
+  `DailyRecord` carries no `coupleId`, so a pure function over records cannot ask
+  which relationship an entry belongs to.
+
+  That matters for one sequence: pair with A, write privately, disconnect, pair
+  with B. B's join time is now, so every entry written during the A period is
+  "before the partner joined" by this function's only available test, and would
+  be offered for reveal to someone it was never about.
+
+  Two things prevent it, both outside this file. `purgeSharedAccess` empties
+  `records` on disconnect (pinned by store.test.tsx, "clears the couple id and
+  shared state"), and the records query filters `.eq('couple_id', coupleId)`, so
+  a new couple's fetch cannot return an old couple's rows.
+
+  Written down because it is a real dependency and not an obvious one: this
+  function is safe for exactly as long as its caller passes records from the
+  CURRENT couple. Anything that later hands it an archive -- a merged history, an
+  export preview, an "all my entries" screen -- reopens the sequence above.
+*/
 export const REVEAL_WINDOW_DAYS = 7;
 
 export interface RevealCandidate {

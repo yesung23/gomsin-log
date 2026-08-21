@@ -54,10 +54,12 @@ ALTER TABLE public.device_push_tokens ENABLE ROW LEVEL SECURITY;
 CREATE INDEX idx_device_push_tokens_user
   ON public.device_push_tokens (user_id);
 
-CREATE POLICY "Users manage only their own push tokens"
-  ON public.device_push_tokens FOR ALL
-  USING (user_id = auth.uid())
-  WITH CHECK (user_id = auth.uid());
+-- SELECT only. Every write goes through `register_push_token()` below, because a
+-- direct INSERT cannot express the one thing registration has to do: take the
+-- token away from whoever held it last. See that function for why.
+CREATE POLICY "Users read only their own push tokens"
+  ON public.device_push_tokens FOR SELECT
+  USING (user_id = auth.uid());
 
 -- =============================================================
 -- 2. The merged flag, in a table only its owner can read
@@ -167,6 +169,14 @@ DECLARE
   v_local_date DATE := (p_now AT TIME ZONE 'Asia/Seoul')::DATE;
   v_is_weekend BOOLEAN := EXTRACT(ISODOW FROM (p_now AT TIME ZONE 'Asia/Seoul')) >= 6;
 BEGIN
+  -- The grant is not the only gate. Migration 029 established this shape: a
+  -- caller who somehow holds EXECUTE but is not the service role is refused in
+  -- the body, so a mis-issued GRANT cannot by itself expose every couple's
+  -- delivery schedule.
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Service role required';
+  END IF;
+
   RETURN QUERY
   SELECT t.user_id, t.platform, t.token
   FROM public.couple_members m
@@ -213,6 +223,10 @@ LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public, pg_temp
 AS $$
 BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Service role required';
+  END IF;
+
   INSERT INTO public.push_delivery_state (user_id, has_unseen, last_notified_at)
   VALUES (p_user_id, FALSE, p_now)
   ON CONFLICT (user_id) DO UPDATE
@@ -264,6 +278,50 @@ $$;
 --
 -- Sign-out is the one that needs an explicit call, because the row would
 -- otherwise outlive the session that created it.
+
+-- Registering a token, which is really TAKING it.
+--
+-- APNs and FCM issue a token to a device+install, and they reissue that same
+-- token to whoever installs next. So a phone handed to a sibling, or an app
+-- reinstalled under a second account, arrives holding a token the previous
+-- account still owns a row for.
+--
+-- A plain INSERT cannot express this. The UNIQUE constraint would reject it, and
+-- RLS forbids deleting the other account's row -- so the registration would fail,
+-- the arriving account would get no notifications, and the DEPARTED account would
+-- keep receiving that device's. §14.3 requires the opposite: an account switch
+-- invalidates the token immediately.
+--
+-- Hence a function. It removes whoever held the token, then claims it for the
+-- caller. Handing a device over cannot leave the previous owner listening.
+CREATE OR REPLACE FUNCTION public.register_push_token(p_platform TEXT, p_token TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- Not a security boundary: the table's CHECK constraint already refuses any
+  -- other platform, and a mutation test confirms it does so with this block
+  -- removed. This exists so the failure names the problem instead of surfacing a
+  -- constraint violation.
+  IF p_platform IS NULL OR p_platform NOT IN ('ios', 'android') THEN
+    RAISE EXCEPTION 'Unsupported push platform' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_token IS NULL OR length(btrim(p_token)) = 0 THEN
+    RAISE EXCEPTION 'Empty push token' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  DELETE FROM public.device_push_tokens WHERE token = p_token;
+
+  INSERT INTO public.device_push_tokens (user_id, platform, token)
+  VALUES (v_uid, p_platform, p_token);
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION public.revoke_my_push_tokens()
 RETURNS VOID
@@ -362,7 +420,10 @@ $$;
 -- Table grants. RLS decides WHICH rows; without a grant the role cannot reach the
 -- table at all and every denial would look like a missing privilege rather than a
 -- policy decision, which is what migration 012 established for the core tables.
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.device_push_tokens TO authenticated;
+-- Read-only. Someone may see which of their own devices are registered; every
+-- write is a function, so no client can claim a token for another account or
+-- leave a departed account listening on a handed-over phone.
+GRANT SELECT ON public.device_push_tokens TO authenticated;
 -- Read-only by design: every write to delivery state goes through a function.
 GRANT SELECT ON public.push_delivery_state TO authenticated;
 
@@ -379,6 +440,10 @@ GRANT EXECUTE ON FUNCTION public.mark_push_delivered(UUID, TIMESTAMPTZ) TO servi
 REVOKE ALL ON FUNCTION public.clear_my_unseen() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.clear_my_unseen() FROM anon;
 GRANT EXECUTE ON FUNCTION public.clear_my_unseen() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.register_push_token(TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.register_push_token(TEXT, TEXT) FROM anon;
+GRANT EXECUTE ON FUNCTION public.register_push_token(TEXT, TEXT) TO authenticated;
 
 REVOKE ALL ON FUNCTION public.revoke_my_push_tokens() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.revoke_my_push_tokens() FROM anon;

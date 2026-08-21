@@ -1435,12 +1435,41 @@ check(
 // The Edge Function's whole view of the world. If `authenticated` could call it,
 // any account could enumerate every couple's delivery schedule.
 
-mustSql(`
-  INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES
-    ('${E}', 'ios', 'token-e'), ('${D}', 'android', 'token-d')`, '048 token fixture');
+check(asUser(E, `SELECT public.register_push_token('ios', 'token-e')`).ok
+  && asUser(D, `SELECT public.register_push_token('android', 'token-d')`).ok,
+  '048 an account can register its own device');
+check(!asUser(D, `SELECT public.register_push_token('desktop', 'token-x')`).ok,
+  '048 an unsupported platform is refused');
+check(!asUser(D, `SELECT public.register_push_token('ios', '   ')`).ok,
+  '048 an empty token is refused');
+check(!psql(['-At', '-c', 'SET ROLE authenticated', '-c', `SELECT public.register_push_token('ios', 'token-null')`]).ok,
+  '048 a NULL actor CANNOT register a token');
+
+// The device-handover case, which a plain INSERT could not express: the token
+// UNIQUE would reject the arriving account and the DEPARTED one would keep
+// receiving that phone's notifications.
+check(asUser(D, `SELECT public.register_push_token('ios', 'token-e')`).ok,
+  '048 a handed-over device can be claimed by the account now using it');
+check(mustSql(`SELECT user_id FROM public.device_push_tokens WHERE token = 'token-e'`, 'handover') === D,
+  '048 claiming a token TAKES it, so the previous account stops receiving that device',
+);
+check(mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE token = 'token-e'`, 'no dup') === '1',
+  '048 a handover leaves exactly one owner, never two');
+
+// Put E back on its own device for the delivery tests below.
+mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e'`, 'reset handover');
+check(asUser(E, `SELECT public.register_push_token('ios', 'token-e')`).ok, '048 re-registered');
 
 check(!asUser(D, 'SELECT * FROM public.push_delivery_candidates()').ok,
   '048 an authenticated user CANNOT ask who is due a notification');
+// The grant is not the only gate (029's shape): EXECUTE without the service_role
+// claim is still refused, so a mis-issued GRANT cannot expose the schedule.
+check(!psql(['-At',
+  '-c', 'GRANT EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) TO authenticated',
+  '-c', 'SET ROLE authenticated',
+  '-c', 'SELECT * FROM public.push_delivery_candidates()']).ok,
+  '048 EXECUTE without the service_role claim is refused in the body');
+mustSql('REVOKE EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) FROM authenticated', 'restore grant');
 check(!asAnon('SELECT * FROM public.push_delivery_candidates()').ok,
   '048 anon CANNOT ask who is due a notification');
 
@@ -1521,7 +1550,7 @@ check(
   '048 a partner CANNOT see how many devices the other carries',
 );
 check(!asUser(D, `INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES ('${E}', 'ios', 'forged')`).ok,
-  '048 nobody can register a token attributed to another account');
+  '048 nobody can write the token table directly, for any account including their own');
 check(!asAnon('SELECT count(*) FROM public.device_push_tokens').ok
   || asAnon('SELECT count(*) FROM public.device_push_tokens').stdout.trim() === '0',
   '048 anon sees no tokens');

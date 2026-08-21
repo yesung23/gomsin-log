@@ -103,6 +103,7 @@ const ORDER = [
   '044_unlink_crypto_pairing_authority.sql',
   '045_harden_e2ee_write_floor_activation.sql',
   '046_require_actor_for_device_provisioning.sql',
+  '048_push_delivery_metadata.sql',
 ];
 
 /**
@@ -310,7 +311,7 @@ function checkVisible(userId, predicate, expected, message) {
 // Cluster
 // ---------------------------------------------------------------------------
 
-console.log('active fresh-chain harness — migrations 001..040 + 043..045 on throwaway PostgreSQL 17\n');
+console.log('active fresh-chain harness — migrations 001..040 + 043..046 + 048 on throwaway PostgreSQL 17\n');
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -1360,6 +1361,206 @@ check(
     'unchanged',
   )) === 1,
   '038 the partner STILL cannot write the author\'s daily_records row',
+);
+
+// ---------------------------------------------------------------------------
+// 048 — push delivery metadata
+//
+// The rule this section exists for is the negative one. A `나만 보기` record is
+// invisible to the partner, so notifying them about it would leak the single fact
+// the privacy setting exists to hide: that anything was written at all. Everything
+// else here is ordinary authorization; that one is the product.
+// ---------------------------------------------------------------------------
+
+const D = 'dddddddd-0000-4000-8000-00000000000d';
+const E = 'eeeeeeee-0000-4000-8000-00000000000e';
+const COUPLE3 = '33333333-0000-4000-8000-000000000003';
+
+mustSql(`
+  INSERT INTO auth.users (id, email) VALUES
+    ('${D}', 'd@example.test'), ('${E}', 'e@example.test');
+  INSERT INTO public.profiles (id, display_name, role) VALUES
+    ('${D}', 'D', 'gomsin'), ('${E}', 'E', 'soldier');
+  INSERT INTO public.couples (id) VALUES ('${COUPLE3}');
+  INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES
+    ('${COUPLE3}', '${D}', 'gomsin', 'active'),
+    ('${COUPLE3}', '${E}', 'soldier', 'active');
+`, '048 fixture');
+
+function unseenOf(userId) {
+  // COALESCE, because "no row yet" and "row saying false" are the same fact: this
+  // person has nothing waiting. A missing row is the normal state before the first
+  // act, not an error.
+  return mustSql(
+    `SELECT COALESCE((SELECT has_unseen FROM public.push_delivery_state WHERE user_id = '${userId}'), FALSE)`,
+    'read has_unseen',
+  );
+}
+
+// --- the flag is raised by an act, and only by a visible one ----------------
+
+check(unseenOf(E) === 'f', '048 a fresh membership starts with nothing to be invited back for');
+
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('d0000000-0000-4000-8000-000000000001', '${D}', '${COUPLE3}', CURRENT_DATE, 'shared', false)`,
+  '048 shared insert');
+check(unseenOf(E) === 't', '048 a SHARED record raises the partner\'s merged flag');
+check(unseenOf(D) === 'f', '048 the author is never notified about their own act');
+
+mustSql(`UPDATE public.push_delivery_state SET has_unseen = FALSE WHERE user_id IN ('${D}', '${E}')`, 'reset');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('d0000000-0000-4000-8000-000000000002', '${D}', '${COUPLE3}', CURRENT_DATE, 'private', true)`,
+  '048 private insert');
+check(
+  unseenOf(E) === 'f',
+  '048 a PRIVATE record raises NOTHING, so the notification cannot leak that it exists',
+);
+
+// --- the partner cannot observe the flag ------------------------------------
+// `has_unseen` is delivery state, not a read receipt. A read receipt is defined
+// by the PARTNER learning something, so the test is that they cannot.
+
+mustSql(`INSERT INTO public.push_delivery_state (user_id, has_unseen) VALUES ('${E}', TRUE)
+     ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE`, 'raise');
+const partnerReadsFlag = asUser(D, `
+  SELECT count(*) FROM public.push_delivery_state WHERE user_id = '${E}' AND has_unseen IS TRUE`);
+check(
+  !partnerReadsFlag.ok || partnerReadsFlag.stdout.trim() === '0',
+  '048 the partner CANNOT read the other side\'s delivery flag',
+);
+
+// --- who may ask who to notify ----------------------------------------------
+// The Edge Function's whole view of the world. If `authenticated` could call it,
+// any account could enumerate every couple's delivery schedule.
+
+mustSql(`
+  INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES
+    ('${E}', 'ios', 'token-e'), ('${D}', 'android', 'token-d')`, '048 token fixture');
+
+check(!asUser(D, 'SELECT * FROM public.push_delivery_candidates()').ok,
+  '048 an authenticated user CANNOT ask who is due a notification');
+check(!asAnon('SELECT * FROM public.push_delivery_candidates()').ok,
+  '048 anon CANNOT ask who is due a notification');
+
+// 20:00 KST on a Wednesday sits inside the migration-001 weekday default window.
+const INSIDE = `TIMESTAMPTZ '2026-08-19 20:00+09'`;
+const OUTSIDE = `TIMESTAMPTZ '2026-08-19 03:00+09'`;
+
+const dueInside = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+  '048 candidates inside window');
+check(dueInside === '1', '048 service_role CAN ask, and a raised flag inside contact hours is due');
+
+const dueOutside = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates(${OUTSIDE}) WHERE user_id = '${E}'`,
+  '048 candidates outside window');
+check(dueOutside === '0', '048 nobody is notified outside the hours they typed in');
+
+// --- the sender learns nothing about what happened ---------------------------
+// Three columns, none of them content, no event kind and no count. `3개` is a
+// debt; the payload the device builds says 새로운 소식 for every kind alike.
+const shape = mustAsServiceRole(
+  `SELECT string_agg(a.attname, ',' ORDER BY a.attnum)
+   FROM pg_proc p
+   JOIN pg_type t ON t.oid = p.prorettype
+   JOIN pg_class c ON c.reltype = t.oid
+   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
+   WHERE p.proname = 'push_delivery_candidates'`,
+  '048 candidate shape');
+check(
+  shape === '' || shape === null || !/log_text|content|emotion|count/i.test(shape),
+  '048 the sender\'s view carries no content, no event kind and no count',
+);
+
+// --- at most one send per recipient per day ---------------------------------
+
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '048 mark delivered');
+check(unseenOf(E) === 'f', '048 delivering lowers the flag');
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+    '048 second look') === '0',
+  '048 a delivered recipient is not due again',
+);
+
+// Raised again the same day -- a second act -- still does not earn a second send.
+mustSql(`UPDATE public.push_delivery_state SET has_unseen = TRUE WHERE user_id = '${E}'`, 'raise again');
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-19 21:00+09') WHERE user_id = '${E}'`,
+    '048 same day') === '0',
+  '048 a SECOND act on the same day earns no second notification',
+);
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-20 20:00+09') WHERE user_id = '${E}'`,
+    '048 next day') === '1',
+  '048 the next Korean-local day starts a new allowance',
+);
+
+// --- clearing one's own flag -------------------------------------------------
+
+const clearedByOther = asUser(D, 'SELECT public.clear_my_unseen()');
+check(clearedByOther.ok && unseenOf(E) === 't',
+  '048 clearing acts on the caller\'s own row, never on the partner\'s');
+check(asUser(E, 'SELECT public.clear_my_unseen()').ok && unseenOf(E) === 'f',
+  '048 someone already in the app can stop being invited back to it');
+check(!psql(['-At', '-c', 'SET ROLE authenticated', '-c', 'SELECT public.clear_my_unseen()']).ok,
+  '048 a NULL actor CANNOT clear anything');
+check(!asAnon('SELECT public.clear_my_unseen()').ok, '048 anon CANNOT clear anything');
+
+// --- token ownership ---------------------------------------------------------
+
+const partnerCountsTokens = asUser(D, `SELECT count(*) FROM public.device_push_tokens WHERE user_id = '${E}'`);
+check(
+  // Either the grant is absent (query fails) or RLS filters every row away. Both
+  // are denials; asserting only on the count would pass vacuously on an error.
+  !partnerCountsTokens.ok || partnerCountsTokens.stdout.trim() === '0',
+  '048 a partner CANNOT see how many devices the other carries',
+);
+check(!asUser(D, `INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES ('${E}', 'ios', 'forged')`).ok,
+  '048 nobody can register a token attributed to another account');
+check(!asAnon('SELECT count(*) FROM public.device_push_tokens').ok
+  || asAnon('SELECT count(*) FROM public.device_push_tokens').stdout.trim() === '0',
+  '048 anon sees no tokens');
+
+check(!psql(['-At', '-c', 'SET ROLE authenticated', '-c', 'SELECT public.revoke_my_push_tokens()']).ok,
+  '048 a NULL actor CANNOT revoke tokens');
+check(asUser(E, 'SELECT public.revoke_my_push_tokens()').ok
+  && mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE user_id = '${E}'`, 'after revoke') === '0'
+  && mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE user_id = '${D}'`, 'others intact') === '1',
+  '048 signing out revokes only the caller\'s own tokens',
+);
+
+// --- unlink ends delivery, on both sides ------------------------------------
+// §14.4: an ended relationship must not be able to notify. Both the tokens and
+// the flags go, so a later reconnection cannot fire a notification left standing
+// from the previous relationship.
+
+mustSql(`
+  INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES ('${E}', 'ios', 'token-e2');
+  INSERT INTO public.push_delivery_state (user_id, has_unseen) VALUES ('${D}', TRUE), ('${E}', TRUE)
+    ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE`, '048 pre-unlink');
+check(asUser(D, 'SELECT public.disconnect_couple()').ok, '048 unlink succeeds');
+check(
+  mustSql(
+    `SELECT count(*) FROM public.device_push_tokens WHERE user_id IN ('${D}', '${E}')`,
+    'tokens after unlink') === '0',
+  '048 unlink revokes the push tokens of BOTH members',
+);
+check(
+  mustSql(
+    `SELECT count(*) FROM public.push_delivery_state WHERE user_id IN ('${D}', '${E}') AND has_unseen IS TRUE`,
+    'flags after unlink') === '0',
+  '048 unlink lowers both merged flags, so reconnecting cannot fire a stale one',
+);
+check(
+  mustAsServiceRole(
+    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id IN ('${D}', '${E}')`,
+    'candidates after unlink') === '0',
+  '048 a disconnected relationship produces no delivery candidates',
 );
 
 // ---------------------------------------------------------------------------

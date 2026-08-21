@@ -15,6 +15,11 @@
 > ⚠️ 이 저장소의 코드만으로는 원격 Supabase 프로젝트의 실제 상태를 알 수 없습니다.
 > 아래 "적용 순서"를 반드시 스테이징 프로젝트에서 먼저 검증하세요.
 
+> **048과 047의 관계 (2026-08-21).** 047(care signal `feeling_unwell`)은 PR #76이 소유하며
+> 이 브랜치에는 없습니다. 048은 047과 겹치는 객체가 없어 순서 충돌은 없지만, **두 계보가
+> 합쳐진 뒤 001→048 전체 fresh chain을 다시 한 번 실행해야** 결합 상태가 검증됩니다.
+> 이 브랜치에서 실행한 harness는 047이 빠진 체인입니다.
+
 ## 상태 표기의 의미
 
 네 가지는 서로 다른 사실이며 절대 섞어 쓰지 않습니다.
@@ -78,6 +83,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `044_unlink_crypto_pairing_authority.sql` | `disconnect_couple()`가 관계 멤버십과 live `crypto_pairings`를 같은 트랜잭션에서 `UNLINKED`로 전환한다. historical key row를 삭제하지 않으며, former partner와 stale local authority가 새 couple scope를 다시 열 수 없도록 하는 forward correction이다 | **Git 추적됨 / 운영 미적용 — 031–040 및 043과 함께 staging actor/RLS 검증 필요** |
 | `045_harden_e2ee_write_floor_activation.sql` | 되돌릴 수 없는 exact-scope write floor 활성화를 소유 ACTIVE 기기 + 기기 인증서 + 해당 ACTIVE epoch의 self-notarized envelope에 결속한다. PENDING·recovery·provisioning·failed·revoked 기기는 거부한다 | **신규 / 어디에도 미적용 — 031→032→034→035→036→037→038→039→040→043→044→045 fresh-chain actor 검증 필요** |
 | `046_require_actor_for_device_provisioning.sql` | `e2ee_begin_device_provisioning`·`e2ee_finalize_device_provisioning`이 `auth.uid()`가 NULL이면 소유권 비교를 건너뛰던 문제를 forward 수정한다. 두 함수 모두 NULL actor를 먼저 거부하고, 소유자 불일치는 `E2EE_DEVICE_WRONG_ACCOUNT`다. revocation 우선순위·인증서·envelope coverage·허용 상태·idempotent 반환은 그대로 보존한다. PostgREST 캐시를 위해 `NOTIFY pgrst`를 포함한다 | **신규 / 어디에도 미적용 — write-floor harness에서 NULL actor·타 계정·anon 거부를 실제 PostgreSQL로 검증함** |
+| `048_push_delivery_metadata.sql` | Gate 3 push의 **유일한** 서버 상태. `device_push_tokens`(본인만, 토큰 UNIQUE로 기기 이양 처리) + `push_delivery_state`(수신자별 병합 플래그 하나, **본인만 SELECT**) + 발송 후보 조회·기록·본인 플래그 해제·토큰 회수 함수. `daily_records` AFTER INSERT 트리거가 플래그를 올리되 **`is_private` 기록은 아무것도 올리지 않는다** — 비공개 기록에 알림이 가면 '무언가 썼다'는 사실 자체가 새기 때문이다. **전략은 `couple_members.has_unseen`을 지정했으나 구현·검증 결과 그것이 틀렸다**: 001의 SELECT 정책이 활성 파트너에게 상대 행 전부를 보여주므로 그 자리의 플래그는 곧 읽음 표시가 되고, RLS는 row 단위라 컬럼 하나만 가릴 수 없다. 그래서 전용 테이블로 옮겼다. 발송자(Edge Function)는 `service_role`만 호출 가능하며 콘텐츠·이벤트 종류·개수를 볼 수 없다. 하루 1회 상한과 연락 가능 시간은 발송자가 아니라 DB가 강제한다. `disconnect_couple`은 양쪽 토큰을 삭제하고 양쪽 플래그를 내린다 | **신규 / 어디에도 미적용 — fresh chain(001→046→048, 45개)에 적용하고 phase0 harness에서 28개 계약을 실제 PostgreSQL 17.10으로 검증함. mutation 4건(비공개 누출·하루 1회·연락 시간·NULL actor) 전부 실패 확인** |
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 

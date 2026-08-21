@@ -4318,6 +4318,39 @@ quarantine 이 `records: []` 로 자기 기록까지 비우는데, 고정 코어
 #### PRODUCTION
 - NOT APPLIED. 047~055는 여전히 어디에도 미적용. merge 하지 않았다.
 
+#### STOPPED AT
+
+- branch: `fix/push-function-contract-search-path` → **PR #83**, base `master` (`191df31`)
+- 커밋 4개: 계약 커버리지(`a08da13`) · 감사 원장+훅 경고(`23352c7`) · 배선 게이트(`653bb99`) · C7(`99280ab`)
+- changed: harness 1 · 테스트 2(1 신규) · 제품 UI 3 · 문서 4 · vault 3
+- explicitly not changed: migration 0건 · 원격 0회 · merge 0회
+- Production: NOT APPLIED · Supabase remote: UNVERIFIED · P6: NOT AUTHORIZED
+
+#### NEXT ACTION — 다음 세션은 여기서 시작한다
+
+```bash
+bash scripts/agent/session-start.sh
+```
+
+기준 SHA `191df31`. 우선순위 순으로, 각 항목에 **왜 아직 안 됐는지**를 함께 적는다.
+
+1. **PR #83 CI 확인 후 병합 판단** — merge는 user 게이트다(hook이 막는다)
+2. **`gatePathCoverage.test.ts` · `authorRoleAndGateAudit.test.ts`** — ox-alpha가
+   같은 부류로 지목했고 raw 읽기는 확인했다(`:315`·`:439`·`:456`·`:552`). **mutation
+   증명이 아직 없어서 고치지 않았다.** 증명 먼저, 수정은 그다음
+3. **`TodayLogWidget` 렌더 테스트** — C7의 명시된 커버리지 공백
+4. **D1 운영 Supabase 카탈로그 read-only 조회** — ox-alpha 1순위이고 나도 동의한다.
+   **훅이 원격 접근을 user 전용으로 막는다.** user가 직접 하거나 명시 승인 필요
+5. **D4 `send-push` bearer 검증 + handler 테스트** — C3·C9. Edge Function은 지금
+   `delete-account` 하나만 실행된다
+6. **002 우회 절차를 LV runbook에** — 없으면 LV 프로젝트 생성 당일에 터진다
+7. **PR 정리 11건** — 조사·근거 작성 완료(`2026-08-22` 감사 리포트), **승인 대기 중**
+
+#### DO NOT ADVANCE UNTIL
+- D1이 확정되기 전에는 어떤 배포 판단도 하지 않는다
+- 002 우회가 runbook에 들어가기 전에는 LV 프로젝트를 만들지 않는다
+- mutation 증명 없이 2번 게이트들을 고치지 않는다
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

@@ -3561,7 +3561,7 @@ cherry-pick이 실제 landing에서도 발생할 충돌을 미리 드러냈다.
 
 | 무엇 | 어디서 | 결과 |
 |---|---|---|
-| `npm run verify` | 결합 트리 | **EXIT=0** — 185 files / 2808 tests |
+| `npm run verify` | 결합 트리 | **EXIT=0** — 186 files / 2812 tests |
 | `npm run verify` | #79 최종 | **EXIT=0** — 185 files / 2796 tests, Errors 0 |
 | `npm run test:phase0` | 결합 트리 | **48 migrations / 205 assertions** |
 | `npm run test:phase0` | #79 최종 | 47 migrations / 197 assertions |

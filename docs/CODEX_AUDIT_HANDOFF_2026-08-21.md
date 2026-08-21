@@ -23,7 +23,7 @@
 각 PR은 앞선 것을 **포함**한다(#75·#76은 #74를, #77은 #74를, #78은 #77을, #79는 #78을).
 순서대로 landing하면 뒤의 것은 자기 커밋만 남기고 줄어든다.
 
-**결합 트리는 `audit/combined-scratch`(`d5471f3`)에 있다.** #79에 #75·#76을 cherry-pick한
+**결합 트리는 `audit/combined-scratch`에 있다.** #79에 #75·#76을 cherry-pick한
 것으로, landing 대상이 아니라 **검증 대상**이다. 병합 없이 최종 트리를 실행해 보기 위해
 만들었고, 아래 §3의 결합 체인 결과는 거기서 나왔다. landing 후 이 브랜치는 버린다.
 
@@ -63,7 +63,7 @@
 | 무엇 | 결과 |
 |---|---|
 | `npm run verify` (#79) | **PASS (EXIT=0)** — 185 files / 2796 tests, unhandled rejection 0 |
-| `npm run verify` (결합) | **PASS (EXIT=0)** — 185 files / 2808 tests |
+| `npm run verify` (결합) | **PASS (EXIT=0)** — 186 files / 2812 tests |
 | `npm run test:phase0` (#79) | **47 migrations / 197 assertions** (048이 37개, 049가 19개, 050이 16개) |
 | `npm run test:phase0` (결합) | **48 migrations / 205 assertions** — 047 포함 fresh chain, 첫 실행 |
 | `npm run test:p5` | PASS (93) |

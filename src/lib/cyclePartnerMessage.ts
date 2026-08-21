@@ -39,12 +39,19 @@ export interface CyclePartnerMessage {
 /**
  * The withholding guarantee, in one place.
  *
- * It is a promise about `CyclePartnerMessageInput`, whose shape is what actually
- * enforces it: there is no field on that type that could carry any of these. If a
- * field is ever added, this sentence has to change in the same commit, and
+ * A promise about `CyclePartnerMessageInput`, whose shape is what enforces it:
+ * there is no field on that type that could carry any of these. If one is ever
+ * added, this sentence has to change in the same commit, and
  * `cyclePartnerMessage.test.ts` is what makes that unavoidable.
+ *
+ * 통증 is in this list and stays in it. A 2026-08-20 draft removed it to make room
+ * for graded pain sharing; the independent review (2026-08-21) refused that
+ * vocabulary, so the recorded pain level is once again unconditionally withheld.
+ * The `feeling_unwell` care signal is not an exception to this sentence: it is an
+ * independent opt-in message that carries no recorded value and no grade.
  */
 const NEVER_SHARED = '증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요.';
+
 
 function formatKoreanDate(date: string): string {
   const [, month, day] = date.split('-');

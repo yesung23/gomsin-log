@@ -35,6 +35,9 @@ describe('cycle validation and mapping', () => {
       'need_space',
       'would_like_support',
       'check_in_later',
+      // Added 2026-08-21 (migration 047): the one ungraded body-state kind the
+      // independent review approved. No pain_* grade may ever join this list.
+      'feeling_unwell',
     ]);
     expect(CYCLE_SYMPTOMS.every(isCycleSymptom)).toBe(true);
     expect(CYCLE_SUPPORT_KINDS.every(isCycleSupportKind)).toBe(true);

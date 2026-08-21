@@ -468,6 +468,7 @@ export function isCycleSupportKind(value: unknown): value is CycleSupportKind {
   return typeof value === 'string' && cycleSupportKindSet.has(value);
 }
 
+
 export function isValidCycleSupportMessage(message?: string): boolean {
   return message === undefined || Array.from(message).length <= CYCLE_SUPPORT_MESSAGE_MAX_LENGTH;
 }

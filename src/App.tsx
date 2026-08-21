@@ -138,11 +138,9 @@ const AUTH_STAGE_CODES: Record<AuthSyncStage, string> = {
 function AuthSyncUnavailable({
   reason,
   stage,
-  code,
 }: {
   reason: ServerErrorKind | null;
   stage: AuthSyncStage | null;
-  code: string | null;
 }) {
   const { signOut } = useStore();
   const [busy, setBusy] = useState(false);
@@ -165,10 +163,29 @@ function AuthSyncUnavailable({
       <section role="alert" className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3">
         <h1 className="text-heading text-foreground">{title}</h1>
         <p className="text-body text-muted-foreground">{description}</p>
+        {/*
+          The diagnostic, in this app's vocabulary only.
+
+          This line used to append the raw PostgREST/Postgres code, so a failing
+          table put `진단 코드: RECORDS-SERVER-PGRST500` on the first screen a person
+          saw. Two problems, and the smaller one is that it looks broken: nobody
+          outside this repository can act on `PGRST500`, and printing it tells any
+          reader which backend stack this runs on, on a screen shown before anyone
+          has authenticated.
+
+          `RECORDS-SERVER` is enough. The stage and the classified kind are terms
+          this codebase defines, they are what a support conversation actually
+          needs, and they name no vendor. The raw code stays where it is useful --
+          the server's own logs.
+
+          `authSyncCode` is still set on the store and is now read by nothing.
+          Removing it is a store-interface change, which is outside what Phase 0
+          allows itself to touch; it is left as a cleanup rather than smuggled in
+          here.
+        */}
         {stage && (
           <p className="text-caption text-muted-foreground" aria-label="오류 진단 코드">
             진단 코드: {AUTH_STAGE_CODES[stage]}-{(reason || 'UNKNOWN').toUpperCase()}
-            {code ? `-${code}` : ''}
           </p>
         )}
         <button
@@ -201,7 +218,6 @@ export function App() {
     authSyncUnavailable,
     authSyncReason,
     authSyncStage,
-    authSyncCode,
     accountDeletionRecovery,
   } = useStore();
 
@@ -240,7 +256,6 @@ export function App() {
               <AuthSyncUnavailable
                 reason={authSyncReason}
                 stage={authSyncStage}
-                code={authSyncCode}
               />
             )}
           />

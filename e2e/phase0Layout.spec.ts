@@ -99,8 +99,15 @@ test('a server failure never shows the user a raw diagnostic code', async ({ bro
   await page.goto('/record');
   await page.waitForTimeout(2000);
 
+  /*
+    Vendor and database codes only. `RECORDS-SERVER` is this codebase's own
+    vocabulary for stage and classified kind -- it is what a support conversation
+    needs and it names no backend, so it is allowed to stay. `PGRST500` is not:
+    nobody outside this repository can act on it, and printing it tells any reader
+    which stack this runs on, on a screen shown before anyone has authenticated.
+  */
   const body = (await page.locator('body').innerText()).toUpperCase();
-  for (const leak of ['PGRST', 'RECORDS-SERVER', '42501', 'POSTGREST']) {
+  for (const leak of ['PGRST', 'POSTGREST', '42501', 'SUPABASE']) {
     expect(body, `a raw diagnostic (${leak}) reached the screen`).not.toContain(leak);
   }
 

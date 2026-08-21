@@ -90,8 +90,8 @@ test('the whole wizard completes: role, nickname, space with a code, anniversary
   // the app may interrupt, not when a phone is reachable.
   await expect(page.getByText('주로 언제 오늘의 로그를 확인할 수 있나요?')).toHaveCount(0);
 
-  await page.getByRole('button', { name: '다음' }).click();
-  await expect(page.getByRole('button', { name: '완료' })).toBeVisible();
+  // This IS the last input step for both roles now, so its button says so.
+  await page.getByRole('button', { name: '완료하기' }).click();
   await context.close();
 });
 

@@ -65,3 +65,18 @@ describe('the question differs because the question IS different', () => {
     expect(promise.slice(0, 120)).toContain('내용은 담기지 않아요');
   });
 });
+
+describe('the wizard does not lie about where it ends', () => {
+  it('never labels the anniversary step 완료 for 곰신', () => {
+    /*
+      It did, because the anniversary WAS their last step. Contact hours follows
+      it for both roles now, so a button reading 완료 and then showing another
+      screen is the app being wrong about itself.
+
+      Caught by the browser matrix, not by anything here: a unit test that drives
+      the wizard would have been written against whatever the label happened to
+      be. The e2e clicks 다음 and times out when it is not there.
+    */
+    expect(SOURCE).not.toContain("{role === 'gomsin' ? '완료' : '다음'}");
+  });
+});

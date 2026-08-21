@@ -1246,9 +1246,18 @@ export function OnboardingPage() {
                 </button>
               </div>
 
+              {/*
+                Always 다음 now.
+
+                This said 완료 for 곰신 because the anniversary WAS their last
+                step. Contact hours comes after it for both roles, so the label
+                was describing a wizard that no longer exists -- and a button
+                that says 완료 and then shows another screen is the app being
+                wrong about itself, not a cosmetic slip.
+              */}
               <Button variant="primary" size="lg" full
                 onClick={handleNext}>
-                {role === 'gomsin' ? '완료' : '다음'}
+                다음
               </Button>
             </div>
           )}

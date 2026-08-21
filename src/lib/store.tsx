@@ -2629,6 +2629,59 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [state.authenticatedUser?.id]);
 
+  /**
+   * Try the queue whenever the app can plausibly reach the server.
+   *
+   * The only flush trigger used to live inside the realtime effect, and that
+   * effect returns early unless the couple is connected AND active. Two people
+   * were left holding undelivered entries:
+   *
+   *  - Anyone who wrote while an invite was still outstanding. `queueRecordForLater`
+   *    accepts a pending couple deliberately, so the entries were queued, the
+   *    banner promised "연결되면 자동으로 보내요", and no listener existed in that
+   *    state to keep the promise.
+   *
+   *  - Everyone, on every cold launch. The listeners were installed and never
+   *    invoked once, so opening the app on a good connection flushed nothing --
+   *    the user had to background and foreground it to send yesterday's entry.
+   *
+   * Both are the same failure: a diary entry the app said it would deliver,
+   * sitting on the device indefinitely. This runs on identity rather than on
+   * couple state because `flushOutbox` already decides what is deliverable --
+   * it captures the active identity, and each entry carries its own
+   * `expectedCoupleId`, so an entry queued for a couple the account has since
+   * left is blocked rather than sent to the wrong person. Re-entrant calls are
+   * single-flighted inside it, so overlapping with the realtime listener costs
+   * one pass.
+   */
+  useEffect(() => {
+    if (!isAuthChecked || !authUserId) return;
+
+    const flush = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void flushOutboxRef.current?.();
+    };
+
+    /*
+      Deferred by a tick rather than called inline.
+
+      `flushOutbox` asks `captureActiveIdentity()` who is signed in, and that
+      compares `stateRef.current` against `sessionUserIdRef.current`. Both are
+      refs assigned by other effects, and effect order is not something this one
+      should depend on -- an inline call ran first on sign-in, saw a mismatched
+      pair, and returned having done nothing. Which is the failure mode being
+      fixed here, arriving through the fix.
+    */
+    const initial = window.setTimeout(flush, 0);
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('online', flush);
+    return () => {
+      window.clearTimeout(initial);
+      document.removeEventListener('visibilitychange', flush);
+      window.removeEventListener('online', flush);
+    };
+  }, [isAuthChecked, authUserId]);
+
   const updateRecord = async (
     id: string,
     updates: Partial<DailyRecord>,

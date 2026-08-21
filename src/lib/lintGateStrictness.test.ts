@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 /**
@@ -74,5 +75,42 @@ describe('the lint gate can actually fail', () => {
     expect(read('eslint.config.js')).toContain('react-refresh');
     expect(read('src/components/media/RecordMediaGallery.tsx'))
       .not.toContain('export function attachmentUnavailableCopy');
+  });
+});
+
+describe('the Deno type-check gate covers every edge function', () => {
+  /*
+    Same failure shape as the lint gate above, one layer over.
+
+    `check:edge` does not take a directory; it names each file. That is a gate
+    whose coverage is a list someone has to remember to extend, and the cost of
+    forgetting is invisible: the new function is simply never type-checked, the
+    command still exits 0, and CI still prints a green tick for "Deno Edge
+    Function validation".
+
+    Edge functions are where the service key lives. A file that ships without a
+    type check there is not the same risk as an unchecked component.
+
+    So the list is checked against the tree. Adding a function now fails this
+    test until the gate is told about it, which is the moment the author is
+    already in `supabase/functions/` and can fix it in one line.
+  */
+  const edgeSources = execFileSync('git', ['ls-files', 'supabase/functions'], {
+    encoding: 'utf8',
+    cwd: process.cwd(),
+  })
+    .split('\n')
+    .filter((file) => file.endsWith('.ts') && !file.endsWith('_test.ts'));
+
+  it('finds edge sources to check in the first place', () => {
+    // Guards the assertion below: an empty list would make it vacuously true,
+    // and a `git ls-files` that silently returns nothing is exactly how such a
+    // test starts passing for the wrong reason.
+    expect(edgeSources.length).toBeGreaterThan(5);
+  });
+
+  it('names every one of them', () => {
+    const missing = edgeSources.filter((file) => !scripts['check:edge'].includes(file));
+    expect(missing).toEqual([]);
   });
 });

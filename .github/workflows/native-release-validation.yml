@@ -498,8 +498,18 @@ jobs:
             exit 1
           fi
 
-          # Usage descriptions: microphone yes, photo library no, tracking no.
-          test -n "$(read_key NSMicrophoneUsageDescription)"
+          # Usage descriptions: camera yes, microphone no, photo library no,
+          # tracking no.
+          #
+          # NSMicrophoneUsageDescription became FORBIDDEN on 2026-08-21. The
+          # composer's voice recorder was removed when video and audio uploads
+          # were closed until the encrypted media foundation, so the app no longer
+          # touches the microphone -- and shipping a usage string for a capability
+          # the binary never exercises is something App Review asks about. This
+          # assertion flipped rather than being deleted, so re-adding the key
+          # without re-opening the feature fails here.
+          test -n "$(read_key NSCameraUsageDescription)"
+          missing NSMicrophoneUsageDescription
           missing NSPhotoLibraryUsageDescription
           missing NSPhotoLibraryAddUsageDescription
           missing NSUserTrackingUsageDescription

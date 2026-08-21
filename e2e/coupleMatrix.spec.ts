@@ -295,19 +295,34 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
   const textarea = page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?');
   await textarea.fill('오늘도 보고 싶어');
 
+  /*
+    A photo, not the voice memo this used to use.
+
+    The defect under test is "a failed UPLOAD destroys the chip", which has
+    nothing to do with the file's kind. Audio stopped being a valid choice on
+    2026-08-21: `classifyMediaFile` now refuses it by policy before any upload is
+    attempted, so this test would have been asserting the refusal path and never
+    reaching the storage failure it was written for.
+  */
   await page.locator('input[type="file"]').first().setInputFiles({
-    name: '목소리.webm',
-    mimeType: 'audio/webm',
-    buffer: Buffer.from('fake-audio'),
+    name: '노을.png',
+    mimeType: 'image/png',
+    // A REAL 1x1 PNG, not a placeholder string. Photos are decoded and re-encoded
+    // to strip EXIF before upload, so undecodable bytes would fail in the
+    // sanitizer and never reach the storage failure this test injects.
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
   });
-  await expect(page.getByText('목소리.webm')).toBeVisible();
+  await expect(page.getByText('노을.png')).toBeVisible();
 
   await page.getByRole('button', { name: '저장' }).click();
 
   // The record text persisted, the file did not -- and the file is still here to
   // retry with. Before the fix this chip was destroyed before the warning showed.
   await expect(page.getByText('올리지 못했어요', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('목소리.webm')).toBeVisible();
+  await expect(page.getByText('노을.png')).toBeVisible();
 
   expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);
   await context.close();

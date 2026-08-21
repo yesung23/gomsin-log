@@ -68,11 +68,17 @@ public class NativeConfigTest {
         // down. Its TypeScript twin (src/lib/nativeConfig.test.ts) was updated at
         // the time; this JVM copy was not, and no workflow ran for this branch
         // family to catch the drift.
+        //
+        // RECORD_AUDIO and MODIFY_AUDIO_SETTINGS were removed on 2026-08-21, when
+        // video and audio uploads were closed until the encrypted media
+        // foundation. The composer's recorder went with them, so the app asks for
+        // no microphone at all -- and a permission the code cannot justify is
+        // exactly what this test exists to catch. The drift ran the other way this
+        // time: the manifest and the TypeScript twin were updated, this JVM copy
+        // was not, and the Android job is the only thing that reads it.
         List<String> expected = Arrays.asList(
             "android.permission.ACCESS_NETWORK_STATE",
-            "android.permission.INTERNET",
-            "android.permission.MODIFY_AUDIO_SETTINGS",
-            "android.permission.RECORD_AUDIO"
+            "android.permission.INTERNET"
         );
         assertEquals(expected, declared);
     }

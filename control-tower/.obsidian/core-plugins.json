@@ -28,5 +28,6 @@
   "zk-prefixer": false,
   "daily-notes": false,
   "webviewer": false,
-  "footnotes": false
+  "footnotes": false,
+  "bases": true
 }

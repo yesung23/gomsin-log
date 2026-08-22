@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -18,6 +19,9 @@ let currentState: AppState;
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({ state: currentState, isReady: true }),
+}));
+vi.mock('@/components/MobileShell', () => ({
+  MobileShell: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/components/ui/AppBar', () => ({
   AppBar: ({ title }: { title: string }) => <h1>{title}</h1>,

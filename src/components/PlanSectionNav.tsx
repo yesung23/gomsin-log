@@ -36,7 +36,15 @@ export function PlanSectionNav({ active }: { active: 'schedule' | 'trips' }) {
     <div
       role="tablist"
       aria-label="계획 종류"
-      className="flex gap-1 p-1 rounded-control bg-muted"
+      /*
+        인스타 프로필의 탭 줄과 같은 문법 (2026-08-23).
+
+        알약 모양 스위처를 걷어냈다. 종이 위에서 채운 알약은 그 화면에서 유일하게 앱처럼
+        보이는 물건이 되고, 그 하나 때문에 나머지가 전부 인쇄된 것처럼 읽힌다. 대신
+        선택된 쪽 아래에 잉크로 밑줄을 긋는다.
+      */
+      className="flex"
+      style={{ borderBottom: 'var(--stroke) solid var(--ink-faint)' }}
     >
       {items.map((item) => {
         const isActive = item.key === active;
@@ -49,9 +57,13 @@ export function PlanSectionNav({ active }: { active: 'schedule' | 'trips' }) {
             aria-selected={isActive}
             aria-label={item.ariaLabel}
             onClick={() => !isActive && navigate(item.to)}
-            className={`press-response-row flex-1 min-h-11 rounded-control text-label font-semibold flex items-center justify-center gap-1.5 ${ isActive ? 'bg-card text-foreground' : 'text-muted-foreground active:scale-95' }`}
+            className="press-response-row flex-1 min-h-11 text-label font-semibold flex items-center justify-center gap-1.5"
+            style={{
+              color: isActive ? 'var(--ink)' : 'var(--ink-soft)',
+              borderBottom: isActive ? 'var(--stroke-bold) solid var(--ink)' : undefined,
+            }}
           >
-            <Icon size={14} aria-hidden="true" />
+            <Icon size={15} className="pen-icon" aria-hidden="true" />
             {item.label}
           </button>
         );

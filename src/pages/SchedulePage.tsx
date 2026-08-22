@@ -21,7 +21,6 @@ import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
-import { AppBar } from '@/components/ui/AppBar';
 import { PlanSectionNav } from '@/components/PlanSectionNav';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -515,40 +514,16 @@ export function SchedulePage() {
         바뀌었고 셀 계산·이벤트·실시간 구독은 그대로다.
       */}
       <div className="notebook min-h-full pb-28 px-4 pt-5 space-y-5">
-        <AppBar
-          sticky={false}
-          className="px-0 pt-0"
-          title="우리의 계획"
-          actions={
-            picking ? (
-              <Button variant="ghost" size="sm" onClick={cancelPicking}>
-                <span>취소</span>
-              </Button>
-            ) : (
-              /*
-                `+` 가 폼을 바로 열지 않고 **날짜 고르기**를 켠다.
+        {/*
+          제목줄을 걷어냈다 (2026-08-23).
 
-                예전에는 화면에 선택돼 있던 하루로 폼이 열렸다. 휴가 3박 4일을 넣으려면
-                폼 안에서 종료일을 따로 입력해야 했고, 달력을 보면서 고를 수 있는데도
-                날짜를 타이핑하게 만드는 순서였다.
-              */
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  if (!hasCoupleSpace) return;
-                  setPicking(true);
-                  setPickFrom(null);
-                  setPickTo(null);
-                }}
-                disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
-              >
-                <Plus size={14} aria-hidden="true" />
-                <span>일정 추가</span>
-              </Button>
-            )
-          }
-        />
+          `우리의 계획` 이라는 앱바와 그 아래 `2026년 8월` 이 따로 있었다. 프리뷰는 달
+          이름이 곧 헤더이고 그 줄 오른쪽에 `‹ › +` 가 있다 -- 인스타의 화면들이 그렇듯
+          제목이 곧 지금 보고 있는 것이다. 화면 이름을 한 번 더 적는 줄은 종이를 먹는다.
+
+          `+` 는 채운 알약이 아니라 펜 획이다. 종이 위에서 채운 알약은 그 화면에서 유일하게
+          앱처럼 보이는 물건이 된다.
+        */}
 
         <PlanSectionNav active="schedule" />
 
@@ -619,28 +594,54 @@ export function SchedulePage() {
             {/* Calendar grid */}
             <section aria-label="달력">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-heading text-foreground">{currYear}년 {currMonth + 1}월</h2>
+                <h2 className="text-heading" style={{ color: 'var(--ink)' }}>{currYear}년 {currMonth + 1}월</h2>
                 <div className="flex items-center gap-1">
+                  {picking ? (
+                    <button
+                      type="button"
+                      onClick={cancelPicking}
+                      className="press-response min-h-11 px-2 text-label"
+                      style={{ color: 'var(--ink-soft)' }}
+                    >
+                      취소
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => moveMonth(-1)}
                     aria-label="이전 달"
-                    className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
+                    className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control"
                   >
-                    <ChevronLeft size={16} />
+                    <ChevronLeft size={18} className="pen-icon" color="var(--ink)" />
                   </button>
                   <button
                     type="button"
                     onClick={() => moveMonth(1)}
                     aria-label="다음 달"
-                    className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control text-muted-foreground hover:bg-muted"
+                    className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control"
                   >
-                    <ChevronRight size={16} />
+                    <ChevronRight size={18} className="pen-icon" color="var(--ink)" />
                   </button>
+                  {!picking ? (
+                    <button
+                      type="button"
+                      aria-label="일정 추가"
+                      onClick={() => {
+                        if (!hasCoupleSpace) return;
+                        setPicking(true);
+                        setPickFrom(null);
+                        setPickTo(null);
+                      }}
+                      disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
+                      className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control disabled:opacity-40"
+                    >
+                      <Plus size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+                    </button>
+                  ) : null}
                 </div>
               </div>
-              <div className="grid grid-cols-7 gap-0.5 text-center text-caption font-medium text-muted-foreground pb-1">
-                <span className="text-destructive">일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span className="text-info">토</span>
+              <div className="grid grid-cols-7 gap-0.5 pb-1 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
+                <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
               </div>
               <div
                 className="grid grid-cols-7 gap-0.5 text-center"
@@ -682,13 +683,41 @@ export function SchedulePage() {
                         ? `${date}${inPick ? ', 선택됨' : ''}`
                         : `${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
                       aria-pressed={isSelected}
-                      className={`press-response min-h-11 min-w-[44px] rounded-control flex flex-col items-center justify-center text-label ${ isSelected ? 'ring-2 ring-coral bg-coral/10 text-coral font-semibold' : isToday ? 'bg-coral-strong text-coral-strong-foreground font-bold' : 'hover:bg-muted/50 text-foreground' }`}
+                      /*
+                        달력 칸도 손으로 그린 것이다 (2026-08-23).
+
+                        오늘은 잉크로 채운 삐뚤한 사각형, 고른 날은 강조 잉크. 링과 채움을
+                        같은 반경으로 두면 자로 그린 캘린더 앱이 되고, 그러면 이 화면만
+                        공책이 아니게 된다.
+                      */
+                      className="press-response min-h-11 min-w-[44px] flex flex-col items-center justify-center text-label"
+                      style={
+                        isSelected
+                          ? {
+                            color: 'var(--paper)',
+                            background: 'var(--ink-accent)',
+                            borderRadius: '60px 6px 66px 6px / 6px 66px 6px 60px',
+                            fontWeight: 600,
+                          }
+                          : isToday
+                            ? {
+                              color: 'var(--paper)',
+                              background: 'var(--ink)',
+                              borderRadius: '60px 6px 66px 6px / 6px 66px 6px 60px',
+                              fontWeight: 700,
+                            }
+                            : { color: 'var(--ink)' }
+                      }
                     >
                       <span>{day}</span>
                       {(dayEvents.length > 0 || dayTasks.length > 0) && (
                         <span className="flex gap-0.5 mt-0.5" aria-hidden="true">
                           {dayEvents.slice(0, 3).map((event) => (
-                            <span key={event.id} className={`w-1 h-1 rounded-full ${event.isPrivate ? 'bg-muted-foreground' : isToday && !isSelected ? 'bg-coral-strong-foreground' : 'bg-coral'}`} />
+                            <span
+                              key={event.id}
+                              className="w-1 h-1 rounded-full"
+                              style={{ background: isToday || isSelected ? 'var(--paper)' : event.isPrivate ? 'var(--ink-soft)' : 'var(--ink-accent)' }}
+                            />
                           ))}
                           {dayTasks.length > 0 && <span className="w-1 h-1 rounded-sm bg-info" />}
                         </span>
@@ -732,7 +761,7 @@ export function SchedulePage() {
                     type="button"
                     onClick={openCreateModal}
                     disabled={!hasCoupleSpace || isOffline}
-                    className="press-response text-caption font-semibold text-info disabled:opacity-40 min-h-11 flex items-center"
+                    className="press-response text-caption font-semibold disabled:opacity-40 min-h-11 flex items-center" style={{ color: 'var(--ink)' }}
                   >
                     이 날짜에 추가
                   </button>
@@ -747,14 +776,14 @@ export function SchedulePage() {
                     onChange={(event) => setTaskTitle(event.target.value.slice(0, 120))}
                     onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }}
                     placeholder="우리 할 일 빠르게 추가"
-                    className="flex-1 min-w-0 bg-muted rounded-control px-3 py-2 text-body outline-none focus:ring-2 focus:ring-info/40 min-h-11"
+                    className="ink-chip flex-1 min-w-0 bg-transparent px-3 py-2 text-body outline-none min-h-11"
                   />
                   <input
                     type="time"
                     value={taskTime}
                     onChange={(event) => setTaskTime(event.target.value)}
                     aria-label="할 일 시간"
-                    className="w-20 bg-muted rounded-control px-2 py-2 text-body min-h-11"
+                    className="ink-chip w-20 bg-transparent px-2 py-2 text-body min-h-11"
                   />
                   <Button
                     size="sm"
@@ -804,7 +833,7 @@ export function SchedulePage() {
                             onClick={() => void handleToggleTask(task)}
                             disabled={pending || isOffline}
                             aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`}
-                            className="press-response text-info disabled:opacity-40 min-w-11 min-h-11 flex items-center justify-center -m-2"
+                            className="press-response disabled:opacity-40 min-w-11 min-h-11 flex items-center justify-center -m-2" style={{ color: 'var(--ink)' }}
                           >
                             {task.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
                           </button>

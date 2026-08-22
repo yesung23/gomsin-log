@@ -273,7 +273,7 @@ describe('H-4: the entry point survives the conditions that caused the stranding
     // `/trips/:id` 는 일정을, `/settings` 는 우리를 켠다. 위의 덮임 검사는 "어딘가에
     // 걸린다"만 보므로, 어느 탭이 맞는지는 여기서 못 박는다.
     expect(shell).toContain("matchPrefixes: ['/schedule', '/trips']");
-    expect(shell).toContain("matchPrefixes: ['/us', '/search', '/record', '/my', '/settings']");
+    expect(shell).toContain("matchPrefixes: ['/us', '/search', '/record', '/compose', '/my', '/settings']");
     // 복무는 `우리` 가 아니라 `나` 가 가져갔다 -- 그 화면이 답하는 질문이 그쪽이다.
     expect(shell).toContain("matchPrefixes: ['/me', '/service']");
   });

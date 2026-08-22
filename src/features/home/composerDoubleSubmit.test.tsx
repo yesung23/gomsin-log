@@ -95,7 +95,7 @@ async function composeText(text: string) {
   const user = userEvent.setup();
   renderIn(<RoleHome />);
   await user.click(screen.getByText('한줄'));
-  const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+  const textarea = await screen.findByPlaceholderText('오늘 어땠어?');
   await user.type(textarea, text);
   return user;
 }

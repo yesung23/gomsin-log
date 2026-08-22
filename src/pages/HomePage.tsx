@@ -1,26 +1,25 @@
 import { MobileShell } from '@/components/MobileShell';
-import { RoleHome } from '@/features/home/RoleHome';
+import { PaperHome } from '@/features/home/PaperHome';
 
 /**
- * Two homes, because the two roles came here to do opposite things.
+ * 홈 — 노트에 그린 인스타그램 (2026-08-23).
  *
- * 곰신 has their phone all day and is CAPTURING; 군화 gets a short window and is
- * CATCHING UP, usually just before a call. `RoleHome` pins the surfaces that
- * answer that (`HOME_CORE_BY_ROLE`) above an arrangeable widget layer, so the
- * screen says what it is for before it offers anything to rearrange -- which is
- * PRODUCT_V3 §6, 홈을 무관한 카드의 대시보드로 만들지 않는다.
+ * 앞선 홈은 `RoleHome` 이었다. 역할별로 코어 표면을 고정하고 그 아래 끌어 옮기는 위젯을
+ * 두는 대시보드였고, 뒤에 괘선을 깔아도 그것은 **여전히 위젯 대시보드**였다. 인스타의
+ * 홈에는 배치할 것이 없다 -- 레일과 피드가 있을 뿐이다.
  *
- * 군화 previously got `SoldierDashboard`, a hardcoded tree that could not be
- * changed at all. Removing it was right; the lesson drawn from it was not. "A
- * home must be customisable" merged two purposes into one engine, and that is how
- * the person with the scarce phone window ended up with no composer on their home
- * (§5.1 requires one for both roles). Nothing was deleted to fix this: everything
- * that was arrangeable still is, minus the four surfaces now pinned.
+ * `PaperHome` 은 그 골격을 그대로 쓴다: 헤더 56px, 스토리 레일 106px, 포스트(작성자
+ * 54px → 사진/글 → 액션 44px → 캡션 → 시간). 이 숫자들이 인스타를 인스타로 보이게 하고,
+ * 바뀌는 것은 그 안이 무엇으로 그려졌는가뿐이다.
+ *
+ * 역할차는 사라지지 않았다. 자리를 다르게 주는 대신 **같은 화면에서 다른 링을 먼저 누르게**
+ * 한다 -- 왼쪽 링의 `+` 가 곰신의 1차 행동(기록), 오른쪽 링이 군화의 1차 행동(놓친 하루).
+ * §5.2가 요구한 것이 그것이고, `RoleHome` 은 그 요구를 두 개의 다른 화면으로 풀었다.
  */
 export function HomePage() {
   return (
     <MobileShell>
-      <RoleHome />
+      <PaperHome />
     </MobileShell>
   );
 }

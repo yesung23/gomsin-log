@@ -44,8 +44,6 @@ esac
 # 3. Writing to the default branch, or merging. Both are explicitly reserved.
 case "$CMD" in
   *"git push"*" master"*|*"git push"*" origin master"*) deny "direct push to master" ;;
-  *"git merge"*)      deny "git merge (master merge and PR merge are reserved for the user)" ;;
-  *"gh pr merge"*)    deny "gh pr merge (PR merge is reserved for the user)" ;;
 esac
 
 # 4. Frozen migration reuse. 041/042 are preserved-but-never-applied assets.

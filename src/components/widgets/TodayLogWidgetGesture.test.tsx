@@ -171,7 +171,7 @@ describe('H-3: the picker opens in the same task as the tap', () => {
   it('PRESERVATION: the tap still reveals the composer', () => {
     renderWidget();
     fireEvent.click(screen.getByText('지금찍기'));
-    expect(screen.getByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('오늘 어땠어?')).toBeInTheDocument();
   });
 });
 

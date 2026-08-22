@@ -68,7 +68,7 @@ vi.mock('@/lib/useStore', () => ({
 
 const { TodayLogWidget } = await import('@/components/widgets/TodayLogWidget');
 
-const PLACEHOLDER = '지금 이 순간, 어떤 생각을 하고 있나요?';
+const PLACEHOLDER = '오늘 어땠어?';
 const DRAFT_TEXT = '오늘 진짜 힘들었는데 네 생각하니까 나아졌어';
 
 function renderComposer() {

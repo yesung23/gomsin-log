@@ -157,15 +157,26 @@ describe('M-1: UsPage invents no anniversary', () => {
     const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     storeState = baseState(todayStr);
     renderUsPage();
-    expect(screen.getByText(/함께한 지 \+1일째/)).toBeInTheDocument();
+    expect(screen.getByText(/1일째 같은 하늘 아래/)).toBeInTheDocument();
   });
 
   it('PRESERVATION: a non-connected lifecycle keeps its own copy', () => {
+    /*
+      이 단언이 지키는 것은 특정 문장이 아니라 **연결되지 않은 커플이 그 사실을 이 화면에서
+      본다**는 것이다. 앞선 판에서는 그 문장을 `UsPage` 가 직접 들고 있었고, V4가 화면을
+      인스타 프로필로 바꾸면서 사라졌다.
+
+      같은 보장을 `CoupleStatusBanner` 가 진다 -- 상태별 문구를 그 컴포넌트가 소유하고,
+      연결된 커플에게는 아무것도 그리지 않는다. 그래서 단언을 그 배너의 상태 표식으로
+      옮긴다. 문장이 바뀌어도 보장은 남고, 배너가 빠지면 여기서 걸린다.
+    */
     lifecycle = 'pending';
     storeState = baseState(undefined);
     storeState.profile.couple.connected = false;
     renderUsPage();
-    expect(screen.getByText(/상대방이 초대 코드를 입력하면 연결돼요/)).toBeInTheDocument();
+    const banner = screen.getByTestId('couple-status-banner');
+    expect(banner).toHaveAttribute('data-lifecycle', 'pending');
+    expect(banner.textContent).toContain('상대방을 기다리고 있어요');
   });
 });
 

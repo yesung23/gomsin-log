@@ -128,7 +128,7 @@ describe('composer availability by role', () => {
     renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
-    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    const textarea = await screen.findByPlaceholderText('오늘 어땠어?');
     await user.type(textarea, '훈련 끝나고 잠깐 남기는 기록');
     await user.click(screen.getByText('저장'));
 
@@ -286,7 +286,7 @@ describe('composer attachment handling', () => {
     renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
-    const textarea = screen.getByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    const textarea = screen.getByPlaceholderText('오늘 어땠어?');
     await user.type(textarea, '오늘도 보고 싶어');
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(input, new File(['x'], 'sunset.png', { type: 'image/png' }));
@@ -316,7 +316,7 @@ describe('composer attachment handling', () => {
     renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
-    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    const textarea = await screen.findByPlaceholderText('오늘 어땠어?');
     await user.type(textarea, '    ');
 
     expect(screen.getByText('저장')).toBeDisabled();
@@ -328,7 +328,7 @@ describe('composer attachment handling', () => {
     renderIn(<RoleHome />);
 
     await user.click(screen.getByText('한줄'));
-    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    const textarea = await screen.findByPlaceholderText('오늘 어땠어?');
     await user.type(textarea, '  오늘 하루  ');
 
     expect(screen.getByText('저장')).not.toBeDisabled();
@@ -376,7 +376,7 @@ describe('composer emotion review (suggested, then answered)', () => {
   async function openWith(user: ReturnType<typeof userEvent.setup>, text: string) {
     renderIn(<RoleHome />);
     await user.click(screen.getByText('한줄'));
-    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    const textarea = await screen.findByPlaceholderText('오늘 어땠어?');
     await user.type(textarea, text);
     await user.tab();
     return waitFor(() => expect(screen.getByTestId('emotion-suggestion-list')).toBeInTheDocument());
@@ -592,7 +592,7 @@ describe('composer emotion review (suggested, then answered)', () => {
     const user = userEvent.setup({ delay: null });
     renderIn(<RoleHome />);
     await user.click(screen.getByText('한줄'));
-    const textarea = await screen.findByPlaceholderText('지금 이 순간, 어떤 생각을 하고 있나요?');
+    const textarea = await screen.findByPlaceholderText('오늘 어땠어?');
     await user.type(textarea, LOG_TEXT);
 
     expect(screen.queryByTestId('emotion-suggestion-review')).not.toBeInTheDocument();

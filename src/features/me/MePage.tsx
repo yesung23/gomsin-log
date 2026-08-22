@@ -8,6 +8,7 @@ import { computeServiceProgress } from '@/lib/milestones';
 import { localToday } from '@/lib/cycle';
 import { useStore } from '@/lib/useStore';
 import type { MilitaryInfo, ContactPreferences } from '@/types';
+import { MobileShell } from '@/components/MobileShell';
 
 /**
  * 나 — 지금 상대에게 연락해도 되나. 상대는 지금 어떤 상태인가.
@@ -37,7 +38,7 @@ import type { MilitaryInfo, ContactPreferences } from '@/types';
  * 시각도, 접속 여부도 없다. 컨디션은 주기에서 계산되지 않고 사용자가 그날 직접 고른다.
  */
 
-export function MePage() {
+function MePageBody() {
   const navigate = useNavigate();
   const { state } = useStore();
   const { profile, authenticatedUser } = state;
@@ -209,5 +210,19 @@ function ServiceCard({
         <p className="mt-1.5 text-caption text-muted-foreground line-clamp-2">{military.memo}</p>
       ) : null}
     </button>
+  );
+}
+
+/**
+ * 탭은 셸 안에 있어야 한다.
+
+ * 셸이 하단 탭바와 스킵 링크와 라우트 안내를 갖는다. 이것 없이 렌더하면 그 탭에 들어간
+ * 사람은 탭바가 없어 **빠져나올 수 없다** -- 뒤로 가기 말고는.
+ */
+export function MePage() {
+  return (
+    <MobileShell>
+      <MePageBody />
+    </MobileShell>
   );
 }

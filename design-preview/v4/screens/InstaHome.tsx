@@ -31,7 +31,7 @@ function timeAgo(date: string, time: string): string {
   return `${days}일 전`;
 }
 
-export function InstaHome() {
+export function InstaHome({ onOpenStory }: { onOpenStory?: () => void }) {
   return (
     <div className="notebook min-h-full pb-6">
       {/* 헤더 — 인스타와 같은 56px */}
@@ -51,13 +51,15 @@ export function InstaHome() {
         </div>
       </header>
 
-      {/* 스토리 레일 — 인스타와 같은 106px */}
-      <section aria-label="스토리" className="flex h-[106px] items-start gap-5 px-4 pt-1">
-        <button type="button" className="tap flex w-[72px] flex-col items-center gap-1.5">
-          <InkCircle size={66} ring="new"><PenFace size={44} /></InkCircle>
-          <span className="print text-[11px] leading-none" style={{ color: 'var(--ink)' }}>춘향</span>
-        </button>
+      {/*
+        스토리 레일 — 인스타와 같은 106px, 같은 순서.
 
+        **내 스토리가 맨 왼쪽이다.** 인스타에서 왼쪽 끝은 언제나 자기 자신이고 `+` 배지가
+        거기 붙는다. 처음에 상대를 왼쪽에 뒀다가 되돌렸다 -- 군화의 1차 행동이 따라잡기라는
+        이유였는데, 그건 이 레일이 아니라 아래 피드가 하는 일이다. 손이 기억하는 자리를
+        바꾸면 인스타 문법을 빌려 온 이유 자체가 사라진다.
+      */}
+      <section aria-label="스토리" className="flex h-[106px] items-start gap-5 px-4 pt-1">
         <div className="relative">
           <button type="button" className="tap flex w-[72px] flex-col items-center gap-1.5">
             <InkCircle size={66} ring="seen"><PenFace size={44} tone="b" /></InkCircle>
@@ -71,6 +73,11 @@ export function InstaHome() {
             <Plus size={13} color="var(--paper)" strokeWidth={2.6} />
           </span>
         </div>
+
+        <button type="button" onClick={onOpenStory} className="tap flex w-[72px] flex-col items-center gap-1.5">
+          <InkCircle size={66} ring="new"><PenFace size={44} /></InkCircle>
+          <span className="print text-[11px] leading-none" style={{ color: 'var(--ink)' }}>춘향</span>
+        </button>
 
         {/*
           링은 여기서 끝난다.

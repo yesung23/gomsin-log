@@ -22,7 +22,7 @@ import { FIXTURE_RECORDS, TODAY } from '../fixtures';
 
 const moments = FIXTURE_RECORDS.filter((r) => r.userId === 'partner-fixture' && r.date === TODAY);
 
-export function InstaStory() {
+export function InstaStory({ onClose }: { onClose?: () => void }) {
   const [index, setIndex] = useState(0);
   const [marked, setMarked] = useState<Set<string>>(new Set());
   const moment = moments[index];
@@ -55,7 +55,7 @@ export function InstaStory() {
         <span className="print text-[13px] font-semibold" style={{ color: 'var(--ink)' }}>춘향</span>
         <span className="print text-[12px]" style={{ color: 'var(--ink-soft)' }}>{moment.time}</span>
         <span className="flex-1" />
-        <button type="button" aria-label="스토리 닫기" className="tap flex h-11 w-11 items-center justify-center">
+        <button type="button" aria-label="스토리 닫기" onClick={onClose} className="tap flex h-11 w-11 items-center justify-center">
           <X size={22} className="pen-icon" color="var(--ink)" />
         </button>
       </header>
@@ -107,7 +107,7 @@ export function InstaStory() {
         </button>
 
         {last ? (
-          <button type="button" className="tap ink-fill px-5 py-2.5">
+          <button type="button" onClick={onClose} className="tap ink-fill px-5 py-2.5">
             <span className="print text-[13px] font-semibold">다 읽었어요</span>
           </button>
         ) : (

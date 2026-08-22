@@ -10,7 +10,7 @@ import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { CoupleStatsRow } from '@/components/CoupleStatsRow';
 import { CoupleHighlights } from '@/components/CoupleHighlights';
 import { AppBar } from '@/components/ui/AppBar';
-import { Heart, CalendarDays, Plane, ChevronRight, MapPin } from 'lucide-react';
+import { Heart, Search, Plane, ChevronRight, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toLocalDateString, localToday, daysBetweenLocal } from '@/lib/utils';
 
@@ -122,8 +122,14 @@ export function UsPage() {
         title="우리"
         actions={
           <div className="flex items-center gap-2">
-            {/* /schedule had no entry point anywhere in the UI before this. */}
             {/*
+              돋보기가 `일정` 칩 자리를 가져갔다 (2026-08-22, §5.3).
+
+              `일정` 은 이제 자기 탭이 있으므로 여기서 한 번 더 갈 이유가 없다. 대신
+              검색이 이 자리를 받는다 -- 검색은 탭이 아니고(이 앱에는 남의 게시물이
+              없어서 탐색 격자가 곧 아래 하루 격자의 복제였다), 기록을 보는 곳이 여기이므로
+              찾는 곳도 여기여야 한다. 종이 일기장 뒤에 붙은 색인과 같다.
+
               These two paint at 64x34 and stay that size. DESIGN_V2 §Visual
               footprint ≠ hit target asks for the compact look AND a 44px target, so
               the gap is closed by a `::before` overlay rather than by growing the
@@ -133,11 +139,12 @@ export function UsPage() {
               but 64px wide already clears it, so only the vertical axis is extended.
             */}
             <button
-              onClick={() => navigate('/schedule')}
+              onClick={() => navigate('/search')}
+              aria-label="기록 찾기"
               className="press-response text-label font-bold text-foreground bg-navy/10 px-3 py-2 rounded-control flex items-center gap-1 relative isolate before:absolute before:content-[''] before:-z-10 before:left-0 before:right-0 before:top-[-6px] before:bottom-[-6px]"
             >
-              <CalendarDays size={14} />
-              <span>일정</span>
+              <Search size={14} />
+              <span>찾기</span>
             </button>
             <button
               onClick={() => navigate('/trips')}

@@ -15,7 +15,7 @@ import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
-import type { CycleSupportKind, CycleSupportSignal, Role } from '@/types';
+import type { CycleSupportKind, CycleSupportSignal } from '@/types';
 import { Card } from '@/components/ui/Card';
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'disconnected' | CycleFetchFailureReason;
@@ -38,7 +38,22 @@ const kindLabels: Record<CycleSupportKind, string> = {
 };
 
 interface CycleSupportSectionProps {
-  role: Role;
+  /**
+   * 내 신호를 보내는 자리인가, 상대의 신호를 읽는 자리인가.
+   *
+   * 예전에는 `role === 'gomsin'` 이었다. 그것은 **컨디션을 역할의 일로 만든 것**이고,
+   * 결과적으로 군화는 자기 몸이 힘든 날에도 그 사실을 보낼 방법이 없었다. 군 복무가
+   * 아닌 커플에서는 더 분명하게 틀린다 -- 그 커플에도 `soldier` 역할을 가진 사람이
+   * 있고, 그 사람은 영원히 읽기만 하게 된다.
+   *
+   * 서버는 이것을 역할로 막고 있지 않았다. `cycle_support_signals` 의 RLS 는
+   * `owner_id = auth.uid()` 와 커플 소속만 본다(migration 014). 제약은 이 파일 한 줄에만
+   * 있었고, 그래서 마이그레이션 없이 고칠 수 있다.
+   *
+   * 이제 부르는 쪽이 정한다. `컨디션` 탭은 이 컴포넌트를 **두 번** 그린다 -- 내 것 하나,
+   * 상대 것 하나.
+   */
+  mine: boolean;
   authenticated: boolean;
   userId?: string;
   coupleId?: string;
@@ -66,14 +81,14 @@ function nextKoreaMidnightMs(nowMs: number): number {
 }
 
 export function CycleSupportSection({
-  role,
+  mine,
   authenticated,
   userId,
   coupleId,
   connected,
 }: CycleSupportSectionProps) {
-  const owner = role === 'gomsin';
-  const identityKey = `${authenticated ? userId || '' : ''}:${connected ? coupleId || '' : ''}:${role}`;
+  const owner = mine;
+  const identityKey = `${authenticated ? userId || '' : ''}:${connected ? coupleId || '' : ''}:${mine ? 'mine' : 'partner'}`;
   const identityRef = useRef(identityKey);
   const generationRef = useRef(0);
   if (identityRef.current !== identityKey) {

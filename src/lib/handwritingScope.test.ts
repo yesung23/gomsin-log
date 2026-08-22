@@ -30,6 +30,8 @@ const WHITELIST = [
   'src/features/story/',
   'src/features/home/',
   'src/features/us/',
+  'src/features/search/',
+  'src/features/diary/',
   'src/pages/RecordPage.tsx',
 ];
 

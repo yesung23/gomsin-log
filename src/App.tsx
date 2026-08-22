@@ -48,6 +48,15 @@ const ServicePage = lazy(() =>
 const LegalPage = lazy(() =>
   import('@/pages/LegalPage').then((m) => ({ default: m.LegalPage })),
 );
+const MePage = lazy(() =>
+  import('@/features/me/MePage').then((m) => ({ default: m.MePage })),
+);
+const DiaryPage = lazy(() =>
+  import('@/features/diary/DiaryPage').then((m) => ({ default: m.DiaryPage })),
+);
+const SearchPage = lazy(() =>
+  import('@/features/search/SearchPage').then((m) => ({ default: m.SearchPage })),
+);
 const StoryRoute = lazy(() =>
   import('@/features/story/StoryRoute').then((m) => ({ default: m.StoryRoute })),
 );
@@ -365,6 +374,9 @@ export function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/home" element={<HomePage />} />
               <Route path="/record" element={<RecordPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/me" element={<MePage />} />
+              <Route path="/diary" element={<DiaryPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/service" element={<ServicePage />} />
               <Route path="/us" element={<UsPage />} />

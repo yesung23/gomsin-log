@@ -42,10 +42,10 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const user = userEvent.setup();
     renderShell('/home');
 
-    await user.click(screen.getByRole('tab', { name: '기록' }));
+    await user.click(screen.getByRole('tab', { name: '나' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toBe('기록 화면입니다');
+      expect(screen.getByRole('status').textContent).toBe('나 화면입니다');
     });
   });
 
@@ -73,6 +73,22 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     expect(document.activeElement).toBe(skip);
     expect(skip).toHaveAttribute('href', '#main-content');
     expect(container.querySelector('#main-content')).not.toBeNull();
+  });
+
+  it('다섯 칸이 전부 접근성 이름을 갖는다', () => {
+    /*
+      2026-08-22 개정으로 탭바에서 눈으로 읽는 글자가 사라졌다 -- 인스타의 근육 기억을
+      빌리기 위해서다. 그 순간 `aria-label` 은 보조 표시가 아니라 **유일한 이름**이 됐고,
+      하나라도 빠지면 그 칸은 스크린리더에게 목적지 없는 링크가 된다.
+
+      소스 문자열이 아니라 렌더해서 센다. `label:` 이 테이블에 있다는 사실은 그것이 실제로
+      `aria-label` 로 나갔다는 뜻이 아니다.
+    */
+    renderShell('/home');
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(5);
+    expect(tabs.map((tab) => tab.getAttribute('aria-label')))
+      .toEqual(['홈', '나', '일기장', '일정', '우리']);
   });
 
   it('PRESERVATION: the tab bar still lights the section it is in', () => {

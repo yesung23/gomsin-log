@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CycleSupportSignalsFetchResult } from '@/lib/cycle';
@@ -63,12 +65,12 @@ describe('CycleSupportSection identity and expiry isolation', () => {
 
   it('ignores a previous account response after the active identity changes', async () => {
     const view = render(
-      <CycleSupportSection role="soldier" authenticated userId="user-a" coupleId="couple-a" connected />,
+      <CycleSupportSection mine={false} authenticated userId="user-a" coupleId="couple-a" connected />,
     );
     await waitFor(() => expect(loads).toHaveLength(1));
 
     view.rerender(
-      <CycleSupportSection role="soldier" authenticated userId="user-b" coupleId="couple-b" connected />,
+      <CycleSupportSection mine={false} authenticated userId="user-b" coupleId="couple-b" connected />,
     );
     await waitFor(() => expect(loads).toHaveLength(2));
 
@@ -89,7 +91,7 @@ describe('CycleSupportSection identity and expiry isolation', () => {
 
   it('removes a displayed signal when its local expiry boundary passes', async () => {
     render(
-      <CycleSupportSection role="soldier" authenticated userId="user-a" coupleId="couple-a" connected />,
+      <CycleSupportSection mine={false} authenticated userId="user-a" coupleId="couple-a" connected />,
     );
     await waitFor(() => expect(loads).toHaveLength(1));
 
@@ -127,7 +129,7 @@ describe('CycleSupportSection write integrity', () => {
   /** Render as the owner (gomsin) with an empty, loaded signal list. */
   async function renderOwnerWithShareForm() {
     const view = render(
-      <CycleSupportSection role="gomsin" authenticated userId="user-a" coupleId="couple-a" connected />,
+      <CycleSupportSection mine authenticated userId="user-a" coupleId="couple-a" connected />,
     );
     await waitFor(() => expect(loads).toHaveLength(1));
     await act(async () => {
@@ -171,7 +173,7 @@ describe('CycleSupportSection write integrity', () => {
   it('keeps the shared signal visible when revoking it fails', async () => {
     revokeSignal.mockResolvedValue({ ok: false, reason: 'forbidden' });
     render(
-      <CycleSupportSection role="gomsin" authenticated userId="user-a" coupleId="couple-a" connected />,
+      <CycleSupportSection mine authenticated userId="user-a" coupleId="couple-a" connected />,
     );
     await waitFor(() => expect(loads).toHaveLength(1));
     await act(async () => {
@@ -242,4 +244,54 @@ describe('CycleSupportSection write integrity', () => {
     });
   });
 
+
+  /**
+   * 컨디션은 역할의 일이 아니라 몸의 일이다.
+   *
+   * 이 컴포넌트는 `role === 'gomsin'` 으로 보내는 쪽과 읽는 쪽을 갈랐다. 그 결과 군화는
+   * 자기 몸이 힘든 날에도 그 사실을 보낼 방법이 없었고, 군 복무가 아닌 커플에서는 더
+   * 분명하게 틀렸다 -- 그 커플에도 `soldier` 역할을 가진 사람이 있고 그 사람은 영원히
+   * 읽기만 하게 된다.
+   *
+   * 서버는 이것을 역할로 막고 있지 않았다. `cycle_support_signals` 의 RLS 는
+   * `owner_id = auth.uid()` 와 커플 소속만 본다(migration 014). 제약은 클라이언트 한
+   * 줄이었고, 마이그레이션 없이 풀렸다.
+   *
+   * 이 블록이 지키는 것은 그 사실 하나다: **보내는 자리인지 읽는 자리인지는 부르는 쪽이
+   * 정하고, 역할은 그 판단에 들어오지 않는다.**
+   */
+  describe('보내는 쪽은 역할이 정하지 않는다', () => {
+    it('역할이라는 개념 자체가 이 컴포넌트에 없다', () => {
+      /*
+        값이 아니라 소스를 본다. `mine` 을 받으면서 안에서 다시 역할을 읽어 덮어쓰면 위의
+        렌더 단언들은 전부 통과하면서 결함만 되살아난다 -- 실제로 되돌리기 가장 쉬운 방법이
+        그것이다.
+      */
+      const source = readFileSync(
+        resolve(process.cwd(), 'src/components/CycleSupportSection.tsx'),
+        'utf8',
+      ).replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(source).not.toMatch(/'gomsin'/);
+      expect(source).not.toMatch(/'soldier'/);
+    });
+
+    it('mine 이면 보내는 자리다', async () => {
+      render(
+        <CycleSupportSection mine authenticated userId="user-a" coupleId="couple-a" connected />,
+      );
+      await waitFor(() => expect(loads).toHaveLength(1));
+      await act(async () => { loads[0].resolve({ ok: true, signals: [] }); });
+      expect(await screen.findByText('오늘만 공유하기')).toBeInTheDocument();
+    });
+
+    it('mine 이 아니면 읽는 자리다 -- 같은 사용자, 같은 커플, 같은 역할이어도', async () => {
+      render(
+        <CycleSupportSection mine={false} authenticated userId="user-a" coupleId="couple-a" connected />,
+      );
+      await waitFor(() => expect(loads).toHaveLength(1));
+      await act(async () => { loads[0].resolve({ ok: true, signals: [] }); });
+      expect(screen.queryByText('오늘만 공유하기')).not.toBeInTheDocument();
+    });
+  });
 });
+

@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import { ContactHoursSection } from '@/components/ContactHoursSection';
+import { HandwritingSection } from '@/components/HandwritingSection';
 import {
   consumeCoupleInvitation,
   createCoupleInvitation,
@@ -666,6 +667,8 @@ export function SettingsPage() {
             </button>
           </section>
         )}
+
+        <HandwritingSection userId={state.authenticatedUser?.id || profile.id || ''} />
 
         {/* General Settings */}
         <section className="space-y-2">

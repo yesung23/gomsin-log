@@ -356,36 +356,71 @@ describe('prose leading is not tightened below the reflow floor', () => {
   });
 });
 
-describe('the app has exactly one typeface', () => {
+describe('the app has exactly two typefaces, and the second has a boundary', () => {
   /*
-   * Pretendard, and nothing else.
+   * Pretendard for what the app says; 나눔손글씨 세화체 for what a PERSON WROTE.
    *
-   * A handwriting accent (Nanum Pen Script) was added on 2026-08-09 and removed the
-   * same day. Two things were learned and are worth not re-learning:
+   * This guard used to read "exactly one typeface", and its own comment said why
+   * that was the wrong permanent rule: it was written to fail when a second face
+   * appeared WITHOUT the import that would make it work -- not to ban handwriting.
+   * The 2026-08-09 revert had two findings and both were about HOW, not whether:
    *
-   *   1. Rendered beside it, the plain figure read better. That was the deciding
-   *      reason, and it is a judgement someone may reasonably revisit.
-   *   2. It only ever worked on all-latin strings. Shipping the Korean subset costs
-   *      588 kB against 16 kB for latin, so with latin only, `8월 6일 화요일` came
-   *      out as handwritten digits inside Pretendard Korean -- two faces colliding
-   *      in one short line. That is a fact about the font, not a preference.
+   *   1. Rendered beside it, the plain figure read better. True of a face applied
+   *      to the interface. It no longer is: handwriting reaches only what a person
+   *      wrote, and `src/lib/handwritingScope.test.ts` counts every use.
+   *   2. It only ever worked on all-latin strings, because the Korean subset cost
+   *      588 kB against 16 kB. Still true OF A SINGLE SUBSET FILE -- KS X 1001's
+   *      2,350 syllables measure 532 kB. Cut frequency-first into 60-glyph
+   *      unicode-range slices, a real screen pulls 81-105 kB. So `8월 6일 화요일`
+   *      no longer comes out as handwritten digits inside Pretendard Korean: the
+   *      Korean glyphs are there, and that line is not handwriting anyway.
    *
-   * So this guard is not "handwriting is banned forever". It fails if a second face
-   * appears WITHOUT the import that would make it work, which is the specific way
-   * this would break: a `font-hand` class surviving a revert, or being added while
-   * only the latin subset is imported.
+   * What replaces the old rule is a boundary, and these are its three edges.
    */
   const css = read('src/styles/index.css');
 
-  it('declares one font family and no second face', () => {
+  it('declares exactly two families and no third face', () => {
     expect(css).toContain('--font-sans:');
-    expect(css).not.toContain('--font-hand:');
+    expect(css).toContain('--font-hand:');
+    // Anchored to the start of a declaration: `--text-display--font-weight:` also
+    // ends in `--font-weight:` and is a type-scale step, not a face.
+    const families = [...css.matchAll(/^\s*--font-(?!hand-scale)([a-z-]+):/gm)].map((m) => m[1]);
+    expect([...new Set(families)].sort()).toEqual(['hand', 'sans']);
   });
 
-  it('imports no font other than the self-hosted Pretendard subset', () => {
+  it('makes the second face fall back to the first, not to the browser default', () => {
+    /*
+     * The slices are 187 files fetched on demand. A miss must land on Pretendard --
+     * which is present and Korean -- rather than on whatever the OS picks, because
+     * the one thing this app cannot afford is the partner's own sentence being the
+     * hardest thing on the screen to read.
+     */
+    const declaration = css.slice(css.indexOf('--font-hand:'));
+    expect(declaration.slice(0, declaration.indexOf(';'))).toContain('var(--font-sans)');
+  });
+
+  it('imports both faces self-hosted, and nothing from a CDN', () => {
+    /*
+     * `_headers` sets `font-src 'self' data:`, so a third-party origin is blocked at
+     * runtime while typecheck, lint, tests and the build all still pass -- the exact
+     * trap that sent Pretendard from jsdelivr to npm. `cspExternalResources.test.ts`
+     * guards the origin; this guards the list.
+     */
     const imports = [...css.matchAll(/@import\s+"([^"]+)"/g)].map((m) => m[1]);
-    const fontImports = imports.filter((s) => /font|pretendard|fontsource/i.test(s));
-    expect(fontImports).toEqual(['pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css']);
+    const fontImports = imports.filter((s) => /font|pretendard|fontsource|hand/i.test(s));
+    expect(fontImports).toEqual([
+      'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css',
+      '../fonts/hand/hand.css',
+    ]);
+  });
+
+  it('scales the second face without inventing an eighth step', () => {
+    // `.hand-text` multiplies the inherited size; it never names one. A literal
+    // there would be a font-size outside the seven steps that this file's own
+    // whole-tree walk cannot see, because it lives in CSS rather than a class.
+    const rule = css.slice(css.indexOf('.hand-text {'));
+    expect(rule.slice(0, rule.indexOf('}'))).toContain('calc(1em * var(--font-hand-scale))');
+    expect(rule.slice(0, rule.indexOf('}'))).not.toMatch(/font-size:\s*[\d.]+(px|rem)/);
   });
 
   it('leaves no orphaned handwriting class behind in the tree', () => {

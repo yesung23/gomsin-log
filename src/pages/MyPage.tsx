@@ -4,15 +4,12 @@ import { MobileShell } from '@/components/MobileShell';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
-import { CycleSupportSection } from '@/components/CycleSupportSection';
-import { CycleTrackerSection } from '@/components/CycleTrackerSection';
-import { CyclePartnerCard } from '@/components/cycle/CyclePartnerCard';
 import { useStore } from '@/lib/useStore';
 
 export function MyPage() {
   const navigate = useNavigate();
   const { state, coupleLifecycle } = useStore();
-  const { profile, authenticatedUser } = state;
+  const { profile } = state;
 
   const isGomsin = profile.role === 'gomsin';
   const roleLabel = isGomsin ? '곰신' : '군화';
@@ -94,35 +91,14 @@ export function MyPage() {
           </div>
         </div>
 
-        {isGomsin && (
-          <CycleTrackerSection
-            key={authenticatedUser?.id || 'signed-out'}
-            userId={authenticatedUser?.id}
-          />
-        )}
-
         {/*
-          The receiving end of the owner's three sharing toggles. Only the
-          partner sees it, and it renders nothing unless the owner turned
-          something on, so a partner who is shown nothing cannot infer whether
-          the owner considered sharing and declined.
-        */}
-        {!isGomsin && (
-          <CyclePartnerCard
-            key={authenticatedUser?.id || 'signed-out'}
-            authenticated={Boolean(authenticatedUser?.id)}
-            userId={authenticatedUser?.id}
-            connected={connected}
-          />
-        )}
+          주기 · 배려 신호 · 상대 주기 카드는 `나` 탭으로 **옮겼다**(2026-08-22, §5.4).
 
-        <CycleSupportSection
-          role={profile.role}
-          authenticated={Boolean(authenticatedUser?.id)}
-          userId={authenticatedUser?.id}
-          coupleId={profile.couple.coupleId}
-          connected={connected}
-        />
+          여기 있는 동안 그것들은 설정 안에 있었고, 매일 답해야 하는 질문("지금 연락해도
+          되나")의 답이 설정 안에 있으면 그 기능은 없는 것과 같다. 복사하지 않고 옮긴
+          이유는 같은 것을 두 곳에서 켜고 끄면 어느 쪽이 진짜인지 알 수 없게 되기
+          때문이다.
+        */}
 
         {!isGomsin && (
           <section className="space-y-3">

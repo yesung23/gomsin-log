@@ -61,18 +61,6 @@ const DECORATIVE_CORAL_FILLS: Array<{ file: string; anchor: string; occurrences:
       + 'row it belongs to states its time and author in text.',
   },
   {
-    file: 'src/components/MobileShell.tsx',
-    anchor: 'w-4 h-0.5 rounded-full bg-coral',
-    occurrences: 1,
-    reason: 'The bar under the active tab: 16x2px, aria-hidden, on the tab bar '
-      + 'surface. Restored 2026-08-09 after the density pass removed it as a '
-      + 'duplicate signal -- it was, and it was also the only saturated brand '
-      + 'colour on every screen, which is why the app read cold without it. It is '
-      + 'decoration on top of aria-selected, the text-coral-strong tint and the '
-      + 'label weight, so it is never the only signal (WCAG 1.4.1) and it never '
-      + 'has a label on it.',
-  },
-  {
     file: 'src/pages/RecordPage.tsx',
     anchor: "isSelected ? 'bg-coral-strong-foreground/80' : 'bg-coral'",
     occurrences: 1,

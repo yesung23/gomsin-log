@@ -41,6 +41,7 @@ describe('a route change is announced and moves focus', () => {
     expect(routeScreenName('/')).toBe('홈');
     expect(routeScreenName('/home')).toBe('홈');
     expect(routeScreenName('/record')).toBe('기록');
+    expect(routeScreenName('/search')).toBe('찾기');
     expect(routeScreenName('/schedule')).toBe('일정');
     // Prefix-matched for the same reason the tab highlight is.
     expect(routeScreenName('/trips')).toBe('일정');
@@ -83,6 +84,14 @@ describe('a route change is announced and moves focus', () => {
     expect(shell).toContain('matchPrefixes');
     expect(shell).toContain('aria-selected={active}');
   });
+
+  /*
+    탭바에서 눈으로 읽는 글자가 사라진 뒤(2026-08-22 §5 개정) `aria-label` 은 보조
+    표시가 아니라 **유일한 이름**이 됐다. 다섯 칸이 전부 이름을 갖는지는 렌더해서 세야
+    하므로 -- `label:` 이 소스에 있다는 것이 그것이 `aria-label` 로 나갔다는 뜻은
+    아니다 -- `mobileShellRouteAnnounce.test.tsx` 가 그 단언의 주인이다.
+  */
+
 });
 
 describe('widget editing is reachable without a pointer', () => {

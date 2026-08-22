@@ -95,7 +95,7 @@ export function WidgetWrapper({ id, label, isEditMode, onRemove, children }: Wid
             <GripHorizontal className="w-5 h-5 text-muted-foreground" aria-hidden="true" />
           </button>
           {/* Prevent clicks on content during edit mode */}
-          <div className="absolute inset-0 bg-card/20 z-10 rounded-surface cursor-pointer" aria-hidden="true" />
+          <div className="absolute inset-0 bg-muted/20 z-10 rounded-surface cursor-pointer" aria-hidden="true" />
         </>
       )}
 

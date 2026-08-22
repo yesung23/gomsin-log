@@ -30,6 +30,8 @@ import type { Role } from '@/types';
 import { AddWidgetBottomSheet } from '@/components/widgets/AddWidgetBottomSheet';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { CallBriefingWidget } from '@/components/widgets/CallBriefingWidget';
+import { StoryRailWidget } from '@/components/widgets/StoryRailWidget';
+import { PaperFeedWidget } from '@/components/widgets/PaperFeedWidget';
 
 /**
  * The home screen, shaped by what this person came here to do.
@@ -123,11 +125,15 @@ export function RoleHome() {
     () => HOME_CORE_BY_ROLE[role]
       .map((id) => ({
         id,
-        // `call_briefing` is deliberately outside the registry -- it was never
-        // arrangeable, and giving it an entry would offer to remove it.
+        // `call_briefing`과 `story_rail`은 의도적으로 레지스트리 밖이다 -- 둘 다
+        // 재배치할 수 있었던 적이 없고, 항목을 주면 제거를 제안하는 셈이 된다.
         Component: id === 'call_briefing'
           ? CallBriefingWidget
-          : WIDGET_REGISTRY[id]?.component,
+          : id === 'story_rail'
+            ? StoryRailWidget
+            : id === 'paper_feed'
+              ? PaperFeedWidget
+              : WIDGET_REGISTRY[id]?.component,
       }))
       .filter((entry): entry is { id: string; Component: NonNullable<typeof entry.Component> } =>
         Boolean(entry.Component)),
@@ -206,9 +212,24 @@ export function RoleHome() {
   };
 
   return (
-    <div className="pb-6">
-      {/* Header — compact, low-chrome: app name + edit controls only */}
-      <header className="px-4 pt-3 pb-3 flex items-center justify-between sticky top-0 bg-background/90 backdrop-blur-xl z-40">
+    /*
+      홈이 공책 위로 옮겨졌다 (2026-08-22, §5).
+
+      위젯 시스템은 그대로다 -- 끌어 옮기기, 편집 모드, 코어 고정, 키보드 경로까지.
+      바뀐 것은 그것들이 **무엇 위에 그려졌는가**뿐이다. `.notebook` 이 괘선을 깔고,
+      위젯이 카드로 배경을 덮는 대신 그 위에 얹힌다.
+    */
+    <div className="notebook min-h-full pb-6">
+      {/*
+        인스타의 홈 헤더와 같은 자리 -- 왼쪽에 이름, 오른쪽에 동작 둘.
+
+        `backdrop-blur` 를 뺐다. 괘선 위에서 흐려지면 종이가 젖은 것처럼 읽힌다. 대신
+        종이색으로 덮는다 -- 탭바가 같은 이유로 같은 선택을 한다.
+      */}
+      <header
+        className="px-4 pt-3 pb-3 flex items-center justify-between sticky top-0 z-40"
+        style={{ background: 'var(--paper)' }}
+      >
         {/*
           The header carries the signed-in name next to the app name.
 
@@ -225,9 +246,13 @@ export function RoleHome() {
           the content.
         */}
         <span className="flex items-baseline gap-1.5 min-w-0">
-          <span className="text-label font-semibold text-coral-strong">곰신로그</span>
+          {/*
+            인스타의 로고 자리. 손글씨가 아니라 인쇄체다 -- §손글씨는 사람이 쓴 글에만
+            붙고 앱 이름은 앱이 아는 사실이다.
+          */}
+          <span className="text-label font-semibold" style={{ color: 'var(--ink)' }}>곰신로그</span>
           {state.profile.myName ? (
-            <span className="text-caption text-muted-foreground truncate">
+            <span className="text-caption truncate" style={{ color: 'var(--ink-soft)' }}>
               {state.profile.myName}
             </span>
           ) : null}
@@ -254,11 +279,11 @@ export function RoleHome() {
                 icon-only `+`, so this name is read by assistive tech only.
               */}
               <button
-                className="press-response w-11 h-11 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted/40"
+                className="press-response w-11 h-11 rounded-full flex items-center justify-center"
                 aria-label="새 항목 추가"
                 onClick={() => setIsAddWidgetOpen(true)}
               >
-                <Plus size={20} strokeWidth={1.5} />
+                <Plus size={22} className="pen-icon" color="var(--ink)" />
               </button>
 
               {/*
@@ -274,10 +299,10 @@ export function RoleHome() {
               */}
               <button
                 onClick={() => setIsEditMode(true)}
-                className="press-response w-11 h-11 flex items-center justify-center text-muted-foreground hover:bg-muted/40 rounded-full"
+                className="press-response w-11 h-11 flex items-center justify-center rounded-full"
                 aria-label="위젯 편집"
               >
-                <LayoutGrid size={20} strokeWidth={1.5} />
+                <LayoutGrid size={21} className="pen-icon" color="var(--ink)" />
               </button>
             </>
           )}

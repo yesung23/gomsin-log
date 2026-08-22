@@ -4384,9 +4384,169 @@ bash scripts/agent/session-start.sh
 - 002 우회가 runbook에 들어가기 전에는 LV 프로젝트를 만들지 않는다
 - mutation 증명 없이 2번 게이트들을 고치지 않는다
 
+### 2026-08-22 · [V4] 종이 인스타그램 — 설계부터 LV 범위 구현까지
+
+#### PLAN POSITION
+- Phase: V4-0 ~ V4-4. LV 범위(V4-1~V4-3)는 구현 완료, V4-4는 통계 줄까지
+- Workstream: 제품 경험 · 정보구조 · 시각 시스템
+- Step: 스토리·지면·커플 통계 착지
+- Previous Gate: 없음 (신규 workstream)
+- This Gate: 실기기 확인 — `--font-hand-scale` 실측과 첫 화면 전송량
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` 전문
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1.md` §1·§7·§9·§12
+- Engineering source checked: `ENGINEERING_ROADMAP.md` §2·§LV·ARCH-P6
+- Current-state checked: `CURRENT_STATE.md` 전문
+- Latest relevant Work Log checked: 예
+- MASTER PLAN version: `docs/EXPERIENCE_V4_MASTER_PLAN.md` 2026-08-22
+- Does this task conflict with canonical direction? YES → 개정안을 `CANON_AMENDMENTS_V4.md`로
+  분리하고, **구현이 끝난 것만** canonical에 반영했다(A1·A2·A3·A4·A5·A6·A7 일부)
+
+#### OWNERSHIP
+- Tool / Model / Role: Claude Code · Opus 5 · CPO + 구현
+- Branch: `opus/v4-story` (base `a546dc6`)
+- Base SHA: `3231c4b` → `d09fcdd`(계획) → `a546dc6`(손글씨) → 이 브랜치
+
+#### CHANGED / REVIEWED
+- **설계 (3문서, 2,500여 줄).** `EXPERIENCE_V4_MASTER_PLAN.md`가 인스타 요소를
+  A(그대로)/B(종이로 번역)/C(자리 재사용)/D(만들지 않음) 4등급으로 나누고 기능 43개에
+  주소를 부여한다. `V4_VISUAL_SPEC.md`가 파일 단위 실행 명세, `CANON_AMENDMENTS_V4.md`가
+  승인 대기 개정안이다.
+- **손글씨 (`a546dc6`).** 나눔손글씨 세화체를 빈도순 60자 unicode-range 187 슬라이스로
+  자른다. `scripts/fonts/`가 빈도표와 슬라이스를 만들고 화면별 전송량을 시뮬레이션한다.
+  사용자 기록을 코퍼스로 쓰지 않는다 — E2EE 대상이라 서버에서 만들 수 없다.
+- **종이 컴포넌트 6개** · **스토리**(투영·뷰어·라우트 3개) · **홈 레일** · **지면** ·
+  **커플 통계 3칸**. 우리 격자의 칸이 보관 스토리로 간다.
+
+- **구현하면서 잡은 결함 다섯.** 전부 되돌리지 않았으면 조용히 망가졌을 것들이다.
+  1. **팔레트 오류(내 계획의 것).** 계획 §4.2가 "카드를 웜 뉴트럴로"라고 썼는데,
+     그 변경은 2026-08-09에 이미 시도되고 되돌려졌으며 `themeTokens.test.ts`가
+     `--card: oklch(1 0 0);`을 리터럴로 단언한다. `index.css` 주석이 이미 답을 갖고
+     있었다 — *따뜻한 페이지 위의 흰 카드가 패널이 아니라 종이로 읽힌다.* 기반이 이미
+     종이였으므로 V4가 더한 것은 질감·구분선·컴포넌트뿐이다.
+  2. **폰트 인라인.** Vite가 4 kB 미만 자산을 base64로 CSS에 박는데 하필 가장 희귀한
+     12음절짜리 `hand-186`이 3.7 kB라 걸렸다. 슬라이스가 스타일시트 안에 있으면
+     `unicode-range`가 무슨 범위를 적어 두든 매 로드마다 내려온다. 네트워크 탭 말고는
+     아무것도 눈치채지 못하므로 **빌드에서 떨어뜨리는 가드**를 넣었다.
+  3. **폰트 위치.** `public/`이 아니라 `src/fonts/`다. 서비스워커 프리캐시 제외 규칙이
+     `dist/assets`만 훑으므로 `public/`은 그 바깥이고 해시도 붙지 않는다.
+  4. **닫기 이름 셋 겹침.** 스토리 마지막 카드에서 화살표·헤더 X·카드 버튼이 전부
+     `닫기`였다. 테스트가 아니라 **설계를 고쳤다** — 마지막에서 화살표를 비활성화하고
+     나가는 길을 닫는 카드가 소유한다.
+  5. **지면과 `상대방의 오늘`의 중복.** 날짜로만 가른 첫 판이 틀렸다. §6.1이 다루는
+     것은 오늘이 아니라 **마지막 확인 이후 놓친 구간**이라 어제·그제까지 뻗는다.
+     경계를 **확인 여부**로 다시 그었다 — 못 본 것은 스토리, 확인한 것은 지면.
+     이 규칙이 더 정확할 뿐 아니라 더 옳다.
+
+- **막힌 가드를 우회하지 않고 고쳐 썼다.** `typeScale.test.ts`의 `exactly one typeface`가
+  `--font-hand:`를 정면으로 막았는데, 그 가드의 주석이 스스로 "손글씨 영구 금지가 아니라
+  동작하게 만들 import 없이 두 번째 서체가 나타나는 것을 막는 것"이라고 밝히고 있었다.
+  규칙을 경계로 다시 썼다 — 서체가 정확히 둘 · 두 번째가 첫 번째로 fallback ·
+  둘 다 자체 호스팅 · 여덟 번째 크기 단계를 만들지 않을 것.
+  `emotionRedesign`의 군화 홈 순서 단언도 본체(설명이 설명되는 것보다 앞설 수 없다)를
+  별도 단언으로 뽑아 좁혔다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: **새 migration 없음.** 원격 Supabase 조회·변경 없음.
+  V4-1~V4-4는 서버 스키마를 한 줄도 바꾸지 않는다
+- product semantics: 구현이 끝난 개정만 canonical에 반영. A8·A9는 제안으로 남김
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: `npm run verify`
+- PASS / FAIL: **PASS — EXIT=0 / 200 files · 2,988 tests · build PASS**
+- mutation 3건 실제 확인:
+  1. 화이트리스트 밖에 `hand-text` 주입 → 손글씨 가드 2개 FAIL
+  2. 폰트 인라인 재허용(`assetsInlineLimit: 4096`) → **빌드 실패**,
+     `A font was inlined into index-*.css`
+  3. 링을 셋으로 늘리는 것은 타입으로 불가능(배열을 받지 않는다) — 대신 렌더된 링 수를
+     `[data-ink-ring]`으로 센다
+- 폰트 실측: 전체 2,643 kB · KS X 1001 2,350자 532 kB · **60자 187슬라이스에서 첫 화면
+  81–105 kB** (예산 150 kB)
+- **실행하지 않은 검증:** 실기기, 브라우저 육안, e2e, migration harness, 원격 상태
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: **DELTA** — 홈 코어 구성과 `상대방의 오늘`의 표현 경로가 바뀌었다.
+  권한 판정·영수증 상태 기계·요약 규칙은 건드리지 않았다
+
+#### BLOCKERS
+- environment: 실기기 없음 → `--font-hand-scale`은 **잠정값 1.15**
+- **사고 하나를 기록한다.** 세션 중간에 다른 세션이 `opus/v4-paper-instagram`에서
+  `fix/lv-security-closure`로 브랜치를 바꾸고 `git reset`을 돌려 **커밋하지 않은 작업이
+  사라졌다.** 커밋된 것(`d09fcdd`·`a546dc6`)은 살아남았고 나머지는 다시 썼다.
+  이후 `claim.sh`로 점유를 잡고 **단위마다 즉시 커밋**했다. 같은 작업 트리를 여러 세션이
+  공유하는 한 이것은 다시 일어날 수 있다
+
+#### STOPPED AT
+- exact completed boundary: V4-1~V4-3 전체와 V4-4의 통계 줄까지 구현·검증·커밋 완료.
+  푸시하지 않음
+
+#### REMAINING
+- not completed: V4-4의 하이라이트(마일스톤)·프로필 탭 3개, V4-5(탭바 재편·작성 시트),
+  배려 신호의 컴포저 이동, 반응 도장 배선(**migration gate 필요 — 뷰어 반응이 데이터
+  모델에 없다**)
+
+#### NEXT ACTION
+- next owner: 사용자 (실기기 확인) → 구현자
+- 기준 SHA: `af0fd03`
+- exact next task: 390px 실기기에서 5줄 본문 가독성으로 `--font-hand-scale` 확정,
+  네트워크 탭에서 첫 화면 폰트 전송량이 150 kB 이하인지 확인
+
+#### DO NOT ADVANCE UNTIL
+- 실기기에서 손글씨 가독성과 첫 화면 전송량이 확인됐다
+- 반응 도장을 배선하려면 `gomsin-migration-gate`를 밟았다
+- Push(Gate 3)·통화 모드(Gate 4)가 실기기에서 도는 것을 확인했다 — 루프의 첫 화살표와
+  마지막 화살표 없이는 어떤 표현도 검증되지 않는다
+
+#### PRODUCTION
+- NOT APPLIED
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.
   링크와 요약이면 충분하다.
 - 제품 방향이 바뀌면 `PRODUCT_V3.md`를 먼저 고치고, 여기에는 "고쳤다"만 남긴다.
 - 운영 배포 상태를 여기에 쓰지 않는다. 마이그레이션 ledger가 유일한 출처다.
+
+## 2026-08-22 · opus · V4 탭 재편과 일기장 (`opus/v4-story`)
+
+**한 일**
+
+- `PRODUCT_V3` §5 개정 — 5탭을 `홈 · 나 · 일기장 · 일정 · 우리`로. §5.3(찾기가 탭이 아닌
+  이유) · §5.4(나) · §5.5(일기장) 신설. §7.1의 진입점 소유자를 `우리`로 옮김.
+  `CANON_AMENDMENTS_V4` A9 반영 표시.
+- `src/styles/paper.css` 신설 — 공책 표면 토큰·클래스. 옛 토큰을 지우지 않는 추가 층.
+- `src/features/diary/` — 월별 지면(`diaryMonths`), 스티커 12종(인라인 SVG, 기본 세트
+  무료), 붙임 저장(기기 로컬), 지면 화면.
+- `src/features/me/` — 복무·주기·배려 신호를 `마이`에서 **옮겨** 옴(복사 아님).
+- `src/features/search/` — 검색만. 탐색 격자는 `우리` 격자와 중복이라 삭제. `우리` 헤더의
+  돋보기로 진입.
+- `CycleSupportSection` — 보내는 쪽 판정을 `role === 'gomsin'`에서 `mine` prop으로.
+  RLS는 원래 역할을 보지 않았으므로 마이그레이션 없음.
+
+**가드가 잡은 것**
+
+- 탭 덮임 테스트가 `/record`(신규 결함)와 **`/call`(기존 결함)**을 찾음 — 통화 모드에서
+  탭바가 전부 꺼져 있었다.
+- 지면이 포인터 전용이었다 — 키보드 경로(Enter로 붙이기 · 방향키로 옮기기 · Enter로
+  떼기) 추가.
+- `paperTokens.test.ts` — 프리뷰에서 눈으로 고른 색 셋이 WCAG 미달(3.58 / 3.58 / 2.06 /
+  2.64). 계산이 통과시킨 값으로 교체.
+
+**검증**
+
+- `npm run verify` EXIT=0 (208 files / 3099 tests).
+- 대비 가드·배려 신호 역할 해제는 뮤테이션으로 확인.
+- **실행하지 않음**: 앱을 브라우저에서 직접 보지 못했다(로그인 필요). 화면 동작은 렌더
+  테스트로만 확인. 기기 검증(손글씨 배율, 첫 페인트 폰트 전송량) 미실행.
+
+**다음**
+
+- 일기장 붙임 동기화 — CSK 도메인 테이블·RLS. migration gate가 판정.
+- `P-MP` 게이트 셋(구매자 정의 · 미리보기의 상대 노출 범위 · 연결 해제 후 접근) —
+  이것이 열려야 `한 권으로 만들기`에 결제가 붙는다.
+- 주기 트래커의 역할 게이트 — 배려 신호와 같은 이유로 풀려야 하나 HRK 도메인이라 §21을
+  다시 읽고 판단할 일. 이번 작업이 앞질러 하지 않았다.
+- 나머지 화면(홈 · 우리 · 일정)의 공책 표면 이관.

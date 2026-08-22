@@ -216,29 +216,66 @@ describe('H-4: the entry point survives the conditions that caused the stranding
    * The guard is kept, not weakened: the four original destinations must all
    * still be present, so this still fails if navigation quietly loses one.
    */
-  it('PRESERVATION: the tab bar keeps all four original tabs, plus 일정', () => {
+  it('탭바가 다섯 칸이고, 그리드가 그 수와 맞는다', () => {
     const shell = readFileSync(
       resolve(process.cwd(), 'src/components/MobileShell.tsx'),
       'utf8',
     );
     const tabs = [...shell.matchAll(/to: '(\/[a-z]+)'/g)].map((match) => match[1]);
-    expect(tabs).toEqual(['/home', '/record', '/schedule', '/us', '/my']);
-    for (const original of ['/home', '/record', '/us', '/my']) {
-      expect(tabs, `original tab ${original} must survive`).toContain(original);
-    }
-    // The grid must actually fit the tabs it renders.
+    expect(tabs).toEqual(['/home', '/me', '/diary', '/schedule', '/us']);
+    // 그리드가 실제로 그리는 칸 수와 맞아야 한다. 어긋나면 칸 하나가 잘리거나 빈다.
     expect(shell).toContain(`grid-cols-${tabs.length}`);
   });
 
-  it('every tab keeps its section lit on detail screens', () => {
+  /**
+   * 어느 화면도 어느 탭에도 속하지 않는 상태가 없다.
+   *
+   * 앞선 판은 탭 목록을 글자 그대로 적어 두고 그것이 안 바뀌었는지 봤다. 그 테스트는
+   * 탭이 재편될 때 **반드시** 깨지지만, 정작 재편이 만드는 진짜 사고는 잡지 못한다 --
+   * 탭을 잃은 화면(`/my`, `/settings`, `/record`, `/service`)이 아무 탭에도 안 걸려서
+   * 서 있는 동안 앱이 "당신은 아무 데도 없다"고 말하는 것.
+   *
+   * 그래서 목록이 아니라 **덮이는지**를 본다. 라우터가 셸 안에서 서비스하는 경로를
+   * `App.tsx` 에서 읽어 와, 각각이 어떤 탭의 `matchPrefixes` 에 걸리는지 확인한다.
+   * 새 화면을 추가하면서 탭에 안 걸면 여기서 걸린다.
+   */
+  it('셸이 서비스하는 모든 경로가 어떤 탭에든 걸린다', () => {
     const shell = readFileSync(
       resolve(process.cwd(), 'src/components/MobileShell.tsx'),
       'utf8',
     );
-    // /trips/:id must light 일정, and /settings must light 마이 -- otherwise a
-    // detail screen looks like it belongs to no section at all.
+    const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+
+    const prefixes = [...shell.matchAll(/matchPrefixes: \[([^\]]*)\]/g)]
+      .flatMap((match) => [...match[1].matchAll(/'([^']+)'/g)].map((inner) => inner[1]));
+    expect(prefixes.length, 'matchPrefixes 를 못 읽었다').toBeGreaterThan(5);
+
+    const routes = [...app.matchAll(/<Route path="(\/[a-z][a-z/:-]*)"/g)]
+      .map((match) => match[1])
+      // 셸 밖에서 그려지는 것들. 탭바가 없으므로 걸릴 탭도 없다.
+      .filter((path) => !path.startsWith('/auth') && !path.startsWith('/legal')
+        && !path.startsWith('/onboarding') && !path.startsWith('/story'))
+      // `:id` 자리는 접두사 판정에 쓰이지 않으므로 부모까지만 본다.
+      .map((path) => path.replace(/\/:[^/]+$/, ''));
+    expect(routes.length, '라우트를 못 읽었다').toBeGreaterThan(8);
+
+    const orphans = routes.filter((path) => !prefixes.some(
+      (prefix) => prefix === '/' ? path === '/' : path === prefix || path.startsWith(`${prefix}/`),
+    ));
+    expect(orphans, '이 화면들은 어느 탭에도 걸리지 않는다').toEqual([]);
+  });
+
+  it('섹션 안의 상세 화면에서도 그 섹션이 켜져 있다', () => {
+    const shell = readFileSync(
+      resolve(process.cwd(), 'src/components/MobileShell.tsx'),
+      'utf8',
+    );
+    // `/trips/:id` 는 일정을, `/settings` 는 우리를 켠다. 위의 덮임 검사는 "어딘가에
+    // 걸린다"만 보므로, 어느 탭이 맞는지는 여기서 못 박는다.
     expect(shell).toContain("matchPrefixes: ['/schedule', '/trips']");
-    expect(shell).toContain("matchPrefixes: ['/my', '/settings']");
+    expect(shell).toContain("matchPrefixes: ['/us', '/search', '/record', '/my', '/settings']");
+    // 복무는 `우리` 가 아니라 `나` 가 가져갔다 -- 그 화면이 답하는 질문이 그쪽이다.
+    expect(shell).toContain("matchPrefixes: ['/me', '/service']");
   });
 
   it('PRESERVATION: the widget entry points still exist for users who kept them', () => {

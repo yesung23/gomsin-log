@@ -1,4 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import {
+  applyHandwritingAttribute,
+  loadHandwritingEnabled,
+} from '@/lib/handwritingPreference';
 import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
@@ -43,6 +47,18 @@ const ServicePage = lazy(() =>
 );
 const LegalPage = lazy(() =>
   import('@/pages/LegalPage').then((m) => ({ default: m.LegalPage })),
+);
+const MePage = lazy(() =>
+  import('@/features/me/MePage').then((m) => ({ default: m.MePage })),
+);
+const DiaryPage = lazy(() =>
+  import('@/features/diary/DiaryPage').then((m) => ({ default: m.DiaryPage })),
+);
+const SearchPage = lazy(() =>
+  import('@/features/search/SearchPage').then((m) => ({ default: m.SearchPage })),
+);
+const StoryRoute = lazy(() =>
+  import('@/features/story/StoryRoute').then((m) => ({ default: m.StoryRoute })),
 );
 
 function PageLoader() {
@@ -270,6 +286,19 @@ export function App() {
     return () => { disposed = true; dispose?.(); };
   }, []);
 
+  /*
+    손글씨를 켤지 끌지는 그 사람의 눈과 그 기기의 화면에 관한 값이므로 계정별 로컬 설정이다.
+    `<html>`에 `data-hand`로 반영하고, 켬일 때는 속성을 아예 달지 않는다 -- 켬이 기본이라
+    첫 페인트가 이 효과를 기다리지 않는다.
+
+    계정이 바뀌면 다시 읽는다. 같은 기기를 두 사람이 쓸 때 한쪽의 선택이 다른 쪽에 남으면
+    사용자가 하지 않은 설정이 적용된 것으로 보인다.
+  */
+  const viewerId = state.authenticatedUser?.id || state.profile.id || '';
+  useEffect(() => {
+    applyHandwritingAttribute(loadHandwritingEnabled(viewerId));
+  }, [viewerId]);
+
   if (!isReady) {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center">
@@ -324,6 +353,17 @@ export function App() {
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           {/* Legal documents must be reachable before sign-in too (store listing requirement). */}
           <Route path="/legal/:doc" element={<LegalPage />} />
+          {/*
+            스토리.
+
+            PRODUCT_V3 §7.5 -- 기록은 라우트로 주소 지정 가능해야 한다. 휘발성 앱 상태로만
+            대상을 지정하면 새로고침·딥링크·알림에서 원본에 도달할 수 없다. `?at=`은
+            인덱스가 아니라 `recordId`이며, 그래야 기록 하나가 지워져도 옆 기록이 열리지
+            않는다(§4.2 근사치 금지).
+          */}
+          <Route path="/story/partner" element={<StoryRoute mode="today" />} />
+          <Route path="/story/mine" element={<StoryRoute mode="mine" />} />
+          <Route path="/story/day/:date" element={<StoryRoute mode="archive" />} />
           {!state.setupComplete ? (
             <>
               <Route path="/onboarding" element={<OnboardingPage />} />
@@ -334,6 +374,9 @@ export function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/home" element={<HomePage />} />
               <Route path="/record" element={<RecordPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/me" element={<MePage />} />
+              <Route path="/diary" element={<DiaryPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/service" element={<ServicePage />} />
               <Route path="/us" element={<UsPage />} />

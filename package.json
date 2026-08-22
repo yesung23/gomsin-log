@@ -8,6 +8,8 @@
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",
     "preview": "vite preview",
+    "preview:design": "vite --config design-preview/vite.config.ts",
+    "preview:v4": "vite --config design-preview/vite.config.ts --host",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b --force",
     "test": "vitest run --config vitest.config.ts --configLoader runner",

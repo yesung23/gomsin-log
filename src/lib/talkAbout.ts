@@ -1,5 +1,6 @@
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { isMissingTable } from '@/lib/serverErrors';
 import type { TalkAboutMark } from '@/types';
 
 /**
@@ -40,7 +41,13 @@ export function isTalkAboutMarkActive(mark: TalkAboutMark, now: Date = new Date(
 }
 
 export type TalkAboutFetchResult =
-  | { ok: true; marks: TalkAboutMark[] }
+  /**
+   * `deployed: false` means the table is not in the schema at all, so `marks` is
+   * empty because **there are none** -- not because the read failed. See
+   * `isMissingTable` for why schema absence is the one failure that licenses an
+   * empty answer.
+   */
+  | { ok: true; marks: TalkAboutMark[]; deployed?: boolean }
   | { ok: false; error: unknown };
 
 export async function fetchTalkAboutMarksResultFromDB(
@@ -59,10 +66,32 @@ export async function fetchTalkAboutMarksResultFromDB(
     .order('created_at', { ascending: false });
 
   if (error) {
+    /*
+      테이블이 스키마에 아예 없으면 실패가 아니라 **없음**이다.
+
+      `이따 이야기하기` 표시는 기록 위에 얹히는 부가 메타데이터다. 038/043 이 아직
+      운영에 적용되지 않았다면 그 표시는 누구에게도 존재하지 않으므로 빈 목록이
+      추측이 아니라 사실이다.
+
+      이것을 실패로 다루면 어떻게 되는지는 실제로 겪었다 -- 로그인 직후 하이드레이션이
+      이 조각에서 멈춰 `TALK_ABOUT-SERVER` 화면이 뜨고, **앱 전체에 들어갈 수 없었다.**
+      기능 하나의 배포 지연이 계정을 인질로 잡으면 안 된다.
+
+      권한 거부(42501)나 네트워크 실패는 여전히 실패다. 그때는 표시가 있는데 못 읽는
+      것이므로 빈 목록이 거짓말이 된다.
+    */
+    if (isMissingTable(error)) {
+      console.warn(
+        '[gomsinlog] talk_about_marks is not in the schema (PGRST205). '
+        + 'Apply migrations 038 and 043 and reload the schema cache '
+        + '(Settings -> API -> Reload schema). Talk-about marks read as empty until then.',
+      );
+      return { ok: true, marks: [], deployed: false };
+    }
     console.error('Failed to fetch talk-about marks:', error);
     return { ok: false, error };
   }
-  return { ok: true, marks: (data || []).map(mapRow) };
+  return { ok: true, marks: (data || []).map(mapRow), deployed: true };
 }
 
 export interface TalkAboutWriteResult {

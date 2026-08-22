@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, BookOpen, CalendarDays, Heart, User, Plus } from 'lucide-react';
+import { Home, HeartPulse, BookHeart, CalendarDays, CircleUserRound, Plus } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { routeAnnouncement } from '@/lib/routeAnnouncement';
@@ -8,30 +8,62 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 
 /**
- * Five tabs: 홈 · 기록 · 일정 · 우리 · 마이.
+ * 다섯 칸 — 인스타그램의 자리를 빌리되, 빌릴 것이 없는 칸은 빌리지 않는다.
  *
- * 일정 was added because the planning surface was the least reachable part of the
- * app and the most asked-for. Before this, `/schedule` and `/trips` had NO tab at
- * all: the only ways in were a widget the user is free to delete and two buttons
- * on `/us`. That also meant standing on `/trips` highlighted no tab, so the app
- * silently told you that you were nowhere.
+ *     인스타      홈    검색    만들기(+)   릴스     프로필
+ *     곰신로그    홈    나      일기장      일정     우리
  *
- * `matchPrefixes` exists for the same reason: `/trips/:id` and `/schedule` are both
- * "일정", so the tab stays lit while you move around inside the section instead of
- * going dark on a detail screen.
+ * 자리와 개수가 같아야 손이 기억한다. 인스타를 쓰는 사람은 왼쪽 끝이 홈이고 오른쪽 끝이
+ * 자기 프로필이라는 것을 몸으로 안다. 릴스 자리에 일정이 오는 것은 성격이 맞아서다 --
+ * 다른 넷은 전부 과거와 현재인데 일정만 미래이고, 인스타에서도 그 칸은 "다른 종류의
+ * 것"을 보는 자리다.
+ *
+ * ## 검색 칸을 빌리지 않은 이유
+ *
+ * 한 번 빌렸다가 되돌렸다. **인스타에 검색 탭이 있는 이유는 거기에 남의 게시물이 있기
+ * 때문이다.** 알고리즘이 고른 모르는 사람들의 것. 이 앱에는 남이 없으므로 탐색 격자에
+ * 넣을 것이 우리 둘의 기록밖에 없고, 그것은 `우리` 탭의 하루 격자와 **같은 화면**이다.
+ * 고유하게 남는 검색은 탭이 아니라 `우리` 헤더의 돋보기가 됐다(§5.3).
+ *
+ * ## 가운데는 왜 만들기가 아닌가
+ *
+ * 기록 진입점을 여기 두는 것도 한 번 짰다. 되돌린 이유는 자리의 값이 다르기 때문이다 --
+ * 가운데는 엄지가 가장 쉽게 닿는 칸이고, 기록은 떠 있는 버튼으로 어느 화면에서든 한 번이면
+ * 되므로 이 칸을 쓸 이유가 없다(§7.1). 그 자리는 **이 앱이 왜 기록을 쌓게 하는지에 대한
+ * 답**이 가져간다: 쌓인 것이 물건이 된다(§5.2).
+ *
+ * `matchPrefixes` 는 섹션 안에서 움직이는 동안 탭이 꺼지지 않게 한다. 꺼지면 앱이
+ * "당신은 아무 데도 없다"고 말한다. 어느 경로도 빠지지 않는다는 것은
+ * `settingsRouteReachability.test.tsx` 가 라우터에서 직접 읽어 확인한다.
  */
 const TABS = [
   {
+    /*
+      `/call` 이 여기 걸린다.
+
+      이건 탭 재편이 만든 것이 아니라 **원래부터 어느 탭에도 없었다.** 통화 모드는 홈의
+      `이야기할 것` 위젯에서 들어가는데, 들어간 순간 탭바가 전부 꺼졌다.
+    */
     to: '/home',
     label: '홈',
     icon: Home,
-    matchPrefixes: ['/home', '/'],
+    matchPrefixes: ['/home', '/', '/call'],
   },
   {
-    to: '/record',
-    label: '기록',
-    icon: BookOpen,
-    matchPrefixes: ['/record'],
+    to: '/me',
+    label: '나',
+    icon: HeartPulse,
+    matchPrefixes: ['/me', '/service'],
+  },
+  {
+    /*
+      가운데는 이 앱이 왜 기록을 쌓게 하는지에 대한 답이 가져간다: 쌓인 것이 물건이
+      된다(§5.5). 한 달치가 지면으로 엮이고, 꾸미고 싶으면 꾸미고, 한 권이 된다.
+    */
+    to: '/diary',
+    label: '일기장',
+    icon: BookHeart,
+    matchPrefixes: ['/diary'],
   },
   {
     to: '/schedule',
@@ -40,30 +72,29 @@ const TABS = [
     matchPrefixes: ['/schedule', '/trips'],
   },
   {
+    /*
+      `우리` 가 기록을 보고 찾는 곳 전부를 갖는다.
+
+      하루 격자와 검색(`/search`)과 원본(`/record`), 그리고 `☰` 안의 계정·설정까지.
+      §7.1 의 제거 불가 작성 진입점도 여기 있다.
+    */
     to: '/us',
     label: '우리',
-    icon: Heart,
-    matchPrefixes: ['/us', '/service'],
-  },
-  {
-    to: '/my',
-    label: '마이',
-    icon: User,
-    matchPrefixes: ['/my', '/settings'],
+    icon: CircleUserRound,
+    matchPrefixes: ['/us', '/search', '/record', '/my', '/settings'],
   },
 ] as const;
 
 /**
- * Whether this screen already pins a primary action of its own.
+ * 이 화면이 이미 자기 주요 동작을 고정하고 있는가.
  *
- * The shell's compose button is withheld on these so two floating controls never
- * share a corner. `/record`'s CTA opens the very composer this button routes to,
- * and a trip DETAIL pins its own pair.
+ * 그렇다면 셸의 기록 버튼은 거둔다 -- 둥근 컨트롤 둘이 한 모서리를 나눠 갖지 않도록.
+ * `/record` 의 CTA 는 이 버튼이 여는 바로 그 컴포저를 열고, 여행 **상세**는 자기 짝을
+ * 고정한다.
  *
- * Written as a predicate rather than a prefix list because the trip screens split:
- * `/trips/:id` pins two buttons, `/trips` pins none. A prefix would have taken the
- * list with it and made the one screen people browse while remembering something
- * the one screen with no way to record it.
+ * 접두사 목록이 아니라 술어인 이유는 여행 화면이 갈리기 때문이다: `/trips/:id` 는 둘을
+ * 고정하고 `/trips` 는 아무것도 고정하지 않는다. 접두사로 적으면 목록까지 함께 가져가서,
+ * **무언가를 떠올리기 가장 쉬운 화면**이 그것을 남길 방법이 없는 유일한 화면이 된다.
  */
 function ownsPrimaryAction(pathname: string): boolean {
   if (pathname === '/record' || pathname.startsWith('/record/')) return true;
@@ -188,22 +219,21 @@ export function MobileShell({ children }: { children: ReactNode }) {
         </main>
 
         {/*
-          Write from anywhere, in one tap.
+          어느 화면에서든 한 번에 기록을 시작한다.
 
-          The composer lived on `/record` behind its own floating CTA, and on Home
-          inside a widget the user is free to delete. From 일정, 우리 or 마이 --
-          and from Home with that widget removed -- capturing a thought meant
-          navigating first. PRODUCT_V3 §7.1 asks for thirty seconds end to end and
-          three of them were going to travel.
+          §7.1 은 30초 안의 기록을 요구하고, 그러려면 `일정` · `우리` · `컨디션` 에 서
+          있는 사람도 이동 없이 시작할 수 있어야 한다. 탭바 가운데를 잠깐 이 동작에 준
+          적이 있는데, 그 칸은 매일 답해야 하는 질문이 가져가는 것이 맞아서 버튼을
+          되돌렸다.
 
-          Not a sixth tab. §5 fixes the five, and this is an ACTION rather than a
-          place, so it is a button floating over the bar rather than a peer of it.
-          It sits bottom-right because that is the easiest corner for a thumb, and
-          it clears the measured bar height for the reason the banner does.
+          여섯 번째 탭이 아니다. §5 가 다섯을 고정하고, 이것은 **장소가 아니라 동작**이므로
+          바의 동료가 아니라 바 위에 뜬다. 엄지가 가장 쉬운 오른쪽 아래에 두고, 잰
+          탭바 높이만큼 띄운다.
 
-          Withheld on the two screens that already own a primary floating action,
-          so the user never sees two competing round buttons: `/record`, whose CTA
-          opens this same composer, and a trip detail with its own pinned pair.
+          이미 자기 주요 동작을 고정한 화면에서는 거둔다 -- 둥근 버튼 둘이 한 모서리를
+          다투지 않도록. `/record` 의 CTA 는 바로 이 컴포저를 열고, 여행 상세는 자기 짝을
+          고정한다. 그 두 화면에서도 진입점이 사라지지 않는 것은 `찾기` 탭의 펜이 §7.1 의
+          제거 불가 진입점을 따로 지고 있기 때문이다.
         */}
         {!ownsPrimaryAction(pathname) && (
           <Link
@@ -221,14 +251,27 @@ export function MobileShell({ children }: { children: ReactNode }) {
         {/* Offline indicator – sits visually above the tab bar */}
         <OfflineBanner />
 
-        {/* Fixed 5-Tab Navigation Bar (홈 | 기록 | 일정 | 우리 | 마이) */}
+        {/*
+          다섯 칸: 홈 | 찾기 | 남기기 | 일정 | 우리.
+
+          공책을 덮는다 -- 반투명이 아니다. 괘선 위에 떠 있으면 글과 겹쳐 읽히고, 그러면
+          탭바가 아니라 얼룩이 된다. 이 바만 종이를 가린다.
+
+          `--paper` 는 아직 옮기지 않은 화면의 `--card` 와 사실상 같은 색이다(낮은 흰색,
+          밤은 세 단위 차이). 그래서 이 바는 옛 화면 아래에서도 어색하지 않고, 화면을
+          하나씩 옮기는 동안 바를 두 번 고칠 필요가 없다.
+        */}
         <nav
           ref={navRef}
-          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-card/95 backdrop-blur-md border-t border-border z-50"
+          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] z-50"
+          style={{
+            background: 'var(--paper)',
+            borderTop: 'var(--stroke) solid var(--ink-faint)',
+          }}
           role="tablist"
           aria-label="하단 내비게이션"
         >
-          <ul className="grid grid-cols-5 px-1 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),8px)] items-end">
+          <ul className="grid grid-cols-5 px-1 pb-[max(env(safe-area-inset-bottom,0px),8px)] items-stretch">
             {TABS.map((t) => {
               // Prefix matching, so a detail screen inside a section keeps its tab
               // lit. `/` is matched exactly: as a prefix it would light every tab.
@@ -246,48 +289,28 @@ export function MobileShell({ children }: { children: ReactNode }) {
                     aria-label={t.label}
                     className={cn(
                       /*
-                        `press-response` replaces `transition-colors duration-200`.
+                        `press-response` 는 그대로 둔다.
 
-                        The tab bar is the most-tapped control in the app and it had
-                        no press state at all: it answered on NAVIGATION, which on a
-                        slow route is far enough after the finger that the tap reads
-                        as dropped and gets repeated. `:active` is set on pointer-DOWN,
-                        so the bar now answers the finger and the route arrives when
-                        it arrives.
-
-                        The class owns the colour transition too -- see its definition
-                        in `index.css` for why it has to.
+                        탭바는 이 앱에서 가장 많이 눌리는 컨트롤이고, 예전에는 눌림에
+                        아무 답이 없었다 -- 느린 경로에서는 손가락에서 한참 뒤에야
+                        반응해 탭이 씹힌 것처럼 읽히고 다시 눌리게 된다. `:active` 는
+                        포인터가 내려가는 순간 걸리므로 바가 먼저 답하고 경로는 올 때
+                        온다.
                       */
-                      'press-response flex flex-col items-center gap-0.5 py-1 text-center min-h-11 justify-center relative w-full rounded-control',
-                      active
-                        ? 'text-coral-strong'
-                        : 'text-muted-foreground hover:text-foreground'
+                      'press-response flex items-center justify-center w-full min-h-11 py-3',
                     )}
                   >
-                    <Icon size={21} strokeWidth={active ? 2.2 : 1.8} aria-hidden="true" />
-                    <span className={cn('text-caption', active ? 'font-semibold' : 'font-normal')}>
-                      {t.label}
-                    </span>
-                    {/*
-                      The coral bar under the active tab.
-
-                      It was removed in the 2026-08-08 density pass as a duplicate
-                      signal -- the tint and the weight already say which tab is
-                      lit. That reasoning was right about redundancy and wrong
-                      about what the redundancy was doing: this bar was the one
-                      piece of saturated brand colour on every screen, and the app
-                      read cold without it.
-
-                      Restored at 16x2px instead of the old 20x3px, and it stays
-                      `aria-hidden`: it is decoration on top of `aria-selected`,
-                      the tint and the weight, never the only signal.
-                    */}
-                    {active ? (
-                      <span
-                        aria-hidden="true"
-                        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-coral"
-                      />
-                    ) : null}
+                    <Icon
+                      size={23}
+                      className="pen-icon"
+                      color={active ? 'var(--ink)' : 'var(--ink-soft)'}
+                      /*
+                        인스타는 선택된 홈 아이콘을 채운다. 채움이 있는 아이콘에서만
+                        의미가 있으므로 홈에만 준다 -- 달력이나 펜을 채우면 뭉개진다.
+                      */
+                      fill={active && t.label === '홈' ? 'var(--ink)' : 'none'}
+                      aria-hidden="true"
+                    />
                   </Link>
                 </li>
               );

@@ -22,26 +22,59 @@ import { InkCircle, PenFace } from './common';
  *
  * 인스타는 클수록 좋은 숫자만 있다. 여기는 첫 칸이 쌓이고 나머지 둘은 줄어든다 --
  * 두 방향이 한 줄에 공존하는 것이 떨어져 있는 두 사람의 시간 감각이다.
+ *
+ * ## 군 복무 커플이 아닐 때
+ *
+ * §11: **군 복무는 집중된 초기 사용 사례이지 제품의 정체성 전체가 아니다.** 그래서
+ * 군 관련 표면은 끄는 것이 아니라 **없다.** 비활성으로 남기거나 "해당 없음"을 적으면
+ * 그 커플에게 이 앱은 자기 것이 아닌 앱이 된다.
+ *
+ * 통계 세 번째 칸은 전역 대신 다음 기념일이 오고, 하이라이트에서 전역이 빠진다.
+ * 화면 어디에도 전역·복무·군화 같은 말이 남지 않는다. 유학·주말부부·파병 -- 떨어져
+ * 있는 이유가 무엇이든 같은 화면을 쓴다.
+ *
+ * 앱의 `buildCoupleStats`·`buildHighlights` 는 이미 이렇게 동작한다. 군 정보가 없으면
+ * 조용히 기념일로 바뀌고 전역 하이라이트를 만들지 않으며, 그 동작에 테스트가 있다.
  */
 
-const STATS = [
+/** 군 정보가 있을 때와 없을 때. 세 번째 칸만 다르다. */
+const STATS = (military: boolean) => [
   { value: '412', label: '함께한 날' },
   { value: 'D-12', label: '만남까지' },
-  { value: '101', label: '전역까지' },
+  military
+    ? { value: '101', label: '전역까지' }
+    : { value: 'D-33', label: '1주년' },
 ];
 
-const HIGHLIGHTS = [
-  { label: '100일', when: '4/10', reached: true },
-  { label: '첫 면회', when: '4/24', reached: true },
-  { label: '첫 휴가', when: '6/23', reached: true },
-  { label: '1주년', when: '8/26', reached: true },
-  { label: '전역', when: 'D-101', reached: false },
-];
+/**
+ * 하이라이트.
+ *
+ * 군 복무 커플이면 첫 면회·첫 휴가가 있고 맨 뒤에 아직 오지 않은 전역이 온다.
+ * 아니면 그 자리에 다음 기념일이 온다 -- **미래 하나는 언제나 남는다.** 기다림이
+ * 이 제품이고, 무엇을 기다리는지만 커플마다 다르다.
+ */
+const HIGHLIGHTS = (military: boolean) => (military
+  ? [
+    { label: '100일', when: '4/10', reached: true },
+    { label: '첫 면회', when: '4/24', reached: true },
+    { label: '첫 휴가', when: '6/23', reached: true },
+    { label: '1주년', when: '8/26', reached: true },
+    { label: '전역', when: 'D-101', reached: false },
+  ]
+  : [
+    { label: '100일', when: '4/10', reached: true },
+    { label: '첫 여행', when: '5/12', reached: true },
+    { label: '200일', when: '7/18', reached: true },
+    { label: '1주년', when: '8/26', reached: true },
+    { label: '2주년', when: 'D-33', reached: false },
+  ]);
 
 /** 하루 격자. 한 달은 언제나 28~31칸이라 구멍이 나지 않는다. */
 const DAYS = Array.from({ length: 31 }, (_, i) => i);
 
-export function InstaProfile() {
+export function InstaProfile({ military = true }: { military?: boolean }) {
+  const stats = STATS(military);
+  const highlights = HIGHLIGHTS(military);
   return (
     <div className="notebook min-h-full pb-8">
       <header className="flex h-14 items-center gap-2 px-4">
@@ -59,7 +92,7 @@ export function InstaProfile() {
       <div className="flex items-center gap-6 px-4 pt-1">
         <InkCircle size={82} ring="seen"><PenFace size={56} /></InkCircle>
         <div className="flex flex-1 items-stretch">
-          {STATS.map((stat) => (
+          {stats.map((stat) => (
             <button key={stat.label} type="button" className="tap flex flex-1 flex-col items-center gap-0.5">
               {/* 셋 다 같은 크기·같은 색. 줄어드는 숫자에 경고색을 쓰지 않는다. */}
               <span className="print text-[17px] font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
@@ -88,7 +121,7 @@ export function InstaProfile() {
 
       {/* 하이라이트 — 인스타는 과거만 담는다. 맨 뒤 하나가 아직 오지 않은 것이다. */}
       <div className="flex gap-4 overflow-x-auto px-4 pt-5 pb-1">
-        {HIGHLIGHTS.map((item) => (
+        {highlights.map((item) => (
           <button key={item.label} type="button" disabled={!item.reached}
             className="tap flex w-[66px] shrink-0 flex-col items-center gap-1.5 disabled:opacity-45">
             <InkCircle size={60} ring={item.reached ? 'seen' : 'none'}>

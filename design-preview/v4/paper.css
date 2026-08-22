@@ -127,31 +127,12 @@
 }
 
 /*
- * 마스킹테이프.
+ * 마스킹테이프는 뺐다 (2026-08-22).
  *
- * 다이어리에 사진을 붙일 때 쓰는 반투명 종이테이프다. 사진 모서리에 짧은 조각이 비스듬히
- * 얹히면 화면 위에 떠 있던 사진이 **공책에 붙인 사진**이 된다 -- 이 앱에서 사진이
- * 스크랩북의 물건처럼 읽히게 하는 가장 싼 방법이고, 이미지 에셋도 필요 없다.
- *
- * 두 조각을 서로 반대 모서리에 어긋난 각도로 둔다. 네 모서리를 다 붙이면 액자가 되고,
- * 각도가 같으면 인쇄된 장식이 된다.
+ * 사진 모서리에 반투명 종이테이프를 얹어 "공책에 붙인 사진"으로 만드는 것이었고, CSS만으로
+ * 되며 보기에도 좋았다. 다만 지금 판단할 것이 아니라 나중에 붙이기로 했다. 구현은
+ * `2dcc674` 에 그대로 있으므로 되살릴 때 다시 쓰지 않아도 된다.
  */
-.tape {
-  position: absolute;
-  width: 62px;
-  height: 20px;
-  background: color-mix(in srgb, var(--ink) 9%, transparent);
-  border-left: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
-  border-right: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
-  pointer-events: none;
-}
-
-[data-theme='dark'] .tape {
-  background: color-mix(in srgb, var(--ink) 13%, transparent);
-}
-
-.tape-tl { top: -9px; left: -14px; transform: rotate(-38deg); }
-.tape-br { bottom: -9px; right: -14px; transform: rotate(-38deg); }
 
 .tap {
   transition: opacity 120ms ease, transform 120ms ease;

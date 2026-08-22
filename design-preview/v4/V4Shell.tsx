@@ -80,6 +80,18 @@ export function V4Shell() {
     여기서 바꾼다. 0 이면 픽스처 그대로.
   */
   const [momentCount, setMomentCount] = useState(0);
+  /*
+    군 복무 커플인가.
+
+    §11 -- 군 복무는 집중된 초기 사용 사례이지 제품의 정체성이 아니다. 유학·주말부부·
+    파병, 떨어져 있는 이유가 무엇이든 같은 앱을 쓴다. 그래서 군 관련 표면은 끄는 것이
+    아니라 **없어야** 하고, 없을 때 화면이 어떻게 보이는지는 눈으로 확인해야 안다.
+
+    앱은 이미 이렇게 동작한다 -- `buildCoupleStats` 와 `buildHighlights` 가 군 정보가
+    없으면 조용히 기념일로 바꾸고, 그 동작에 테스트가 있다. 이 토글은 그 두 상태를
+    프리뷰에서 나란히 보기 위한 것이다.
+  */
+  const [military, setMilitary] = useState(true);
 
   /*
     배율을 실제 토큰에 쓴다.
@@ -138,14 +150,24 @@ export function V4Shell() {
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setDark((value) => !value)}
-            aria-pressed={dark}
-            className="min-h-11 w-full rounded-md bg-neutral-300 text-[12px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
-          >
-            {dark ? '밤의 공책' : '낮의 공책'}
-          </button>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => setDark((value) => !value)}
+              aria-pressed={dark}
+              className="min-h-11 flex-1 rounded-md bg-neutral-300 text-[12px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+            >
+              {dark ? '밤의 공책' : '낮의 공책'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMilitary((value) => !value)}
+              aria-pressed={military}
+              className="min-h-11 flex-1 rounded-md bg-neutral-300 text-[12px] font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+            >
+              {military ? '군 복무 커플' : '일반 커플'}
+            </button>
+          </div>
 
           <DeviceReadout scale={scale} onScaleChange={setScale} />
 
@@ -221,8 +243,8 @@ export function V4Shell() {
                   onCompose={() => setOverlay('compose')}
                 />
               ) : tab === 'search' ? <InstaSearch />
-                : tab === 'plan' ? <InstaPlan />
-                  : <InstaProfile />}
+                : tab === 'plan' ? <InstaPlan military={military} />
+                  : <InstaProfile military={military} />}
             </div>
             <InkTabBar
               active={tab}

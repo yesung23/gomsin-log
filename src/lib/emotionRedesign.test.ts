@@ -370,15 +370,29 @@ describe('role-aware home widgets', () => {
      * `partner_day` was moved in front of them.
      */
     /*
-     * THIRD MOVE, and the last one that can happen to this assertion: the ordering
-     * it protects is no longer a default that a user can rearrange away. The
-     * surfaces are PINNED (`HOME_CORE_BY_ROLE`), so 군화's home leads with the
-     * briefing (§6.1's 요약 층) and then the day itself (원본 층) whatever anyone
-     * does to their widgets. The arrangeable layer below is now just D-Day.
+     * THIRD MOVE: the ordering it protects is no longer a default that a user can
+     * rearrange away. The surfaces are PINNED (`HOME_CORE_BY_ROLE`), so 군화's home
+     * leads with the briefing (§6.1's 요약 층) and then the day itself (원본 층)
+     * whatever anyone does to their widgets. The arrangeable layer below is now
+     * just D-Day.
+     *
+     * FOURTH MOVE (2026-08-22): `story_rail` goes in front of all of it, and the
+     * thing this assertion protects survives intact -- the rail is not another
+     * DESCRIPTION of the partner's day. It is the door to the day itself, and what
+     * it shows about the partner is two facts (a ring state and a time), neither of
+     * which restates the briefing.
+     *
+     * The claim being made here has therefore narrowed, on purpose: descriptions
+     * must not precede the thing they describe. `call_briefing` still leads the
+     * described surfaces, and `partner_day` still precedes the three widgets that
+     * merely describe it.
      */
     expect(HOME_CORE_BY_ROLE.soldier).toEqual([
-      'call_briefing', 'partner_day', 'talk_about_list', 'today_word',
+      'story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word',
     ]);
+    // 설명이 설명되는 것보다 앞설 수 없다는 것이 이 단언의 본체다.
+    expect(HOME_CORE_BY_ROLE.soldier.indexOf('call_briefing'))
+      .toBeLessThan(HOME_CORE_BY_ROLE.soldier.indexOf('partner_day'));
     expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['dday']);
     // `talk_about_list` joined in P3. It is not another DESCRIPTION of the
     // day -- it is the couple's own explicit marks on records already on this

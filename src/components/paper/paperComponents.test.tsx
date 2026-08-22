@@ -59,6 +59,12 @@ describe('InkRing — 링은 상태를 그리되 아무것도 알리지 않는�
     expect(container.querySelector('svg')).toBeTruthy();
   });
 
+  it('상태를 셀 수 있게 드러낸다', () => {
+    // 링이 셋이 되는 순간 정렬이 필요해지고 정렬이 있으면 알고리즘이 생긴다. 세어야 한다.
+    const { container } = render(<InkRing state="unread"><i /></InkRing>);
+    expect(container.querySelector('[data-ink-ring="unread"]')).toBeTruthy();
+  });
+
   it('장식용 svg를 스크린리더에 읽히지 않는다', () => {
     const { container } = render(<InkRing state="unread"><i /></InkRing>);
     expect(container.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');

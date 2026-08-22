@@ -93,9 +93,24 @@ export type WidgetDef = {
  * widget now would be offering to remove the one thing that screen is for.
  */
 export const HOME_CORE_BY_ROLE: Record<Role, readonly string[]> = {
-  gomsin: ['today_word', 'partner_day', 'talk_about_list'],
-  soldier: ['call_briefing', 'partner_day', 'talk_about_list', 'today_word'],
+  gomsin: ['story_rail', 'today_word', 'partner_day', 'talk_about_list'],
+  soldier: ['story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word'],
 };
+
+/**
+ * 레일이 두 역할 모두의 첫 번째인 이유.
+ *
+ * 역할별 홈이라는 판단은 옳았지만, 결과적으로 두 사람의 첫 화면이 구조적으로 달라서
+ * "우리 둘의 공간"이라는 감각이 화면에 없었다. 레일은 그 둘을 한 표면에 담는다 --
+ * 왼쪽 링이 군화의 1차 행동(놓친 하루)이고 오른쪽 `+`가 곰신의 1차 행동(기록)이다.
+ *
+ * 그래서 §5.2가 요구하는 "곰신 홈은 남기는 곳, 군화 홈은 따라잡는 곳"이 약해지지 않는다.
+ * 레일 아래의 순서는 그대로 역할별이며, 곰신에게는 컴포저가, 군화에게는 요약이 먼저 온다.
+ * 달라진 것은 그 위에 두 사람이 공유하는 표면이 하나 생겼다는 것뿐이다.
+ *
+ * `story_rail`은 `call_briefing`과 마찬가지로 레지스트리 밖이다. 재배치할 수 있었던 적이
+ * 없고, 항목을 주면 제거를 제안하는 셈이 된다.
+ */
 
 export function isHomeCore(id: string, role: Role): boolean {
   return HOME_CORE_BY_ROLE[role].includes(id);

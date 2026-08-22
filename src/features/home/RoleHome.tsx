@@ -30,6 +30,7 @@ import type { Role } from '@/types';
 import { AddWidgetBottomSheet } from '@/components/widgets/AddWidgetBottomSheet';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { CallBriefingWidget } from '@/components/widgets/CallBriefingWidget';
+import { StoryRailWidget } from '@/components/widgets/StoryRailWidget';
 
 /**
  * The home screen, shaped by what this person came here to do.
@@ -123,11 +124,13 @@ export function RoleHome() {
     () => HOME_CORE_BY_ROLE[role]
       .map((id) => ({
         id,
-        // `call_briefing` is deliberately outside the registry -- it was never
-        // arrangeable, and giving it an entry would offer to remove it.
+        // `call_briefing`과 `story_rail`은 의도적으로 레지스트리 밖이다 -- 둘 다
+        // 재배치할 수 있었던 적이 없고, 항목을 주면 제거를 제안하는 셈이 된다.
         Component: id === 'call_briefing'
           ? CallBriefingWidget
-          : WIDGET_REGISTRY[id]?.component,
+          : id === 'story_rail'
+            ? StoryRailWidget
+            : WIDGET_REGISTRY[id]?.component,
       }))
       .filter((entry): entry is { id: string; Component: NonNullable<typeof entry.Component> } =>
         Boolean(entry.Component)),

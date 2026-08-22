@@ -54,6 +54,9 @@ export function InkRing({
   const radius = size / 2 - 2;
   return (
     <span
+      // 링이 몇 개인지, 어떤 상태인지가 이 앱에서 세어야 하는 사실이다. 링이 셋이 되는
+      // 순간 정렬이 필요해지고 정렬이 있으면 알고리즘이 생기므로, 테스트가 그것을 센다.
+      data-ink-ring={state}
       className={cn('relative inline-flex items-center justify-center', className)}
       style={{ width: size, height: size }}
     >

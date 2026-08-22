@@ -101,8 +101,18 @@ export function UsPage() {
     [months, visibleMonthCount, visibleRecords, events, trips, todayStr, anniversaryDate],
   );
 
-  /** A day leads to that day's records. The exact ones, never an approximation. */
-  const openDay = (date: string) => navigate(`/record?date=${date}`);
+  /**
+   * 칸 하나가 그날의 보관 스토리로.
+   *
+   * 전에는 `/record?date=`로 갔다. 정확한 날짜였지만 다른 탭의 다른 문법으로 떨어졌고,
+   * 사진첩을 넘기던 손이 갑자기 목록을 읽게 됐다. 지금은 오늘 아침에 넘긴 그 봉투를
+   * 석 달 뒤 같은 제스처로 다시 넘긴다 -- 그것이 "오늘의 스토리가 내일의 기억"이라는
+   * 명제를 화면으로 증명하는 방식이다.
+   *
+   * "정확한 원본, 근사치 금지"(§4.2)는 그대로 지켜진다. 보관 스토리는 그 날짜의 기록만
+   * 담고, 각 카드의 `원본 보기`가 정확히 그 기록으로 간다.
+   */
+  const openDay = (date: string) => navigate(`/story/day/${date}`);
 
   return (
     <MobileShell>

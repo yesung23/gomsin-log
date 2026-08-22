@@ -7,6 +7,7 @@ import { MobileShell } from '@/components/MobileShell';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
+import { CoupleStatsRow } from '@/components/CoupleStatsRow';
 import { AppBar } from '@/components/ui/AppBar';
 import { Heart, CalendarDays, Plane, ChevronRight, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -157,7 +158,7 @@ export function UsPage() {
             record id, and widening them for a decoration is not a trade worth making.
           */}
           <AvatarPicker
-            userId={state.authenticatedUser?.id || state.profile.id}
+            userId={state.authenticatedUser?.id || state.profile.id || ''}
             slot="couple"
             size={56}
             label="커플 사진"
@@ -192,6 +193,25 @@ export function UsPage() {
             </p>
           </div>
         </section>
+
+        {/*
+          통계 세 칸과 보호 표식.
+
+          인스타 프로필의 `게시물 · 팔로워 · 팔로잉` 자리를 관계의 시간으로 바꾼다.
+          자물쇠는 §14.5의 단계별 표현 계약을 따르는데, 그 문장을 여기에 복사하지 않고
+          이미 정직하게 쓰여 있는 개인정보 처리방침으로 보낸다 -- 보안 표현이 두 곳에
+          있으면 한쪽이 낡는 날이 오고, 낡는 쪽이 화면일 가능성이 높다.
+        */}
+        {connected ? (
+          <CoupleStatsRow
+            userId={state.authenticatedUser?.id || state.profile.id || ''}
+            anniversaryDate={anniversaryDate}
+            events={events}
+            military={state.profile.military}
+            todayStr={todayStr}
+            onProtectionTap={() => navigate('/legal/privacy')}
+          />
+        ) : null}
 
         <CoupleStatusBanner />
 

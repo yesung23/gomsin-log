@@ -52,8 +52,19 @@ export function MePage() {
 
     `computeServiceProgress` 가 `null` 이면 입대일이나 전역일이 없거나 상태가 `unknown`
     이다. 어느 쪽이든 이 커플에게 복무는 **없는 사실**이므로 자리도 만들지 않는다.
+
+    전역한 뒤에도 그리지 않는다. 그 함수는 전역 뒤에도 `isDischarged: true` 로 계속 값을
+    주는데, 그건 `/service` 와 `coupleStats` 가 그 상태를 알아야 해서다. 이 화면은 다르다
+    -- 여기가 답하는 질문은 "지금 연락해도 되나"이고, 전역한 사람에게 복무는 더 이상 그
+    질문의 답이 아니다. 남겨 두면 **"전역 🎉" 가 영원히 붙어 있는 트로피**가 되고, §11이
+    말하는 "군 관련 표면은 끄는 것이 아니라 없다"에 어긋난다.
+
+    전역이라는 사건 자체는 축하받아야 하고, 그 자리는 따로 있다 -- `우리` 의 하이라이트와
+    `일기장` 의 마일스톤(`BUSINESS` §9.2가 1순위로 검증하겠다고 한 바로 그것)이다.
   */
-  const serving = progress !== null;
+  const discharged = progress?.isDischarged === true
+    || profile.military.militaryStatus === 'discharged';
+  const serving = progress !== null && !discharged;
 
   return (
     <div className="min-h-full pb-24">
@@ -119,7 +130,6 @@ export function MePage() {
             partnerName={profile.couple.partnerName}
             remainingDays={progress.remainingDays}
             percent={progress.percent}
-            isDischarged={progress.isDischarged}
             onOpen={() => navigate('/service')}
           />
         ) : null}
@@ -142,7 +152,6 @@ function ServiceCard({
   partnerName,
   remainingDays,
   percent,
-  isDischarged,
   onOpen,
 }: {
   military: MilitaryInfo;
@@ -151,7 +160,6 @@ function ServiceCard({
   partnerName: string;
   remainingDays: number;
   percent: number;
-  isDischarged: boolean;
   onOpen: () => void;
 }) {
   return (
@@ -167,7 +175,7 @@ function ServiceCard({
           {mine ? '내 복무' : `${partnerName}의 복무`}
         </span>
         <span className="ml-auto text-heading font-bold text-card-foreground tabular-nums">
-          {isDischarged ? '전역 🎉' : `D-${remainingDays}`}
+          D-{remainingDays}
         </span>
         <ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" />
       </div>
@@ -179,15 +187,10 @@ function ServiceCard({
         갈린다. 여기서 이 막대가 하는 일은 "얼마나 왔나"를 한눈에 말하는 것 하나뿐이므로
         대비가 곧 기능이다. `/service` 의 큰 막대는 어두운 남색 위에 있어서 기본 토큰으로
         충분하고, 그래서 둘이 다른 토큰을 쓴다.
-
-        전역했으면 막대 자체가 없다. 100% 로 채운 막대는 "다 왔다"가 아니라 "진행 중"으로
-        읽히고, 그 사람에게 복무는 이미 끝난 일이다.
       */}
-      {isDischarged ? null : (
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-coral-strong" style={{ width: `${percent}%` }} />
-        </div>
-      )}
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-coral-strong" style={{ width: `${percent}%` }} />
+      </div>
 
       {/*
         연락 가능 시간이야말로 이 화면의 질문에 가장 직접 답한다.

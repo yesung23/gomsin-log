@@ -229,6 +229,31 @@ export function isSchemaCacheMiss(error: unknown): boolean {
 }
 
 /**
+ * Is this PostgREST telling us the TABLE does not exist in the schema at all?
+ *
+ * `PGRST205` is the table-shaped sibling of `PGRST202`: the migration that creates
+ * it has not been applied, or it has and the schema cache was not reloaded. `42P01`
+ * is the same fact arriving from PostgreSQL directly rather than through PostgREST.
+ *
+ * ## Why this is a separate question from "the request failed"
+ *
+ * Both classify as `server` and neither is the caller's fault, but they answer
+ * different questions about the DATA. If a table is absent from the schema, then
+ * no row of it exists -- for this viewer, for their partner, for anyone. That is a
+ * fact, not a guess, and a caller reading additive metadata may treat it as an
+ * empty set.
+ *
+ * A `forbidden` (42501) says the opposite: rows may well exist and this viewer may
+ * not see them. Treating that as empty would misrepresent. So would a network
+ * failure. **Only schema absence licenses the empty answer**, which is why this is
+ * one narrow predicate rather than a widening of `classifyServerError`.
+ */
+export function isMissingTable(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === 'PGRST205' || code === '42P01';
+}
+
+/**
  * One actionable operator diagnostic for that deployment gap.
  *
  * The point is that the log names the remedy. A bare "Error in disconnect_couple

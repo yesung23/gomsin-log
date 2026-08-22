@@ -77,7 +77,20 @@ bash scripts/agent/ct-sync.sh push "ct: opus PartnerDay 상한 조사"
 | Cursor | `.cursor/rules/control-tower.mdc` + `AGENTS.md` | always-apply 규칙 |
 | Antigravity | `.agents/rules/control-tower.md` + `AGENTS.md` | 워크스페이스 규칙 |
 | Kiro | `.kiro/` | spec 기반 |
+| ox-alpha (opencode zen) | 없음 — CLI로 부른다 | **`--agent plan` 필수.** 아래 경고 |
 | 웹 챗 (ChatGPT · Claude.ai · Grok) | 없음 — 저장소를 못 읽는다 | `control-tower/Chat AI Bootstrap.md`를 붙여넣는다 |
+
+> **⚠️ 훅은 Claude Code 밖에서 작동하지 않는다.**
+> `.claude/hooks/`는 `.claude/settings.json`의 Claude Code 설정이다. opencode·Cursor·
+> Antigravity는 그 파일을 읽지 않으므로 master 직접 push · 적용된 migration 재작성 ·
+> frozen 041/042 재사용 · PR merge · production mutation이 **그쪽에서는 막히지 않는다.**
+> ox-alpha는 `--agent plan`(저장소 쓰기 `deny`)으로만 부른다:
+>
+> ```bash
+> ~/.opencode/bin/opencode run --agent plan -m opencode/x-preview-f-free "..."
+> ```
+>
+> 다른 도구도 마찬가지다 — **가드는 Claude Code에만 있고, 규율은 문서에만 있다.**
 
 각 진입점은 **이 문서를 가리키는 얇은 포인터**다. 절차를 고칠 때는 이 파일만 고친다.
 

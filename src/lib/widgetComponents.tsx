@@ -65,7 +65,21 @@ const WidgetCard = ({
 
 // 1. 오늘의 브리핑 -- summarises what actually happened today.
 export const TodayBriefingWidget = () => {
-  const { state, setHighlightedRecordId } = useStore();
+  const { state, sharedSyncStatus, setHighlightedRecordId } = useStore();
+  /*
+    Quarantine empties `records` -- one's OWN records included (`store.tsx`, the
+    `nextState` that assigns `records: []`). A surface that reads only the length
+    therefore says "nothing here" when the truth is "we could not confirm what is
+    here", and §4.2 forbids exactly that. `PartnerDayTimelineWidget` already drew
+    the distinction; this one did not.
+
+    Written HERE and not beside the JSX, because the first attempt put it inside
+    the element and JSX renders a bare block comment as TEXT. It shipped to CI
+    with the explanation printed on screen, backticks and all -- caught by the
+    literal-backtick test that exists because this exact thing happened once
+    before.
+  */
+
   const navigate = useNavigate();
   const { profile, records } = state;
   const viewer = { userId: profile.id, role: profile.role };
@@ -100,9 +114,11 @@ export const TodayBriefingWidget = () => {
         </p>
       ) : (
         <WidgetEmpty>
-          {mine.length > 0
-            ? `오늘 ${mine.length}개를 남겼어요. ${partnerName}의 기록은 아직 없어요.`
-            : `아직 오늘의 기록이 없어요. 첫 순간을 남겨보세요.`}
+          {sharedSyncStatus === 'unavailable'
+            ? '기록을 확인하는 중이에요.'
+            : mine.length > 0
+              ? `오늘 ${mine.length}개를 남겼어요. ${partnerName}의 기록은 아직 없어요.`
+              : `아직 오늘의 기록이 없어요. 첫 순간을 남겨보세요.`}
         </WidgetEmpty>
       )}
     </WidgetCard>

@@ -45,7 +45,7 @@ Do not copy any of these into the vault.
 
 ## Agents
 
-[[Claude Opus]] · [[Codex]] · [[Cursor]] · [[Antigravity]] · [[Grok Build]] · [[Grok 4.6]] · [[ChatGPT]] · [[Kiro]]
+[[Claude Opus]] · [[Codex]] · [[Cursor]] · [[Antigravity]] · [[Ox Alpha]] · [[Grok Build]] · [[Grok 4.6]] · [[ChatGPT]] · [[Kiro]]
 
 ## Open work
 

@@ -192,11 +192,42 @@ describe('a tapped notification cannot be steered by its payload', () => {
  * every test written about the function. So this counts callers instead.
  */
 describe('the setup is actually reachable from the product', () => {
-  const store = readFileSync(resolve(process.cwd(), 'src/lib/store.tsx'), 'utf8');
+  /**
+   * Comments are stripped before anything is matched, and the same probe that
+   * forced `productEvents.test.ts` to do it forces it here.
+   *
+   * This gate read `store.tsx` raw and asserted it CONTAINED
+   * `setUpPushNotifications()`. Commenting the call out -- so no device ever
+   * registers and the first arrow of the loop is severed -- left all of this
+   * green, because the call is still spelled inside the comment that replaced
+   * it. Measured, not argued: the line was commented out and every test in this
+   * file passed.
+   *
+   * `npm run typecheck` did fail on that mutation, but only incidentally: there
+   * is exactly ONE call site, so removing it makes the import unused (TS6133).
+   * A second reference to the symbol anywhere in the file takes that away and
+   * leaves nothing at all. A gate whose protection comes from an unrelated
+   * compiler diagnostic is not a gate.
+   *
+   * Same class as the push-module export gate and the §19 instrumentation gate
+   * before it. Third occurrence; the strip helper is copied rather than invented
+   * so the three read alike.
+   */
+  const stripComments = (text: string) =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+
+  const store = stripComments(
+    readFileSync(resolve(process.cwd(), 'src/lib/store.tsx'), 'utf8'),
+  );
 
   it('is called by the store', () => {
     expect(store).toContain("from '@/lib/pushNotifications'");
-    expect(store).toContain('setUpPushNotifications()');
+    /*
+      A CALL, not a mention. `void setUpPushNotifications();` and
+      `setUpPushNotifications()` both match; a bare identifier in an export list
+      or a type position does not.
+    */
+    expect(store).toMatch(/(^|[^.\w])setUpPushNotifications\s*\(/m);
   });
 
   it('is keyed on the couple lifecycle, not on the invitation poll', () => {

@@ -49,11 +49,18 @@ for _, h in heads[-3:]:
     print("  · " + h)
 if heads:
     body = t[heads[-1][0]:]
-    m = re.search(r"^#### STOPPED AT\n(.*?)(?=\n#### |\n### |\Z)", body, re.S | re.M)
-    if m:
-        print("\n  최신 세션의 STOPPED AT:")
-        for line in m.group(1).strip().splitlines()[:14]:
+    # STOPPED AT 은 어디서 멈췄나, NEXT ACTION 은 무엇부터 하나. 재개에는 둘 다 필요하고,
+    # 처음에는 앞엣것만 출력해서 정작 다음 할 일이 보이지 않았다.
+    for title, limit in (("STOPPED AT", 12), ("NEXT ACTION", 24), ("DO NOT ADVANCE UNTIL", 8)):
+        m = re.search(r"^#### " + title + r"[^\n]*\n(.*?)(?=\n#### |\n### |\Z)", body, re.S | re.M)
+        if not m:
+            continue
+        print(f"\n  최신 세션의 {title}:")
+        lines = m.group(1).strip().splitlines()
+        for line in lines[:limit]:
             print("    " + line)
+        if len(lines) > limit:
+            print(f"    … ({len(lines) - limit}줄 더 — docs/WORK_LOG.md 를 연다)")
 PY
 
 rule "5. 최근 agent report 5개 — control-tower/reports/"

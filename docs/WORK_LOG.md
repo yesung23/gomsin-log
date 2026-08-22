@@ -4176,6 +4176,214 @@ master에 올라갔다. 남은 것: **Codex 재검토**(승급 후로 밀렸다)
 배포 체크리스트 §6-1의 스케줄러 확인 5항목(사람이 배포 환경에서), APNs/FCM 자격증명,
 실기기 2대.
 
+### 2026-08-22 · 내가 고친 계약 검사가 같은 종류의 구멍을 갖고 있었다
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비 · Workstream: Gate 3 push
+- Step: PR #80 병합 후, 건너뛴 독립 재검토를 대신하는 적대적 자기검토
+- This Gate: 없음 — 게이트를 옮기지 않는다
+
+#### DIRECTION CHECK
+- Product source checked: NOT APPLICABLE (제품 동작 무변경)
+- Business source checked: NOT APPLICABLE
+- Engineering source checked: `AGENTS.md`, migration 030(search_path 고정의 근거)
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-22 PR #80 HOLD 3건 마감
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code · Model: Opus 5 · Role: 자기 작업의 적대적 리뷰어
+- Branch: `fix/push-function-contract-search-path`, base `master` (`191df31`)
+
+#### 무엇이 문제였나
+
+바로 앞 세션에서 Codex Finding 2를 고치며 카탈로그 계약 검사를 "전량 비교"로 바꿨다.
+그 문자열에 담은 것은 schema 한정 `count(*)` · identity arguments · `pronargdefaults` ·
+`pg_get_function_result` 넷이었다. **`prosecdef`와 `proconfig`가 없었다.**
+
+그리고 harness 전체에서 그 둘을 검사하는 곳은 `create_invitation`(030) **하나뿐**이다.
+`mark_push_delivered`도 `push_delivery_candidates`도, SECURITY DEFINER인지도
+search_path가 고정됐는지도 **아무도 확인하지 않고 있었다.**
+
+측정으로 확인했다: `mark_push_delivered`에서 `SET search_path = public, pg_temp`를
+지우고 phase0을 돌리면 **282개가 전부 초록이고 EXIT=0이다.**
+
+`SECURITY DEFINER` 함수의 search_path를 고정하지 않는 것은 migration 030이 존재하는
+바로 그 권한 상승 경로다. Codex가 지적한 것이 "mutation이 살아남는 검사"였는데,
+그 지적을 고치며 만든 검사가 **같은 종류의 구멍**을 갖고 있었다.
+
+#### CHANGED
+
+`scripts/phase0/storage-authz-harness.mjs` — 계약 문자열에 `prosecdef`와
+`array_to_string(proconfig, ',')`를 추가한다. 고정되지 않은 함수는 `proconfig IS NULL`이라
+비교 전체가 NULL로 삼켜지므로 `COALESCE(..., 'UNPINNED')`로 **말로 적히게** 했다.
+같은 커밋에서 `endsWith`로 result type을 보던 assertion을 구분자로 둘러싼 `includes`로
+바꿨다 — 문자열 끝이 바뀌자 그 검사가 실제로 깨졌고, 끝에 의존하는 검사는 다음에도 깨진다.
+
+#### VERIFICATION
+
+| 무엇 | 결과 |
+|---|---|
+| `npm run test:phase0` | **282 assertions / 0 FAIL**, 53 migrations (001..055) |
+| mutation: `mark_push_delivered`의 `SET search_path` 제거 | **FAIL** — 계약이 `... ;; true ;; UNPINNED`로 어긋난다. **수정 전에는 통과하던 것** |
+| mutation: `push_delivery_candidates`를 `SECURITY INVOKER`로 강등 | exit≠0으로 잡히지만 `FAIL` 줄 0개 — **계약 검사가 아니라 앞의 동작 테스트가 예외로 먼저 터졌다.** 내 검사가 잡았다고 말하지 않는다 |
+| `git diff --check` | clean |
+
+**실행하지 않은 것:** 앱 검증 — 이 커밋은 harness 파일 하나만 바꾼다. 제품 코드·
+migration·문서 무변경. 원격 Supabase 조회·변경 없음.
+
+#### 결함이 아니라고 판정한 것
+
+단조 가드는 잘못된 값도 영구히 고착시킨다 — 미래 시각이 한 번 `last_notified_at`에
+박히면 그날이 지날 때까지 상한이 닫힌 채 남고, 수정 전에는 다음 mark가 덮어써서
+스스로 나았다. **도달 경로를 확인했다:** `send-push/index.ts:82`가
+`push_delivery_candidates`를 **인자 없이** 호출하므로 `p_now`는 DB의 `now()`이고,
+`decidedAt`은 그 행에서 그대로 되돌아온다(`index.ts:125-136`). 발송자가 미래 시각을
+만들 수 없다. DB 시계가 튀어야 하며, `notified_through`가 **이미** 같은 성질을 갖고
+있었다. 새 위험 종류가 아니므로 고치지 않고 이름만 남긴다.
+
+#### 이어서 — ox-alpha 감사를 원장에 넣고, 그 판정을 재검증했다
+
+user가 opencode zen(`opencode/x-preview-f-free`)으로 돌린 전체 감사 보고서를 받았다.
+**액면 그대로 받지 않고 검증 가능한 주장 7건을 직접 확인했다.**
+
+| 주장 | 판정 |
+|---|---|
+| 002 중복이 LV fresh chain을 막는다 | **참** — `_recursion:11`이 DROP 없이 정책 재생성. `_and_rpc:32`에는 DROP이 있다. README:376-391 경고 |
+| send-push 인바운드 인증 없음 | **참** — 유일한 `Authorization`은 `:90`의 FCM 아웃바운드 |
+| `briefings` 평문 테이블 생존 | **참, 단 심각도 하향** — GRANT가 SELECT뿐이고 쓰기 경로 0건. 행 존재는 UNVERIFIED |
+| 032 단독 = 쓰기 불능 | **참** — 039 헤더가 스스로 문서화하고 있다 |
+| C7 quarantine 거짓 공백 | **참** — 세 표면이 `sharedSyncStatus` 각 0회 참조, 올바른 패턴은 PartnerDay에 8회 |
+| C9 Edge Function 무테스트 | **참** |
+| C8 배선 게이트가 무용 | **참, 단 결과 과장** — 아래 |
+
+**C8은 측정해서 정정했다.** `store.tsx:1036`의 호출을 줄 전체 주석 처리하면 전용
+배선 테스트는 **19/19 통과**하지만 `npm run typecheck`가 **TS6133로 실패**한다. 즉
+"테스트는 green"은 전체 스위트 기준 거짓이고 CI가 막는다. 다만 그 방어는 우연이다 —
+호출부가 하나뿐이라 import가 미사용이 되어 걸린 것이고, 그 심볼을 참조하는 줄이
+하나만 더 생기면 사라진다. 게이트 자체는 여전히 아무것도 지키지 않는다.
+
+**ox-alpha가 놓친 것도 기록한다.** 같은 tree 안의 `prosecdef`/`proconfig` 공백은
+그쪽 C 목록에 없다. 두 검토가 서로를 대체하지 않는다는 증거다.
+
+#### C8 수정 — 증명된 하나만 고쳤다
+
+`src/lib/pushNotifications.test.ts`의 배선 게이트를 주석 제거 + 호출 형태 regex로
+바꿨다. 헬퍼는 발명하지 않고 `productEvents.test.ts:155`의 것을 **그대로 복사**했다 —
+그 파일에 이미 같은 probe 기록이 있다("commenting out the real `recordProductEvent`
+calls … left every test here green"). 이 부류의 **세 번째** 발생이다.
+
+| 무엇 | 수정 전 | 수정 후 |
+|---|---|---|
+| `store.tsx:1036`의 호출을 주석 처리 | **19/19 통과** | **2건 실패** |
+
+ox-alpha가 함께 지목한 `gatePathCoverage.test.ts`·`authorRoleAndGateAudit.test.ts`는
+**고치지 않았다.** 소스를 raw로 읽는 것은 확인했으나(`:315`·`:439`·`:456`·`:552`)
+각각을 mutation으로 증명하지 않았고, 증명 없이 고치는 것은 지금 비판하고 있는 바로 그
+행동이다. 별도 작업으로 남긴다.
+
+#### C7 수정 — quarantine 을 공백으로 그리지 않는다 (§4.2)
+
+quarantine 이 `records: []` 로 자기 기록까지 비우는데, 고정 코어 세 표면이 길이만 보고
+"아직 ... 없어요" 라고 단정했다. **앱이 아무것도 확인하지 못하는 바로 그 순간에,
+15분짜리 연락 시간에 들어온 군화에게 "아무것도 없다" 고 말하는 것**이다. 미관 문제가
+아니라 루프의 첫 화살표가 일어나지 않은 상태를 보고하는 것이다.
+
+세 표면에 `sharedSyncStatus === 'unavailable'` 분기를 넣었다. 문구는 발명하지 않고
+`PartnerDayTimelineWidget` 의 Skeleton label(`기록을 확인하는 중이에요.`)을 그대로 썼다.
+
+**회귀 테스트**: `src/lib/quarantineEmptyState.test.tsx` 신규 — grep 이 아니라 **렌더**한다.
+각 표면마다 `live`(원래 문구가 나온다)와 `unavailable`(확인 중 문구가 나오고 **원래 문구는
+나오지 않는다**) 두 방향을 본다. 부정 assertion 이 load-bearing 이다 — 두 문장을 다 그리는
+표면에서 긍정만으로는 통과하기 때문이다.
+
+| 무엇 | 결과 |
+|---|---|
+| 수정 후 | **4/4 통과** |
+| 수정을 되돌리면 | **2 실패 / 2 통과** — 대조군은 계속 통과하므로 판별력이 있다 |
+
+**커버리지 공백을 명시한다.** `TodayLogWidget` 은 같은 수정이 들어갔지만 렌더 테스트가
+없다. 컴포저·감정 후보 훅·제안 리뷰를 함께 끌고 오므로 렌더 가능한 수준의 모킹이 수정보다
+큰 작업이다. `tsc` 와 읽기로만 확인했고 이는 나머지 둘보다 약하다. 테스트 파일 안에도
+같은 문장을 적어 두었다 — **이름 붙지 않은 미검증 분기가 바로 이 파일의 주제가 살아남은
+방식이기 때문이다.**
+
+#### C7 을 CI 가 되돌려 세웠다 — 설명을 화면에 인쇄하고 있었다
+
+**내가 만든 결함이다.** 세 표면에 분기를 넣으면서 이유를 블록 주석으로 **JSX 안에**
+적었다. JSX 안의 블록 주석은 주석이 아니다 — React 가 텍스트로 렌더한다. 빈 상태
+자리에 설명이 백틱까지 그대로 인쇄되어 CI 로 나갔다.
+
+```
+Received: "/* Quarantine empties `records` -- one's OWN records included …
+           */아직 표시한 기록이 없어요. …"
+```
+
+**저장소가 예전에 같은 일을 겪어 만들어 둔 검사가 잡았다** —
+`TalkAboutListWidget.test.tsx`의 "the empty state does not show literal backticks
+around 이따 이야기하기". CI 15건 중 vitest 2건 실패.
+
+**내 테스트는 못 잡았다.** 어느 문장이 나오는지만 물었고 소스 표기가 함께 나오는지는
+묻지 않았다. 분기 확인 4개가 전부 통과하는 채로 화면에는 주석이 찍히고 있었다.
+이 브랜치가 내내 지적해 온 것과 **정확히 같은 모양**이다 — 무엇을 담았는지 세어 보기
+전에는 "검사한다"는 말에 아무 뜻도 없다.
+
+수정: 설명을 컴포넌트 본문으로 옮긴다(렌더되지 않고 다음 사람에게는 보인다).
+그리고 렌더 헬퍼 `draw()` 가 **모든 경우에** `/*` · `*/` · 백틱 유출을 검사한다.
+
+| 무엇 | 결과 |
+|---|---|
+| CI 가 잡았던 `TalkAboutListWidget.test.tsx` | **26/26 통과** |
+| 내 테스트 | **4/4 통과** |
+| mutation: 주석을 JSX 안에 되돌림 | **2 실패** — 아까는 통과했다 |
+
+**그리고 lint 도 한 번 더 걸렸다.** 주석 안에 `*/` 를 쓰려고 zero-width space 를
+끼웠더니 `no-irregular-whitespace`. 이번엔 **CI 가 아니라 로컬에서 잡았다** — 앞선
+실패 뒤로 push 전에 `npm run verify` 를 돌리기로 바꿨기 때문이다.
+
+#### 함께 넣은 것 — 훅은 Claude Code 밖에서 작동하지 않는다
+
+`docs/AI_SESSION_PROTOCOL.md`에 경고를 못박았다. `.claude/hooks/`는
+`.claude/settings.json`의 Claude Code 설정이고 opencode·Cursor·Antigravity는 그 파일을
+읽지 않는다. 오늘 밤 나를 여섯 번 막은 가드가 **그쪽에는 하나도 없다.** ox-alpha는
+`--agent plan`(저장소 쓰기 `deny`, 원문 확인)으로만 부른다.
+
+#### PRODUCTION
+- NOT APPLIED. 047~055는 여전히 어디에도 미적용. merge 하지 않았다.
+
+#### STOPPED AT
+
+- branch: `fix/push-function-contract-search-path` → **PR #83**, base `master` (`191df31`)
+- 커밋 4개: 계약 커버리지(`a08da13`) · 감사 원장+훅 경고(`23352c7`) · 배선 게이트(`653bb99`) · C7(`99280ab`)
+- changed: harness 1 · 테스트 2(1 신규) · 제품 UI 3 · 문서 4 · vault 3
+- explicitly not changed: migration 0건 · 원격 0회 · merge 0회
+- Production: NOT APPLIED · Supabase remote: UNVERIFIED · P6: NOT AUTHORIZED
+
+#### NEXT ACTION — 다음 세션은 여기서 시작한다
+
+```bash
+bash scripts/agent/session-start.sh
+```
+
+기준 SHA `191df31`. 우선순위 순으로, 각 항목에 **왜 아직 안 됐는지**를 함께 적는다.
+
+1. **PR #83 CI 확인 후 병합 판단** — merge는 user 게이트다(hook이 막는다)
+2. **`gatePathCoverage.test.ts` · `authorRoleAndGateAudit.test.ts`** — ox-alpha가
+   같은 부류로 지목했고 raw 읽기는 확인했다(`:315`·`:439`·`:456`·`:552`). **mutation
+   증명이 아직 없어서 고치지 않았다.** 증명 먼저, 수정은 그다음
+3. **`TodayLogWidget` 렌더 테스트** — C7의 명시된 커버리지 공백
+4. **D1 운영 Supabase 카탈로그 read-only 조회** — ox-alpha 1순위이고 나도 동의한다.
+   **훅이 원격 접근을 user 전용으로 막는다.** user가 직접 하거나 명시 승인 필요
+5. **D4 `send-push` bearer 검증 + handler 테스트** — C3·C9. Edge Function은 지금
+   `delete-account` 하나만 실행된다
+6. **002 우회 절차를 LV runbook에** — 없으면 LV 프로젝트 생성 당일에 터진다
+7. **PR 정리 11건** — 조사·근거 작성 완료(`2026-08-22` 감사 리포트), **승인 대기 중**
+
+#### DO NOT ADVANCE UNTIL
+- D1이 확정되기 전에는 어떤 배포 판단도 하지 않는다
+- 002 우회가 runbook에 들어가기 전에는 LV 프로젝트를 만들지 않는다
+- mutation 증명 없이 2번 게이트들을 고치지 않는다
+
 ## 유지 규칙
 
 - 세션이 끝나면 이 문서에 **한 항목**을 추가한다. 커밋 메시지를 여기 복사하지 않는다.

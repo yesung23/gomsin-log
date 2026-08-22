@@ -350,10 +350,18 @@ describe('composer attachment handling', () => {
 /**
  * The composer preview must be derived from the very array that gets saved, and
  * the derivation itself must never be persisted. `LOG_TEXT` is chosen so the
- * rule engine yields 속상함 (sadness) then 행복 (joy) -- a recovery flow.
+ * rule engine yields 속상함 (sadness) then 기뻤어 (joy) -- a recovery flow.
  */
 describe('composer emotion review (suggested, then answered)', () => {
-  const LOG_TEXT = '오늘은 많이 속상했어. 그래도 저녁에는 기분이 좋아졌어.';
+  /*
+    일기 문장에 감정 라벨이 글자 그대로 들어 있으면 안 된다.
+
+    어휘를 일상어로 바꾸면서 라벨(`속상했어`)이 사람이 실제로 쓰는 문장과 같은 모양이
+    됐다. 아래 "일기 본문은 저장되지 않는다"는 단언은 저장된 JSON 에 그 문자열이 없는지를
+    보는데, 문장과 라벨이 같으면 **라벨 때문에** 실패한다 -- 그러면 그 테스트는 잡으려던
+    결함(본문 유출)을 더 이상 잡지 못한다. 뜻은 같게 두고 글자만 겹치지 않게 쓴다.
+  */
+  const LOG_TEXT = '오늘은 많이 울적했다. 그래도 저녁에는 기분이 나아졌다.';
   /** The literal case the product owner reported. */
   const REPORTED_TEXT = '일하느라 ㅈ같았는데, 손님이 먹을 것을 줘서 기분이 나아졌어';
 
@@ -408,15 +416,15 @@ describe('composer emotion review (suggested, then answered)', () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
 
-    expect(screen.getByText('슬픔')).toBeInTheDocument();
-    expect(screen.getByText('행복')).toBeInTheDocument();
+    expect(screen.getByText('속상했어')).toBeInTheDocument();
+    expect(screen.getByText('기뻤어')).toBeInTheDocument();
     // Nothing answered yet, so there is no flow to preview.
-    expect(screen.queryByText('슬픔 → 행복')).not.toBeInTheDocument();
+    expect(screen.queryByText('속상했어 → 기뻤어')).not.toBeInTheDocument();
 
     await answerAll(user);
 
     expect(await screen.findByText('마음의 흐름')).toBeInTheDocument();
-    expect(screen.getByText('슬픔 → 행복')).toBeInTheDocument();
+    expect(screen.getByText('속상했어 → 기뻤어')).toBeInTheDocument();
     expect(screen.getByText('미리보기예요. 이 정리는 저장되지 않아요.')).toBeInTheDocument();
   });
 
@@ -424,46 +432,46 @@ describe('composer emotion review (suggested, then answered)', () => {
    * The reported sentence, end to end. "ㅈ같았는데" has to be understood: an engine
    * that only knows "짜증났는데" misses the entries carrying the most feeling.
    */
-  it('reads the reported example as 분노 → 행복 and shows the evidence phrase', async () => {
+  it('reads the reported example as 화났어 → 기뻤어 and shows the evidence phrase', async () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, REPORTED_TEXT);
 
-    expect(screen.getByText('분노')).toBeInTheDocument();
-    expect(screen.getByText('행복')).toBeInTheDocument();
+    expect(screen.getByText('화났어')).toBeInTheDocument();
+    expect(screen.getByText('기뻤어')).toBeInTheDocument();
     // The user can see WHY, not just what.
     expect(screen.getByText('“ㅈ같음”에서 읽었어요')).toBeInTheDocument();
     expect(screen.getByText('“기분이 나아짐”에서 읽었어요')).toBeInTheDocument();
     await answerAll(user);
-    expect(await screen.findByText('분노 → 행복')).toBeInTheDocument();
+    expect(await screen.findByText('화났어 → 기뻤어')).toBeInTheDocument();
   });
 
   it('✕ removes a feeling from what will be saved, and it can be put back', async () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
 
-    await user.click(screen.getByLabelText('슬픔 빼기'));
+    await user.click(screen.getByLabelText('속상했어 빼기'));
 
     // Scoped to the kept list on purpose: the restore button also carries the
-    // word 슬픔, so an unscoped query would pass whether or not removal worked.
+    // word 속상했어, so an unscoped query would pass whether or not removal worked.
     await waitFor(() => {
-      expect(screen.getByLabelText('슬픔 다시 넣기')).toBeInTheDocument();
+      expect(screen.getByLabelText('속상했어 다시 넣기')).toBeInTheDocument();
     });
     const keptList = screen.getByTestId('emotion-suggestion-list');
-    expect(keptList.textContent).not.toContain('슬픔');
-    expect(keptList.textContent).toContain('행복');
+    expect(keptList.textContent).not.toContain('속상했어');
+    expect(keptList.textContent).toContain('기뻤어');
     // Removal is reversible: a mis-tap must not cost the user their reading.
     expect(screen.getByTestId('emotion-suggestion-removed')).toBeInTheDocument();
 
-    await user.click(screen.getByLabelText('슬픔 다시 넣기'));
+    await user.click(screen.getByLabelText('속상했어 다시 넣기'));
     await waitFor(() => {
-      expect(screen.getByTestId('emotion-suggestion-list').textContent).toContain('슬픔');
+      expect(screen.getByTestId('emotion-suggestion-list').textContent).toContain('속상했어');
     });
   });
 
   /**
    * Correcting a reading IS answering it.
    *
-   * Someone who replaces 슬픔 with 분노 has said more about what they felt than
+   * Someone who replaces 속상했어 with 화났어 has said more about what they felt than
    * someone who tapped 맞아요, so a correction must not also require a separate
    * confirmation before it can be stored.
    */
@@ -485,7 +493,7 @@ describe('composer emotion review (suggested, then answered)', () => {
       { emotionFlow: EmotionFlowItem[] },
     ];
     expect(record.emotionFlow.map((item) => item.basic)).toEqual(['anger']);
-    expect(record.emotionFlow.map((item) => item.displayLabel)).toEqual(['분노']);
+    expect(record.emotionFlow.map((item) => item.displayLabel)).toEqual(['화났어']);
     // A human overrode the machine, and that is recorded.
     expect(record.emotionFlow[0].userEdited).toBe(true);
     expect(record.emotionFlow[0].source).toBe('user_confirmed');
@@ -507,13 +515,22 @@ describe('composer emotion review (suggested, then answered)', () => {
     expect(record.emotionFlow.every((i) => !('matchedText' in i))).toBe(true);
     // The evidence phrase is display-only and must not ride along.
     expect(record.emotionFlow.every((i) => !('evidence' in i))).toBe(true);
-    expect(record.emotionFlow.map((i) => i.displayLabel)).toEqual(['슬픔', '행복']);
+    expect(record.emotionFlow.map((i) => i.displayLabel)).toEqual(['속상했어', '기뻤어']);
     expect(record.emotionFlow.map((i) => i.sequence)).toEqual([1, 2]);
 
     for (const key of ['emotionFlowAnalysis', 'analysis', 'summary', 'emotionSummary', 'shape']) {
       expect(record).not.toHaveProperty(key);
     }
-    expect(JSON.stringify(record.emotionFlow)).not.toContain('속상했어');
+    /*
+      카나리아는 **일기에만 있는 말**이어야 한다.
+
+      원래 `속상했어` 를 썼고 그때는 그것이 일기 문장에만 있는 말이었다. 어휘가 일상어로
+      바뀌면서 그것이 감정 라벨이 됐고, 그러면 이 단언은 라벨 때문에 실패하거나 -- 라벨을
+      허용하도록 느슨하게 고치면 -- 본문 유출을 더 이상 잡지 못한다. 지금 일기에만 있는
+      말로 바꾼다.
+    */
+    expect(JSON.stringify(record.emotionFlow)).not.toContain('울적했다');
+    expect(JSON.stringify(record.emotionFlow)).not.toContain('나아졌다');
     expect(JSON.stringify(record.emotionFlow)).not.toContain('좋아졌어');
   });
 
@@ -534,8 +551,8 @@ describe('composer emotion review (suggested, then answered)', () => {
     const user = userEvent.setup({ delay: null });
     await openWith(user, LOG_TEXT);
 
-    await user.click(screen.getByLabelText('슬픔 빼기'));
-    await user.click(screen.getByLabelText('행복 빼기'));
+    await user.click(screen.getByLabelText('속상했어 빼기'));
+    await user.click(screen.getByLabelText('기뻤어 빼기'));
     expect(await screen.findByTestId('emotion-suggestion-empty')).toBeInTheDocument();
 
     await user.click(screen.getByText('저장'));

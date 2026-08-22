@@ -74,10 +74,28 @@ function addEventButton(): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
-async function openCreateModal() {
-  // The entry point is disabled until the first load settles.
+/**
+ * `일정 추가` 는 폼이 아니라 **날짜 고르기**를 연다 (2026-08-22).
+ *
+ * 예전에는 화면에 선택돼 있던 하루로 폼이 바로 열렸다. 휴가 3박 4일을 넣으려면 폼 안에서
+ * 종료일을 따로 입력해야 했고, 달력을 보면서 고를 수 있는데도 날짜를 타이핑하게 만드는
+ * 순서였다. 이제 달력에서 고르고 `다음` 을 눌러야 폼이 온다.
+ */
+async function pickDay() {
   await waitFor(() => expect(addEventButton()).toBeEnabled());
   fireEvent.click(addEventButton());
+  /*
+    날짜를 박지 않는다. 이 스위트에는 고정 시계가 없어서 달력이 **실행하는 날의 달**을
+    그리고, 하드코딩한 날짜는 그 달이 지나면 조용히 사라진다. 고르는 동안 날짜 칸의
+    접근성 이름은 `YYYY-MM-DD` 뿐이므로 그중 첫 칸을 집는다.
+  */
+  const days = await screen.findAllByRole('button', { name: /^\d{4}-\d{2}-\d{2}(, 선택됨)?$/ });
+  fireEvent.click(days[0]);
+  fireEvent.click(screen.getByText('다음'));
+}
+
+async function openCreateModal() {
+  await pickDay();
   const title = await screen.findByLabelText(/일정 제목/);
   fireEvent.change(title, { target: { value: '면회' } });
 }
@@ -202,8 +220,7 @@ describe('SchedulePage write integrity', () => {
     //
     // Synchronise on the condition that actually gates the click, exactly as
     // `openCreateModal()` above already does. The assertions below are unchanged.
-    await waitFor(() => expect(addEventButton()).toBeEnabled());
-    fireEvent.click(addEventButton());
+    await pickDay();
     fireEvent.change(await screen.findByLabelText(/일정 제목/), { target: { value: '거절되는 일정' } });
     await act(async () => {
       fireEvent.click(screen.getByText('등록하기'));

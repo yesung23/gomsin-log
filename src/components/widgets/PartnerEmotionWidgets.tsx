@@ -4,7 +4,7 @@ import { ArrowRight, Sparkles } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
-import { basicEmotionOf } from '@/lib/basicEmotions';
+import { basicEmotionOf, basicEmotionLabelOf } from '@/lib/basicEmotions';
 import { EmotionCharacter } from '@/components/emotion/EmotionCharacter';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { generateDailySummary, summaryTargetRecordId } from '@/lib/briefing';
@@ -113,7 +113,7 @@ export function PartnerEmotionFlowWidget() {
                 {index > 0 && <ArrowRight size={12} className="text-muted-foreground" aria-hidden="true" />}
                 <span className="pl-1 pr-2 py-1 rounded-lg bg-muted text-label font-bold text-foreground flex items-center gap-1">
                   <EmotionCharacter emotion={basicEmotionOf(item)} selected size={22} />
-                  {item.displayLabel}
+                  {basicEmotionLabelOf(item)}
                 </span>
               </span>
             ))}

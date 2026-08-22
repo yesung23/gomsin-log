@@ -36,12 +36,12 @@ import type { BasicEmotion, EmotionGroup, Trip } from '@/types';
 // The six-emotion vocabulary
 // ---------------------------------------------------------------------------
 describe('the six basic emotions', () => {
-  it('is exactly 분노 · 혐오 · 공포 · 행복 · 슬픔 · 놀람', () => {
+  it('is exactly 화났어 · 별로였어 · 걱정됐어 · 기뻤어 · 속상했어 · 놀랐어', () => {
     expect([...BASIC_EMOTION_ORDER].sort()).toEqual(
       ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise'],
     );
     expect(BASIC_EMOTION_ORDER.map((basic) => BASIC_EMOTION_LABEL[basic])).toEqual(
-      ['행복', '놀람', '공포', '혐오', '분노', '슬픔'],
+      ['기뻤어', '놀랐어', '걱정됐어', '별로였어', '화났어', '속상했어'],
     );
   });
 
@@ -84,14 +84,14 @@ describe('the six basic emotions', () => {
 
   it('rewrites group, label and userEdited when a human corrects a reading', () => {
     const corrected = applyBasicEmotion(
-      { sequence: 1, group: 'joy', displayLabel: '행복', basic: 'happiness' },
+      { sequence: 1, group: 'joy', displayLabel: '기뻤어', basic: 'happiness' },
       'anger',
     );
     // Every existing reader keys off group/displayLabel, so both must follow.
     expect(corrected).toMatchObject({
       basic: 'anger',
       group: 'anger',
-      displayLabel: '분노',
+      displayLabel: '화났어',
       userEdited: true,
     });
   });
@@ -104,7 +104,7 @@ describe('extractEmotionCandidates', () => {
   /** The literal sentence the product owner reported. */
   const REPORTED = '일하느라 ㅈ같았는데, 손님이 먹을 것을 줘서 기분이 나아졌어';
 
-  it('reads the reported sentence as 분노 → 행복 with the evidence phrases', () => {
+  it('reads the reported sentence as 화났어 → 기뻤어 with the evidence phrases', () => {
     const candidates = extractEmotionCandidates(REPORTED);
     expect(candidates.map((c) => c.basic)).toEqual(['anger', 'happiness']);
     expect(candidates.map((c) => c.evidence)).toEqual(['ㅈ같음', '기분이 나아짐']);
@@ -138,8 +138,8 @@ describe('extractEmotionCandidates', () => {
 
   it('does not treat a scary film as the writer being afraid', () => {
     expect(extractEmotionCandidates('무서운 영화 봤어 ㅋㅋ')).toEqual([]);
-    expect(extractEmotionCandidates('공포 게임 하느라 무서웠다 ㅋㅋ')).toEqual([]);
-    // ...but a genuinely frightening day still reads as 공포.
+    expect(extractEmotionCandidates('걱정됐어 게임 하느라 무서웠다 ㅋㅋ')).toEqual([]);
+    // ...but a genuinely frightening day still reads as 걱정됐어.
     expect(extractEmotionCandidates('밤길이 너무 무서웠어')[0]?.basic).toBe('fear');
   });
 
@@ -149,9 +149,9 @@ describe('extractEmotionCandidates', () => {
    * that happens to sit inside an unrelated word.
    */
   it('does not fire on a stem that is merely a substring of another word', () => {
-    // 서운(hurt) inside 무서운(scary) -- read as 분노 before this was tightened.
+    // 서운(hurt) inside 무서운(scary) -- read as 화났어 before this was tightened.
     expect(extractEmotionCandidates('무서운 꿈을 꿨어')[0]?.basic).not.toBe('anger');
-    // 화 + 나 inside "영화 나왔어" -- read as 분노.
+    // 화 + 나 inside "영화 나왔어" -- read as 화났어.
     expect(extractEmotionCandidates('새 영화 나왔어')).toEqual([]);
     // 물렸(bitten) vs 물렸(fed up).
     expect(extractEmotionCandidates('모기에 물렸어')).toEqual([]);
@@ -307,7 +307,7 @@ describe('what actually gets stored', () => {
 
   it('a correction changes the analysed shape, not just the label', () => {
     // The reported defect: the label could be fixed while the drawn line stayed
-    // wrong. 분노 → 행복 rises; 행복 → 행복 is flat.
+    // wrong. 화났어 → 기뻤어 rises; 기뻤어 → 기뻤어 is flat.
     const rising = analyzeEmotionFlow(
       candidatesToFlowItems(candidates, {
         isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
@@ -329,7 +329,7 @@ describe('what actually gets stored', () => {
   it('re-opens a stored flow for correction, mapping legacy groups forward', () => {
     const reopened = flowItemsToCandidates([
       { sequence: 2, group: 'longing', displayLabel: '그리움', id: 'b' },
-      { sequence: 1, group: 'joy', displayLabel: '행복', id: 'a' },
+      { sequence: 1, group: 'joy', displayLabel: '기뻤어', id: 'a' },
     ]);
     // Sorted by sequence, and legacy groups resolved rather than defaulted.
     expect(reopened.map((c) => c.id)).toEqual(['a', 'b']);

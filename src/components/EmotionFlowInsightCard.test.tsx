@@ -36,7 +36,7 @@ describe('EmotionFlowInsightCard', () => {
       <EmotionFlowInsightCard
         items={[
           confirmed('joy', 1, '기쁨', { source: 'rule_suggested' }),
-          confirmed('sadness', 2, '슬픔', { source: 'rule_suggested' }),
+          confirmed('sadness', 2, '속상했어', { source: 'rule_suggested' }),
         ]}
       />,
     );
@@ -47,7 +47,7 @@ describe('EmotionFlowInsightCard', () => {
     const { container } = render(
       <EmotionFlowInsightCard
         items={[
-          confirmed('sadness', 1, '슬픔'),
+          confirmed('sadness', 1, '속상했어'),
           confirmed('uncertain', 2, '모르겠음'),
           confirmed('joy', 3, '기쁨'),
         ]}
@@ -55,7 +55,7 @@ describe('EmotionFlowInsightCard', () => {
     );
     const text = container.textContent ?? '';
     expect(text).toContain('마음의 흐름');
-    expect(text).toContain('슬픔 → 모르겠음 → 기쁨');
+    expect(text).toContain('속상했어 → 모르겠음 → 기쁨');
     expect(text).toContain('마음이 조금씩 편해지는 쪽으로 움직였어요.');
   });
 
@@ -71,10 +71,10 @@ describe('EmotionFlowInsightCard', () => {
   it('renders the largest-transition line when there are at least two points', () => {
     const { container } = render(
       <EmotionFlowInsightCard
-        items={[confirmed('joy', 1, '기쁨'), confirmed('sadness', 2, '슬픔')]}
+        items={[confirmed('joy', 1, '기쁨'), confirmed('sadness', 2, '속상했어')]}
       />,
     );
-    expect(container.textContent).toContain('가장 큰 변화: 기쁨 → 슬픔');
+    expect(container.textContent).toContain('가장 큰 변화: 기쁨 → 속상했어');
   });
 
   it('omits the largest-transition line for a single point', () => {
@@ -88,7 +88,7 @@ describe('EmotionFlowInsightCard', () => {
     const { container } = render(
       <EmotionFlowInsightCard
         items={[
-          confirmed('sadness', 1, '슬픔'),
+          confirmed('sadness', 1, '속상했어'),
           confirmed('calm', 2, '평온'),
           confirmed('joy', 3, '기쁨'),
         ]}
@@ -137,7 +137,7 @@ describe('EmotionFlowInsightCard', () => {
     const { container } = render(
       <EmotionFlowInsightCard
         items={[
-          confirmed('anger', 1, '분노', { matchedText: secret }),
+          confirmed('anger', 1, '화났어', { matchedText: secret }),
           confirmed('calm', 2, '평온'),
         ]}
       />,

@@ -97,6 +97,33 @@ export function SchedulePage() {
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [eventType, setEventType] = useState<EventType>('visit');
+  /*
+    여러 날을 한 번에 고르기 (2026-08-22).
+
+    커플 일정은 대부분 **연속된 날**이다 -- 휴가 3박 4일, 여행 닷새. 하루씩 네 번 넣게
+    하면 같은 일정이 네 개가 되고 `우리` 격자에도 네 번 찍힌다. 이벤트 모델이 이미
+    `startDate` + `endDate` 범위이므로, 끌어서 고른 범위가 그대로 한 건이 된다.
+
+    ## 왜 좌표로 찾는가
+
+    터치에서는 `pointerdown` 이 일어난 요소로 포인터가 **암묵적으로 캡처된다.** 손가락이
+    옆 칸으로 옮겨가도 이벤트의 target 은 처음 칸이고, 그 칸의 `onPointerEnter` 는 영영
+    오지 않는다. 마우스로는 되고 폰에서는 안 되는, 정확히 이 앱의 대상에서만 죽는
+    코드다. 격자가 `pointermove` 를 받아 손가락 좌표 아래의 날을 직접 찾는다.
+
+    ## 왜 확정값을 ref 에서 읽는가
+
+    `pointermove` 는 React 의 continuous 이벤트여서 그 안의 setState 가 즉시 flush 되지
+    않는다. 손가락을 빠르게 튕기면 `pointerup` 이 그 렌더보다 먼저 도착하고, 그때 state
+    는 아직 비어 있어 방금 잡은 범위가 통째로 사라진다.
+  */
+  const [picking, setPicking] = useState(false);
+  const [pickFrom, setPickFrom] = useState<string | null>(null);
+  const [pickTo, setPickTo] = useState<string | null>(null);
+  const pickAnchor = useRef<string | null>(null);
+  const pickEnd = useRef<string | null>(null);
+  const pickDragged = useRef(false);
+
   const [eventStartDate, setEventStartDate] = useState(today);
   const [eventEndDate, setEventEndDate] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
@@ -199,6 +226,76 @@ export function SchedulePage() {
     const next = new Date(currYear, currMonth + offset, 1);
     setCurrYear(next.getFullYear());
     setCurrMonth(next.getMonth());
+  };
+
+  const dayUnder = (x: number, y: number): string | null => {
+    const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-cal-date]');
+    return cell?.dataset.calDate ?? null;
+  };
+
+  const onGridDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!picking) return;
+    const date = dayUnder(event.clientX, event.clientY);
+    pickAnchor.current = date;
+    pickEnd.current = date;
+    pickDragged.current = false;
+    setPickFrom(date);
+    setPickTo(date);
+  };
+
+  const onGridMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!picking || !pickAnchor.current) return;
+    const date = dayUnder(event.clientX, event.clientY);
+    if (!date || date === pickEnd.current) return;
+    pickDragged.current = true;
+    pickEnd.current = date;
+    const [from, to] = [pickAnchor.current, date].sort();
+    setPickFrom(from);
+    setPickTo(to);
+  };
+
+  const onGridUp = () => {
+    if (!picking) return;
+    pickAnchor.current = null;
+  };
+
+  const cancelPicking = () => {
+    setPicking(false);
+    setPickFrom(null);
+    setPickTo(null);
+    pickAnchor.current = null;
+    pickEnd.current = null;
+    pickDragged.current = false;
+  };
+
+  /** 고른 범위를 사람이 읽는 말로. 하루면 하루라고, 여러 날이면 며칠인지. */
+  const pickedLabel = (() => {
+    if (!pickFrom) return '날짜를 골라 주세요';
+    if (!pickTo || pickTo === pickFrom) return `${pickFrom.slice(5)} 하루`;
+    const span = Math.round(
+      (Date.parse(`${pickTo}T00:00:00`) - Date.parse(`${pickFrom}T00:00:00`)) / 86400000,
+    ) + 1;
+    return `${pickFrom.slice(5)} – ${pickTo.slice(5)} · ${span}일`;
+  })();
+
+  /*
+    고른 범위로 폼을 연다.
+
+    하루만 골랐으면 `endDate` 를 비운다 -- 시작일과 같은 종료일을 저장하면 하루짜리
+    일정이 기간 일정처럼 읽히고, 기존 데이터와도 모양이 달라진다.
+  */
+  const openCreateFromPick = () => {
+    if (!pickFrom) return;
+    setEditingEventId(null);
+    setTitle('');
+    setEventType('visit');
+    setEventStartDate(pickFrom);
+    setEventEndDate(pickTo && pickTo !== pickFrom ? pickTo : '');
+    setIsPrivate(!activeCouple);
+    setTalkAbout(false);
+    setFormError(null);
+    setPicking(false);
+    setShowEventModal(true);
   };
 
   const openCreateModal = () => {
@@ -411,21 +508,45 @@ export function SchedulePage() {
 
   return (
     <MobileShell>
-      <div className="pb-28 px-4 pt-5 space-y-5">
+      {/*
+        일정이 공책 위로 옮겨졌다 (2026-08-22, §5).
+
+        달력 문법은 이 앱에서 여기만 소유한다 -- 요일을 맞추고 미래를 담는다. 표면만
+        바뀌었고 셀 계산·이벤트·실시간 구독은 그대로다.
+      */}
+      <div className="notebook min-h-full pb-28 px-4 pt-5 space-y-5">
         <AppBar
           sticky={false}
           className="px-0 pt-0"
           title="우리의 계획"
           actions={
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={openCreateModal}
-              disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
-            >
-              <Plus size={14} aria-hidden="true" />
-              <span>일정 추가</span>
-            </Button>
+            picking ? (
+              <Button variant="ghost" size="sm" onClick={cancelPicking}>
+                <span>취소</span>
+              </Button>
+            ) : (
+              /*
+                `+` 가 폼을 바로 열지 않고 **날짜 고르기**를 켠다.
+
+                예전에는 화면에 선택돼 있던 하루로 폼이 열렸다. 휴가 3박 4일을 넣으려면
+                폼 안에서 종료일을 따로 입력해야 했고, 달력을 보면서 고를 수 있는데도
+                날짜를 타이핑하게 만드는 순서였다.
+              */
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  if (!hasCoupleSpace) return;
+                  setPicking(true);
+                  setPickFrom(null);
+                  setPickTo(null);
+                }}
+                disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
+              >
+                <Plus size={14} aria-hidden="true" />
+                <span>일정 추가</span>
+              </Button>
+            )
           }
         />
 
@@ -521,7 +642,16 @@ export function SchedulePage() {
               <div className="grid grid-cols-7 gap-0.5 text-center text-caption font-medium text-muted-foreground pb-1">
                 <span className="text-destructive">일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span className="text-info">토</span>
               </div>
-              <div className="grid grid-cols-7 gap-0.5 text-center">
+              <div
+                className="grid grid-cols-7 gap-0.5 text-center"
+                onPointerDown={onGridDown}
+                onPointerMove={onGridMove}
+                onPointerUp={onGridUp}
+                /* 손가락이 격자 밖에서 떨어져도 끌기는 끝나야 한다. 잡힌 채 남으면 유령 선택이 된다. */
+                onPointerCancel={onGridUp}
+                onPointerLeave={onGridUp}
+                style={{ touchAction: picking ? 'none' : undefined }}
+              >
                 {Array.from({ length: firstDayOfWeek }).map((_, index) => <div key={`empty-${index}`} className="h-11" />)}
                 {Array.from({ length: daysInMonth }).map((_, index) => {
                   const day = index + 1;
@@ -529,13 +659,28 @@ export function SchedulePage() {
                   const dayEvents = eventsOnDate(events, date);
                   const dayTasks = tasks.filter((task) => task.dueDate === date && !task.completed);
                   const isToday = date === today;
-                  const isSelected = date === selectedDate;
+                  const inPick = Boolean(picking && pickFrom && date >= pickFrom && date <= (pickTo || pickFrom));
+                  const isSelected = picking ? inPick : date === selectedDate;
                   return (
                     <button
                       type="button"
                       key={date}
-                      onClick={() => setSelectedDate(date)}
-                      aria-label={`${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
+                      data-cal-date={date}
+                      /*
+                        고르는 동안에는 탭이 그 하루를 잡는다. 끌기가 끝난 뒤 브라우저가
+                        보내는 click 은 anchor 가 이미 비어 있어도 도착하므로, 끌었을
+                        때는 삼킨다 -- 안 그러면 놓은 순간 범위가 하루로 줄어든다.
+                      */
+                      onClick={() => {
+                        if (!picking) { setSelectedDate(date); return; }
+                        if (pickDragged.current) { pickDragged.current = false; return; }
+                        setPickFrom(date);
+                        setPickTo(date);
+                        pickEnd.current = date;
+                      }}
+                      aria-label={picking
+                        ? `${date}${inPick ? ', 선택됨' : ''}`
+                        : `${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
                       aria-pressed={isSelected}
                       className={`press-response min-h-11 min-w-[44px] rounded-control flex flex-col items-center justify-center text-label ${ isSelected ? 'ring-2 ring-coral bg-coral/10 text-coral font-semibold' : isToday ? 'bg-coral-strong text-coral-strong-foreground font-bold' : 'hover:bg-muted/50 text-foreground' }`}
                     >
@@ -552,6 +697,30 @@ export function SchedulePage() {
                   );
                 })}
               </div>
+
+              {/*
+                고르는 동안의 확정 줄.
+
+                달력 바로 아래에 둔다 -- 방금 고른 것과 그것을 확정하는 버튼 사이에
+                화면이 끼면 사용자는 둘을 연결해서 읽지 못한다.
+              */}
+              {picking ? (
+                <div className="mt-3 flex items-center gap-3">
+                  <p className="text-label flex-1" style={{ color: 'var(--ink)' }}>{pickedLabel}</p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={openCreateFromPick}
+                    disabled={!pickFrom}
+                  >
+                    <span>다음</span>
+                  </Button>
+                </div>
+              ) : (
+                <p className="mt-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
+                  일정 추가를 누르고 날짜를 끌면 여러 날이 한 번에 잡혀요
+                </p>
+              )}
             </section>
 
             {/* Selected date events and tasks */}

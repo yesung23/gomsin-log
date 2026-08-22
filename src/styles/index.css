@@ -400,7 +400,7 @@
    * colour is the second signal, and the label under it is the third, so none of
    * the three is load-bearing on its own.
    *
-   * Hue 40 for 분노 rather than the brand's own 12-25: coral is the app's chrome,
+   * Hue 40 for anger rather than the brand's own 12-25: coral is the app's chrome,
    * and an anger accent inside that hue would read as a UI state rather than as a
    * feeling. Pushed to a rust that is still hot but unmistakably not the brand.
    *

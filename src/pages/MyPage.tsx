@@ -56,7 +56,8 @@ export function MyPage() {
           </AppBarAction>
         }
       />
-      <div className="px-4 pt-4 pb-28 space-y-5">
+      {/* 마이도 공책 위로 (2026-08-22, §5). 탭은 잃었지만 화면은 그대로다 -- `우리 → ☰`. */}
+      <div className="notebook min-h-full px-4 pt-4 pb-28 space-y-5">
 
         <div className="flex items-center gap-3 py-2">
           {/*

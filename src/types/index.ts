@@ -91,7 +91,7 @@ export interface EmotionFlowItem {
   source?: 'rule_suggested' | 'user_confirmed';
   visibility?: EmotionVisibility;
   /**
-   * The refined six-emotion reading (분노 / 혐오 / 공포 / 행복 / 슬픔 / 놀람).
+   * The refined six-emotion reading (화났어 / 별로였어 / 걱정됐어 / 기뻤어 / 속상했어 / 놀랐어).
    *
    * Optional because records written before this existed have only `group`;
    * `basicEmotionOf()` maps those forward, so nothing needs migrating.

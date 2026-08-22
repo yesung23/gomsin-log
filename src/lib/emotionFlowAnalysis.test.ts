@@ -209,7 +209,7 @@ describe('analyzeEmotionFlow — shapes', () => {
 describe('analyzeEmotionFlow — numeric outputs', () => {
   it('reports startState, endState, netChange and swing', () => {
     const result = analyzeEmotionFlow([
-      confirmed('sadness', 1, '슬픔'),
+      confirmed('sadness', 1, '속상했어'),
       confirmed('joy', 2, '기쁨'),
       confirmed('calm', 3, '평온'),
     ])!;
@@ -255,15 +255,15 @@ describe('analyzeEmotionFlow — numeric outputs', () => {
 describe('analyzeEmotionFlow — summary', () => {
   it('joins the ordered labels with arrows', () => {
     const result = analyzeEmotionFlow([
-      confirmed('sadness', 1, '슬픔'),
+      confirmed('sadness', 1, '속상했어'),
       confirmed('joy', 2, '기쁨'),
     ])!;
-    expect(result.summary).toContain('슬픔 → 기쁨');
+    expect(result.summary).toContain('속상했어 → 기쁨');
   });
 
   it('appends the fixed recovery sentence', () => {
     const result = analyzeEmotionFlow([
-      confirmed('sadness', 1, '슬픔'),
+      confirmed('sadness', 1, '속상했어'),
       confirmed('joy', 2, '기쁨'),
     ])!;
     expect(result.summary).toContain('마음이 조금씩 편해지는 쪽으로 움직였어요.');
@@ -272,7 +272,7 @@ describe('analyzeEmotionFlow — summary', () => {
   it('appends the fixed downward sentence', () => {
     const result = analyzeEmotionFlow([
       confirmed('joy', 1, '기쁨'),
-      confirmed('sadness', 2, '슬픔'),
+      confirmed('sadness', 2, '속상했어'),
     ])!;
     expect(result.summary).toContain('하루가 지나면서 마음이 무거워졌어요.');
   });
@@ -281,13 +281,13 @@ describe('analyzeEmotionFlow — summary', () => {
     const fixtures: EmotionFlowItem[][] = [
       [confirmed('joy', 1, '기쁨')],
       [confirmed('neutral', 1, '보통'), confirmed('uncertain', 2, '모르겠음')],
-      [confirmed('sadness', 1, '슬픔'), confirmed('joy', 2, '기쁨')],
-      [confirmed('joy', 1, '기쁨'), confirmed('sadness', 2, '슬픔')],
+      [confirmed('sadness', 1, '속상했어'), confirmed('joy', 2, '기쁨')],
+      [confirmed('joy', 1, '기쁨'), confirmed('sadness', 2, '속상했어')],
       [
         confirmed('joy', 1, '기쁨'),
-        confirmed('sadness', 2, '슬픔'),
+        confirmed('sadness', 2, '속상했어'),
         confirmed('joy', 3, '기쁨'),
-        confirmed('sadness', 4, '슬픔'),
+        confirmed('sadness', 4, '속상했어'),
       ],
       [confirmed('joy', 1, '기쁨'), confirmed('calm', 2, '평온'), confirmed('love', 3, '사랑')],
     ];
@@ -303,8 +303,8 @@ describe('analyzeEmotionFlow — summary', () => {
 describe('analyzeEmotionFlow — determinism and privacy', () => {
   it('produces a deep-equal result across repeated calls', () => {
     const items = [
-      confirmed('sadness', 1, '슬픔'),
-      confirmed('anger', 2, '분노'),
+      confirmed('sadness', 1, '속상했어'),
+      confirmed('anger', 2, '화났어'),
       confirmed('calm', 3, '평온'),
     ];
     expect(analyzeEmotionFlow(items)).toEqual(analyzeEmotionFlow(items));
@@ -324,7 +324,7 @@ describe('analyzeEmotionFlow — determinism and privacy', () => {
         id: 'a',
         group: 'anger',
         sequence: 1,
-        displayLabel: '분노',
+        displayLabel: '화났어',
         source: 'user_confirmed',
         matchedText: secret,
       }),

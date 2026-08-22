@@ -70,7 +70,7 @@ function buildCalendarGrid(year: number, month: number) {
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 const REACTION_LABELS: Record<string, string> = {
-  good: '😊 좋았어',
+  good: '😊 기뻤어',
   event: '💬 이런 일이 있었어',
   hard: '🥹 힘들었어',
   thought_of_you: '💌 네 생각났어',
@@ -646,7 +646,13 @@ export function RecordPage() {
           </AppBarAction>
         }
       />
-      <div className="px-4 pt-4 pb-28 relative min-h-screen">
+      {/*
+        기록도 공책 위로 (2026-08-22, §5).
+
+        탭은 `우리` 에 흡수됐지만 화면은 그대로다 -- 검색 결과와 떠 있는 버튼과 홈
+        컴포저가 전부 여기로 온다. §7.5 의 "정확히 그 기록" 도 여기서 지켜진다.
+      */}
+      <div className="notebook px-4 pt-4 pb-28 relative min-h-screen">
 
         {tripPeriod ? (
           <div className="mb-4 rounded-2xl border border-coral/30 bg-coral/10 p-4 flex items-start justify-between gap-3">

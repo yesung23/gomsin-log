@@ -320,7 +320,7 @@ describe('EmoFlow persistence boundary', () => {
     const stored = emotionFlowForStorage({
       isPrivate: false,
       emotionFlow: [
-        item({ id: 'a', group: 'joy', displayLabel: '행복', visibility: 'shared', matchedText: SECRET }),
+        item({ id: 'a', group: 'joy', displayLabel: '기뻤어', visibility: 'shared', matchedText: SECRET }),
         item({ id: 'b', group: 'shame', displayLabel: '부끄러움', visibility: 'author_only', matchedText: SECRET }),
       ],
     });
@@ -333,7 +333,7 @@ describe('EmoFlow persistence boundary', () => {
     const stored = emotionFlowForStorage({
       isPrivate: true,
       emotionFlow: [
-        item({ id: 'a', group: 'joy', displayLabel: '행복', visibility: 'shared', matchedText: SECRET }),
+        item({ id: 'a', group: 'joy', displayLabel: '기뻤어', visibility: 'shared', matchedText: SECRET }),
         item({ id: 'b', group: 'shame', displayLabel: '부끄러움', visibility: 'author_only', matchedText: SECRET }),
       ],
     });
@@ -350,17 +350,17 @@ describe('EmoFlow persistence boundary', () => {
       emotionFlow: [
         item({ id: 'a', group: 'sadness', displayLabel: '속상함', sequence: 1, visibility: 'shared' }),
         item({ id: 'b', group: 'shame', displayLabel: '부끄러움', sequence: 2, visibility: 'author_only' }),
-        item({ id: 'c', group: 'joy', displayLabel: '행복', sequence: 3, visibility: 'shared' }),
+        item({ id: 'c', group: 'joy', displayLabel: '기뻤어', sequence: 3, visibility: 'shared' }),
       ],
     });
 
     const authorView = analyzeEmotionFlow(shared.emotionFlow)!;
-    expect(authorView.points.map((p) => p.label)).toEqual(['속상함', '부끄러움', '행복']);
+    expect(authorView.points.map((p) => p.label)).toEqual(['속상함', '부끄러움', '기뻤어']);
 
     const partnerView = analyzeEmotionFlow(
       sanitizeRecordForViewer(shared, { userId: ME, role: 'gomsin' }).emotionFlow,
     )!;
-    expect(partnerView.points.map((p) => p.label)).toEqual(['속상함', '행복']);
+    expect(partnerView.points.map((p) => p.label)).toEqual(['속상함', '기뻤어']);
     expect(partnerView.summary).not.toContain('부끄러움');
   });
 

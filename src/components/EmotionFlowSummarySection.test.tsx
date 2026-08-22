@@ -77,7 +77,7 @@ describe('EmotionFlowSummarySection states', () => {
   it('prefers the not-yet-confirmed state over an empty verdict, even with records', () => {
     // `isLoading` outranks a records array, because a partial array during
     // quarantine would produce a summary of the wrong period.
-    const records = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어요')])];
+    const records = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어')])];
     render(<EmotionFlowSummarySection records={records} periodLabel="2026년 2월" isLoading />);
     expect(screen.getByTestId('emotion-flow-summary')).toHaveAttribute('data-state', 'loading');
   });
@@ -102,7 +102,7 @@ describe('EmotionFlowSummarySection states', () => {
   });
 
   it('prefers the error state over rendering a stale summary', () => {
-    const records = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어요')])];
+    const records = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어')])];
     render(
       <EmotionFlowSummarySection
         records={records}
@@ -118,33 +118,33 @@ describe('EmotionFlowSummarySection aggregation', () => {
   it('aggregates across records in chronological order', () => {
     const records = [
       // Deliberately out of order in the array: the component must sort.
-      record('r2', '2026-02-03', [item(1, 'joy', '기뻤어요')]),
-      record('r1', '2026-02-01', [item(1, 'sadness', '슬펐어요')]),
+      record('r2', '2026-02-03', [item(1, 'joy', '기뻤어')]),
+      record('r1', '2026-02-01', [item(1, 'sadness', '속상했어')]),
     ];
     render(<EmotionFlowSummarySection records={records} periodLabel="2026년 2월" />);
 
     const section = screen.getByTestId('emotion-flow-summary');
     expect(section).toHaveAttribute('data-state', 'ready');
-    expect(screen.getByTestId('summary-start')).toHaveTextContent('슬펐어요');
-    expect(screen.getByTestId('summary-end')).toHaveTextContent('기뻤어요');
+    expect(screen.getByTestId('summary-start')).toHaveTextContent('속상했어');
+    expect(screen.getByTestId('summary-end')).toHaveTextContent('기뻤어');
     // sadness -> joy is a rising period.
     expect(section).toHaveAttribute('data-shape', 'recovery');
   });
 
   it('orders same-day records by time', () => {
     const records = [
-      record('r2', '2026-02-01', [item(1, 'joy', '기뻤어요')], { time: '20:00' }),
-      record('r1', '2026-02-01', [item(1, 'sadness', '슬펐어요')], { time: '08:00' }),
+      record('r2', '2026-02-01', [item(1, 'joy', '기뻤어')], { time: '20:00' }),
+      record('r1', '2026-02-01', [item(1, 'sadness', '속상했어')], { time: '08:00' }),
     ];
     render(<EmotionFlowSummarySection records={records} periodLabel="2026년 2월" />);
-    expect(screen.getByTestId('summary-start')).toHaveTextContent('슬펐어요');
-    expect(screen.getByTestId('summary-end')).toHaveTextContent('기뻤어요');
+    expect(screen.getByTestId('summary-start')).toHaveTextContent('속상했어');
+    expect(screen.getByTestId('summary-end')).toHaveTextContent('기뻤어');
   });
 
   it('counts contributing records and total confirmed items', () => {
     const records = [
-      record('r1', '2026-02-01', [item(1, 'joy', '기뻤어요'), item(2, 'calm', '편안했어요')]),
-      record('r2', '2026-02-02', [item(1, 'sadness', '슬펐어요')]),
+      record('r1', '2026-02-01', [item(1, 'joy', '기뻤어'), item(2, 'calm', '편안했어요')]),
+      record('r2', '2026-02-02', [item(1, 'sadness', '속상했어')]),
       // Contributes nothing, so it must not be counted.
       record('r3', '2026-02-03', []),
     ];
@@ -153,24 +153,24 @@ describe('EmotionFlowSummarySection aggregation', () => {
   });
 
   it('reflects a record edit immediately, with nothing to invalidate', () => {
-    const before = [record('r1', '2026-02-01', [item(1, 'sadness', '슬펐어요')])];
+    const before = [record('r1', '2026-02-01', [item(1, 'sadness', '속상했어')])];
     const { rerender } = render(
       <EmotionFlowSummarySection records={before} periodLabel="2026년 2월" />,
     );
-    expect(screen.getByTestId('summary-end')).toHaveTextContent('슬펐어요');
+    expect(screen.getByTestId('summary-end')).toHaveTextContent('속상했어');
 
     // The same record, edited: its confirmed items were cleared and replaced.
-    const after = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어요')])];
+    const after = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어')])];
     rerender(<EmotionFlowSummarySection records={after} periodLabel="2026년 2월" />);
 
-    expect(screen.getByTestId('summary-end')).toHaveTextContent('기뻤어요');
-    expect(screen.queryByText('슬펐어요')).toBeNull();
+    expect(screen.getByTestId('summary-end')).toHaveTextContent('기뻤어');
+    expect(screen.queryByText('속상했어')).toBeNull();
   });
 
   it('reflects a record deletion immediately', () => {
     const before = [
-      record('r1', '2026-02-01', [item(1, 'sadness', '슬펐어요')]),
-      record('r2', '2026-02-02', [item(1, 'joy', '기뻤어요')]),
+      record('r1', '2026-02-01', [item(1, 'sadness', '속상했어')]),
+      record('r2', '2026-02-02', [item(1, 'joy', '기뻤어')]),
     ];
     const { rerender } = render(
       <EmotionFlowSummarySection records={before} periodLabel="2026년 2월" />,
@@ -184,11 +184,11 @@ describe('EmotionFlowSummarySection aggregation', () => {
       />,
     );
     expect(screen.getByTestId('summary-counts')).toHaveTextContent('기록 1개');
-    expect(screen.queryByText('기뻤어요')).toBeNull();
+    expect(screen.queryByText('기뻤어')).toBeNull();
   });
 
   it('returns to the empty state when the last contributing record is deleted', () => {
-    const before = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어요')])];
+    const before = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어')])];
     const { rerender } = render(
       <EmotionFlowSummarySection records={before} periodLabel="2026년 2월" />,
     );
@@ -203,21 +203,21 @@ describe('EmotionFlowSummarySection privacy', () => {
   it('ignores items that are not user_confirmed', () => {
     const records = [
       record('r1', '2026-02-01', [
-        item(1, 'joy', '기뻤어요'),
+        item(1, 'joy', '기뻤어'),
         // A rule suggestion. Composer-local; it must never drive narrative.
-        item(2, 'anger', '화났어요', { source: 'rule_suggested' }),
+        item(2, 'anger', '화났어', { source: 'rule_suggested' }),
       ]),
     ];
     render(<EmotionFlowSummarySection records={records} periodLabel="2026년 2월" />);
 
     expect(screen.getByTestId('summary-counts')).toHaveTextContent('마음 1개');
-    expect(screen.queryByText('화났어요')).toBeNull();
+    expect(screen.queryByText('화났어')).toBeNull();
   });
 
   it('never renders matchedText or any diary fragment', () => {
     const records = [
       record('r1', '2026-02-01', [
-        item(1, 'joy', '기뻤어요', { matchedText: '비밀 일기 조각' } as Partial<EmotionFlowItem>),
+        item(1, 'joy', '기뻤어', { matchedText: '비밀 일기 조각' } as Partial<EmotionFlowItem>),
       ]),
     ];
     const { container } = render(
@@ -233,7 +233,7 @@ describe('EmotionFlowSummarySection privacy', () => {
     // Defence in depth: the summary reads no `matchedText`, and the write path
     // strips it. Both are asserted so neither can regress alone.
     const withMatched = record('r1', '2026-02-01', [
-      item(1, 'joy', '기뻤어요', { matchedText: '비밀 일기 조각' } as Partial<EmotionFlowItem>),
+      item(1, 'joy', '기뻤어', { matchedText: '비밀 일기 조각' } as Partial<EmotionFlowItem>),
     ]);
     const stored = emotionFlowForStorage(withMatched);
     expect(JSON.stringify(stored)).not.toContain('비밀 일기 조각');
@@ -242,9 +242,9 @@ describe('EmotionFlowSummarySection privacy', () => {
 
   it('uses no diagnostic vocabulary in any rendered state', () => {
     const records = [
-      record('r1', '2026-02-01', [item(1, 'sadness', '슬펐어요')]),
-      record('r2', '2026-02-05', [item(1, 'anger', '화났어요')]),
-      record('r3', '2026-02-09', [item(1, 'joy', '기뻤어요')]),
+      record('r1', '2026-02-01', [item(1, 'sadness', '속상했어')]),
+      record('r2', '2026-02-05', [item(1, 'anger', '화났어')]),
+      record('r3', '2026-02-09', [item(1, 'joy', '기뻤어')]),
     ];
     const { container } = render(
       <EmotionFlowSummarySection records={records} periodLabel="2026년 2월" />,
@@ -255,9 +255,9 @@ describe('EmotionFlowSummarySection privacy', () => {
   });
 
   it('exposes every rendered fact as real text, not only in the aria label', () => {
-    const records = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어요')])];
+    const records = [record('r1', '2026-02-01', [item(1, 'joy', '기뻤어')])];
     render(<EmotionFlowSummarySection records={records} periodLabel="2026년 2월" />);
-    expect(screen.getByTestId('summary-start')).toHaveTextContent('기뻤어요');
+    expect(screen.getByTestId('summary-start')).toHaveTextContent('기뻤어');
     expect(screen.getByTestId('summary-counts')).toBeInTheDocument();
     expect(screen.getByText('2026년 2월')).toBeInTheDocument();
   });

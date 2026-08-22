@@ -17,7 +17,7 @@ import { RecordMoodSection } from '@/components/emotion/RecordMoodSection';
 function item(partial: Partial<EmotionFlowItem> & { sequence: number }): EmotionFlowItem {
   return {
     group: 'joy',
-    displayLabel: '행복',
+    displayLabel: '기뻤어',
     source: 'user_confirmed',
     basic: 'happiness',
     ...partial,
@@ -79,7 +79,7 @@ describe('changing it costs one tap', () => {
     // `group` and `displayLabel` are rewritten too, so every existing reader --
     // the partner's summary, the flow analysis -- agrees with the correction.
     expect(next[0].group).toBe('anger');
-    expect(next[0].displayLabel).toBe('분노');
+    expect(next[0].displayLabel).toBe('화났어');
     // Durability: this is what stops a later re-analysis quietly undoing it.
     expect(next[0].userEdited).toBe(true);
     expect(next[0].source).toBe('user_confirmed');
@@ -150,7 +150,7 @@ describe('changing it costs one tap', () => {
 
 describe('a multi-feeling entry keeps all of its feelings', () => {
   const flow = [
-    item({ sequence: 1, basic: 'anger', group: 'anger', displayLabel: '분노' }),
+    item({ sequence: 1, basic: 'anger', group: 'anger', displayLabel: '화났어' }),
     item({ sequence: 2, basic: 'happiness' }),
   ];
 
@@ -176,7 +176,7 @@ describe('a multi-feeling entry keeps all of its feelings', () => {
     const onChange = vi.fn().mockResolvedValue(true);
     render(<RecordMoodSection items={flow} onChange={onChange} />);
 
-    fireEvent.click(screen.getByLabelText('1번째 마음 분노 고르기'));
+    fireEvent.click(screen.getByLabelText('1번째 마음 화났어 고르기'));
     expect(selectedOption()).toBe('anger');
 
     fireEvent.click(screen.getByTestId('record-mood-option-fear'));
@@ -341,7 +341,7 @@ describe('removing a feeling', () => {
       />,
     );
 
-    fireEvent.click(screen.getByLabelText('1번째 마음 분노 고르기'));
+    fireEvent.click(screen.getByLabelText('1번째 마음 화났어 고르기'));
     fireEvent.click(screen.getByTestId('record-mood-remove'));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));

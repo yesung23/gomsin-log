@@ -35,7 +35,7 @@ import { EmotionCharacter } from '@/components/emotion/EmotionCharacter';
  *
  * ## Multi-item flows
  *
- * An entry can hold up to four feelings in sequence (분노 → 행복). Showing six
+ * An entry can hold up to four feelings in sequence (화났어 → 기뻤어). Showing six
  * characters per item would be twenty-four targets, so the sequence is a row of
  * small characters and the picker edits whichever one is chosen -- the last by
  * default, because when a single feeling is wanted from a whole entry, where the

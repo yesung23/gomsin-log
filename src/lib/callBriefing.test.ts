@@ -21,7 +21,7 @@ describe('buildCallBriefing', () => {
   it('keeps only the last seven days and quotes at most three grounded topics', () => {
     const records = [
       record({ id: 'old', date: '2026-07-31', createdAt: '2026-07-31T09:00:00Z' }),
-      record({ id: 'a', date: '2026-08-01', createdAt: '2026-08-01T09:00:00Z', reaction: 'good', log: '산책해서 좋았어' }),
+      record({ id: 'a', date: '2026-08-01', createdAt: '2026-08-01T09:00:00Z', reaction: 'good', log: '산책해서 기뻤어' }),
       record({ id: 'b', date: '2026-08-03', createdAt: '2026-08-03T09:00:00Z', reaction: 'event', log: '새 프로젝트가 시작됐어' }),
       record({ id: 'c', date: '2026-08-06', createdAt: '2026-08-06T09:00:00Z', reaction: 'thought_of_you', log: '네 생각이 났어' }),
       record({ id: 'd', date: '2026-08-07', createdAt: '2026-08-07T09:00:00Z', reaction: 'hard', log: '오늘 일이 정말 힘들었어' }),

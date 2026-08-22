@@ -21,6 +21,7 @@ import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 import type { RecordMutationReason } from '@/lib/storeContext';
+import { basicEmotionLabelOf } from '@/lib/basicEmotions';
 
 /**
  * The author's own one-tap description of their day.
@@ -788,7 +789,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                       <span className="text-caption text-muted-foreground mt-0.5 inline-block">
                         {confirmedFlow.map((f, i) => (
                           <span key={f.id || i}>
-                            {i > 0 && ' → '}{f.displayLabel}
+                            {i > 0 && ' → '}{basicEmotionLabelOf(f)}
                           </span>
                         ))}
                       </span>

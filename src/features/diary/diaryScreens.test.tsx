@@ -31,7 +31,7 @@ function record(partial: Partial<DailyRecord> & { date: string }): DailyRecord {
     date: partial.date,
     time: partial.time ?? '09:00',
     authorRole: 'gomsin',
-    log: partial.log ?? '오늘은 좋았어',
+    log: partial.log ?? '오늘은 기뻤어',
     isPrivate: false,
     createdAt: `${partial.date}T00:00:00.000Z`,
     ...partial,

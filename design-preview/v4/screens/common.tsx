@@ -20,7 +20,7 @@ export function InkCircle({
   children?: ReactNode;
 }) {
   const r = size / 2 - 2;
-  const stroke = ring === 'new' ? 'var(--accent)' : 'var(--ink-faint)';
+  const stroke = ring === 'new' ? 'var(--ink-accent)' : 'var(--ink-faint)';
   return (
     <span className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
       {ring !== 'none' ? (

@@ -159,8 +159,8 @@ export function InstaStory({
             <button type="button" aria-label="이따 이야기하기" onClick={toggle} className="tap flex h-11 w-11 items-center justify-center">
               <Bookmark
                 size={21} className="pen-icon"
-                color={marked.has(moment.id) ? 'var(--accent)' : 'var(--ink)'}
-                fill={marked.has(moment.id) ? 'var(--accent)' : 'none'}
+                color={marked.has(moment.id) ? 'var(--ink-accent)' : 'var(--ink)'}
+                fill={marked.has(moment.id) ? 'var(--ink-accent)' : 'none'}
               />
             </button>
           </>

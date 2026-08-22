@@ -54,7 +54,7 @@ export function InstaHome({
           <button type="button" aria-label="이야기할 것" onClick={onOpenSaved} className="tap relative flex h-11 w-11 items-center justify-center">
             <Bookmark size={22} className="pen-icon" color="var(--ink)" fill="none" />
             {/* 인스타의 빨간 점과 같은 자리. 개수를 적지 않는다 -- 개수는 부채다. */}
-            <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />
+            <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full" style={{ background: 'var(--ink-accent)' }} />
           </button>
           <button type="button" aria-label="통화 모드" onClick={onOpenCall} className="tap flex h-11 w-11 items-center justify-center">
             <Phone size={21} className="pen-icon" color="var(--ink)" fill="none" />

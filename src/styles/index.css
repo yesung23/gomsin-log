@@ -82,6 +82,9 @@
  */
 @import "../fonts/hand/hand.css";
 
+/* 노트에 그린 인스타그램의 표면. 옛 토큰을 지우지 않고 더해지는 층이다. */
+@import "./paper.css";
+
 @theme inline {
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   /*

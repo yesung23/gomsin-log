@@ -265,7 +265,7 @@ export function InstaPlan({ military = true }: { military?: boolean }) {
                     on
                       ? {
                         color: 'var(--paper)',
-                        background: 'var(--accent)',
+                        background: 'var(--ink-accent)',
                         borderRadius: '60px 6px 66px 6px / 6px 66px 6px 60px',
                       }
                       : today
@@ -280,7 +280,7 @@ export function InstaPlan({ military = true }: { military?: boolean }) {
                   {day}
                 </span>
                 {mark && !selecting ? (
-                  <span className="print text-[9px] leading-none" style={{ color: 'var(--accent)' }}>
+                  <span className="print text-[9px] leading-none" style={{ color: 'var(--ink-accent)' }}>
                     {mark}
                   </span>
                 ) : (

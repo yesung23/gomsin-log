@@ -81,7 +81,7 @@ export function InstaSaved({ onClose, onCall }: { onClose?: () => void; onCall?:
                       onClick={() => setDone((current) => new Set(current).add(topic.id))}
                       className="tap flex min-h-11 w-11 items-center justify-center"
                     >
-                      <Bookmark size={19} className="pen-icon" color="var(--accent)" fill="var(--accent)" />
+                      <Bookmark size={19} className="pen-icon" color="var(--ink-accent)" fill="var(--ink-accent)" />
                     </button>
                   </div>
                   <div className="ink-rule mt-3" />

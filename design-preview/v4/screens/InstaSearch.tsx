@@ -111,7 +111,7 @@ function Results({ result }: { result: ReturnType<typeof searchRecords> }) {
                   {result.kind === 'date' ? match.snippet : (
                     <>
                       {before}
-                      <mark style={{ background: 'transparent', color: 'var(--accent)', fontWeight: 700 }}>
+                      <mark style={{ background: 'transparent', color: 'var(--ink-accent)', fontWeight: 700 }}>
                         {hit}
                       </mark>
                       {after}

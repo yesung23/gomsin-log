@@ -81,20 +81,29 @@ export function PhotoFrame({
   ratio = '4 / 5',
   label,
   fit = false,
+  taped = true,
 }: {
   ratio?: string;
   label?: string;
   fit?: boolean;
+  /** 마스킹테이프로 붙였는가. 격자처럼 촘촘한 곳에서는 끈다 -- 조각이 서로 겹친다. */
+  taped?: boolean;
 }) {
   return (
     <div
-      className="photo-frame mx-auto flex items-center justify-center"
+      className="photo-frame relative mx-auto flex items-center justify-center"
       style={
         fit
           ? { aspectRatio: ratio, maxHeight: '100%', maxWidth: '100%', height: '100%' }
           : { aspectRatio: ratio, width: '100%' }
       }
     >
+      {taped ? (
+        <>
+          <span className="tape tape-tl" aria-hidden="true" />
+          <span className="tape tape-br" aria-hidden="true" />
+        </>
+      ) : null}
       <span className="print text-[11px] tracking-wide" style={{ color: 'var(--ink-faint)' }}>
         {label ?? '사진'}
       </span>

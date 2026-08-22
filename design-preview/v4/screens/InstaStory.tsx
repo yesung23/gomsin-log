@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { X, Bookmark, Heart, Stamp as StampIcon } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Bookmark, Heart, Stamp as StampIcon } from 'lucide-react';
 import { InkCircle, PenFace, PhotoFrame } from './common';
 import { FIXTURE_RECORDS, TODAY } from '../fixtures';
 import type { PreviewRecord } from '../fixtures';
@@ -24,6 +24,16 @@ import type { PreviewRecord } from '../fixtures';
  * 처음에는 접근성 때문에 이름 있는 화살표를 뒀는데 그건 문제를 잘못 푼 것이었다 --
  * **탭 영역도 이름을 가질 수 있다.** 좌우를 `aria-label` 붙은 버튼으로 두면 인스타의
  * 제스처와 스크린리더 지원을 둘 다 얻고, 키보드 좌우도 그대로 동작한다.
+ *
+ * ## 닫기 버튼이 없다
+ *
+ * 인스타의 스토리는 **아래로 끌어서** 닫는다 -- 끄는 만큼 카드가 작아지다가 놓으면
+ * 빠져나간다. ✕ 를 두면 화면 구석에 상시로 무언가가 떠 있고, 그건 이 화면이 하려는
+ * 일(상대의 하루에 잠깐 들어가 있는 것)과 어긋난다.
+ *
+ * 대신 **보이지 않는 닫기 버튼**을 남긴다. 끌기는 스크린리더 사용자가 발견할 수도
+ * 수행할 수도 없는 제스처이므로, 그들에게는 이름이 있는 컨트롤이 있어야 한다.
+ * 키보드는 `Esc` 로 닫는다. 보이는 것만 없앴지 나가는 길을 없앤 것이 아니다.
  *
  * ## 자동으로 넘어가지 않는다
  *
@@ -88,9 +98,58 @@ export function InstaStory({
     });
   };
 
+  /*
+    아래로 끌어서 닫기.
+
+    끄는 만큼 카드가 작아지고 흐려진다 -- 얼마나 더 끌어야 닫히는지를 화면이 말한다.
+    임계값 전에 놓으면 제자리로 돌아온다.
+
+    `dragged` 를 두는 이유: 끌고 놓는 동작은 좌우 탭 영역에서도 시작될 수 있는데, 그때
+    `click` 이 함께 발생해 다음 장으로 넘어가 버린다. 끌었으면 그 클릭을 무시한다.
+  */
+  const dragStart = useRef<number | null>(null);
+  const dragged = useRef(false);
+  const [dragY, setDragY] = useState(0);
+
+  const DISMISS_AT = 120;
+  const progress = Math.min(dragY / (DISMISS_AT * 2), 1);
+
+  const onPointerDown = (event: React.PointerEvent) => {
+    dragStart.current = event.clientY;
+    dragged.current = false;
+  };
+
+  const onPointerMove = (event: React.PointerEvent) => {
+    if (dragStart.current === null) return;
+    const delta = event.clientY - dragStart.current;
+    // 위로 끄는 것은 무시한다. 스토리에는 위로 갈 곳이 없다.
+    if (delta <= 0) { setDragY(0); return; }
+    if (delta > 6) dragged.current = true;
+    setDragY(delta);
+  };
+
+  const endDrag = () => {
+    const shouldClose = dragY > DISMISS_AT;
+    dragStart.current = null;
+    setDragY(0);
+    if (shouldClose) onClose?.();
+  };
+
   return (
     <div
       className="notebook relative flex h-full flex-col"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      style={{
+        transform: dragY > 0 ? `translateY(${dragY * 0.5}px) scale(${1 - progress * 0.12})` : undefined,
+        opacity: dragY > 0 ? 1 - progress * 0.35 : undefined,
+        borderRadius: dragY > 0 ? 26 : undefined,
+        // 끄는 동안에는 전환을 끈다 -- 손가락을 따라와야지 뒤늦게 따라오면 안 된다.
+        transition: dragStart.current === null ? 'transform 220ms ease, opacity 220ms ease' : 'none',
+        touchAction: 'pan-y',
+      }}
       onKeyDown={(event) => {
         if (event.key === 'ArrowRight') { event.preventDefault(); go(index + 1); }
         else if (event.key === 'ArrowLeft') { event.preventDefault(); go(index - 1); }
@@ -114,8 +173,14 @@ export function InstaStory({
           {moment ? moment.time : '오늘'}
         </span>
         <span className="flex-1" />
-        <button type="button" aria-label="스토리 닫기" onClick={onClose} className="tap flex h-11 w-11 items-center justify-center">
-          <X size={22} className="pen-icon" color="var(--ink)" />
+        {/*
+          보이지 않는 닫기.
+
+          끌기는 스크린리더 사용자가 발견할 수도 수행할 수도 없는 제스처다. `sr-only` 로
+          두면 화면에는 없고 보조기술에는 있으며, 키보드로 Tab 하면 포커스가 잡힌다.
+        */}
+        <button type="button" onClick={onClose} className="sr-only focus:not-sr-only focus:absolute focus:right-3 focus:top-3">
+          스토리 닫기
         </button>
       </header>
 
@@ -131,12 +196,14 @@ export function InstaStory({
         넘기는 일이 훨씬 잦기 때문이다.
       */}
       <button
-        type="button" aria-label="이전 순간" onClick={() => go(index - 1)} disabled={index === 0}
+        type="button" aria-label="이전 순간"
+        onClick={() => { if (dragged.current) return; go(index - 1); }}
+        disabled={index === 0}
         className="absolute left-0 top-20 bottom-20 z-0 w-1/3 disabled:pointer-events-none"
       />
       <button
         type="button" aria-label={last ? '스토리 닫기' : '다음 순간'}
-        onClick={() => (last ? onClose?.() : go(index + 1))}
+        onClick={() => { if (dragged.current) return; if (last) onClose?.(); else go(index + 1); }}
         className="absolute right-0 top-20 bottom-20 z-0 w-2/3"
       />
 
@@ -295,8 +362,9 @@ function DaySummary({
           </li>
         ))}
       </ul>
-      <p className="print pt-5 text-[11px]" style={{ color: 'var(--ink-soft)' }}>
+      <p className="print whitespace-pre-line pt-5 text-[11px] leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
         {rest > 0 ? `줄을 누르면 그 순간으로 가요 · 넘기면 ${rest}개 더 있어요` : '줄을 누르면 그 순간으로 가요'}
+        {'\n'}아래로 끌면 닫혀요
       </p>
     </div>
   );

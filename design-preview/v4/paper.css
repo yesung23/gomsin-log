@@ -126,6 +126,33 @@
     repeating-linear-gradient(45deg, transparent 0 11px, rgb(0 0 0 / 2.5%) 11px 12px);
 }
 
+/*
+ * 마스킹테이프.
+ *
+ * 다이어리에 사진을 붙일 때 쓰는 반투명 종이테이프다. 사진 모서리에 짧은 조각이 비스듬히
+ * 얹히면 화면 위에 떠 있던 사진이 **공책에 붙인 사진**이 된다 -- 이 앱에서 사진이
+ * 스크랩북의 물건처럼 읽히게 하는 가장 싼 방법이고, 이미지 에셋도 필요 없다.
+ *
+ * 두 조각을 서로 반대 모서리에 어긋난 각도로 둔다. 네 모서리를 다 붙이면 액자가 되고,
+ * 각도가 같으면 인쇄된 장식이 된다.
+ */
+.tape {
+  position: absolute;
+  width: 62px;
+  height: 20px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+  pointer-events: none;
+}
+
+[data-theme='dark'] .tape {
+  background: color-mix(in srgb, var(--ink) 13%, transparent);
+}
+
+.tape-tl { top: -9px; left: -14px; transform: rotate(-38deg); }
+.tape-br { bottom: -9px; right: -14px; transform: rotate(-38deg); }
+
 .tap {
   transition: opacity 120ms ease, transform 120ms ease;
   -webkit-tap-highlight-color: transparent;

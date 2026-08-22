@@ -8,6 +8,7 @@ import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { CoupleStatsRow } from '@/components/CoupleStatsRow';
+import { CoupleHighlights } from '@/components/CoupleHighlights';
 import { AppBar } from '@/components/ui/AppBar';
 import { Heart, CalendarDays, Plane, ChevronRight, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -210,6 +211,21 @@ export function UsPage() {
             military={state.profile.military}
             todayStr={todayStr}
             onProtectionTap={() => navigate('/legal/privacy')}
+          />
+        ) : null}
+
+        {/*
+          하이라이트.
+
+          인스타는 과거만 담지만 이 앱은 기다림이 제품이라 맨 뒤에 아직 오지 않은 것을
+          하나 흐리게 놓는다. 도착하면 색이 들어오고 그날의 스토리가 담긴다.
+        */}
+        {connected ? (
+          <CoupleHighlights
+            anniversaryDate={anniversaryDate}
+            events={events}
+            military={state.profile.military}
+            todayStr={todayStr}
           />
         ) : null}
 

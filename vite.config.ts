@@ -114,6 +114,23 @@ function injectServiceWorkerManifest(): Plugin {
         buildHash.update(file);
         buildHash.update(readFileSync(resolve(outputDirectory, file)));
       }
+      /*
+       * A font that got inlined is a font that is downloaded on every load, which
+       * silently undoes the `unicode-range` slicing. Nothing else in the pipeline
+       * would notice -- the build succeeds, the page renders, and only a network
+       * tab shows it. So fail here instead.
+       */
+      for (const file of listFiles(assetsDirectory)) {
+        if (!file.endsWith('.css')) continue;
+        const contents = readFileSync(resolve(assetsDirectory, file), 'utf8');
+        if (/url\(\s*["']?data:(?:font|application\/font)/.test(contents)) {
+          throw new Error(
+            `A font was inlined into ${file}. Fonts must stay separate files so `
+            + 'unicode-range can keep them off the critical path '
+            + '(see build.assetsInlineLimit).',
+          );
+        }
+      }
       const buildId = buildHash.digest('hex').slice(0, 12);
       const serviceWorkerPath = resolve(outputDirectory, 'sw.js');
       const serviceWorker = readFileSync(serviceWorkerPath, 'utf8');
@@ -179,6 +196,24 @@ export default defineConfig({
     failOnEmptyChunks(() => emptyChunkWarnings),
   ],
   build: {
+    /*
+     * Never inline a font, whatever its size.
+     *
+     * Vite inlines any asset under 4 kB as a base64 data URI. That is right for a
+     * small icon and wrong for a font slice: the handwriting face is cut into 187
+     * `unicode-range` slices precisely so a browser fetches only the few a screen
+     * actually renders, and a slice living inside the stylesheet is fetched on
+     * every single load no matter what its range says.
+     *
+     * It bit exactly one slice -- `hand-186`, the 12 rarest syllables at 3.7 kB --
+     * which is the worst possible one to make unconditional. Base64 also adds ~33%,
+     * so the cost was paid twice.
+     *
+     * `false` means "emit as a file"; `undefined` leaves every other asset on the
+     * default rule.
+     */
+    assetsInlineLimit: (filePath: string) =>
+      (/\.woff2?$/.test(filePath) ? false : undefined),
     rollupOptions: {
       /**
        * An entry in `manualChunks` that no module in the eager graph actually

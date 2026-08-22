@@ -59,10 +59,48 @@
  *
  * If it is ever revisited, the finding to start from is that finding -- not the
  * licence, which was fine (SIL OFL 1.1).
+ *
+ * 2026-08-22: revisited, and both findings still hold. What changed is where the
+ * handwriting is allowed to land, which is what makes it pass this time.
+ *
+ *   READABILITY -- the 2026-08-09 attempt put handwriting on the interface. It now
+ *   goes only on what a PERSON WROTE (`DESIGN_V2` 손글씨 whitelist, enforced by
+ *   src/lib/handwritingScope.test.ts). Time, counts, buttons, settings and every
+ *   legal or security sentence stay Pretendard, so a late or failed font leaves
+ *   the app fully legible -- and a person who cannot read it can switch it off.
+ *
+ *   588 kB -- that figure was a single subset file, and it is still right: KS X
+ *   1001's 2,350 syllables measure 532 kB in woff2. What the comparison missed is
+ *   that a screen never needs 2,350 syllables. Cut frequency-first into 60-glyph
+ *   unicode-range slices, a real screen pulls 81-105 kB (measured, not estimated;
+ *   scripts/fonts/ builds them and prints the simulation). Bigger slices are
+ *   WORSE, which is the counter-intuitive part: 50 unique syllables scattered
+ *   across ranks 0-600 drag whole 300-glyph slices in with them.
+ *
+ * The face is 나눔손글씨 세화체 (Nanum SeHwaCe), Regular only -- so nothing here
+ * may synthesise weight.
  */
+@import "../fonts/hand/hand.css";
 
 @theme inline {
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  /*
+   * 사람이 쓴 글의 서체. 앱이 하는 말(`--font-sans`)과 구분된다.
+   *
+   * fallback이 진짜 fallback이다: 슬라이스가 늦거나 실패해도 문장은 Pretendard로 즉시
+   * 읽힌다. 손글씨가 본문에만 붙기 때문에 그 실패가 화면을 깨지 않는다.
+   */
+  --font-hand: "Gomsin Hand", var(--font-sans);
+  /*
+   * 손글씨의 x-height가 작아 같은 px에서 더 작아 보이는 것을 보정한다.
+   *
+   * 새 폰트 크기 단계를 만들지 않으려고 배율로 둔다 -- 7단계 스케일은 그대로 있고
+   * `.hand-text`가 `calc(1em * ...)`으로만 곱한다. 단계를 늘리면 typeScale.test.ts와
+   * 싸우게 되고, 그 싸움은 결국 가드에 예외를 뚫는 것으로 끝난다.
+   *
+   * 잠정값이다. 390px 실기기에서 5줄 본문을 읽혀 확정한다(V4-0).
+   */
+  --font-hand-scale: 1.15;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -464,6 +502,35 @@
   --success-surface: oklch(0.25 0.04 155);
 }
 
+@layer components {
+  /*
+   * 사람이 쓴 글.
+   *
+   * 유틸리티가 아니라 클래스 하나인 이유는 강제 가능성이다. `font-hand` 같은 유틸리티로
+   * 흩뿌리면 어디에 붙었는지 셀 수 없고, 화이트리스트가 문서 안의 희망사항이 된다.
+   * 이 클래스 하나만 있으면 src/lib/handwritingScope.test.ts 가 전수로 셀 수 있다.
+   */
+  .hand-text {
+    font-family: var(--font-hand);
+    font-size: calc(1em * var(--font-hand-scale));
+    /* 세화체는 Regular 하나뿐이다. 합성 굵기는 손글씨 획을 뭉갠다. */
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  /*
+   * 손글씨 끄기.
+   *
+   * 취향 설정이 아니라 접근성 장치다. 손글씨는 저시력·난독 사용자에게 벽이 될 수 있고,
+   * 이 앱을 볼 사람이 커플 둘만은 아니다. 크기도 함께 되돌린다 -- 배율만 남으면 Pretendard가
+   * 1.15배로 그려져 스케일 밖의 여덟 번째 크기가 된다.
+   */
+  [data-hand='off'] .hand-text {
+    font-family: var(--font-sans);
+    font-size: 1em;
+  }
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
@@ -474,6 +541,40 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+  /*
+   * 종이 결.
+   *
+   * 팔레트를 건드리지 않는다. `--cream`은 이미 hue 18의 따뜻한 종이면이고 `--card`는 그 위에
+   * 놓인 흰 종이 조각이며, 그 대비가 이 앱의 종이 은유 그 자체다(--card 주석 참조). 카드를
+   * 따뜻하게 만드는 변경은 2026-08-09에 이미 시도되고 되돌려졌고 themeTokens.test.ts가
+   * 그 값을 리터럴로 단언한다. 그러니 여기서 더할 것은 색이 아니라 질감뿐이다.
+   *
+   * 이미지 에셋을 쓰지 않는다 -- 번들 비용이 들고, CSP의 img-src를 건드리며, dark에서 두
+   * 번째 파일이 필요해진다. 그라디언트 두 겹이면 충분하다.
+   *
+   * 카드 위에는 얹지 않는다. body에만 있으므로 카드는 결이 없는 흰 종이로 남는다.
+   *
+   * 1.2% 이하로 유지한다. 이 위에 글자가 놓이므로 값을 올리면 e2e/tokenContrast.spec.ts가
+   * 재는 대비가 흔들린다.
+   */
+  body {
+    background-image:
+      repeating-linear-gradient(
+        0deg,
+        color-mix(in oklch, var(--color-foreground) 1.2%, transparent) 0 1px,
+        transparent 1px 3px
+      ),
+      repeating-linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--color-foreground) 0.8%, transparent) 0 1px,
+        transparent 1px 4px
+      );
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    body {
+      background-image: none;
+    }
   }
   /*
    * Touch hygiene, applied to everything the user presses.

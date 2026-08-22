@@ -1,4 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import {
+  applyHandwritingAttribute,
+  loadHandwritingEnabled,
+} from '@/lib/handwritingPreference';
 import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
@@ -269,6 +273,19 @@ export function App() {
     });
     return () => { disposed = true; dispose?.(); };
   }, []);
+
+  /*
+    손글씨를 켤지 끌지는 그 사람의 눈과 그 기기의 화면에 관한 값이므로 계정별 로컬 설정이다.
+    `<html>`에 `data-hand`로 반영하고, 켬일 때는 속성을 아예 달지 않는다 -- 켬이 기본이라
+    첫 페인트가 이 효과를 기다리지 않는다.
+
+    계정이 바뀌면 다시 읽는다. 같은 기기를 두 사람이 쓸 때 한쪽의 선택이 다른 쪽에 남으면
+    사용자가 하지 않은 설정이 적용된 것으로 보인다.
+  */
+  const viewerId = state.authenticatedUser?.id || state.profile.id || '';
+  useEffect(() => {
+    applyHandwritingAttribute(loadHandwritingEnabled(viewerId));
+  }, [viewerId]);
 
   if (!isReady) {
     return (

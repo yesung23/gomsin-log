@@ -386,9 +386,16 @@ describe('role-aware home widgets', () => {
      * must not precede the thing they describe. `call_briefing` still leads the
      * described surfaces, and `partner_day` still precedes the three widgets that
      * merely describe it.
+     *
+     * FIFTH MOVE (2026-08-22): `paper_feed` goes last, and it is not a fifth
+     * description either -- it holds a DIFFERENT PERIOD. Today lives in the story,
+     * yesterday-onward lives in the feed, and last month lives in 우리. Nothing
+     * appears in two places at once, which is the rule that keeps the 2026-08-20
+     * conversational home from recurring (its summary card repeated the bubble
+     * directly beneath it).
      */
     expect(HOME_CORE_BY_ROLE.soldier).toEqual([
-      'story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word',
+      'story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word', 'paper_feed',
     ]);
     // 설명이 설명되는 것보다 앞설 수 없다는 것이 이 단언의 본체다.
     expect(HOME_CORE_BY_ROLE.soldier.indexOf('call_briefing'))

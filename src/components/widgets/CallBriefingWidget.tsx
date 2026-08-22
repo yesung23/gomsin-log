@@ -83,7 +83,17 @@ export function CallBriefingWidget() {
       subjectId: recordId,
     });
     setHighlightedRecordId(recordId);
-    navigate(`/record?record=${recordId}`);
+    /*
+      줄에서 스토리의 그 순간으로.
+
+      전에는 기록 상세로 바로 갔다. 정확했지만 하루의 흐름이 끊겼다 -- 한 건을 읽고 나면
+      나머지로 돌아올 길이 뒤로 가기뿐이었다. 스토리로 들어가면 그 순간에서 시작해 계속
+      넘길 수 있고, 카드마다 `원본 보기`가 있으므로 상세로 가는 길도 그대로 남는다.
+
+      `?at=`은 `recordId`다. 정확한 원본 계약(§4.2)은 여기서도 인덱스가 아니라 id로
+      지킨다 -- 그 기록이 사라졌다면 스토리가 부재 카드를 그리고 대체하지 않는다.
+    */
+    navigate(`/story/partner?at=${recordId}`);
   };
 
   const markCallComplete = () => {

@@ -93,8 +93,8 @@ export type WidgetDef = {
  * widget now would be offering to remove the one thing that screen is for.
  */
 export const HOME_CORE_BY_ROLE: Record<Role, readonly string[]> = {
-  gomsin: ['story_rail', 'today_word', 'partner_day', 'talk_about_list'],
-  soldier: ['story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word'],
+  gomsin: ['story_rail', 'today_word', 'partner_day', 'talk_about_list', 'paper_feed'],
+  soldier: ['story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word', 'paper_feed'],
 };
 
 /**
@@ -108,8 +108,12 @@ export const HOME_CORE_BY_ROLE: Record<Role, readonly string[]> = {
  * 레일 아래의 순서는 그대로 역할별이며, 곰신에게는 컴포저가, 군화에게는 요약이 먼저 온다.
  * 달라진 것은 그 위에 두 사람이 공유하는 표면이 하나 생겼다는 것뿐이다.
  *
- * `story_rail`은 `call_briefing`과 마찬가지로 레지스트리 밖이다. 재배치할 수 있었던 적이
- * 없고, 항목을 주면 제거를 제안하는 셈이 된다.
+ * `story_rail`과 `paper_feed`는 `call_briefing`과 마찬가지로 레지스트리 밖이다. 재배치할
+ * 수 있었던 적이 없고, 항목을 주면 제거를 제안하는 셈이 된다.
+ *
+ * `paper_feed`가 맨 아래인 것도 시간 때문이다. 위로 갈수록 지금이고 아래로 갈수록 쌓인
+ * 것이다 -- 레일이 오늘, 그 아래가 오늘의 맥락, 지면이 어제부터, 그리고 `우리` 탭이
+ * 지난 달을 소유한다.
  */
 
 export function isHomeCore(id: string, role: Role): boolean {

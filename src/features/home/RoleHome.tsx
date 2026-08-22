@@ -31,6 +31,7 @@ import { AddWidgetBottomSheet } from '@/components/widgets/AddWidgetBottomSheet'
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { CallBriefingWidget } from '@/components/widgets/CallBriefingWidget';
 import { StoryRailWidget } from '@/components/widgets/StoryRailWidget';
+import { PaperFeedWidget } from '@/components/widgets/PaperFeedWidget';
 
 /**
  * The home screen, shaped by what this person came here to do.
@@ -130,7 +131,9 @@ export function RoleHome() {
           ? CallBriefingWidget
           : id === 'story_rail'
             ? StoryRailWidget
-            : WIDGET_REGISTRY[id]?.component,
+            : id === 'paper_feed'
+              ? PaperFeedWidget
+              : WIDGET_REGISTRY[id]?.component,
       }))
       .filter((entry): entry is { id: string; Component: NonNullable<typeof entry.Component> } =>
         Boolean(entry.Component)),

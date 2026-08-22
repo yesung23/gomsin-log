@@ -60,15 +60,26 @@ export function InstaStory({ onClose }: { onClose?: () => void }) {
         </button>
       </header>
 
-      <div className="flex flex-1 flex-col justify-center gap-4 px-5 pb-2">
-        {index % 2 === 0 ? <PhotoFrame ratio="4 / 5" /> : null}
+      {/*
+        미디어는 남는 공간에 맞춘다.
+
+        인스타의 스토리는 화면을 채우되 하단 컨트롤을 밀어내지 않는다. `min-h-0` 이 없으면
+        flex 자식이 콘텐츠 크기 아래로 줄지 않아서, 사진 틀이 화면을 다 먹고 액션 줄과
+        좌우 이동이 화면 밖으로 밀린다 -- 실제로 그렇게 만들었다가 스크린샷에서 잡혔다.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col justify-center gap-3 px-5 pb-2">
+        {index % 2 === 0 ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <PhotoFrame ratio="4 / 5" fit />
+          </div>
+        ) : null}
         {/*
           사진이 없으면 글이 화면의 주인공이 된다.
 
           사진 자리를 비워 두면 구멍이 되고, 글이 그 자리를 차지하면 글이 주인공인
           하루가 된다. 사진을 잘 올리지 않는 커플에게 구멍이 생기지 않는 이유다.
         */}
-        <p className="hand text-[17px] whitespace-pre-wrap break-keep" style={{ color: 'var(--ink)' }}>
+        <p className="hand shrink-0 overflow-y-auto text-[17px] whitespace-pre-wrap break-keep" style={{ color: 'var(--ink)' }}>
           {moment.log}
         </p>
       </div>

@@ -112,7 +112,7 @@ export function InstaCompose({ onClose }: { onClose?: () => void }) {
           명시적 행위를 요구한다. 기본값으로 하나 골라 두면 그건 명시적 행위가 아니다.
         */}
         <p className="print pb-2.5 text-[12px]" style={{ color: 'var(--ink-soft)' }}>
-          지금 마음 (선택)
+          오늘 마음 (선택)
         </p>
         <div className="flex justify-between" role="radiogroup" aria-label="지금 마음">
           {EMOTION_ORDER.map((item) => {

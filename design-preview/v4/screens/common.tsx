@@ -70,10 +70,31 @@ export function PenFace({ size = 40, tone = 'a' }: { size?: number; tone?: 'a' |
   );
 }
 
-/** 사진이 올 자리. 프리뷰에는 실제 미디어가 없으므로 연필로 그린 틀이 온다. */
-export function PhotoFrame({ ratio = '4 / 5', label }: { ratio?: string; label?: string }) {
+/**
+ * 사진이 올 자리. 프리뷰에는 실제 미디어가 없으므로 연필로 그린 틀이 온다.
+ *
+ * `fit`은 스토리처럼 **남는 공간에 맞춰야 하는** 곳에서 쓴다. 인스타의 스토리는 미디어가
+ * 화면에 맞춰지지 하단 컨트롤을 밀어내지 않는다 -- 처음에 비율만 주고 두었더니 사진 틀이
+ * 화면을 다 먹고 액션 줄과 좌우 이동이 화면 밖으로 밀렸다.
+ */
+export function PhotoFrame({
+  ratio = '4 / 5',
+  label,
+  fit = false,
+}: {
+  ratio?: string;
+  label?: string;
+  fit?: boolean;
+}) {
   return (
-    <div className="photo-frame flex w-full items-center justify-center" style={{ aspectRatio: ratio }}>
+    <div
+      className="photo-frame mx-auto flex items-center justify-center"
+      style={
+        fit
+          ? { aspectRatio: ratio, maxHeight: '100%', maxWidth: '100%', height: '100%' }
+          : { aspectRatio: ratio, width: '100%' }
+      }
+    >
       <span className="print text-[11px] tracking-wide" style={{ color: 'var(--ink-faint)' }}>
         {label ?? '사진'}
       </span>

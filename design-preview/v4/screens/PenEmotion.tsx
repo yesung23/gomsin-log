@@ -34,14 +34,29 @@ export const EMOTION_ORDER: readonly BasicEmotion[] = [
   'happiness', 'surprise', 'fear', 'disgust', 'anger', 'sadness',
 ];
 
-/** 앱의 라벨을 그대로 쓴다. 프리뷰가 다른 말을 쓰면 그것부터 앱과 갈라진다. */
+/**
+ * 라벨은 일상어다.
+ *
+ * 앱의 `BASIC_EMOTION_LABEL`은 `행복·놀람·공포·혐오·분노·슬픔`이다. 에크만식 분류로는
+ * 정확하지만 **커플 일기에 `혐오`와 `공포`는 세다.** "오늘 어땠어?"에 혐오를 고르는
+ * 사람은 없고, 있다면 그건 앱이 시킨 말이다.
+ *
+ * 이 앱은 상대에게 하루를 전하는 곳이지 감정을 분류하는 곳이 아니다. 그래서 분류명이
+ * 아니라 **실제로 쓰는 말**을 쓴다 -- `별로였어`가 `혐오`보다 사람이 하는 말이다.
+ *
+ * 키는 그대로 둔다. 감정 엔진·색 토큰·흐름 분석이 전부 이 키를 쓰므로, 바뀌는 것은
+ * 사람에게 보이는 문자열뿐이다.
+ *
+ * **앱에도 같은 변경이 필요하다.** `src/lib/basicEmotions.ts`의 `BASIC_EMOTION_LABEL`을
+ * 바꿔야 하고, 흐름 서술(`속상했어 → 좋았어`)과 감정 엔진 테스트가 함께 움직인다.
+ */
 export const EMOTION_LABEL: Record<BasicEmotion, string> = {
-  happiness: '행복',
-  surprise: '놀람',
-  fear: '공포',
-  disgust: '혐오',
-  anger: '분노',
-  sadness: '슬픔',
+  happiness: '좋았어',
+  surprise: '놀랐어',
+  fear: '걱정됐어',
+  disgust: '별로였어',
+  anger: '화났어',
+  sadness: '속상했어',
 };
 
 /** 앱의 감정 토큰. 새 색을 만들지 않는다. */

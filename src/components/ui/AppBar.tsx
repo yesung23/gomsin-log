@@ -60,20 +60,36 @@ export function AppBar({
   return (
     <header
       className={cn(
-        'flex items-center gap-2 px-4 pt-3 pb-3',
-        sticky && 'sticky top-0 z-40 bg-background/85 backdrop-blur-xl border-b border-border',
+        /*
+          공책 위의 헤더 (2026-08-22, §5).
+
+          `backdrop-blur` 를 걷어냈다. 괘선 위에서 흐려지면 종이가 젖은 것처럼 읽힌다.
+          대신 종이색으로 덮는다 -- 이 바만 종이를 가리고 나머지는 그 위에 그려진다.
+
+          아래 경계는 실선이 아니라 손으로 그은 선(`ink-rule`)이다. 자로 그은 1px 은
+          이 화면에서 유일한 기계 선이 되어 눈에 띈다.
+        */
+        'relative flex items-center gap-2 px-4 pt-3 pb-3',
+        sticky && 'sticky top-0 z-40',
         className,
       )}
+      style={sticky ? { background: 'var(--paper)', ...props.style } : props.style}
       {...props}
     >
+      {sticky ? (
+        <span
+          aria-hidden="true"
+          className="ink-rule absolute inset-x-0 bottom-0"
+        />
+      ) : null}
       {onBack && (
         <button
           type="button"
           onClick={onBack}
           aria-label={backLabel}
-          className="press-response shrink-0 -ml-2 min-h-11 min-w-[44px] flex items-center justify-center rounded-control text-foreground"
+          className="press-response shrink-0 -ml-2 min-h-11 min-w-[44px] flex items-center justify-center rounded-control"
         >
-          <ChevronLeft size={22} aria-hidden="true" />
+          <ChevronLeft size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
         </button>
       )}
 

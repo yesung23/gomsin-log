@@ -175,7 +175,7 @@ describe('briefing.ts', () => {
           {
             sequence: 2,
             group: 'joy',
-            displayLabel: '행복',
+            displayLabel: '기뻤어',
             source: 'user_confirmed',
             visibility: 'shared',
           },
@@ -193,8 +193,8 @@ describe('briefing.ts', () => {
 
     expect(generateEmotionFlowBriefing(records)).toEqual({
       recordId: 'shared-emotion',
-      flowText: '오늘의 마음: 행복',
-      labels: ['행복'],
+      flowText: '오늘의 마음: 기뻤어',
+      labels: ['기뻤어'],
     });
   });
 

@@ -113,7 +113,7 @@ function useReview(
     });
   }, []);
 
-  // Correcting a feeling IS answering it: someone who replaces 놀람 with 분노 has
+  // Correcting a feeling IS answering it: someone who replaces 놀랐어 with 화났어 has
   // said more about what they felt than someone who tapped agree.
   const changeEmotion = useCallback((id: string, basic: BasicEmotion) => {
     setOverrides((current) => ({ ...current, [id]: basic }));
@@ -265,7 +265,7 @@ export function applyCorrections(
       id: candidate.id,
       sequence: index + 1,
       group: 'surprise',
-      displayLabel: '놀람',
+      displayLabel: '놀랐어',
     };
     return { ...applyBasicEmotion(base, candidate.basic), sequence: index + 1 };
   });

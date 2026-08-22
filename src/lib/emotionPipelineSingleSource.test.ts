@@ -105,14 +105,14 @@ describe('exactly one pipeline reads emotions out of text', () => {
  * re-expressed somewhere is coverage silently lost.
  */
 describe('PORTED from the retired engine: the same guarantees still hold', () => {
-  it('reads an explicit happy expression as 행복', () => {
-    expect(extractEmotionCandidates('오늘 진짜 행복했어')[0]?.basic).toBe('happiness');
+  it('reads an explicit happy expression as 기뻤어', () => {
+    expect(extractEmotionCandidates('오늘 진짜 기뻤어했어')[0]?.basic).toBe('happiness');
   });
 
   it('keeps a complex flow in the order it was written', () => {
     // The retired engine's own fixture. It read 속상함 → joy → 그리움; the six-emotion
-    // vocabulary says 슬픔 → 행복 → 행복, and 행복 → 행복 collapses, so the shape is
-    // 슬픔 → 행복. Same story, one fewer redundant beat.
+    // vocabulary says 속상했어 → 기뻤어 → 기뻤어, and 기뻤어 → 기뻤어 collapses, so the shape is
+    // 속상했어 → 기뻤어. Same story, one fewer redundant beat.
     const flow = extractEmotionCandidates(
       '알바에서 진상 손님을 만나 속상했는데, 친구와 치킨 먹고 기분이 나아졌어. 우리가 함께 왔던 곳이라 네 생각이 났어',
     );
@@ -120,8 +120,8 @@ describe('PORTED from the retired engine: the same guarantees still hold', () =>
   });
 
   it.each([
-    '오늘 하나도 안 행복해',
-    '오늘 기분이 별로 안 좋았어',
+    '오늘 하나도 안 기뻤어해',
+    '오늘 기분이 별로 안 기뻤어',
   ])('does not read joy out of negated text: %s', (text) => {
     expect(extractEmotionCandidates(text).some((c) => c.basic === 'happiness')).toBe(false);
   });
@@ -154,7 +154,7 @@ describe('PORTED from the retired engine: the same guarantees still hold', () =>
   });
 
   it('merges consecutive matches of the same feeling into one beat', () => {
-    expect(extractEmotionCandidates('오늘 기분 좋고 행복하고 신나고 즐거웠어')).toHaveLength(1);
+    expect(extractEmotionCandidates('오늘 기분 좋고 기뻤어하고 신나고 즐거웠어')).toHaveLength(1);
   });
 });
 

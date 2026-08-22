@@ -156,7 +156,13 @@ export function UsPage() {
           </div>
         }
       />
-      <div className="pb-28 px-5 pt-4 space-y-5">
+      {/*
+        우리가 공책 위로 옮겨졌다 (2026-08-22, §5).
+
+        하루 격자·요일 비정렬·조용한 칸은 전부 유지한다(§10). 이 탭은 **자동으로 쌓인
+        것을 보는 곳**이고, 손댄 것이 남는 곳은 `일기장` 이다(§5.5).
+      */}
+      <div className="notebook min-h-full pb-28 px-5 pt-4 space-y-5">
         {/* Profile */}
         <section className="flex flex-col items-center text-center py-3 space-y-2">
           {/*

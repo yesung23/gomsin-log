@@ -61,7 +61,7 @@ export interface EmotionCharacterProps {
  * can take the accent while the face keeps the ink.
  */
 const ART: Record<BasicEmotion, { body: string; face: ReactElement; accent: string }> = {
-  /* 행복 — round, tilted up, a sprout. The only one that grows something. */
+  /* 기뻤어 — round, tilted up, a sprout. The only one that grows something. */
   happiness: {
     body: 'M24 10c8.3 0 14 5.9 14 13.6S32.3 40 24 40s-14-4.7-14-12.4S15.7 10 24 10Z',
     accent: 'var(--emotion-happiness)',
@@ -76,7 +76,7 @@ const ART: Record<BasicEmotion, { body: string; face: ReactElement; accent: stri
       </>
     ),
   },
-  /* 놀람 — tall and narrow, lifted. Reads as "stood up suddenly". */
+  /* 놀랐어 — tall and narrow, lifted. Reads as "stood up suddenly". */
   surprise: {
     body: 'M24 7c7.4 0 12.5 6.4 12.5 15.4S31.4 41 24 41s-12.5-9.6-12.5-18.6S16.6 7 24 7Z',
     accent: 'var(--emotion-surprise)',
@@ -90,7 +90,7 @@ const ART: Record<BasicEmotion, { body: string; face: ReactElement; accent: stri
       </>
     ),
   },
-  /* 공포 — tapered to a point at the top, narrow shoulders, unsettled base. */
+  /* 걱정됐어 — tapered to a point at the top, narrow shoulders, unsettled base. */
   fear: {
     body: 'M24 8c5.6 3.4 11 8.8 11 16.2 0 8-4.9 12.8-11 12.8s-11-4.8-11-12.8C13 16.8 18.4 11.4 24 8Z',
     accent: 'var(--emotion-fear)',
@@ -109,7 +109,7 @@ const ART: Record<BasicEmotion, { body: string; face: ReactElement; accent: stri
       </>
     ),
   },
-  /* 혐오 — squat and wide, leaning away from the viewer. */
+  /* 별로였어 — squat and wide, leaning away from the viewer. */
   disgust: {
     body: 'M23 13c9.2-1.4 15 3.4 15 11.4C38 33 32 39 23.4 39 15 39 10 34 10 26.6 10 19 14.6 14.2 23 13Z',
     accent: 'var(--emotion-disgust)',
@@ -123,7 +123,7 @@ const ART: Record<BasicEmotion, { body: string; face: ReactElement; accent: stri
       </>
     ),
   },
-  /* 분노 — squared shoulders. The only silhouette in the set with corners. */
+  /* 화났어 — squared shoulders. The only silhouette in the set with corners. */
   anger: {
     body: 'M15 14h18a5 5 0 0 1 5 5v8c0 7.2-5.4 12-14 12s-14-4.8-14-12v-8a5 5 0 0 1 5-5Z',
     accent: 'var(--emotion-anger)',
@@ -137,7 +137,7 @@ const ART: Record<BasicEmotion, { body: string; face: ReactElement; accent: stri
       </>
     ),
   },
-  /* 슬픔 — light at the top, heavy at the bottom. It sinks. */
+  /* 속상했어 — light at the top, heavy at the bottom. It sinks. */
   sadness: {
     body: 'M24 9c7 0 12 4.4 12 11 0 8.8-3.4 20-12 20s-12-11.2-12-20c0-6.6 5-11 12-11Z',
     accent: 'var(--emotion-sadness)',

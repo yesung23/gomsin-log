@@ -127,7 +127,7 @@ describe('본문이 없는 순간', () => {
     const text = momentSummaryText(record({ log: '', attachments: [] }));
     expect(text).toBe('순간을 남겼어요');
     // 감정을 단정하거나 이야기를 만들지 않는다(§6.3).
-    expect(text).not.toMatch(/좋|슬프|힘들|행복|평온/);
+    expect(text).not.toMatch(/좋|슬프|힘들|기뻤어|평온/);
   });
 
   it('긴 본문은 자르되 원문에서 잘라낸다', () => {

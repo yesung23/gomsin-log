@@ -30,10 +30,10 @@ import type { EmotionCandidate } from '@/lib/emotionCandidates';
  *
  * ## Why it is not a smaller control
  *
- * A single "the app thinks you felt 행복" line with a checkmark would be shorter,
+ * A single "the app thinks you felt 기뻤어" line with a checkmark would be shorter,
  * but it hides the two things that make the reading judgeable: WHICH PHRASE it
  * came from, and that there may be a SEQUENCE. `ㅈ같았는데 ... 기분이 나아졌어` is
- * 분노 → 행복, and collapsing it to one feeling loses the shape of the day, which
+ * 화났어 → 기뻤어, and collapsing it to one feeling loses the shape of the day, which
  * is the part worth keeping.
  *
  * ## Timing

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { analyzeEmotionFlow } from '@/lib/emotionFlowAnalysis';
 import type { DailyRecord, EmotionFlowItem } from '@/types';
 import { Card } from '@/components/ui/Card';
+import { basicEmotionLabelOf } from '@/lib/basicEmotions';
 
 /**
  * Aggregated emotion flow for the records currently on screen.
@@ -80,7 +81,7 @@ export function EmotionFlowSummarySection({
           // is deliberately NOT copied, so it cannot reach the analysis or any
           // rendered string.
           group: item.group,
-          displayLabel: item.displayLabel,
+          displayLabel: basicEmotionLabelOf(item),
           source: item.source,
           sequence: items.length + 1,
         });

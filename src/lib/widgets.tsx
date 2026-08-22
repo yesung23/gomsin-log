@@ -92,9 +92,23 @@ export type WidgetDef = {
  * it was pinned by the home screen outside the widget list -- and making it a
  * widget now would be offering to remove the one thing that screen is for.
  */
+/**
+ * 홈에는 **게시물**이 오고, 상대의 하루는 레일 너머에 있다 (2026-08-22 재개정).
+ *
+ * `partner_day` 가 코어에서 빠졌다. 그 위젯은 §6.1의 (B) 원본 층 -- 시간 → 미디어 →
+ * 원문 -- 을 홈에 통째로 그렸고, **그러면 스토리에 들어갈 이유가 없다.** 이미 다 본
+ * 것의 목차가 요약이고, 스토리는 같은 것을 한 번 더 보여주는 곳이 된다. "같은 기록이
+ * 두 자리에 동시에 있지 않는다"는 §6.1의 규칙을 어긴 것도 이쪽이다.
+ *
+ * 이제 두 층이 모두 스토리 안에 있다 -- 첫 장이 요약, 옆으로 넘기면 순간들. 홈은
+ * 인스타의 홈이 그렇듯 **레일과 지면**이다. 스토리와 게시물은 별개다.
+ *
+ * 위젯 자체는 지우지 않았다. 코어에서 빠졌을 뿐이므로 원하는 사람은 더할 수 있다 --
+ * 코어가 아니라는 것과 존재하지 않는다는 것은 다르다.
+ */
 export const HOME_CORE_BY_ROLE: Record<Role, readonly string[]> = {
-  gomsin: ['story_rail', 'today_word', 'partner_day', 'talk_about_list', 'paper_feed'],
-  soldier: ['story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word', 'paper_feed'],
+  gomsin: ['story_rail', 'today_word', 'talk_about_list', 'paper_feed'],
+  soldier: ['story_rail', 'call_briefing', 'talk_about_list', 'today_word', 'paper_feed'],
 };
 
 /**

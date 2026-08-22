@@ -24,7 +24,7 @@ function flowItem(overrides: Partial<EmotionFlowItem> = {}): EmotionFlowItem {
   return {
     id: 'flow-1',
     group: 'joy',
-    displayLabel: '행복',
+    displayLabel: '기뻤어',
     sequence: 1,
     source: 'user_confirmed',
     visibility: 'shared',
@@ -283,7 +283,7 @@ describe('RecordPage partner privacy sanitisation', () => {
         authorRole: 'soldier',
         time: '11:00',
         emotionFlow: [
-          flowItem({ id: 'shared-1', group: 'joy', displayLabel: '행복', sequence: 1 }),
+          flowItem({ id: 'shared-1', group: 'joy', displayLabel: '기뻤어', sequence: 1 }),
           flowItem({
             id: 'private-1',
             group: 'shame',
@@ -300,7 +300,7 @@ describe('RecordPage partner privacy sanitisation', () => {
     // Only the shared label survives `visibleRecordsForViewer`. It now appears in
     // more than one place (the record's insight card AND the derived period
     // summary), so assert presence by count rather than uniqueness.
-    expect(screen.getAllByText('행복').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('기뻤어').length).toBeGreaterThan(0);
     expect(screen.queryByText(/부끄러움/)).not.toBeInTheDocument();
     // The author-only item must not leak through the aggregated period summary
     // either -- it reads the same viewer-filtered records.
@@ -402,15 +402,15 @@ describe('RecordPage detail insight card', () => {
       record({
         emotionFlow: [
           flowItem({ id: 'a', group: 'sadness', displayLabel: '속상함', sequence: 1 }),
-          flowItem({ id: 'b', group: 'joy', displayLabel: '행복', sequence: 2 }),
+          flowItem({ id: 'b', group: 'joy', displayLabel: '기뻤어', sequence: 2 }),
         ],
       }),
     ]);
     await openRecord(user, '10:00');
 
     expect(await screen.findByText('마음의 흐름')).toBeInTheDocument();
-    expect(screen.getByText('속상함 → 행복')).toBeInTheDocument();
-    expect(screen.getByText('가장 큰 변화: 속상함 → 행복')).toBeInTheDocument();
+    expect(screen.getByText('속상함 → 기뻤어')).toBeInTheDocument();
+    expect(screen.getByText('가장 큰 변화: 속상함 → 기뻤어')).toBeInTheDocument();
     // Detail variant: no composer-only preview notice.
     expect(screen.queryByText(/저장되지 않아요/)).not.toBeInTheDocument();
   });
@@ -543,7 +543,7 @@ describe('RecordPage period summary', () => {
   it('renders the aggregated summary for the visible month', async () => {
     renderPage([
       record({
-        emotionFlow: [flowItem({ id: 'a', group: 'joy', displayLabel: '행복', sequence: 1 })],
+        emotionFlow: [flowItem({ id: 'a', group: 'joy', displayLabel: '기뻤어', sequence: 1 })],
       }),
     ]);
 

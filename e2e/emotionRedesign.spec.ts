@@ -32,7 +32,7 @@ function row(page: import('@playwright/test').Page, basic: string) {
 
 test('the reading is offered as a question, and answers nothing on its own', async ({ browser }) => {
   /*
-   * Replaces "reads as 분노 → 행복 with no tap required", whose premise the
+   * Replaces "reads as 화났어 → 기뻤어 with no tap required", whose premise the
    * privacy redesign deliberately inverted. PRODUCT_V3 §13: a machine reading is
    * the author's private business until an affirmative act makes it theirs, and
    * the absence of a refusal is not that act. So what this now protects is the
@@ -48,8 +48,8 @@ test('the reading is offered as a question, and answers nothing on its own', asy
   await openComposer(page);
 
   const list = page.getByTestId('emotion-suggestion-list');
-  await expect(list).toContainText('분노');
-  await expect(list).toContainText('행복');
+  await expect(list).toContainText('화났어');
+  await expect(list).toContainText('기뻤어');
   // The evidence phrase explains WHY, which is what makes the question fair.
   await expect(list).toContainText('“ㅈ같음”에서 읽었어요');
 
@@ -58,7 +58,7 @@ test('the reading is offered as a question, and answers nothing on its own', asy
   await expect(row(page, 'happiness')).toHaveAttribute('data-answered', 'false');
 
   // Nothing is confirmed, so there is no flow to preview.
-  await expect(page.getByText('분노 → 행복')).toHaveCount(0);
+  await expect(page.getByText('화났어 → 기뻤어')).toHaveCount(0);
 
   expect(errors).toEqual([]);
   await context.close();
@@ -75,7 +75,7 @@ test('answering the readings is what produces the flow', async ({ browser }) => 
   await expect(row(page, 'anger')).toHaveAttribute('data-answered', 'true');
   await expect(row(page, 'happiness')).toHaveAttribute('data-answered', 'true');
   // Only now does the sequence exist to be shown back.
-  await expect(page.getByText('분노 → 행복').first()).toBeVisible();
+  await expect(page.getByText('화났어 → 기뻤어').first()).toBeVisible();
 
   await context.close();
 });
@@ -86,12 +86,12 @@ test('✕ removes a feeling and it can be restored, all with real clicks', async
   const page = await context.newPage();
   await openComposer(page);
 
-  await page.getByLabel('분노 빼기').click();
-  await expect(page.getByTestId('emotion-suggestion-list')).not.toContainText('분노');
+  await page.getByLabel('화났어 빼기').click();
+  await expect(page.getByTestId('emotion-suggestion-list')).not.toContainText('화났어');
   await expect(page.getByTestId('emotion-suggestion-removed')).toBeVisible();
 
-  await page.getByLabel('분노 다시 넣기').click();
-  await expect(page.getByTestId('emotion-suggestion-list')).toContainText('분노');
+  await page.getByLabel('화났어 다시 넣기').click();
+  await expect(page.getByTestId('emotion-suggestion-list')).toContainText('화났어');
   await context.close();
 });
 
@@ -115,12 +115,12 @@ test('다른 마음 corrects a wrong reading, and every control is a 44px target
   await expect(page.getByTestId(`emotion-suggestion-picker-${candidateId}`)).toBeVisible();
   await page.getByTestId(`emotion-suggestion-option-${candidateId}-disgust`).click();
 
-  await expect(page.getByTestId('emotion-suggestion-list')).toContainText('혐오');
+  await expect(page.getByTestId('emotion-suggestion-list')).toContainText('별로였어');
   // Correcting counts as answering, so this row is now settled.
   await expect(row(page, 'disgust')).toHaveAttribute('data-answered', 'true');
 
   // The remove control has to be thumb-reachable, and actually hit-testable.
-  const remove = page.getByLabel('혐오 빼기');
+  const remove = page.getByLabel('별로였어 빼기');
   const box = await remove.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.height).toBeGreaterThanOrEqual(44);
@@ -176,8 +176,8 @@ test('a saved record can have its emotion flow corrected afterwards', async ({ b
         log_text: '고쳐야 하는 기록',
         record_time: '09:00',
         emotion_flow: [
-          { id: 'f1', group: 'joy', displayLabel: '행복', basic: 'happiness', sequence: 1, source: 'user_confirmed', visibility: 'shared' },
-          { id: 'f2', group: 'sadness', displayLabel: '슬픔', basic: 'sadness', sequence: 2, source: 'user_confirmed', visibility: 'shared' },
+          { id: 'f1', group: 'joy', displayLabel: '기뻤어', basic: 'happiness', sequence: 1, source: 'user_confirmed', visibility: 'shared' },
+          { id: 'f2', group: 'sadness', displayLabel: '속상했어', basic: 'sadness', sequence: 2, source: 'user_confirmed', visibility: 'shared' },
         ],
       }),
     ],

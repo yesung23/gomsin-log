@@ -86,7 +86,7 @@ function openerFor(topic: CallBriefingTopic | undefined): string | null {
   if (topic.reaction === 'hard') return `“${topic.text}” 이 일, 지금은 좀 괜찮아?`;
   if (topic.reaction === 'thought_of_you') return '나를 생각했던 순간부터 천천히 들려줄래?';
   if (topic.reaction === 'event') return `“${topic.text}” 그 뒤에는 어떻게 됐어?`;
-  if (topic.reaction === 'good') return `“${topic.text}” 무엇이 제일 좋았어?`;
+  if (topic.reaction === 'good') return `“${topic.text}” 무엇이 제일 기뻤어?`;
   return `“${topic.text}” 이 이야기부터 들려줄래?`;
 }
 

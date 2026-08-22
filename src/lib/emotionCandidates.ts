@@ -19,7 +19,7 @@ import { normalizeText } from '@/lib/emotionText';
  * Two things make that safe rather than presumptuous:
  *
  *  1. Every candidate carries the `evidence` phrase it came from, so the user can
- *     see WHY the app said 분노 and judge it in one glance instead of trusting a
+ *     see WHY the app said 화났어 and judge it in one glance instead of trusting a
  *     bare label.
  *  2. Every candidate is correctable to any of the six basic emotions, so a wrong
  *     reading is a two-tap fix rather than an argument with the app.
@@ -60,18 +60,18 @@ const LEXICON: readonly Lexeme[] = [
   // --- anger -------------------------------------------------------------
   { pattern: /ㅈ같|좆같|존같|개같|줫같|개짜증|씨발|시발|ㅅㅂ|빡쳐|빡침|빡쳤|열받|짜증/, basic: 'anger', evidence: 'ㅈ같음' },
   // `화가 나` needs the particle: a bare `화\s*나` also matches "영화 나왔어".
-  { pattern: /화가\s*나|화났|화나서|화나요|분노|열뻗|따졌|싸웠|싸움|어이없/, basic: 'anger', evidence: '화남' },
+  { pattern: /화가\s*나|화났|화나서|화나요|화났어|열뻗|따졌|싸웠|싸움|어이없/, basic: 'anger', evidence: '화남' },
   // `서운했` not `서운`: 서운 is a substring of 무서운, so the bare stem read
   // "무서운 영화" as the writer feeling hurt.
   { pattern: /답답|억울|불만족|언짢|서운했|서운해|서운하|삐졌|삐침/, basic: 'anger', evidence: '답답함' },
 
   // --- happiness ---------------------------------------------------------
   { pattern: /기분(?:이|은|도)?\s*나아졌|나아졌|풀렸|괜찮아졌|좋아졌/, basic: 'happiness', evidence: '기분이 나아짐' },
-  { pattern: /행복|기뻤|기쁨|신났|신남|설렜|설렘|뿌듯|감사|고마웠|힐링|즐거웠|즐거움|웃었|웃겨|재밌|재미있|맛있/, basic: 'happiness', evidence: '행복함' },
+  { pattern: /기뻤어|기뻤|기쁨|신났|신남|설렜|설렘|뿌듯|감사|고마웠|힐링|즐거웠|즐거움|웃었|웃겨|재밌|재미있|맛있/, basic: 'happiness', evidence: '기뻤어함' },
   { pattern: /사랑|보고\s*싶|보고싶|그리웠|그립|생각났|생각나/, basic: 'happiness', evidence: '보고 싶음' },
 
   // --- sadness -----------------------------------------------------------
-  { pattern: /우울|슬펐|슬퍼|슬픔|눈물|울었|서러|먹먹|뭉클|울적|허전|공허/, basic: 'sadness', evidence: '슬픔' },
+  { pattern: /우울|슬펐|슬퍼|속상했어|눈물|울었|서러|먹먹|뭉클|울적|허전|공허/, basic: 'sadness', evidence: '속상했어' },
   { pattern: /속상|아쉬웠|아쉬움|씁쓸|외로|혼자\s*같|지쳤|지침|힘들었|힘듦|피곤|버겁/, basic: 'sadness', evidence: '속상함' },
   { pattern: /미안|후회|자책|안쓰러|죄송/, basic: 'sadness', evidence: '미안함' },
 
@@ -81,27 +81,27 @@ const LEXICON: readonly Lexeme[] = [
 
   // --- disgust -----------------------------------------------------------
   // `물렸` is deliberately absent: "모기에 물렸어" is a mosquito bite, not disgust.
-  { pattern: /역겨|구역질|더럽|비위|혐오|끔찍|질렸/, basic: 'disgust', evidence: '역겨움' },
+  { pattern: /역겨|구역질|더럽|비위|별로였어|끔찍|질렸/, basic: 'disgust', evidence: '역겨움' },
   { pattern: /불쾌|꺼림칙|거북|부담|싫었|싫어|싫음|불편/, basic: 'disgust', evidence: '불쾌함' },
   { pattern: /창피|부끄러|민망|쪽팔/, basic: 'disgust', evidence: '부끄러움' },
 
   // --- surprise ----------------------------------------------------------
   // `갑자기` is deliberately absent: "갑자기 비가 왔어" reports timing, not feeling.
-  { pattern: /놀랐|놀람|깜짝|대박|믿기지\s*않|어리둥절|의외|뜻밖/, basic: 'surprise', evidence: '놀람' },
+  { pattern: /놀랐|놀랐어|깜짝|대박|믿기지\s*않|어리둥절|의외|뜻밖/, basic: 'surprise', evidence: '놀랐어' },
 ];
 
 /** Words that flip a reading, checked immediately before the matched keyword. */
 const NEGATION = /(?:안|못|별로|전혀|그다지|하나도|아니)\s*$/;
 
 /** "무서운 영화 봤다" is not fear about the user's life. */
-const ENTERTAINMENT = /(?:영화|드라마|웹툰|게임|놀이기구|공포\s*영화|ㅋㅋ|ㅎㅎ)/;
+const ENTERTAINMENT = /(?:영화|드라마|웹툰|게임|놀이기구|걱정됐어\s*영화|ㅋㅋ|ㅎㅎ)/;
 
 /**
  * Split into clauses so a text can yield an ordered FLOW rather than one verdict.
  *
  * `-는데` / `-지만` are included because they are the commonest Korean pivots and
  * the reported example turns on one of them: "일하느라 ㅈ같았는데, 손님이 먹을
- * 것을 줘서 기분이 나아졌어" has to become 분노 -> 행복, not a single emotion.
+ * 것을 줘서 기분이 나아졌어" has to become 화났어 -> 기뻤어, not a single emotion.
  */
 function segment(normalized: string): { text: string; position: number }[] {
   const splitter = /(?:[.!?,;\n]+|(?:는데|은데|지만|하지만|그런데|근데|그래도|그러다가|그러고\s*나서|끝나고|이후에|나중에|결국|덕분에|그래서|그러니까))/g;
@@ -151,7 +151,7 @@ export function extractEmotionCandidates(logText: string): EmotionCandidate[] {
   }
 
   // Collapse only *adjacent* repeats. Non-adjacent repeats are kept, because
-  // 분노 -> 행복 -> 분노 is a real and meaningful shape.
+  // 화났어 -> 기뻤어 -> 화났어 is a real and meaningful shape.
   const collapsed = found.filter(
     (item, index) => index === 0 || item.basic !== found[index - 1].basic,
   );
@@ -241,7 +241,7 @@ export function flowItemsToCandidates(items: EmotionFlowItem[]): EmotionCandidat
       id: item.id || `stored-${index + 1}`,
       // `basicEmotionOf` rather than `item.basic`, so a record stored before this
       // feature existed opens with its legacy group mapped forward instead of
-      // silently defaulting every old feeling to 놀람.
+      // silently defaulting every old feeling to 놀랐어.
       basic: basicEmotionOf(item),
       // A stored item has no evidence by design; the phrase was never saved.
       evidence: '',

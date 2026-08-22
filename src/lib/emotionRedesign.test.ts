@@ -36,12 +36,12 @@ import type { BasicEmotion, EmotionGroup, Trip } from '@/types';
 // The six-emotion vocabulary
 // ---------------------------------------------------------------------------
 describe('the six basic emotions', () => {
-  it('is exactly 분노 · 혐오 · 공포 · 행복 · 슬픔 · 놀람', () => {
+  it('is exactly 화났어 · 별로였어 · 걱정됐어 · 기뻤어 · 속상했어 · 놀랐어', () => {
     expect([...BASIC_EMOTION_ORDER].sort()).toEqual(
       ['anger', 'disgust', 'fear', 'happiness', 'sadness', 'surprise'],
     );
     expect(BASIC_EMOTION_ORDER.map((basic) => BASIC_EMOTION_LABEL[basic])).toEqual(
-      ['행복', '놀람', '공포', '혐오', '분노', '슬픔'],
+      ['기뻤어', '놀랐어', '걱정됐어', '별로였어', '화났어', '속상했어'],
     );
   });
 
@@ -84,14 +84,14 @@ describe('the six basic emotions', () => {
 
   it('rewrites group, label and userEdited when a human corrects a reading', () => {
     const corrected = applyBasicEmotion(
-      { sequence: 1, group: 'joy', displayLabel: '행복', basic: 'happiness' },
+      { sequence: 1, group: 'joy', displayLabel: '기뻤어', basic: 'happiness' },
       'anger',
     );
     // Every existing reader keys off group/displayLabel, so both must follow.
     expect(corrected).toMatchObject({
       basic: 'anger',
       group: 'anger',
-      displayLabel: '분노',
+      displayLabel: '화났어',
       userEdited: true,
     });
   });
@@ -104,7 +104,7 @@ describe('extractEmotionCandidates', () => {
   /** The literal sentence the product owner reported. */
   const REPORTED = '일하느라 ㅈ같았는데, 손님이 먹을 것을 줘서 기분이 나아졌어';
 
-  it('reads the reported sentence as 분노 → 행복 with the evidence phrases', () => {
+  it('reads the reported sentence as 화났어 → 기뻤어 with the evidence phrases', () => {
     const candidates = extractEmotionCandidates(REPORTED);
     expect(candidates.map((c) => c.basic)).toEqual(['anger', 'happiness']);
     expect(candidates.map((c) => c.evidence)).toEqual(['ㅈ같음', '기분이 나아짐']);
@@ -138,8 +138,8 @@ describe('extractEmotionCandidates', () => {
 
   it('does not treat a scary film as the writer being afraid', () => {
     expect(extractEmotionCandidates('무서운 영화 봤어 ㅋㅋ')).toEqual([]);
-    expect(extractEmotionCandidates('공포 게임 하느라 무서웠다 ㅋㅋ')).toEqual([]);
-    // ...but a genuinely frightening day still reads as 공포.
+    expect(extractEmotionCandidates('걱정됐어 게임 하느라 무서웠다 ㅋㅋ')).toEqual([]);
+    // ...but a genuinely frightening day still reads as 걱정됐어.
     expect(extractEmotionCandidates('밤길이 너무 무서웠어')[0]?.basic).toBe('fear');
   });
 
@@ -149,9 +149,9 @@ describe('extractEmotionCandidates', () => {
    * that happens to sit inside an unrelated word.
    */
   it('does not fire on a stem that is merely a substring of another word', () => {
-    // 서운(hurt) inside 무서운(scary) -- read as 분노 before this was tightened.
+    // 서운(hurt) inside 무서운(scary) -- read as 화났어 before this was tightened.
     expect(extractEmotionCandidates('무서운 꿈을 꿨어')[0]?.basic).not.toBe('anger');
-    // 화 + 나 inside "영화 나왔어" -- read as 분노.
+    // 화 + 나 inside "영화 나왔어" -- read as 화났어.
     expect(extractEmotionCandidates('새 영화 나왔어')).toEqual([]);
     // 물렸(bitten) vs 물렸(fed up).
     expect(extractEmotionCandidates('모기에 물렸어')).toEqual([]);
@@ -307,7 +307,7 @@ describe('what actually gets stored', () => {
 
   it('a correction changes the analysed shape, not just the label', () => {
     // The reported defect: the label could be fixed while the drawn line stayed
-    // wrong. 분노 → 행복 rises; 행복 → 행복 is flat.
+    // wrong. 화났어 → 기뻤어 rises; 기뻤어 → 기뻤어 is flat.
     const rising = analyzeEmotionFlow(
       candidatesToFlowItems(candidates, {
         isPrivate: false, shareWithPartner: true, confirmedIds: allAnswered,
@@ -329,7 +329,7 @@ describe('what actually gets stored', () => {
   it('re-opens a stored flow for correction, mapping legacy groups forward', () => {
     const reopened = flowItemsToCandidates([
       { sequence: 2, group: 'longing', displayLabel: '그리움', id: 'b' },
-      { sequence: 1, group: 'joy', displayLabel: '행복', id: 'a' },
+      { sequence: 1, group: 'joy', displayLabel: '기뻤어', id: 'a' },
     ]);
     // Sorted by sequence, and legacy groups resolved rather than defaulted.
     expect(reopened.map((c) => c.id)).toEqual(['a', 'b']);
@@ -394,12 +394,19 @@ describe('role-aware home widgets', () => {
      * conversational home from recurring (its summary card repeated the bubble
      * directly beneath it).
      */
+    /*
+     * SIXTH MOVE (2026-08-22): `partner_day` 가 코어에서 빠졌다 -- 원본 층이 스토리로
+     * 갔기 때문이다(§6.1 재개정). 그래서 "설명이 설명되는 것보다 앞설 수 없다"를
+     * **홈 안의 순서**로 물을 수 없게 됐다. 설명 대상이 이제 홈에 없다.
+     *
+     * 규칙 자체는 살아 있고 형태만 바뀐다: 설명 대상이 홈에 없으면 **그 설명들도 홈에
+     * 고정되지 않는다.** 아래 세 위젯이 코어에서 빠져 있는지를 보는 것이 그 검사다.
+     * 레일은 설명이 아니라 문이므로 맨 앞에 남는다.
+     */
     expect(HOME_CORE_BY_ROLE.soldier).toEqual([
-      'story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word', 'paper_feed',
+      'story_rail', 'call_briefing', 'talk_about_list', 'today_word', 'paper_feed',
     ]);
-    // 설명이 설명되는 것보다 앞설 수 없다는 것이 이 단언의 본체다.
-    expect(HOME_CORE_BY_ROLE.soldier.indexOf('call_briefing'))
-      .toBeLessThan(HOME_CORE_BY_ROLE.soldier.indexOf('partner_day'));
+    expect(HOME_CORE_BY_ROLE.soldier[0]).toBe('story_rail');
     expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['dday']);
     // `talk_about_list` joined in P3. It is not another DESCRIPTION of the
     // day -- it is the couple's own explicit marks on records already on this
@@ -508,10 +515,26 @@ describe('role-aware home widgets', () => {
      * survives any arrangement. That is also why it is absent from `widgetsForRole`
      * now: it is not a thing to add, it is already there.
      */
+    /*
+     * SIXTH MOVE (2026-08-22): 표면이 홈에서 **스토리**로 갔다(§6.1 재개정). 지켜야 하는
+     * 것은 `partner_day` 라는 위젯이 아니라 **양쪽 모두 상대의 하루에 닿는 고정 표면을
+     * 갖는다**는 상호성이므로, 단언을 그 문 앞으로 옮긴다.
+     *
+     * 홈에 원본 타임라인을 통째로 그리면 스토리에 들어갈 이유가 없어진다 -- 이미 다 본
+     * 것의 목차가 요약이 되고, "같은 기록이 두 자리에 동시에 있지 않는다"도 깨진다.
+     * 그래서 위젯은 코어에서 빠졌고, 대신 `story_rail` 이 두 역할 모두에 고정돼 있다.
+     * 레일은 설명이 아니라 **문**이므로 이 블록이 막으려던 것과 성격이 다르다.
+     */
+    for (const role of ['gomsin', 'soldier'] as const) {
+      expect(HOME_CORE_BY_ROLE[role], `${role}: 상대의 하루로 가는 문이 고정돼야 한다`)
+        .toContain('story_rail');
+      // 원본 타임라인은 홈에 남지 않는다. 남으면 스토리와 같은 기록이 두 자리에 있다.
+      expect(HOME_CORE_BY_ROLE[role], `${role}: 원본 층은 스토리가 갖는다`)
+        .not.toContain('partner_day');
+    }
+    // 위젯이 사라진 것은 아니다 -- 코어가 아닐 뿐이므로 원하는 사람은 더할 수 있다.
     expect(isWidgetAllowedForRole('partner_day', 'soldier')).toBe(true);
     expect(isWidgetAllowedForRole('partner_day', 'gomsin')).toBe(true);
-    expect(HOME_CORE_BY_ROLE.gomsin).toContain('partner_day');
-    expect(HOME_CORE_BY_ROLE.soldier).toContain('partner_day');
   });
 
   it('gives both roles a default layout made only of widgets they may use', () => {

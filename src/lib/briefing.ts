@@ -1,5 +1,6 @@
 import type { DailyRecord, DailySummary, SummaryItem } from '@/types';
 import { isRecordContentAvailable } from '@/lib/recordAvailability';
+import { basicEmotionLabelOf } from '@/lib/basicEmotions';
 
 export function generateDailySummary(
   records: DailyRecord[],
@@ -173,7 +174,7 @@ export function generateEmotionFlowBriefing(records: DailyRecord[]): EmotionFlow
 
     if (sharedFlow.length === 0) continue;
 
-    const labels = sharedFlow.map((f) => f.displayLabel);
+    const labels = sharedFlow.map((f) => basicEmotionLabelOf(f));
     const flowText = labels.join(' → ');
 
     return {

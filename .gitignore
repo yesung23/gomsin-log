@@ -112,3 +112,8 @@ control-tower/.obsidian/workspace-cache/
 control-tower/.obsidian/plugins/
 control-tower/.makemd/
 control-tower/.space/
+
+# 폰트 서브셋 도구용 로컬 venv와 파이썬 캐시
+.fontenv/
+__pycache__/
+*.pyc

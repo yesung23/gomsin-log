@@ -18,9 +18,6 @@ import { FIXTURE_RECORDS, TODAY } from '../fixtures';
  *      것이 그것이다.
  */
 
-/** 사진이 붙은 기록. 나머지는 글이 그 자리를 차지한다. */
-const WITH_PHOTO = new Set(['p-2', 'm-2']);
-
 const partnerToday = FIXTURE_RECORDS.filter((r) => r.userId === 'partner-fixture' && r.date === TODAY);
 const feed = FIXTURE_RECORDS.filter((r) => r.date !== TODAY && !r.isPrivate).reverse();
 
@@ -45,7 +42,11 @@ export function InstaHome({
   return (
     <div className="notebook min-h-full pb-6">
       {/* 헤더 — 인스타와 같은 56px */}
-      <header className="flex h-14 items-center justify-between px-4">
+      <header
+        className="flex h-14 items-center justify-between px-4"
+        // 노치를 피한다. 데스크톱에서는 inset 이 0 이라 그대로다.
+        style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}
+      >
         <span className="hand text-[22px] leading-none" style={{ color: 'var(--ink)' }}>
           곰신로그
         </span>
@@ -125,13 +126,13 @@ export function InstaHome({
               되돌린 피드가 겪은 밀도 실패다. 글이 주인공인 하루는 구멍이 아니다.
             */}
             <div className="px-4">
-              {WITH_PHOTO.has(record.id) ? (
+              {record.hasPhoto === true ? (
                 <PhotoFrame ratio={index % 3 === 1 ? '1 / 1' : '4 / 5'} />
               ) : (
                 <div
                   className="flex items-center px-5 py-7"
                   style={{
-                    border: '1.5px solid var(--ink-faint)',
+                    border: 'var(--stroke) solid var(--ink-faint)',
                     borderRadius: index % 2 ? '10px 3px 12px 3px / 3px 12px 3px 10px' : '3px 12px 3px 10px / 12px 3px 10px 3px',
                   }}
                 >
@@ -158,7 +159,7 @@ export function InstaHome({
 
             {/* 캡션과 시간. 글이 이미 위에 있으면 여기서 반복하지 않는다. */}
             <div className="space-y-1 px-4">
-              {WITH_PHOTO.has(record.id) ? (
+              {record.hasPhoto === true ? (
                 <p className="hand text-[15px]" style={{ color: 'var(--ink)' }}>
                   <span className="print mr-1.5 text-[13px] font-semibold">{mine ? '몽룡' : '춘향'}</span>
                   {record.log}

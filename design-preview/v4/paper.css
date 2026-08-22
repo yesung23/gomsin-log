@@ -27,19 +27,41 @@
   --margin-rule: #eab8b0;    /* 왼쪽 여백선. 연한 빨강 */
   --ink: #2a2723;            /* 펜 */
   --ink-soft: #8a847a;
-  --ink-faint: #cfc9be;
+  --ink-faint: #b8b1a3;
   --accent: #d95f45;
   --rule-gap: 30px;
+
+  /*
+   * 획 두께.
+   *
+   * 낮과 밤이 다르다. **밝은 획은 어두운 바탕에서 더 얇아 보인다** -- 빛이 번지면서
+   * 가장자리를 먹기 때문이고(halation), 같은 1.5px 이 낮에는 또렷하고 밤에는 흐리다.
+   * 그래서 두께를 토큰으로 두고 다크에서 올린다. 눈속임이 아니라 보정이다.
+   */
+  --stroke: 1.5px;
+  --stroke-thin: 1.2px;
+  --stroke-bold: 1.8px;
 }
 
 [data-theme='dark'] {
   --paper: #16151a;
-  --rule: #2b3140;
-  --margin-rule: #4a3330;
-  --ink: #efece5;
-  --ink-soft: #8d877e;
-  --ink-faint: #383440;
-  --accent: #e8836d;
+  --rule: #3a4257;
+  --margin-rule: #6b4a45;
+  --ink: #f4f1ea;
+  --ink-soft: #a49d93;
+  /*
+   * 밤의 흐린 잉크.
+   *
+   * 처음에는 `#383440` 이었다. 배경(`#16151a`)과 거의 붙어 있어서 칩·사진 틀·격자 칸의
+   * 테두리가 사실상 보이지 않았고, 화면 전체가 흐리다는 인상의 실제 원인이 이것이었다.
+   * 밤에는 흐린 잉크도 종이보다 확실히 밝아야 한다.
+   */
+  --ink-faint: #5d5866;
+  --accent: #f0937c;
+
+  --stroke: 2px;
+  --stroke-thin: 1.6px;
+  --stroke-bold: 2.4px;
 }
 
 /*
@@ -64,7 +86,7 @@
 
 /* 손으로 그린 상자. 네 모서리가 서로 다르다. */
 .ink-box {
-  border: 1.5px solid var(--ink);
+  border: var(--stroke) solid var(--ink);
   border-radius: 225px 15px 255px 15px / 15px 225px 15px 255px;
 }
 .ink-box:nth-of-type(3n + 2) { border-radius: 15px 225px 15px 255px / 225px 15px 255px 15px; }
@@ -72,7 +94,7 @@
 
 /* 얇게 그린 것. 칩·라벨. */
 .ink-chip {
-  border: 1.2px solid var(--ink-soft);
+  border: var(--stroke-thin) solid var(--ink-soft);
   border-radius: 120px 8px 130px 8px / 8px 130px 8px 120px;
 }
 .ink-chip:nth-of-type(even) { border-radius: 8px 130px 8px 120px / 130px 8px 120px 8px; }
@@ -86,7 +108,7 @@
 
 /* 손으로 그은 선. 자로 그은 실선이 아니다. */
 .ink-rule {
-  height: 1.5px;
+  height: var(--stroke);
   background: repeating-linear-gradient(90deg, var(--ink-faint) 0 7px, transparent 7px 10px);
 }
 
@@ -98,7 +120,7 @@
  * 그린 틀은 "여기 사진이 온다"를 정직하게 말한다.
  */
 .photo-frame {
-  border: 1.5px solid var(--ink-faint);
+  border: var(--stroke) solid var(--ink-faint);
   border-radius: 8px 3px 10px 3px / 3px 10px 3px 8px;
   background:
     repeating-linear-gradient(45deg, transparent 0 11px, rgb(0 0 0 / 2.5%) 11px 12px);
@@ -110,6 +132,16 @@
   touch-action: manipulation;
 }
 .tap:active { opacity: 0.6; transform: scale(0.985); }
+
+/*
+ * 움직임을 줄이는 설정을 존중한다.
+ *
+ * 눌림의 크기 변화는 장식이고, 불투명도만으로도 눌렸다는 것은 전달된다.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .tap { transition: none; }
+  .tap:active { transform: none; }
+}
 
 /* 사람이 쓴 글. 앱과 같은 서체 토큰. */
 .hand {
@@ -123,4 +155,27 @@
 .print { font-family: var(--font-sans); }
 
 /* 아이콘. 펜으로 그린 것처럼 획을 살짝 굵게, 끝을 둥글게. */
+/*
+ * 아이콘도 밤에 굵어진다.
+ *
+ * `lucide` 는 `stroke-width` 를 속성으로 받지만 CSS 가 이긴다. 컴포넌트마다 두께를
+ * 넘기는 대신 여기 한 곳에서 낮과 밤을 가른다.
+ */
 .pen-icon { stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+[data-theme='dark'] .pen-icon { stroke-width: 2.3; }
+
+/*
+ * 괘선도 밤에는 한 단계 진하게.
+ *
+ * 종이의 결이 안 보이면 공책이 아니라 그냥 어두운 화면이 된다.
+ */
+[data-theme='dark'] .notebook {
+  background-image:
+    linear-gradient(90deg, transparent 0 27px, var(--margin-rule) 27px 29px, transparent 29px),
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 calc(var(--rule-gap) - 1.5px),
+      var(--rule) calc(var(--rule-gap) - 1.5px) var(--rule-gap)
+    );
+}

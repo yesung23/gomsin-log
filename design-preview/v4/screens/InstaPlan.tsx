@@ -119,7 +119,7 @@ export function InstaPlan() {
           <span className="print text-[12px]" style={{ color: 'var(--ink-soft)' }}>전역까지 101일</span>
           <span className="print text-[12px] tabular-nums" style={{ color: 'var(--ink-soft)' }}>76%</span>
         </div>
-        <div className="mt-1.5 h-2 overflow-hidden" style={{ border: '1.2px solid var(--ink-faint)', borderRadius: '40px 4px 44px 4px / 4px 44px 4px 40px' }}>
+        <div className="mt-1.5 h-2 overflow-hidden" style={{ border: 'var(--stroke-thin) solid var(--ink-faint)', borderRadius: '40px 4px 44px 4px / 4px 44px 4px 40px' }}>
           {/* 단색 잉크 바 하나. 색으로 재촉하지 않는다. */}
           <div className="h-full" style={{ width: '76%', background: 'var(--ink-faint)' }} />
         </div>

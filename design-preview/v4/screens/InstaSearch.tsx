@@ -145,7 +145,7 @@ function ExploreGrid() {
             gridColumn: BIG.has(index) ? 'span 2' : undefined,
             gridRow: BIG.has(index) ? 'span 2' : undefined,
             aspectRatio: '1 / 1',
-            border: '1.2px solid var(--ink-faint)',
+            border: 'var(--stroke-thin) solid var(--ink-faint)',
             borderRadius: index % 2
               ? '8px 2px 10px 2px / 2px 10px 2px 8px'
               : '2px 10px 2px 8px / 10px 2px 8px 2px',

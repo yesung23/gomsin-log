@@ -32,11 +32,20 @@ export function InkTabBar({ active, onChange }: { active: Tab; onChange: (tab: T
   return (
     <nav
       aria-label="주요 메뉴"
-      className="sticky bottom-0 flex h-[52px] items-center"
+      className="sticky bottom-0 flex items-center"
       style={{
-        borderTop: '1.5px solid var(--ink-faint)',
+        height: 52,
+        borderTop: 'var(--stroke) solid var(--ink-faint)',
         // 괘선 위에 떠 있으면 글과 겹쳐 읽힌다. 탭바만 종이를 덮는다.
         background: 'var(--paper)',
+        /*
+          홈 인디케이터를 피한다.
+
+          안 잡으면 아이폰에서 마지막 탭이 인디케이터 밑으로 들어가 눌리지 않는다.
+          데스크톱에서는 inset 이 0 이라 아무 일도 일어나지 않는다.
+        */
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        boxSizing: 'content-box',
       }}
     >
       {TABS.map((tab) => {

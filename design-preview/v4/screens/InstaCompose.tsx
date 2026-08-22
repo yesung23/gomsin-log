@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { X, Image as ImageIcon, Check } from 'lucide-react';
 import { PhotoFrame } from './common';
-import { PenEmotion, EMOTION_ORDER, EMOTION_LABEL, type BasicEmotion } from './PenEmotion';
+import { PenEmotion } from './PenEmotion';
+import { EMOTION_ORDER, EMOTION_LABEL, type BasicEmotion } from './emotionVocabulary';
 
 /**
  * 남기기 — 인스타의 만들기 흐름과 같은 자리.
@@ -64,7 +65,7 @@ export function InstaCompose({ onClose }: { onClose?: () => void }) {
             className="print px-2.5 py-1 text-[12px] tabular-nums"
             style={{
               color: 'var(--ink-soft)',
-              border: '1.2px solid var(--ink-faint)',
+              border: 'var(--stroke-thin) solid var(--ink-faint)',
               borderRadius: '80px 6px 90px 6px / 6px 90px 6px 80px',
             }}
           >
@@ -167,7 +168,7 @@ export function InstaCompose({ onClose }: { onClose?: () => void }) {
           <span
             className="flex h-5 w-5 shrink-0 items-center justify-center"
             style={{
-              border: '1.4px solid var(--ink)',
+              border: 'var(--stroke) solid var(--ink)',
               borderRadius: '30px 4px 34px 4px / 4px 34px 4px 30px',
               background: unwell ? 'var(--ink)' : 'transparent',
             }}

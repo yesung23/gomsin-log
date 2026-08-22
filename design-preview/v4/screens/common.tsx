@@ -43,7 +43,7 @@ export function InkCircle({
           width: size - (ring === 'none' ? 0 : 11),
           height: size - (ring === 'none' ? 0 : 11),
           background: 'var(--paper)',
-          border: '1.2px solid var(--ink-faint)',
+          border: 'var(--stroke-thin) solid var(--ink-faint)',
         }}
       >
         {children}
@@ -56,16 +56,16 @@ export function InkCircle({
 export function PenFace({ size = 40, tone = 'a' }: { size?: number; tone?: 'a' | 'b' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true" fill="none">
-      <circle cx="20" cy="17" r="9" stroke="var(--ink)" strokeWidth="1.4" />
+      <circle cx="20" cy="17" r="9" stroke="var(--ink)" strokeWidth="var(--stroke)" />
       {tone === 'a' ? (
-        <path d="M11 14 Q20 4 29 14" stroke="var(--ink)" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="M11 14 Q20 4 29 14" stroke="var(--ink)" strokeWidth="var(--stroke)" strokeLinecap="round" />
       ) : (
-        <path d="M11 15 Q20 6 29 15 L29 16 L11 16 Z" stroke="var(--ink)" strokeWidth="1.4" strokeLinejoin="round" />
+        <path d="M11 15 Q20 6 29 15 L29 16 L11 16 Z" stroke="var(--ink)" strokeWidth="var(--stroke)" strokeLinejoin="round" />
       )}
       <circle cx="17" cy="17" r="0.9" fill="var(--ink)" />
       <circle cx="23" cy="17" r="0.9" fill="var(--ink)" />
-      <path d="M17.5 21 Q20 23 22.5 21" stroke="var(--ink)" strokeWidth="1.2" strokeLinecap="round" />
-      <path d="M8 38 Q20 27 32 38" stroke="var(--ink)" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M17.5 21 Q20 23 22.5 21" stroke="var(--ink)" strokeWidth="var(--stroke-thin)" strokeLinecap="round" />
+      <path d="M8 38 Q20 27 32 38" stroke="var(--ink)" strokeWidth="var(--stroke)" strokeLinecap="round" />
     </svg>
   );
 }

@@ -100,7 +100,7 @@ export function InstaProfile() {
       </div>
 
       {/* 탭 줄 — 인스타의 격자/릴스/태그됨 자리 */}
-      <div className="mt-4 flex" style={{ borderTop: '1.5px solid var(--ink-faint)' }}>
+      <div className="mt-4 flex" style={{ borderTop: 'var(--stroke) solid var(--ink-faint)' }}>
         {[
           { Icon: Grid3x3, label: '하루', on: true },
           { Icon: ImageIcon, label: '사진', on: false },
@@ -108,7 +108,7 @@ export function InstaProfile() {
         ].map(({ Icon, label, on }) => (
           <button key={label} type="button" aria-label={label}
             className="tap flex flex-1 items-center justify-center py-3"
-            style={on ? { borderBottom: '2px solid var(--ink)' } : undefined}>
+            style={on ? { borderBottom: 'var(--stroke-bold) solid var(--ink)' } : undefined}>
             <Icon size={20} className="pen-icon" color={on ? 'var(--ink)' : 'var(--ink-soft)'} />
           </button>
         ))}
@@ -132,7 +132,7 @@ export function InstaProfile() {
               className="tap flex items-center justify-center"
               style={{
                 aspectRatio: '1 / 1',
-                border: '1.2px solid var(--ink-faint)',
+                border: 'var(--stroke-thin) solid var(--ink-faint)',
                 borderRadius: day % 2 ? '6px 2px 8px 2px / 2px 8px 2px 6px' : '2px 8px 2px 6px / 8px 2px 6px 2px',
               }}>
               <span className="print text-[11px]" style={{ color: 'var(--ink-soft)' }}>

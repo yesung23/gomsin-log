@@ -72,6 +72,14 @@ export function V4Shell() {
   const [scale, setScale] = useState(1.15);
   const [dark, setDark] = useState(false);
   const [chrome, setChrome] = useState(true);
+  /*
+    스토리 순간 수.
+
+    진행 바가 칸 수에 따라 어떻게 되는지는 기기에서 눈으로 봐야 안다 -- 390px 에서
+    12칸이면 칸 하나가 27px 이고 40칸이면 6px 이다. 픽스처를 늘렸다 줄였다 하는 대신
+    여기서 바꾼다. 0 이면 픽스처 그대로.
+  */
+  const [momentCount, setMomentCount] = useState(0);
 
   /*
     배율을 실제 토큰에 쓴다.
@@ -140,6 +148,26 @@ export function V4Shell() {
           </button>
 
           <DeviceReadout scale={scale} onScaleChange={setScale} />
+
+          <div className="rounded-md bg-neutral-900 p-3 text-neutral-100">
+            <label className="block space-y-1">
+              <span className="text-[12px] font-semibold">
+                스토리 순간 수{' '}
+                <span className="tabular-nums">{momentCount || '픽스처'}</span>
+              </span>
+              <input
+                type="range" min={0} max={40} step={1}
+                value={momentCount}
+                onChange={(event) => setMomentCount(Number(event.target.value))}
+                className="w-full"
+                aria-label="스토리 순간 수"
+              />
+              <span className="block text-[11px] leading-relaxed text-neutral-400">
+                진행 바가 몇 칸까지 읽히는지 본다. 12칸을 넘으면 창이 밀리고 양 끝에
+                남은 수가 붙는다.
+              </span>
+            </label>
+          </div>
         </div>
       ) : (
         <button
@@ -176,7 +204,7 @@ export function V4Shell() {
         */}
         {overlay ? (
           <div className="h-full w-full">
-            {overlay === 'story' ? <InstaStory onClose={() => setOverlay(null)} />
+            {overlay === 'story' ? <InstaStory onClose={() => setOverlay(null)} momentCount={momentCount || undefined} />
               : overlay === 'compose' ? <InstaCompose onClose={() => setOverlay(null)} />
                 : overlay === 'saved' ? (
                   <InstaSaved onClose={() => setOverlay(null)} onCall={() => setOverlay('call')} />

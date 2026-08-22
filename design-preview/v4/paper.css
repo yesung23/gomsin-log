@@ -1,0 +1,126 @@
+/*
+ * 노트에 그린 인스타그램 — 프리뷰 전용 스킨.
+ *
+ * 레이아웃·위치·제스처는 **인스타그램 그대로**다. 헤더 높이, 스토리 레일, 포스트의
+ * 세로 순서(작성자 → 사진 → 액션 줄 → 캡션 → 시간), 프로필의 3통계와 3열 격자까지
+ * 같은 자리에 같은 크기로 둔다. 바뀌는 것은 그것이 **무엇 위에 그려졌는가**뿐이다.
+ *
+ * 화면은 공책이다. 괘선이 깔려 있고 왼쪽에 여백선이 있으며, 그 위에 펜으로 인스타그램을
+ * 그려 놓은 것처럼 보여야 한다. 그래서:
+ *
+ *   - 배경은 괘선이고 UI가 그 위에 뜬다. 카드가 배경을 가리지 않는다.
+ *   - 선은 자로 그은 것이 아니라 손으로 그은 것이다.
+ *   - 사람이 쓴 글은 손글씨, 앱이 아는 사실(시간·개수)은 인쇄체다.
+ *
+ * ## 삐뚤빼뚤을 CSS로만 만드는 이유
+ *
+ * SVG 필터(feTurbulence)로 진짜 손떨림을 줄 수 있지만 스크롤하는 목록의 모든 요소에
+ * 걸면 기기에서 프레임이 떨어진다. 네 모서리의 반경을 서로 다르게 주는 것만으로
+ * 자로 그린 상자가 손으로 그린 상자가 되고, 이건 공짜다.
+ *
+ * 반복되는 요소가 전부 똑같이 삐뚤면 그것은 다시 인쇄가 된다. 변형을 셋 두고 돌린다.
+ */
+
+:root {
+  --paper: #fcfbf7;          /* 공책 종이 */
+  --rule: #cfd9e8;           /* 괘선. 연한 파랑 */
+  --margin-rule: #eab8b0;    /* 왼쪽 여백선. 연한 빨강 */
+  --ink: #2a2723;            /* 펜 */
+  --ink-soft: #8a847a;
+  --ink-faint: #cfc9be;
+  --accent: #d95f45;
+  --rule-gap: 30px;
+}
+
+[data-theme='dark'] {
+  --paper: #16151a;
+  --rule: #2b3140;
+  --margin-rule: #4a3330;
+  --ink: #efece5;
+  --ink-soft: #8d877e;
+  --ink-faint: #383440;
+  --accent: #e8836d;
+}
+
+/*
+ * 공책.
+ *
+ * 괘선이 화면 전체에 깔린다. UI가 그 위에 그려지므로 카드에 배경을 채우지 않는다 --
+ * 채우는 순간 종이가 사라지고 다시 앱 화면이 된다.
+ */
+.notebook {
+  background-color: var(--paper);
+  background-image:
+    /* 왼쪽 여백선 */
+    linear-gradient(90deg, transparent 0 27px, var(--margin-rule) 27px 28px, transparent 28px),
+    /* 가로 괘선 */
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 calc(var(--rule-gap) - 1px),
+      var(--rule) calc(var(--rule-gap) - 1px) var(--rule-gap)
+    );
+  color: var(--ink);
+}
+
+/* 손으로 그린 상자. 네 모서리가 서로 다르다. */
+.ink-box {
+  border: 1.5px solid var(--ink);
+  border-radius: 225px 15px 255px 15px / 15px 225px 15px 255px;
+}
+.ink-box:nth-of-type(3n + 2) { border-radius: 15px 225px 15px 255px / 225px 15px 255px 15px; }
+.ink-box:nth-of-type(3n + 3) { border-radius: 255px 15px 225px 25px / 25px 255px 15px 225px; }
+
+/* 얇게 그린 것. 칩·라벨. */
+.ink-chip {
+  border: 1.2px solid var(--ink-soft);
+  border-radius: 120px 8px 130px 8px / 8px 130px 8px 120px;
+}
+.ink-chip:nth-of-type(even) { border-radius: 8px 130px 8px 120px / 130px 8px 120px 8px; }
+
+/* 잉크로 칠한 자리. */
+.ink-fill {
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 225px 15px 255px 15px / 15px 225px 15px 255px;
+}
+
+/* 손으로 그은 선. 자로 그은 실선이 아니다. */
+.ink-rule {
+  height: 1.5px;
+  background: repeating-linear-gradient(90deg, var(--ink-faint) 0 7px, transparent 7px 10px);
+}
+
+/*
+ * 사진 자리.
+ *
+ * 인스타는 사진이 전폭이다. 여기서는 그 자리에 **연필로 그린 사진 틀**이 온다 --
+ * 프리뷰에는 실제 미디어가 없고, 없는 것을 회색 상자로 두면 로딩 실패처럼 보인다.
+ * 그린 틀은 "여기 사진이 온다"를 정직하게 말한다.
+ */
+.photo-frame {
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 8px 3px 10px 3px / 3px 10px 3px 8px;
+  background:
+    repeating-linear-gradient(45deg, transparent 0 11px, rgb(0 0 0 / 2.5%) 11px 12px);
+}
+
+.tap {
+  transition: opacity 120ms ease, transform 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.tap:active { opacity: 0.6; transform: scale(0.985); }
+
+/* 사람이 쓴 글. 앱과 같은 서체 토큰. */
+.hand {
+  font-family: var(--font-hand, "Gomsin Hand", sans-serif);
+  font-weight: 400;
+  font-size: calc(1em * var(--font-hand-scale, 1.15));
+  line-height: 1.6;
+}
+
+/* 앱이 아는 사실. 시간·개수·라벨. */
+.print { font-family: var(--font-sans); }
+
+/* 아이콘. 펜으로 그린 것처럼 획을 살짝 굵게, 끝을 둥글게. */
+.pen-icon { stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }

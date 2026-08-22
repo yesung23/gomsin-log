@@ -209,8 +209,12 @@ describe('C4 - PRESERVATION: token definitions and the light theme are untouched
 
   it('keeps the theme-colour constants in sync with --background', () => {
     const store = readFileSync(resolve(process.cwd(), 'src/lib/store.tsx'), 'utf8');
-    expect(store).toContain("const LIGHT_THEME_COLOR = '#FFF7F7'");
-    expect(store).toContain("const DARK_THEME_COLOR = '#16181D'");
+    /*
+      브라우저 크롬의 색이 `--background` 와 어긋나면 상단 바와 화면 사이에 이음매가
+      생긴다. 2026-08-23 에 배경이 종이가 됐으므로 이 상수도 종이를 따라간다.
+    */
+    expect(store).toContain("const LIGHT_THEME_COLOR = '#fcfbf7'");
+    expect(store).toContain("const DARK_THEME_COLOR = '#16151a'");
   });
 
   it('the dark palette remap has been deleted, and white is still not remapped', () => {
@@ -304,12 +308,31 @@ describe('C5 - --navy is never used as a foreground colour', () => {
     expect(css).toContain('--navy: oklch(0.29 0.055 265);');
   });
 
-  it('the replacement token is identical to --navy in the light theme', () => {
-    // This is what makes the swap a pure dark-mode fix with no light-mode delta.
+  it('the foreground token inverts between the themes, whatever it points at', () => {
+    /*
+      C5가 지키는 것은 특정 색이 아니라 **전경색이 두 테마에서 뒤집힌다**는 성질이다.
+      `--navy` 는 두 테마 모두 어두워 그 성질이 없었고, 그래서 다크에서 어두운 글자가
+      어두운 배경에 그려졌다.
+
+      2026-08-23 에 V4가 표면을 공책으로 바꾸면서 이 토큰은 `--ink` 를 가리킨다. 그 값은
+      낮에 어둡고 밤에 밝으므로 이 블록이 요구하던 성질을 **더 잘** 만족한다. 그래서
+      단언을 값이 아니라 성질로 되돌린다 -- 다음에 표면이 또 바뀌어도 같은 것을 지킨다.
+    */
     const css = readFileSync(resolve(process.cwd(), 'src/styles/index.css'), 'utf8');
-    expect(css).toContain('--foreground: var(--navy);');
-    // ...and genuinely different in dark, otherwise the fix would be a no-op.
-    expect(css).toContain('--foreground: oklch(0.95 0.012 85);');
+    expect(css).toContain('--foreground: var(--ink);');
+    // 두 테마가 같은 토큰을 가리키되, 그 토큰의 값이 테마마다 다르다.
+    const paper = readFileSync(resolve(process.cwd(), 'src/styles/paper.css'), 'utf8');
+    const light = /:root \{[\s\S]*?\n\}/.exec(paper)?.[0] ?? '';
+    const dark = /\[data-theme='dark'\] \{[\s\S]*?\n\}/.exec(paper)?.[0] ?? '';
+    const inkOf = (block: string) => /--ink:\s*(#[0-9a-f]{6})/.exec(block)?.[1];
+    const lightInk = inkOf(light);
+    const darkInk = inkOf(dark);
+    expect(lightInk, '낮의 잉크를 못 읽었다').toBeTruthy();
+    expect(darkInk, '밤의 잉크를 못 읽었다').toBeTruthy();
+    expect(darkInk).not.toBe(lightInk);
+    // 그리고 실제로 뒤집힌다: 낮의 잉크는 어둡고 밤의 잉크는 밝다.
+    const brightness = (hex: string) => parseInt(hex.slice(1, 3), 16) + parseInt(hex.slice(3, 5), 16) + parseInt(hex.slice(5, 7), 16);
+    expect(brightness(lightInk!)).toBeLessThan(brightness(darkInk!));
   });
 
   it('still permits --navy as a surface, border or gradient stop', () => {

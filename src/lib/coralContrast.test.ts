@@ -70,13 +70,6 @@ const DECORATIVE_CORAL_FILLS: Array<{ file: string; anchor: string; occurrences:
       + 'now has to hold.',
   },
   {
-    file: 'src/pages/SchedulePage.tsx',
-    anchor: "isToday && !isSelected ? 'bg-coral-strong-foreground' : 'bg-coral'",
-    occurrences: 1,
-    reason: 'Event dot on a calendar cell. Same pairing as RecordPage: coral on '
-      + 'the page surface, and the label colour once the cell itself is filled.',
-  },
-  {
     file: 'src/pages/ServicePage.tsx',
     anchor: 'h-full bg-coral rounded-full',
     occurrences: 1,

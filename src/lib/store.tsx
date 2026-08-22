@@ -160,8 +160,8 @@ const REALTIME_RECOVERY_MAX_DELAY_MS = 30_000;
 /** Stop polling for the partner after roughly 15 minutes. */
 const PARTNER_POLL_MAX_ATTEMPTS = 26;
 /** Must match --background in styles/index.css for each theme. */
-const LIGHT_THEME_COLOR = '#FFF7F7';
-const DARK_THEME_COLOR = '#16181D';
+const LIGHT_THEME_COLOR = '#fcfbf7';
+const DARK_THEME_COLOR = '#16151a';
 
 /**
  * The theme to use on a device that has never chosen one, so the app opens in

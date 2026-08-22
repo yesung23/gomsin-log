@@ -145,7 +145,15 @@ const ART: Record<BasicEmotion, { body: string; face: ReactElement; accent: stri
       <>
         <path d="M17.4 25.6c1-1.6 3.2-1.6 4.2 0" stroke={INK} strokeWidth="2" strokeLinecap="round" fill="none" transform="rotate(180 19.5 24.8)" />
         <path d="M26.4 25.6c1-1.6 3.2-1.6 4.2 0" stroke={INK} strokeWidth="2" strokeLinecap="round" fill="none" transform="rotate(180 28.5 24.8)" />
-        <path d="M21 33.4c1.4-1.8 4.6-1.8 6 0" stroke={INK} strokeWidth="2" strokeLinecap="round" fill="none" transform="rotate(180 24 32.5)" />
+        {/*
+          입꼬리는 내려가 있어야 한다.
+
+          이 곡선은 제어점이 y 가 **작은** 쪽에 있어 위로 볼록하다 -- SVG 에서 y 는 아래로
+          커지므로 그것이 찡그린 입이다. 여기에 `rotate(180)` 이 걸려 있었고, 뒤집힌 결과는
+          웃는 입이었다. 눈은 뒤집힌 채로 둔다 -- `기뻤어` 의 눈과 정확히 반대가 되어
+          둘을 구별하는 것이 그 눈이다.
+        */}
+        <path d="M21 33.4c1.4-1.8 4.6-1.8 6 0" stroke={INK} strokeWidth="2" strokeLinecap="round" fill="none" />
       </>
     ),
   },
@@ -175,18 +183,24 @@ export function EmotionCharacter({
     >
       <path
         d={art.body}
-        fill={selected ? art.accent : 'var(--muted-foreground)'}
+        fill={selected ? art.accent : 'var(--ink-faint)'}
         /*
           Unselected is monochrome, not merely faded. Six washed-out colours still
           read as six competing colours; one grey shape reads as "not this one",
           which is what the state actually means. It is also why the silhouettes
           have to differ -- in this state the shape is the ONLY thing left.
+
+          `--ink-faint` 로 바꾸고 흐리게 하는 것을 그만뒀다 (2026-08-23). 앞선 값은
+          `--muted-foreground` 를 0.3 불투명도로 칠했고, 공책의 어두운 종이 위에서
+          **여섯 개가 전부 사라졌다.** `--ink-faint` 는 낮과 밤 모두 종이에서 3:1 이상이
+          보장된 유일한 흐린 잉크다(`paperTokens.test.ts`). 골라지지 않았다는 뜻은
+          불투명도가 아니라 **색이 없다는 것**으로 전한다.
         */
-        opacity={selected ? 1 : 0.3}
+        opacity={1}
       />
       {/* The face fades with the body but never disappears: a blank pebble reads as
           a loading placeholder rather than an unchosen option. */}
-      <g opacity={selected ? 1 : 0.45}>{art.face}</g>
+      <g opacity={selected ? 1 : 0.7}>{art.face}</g>
     </svg>
   );
 }

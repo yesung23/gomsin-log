@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, HeartPulse, BookHeart, CalendarDays, CircleUserRound, Plus } from 'lucide-react';
+import { Home, HeartPulse, BookHeart, CalendarDays, CircleUserRound } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { routeAnnouncement } from '@/lib/routeAnnouncement';
@@ -47,7 +47,7 @@ const TABS = [
     to: '/home',
     label: '홈',
     icon: Home,
-    matchPrefixes: ['/home', '/', '/call'],
+    matchPrefixes: ['/home', '/', '/call', '/saved'],
   },
   {
     to: '/me',
@@ -81,25 +81,9 @@ const TABS = [
     to: '/us',
     label: '우리',
     icon: CircleUserRound,
-    matchPrefixes: ['/us', '/search', '/record', '/my', '/settings'],
+    matchPrefixes: ['/us', '/search', '/record', '/compose', '/my', '/settings'],
   },
 ] as const;
-
-/**
- * 이 화면이 이미 자기 주요 동작을 고정하고 있는가.
- *
- * 그렇다면 셸의 기록 버튼은 거둔다 -- 둥근 컨트롤 둘이 한 모서리를 나눠 갖지 않도록.
- * `/record` 의 CTA 는 이 버튼이 여는 바로 그 컴포저를 열고, 여행 **상세**는 자기 짝을
- * 고정한다.
- *
- * 접두사 목록이 아니라 술어인 이유는 여행 화면이 갈리기 때문이다: `/trips/:id` 는 둘을
- * 고정하고 `/trips` 는 아무것도 고정하지 않는다. 접두사로 적으면 목록까지 함께 가져가서,
- * **무언가를 떠올리기 가장 쉬운 화면**이 그것을 남길 방법이 없는 유일한 화면이 된다.
- */
-function ownsPrimaryAction(pathname: string): boolean {
-  if (pathname === '/record' || pathname.startsWith('/record/')) return true;
-  return pathname.startsWith('/trips/');
-}
 
 export function MobileShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
@@ -182,12 +166,13 @@ export function MobileShell({ children }: { children: ReactNode }) {
           other by `src/lib/astryxFoundation.test.ts`.
         */
         data-astryx-theme="gomsin"
-        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
-        style={
-          tabBarHeight > 0
+        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        style={{
+          background: 'var(--paper)',
+          ...(tabBarHeight > 0
             ? ({ '--gomsin-tabbar-height': `${tabBarHeight}px` } as CSSProperties)
-            : undefined
-        }
+            : {}),
+        }}
       >
         {/*
           First focusable element on every screen. The tab bar is the LAST thing
@@ -206,11 +191,17 @@ export function MobileShell({ children }: { children: ReactNode }) {
           {announcement}
         </div>
 
+        {/*
+          종이가 여기 깔린다 (2026-08-23).
+
+          화면마다 `.notebook` 을 붙이면 내용이 짧은 화면에서 종이가 내용 높이에서 끝나고
+          그 아래가 검게 끊긴다. 스크롤 영역 자체가 공책이면 어느 화면이든 끝까지 종이다.
+        */}
         <main
           id="main-content"
           ref={mainRef}
           tabIndex={-1}
-          className="flex-1 pb-20 overflow-y-auto focus:outline-none"
+          className="notebook flex-1 pb-20 overflow-y-auto focus:outline-none"
         >
           {/* Shown above every tab, because a stale or withheld shared workspace
               affects the timeline, the calendar and the trip list alike. */}
@@ -219,31 +210,16 @@ export function MobileShell({ children }: { children: ReactNode }) {
         </main>
 
         {/*
-          어느 화면에서든 한 번에 기록을 시작한다.
+          떠 있던 기록 버튼은 **스토리 레일의 `+` 로 옮겨갔다** (2026-08-23).
 
-          §7.1 은 30초 안의 기록을 요구하고, 그러려면 `일정` · `우리` · `컨디션` 에 서
-          있는 사람도 이동 없이 시작할 수 있어야 한다. 탭바 가운데를 잠깐 이 동작에 준
-          적이 있는데, 그 칸은 매일 답해야 하는 질문이 가져가는 것이 맞아서 버튼을
-          되돌렸다.
+          인스타에는 떠 있는 버튼이 없다. 만들기는 탭바 가운데이거나 자기 스토리 링에
+          붙은 `+` 이고, 이 앱은 후자를 쓴다 -- 홈 맨 왼쪽 링이 내 스토리이고 거기 `+` 가
+          붙는다. 산호빛 원이 종이 위에 떠 있으면 그것 하나가 이 화면에서 유일하게 앱처럼
+          보이는 물건이 된다.
 
-          여섯 번째 탭이 아니다. §5 가 다섯을 고정하고, 이것은 **장소가 아니라 동작**이므로
-          바의 동료가 아니라 바 위에 뜬다. 엄지가 가장 쉬운 오른쪽 아래에 두고, 잰
-          탭바 높이만큼 띄운다.
-
-          이미 자기 주요 동작을 고정한 화면에서는 거둔다 -- 둥근 버튼 둘이 한 모서리를
-          다투지 않도록. `/record` 의 CTA 는 바로 이 컴포저를 열고, 여행 상세는 자기 짝을
-          고정한다. 그 두 화면에서도 진입점이 사라지지 않는 것은 `찾기` 탭의 펜이 §7.1 의
-          제거 불가 진입점을 따로 지고 있기 때문이다.
+          §7.1 의 제거 불가 진입점은 사라지지 않았다. 홈의 레일 `+`, `우리` 헤더의 펜,
+          `찾기` 의 펜이 그것을 나눠 진다 -- `composeFromAnywhere.test.tsx` 가 센다.
         */}
-        {!ownsPrimaryAction(pathname) && (
-          <Link
-            to="/record?compose=1"
-            aria-label="기록 남기기"
-            className="press-response fixed right-[max(calc(50%-215px+16px),16px)] bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+12px)] z-40 w-14 h-14 rounded-full bg-coral-strong text-coral-strong-foreground shadow-lg flex items-center justify-center"
-          >
-            <Plus size={26} strokeWidth={2.4} aria-hidden="true" />
-          </Link>
-        )}
 
         {/* iOS Safari Standalone Install Banner Prompt */}
         <InstallPromptBanner />

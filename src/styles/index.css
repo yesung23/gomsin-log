@@ -273,8 +273,19 @@
    */
   --cream: oklch(0.985 0.012 18);
   --navy: oklch(0.28 0.06 265);
-  --background: var(--cream);
-  --foreground: var(--navy);
+  /*
+   * 앱의 표면이 공책이 됐다 (2026-08-23).
+   *
+   * `--background` 와 `--foreground` 가 종이와 잉크를 가리킨다. 아직 V4로 옮기지 않은
+   * 화면과 컴포넌트가 수백 군데이고, 그것들은 전부 이 두 토큰으로 그려진다 -- 여기서
+   * 한 번 돌리면 손대지 않은 화면도 같은 종이 위에 같은 잉크로 그려진다.
+   *
+   * C5가 `--navy` 를 전경색에서 몰아낸 이유(두 테마 모두 어둡다)를 `--ink` 는 더 잘
+   * 만족한다: 낮에는 어둡고 밤에는 밝다. 그 값들의 대비는 `paperTokens.test.ts` 가
+   * CSS에서 직접 읽어 계산한다 -- 낮 14.35:1, 밤 16.10:1.
+   */
+  --background: var(--paper);
+  --foreground: var(--ink);
   /*
    * Stays exactly `oklch(1 0 0)`. Warming the card was tried on 2026-08-09 and
    * reverted: this value being byte-identical to Tailwind's `white` is the reason
@@ -436,8 +447,8 @@
 [data-theme='dark'] {
   --cream: oklch(0.17 0.018 265);
   --navy: oklch(0.29 0.055 265);
-  --background: oklch(0.16 0.016 265);
-  --foreground: oklch(0.95 0.012 85);
+  --background: var(--paper);
+  --foreground: var(--ink);
   --card: oklch(0.21 0.018 265);
   --card-foreground: var(--foreground);
   --muted: oklch(0.25 0.016 265);

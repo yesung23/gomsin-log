@@ -5,6 +5,7 @@ import { visibleRecordsForViewer } from '@/lib/privacy';
 import { useStore } from '@/lib/useStore';
 import { buildDiaryMonths, type DiaryMonth } from './diaryMonths';
 import { MonthSpread } from './MonthSpread';
+import { MobileShell } from '@/components/MobileShell';
 
 /**
  * 일기장 — 쌓인 것이 물건이 되는 곳.
@@ -32,7 +33,7 @@ import { MonthSpread } from './MonthSpread';
  * 격자를 두 탭이 보여주게 되고, 그것은 §5.3이 `찾기` 탭을 없앤 것과 같은 결함이다.
  */
 
-export function DiaryPage() {
+function DiaryPageBody() {
   const { state } = useStore();
   const { profile } = state;
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -133,5 +134,19 @@ function MonthCard({ month, onOpen }: { month: DiaryMonth; onOpen: () => void })
         </span>
       </div>
     </button>
+  );
+}
+
+/**
+ * 탭은 셸 안에 있어야 한다.
+
+ * 셸이 하단 탭바와 스킵 링크와 라우트 안내를 갖는다. 이것 없이 렌더하면 그 탭에 들어간
+ * 사람은 탭바가 없어 **빠져나올 수 없다** -- 뒤로 가기 말고는.
+ */
+export function DiaryPage() {
+  return (
+    <MobileShell>
+      <DiaryPageBody />
+    </MobileShell>
   );
 }

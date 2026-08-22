@@ -73,6 +73,7 @@ export type ProductEventScreen =
   | 'us'
   | 'my'
   | 'call'
+  | 'story'
   | 'onboarding'
   | 'settings';
 

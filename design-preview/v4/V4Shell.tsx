@@ -7,6 +7,9 @@ import { InstaProfile } from './screens/InstaProfile';
 import { InstaSearch } from './screens/InstaSearch';
 import { InstaPlan } from './screens/InstaPlan';
 import { InkTabBar, type Tab } from './screens/InkTabBar';
+import { InstaCompose } from './screens/InstaCompose';
+import { InstaSaved } from './screens/InstaSaved';
+import { InstaCall } from './screens/InstaCall';
 
 /**
  * GOMSINLOG V4 Preview Shell — Tailscale 모바일 검증용.
@@ -55,9 +58,17 @@ const SURFACE_TO_TAB: Record<Surface, Tab> = { home: 'home', story: 'home', memo
 
 const DEVICE = { width: 390, height: 844 };
 
+/*
+  전체화면으로 덮이는 것들.
+
+  인스타에서 스토리·만들기·DM 은 탭 위에 올라오지 탭을 바꾸지 않는다. 여기도 같다 --
+  덮인 동안 탭바가 사라지고, 닫으면 있던 탭으로 돌아온다.
+*/
+type Overlay = null | 'story' | 'compose' | 'saved' | 'call';
+
 export function V4Shell() {
   const [tab, setTab] = useState<Tab>('home');
-  const [story, setStory] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [scale, setScale] = useState(1.15);
   const [dark, setDark] = useState(false);
   const [chrome, setChrome] = useState(true);
@@ -103,13 +114,13 @@ export function V4Shell() {
                 key={item.id}
                 type="button"
                 role="tab"
-                aria-selected={(story ? 'story' : tab === 'us' ? 'memory' : 'home') === item.id}
+                aria-selected={(overlay === 'story' ? 'story' : tab === 'us' ? 'memory' : 'home') === item.id}
                 onClick={() => {
-                  setStory(item.id === 'story');
+                  setOverlay(item.id === 'story' ? 'story' : null);
                   setTab(SURFACE_TO_TAB[item.id]);
                 }}
                 className={`min-h-11 flex-1 rounded-md text-[13px] font-semibold ${
-                  (story ? 'story' : tab === 'us' ? 'memory' : 'home') === item.id
+                  (overlay === 'story' ? 'story' : tab === 'us' ? 'memory' : 'home') === item.id
                     ? 'bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900'
                     : 'bg-neutral-300 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
                 }`}
@@ -157,25 +168,45 @@ export function V4Shell() {
         }}
       >
         {/*
-          스토리는 탭바를 덮는다.
+          덮개가 있으면 탭바가 사라진다.
 
           인스타에서 스토리를 열면 하단 탭이 사라진다. 전체화면이 전체화면이어야 몰입이
-          되고, 그 몰입이 이 앱에서는 "상대의 하루를 만나는 순간"이다.
+          되고, 그 몰입이 이 앱에서는 "상대의 하루를 만나는 순간"이다. 만들기와 통화 모드도
+          같은 이유로 덮는다 -- 쓰는 동안과 통화하는 동안은 다른 데로 갈 이유가 없다.
         */}
-        {story ? (
+        {overlay ? (
           <div className="h-full w-full">
-            <InstaStory onClose={() => setStory(false)} />
+            {overlay === 'story' ? <InstaStory onClose={() => setOverlay(null)} />
+              : overlay === 'compose' ? <InstaCompose onClose={() => setOverlay(null)} />
+                : overlay === 'saved' ? (
+                  <InstaSaved onClose={() => setOverlay(null)} onCall={() => setOverlay('call')} />
+                ) : <InstaCall onClose={() => setOverlay(null)} />}
           </div>
         ) : (
           <div className="flex h-full w-full flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {tab === 'home' ? <InstaHome onOpenStory={() => setStory(true)} />
-                : tab === 'search' ? <InstaSearch />
-                  : tab === 'create' ? <InstaHome onOpenStory={() => setStory(true)} />
-                    : tab === 'plan' ? <InstaPlan />
-                      : <InstaProfile />}
+              {tab === 'home' ? (
+                <InstaHome
+                  onOpenStory={() => setOverlay('story')}
+                  onOpenSaved={() => setOverlay('saved')}
+                  onOpenCall={() => setOverlay('call')}
+                  onCompose={() => setOverlay('compose')}
+                />
+              ) : tab === 'search' ? <InstaSearch />
+                : tab === 'plan' ? <InstaPlan />
+                  : <InstaProfile />}
             </div>
-            <InkTabBar active={tab} onChange={setTab} />
+            <InkTabBar
+              active={tab}
+              onChange={(next) => {
+                /*
+                  `남기기`는 탭이 아니라 덮개다. 인스타의 만들기 버튼도 탭을 바꾸지 않고
+                  시트를 올린다 -- 쓰다 말고 다른 탭으로 가는 일이 없어야 30초가 지켜진다.
+                */
+                if (next === 'create') setOverlay('compose');
+                else setTab(next);
+              }}
+            />
           </div>
         )}
       </div>

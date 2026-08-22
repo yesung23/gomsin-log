@@ -31,7 +31,17 @@ function timeAgo(date: string, time: string): string {
   return `${days}일 전`;
 }
 
-export function InstaHome({ onOpenStory }: { onOpenStory?: () => void }) {
+export function InstaHome({
+  onOpenStory,
+  onOpenSaved,
+  onOpenCall,
+  onCompose,
+}: {
+  onOpenStory?: () => void;
+  onOpenSaved?: () => void;
+  onOpenCall?: () => void;
+  onCompose?: () => void;
+}) {
   return (
     <div className="notebook min-h-full pb-6">
       {/* 헤더 — 인스타와 같은 56px */}
@@ -40,12 +50,12 @@ export function InstaHome({ onOpenStory }: { onOpenStory?: () => void }) {
           곰신로그
         </span>
         <div className="flex items-center gap-1">
-          <button type="button" aria-label="이야기할 것" className="tap relative flex h-11 w-11 items-center justify-center">
+          <button type="button" aria-label="이야기할 것" onClick={onOpenSaved} className="tap relative flex h-11 w-11 items-center justify-center">
             <Bookmark size={22} className="pen-icon" color="var(--ink)" fill="none" />
             {/* 인스타의 빨간 점과 같은 자리. 개수를 적지 않는다 -- 개수는 부채다. */}
             <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />
           </button>
-          <button type="button" aria-label="통화 모드" className="tap flex h-11 w-11 items-center justify-center">
+          <button type="button" aria-label="통화 모드" onClick={onOpenCall} className="tap flex h-11 w-11 items-center justify-center">
             <Phone size={21} className="pen-icon" color="var(--ink)" fill="none" />
           </button>
         </div>
@@ -61,17 +71,20 @@ export function InstaHome({ onOpenStory }: { onOpenStory?: () => void }) {
       */}
       <section aria-label="스토리" className="flex h-[106px] items-start gap-5 px-4 pt-1">
         <div className="relative">
-          <button type="button" className="tap flex w-[72px] flex-col items-center gap-1.5">
+          <button type="button" onClick={onCompose} className="tap flex w-[72px] flex-col items-center gap-1.5">
             <InkCircle size={66} ring="seen"><PenFace size={44} tone="b" /></InkCircle>
             <span className="print text-[11px] leading-none" style={{ color: 'var(--ink-soft)' }}>내 스토리</span>
           </button>
           {/* 인스타의 `+` 배지와 같은 자리 */}
-          <span
-            className="absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full"
+          <button
+            type="button"
+            aria-label="지금 남기기"
+            onClick={onCompose}
+            className="tap absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full"
             style={{ background: 'var(--ink)', border: '2px solid var(--paper)' }}
           >
             <Plus size={13} color="var(--paper)" strokeWidth={2.6} />
-          </span>
+          </button>
         </div>
 
         <button type="button" onClick={onOpenStory} className="tap flex w-[72px] flex-col items-center gap-1.5">

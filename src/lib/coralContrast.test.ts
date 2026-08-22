@@ -221,12 +221,33 @@ describe('C7 - the token pair is defined in both themes and documented with its 
     }
   });
 
-  it('routes the Button primitive at the fill token, not the ink token', () => {
-    // The primitive is the one place a filled primary is defined, so this is the
-    // single assertion that keeps every CTA pink.
+  it('routes the filled primary at a MEASURED pair, whichever pair that is', () => {
+    /*
+      이 단언은 원래 "every CTA pink" 를 지켰다. V4 (2026-08-22) 가 채운 버튼을 산호빛
+      에서 **잉크**로 옮기면서 그 문장은 더 이상 이 클러스터가 지키려던 것이 아니게 됐다.
+
+      C7 이 실제로 지키는 것은 색이 아니라 **칠한 면 위의 글자가 읽히는가**다. 그래서
+      단언을 그쪽으로 되돌린다: `primary` 는 짝이 측정된 조합이어야 하고, 짝지어지지 않은
+      한쪽 -- 칠만 하고 글자색을 정하지 않는 것 -- 이어서는 안 된다.
+
+      새 조합 `ink-fill` 은 `--ink` 위의 `--paper` 이고 그 대비는 `paperTokens.test.ts`
+      가 CSS 에서 직접 읽어 계산한다 (낮 14.35:1, 밤 16.10:1). 옛 조합이 요구하던
+      4.5:1 을 넉넉히 넘는다.
+    */
     const button = read('src/components/ui/Button.tsx');
-    expect(button).toContain('primary: \'bg-coral-fill text-coral-fill-foreground\'');
-    expect(button).not.toContain('primary: \'bg-coral-strong');
+    const primary = /primary: '([^']+)'/.exec(button)?.[1];
+    expect(primary, 'Button 의 primary 를 못 읽었다').toBeTruthy();
+
+    const MEASURED_PAIRS = [
+      // 칠과 글자색을 한 클래스가 함께 정한다. 근거는 paperTokens.test.ts.
+      'ink-fill',
+      // 옛 조합. 근거는 이 파일 위쪽의 토큰 단언들.
+      'bg-coral-fill text-coral-fill-foreground',
+    ];
+    expect(MEASURED_PAIRS, `primary 가 측정되지 않은 조합이다: ${primary}`).toContain(primary);
+
+    // 짝지어지지 않은 칠은 여전히 금지다 -- 글자색을 정하지 않은 채 배경만 칠하는 것.
+    expect(primary).not.toMatch(/^bg-coral(-strong)?$/);
   });
 
   it('exposes the pair to Tailwind so bg-/text- utilities exist for it', () => {

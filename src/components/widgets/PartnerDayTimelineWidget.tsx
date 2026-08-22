@@ -33,7 +33,7 @@ import type { Attachment, DailyRecord } from '@/types';
  */
 
 const REACTION_LABELS: Record<string, string> = {
-  good: '기뻤어',
+  good: '좋았어',
   event: '이런 일이',
   hard: '힘들었어',
   thought_of_you: '네 생각났어',

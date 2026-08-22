@@ -52,7 +52,14 @@ export function Card({
   return (
     <section
       className={cn(
-        'rounded-surface bg-card border border-border',
+        /*
+          카드가 종이를 덮지 않는다 (2026-08-22, §5).
+
+          `bg-card` 로 채우는 순간 괘선이 사라지고 다시 앱 화면이 된다. 대신 손으로 그린
+          상자(`ink-box`)가 그 위에 그려진다 -- 네 모서리 반경이 서로 달라 자로 그린
+          상자가 아니고, 반복되는 카드가 전부 똑같이 삐뚤지 않도록 세 변형을 돌린다.
+        */
+        'ink-box',
         rail && 'border-l-4 border-l-coral',
         !flush && 'p-4',
         className,
@@ -61,7 +68,7 @@ export function Card({
     >
       {title ? (
         <div className="flex items-start justify-between gap-3 mb-2.5">
-          <h2 id={titleId} className="text-heading text-foreground min-w-0">
+          <h2 id={titleId} className="text-heading min-w-0" style={{ color: 'var(--ink)' }}>
             {title}
           </h2>
           {action ? <div className="shrink-0">{action}</div> : null}

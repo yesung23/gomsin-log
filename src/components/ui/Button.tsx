@@ -27,11 +27,21 @@ import { cn } from '@/lib/utils';
 type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
 type Size = 'sm' | 'md' | 'lg';
 
+/*
+  잉크로 그린 컨트롤 (2026-08-22, §5).
+
+  `primary` 는 잉크로 칠한 자리, `secondary` 와 `outline` 은 얇게 그린 상자다. 모두
+  모서리 반경이 서로 달라 자로 그린 버튼이 아니다.
+
+  **`destructive` 만 색을 지킨다.** 되돌릴 수 없는 동작은 손으로 그린 선이 아니라
+  경고색으로 말해야 하고, 그 판단은 미감보다 앞선다. 같은 이유로 `handwritingScope`
+  가 법적·오류·보안 문구를 인쇄체로 못 박는다.
+*/
 const VARIANT: Record<Variant, string> = {
-  primary: 'bg-coral-fill text-coral-fill-foreground',
-  secondary: 'bg-muted text-foreground',
-  outline: 'bg-transparent text-foreground border border-border',
-  ghost: 'bg-transparent text-muted-foreground',
+  primary: 'ink-fill',
+  secondary: 'ink-chip',
+  outline: 'ink-chip bg-transparent',
+  ghost: 'bg-transparent',
   destructive: 'bg-destructive text-destructive-foreground',
 };
 

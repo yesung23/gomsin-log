@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Image as ImageIcon, Check } from 'lucide-react';
 import { PhotoFrame } from './common';
+import { PenEmotion, EMOTION_ORDER, EMOTION_LABEL, type BasicEmotion } from './PenEmotion';
 
 /**
  * 남기기 — 인스타의 만들기 흐름과 같은 자리.
@@ -30,11 +31,9 @@ import { PhotoFrame } from './common';
  * 그날 직접 고르는 독립 신호이며 주기를 켜지 않은 사람도 똑같이 쓴다.
  */
 
-const TAGS = ['좋았어', '이런 일이', '힘들었어', '네 생각났어'];
-
 export function InstaCompose({ onClose }: { onClose?: () => void }) {
   const [text, setText] = useState('');
-  const [tag, setTag] = useState<string | null>(null);
+  const [emotion, setEmotion] = useState<BasicEmotion | null>(null);
   const [shared, setShared] = useState(true);
   const [photo, setPhoto] = useState(false);
   const [unwell, setUnwell] = useState(false);
@@ -99,20 +98,45 @@ export function InstaCompose({ onClose }: { onClose?: () => void }) {
 
         <div className="ink-rule my-5" />
 
-        <p className="print pb-2 text-[12px]" style={{ color: 'var(--ink-soft)' }}>오늘 어땠어? (선택)</p>
-        <div className="flex flex-wrap gap-2">
-          {TAGS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              aria-pressed={tag === item}
-              onClick={() => setTag(tag === item ? null : item)}
-              className="tap ink-chip min-h-11 px-3.5"
-              style={tag === item ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
-            >
-              <span className="hand text-[15px]">{item}</span>
-            </button>
-          ))}
+        {/*
+          감정.
+
+          여섯 낱말을 고르는 것은 서식이고, 여섯 얼굴을 고르는 것은 읽기 전에 알아보는
+          일이다. 이 앱에서 사람이 실제로 무언가를 느끼는 중에 만지는 유일한 컨트롤이라
+          -- 읽기가 가장 먼저 없어지는 상태다 -- 그림이어야 한다.
+
+          앱의 `EmotionCharacter`와 같은 여섯이고 같은 라벨, 같은 색 토큰이다. 다른 것은
+          재질뿐이다: 채운 씨앗이 아니라 펜으로 그린 선.
+
+          **고르지 않으면 아무것도 붙지 않는다.** §13 -- 파트너에게 보이는 감정은 작성자의
+          명시적 행위를 요구한다. 기본값으로 하나 골라 두면 그건 명시적 행위가 아니다.
+        */}
+        <p className="print pb-2.5 text-[12px]" style={{ color: 'var(--ink-soft)' }}>
+          지금 마음 (선택)
+        </p>
+        <div className="flex justify-between" role="radiogroup" aria-label="지금 마음">
+          {EMOTION_ORDER.map((item) => {
+            const on = emotion === item;
+            return (
+              <button
+                key={item}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                aria-label={EMOTION_LABEL[item]}
+                onClick={() => setEmotion(on ? null : item)}
+                className="tap flex min-h-11 w-[52px] flex-col items-center gap-1"
+              >
+                <PenEmotion emotion={item} selected={on} size={40} />
+                <span
+                  className="print text-[11px]"
+                  style={{ color: on ? 'var(--ink)' : 'var(--ink-soft)', fontWeight: on ? 600 : 400 }}
+                >
+                  {EMOTION_LABEL[item]}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="ink-rule my-5" />

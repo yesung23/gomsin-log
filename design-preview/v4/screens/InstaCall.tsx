@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Check, ChevronRight } from 'lucide-react';
+import { X, Bookmark, ChevronRight } from 'lucide-react';
 import { FIXTURE_RECORDS } from '../fixtures';
 
 /**
@@ -14,7 +14,13 @@ import { FIXTURE_RECORDS } from '../fixtures';
  *      이 화면은 그동안 옆에 있을 뿐이다.
  *   2. **통화에 관한 어떤 것도 기록하지 않는다.** 시각·길이·횟수 전부. 통화 기록은
  *      §16이 배제한 감시 표면 그 자체다.
- *   3. **`다음`은 건너뛰기이지 완료가 아니다.** 지나친 항목은 그대로 남는다.
+ *   3. **`다음`은 건너뛰기다.** 지나친 항목은 그대로 남는다.
+ *
+ * ## `이야기했어요` 대신 책갈피를 뺀다
+ *
+ * 체크 아이콘에 "했어요"는 할 일 목록의 문법이고, §8이 작업 관리자로 만들지 말라고 한
+ * 바로 그 모양이다. 인스타에는 완료가 없고 저장과 저장 취소뿐이다 -- 다 본 것은
+ * 책갈피를 눌러 뺀다. 동사가 없으므로 잘한 일도 못 한 일도 되지 않는다.
  *
  * ## 왜 하나씩 크게 보여주나
  *
@@ -63,7 +69,7 @@ export function InstaCall({ onClose }: { onClose?: () => void }) {
             </p>
           </>
         ) : remaining.length === 0 ? (
-          <p className="hand text-[20px]" style={{ color: 'var(--ink)' }}>다 이야기했어요</p>
+          <p className="hand text-[20px]" style={{ color: 'var(--ink)' }}>책갈피가 비었어요</p>
         ) : (
           <>
             <p className="hand text-[20px]" style={{ color: 'var(--ink)' }}>끝까지 봤어요</p>
@@ -82,8 +88,8 @@ export function InstaCall({ onClose }: { onClose?: () => void }) {
               onClick={() => setDone((set) => new Set(set).add(current.id))}
               className="tap ink-fill flex w-full items-center justify-center gap-2 py-4"
             >
-              <Check size={17} strokeWidth={2.4} />
-              <span className="print text-[15px] font-semibold">이야기했어요</span>
+              <Bookmark size={17} strokeWidth={2} fill="currentColor" />
+              <span className="print text-[15px] font-semibold">책갈피 빼기</span>
             </button>
             {/*
               `다음`은 건너뛰기다. 완료가 아니고 아무것도 쓰지 않는다.

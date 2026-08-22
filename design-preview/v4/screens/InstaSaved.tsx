@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, Check, ArrowUpRight, Phone } from 'lucide-react';
+import { ChevronLeft, Bookmark, ArrowUpRight, Phone } from 'lucide-react';
 import { FIXTURE_RECORDS } from '../fixtures';
 
 /**
@@ -9,7 +9,15 @@ import { FIXTURE_RECORDS } from '../fixtures';
  * 다른 점은 **이것이 다음 통화의 목차**라는 것 -- 그래서 목록 끝에 통화 모드로 가는
  * 길이 있다.
  *
- * ## 작업 관리자로 만들지 않는다
+ * ## 완료 버튼이 없는 이유
+ *
+ * 처음에는 `이야기했어요` 버튼을 뒀다가 뺐다. 체크 아이콘에 "했어요"는 정확히 할 일
+ * 목록의 문법이고, §8이 **작업 관리자로 만들지 않는다**고 못 박은 바로 그 모양이다.
+ * 목록을 비우는 일이 숙제가 되면 표시하는 일도 숙제가 된다.
+ *
+ * 인스타에는 완료가 없다. **저장과 저장 취소**뿐이고, 다 본 것은 책갈피를 눌러 뺀다.
+ * 여기서도 같다 -- 채워진 책갈피를 누르면 그 줄이 목록에서 빠진다. 동사가 없으므로
+ * 잘한 일도 못 한 일도 되지 않고, 그냥 자리를 정리하는 동작이 된다.
  *
  * §8: 자유 텍스트 메모 없음, 담당자 지정 없음, 마감일 없음, 별도 하단 탭 없음,
  * 앱 아이콘 배지 없음. **자동 만료도 없다** -- 날짜가 지나도 남고, 독촉하지 않는다.
@@ -40,7 +48,7 @@ export function InstaSaved({ onClose, onCall }: { onClose?: () => void; onCall?:
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
         {remaining.length === 0 ? (
           <p className="print pt-10 text-center text-[13px]" style={{ color: 'var(--ink-soft)' }}>
-            이야기할 것을 다 나눴어요
+책갈피가 비었어요
           </p>
         ) : (
           <ul>
@@ -55,18 +63,25 @@ export function InstaSaved({ onClose, onCall }: { onClose?: () => void; onCall?:
                   <p className="hand text-[16px]" style={{ color: 'var(--ink)' }}>
                     {topic.log.split('\n')[0]}
                   </p>
-                  <div className="flex items-center gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setDone((current) => new Set(current).add(topic.id))}
-                      className="tap ink-chip flex min-h-11 items-center gap-1.5 px-3"
-                    >
-                      <Check size={14} className="pen-icon" color="var(--ink)" />
-                      <span className="print text-[12px]" style={{ color: 'var(--ink)' }}>이야기했어요</span>
-                    </button>
-                    <button type="button" className="tap flex min-h-11 items-center gap-1 px-2">
+                  <div className="flex items-center gap-1 pt-2">
+                    <button type="button" className="tap flex min-h-11 items-center gap-1 px-1">
                       <span className="print text-[12px]" style={{ color: 'var(--ink-soft)' }}>원본 보기</span>
                       <ArrowUpRight size={13} className="pen-icon" color="var(--ink-soft)" />
+                    </button>
+                    <span className="flex-1" />
+                    {/*
+                      채워진 책갈피. 누르면 이 줄이 빠진다.
+
+                      인스타의 저장 취소와 같은 자리, 같은 아이콘, 같은 동작이다. 동사를
+                      붙이지 않는 것이 요점 -- `했어요`가 붙는 순간 숙제가 된다.
+                    */}
+                    <button
+                      type="button"
+                      aria-label="책갈피 빼기"
+                      onClick={() => setDone((current) => new Set(current).add(topic.id))}
+                      className="tap flex min-h-11 w-11 items-center justify-center"
+                    >
+                      <Bookmark size={19} className="pen-icon" color="var(--accent)" fill="var(--accent)" />
                     </button>
                   </div>
                   <div className="ink-rule mt-3" />
@@ -88,8 +103,8 @@ export function InstaSaved({ onClose, onCall }: { onClose?: () => void; onCall?:
           </button>
         ) : null}
 
-        <p className="print pt-4 text-center text-[11px]" style={{ color: 'var(--ink-soft)' }}>
-          날짜가 지나도 사라지지 않아요. 재촉하지 않아요.
+        <p className="print whitespace-pre-line pt-4 text-center text-[11px] leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
+          이야기 나눈 건 책갈피를 빼면 여기서 사라져요.{'\n'}날짜가 지나도 저절로 없어지지 않고, 재촉하지 않아요.
         </p>
       </div>
     </div>

@@ -394,12 +394,19 @@ describe('role-aware home widgets', () => {
      * conversational home from recurring (its summary card repeated the bubble
      * directly beneath it).
      */
+    /*
+     * SIXTH MOVE (2026-08-22): `partner_day` 가 코어에서 빠졌다 -- 원본 층이 스토리로
+     * 갔기 때문이다(§6.1 재개정). 그래서 "설명이 설명되는 것보다 앞설 수 없다"를
+     * **홈 안의 순서**로 물을 수 없게 됐다. 설명 대상이 이제 홈에 없다.
+     *
+     * 규칙 자체는 살아 있고 형태만 바뀐다: 설명 대상이 홈에 없으면 **그 설명들도 홈에
+     * 고정되지 않는다.** 아래 세 위젯이 코어에서 빠져 있는지를 보는 것이 그 검사다.
+     * 레일은 설명이 아니라 문이므로 맨 앞에 남는다.
+     */
     expect(HOME_CORE_BY_ROLE.soldier).toEqual([
-      'story_rail', 'call_briefing', 'partner_day', 'talk_about_list', 'today_word', 'paper_feed',
+      'story_rail', 'call_briefing', 'talk_about_list', 'today_word', 'paper_feed',
     ]);
-    // 설명이 설명되는 것보다 앞설 수 없다는 것이 이 단언의 본체다.
-    expect(HOME_CORE_BY_ROLE.soldier.indexOf('call_briefing'))
-      .toBeLessThan(HOME_CORE_BY_ROLE.soldier.indexOf('partner_day'));
+    expect(HOME_CORE_BY_ROLE.soldier[0]).toBe('story_rail');
     expect(DEFAULT_LAYOUT_BY_ROLE.soldier).toEqual(['dday']);
     // `talk_about_list` joined in P3. It is not another DESCRIPTION of the
     // day -- it is the couple's own explicit marks on records already on this
@@ -508,10 +515,26 @@ describe('role-aware home widgets', () => {
      * survives any arrangement. That is also why it is absent from `widgetsForRole`
      * now: it is not a thing to add, it is already there.
      */
+    /*
+     * SIXTH MOVE (2026-08-22): 표면이 홈에서 **스토리**로 갔다(§6.1 재개정). 지켜야 하는
+     * 것은 `partner_day` 라는 위젯이 아니라 **양쪽 모두 상대의 하루에 닿는 고정 표면을
+     * 갖는다**는 상호성이므로, 단언을 그 문 앞으로 옮긴다.
+     *
+     * 홈에 원본 타임라인을 통째로 그리면 스토리에 들어갈 이유가 없어진다 -- 이미 다 본
+     * 것의 목차가 요약이 되고, "같은 기록이 두 자리에 동시에 있지 않는다"도 깨진다.
+     * 그래서 위젯은 코어에서 빠졌고, 대신 `story_rail` 이 두 역할 모두에 고정돼 있다.
+     * 레일은 설명이 아니라 **문**이므로 이 블록이 막으려던 것과 성격이 다르다.
+     */
+    for (const role of ['gomsin', 'soldier'] as const) {
+      expect(HOME_CORE_BY_ROLE[role], `${role}: 상대의 하루로 가는 문이 고정돼야 한다`)
+        .toContain('story_rail');
+      // 원본 타임라인은 홈에 남지 않는다. 남으면 스토리와 같은 기록이 두 자리에 있다.
+      expect(HOME_CORE_BY_ROLE[role], `${role}: 원본 층은 스토리가 갖는다`)
+        .not.toContain('partner_day');
+    }
+    // 위젯이 사라진 것은 아니다 -- 코어가 아닐 뿐이므로 원하는 사람은 더할 수 있다.
     expect(isWidgetAllowedForRole('partner_day', 'soldier')).toBe(true);
     expect(isWidgetAllowedForRole('partner_day', 'gomsin')).toBe(true);
-    expect(HOME_CORE_BY_ROLE.gomsin).toContain('partner_day');
-    expect(HOME_CORE_BY_ROLE.soldier).toContain('partner_day');
   });
 
   it('gives both roles a default layout made only of widgets they may use', () => {

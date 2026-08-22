@@ -15,6 +15,33 @@
 > ⚠️ 이 저장소의 코드만으로는 원격 Supabase 프로젝트의 실제 상태를 알 수 없습니다.
 > 아래 "적용 순서"를 반드시 스테이징 프로젝트에서 먼저 검증하세요.
 
+> **원격 실측 (2026-08-22, `xzlorqsjajokrlkunxhr`).** CLI의 마이그레이션 목록 조회와
+> 테이블 통계 조회로 직접 읽었습니다. 둘 다 read-only이며 원격을 변경하지 않았습니다.
+>
+> - **CLI 추적 테이블(`supabase_migrations.schema_migrations`)이 001–055 전부
+>   비어 있습니다.** DB가 비었다는 뜻이 아니라 **마이그레이션이 CLI 밖(대시보드 SQL
+>   에디터)에서 적용됐다**는 뜻입니다. 그래서 CLI로 일괄 배포하는 명령을 실행하면 이미
+>   적용된 001–030을 처음부터 다시 밀어붙입니다. **쓰지 마세요.**
+> - 카탈로그 실측: `couples` · `couple_members` · `daily_records` · `events` · `trips` ·
+>   `trip_items` · `trip_checklists` · `couple_tasks` · `profiles` · `invitation_codes` ·
+>   `invitation_attempts` · `contact_preferences` · `briefings` · `cycle_*` ·
+>   `user_sensitive_consents` · `account_deletion_requests` ·
+>   `collaboration_invalidations` 존재 → **001–030 적용됨**.
+> - `talk_about_marks` **없음**, E2EE 테이블(`devices` · `scope_keys` · `key_envelopes` ·
+>   `crypto_pairings` 등) **없음** → **031–055 미적용**. 아래 표의 "운영 미적용" 표기가
+>   이 날짜 기준으로 재확인되었습니다.
+> - 결과: 로그인 직후 하이드레이션이 `talk_about_marks` 조회에서 `PGRST205`로 실패해
+>   `TALK_ABOUT-SERVER` 화면이 뜨고 앱에 들어갈 수 없었습니다. 코드 쪽은 그 조각의
+>   실패가 계정 전체의 실패로 번지지 않게 고쳤지만(`talkAbout.ts`의 `isMissingTable`
+>   분기), **`이따 이야기하기`는 038과 043을 적용해야 동작합니다.**
+> - 038·043 의존성 확인: 두 파일이 참조하는 것은 `daily_records` · `couples` ·
+>   `collaboration_invalidations` · `emit_collaboration_invalidation()` ·
+>   `get_my_active_couple_id()`뿐이고 전부 원격에 있습니다. 038의 E2EE 언급은 139행
+>   **주석 한 줄**이며 실행되는 구문이 아닙니다. 따라서 031–037 없이 이 둘만 적용해도
+>   깨지지 않습니다 — 다만 그렇게 하면 위 "042 번호 예약 충돌" 문단이 경고한 **번호
+>   순서와 실제 적용 이력의 불일치**가 하나 더 생기므로, 적용한 날짜와 방법을 반드시 이
+>   원장에 남기세요.
+
 > **048과 047의 관계 (2026-08-21, 같은 날 갱신).** 위 문단은 원래 "047은 PR #76이 소유하며
 > 이 브랜치에는 없습니다 / 여기서 실행한 harness는 047이 빠진 체인입니다"로 끝났습니다.
 > **두 문장 모두 이 트리에서 거짓입니다.** 047은 여기 커밋되어 있고 harness `ORDER`에도

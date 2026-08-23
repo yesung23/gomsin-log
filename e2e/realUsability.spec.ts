@@ -84,13 +84,29 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
    * navigates nowhere, or lands on a blank screen, is invisible to a route-by-route
    * check but is exactly what a user hits.
    */
-  for (const label of ['기록', '일정', '우리', '마이', '홈']) {
+  /*
+    V4 의 다섯 칸은 `홈 · 찾기 · 기록 남기기 · 일정 · 우리` 다 (`MobileShell`).
+    `나` 와 `일기장` 은 사라진 것이 아니라 `우리` 안으로 들어갔다.
+  */
+  for (const label of ['찾기', '일정', '우리', '홈']) {
     await page.getByRole('tab', { name: label }).click();
     await expect(page.locator('main')).not.toBeEmpty();
     // A screen with no interactive control is a dead end even if it rendered.
     const controls = await page.locator('main button, main a[href], main input').count();
     expect(controls, `${label} tab has no operable control`).toBeGreaterThan(0);
   }
+
+  /*
+    가운데 칸은 장소가 아니라 **동작**이다. 컴포저가 전체 화면으로 열리므로 그 위에는
+    `main` 도 탭바도 없다 -- 그래서 같은 단언을 쓸 수 없고, 대신 열렸는가와 조작할 것이
+    있는가를 본다. 열리지 않으면 그것이야말로 죽은 칸이다.
+  */
+  await page.getByRole('tab', { name: '기록 남기기' }).click();
+  await page.waitForURL(/\/compose$/, { timeout: 20_000 });
+  const composeControls = await page.locator('button, textarea').count();
+  expect(composeControls, '기록 남기기 tab has no operable control').toBeGreaterThan(0);
+  await page.getByRole('button', { name: '닫기' }).click();
+  await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
   expect(errors, 'errors while walking the tab bar').toEqual([]);
   await context.close();
@@ -118,7 +134,18 @@ test('the primary action on each core screen is present and enabled for a real c
 
   for (const { route, name, what } of checks) {
     await bootedInto(page, route);
-    await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
     const control = page.getByRole('button', { name }).first();
     await expect(control, `${what}: control missing on ${route}`).toBeVisible();
     await expect(control, `${what}: control disabled for a connected couple`).toBeEnabled();
@@ -209,8 +236,15 @@ test('cycle data stays untouched until the user separately consents to sensitive
     if (/\/rest\/v1\/cycle_(settings|periods|daily_logs)/.test(request.url())) cycleRequests += 1;
   });
 
-  await bootedInto(page, '/my');
-  await expect(page.getByText('내 몸의 리듬 시작하기')).toBeVisible({ timeout: 20_000 });
+  // 주기 추적은 `/me` 가 소유한다. `/my` 는 마이 목록 화면이며 이 표면을 갖지 않는다.
+  await bootedInto(page, '/me');
+  /*
+    `main` 의 내용으로 확인한다 -- 없을 때 **무엇이 대신 있었는지**를 실패가 말해 주기
+    때문이다. `getByText(...).toBeVisible()` 은 "못 찾았다"까지만 말하고, 동의 카드가
+    안 뜨는 이유가 로그인 상태인지, 로딩이 안 끝난 것인지, 역할 판정인지 구분하지
+    못한다. 지키는 것은 같고 실패가 더 많이 말한다.
+  */
+  await expect(page.locator('main')).toContainText('내 몸의 리듬 시작하기', { timeout: 20_000 });
   await page.waitForTimeout(500);
   expect(cycleRequests).toBe(0);
 
@@ -234,7 +268,9 @@ test('the cycle tracker fits a 320px screen and opens its day sheet by keyboard'
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
 
-  await bootedInto(page, '/my');
+  await bootedInto(page, '/me');
+  // 동의 카드가 떴는지 먼저 본다. 안 떴으면 실패가 그 자리에 무엇이 있었는지 말한다.
+  await expect(page.locator('main')).toContainText('내 몸의 리듬 시작하기', { timeout: 20_000 });
   await page.getByRole('checkbox', { name: /민감정보 수집·이용/ }).check();
   await page.getByRole('button', { name: '동의하고 시작하기' }).click();
   await expect(page.getByTestId('cycle-hero')).toBeVisible({ timeout: 20_000 });
@@ -295,7 +331,18 @@ test('every interactive control clears the 44px tap target, hit area included', 
   const offenders: string[] = [];
   for (const route of ['/home', '/record', '/schedule', '/trips', '/us', '/service', '/my', '/settings']) {
     await bootedInto(page, route);
-    await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+    /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 
     const bad = await page.evaluate(() => {
       const out: string[] = [];

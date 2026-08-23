@@ -1,132 +1,117 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it, expect, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
 
 /**
- * 기록을 시작하는 것은 어느 화면에서든 한 번이다.
+ * 기록을 시작하는 길이 언제나 열려 있다.
  *
  * `PRODUCT_V3` §7.1 은 30초 안의 기록을 목표로 삼고 진입점을 **제거할 수 없는 계약**으로
- * 만든다. 그것이 요구하지 않은 것은 나머지 네 탭이 막다른 길이어도 된다는 것인데, 한때
- * 그랬다 -- 컴포저는 `/record` 의 떠 있는 CTA 와 홈의 지울 수 있는 위젯에만 있어서,
- * `일정`·`우리`·`나` 에서 생각 하나를 붙잡으려면 이동부터 해야 했다.
+ * 만든다. 그 계약을 지키는 방식은 세 번 바뀌었고, 매번 이 파일이 따라갔다.
  *
- * 그래서 셸이 버튼 하나를 띄운다. **여섯 번째 탭이 아니다** -- §5 가 다섯을 고정하고,
- * 이것은 장소가 아니라 동작이므로 바의 동료가 아니라 바 위에 뜬다.
+ *     1. `/record` 의 떠 있는 CTA 하나            -- 다른 탭에서는 이동부터 해야 했다
+ *     2. 셸이 띄우는 둥근 버튼                     -- 자기 CTA 가 있는 화면에서 거둬졌다
+ *     3. 탭바 가운데 칸                           -- 엄지가 가장 쉬운 칸을 동작에 썼다
+ *     4. **스토리 레일의 `+` · `우리` 의 펜 · `찾기` 의 펜** (2026-08-23)
  *
- * ## 계약은 이 버튼 하나에 기대지 않는다
+ * 넷째가 지금이다. 인스타에는 떠 있는 버튼이 없다 -- 만들기는 자기 스토리 링에 붙은 `+`
+ * 이거나 프로필의 `+` 이고, 이 앱은 둘 다 쓴다. 산호빛 원이 종이 위에 떠 있으면 그것
+ * 하나가 화면에서 유일하게 앱처럼 보이는 물건이 된다.
  *
- * 이 버튼은 자기 주요 동작을 이미 고정한 화면(`/record`, 여행 상세)에서 스스로를 거둔다.
- * 즉 §7.1 이 "제거할 수 없다"고 한 것을 이 버튼만으로는 지킬 수 없다. 지키는 것은
- * `찾기` 탭의 펜이며, 그쪽은 어떤 조건에서도 사라지지 않는다. 이 파일이 양쪽을 다 본다.
+ * ## 이 파일이 지키는 것
+ *
+ * 진입점이 **어디에 있는지가 아니라, 조건 없이 있는지**다. 세 자리 모두 삼항이나 `&&`
+ * 뒤에 숨지 않아야 한다 -- 앞선 판이 정확히 그렇게 무너졌다: `ownsPrimaryAction` 이
+ * 참인 화면에서 버튼이 스스로를 거뒀고, "제거할 수 없다"고 한 것에 제거되는 경우가
+ * 둘 있었다.
  */
 
-vi.mock('@/components/InstallPromptBanner', () => ({ InstallPromptBanner: () => null }));
-vi.mock('@/components/OfflineBanner', () => ({ OfflineBanner: () => null }));
-vi.mock('@/components/SharedSyncBanner', () => ({ SharedSyncBanner: () => null }));
+const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
-const { MobileShell } = await import('@/components/MobileShell');
+/**
+ * 진입점 셋. 각각 그 화면에서 조건 없이 그려져야 한다.
+ *
+ * `anchor` 는 진입점을 여는 태그 바로 앞의 문자열이고, 그 앞 240자에 조건 분기가 없으면
+ * 조건 없이 그려지는 것이다. 소스에서 보는 이유는 세 화면 모두 렌더하려면 스토어 전체가
+ * 필요하고, 여기서 보고 싶은 것은 **구조적 사실**이기 때문이다.
+ */
+const ENTRY_POINTS: Array<{ file: string; label: string; where: string }> = [
+  {
+    file: 'src/features/home/PaperHome.tsx',
+    label: '기록 남기기',
+    where: '홈 스토리 레일의 + 배지',
+  },
+  {
+    file: 'src/features/us/PaperProfile.tsx',
+    label: '기록 남기기',
+    where: '우리 헤더의 펜',
+  },
+  {
+    file: 'src/features/search/SearchPage.tsx',
+    label: '기록 남기기',
+    where: '찾기 헤더의 펜',
+  },
+];
 
-function renderShell(initialPath: string) {
-  return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <MobileShell>
-        <p>본문</p>
-      </MobileShell>
-    </MemoryRouter>,
-  );
-}
+describe('기록을 시작하는 길은 조건 없이 열려 있다', () => {
+  it.each(ENTRY_POINTS)('$where 는 조건 뒤에 숨지 않는다', ({ file, label }) => {
+    const source = read(file);
+    const at = source.indexOf(`aria-label="${label}"`);
+    expect(at, `${file} 에 진입점이 없다`).toBeGreaterThan(-1);
 
-const compose = () => screen.queryByRole('link', { name: '기록 남기기' });
-
-describe('어느 탭에서도 기록을 시작할 수 있다', () => {
-  for (const path of ['/home', '/me', '/diary', '/schedule', '/us', '/search', '/my']) {
-    it(`${path} 에서 있다`, () => {
-      renderShell(path);
-      expect(compose()).toBeInTheDocument();
-    });
-  }
-
-  it('기록 탭이 아니라 이미 열린 컴포저로 간다', () => {
-    renderShell('/home');
-    // 라우터 상태가 아니라 주소다. §7.5 가 기록에 요구하는 것과 같은 이유 --
-    // 새로고침이나 딥링크가 여기 도착할 수 있어야 한다.
-    expect(compose()).toHaveAttribute('href', '/record?compose=1');
-  });
-});
-
-describe('이미 자기 주요 동작을 고정한 화면과 다투지 않는다', () => {
-  it('/record 에서는 거둔다 -- 그 화면의 CTA 가 같은 컴포저를 연다', () => {
-    renderShell('/record');
-    expect(compose()).not.toBeInTheDocument();
-  });
-
-  it('여행 상세에서는 거둔다 -- 자기 짝을 고정한다', () => {
-    renderShell('/trips/abc');
-    expect(compose()).not.toBeInTheDocument();
-  });
-
-  it('여행 목록에서는 있다 -- 아무것도 고정하지 않는다', () => {
-    // 접두사 매칭이 이걸 한 번 삼켰고, 그래서 판정이 술어다. 목록은 평범한 화면이고,
-    // 여행을 되읽다 보면 남길 만한 생각이 쉽게 떠오른다 -- **기억을 가장 잘 불러오는
-    // 화면**이 그것을 붙잡을 방법이 없는 유일한 화면이 되는 것이 그 실수였다.
-    renderShell('/trips');
-    expect(compose()).toBeInTheDocument();
-  });
-});
-
-describe('버튼이 거둬지는 화면에서도 진입점은 남는다', () => {
-  it('탭바에서 우리가 그 화면들을 켜고 있다', () => {
-    /*
-      `/record` 와 `/search` 는 `우리` 탭에 걸린다. 그래서 버튼이 거둬진 화면에서도
-      사용자는 진입점이 어디 있는지 볼 수 있다 -- 켜져 있는 탭을 누르면 기록을 보고 찾고
-      남기는 화면들이 나온다.
-    */
-    const shell = readFileSync(resolve(process.cwd(), 'src/components/MobileShell.tsx'), 'utf8');
-    expect(shell).toContain("matchPrefixes: ['/us', '/search', '/record', '/my', '/settings']");
-  });
-
-  it('찾기 화면의 펜은 어떤 조건에도 걸려 있지 않다', () => {
-    /*
-      §7.1 의 제거 불가 진입점은 실제로 여기다. 소스에서 보는 이유는 이 화면을 렌더하려면
-      스토어 전체가 필요하고, 여기서 보고 싶은 것은 **조건이 없다**는 구조적 사실이기
-      때문이다. 감싸는 조건이 생기면 `{` 앞에 붙은 삼항이나 `&&` 가 함께 들어온다.
-    */
-    const page = readFileSync(resolve(process.cwd(), 'src/features/search/SearchPage.tsx'), 'utf8');
-    const at = page.indexOf('aria-label="기록 남기기"');
-    expect(at).toBeGreaterThan(-1);
-    // 버튼을 여는 태그부터 그 앞 120자 안에 조건 분기가 없어야 한다.
-    const before = page.slice(Math.max(0, at - 240), at);
-    expect(before).not.toMatch(/\?\s*\(\s*$|&&\s*\(\s*$/);
+    const before = source.slice(Math.max(0, at - 240), at);
+    // 여는 `<button` 이 그 앞에 있고, 그 사이에 삼항이나 `&&` 가 없어야 한다.
     expect(before).toContain('<button');
+    const opening = before.slice(before.lastIndexOf('<button'));
+    expect(opening, `${file}: 진입점이 조건부로 그려진다`).not.toMatch(/\?|&&/);
+  });
+
+  it('셋 다 같은 곳으로 간다', () => {
+    for (const { file } of ENTRY_POINTS) {
+      expect(read(file), `${file}`).toContain("navigate('/compose')");
+    }
+  });
+
+  it('거둬지는 진입점이 하나도 없다', () => {
+    /*
+      가드 건전성. 앞선 판이 무너진 방식이 이것이었다 -- 화면이 자기 주요 동작을 이미
+      가졌다는 이유로 진입점이 스스로를 거뒀다. 그 술어가 다시 들어오면 여기서 걸린다.
+    */
+    expect(read('src/components/MobileShell.tsx')).not.toContain('ownsPrimaryAction');
+  });
+
+  it('탭바 가운데가 기록 작성이고, 그 칸은 어디서도 선택되지 않는다', () => {
+    /*
+      인스타의 다섯 자리로 돌아왔다 -- 홈 · 검색 · 만들기 · 릴스 · 프로필. 가운데를 다른
+      것에 준 적이 있고 되돌렸다: 인스타를 쓰는 사람이 손으로 아는 자리를 바꾸면 문법을
+      빌려온 이유 자체가 사라진다.
+
+      가운데는 **장소가 아니라 동작**이므로 어떤 경로에서도 선택되지 않는다. 눌리면
+      컴포저가 열리고 탭바는 원래 있던 곳을 계속 가리킨다.
+    */
+    const shell = read('src/components/MobileShell.tsx');
+    const tabs = [...shell.matchAll(/to: '(\/[a-z]+)'/g)].map((match) => match[1]);
+    expect(tabs).toEqual(['/home', '/search', '/compose', '/schedule', '/us']);
+    expect(shell).toContain("matchPrefixes: [] as string[]");
   });
 });
 
 /**
  * 한 동작에 한 이름.
  *
- * 셸의 버튼과 `찾기` 의 펜과 `/record` 의 CTA 는 같은 컴포저를 연다. 한때 그것들이 서로
- * 다른 이름을 가졌고(`기록 남기기` / `지금의 마음 남기기`), 한 화면에서 컨트롤을 배운
- * 사람에게 다음 화면의 같은 컨트롤이 다른 기능처럼 보였다.
+ * 세 진입점과 열리는 화면이 같은 컴포저를 연다. 한때 그것들이 서로 다른 이름을 가졌고
+ * (`기록 남기기` / `지금의 마음 남기기`), 한 화면에서 컨트롤을 배운 사람에게 다음 화면의
+ * 같은 컨트롤이 다른 기능처럼 보였다.
  */
 describe('기록 남기기는 어디서나 같은 이름이다', () => {
-  const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
-
-  it('셸 · 찾기 · CTA · 열리는 시트가 같은 이름을 쓴다', () => {
-    expect(read('src/components/MobileShell.tsx')).toContain('aria-label="기록 남기기"');
-    expect(read('src/features/search/SearchPage.tsx')).toContain('aria-label="기록 남기기"');
-    expect(read('src/pages/RecordPage.tsx')).toContain('<span>기록 남기기</span>');
-    expect(read('src/pages/RecordPage.tsx')).toContain('aria-label="기록 남기기"');
+  it('두 번째 이름이 남아 있지 않다', () => {
+    for (const { file } of ENTRY_POINTS) {
+      expect(read(file)).not.toContain('지금의 마음 남기기');
+    }
+    expect(read('src/features/compose/ComposePage.tsx')).not.toContain('지금의 마음 남기기');
   });
 
-  it('두 번째 이름이 남아 있지 않다', () => {
-    for (const path of [
-      'src/components/MobileShell.tsx',
-      'src/pages/RecordPage.tsx',
-      'src/features/search/SearchPage.tsx',
-    ]) {
-      expect(read(path)).not.toContain('지금의 마음 남기기');
-    }
+  it('열리는 화면이 자기가 무엇인지 말한다', () => {
+    // 진입점의 이름과 도착지의 제목이 어긋나면 누른 사람은 잘못 눌렀다고 읽는다.
+    expect(read('src/features/compose/ComposePage.tsx')).toContain('오늘 남기기');
   });
 });

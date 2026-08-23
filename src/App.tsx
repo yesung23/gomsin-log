@@ -48,6 +48,12 @@ const ServicePage = lazy(() =>
 const LegalPage = lazy(() =>
   import('@/pages/LegalPage').then((m) => ({ default: m.LegalPage })),
 );
+const ComposePage = lazy(() =>
+  import('@/features/compose/ComposePage').then((m) => ({ default: m.ComposePage })),
+);
+const SavedTopicsPage = lazy(() =>
+  import('@/features/talk/SavedTopicsPage').then((m) => ({ default: m.SavedTopicsPage })),
+);
 const MePage = lazy(() =>
   import('@/features/me/MePage').then((m) => ({ default: m.MePage })),
 );
@@ -374,6 +380,7 @@ export function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/home" element={<HomePage />} />
               <Route path="/record" element={<RecordPage />} />
+              <Route path="/compose" element={<ComposePage />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/me" element={<MePage />} />
               <Route path="/diary" element={<DiaryPage />} />
@@ -386,6 +393,7 @@ export function App() {
                   one-handed with a phone against an ear, and a row of navigation
                   targets along the bottom edge is the wrong thing to have under a
                   thumb that is aiming for 이야기했어요. */}
+              <Route path="/saved" element={<SavedTopicsPage />} />
               <Route path="/call" element={<CallModePage />} />
               <Route path="/trips" element={<TripsPage />} />
               <Route path="/trips/:id" element={<TripDetailPage />} />

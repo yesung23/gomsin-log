@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -18,6 +19,9 @@ let currentState: AppState;
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({ state: currentState, isReady: true }),
+}));
+vi.mock('@/components/MobileShell', () => ({
+  MobileShell: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/components/ui/AppBar', () => ({
   AppBar: ({ title }: { title: string }) => <h1>{title}</h1>,
@@ -115,6 +119,24 @@ describe('군 관련 카드는 끄는 것이 아니라 없다', () => {
     renderMe();
     expect(screen.queryByRole('button', { name: /복무 현황 열기/ })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/복무|전역|면회/);
+  });
+
+  it.each([
+    ['전역일이 지났으면', { ...SERVING, enlistmentDate: '2023-01-01', expectedDischargeDate: '2024-01-01' }],
+    ['상태가 discharged 면', { ...SERVING, militaryStatus: 'discharged' }],
+  ] as const)('%s 카드가 사라진다 -- 트로피로 남지 않는다', (_label, military) => {
+    /*
+      `computeServiceProgress` 는 전역 뒤에도 `isDischarged: true` 로 계속 값을 준다 --
+      `/service` 와 `coupleStats` 가 그 상태를 알아야 하기 때문이다. 이 화면은 다르다.
+      여기가 답하는 질문은 "지금 연락해도 되나"이고, 전역한 사람에게 복무는 더 이상 그
+      질문의 답이 아니다. 남겨 두면 `전역 🎉` 가 영원히 붙어 있는 트로피가 된다.
+
+      전역이라는 사건은 `우리` 의 하이라이트와 `일기장` 의 마일스톤이 축하한다.
+    */
+    currentState = stateWith(military as MilitaryInfo);
+    renderMe();
+    expect(screen.queryByRole('button', { name: /복무 현황 열기/ })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/전역|복무|면회/);
   });
 
   it('군 카드가 없어도 컨디션은 그대로 있다', () => {

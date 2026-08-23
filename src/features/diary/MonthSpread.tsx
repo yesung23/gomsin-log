@@ -114,7 +114,7 @@ export function MonthSpread({
   const full = placements.length >= PLACEMENT_LIMIT;
 
   return (
-    <div className="notebook flex min-h-full flex-col pb-24">
+    <div className="notebook flex min-h-screen min-h-[100dvh] flex-col pb-24">
       <header className="flex h-14 shrink-0 items-center gap-1 px-3">
         <button
           type="button"

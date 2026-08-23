@@ -66,12 +66,16 @@ vi.mock('@/lib/useStore', () => ({
 
 const { SchedulePage } = await import('@/pages/SchedulePage');
 
-/** The 일정 추가 label is a <span> inside the button, so resolve the button itself. */
+/**
+ * `일정 추가` 는 글자가 없는 펜 아이콘이다 (2026-08-23).
+ *
+ * V4가 채운 알약을 걷어내고 달 헤더 오른쪽의 `+` 로 옮겼다 -- 프리뷰가 그렇고, 종이 위에서
+ * 채운 알약은 그 화면에서 유일하게 앱처럼 보이는 물건이 된다. 그래서 글자로 찾을 수 없고
+ * **접근성 이름**으로 찾는다. 글자가 없어진 뒤에는 그것이 이 컨트롤의 유일한 이름이므로,
+ * 이 쿼리가 실패한다는 것은 스크린리더도 이 버튼을 못 찾는다는 뜻이다.
+ */
 function addEventButton(): HTMLButtonElement {
-  const span = screen.getByText('일정 추가');
-  const button = span.closest('button');
-  if (!button) throw new Error('일정 추가 button not found');
-  return button as HTMLButtonElement;
+  return screen.getByRole('button', { name: '일정 추가' }) as HTMLButtonElement;
 }
 
 /**
@@ -129,7 +133,7 @@ describe('SchedulePage loading lifecycle', () => {
     setOnLine(true);
     renderSchedulePage();
 
-    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '일정 추가' })).toBeInTheDocument();
     await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => window.setTimeout(resolve, 20));
     expect(reloadCalls).toHaveBeenCalledTimes(1);
@@ -149,7 +153,7 @@ describe('SchedulePage offline read-only mode', () => {
 
   it('disables the create entry point while offline', async () => {
     renderSchedulePage();
-    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '일정 추가' })).toBeInTheDocument();
 
     expect(addEventButton()).toBeEnabled();
 
@@ -164,7 +168,7 @@ describe('SchedulePage offline read-only mode', () => {
   it('re-enables the create entry point when the connection returns', async () => {
     setOnLine(false);
     renderSchedulePage();
-    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '일정 추가' })).toBeInTheDocument();
     expect(addEventButton()).toBeDisabled();
 
     await act(async () => {
@@ -177,7 +181,7 @@ describe('SchedulePage offline read-only mode', () => {
 
   it('issues no server write for a save attempted while offline', async () => {
     renderSchedulePage();
-    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '일정 추가' })).toBeInTheDocument();
 
     await openCreateModal();
 
@@ -209,7 +213,7 @@ describe('SchedulePage write integrity', () => {
   it('does not add the event locally when the server refuses the write', async () => {
     addEvent.mockResolvedValue(false);
     renderSchedulePage();
-    expect(await screen.findByText('우리의 계획')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '일정 추가' })).toBeInTheDocument();
 
     // FLAKE FIX. This used to click as soon as the header existed, but the header
     // renders immediately while the 일정 추가 button stays

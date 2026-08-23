@@ -89,10 +89,16 @@ export function EmotionSuggestionReview({
   return (
     <div
       data-testid="emotion-suggestion-review"
-      className={`p-3.5 rounded-surface bg-coral/5 border border-coral/20 space-y-3 ${className || ''}`}
+      /*
+        종이 위의 구역이지 카드가 아니다 (2026-08-23).
+
+        분홍 배경에 둥근 카드였다. 공책 위에서 그 하나가 유일하게 앱처럼 보였고, 그것
+        때문에 나머지 화면이 인쇄된 것처럼 읽혔다. 채우기를 걷고 손으로 그린 상자로 둔다.
+      */
+      className={`ink-box p-3.5 space-y-3 ${className || ''}`}
     >
       <div className="space-y-1">
-        <h4 className="text-label font-bold text-foreground">이렇게 느꼈나요?</h4>
+        <h4 className="text-label font-bold" style={{ color: 'var(--ink)' }}>이렇게 느꼈나요?</h4>
         <p className="text-caption text-muted-foreground leading-tight">
           글에서 읽어본 거예요. 눌러서 확인한 마음만 저장돼요.
         </p>
@@ -117,9 +123,16 @@ export function EmotionSuggestionReview({
                 data-testid={`emotion-suggestion-${candidate.id}`}
                 data-basic={candidate.basic}
                 data-answered={answered ? 'true' : 'false'}
-                className={`rounded-control border p-2 space-y-2 ${
-                  answered ? 'border-coral/40 bg-card' : 'border-dashed border-border bg-card/60'
-                }`}
+                /*
+                  확인한 줄은 실선, 아직인 줄은 점선. 채우기로 구별하면 종이가 사라진다.
+                */
+                className="p-2 space-y-2"
+                style={{
+                  border: answered
+                    ? 'var(--stroke) solid var(--ink)'
+                    : 'var(--stroke-thin) dashed var(--ink-faint)',
+                  borderRadius: '120px 8px 130px 8px / 8px 130px 8px 120px',
+                }}
               >
                 <div className="flex items-center gap-2">
                   {candidates.length > 1 && (
@@ -176,7 +189,7 @@ export function EmotionSuggestionReview({
                     onClick={() => setPickerFor(picking ? null : candidate.id)}
                     aria-expanded={picking}
                     data-testid={`emotion-suggestion-change-${candidate.id}`}
-                    className="press-response-row flex-1 min-h-11 rounded-control border border-border bg-card text-label font-bold text-foreground"
+                    className="press-response-row ink-chip flex-1 min-h-11 text-label font-bold" style={{ color: 'var(--ink)' }}
                   >
                     {picking ? '닫기' : '다른 마음'}
                   </button>
@@ -233,7 +246,7 @@ export function EmotionSuggestionReview({
           type="button"
           onClick={onConfirmAll}
           data-testid="emotion-suggestion-confirm-all"
-          className="press-response-row w-full min-h-11 rounded-control border border-coral/40 bg-coral/10 text-label font-bold text-coral-strong"
+          className="press-response-row ink-fill w-full min-h-11 text-label font-bold"
         >
           {unanswered}개 다 맞아요
         </button>
@@ -249,7 +262,7 @@ export function EmotionSuggestionReview({
                 type="button"
                 onClick={() => onRestore(candidate.id)}
                 aria-label={`${BASIC_EMOTION_LABEL[candidate.basic]} 다시 넣기`}
-                className="press-response min-h-11 px-3 rounded-control bg-muted text-muted-foreground border border-border text-caption font-bold flex items-center gap-1"
+                className="press-response ink-chip min-h-11 px-3 text-caption font-bold flex items-center gap-1" style={{ color: 'var(--ink-soft)' }}
               >
                 <RotateCcw size={12} aria-hidden="true" />
                 {BASIC_EMOTION_LABEL[candidate.basic]}
@@ -264,7 +277,7 @@ export function EmotionSuggestionReview({
       </p>
 
       {onToggleShareWithPartner && (
-        <label className="flex items-center gap-1.5 min-h-11 px-3 rounded-control bg-card border border-border text-label font-semibold text-foreground cursor-pointer w-fit">
+        <label className="ink-chip flex items-center gap-1.5 min-h-11 px-3 text-label font-semibold cursor-pointer w-fit" style={{ color: 'var(--ink)' }}>
           <input
             type="checkbox"
             checked={!!shareWithPartner}

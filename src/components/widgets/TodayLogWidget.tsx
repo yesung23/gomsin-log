@@ -562,13 +562,32 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       )}
 
       {/* Input Composer — progressive disclosure: only after a type is chosen */}
+      {/*
+        컴포저가 공책 지면이 됐다 (2026-08-23).
+
+        로직은 하나도 바뀌지 않았다 -- 오프라인 큐, 보호 설정 안내, §19 계측, 실패한
+        파일 처리까지 그대로다. 바뀐 것은 **표현**뿐이다: 채운 카드가 아니라 종이 위에
+        직접 쓰고, 글은 손글씨로 그려진다.
+      */}
       {showInputCard && (
-        <div className="mt-3 p-3 rounded-surface bg-card border border-border animate-fade-in space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-caption font-semibold text-muted-foreground">순간 남기기</span>
+        <div className="mt-3 animate-fade-in space-y-3">
+          <div className="flex items-center gap-2">
+            {/* 일기의 날짜 도장. 노트 상단에 찍는 그것. */}
+            <span
+              className="px-2.5 py-1 text-caption tabular-nums"
+              style={{
+                color: 'var(--ink-soft)',
+                border: 'var(--stroke-thin) solid var(--ink-faint)',
+                borderRadius: '80px 6px 90px 6px / 6px 90px 6px 80px',
+              }}
+            >
+              {new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}
+            </span>
+            <span className="flex-1" />
             <button
               onClick={() => setShowInputCard(false)}
-              className="press-response min-h-11 min-w-11 flex items-center justify-center text-caption text-muted-foreground"
+              className="press-response min-h-11 min-w-11 flex items-center justify-center text-caption"
+              style={{ color: 'var(--ink-soft)' }}
             >
               닫기
             </button>
@@ -589,8 +608,10 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
             */
             onBlur={settleComposition}
             aria-label="오늘의 기록"
-            placeholder="지금 이 순간, 어떤 생각을 하고 있나요?"
-            className="w-full h-20 bg-muted rounded-control p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
+            placeholder="오늘 어땠어?"
+            rows={6}
+            className="hand-text w-full resize-none bg-transparent text-heading outline-none placeholder:opacity-40"
+            style={{ color: 'var(--ink)', lineHeight: '30px' }}
           />
 
           {/*

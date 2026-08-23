@@ -6,6 +6,7 @@ import { visibleRecordsForViewer } from '@/lib/privacy';
 import { searchRecords, excerptAround, type SearchResult } from '@/lib/recordSearch';
 import { localToday } from '@/lib/cycle';
 import type { DailyRecord } from '@/types';
+import { MobileShell } from '@/components/MobileShell';
 
 /**
  * 찾기 — `우리`의 색인.
@@ -37,7 +38,7 @@ import type { DailyRecord } from '@/types';
  * 않는다.
  */
 
-export function SearchPage() {
+function SearchPageBody() {
   const navigate = useNavigate();
   const { state } = useStore();
   const [query, setQuery] = useState('');
@@ -65,7 +66,7 @@ export function SearchPage() {
   };
 
   return (
-    <div className="notebook min-h-full pb-6">
+    <div className="min-h-full pb-6">
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-2">
           <div className="ink-chip flex flex-1 items-center gap-2 px-3">
@@ -96,7 +97,7 @@ export function SearchPage() {
           <button
             type="button"
             aria-label="기록 남기기"
-            onClick={() => navigate('/record?compose=1')}
+            onClick={() => navigate('/compose')}
             className="ink-chip flex h-11 w-11 items-center justify-center"
           >
             <SquarePen size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
@@ -186,5 +187,19 @@ function Results({
         })}
       </ul>
     </div>
+  );
+}
+
+/**
+ * 탭은 셸 안에 있어야 한다.
+
+ * 셸이 하단 탭바와 스킵 링크와 라우트 안내를 갖는다. 이것 없이 렌더하면 그 탭에 들어간
+ * 사람은 탭바가 없어 **빠져나올 수 없다** -- 뒤로 가기 말고는.
+ */
+export function SearchPage() {
+  return (
+    <MobileShell>
+      <SearchPageBody />
+    </MobileShell>
   );
 }

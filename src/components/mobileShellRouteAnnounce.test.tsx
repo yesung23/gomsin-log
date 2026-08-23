@@ -42,10 +42,10 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const user = userEvent.setup();
     renderShell('/home');
 
-    await user.click(screen.getByRole('tab', { name: '나' }));
+    await user.click(screen.getByRole('tab', { name: '찾기' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toBe('나 화면입니다');
+      expect(screen.getByRole('status').textContent).toBe('찾기 화면입니다');
     });
   });
 
@@ -88,7 +88,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(5);
     expect(tabs.map((tab) => tab.getAttribute('aria-label')))
-      .toEqual(['홈', '나', '일기장', '일정', '우리']);
+      .toEqual(['홈', '찾기', '기록 남기기', '일정', '우리']);
   });
 
   it('PRESERVATION: the tab bar still lights the section it is in', () => {

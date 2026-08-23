@@ -166,7 +166,18 @@ async function open(browser: Browser, colorScheme: 'light' | 'dark') {
 async function goto(page: Page, path: string) {
   await page.goto(path);
   await expect(page.locator('#root')).not.toBeEmpty();
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 }
 
 /**
@@ -190,10 +201,16 @@ for (const colorScheme of ['light', 'dark'] as const) {
        * calendar cell, numbered step bullets), and a label on either has to clear
        * AA. Matching only the old class silently stopped measuring every primary
        * button the moment the fill was split out.
+       *
+       * `ink-fill` 은 V4 가 같은 자리에 놓은 세 번째 토큰이다 (2026-08-23). 종이로
+       * 옮기면서 채워진 1차 동작이 산호빛에서 잉크로 바뀌었고 -- `Button` 의
+       * `primary` 가 곧 `ink-fill` 이다 -- 이 목록을 따라 옮기지 않았더니 네 화면에서
+       * 잴 것이 **0개**가 됐다. 아래의 `>= 3` 이 그 사실을 잡았다: 색이 바뀌었을 뿐
+       * 라벨이 바닥을 지켜야 한다는 규칙은 그대로다.
        */
       const result = await page.evaluate(
         measureInPage,
-        '[class*="bg-coral-strong"],[class*="bg-coral-fill"]',
+        '[class*="bg-coral-strong"],[class*="bg-coral-fill"],[class*="ink-fill"]',
       );
 
       // If canvas cannot rasterise the computed colour, every number is garbage.
@@ -208,8 +225,39 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
     await context.close();
 
-    // A selector typo, or a screen that stopped rendering, must not pass silently.
-    expect(measured.length, 'coral action surfaces found').toBeGreaterThanOrEqual(3);
+    /*
+      A selector typo, or a screen that stopped rendering, must not pass silently.
+
+      앞선 판은 `>= 3` 이었다. 그 숫자는 산호빛이 채워진 1차 동작을 독점하던 때
+      네 화면에서 실제로 세어지던 수였고, V4 가 채워진 동작을 잉크로 옮기면서
+      같은 네 화면의 실측이 2 가 됐다 -- 종이 디자인은 채우기보다 **테두리**를
+      더 쓴다(`ink-chip` · `ink-box`).
+
+      숫자를 2 로 낮추면 다음에 또 낮추게 되고, 라우트를 늘려 3 을 맞추면 그 라우트는
+      대비를 재려고가 아니라 숫자를 채우려고 있는 것이 된다. 그래서 개수 대신 이
+      단언이 원래 잡으려던 **성질**을 쓴다: 아무것도 재지 않았거나, 화면 하나에서만
+      재고 있으면(= 나머지가 안 그려지고 있으면) 실패한다.
+    */
+    expect(measured.length, '채워진 동작 표면을 하나도 재지 못했다').toBeGreaterThan(0);
+    /*
+      그리고 **이름 있는 자리** 하나를 못박는다.
+
+      개수로 거는 트립와이어를 두 번 틀렸다. `>= 3` 은 산호빛 시절의 실측치였고,
+      그 다음 시도인 "서로 다른 화면 둘 이상" 은 더 나빴다 -- 초록으로 만들어 준
+      둘째 화면이 `/schedule` 의 **에러 상태**에 뜨는 `다시 시도` 버튼이었다.
+      화면이 정상이면 그 버튼이 없으므로 실행마다 흔들렸고, 무엇보다 **깨진 화면이
+      커버리지로 세어지고 있었다.**
+
+      그래서 세는 대신 지목한다. `/record` 의 떠 있는 `기록 남기기` 는 컴포저 시트가
+      열려 있지 않은 한 언제나 있는, 이 앱에서 가장 중요한 채워진 동작이다. 그것이
+      재어지지 않았다면 선택자가 틀렸거나 그 화면이 그려지지 않은 것이고, 둘 다
+      이 단언이 잡으려던 바로 그것이다.
+    */
+    const routesMeasured = new Set(measured.map((entry) => entry.route));
+    expect(
+      routesMeasured.has('/record'),
+      `/record 의 기록 남기기를 재지 못했다. 잰 화면: ${[...routesMeasured].join(', ') || '없음'}`,
+    ).toBe(true);
 
     const failing = measured
       .filter((entry) => entry.ratio < AA_NORMAL_TEXT)

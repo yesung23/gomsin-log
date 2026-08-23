@@ -102,8 +102,18 @@
   .notebook {
     background-color: var(--paper);
     background-image:
-      /* 왼쪽 여백선 */
-      linear-gradient(90deg, transparent 0 27px, var(--margin-rule) 27px 28px, transparent 28px),
+      /*
+       * 왼쪽 여백선.
+       *
+       * 10px 이다. 27px 이었고 그 자리는 진짜 공책의 여백선 자리이지만, 이 앱의 레이아웃은
+       * 인스타를 빌려 와 16px 에서 시작한다 -- 그래서 선이 글자 한가운데를 가로질렀다.
+       * 스토리 레일의 라벨도, 컴포저의 날짜 도장도, 감정 라벨도 전부 그 선에 잘렸다.
+       *
+       * 내용을 오른쪽으로 밀어 선을 피하는 방법도 있었고 한 번 그렇게 했다. 되돌린 이유는
+       * 인스타의 전폭이 사라지기 때문이다 -- 사진이 화면 끝까지 가지 않으면 그것은 더
+       * 이상 인스타의 피드가 아니다. **종이가 레이아웃을 피하는 쪽이 맞다.**
+       */
+      linear-gradient(90deg, transparent 0 10px, var(--margin-rule) 10px 11px, transparent 11px),
       /* 가로 괘선 */
       repeating-linear-gradient(
         180deg,
@@ -120,7 +130,7 @@
    */
   [data-theme='dark'] .notebook {
     background-image:
-      linear-gradient(90deg, transparent 0 27px, var(--margin-rule) 27px 29px, transparent 29px),
+      linear-gradient(90deg, transparent 0 10px, var(--margin-rule) 10px 12px, transparent 12px),
       repeating-linear-gradient(
         180deg,
         transparent 0 calc(var(--rule-gap) - 1.5px),

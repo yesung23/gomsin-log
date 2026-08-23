@@ -68,7 +68,18 @@ async function goto(page: Page, path: string) {
   await page.goto(path);
   await expect(page.locator('#root')).not.toBeEmpty();
   // The tab bar is present on every routed screen and is the last thing to mount.
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 }
 
 // ---------------------------------------------------------------------------
@@ -291,8 +302,12 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
   });
   await goto(page, '/');
 
-  await page.getByRole('button', { name: '한줄' }).click();
-  const textarea = page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?');
+  /*
+    V4 의 컴포저는 `/compose` 전체 화면이고, 홈에서 여는 문은 스토리 레일의 `+`
+    (`기록 남기기`) 다.
+  */
+  await page.getByRole('button', { name: '기록 남기기' }).click();
+  const textarea = page.getByPlaceholder('오늘 어땠어?');
   await textarea.fill('오늘도 보고 싶어');
 
   /*
@@ -315,14 +330,27 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
       'base64',
     ),
   });
-  await expect(page.getByText('노을.png')).toBeVisible();
+  /*
+    버튼으로 좁힌다. 실패 뒤에는 토스트에도 `사진 1장은 올리지 못했어요` 가 떠서
+    글자로 찾으면 두 개가 걸린다 -- 여기서 보려는 것은 **집게에 남은 파일**이다.
+  */
+  const picker = page.getByRole('button', { name: '사진 1장' });
+  await expect(picker).toBeVisible();
 
-  await page.getByRole('button', { name: '저장' }).click();
+  await page.getByRole('button', { name: '남기기', exact: true }).click();
 
-  // The record text persisted, the file did not -- and the file is still here to
-  // retry with. Before the fix this chip was destroyed before the warning showed.
+  /*
+    The record text persisted, the file did not -- and the file is still here to
+    retry with. Before the fix this chip was destroyed before the warning showed.
+
+    V4 는 파일 이름 대신 `사진 N장` 으로 센다. 그래서 이름이 아니라 **세 가지**를 본다:
+    경고가 떴는가, 화면이 컴포저에 남아 있는가(홈으로 돌아가면 사본이 사라진 것이다),
+    그리고 글은 비었는데 사진은 그대로 세어지는가.
+  */
   await expect(page.getByText('올리지 못했어요', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('노을.png')).toBeVisible();
+  await expect(page).toHaveURL(/\/compose$/);
+  await expect(picker).toBeVisible();
+  await expect(textarea).toHaveValue('');
 
   expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);
   await context.close();
@@ -404,27 +432,28 @@ for (const [label, scenario] of [['creator', CREATOR], ['partner', PARTNER]] as 
   test(`connected ${label} refuses online save as protection_required (no plaintext write)`, async ({ browser }) => {
     const { context, page, errors, unrouted, dailyRecordWrites } = await open(browser, scenario);
 
-    if (label === 'creator') {
-      await goto(page, '/');
-      await page.getByRole('button', { name: '한줄' }).click();
-    } else {
-      await goto(page, '/record');
-      await page.getByRole('button', { name: '기록 남기기' }).click();
-      await expect(page.getByRole('dialog', { name: '기록 남기기' })).toBeVisible();
-      await page.getByRole('button', { name: '한줄' }).click();
-    }
+    /*
+      두 역할이 **같은 문**으로 들어간다 (V4).
+
+      앞선 판은 곰신만 홈에서 컴포저를 열 수 있고 군화는 `/record` 의 시트를 거쳐야
+      했다. V4 의 홈은 두 역할에게 같은 화면이고 레일의 `+` 도 둘 다 갖는다. 역할별로
+      다른 문을 유지하면 이 테스트가 지키려는 것(보호 없이는 평문을 쓰지 않는다)이
+      아니라 사라진 화면 구조를 지키게 된다.
+    */
+    await goto(page, '/');
+    await page.getByRole('button', { name: '기록 남기기' }).click();
 
     // Type the record content. The composer is now open for either role.
-    await page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?').fill('보호가 필요한 기록');
+    await page.getByPlaceholder('오늘 어땠어?').fill('보호가 필요한 기록');
 
     // Save must be enabled while online with content.
-    const save = page.getByRole('button', { name: '저장' });
+    const save = page.getByRole('button', { name: '남기기', exact: true });
     await expect(save).toBeEnabled();
 
     await save.click();
 
     // A. User state: draft must remain (composer not cleared).
-    await expect(page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByPlaceholder('오늘 어땠어?')).toBeVisible({ timeout: 10_000 });
 
     // B. Security UX: protection_required guidance appears with Settings CTA.
     await expect(page.getByText('기록 보호 설정이 필요해요', { exact: false })).toBeVisible({ timeout: 10_000 });
@@ -448,11 +477,11 @@ test('a genuinely offline device says so, and stores the record it cannot send',
   const { context, page } = await open(browser, CREATOR);
   await goto(page, '/');
 
-  await page.getByRole('button', { name: '한줄' }).click();
-  await page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?').fill('오프라인 테스트');
+  await page.getByRole('button', { name: '기록 남기기' }).click();
+  await page.getByPlaceholder('오늘 어땠어?').fill('오프라인 테스트');
 
   // Enabled while online with content to save.
-  const save = page.getByRole('button', { name: '저장' });
+  const save = page.getByRole('button', { name: '남기기', exact: true });
   await expect(save).toBeEnabled();
 
   await context.setOffline(true);
@@ -482,7 +511,7 @@ test('a genuinely offline device says so, and stores the record it cannot send',
   await expect(page.getByText('연결되면', { exact: false }).first())
     .toBeVisible({ timeout: 15_000 });
   // The composer is cleared, because the text is no longer unsent work.
-  await expect(page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?'))
+  await expect(page.getByPlaceholder('오늘 어땠어?'))
     .toBeHidden({ timeout: 15_000 });
   // And the queue is visible rather than a promise nobody can check.
   await expect(page.getByTestId('outbox-waiting')).toContainText('보낼 기록 1개');

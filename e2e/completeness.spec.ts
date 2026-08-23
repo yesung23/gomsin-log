@@ -20,7 +20,7 @@ const NEW_ACCOUNT: Scenario = {
   records: [],
 };
 
-const PLACEHOLDER = '지금 이 순간, 어떤 생각을 하고 있나요?';
+const PLACEHOLDER = '오늘 어땠어?';
 
 async function settle(page: import('@playwright/test').Page) {
   await expect(page.locator('#root')).not.toBeEmpty();
@@ -134,7 +134,13 @@ test('an unsent draft survives a tab round-trip and is never written to storage'
   await settle(page);
 
   const DRAFT = '오늘 진짜 힘들었는데 네 생각하니까 나아졌어';
-  await page.getByRole('button', { name: '한줄' }).click();
+  /*
+    V4 에서 컴포저는 홈 안에 접혀 있던 카드가 아니라 `/compose` 전체 화면이다. 여는
+    문은 스토리 레일 내 스토리에 붙은 `+` 이며, 그 접근 이름이 `기록 남기기` 다.
+    지키는 성질은 그대로다 -- 탭을 한 바퀴 돌아도 쓰던 글이 사라지지 않는가.
+  */
+  const openComposer = () => page.getByRole('button', { name: '기록 남기기' }).click();
+  await openComposer();
   const field = page.getByPlaceholder(PLACEHOLDER);
   await field.fill(DRAFT);
   /*
@@ -148,14 +154,22 @@ test('an unsent draft survives a tab round-trip and is never written to storage'
    */
   await expect(field).toHaveValue(DRAFT);
 
+  /*
+    컴포저는 전체 화면이라 그 위에는 탭바가 없다. 그래서 탭을 도는 경로는 반드시
+    한 번 닫고 시작한다 -- 실제 사용자도 그렇게 한다.
+  */
+  await page.getByRole('button', { name: '닫기' }).click();
+  await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
+
   const tab = (name: string) =>
     page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });
-  await tab('기록').click();
-  await page.waitForURL(/\/record$/, { timeout: 20_000 });
+  await tab('우리').click();
+  await page.waitForURL(/\/us$/, { timeout: 20_000 });
   await tab('홈').click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
-  // Restored, and the card reopened so it is not hidden behind a collapsed composer.
+  // 다시 열면 쓰던 글이 그대로 있다.
+  await openComposer();
   const restored = page.getByPlaceholder(PLACEHOLDER);
   await expect(restored).toBeVisible({ timeout: 20_000 });
   await expect(restored).toHaveValue(DRAFT);
@@ -169,10 +183,13 @@ test('an unsent draft survives a tab round-trip and is never written to storage'
   expect(stored.v2).not.toContain('힘들었는데');
   expect(stored.session).not.toContain('힘들었는데');
 
-  // ...and therefore it is deliberately gone after a reload.
+  /*
+    ...그러므로 새로고침 뒤에는 의도적으로 없다. `/compose` 는 언제나 필드를 그리므로
+    사라지는 것은 필드가 아니라 **그 안의 글**이다.
+  */
   await page.reload();
   await settle(page);
-  await expect(page.getByPlaceholder(PLACEHOLDER)).toHaveCount(0);
+  await expect(page.getByPlaceholder(PLACEHOLDER)).toHaveValue('');
   await context.close();
 });
 
@@ -190,19 +207,24 @@ test('a saved record clears the draft instead of leaving it to be re-sent', asyn
   await page.goto('/');
   await settle(page);
 
-  await page.getByRole('button', { name: '한줄' }).click();
+  const openComposer = () => page.getByRole('button', { name: '기록 남기기' }).click();
+  await openComposer();
   await page.getByPlaceholder(PLACEHOLDER).fill('저장될 기록');
-  await page.getByRole('button', { name: '저장' }).click();
+  // V4 컴포저의 확정은 인스타의 `공유` 자리에 있는 `남기기` 다.
+  await page.getByRole('button', { name: '남기기', exact: true }).click();
+
+  // 남긴 뒤에는 컴포저가 닫히고 홈으로 돌아온다.
+  await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
   const tab = (name: string) =>
     page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });
-  await expect(page.getByPlaceholder(PLACEHOLDER)).toHaveCount(0, { timeout: 20_000 });
-  await tab('기록').click();
-  await page.waitForURL(/\/record$/, { timeout: 20_000 });
+  await tab('우리').click();
+  await page.waitForURL(/\/us$/, { timeout: 20_000 });
   await tab('홈').click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
   // A saved record is not unsent work, so nothing should be waiting.
-  await expect(page.getByPlaceholder(PLACEHOLDER)).toHaveCount(0);
+  await openComposer();
+  await expect(page.getByPlaceholder(PLACEHOLDER)).toHaveValue('');
   await context.close();
 });

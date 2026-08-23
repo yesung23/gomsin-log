@@ -32,6 +32,8 @@ const WHITELIST = [
   'src/features/us/',
   'src/features/search/',
   'src/features/diary/',
+  'src/features/talk/',
+  'src/features/compose/',
   'src/pages/RecordPage.tsx',
 ];
 

@@ -90,7 +90,7 @@ function renderComposer(connected: boolean) {
 
 async function writeAndSave(user: ReturnType<typeof userEvent.setup>, text: string) {
   await user.click(screen.getByText('한줄'));
-  await user.type(screen.getByPlaceholderText(/지금 이 순간/), text);
+  await user.type(screen.getByPlaceholderText(/오늘 어땠어/), text);
   await user.click(screen.getByRole('button', { name: '저장' }));
   await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
   return addRecordWithMedia.mock.calls[0][0] as unknown as { isPrivate: boolean; talkAbout: boolean };

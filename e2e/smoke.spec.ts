@@ -26,8 +26,16 @@ test('the production bundle boots, authenticates and leaves onboarding', async (
 
   // The splash must resolve: `isReady` becomes true and a real screen renders.
   await expect(page.locator('body')).not.toBeEmpty();
-  // The authenticated home surface, not the onboarding wizard.
-  await expect(page.getByText('춘향', { exact: false }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    The authenticated home surface, not the onboarding wizard.
+
+    앞선 판은 자기 이름(`춘향`)을 찾았다. V4 의 홈은 자기 자리를 이름이 아니라
+    `내 스토리` 로 부르므로 그 글자가 사라졌다. 대신 두 가지를 본다: 온보딩에는 없는
+    **탭바**가 떴는가(구조), 그리고 상대의 이름이 실제 데이터로 그려졌는가(내용).
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  await expect(page.getByText('몽룡', { exact: false }).first()).toBeVisible({ timeout: 20_000 });
 
   expect(unrouted, `unrouted supabase calls: ${unrouted.join(', ')}`).toEqual([]);
   expect(rejections).toEqual([]);

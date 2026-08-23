@@ -6,3 +6,4 @@ export { Bookmark } from './Bookmark';
 export { PaperCard } from './PaperCard';
 export { FoldDivider } from './FoldDivider';
 export { PaperSkeleton } from './PaperSkeleton';
+export { InkCircle, PenFace } from './InkCircle';

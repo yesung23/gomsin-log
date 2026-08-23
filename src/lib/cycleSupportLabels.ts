@@ -1,4 +1,4 @@
-import type { CycleSupportKind } from '@/types';
+import type { CycleSupportKind, CycleSupportSignal } from '@/types';
 
 /**
  * 배려 신호가 사람에게 보이는 문장. **한 곳에서만 정한다.**
@@ -24,3 +24,25 @@ export const CYCLE_SUPPORT_LABEL: Record<CycleSupportKind, string> = {
   check_in_later: '나중에 안부를 물어봐 주세요',
   feeling_unwell: '오늘은 몸이 힘들어요',
 };
+
+/**
+ * 어느 쪽의 신호를 보고 있는가. **한 곳에서만 정한다.**
+ *
+ * 같은 판정이 세 자리에 있었다 -- `/me` 의 내 카드, `/me` 의 상대 카드, 홈 레일의
+ * 쪽지. 셋 다 `ownerId === userId` 한 줄이고, 셋 중 하나에서 부호가 뒤집히면
+ * **내가 보낸 말이 상대가 한 말로 화면에 뜬다.** 조용히 틀리는 종류이고, 세 자리에
+ * 흩어져 있으면 하나를 고칠 때 나머지를 같이 보게 되지 않는다.
+ *
+ * `userId` 가 없으면 빈 목록이다. `ownerId !== undefined` 는 언제나 참이므로, 이
+ * 가드가 없으면 로그아웃 직후 한 프레임 동안 남의 신호가 남는다.
+ */
+export function signalsFrom(
+  signals: readonly CycleSupportSignal[],
+  userId: string | undefined,
+  side: 'mine' | 'partner',
+): CycleSupportSignal[] {
+  if (!userId) return [];
+  return signals.filter((signal) => (side === 'mine'
+    ? signal.ownerId === userId
+    : signal.ownerId !== userId));
+}

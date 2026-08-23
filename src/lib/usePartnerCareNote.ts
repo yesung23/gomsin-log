@@ -4,6 +4,7 @@ import {
   fetchCycleSupportSignalsResultFromDB,
   localToday,
 } from '@/lib/cycle';
+import { signalsFrom } from '@/lib/cycleSupportLabels';
 import type { CycleSupportSignal } from '@/types';
 
 /**
@@ -45,12 +46,7 @@ export function selectPartnerCareNote(
   today: string,
   nowIso: string,
 ): CycleSupportSignal | null {
-  if (!userId) return null;
-  return activeCycleSupportSignal(
-    signals.filter((signal) => signal.ownerId !== userId),
-    today,
-    nowIso,
-  );
+  return activeCycleSupportSignal(signalsFrom(signals, userId, 'partner'), today, nowIso);
 }
 
 export function usePartnerCareNote({

@@ -15,7 +15,7 @@ import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
-import { CYCLE_SUPPORT_LABEL } from '@/lib/cycleSupportLabels';
+import { CYCLE_SUPPORT_LABEL, signalsFrom } from '@/lib/cycleSupportLabels';
 import type { CycleSupportKind, CycleSupportSignal } from '@/types';
 import { Card } from '@/components/ui/Card';
 
@@ -158,8 +158,8 @@ export function CycleSupportSection({
       setNowIso(checkedAt);
       setSignals(result.signals);
       const visibleSignals = owner
-        ? result.signals.filter((signal) => signal.ownerId === userId)
-        : result.signals.filter((signal) => signal.ownerId !== userId);
+        ? signalsFrom(result.signals, userId, 'mine')
+        : signalsFrom(result.signals, userId, 'partner');
       const active = activeCycleSupportSignal(visibleSignals, koreaToday(new Date(checkedAt)), checkedAt);
       setLoadState(active ? 'ready' : 'empty');
     } catch (error) {
@@ -266,8 +266,8 @@ export function CycleSupportSection({
 
   const visibleSignals = useMemo(
     () => owner
-      ? signals.filter((signal) => signal.ownerId === userId)
-      : signals.filter((signal) => signal.ownerId !== userId),
+      ? signalsFrom(signals, userId, 'mine')
+      : signalsFrom(signals, userId, 'partner'),
     [owner, signals, userId],
   );
   const activeSignal = useMemo(

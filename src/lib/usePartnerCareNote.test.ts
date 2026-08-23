@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { selectPartnerCareNote } from '@/lib/usePartnerCareNote';
+import { signalsFrom } from '@/lib/cycleSupportLabels';
 import type { CycleSupportSignal } from '@/types';
 
 const TODAY = '2026-08-23';
@@ -63,5 +64,30 @@ describe('홈 쪽지에 뜨는 것은 상대가 오늘 보낸 살아 있는 신�
       ME, TODAY, NOW,
     );
     expect(picked?.id).toBe('now');
+  });
+});
+
+describe('어느 쪽 신호인지 가르는 판정은 한 곳이 소유한다', () => {
+  it('내 것과 상대 것을 정확히 갈라 낸다', () => {
+    const both = [signal({ id: 'theirs' }), signal({ id: 'mine', ownerId: ME })];
+    expect(signalsFrom(both, ME, 'mine').map((one) => one.id)).toEqual(['mine']);
+    expect(signalsFrom(both, ME, 'partner').map((one) => one.id)).toEqual(['theirs']);
+  });
+
+  /*
+    부호가 뒤집히면 **내가 보낸 말이 상대가 한 말로 화면에 뜬다.** 세 자리에 흩어져
+    있던 판정이라 하나를 고칠 때 나머지를 같이 보게 되지 않았다.
+  */
+  it('두 쪽이 서로를 겹치지 않는다', () => {
+    const both = [signal({ id: 'theirs' }), signal({ id: 'mine', ownerId: ME })];
+    const mine = signalsFrom(both, ME, 'mine').map((one) => one.id);
+    const partner = signalsFrom(both, ME, 'partner').map((one) => one.id);
+    expect(mine.filter((id) => partner.includes(id))).toEqual([]);
+    expect([...mine, ...partner].sort()).toEqual(['mine', 'theirs']);
+  });
+
+  it('내가 누구인지 모르면 어느 쪽도 아니다', () => {
+    expect(signalsFrom([signal()], undefined, 'mine')).toEqual([]);
+    expect(signalsFrom([signal()], undefined, 'partner')).toEqual([]);
   });
 });

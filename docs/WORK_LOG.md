@@ -4786,3 +4786,22 @@ e2e · Postgres 계약 · Deno).
 
 #### CORRECTION
 - The first remote browser run `32633479877` failed only because its fixture used a Korean storage filename rejected by the production canonical media-path validator. The fixture now uses `trip-photo.jpg`; the rerun passed. This was a test-fixture defect, not a production-data or Supabase change.
+
+### 2026-08-23 · LV · 우리 여행 요약과 프로필 탭 크기 안정화
+
+#### RESULT
+- runtime commit: `8ee3818` — `우리 → 여행` now shows up to three compact, date/status-labelled trip rows; each row opens its trip detail and `전체 보기` opens `/trips`
+- the selected `게시물 · 사진 · 여행` tab reserves the same border space as its siblings; its keyboard focus ring is drawn inside the tab so the middle tab no longer appears to grow
+- the existing `우리 → 사진` record list and photo-only `게시물` grid remain unchanged
+
+#### VERIFICATION
+- focused Vitest: PASS — 2 files / 19 tests
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- local `npm run verify` with documented non-secret placeholder environment: PASS — 221 Vitest files / 3202 tests and build (existing >500kB chunk warning only)
+- local real-browser `e2e/usArchiveShots.spec.ts`: PASS — 320px and 390px; trip summary, photo tab, and equal tab dimensions checked; screenshots captured
+
+#### NOT APPLIED
+- Supabase production data: not touched
+- migrations: none created or applied
+- physical-device verification: not run

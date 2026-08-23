@@ -27,8 +27,8 @@
 
 ### Latest live checkpoint — 2026-08-23
 
-- master is now at 8d6f67d, a normal fast-forward from 2a555f5. The photo-only post correction is in the default branch; runtime implementation is in `a773834` and the follow-up browser-fixture correction is in `8d6f67d`.
-- Our first tab now renders a travel-scoped **photo-only** post grid; a tile opens a photo-primary detail viewer; the photo tab renders the existing record-centered list; the travel tab keeps the existing trips entry point.
+- The photo-only post correction is in the default branch; runtime implementation is in `a773834` and the follow-up browser-fixture correction is in `8d6f67d`. The latest profile correction runtime commit is `8ee3818`.
+- Our first tab now renders a travel-scoped **photo-only** post grid; a tile opens a photo-primary detail viewer; the photo tab renders the existing record-centered list; the travel tab now shows a compact list of up to three trips before the full planner. Profile tabs keep a stable border footprint and inset focus ring.
 - Search keeps the existing local date/content search. With an empty query, the soldier role shows service/contact information and the gomsin role shows the existing cycle surface.
 - master validation run 32633810978 and native release validation run 32633810931 both completed successfully for `8d6f67d`. The Vercel production URL returned HTTP 200; the in-app browser showed the photo-only empty state on `게시물` and the existing record list on `사진`.
 - The remote browser matrix passed the fixture-backed photo tile and detail-viewer path at 320px and 390px. An authenticated browser refresh of /us showed 게시물 · 사진 · 여행; /search still retains its role-specific surface from the preceding change.

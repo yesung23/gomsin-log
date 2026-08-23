@@ -98,7 +98,7 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.getByRole('button', { name: '기록 찾기' })).toBeInTheDocument();
   });
 
-  it('게시물 격자 탭은 여행과 연결된 기록만 노출한다', () => {
+  it('게시물 격자 탭은 여행 중인 사진 게시물만 노출하고 누르면 사진 상세를 연다', () => {
     const trip: Trip = {
       id: 'trip-jeju',
       coupleId: 'couple-1',
@@ -111,7 +111,12 @@ describe('PaperProfile (우리 화면)', () => {
     };
 
     const normalRecord = makeRecord({ id: 'rec-normal', date: '2026-08-05', log: '평범한 하루' });
-    const travelRecord = makeRecord({ id: 'rec-travel', date: '2026-08-11', log: '제주도 바다 도착!' });
+    const travelRecord = makeRecord({
+      id: 'rec-travel',
+      date: '2026-08-11',
+      log: '제주도 바다 도착!',
+      attachments: [{ type: 'photo', name: '제주도.jpg', url: 'https://example.test/jeju.jpg' }],
+    });
 
     storeState = {
       ...baseState(),
@@ -125,9 +130,19 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    // 여행 기록만 격자에 존재해야 함
+    // 여행 중 사진 게시물만 격자에 존재해야 함
     expect(screen.getByTestId('post-tile-rec-travel')).toBeInTheDocument();
     expect(screen.queryByTestId('post-tile-rec-normal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('post-tile-rec-travel')).toHaveAttribute('data-kind', 'photo');
+    expect(screen.queryByText('평범한 하루')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('post-tile-rec-travel'));
+    const viewer = screen.getByTestId('photo-post-viewer');
+    expect(viewer).toBeInTheDocument();
+    expect(viewer.querySelector('[data-testid="record-attachment"] img[alt="제주도.jpg"]')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '사진 게시물 닫기' }));
+    expect(screen.queryByTestId('photo-post-viewer')).not.toBeInTheDocument();
   });
 
   it('여행 기록이 없으면 여행 안내 문구가 격자에 노출된다', () => {
@@ -143,7 +158,7 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/아직 여행 기록이 없어요/)).toBeInTheDocument();
+    expect(screen.getByText(/아직 여행 사진이 없어요/)).toBeInTheDocument();
   });
 
   it('사진 탭을 누르면 모든 기존 기록을 읽을 수 있고 RecordPage로 이어지는 액션을 제공한다', () => {

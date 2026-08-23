@@ -11,9 +11,9 @@ for (const width of [320, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 844 } });
     await installMockBackend(context, {
       ...PARTNER,
-      // 이 화면의 게시물 격자는 모든 기록이 아니라 여행 기간의 기록만 보여준다.
+      // 이 화면의 게시물 격자는 모든 기록이 아니라 여행 기간의 사진 게시물만 보여준다.
       // 기존 PARTNER fixture의 기록은 모두 TODAY에 있으므로, 그 날짜를 여행 기간으로
-      // 열어 실제 여행 게시물 경로를 브라우저에서 확인한다.
+      // 열어 실제 여행 사진 게시물·상세 보기 경로를 브라우저에서 확인한다.
       trips: [{
         id: 'trip-browser',
         couple_id: 'couple-1',
@@ -24,6 +24,12 @@ for (const width of [320, 390]) {
         status: 'planned',
         created_at: `${TODAY}T00:00:00Z`,
       }],
+      records: (PARTNER.records ?? []).map((record) => record.id === 'rec-shared'
+        ? {
+          ...record,
+          attachments: [{ type: 'photo', name: '여행-사진.jpg', path: 'couple-1/rec-shared/여행-사진.jpg' }],
+        }
+        : record),
     });
     const page = await context.newPage();
     await page.goto('/us');
@@ -38,7 +44,15 @@ for (const width of [320, 390]) {
       결과를 눈으로 볼 수 있게 남기는가.
     */
     await expect(page.getByTestId('post-grid')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('post-grid').locator('[data-kind="photo"]')).toHaveCount(1);
+    await expect(page.getByTestId('post-grid').locator('[data-kind="text"]')).toHaveCount(0);
     await page.screenshot({ path: `${OUT}/us-${width}.png`, fullPage: true });
+
+    await page.getByTestId('post-tile-rec-shared').click();
+    await expect(page.getByTestId('photo-post-viewer')).toBeVisible();
+    await page.screenshot({ path: `${OUT}/us-post-detail-${width}.png`, fullPage: true });
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('photo-post-viewer')).toHaveCount(0);
     await context.close();
   });
 }

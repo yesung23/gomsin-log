@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Search, SquarePen } from 'lucide-react';
+import { Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Search, SquarePen, X } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { buildCoupleStats, togetherDays } from '@/lib/coupleStats';
 import { buildHighlights } from '@/lib/coupleHighlights';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { PostGrid } from '@/features/us/PostGrid';
-import { isTravelRecord } from '@/features/us/postTiles';
+import { getPhotoAttachments, isTravelRecord } from '@/features/us/postTiles';
 import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { cn } from '@/lib/utils';
@@ -33,7 +33,7 @@ import type { DailyRecord, Role } from '@/types';
  *     게시물 → 함께한 날      팔로워 → 만남까지      팔로잉 → 전역까지
  *     프로필 편집 → 우리 소개 편집                   프로필 공유 → 기억 만들기
  *     하이라이트 → 마일스톤 (**맨 뒤에 아직 오지 않은 것 하나**)
- *     게시물 격자 → 여행 중 남긴 게시물
+ *     게시물 격자 → 여행 중 남긴 사진 게시물
  *     사진 탭 → 기존 기록 목록
  *
  * 인스타는 클수록 좋은 숫자만 있다. 여기는 첫 칸이 쌓이고 나머지 둘은 줄어든다 -- 두
@@ -60,6 +60,7 @@ export function PaperProfile() {
   const { profile } = state;
   const todayStr = localToday();
   const [tab, setTab] = useState<GridTab>('post');
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
 
   const records = useMemo(
     () => visibleRecordsForViewer(state.records, {
@@ -72,6 +73,11 @@ export function PaperProfile() {
   const travelRecords = useMemo(
     () => records.filter((record) => isTravelRecord(record, state.trips, state.events)),
     [records, state.trips, state.events],
+  );
+
+  const selectedPost = useMemo(
+    () => (selectedPostId ? travelRecords.find((record) => record.id === selectedPostId) ?? null : null),
+    [selectedPostId, travelRecords],
   );
 
   const hasMilitary = Boolean(profile.military?.expectedDischargeDate);
@@ -318,9 +324,23 @@ export function PaperProfile() {
         <PostGrid
           records={travelRecords}
           coupleId={profile.couple.coupleId}
-          onOpen={(recordId: string) => navigate(`/record?record=${encodeURIComponent(recordId)}`)}
+          onOpen={setSelectedPostId}
         />
       )}
+
+      {selectedPost ? (
+        <PhotoPostViewer
+          record={selectedPost}
+          coupleId={profile.couple.coupleId}
+          viewer={{ userId: profile.id, role: profile.role }}
+          partnerName={profile.couple.partnerName || '상대방'}
+          onClose={() => setSelectedPostId(null)}
+          onOpenRecord={(recordId) => {
+            setSelectedPostId(null);
+            navigate(`/record?record=${encodeURIComponent(recordId)}`);
+          }}
+        />
+      ) : null}
 
       {/*
         `더 보기` 가 없어졌다. 그것은 달 단위 격자가 세 달씩 늘려 가던 것이고, 게시물
@@ -453,6 +473,113 @@ function ProfileRecordList({
             </article>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 게시물 하나의 상세 보기.
+ *
+ * 격자는 사진을 고르는 표면이고, 이 화면은 고른 사진을 크게 읽는 표면이다. 원본 기록의
+ * 글은 캡션처럼 사진 아래에만 두며, 글 목록을 다시 여기서 복제하지 않는다. 여러 장이면
+ * `RecordMediaGallery`가 가진 스와이프·확대 동작을 그대로 사용한다.
+ */
+function PhotoPostViewer({
+  record,
+  coupleId,
+  viewer,
+  partnerName,
+  onClose,
+  onOpenRecord,
+}: {
+  record: DailyRecord;
+  coupleId?: string;
+  viewer: { userId?: string; role?: Role };
+  partnerName: string;
+  onClose: () => void;
+  onOpenRecord: (recordId: string) => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const photos = useMemo(() => getPhotoAttachments(record), [record]);
+  const author = recordAuthorPresentation(record, viewer, partnerName);
+  const [, month, day] = record.date.split('-');
+  const dateLabel = `${Number(month)}월 ${Number(day)}일${record.time ? ` ${record.time}` : ''}`;
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    closeButtonRef.current?.focus();
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  if (photos.length === 0) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="photo-post-viewer-title"
+        data-testid="photo-post-viewer"
+        className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex min-h-11 items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 id="photo-post-viewer-title" className="text-label font-semibold text-card-foreground">
+              {dateLabel}
+            </h2>
+            <span className={cn('mt-1 inline-block rounded-full px-2 py-0.5 text-caption font-semibold', author.chipClass)}>
+              {author.attribution}
+            </span>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label="사진 게시물 닫기"
+            className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"
+          >
+            <X size={19} aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="pt-3">
+          <RecordMediaGallery
+            attachments={photos}
+            coupleId={coupleId}
+            recordId={record.id}
+          />
+        </div>
+
+        {record.contentUnavailable ? (
+          <p className="pt-3 text-caption leading-relaxed text-muted-foreground">
+            사진은 보이지만 이 기록의 글은 이 기기에서 아직 열 수 없어요.
+          </p>
+        ) : record.log.trim() ? (
+          <p className="hand-text whitespace-pre-wrap break-keep pt-3 text-body text-card-foreground">
+            {record.log}
+          </p>
+        ) : null}
+
+        <div className="flex justify-end pt-3">
+          <button
+            type="button"
+            onClick={() => onOpenRecord(record.id)}
+            className="ink-chip min-h-9 px-3 text-caption font-semibold"
+            style={{ color: 'var(--ink)' }}
+          >
+            기록 자세히 보기
+          </button>
+        </div>
       </div>
     </div>
   );

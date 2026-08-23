@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildPostTiles, isTravelRecord } from '@/features/us/postTiles';
+import { buildPostTiles, getPhotoAttachments, isTravelRecord } from '@/features/us/postTiles';
 import type { CoupleEvent, DailyRecord, Trip } from '@/types';
 
 const record = (over: Partial<DailyRecord> & { id: string; date: string }): DailyRecord => ({
@@ -11,39 +11,35 @@ const record = (over: Partial<DailyRecord> & { id: string; date: string }): Dail
   ...over,
 } as DailyRecord);
 
-describe('게시물 격자는 하루가 아니라 기록을 센다', () => {
+describe('게시물 격자는 사진 게시물을 센다', () => {
   /*
-    하루 격자를 고른 원래 이유가 "사진 안 올리는 커플에게 구멍 난 격자가 되는 것을
-    막으려고" 였다. 칸의 단위를 기록으로 바꾸면 그 문제가 **구조적으로** 사라진다 --
-    남기지 않은 날은 칸이 생기지 않을 뿐 빈 칸으로 남지 않는다.
+    글 중심 기록은 이 격자가 아니라 `사진` 탭의 기존 기록 목록이 맡는다. 이 함수가
+    사진 없는 기록을 칸으로 만들지 않는지 순수 함수로 고정한다.
   */
-  it('남기지 않은 날은 칸이 되지 않는다', () => {
+  it('사진 없는 기록은 칸이 되지 않는다', () => {
     const tiles = buildPostTiles([record({ id: 'a', date: '2026-08-20' })]);
-    expect(tiles).toHaveLength(1);
-    expect(tiles[0].date).toBe('2026-08-20');
+    expect(tiles).toEqual([]);
   });
 
   it('하루에 여럿 남기면 칸도 여럿이다', () => {
     const tiles = buildPostTiles([
-      record({ id: 'a', date: '2026-08-20', time: '09:00' }),
-      record({ id: 'b', date: '2026-08-20', time: '21:00' }),
+      record({ id: 'a', date: '2026-08-20', time: '09:00', attachments: [{ type: 'photo', name: 'a.jpg' }] }),
+      record({ id: 'b', date: '2026-08-20', time: '21:00', attachments: [{ type: 'photo', name: 'b.jpg' }] }),
     ]);
     expect(tiles.map((tile) => tile.recordId)).toEqual(['b', 'a']);
   });
 
   it('최근이 먼저다', () => {
     const tiles = buildPostTiles([
-      record({ id: 'old', date: '2026-08-01' }),
-      record({ id: 'new', date: '2026-08-22' }),
+      record({ id: 'new', date: '2026-08-22', attachments: [{ type: 'photo', name: 'new.jpg' }] }),
+      record({ id: 'old', date: '2026-08-01', attachments: [{ type: 'photo', name: 'old.jpg' }] }),
     ]);
     expect(tiles.map((tile) => tile.recordId)).toEqual(['new', 'old']);
   });
 
-  /* 인스타에는 글만 있는 게시물이 없지만 이 앱에는 그것이 대부분이다. */
-  it('글만 있는 기록도 칸이 된다', () => {
+  it('글만 있는 기록은 게시물 격자에서 제외한다', () => {
     const [tile] = buildPostTiles([record({ id: 'a', date: '2026-08-20', log: '글만' })]);
-    expect(tile.photo).toBeUndefined();
-    expect(tile.text).toBe('글만');
+    expect(tile).toBeUndefined();
   });
 
   it('사진이 있으면 첫 장이 칸이 된다', () => {
@@ -72,14 +68,12 @@ describe('게시물 격자는 하루가 아니라 기록을 센다', () => {
     음성 같은 것은 격자가 보여줄 수 없다. 칸으로 만들면 무엇이 들었는지 알 수 없는
     회색 사각형이 되고, 사진이 있는 줄 알고 눌렀다가 아닌 것을 만나게 된다.
   */
-  it('보여줄 수 없는 첨부는 사진 칸으로 만들지 않는다', () => {
-    const [tile] = buildPostTiles([record({
+  it('영상·음성만 있는 기록은 사진 게시물로 만들지 않는다', () => {
+    expect(buildPostTiles([record({
       id: 'a',
       date: '2026-08-20',
-      attachments: [{ type: 'audio', name: 'v.m4a', path: 'c/v.m4a' }],
-    })]);
-    expect(tile.photo).toBeUndefined();
-    expect(tile.multiple).toBe(false);
+      attachments: [{ type: 'video', name: 'v.mp4', path: 'c/v.mp4' }],
+    })])).toEqual([]);
   });
 
   /*
@@ -88,7 +82,10 @@ describe('게시물 격자는 하루가 아니라 기록을 센다', () => {
   */
   it('이 기기가 못 여는 기록도 칸으로 남는다', () => {
     const [tile] = buildPostTiles([record({
-      id: 'a', date: '2026-08-20', contentUnavailable: 'key_unavailable',
+      id: 'a',
+      date: '2026-08-20',
+      contentUnavailable: 'key_unavailable',
+      attachments: [{ type: 'photo', name: '잠긴.jpg', path: 'c/잠긴.jpg' }],
     })]);
     expect(tile.unavailable).toBe(true);
   });
@@ -99,6 +96,16 @@ describe('게시물 격자는 하루가 아니라 기록을 센다', () => {
 
   it('아무것도 없으면 격자도 없다', () => {
     expect(buildPostTiles([])).toEqual([]);
+  });
+
+  it('사진 첨부 추출도 영상·음성을 제외한다', () => {
+    expect(getPhotoAttachments({
+      attachments: [
+        { type: 'photo', name: '사진.jpg' },
+        { type: 'video', name: '영상.mp4' },
+        { type: 'voice', name: '음성.m4a' },
+      ],
+    })).toEqual([{ type: 'photo', name: '사진.jpg' }]);
   });
 });
 

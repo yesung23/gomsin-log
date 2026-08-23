@@ -29,7 +29,7 @@ bash scripts/agent/claim.sh --list                                # 보기
 <!-- CLAIMS:BEGIN -->
 | agent | scope | branch | since (UTC) |
 |---|---|---|---|
-| _(없음)_ | | | |
+| codex | 온보딩 프롬프트·WHAT_IS 문서 일관성 감사 및 수정 | opus/v4-a1-a2 | 2026-08-23T08:10Z |
 <!-- CLAIMS:END -->
 
 24시간이 지난 줄은 `session-start.sh`가 **STALE**로 표시한다. STALE이면 그 AI가

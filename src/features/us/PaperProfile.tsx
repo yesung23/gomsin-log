@@ -6,12 +6,15 @@ import { visibleRecordsForViewer } from '@/lib/privacy';
 import { buildCoupleStats, togetherDays } from '@/lib/coupleStats';
 import { buildHighlights } from '@/lib/coupleHighlights';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
-import { buildMonthTexture, monthsWithContent } from '@/features/us/monthTexture';
-import { MonthGrid } from '@/features/us/MonthGrid';
-import { MediaArchiveGrid } from '@/components/media/MediaArchiveGrid';
+import { PostGrid } from '@/features/us/PostGrid';
+import { isTravelRecord } from '@/features/us/postTiles';
+import { recordAuthorPresentation } from '@/lib/recordAuthor';
+import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
+import { cn } from '@/lib/utils';
 import { InkCircle, PenFace } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { localToday } from '@/lib/cycle';
+import type { DailyRecord, Role } from '@/types';
 
 /**
  * 우리 — 인스타 프로필과 같은 구조.
@@ -30,7 +33,8 @@ import { localToday } from '@/lib/cycle';
  *     게시물 → 함께한 날      팔로워 → 만남까지      팔로잉 → 전역까지
  *     프로필 편집 → 우리 소개 편집                   프로필 공유 → 기억 만들기
  *     하이라이트 → 마일스톤 (**맨 뒤에 아직 오지 않은 것 하나**)
- *     격자 → 하루 격자 (사진 단위가 아니라 하루 단위)
+ *     게시물 격자 → 여행 중 남긴 게시물
+ *     사진 탭 → 기존 기록 목록
  *
  * 인스타는 클수록 좋은 숫자만 있다. 여기는 첫 칸이 쌓이고 나머지 둘은 줄어든다 -- 두
  * 방향이 한 줄에 공존하는 것이 떨어져 있는 두 사람의 시간 감각이다. 셋 다 같은 크기·같은
@@ -48,14 +52,14 @@ import { localToday } from '@/lib/cycle';
  * 전역 하이라이트를 만들지 않는다. 이 화면은 그 동작을 따라갈 뿐 다시 판단하지 않는다.
  */
 
-type GridTab = 'day' | 'photo' | 'trip';
+type GridTab = 'post' | 'photo' | 'trip';
 
 export function PaperProfile() {
   const navigate = useNavigate();
   const { state } = useStore();
   const { profile } = state;
   const todayStr = localToday();
-  const [tab, setTab] = useState<GridTab>('day');
+  const [tab, setTab] = useState<GridTab>('post');
 
   const records = useMemo(
     () => visibleRecordsForViewer(state.records, {
@@ -63,6 +67,11 @@ export function PaperProfile() {
       role: profile.role,
     }),
     [state.records, profile.id, profile.role],
+  );
+
+  const travelRecords = useMemo(
+    () => records.filter((record) => isTravelRecord(record, state.trips, state.events)),
+    [records, state.trips, state.events],
   );
 
   const hasMilitary = Boolean(profile.military?.expectedDischargeDate);
@@ -93,29 +102,6 @@ export function PaperProfile() {
     폰이 접히는 선까지 보이는 양이 그 정도이고, 두 해 된 관계는 그렇지 않으면 스무 칸을
     보려고 칠백 칸을 mount 한다. `UsPage` 가 같은 이유로 같은 수를 쓴다.
   */
-  const [visibleMonthCount, setVisibleMonthCount] = useState(3);
-  const monthList = useMemo(
-    () => monthsWithContent({
-      records,
-      events: state.events,
-      trips: state.trips,
-      today: todayStr,
-      anniversary: profile.couple.anniversaryDate,
-    }),
-    [records, state.events, state.trips, todayStr, profile.couple.anniversaryDate],
-  );
-  const months = useMemo(
-    () => monthList.slice(0, visibleMonthCount).map((m) => buildMonthTexture({
-      year: m.year,
-      month: m.month,
-      records,
-      events: state.events,
-      trips: state.trips,
-      today: todayStr,
-      anniversary: profile.couple.anniversaryDate,
-    })),
-    [monthList, visibleMonthCount, records, state.events, state.trips, todayStr, profile.couple.anniversaryDate],
-  );
   const together = togetherDays(profile.couple.anniversaryDate, todayStr);
 
   const names = [profile.myName, profile.couple.partnerName].filter(Boolean);
@@ -280,7 +266,7 @@ export function PaperProfile() {
       {/* 탭 줄 — 인스타의 격자/릴스/태그됨 자리 */}
       <div className="mt-4 flex" style={{ borderTop: 'var(--stroke) solid var(--ink-faint)' }}>
         {([
-          { id: 'day', Icon: Grid3x3, label: '하루' },
+          { id: 'post', Icon: Grid3x3, label: '게시물' },
           { id: 'photo', Icon: ImageIcon, label: '사진' },
           { id: 'trip', Icon: Plane, label: '여행' },
         ] as const).map(({ id, Icon, label }) => (
@@ -298,21 +284,15 @@ export function PaperProfile() {
         ))}
       </div>
 
-      {/*
-        탭을 그렸으면 눌렀을 때 다른 것이 나와야 한다 (2026-08-23).
-
-        `하루 · 사진 · 여행` 셋을 그려 놓고 `사진` 을 눌러도 하루 격자가 그대로였다.
-        미이행이 아니라 **없는 것을 있는 것처럼 그린 것**이고, 사용자에게는 눌리지 않는
-        탭으로 읽힌다.
-
-        `사진` 은 계획 #16 이 원래 이 자리에 두려던 미디어 아카이브다 --
-        `MediaArchiveGrid` 가 이미 있었고 아무도 부르지 않고 있었다.
-      */}
       {tab === 'photo' ? (
-        <MediaArchiveGrid
+        <ProfileRecordList
           records={records}
           coupleId={profile.couple.coupleId}
-          emptyDescription="사진이 있는 기록을 남기면 여기 모여요."
+          viewer={{ userId: profile.id, role: profile.role }}
+          partnerName={profile.couple.partnerName || '상대방'}
+          onOpenRecord={(recordId) => navigate(`/record?record=${encodeURIComponent(recordId)}`)}
+          onOpenDate={(date) => navigate(`/record?date=${encodeURIComponent(date)}`)}
+          onOpenTimeline={() => navigate('/record')}
         />
       ) : tab === 'trip' ? (
         <div className="px-4 pt-8 text-center">
@@ -327,39 +307,153 @@ export function PaperProfile() {
             <span className="text-label" style={{ color: 'var(--ink)' }}>여행 열기</span>
           </button>
         </div>
-      ) : months.length === 0 ? (
-        <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
-          아직 쌓인 하루가 없어요.
-          <br />
-          오늘 있었던 일을 하나 남기면 여기부터 채워져요.
-        </p>
       ) : (
-        months.map((month) => (
-          <section key={month.key} className="pt-4">
-            <p className="px-4 pb-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
-              {month.year}년 {month.month}월 · 기록 {month.recordCount} · 사진 {month.photoCount}
-            </p>
-            <div className="px-1">
-              <MonthGrid
-                data={month}
-                coupleId={profile.couple.coupleId}
-                onOpenDay={(date) => navigate(`/story/day/${date}`)}
-              />
-            </div>
-          </section>
-        ))
+        /*
+          게시물 격자 (2026-08-23).
+
+          일반 기록을 전부 게시물처럼 보여주지 않는다. 여행과 연결된 날짜의 기록만
+          게시물로 제한하고, 여행 연결은 `postTiles.ts` 의 날짜 기반 판별이 소유한다.
+          현재 `DailyRecord` 에 여행 외래키가 없으므로 임의의 데이터 필드를 만들지 않는다.
+        */
+        <PostGrid
+          records={travelRecords}
+          coupleId={profile.couple.coupleId}
+          onOpen={(recordId: string) => navigate(`/record?record=${encodeURIComponent(recordId)}`)}
+        />
       )}
 
-      {/* `더 보기` 는 하루 격자의 것이다. 다른 탭에서 뜨면 무엇을 더 보는지 알 수 없다. */}
-      {tab === 'day' && monthList.length > visibleMonthCount ? (
+      {/*
+        `더 보기` 가 없어졌다. 그것은 달 단위 격자가 세 달씩 늘려 가던 것이고, 게시물
+        격자는 달로 나뉘지 않는다 -- 남겨 두면 눌러도 아무것도 늘지 않는 버튼이 된다.
+      */}
+    </div>
+  );
+}
+
+/**
+ * 사진/기록 탭 — 기존 기록 목록을 읽고 세부/타임라인으로 진입하는 화면.
+ */
+function ProfileRecordList({
+  records,
+  coupleId,
+  viewer,
+  partnerName,
+  onOpenRecord,
+  onOpenDate,
+  onOpenTimeline,
+}: {
+  records: DailyRecord[];
+  coupleId?: string;
+  viewer: { userId?: string; role?: Role };
+  partnerName: string;
+  onOpenRecord: (recordId: string) => void;
+  onOpenDate: (date: string) => void;
+  onOpenTimeline: () => void;
+}) {
+  const sorted = useMemo(
+    () => [...records].sort((a, b) => (a.date === b.date ? (b.time || '').localeCompare(a.time || '') : b.date.localeCompare(a.date))),
+    [records],
+  );
+
+  if (sorted.length === 0) {
+    return (
+      <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
+        아직 남긴 기록이 없어요.
+        <br />
+        오늘 있었던 일을 하나 남기면 여기 모여요.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4 px-4 pt-3" data-testid="profile-records-list">
+      <div className="flex items-center justify-between">
+        <span className="text-caption font-semibold" style={{ color: 'var(--ink-soft)' }}>
+          총 {sorted.length}개의 기록
+        </span>
         <button
           type="button"
-          onClick={() => setVisibleMonthCount((count) => count + 3)}
-          className="ink-chip mx-4 mt-6 block w-[calc(100%-2rem)] py-3"
+          onClick={onOpenTimeline}
+          className="text-caption font-semibold underline"
+          style={{ color: 'var(--ink-soft)' }}
         >
-          <span className="text-label" style={{ color: 'var(--ink)' }}>더 보기</span>
+          타임라인 전체 보기
         </button>
-      ) : null}
+      </div>
+
+      <div className="space-y-3">
+        {sorted.map((record) => {
+          const author = recordAuthorPresentation(record, viewer, partnerName);
+          const [, month, day] = record.date.split('-');
+          const dateLabel = `${Number(month)}월 ${Number(day)}일`;
+
+          return (
+            <article
+              key={record.id}
+              className="space-y-2 rounded-control p-3.5 text-left"
+              style={{
+                background: 'var(--paper)',
+                border: 'var(--stroke-thin) solid var(--ink-faint)',
+              }}
+            >
+              <header className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={cn('inline-block px-2 py-0.5 rounded-full font-semibold text-caption', author.chipClass)}
+                  >
+                    {author.attribution}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onOpenDate(record.date)}
+                    className="text-caption tabular-nums hover:underline"
+                    style={{ color: 'var(--ink-soft)' }}
+                    aria-label={`${record.date} 기록 타임라인 열기`}
+                  >
+                    {dateLabel} {record.time}
+                  </button>
+                </div>
+                {record.isPrivate ? (
+                  <span className="flex items-center gap-1 text-caption" style={{ color: 'var(--ink-soft)' }}>
+                    <Lock size={12} aria-hidden="true" /> 나만 보기
+                  </span>
+                ) : null}
+              </header>
+
+              {record.attachments && record.attachments.length > 0 ? (
+                <div className="pt-1">
+                  <RecordMediaGallery
+                    attachments={record.attachments}
+                    coupleId={coupleId}
+                    recordId={record.id}
+                  />
+                </div>
+              ) : null}
+
+              {record.contentUnavailable ? (
+                <p className="text-body" style={{ color: 'var(--ink-soft)' }}>
+                  이 기기에서 아직 이 기록을 열 수 없어요.
+                </p>
+              ) : record.log ? (
+                <p className="hand-text text-body whitespace-pre-wrap break-keep" style={{ color: 'var(--ink)' }}>
+                  {record.log}
+                </p>
+              ) : null}
+
+              <div className="flex items-center justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenRecord(record.id)}
+                  className="ink-chip min-h-9 px-3 text-caption font-semibold"
+                  style={{ color: 'var(--ink)' }}
+                >
+                  기록 자세히 보기
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }

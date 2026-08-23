@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, CalendarDays, SquarePen } from 'lucide-react';
+import { Search, X, CalendarDays, SquarePen, Shield, Calendar, ChevronRight } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { searchRecords, excerptAround, type SearchResult } from '@/lib/recordSearch';
 import { localToday } from '@/lib/cycle';
-import type { DailyRecord } from '@/types';
+import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
+import { daysBetweenLocal, formatLocalDate } from '@/lib/utils';
+import { ServiceCard } from '@/features/me/MePage';
+import { CycleTrackerSection } from '@/components/CycleTrackerSection';
+import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent } from '@/types';
 import { MobileShell } from '@/components/MobileShell';
 
 /**
@@ -13,8 +17,9 @@ import { MobileShell } from '@/components/MobileShell';
  *
  * 탭이 아니다. 한 번 탭으로 짰다가 되돌렸다(§5.3): **인스타에 검색 탭이 있는 이유는
  * 거기에 남의 게시물이 있기 때문**이고, 이 앱에는 남이 없다. 그래서 탐색 격자에 넣을
- * 것이 우리 둘의 기록밖에 없었고 그것은 `우리` 탭의 하루 격자와 같은 화면이었다. 격자를
- * 지우고 검색만 남겼다. 종이 일기장 뒤에 붙은 색인과 같은 자리다.
+ * 것이 우리 둘의 기록밖에 없었고 그것은 `우리` 탭의 게시물 격자와 같은 화면이었다. 격자를
+ * 지우고 검색을 남겼다. 현재는 검색어가 없을 때 역할별 개인 정보 surface를 먼저 보여주고,
+ * 입력하면 종이 일기장 뒤에 붙은 색인처럼 동작한다.
  *
  * ## 이 화면이 지키는 것 셋
  *
@@ -23,8 +28,8 @@ import { MobileShell } from '@/components/MobileShell';
  *      검색은 원래부터 기기의 일이다.
  *   2. **최근 검색을 저장하지 않는다.** 자기 일기에서 무엇을 찾았는지는 그 자체로 사적인
  *      사실이고, 폰을 옆에서 보는 사람에게 가장 먼저 읽히는 흔적이다.
- *   3. **입력 전에는 아무것도 그리지 않는다.** 보여줄 만한 것을 억지로 채우면 그것이
- *      곧 `우리` 격자의 복제가 된다. 찾으러 온 사람은 칠 것이 있어서 온 것이다.
+ *   3. **역할별 기본 surface와 검색 결과를 섞지 않는다.** 검색어가 없을 때만 군화의
+ *      복무 정보 또는 곰신의 주기 표면을 보여주고, 찾는 동안에는 검색 결과만 보여준다.
  *
  * 한 칸으로 둘을 받는다 -- `8/14` 같은 날짜면 그날을 열고, 아니면 쓴 말에서 찾는다.
  * 토글을 두면 사용자가 무엇을 고를지 먼저 정해야 하는데, 찾을 때 사람은 그냥 기억나는
@@ -37,6 +42,102 @@ import { MobileShell } from '@/components/MobileShell';
  * 않게** 하기 위해서다. 둥근 부유 버튼이 아니라 줄 안의 작은 펜이라 탭바와 자리를 다투지
  * 않는다.
  */
+
+interface SoldierSearchSurfaceProps {
+  military: MilitaryInfo;
+  contact: ContactPreferences;
+  partnerName: string;
+  events: CoupleEvent[];
+  today: string;
+  onOpenService: () => void;
+}
+
+function SoldierSearchSurface({
+  military,
+  contact,
+  partnerName,
+  events,
+  today,
+  onOpenService,
+}: SoldierSearchSurfaceProps) {
+  const progress = computeServiceProgress(military, today);
+  const discharged = progress?.isDischarged === true || military?.militaryStatus === 'discharged';
+  const serving = progress !== null && !discharged;
+
+  const nextLeave = nextUpcomingEvent(events, today, ['vacation', 'visit']);
+
+  return (
+    <div className="space-y-4" data-testid="soldier-search-surface">
+      {serving ? (
+        <ServiceCard
+          military={military}
+          contact={contact}
+          mine={true}
+          partnerName={partnerName}
+          remainingDays={progress.remainingDays}
+          percent={progress.percent}
+          onOpen={onOpenService}
+        />
+      ) : discharged ? (
+        <button
+          type="button"
+          onClick={onOpenService}
+          aria-label="내 복무 현황 열기"
+          className="press-response w-full rounded-control border border-border bg-card p-4 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <Shield size={16} className="text-muted-foreground" aria-hidden="true" />
+            <span className="text-label font-bold text-card-foreground">내 복무</span>
+            <span className="ml-auto text-label font-bold text-card-foreground">전역했어요</span>
+            <ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" />
+          </div>
+          <p className="mt-2 text-caption text-muted-foreground">
+            복무 정보를 다시 확인하거나 수정할 수 있어요.
+          </p>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onOpenService}
+          aria-label="복무 정보 입력하기"
+          className="press-response w-full rounded-control border border-border bg-card p-4 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <Shield size={16} className="text-muted-foreground" aria-hidden="true" />
+            <span className="text-label font-bold text-card-foreground">내 복무</span>
+            <span className="ml-auto text-caption text-muted-foreground">입력하기</span>
+            <ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" />
+          </div>
+          <p className="mt-2 text-caption text-muted-foreground">
+            입대일과 예상 전역일을 입력하면 남은 복무일과 진척도를 확인할 수 있어요.
+          </p>
+        </button>
+      )}
+
+      {nextLeave ? (
+        <div className="rounded-control border border-border bg-card p-4" data-testid="soldier-next-leave">
+          <div className="flex items-center gap-2">
+            <Calendar size={16} className="text-muted-foreground" aria-hidden="true" />
+            <span className="text-label font-bold text-card-foreground">
+              {nextLeave.eventType === 'vacation' ? '다음 휴가' : '다음 면회'}
+            </span>
+            <span className="ml-auto text-label font-bold text-coral-strong tabular-nums">
+              {nextLeave.startDate === today ? 'D-Day' : `D-${daysBetweenLocal(today, nextLeave.startDate)}`}
+            </span>
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-label font-semibold text-card-foreground truncate">
+              {nextLeave.title || (nextLeave.eventType === 'vacation' ? '휴가' : '면회')}
+            </span>
+            <span className="text-caption text-muted-foreground shrink-0 ml-2">
+              {formatLocalDate(nextLeave.startDate)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function SearchPageBody() {
   const navigate = useNavigate();
@@ -59,6 +160,7 @@ function SearchPageBody() {
 
   const today = localToday();
   const result = useMemo(() => searchRecords(records, query, today), [records, query, today]);
+  const isSoldier = state.profile.role === 'soldier';
 
   const openRecord = (record: DailyRecord) => {
     // §7.5 -- 근사치가 아니라 정확히 그 기록. `?record=` 는 새로고침과 딥링크에도 남는다.
@@ -66,7 +168,7 @@ function SearchPageBody() {
   };
 
   return (
-    <div className="min-h-full pb-6">
+    <div className="min-h-full pb-24">
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-2">
           <div className="ink-chip flex flex-1 items-center gap-2 px-3">
@@ -110,7 +212,27 @@ function SearchPageBody() {
         </p>
       </div>
 
-      {result.kind === 'empty' ? null : <Results result={result} onOpen={openRecord} />}
+      {result.kind === 'empty' ? (
+        <div className="px-4 py-3">
+          {isSoldier ? (
+            <SoldierSearchSurface
+              military={state.profile.military}
+              contact={state.profile.contact}
+              partnerName={state.profile.couple?.partnerName || '곰신'}
+              events={state.events}
+              today={today}
+              onOpenService={() => navigate('/service')}
+            />
+          ) : (
+            <CycleTrackerSection
+              key={state.authenticatedUser?.id || 'signed-out'}
+              userId={state.authenticatedUser?.id}
+            />
+          )}
+        </div>
+      ) : (
+        <Results result={result} onOpen={openRecord} />
+      )}
     </div>
   );
 }

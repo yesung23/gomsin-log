@@ -146,7 +146,7 @@ function MePageBody() {
  * 그 답에 필요한 것은 **얼마나 남았나**와 **언제 닿나** 둘뿐이다. 나머지 -- 군별, 입대일,
  * 다음 휴가 목록, 수정 -- 는 `/service` 가 계속 소유한다.
  */
-function ServiceCard({
+export function ServiceCard({
   military,
   contact,
   mine,

@@ -288,7 +288,11 @@ function Post({
           type="button"
           aria-label={`${author}의 기록 열기`}
           onClick={onOpen}
-          className="flex h-11 w-8 items-center justify-center"
+          /*
+            인스타의 `…` 는 좁게 그려지지만 여기서는 44px 를 채운다. 세로만 44 이고
+            가로가 32 이면 규칙을 절반만 지킨 것이다 -- 엄지는 두 방향으로 빗나간다.
+          */
+          className="flex h-11 w-11 items-center justify-center"
         >
           <MoreHorizontal size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
         </button>

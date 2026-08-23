@@ -181,7 +181,11 @@ export function PaperProfile() {
               type="button"
               disabled={!stat.href}
               onClick={() => stat.href && navigate(stat.href)}
-              className="flex flex-1 flex-col items-center gap-0.5 disabled:cursor-default"
+              /*
+                두 줄짜리 통계라 자연 높이가 42px 로 떨어진다 -- 44 에서 2px 모자란다.
+                눌리는 칸이므로 `min-h-11` 로 바닥을 깐다(DESIGN_V2 §44px).
+              */
+              className="flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 disabled:cursor-default"
             >
               <span className="text-heading font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
                 {stat.value}
@@ -230,14 +234,14 @@ export function PaperProfile() {
         <button
           type="button"
           onClick={() => navigate('/me')}
-          className="ink-chip flex-1 py-2"
+          className="ink-chip flex min-h-11 flex-1 items-center justify-center"
         >
           <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>오늘 내 상태</span>
         </button>
         <button
           type="button"
           onClick={() => navigate('/diary')}
-          className="ink-chip flex-1 py-2"
+          className="ink-chip flex min-h-11 flex-1 items-center justify-center"
         >
           <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>일기장</span>
         </button>

@@ -301,8 +301,12 @@ test("상대방의 오늘 shows the partner's photo at full width", async ({ bro
    * feed's copy of the gallery rather than the 기록 tab's.
    *
    * V4 이전에는 `widget-partner-day` 위젯이 그 사본을 갖고 있었다. 홈이 피드가 되면서
-   * 상대의 오늘은 위젯이 아니라 **게시물**이 되었고, 갤러리는 `PaperHome` 이 그린다.
-   * 지키는 것은 그대로다 -- 홈에서 상대의 사진이 본문 폭을 채우는가.
+   * 상대의 오늘은 **스토리**가 되었다 -- 그리고 홈의 피드는 스토리에 있는 기록을
+   * 일부러 제외한다(`PaperHome.feed`). 같은 하루가 두 번 나오면 피드가 스토리의
+   * 그림자가 되기 때문이다.
+   *
+   * 그래서 사진을 보는 자리도 스토리 안이다. 지키는 것은 그대로다 -- 상대의 사진이
+   * 본문 폭을 채우는가.
    */
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, {
@@ -329,6 +333,9 @@ test("상대방의 오늘 shows the partner's photo at full width", async ({ bro
 
   await page.goto('/home');
   await ready(page);
+
+  await page.getByRole('button', { name: '춘향의 스토리' }).click();
+  await expect(page).toHaveURL(/\/story\/partner$/);
 
   const media = page.getByTestId('record-attachment').first();
   await expect(media).toBeVisible({ timeout: 15_000 });

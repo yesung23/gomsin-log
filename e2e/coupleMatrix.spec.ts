@@ -330,7 +330,12 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
       'base64',
     ),
   });
-  await expect(page.getByText('사진 1장')).toBeVisible();
+  /*
+    버튼으로 좁힌다. 실패 뒤에는 토스트에도 `사진 1장은 올리지 못했어요` 가 떠서
+    글자로 찾으면 두 개가 걸린다 -- 여기서 보려는 것은 **집게에 남은 파일**이다.
+  */
+  const picker = page.getByRole('button', { name: '사진 1장' });
+  await expect(picker).toBeVisible();
 
   await page.getByRole('button', { name: '남기기', exact: true }).click();
 
@@ -344,7 +349,7 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
   */
   await expect(page.getByText('올리지 못했어요', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page).toHaveURL(/\/compose$/);
-  await expect(page.getByText('사진 1장')).toBeVisible();
+  await expect(picker).toBeVisible();
   await expect(textarea).toHaveValue('');
 
   expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);

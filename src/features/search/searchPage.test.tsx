@@ -23,6 +23,14 @@ vi.mock('@/components/MobileShell', () => ({
   MobileShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
 
+vi.mock('@/components/CycleSupportSection', () => ({
+  CycleSupportSection: ({ mine }: { mine: boolean }) => (
+    <div data-testid={mine ? 'cycle-support-mine' : 'cycle-support-partner'}>
+      {mine ? '오늘 내 컨디션' : '상대 배려 신호'}
+    </div>
+  ),
+}));
+
 vi.mock('@/components/CycleTrackerSection', () => ({
   CycleTrackerSection: () => <div data-testid="cycle-tracker-section">내 몸의 리듬</div>,
 }));
@@ -177,10 +185,12 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
 });
 
 describe('곰신(gomsin) 기본 주 콘텐츠', () => {
-  it('곰신에게는 주기 surface(CycleTrackerSection)가 메인으로 렌더링되고 군화 카드는 뜨지 않는다', () => {
+  it('곰신에게는 오늘 내 상태 surface(CycleSupportSection + CycleTrackerSection)가 메인으로 렌더링되고 군화 카드는 뜨지 않는다', () => {
     currentState = stateWith({ role: 'gomsin' });
     renderSearch();
 
+    expect(screen.getByTestId('gomsin-search-surface')).toBeInTheDocument();
+    expect(screen.getByTestId('cycle-support-mine')).toBeInTheDocument();
     expect(screen.getByTestId('cycle-tracker-section')).toBeInTheDocument();
     expect(screen.queryByTestId('soldier-search-surface')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /복무 현황 열기/ })).not.toBeInTheDocument();

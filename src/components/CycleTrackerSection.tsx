@@ -779,7 +779,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           className="rounded-control border border-border bg-muted/40 p-3 space-y-2 text-caption text-muted-foreground leading-relaxed"
         >
           <p className="text-label font-bold text-foreground">동의 전에 확인해 주세요</p>
-          <p><strong className="text-foreground">수집 항목:</strong> 생리 시작·종료일, 일별 컨디션(증상·출혈량·통증·기분·메모), 평균 주기 설정</p>
+          <p><strong className="text-foreground">수집 항목:</strong> 생리 시작·종료일, 일별 컨디션(증상·통증·기분·메모), 평균 주기 설정</p>
           <p><strong className="text-foreground">이용 목적:</strong> 본인 주기 기록과 예상 범위 표시</p>
           <p><strong className="text-foreground">파트너 공유:</strong> 직접 선택한 항목만. 원본 기록은 공유되지 않아요.</p>
           <p><strong className="text-foreground">보유 기간:</strong> 직접 삭제하거나 회원 탈퇴할 때까지</p>

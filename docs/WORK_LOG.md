@@ -318,6 +318,59 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 #### PRODUCTION
 - NOT APPLIED
 
+### 2026-08-23 · LV · 프로필 상태/일기장 진입 제거, 곰신 찾기 메인 상태 배치, 출혈량 UI 제거
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비
+- Workstream: V4 화면 및 주기 UI 정돈
+- Step: 프로필 화면의 '오늘 내 상태'/'일기장' 버튼 제거, 곰신 '찾기' 메인에 '오늘 내 상태'(컨디션·배려신호·주기) 배치, '출혈량' UI 전면 제거
+- Previous Gate: 일기장 하단 탭 및 다꾸 상점 릴리스 통합
+- This Gate: typecheck / lint / Vitest / Playwright 검증 완료, Supabase 미변경, master 미push
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` §5·§10·§16·§21, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `CLAUDE.md`, `AGENTS.md`
+- Current-state checked: `CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-23 릴리스 통합 항목
+- MASTER PLAN version / 기준일: `EXPERIENCE_V4_MASTER_PLAN.md`
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict:
+
+#### OWNERSHIP
+- Tool: Codex execution
+- Model: gemini-3.7-flash
+- Role: implementation & verification
+- PR: #88 / release branch
+- Branch: `release/v4-diary-shop-integration`
+- Base SHA: `6555cca`
+- Old HEAD: `6555cca`
+- New/Reviewed HEAD: working-tree changes uncommitted
+
+#### CHANGED / REVIEWED
+- file: `src/features/us/PaperProfile.tsx`, `src/features/us/paperProfile.test.tsx`
+- function/component/migration: `PaperProfile`
+- what changed/reviewed: 프로필 상단의 '오늘 내 상태' 및 '일기장' 바로가기 버튼 블록을 제거함. 하단 중앙 탭의 독립적인 일기장(/diary)과 상점(/shop)은 유지됨.
+- file: `src/features/search/SearchPage.tsx`, `src/features/search/searchPage.test.tsx`
+- function/component/migration: `SearchPage`, `GomsinSearchSurface`, `SoldierSearchSurface`
+- what changed/reviewed: 곰신(gomsin) 역할이 검색어 없이 찾기 탭 진입 시 '오늘 내 상태'(내 컨디션 신호, 상대 배려 신호, 주기 트래커) surface를 메인으로 보여주도록 배치함. 군화(soldier)는 기존 복무 정보 및 다음 휴가/면회 표면을 유지함. 검색어 입력 시 기존 기록 검색 결과로 전환되는 동작과 상단 기록 작성 진입점(/compose)을 양 역할에 보존함.
+- file: `src/components/cycle/CycleDailyLogEditor.tsx`, `src/components/cycle/CycleDaySheet.tsx`, `src/components/CycleTrackerSection.tsx`, `src/components/cycle/CycleSettingsSheet.tsx`, `src/lib/cyclePartnerMessage.ts`, `src/lib/cyclePartnerMessage.test.ts`, `src/components/cycleV3DataPath.test.tsx`
+- function/component/migration: 생리 주기 컨디션 기록기 및 시트 UI
+- what changed/reviewed: '출혈량' 입력 옵션(OptionRow), 상세 시트의 출혈량 표시(Field), 민감정보 수집 항목 고지 문구 및 파트너 미공유 보증 문구에서 '출혈량' UI를 제거함. 기존 DB 스키마 및 flow 데이터는 삭제/파괴하지 않고 보존함.
+
+#### VERIFICATION
+- command: `npm run typecheck` → PASS
+- command: `npm run lint` → PASS
+- command: `npx vitest run ...` (14개 파일 213개 테스트) → PASS
+- command: `npm run build` → PASS (Vite production build)
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="..." npx playwright test e2e/realUsability.spec.ts` → PASS (10개 시나리오 전체 통과)
+
+#### DO NOT ADVANCE UNTIL
+- master 직접 push 금지
+
+#### PRODUCTION
+- NOT APPLIED / 원격 catalog UNVERIFIED
+
 ### 2026-08-23 · LV · 일기장 하단 탭 전환 및 다꾸/기억 상점 최소 화면 구현
 
 #### PLAN POSITION

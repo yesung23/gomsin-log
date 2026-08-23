@@ -87,7 +87,7 @@ describe('the partner preview reflects the real preferences', () => {
        * The recorded pain level is unconditionally withheld; the `feeling_unwell`
        * care signal is an independent message, not an exception to this sentence.
        */
-      for (const withheld of ['증상', '출혈량', '통증', '기분', '메모']) {
+      for (const withheld of ['증상', '통증', '기분', '메모']) {
         expect(message.neverShared, withheld).toContain(withheld);
       }
       // And it stays OUT of the shared list, which is what the split is for.

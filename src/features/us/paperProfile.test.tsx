@@ -84,7 +84,7 @@ describe('PaperProfile (우리 화면)', () => {
     storeState = baseState();
   });
 
-  it('상단 영역(헤더, 커플 상태 배너, 통계, 소개, 오늘 내 상태/일기장 버튼)이 렌더된다', () => {
+  it('상단 영역(헤더, 커플 상태 배너, 통계, 소개)이 렌더된다', () => {
     render(
       <MemoryRouter>
         <PaperProfile />
@@ -92,8 +92,6 @@ describe('PaperProfile (우리 화면)', () => {
     );
 
     expect(screen.getByText('춘향 ♥ 몽룡')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '오늘 내 상태' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '일기장' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '기록 남기기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '기록 찾기' })).toBeInTheDocument();
   });

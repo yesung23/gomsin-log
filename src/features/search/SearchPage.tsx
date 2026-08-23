@@ -9,6 +9,7 @@ import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
 import { daysBetweenLocal, formatLocalDate } from '@/lib/utils';
 import { ServiceCard } from '@/features/me/MePage';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
+import { CycleSupportSection } from '@/components/CycleSupportSection';
 import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent } from '@/types';
 import { MobileShell } from '@/components/MobileShell';
 
@@ -139,6 +140,46 @@ function SoldierSearchSurface({
   );
 }
 
+function GomsinSearchSurface({
+  authenticated,
+  userId,
+  coupleId,
+  connected,
+}: {
+  authenticated: boolean;
+  userId?: string;
+  coupleId?: string;
+  connected: boolean;
+}) {
+  return (
+    <div className="space-y-4" data-testid="gomsin-search-surface">
+      {/* 내 배려/컨디션 신호 */}
+      <CycleSupportSection
+        key={`mine:${userId || 'signed-out'}`}
+        mine
+        authenticated={authenticated}
+        userId={userId}
+        coupleId={coupleId}
+        connected={connected}
+      />
+      {/* 상대방이 보낸 배려 신호 */}
+      <CycleSupportSection
+        key={`partner:${userId || 'signed-out'}`}
+        mine={false}
+        authenticated={authenticated}
+        userId={userId}
+        coupleId={coupleId}
+        connected={connected}
+      />
+      {/* 생리 주기 트래커 */}
+      <CycleTrackerSection
+        key={userId || 'signed-out'}
+        userId={userId}
+      />
+    </div>
+  );
+}
+
 function SearchPageBody() {
   const navigate = useNavigate();
   const { state } = useStore();
@@ -224,9 +265,11 @@ function SearchPageBody() {
               onOpenService={() => navigate('/service')}
             />
           ) : (
-            <CycleTrackerSection
-              key={state.authenticatedUser?.id || 'signed-out'}
+            <GomsinSearchSurface
+              authenticated={Boolean(state.authenticatedUser?.id)}
               userId={state.authenticatedUser?.id}
+              coupleId={state.profile.couple?.coupleId}
+              connected={Boolean(state.profile.couple?.connected)}
             />
           )}
         </div>

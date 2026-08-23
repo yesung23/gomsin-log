@@ -219,30 +219,6 @@ export function PaperProfile() {
       </div>
 
       {/*
-        인스타의 `프로필 편집` · `프로필 공유` 자리.
-
-        탭 다섯이 인스타 배치로 돌아가면서 `나` 와 `일기장` 이 칸을 잃었다. 화면이 사라진
-        것이 아니라 **자리를 옮긴 것**이므로 여기서 닿아야 한다 -- 프로필이 관계의 화면이고,
-        내 상태(복무·주기·컨디션)와 쌓인 것을 묶는 일(일기장)이 둘 다 관계의 일이다.
-      */}
-      <div className="flex gap-2 px-4 pt-3">
-        <button
-          type="button"
-          onClick={() => navigate('/me')}
-          className="ink-chip flex min-h-11 flex-1 items-center justify-center"
-        >
-          <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>오늘 내 상태</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate('/diary')}
-          className="ink-chip flex min-h-11 flex-1 items-center justify-center"
-        >
-          <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>일기장</span>
-        </button>
-      </div>
-
-      {/*
         하이라이트 — 인스타는 과거만 담는다. 여기는 **맨 뒤 하나가 아직 오지 않은 것**이다.
 
         기다림이 이 제품이므로 미래 하나는 언제나 남는다. 아직인 것은 흐리게 그리고 누를

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Loader2, Trash2 } from 'lucide-react';
-import { CYCLE_FLOWS, CYCLE_MOODS, CYCLE_PAIN_LEVELS, CYCLE_SYMPTOMS } from '@/types';
+import { CYCLE_MOODS, CYCLE_PAIN_LEVELS, CYCLE_SYMPTOMS } from '@/types';
 import type { CycleDailyLog, CycleSymptom } from '@/types';
 import { cn } from '@/lib/utils';
 import { CycleSheet } from './CycleSheet';
 import { draftFromDailyLog, type CycleDailyLogDraft } from './cycleDrafts';
-import { flowLabels, formatKoreanDate, moodLabels, painLabels, symptomLabels } from './cycleFormatting';
+import { formatKoreanDate, moodLabels, painLabels, symptomLabels } from './cycleFormatting';
 
 interface CycleDailyLogEditorProps {
   date: string;
@@ -98,14 +98,6 @@ export function CycleDailyLogEditor({
   return (
     <CycleSheet title={`${formatKoreanDate(date)} 컨디션 기록`} onClose={onClose} busy={busy}>
       <div className="space-y-4">
-        <OptionRow
-          legend="출혈량"
-          options={CYCLE_FLOWS}
-          labels={flowLabels}
-          value={draft.flow}
-          onSelect={(flow) => setDraft((current) => ({ ...current, flow }))}
-          columns="grid-cols-4"
-        />
         <OptionRow
           legend="통증"
           options={CYCLE_PAIN_LEVELS}

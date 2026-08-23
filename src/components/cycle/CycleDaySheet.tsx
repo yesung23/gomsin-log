@@ -1,7 +1,7 @@
 import { Pencil } from 'lucide-react';
 import type { CycleDailyLog, CyclePeriod } from '@/types';
 import { CycleSheet } from './CycleSheet';
-import { flowLabels, formatKoreanDate, moodLabels, painLabels, symptomLabels } from './cycleFormatting';
+import { formatKoreanDate, moodLabels, painLabels, symptomLabels } from './cycleFormatting';
 
 interface CycleDaySheetProps {
   date: string;
@@ -79,7 +79,6 @@ export function CycleDaySheet({
                   ? dailyLog.symptoms.map((symptom) => symptomLabels[symptom]).join(' · ')
                   : '기록 없음'}
               />
-              <Field label="출혈량" value={dailyLog.flow ? flowLabels[dailyLog.flow] : '기록 없음'} />
               <Field label="통증" value={dailyLog.painLevel ? painLabels[dailyLog.painLevel] : '기록 없음'} />
               <Field label="기분" value={dailyLog.mood ? moodLabels[dailyLog.mood] : '기록 없음'} />
               {dailyLog.note && <Field label="메모" value={dailyLog.note} />}

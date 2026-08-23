@@ -50,7 +50,7 @@ export interface CyclePartnerMessage {
  * The `feeling_unwell` care signal is not an exception to this sentence: it is an
  * independent opt-in message that carries no recorded value and no grade.
  */
-const NEVER_SHARED = '증상, 출혈량, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요.';
+const NEVER_SHARED = '증상, 통증, 기분, 메모는 어떤 경우에도 보이지 않아요.';
 
 
 function formatKoreanDate(date: string): string {

@@ -274,7 +274,6 @@ describe('detailed daily log persistence', () => {
         id: 'log-814',
         userId: 'user-a',
         logDate: '2026-08-14',
-        flow: 'heavy',
         painLevel: 'severe',
         mood: 'tired',
         symptoms: ['headache'],
@@ -286,7 +285,8 @@ describe('detailed daily log persistence', () => {
     fireEvent.click(screen.getByRole('button', { name: /자세히 기록하기/ }));
     const sheet = await screen.findByRole('dialog', { name: /컨디션 기록/ });
 
-    fireEvent.click(screen.getByRole('button', { name: '출혈량 많음' }));
+    // 출혈량 UI는 제거되어 노출되지 않음
+    expect(screen.queryByRole('button', { name: /출혈량/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '통증 심함' }));
     fireEvent.click(screen.getByRole('button', { name: '기분 피곤' }));
     fireEvent.click(screen.getByRole('button', { name: '증상 두통' }));
@@ -299,7 +299,6 @@ describe('detailed daily log persistence', () => {
       '2026-08-14',
       ['headache'],
       expect.objectContaining({
-        flow: 'heavy',
         painLevel: 'severe',
         mood: 'tired',
         note: '오늘은 좀 힘들었어요',
@@ -333,7 +332,7 @@ describe('detailed daily log persistence', () => {
     // And the detail sheet restores every stored field.
     fireEvent.click(screen.getByRole('button', { name: /자세히 기록하기/ }));
     await screen.findByRole('dialog', { name: /컨디션 기록/ });
-    expect(screen.getByRole('button', { name: '출혈량 많음' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /출혈량/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '통증 심함' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '기분 피곤' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByLabelText('메모')).toHaveValue('복원된 메모');

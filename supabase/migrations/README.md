@@ -783,3 +783,16 @@ supabase functions deploy delete-account
 
 ## 022 — V3 cycle tables
 `022_cycle_v3_schema.sql`은 생리 기간(`cycle_periods`), 일별 컨디션(`cycle_daily_logs`), 민감정보 동의(`user_sensitive_consents`), 공유 옵션(`cycle_sharing_preferences`) 테이블을 생성하고 legacy 데이터를 안전하게 이관합니다. (신규 / 원격 적용 미확인)
+
+## 057–059 원격 상태 확인 (2026-08-24)
+
+- `057_profile_identity_and_caption.sql`, `058_couple_highlights.sql`,
+  `059_partner_managed_username.sql`은 저장소에 존재하며 fresh-chain 계약에서 검증됩니다.
+- 사용자는 Supabase SQL Editor에서 해당 작업을 완료했다고 보고했습니다. 이 에이전트는
+  운영 Supabase에 SQL을 실행하지 않았습니다.
+- 사후 익명 PostgREST probe에서 `profiles.username`, `profiles.profile_caption`,
+  `couple_highlights`, `set_partner_username(text)`가 모두 해석되고 `401/42501`로
+  익명 접근이 거부되었습니다. 따라서 요청 객체의 현재 존재·anon 차단은 확인되지만,
+  전체 migration ledger와 authenticated actor별 동작은 `UNVERIFIED`입니다.
+- Docker Desktop 부재로 `supabase db dump --linked`를 실행할 수 없으므로 이 probe를
+  전체 원격 스키마 감사의 대체 증거로 사용하지 않습니다.

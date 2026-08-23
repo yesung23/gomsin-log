@@ -460,3 +460,31 @@ partner-managed trigger/RPC and assumes those columns already exist.
 - The full remote migration ledger was not dumped; Docker-based inspection remains
   `BLOCKED`. The user's SQL Editor is the source for the applied-migration action;
   this agent performed no remote mutation.
+
+## 12. 2026-08-24 PR #89 release candidate status
+
+This is the current release-candidate truth. It does not claim that an open PR is
+present in `origin/master` or Production.
+
+- Branch: `codex/service-rank-profile-settings-impl`.
+- Exact HEAD: `895b2ada43d8f2640912eed4058358b5a8758b32` (`fix: expand username touch target`).
+- PR: [#89](https://github.com/yesung23/gomsin-log/pull/89), OPEN, non-draft, mergeable; not merged.
+- Remote CI: PASS at the exact HEAD, including the real-browser creator/partner matrix,
+  typecheck/lint/Vitest/build, PostgreSQL security contracts, Deno, Android, iOS,
+  Capacitor, audit, boundary, and secret scans.
+- Vercel: the PR preview deployment completed successfully. The production CLI had no
+  credentials and the browser redirected to login, so production promotion is
+  `BLOCKED`; no production deployment was applied by this agent.
+- Production URL: `https://gomsin-log.vercel.app/us` returned HTTP 200, but its cached
+  existing deployment is not evidence that `895b2ad` is live.
+- Supabase: the user reported SQL Editor completion. Targeted anonymous probes resolve
+  `profiles.username`, `profiles.profile_caption`, `couple_highlights`, and
+  `set_partner_username(text)` and return `401/42501`; the full migration ledger remains
+  `UNVERIFIED`, and this agent performed no remote SQL mutation.
+- Local verification: `npm run verify`, `npm run test:phase0`, and `git diff --check`
+  are PASS. Local `npm run test:e2e` is BLOCKED because Playwright Chromium is absent;
+  the remote real-browser matrix is PASS.
+- Remaining release risks: production promotion, authenticated production route review,
+  two-account/two-device realtime parity, and cross-device avatar synchronization remain
+  unverified. The two stale untracked control-tower reports are preserved and are not part
+  of the PR.

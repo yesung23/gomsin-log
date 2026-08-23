@@ -114,6 +114,96 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-24 · Codex · PR #89 릴리스 게이트 및 운영 배포 경계 확인
+
+#### PLAN POSITION
+- Phase: V4 product-surface completion / release gate
+- Workstream: engineering — commit, PR, CI, deployment evidence, documentation
+- Step: exact HEAD release validation after the username touch-target correction
+- Previous Gate: PR #89 browser matrix failed only on `아이디 설정하기` measuring 95x22
+- This Gate: correction committed and pushed; all PR checks passed; production deployment path audited
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — no strategy or monetization change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/skills/release-validation.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, current branch, `origin/master`, PR metadata, Vercel and Supabase probes
+- Latest relevant Work Log checked: 2026-08-24 원격 Supabase 057–059 readiness 재확인 및 릴리스 전 게이트
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5/Codex; prior independent feature audit by `google-antigravity/gemini-3.7-flash`
+- Role: primary release integrator
+- PR: [#89](https://github.com/yesung23/gomsin-log/pull/89)
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- Old HEAD: `196c4c5499ff4d7061f896a7d7cc119e02747eec`
+- New/Reviewed HEAD: `895b2ada43d8f2640912eed4058358b5a8758b32`
+
+#### CHANGED / REVIEWED
+- file: `src/features/us/SharedProfile.tsx`
+- function/component/migration: profile username setup button
+- what changed/reviewed: added a 44px minimum touch target while preserving the Instagram-like header layout
+- why: the remote real-browser usability gate measured the button at 95x22 and rejected it
+- file: PR #89 CI and Vercel preview
+- function/component/migration: browser, static, security, native, and preview deployment gates
+- what changed/reviewed: exact HEAD `895b2ad` passed the full remote matrix; preview deployment completed
+- why: distinguish a verified PR preview from production deployment
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: no migration file or remote SQL changed in this release correction
+- product semantics: none; this is a touch-target-only correction
+- Production: production deployment was not applied; PR was not merged
+
+#### VERIFICATION
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, ESLint, 230 Vitest files / 3275 tests, and Vite build; existing large-chunk warning only
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — throwaway PostgreSQL 17, 57 migrations / 328 assertions
+- command: PR #89 remote validation at exact HEAD `895b2ad`
+- PASS / FAIL / UNVERIFIED: PASS — real-browser creator/partner matrix, typecheck/lint/Vitest/build, PostgreSQL security, Deno, Android, iOS, Capacitor, audit, boundary, and secret scans
+- command: `npm run test:e2e`
+- PASS / FAIL / UNVERIFIED: BLOCKED — local Playwright Chromium executable is not installed; the remote browser matrix is the executed browser evidence
+- command: targeted Supabase PostgREST probes
+- PASS / FAIL / UNVERIFIED: PASS for object resolution and anonymous denial; full migration ledger remains UNVERIFIED. The user applied SQL in Supabase; this agent performed no remote SQL mutation
+- command: Vercel production CLI/browser auth check and `curl -I https://gomsin-log.vercel.app/us`
+- PASS / FAIL / UNVERIFIED: BLOCKED for production deployment — CLI had no credentials and the browser redirected to Vercel login; production returned HTTP 200 for the existing deployment, not proof of this branch
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — one presentation touch-target class change; prior feature/privacy review remains semantically applicable, while CI was rerun on the new exact HEAD
+- whether an earlier review is stale: no security or data semantics changed; remote CI was nevertheless rerun and passed
+
+#### BLOCKERS
+- code: none for the committed PR scope
+- environment: Vercel production credentials/session are unavailable in this environment
+- external/manual: PR #89 remains OPEN and unmerged; authenticated production browser and two-device sync remain unverified
+
+#### STOPPED AT
+- exact completed boundary: commit `895b2ad`, push, PR #89, all remote checks PASS, preview deployment PASS, production deployment not applied
+
+#### REMAINING
+- not completed: production promotion of PR #89 and authenticated production/two-device verification
+
+#### NEXT ACTION
+- next owner: user / PR owner
+- tool/model: Vercel-authenticated release owner; merge only with explicit approval
+- 기준 SHA: `895b2ada43d8f2640912eed4058358b5a8758b32`
+- exact next task: authenticate Vercel or explicitly approve the repository's normal production promotion path, then verify `/us`, `/search`, and `/settings?profile=edit` on the resulting production deployment
+
+#### DO NOT ADVANCE UNTIL
+- the intended production promotion path and rollback target are confirmed
+- production URL is verified against the exact deployed commit, not only HTTP 200
+- Supabase full migration ledger or authenticated actor evidence is separately captured if required
+
+#### PRODUCTION
+- NOT APPLIED — preview deployment completed; production CLI/browser deployment was blocked by missing Vercel authentication
+
 ### 2026-08-24 · Codex · Gemini 3.7 Flash 독립 감사 반영 및 인스타그램형 프로필/복무 표면 최종 로컬 게이트
 
 #### PLAN POSITION

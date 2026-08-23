@@ -157,7 +157,7 @@ export function SharedProfile() {
         {profile.username ? (
           <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
         ) : (
-          <button type="button" onClick={() => navigate('/settings?profile=edit')} className="truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
+          <button type="button" onClick={() => navigate('/settings?profile=edit')} className="inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
             아이디 설정하기
           </button>
         )}

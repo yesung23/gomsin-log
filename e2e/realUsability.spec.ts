@@ -85,10 +85,9 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
    * check but is exactly what a user hits.
    */
   /*
-    V4 의 다섯 칸은 `홈 · 찾기 · 기록 남기기 · 일정 · 우리` 다 (`MobileShell`).
-    `나` 와 `일기장` 은 사라진 것이 아니라 `우리` 안으로 들어갔다.
+    V4의 다섯 칸은 `홈 · 찾기 · 일기장 · 일정 · 우리`다 (`MobileShell`).
   */
-  for (const label of ['찾기', '일정', '우리', '홈']) {
+  for (const label of ['찾기', '일기장', '일정', '우리', '홈']) {
     await page.getByRole('tab', { name: label }).click();
     await expect(page.locator('main')).not.toBeEmpty();
     // A screen with no interactive control is a dead end even if it rendered.
@@ -97,14 +96,25 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   }
 
   /*
-    가운데 칸은 장소가 아니라 **동작**이다. 컴포저가 전체 화면으로 열리므로 그 위에는
-    `main` 도 탭바도 없다 -- 그래서 같은 단언을 쓸 수 없고, 대신 열렸는가와 조작할 것이
-    있는가를 본다. 열리지 않으면 그것이야말로 죽은 칸이다.
+    일기장(/diary)에서 상점(/shop) 진입과 복귀를 확인한다.
   */
-  await page.getByRole('tab', { name: '기록 남기기' }).click();
+  await page.getByRole('tab', { name: '일기장' }).click();
+  await page.waitForURL(/\/diary$/, { timeout: 20_000 });
+  await page.getByRole('button', { name: '상점 둘러보기' }).click();
+  await page.waitForURL(/\/shop$/, { timeout: 20_000 });
+  expect(await page.locator('article, [role="tab"]').count()).toBeGreaterThan(0);
+  await page.getByRole('button', { name: '일기장으로 돌아가기' }).click();
+  await page.waitForURL(/\/diary$/, { timeout: 20_000 });
+
+  /*
+    기록 작성 진입점(홈 스토리 레일의 + 배지)이 컴포저(/compose)를 열고 닫는 것을 확인한다.
+  */
+  await page.getByRole('tab', { name: '홈' }).click();
+  await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
+  await page.getByRole('button', { name: '기록 남기기' }).click();
   await page.waitForURL(/\/compose$/, { timeout: 20_000 });
   const composeControls = await page.locator('button, textarea').count();
-  expect(composeControls, '기록 남기기 tab has no operable control').toBeGreaterThan(0);
+  expect(composeControls, '기록 작성 컴포저 has no operable control').toBeGreaterThan(0);
   await page.getByRole('button', { name: '닫기' }).click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 

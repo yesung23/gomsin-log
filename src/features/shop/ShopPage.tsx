@@ -197,10 +197,10 @@ export function ShopPageBody() {
               <div className="flex items-start justify-between gap-2">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                    <span className="text-caption font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground">
                       {product.categoryLabel}
                     </span>
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-coral/10 text-coral">
+                    <span className="text-caption font-semibold px-2 py-0.5 rounded bg-coral/10 text-coral">
                       {product.statusBadge}
                     </span>
                   </div>

@@ -50,7 +50,7 @@ test('the record timeline paints prose at body and nothing below caption', async
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 
   const result = await page.evaluate(() => {
     /** Every record card. The label is built from the author attribution. */

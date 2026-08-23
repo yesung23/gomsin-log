@@ -84,13 +84,29 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
    * navigates nowhere, or lands on a blank screen, is invisible to a route-by-route
    * check but is exactly what a user hits.
    */
-  for (const label of ['나', '일기장', '일정', '우리', '홈']) {
+  /*
+    V4 의 다섯 칸은 `홈 · 찾기 · 기록 남기기 · 일정 · 우리` 다 (`MobileShell`).
+    `나` 와 `일기장` 은 사라진 것이 아니라 `우리` 안으로 들어갔다.
+  */
+  for (const label of ['찾기', '일정', '우리', '홈']) {
     await page.getByRole('tab', { name: label }).click();
     await expect(page.locator('main')).not.toBeEmpty();
     // A screen with no interactive control is a dead end even if it rendered.
     const controls = await page.locator('main button, main a[href], main input').count();
     expect(controls, `${label} tab has no operable control`).toBeGreaterThan(0);
   }
+
+  /*
+    가운데 칸은 장소가 아니라 **동작**이다. 컴포저가 전체 화면으로 열리므로 그 위에는
+    `main` 도 탭바도 없다 -- 그래서 같은 단언을 쓸 수 없고, 대신 열렸는가와 조작할 것이
+    있는가를 본다. 열리지 않으면 그것이야말로 죽은 칸이다.
+  */
+  await page.getByRole('tab', { name: '기록 남기기' }).click();
+  await page.waitForURL(/\/compose$/, { timeout: 20_000 });
+  const composeControls = await page.locator('button, textarea').count();
+  expect(composeControls, '기록 남기기 tab has no operable control').toBeGreaterThan(0);
+  await page.getByRole('button', { name: '닫기' }).click();
+  await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
   expect(errors, 'errors while walking the tab bar').toEqual([]);
   await context.close();
@@ -129,7 +145,7 @@ test('the primary action on each core screen is present and enabled for a real c
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
     const control = page.getByRole('button', { name }).first();
     await expect(control, `${what}: control missing on ${route}`).toBeVisible();
     await expect(control, `${what}: control disabled for a connected couple`).toBeEnabled();
@@ -220,7 +236,8 @@ test('cycle data stays untouched until the user separately consents to sensitive
     if (/\/rest\/v1\/cycle_(settings|periods|daily_logs)/.test(request.url())) cycleRequests += 1;
   });
 
-  await bootedInto(page, '/my');
+  // 주기 추적은 `/me` 가 소유한다. `/my` 는 마이 목록 화면이며 이 표면을 갖지 않는다.
+  await bootedInto(page, '/me');
   await expect(page.getByText('내 몸의 리듬 시작하기')).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(500);
   expect(cycleRequests).toBe(0);
@@ -245,7 +262,7 @@ test('the cycle tracker fits a 320px screen and opens its day sheet by keyboard'
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
 
-  await bootedInto(page, '/my');
+  await bootedInto(page, '/me');
   await page.getByRole('checkbox', { name: /민감정보 수집·이용/ }).check();
   await page.getByRole('button', { name: '동의하고 시작하기' }).click();
   await expect(page.getByTestId('cycle-hero')).toBeVisible({ timeout: 20_000 });
@@ -317,7 +334,7 @@ test('every interactive control clears the 44px tap target, hit area included', 
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 
     const bad = await page.evaluate(() => {
       const out: string[] = [];

@@ -79,7 +79,7 @@ async function goto(page: Page, path: string) {
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +302,11 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
   });
   await goto(page, '/');
 
-  await page.getByRole('button', { name: '한줄' }).click();
+  /*
+    V4 의 컴포저는 `/compose` 전체 화면이고, 홈에서 여는 문은 스토리 레일의 `+`
+    (`기록 남기기`) 다.
+  */
+  await page.getByRole('button', { name: '기록 남기기' }).click();
   const textarea = page.getByPlaceholder('오늘 어땠어?');
   await textarea.fill('오늘도 보고 싶어');
 
@@ -326,14 +330,22 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
       'base64',
     ),
   });
-  await expect(page.getByText('노을.png')).toBeVisible();
+  await expect(page.getByText('사진 1장')).toBeVisible();
 
-  await page.getByRole('button', { name: '저장' }).click();
+  await page.getByRole('button', { name: '남기기', exact: true }).click();
 
-  // The record text persisted, the file did not -- and the file is still here to
-  // retry with. Before the fix this chip was destroyed before the warning showed.
+  /*
+    The record text persisted, the file did not -- and the file is still here to
+    retry with. Before the fix this chip was destroyed before the warning showed.
+
+    V4 는 파일 이름 대신 `사진 N장` 으로 센다. 그래서 이름이 아니라 **세 가지**를 본다:
+    경고가 떴는가, 화면이 컴포저에 남아 있는가(홈으로 돌아가면 사본이 사라진 것이다),
+    그리고 글은 비었는데 사진은 그대로 세어지는가.
+  */
   await expect(page.getByText('올리지 못했어요', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('노을.png')).toBeVisible();
+  await expect(page).toHaveURL(/\/compose$/);
+  await expect(page.getByText('사진 1장')).toBeVisible();
+  await expect(textarea).toHaveValue('');
 
   expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);
   await context.close();
@@ -415,21 +427,22 @@ for (const [label, scenario] of [['creator', CREATOR], ['partner', PARTNER]] as 
   test(`connected ${label} refuses online save as protection_required (no plaintext write)`, async ({ browser }) => {
     const { context, page, errors, unrouted, dailyRecordWrites } = await open(browser, scenario);
 
-    if (label === 'creator') {
-      await goto(page, '/');
-      await page.getByRole('button', { name: '한줄' }).click();
-    } else {
-      await goto(page, '/record');
-      await page.getByRole('button', { name: '기록 남기기' }).click();
-      await expect(page.getByRole('dialog', { name: '기록 남기기' })).toBeVisible();
-      await page.getByRole('button', { name: '한줄' }).click();
-    }
+    /*
+      두 역할이 **같은 문**으로 들어간다 (V4).
+
+      앞선 판은 곰신만 홈에서 컴포저를 열 수 있고 군화는 `/record` 의 시트를 거쳐야
+      했다. V4 의 홈은 두 역할에게 같은 화면이고 레일의 `+` 도 둘 다 갖는다. 역할별로
+      다른 문을 유지하면 이 테스트가 지키려는 것(보호 없이는 평문을 쓰지 않는다)이
+      아니라 사라진 화면 구조를 지키게 된다.
+    */
+    await goto(page, '/');
+    await page.getByRole('button', { name: '기록 남기기' }).click();
 
     // Type the record content. The composer is now open for either role.
     await page.getByPlaceholder('오늘 어땠어?').fill('보호가 필요한 기록');
 
     // Save must be enabled while online with content.
-    const save = page.getByRole('button', { name: '저장' });
+    const save = page.getByRole('button', { name: '남기기', exact: true });
     await expect(save).toBeEnabled();
 
     await save.click();
@@ -459,11 +472,11 @@ test('a genuinely offline device says so, and stores the record it cannot send',
   const { context, page } = await open(browser, CREATOR);
   await goto(page, '/');
 
-  await page.getByRole('button', { name: '한줄' }).click();
+  await page.getByRole('button', { name: '기록 남기기' }).click();
   await page.getByPlaceholder('오늘 어땠어?').fill('오프라인 테스트');
 
   // Enabled while online with content to save.
-  const save = page.getByRole('button', { name: '저장' });
+  const save = page.getByRole('button', { name: '남기기', exact: true });
   await expect(save).toBeEnabled();
 
   await context.setOffline(true);

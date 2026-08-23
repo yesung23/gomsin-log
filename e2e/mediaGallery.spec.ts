@@ -109,7 +109,7 @@ async function ready(page: Page) {
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 }
 
 /**
@@ -298,7 +298,11 @@ test('nothing overflows at 320px, in either lens', async ({ browser }) => {
 test("상대방의 오늘 shows the partner's photo at full width", async ({ browser }) => {
   /*
    * The partner's own record carries the media here, so this exercises the home
-   * widget's copy of the gallery rather than the 기록 tab's.
+   * feed's copy of the gallery rather than the 기록 tab's.
+   *
+   * V4 이전에는 `widget-partner-day` 위젯이 그 사본을 갖고 있었다. 홈이 피드가 되면서
+   * 상대의 오늘은 위젯이 아니라 **게시물**이 되었고, 갤러리는 `PaperHome` 이 그린다.
+   * 지키는 것은 그대로다 -- 홈에서 상대의 사진이 본문 폭을 채우는가.
    */
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, {
@@ -326,10 +330,8 @@ test("상대방의 오늘 shows the partner's photo at full width", async ({ bro
   await page.goto('/home');
   await ready(page);
 
-  const widget = page.getByTestId('widget-partner-day');
-  await expect(widget).toBeVisible();
-  const media = widget.getByTestId('record-attachment').first();
-  await expect(media).toBeVisible();
+  const media = page.getByTestId('record-attachment').first();
+  await expect(media).toBeVisible({ timeout: 15_000 });
   expect((await media.boundingBox())!.width).toBeGreaterThan(150);
 
   expect(await horizontalOverflow(page)).toBe(0);

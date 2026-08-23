@@ -22,8 +22,12 @@ async function openComposer(page: import('@playwright/test').Page) {
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
-  await page.getByRole('button', { name: '한줄' }).click();
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  /*
+    컴포저는 홈 안의 접힌 카드가 아니라 `/compose` 전체 화면이다 (V4). 홈에서 여는
+    문은 스토리 레일 내 스토리에 붙은 `+` 이고, 그 접근 이름이 `기록 남기기` 다.
+  */
+  await page.getByRole('button', { name: '기록 남기기' }).click();
   const textarea = page.getByPlaceholder('오늘 어땠어?');
   await textarea.fill(REPORTED);
   /*
@@ -171,15 +175,16 @@ test('one tap on 저장 saves, even though the tap itself reveals the reading', 
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
-  await page.getByRole('button', { name: '한줄' }).click();
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  await page.getByRole('button', { name: '기록 남기기' }).click();
   await page.getByPlaceholder('오늘 어땠어?').fill(REPORTED);
 
   const write = page.waitForRequest(
     (request) => request.method() === 'POST' && request.url().includes('/rest/v1/daily_records'),
     { timeout: 15_000 },
   );
-  await page.getByRole('button', { name: '저장' }).click();
+  // 인스타의 `공유` 자리. `기록 남기기` 와 이름이 겹치므로 정확히 일치시킨다.
+  await page.getByRole('button', { name: '남기기', exact: true }).click();
   await write;
 
   // And the composer really did hand the entry off.
@@ -217,7 +222,7 @@ test('a saved record can have its emotion flow corrected afterwards', async ({ b
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 
   const entry = page.getByText('고쳐야 하는 기록', { exact: true }).first();
   await expect(entry).toBeVisible({ timeout: 20_000 });
@@ -269,7 +274,7 @@ test("군화's home leads with the briefing, and the descriptions are one tap in
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 
   /*
    * Updated with the 군화 home default, and the reason is here rather than in a
@@ -335,7 +340,7 @@ test('the 일정 tab exists and stays lit on 여행 and on a trip detail', async
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 
   /**
    * Scoped to the bottom bar by its own aria-label.

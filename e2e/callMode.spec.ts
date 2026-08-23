@@ -40,7 +40,7 @@ async function ready(page: Page) {
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tab')).toHaveCount(5);
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 }
 
 test('the call screen is reachable from the list, and shows one topic at a time', async ({ browser }) => {
@@ -52,6 +52,13 @@ test('the call screen is reachable from the list, and shows one topic at a time'
   const page = await context.newPage();
   await page.goto('/');
   await ready(page);
+
+  /*
+    목록은 홈 헤더의 `이야기할 것` 아이콘 뒤에 있다 (V4). 홈이 피드가 되면서 위젯
+    목록이 `/saved` 로 옮겨 갔고, 통화 모드로 가는 문도 그 목록 끝에 있다.
+  */
+  await page.getByRole('button', { name: '이야기할 것' }).click();
+  await page.waitForURL(/\/saved$/, { timeout: 20_000 });
 
   const entry = page.getByTestId('talk-about-call-mode');
   await expect(entry).toBeVisible({ timeout: 20_000 });
@@ -95,8 +102,13 @@ test('with nothing marked, the entry is hidden and the screen is still safe to o
   await page.goto('/');
   await ready(page);
 
-  // Hidden rather than disabled: an entry to a screen that opens on "nothing to
-  // talk about" is worse than no entry.
+  /*
+    Hidden rather than disabled: an entry to a screen that opens on "nothing to
+    talk about" is worse than no entry.
+
+    목록 화면에서 확인한다. 홈에서 보면 표식이 없는 것이 당연해 아무것도 지키지 못한다.
+  */
+  await page.goto('/saved');
   await expect(page.getByTestId('talk-about-call-mode')).toHaveCount(0);
 
   // Reached directly anyway -- a stale link, a back button -- it must not break.

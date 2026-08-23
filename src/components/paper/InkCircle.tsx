@@ -25,6 +25,14 @@ export function InkCircle({
   return (
     <span
       className="relative inline-flex items-center justify-center"
+      /*
+        링의 상태를 **읽을 수 있게** 내놓는다.
+
+        `new` 와 `seen` 의 차이는 획의 색과 굵기뿐이라 밖에서는 픽셀을 재는 수밖에
+        없었다. 링이 곰신·군화의 1차 행동을 가리키는 유일한 신호이므로, 그 신호가
+        테스트에서 보이지 않으면 조용히 꺼져도 아무도 모른다.
+      */
+      data-ring={ring}
       style={{ width: size, height: size }}
     >
       {ring !== 'none' ? (

@@ -258,7 +258,7 @@ test('a saved record can have its emotion flow corrected afterwards', async ({ b
   await context.close();
 });
 
-test("군화's home leads with the briefing, and the descriptions are one tap inside it", async ({ browser }) => {
+test("군화의 홈은 곰신과 같은 화면이고, 먼저 가리키는 링만 다르다", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, PARTNER);
   const page = await context.newPage();
@@ -277,42 +277,35 @@ test("군화's home leads with the briefing, and the descriptions are one tap in
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
 
   /*
-   * Updated with the 군화 home default, and the reason is here rather than in a
-   * commit message.
+   * 이 테스트가 지키던 것이 무엇이었고, 지금은 무엇인가 (2026-08-23).
    *
-   * 마음 흐름 / 오늘의 요약 / 다정한 한마디 used to be default home widgets sitting
-   * under the pinned briefing, so the same day was described four times in four
-   * wrappers. They are not deleted: they render inside the briefing's disclosure and
-   * are still offered by 위젯 추가.
+   * 앞선 판은 군화의 홈이 **통화 브리핑으로 시작하는가**를 지켰다. 브리핑이 상단에
+   * 고정되고 마음 흐름·요약은 그 안의 펼침으로 들어가, 40초짜리 확인이 스크롤 없이
+   * 끝나야 한다는 계약이었다.
    *
-   * What this test now protects is stronger than the old ordering claim: the
-   * confirm action -- the thing the north-star metric times -- must be reachable
-   * WITHOUT opening the descriptions, and the descriptions must still be reachable
-   * in one tap with the flow still ahead of the summary.
+   * V4는 그 계약을 **다른 방법으로** 지킨다. 두 역할에게 서로 다른 화면을 주는 대신
+   * 같은 화면을 주고, 먼저 누르는 링만 다르게 한다 -- 왼쪽 링의 `+` 가 곰신의 1차
+   * 행동(기록), 오른쪽 링이 군화의 1차 행동(놓친 하루)이다(`HomePage.tsx`, §5.2).
+   * 통화 브리핑 위젯과 위젯 편집은 그 결정과 함께 홈에서 걷혔다.
+   *
+   * 그래서 여기서 지키는 것은 순서가 아니라 **도달**이다: 군화가 홈을 열었을 때
+   * 놓친 하루로 가는 링이 거기 있고, 아직 안 봤다고 말하고 있고, 한 번에 열리는가.
+   * 이것이 꺼지면 군화의 홈은 아무 데도 가리키지 않는 화면이 된다.
    */
-  const briefing = page.getByTestId('call-briefing');
-  await expect(briefing).toBeVisible();
+  const mine = page.getByRole('button', { name: '내 스토리' });
+  const theirs = page.getByRole('button', { name: '춘향의 스토리' });
+  await expect(mine).toBeVisible();
+  await expect(theirs).toBeVisible();
 
-  // The measured action is available before anything optional is expanded.
-  await expect(briefing.getByRole('button', { name: /여기까지 확인/ })).toBeVisible();
+  // 링은 **내 쪽의 사실**만 말한다: 아직 안 본 것이 있는가.
+  await expect(theirs.locator('[data-ring]')).toHaveAttribute('data-ring', 'new');
+  // 내 것은 내가 이미 아는 것이므로 안 본 것일 수 없다.
+  await expect(mine.locator('[data-ring]')).toHaveAttribute('data-ring', 'seen');
 
-  // Collapsed by default: a soldier with forty seconds never scrolls past them.
-  const flow = page.getByTestId('widget-partner-emotion-flow');
-  await expect(flow).toHaveCount(0);
+  // 그리고 한 번 누르면 열린다.
+  await theirs.click();
+  await expect(page).toHaveURL(/\/story\/partner$/);
 
-  await briefing.getByRole('button', { name: /더 보기/ }).click();
-
-  const summary = page.getByTestId('widget-partner-emotion-summary');
-  await expect(flow).toBeVisible();
-  await expect(summary).toBeVisible();
-
-  // The relationship the original test existed to protect, at its new location.
-  const flowBox = await flow.boundingBox();
-  const summaryBox = await summary.boundingBox();
-  expect(flowBox!.y).toBeLessThan(summaryBox!.y);
-
-  // And the 군화 home is still editable, which it never was before the redesign.
-  await expect(page.getByRole('button', { name: '새 항목 추가' })).toBeVisible();
   await context.close();
 });
 

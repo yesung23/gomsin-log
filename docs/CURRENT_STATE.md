@@ -302,6 +302,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |
 | 여행 플래너·공동 할 일 | 동결. 새 투자 없음. 위치 privacy gate는 별도 충족 필요 |
+| 위젯 홈 · 통화 브리핑 · 상대 감정 위젯 | **V4에서 홈이 피드가 되면서 걷혔다 (2026-08-23, 의도된 제품 결정).** `RoleHome`·`CallBriefingWidget`(`여기까지 확인` 포함)·`PartnerEmotionWidgets`·`PartnerDayTimelineWidget`·`CareHintWidget`·`AddWidgetBottomSheet`와 `lib/widgets.tsx` 레지스트리는 저장소에 남아 있으나 **어느 라우트에서도 마운트되지 않는다.** V4는 두 역할에게 같은 홈을 주고 역할차를 "먼저 누르는 링"으로 푼다(`HomePage.tsx`, PRODUCT §5.2). 되돌리려면 컴포넌트는 그대로 있으므로 자리만 정하면 된다. 통화 목차와 통화 모드 자체는 `/saved`·`/call`이 계속 소유한다 |
 
 ## 5. Phase 0 production baseline
 

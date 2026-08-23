@@ -239,10 +239,25 @@ for (const colorScheme of ['light', 'dark'] as const) {
       재고 있으면(= 나머지가 안 그려지고 있으면) 실패한다.
     */
     expect(measured.length, '채워진 동작 표면을 하나도 재지 못했다').toBeGreaterThan(0);
+    /*
+      그리고 **이름 있는 자리** 하나를 못박는다.
+
+      개수로 거는 트립와이어를 두 번 틀렸다. `>= 3` 은 산호빛 시절의 실측치였고,
+      그 다음 시도인 "서로 다른 화면 둘 이상" 은 더 나빴다 -- 초록으로 만들어 준
+      둘째 화면이 `/schedule` 의 **에러 상태**에 뜨는 `다시 시도` 버튼이었다.
+      화면이 정상이면 그 버튼이 없으므로 실행마다 흔들렸고, 무엇보다 **깨진 화면이
+      커버리지로 세어지고 있었다.**
+
+      그래서 세는 대신 지목한다. `/record` 의 떠 있는 `기록 남기기` 는 컴포저 시트가
+      열려 있지 않은 한 언제나 있는, 이 앱에서 가장 중요한 채워진 동작이다. 그것이
+      재어지지 않았다면 선택자가 틀렸거나 그 화면이 그려지지 않은 것이고, 둘 다
+      이 단언이 잡으려던 바로 그것이다.
+    */
+    const routesMeasured = new Set(measured.map((entry) => entry.route));
     expect(
-      new Set(measured.map((entry) => entry.route)).size,
-      `한 화면에서만 재고 있다 -- 나머지가 그려지지 않았을 수 있다: ${measured.map((entry) => entry.route).join(', ')}`,
-    ).toBeGreaterThanOrEqual(2);
+      routesMeasured.has('/record'),
+      `/record 의 기록 남기기를 재지 못했다. 잰 화면: ${[...routesMeasured].join(', ') || '없음'}`,
+    ).toBe(true);
 
     const failing = measured
       .filter((entry) => entry.ratio < AA_NORMAL_TEXT)

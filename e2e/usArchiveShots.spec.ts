@@ -27,7 +27,10 @@ for (const width of [320, 390]) {
       records: (PARTNER.records ?? []).map((record) => record.id === 'rec-shared'
         ? {
           ...record,
-          attachments: [{ type: 'photo', name: '여행-사진.jpg', path: 'couple-1/rec-shared/여행-사진.jpg' }],
+          // Record media paths use the same canonical ASCII filename rule as
+          // production storage; a Korean filename would be rejected before the
+          // photo ever reaches the grid.
+          attachments: [{ type: 'photo', name: 'trip-photo.jpg', path: 'couple-1/rec-shared/trip-photo.jpg' }],
         }
         : record),
     });

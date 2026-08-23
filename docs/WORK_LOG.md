@@ -4767,3 +4767,22 @@ e2e · Postgres 계약 · Deno).
 - Supabase and Production data: not touched
 - migrations: none created or applied
 - gomsin-role browser session: not available in the current signed-in session; role-specific repository tests cover it
+
+### 2026-08-23 · LV · 우리 게시물 사진 전용 및 인스타식 상세 viewer — master 반영
+
+#### RESULT
+- master commit: `8d6f67d` (runtime correction `a773834` + canonical media-path fixture correction)
+- `우리 → 게시물`: 여행 기간 안의 사진 첨부 기록만 3열 격자로 표시; 글만 있거나 영상·음성만 있는 기록은 제외
+- 사진 타일 클릭: `PhotoPostViewer`에서 사진을 먼저 보여주고 기존 `RecordMediaGallery`의 여러 장 넘기기·확대를 재사용; 글은 보조 캡션
+- `우리 → 사진`: 기존 기록 중심 목록(내용·미디어·상세·타임라인) 유지
+- 운영 Supabase, migration, production data: 변경·적용하지 않음
+
+#### VERIFICATION
+- local focused tests: PASS — 3 files / 62 tests; `npm run lint`: PASS; `git diff --check`: PASS
+- local `npm run verify` with documented non-secret placeholder environment: PASS — typecheck, lint, 221 Vitest files / 3202 tests, build
+- GitHub master validation `32633810978`: PASS — browser matrix, full Vitest/build, PostgreSQL, Deno, boundary/audit
+- GitHub native release validation `32633810931`: PASS — full Vitest/build, Android, iOS, Capacitor, Deno, secret scan
+- in-app browser: PASS — production `/us` photo-only empty state and existing `사진` record list visually inspected; live HTTP 200
+
+#### CORRECTION
+- The first remote browser run `32633479877` failed only because its fixture used a Korean storage filename rejected by the production canonical media-path validator. The fixture now uses `trip-photo.jpg`; the rerun passed. This was a test-fixture defect, not a production-data or Supabase change.

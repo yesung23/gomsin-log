@@ -27,11 +27,11 @@
 
 ### Latest live checkpoint — 2026-08-23
 
-- master is now at e53f99a, a normal fast-forward from 4d2507c. The deployed UI change is on the default branch.
-- Our first tab now renders a travel-scoped post grid; the photo tab renders the existing record list; the travel tab keeps the existing trips entry point.
+- master is now at 8d6f67d, a normal fast-forward from 2a555f5. The photo-only post correction is in the default branch; runtime implementation is in `a773834` and the follow-up browser-fixture correction is in `8d6f67d`.
+- Our first tab now renders a travel-scoped **photo-only** post grid; a tile opens a photo-primary detail viewer; the photo tab renders the existing record-centered list; the travel tab keeps the existing trips entry point.
 - Search keeps the existing local date/content search. With an empty query, the soldier role shows service/contact information and the gomsin role shows the existing cycle surface.
-- master validation run 32631401176 and native release validation run 32631401357 both completed successfully. The Vercel status for e53f99a is successful.
-- An authenticated browser refresh of /us showed 게시물 · 사진 · 여행 and the first tab post grid; /search showed the soldier service card. The gomsin role was covered by the repository role-specific tests, not by this browser session.
+- master validation run 32633810978 and native release validation run 32633810931 both completed successfully for `8d6f67d`. The Vercel production URL returned HTTP 200; the in-app browser showed the photo-only empty state on `게시물` and the existing record list on `사진`.
+- The remote browser matrix passed the fixture-backed photo tile and detail-viewer path at 320px and 390px. An authenticated browser refresh of /us showed 게시물 · 사진 · 여행; /search still retains its role-specific surface from the preceding change.
 - Supabase, Production data, migrations, and remote catalog were not changed or applied.
 - PR #88 remains open at a different head (a7c2d5c); it was not approved because it does not identify the deployed commit.
 

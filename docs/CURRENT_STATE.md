@@ -37,11 +37,11 @@
 
 ### Latest release checkpoint — 2026-08-24
 
-- The release checkout adds the next product slice in implementation commit `e1874d6`: the soldier search surface now shows service information and a personal service level inline; the My profile surface shows one identity, an optional English username, an editable token-based caption, the existing local profile-photo picker, and source-derived highlight edit entrypoints.
+- The release checkout adds the next product slice in implementation commit `fd6c305` (feature integration `e1874d6` plus the post-deploy 44px tap-target repair): the soldier search surface now shows service information and a personal service level inline; the My profile surface shows one identity, an optional English username, an editable token-based caption, the existing local profile-photo picker, and source-derived highlight edit entrypoints.
 - Migration `057_profile_identity_and_caption.sql` is present in the repository and is included in the fresh-chain harness. The throwaway PostgreSQL proof covers 55 migrations and 309 assertions. **Remote Supabase application is NOT APPLIED and the remote catalog is UNVERIFIED.**
-- `npm run verify` passed on the release checkout: typecheck, lint, 226 Vitest files / 3240 tests, and build. `git diff --check` passed.
+- `npm run verify` passed on the release checkout: typecheck, lint, 226 Vitest files / 3240 tests, and build. `git diff --check` passed. GitHub master validation `32648302871` and native release validation `32648302894` both passed; the real-browser matrix passed after the tap-target repair.
 - The profile username/caption write path is account-owner scoped, not a device-identity policy. Profile photos remain in the existing device-local avatar boundary. Highlight editing routes to the source feature (`/settings`, `/schedule`, `/service`) until a specific-event editor contract exists.
-- This checkpoint is an active release candidate until the exact commit is pushed and the Vercel/browser response is checked. No Supabase or production data was changed.
+- Vercel reports the `fd6c305` deployment successful, and the in-app browser confirmed `/us`, `/search`, profile editing entrypoints, and the post/photo/travel tab paths. No Supabase or production data was changed.
 
 이 절은 merge된 default branch만 설명한다.
 

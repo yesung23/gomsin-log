@@ -20,12 +20,16 @@ Product V3, Business Memory Roadmap, Engineering Roadmap, 현재 코드와 세�
 - `npm run test:phase0`: PASS — throwaway PostgreSQL 17, fresh chain 001..057, 55 migrations / 309 assertions.
 - targeted regression tests: PASS — 마지막 회귀 묶음 2 files / 14 tests 포함.
 - `git diff --check`: PASS.
-- 원격 Supabase catalog, migration 057 적용, 실제 기기, CI 실행, 사용자 계정의 production browser 경로: 이 리포트 시점에 UNVERIFIED.
+- GitHub master validation `32648302871`: PASS — real-browser creator/partner matrix 포함.
+- GitHub Native release validation `32648302894`: PASS.
+- 로컬 Playwright 44px 단일 테스트: UNVERIFIED — 이 환경에 Chromium 실행 파일 없음; 동일 검사는 원격 matrix에서 PASS.
+- 원격 Supabase catalog와 migration 057 적용, 실제 물리 기기: UNVERIFIED/NOT APPLIED. GitHub CI와 로그인된 in-app browser 경로는 별도로 확인했다.
 
 ## 변경 커밋
 
 - 구현: `e1874d6` (`feat: refine search service and profile identity`)
-- master 반영 및 Vercel 응답은 구현 커밋 이후 별도 확인한다.
+- 회귀 보정: `fd6c305` (`fix: keep profile setup action tappable`)
+- master 반영: `fd6c305`; Vercel commit status `success`.
 
 ## 남은 작업
 

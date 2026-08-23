@@ -141,7 +141,7 @@
 - Branch: `release/v4-diary-shop-integration`
 - Base SHA: `d783d20d2f12a32af8d2afff21ae22e64f9af4fe`
 - Old HEAD: `d783d20d2f12a32af8d2afff21ae22e64f9af4fe`
-- New/Reviewed HEAD: `e1874d6` (implementation commit; docs/release follow-up will be recorded separately)
+- New/Reviewed HEAD: `fd6c305` (implementation plus post-deploy 44px tap-target regression fix; docs follow-up is this bookkeeping commit)
 
 #### CHANGED / REVIEWED
 - file: `src/features/search/SearchPage.tsx`, `src/lib/serviceLevel.ts`
@@ -179,6 +179,14 @@
 - command: `git diff --check`
 - PASS / FAIL / UNVERIFIED: PASS
 - what it actually proves: 커밋 전 whitespace 오류 없음
+- command: GitHub Actions `master validation` run `32648302871`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: exact `fd6c305` 기준 typecheck/lint/Vitest/build, fresh PostgreSQL security contracts, and real-browser creator/partner matrix 98/98 통과. 첫 `bc86b19` run에서 발견된 `아이디 설정하기 74x16` 터치 영역 회귀는 `fd6c305`의 `min-h-11`로 수정 후 통과
+- command: GitHub Actions `Native release validation` run `32648302894`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: Capacitor sync cleanliness, Android debug compile/unit/lint, iOS unsigned simulator build, secret scan, and native typecheck/test/build directions 통과
+- command: local Playwright targeted 44px test
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — 이 환경에 Chromium 실행 파일이 없어 실행되지 않음; 동일 검사는 원격 browser matrix에서 PASS
 
 #### REVIEW IMPACT
 - NONE / DELTA / FULL: DELTA
@@ -190,19 +198,19 @@
 - external/manual: migration 057은 원격 Supabase에 아직 적용하지 않았고 원격 catalog는 UNVERIFIED; 새 ID/문구 저장은 적용 후 확인 필요
 
 #### STOPPED AT
-- exact completed boundary: 코드·테스트·fresh-chain migration harness 통합 완료, master 반영 및 Vercel 자동 배포 확인 대기
+- exact completed boundary: `fd6c305` master 반영, Vercel commit status success, `/us`·`/search` 브라우저 경로 확인, GitHub master/native validation PASS
 
 #### REMAINING
-- not completed: 실제 device-only ID 변경을 보장하는 기기 식별 정책, 서버 동기화 프로필 사진, Instagram식 임의 하이라이트 커버/새 하이라이트 생성, 일정 특정 이벤트를 바로 여는 query contract
+- not completed: 실제 device-only ID 변경을 보장하는 기기 식별 정책, 서버 동기화 프로필 사진, Instagram식 임의 하이라이트 커버/새 하이라이트 생성, 일정 특정 이벤트를 바로 여는 query contract; 원격 Supabase migration 057 적용
 
 #### NEXT ACTION
 - next owner: Codex primary
 - tool/model: repository verification + browser read-only check
 - 기준 SHA: `e1874d6`
-- exact next task: Work Log/CURRENT_STATE/report 기록 후 master push, Vercel 응답과 로그인된 브라우저의 `/us`·`/search` 경로 확인
+- exact next task: 이 docs-only follow-up을 master에 push하고 최종 clean status를 확인
 
 #### DO NOT ADVANCE UNTIL
-- next-step conditions: code commit exact HEAD 확인, docs 기록, `npm run verify`/phase0 PASS, remote Supabase NOT APPLIED 명시, 배포 응답과 브라우저 결과를 별도로 기록
+- next-step conditions: docs-only commit exact HEAD 확인, remote Supabase NOT APPLIED 명시, unrelated parent checkout 변경 보존
 
 #### PRODUCTION
 - NOT APPLIED — Supabase migration·데이터 변경 없음

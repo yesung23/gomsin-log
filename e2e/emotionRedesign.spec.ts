@@ -11,9 +11,20 @@ const REPORTED = '일하느라 ㅈ같았는데, 손님이 먹을 것을 줘서 �
 
 async function openComposer(page: import('@playwright/test').Page) {
   await page.goto('/');
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tab')).toHaveCount(5);
   await page.getByRole('button', { name: '한줄' }).click();
-  const textarea = page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?');
+  const textarea = page.getByPlaceholder('오늘 어땠어?');
   await textarea.fill(REPORTED);
   /*
    * Blur, because analysis runs at a COMPOSITION BOUNDARY and not on every
@@ -149,9 +160,20 @@ test('one tap on 저장 saves, even though the tap itself reveals the reading', 
   const page = await context.newPage();
 
   await page.goto('/');
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tab')).toHaveCount(5);
   await page.getByRole('button', { name: '한줄' }).click();
-  await page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?').fill(REPORTED);
+  await page.getByPlaceholder('오늘 어땠어?').fill(REPORTED);
 
   const write = page.waitForRequest(
     (request) => request.method() === 'POST' && request.url().includes('/rest/v1/daily_records'),
@@ -161,7 +183,7 @@ test('one tap on 저장 saves, even though the tap itself reveals the reading', 
   await write;
 
   // And the composer really did hand the entry off.
-  await expect(page.getByPlaceholder('지금 이 순간, 어떤 생각을 하고 있나요?')).toHaveCount(0);
+  await expect(page.getByPlaceholder('오늘 어땠어?')).toHaveCount(0);
   await context.close();
 });
 
@@ -184,7 +206,18 @@ test('a saved record can have its emotion flow corrected afterwards', async ({ b
   });
   const page = await context.newPage();
   await page.goto('/record');
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tab')).toHaveCount(5);
 
   const entry = page.getByText('고쳐야 하는 기록', { exact: true }).first();
   await expect(entry).toBeVisible({ timeout: 20_000 });
@@ -225,7 +258,18 @@ test("군화's home leads with the briefing, and the descriptions are one tap in
   await installMockBackend(context, PARTNER);
   const page = await context.newPage();
   await page.goto('/');
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tab')).toHaveCount(5);
 
   /*
    * Updated with the 군화 home default, and the reason is here rather than in a
@@ -280,7 +324,18 @@ test('the 일정 tab exists and stays lit on 여행 and on a trip detail', async
   const page = await context.newPage();
 
   await page.goto('/');
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tab')).toHaveCount(5);
 
   /**
    * Scoped to the bottom bar by its own aria-label.

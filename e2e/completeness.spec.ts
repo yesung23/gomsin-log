@@ -20,7 +20,7 @@ const NEW_ACCOUNT: Scenario = {
   records: [],
 };
 
-const PLACEHOLDER = '지금 이 순간, 어떤 생각을 하고 있나요?';
+const PLACEHOLDER = '오늘 어땠어?';
 
 async function settle(page: import('@playwright/test').Page) {
   await expect(page.locator('#root')).not.toBeEmpty();
@@ -150,7 +150,7 @@ test('an unsent draft survives a tab round-trip and is never written to storage'
 
   const tab = (name: string) =>
     page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });
-  await tab('기록').click();
+  await tab('우리').click();
   await page.waitForURL(/\/record$/, { timeout: 20_000 });
   await tab('홈').click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
@@ -197,7 +197,7 @@ test('a saved record clears the draft instead of leaving it to be re-sent', asyn
   const tab = (name: string) =>
     page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });
   await expect(page.getByPlaceholder(PLACEHOLDER)).toHaveCount(0, { timeout: 20_000 });
-  await tab('기록').click();
+  await tab('우리').click();
   await page.waitForURL(/\/record$/, { timeout: 20_000 });
   await tab('홈').click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });

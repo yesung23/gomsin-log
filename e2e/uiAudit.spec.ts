@@ -57,7 +57,18 @@ async function boot(
  * true and a real screen has rendered, so waiting for it is the honest gate.
  */
 async function ready(page: Page) {
-  await expect(page.getByText('마이', { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  /*
+    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
+    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
+
+    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
+    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+  */
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('tab')).toHaveCount(5);
 }
 
 async function shot(page: Page, name: string) {

@@ -101,6 +101,7 @@ bash scripts/agent/claim.sh --release opus
 | 질문 | authoritative home |
 |---|---|
 | 제품 의도 | `docs/PRODUCT_V3.md` |
+| V4 화면이 실제로 어떻게 생겼나 | `docs/V4_AS_BUILT.md` |
 | 사업전략·수익화·시장·Memory Product | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |
 | 구현 순서·단계·gate | `docs/ENGINEERING_ROADMAP.md` |
 | 현재 구현 현실·blocker | 저장소 코드, 그 다음 `docs/CURRENT_STATE.md` |

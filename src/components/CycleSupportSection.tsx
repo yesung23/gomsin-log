@@ -15,6 +15,7 @@ import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
+import { CYCLE_SUPPORT_LABEL } from '@/lib/cycleSupportLabels';
 import type { CycleSupportKind, CycleSupportSignal } from '@/types';
 import { Card } from '@/components/ui/Card';
 
@@ -29,13 +30,8 @@ type LoadState = 'loading' | 'ready' | 'empty' | 'disconnected' | CycleFetchFail
  * "오늘은 몸이 힘들어요" says today is hard without saying how much — which is all a
  * care signal needs to say, and exactly what V1_LAUNCH_DECISIONS §5 approved.
  */
-const kindLabels: Record<CycleSupportKind, string> = {
-  resting: '오늘은 쉬어가고 싶어요',
-  need_space: '조용한 시간이 필요해요',
-  would_like_support: '따뜻한 응원을 받고 싶어요',
-  check_in_later: '나중에 안부를 물어봐 주세요',
-  feeling_unwell: '오늘은 몸이 힘들어요',
-};
+/** 어휘는 `cycleSupportLabels` 하나가 소유한다. 자리마다 다른 문장을 두지 않는다. */
+const kindLabels = CYCLE_SUPPORT_LABEL;
 
 interface CycleSupportSectionProps {
   /**

@@ -56,21 +56,21 @@ describe('ShopPage (다꾸 상점 화면)', () => {
 
     // 스티커 탭 클릭
     await user.click(screen.getByRole('tab', { name: '스티커' }));
-    expect(screen.getByText('군화·곰신 일상 스티커 팩')).toBeInTheDocument();
-    expect(screen.queryByText('빈티지 크라프트지 테마')).not.toBeInTheDocument();
-    expect(screen.queryByText('우리의 한 달 기억책 (실물 & 디지털)')).not.toBeInTheDocument();
+    expect(screen.getByText('군화·곰신 일상 스티커 팩 (후보)')).toBeInTheDocument();
+    expect(screen.queryByText('빈티지 크라프트지 테마 (미리보기)')).not.toBeInTheDocument();
+    expect(screen.queryByText('우리의 한 달 기억책 (상품 후보)')).not.toBeInTheDocument();
 
     // 다꾸 테마 탭 클릭
     await user.click(screen.getByRole('tab', { name: '다꾸 테마' }));
-    expect(screen.getByText('빈티지 크라프트지 테마')).toBeInTheDocument();
-    expect(screen.queryByText('군화·곰신 일상 스티커 팩')).not.toBeInTheDocument();
-    expect(screen.queryByText('우리의 한 달 기억책 (실물 & 디지털)')).not.toBeInTheDocument();
+    expect(screen.getByText('빈티지 크라프트지 테마 (미리보기)')).toBeInTheDocument();
+    expect(screen.queryByText('군화·곰신 일상 스티커 팩 (후보)')).not.toBeInTheDocument();
+    expect(screen.queryByText('우리의 한 달 기억책 (상품 후보)')).not.toBeInTheDocument();
 
     // 책 만들기 탭 클릭
     await user.click(screen.getByRole('tab', { name: '책 만들기' }));
-    expect(screen.getByText('우리의 한 달 기억책 (실물 & 디지털)')).toBeInTheDocument();
-    expect(screen.queryByText('군화·곰신 일상 스티커 팩')).not.toBeInTheDocument();
-    expect(screen.queryByText('빈티지 크라프트지 테마')).not.toBeInTheDocument();
+    expect(screen.getByText('우리의 한 달 기억책 (상품 후보)')).toBeInTheDocument();
+    expect(screen.queryByText('군화·곰신 일상 스티커 팩 (후보)')).not.toBeInTheDocument();
+    expect(screen.queryByText('빈티지 크라프트지 테마 (미리보기)')).not.toBeInTheDocument();
   });
 
   it('모든 상품에 결제 대신 준비 중 상태가 정직하게 표시되고 버튼이 비활성화된다', () => {
@@ -86,6 +86,13 @@ describe('ShopPage (다꾸 상점 화면)', () => {
     renderShop();
     expect(screen.queryByText(/₩|\d+원/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /결제|구매하기|구독/ })).not.toBeInTheDocument();
+  });
+
+  it('확정되지 않은 상품 사양이나 배송/제작 확정 약속 카피가 노출되지 않는다', () => {
+    renderShop();
+    expect(
+      screen.queryByText(/배송해 드려요|프리미엄 하드커버|맞춤 각인|실물 & 디지털 선택 가능|24종|20종|16종/),
+    ).not.toBeInTheDocument();
   });
 
   it('뒤로 가기 버튼이 일기장(/diary)으로 돌아간다', async () => {

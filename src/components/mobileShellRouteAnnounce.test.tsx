@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -22,10 +22,16 @@ vi.mock('@/components/SharedSyncBanner', () => ({ SharedSyncBanner: () => null }
 
 const { MobileShell } = await import('@/components/MobileShell');
 
+function LocationDisplay() {
+  const { pathname } = useLocation();
+  return <span data-testid="current-path">{pathname}</span>;
+}
+
 function renderShell(initialPath: string) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <MobileShell>
+        <LocationDisplay />
         <p>본문</p>
       </MobileShell>
     </MemoryRouter>,
@@ -46,6 +52,23 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
 
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('찾기 화면입니다');
+    });
+  });
+
+  it('가운데 일기장 탭을 클릭하면 /diary 경로로 이동하고 탭이 활성화된다', async () => {
+    const user = userEvent.setup();
+    renderShell('/home');
+
+    const diaryTab = screen.getByRole('tab', { name: '일기장' });
+    expect(diaryTab).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByTestId('current-path').textContent).toBe('/home');
+
+    await user.click(diaryTab);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-path').textContent).toBe('/diary');
+      expect(diaryTab).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('status').textContent).toBe('일기장 화면입니다');
     });
   });
 

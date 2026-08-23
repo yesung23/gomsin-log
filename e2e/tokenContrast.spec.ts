@@ -225,8 +225,24 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
     await context.close();
 
-    // A selector typo, or a screen that stopped rendering, must not pass silently.
-    expect(measured.length, 'coral action surfaces found').toBeGreaterThanOrEqual(3);
+    /*
+      A selector typo, or a screen that stopped rendering, must not pass silently.
+
+      앞선 판은 `>= 3` 이었다. 그 숫자는 산호빛이 채워진 1차 동작을 독점하던 때
+      네 화면에서 실제로 세어지던 수였고, V4 가 채워진 동작을 잉크로 옮기면서
+      같은 네 화면의 실측이 2 가 됐다 -- 종이 디자인은 채우기보다 **테두리**를
+      더 쓴다(`ink-chip` · `ink-box`).
+
+      숫자를 2 로 낮추면 다음에 또 낮추게 되고, 라우트를 늘려 3 을 맞추면 그 라우트는
+      대비를 재려고가 아니라 숫자를 채우려고 있는 것이 된다. 그래서 개수 대신 이
+      단언이 원래 잡으려던 **성질**을 쓴다: 아무것도 재지 않았거나, 화면 하나에서만
+      재고 있으면(= 나머지가 안 그려지고 있으면) 실패한다.
+    */
+    expect(measured.length, '채워진 동작 표면을 하나도 재지 못했다').toBeGreaterThan(0);
+    expect(
+      new Set(measured.map((entry) => entry.route)).size,
+      `한 화면에서만 재고 있다 -- 나머지가 그려지지 않았을 수 있다: ${measured.map((entry) => entry.route).join(', ')}`,
+    ).toBeGreaterThanOrEqual(2);
 
     const failing = measured
       .filter((entry) => entry.ratio < AA_NORMAL_TEXT)

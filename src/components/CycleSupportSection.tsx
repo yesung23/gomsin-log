@@ -191,8 +191,26 @@ export function CycleSupportSection({
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => void load(), 150);
     };
+    /*
+      토픽에 관점을 넣는다 -- 넣지 않으면 **`나` 화면이 통째로 죽는다.**
+
+      이 컴포넌트는 한 화면에 둘이 뜬다(내가 보낸 것 · 상대가 보낸 것). supabase-js 의
+      `channel(topic)` 은 같은 토픽이면 **이미 있는 채널을 돌려준다.** 그래서 둘째
+      인스턴스는 첫째가 이미 `subscribe()` 한 채널에 `.on()` 을 걸게 되고,
+      realtime-js 는 거기서 던진다:
+
+          cannot add `postgres_changes` callbacks for realtime:cycle-support:<id>
+          after `subscribe()`
+
+      effect 안에서 던진 오류는 ErrorBoundary 까지 올라가므로 화면에 `main` 조차 남지
+      않는다. 실제로 `/me` 는 연결된 커플에게 빈 화면이었고, e2e 가 "`main` 을 찾을 수
+      없다"로 그것을 잡았다. 단위 테스트는 이 컴포넌트를 목으로 갈아끼우고 있어서
+      볼 수 없었다.
+
+      둘이 같은 테이블을 보지만 거르는 기준이 반대이므로(`owner`), 채널도 둘이면 된다.
+    */
     const channel = client
-      .channel(`cycle-support:${coupleId}`)
+      .channel(`cycle-support:${coupleId}:${owner ? 'mine' : 'partner'}`)
       .on(
         'postgres_changes',
         {
@@ -247,7 +265,8 @@ export function CycleSupportSection({
       window.removeEventListener('online', recover);
       void client.removeChannel(channel);
     };
-  }, [authenticated, captureIdentity, connected, coupleId, isCurrentIdentity, load, userId]);
+    // `owner` 가 토픽에 들어가므로 의존성에도 있어야 한다.
+  }, [authenticated, captureIdentity, connected, coupleId, isCurrentIdentity, load, owner, userId]);
 
   const visibleSignals = useMemo(
     () => owner

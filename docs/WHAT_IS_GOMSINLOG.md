@@ -200,6 +200,9 @@ npm install && npm run dev
 npm run verify
 ```
 
+다른 AI에게 이 저장소를 맡길 때는 [`ONBOARDING_PROMPT.md`](ONBOARDING_PROMPT.md)의
+블록을 그대로 붙여넣는다.
+
 읽는 순서: **이 문서 → [`V4_AS_BUILT.md`](V4_AS_BUILT.md)(화면) →
 [`PRODUCT_V3.md`](PRODUCT_V3.md)(의도) → [`V4_BACKLOG.md`](V4_BACKLOG.md)(남은 일)**.
 

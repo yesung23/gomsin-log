@@ -6,8 +6,7 @@ import { visibleRecordsForViewer } from '@/lib/privacy';
 import { buildCoupleStats, togetherDays } from '@/lib/coupleStats';
 import { buildHighlights } from '@/lib/coupleHighlights';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
-import { buildMonthTexture, monthsWithContent } from '@/features/us/monthTexture';
-import { MonthGrid } from '@/features/us/MonthGrid';
+import { PostGrid } from '@/features/us/PostGrid';
 import { MediaArchiveGrid } from '@/components/media/MediaArchiveGrid';
 import { InkCircle, PenFace } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
@@ -48,14 +47,14 @@ import { localToday } from '@/lib/cycle';
  * 전역 하이라이트를 만들지 않는다. 이 화면은 그 동작을 따라갈 뿐 다시 판단하지 않는다.
  */
 
-type GridTab = 'day' | 'photo' | 'trip';
+type GridTab = 'post' | 'photo' | 'trip';
 
 export function PaperProfile() {
   const navigate = useNavigate();
   const { state } = useStore();
   const { profile } = state;
   const todayStr = localToday();
-  const [tab, setTab] = useState<GridTab>('day');
+  const [tab, setTab] = useState<GridTab>('post');
 
   const records = useMemo(
     () => visibleRecordsForViewer(state.records, {
@@ -93,29 +92,6 @@ export function PaperProfile() {
     폰이 접히는 선까지 보이는 양이 그 정도이고, 두 해 된 관계는 그렇지 않으면 스무 칸을
     보려고 칠백 칸을 mount 한다. `UsPage` 가 같은 이유로 같은 수를 쓴다.
   */
-  const [visibleMonthCount, setVisibleMonthCount] = useState(3);
-  const monthList = useMemo(
-    () => monthsWithContent({
-      records,
-      events: state.events,
-      trips: state.trips,
-      today: todayStr,
-      anniversary: profile.couple.anniversaryDate,
-    }),
-    [records, state.events, state.trips, todayStr, profile.couple.anniversaryDate],
-  );
-  const months = useMemo(
-    () => monthList.slice(0, visibleMonthCount).map((m) => buildMonthTexture({
-      year: m.year,
-      month: m.month,
-      records,
-      events: state.events,
-      trips: state.trips,
-      today: todayStr,
-      anniversary: profile.couple.anniversaryDate,
-    })),
-    [monthList, visibleMonthCount, records, state.events, state.trips, todayStr, profile.couple.anniversaryDate],
-  );
   const together = togetherDays(profile.couple.anniversaryDate, todayStr);
 
   const names = [profile.myName, profile.couple.partnerName].filter(Boolean);
@@ -280,7 +256,7 @@ export function PaperProfile() {
       {/* 탭 줄 — 인스타의 격자/릴스/태그됨 자리 */}
       <div className="mt-4 flex" style={{ borderTop: 'var(--stroke) solid var(--ink-faint)' }}>
         {([
-          { id: 'day', Icon: Grid3x3, label: '하루' },
+          { id: 'post', Icon: Grid3x3, label: '게시물' },
           { id: 'photo', Icon: ImageIcon, label: '사진' },
           { id: 'trip', Icon: Plane, label: '여행' },
         ] as const).map(({ id, Icon, label }) => (
@@ -327,39 +303,33 @@ export function PaperProfile() {
             <span className="text-label" style={{ color: 'var(--ink)' }}>여행 열기</span>
           </button>
         </div>
-      ) : months.length === 0 ? (
-        <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
-          아직 쌓인 하루가 없어요.
-          <br />
-          오늘 있었던 일을 하나 남기면 여기부터 채워져요.
-        </p>
       ) : (
-        months.map((month) => (
-          <section key={month.key} className="pt-4">
-            <p className="px-4 pb-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
-              {month.year}년 {month.month}월 · 기록 {month.recordCount} · 사진 {month.photoCount}
-            </p>
-            <div className="px-1">
-              <MonthGrid
-                data={month}
-                coupleId={profile.couple.coupleId}
-                onOpenDay={(date) => navigate(`/story/day/${date}`)}
-              />
-            </div>
-          </section>
-        ))
+        /*
+          게시물 격자 (2026-08-23).
+
+          앞의 판은 한 달의 모든 날을 7열로 그렸다. "달력이 아니라 질감" 이라고 적혀
+          있었지만 날짜가 적혀 있고 빈 칸이 있으면 **쓰는 사람에게는 달력으로 읽힌다** --
+          그리고 달력은 `일정` 이 갖는다. 그쪽은 앞으로 올 날을 다루므로 날짜 칸이 맞고,
+          여기는 이미 지난 것이라 순서만 있으면 된다.
+
+          칸의 단위가 하루에서 **기록**으로 바뀌면서, 하루 격자를 고른 원래 걱정(사진을
+          잘 안 올리는 커플에게 구멍 난 격자가 된다)이 구조적으로 사라졌다. 남기지 않은
+          날은 칸이 생기지 않을 뿐 빈 칸으로 남지 않는다.
+
+          `MonthGrid` 와 `monthTexture` 는 지우지 않는다 -- 되돌릴 자리가 남아 있어야
+          한다. 마운트되지 않는다는 사실은 `CURRENT_STATE.md` 가 기록한다.
+        */
+        <PostGrid
+          records={records}
+          coupleId={profile.couple.coupleId}
+          onOpen={(recordId: string) => navigate(`/record?record=${encodeURIComponent(recordId)}`)}
+        />
       )}
 
-      {/* `더 보기` 는 하루 격자의 것이다. 다른 탭에서 뜨면 무엇을 더 보는지 알 수 없다. */}
-      {tab === 'day' && monthList.length > visibleMonthCount ? (
-        <button
-          type="button"
-          onClick={() => setVisibleMonthCount((count) => count + 3)}
-          className="ink-chip mx-4 mt-6 block w-[calc(100%-2rem)] py-3"
-        >
-          <span className="text-label" style={{ color: 'var(--ink)' }}>더 보기</span>
-        </button>
-      ) : null}
+      {/*
+        `더 보기` 가 없어졌다. 그것은 달 단위 격자가 세 달씩 늘려 가던 것이고, 게시물
+        격자는 달로 나뉘지 않는다 -- 남겨 두면 눌러도 아무것도 늘지 않는 버튼이 된다.
+      */}
     </div>
   );
 }

@@ -29,7 +29,7 @@ export function ProfileIdentity({
           <button
             type="button"
             onClick={() => navigate('/settings')}
-            className="text-caption underline underline-offset-2"
+            className="inline-flex min-h-11 items-center text-caption underline underline-offset-2"
             style={{ color: 'var(--ink-soft)' }}
           >
             아이디 설정하기

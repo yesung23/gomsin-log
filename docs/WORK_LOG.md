@@ -4749,6 +4749,105 @@ e2e · Postgres 계약 · Deno).
 3. 실제 폰에서 `우리 → ☰ → 설정 → 기록 보호` 설정 (브라우저 불가)
 4. 마운트되지 않는 위젯 트리 정리 여부 결정
 
+### 2026-08-23 · Codex · 온보딩 프롬프트·제품 설명 정합성 수정 (`opus/v4-a1-a2`)
+
+#### PLAN POSITION
+- Phase: V4 문서·온보딩 거버넌스
+- Workstream: documentation governance
+- Step: 온보딩 프롬프트와 제품 설명의 canonical 계약 정합화
+- Previous Gate: `1c8c119` — 다른 AI에게 붙여넣는 온보딩 프롬프트
+- This Gate: live-first 세션 절차, engineering contract, 운영 상태 표현, 종료 보고 규칙 정정
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` §5·§13·§13.1·§16·§19
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 사업·고객·BM 변경 없음
+- Engineering source checked: `ENGINEERING_ROADMAP.md` · `docs/skills/release-validation.md`
+- Current-state checked: `CURRENT_STATE.md` · `scripts/agent/session-start.sh` live output
+- Latest relevant Work Log checked: 2026-08-23 V4/e2e 감사 항목
+- MASTER PLAN version / 기준일: `docs/EXPERIENCE_V4_MASTER_PLAN.md` / 2026-08-22 참고, 변경 없음
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5
+- Role: documentation implementation + independent verification
+- PR: #88
+- Branch: `opus/v4-a1-a2`
+- Base SHA: `1c8c119`
+- Old HEAD: `1c8c119`
+- New HEAD / Reviewed HEAD: `e5e5f23` — 문서 변경 커밋; 아래 WORK_LOG 갱신은 bookkeeping-only follow-up
+
+#### CHANGED / REVIEWED
+- file: `docs/ONBOARDING_PROMPT.md`
+- function/component/migration: N/A
+- what changed/reviewed: session-start 선행, `AGENTS.md`·canonical 문서 읽기, 방향 확인,
+  점유·리포트·ct-sync, 범위별 검증, 운영/로컬/테스트/실기기 증거 분리, UI·보안 금지선을 추가하고
+  오래되거나 과도하게 넓은 문장을 정정했다.
+- why: 기존 프롬프트가 repository contract보다 먼저 제품 문서를 읽게 했고 AGENTS/Control Tower
+  종료 절차를 빠뜨렸으며, 제품의 감정 추론 규칙과 탭 변경 방향 확인을 충분히 설명하지 않았다.
+- file: `docs/WHAT_IS_GOMSINLOG.md`
+- function/component/migration: N/A
+- what changed/reviewed: authoritative home에 `AGENTS.md`·`AI_SESSION_PROTOCOL.md`를 추가하고,
+  코드/live state와 canonical 문서의 역할을 분리했다. V4·E2EE가 이미 Production에 올라갔다고
+  단정하던 문장을 저장소 artifact와 별도 운영/device gate로 정정했다.
+- why: 현재 live state와 `CURRENT_STATE.md`는 Production/Supabase/device evidence를 자동 충족하지
+  않는다고 명시한다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음; migration 파일·원격 catalog 미접촉
+- product semantics: 변경 없음; 문서의 설명과 온보딩 guard만 canonical 규칙에 맞춤
+- Production: NOT APPLIED; Supabase 조회·변경 없음
+
+#### VERIFICATION
+- command: `bash scripts/agent/session-start.sh`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 작업 시작 시점의 branch/HEAD/PR/점유/최근 세션과 Production·remote
+  Supabase의 현재 보고 경계를 확인했다. 문서 변경 이후 volatile 상태의 최신성까지 증명하지는 않는다.
+- command: `scripts/agent/validate.sh docs`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: `git diff --check`가 통과했다. 이 스크립트는 앱 전체 검증이 아니다.
+- command: 변경 문서 2개 내부 Markdown 링크 확인 스크립트
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 상대 경로 local link target이 모두 존재한다.
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — 문서 전용 변경이라 실행하지 않음
+- what it actually proves: 해당 없음
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: NARROW DELTA — docs/comment wording only, security semantics 없음
+- whether an earlier review is stale: 앱·migration·보안 review는 stale하지 않음. 온보딩 문서의
+  이전 표현에 대한 narrow docs delta만 새 HEAD `e5e5f23` 기준으로 다시 확인함.
+
+#### BLOCKERS
+- code: 없음
+- environment: 문서 검증에는 없음
+- external/manual: remote Supabase catalog·Production 적용·실기기 검증은 이 작업 범위에서 확인하지
+  않았고 `UNVERIFIED`로 남김
+
+#### STOPPED AT
+- exact completed boundary: `e5e5f23`의 두 문서 변경을 구현·검토·커밋 완료. WORK_LOG 갱신은
+  이 항목을 남기는 bookkeeping-only follow-up이다.
+
+#### REMAINING
+- not completed: 앱 전체 `npm run verify`, e2e, migration harness, 원격 Supabase, Production,
+  실기기 검증은 실행하지 않음
+
+#### NEXT ACTION
+- next owner: 사용자 / PR owner
+- tool/model: GitHub PR gate
+- 기준 SHA: `e5e5f23` (문서 delta)
+- exact next task: PR #88의 live CI·mergeability·최종 HEAD를 다시 확인한 뒤 push/merge 여부를
+  별도 승인한다.
+
+#### DO NOT ADVANCE UNTIL
+- PR #88의 실제 HEAD와 CI를 live로 다시 확인한다
+- Production/Supabase 적용을 이 문서 변경의 증거로 간주하지 않는다
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-23 · LV · 우리 게시물/사진 탭 및 찾기 역할별 메인 — master 반영
 
 #### RESULT

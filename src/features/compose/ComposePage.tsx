@@ -8,7 +8,8 @@ import { MEDIA_ACCEPT } from '@/lib/records';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from '@/lib/composerDraft';
 import { EmotionCharacter } from '@/components/emotion/EmotionCharacter';
 import { useEmotionCandidatesAtBoundary } from '@/lib/useEmotionCandidates';
-import { BASIC_EMOTION_LABEL, BASIC_EMOTION_ORDER, GROUP_BY_BASIC } from '@/lib/basicEmotions';
+import { BASIC_EMOTION_LABEL, BASIC_EMOTION_ORDER } from '@/lib/basicEmotions';
+import { buildEmotionFlow } from '@/lib/composeEmotionFlow';
 import { localToday } from '@/lib/cycle';
 import type { BasicEmotion, EmotionFlowItem } from '@/types';
 
@@ -76,6 +77,8 @@ export function ComposePage() {
   const [mood, setMood] = useState<BasicEmotion[]>([]);
   /** 어떤 읽기에서 씨앗을 받았는지. 같은 읽기로 두 번 덮어쓰지 않는다. */
   const seededFrom = useRef<string>('');
+  /** 사용자가 감정 칸을 한 번이라도 눌렀는가. 누른 뒤에는 읽기가 덮어쓰지 않는다. */
+  const moodTouched = useRef(false);
   const [isPrivate, setIsPrivate] = useState(restored?.isPrivate ?? false);
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
@@ -121,11 +124,21 @@ export function ComposePage() {
   useEffect(() => {
     const key = review.candidates.map((candidate) => candidate.id).join('|');
     if (!key || key === seededFrom.current) return;
+    /*
+      한 번이라도 손댔으면 그때부터는 사용자의 목록이다.
+
+      키만 비교하면 **글을 고칠 때마다** 새 후보로 덮어써서 꺼 놓은 칸이 되살아난다.
+      끈 것을 앱이 다시 켜면 그건 대화가 아니라 말싸움이고, §13.1이 개별 확인 대신
+      "저장 순간 화면이 말하고 있었다"를 받아들이는 근거 자체가 무너진다 -- 되살아난
+      칸은 사용자가 본 적 없는 상태이기 때문이다.
+    */
+    if (moodTouched.current) return;
     seededFrom.current = key;
     setMood(review.candidates.map((candidate) => candidate.basic));
   }, [review.candidates]);
 
   const toggleMood = (item: BasicEmotion) => {
+    moodTouched.current = true;
     setMood((current) => (current.includes(item)
       ? current.filter((one) => one !== item)
       : [...current, item]));
@@ -134,35 +147,12 @@ export function ComposePage() {
   /*
     고른 것이 그대로 저장된다.
 
-    전부 `user_confirmed` 다 -- 화면에 눌린 채로 보이는 것을 두고 `남기기` 를 누르는 것이
-    작성자의 행위이기 때문이다. §13 이 막으려던 것은 **보이지 않는 기본값**이고, 여기서는
-    무엇이 저장될지 여섯 칸이 언제나 말하고 있다.
-
-    그래서 §13 의 보호는 다른 자리에 남긴다: `상대에게도 보여주기` 는 **꺼진 채로 시작하고
-    직접 켜야 한다.** 앱이 읽은 것이 작성자도 모르게 상대에게 가는 일은 여전히 없다.
+    규칙 자체는 `buildEmotionFlow` 가 갖는다 -- §13.1이 못박은 "감정만 따로 더 넓게
+    공개되는 경로는 없다" 를 실제로 실행해 보는 테스트가 있어야 하기 때문이다.
+    여기서는 화면의 두 값(눌린 칸, 공개 범위)을 그 함수에 넘길 뿐이다.
   */
-  const buildFlow = (now: Date): EmotionFlowItem[] => mood.map((basic, index) => ({
-    id: `mood-${now.getTime()}-${index}`,
-    sequence: index + 1,
-    group: GROUP_BY_BASIC[basic],
-    basic,
-    displayLabel: BASIC_EMOTION_LABEL[basic],
-    source: 'user_confirmed' as const,
-    /*
-      감정은 기록의 공개 범위를 그대로 따른다.
-
-      한때 `상대에게도 이 마음 보여주기` 스위치가 따로 있었고 기본이 꺼짐이었다. 없앤
-      이유는 그것이 답할 수 없는 질문이기 때문이다 -- 글은 보여주면서 그 글에서 읽은
-      마음만 숨기는 상태가 무엇을 뜻하는지 사용자도 상대도 알 수 없다. `나만 보기` 면
-      둘 다 나만 보고, `우리에게 공유` 면 둘 다 함께 본다.
-
-      §13 이 요구하는 "작성자의 명시적 행위" 는 공개 범위 그 자체가 진다 -- 접히지 않고
-      화면에 늘 보이며(§7.2), 고른 마음도 여섯 칸에 눌린 채로 보인다. 무엇이 상대에게
-      갈지 화면이 두 곳에서 말하고 있다.
-    */
-    visibility: effectivePrivate ? ('author_only' as const) : ('shared' as const),
-    userEdited: true,
-  }));
+  const buildFlow = (now: Date): EmotionFlowItem[] =>
+    buildEmotionFlow({ mood, now, isPrivate: effectivePrivate });
 
   const save = async () => {
     if (saving || !hasContent) return;
@@ -194,6 +184,7 @@ export function ComposePage() {
       review.reset();
       setMood([]);
       seededFrom.current = '';
+      moodTouched.current = false;
       toast.success(message);
       navigate('/home');
     };
@@ -277,6 +268,7 @@ export function ComposePage() {
       review.reset();
       setMood([]);
       seededFrom.current = '';
+      moodTouched.current = false;
       toast.warning(
         `사진 ${result.failedFiles.length}장은 올리지 못했어요. 글은 남겼어요. 아래에 그대로 두었으니 다시 시도해 주세요.`,
       );

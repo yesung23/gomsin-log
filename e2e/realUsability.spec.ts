@@ -238,7 +238,13 @@ test('cycle data stays untouched until the user separately consents to sensitive
 
   // 주기 추적은 `/me` 가 소유한다. `/my` 는 마이 목록 화면이며 이 표면을 갖지 않는다.
   await bootedInto(page, '/me');
-  await expect(page.getByText('내 몸의 리듬 시작하기')).toBeVisible({ timeout: 20_000 });
+  /*
+    `main` 의 내용으로 확인한다 -- 없을 때 **무엇이 대신 있었는지**를 실패가 말해 주기
+    때문이다. `getByText(...).toBeVisible()` 은 "못 찾았다"까지만 말하고, 동의 카드가
+    안 뜨는 이유가 로그인 상태인지, 로딩이 안 끝난 것인지, 역할 판정인지 구분하지
+    못한다. 지키는 것은 같고 실패가 더 많이 말한다.
+  */
+  await expect(page.locator('main')).toContainText('내 몸의 리듬 시작하기', { timeout: 20_000 });
   await page.waitForTimeout(500);
   expect(cycleRequests).toBe(0);
 
@@ -263,6 +269,8 @@ test('the cycle tracker fits a 320px screen and opens its day sheet by keyboard'
   const page = await context.newPage();
 
   await bootedInto(page, '/me');
+  // 동의 카드가 떴는지 먼저 본다. 안 떴으면 실패가 그 자리에 무엇이 있었는지 말한다.
+  await expect(page.locator('main')).toContainText('내 몸의 리듬 시작하기', { timeout: 20_000 });
   await page.getByRole('checkbox', { name: /민감정보 수집·이용/ }).check();
   await page.getByRole('button', { name: '동의하고 시작하기' }).click();
   await expect(page.getByTestId('cycle-hero')).toBeVisible({ timeout: 20_000 });

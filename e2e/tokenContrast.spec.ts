@@ -201,10 +201,16 @@ for (const colorScheme of ['light', 'dark'] as const) {
        * calendar cell, numbered step bullets), and a label on either has to clear
        * AA. Matching only the old class silently stopped measuring every primary
        * button the moment the fill was split out.
+       *
+       * `ink-fill` 은 V4 가 같은 자리에 놓은 세 번째 토큰이다 (2026-08-23). 종이로
+       * 옮기면서 채워진 1차 동작이 산호빛에서 잉크로 바뀌었고 -- `Button` 의
+       * `primary` 가 곧 `ink-fill` 이다 -- 이 목록을 따라 옮기지 않았더니 네 화면에서
+       * 잴 것이 **0개**가 됐다. 아래의 `>= 3` 이 그 사실을 잡았다: 색이 바뀌었을 뿐
+       * 라벨이 바닥을 지켜야 한다는 규칙은 그대로다.
        */
       const result = await page.evaluate(
         measureInPage,
-        '[class*="bg-coral-strong"],[class*="bg-coral-fill"]',
+        '[class*="bg-coral-strong"],[class*="bg-coral-fill"],[class*="ink-fill"]',
       );
 
       // If canvas cannot rasterise the computed colour, every number is garbage.

@@ -196,7 +196,19 @@ describe('PaperProfile (우리 화면)', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/record?record=rec-2');
   });
 
-  it('여행 탭을 누르면 여행 페이지 진입 버튼을 제공한다', () => {
+  it('여행 탭을 누르면 간단한 여행 목록과 상세 진입을 제공한다', () => {
+    const trip: Trip = {
+      id: 'trip-jeju',
+      coupleId: 'couple-1',
+      createdBy: 'user-me',
+      title: '제주 여행',
+      startDate: '2099-08-10',
+      endDate: '2099-08-12',
+      status: 'planned',
+      createdAt: '2026-08-01T00:00:00Z',
+    };
+    storeState = { ...baseState(), trips: [trip] };
+
     render(
       <MemoryRouter>
         <PaperProfile />
@@ -206,9 +218,12 @@ describe('PaperProfile (우리 화면)', () => {
     const tripTab = screen.getByRole('button', { name: '여행' });
     fireEvent.click(tripTab);
 
-    expect(screen.getByText('여행은 따로 펼쳐 봐요.')).toBeInTheDocument();
-    const openTripBtn = screen.getByRole('button', { name: '여행 열기' });
-    fireEvent.click(openTripBtn);
+    expect(screen.getByTestId('profile-trips-list')).toBeInTheDocument();
+    expect(screen.getByText('제주 여행')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '제주 여행 열기' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/trips/trip-jeju');
+
+    fireEvent.click(screen.getByRole('button', { name: '전체 보기' }));
     expect(mockNavigate).toHaveBeenCalledWith('/trips');
   });
 });

@@ -628,6 +628,12 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
+
+  /* Profile tabs keep the keyboard ring visible without making the selected tab look larger. */
+  .profile-tab:focus-visible {
+    outline-offset: -2px;
+    border-radius: 0;
+  }
 }
 
 /*

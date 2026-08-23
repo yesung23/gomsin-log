@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Search, SquarePen, X } from 'lucide-react';
+import { CalendarDays, ChevronRight, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Search, SquarePen, X } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { buildCoupleStats, togetherDays } from '@/lib/coupleStats';
@@ -8,13 +8,15 @@ import { buildHighlights } from '@/lib/coupleHighlights';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { PostGrid } from '@/features/us/PostGrid';
 import { getPhotoAttachments, isTravelRecord } from '@/features/us/postTiles';
+import { TRIP_PHASE_ORDER, TRIP_PHASE_PILL, groupTripsByPhase, type TripPhase } from '@/lib/tripPhase';
+import { formatLocalDate } from '@/lib/utils';
 import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { cn } from '@/lib/utils';
 import { InkCircle, PenFace } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { localToday } from '@/lib/cycle';
-import type { DailyRecord, Role } from '@/types';
+import type { DailyRecord, Role, Trip } from '@/types';
 
 /**
  * 우리 — 인스타 프로필과 같은 구조.
@@ -282,8 +284,10 @@ export function PaperProfile() {
             aria-label={label}
             aria-pressed={tab === id}
             onClick={() => setTab(id)}
-            className="flex flex-1 items-center justify-center py-3"
-            style={tab === id ? { borderBottom: 'var(--stroke-bold) solid var(--ink)' } : undefined}
+            className="profile-tab flex flex-1 items-center justify-center py-3"
+            style={{
+              borderBottom: `var(--stroke-bold) solid ${tab === id ? 'var(--ink)' : 'transparent'}`,
+            }}
           >
             <Icon size={20} className="pen-icon" color={tab === id ? 'var(--ink)' : 'var(--ink-soft)'} aria-hidden="true" />
           </button>
@@ -301,18 +305,12 @@ export function PaperProfile() {
           onOpenTimeline={() => navigate('/record')}
         />
       ) : tab === 'trip' ? (
-        <div className="px-4 pt-8 text-center">
-          <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
-            여행은 따로 펼쳐 봐요.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate('/trips')}
-            className="ink-chip mt-3 min-h-11 px-4"
-          >
-            <span className="text-label" style={{ color: 'var(--ink)' }}>여행 열기</span>
-          </button>
-        </div>
+        <ProfileTripList
+          trips={state.trips}
+          todayStr={todayStr}
+          onOpenTrip={(tripId) => navigate(`/trips/${encodeURIComponent(tripId)}`)}
+          onOpenAll={() => navigate('/trips')}
+        />
       ) : (
         /*
           게시물 격자 (2026-08-23).
@@ -347,6 +345,116 @@ export function PaperProfile() {
         격자는 달로 나뉘지 않는다 -- 남겨 두면 눌러도 아무것도 늘지 않는 버튼이 된다.
       */}
     </div>
+  );
+}
+
+function ProfileTripList({
+  trips,
+  todayStr,
+  onOpenTrip,
+  onOpenAll,
+}: {
+  trips: Trip[];
+  todayStr: string;
+  onOpenTrip: (tripId: string) => void;
+  onOpenAll: () => void;
+}) {
+  const orderedTrips = useMemo(() => {
+    const grouped = groupTripsByPhase(trips, todayStr);
+    return TRIP_PHASE_ORDER.flatMap((phase) => grouped[phase].map((trip) => ({ trip, phase })));
+  }, [todayStr, trips]);
+  const visibleTrips = orderedTrips.slice(0, 3);
+
+  return (
+    <section className="space-y-2 px-4 pt-3" data-testid="profile-trips-list" aria-label="여행 요약">
+      <div className="flex items-center justify-between">
+        <span className="text-caption font-semibold" style={{ color: 'var(--ink-soft)' }}>
+          여행 {trips.length > 0 ? trips.length : ''}
+        </span>
+        <button
+          type="button"
+          onClick={onOpenAll}
+          className="text-caption font-semibold underline"
+          style={{ color: 'var(--ink-soft)' }}
+        >
+          전체 보기
+        </button>
+      </div>
+
+      {visibleTrips.length > 0 ? (
+        <div className="space-y-2">
+          {visibleTrips.map(({ trip, phase }) => (
+            <ProfileTripRow key={trip.id} trip={trip} phase={phase} onOpen={onOpenTrip} />
+          ))}
+        </div>
+      ) : (
+        <div
+          className="rounded-control px-4 py-5 text-center"
+          style={{ background: 'var(--paper)', border: 'var(--stroke-thin) solid var(--ink-faint)' }}
+        >
+          <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
+            등록한 여행이 없어요.
+            <br />
+            여행을 만들면 여기서 바로 볼 수 있어요.
+          </p>
+          <button
+            type="button"
+            onClick={onOpenAll}
+            className="ink-chip mt-3 min-h-11 px-4"
+          >
+            <span className="text-label" style={{ color: 'var(--ink)' }}>여행 만들기</span>
+          </button>
+        </div>
+      )}
+
+      {orderedTrips.length > visibleTrips.length ? (
+        <button
+          type="button"
+          onClick={onOpenAll}
+          className="min-h-11 w-full text-caption font-semibold underline"
+          style={{ color: 'var(--ink-soft)' }}
+        >
+          여행 전체 보기 ({orderedTrips.length})
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function ProfileTripRow({
+  trip,
+  phase,
+  onOpen,
+}: {
+  trip: Trip;
+  phase: TripPhase;
+  onOpen: (tripId: string) => void;
+}) {
+  const dateLabel = trip.startDate === trip.endDate
+    ? formatLocalDate(trip.startDate)
+    : `${formatLocalDate(trip.startDate)} ~ ${formatLocalDate(trip.endDate)}`;
+
+  return (
+    <button
+      type="button"
+      data-testid={`profile-trip-${trip.id}`}
+      aria-label={`${trip.title} 열기`}
+      onClick={() => onOpen(trip.id)}
+      className="press-response flex min-h-16 w-full items-center gap-3 rounded-control px-3 text-left"
+      style={{ background: 'var(--paper)', border: 'var(--stroke-thin) solid var(--ink-faint)' }}
+    >
+      <CalendarDays size={18} className="shrink-0 pen-icon" color="var(--ink-soft)" aria-hidden="true" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-label font-semibold" style={{ color: 'var(--ink)' }}>{trip.title}</span>
+          <span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>{TRIP_PHASE_PILL[phase]}</span>
+        </span>
+        <span className="mt-0.5 block truncate text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
+          {dateLabel}
+        </span>
+      </span>
+      <ChevronRight size={16} className="shrink-0 pen-icon" color="var(--ink-soft)" aria-hidden="true" />
+    </button>
   );
 }
 

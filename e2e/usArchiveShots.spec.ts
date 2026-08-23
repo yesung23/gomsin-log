@@ -56,6 +56,24 @@ for (const width of [320, 390]) {
     await page.screenshot({ path: `${OUT}/us-post-detail-${width}.png`, fullPage: true });
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('photo-post-viewer')).toHaveCount(0);
+
+    const photoTab = page.getByRole('button', { name: '사진', exact: true });
+    await photoTab.click();
+    await expect(photoTab).toHaveAttribute('aria-pressed', 'true');
+    const tabSizes = await page.locator('.profile-tab').evaluateAll((elements) => elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    }));
+    expect(new Set(tabSizes.map(({ height }) => height)).size, 'the selected tab must keep the same height as its siblings').toBe(1);
+    expect(Math.max(...tabSizes.map(({ width }) => width)) - Math.min(...tabSizes.map(({ width }) => width)))
+      .toBeLessThan(0.1);
+    await page.screenshot({ path: `${OUT}/us-photo-tab-${width}.png`, fullPage: true });
+
+    await page.getByRole('button', { name: '여행' }).click();
+    await expect(page.getByTestId('profile-trips-list')).toBeVisible();
+    await expect(page.getByTestId('profile-trip-trip-browser')).toBeVisible();
+    await page.screenshot({ path: `${OUT}/us-trips-${width}.png`, fullPage: true });
+
     await context.close();
   });
 }

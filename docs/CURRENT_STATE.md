@@ -302,6 +302,7 @@ P5.3/P5.4 chat stack은 active draft 자산으로 보존하지만 V1 제품 진�
 | Moment / 월간 히스토리 | 미구현 |
 | 수익화 / 구독 | 코드 없음. 방향은 [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md) |
 | 여행 플래너·공동 할 일 | 동결. 새 투자 없음. 위치 privacy gate는 별도 충족 필요 |
+| 감정 · 기계 추론 노출 | **§13이 2026-08-23에 개정됐다.** V4 컴포저는 기계가 읽은 감정을 여섯 칸에 미리 눌린 채로 두고, 기록의 공개 범위 기본값은 `우리에게 공유`다. 그래서 감정 칸을 건드리지 않은 사용자의 추론이 파트너에게 간다 -- 개정 전 규칙이 금지하던 일이다. 확인받은 제품 결정이며 `PRODUCT_V3.md` §13.1이 무엇이 남는지(보장 넷) 소유한다. 되돌릴 자리는 하나다: 컴포저가 읽은 것을 미리 누르지 않는 것 |
 | 위젯 홈 · 통화 브리핑 · 상대 감정 위젯 | **V4에서 홈이 피드가 되면서 걷혔다 (2026-08-23, 의도된 제품 결정).** `RoleHome`·`CallBriefingWidget`(`여기까지 확인` 포함)·`PartnerEmotionWidgets`·`PartnerDayTimelineWidget`·`CareHintWidget`·`AddWidgetBottomSheet`와 `lib/widgets.tsx` 레지스트리는 저장소에 남아 있으나 **어느 라우트에서도 마운트되지 않는다.** V4는 두 역할에게 같은 홈을 주고 역할차를 "먼저 누르는 링"으로 푼다(`HomePage.tsx`, PRODUCT §5.2). 되돌리려면 컴포넌트는 그대로 있으므로 자리만 정하면 된다. 통화 목차와 통화 모드 자체는 `/saved`·`/call`이 계속 소유한다 |
 
 ## 5. Phase 0 production baseline

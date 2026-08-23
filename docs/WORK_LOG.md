@@ -318,6 +318,165 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 #### PRODUCTION
 - NOT APPLIED
 
+### 2026-08-23 · LV · 일기장 하단 탭 전환 및 다꾸/기억 상점 최소 화면 구현
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비
+- Workstream: V4 화면 개편
+- Step: 하단 3번째 탭을 일기장(/diary)으로 전환, 다꾸 상점(/shop) 최소 화면 추가, 3대 작성 진입점 보존
+- Previous Gate: 우리 여행 게시물·사진 탭 및 찾기 역할별 화면 개편
+- This Gate: typecheck / lint / unit tests / build 검증 완료, Supabase 미변경, master 미push
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` §5·§7.1·§9·§16, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `BUSINESS_MEMORY_ROADMAP_V1.md` §9.2·§9.5, `ENGINEERING_ROADMAP.md` §P-MP (실제 결제·주문은 P-MP 게이트 전이므로 결제 버튼 없이 정직한 준비 중 상태 유지, 무료 12종 스티커 꾸미기 보존)
+- Engineering source checked: `CLAUDE.md`, `AGENTS.md`
+- Current-state checked: `bash scripts/agent/session-start.sh`, `CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-23 V4 화면 작업 항목
+- MASTER PLAN version / 기준일: `EXPERIENCE_V4_MASTER_PLAN.md`
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict:
+
+#### OWNERSHIP
+- Tool: Codex subagent execution
+- Model: gemini-3.7-flash
+- Role: implementation & verification
+- PR: #88 (unpushed local working tree)
+- Branch: `opus/v4-a1-a2`
+- Base SHA: `bf4272c5a60d3d4e5eeb14c003ae67eb67fad24e`
+- Old HEAD: `bf4272c5a60d3d4e5eeb14c003ae67eb67fad24e`
+- New/Reviewed HEAD: working-tree changes uncommitted / not pushed to master
+
+#### CHANGED / REVIEWED
+- file: `src/components/MobileShell.tsx`
+- function/component/migration: `MobileShell`, `TABS`
+- what changed/reviewed: 하단 5칸의 3번째 탭을 `/compose`('기록 남기기')에서 `/diary`('일기장')으로 전환하고 `BookHeart` 아이콘을 부여함. `matchPrefixes`에 `['/diary', '/shop']`을 매핑하고 `우리` 탭 매핑에서 `'/diary'`를 분리하여 활성 상태가 일기장에 정확히 켜지도록 함.
+- file: `src/App.tsx`, `src/lib/routeAnnouncement.ts`
+- function/component/migration: `App`, `routeAnnouncement`, `ROUTES`
+- what changed/reviewed: `/shop` 경로에 `ShopPage` lazy route를 등록하고 라우트 접근성 안내에 `'상점'`을 추가함.
+- file: `src/features/shop/ShopPage.tsx`
+- function/component/migration: `ShopPage`, `ShopPageBody`, `PRODUCTS`, `CATEGORIES`
+- what changed/reviewed: 스티커, 다꾸 테마, 책 만들기 3개 카테고리의 상품 카드와 미리보기, 카테고리 필터 탭, 일기장으로의 뒤로가기를 구현함. 결제·주문·스키마 변경 없이 '아직 결제를 열지 않았어요 · 준비 중' 안내와 '기본 12종 스티커 무료' 원칙을 정직하게 명시함.
+- file: `src/features/diary/DiaryPage.tsx`
+- function/component/migration: `DiaryPageBody`, `AppBar`
+- what changed/reviewed: 일기장 상단 헤더와 본문에 상점(`/shop`)으로 이동하는 액션 버튼 및 둘러보기 배너를 추가함.
+- file: `src/features/shop/shopPage.test.tsx`, `src/features/diary/diaryScreens.test.tsx`, `src/components/mobileShellRouteAnnounce.test.tsx`, `src/pages/settingsRouteReachability.test.tsx`, `src/components/composeFromAnywhere.test.tsx`, `src/lib/accessibilityInvariants.test.ts`
+- function/component/migration: 테스트 스위트
+- what changed/reviewed: 하단 탭바 5칸 접근성 이름, 3대 작성 진입점(홈 레일 +, 우리 헤더 펜, 찾기 헤더 펜) 보존, 상점 렌더링/카테고리/정직한 결제 안내, 일기장 상점 버튼 연결 테스트를 추가 및 통과함.
+
+#### VERIFICATION
+- command: `npm run typecheck` → PASS
+- command: `npm run lint` → PASS
+- command: `npx vitest run src/components/mobileShellRouteAnnounce.test.tsx src/pages/settingsRouteReachability.test.tsx src/components/composeFromAnywhere.test.tsx src/features/diary/diaryScreens.test.tsx src/features/shop/shopPage.test.tsx src/lib/accessibilityInvariants.test.ts` → PASS (87 tests)
+- command: `npm run build` → PASS (Vite production build)
+- unexecuted verifications: 실기기(Physical device) 검증, 원격 Supabase/Production 배포(본 세션에서는 로컬 구현 및 검증만 수행하고 master push/원격 배포는 수행하지 않음)
+
+#### DO NOT ADVANCE UNTIL
+- P-MP 게이트 확정 전 유료 결제/주문 Supabase 스키마 임의 배포 금지
+- master 직접 push 금지 (PR #88 검토 및 승인 대기)
+
+#### PRODUCTION
+- NOT APPLIED / 원격 catalog UNVERIFIED
+
+### 2026-08-23 · LV · 우리 게시물/사진 탭 및 찾기 역할별 메인
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비
+- Workstream: V4 화면 개편
+- Step: 우리 탭의 여행 게시물·기록 목록 분리 및 찾기 역할별 기본 화면 구현
+- Previous Gate: 요청 범위 확인 및 두 구현 에이전트 점유
+- This Gate: 코드·문서·브라우저 회귀 검증 완료, 배포 화면은 별도 구분
+
+#### DIRECTION CHECK
+- Product source checked: `PRODUCT_V3.md` §5·§10·§16·§19·§21
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE (기존 데이터 표면을 재배치한 UI 작업)
+- Engineering source checked: `docs/skills/feature-build.md`, `CLAUDE.md`, `AGENTS.md`
+- Current-state checked: `bash scripts/agent/session-start.sh`, `CURRENT_STATE.md`
+- Latest relevant Work Log checked: 최근 V4 화면·브라우저 검증 항목
+- MASTER PLAN version / 기준일: `EXPERIENCE_V4_MASTER_PLAN.md` 저장소 현재본
+- Does this task conflict with canonical direction? **YES — 제한된 문서 충돌**
+- If YES, what conflict: 현재 `PRODUCT_V3` §5.3·§5.4는 찾기를 기록 색인으로만 두고 역할별 표면을 `나`에 둔다. 사용자가 명시적으로 찾기 메인을 역할별 정보로 바꾸라고 요청했으므로 active worktree에 그 요청을 구현했다. `PRODUCT_V3` 자체는 이 UI 작업에서 임의로 개정하지 않았고, 병합 전 제품 의도 확인이 필요하다.
+
+#### OWNERSHIP
+- Tool: Codex multi-agent orchestration
+- Model: GPT-5 + two implementation subagents
+- Role: implementation + independent integration verification
+- PR: #88 (현재 변경은 아직 push하지 않음)
+- Branch: `opus/v4-a1-a2`
+- Base SHA: `55e935de6744fbfca3b1a43bae3fbea190db821c`
+- Old HEAD: `55e935de6744fbfca3b1a43bae3fbea190db821c`
+- New/Reviewed HEAD: same SHA; working-tree changes are uncommitted
+
+#### CHANGED / REVIEWED
+- file: `src/features/us/PaperProfile.tsx`, `src/features/us/PostGrid.tsx`, `src/features/us/postTiles.ts`
+- function/component/migration: `PaperProfile`, `ProfileRecordList`, `PostGrid`, `isTravelRecord`
+- what changed/reviewed: 우리 첫 탭은 기존 기록 전체가 아니라 여행 목록 또는 `trip` 이벤트의 기간에 해당하는 기록만 3열 게시물 격자로 보여준다. 사진 탭은 기존의 볼 수 있는 기록을 최신순 목록으로 보여주고 미디어·상세 기록·날짜별 타임라인으로 연결한다. 여행 탭의 `/trips` 진입은 유지했다.
+- why: 사용자가 여행 때 인스타그램처럼 남긴 게시물만 격자에 보길 원했고, 일반 기록 전체는 사진 탭에서 읽길 원했다. `DailyRecord`에 `trip_id`가 없어 스키마를 새로 만들지 않고 날짜 범위 판별을 사용했으며 한계도 문서에 적었다.
+- file: `src/features/search/SearchPage.tsx`, `src/features/me/MePage.tsx`
+- function/component/migration: `SoldierSearchSurface`, `SearchPageBody`, exported `ServiceCard`
+- what changed/reviewed: 기존 검색 입력·날짜/내용 검색·정확한 기록 링크·기록 작성 버튼은 유지했다. 검색어가 없을 때 군화는 복무·연락 가능 시간·다음 휴가/면회를, 곰신은 기존 주기·공유 표면을 먼저 본다. 정보가 없거나 전역한 경우 지어내지 않고 입력/확인 상태로 보여준다.
+- why: 찾기 탭의 메인을 역할별 정보로 하되 기존 찾기 기능은 보존하라는 요청을 만족하기 위해서다.
+- file: `src/features/us/paperProfile.test.tsx`, `src/features/search/searchPage.test.tsx`, `src/features/search/searchPageRenders.test.tsx`, `src/features/us/postTiles.test.ts`
+- function/component/migration: render·순수 함수·privacy 경계 테스트
+- what changed/reviewed: 상단 영역이 계속 마운트되는지, 여행 기록만 격자에 들어가는지, 사진 탭의 전체 기록과 라우팅, 군화/곰신 기본 화면, 검색 결과와 비공개 필터를 실행으로 확인했다. 목으로 화면 전체를 가린 테스트만 두지 않고 실제 `PaperProfile`·`SearchPage` 마운트 테스트를 추가했다.
+- why: 이전 저장소 결함 패턴인 "목 때문에 실제 크래시를 못 보는 테스트"를 피하기 위해서다.
+- file: `e2e/usArchiveShots.spec.ts`
+- function/component/migration: authenticated mock browser fixture
+- what changed/reviewed: 여행 기간 fixture를 추가해 320/390px 실브라우저에서 여행 게시물 격자 자체를 확인하도록 기존 회귀 테스트를 새 계약에 맞췄다.
+- file: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/CURRENT_STATE.md`
+- function/component/migration: documentation only
+- what changed/reviewed: 새 탭 의미·한계·백로그 상태와 active worktree/master·배포 증거의 경계를 갱신했다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음; `trip_id`를 새로 만들지 않았고 migration·harness를 건드리지 않음
+- Production/Supabase: 조회·변경·적용 없음
+- master: 직접 push·merge 없음
+
+#### VERIFICATION
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/features/us/postTiles.test.ts src/features/us/paperProfile.test.tsx src/features/search/searchPage.test.tsx src/features/search/searchPageRenders.test.tsx`
+- PASS / FAIL / UNVERIFIED: **PASS — 4 files, 32 tests**
+- what it actually proves: 새 순수 함수와 두 화면의 마운트·역할·라우팅 계약을 jsdom에서 확인한다.
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: **PASS — typecheck, lint, full test 221 files / 3202 tests, build**
+- what it actually proves: 저장소 전체 TypeScript·lint·Vitest·production build가 현재 working tree에서 통과했다. 운영 배포나 실제 Supabase를 증명하지 않는다.
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npx playwright test e2e/usArchiveShots.spec.ts`
+- PASS / FAIL / UNVERIFIED: **PASS — 2 tests**
+- what it actually proves: mock backend를 쓰는 실제 브라우저에서 320/390px 우리 게시물 격자가 렌더되고 screenshot이 생성됐다. 실제 운영 데이터/RLS 증거는 아니다.
+- command: in-app browser `https://gomsin-log.vercel.app` 주요 경로 점검
+- PASS / FAIL / UNVERIFIED: **UNVERIFIED for this change**
+- what it actually proves: 로그인된 배포 세션에서 `/home`, `/search`, `/compose`, `/schedule`, `/us`, `/me`, `/my`, `/service`, `/record`, `/diary`, `/trips`가 모두 화면을 렌더했다. 그러나 `/us`는 여전히 `하루` 격자를, `/search`는 검색 입력만 보여 **현재 배포본이 이번 working tree보다 이전 버전**임을 확인했다. `/compose`는 첫 짧은 대기에서 selector timeout이 났지만 1.8초 재확인에서는 정상 렌더됐다.
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: **FULL within requested UI slice**
+- whether an earlier review is stale: active worktree의 이전 하루 격자·찾기 빈 화면 설명은 이번 변경으로 stale하다. remote/Production 증거는 이번 변경을 검증하지 않는다.
+
+#### BLOCKERS
+- code: 없음
+- environment: 없음
+- external/manual: 배포 URL은 아직 이전 빌드다. 이번 변경을 실제 로그인 화면에서 보려면 사용자 승인 후 branch push/preview 또는 배포가 필요하다. 그 작업은 이번 세션에서 하지 않았다.
+
+#### STOPPED AT
+- exact completed boundary: working tree의 코드·테스트·문서와 mock-browser 회귀 검증 완료. Production/remote 배포는 건드리지 않음.
+
+#### REMAINING
+- not completed: 배포된 로그인 화면에서 새 우리/찾기 UI 확인, `PRODUCT_V3`의 §5.3·§5.4 제품 의도와 이번 위치 변경의 최종 정합성 확인
+
+#### NEXT ACTION
+- next owner: 사용자 / PR owner
+- tool/model: branch review → approved preview deployment
+- 기준 SHA: `55e935de6744fbfca3b1a43bae3fbea190db821c` + uncommitted working tree
+- exact next task: 변경 diff를 승인하면 named paths를 branch에 commit/push하고 preview에서 군화·곰신 역할별 `/search`와 `/us`의 게시물·사진 탭을 다시 캡처한다.
+
+#### DO NOT ADVANCE UNTIL
+- active worktree 변경을 remote/Production 적용으로 표현하지 않는다
+- `PRODUCT_V3`의 찾기/나 표면 충돌을 제품 의도 확인 없이 canonical 완료로 쓰지 않는다
+- 새 배포 화면에서 역할별 실제 렌더링을 확인한다
+
+#### PRODUCTION
+- NOT APPLIED
+
+
 ### 2026-08-21 · LV · migration 047 delta — independent READ-ONLY security review (원 3단계 어휘에 대한 판정)
 
 > reviewer가 남긴 READY-TO-COPY 판정의 반영이다. 판정 대상은 **개정 전** tree

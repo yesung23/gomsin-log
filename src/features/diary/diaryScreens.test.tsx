@@ -2,7 +2,14 @@ import type { ReactNode } from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord } from '@/types';
+
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return { ...actual, useNavigate: () => navigate };
+});
 
 /**
  * 일기장이 실제로 그려지고, 실제로 꾸며지는가.
@@ -21,10 +28,24 @@ vi.mock('@/components/MobileShell', () => ({
   MobileShell: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/components/ui/AppBar', () => ({
-  AppBar: ({ title }: { title: string }) => <h1>{title}</h1>,
+  AppBar: ({ title, actions }: { title: ReactNode; actions?: ReactNode }) => (
+    <header>
+      <h1>{title}</h1>
+      {actions}
+    </header>
+  ),
+  AppBarAction: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
 }));
 
 const { DiaryPage } = await import('./DiaryPage');
+
+function renderDiary() {
+  return render(
+    <MemoryRouter initialEntries={['/diary']}>
+      <DiaryPage />
+    </MemoryRouter>,
+  );
+}
 
 const ME = 'user-me';
 
@@ -60,6 +81,7 @@ function stateWith(records: DailyRecord[]): AppState {
 }
 
 beforeEach(() => {
+  navigate.mockReset();
   localStorage.clear();
   currentState = stateWith([
     record({ date: '2026-08-02', time: '08:00', log: '8월 첫 기록' }),
@@ -70,7 +92,7 @@ beforeEach(() => {
 
 describe('한 달씩 엮여 있다', () => {
   it('최근 달이 먼저 오고 숫자가 함께 온다', () => {
-    render(<DiaryPage />);
+    renderDiary();
     const cards = screen.getAllByRole('button', { name: /지면 열기$/ });
     expect(cards.map((card) => card.getAttribute('aria-label')))
       .toEqual(['2026년 8월 지면 열기', '2026년 6월 지면 열기']);
@@ -84,7 +106,7 @@ describe('한 달씩 엮여 있다', () => {
       금지하는 것과 같은 이유로 남기지 않은 날이 결핍이 된다.
     */
     currentState = stateWith([]);
-    render(<DiaryPage />);
+    renderDiary();
     expect(screen.getByText('아직 엮을 것이 없어요.')).toBeInTheDocument();
     expect(screen.queryByText(/D-|남았/)).not.toBeInTheDocument();
   });
@@ -93,7 +115,7 @@ describe('한 달씩 엮여 있다', () => {
 describe('지면을 열면 그 달의 기록이 있다', () => {
   it('그 달만 온다', async () => {
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
 
     expect(screen.getByText('8월 첫 기록')).toBeInTheDocument();
@@ -111,7 +133,7 @@ describe('지면을 열면 그 달의 기록이 있다', () => {
       record({ date: '2026-08-02', log: '', contentUnavailable: 'key_unavailable' }),
     ]);
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
     expect(screen.getByText('이 기기에서 아직 열 수 없어요')).toBeInTheDocument();
   });
@@ -119,7 +141,7 @@ describe('지면을 열면 그 달의 기록이 있다', () => {
   it('이 기기에만 남는다는 사실을 화면이 직접 말한다', async () => {
     // 상대에게도 보이는 줄 알고 꾸몄는데 안 보이는 것은 이 제품이 만들면 안 되는 놀람이다.
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
     expect(screen.getByText(/이 기기에만 남아요/)).toBeInTheDocument();
   });
@@ -130,7 +152,7 @@ describe('지면을 열면 그 달의 기록이 있다', () => {
       두면 이 화면은 아직 존재하지 않는 것을 파는 화면이 된다.
     */
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
     expect(screen.getByText('한 권으로 만들기')).toBeInTheDocument();
     expect(screen.getByText(/아직 준비 중이에요/)).toBeInTheDocument();
@@ -142,7 +164,7 @@ describe('읽는 동안에는 붙지 않는다', () => {
   it('꾸미기를 켜기 전에는 스티커 고르는 줄이 없다', async () => {
     // 읽으려고 열었는데 스크롤하다 스티커가 붙으면 그건 사고다.
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
     expect(screen.queryByRole('radiogroup', { name: '붙일 스티커' })).not.toBeInTheDocument();
   });
@@ -153,7 +175,7 @@ describe('읽는 동안에는 붙지 않는다', () => {
       매번 그것을 지나쳐야 한다.
     */
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
     await user.click(screen.getByRole('button', { name: '꾸미기' }));
     expect(screen.queryByRole('button', { name: /지면 · 누르면/ })).not.toBeInTheDocument();
@@ -163,7 +185,7 @@ describe('읽는 동안에는 붙지 않는다', () => {
 describe('포인터 없이도 꾸며진다', () => {
   async function openAndPick() {
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
     await user.click(screen.getByRole('button', { name: '꾸미기' }));
     await user.click(screen.getByRole('radio', { name: '하트' }));
@@ -231,11 +253,29 @@ describe('유료 표시가 화면에 없다', () => {
       두면 무료로 꾸미는 루프가 돌기 전에 결제가 먼저 보인다.
     */
     const user = userEvent.setup();
-    render(<DiaryPage />);
+    renderDiary();
     await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
     await user.click(screen.getByRole('button', { name: '꾸미기' }));
     const row = screen.getByRole('radiogroup', { name: '붙일 스티커' });
     expect(within(row).getAllByRole('radio')).toHaveLength(12);
     expect(row.textContent).not.toMatch(/원|₩|잠금|구매|Plus/);
+  });
+});
+
+describe('상점 진입점 제공', () => {
+  it('헤더와 본문에 상점 버튼이 있고 /shop으로 이동한다', async () => {
+    const user = userEvent.setup();
+    renderDiary();
+
+    const headerShopBtn = screen.getByRole('button', { name: '상점' });
+    expect(headerShopBtn).toBeInTheDocument();
+    await user.click(headerShopBtn);
+    expect(navigate).toHaveBeenCalledWith('/shop');
+
+    navigate.mockClear();
+    const bannerShopBtn = screen.getByRole('button', { name: '상점 둘러보기' });
+    expect(bannerShopBtn).toBeInTheDocument();
+    await user.click(bannerShopBtn);
+    expect(navigate).toHaveBeenCalledWith('/shop');
   });
 });

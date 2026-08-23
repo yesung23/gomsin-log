@@ -222,7 +222,7 @@ describe('H-4: the entry point survives the conditions that caused the stranding
       'utf8',
     );
     const tabs = [...shell.matchAll(/to: '(\/[a-z]+)'/g)].map((match) => match[1]);
-    expect(tabs).toEqual(['/home', '/search', '/compose', '/schedule', '/us']);
+    expect(tabs).toEqual(['/home', '/search', '/diary', '/schedule', '/us']);
     // 그리드가 실제로 그리는 칸 수와 맞아야 한다. 어긋나면 칸 하나가 잘리거나 빈다.
     expect(shell).toContain(`grid-cols-${tabs.length}`);
   });
@@ -284,7 +284,8 @@ describe('H-4: the entry point survives the conditions that caused the stranding
     // `/trips/:id` 는 일정을, `/settings` 는 우리를 켠다. 위의 덮임 검사는 "어딘가에
     // 걸린다"만 보므로, 어느 탭이 맞는지는 여기서 못 박는다.
     expect(shell).toContain("matchPrefixes: ['/schedule', '/trips']");
-    expect(shell).toContain("matchPrefixes: ['/us', '/me', '/service', '/diary', '/my', '/settings']");
+    expect(shell).toContain("matchPrefixes: ['/us', '/me', '/service', '/my', '/settings']");
+    expect(shell).toContain("matchPrefixes: ['/diary', '/shop']");
     // 검색 결과가 데려가는 곳이 원본이므로, 원본을 보는 동안 켜지는 것은 그리로 온 문이다.
     expect(shell).toContain("matchPrefixes: ['/search', '/record']");
   });

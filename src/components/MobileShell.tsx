@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Search, PlusSquare, CalendarDays } from 'lucide-react';
+import { Home, Search, BookHeart, CalendarDays } from 'lucide-react';
 import { InkCircle, PenFace } from '@/components/paper';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
@@ -58,16 +58,13 @@ const TABS = [
   },
   {
     /*
-      가운데는 장소가 아니라 **동작**이다. 어떤 경로에서도 선택되지 않는다 -- 인스타의
-      만들기 탭도 같다. 눌리면 컴포저가 열리고 탭바는 원래 있던 곳을 계속 가리킨다.
-
-      이름이 `남기기` 가 아니라 `기록 남기기` 인 것은 같은 동작에 두 이름을 두지 않기
-      위해서다. 홈 레일의 `+`, `우리` 의 펜, `찾기` 의 펜이 모두 이 이름을 쓴다.
+      가운데는 여태 남긴 기록들을 월별로 모아 읽고 꾸미는 일기장이다.
+      상점(/shop)도 일기장에서 진입하므로 같은 탭에 걸린다.
     */
-    to: '/compose',
-    label: '기록 남기기',
-    icon: PlusSquare,
-    matchPrefixes: [] as string[],
+    to: '/diary',
+    label: '일기장',
+    icon: BookHeart,
+    matchPrefixes: ['/diary', '/shop'],
   },
   {
     to: '/schedule',
@@ -83,7 +80,7 @@ const TABS = [
     to: '/us',
     label: '우리',
     icon: null,
-    matchPrefixes: ['/us', '/me', '/service', '/diary', '/my', '/settings'],
+    matchPrefixes: ['/us', '/me', '/service', '/my', '/settings'],
   },
 ] as const;
 
@@ -280,7 +277,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
                   >
                     {Icon ? (
                       <Icon
-                        size={t.label === '기록 남기기' ? 24 : 23}
+                        size={23}
                         className="pen-icon"
                         color={active ? 'var(--ink)' : 'var(--ink-soft)'}
                         /*

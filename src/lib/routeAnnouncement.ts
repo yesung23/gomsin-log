@@ -23,6 +23,7 @@ const ROUTES: { prefix: string; name: string; exact?: boolean }[] = [
   { prefix: '/search', name: '찾기' },
   { prefix: '/me', name: '나' },
   { prefix: '/diary', name: '일기장' },
+  { prefix: '/shop', name: '상점' },
   { prefix: '/saved', name: '이야기할 것' },
   { prefix: '/schedule', name: '일정' },
   { prefix: '/trips', name: '일정' },

@@ -79,19 +79,16 @@ describe('기록을 시작하는 길은 조건 없이 열려 있다', () => {
     expect(read('src/components/MobileShell.tsx')).not.toContain('ownsPrimaryAction');
   });
 
-  it('탭바 가운데가 기록 작성이고, 그 칸은 어디서도 선택되지 않는다', () => {
+  it('하단 탭바 다섯 칸이 유지되고 가운데는 일기장으로 연결된다', () => {
     /*
-      인스타의 다섯 자리로 돌아왔다 -- 홈 · 검색 · 만들기 · 릴스 · 프로필. 가운데를 다른
-      것에 준 적이 있고 되돌렸다: 인스타를 쓰는 사람이 손으로 아는 자리를 바꾸면 문법을
-      빌려온 이유 자체가 사라진다.
-
-      가운데는 **장소가 아니라 동작**이므로 어떤 경로에서도 선택되지 않는다. 눌리면
-      컴포저가 열리고 탭바는 원래 있던 곳을 계속 가리킨다.
+      하단 탭바 다섯 칸 — 홈 · 찾기 · 일기장 · 일정 · 우리.
+      가운데는 일기장(/diary)이며, 작성 진입점은 홈 레일 +, 우리 헤더 펜, 찾기 헤더 펜과
+      기록 화면이 항상 보장한다(§7.1).
     */
     const shell = read('src/components/MobileShell.tsx');
     const tabs = [...shell.matchAll(/to: '(\/[a-z]+)'/g)].map((match) => match[1]);
-    expect(tabs).toEqual(['/home', '/search', '/compose', '/schedule', '/us']);
-    expect(shell).toContain("matchPrefixes: [] as string[]");
+    expect(tabs).toEqual(['/home', '/search', '/diary', '/schedule', '/us']);
+    expect(shell).toContain("matchPrefixes: ['/diary', '/shop']");
   });
 });
 

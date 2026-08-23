@@ -42,6 +42,8 @@ describe('a route change is announced and moves focus', () => {
     expect(routeScreenName('/home')).toBe('홈');
     expect(routeScreenName('/record')).toBe('기록');
     expect(routeScreenName('/search')).toBe('찾기');
+    expect(routeScreenName('/diary')).toBe('일기장');
+    expect(routeScreenName('/shop')).toBe('상점');
     expect(routeScreenName('/schedule')).toBe('일정');
     // Prefix-matched for the same reason the tab highlight is.
     expect(routeScreenName('/trips')).toBe('일정');

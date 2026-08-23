@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { BookHeart, Images, NotebookPen, CalendarDays } from 'lucide-react';
-import { AppBar } from '@/components/ui/AppBar';
+import { useNavigate } from 'react-router-dom';
+import { BookHeart, Images, NotebookPen, CalendarDays, ShoppingBag } from 'lucide-react';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { useStore } from '@/lib/useStore';
 import { buildDiaryMonths, type DiaryMonth } from './diaryMonths';
@@ -34,6 +35,7 @@ import { MobileShell } from '@/components/MobileShell';
  */
 
 function DiaryPageBody() {
+  const navigate = useNavigate();
   const { state } = useStore();
   const { profile } = state;
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -64,9 +66,40 @@ function DiaryPageBody() {
 
   return (
     <div className="min-h-full pb-24">
-      <AppBar title="일기장" />
+      <AppBar
+        title="일기장"
+        actions={(
+          <AppBarAction
+            aria-label="상점"
+            onClick={() => navigate('/shop')}
+          >
+            <ShoppingBag size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+          </AppBarAction>
+        )}
+      />
 
       <div className="px-4 py-4 space-y-4">
+        {/* 상점 바로가기 배너 */}
+        <div className="rounded-surface border border-border bg-card p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingBag size={18} className="pen-icon text-coral" aria-hidden="true" />
+              <h2 className="text-label font-bold text-card-foreground">다꾸 & 기억 상점</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/shop')}
+              aria-label="상점 둘러보기"
+              className="press-response px-3 py-1.5 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
+            >
+              상점 둘러보기
+            </button>
+          </div>
+          <p className="text-caption text-muted-foreground leading-relaxed">
+            스티커 팩, 다꾸 테마, 한 권으로 만드는 기억책 상품을 미리 둘러보세요.
+          </p>
+        </div>
+
         <p className="text-body text-muted-foreground">
           한 달씩 엮어 뒀어요. 꾸미고 싶으면 꾸미고, 그대로 둬도 괜찮아요.
         </p>

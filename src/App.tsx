@@ -60,6 +60,9 @@ const MePage = lazy(() =>
 const DiaryPage = lazy(() =>
   import('@/features/diary/DiaryPage').then((m) => ({ default: m.DiaryPage })),
 );
+const ShopPage = lazy(() =>
+  import('@/features/shop/ShopPage').then((m) => ({ default: m.ShopPage })),
+);
 const SearchPage = lazy(() =>
   import('@/features/search/SearchPage').then((m) => ({ default: m.SearchPage })),
 );
@@ -384,6 +387,7 @@ export function App() {
               <Route path="/search" element={<SearchPage />} />
               <Route path="/me" element={<MePage />} />
               <Route path="/diary" element={<DiaryPage />} />
+              <Route path="/shop" element={<ShopPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/service" element={<ServicePage />} />
               <Route path="/us" element={<UsPage />} />

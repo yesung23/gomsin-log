@@ -23,6 +23,8 @@ import { daysBetweenLocal, parseLocalDate, toLocalDateString } from '@/lib/utils
  * 지운 것과 같은 규칙이고, 여기서는 빈 목록이 정답이다.
  */
 
+export type HighlightSourceKind = 'anniversary' | 'event' | 'discharge';
+
 export interface Highlight {
   /** `100일` `1주년` `첫 면회` `전역`. 앱이 만드는 라벨이며 사용자 콘텐츠가 아니다. */
   label: string;
@@ -32,6 +34,10 @@ export interface Highlight {
   reached: boolean;
   /** 아직 오지 않은 것에만. `D-302`. */
   countdown?: string;
+  /** 이 하이라이트가 파생된 기존 원본의 종류. */
+  sourceKind: HighlightSourceKind;
+  /** 일정에서 파생된 경우에만. 원본 일정의 정확한 id. */
+  sourceEventId?: string;
 }
 
 const DAY_MILESTONES = [100, 200, 300, 500, 1000, 2000, 3000];
@@ -82,11 +88,15 @@ export function buildHighlights({
     for (const days of DAY_MILESTONES) {
       // 사귄 날이 1일이므로 100일은 99일 뒤다.
       const date = addDays(anniversaryDate, days - 1);
-      if (date <= todayStr) reached.push({ label: `${days}일`, date, reached: true });
+      if (date <= todayStr) {
+        reached.push({ label: `${days}일`, date, reached: true, sourceKind: 'anniversary' });
+      }
     }
     for (let year = 1; year <= 30; year += 1) {
       const date = addYears(anniversaryDate, year);
-      if (date <= todayStr) reached.push({ label: `${year}주년`, date, reached: true });
+      if (date <= todayStr) {
+        reached.push({ label: `${year}주년`, date, reached: true, sourceKind: 'anniversary' });
+      }
     }
   }
 
@@ -104,7 +114,13 @@ export function buildHighlights({
     if (!current || event.startDate < current.startDate) byType.set(event.eventType, event);
   }
   for (const [type, event] of byType) {
-    reached.push({ label: FIRST_LABEL[type] ?? '처음', date: event.startDate, reached: true });
+    reached.push({
+      label: FIRST_LABEL[type] ?? '처음',
+      date: event.startDate,
+      reached: true,
+      sourceKind: 'event',
+      sourceEventId: event.id,
+    });
   }
 
   reached.sort((a, b) => a.date.localeCompare(b.date));
@@ -121,17 +137,22 @@ export function buildHighlights({
       return {
         label: '전역', date: discharge, reached: false,
         countdown: `D-${daysBetweenLocal(todayStr, discharge)}`,
+        sourceKind: 'discharge',
       };
     }
     if (!anniversaryDate) return null;
     const candidates: Highlight[] = [];
     for (const days of DAY_MILESTONES) {
       const date = addDays(anniversaryDate, days - 1);
-      if (date > todayStr) candidates.push({ label: `${days}일`, date, reached: false });
+      if (date > todayStr) {
+        candidates.push({ label: `${days}일`, date, reached: false, sourceKind: 'anniversary' });
+      }
     }
     for (let year = 1; year <= 30; year += 1) {
       const date = addYears(anniversaryDate, year);
-      if (date > todayStr) candidates.push({ label: `${year}주년`, date, reached: false });
+      if (date > todayStr) {
+        candidates.push({ label: `${year}주년`, date, reached: false, sourceKind: 'anniversary' });
+      }
     }
     candidates.sort((a, b) => a.date.localeCompare(b.date));
     const next = candidates[0];

@@ -67,6 +67,9 @@ const profileRow = {
     expectedDischargeDate: '2026-09-09',
     dischargeDateSource: 'calculated',
   },
+  username: 'test_user',
+  profile_caption: '테스트 소개',
+  profile_date_type: 'together',
 };
 
 function setupProfileMock(data: unknown, error: unknown = null) {
@@ -268,6 +271,51 @@ describe('fetchFullStateFromDB', () => {
 
     expect(result.profile!.couple.connected).toBe(false);
     expect(result.profile!.couple.status).toBe('pending');
+  });
+
+  it('maps profile identity fields when the new schema is available', async () => {
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock(null);
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile).toMatchObject({
+      username: 'test_user',
+      profileCaption: '테스트 소개',
+      profileDateType: 'together',
+    });
+  });
+
+  it('retries the old profile columns when migration 057 is not applied', async () => {
+    const maybeSingle = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: { code: '42703', message: 'missing column' } })
+      .mockResolvedValueOnce({ data: { ...profileRow, username: undefined, profile_caption: undefined, profile_date_type: undefined }, error: null });
+    const eq = vi.fn().mockReturnValue({ maybeSingle });
+    const select = vi.fn().mockReturnValue({ eq });
+    const profileChain = { select, eq, maybeSingle };
+    const memberChain = setupMemberMock(null);
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(profileChain.select).toHaveBeenNthCalledWith(1, expect.stringContaining('username'));
+    expect(profileChain.select).toHaveBeenNthCalledWith(2, 'id, display_name, role, avatar_path, military_info, onboarding_completed_at');
+    expect(result.profile?.username).toBeUndefined();
+    expect(result.profile?.profileCaption).toBeUndefined();
+    expect(result.profile?.profileDateType).toBeUndefined();
   });
 
   it('returns an active couple when a partner exists', async () => {

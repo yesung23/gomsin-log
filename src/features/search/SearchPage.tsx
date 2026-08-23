@@ -1,16 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, CalendarDays, SquarePen, Shield, Calendar, ChevronRight } from 'lucide-react';
+import { Search, X, CalendarDays, SquarePen, Shield, Calendar, Clock, ChevronRight } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { searchRecords, excerptAround, type SearchResult } from '@/lib/recordSearch';
 import { localToday } from '@/lib/cycle';
 import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
+import { computeServiceLevel } from '@/lib/serviceLevel';
 import { daysBetweenLocal, formatLocalDate } from '@/lib/utils';
-import { ServiceCard } from '@/features/me/MePage';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
-import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent } from '@/types';
+import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent, Branch, MilitaryStatus } from '@/types';
 import { MobileShell } from '@/components/MobileShell';
 
 /**
@@ -47,37 +47,147 @@ import { MobileShell } from '@/components/MobileShell';
 interface SoldierSearchSurfaceProps {
   military: MilitaryInfo;
   contact: ContactPreferences;
-  partnerName: string;
   events: CoupleEvent[];
   today: string;
   onOpenService: () => void;
 }
 
+const BRANCH_LABELS: Record<Branch, string> = {
+  army: '육군',
+  marine: '해병대',
+  reserve: '상근예비역',
+  navy: '해군',
+  airforce: '공군',
+  social_service: '사회복무요원',
+  other: '기타',
+};
+
+const STATUS_LABELS: Record<MilitaryStatus, string> = {
+  planned: '입대 예정',
+  serving: '복무 중',
+  discharge_soon: '전역 예정',
+  discharged: '전역',
+  unknown: '미입력',
+};
+
+function formatPercent(value: number): string {
+  return Number(value.toFixed(1)).toString();
+}
+
+function InlineServiceInfo({
+  military,
+  contact,
+  progress,
+  onOpenService,
+}: {
+  military: MilitaryInfo;
+  contact: ContactPreferences;
+  progress: NonNullable<ReturnType<typeof computeServiceProgress>>;
+  onOpenService: () => void;
+}) {
+  const level = computeServiceLevel(progress);
+  if (!level) return null;
+
+  const nextGuide = level.nextPercent === null
+    ? '복무를 마쳤어요.'
+    : `다음 레벨 ${level.nextLevel} · ${level.nextLabel}까지 ${formatPercent(Math.max(level.nextPercent - progress.percent, 0))}%`;
+
+  return (
+    <section className="rounded-control border border-border bg-card p-4" data-testid="soldier-service-info">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <Shield size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <div className="min-w-0">
+            <div className="text-label font-bold text-card-foreground">내 복무</div>
+            <div className="text-caption text-muted-foreground">
+              {BRANCH_LABELS[military.branch]} ·{' '}
+              <span data-testid="service-status">
+                {military.militaryStatus === 'discharged' ? '전역했어요' : STATUS_LABELS[military.militaryStatus]}
+              </span>
+            </div>
+          </div>
+        </div>
+        <span className="shrink-0 text-heading font-bold text-card-foreground tabular-nums">
+          {progress.isDischarged ? '전역' : `D-${progress.remainingDays}`}
+        </span>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <div
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-label font-semibold text-card-foreground"
+          data-testid="service-progress-summary"
+        >
+          <span>복무율 {formatPercent(progress.percent)}%</span>
+          <span className="text-muted-foreground">
+            {progress.elapsedDays}일 경과 · {progress.remainingDays}일 남음
+          </span>
+        </div>
+        <div
+          role="progressbar"
+          aria-label="개인 복무 진행률"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress.percent}
+          className="h-1.5 overflow-hidden rounded-full bg-muted"
+        >
+          <div className="h-full rounded-full bg-coral-strong" style={{ width: `${progress.percent}%` }} />
+        </div>
+        <div className="flex justify-between gap-3 text-caption text-muted-foreground">
+          <span>입대 {formatLocalDate(military.enlistmentDate!)}</span>
+          <span>전역 {formatLocalDate(military.expectedDischargeDate!)}</span>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-border/60 pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-label font-bold text-card-foreground" data-testid="service-level">
+            복무 레벨 {level.level} · {level.label}
+          </span>
+          <span className="text-caption text-muted-foreground" data-testid="service-level-guide">
+            {nextGuide}
+          </span>
+        </div>
+      </div>
+
+      {contact.enabled ? (
+        <p className="mt-3 flex items-center gap-1.5 text-caption text-muted-foreground">
+          <Clock size={13} aria-hidden="true" />
+          평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={onOpenService}
+        className="mt-3 text-caption font-semibold text-coral-strong"
+      >
+        복무 정보 수정
+      </button>
+    </section>
+  );
+}
+
 function SoldierSearchSurface({
   military,
   contact,
-  partnerName,
   events,
   today,
   onOpenService,
 }: SoldierSearchSurfaceProps) {
   const progress = computeServiceProgress(military, today);
   const discharged = progress?.isDischarged === true || military?.militaryStatus === 'discharged';
-  const serving = progress !== null && !discharged;
+  const hasRealProgress = progress !== null;
 
   const nextLeave = nextUpcomingEvent(events, today, ['vacation', 'visit']);
 
   return (
     <div className="space-y-4" data-testid="soldier-search-surface">
-      {serving ? (
-        <ServiceCard
+      {hasRealProgress ? (
+        <InlineServiceInfo
           military={military}
           contact={contact}
-          mine={true}
-          partnerName={partnerName}
-          remainingDays={progress.remainingDays}
-          percent={progress.percent}
-          onOpen={onOpenService}
+          progress={progress}
+          onOpenService={onOpenService}
         />
       ) : discharged ? (
         <button
@@ -259,7 +369,6 @@ function SearchPageBody() {
             <SoldierSearchSurface
               military={state.profile.military}
               contact={state.profile.contact}
-              partnerName={state.profile.couple?.partnerName || '곰신'}
               events={state.events}
               today={today}
               onOpenService={() => navigate('/service')}

@@ -53,6 +53,8 @@ function baseState(): AppState {
     profile: {
       id: 'user-me',
       myName: '춘향',
+      username: 'chunhyang',
+      profileCaption: '오늘도 우리답게',
       role: 'gomsin',
       couple: {
         coupleId: 'couple-1',
@@ -91,9 +93,79 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('춘향 ♥ 몽룡')).toBeInTheDocument();
+    expect(screen.getAllByText('춘향')).toHaveLength(2);
+    expect(screen.getByText('@chunhyang')).toBeInTheDocument();
+    expect(screen.getByText('오늘도 우리답게')).toBeInTheDocument();
+    expect(screen.queryByText('춘향 ♥ 몽룡')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '내 프로필 사진 고르기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '기록 남기기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '기록 찾기' })).toBeInTheDocument();
+  });
+
+  it('기념일이 있으면 profileCaption이 없어도 기본 문구를 유지한다', () => {
+    storeState = {
+      ...baseState(),
+      profile: { ...baseState().profile, profileCaption: undefined },
+    };
+
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/일째 같은 하늘 아래/)).toBeInTheDocument();
+  });
+
+  it('기념일이 없으면 기본 문구 대신 설정 상태를 정직하게 보여준다', () => {
+    storeState = {
+      ...baseState(),
+      profile: {
+        ...baseState().profile,
+        username: undefined,
+        profileCaption: undefined,
+        couple: { ...baseState().profile.couple, anniversaryDate: undefined },
+      },
+    };
+
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('아이디 설정하기')).toBeInTheDocument();
+    expect(screen.getByText('기념일 미설정')).toBeInTheDocument();
+  });
+
+  it('하이라이트 원본 열기와 별도 편집 버튼을 연결하고 버튼을 중첩하지 않는다', () => {
+    const event: CoupleEvent = {
+      id: 'visit-first',
+      coupleId: 'couple-1',
+      createdBy: 'user-me',
+      title: '첫 면회',
+      eventType: 'visit',
+      startDate: '2026-02-01',
+      isPrivate: false,
+      createdAt: '2026-02-01T00:00:00Z',
+    };
+    storeState = { ...baseState(), events: [event] };
+
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    const editButton = screen.getByRole('button', { name: '첫 면회 일정 원본 편집' });
+    fireEvent.click(editButton);
+    expect(mockNavigate).toHaveBeenCalledWith('/schedule');
+
+    fireEvent.click(screen.getByRole('button', { name: '첫 면회 2026-02-01' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/story/day/2026-02-01');
+    for (const button of screen.getAllByRole('button')) {
+      expect(button.querySelector('button')).toBeNull();
+    }
   });
 
   it('게시물 격자 탭은 여행 중인 사진 게시물만 노출하고 누르면 사진 상세를 연다', () => {

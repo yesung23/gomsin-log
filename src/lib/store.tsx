@@ -93,6 +93,7 @@ import {
   isCanonicalRecordMediaPath,
 } from '@/lib/records';
 import { StoreContext } from '@/lib/storeContext';
+import { isValidUsername, normalizeUsername, PROFILE_CAPTION_MAX_LENGTH } from '@/lib/profileCaption';
 import type {
   RecordMutationReason,
   RecordMutationResult,
@@ -2091,6 +2092,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // request twice.
     const prev = stateRef.current;
     const newProfile: UserProfile = { ...prev.profile, ...profileUpdates };
+    const hasOwn = (key: keyof UserProfile) => Object.prototype.hasOwnProperty.call(profileUpdates, key);
+    const normalizedUsername = hasOwn('username') && profileUpdates.username !== undefined
+      ? normalizeUsername(profileUpdates.username)
+      : undefined;
+    if (normalizedUsername && !isValidUsername(normalizedUsername)) return false;
+    if (hasOwn('profileCaption') && profileUpdates.profileCaption
+      && profileUpdates.profileCaption.trim().length > PROFILE_CAPTION_MAX_LENGTH) return false;
+    if (hasOwn('profileDateType') && profileUpdates.profileDateType
+      && !['together', 'meeting', 'discharge'].includes(profileUpdates.profileDateType)) return false;
     const commitLocally = () => updateStateImmediately((current) => ({
       ...current,
       profile: { ...current.profile, ...profileUpdates },
@@ -2112,13 +2122,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         profileUpdates.myName !== undefined
         || profileUpdates.military !== undefined
         || profileUpdates.role !== undefined
+        || hasOwn('username')
+        || hasOwn('profileCaption')
+        || hasOwn('profileDateType')
       ) {
         const { data, error } = await supabase
-        .from('profiles')
+          .from('profiles')
         .update({
           display_name: newProfile.myName,
           role: newProfile.role,
           military_info: newProfile.military,
+          ...(hasOwn('username') ? { username: normalizedUsername || null } : {}),
+          ...(hasOwn('profileCaption') ? { profile_caption: newProfile.profileCaption?.trim() || null } : {}),
+          ...(hasOwn('profileDateType') ? { profile_date_type: newProfile.profileDateType || null } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId)

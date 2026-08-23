@@ -427,6 +427,9 @@ export interface MilitaryInfo {
   memo?: string;
 }
 
+export const PROFILE_DATE_TYPES = ['together', 'meeting', 'discharge'] as const;
+export type ProfileDateType = (typeof PROFILE_DATE_TYPES)[number];
+
 export interface CoupleInfo {
   coupleId?: string;
   partnerName: string;
@@ -453,6 +456,9 @@ export interface UserProfile {
   myName: string;
   role: Role;
   avatarPath?: string;
+  username?: string;
+  profileCaption?: string;
+  profileDateType?: ProfileDateType;
   onboardingCompletedAt?: string;
   couple: CoupleInfo;
   military: MilitaryInfo;

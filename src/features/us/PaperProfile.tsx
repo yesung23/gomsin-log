@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { CalendarDays, ChevronRight, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Search, SquarePen, X } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
-import { buildCoupleStats, togetherDays } from '@/lib/coupleStats';
-import { buildHighlights } from '@/lib/coupleHighlights';
+import { buildCoupleStats } from '@/lib/coupleStats';
+import { buildHighlights, type Highlight } from '@/lib/coupleHighlights';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { PostGrid } from '@/features/us/PostGrid';
 import { getPhotoAttachments, isTravelRecord } from '@/features/us/postTiles';
@@ -13,8 +13,11 @@ import { formatLocalDate } from '@/lib/utils';
 import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { cn } from '@/lib/utils';
-import { InkCircle, PenFace } from '@/components/paper';
+import { InkCircle } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
+import { HighlightEditActions } from '@/components/HighlightEditActions';
+import { ProfileIdentity } from '@/components/ProfileIdentity';
+import { renderProfileCaption } from '@/lib/profileCaption';
 import { localToday } from '@/lib/cycle';
 import type { DailyRecord, Role, Trip } from '@/types';
 
@@ -104,16 +107,30 @@ export function PaperProfile() {
     [profile.couple.anniversaryDate, profile.military, state.events, todayStr],
   );
 
-  /*
-    그려지는 달은 셋으로 시작한다.
+  const caption = useMemo(
+    () => renderProfileCaption({
+      template: profile.profileCaption,
+      anniversaryDate: profile.couple.anniversaryDate,
+      events: state.events,
+      military: profile.military,
+      todayStr,
+    }),
+    [profile.couple.anniversaryDate, profile.military, profile.profileCaption, state.events, todayStr],
+  );
 
-    폰이 접히는 선까지 보이는 양이 그 정도이고, 두 해 된 관계는 그렇지 않으면 스무 칸을
-    보려고 칠백 칸을 mount 한다. `UsPage` 가 같은 이유로 같은 수를 쓴다.
-  */
-  const together = togetherDays(profile.couple.anniversaryDate, todayStr);
-
-  const names = [profile.myName, profile.couple.partnerName].filter(Boolean);
-  const title = names.length === 2 ? `${names[0]} ♥ ${names[1]}` : names[0] || '우리';
+  const editHighlight = (highlight: Highlight) => {
+    if (highlight.sourceKind === 'anniversary') {
+      navigate('/settings');
+      return;
+    }
+    if (highlight.sourceKind === 'event') {
+      // SchedulePage has no query contract for opening a specific event editor yet.
+      // Keep the sourceEventId on the highlight, but fall back safely to the schedule.
+      navigate('/schedule');
+      return;
+    }
+    navigate('/service');
+  };
 
   return (
     <div className="min-h-full pb-8">
@@ -121,7 +138,7 @@ export function PaperProfile() {
         className="flex h-14 items-center gap-2 px-4"
         style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}
       >
-        <span className="truncate text-body font-semibold" style={{ color: 'var(--ink)' }}>{title}</span>
+        <span className="truncate text-body font-semibold" style={{ color: 'var(--ink)' }}>{profile.myName || '나'}</span>
         {/* 인스타의 비공개 계정 자물쇠 자리. 자랑이 아니라 고지다 -- 둘만 본다는 사실. */}
         <Lock size={13} className="pen-icon" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
         <span className="flex-1" />
@@ -167,55 +184,28 @@ export function PaperProfile() {
         <CoupleStatusBanner />
       </div>
 
-      <div className="flex items-center gap-6 px-4 pt-1">
-        <InkCircle size={82} ring="seen"><PenFace size={56} /></InkCircle>
-        <div className="flex flex-1 items-stretch">
-          {stats.map((stat) => (
-            <button
-              key={stat.label}
-              type="button"
-              disabled={!stat.href}
-              onClick={() => stat.href && navigate(stat.href)}
-              /*
-                두 줄짜리 통계라 자연 높이가 42px 로 떨어진다 -- 44 에서 2px 모자란다.
-                눌리는 칸이므로 `min-h-11` 로 바닥을 깐다(DESIGN_V2 §44px).
-              */
-              className="flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 disabled:cursor-default"
-            >
-              <span className="text-heading font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
-                {stat.value}
-              </span>
-              <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>{stat.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <ProfileIdentity
+        userId={state.authenticatedUser?.id || profile.id}
+        name={profile.myName}
+        username={profile.username}
+        caption={caption}
+      />
 
-      <div className="px-4 pt-3">
-        <p className="text-label font-semibold" style={{ color: 'var(--ink)' }}>
-          {names.join(' · ') || '우리'}
-        </p>
-        {/*
-          기념일이 없으면 **없다고 말한다.**
-
-          날짜를 지어내 세지 않는 것은 당연하고(M-1), 아무 말도 안 하는 것 역시 답이
-          아니다 -- 통계 첫 칸이 `—` 인 이유를 사용자가 알 수 없다. 어디서 정하는지까지
-          말해야 그 칸이 채워질 수 있다.
-        */}
-        {together !== null ? (
-          <p className="hand-text text-body" style={{ color: 'var(--ink)' }}>
-            {together}일째 같은 하늘 아래
-          </p>
-        ) : (
+      <div className="flex items-stretch px-4 pt-3">
+        {stats.map((stat) => (
           <button
+            key={stat.label}
             type="button"
-            onClick={() => navigate('/settings')}
-            className="text-label"
-            style={{ color: 'var(--ink-soft)' }}
+            disabled={!stat.href}
+            onClick={() => stat.href && navigate(stat.href)}
+            className="flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 disabled:cursor-default"
           >
-            기념일 미설정 · 정하러 가기
+            <span className="text-heading font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
+              {stat.value}
+            </span>
+            <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>{stat.label}</span>
           </button>
-        )}
+        ))}
       </div>
 
       {/*
@@ -227,22 +217,28 @@ export function PaperProfile() {
       {highlights.length > 0 ? (
         <div className="flex gap-4 overflow-x-auto px-4 pb-1 pt-5">
           {highlights.map((item) => (
-            <button
+            <div
               key={`${item.label}:${item.date}`}
-              type="button"
-              disabled={!item.reached}
-              onClick={() => navigate(`/story/day/${item.date}`)}
               className="flex w-[66px] shrink-0 flex-col items-center gap-1.5 disabled:opacity-45"
             >
-              <InkCircle size={60} ring={item.reached ? 'seen' : 'none'}>
-                <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>
-                  {item.countdown ?? `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`}
+              <button
+                type="button"
+                disabled={!item.reached}
+                onClick={() => navigate(`/story/day/${item.date}`)}
+                className="flex w-full flex-col items-center gap-1.5 disabled:opacity-45"
+                aria-label={`${item.label} ${item.date}`}
+              >
+                <InkCircle size={60} ring={item.reached ? 'seen' : 'none'}>
+                  <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>
+                    {item.countdown ?? `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`}
+                  </span>
+                </InkCircle>
+                <span className="max-w-[66px] truncate text-caption" style={{ color: 'var(--ink)' }}>
+                  {item.label}
                 </span>
-              </InkCircle>
-              <span className="max-w-[66px] truncate text-caption" style={{ color: 'var(--ink)' }}>
-                {item.label}
-              </span>
-            </button>
+              </button>
+              <HighlightEditActions highlight={item} onEdit={editHighlight} />
+            </div>
           ))}
         </div>
       ) : null}

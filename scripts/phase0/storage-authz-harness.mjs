@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Executable proof for the real fresh active chain through migration 045.
+ * Executable proof for the real fresh active chain through the latest migration in ORDER.
  *
  * The string-level tests next to these migrations prove the SQL text says what
  * we think it says. They cannot prove the policies DENY anything, because a
@@ -113,6 +113,7 @@ const ORDER = [
   '054_shared_at_is_server_state.sql',
   '055_notified_through_is_the_send_decision.sql',
   '056_diary_pages.sql',
+  '057_profile_identity_and_caption.sql',
 ];
 
 /**
@@ -2992,6 +2993,108 @@ check(
 check(
   !psql(['-At', '-c', 'SET ROLE anon', '-c', 'SELECT count(*) FROM public.diary_pages']).ok,
   '056 anon 에게는 테이블 권한 자체가 없다',
+);
+
+// ---------------------------------------------------------------------------
+// 057 -- owner-only profile identity and caption.
+// ---------------------------------------------------------------------------
+// 057 adds columns and constraints only. The owner-only profiles policies from
+// 001 remain the authorization boundary; this block exercises that boundary
+// with the same A/B/C actors used by the rest of the fresh-chain fixture.
+// The format CHECK intentionally permits only lowercase usernames, so an
+// ordinary mixed-case INSERT would be rejected before it could exercise the
+// lower(username) index. Temporarily remove only that CHECK in this disposable
+// database, seed the uppercase side on B's separate row through real RLS, and
+// restore the CHECK before continuing with the remaining actor tests.
+mustSql(
+  'ALTER TABLE public.profiles DROP CONSTRAINT profiles_username_format_check',
+  '057 isolate case-insensitive unique index',
+);
+const uppercaseSeed = asUser(B, `
+  UPDATE public.profiles SET username = 'Alpha_User' WHERE id = '${B}'`);
+check(uppercaseSeed.ok, '057 case-insensitive uniqueness fixture uses a separate owner row');
+const caseInsensitiveDuplicate = asUser(A, `
+  UPDATE public.profiles SET username = 'alpha_user' WHERE id = '${A}'`);
+check(
+  !caseInsensitiveDuplicate.ok,
+  '057 username uniqueness ignores case across separate profile rows',
+);
+mustSql(
+  `UPDATE public.profiles SET username = 'beta_user' WHERE id = '${B}'`,
+  '057 restore username uniqueness fixture',
+);
+mustSql(`
+  ALTER TABLE public.profiles
+    ADD CONSTRAINT profiles_username_format_check
+    CHECK (username IS NULL OR username ~ '^[a-z][a-z0-9_]{2,19}$')`,
+  '057 restore username format check',
+);
+
+const profileOwnerUpdate = asUser(A, `
+  UPDATE public.profiles
+     SET username = 'alpha_user', profile_caption = 'A caption', profile_date_type = 'together'
+   WHERE id = '${A}'`);
+check(profileOwnerUpdate.ok, '057 owner can update their own username, caption, and date type');
+check(
+  mustSql(`SELECT username || '|' || profile_caption || '|' || profile_date_type
+             FROM public.profiles WHERE id = '${A}'`, '057 owner profile')
+    === 'alpha_user|A caption|together',
+  '057 owner update persists all three profile fields',
+);
+
+const partnerProfileRead = asUser(B,
+  `SELECT count(*) FROM public.profiles WHERE id = '${A}'`);
+check(
+  partnerProfileRead.ok && partnerProfileRead.stdout.trim() === '0',
+  '057 partner cannot read the owner-only profile row',
+);
+const thirdPartyProfileRead = asUser(C,
+  `SELECT count(*) FROM public.profiles WHERE id = '${A}'`);
+check(
+  thirdPartyProfileRead.ok && thirdPartyProfileRead.stdout.trim() === '0',
+  '057 unrelated third party cannot read the owner-only profile row',
+);
+
+const partnerProfileUpdate = asUser(B, `
+  UPDATE public.profiles SET profile_caption = 'partner overwrite' WHERE id = '${A}'`);
+check(
+  partnerProfileUpdate.ok
+    && mustSql(`SELECT profile_caption FROM public.profiles WHERE id = '${A}'`, '057 partner recount')
+      === 'A caption',
+  '057 partner update is filtered to zero rows and cannot change the owner profile',
+);
+const thirdPartyProfileUpdate = asUser(C, `
+  UPDATE public.profiles SET profile_caption = 'third-party overwrite' WHERE id = '${A}'`);
+check(
+  thirdPartyProfileUpdate.ok
+    && mustSql(`SELECT profile_caption FROM public.profiles WHERE id = '${A}'`, '057 third-party recount')
+      === 'A caption',
+  '057 unrelated third-party update is filtered to zero rows and cannot change the owner profile',
+);
+
+const invalidUsername = asUser(B, `
+  UPDATE public.profiles SET username = '1bad' WHERE id = '${B}'`);
+check(!invalidUsername.ok, '057 database CHECK rejects an invalid username');
+const excessiveCaption = asUser(C, `
+  UPDATE public.profiles SET profile_caption = repeat('x', 81) WHERE id = '${C}'`);
+check(!excessiveCaption.ok, '057 database CHECK rejects a caption longer than 80 characters');
+const invalidDateType = asUser(C, `
+  UPDATE public.profiles SET profile_date_type = 'unknown' WHERE id = '${C}'`);
+check(!invalidDateType.ok, '057 database CHECK rejects an invalid profile date type');
+
+const anonProfileRead = asAnon(
+  `SELECT count(*) FROM public.profiles WHERE id = '${A}'`);
+check(
+  !anonProfileRead.ok || Number(anonProfileRead.stdout.trim()) === 0,
+  '057 anon cannot access profiles',
+);
+const anonProfileUpdate = asAnon(`
+  UPDATE public.profiles SET profile_caption = 'anon overwrite' WHERE id = '${A}'`);
+check(
+  !anonProfileUpdate.ok
+    || mustSql(`SELECT profile_caption FROM public.profiles WHERE id = '${A}'`, '057 anon recount')
+      === 'A caption',
+  '057 anon cannot change profiles',
 );
 
 // ---------------------------------------------------------------------------

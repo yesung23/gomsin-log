@@ -39,6 +39,9 @@ import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { formatRecoveryKitArtifact, parseRecoveryKitArtifact } from '@/app/e2ee/recoveryKitArtifact';
 import type { BootstrapResult } from '@/app/e2ee/useCases';
 import { NotificationPreferencesSection } from '@/components/NotificationPreferencesSection';
+import { ProfileCaptionEditor } from '@/components/ProfileCaptionEditor';
+import { isValidUsername, normalizeUsername } from '@/lib/profileCaption';
+import type { ProfileDateType } from '@/types';
 
 function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
   const platform = Capacitor.getPlatform();
@@ -266,6 +269,9 @@ export function SettingsPage() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editName, setEditName] = useState(profile.myName);
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
+  const [editUsername, setEditUsername] = useState(profile.username || '');
+  const [editProfileCaption, setEditProfileCaption] = useState(profile.profileCaption || '');
+  const [editProfileDateType, setEditProfileDateType] = useState<ProfileDateType | ''>(profile.profileDateType || '');
 
   useEscapeKey(() => {
     if (showDeleteAccountModal) {
@@ -334,12 +340,20 @@ export function SettingsPage() {
       toast.error('닉네임은 2~12자로 입력해 주세요.');
       return;
     }
+    const nextUsername = normalizeUsername(editUsername);
+    if (nextUsername && !isValidUsername(nextUsername)) {
+      toast.error('아이디는 소문자 영문으로 시작하는 3~20자여야 해요.');
+      return;
+    }
     const identity = captureIdentity();
     setIsSavingProfile(true);
     try {
       const saved = await updateProfile({
         myName: nextName,
         couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
+        username: nextUsername || undefined,
+        profileCaption: editProfileCaption.trim() || undefined,
+        profileDateType: editProfileDateType || undefined,
       });
       if (!isCurrentIdentity(identity)) return;
       if (!saved) {
@@ -678,6 +692,9 @@ export function SettingsPage() {
               onClick={() => {
                 setEditName(profile.myName);
                 setEditAnniversary(profile.couple.anniversaryDate || '');
+                setEditUsername(profile.username || '');
+                setEditProfileCaption(profile.profileCaption || '');
+                setEditProfileDateType(profile.profileDateType || '');
                 setShowProfileModal(true);
               }}
               leading={<User size={18} className="text-coral" />}
@@ -854,6 +871,30 @@ export function SettingsPage() {
                   className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
                 />
               </div>
+
+              <div className="space-y-2">
+                <label htmlFor="edit-username" className="text-label font-semibold text-muted-foreground">
+                  영어 아이디 (3~20자)
+                </label>
+                <input
+                  id="edit-username"
+                  value={editUsername}
+                  onChange={(event) => setEditUsername(event.target.value.toLowerCase().slice(0, 20))}
+                  maxLength={20}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  placeholder="예: gomsin_log"
+                  className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                />
+                <p className="text-caption text-muted-foreground">소문자 영문으로 시작하고 영문·숫자·밑줄만 사용할 수 있어요.</p>
+              </div>
+
+              <ProfileCaptionEditor
+                caption={editProfileCaption}
+                dateType={editProfileDateType}
+                onCaptionChange={setEditProfileCaption}
+                onDateTypeChange={setEditProfileDateType}
+              />
 
               <div className="space-y-2">
                 <label htmlFor="edit-anniversary" className="text-label font-semibold text-muted-foreground">

@@ -22,11 +22,17 @@ describe('도착한 마일스톤', () => {
     const hundred = list.find((h) => h.label === '100일');
     expect(hundred?.date).toBe('2025-04-10');
     expect(hundred?.reached).toBe(true);
+    expect(hundred?.sourceKind).toBe('anniversary');
   });
 
   it('아직 오지 않은 것은 도착으로 세지 않는다', () => {
     const list = buildHighlights({ anniversaryDate: '2026-08-01', events: [], todayStr: TODAY });
     expect(list.filter((h) => h.reached)).toHaveLength(0);
+  });
+
+  it('주년 마일스톤도 anniversary 원본 종류를 보존한다', () => {
+    const list = buildHighlights({ anniversaryDate: '2025-08-01', events: [], todayStr: TODAY });
+    expect(list.find((h) => h.label === '1주년')).toMatchObject({ sourceKind: 'anniversary' });
   });
 
   it('기념일을 정하지 않았으면 날짜 마일스톤이 없다', () => {
@@ -69,6 +75,23 @@ describe('첫 것만 담는다', () => {
     expect(list.map((h) => h.label)).toEqual(expect.arrayContaining(['첫 면회', '첫 휴가']));
   });
 
+  it('첫 면회·휴가·여행은 각 원본 일정 id를 보존한다', () => {
+    const list = buildHighlights({
+      events: [
+        event({ id: 'visit-first', eventType: 'visit', startDate: '2026-01-10' }),
+        event({ id: 'vacation-first', eventType: 'vacation', startDate: '2026-02-10' }),
+        event({ id: 'trip-first', eventType: 'trip', startDate: '2026-03-10' }),
+      ],
+      todayStr: TODAY,
+    });
+
+    expect(list).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: '첫 면회', sourceKind: 'event', sourceEventId: 'visit-first' }),
+      expect.objectContaining({ label: '첫 휴가', sourceKind: 'event', sourceEventId: 'vacation-first' }),
+      expect.objectContaining({ label: '첫 여행', sourceKind: 'event', sourceEventId: 'trip-first' }),
+    ]));
+  });
+
   it('기억이 되지 않는 일정은 담지 않는다', () => {
     // 범용 캘린더의 모든 항목이 기억이 되지는 않는다.
     const list = buildHighlights({
@@ -95,6 +118,7 @@ describe('아직 오지 않은 것 하나', () => {
     const last = list.at(-1);
     expect(last).toMatchObject({ label: '전역', reached: false });
     expect(last?.countdown).toMatch(/^D-\d+$/);
+    expect(last?.sourceKind).toBe('discharge');
   });
 
   it('전역이 없으면 다음 날짜 마일스톤이 온다', () => {
@@ -102,6 +126,7 @@ describe('아직 오지 않은 것 하나', () => {
     const last = list.at(-1);
     expect(last?.reached).toBe(false);
     expect(last?.countdown).toBeTruthy();
+    expect(last?.sourceKind).toBe('anniversary');
   });
 
   it('전역한 뒤에는 전역이 오지 않는다', () => {

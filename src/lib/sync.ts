@@ -36,6 +36,41 @@ export type FullStateResult =
   | { ok: true; state: Partial<AppState> | null }
   | { ok: false; reason: ServerErrorKind; stage: AuthSyncStage; code?: string };
 
+const PROFILE_COLUMNS = 'id, display_name, role, avatar_path, military_info, onboarding_completed_at';
+const PROFILE_IDENTITY_COLUMNS = `${PROFILE_COLUMNS}, username, profile_caption, profile_date_type`;
+
+async function fetchProfileRow(userId: string) {
+  const profiles = supabase!;
+  let result: {
+    data: any;
+    error: any;
+  };
+
+  try {
+    result = await profiles
+      .from('profiles')
+      .select(PROFILE_IDENTITY_COLUMNS)
+      .eq('id', userId)
+      .maybeSingle();
+  } catch (error) {
+    result = { data: null, error };
+  }
+
+  if (!result.error) return result;
+
+  // 057 may not be applied on an existing remote yet. Keep the account usable
+  // with the old profile shape and leave the new fields absent.
+  try {
+    return await profiles
+      .from('profiles')
+      .select('id, display_name, role, avatar_path, military_info, onboarding_completed_at')
+      .eq('id', userId)
+      .maybeSingle();
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
 /**
  * Preserve the failing read without exposing database details to the UI.
  *
@@ -134,15 +169,9 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
   if (!isSupabaseConfigured || !supabase || !userId) return { ok: true, state: null };
 
   try {
-    // 1. Fetch Profile
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      // Keep this explicit: `select('*')` silently accepted a production schema
-      // that had lost `military_info`, so login succeeded and the failure was
-      // deferred until the user tried to save service information.
-      .select('id, display_name, role, avatar_path, military_info, onboarding_completed_at')
-      .eq('id', userId)
-      .maybeSingle();
+    // 1. Fetch Profile. The identity columns are optional during the 057 rollout;
+    // `fetchProfileRow` retries once with the pre-057 contract when needed.
+    const { data: profileData, error: profileError } = await fetchProfileRow(userId);
 
     // A successful empty lookup is a genuinely new account. Query failures are
     // retryable and must not be confused with onboarding.
@@ -240,6 +269,13 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       myName: profileData.display_name,
       role: memberData?.role || profileData.role,
       avatarPath: profileData.avatar_path,
+      ...(typeof profileData.username === 'string' ? { username: profileData.username } : {}),
+      ...(typeof profileData.profile_caption === 'string' ? { profileCaption: profileData.profile_caption } : {}),
+      ...(profileData.profile_date_type === 'together'
+        || profileData.profile_date_type === 'meeting'
+        || profileData.profile_date_type === 'discharge'
+        ? { profileDateType: profileData.profile_date_type }
+        : {}),
       onboardingCompletedAt: profileData.onboarding_completed_at,
       couple,
       military,

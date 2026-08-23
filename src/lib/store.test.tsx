@@ -16,6 +16,7 @@ const createdChannels: Array<{ name: string; on: ReturnType<typeof vi.fn>; subsc
 const mockSupabase = {
   profileUpdateError: null as null | { message: string },
   profileUpdateMatched: true,
+  lastProfileUpdatePayload: null as Record<string, unknown> | null,
   auth: {
     onAuthStateChange: (cb: AuthCallback) => {
       authCallbacks.push(cb);
@@ -39,7 +40,9 @@ const mockSupabase = {
   removeChannel: vi.fn(),
   rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   from: () => ({
-    update: () => ({
+    update: (payload: Record<string, unknown>) => {
+      mockSupabase.lastProfileUpdatePayload = payload;
+      return {
       eq: () => ({
         select: () => ({
           maybeSingle: () => Promise.resolve({
@@ -48,7 +51,8 @@ const mockSupabase = {
           }),
         }),
       }),
-    }),
+      };
+    },
     upsert: () => Promise.resolve({ error: null }),
   }),
 };
@@ -218,6 +222,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <span data-testid="setup">{String(state.setupComplete)}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
+      <span data-testid="username">{state.profile.username ?? 'none'}</span>
       <span data-testid="couple">{state.profile.couple.coupleId ?? 'none'}</span>
       <span data-testid="partner">{state.profile.couple.partnerName || 'none'}</span>
       <span data-testid="anniversary">{state.profile.couple.anniversaryDate ?? 'none'}</span>
@@ -267,6 +272,11 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
       <button onClick={() => void updateProfile({ myName: 'updated-name' })}>update-profile</button>
+      <button onClick={() => void updateProfile({
+        username: ' Foo_Bar ',
+        profileCaption: '오늘도 함께',
+        profileDateType: 'meeting',
+      })}>update-profile-identity</button>
       <button onClick={() => void updateProfile({
         couple: { ...state.profile.couple, anniversaryDate: undefined },
       })}>clear-anniversary</button>
@@ -318,6 +328,7 @@ describe('StoreProvider auth lifecycle', () => {
     lastFlushResult = null;
     fetchFullStateFromDB.mockReset();
     mockSupabase.profileUpdateError = null;
+    mockSupabase.lastProfileUpdatePayload = null;
     mockSupabase.profileUpdateMatched = true;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
@@ -1491,6 +1502,7 @@ describe('profile persistence acknowledgement', () => {
     fetchFullStateFromDB.mockReset().mockResolvedValue(profileState());
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     mockSupabase.profileUpdateError = null;
+    mockSupabase.profileUpdateMatched = true;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
   });
 
@@ -1536,5 +1548,22 @@ describe('profile persistence acknowledgement', () => {
 
     await waitFor(() => expect(saveCoupleAnniversary).toHaveBeenCalledWith('couple-1', null));
     await waitFor(() => expect(screen.getByTestId('anniversary')).toHaveTextContent('none'));
+  });
+
+  it('writes normalized profile identity fields and only then updates local state', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('name')).toHaveTextContent('original-name'));
+    await act(async () => {
+      screen.getByText('update-profile-identity').click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('username')).toHaveTextContent('Foo_Bar'));
+    expect(mockSupabase.lastProfileUpdatePayload).toMatchObject({
+      username: 'foo_bar',
+      profile_caption: '오늘도 함께',
+      profile_date_type: 'meeting',
+    });
   });
 });

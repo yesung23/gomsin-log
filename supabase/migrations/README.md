@@ -15,22 +15,21 @@
 > ⚠️ 이 저장소의 코드만으로는 원격 Supabase 프로젝트의 실제 상태를 알 수 없습니다.
 > 아래 "적용 순서"를 반드시 스테이징 프로젝트에서 먼저 검증하세요.
 
-> **📄 056 작성됨 · 운영 미적용 (2026-08-23).** `056_diary_pages.sql` — 일기장 지면.
-> 사용자가 고른 기록과 배치가 CSK 봉투 안에 들어간다. **이 파일이 저장소에 있다는
-> 사실은 배포의 증거가 아니다.** 원격 카탈로그에 `diary_pages` 가 있는지는 확인하지
-> 않았고, 이 세션은 운영을 변경하지 않았다.
+> **📄 057 작성됨 · 운영 미적용 (2026-08-23).** `057_profile_identity_and_caption.sql` —
+> owner-only profile identity/caption fields와 database CHECK 및 대소문자 무시 username
+> UNIQUE index를 추가한다. **이 파일이 저장소에 있다는 사실은 배포의 증거가 아니다.**
+> 원격 카탈로그는 이 작업에서 조회하지 않았고, 운영 Supabase는 변경하지 않았다.
 >
-> 실제로 실행한 검증: 빈 PostgreSQL 17 에 001–056 을 순서대로 적용(`npm run test:phase0`,
-> 296 passed), 그중 056 계약 14개 — 커플 구성원 성공 / 타 계정·anon 거부 / 봉투 위조
-> (magic·도메인·epoch) 거부 / 봉투 없는 행 거부 / 세션이 작성자를 정함 / 달 형식 /
-> 한 커플 한 달에 하나. **mutation proof**: 도메인 검사를 빼면 2개, 세션 판정을 빼면
-> 1개가 정확히 실패하고 되돌리면 14개가 돌아온다.
+> 실제로 실행한 검증: 빈 PostgreSQL 17 에 001–057 을 ORDER대로 적용
+> (`npm run test:phase0`, 55 migrations, 309 passed). 그중 057 계약 13개 — owner update
+> 성공 / partner·제3자·anon read·update 거부 / 대소문자 무시 username 중복 거부 /
+> 잘못된 username·81자 caption·허용되지 않은 profile_date_type 거부. 기존 profiles
+> owner-only 정책을 넓히지 않은 것도 실제 RLS actor로 확인했다.
 >
 > 실행하지 않은 것: `test:p5` · `test:write-floor` · `test:rollback` 체인에는 넣지
-> 않았다. 이 테이블은 `daily_records` 의 write floor 와 무관하다 — 평문 경로가
-> 아예 없어 막을 문이 없기 때문이다. 필요해지면 그때 넣는다.
+> 않았다. 057은 `daily_records` 의 write floor 와 무관하다.
 >
-> 다음 사용 가능 번호: **057**.
+> 다음 사용 가능 번호: **058**.
 
 > **✅ 031–038 · 043 적용 완료 (2026-08-23, `xzlorqsjajokrlkunxhr`).** 대시보드 SQL
 > 에디터로 순서대로 적용했고, 테이블 통계 조회로 확인했습니다: `devices` ·
@@ -161,6 +160,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `053_pending_acts_not_shared_history.sql` | 알림 플래그가 "공유 기록이 있다"가 아니라 **"아직 알리지 않은 행위가 있다"**를 뜻하게 한다. 수신자 경계(`notified_through`) + 기록별 공개 시각(`shared_at`) | **운영 미적용** |
 | `054_shared_at_is_server_state.sql` | 053이 취소 규칙 전체를 `daily_records.shared_at`에 의존시켜 놓고 **그 컬럼을 클라이언트가 쓸 수 있게 남겼다.** `authenticated`는 012의 테이블 단위 UPDATE 권한을 갖고, RLS는 row 단위라 컬럼 하나를 가릴 수 없으며, 053의 스탬프 트리거는 `BEFORE INSERT OR UPDATE OF is_private`였다 — `is_private`를 적지 않은 UPDATE는 트리거를 아예 돌리지 않았고, **값을 바꾸지 않고 적기만 한** UPDATE는 아무것도 대입하지 않는 분기로 들어갔다. 실제 체인에서 기록 소유자가 RLS를 통과해 재현했다: 오래된 기록의 `shared_at`을 미래로 밀어두면 유일한 새 행위를 철회해도 파트너 플래그가 **유지된다**(측정값 `t`, 053만으로는 `f`). 트리거를 모든 INSERT/UPDATE로 넓히고 **모든 분기가 대입하게** 해서(전이 없음 → `OLD.shared_at` 복원) 컬럼을 서버 전용으로 만든다. 051 §2와 같은 부류 — 서버가 의존하는 컬럼을, 작성자가 떠올린 경로만 덮는 장치로 지킨 것 **2026-08-21 정정 — repair 문장이 무효였다.** 파일은 트리거를 먼저 설치하고 그 아래에서 이미 왜곡된 행을 UPDATE로 고치려 했다. 그런데 repair 대상은 전부 `is_private = FALSE`이고 그대로 유지되므로, 그 UPDATE는 트리거의 무전이 분기 `NEW.shared_at := OLD.shared_at`로 들어갔고 **트리거가 지우려던 위조값을 그대로 되돌려놓았다.** 두 문장 모두 실행되고 행 수도 보고했지만 아무것도 바뀌지 않았다. 실제 업그레이드 경로에서 측정: 001→053 적용 → 소유자가 RLS를 통과해 `now() + 100 years`로 위조 → 054 적용 → **두 행 모두 2126년 그대로.** 이 파일 자신의 논지가 세 번째로 반복된 것이다(작성자가 떠올린 경로만 덮는 장치). 어디에도 적용되지 않은 파일이므로 새 번호 대신 **054를 직접 수정**했다: repair를 트리거가 붙어 있지 않은 상태에서(DROP TRIGGER 이후, CREATE TRIGGER 이전) 실행한다. DROP은 ACCESS EXCLUSIVE를 잡고 전체가 한 트랜잭션이라 클라이언트가 쓸 수 있는 틈은 생기지 않는다 | **운영 미적용 — fresh chain 001→055(53개)에 적용, phase0 harness 272개 중 054가 10개 + 업그레이드 경로 7개. mutation 4건(054 제거·else 분기 제거·트리거를 `OF is_private`로 되돌림·repair를 트리거 뒤로 되돌림) 전부 실패 확인** |
 | `055_notified_through_is_the_send_decision.sql` | 알림이 덮는 범위는 **결정된 시점**의 행위들인데 경계가 그렇게 말하지 않았다. `mark_push_delivered()`가 `notified_through`를 자기 시계(`p_now DEFAULT now()`)로 찍었고, Edge Function은 인자 없이 호출했다. 발송 결정은 그보다 앞선 `push_delivery_candidates()`에서 났으므로 **그 사이에 공유된 기록은 자기를 담을 수 없었던 알림이 그은 경계 뒤로 넘어갔다.** 실제 체인에서 결정적으로 재현(sleep·스레드 없음): R1 공유 → 후보 선정(23:48:00.566) → R2 공유(23:48:00.588) → mark(23:48:00.610) → **`has_unseen = f`, `partner_has_pending_act = f`.** R2는 지연된 게 아니라 **사라졌다** — 플래그가 내려가 다시 선정되지 않고, 스탬프가 경계 뒤라 영원히 세어지지 않는다. 048/051/052/053이 "행위 없는 알림"을 지웠다면 이것은 "알림 없는 행위"를 지운 반대편이다. 수정: `push_delivery_candidates`가 `decided_at`을 함께 돌려주고(발송자는 **자기가 물어본 시각** 하나만 더 알게 된다), `mark_push_delivered(p_user_id, p_decided_at)`가 그 시각으로 경계를 긋되 `GREATEST`로 **뒤로는 절대 못 간다**(그 사이 앱을 연 사람의 자기 경계가 우선). `has_unseen`은 FALSE로 **대입하지 않고** 053의 `partner_has_pending_act()`로 **재계산**한다. `p_decided_at`에 **DEFAULT를 두지 않은 것이 핵심** — 잊은 호출자는 조용히 행위를 지우는 대신 첫 실행에서 즉시 실패한다. 추가하지 않은 것: 이벤트 이력 테이블·알림별 행·pending count·읽음 표시·파트너 가시 상태 없음. 하루 1회 상한과 재시도 안전성은 그대로 **2026-08-22 보강 — 경계는 뒤로 못 갔지만 스탬프는 갔다.** `notified_through`만 `GREATEST`였고 `last_notified_at`은 flat 대입이었다. 두 sender의 mark가 결정 순서의 **역순**으로 도착하면(재시도 큐와 재기동된 스케줄러가 함께 만드는 흔한 순서) 늦게 온 **더 이른** mark가 스탬프를 뒤로 끌었고, 이미 써 버린 그날의 하루 1회 상한이 다시 열려 **같은 날 알림 2건**이 나갔다. 실제 체인에서 재현: D2 mark → D2 새 행위 → 지연된 D1 mark → 스탬프 `2026-08-19 20:00`, `push_delivery_candidates`가 D2에 후보를 다시 반환. 경계 assertion은 **전부 통과하는 채로** 그 옆에서 벌어졌다 — 그것이 이 결함이 리뷰를 통과한 이유다. 어디에도 적용되지 않은 파일이므로 054의 선례대로 새 번호 대신 **055를 직접 수정**했다: 스탬프도 같은 `GREATEST`를 받는다. `GREATEST`는 PostgreSQL에서 NULL을 무시하므로 첫 mark는 그대로 찍힌다. **함께: 계약 테스트가 너무 약했다** — `pg_proc` 행 수 세기와 result type 정규식은 `DEFAULT now()` 복구와 `extra_meta` OUT 컬럼 추가를 **둘 다 통과시켰다**. 이제 `pg_get_function_identity_arguments` · `pronargdefaults` · `pg_get_function_result` · schema 한정 `count(*)`를 한 문자열로 **전량 비교**한다(빈 결과는 선두 `0`이라 우연 통과 불가, 별도 assertion으로 고정) | **신규 / 어디에도 미적용 — fresh chain 001→055(53개)에 적용, phase0 harness에서 055가 32개(A·B·C·D·E·G·H 시나리오 전부 + 영구 negative proof + 카탈로그 계약 전량 비교 + 공백 결과 방지). mutation 5건(재계산 제거 · 경계 `GREATEST` 제거 · **스탬프 `GREATEST` 제거** · **`DEFAULT now()` 복구** · **extra OUT 컬럼** · **stale overload**) 전부 실패 확인** |
+| `057_profile_identity_and_caption.sql` | profiles에 nullable `username`·`profile_caption`·`profile_date_type`을 추가하고 username 형식, caption 길이, 날짜 타입 CHECK와 `lower(username)` 대소문자 무시 UNIQUE index를 추가한다. 기존 owner-only profiles RLS 정책과 shared projection/RPC는 변경하지 않는다 | **신규 / 운영 미적용 — fresh chain 001→057에 적용, `npm run test:phase0`에서 55 migrations·309 assertions 통과. 운영 Supabase는 변경하지 않음** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수

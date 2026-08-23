@@ -3,6 +3,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, MilitaryInfo, CoupleEvent } from '@/types';
+import { computeServiceProgress } from '@/lib/milestones';
+import { computeServiceLevel } from '@/lib/serviceLevel';
+import { localToday } from '@/lib/cycle';
 
 let currentState: AppState;
 const mockNavigate = vi.fn();
@@ -111,21 +114,30 @@ beforeEach(() => {
 });
 
 describe('군화(soldier) 기본 주 콘텐츠', () => {
-  it('복무 정보가 있으면 내 복무 카드와 연락 가능 시간이 렌더링된다', () => {
+  it('복무 정보가 있으면 상세 페이지로 들어가지 않아도 진행 정보가 렌더링된다', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
 
-    expect(screen.getByRole('button', { name: '내 복무 현황 열기' })).toBeInTheDocument();
+    const progress = computeServiceProgress(SERVING_MILITARY, localToday());
+    const level = computeServiceLevel(progress);
+
+    expect(screen.getByTestId('soldier-service-info')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '내 복무 현황 열기' })).not.toBeInTheDocument();
     expect(screen.getByText('내 복무')).toBeInTheDocument();
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`복무율 ${progress!.percent}%`);
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${progress!.elapsedDays}일 경과`);
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${progress!.remainingDays}일 남음`);
+    expect(screen.getByTestId('service-level')).toHaveTextContent(`복무 레벨 ${level!.level} · ${level!.label}`);
+    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(level!.nextLabel!);
     expect(screen.getByText(/평일 18:00–21:00/)).toBeInTheDocument();
     expect(screen.queryByTestId('cycle-tracker-section')).not.toBeInTheDocument();
   });
 
-  it('복무 카드를 누르면 /service 로 이동한다', () => {
+  it('인라인 복무 정보의 수정 버튼은 /service 로 이동한다', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
 
-    fireEvent.click(screen.getByRole('button', { name: '내 복무 현황 열기' }));
+    fireEvent.click(screen.getByRole('button', { name: '복무 정보 수정' }));
     expect(mockNavigate).toHaveBeenCalledWith('/service');
   });
 
@@ -181,6 +193,8 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
 
     expect(screen.getByText('전역했어요')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '복무 정보 입력하기' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('service-level')).toHaveTextContent('복무 레벨 5 · 완주');
+    expect(screen.getByTestId('service-level-guide')).toHaveTextContent('복무를 마쳤어요.');
   });
 });
 

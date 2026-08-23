@@ -107,6 +107,13 @@ export function SavedTopicsPage() {
         {topics.length > 0 ? (
           <button
             type="button"
+            /*
+              통화 모드로 가는 문의 표식. V4 이전에는 홈 위젯(`TalkAboutListWidget`)이
+              이 표식을 달고 있었고, 홈이 피드가 되면서 목록이 이 화면으로 옮겨 왔다.
+              표식을 지우지 않고 **같이 옮긴다** -- e2e 가 지키는 것은 위젯이 아니라
+              "표시한 것이 있을 때만 통화 모드로 보낸다"는 성질이다.
+            */
+            data-testid="talk-about-call-mode"
             onClick={() => navigate('/call')}
             className="ink-fill mt-4 flex w-full items-center justify-center gap-2 py-3.5"
           >

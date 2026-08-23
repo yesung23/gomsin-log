@@ -101,7 +101,15 @@ export function PaperHome() {
   const hasMarks = (talkAboutMarks?.length ?? 0) > 0;
 
   return (
-    <div className="min-h-full pb-6">
+    /*
+      `home-core` -- 홈이 실제로 그려졌다는 표식.
+
+      V4 이전에는 `RoleHome` 의 역할별 코어 표면이 이 이름을 달았고, e2e 의 홈 스크린샷이
+      그것을 기다렸다. 홈이 피드가 되면서 그 노드는 사라졌지만 **표식이 지키는 것**은
+      바뀌지 않았다: 스플래시도 온보딩도 아닌 홈이 떴는가. 그래서 이름을 지우지 않고
+      새 홈의 뿌리로 옮긴다.
+    */
+    <div className="min-h-full pb-6" data-testid="home-core">
       <header
         className="flex h-14 items-center justify-between px-4"
         style={{ marginTop: 'env(safe-area-inset-top, 0px)', background: 'var(--paper)' }}
@@ -169,7 +177,16 @@ export function PaperHome() {
             type="button"
             aria-label="기록 남기기"
             onClick={() => navigate('/compose')}
-            className="absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full"
+            /*
+              눈에 보이는 것은 22px 이지만 **누르는 곳은 46px** 이다.
+
+              인스타의 `+` 배지도 이만큼 작게 그려진다 -- 작게 보이는 것이 이 배지의
+              일이다. 하지만 그리는 크기와 닿는 크기는 다른 값이어야 한다(DESIGN_V2
+              §Visual footprint ≠ hit target). 이 배지는 곰신의 1차 행동으로 가는
+              문이므로, 22px 그대로 두면 앱에서 가장 중요한 동작이 가장 놓치기 쉬운
+              표적이 된다.
+            */
+            className="absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full before:absolute before:-inset-3 before:content-['']"
             style={{ background: 'var(--ink)', border: '2px solid var(--paper)' }}
           >
             <Plus size={13} color="var(--paper)" strokeWidth={2.6} aria-hidden="true" />

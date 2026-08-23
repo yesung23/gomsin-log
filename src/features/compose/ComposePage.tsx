@@ -244,21 +244,44 @@ export function ComposePage() {
       return;
     }
 
-    if (result.failedFiles.length > 0) {
-      toast.warning(`사진 ${result.failedFiles.length}장은 올리지 못했어요. 글은 저장됐어요.`);
-    }
-
     /*
       §19 계측 -- 실제로 끝난 경로에서만.
 
       실패한 쓰기를 기록 하나로 세지 않는다. 나가는 값은 경과 시간 하나뿐이고 글도,
       길이도, 공개 범위도, 감정도 나가지 않는다.
+
+      사진 일부가 실패해도 **기록은 남았다.** 그래서 계측은 여기서 한 번 나가고,
+      아래의 두 갈래는 화면을 어떻게 둘지만 정한다.
     */
     void recordProductEvent({
       kind: 'record_composed',
       screen: 'home',
       durationMs: Date.now() - openedAt.current,
     });
+
+    /*
+      올리지 못한 사진은 **화면에 그대로 둔다** (D-05).
+
+      글은 저장됐으므로 글은 비운다. 하지만 실패한 파일까지 같이 지우고 홈으로
+      돌려보내면 사용자가 가진 유일한 사본이 사라진다 -- 다시 시도할 방법이 없어진다.
+      옛 컴포저(`TodayLogWidget`)가 이 규칙으로 고쳐졌고, 화면이 `/compose` 로 옮겨
+      왔다고 규칙까지 옮겨오지 않으면 같은 결함이 되돌아온다.
+
+      성공한 사진은 이미 올라갔으므로 목록에서 뺀다. 남는 것은 실패한 것뿐이다.
+    */
+    if (result.failedFiles.length > 0) {
+      const failed = new Set(result.failedFiles);
+      setFiles((current) => current.filter((file) => failed.has(file.name)));
+      setLog('');
+      clearComposerDraft(userId);
+      review.reset();
+      setMood([]);
+      seededFrom.current = '';
+      toast.warning(
+        `사진 ${result.failedFiles.length}장은 올리지 못했어요. 글은 남겼어요. 아래에 그대로 두었으니 다시 시도해 주세요.`,
+      );
+      return;
+    }
 
     done('남겼어요.');
   };

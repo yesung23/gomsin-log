@@ -4748,3 +4748,22 @@ e2e · Postgres 계약 · Deno).
 2. PR #86 머지 → 프로덕션이 V4로 바뀐다
 3. 실제 폰에서 `우리 → ☰ → 설정 → 기록 보호` 설정 (브라우저 불가)
 4. 마운트되지 않는 위젯 트리 정리 여부 결정
+
+### 2026-08-23 · LV · 우리 게시물/사진 탭 및 찾기 역할별 메인 — master 반영
+
+#### RESULT
+- master commit: e53f99a, pushed as a normal fast-forward from 4d2507c
+- deployed surface: /us now shows 게시물 · 사진 · 여행; 게시물 is travel-scoped and 사진 is the existing record list
+- /search keeps date/content search and shows the role-specific empty-query surface; the authenticated browser session verified the soldier service card
+- PR #88 was not approved: its live head a7c2d5c is a different change set from the deployed commit
+
+#### VERIFICATION
+- local master-based verify: PASS — typecheck, lint, 221 test files / 3201 tests, and build with documented placeholder environment
+- GitHub master validation 32631401176: PASS
+- GitHub native release validation 32631401357: PASS
+- authenticated in-app browser after refresh: PASS — /us and /search rendered the new production surface
+
+#### NOT APPLIED
+- Supabase and Production data: not touched
+- migrations: none created or applied
+- gomsin-role browser session: not available in the current signed-in session; role-specific repository tests cover it

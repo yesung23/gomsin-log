@@ -25,6 +25,16 @@
 
 ## 0. Default-branch reality
 
+### Latest live checkpoint — 2026-08-23
+
+- master is now at e53f99a, a normal fast-forward from 4d2507c. The deployed UI change is on the default branch.
+- Our first tab now renders a travel-scoped post grid; the photo tab renders the existing record list; the travel tab keeps the existing trips entry point.
+- Search keeps the existing local date/content search. With an empty query, the soldier role shows service/contact information and the gomsin role shows the existing cycle surface.
+- master validation run 32631401176 and native release validation run 32631401357 both completed successfully. The Vercel status for e53f99a is successful.
+- An authenticated browser refresh of /us showed 게시물 · 사진 · 여행 and the first tab post grid; /search showed the soldier service card. The gomsin role was covered by the repository role-specific tests, not by this browser session.
+- Supabase, Production data, migrations, and remote catalog were not changed or applied.
+- PR #88 remains open at a different head (a7c2d5c); it was not approved because it does not identify the deployed commit.
+
 이 절은 merge된 default branch만 설명한다.
 
 | 영역 | master 기준 현실 |

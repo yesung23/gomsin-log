@@ -9,6 +9,7 @@ import { InkCircle, PenFace } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { usePartnerCareNote } from '@/lib/usePartnerCareNote';
+import { selectOnThisDay, onThisDayLabel } from '@/lib/onThisDay';
 import { CYCLE_SUPPORT_LABEL } from '@/lib/cycleSupportLabels';
 import type { DailyRecord } from '@/types';
 
@@ -92,6 +93,15 @@ export function PaperHome() {
       .filter((record) => record.date >= fromStr && !inStory.has(record.id))
       .sort((a, b) => (a.date === b.date ? b.time.localeCompare(a.time) : b.date.localeCompare(a.date)));
   }, [records, inStory, todayStr]);
+
+  /*
+    1년 전 오늘. 지면 위 조용한 한 줄(계획 #29).
+
+    `records` 를 쓴다 -- 이미 보는 사람 기준으로 걸러진 목록이라, 상대의 비공개 기록이
+    여기로 새어 나올 길이 없다. 피드의 7일 창과 달리 이것은 **오래된 것일수록 값이
+    있으므로** 창을 두지 않는다.
+  */
+  const onThisDay = useMemo(() => selectOnThisDay(records, todayStr), [records, todayStr]);
 
   const markedIds = useMemo(
     () => new Set((talkAboutMarks ?? []).map((mark) => mark.recordId)),
@@ -273,6 +283,31 @@ export function PaperHome() {
       </section>
 
       <div className="ink-rule mx-4" aria-hidden="true" />
+
+      {/*
+        쌓인 것이 스스로 돌아오는 유일한 자리.
+
+        **조용해야 한다.** 카드로 만들면 오늘 남길 것보다 작년이 위에 오고, 그러면 이
+        앱은 추억을 파는 앱이 된다 -- 오늘을 남기게 하는 앱이 아니라. 배지도, 아이콘도,
+        느낌표도 없다. 한 줄이고, 누르면 그날로 간다.
+
+        없으면 자리도 없다. "아직 1년이 안 됐어요" 같은 말은 아무에게도 쓸모가 없고,
+        시작한 지 얼마 안 된 커플에게 매일 그 사실을 알리는 일이 된다.
+      */}
+      {onThisDay ? (
+        <button
+          type="button"
+          onClick={() => navigate(`/record?record=${encodeURIComponent(onThisDay.record.id)}`)}
+          className="flex min-h-11 w-full items-baseline gap-2 px-4 text-left"
+        >
+          <span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>
+            {onThisDayLabel(onThisDay)}
+          </span>
+          <span className="hand-text truncate text-caption" style={{ color: 'var(--ink-soft)' }}>
+            {onThisDay.record.log}
+          </span>
+        </button>
+      ) : null}
 
       {feed.length === 0 ? (
         <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowDown, ArrowUp, Calendar, CheckCircle2, Circle, ExternalLink, ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, RefreshCw, ShieldAlert, Trash2, Unlink,
+  ArrowDown, ArrowUp, Calendar, GripVertical, CheckCircle2, Circle, ExternalLink, ImagePlus, MapPin, MessageCircleHeart, PenTool, Pencil, RefreshCw, ShieldAlert, Trash2, Unlink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
@@ -11,6 +11,7 @@ import { useSheetDrag } from '@/lib/useSheetDrag';
 import { MobileShell } from '@/components/MobileShell';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { Badge } from '@/components/ui/Badge';
+import { reorderByIds } from '@/lib/reorderList';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -529,6 +530,113 @@ export function TripDetailPage() {
     }
   };
 
+  /*
+    ## 끌어 옮기기 (2026-08-23)
+
+    화살표 둘로도 순서는 바뀌었지만, 다섯 번째를 첫째로 올리려면 네 번 눌러야 하고 그
+    사이 네 번의 쓰기가 나간다. 요청은 "쉽게 바꿀 수 있도록" 이었다.
+
+    ### 왜 좌표로 찾는가
+
+    터치에서 `pointerdown` 이 일어난 요소로 포인터가 **암묵적으로 캡처된다.** 손가락이
+    다른 줄로 옮겨가도 이벤트의 target 은 처음 줄이고, 그 줄의 `onPointerEnter` 는 영영
+    오지 않는다. 마우스로는 되고 폰에서는 안 되는, 정확히 이 앱의 대상에서만 죽는
+    코드다. 달력이 같은 함정을 이미 밟았고 같은 방법으로 나왔다.
+
+    ### 시간이 박힌 줄은 끌 수 없다
+
+    시간이 있으면 순서는 시간이 정한다. 끌어서 옮기면 화면과 저장된 값이 어긋나거나,
+    사용자가 방금 넣은 시간을 앱이 무시하는 것이 된다.
+
+    ### 저장은 놓을 때 한 번
+
+    끄는 동안에는 화면만 움직인다. 지나가는 자리마다 쓰면 한 번 끌 때 열 번이 나가고,
+    중간에 실패하면 되돌릴 지점이 어디인지 아무도 모른다.
+  */
+  const [dragItemId, setDragItemId] = useState<string | null>(null);
+  /** 끄는 동안의 순서. 아이디만 들고 있다가 놓을 때 자리 값에 배분한다. */
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const dragOrderRef = useRef<string[] | null>(null);
+
+  const rowIndexUnder = (x: number, y: number): number | null => {
+    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-trip-row]');
+    if (!row) return null;
+    const parsed = Number.parseInt(row.dataset.tripRow ?? '', 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const onDragStart = (itemId: string) => (event: React.PointerEvent) => {
+    event.preventDefault();
+    const ids = currentDayItems.map((item) => item.id);
+    dragOrderRef.current = ids;
+    setDragOrder(ids);
+    setDragItemId(itemId);
+  };
+
+  const onDragMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragItemId || !dragOrderRef.current) return;
+    const index = rowIndexUnder(event.clientX, event.clientY);
+    if (index === null) return;
+    const ids = dragOrderRef.current;
+    const at = ids.indexOf(dragItemId);
+    if (at === -1 || at === index || index >= ids.length) return;
+    const next = [...ids];
+    next.splice(index, 0, next.splice(at, 1)[0]);
+    dragOrderRef.current = next;
+    setDragOrder(next);
+  };
+
+  const onDragEnd = async () => {
+    const finalIds = dragOrderRef.current;
+    dragOrderRef.current = null;
+    setDragItemId(null);
+    setDragOrder(null);
+    if (!finalIds) return;
+
+    const changes = reorderByIds(currentDayItems, finalIds);
+    if (changes.length === 0) return;
+
+    const operationScope = captureTripScope();
+    const before = new Map(currentDayItems.map((item) => [item.id, item.sortOrder]));
+    const rollback = () => setItems((current) => current.map((item) => (
+      before.has(item.id) ? { ...item, sortOrder: before.get(item.id)! } : item
+    )));
+    const next = new Map(changes.map((change) => [change.id, change.sortOrder]));
+    setItems((current) => current.map((item) => (
+      next.has(item.id) ? { ...item, sortOrder: next.get(item.id)! } : item
+    )));
+    for (const change of changes) setItemPending(change.id, true);
+    try {
+      const saved = await reorderTripItemsInDB(changes);
+      if (!isCurrentTripScope(operationScope)) return;
+      if (!saved) {
+        rollback();
+        await loadChildren();
+        if (!isCurrentTripScope(operationScope)) return;
+        toast.error('순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
+      }
+    } catch (error) {
+      if (!isCurrentTripScope(operationScope)) return;
+      rollback();
+      console.error('Failed to reorder trip items:', error);
+      await loadChildren();
+      if (!isCurrentTripScope(operationScope)) return;
+      toast.error('연결 오류로 순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
+    } finally {
+      if (isCurrentTripScope(operationScope)) {
+        for (const change of changes) setItemPending(change.id, false);
+      }
+    }
+  };
+
+  /** 화면이 그리는 순서. 끄는 동안에는 미리보기, 아니면 저장된 순서. */
+  const displayDayItems = useMemo(() => {
+    if (!dragOrder) return currentDayItems;
+    const byId = new Map(currentDayItems.map((item) => [item.id, item]));
+    const ordered = dragOrder.map((id) => byId.get(id)).filter(Boolean) as typeof currentDayItems;
+    return ordered.length === currentDayItems.length ? ordered : currentDayItems;
+  }, [currentDayItems, dragOrder]);
+
   const handleMoveItem = async (index: number, direction: -1 | 1) => {
     if (isOffline) { toast.error(OFFLINE_READONLY_MESSAGE); return; }
     const targetIndex = index + direction;
@@ -780,16 +888,24 @@ export function TripDetailPage() {
               ) : (
                 <>
                   <p className="text-caption text-muted-foreground mb-3 break-keep">
-                    시간을 넣으면 자동 정렬 · 시간 없는 장소는 화살표로 순서 변경
+                    시간을 넣으면 자동 정렬 · 시간 없는 장소는 손잡이를 끌어 순서 변경
                   </p>
+                  {/*
+                    목록이 `pointermove` 를 받는다. 줄마다 받게 하면 터치에서 첫 줄만
+                    이벤트를 받고(암묵적 포인터 캡처) 손가락이 지나가는 줄은 영영
+                    모른다 -- 마우스로는 되고 폰에서는 안 되는 코드가 된다.
+                  */}
+                  <div onPointerMove={onDragMove} onPointerUp={() => void onDragEnd()} onPointerCancel={() => void onDragEnd()}>
                   <RowGroup>
-                    {currentDayItems.map((item, index) => {
+                    {displayDayItems.map((item, index) => {
                       const pending = pendingItemIds.has(item.id);
                       const mapQuery = [item.title, item.address].filter(Boolean).join(' ');
                       const categoryLabel = CATEGORY_OPTIONS.find((opt) => opt.value === item.category)?.label;
                       return (
                         <ListRow
                           key={item.id}
+                          /* 손가락 아래의 줄을 좌표로 찾을 때 쓰는 표식. */
+                          data-trip-row={index}
                           leading={
                             <span className="text-caption text-muted-foreground tabular-nums w-11 text-right">
                               {item.startTime || '미정'}
@@ -797,8 +913,25 @@ export function TripDetailPage() {
                           }
                           trailing={
                             <div className="flex items-center gap-0">
+                              {/*
+                                끌 손잡이. 화살표 둘은 남긴다 -- 끌기는 손이 필요하고,
+                                스크린리더나 키보드로 쓰는 사람에게는 도달할 수 없는
+                                동작이다. 같은 일에 두 길이 있는 것이 아니라, 한 길이
+                                닿지 않는 사람에게 다른 길이 있는 것이다.
+                              */}
+                              <button
+                                type="button"
+                                onPointerDown={onDragStart(item.id)}
+                                disabled={Boolean(item.startTime) || pending || isOffline}
+                                title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : '끌어서 순서 바꾸기'}
+                                className="press-response min-w-11 min-h-11 flex touch-none items-center justify-center text-muted-foreground disabled:opacity-20"
+                                aria-label={`${item.title} 순서 바꾸기 손잡이`}
+                                style={dragItemId === item.id ? { color: 'var(--ink)' } : undefined}
+                              >
+                                <GripVertical size={14} />
+                              </button>
                               <button type="button" onClick={() => void handleMoveItem(index, -1)} disabled={Boolean(item.startTime) || index === 0 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-20" aria-label="위로 이동"><ArrowUp size={14} /></button>
-                              <button type="button" onClick={() => void handleMoveItem(index, 1)} disabled={Boolean(item.startTime) || index === currentDayItems.length - 1 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-20" aria-label="아래로 이동"><ArrowDown size={14} /></button>
+                              <button type="button" onClick={() => void handleMoveItem(index, 1)} disabled={Boolean(item.startTime) || index === displayDayItems.length - 1 || pending || isOffline} title={item.startTime ? '시간을 바꾸면 순서가 바뀌어요.' : undefined} className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-20" aria-label="아래로 이동"><ArrowDown size={14} /></button>
                             </div>
                           }
                         >
@@ -821,6 +954,7 @@ export function TripDetailPage() {
                       );
                     })}
                   </RowGroup>
+                  </div>
                 </>
               )}
             </div>

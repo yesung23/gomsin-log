@@ -108,7 +108,16 @@ export type ListRowProps = {
   className?: string;
   /** Vertical padding. `tight` for dense metadata lists, default otherwise. */
   density?: 'default' | 'tight';
-};
+}
+/*
+  `data-*` 를 통과시킨다.
+
+  TypeScript 는 JSX 의 하이픈 붙은 속성을 검사하지 않는다. 그래서 이 목록을 쓰는 쪽이
+  `data-trip-row={index}` 를 달면 **타입 검사도 통과하고 화면에는 아무것도 붙지 않는다.**
+  손가락 좌표로 줄을 찾는 코드는 그 표식을 못 찾아 아무 일도 하지 않고, 테스트는 전부
+  초록으로 남는다 -- 조용히 죽는 종류의 결함이다. 그래서 명시적으로 받아 넘긴다.
+*/
+& { [attribute: `data-${string}`]: string | number | undefined };
 
 /**
  * One item in a `RowGroup`. Not pressable -- see `PressableRow`.
@@ -116,9 +125,9 @@ export type ListRowProps = {
  * `min-h-11` is 44px: a row is the hit target even when its visible content is
  * two lines of 12px metadata.
  */
-export function ListRow({ leading, trailing, children, className, density = 'default' }: ListRowProps) {
+export function ListRow({ leading, trailing, children, className, density = 'default', ...rest }: ListRowProps) {
   return (
-    <li className={cn('list-none', className)}>
+    <li className={cn('list-none', className)} {...rest}>
       <div
         className={cn(
           'flex items-center gap-3 min-h-11',

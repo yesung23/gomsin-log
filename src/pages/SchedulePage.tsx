@@ -770,29 +770,57 @@ export function SchedulePage() {
 
               {/* Quick task creation */}
               {activeCouple && (
-                <div className="flex gap-2 mb-3">
+                /*
+                  두 줄로 나눴다 (2026-08-23).
+
+                  한 줄에 제목·시간·버튼을 나란히 두었더니 제목이 `flex-1` 로 남는 폭을
+                  전부 먹고 시간 입력이 `w-20`(80px)에 갇혔다. `<input type="time">` 은
+                  브라우저가 그리는 컨트롤이라 안에 `--:--` 와 시계 아이콘이 들어가야
+                  하는데 80px 로는 글자가 잘리고, **화면에서 무시되는 컨트롤**이 됐다.
+
+                  제목이 한 줄을 다 쓰고, 시간과 버튼이 그 아래 한 줄을 나눠 갖는다.
+                  시간에 최소 폭을 주고 `tabular-nums` 로 숫자 폭을 고정해 값이 바뀔 때
+                  줄이 흔들리지 않는다.
+                */
+                <div className="mb-3 space-y-2">
                   <input
                     value={taskTitle}
                     onChange={(event) => setTaskTitle(event.target.value.slice(0, 120))}
                     onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }}
                     placeholder="우리 할 일 빠르게 추가"
-                    className="ink-chip flex-1 min-w-0 bg-transparent px-3 py-2 text-body outline-none min-h-11"
+                    aria-label="할 일 제목"
+                    className="ink-chip w-full bg-transparent px-3 py-2 text-body outline-none min-h-11"
                   />
-                  <input
-                    type="time"
-                    value={taskTime}
-                    onChange={(event) => setTaskTime(event.target.value)}
-                    aria-label="할 일 시간"
-                    className="ink-chip w-20 bg-transparent px-2 py-2 text-body min-h-11"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void handleCreateTask()}
-                    disabled={isSavingTask || !taskTitle.trim() || isOffline}
-                  >
-                    추가
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="time"
+                      value={taskTime}
+                      onChange={(event) => setTaskTime(event.target.value)}
+                      aria-label="할 일 시간"
+                      className="ink-chip min-w-[7.5rem] flex-1 bg-transparent px-3 py-2 text-body tabular-nums min-h-11"
+                      style={{ color: 'var(--ink)' }}
+                    />
+                    {/* 시간을 지우는 길. 한 번 넣으면 못 비우는 입력은 되돌릴 수 없다. */}
+                    {taskTime ? (
+                      <button
+                        type="button"
+                        onClick={() => setTaskTime('')}
+                        aria-label="시간 지우기"
+                        className="press-response min-h-11 min-w-11 flex items-center justify-center"
+                        style={{ color: 'var(--ink-soft)' }}
+                      >
+                        <X size={16} className="pen-icon" aria-hidden="true" />
+                      </button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleCreateTask()}
+                      disabled={isSavingTask || !taskTitle.trim() || isOffline}
+                    >
+                      추가
+                    </Button>
+                  </div>
                 </div>
               )}
               {activeCouple && (

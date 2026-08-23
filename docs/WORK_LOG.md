@@ -114,6 +114,99 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-24 · LV · 찾기 복무 레벨·프로필 정체성·하이라이트 원본 연결
+
+#### PLAN POSITION
+- Phase: Phase 1 / LV 준비
+- Workstream: 제품 기능·프로필·검색·하이라이트 통합
+- Step: 사용자 요청 기능의 세부 범위 구현 및 전체 검증
+- Previous Gate: 2026-08-23 사진 전용 게시물/기존 기록 사진 탭 통합
+- This Gate: 찾기 탭 복무 정보·레벨, 마이 프로필 정체성/문구, 원본 하이라이트 편집 진입점
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md` §§5, 5.4–5.6, 10–11, 13, 16, 19; `docs/DESIGN_V2.md`의 화면 변경 경계
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — 사용자가 고른 기록·사진·기념일을 보존하는 방향과 충돌 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/AI_SESSION_PROTOCOL.md`, `docs/skills/feature-build.md`, `docs/skills/migration-gate.md`
+- Current-state checked: 저장소 코드와 `bash scripts/agent/session-start.sh` 결과; 원격 Supabase·실기기 상태는 별도 미검증
+- Latest relevant Work Log checked: 2026-08-23 사진 전용 게시물/기록 사진 탭 항목
+- MASTER PLAN version / 기준일: repository canonical docs / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. 임의 공개 프로필 업로드·평가 점수·평문 공유 하이라이트는 추가하지 않음
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5
+- Role: primary integration owner + independent verification
+- PR: N/A — 사용자가 명시적으로 master 직접 반영을 요청함
+- Branch: `release/v4-diary-shop-integration`
+- Base SHA: `d783d20d2f12a32af8d2afff21ae22e64f9af4fe`
+- Old HEAD: `d783d20d2f12a32af8d2afff21ae22e64f9af4fe`
+- New/Reviewed HEAD: `e1874d6` (implementation commit; docs/release follow-up will be recorded separately)
+
+#### CHANGED / REVIEWED
+- file: `src/features/search/SearchPage.tsx`, `src/lib/serviceLevel.ts`
+- function/component/migration: 군화의 빈 검색 상태에 복무·연락 가능 시간·D-day·진행률·개인 레벨을 한 화면에 표시; 순수 레벨 계산 함수와 테스트 추가
+- what changed/reviewed: 기존 날짜/내용 검색과 곰신 주기 surface는 유지하고, 레벨은 관계 점수나 연속 기록이 아닌 개인 복무 진행도만 사용
+- why: 사용자가 찾기 탭에서 복무 정보를 상세 화면으로 이동하지 않고 바로 보기를 요청함
+- file: `src/features/us/PaperProfile.tsx`, `src/components/ProfileIdentity.tsx`, `src/pages/SettingsPage.tsx`, `src/lib/profileCaption.ts`, `src/lib/store.tsx`, `src/lib/sync.ts`
+- function/component/migration: 한 사용자 이름·영문 소문자 ID·문구 편집·문구 토큰 렌더링·소유자 프로필 저장/조회·구 스키마 fallback
+- what changed/reviewed: `(함께한 날)`, `(만남)`, `(전역)` 토큰을 실제 날짜/남은 복무일로 치환하고 값이 없으면 만들지 않음; 새 컬럼이 없는 원격에서는 읽기만 구 계약으로 재시도
+- why: 마이 탭을 한 사람 중심의 Instagram 유사 프로필로 정리하되 파트너에게 소유자 프로필 행을 수정할 권한은 부여하지 않기 위해
+- file: `src/lib/coupleHighlights.ts`, `src/components/HighlightEditActions.tsx`
+- function/component/migration: 기념일·이벤트·전역 원본 ID를 보존하고 각 하이라이트에 원본 편집 진입점 추가
+- what changed/reviewed: 도달한 항목은 기존 스토리 보기 경로를 유지하며, 편집은 기념일→설정·이벤트→일정·전역→복무로 이동; 임의 평문 하이라이트/커버 저장은 만들지 않음
+- why: 하이라이트를 편집 가능하게 하되 원본 기록과 개인정보 경계를 유지하기 위해
+- file: `supabase/migrations/057_profile_identity_and_caption.sql`, `scripts/phase0/storage-authz-harness.mjs`
+- function/component/migration: `profiles.username`, `profile_caption`, `profile_date_type` 컬럼·검사·대소문자 무시 unique index와 057 actor/RLS fresh-chain 테스트
+- what changed/reviewed: 55개 migration 체인에 057을 연결하고 owner/partner/third-party/anon 및 잘못된 입력을 서로 다른 키로 검증
+- why: 코드에 migration 파일만 존재하는 상태를 적용 증거로 오해하지 않도록 체인과 negative proof를 함께 유지
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 057 파일만 작성·harness에 연결; 원격 Supabase에는 적용하지 않음
+- product semantics: 관계 점수·조회수·연속 기록·감정 추론·임의 공개 하이라이트를 추가하지 않음
+- Production: 코드 push 전까지 변경하지 않음; Supabase는 변경하지 않음
+
+#### VERIFICATION
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: typecheck·lint·전체 Vitest 226 files / 3240 tests·Vite build가 현재 checkout에서 통과
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: throwaway PostgreSQL 17에서 fresh chain 001..057, 55 migrations / 309 assertions 및 057 actor/RLS negative proof 통과
+- command: targeted Vitest (`searchPage`, `serviceLevel`, `PaperProfile`, `coupleHighlights`, `HighlightEditActions`, `profileCaption`, `migration057`, `store`, `sync`, `handwritingScope`, `migration021`)
+- PASS / FAIL / UNVERIFIED: PASS — 마지막 회귀 묶음 2 files / 14 tests 포함
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 커밋 전 whitespace 오류 없음
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA
+- whether an earlier review is stale: 통합 전 Highlight/프로필 리뷰는 현재 HEAD에 자동 승계하지 않음; 현재 코드와 전체 검증 결과를 기준으로 재확인함
+
+#### BLOCKERS
+- code: 없음
+- environment: 실제 기기·CI 실행은 이 세션에서 별도 확인하지 않음
+- external/manual: migration 057은 원격 Supabase에 아직 적용하지 않았고 원격 catalog는 UNVERIFIED; 새 ID/문구 저장은 적용 후 확인 필요
+
+#### STOPPED AT
+- exact completed boundary: 코드·테스트·fresh-chain migration harness 통합 완료, master 반영 및 Vercel 자동 배포 확인 대기
+
+#### REMAINING
+- not completed: 실제 device-only ID 변경을 보장하는 기기 식별 정책, 서버 동기화 프로필 사진, Instagram식 임의 하이라이트 커버/새 하이라이트 생성, 일정 특정 이벤트를 바로 여는 query contract
+
+#### NEXT ACTION
+- next owner: Codex primary
+- tool/model: repository verification + browser read-only check
+- 기준 SHA: `e1874d6`
+- exact next task: Work Log/CURRENT_STATE/report 기록 후 master push, Vercel 응답과 로그인된 브라우저의 `/us`·`/search` 경로 확인
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: code commit exact HEAD 확인, docs 기록, `npm run verify`/phase0 PASS, remote Supabase NOT APPLIED 명시, 배포 응답과 브라우저 결과를 별도로 기록
+
+#### PRODUCTION
+- NOT APPLIED — Supabase migration·데이터 변경 없음
+
 ### 2026-08-21 · LV · PR #80 마지막 pre-merge blocker 3건 — 전부 재현 후 최소 수정
 
 #### PLAN POSITION

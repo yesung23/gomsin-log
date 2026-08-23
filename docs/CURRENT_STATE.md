@@ -35,6 +35,14 @@
 - Supabase, Production data, migrations, and remote catalog were not changed or applied.
 - PR #88 remains open at a different head (a7c2d5c); it was not approved because it does not identify the deployed commit.
 
+### Latest release checkpoint — 2026-08-24
+
+- The release checkout adds the next product slice in implementation commit `e1874d6`: the soldier search surface now shows service information and a personal service level inline; the My profile surface shows one identity, an optional English username, an editable token-based caption, the existing local profile-photo picker, and source-derived highlight edit entrypoints.
+- Migration `057_profile_identity_and_caption.sql` is present in the repository and is included in the fresh-chain harness. The throwaway PostgreSQL proof covers 55 migrations and 309 assertions. **Remote Supabase application is NOT APPLIED and the remote catalog is UNVERIFIED.**
+- `npm run verify` passed on the release checkout: typecheck, lint, 226 Vitest files / 3240 tests, and build. `git diff --check` passed.
+- The profile username/caption write path is account-owner scoped, not a device-identity policy. Profile photos remain in the existing device-local avatar boundary. Highlight editing routes to the source feature (`/settings`, `/schedule`, `/service`) until a specific-event editor contract exists.
+- This checkpoint is an active release candidate until the exact commit is pushed and the Vercel/browser response is checked. No Supabase or production data was changed.
+
 이 절은 merge된 default branch만 설명한다.
 
 | 영역 | master 기준 현실 |

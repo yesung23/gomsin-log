@@ -100,6 +100,7 @@ bash scripts/agent/claim.sh --release opus
 
 | 질문 | authoritative home |
 |---|---|
+| **곰신로그가 무엇인가 (처음 오는 사람)** | `docs/WHAT_IS_GOMSINLOG.md` |
 | 제품 의도 | `docs/PRODUCT_V3.md` |
 | V4 화면이 실제로 어떻게 생겼나 | `docs/V4_AS_BUILT.md` |
 | 사업전략·수익화·시장·Memory Product | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |

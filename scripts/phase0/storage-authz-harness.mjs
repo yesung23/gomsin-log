@@ -112,6 +112,7 @@ const ORDER = [
   '053_pending_acts_not_shared_history.sql',
   '054_shared_at_is_server_state.sql',
   '055_notified_through_is_the_send_decision.sql',
+  '056_diary_pages.sql',
 ];
 
 /**
@@ -2880,6 +2881,117 @@ check(
   postForge.ok && upgradeSql(`SELECT shared_at > now() + interval '50 years'
                                 FROM public.daily_records WHERE id = '${UP_FORGED}'`, 'upgrade reforge') === 'f',
   '054/upgrade the column is still unwritable AFTER the upgrade, so repairing it did not cost the guard',
+);
+
+// ---------------------------------------------------------------------------
+// 056 -- 일기장 지면. 처음부터 봉투만 받는 테이블.
+// ---------------------------------------------------------------------------
+// 이 테이블에는 `cipher_format = 0` 평문 경로가 없다. `daily_records` 는 평문 시절을
+// 지나왔기 때문에 그 경로를 아직 갖고 있고 write floor 로 막아야 하지만, 여기서는
+// **평문 지면이 표현될 수 없다** -- 막을 문이 애초에 없다는 것이 이 블록의 첫 계약이다.
+//
+// 픽스처를 **직접 세운다.** 앞선 블록들이 계정을 닫고 커플을 해제하는 시나리오를
+// 돌리므로, 공용 `UA`/`UCOUPLE` 에 얹으면 그 시나리오가 바뀔 때마다 여기가 조용히
+// 깨진다 -- 실제로 처음 판이 그렇게 깨졌고, 실패가 "RLS 위반" 이라 원인이 이 파일
+// 바깥에 있다는 것을 한참 뒤에 알았다.
+const DP_A = 'dddddddd-0000-4000-8000-0000000000d1';
+const DP_B = 'dddddddd-0000-4000-8000-0000000000d2';
+const DP_COUPLE = 'dddddddd-0000-4000-8000-0000000000dc';
+const DP_OUTSIDER = 'cccccccc-0000-4000-8000-0000000000c1';
+const DP_ENV = '474c45310100000300000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+const DP_ENV_PERSONAL = '474c45310100000100000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+const DP_ENV_HEALTH = '474c45310100000200000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+const DP_ENV_EPOCH9 = '474c45310100000300000000000000000000000900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+const DP_ENV_BADMAGIC = 'deadbeef0100000300000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+
+mustSql(`INSERT INTO auth.users (id) VALUES ('${DP_A}'), ('${DP_B}'), ('${DP_OUTSIDER}')
+         ON CONFLICT DO NOTHING`, '056 users');
+mustSql(`INSERT INTO public.couples (id) VALUES ('${DP_COUPLE}') ON CONFLICT DO NOTHING`, '056 couple');
+mustSql(`INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES
+           ('${DP_COUPLE}', '${DP_A}', 'gomsin', 'active'),
+           ('${DP_COUPLE}', '${DP_B}', 'soldier', 'active')
+         ON CONFLICT DO NOTHING`, '056 members');
+
+const dpInsert = (actor, couple, month, envelope, epoch = 1, author = actor) => asUser(actor,
+  `INSERT INTO public.diary_pages (couple_id, created_by, month_key, content_envelope, key_domain, key_epoch)
+   VALUES ('${couple}', '${author}', '${month}', decode('${envelope}', 'hex'), 'couple', ${epoch})`);
+
+check(
+  dpInsert(DP_A, DP_COUPLE, '2026-08', DP_ENV).ok,
+  '056 커플 구성원은 자기 커플의 지면을 만든다',
+);
+check(
+  dpInsert(DP_B, DP_COUPLE, '2026-09', DP_ENV).ok,
+  '056 상대도 만든다 -- 지면은 「우리의 한 달」이므로 한쪽만의 것이 아니다',
+);
+
+// 한 커플의 한 달에 지면은 하나다. 둘이 각자 만들면 어느 쪽이 그 달인지 아무도 답할 수 없다.
+check(
+  !dpInsert(DP_B, DP_COUPLE, '2026-08', DP_ENV).ok,
+  '056 같은 달에 두 번째 지면은 만들어지지 않는다',
+);
+
+// --- 봉투를 위조할 수 없다 -------------------------------------------------
+// 거절 케이스마다 **다른 달**을 쓴다. 같은 달을 쓰면 하나가 통과했을 때 나머지가
+// 규칙이 아니라 UNIQUE 제약 때문에 거절되고, 그러면 규칙을 빼도 테스트가 초록으로
+// 남는다 -- 실제로 첫 판이 그랬고 mutation proof 가 그것을 잡았다.
+check(
+  !dpInsert(DP_A, DP_COUPLE, '2026-10', DP_ENV_BADMAGIC).ok,
+  '056 GLE1 이 아닌 바이트열은 거절된다 -- 나중에 복호화 실패로 발견하게 두지 않는다',
+);
+check(
+  !dpInsert(DP_A, DP_COUPLE, '2027-02', DP_ENV_PERSONAL).ok,
+  '056 개인 도메인 봉투는 거절된다 -- 지면은 커플 도메인 하나뿐이다',
+);
+check(
+  !dpInsert(DP_A, DP_COUPLE, '2027-03', DP_ENV_HEALTH).ok,
+  '056 건강 도메인 봉투는 거절된다 -- HRK 가 CSK 자리에 서는 대체가 표현될 수 없어야 한다',
+);
+check(
+  !dpInsert(DP_A, DP_COUPLE, '2027-04', DP_ENV_EPOCH9, 1).ok,
+  '056 봉투 헤더의 epoch 와 열의 epoch 가 어긋나면 거절된다',
+);
+
+// --- 평문 지면은 표현될 수 없다 --------------------------------------------
+check(
+  !asUser(DP_A, `INSERT INTO public.diary_pages (couple_id, created_by, month_key, key_domain, key_epoch)
+               VALUES ('${DP_COUPLE}', '${DP_A}', '2026-11', 'couple', 1)`).ok,
+  '056 봉투 없는 지면은 만들어지지 않는다 -- 이 테이블에 평문 경로가 없다는 뜻이다',
+);
+
+// --- 모양 ------------------------------------------------------------------
+check(
+  !dpInsert(DP_A, DP_COUPLE, '2026-8', DP_ENV).ok,
+  '056 `2026-8` 은 달이 아니다 -- 같은 달이 두 지면이 되는 길을 열에서 막는다',
+);
+
+// --- 쓰는 사람은 세션이 정한다 ---------------------------------------------
+// `created_by` 를 인자로 믿으면 남의 이름으로 지면을 만들 수 있다.
+dpInsert(DP_A, DP_COUPLE, '2026-12', DP_ENV, 1, UB);
+check(
+  sql(`SELECT created_by FROM public.diary_pages WHERE month_key = '2026-12'`).stdout.trim() === DP_A,
+  '056 만든 사람은 인자가 아니라 세션이 정한다 -- 남의 이름으로 지면을 만들 수 없다',
+);
+
+// --- 남의 커플 --------------------------------------------------------------
+check(
+  !dpInsert(DP_OUTSIDER, DP_COUPLE, '2027-01', DP_ENV).ok,
+  '056 커플 밖의 계정은 그 커플의 지면을 만들지 못한다',
+);
+check(
+  asUser(DP_OUTSIDER, `SELECT count(*) FROM public.diary_pages`).stdout.trim() === '0',
+  '056 커플 밖의 계정에게 지면은 보이지 않는다',
+);
+check(
+  asUser(DP_OUTSIDER, `DELETE FROM public.diary_pages WHERE month_key = '2026-08'`).ok
+    && sql(`SELECT count(*) FROM public.diary_pages WHERE month_key = '2026-08'`).stdout.trim() === '1',
+  '056 커플 밖의 계정이 지우려 해도 아무 행도 지워지지 않는다',
+);
+
+// --- anon -------------------------------------------------------------------
+check(
+  !psql(['-At', '-c', 'SET ROLE anon', '-c', 'SELECT count(*) FROM public.diary_pages']).ok,
+  '056 anon 에게는 테이블 권한 자체가 없다',
 );
 
 // ---------------------------------------------------------------------------

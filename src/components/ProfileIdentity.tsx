@@ -19,7 +19,7 @@ export function ProfileIdentity({
         <button
           type="button"
           onClick={() => navigate('/settings?profile=edit')}
-          className="mt-1 text-caption text-left underline underline-offset-2 block"
+          className="mt-1 block min-h-11 text-left text-caption underline underline-offset-2"
           style={{ color: 'var(--ink-soft)' }}
         >
           {caption.status === 'needs_setup' && caption.missing.includes('together')

@@ -237,7 +237,7 @@ export function SharedProfile() {
           { id: 'photo', Icon: ImageIcon, label: '사진' },
           { id: 'trip', Icon: Plane, label: '여행' },
         ] as const).map(({ id, Icon, label }) => (
-          <button key={id} type="button" aria-label={label} aria-pressed={tab === id} onClick={() => setTab(id)} className="flex min-h-11 flex-1 items-center justify-center py-3" style={{ borderBottom: `var(--stroke-bold) solid ${tab === id ? 'var(--ink)' : 'transparent'}` }}>
+          <button key={id} type="button" aria-label={label} aria-pressed={tab === id} onClick={() => setTab(id)} className="profile-tab flex min-h-11 flex-1 items-center justify-center py-3" style={{ borderBottom: `var(--stroke-bold) solid ${tab === id ? 'var(--ink)' : 'transparent'}` }}>
             <Icon size={20} color={tab === id ? 'var(--ink)' : 'var(--ink-soft)'} aria-hidden="true" />
           </button>
         ))}

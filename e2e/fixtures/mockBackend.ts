@@ -395,6 +395,14 @@ export async function installMockBackend(
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
     if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);
+    // Migration 058 is additive to the full-state hydration path. Keep the
+    // browser fixture additive too: an empty highlight workspace is a valid
+    // connected-account response, not an unrouted 500.
+    if (path === '/rest/v1/couple_highlights' && method === 'GET') {
+      const failure = failureFor(scenario, 'couple_highlights');
+      if (failure) return json(route, failure, failure.status);
+      return rows(route, []);
+    }
     if (path === '/rest/v1/talk_about_marks' && method === 'GET') {
       const failure = failureFor(scenario, 'talk_about_marks');
       if (failure) return json(route, failure, failure.status);

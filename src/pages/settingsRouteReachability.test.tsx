@@ -222,7 +222,7 @@ describe('H-4: the entry point survives the conditions that caused the stranding
       'utf8',
     );
     const tabs = [...shell.matchAll(/to: '(\/[a-z]+)'/g)].map((match) => match[1]);
-    expect(tabs).toEqual(['/home', '/me', '/diary', '/schedule', '/us']);
+    expect(tabs).toEqual(['/home', '/search', '/compose', '/schedule', '/us']);
     // 그리드가 실제로 그리는 칸 수와 맞아야 한다. 어긋나면 칸 하나가 잘리거나 빈다.
     expect(shell).toContain(`grid-cols-${tabs.length}`);
   });
@@ -255,6 +255,17 @@ describe('H-4: the entry point survives the conditions that caused the stranding
       // 셸 밖에서 그려지는 것들. 탭바가 없으므로 걸릴 탭도 없다.
       .filter((path) => !path.startsWith('/auth') && !path.startsWith('/legal')
         && !path.startsWith('/onboarding') && !path.startsWith('/story'))
+      /*
+        가운데 칸은 **장소가 아니라 동작**이다.
+
+        `/compose` 는 탭바에 있지만 어떤 경로에서도 선택되지 않는다(`matchPrefixes: []`)
+        -- 인스타의 만들기 탭도 같다: 눌리면 컴포저가 열리고 탭바는 원래 있던 곳을 계속
+        가리킨다. 그래서 "어느 탭에도 안 걸린다"가 여기서는 결함이 아니라 설계다.
+
+        이 예외를 목록에 적어 두는 것은 아래 단언이 그것 하나만 봐주게 하기 위해서다.
+        다른 화면이 같은 상태가 되면 여전히 걸린다.
+      */
+      .filter((path) => path !== '/compose')
       // `:id` 자리는 접두사 판정에 쓰이지 않으므로 부모까지만 본다.
       .map((path) => path.replace(/\/:[^/]+$/, ''));
     expect(routes.length, '라우트를 못 읽었다').toBeGreaterThan(8);
@@ -273,9 +284,9 @@ describe('H-4: the entry point survives the conditions that caused the stranding
     // `/trips/:id` 는 일정을, `/settings` 는 우리를 켠다. 위의 덮임 검사는 "어딘가에
     // 걸린다"만 보므로, 어느 탭이 맞는지는 여기서 못 박는다.
     expect(shell).toContain("matchPrefixes: ['/schedule', '/trips']");
-    expect(shell).toContain("matchPrefixes: ['/us', '/search', '/record', '/compose', '/my', '/settings']");
-    // 복무는 `우리` 가 아니라 `나` 가 가져갔다 -- 그 화면이 답하는 질문이 그쪽이다.
-    expect(shell).toContain("matchPrefixes: ['/me', '/service']");
+    expect(shell).toContain("matchPrefixes: ['/us', '/me', '/service', '/diary', '/my', '/settings']");
+    // 검색 결과가 데려가는 곳이 원본이므로, 원본을 보는 동안 켜지는 것은 그리로 온 문이다.
+    expect(shell).toContain("matchPrefixes: ['/search', '/record']");
   });
 
   it('PRESERVATION: the widget entry points still exist for users who kept them', () => {

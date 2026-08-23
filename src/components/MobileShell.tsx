@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, HeartPulse, BookHeart, CalendarDays, CircleUserRound } from 'lucide-react';
+import { Home, Search, PlusSquare, CalendarDays } from 'lucide-react';
+import { InkCircle, PenFace } from '@/components/paper';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { routeAnnouncement } from '@/lib/routeAnnouncement';
@@ -8,29 +9,27 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 
 /**
- * 다섯 칸 — 인스타그램의 자리를 빌리되, 빌릴 것이 없는 칸은 빌리지 않는다.
+ * 하단 탭바 — 인스타그램의 5칸 그대로.
  *
  *     인스타      홈    검색    만들기(+)   릴스     프로필
- *     곰신로그    홈    나      일기장      일정     우리
+ *     곰신로그    홈    찾기    남기기      일정     우리
  *
- * 자리와 개수가 같아야 손이 기억한다. 인스타를 쓰는 사람은 왼쪽 끝이 홈이고 오른쪽 끝이
- * 자기 프로필이라는 것을 몸으로 안다. 릴스 자리에 일정이 오는 것은 성격이 맞아서다 --
- * 다른 넷은 전부 과거와 현재인데 일정만 미래이고, 인스타에서도 그 칸은 "다른 종류의
- * 것"을 보는 자리다.
+ * 자리와 개수가 같아야 손이 기억한다. 인스타를 쓰는 사람은 왼쪽 끝이 홈이고 가운데가
+ * 만들기이며 오른쪽 끝이 자기 프로필이라는 것을 몸으로 안다. **그 기억을 그대로 쓰는
+ * 것이 이 앱이 인스타 문법을 빌리는 이유다.**
  *
- * ## 검색 칸을 빌리지 않은 이유
+ * 릴스 자리에 일정이 오는 것은 성격이 맞아서다. 다른 넷은 전부 과거와 현재인데 -- 기록·
+ * 탐색·작성·축적 -- 일정만 미래다. 인스타에서도 그 칸은 "다른 종류의 것"을 보는 자리다.
  *
- * 한 번 빌렸다가 되돌렸다. **인스타에 검색 탭이 있는 이유는 거기에 남의 게시물이 있기
- * 때문이다.** 알고리즘이 고른 모르는 사람들의 것. 이 앱에는 남이 없으므로 탐색 격자에
- * 넣을 것이 우리 둘의 기록밖에 없고, 그것은 `우리` 탭의 하루 격자와 **같은 화면**이다.
- * 고유하게 남는 검색은 탭이 아니라 `우리` 헤더의 돋보기가 됐다(§5.3).
+ * 가운데 `+` 는 테두리가 있는 사각형이다. 인스타의 만들기 버튼도 그렇고, 무엇보다 이
+ * 앱에서 **기록 진입점은 제거할 수 없는 계약**(§7.1)이라 눈에 띄어야 한다.
  *
- * ## 가운데는 왜 만들기가 아닌가
+ * ## 한 번 다른 다섯을 시도했고 되돌렸다
  *
- * 기록 진입점을 여기 두는 것도 한 번 짰다. 되돌린 이유는 자리의 값이 다르기 때문이다 --
- * 가운데는 엄지가 가장 쉽게 닿는 칸이고, 기록은 떠 있는 버튼으로 어느 화면에서든 한 번이면
- * 되므로 이 칸을 쓸 이유가 없다(§7.1). 그 자리는 **이 앱이 왜 기록을 쌓게 하는지에 대한
- * 답**이 가져간다: 쌓인 것이 물건이 된다(§5.2).
+ * `홈 · 나 · 일기장 · 일정 · 우리` 로 바꾼 적이 있다. 각 칸의 내용은 여전히 앱 안에
+ * 있지만 -- `나` 는 `우리` 의 통계와 `/service` 로, `일기장` 은 `우리` 의 격자와
+ * `기억 만들기` 로 -- **자리를 바꾼 대가가 너무 컸다.** 인스타를 쓰는 사람이 손으로
+ * 아는 다섯 자리를 바꾸면 문법을 빌려온 이유 자체가 사라진다.
  *
  * `matchPrefixes` 는 섹션 안에서 움직이는 동안 탭이 꺼지지 않게 한다. 꺼지면 앱이
  * "당신은 아무 데도 없다"고 말한다. 어느 경로도 빠지지 않는다는 것은
@@ -39,10 +38,8 @@ import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 const TABS = [
   {
     /*
-      `/call` 이 여기 걸린다.
-
-      이건 탭 재편이 만든 것이 아니라 **원래부터 어느 탭에도 없었다.** 통화 모드는 홈의
-      `이야기할 것` 위젯에서 들어가는데, 들어간 순간 탭바가 전부 꺼졌다.
+      `/call` 과 `/saved` 가 여기 걸린다. 홈 헤더의 두 아이콘에서 들어가는 곳이므로
+      들어가 있는 동안에도 홈이 켜져 있어야 한다.
     */
     to: '/home',
     label: '홈',
@@ -50,20 +47,27 @@ const TABS = [
     matchPrefixes: ['/home', '/', '/call', '/saved'],
   },
   {
-    to: '/me',
-    label: '나',
-    icon: HeartPulse,
-    matchPrefixes: ['/me', '/service'],
+    /*
+      `/record` 가 여기 걸린다. 검색 결과가 데려가는 곳이 원본이므로, 원본을 보는 동안
+      켜져 있어야 하는 것은 그리로 온 문이다.
+    */
+    to: '/search',
+    label: '찾기',
+    icon: Search,
+    matchPrefixes: ['/search', '/record'],
   },
   {
     /*
-      가운데는 이 앱이 왜 기록을 쌓게 하는지에 대한 답이 가져간다: 쌓인 것이 물건이
-      된다(§5.5). 한 달치가 지면으로 엮이고, 꾸미고 싶으면 꾸미고, 한 권이 된다.
+      가운데는 장소가 아니라 **동작**이다. 어떤 경로에서도 선택되지 않는다 -- 인스타의
+      만들기 탭도 같다. 눌리면 컴포저가 열리고 탭바는 원래 있던 곳을 계속 가리킨다.
+
+      이름이 `남기기` 가 아니라 `기록 남기기` 인 것은 같은 동작에 두 이름을 두지 않기
+      위해서다. 홈 레일의 `+`, `우리` 의 펜, `찾기` 의 펜이 모두 이 이름을 쓴다.
     */
-    to: '/diary',
-    label: '일기장',
-    icon: BookHeart,
-    matchPrefixes: ['/diary'],
+    to: '/compose',
+    label: '기록 남기기',
+    icon: PlusSquare,
+    matchPrefixes: [] as string[],
   },
   {
     to: '/schedule',
@@ -73,15 +77,13 @@ const TABS = [
   },
   {
     /*
-      `우리` 가 기록을 보고 찾는 곳 전부를 갖는다.
-
-      하루 격자와 검색(`/search`)과 원본(`/record`), 그리고 `☰` 안의 계정·설정까지.
-      §7.1 의 제거 불가 작성 진입점도 여기 있다.
+      인스타의 프로필 탭은 자기 아바타다. 여기서는 커플 아바타이고, `나` 와 `일기장` 이
+      가졌던 것 -- 복무·주기·컨디션과 월별 지면 -- 이 이 안에 있다.
     */
     to: '/us',
     label: '우리',
-    icon: CircleUserRound,
-    matchPrefixes: ['/us', '/search', '/record', '/compose', '/my', '/settings'],
+    icon: null,
+    matchPrefixes: ['/us', '/me', '/service', '/diary', '/my', '/settings'],
   },
 ] as const;
 
@@ -276,17 +278,24 @@ export function MobileShell({ children }: { children: ReactNode }) {
                       'press-response flex items-center justify-center w-full min-h-11 py-3',
                     )}
                   >
-                    <Icon
-                      size={23}
-                      className="pen-icon"
-                      color={active ? 'var(--ink)' : 'var(--ink-soft)'}
-                      /*
-                        인스타는 선택된 홈 아이콘을 채운다. 채움이 있는 아이콘에서만
-                        의미가 있으므로 홈에만 준다 -- 달력이나 펜을 채우면 뭉개진다.
-                      */
-                      fill={active && t.label === '홈' ? 'var(--ink)' : 'none'}
-                      aria-hidden="true"
-                    />
+                    {Icon ? (
+                      <Icon
+                        size={t.label === '기록 남기기' ? 24 : 23}
+                        className="pen-icon"
+                        color={active ? 'var(--ink)' : 'var(--ink-soft)'}
+                        /*
+                          인스타는 선택된 홈 아이콘을 채운다. 채움이 있는 아이콘에서만
+                          의미가 있으므로 홈에만 준다 -- 달력이나 사각형을 채우면 뭉개진다.
+                        */
+                        fill={active && t.label === '홈' ? 'var(--ink)' : 'none'}
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      /* 인스타의 프로필 탭은 자기 아바타다. 여기서는 커플 아바타. */
+                      <InkCircle size={26} ring={active ? 'seen' : 'none'}>
+                        <PenFace size={18} />
+                      </InkCircle>
+                    )}
                   </Link>
                 </li>
               );

@@ -2,7 +2,7 @@
  * The name of the screen a path leads to, for announcing a route change.
  *
  * A single-page app replaces the document without a page load, so a screen
- * reader is told nothing: moving between 홈 · 나 · 일기장 · 일정 · 우리 produced no
+ * reader is told nothing: moving between 홈 · 찾기 · 남기기 · 일정 · 우리 produced no
  * announcement at all and left focus wherever the previous screen had it. This is
  * the copy an `aria-live` region reads out, and it is a pure function so the
  * mapping can be tested without a router.

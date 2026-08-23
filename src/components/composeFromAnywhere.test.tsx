@@ -79,15 +79,19 @@ describe('기록을 시작하는 길은 조건 없이 열려 있다', () => {
     expect(read('src/components/MobileShell.tsx')).not.toContain('ownsPrimaryAction');
   });
 
-  it('탭바는 다섯 칸이고 그중 어느 것도 기록 작성이 아니다', () => {
+  it('탭바 가운데가 기록 작성이고, 그 칸은 어디서도 선택되지 않는다', () => {
     /*
-      가운데 칸을 기록에 준 적이 있고 되돌렸다. 엄지가 가장 쉽게 닿는 칸은 **매일 답해야
-      하는 질문**이 가져가야 하고, 기록은 레일의 `+` 로 한 번이면 된다.
+      인스타의 다섯 자리로 돌아왔다 -- 홈 · 검색 · 만들기 · 릴스 · 프로필. 가운데를 다른
+      것에 준 적이 있고 되돌렸다: 인스타를 쓰는 사람이 손으로 아는 자리를 바꾸면 문법을
+      빌려온 이유 자체가 사라진다.
+
+      가운데는 **장소가 아니라 동작**이므로 어떤 경로에서도 선택되지 않는다. 눌리면
+      컴포저가 열리고 탭바는 원래 있던 곳을 계속 가리킨다.
     */
     const shell = read('src/components/MobileShell.tsx');
     const tabs = [...shell.matchAll(/to: '(\/[a-z]+)'/g)].map((match) => match[1]);
-    expect(tabs).toEqual(['/home', '/me', '/diary', '/schedule', '/us']);
-    expect(tabs).not.toContain('/compose');
+    expect(tabs).toEqual(['/home', '/search', '/compose', '/schedule', '/us']);
+    expect(shell).toContain("matchPrefixes: [] as string[]");
   });
 });
 

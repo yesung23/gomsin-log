@@ -219,20 +219,27 @@ export function PaperProfile() {
         )}
       </div>
 
+      {/*
+        인스타의 `프로필 편집` · `프로필 공유` 자리.
+
+        탭 다섯이 인스타 배치로 돌아가면서 `나` 와 `일기장` 이 칸을 잃었다. 화면이 사라진
+        것이 아니라 **자리를 옮긴 것**이므로 여기서 닿아야 한다 -- 프로필이 관계의 화면이고,
+        내 상태(복무·주기·컨디션)와 쌓인 것을 묶는 일(일기장)이 둘 다 관계의 일이다.
+      */}
       <div className="flex gap-2 px-4 pt-3">
         <button
           type="button"
-          onClick={() => navigate('/my')}
+          onClick={() => navigate('/me')}
           className="ink-chip flex-1 py-2"
         >
-          <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>우리 소개 편집</span>
+          <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>오늘 내 상태</span>
         </button>
         <button
           type="button"
           onClick={() => navigate('/diary')}
           className="ink-chip flex-1 py-2"
         >
-          <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>기억 만들기</span>
+          <span className="text-caption font-semibold" style={{ color: 'var(--ink)' }}>일기장</span>
         </button>
       </div>
 

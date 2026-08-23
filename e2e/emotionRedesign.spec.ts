@@ -306,6 +306,27 @@ test("군화의 홈은 곰신과 같은 화면이고, 먼저 가리키는 링만
   await theirs.click();
   await expect(page).toHaveURL(/\/story\/partner$/);
 
+  /*
+   * `여기까지 확인` 은 사라지지 않았다 -- **읽기의 끝으로 옮겨갔다.**
+   *
+   * 앞선 판에서는 브리핑에 고정된 버튼이었고, north-star 가 시간을 재는 동작이
+   * 그것이었다. V4에서 CONFIRMED 를 쓰는 유일한 경로는 스토리를 끝까지 읽는 것이다
+   * (`StoryRoute.confirm`). 이 동작이 없어지면 링을 끄는 방법 자체가 사라지고,
+   * 군화의 홈은 영원히 "안 본 것이 있다"고 말하는 화면이 된다 -- 브리핑을 걷어낸
+   * 결정이 남긴 가장 큰 위험이 그것이므로 여기서 지킨다.
+   */
+  const ack = page.getByTestId('story-acknowledge');
+  for (let i = 0; i < 10 && (await ack.count()) === 0; i += 1) {
+    await page.getByRole('button', { name: '다음 순간' }).click();
+  }
+  await expect(ack).toBeVisible({ timeout: 10_000 });
+  await ack.click();
+
+  // 홈으로 돌아오면 링이 더 이상 안 봤다고 말하지 않는다.
+  await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
+  await expect(page.getByRole('button', { name: '춘향의 스토리' }).locator('[data-ring]'))
+    .toHaveAttribute('data-ring', 'seen', { timeout: 15_000 });
+
   await context.close();
 });
 

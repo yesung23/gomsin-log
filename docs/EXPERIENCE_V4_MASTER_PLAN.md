@@ -1,6 +1,14 @@
 # GOMSINLOG EXPERIENCE V4 MASTER PLAN
 ## — 종이로 만든 인스타그램 (Paper Instagram)
 
+> ⚠️ **이 문서는 계획이고, 지어진 것은 다르다 (2026-08-23).**
+> 실제 화면 구조·탭 배치·감정 UI·요약의 자리는 [`V4_AS_BUILT.md`](V4_AS_BUILT.md)가
+> 갖는다. 그 문서와 이 문서가 어긋나면 **그쪽이 이긴다** — 계획 뒤에 방향이 세 번
+> 바뀌었고 바뀐 이유가 거기 §6에 적혀 있다.
+>
+> 여기서 여전히 유효한 것: §1(컨셉) · §2(인스타 해부와 매핑) · §8(위험 요소).
+> 낡은 것: §5(IA) · §6(화면별 UX) · §7(배치 확정표) · §9(단계 계획).
+
 > **분석·설계 문서다. canonical이 아니며, 제품 코드를 바꾸지 않았다.**
 > 제품 의도는 [`PRODUCT_V3.md`](PRODUCT_V3.md), 사업전략은
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md), 구현 순서는

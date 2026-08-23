@@ -8,6 +8,7 @@ import { buildHighlights } from '@/lib/coupleHighlights';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { buildMonthTexture, monthsWithContent } from '@/features/us/monthTexture';
 import { MonthGrid } from '@/features/us/MonthGrid';
+import { MediaArchiveGrid } from '@/components/media/MediaArchiveGrid';
 import { InkCircle, PenFace } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { localToday } from '@/lib/cycle';
@@ -288,7 +289,7 @@ export function PaperProfile() {
             type="button"
             aria-label={label}
             aria-pressed={tab === id}
-            onClick={() => (id === 'trip' ? navigate('/trips') : setTab(id))}
+            onClick={() => setTab(id)}
             className="flex flex-1 items-center justify-center py-3"
             style={tab === id ? { borderBottom: 'var(--stroke-bold) solid var(--ink)' } : undefined}
           >
@@ -297,7 +298,36 @@ export function PaperProfile() {
         ))}
       </div>
 
-      {months.length === 0 ? (
+      {/*
+        탭을 그렸으면 눌렀을 때 다른 것이 나와야 한다 (2026-08-23).
+
+        `하루 · 사진 · 여행` 셋을 그려 놓고 `사진` 을 눌러도 하루 격자가 그대로였다.
+        미이행이 아니라 **없는 것을 있는 것처럼 그린 것**이고, 사용자에게는 눌리지 않는
+        탭으로 읽힌다.
+
+        `사진` 은 계획 #16 이 원래 이 자리에 두려던 미디어 아카이브다 --
+        `MediaArchiveGrid` 가 이미 있었고 아무도 부르지 않고 있었다.
+      */}
+      {tab === 'photo' ? (
+        <MediaArchiveGrid
+          records={records}
+          coupleId={profile.couple.coupleId}
+          emptyDescription="사진이 있는 기록을 남기면 여기 모여요."
+        />
+      ) : tab === 'trip' ? (
+        <div className="px-4 pt-8 text-center">
+          <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
+            여행은 따로 펼쳐 봐요.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate('/trips')}
+            className="ink-chip mt-3 min-h-11 px-4"
+          >
+            <span className="text-label" style={{ color: 'var(--ink)' }}>여행 열기</span>
+          </button>
+        </div>
+      ) : months.length === 0 ? (
         <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
           아직 쌓인 하루가 없어요.
           <br />
@@ -320,7 +350,8 @@ export function PaperProfile() {
         ))
       )}
 
-      {monthList.length > visibleMonthCount ? (
+      {/* `더 보기` 는 하루 격자의 것이다. 다른 탭에서 뜨면 무엇을 더 보는지 알 수 없다. */}
+      {tab === 'day' && monthList.length > visibleMonthCount ? (
         <button
           type="button"
           onClick={() => setVisibleMonthCount((count) => count + 3)}

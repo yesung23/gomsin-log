@@ -19,6 +19,8 @@ interface PostGridProps {
   records: DailyRecord[];
   coupleId?: string;
   onOpen: (recordId: string) => void;
+  emptyMessage?: string;
+  ariaLabel?: string;
 }
 
 /** 사진이 있는 칸. 훅은 반복문 안에서 부를 수 없으므로 따로 뗀다. */
@@ -72,15 +74,13 @@ function PhotoTile({
   );
 }
 
-export function PostGrid({ records, coupleId, onOpen }: PostGridProps) {
+export function PostGrid({ records, coupleId, onOpen, emptyMessage = '아직 사진이 없어요.', ariaLabel = '사진 게시물' }: PostGridProps) {
   const tiles = buildPostTiles(records);
 
   if (tiles.length === 0) {
     return (
       <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
-        아직 여행 사진이 없어요.
-        <br />
-        여행에서 찍은 사진이 여기 모여요.
+        {emptyMessage}
       </p>
     );
   }
@@ -90,7 +90,7 @@ export function PostGrid({ records, coupleId, onOpen }: PostGridProps) {
       data-testid="post-grid"
       className="grid grid-cols-3 gap-0.5 px-0.5"
       role="group"
-      aria-label="사진 게시물"
+      aria-label={ariaLabel}
     >
       {tiles.map((tile) => (
         <PhotoTile key={tile.recordId} tile={tile} coupleId={coupleId} onOpen={onOpen} />

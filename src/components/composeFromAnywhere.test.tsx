@@ -41,7 +41,7 @@ const ENTRY_POINTS: Array<{ file: string; label: string; where: string }> = [
     where: '홈 스토리 레일의 + 배지',
   },
   {
-    file: 'src/features/us/PaperProfile.tsx',
+    file: 'src/features/us/SharedProfile.tsx',
     label: '기록 남기기',
     where: '우리 헤더의 펜',
   },

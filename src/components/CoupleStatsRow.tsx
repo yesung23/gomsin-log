@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { buildCoupleStats, type ThirdSlotChoice } from '@/lib/coupleStats';
+import { effectiveDischargeDate } from '@/lib/milestones';
 import { loadThirdSlot, saveThirdSlot } from '@/lib/thirdSlotPreference';
 import type { CoupleEvent, MilitaryInfo } from '@/types';
 
@@ -38,7 +39,7 @@ export function CoupleStatsRow({
   onProtectionTap: () => void;
 }) {
   const navigate = useNavigate();
-  const hasMilitary = Boolean(military?.enlistmentDate && military?.expectedDischargeDate);
+  const hasMilitary = Boolean(military?.enlistmentDate && effectiveDischargeDate(military));
   const [thirdSlot, setThirdSlot] = useState<ThirdSlotChoice>(
     () => loadThirdSlot(userId, hasMilitary),
   );

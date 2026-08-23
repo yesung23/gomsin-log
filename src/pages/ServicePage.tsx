@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { useStore } from '@/lib/useStore';
 import { useEscapeKey } from '@/lib/hooks';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
-import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
+import { computeServiceProgress, effectiveDischargeDate, nextUpcomingEvent } from '@/lib/milestones';
 import { Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Branch, MilitaryStatus, DischargeDateSource } from '@/types';
@@ -80,7 +80,7 @@ export function ServicePage() {
   // No invented defaults: an empty field stays empty until the user fills it in.
   const [editEnlistDate, setEditEnlistDate] = useState(military?.enlistmentDate || '');
   const [editExpectedDischarge, setEditExpectedDischarge] = useState(
-    military?.expectedDischargeDate || '',
+    military?.expectedDischargeDate || military?.dischargeDate || '',
   );
   const [editDischargeSource, setEditDischargeSource] = useState<DischargeDateSource>(
     editableSource(military?.dischargeDateSource),
@@ -101,7 +101,7 @@ export function ServicePage() {
     setEditBranch(military?.branch || 'army');
     setEditStatus(editableStatus(military?.militaryStatus));
     setEditEnlistDate(military?.enlistmentDate || '');
-    setEditExpectedDischarge(military?.expectedDischargeDate || '');
+    setEditExpectedDischarge(military?.expectedDischargeDate || military?.dischargeDate || '');
     setEditDischargeSource(editableSource(military?.dischargeDateSource));
     setIsEditing(true);
   };
@@ -193,13 +193,21 @@ export function ServicePage() {
               </div>
 
               <div className="text-display mb-4 tracking-tight tabular-nums">
-                {progress.isDischarged ? '전역 🎉' : `D-${progress.remainingDays}`}
+                {progress.isDischarged
+                  ? '전역 🎉'
+                  : progress.isBeforeEnlistment
+                    ? `입대 D-${progress.daysUntilEnlistment ?? 0}`
+                    : `D-${progress.remainingDays}`}
               </div>
 
               <div className="space-y-2">
                 <div className="flex justify-between text-label font-medium text-white/80">
                   <span>복무율 {progress.percent}%</span>
-                  <span>{progress.remainingDays}일 남음</span>
+                  <span>
+                    {progress.isBeforeEnlistment
+                      ? `입대까지 ${progress.daysUntilEnlistment ?? 0}일`
+                      : `${progress.remainingDays}일 남음`}
+                  </span>
                 </div>
                 <div className="h-2.5 bg-black/25 rounded-full overflow-hidden">
                   <div
@@ -209,7 +217,7 @@ export function ServicePage() {
                 </div>
                 <div className="flex justify-between text-caption text-white/60 pt-1">
                   <span>입대 {formatLocalDate(military!.enlistmentDate!)}</span>
-                  <span>전역 {formatLocalDate(military!.expectedDischargeDate!)}</span>
+                  <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
                 </div>
               </div>
             </div>

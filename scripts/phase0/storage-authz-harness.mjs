@@ -114,6 +114,8 @@ const ORDER = [
   '055_notified_through_is_the_send_decision.sql',
   '056_diary_pages.sql',
   '057_profile_identity_and_caption.sql',
+  '058_couple_highlights.sql',
+  '059_partner_managed_username.sql',
 ];
 
 /**
@@ -3006,14 +3008,21 @@ check(
 // lower(username) index. Temporarily remove only that CHECK in this disposable
 // database, seed the uppercase side on B's separate row through real RLS, and
 // restore the CHECK before continuing with the remaining actor tests.
+// Migration 059 is already present in the fresh end-state chain. Temporarily
+// disable only its username trigger while this block seeds the historical 057
+// owner-managed fixture; the trigger is re-enabled before 058/059 assertions.
+mustSql(
+  'ALTER TABLE public.profiles DISABLE TRIGGER enforce_partner_managed_username',
+  '057 isolate 059 username trigger for historical fixture',
+);
 mustSql(
   'ALTER TABLE public.profiles DROP CONSTRAINT profiles_username_format_check',
   '057 isolate case-insensitive unique index',
 );
-const uppercaseSeed = asUser(B, `
+const uppercaseSeed = sql(`
   UPDATE public.profiles SET username = 'Alpha_User' WHERE id = '${B}'`);
 check(uppercaseSeed.ok, '057 case-insensitive uniqueness fixture uses a separate owner row');
-const caseInsensitiveDuplicate = asUser(A, `
+const caseInsensitiveDuplicate = sql(`
   UPDATE public.profiles SET username = 'alpha_user' WHERE id = '${A}'`);
 check(
   !caseInsensitiveDuplicate.ok,
@@ -3030,16 +3039,17 @@ mustSql(`
   '057 restore username format check',
 );
 
+mustSql(`UPDATE public.profiles SET username = 'alpha_user' WHERE id = '${A}'`, '057 seed owner username');
 const profileOwnerUpdate = asUser(A, `
   UPDATE public.profiles
-     SET username = 'alpha_user', profile_caption = 'A caption', profile_date_type = 'together'
+     SET profile_caption = 'A caption', profile_date_type = 'together'
    WHERE id = '${A}'`);
-check(profileOwnerUpdate.ok, '057 owner can update their own username, caption, and date type');
+check(profileOwnerUpdate.ok, '057 owner can update their own caption and date type');
 check(
   mustSql(`SELECT username || '|' || profile_caption || '|' || profile_date_type
              FROM public.profiles WHERE id = '${A}'`, '057 owner profile')
     === 'alpha_user|A caption|together',
-  '057 owner update persists all three profile fields',
+  '057 owner profile keeps the server-managed username and persists caption/date type',
 );
 
 const partnerProfileRead = asUser(B,
@@ -3096,6 +3106,134 @@ check(
       === 'A caption',
   '057 anon cannot change profiles',
 );
+mustSql(
+  'ALTER TABLE public.profiles ENABLE TRIGGER enforce_partner_managed_username',
+  '059 restore username trigger after historical fixture',
+);
+
+// ---------------------------------------------------------------------------
+// 058/059 -- shared highlights and partner-managed usernames.
+// ---------------------------------------------------------------------------
+const H_SHARED_A = '58000000-0000-4000-8000-000000000001';
+const H_SHARED_B = '58000000-0000-4000-8000-000000000002';
+const H_PRIVATE = '58000000-0000-4000-8000-000000000003';
+
+mustSql(`INSERT INTO public.daily_records
+  (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES
+    ('${H_SHARED_A}', '${A}', '${COUPLE1}', CURRENT_DATE, 'shared A', false),
+    ('${H_SHARED_B}', '${B}', '${COUPLE1}', CURRENT_DATE - 1, 'shared B', false),
+    ('${H_PRIVATE}', '${A}', '${COUPLE1}', CURRENT_DATE - 2, 'private A', true)
+  ON CONFLICT (id) DO NOTHING`, '058 highlight records');
+
+const highlightCreate = asUser(A,
+  `SELECT public.save_couple_highlight(NULL, '우리의 여름', ARRAY['${H_SHARED_A}', '${H_SHARED_B}']::uuid[], 0)`);
+check(highlightCreate.ok, '058 active member creates a shared highlight through the RPC');
+const highlightId = mustSql(
+  `SELECT id::text FROM public.couple_highlights WHERE couple_id = '${COUPLE1}' ORDER BY created_at DESC LIMIT 1`,
+  '058 highlight id',
+);
+check(
+  asUser(B, `SELECT count(*) FROM public.couple_highlights WHERE id = '${highlightId}'`).stdout.trim() === '1',
+  '058 active partner sees the same highlight parent',
+);
+check(
+  asUser(B, `SELECT count(*) FROM public.couple_highlight_items WHERE highlight_id = '${highlightId}'`).stdout.trim() === '2',
+  '058 active partner sees both shared highlight items',
+);
+check(
+  !asUser(A, `SELECT public.save_couple_highlight(NULL, 'private', ARRAY['${H_PRIVATE}']::uuid[], 0)`).ok,
+  '058 private records cannot be added to a highlight',
+);
+check(
+  !asUser(B, `SELECT public.save_couple_highlight(NULL, 'private', ARRAY['${H_PRIVATE}']::uuid[], 0)`).ok,
+  '058 partner cannot select the owner private record',
+);
+const highlightEdit = asUser(B, `SELECT public.save_couple_highlight('${highlightId}', 'partner_name', ARRAY['${H_SHARED_B}', '${H_SHARED_A}']::uuid[], 0)`);
+check(
+  highlightEdit.ok
+    && mustSql(`SELECT title FROM public.couple_highlights WHERE id = '${highlightId}'`, '058 partner title') === 'partner_name',
+  '058 either active member can edit the shared title and order',
+);
+check(
+  asUser(B, `DELETE FROM public.couple_highlights WHERE id = '${highlightId}'`).ok
+    && mustSql(`SELECT count(*) FROM public.couple_highlights WHERE id = '${highlightId}'`, '058 deleted highlight') === '0',
+  '058 either active member can delete a highlight',
+);
+
+const highlightRecreated = asUser(A,
+  `SELECT public.save_couple_highlight(NULL, '다시 고른 여름', ARRAY['${H_SHARED_A}', '${H_SHARED_B}']::uuid[], 0)`);
+check(highlightRecreated.ok, '058 a highlight can be recreated after deletion');
+const highlightId2 = mustSql(
+  `SELECT id::text FROM public.couple_highlights WHERE couple_id = '${COUPLE1}' ORDER BY created_at DESC LIMIT 1`,
+  '058 recreated highlight id',
+);
+check(
+  asUser(A, `UPDATE public.daily_records SET is_private = true WHERE id = '${H_SHARED_A}'`).ok
+    && mustSql(`SELECT count(*) FROM public.couple_highlight_items WHERE highlight_id = '${highlightId2}'`, '058 private transition') === '1',
+  '058 shared-to-private removes the selected item in the same transaction',
+);
+check(
+  asUser(A, `UPDATE public.daily_records SET is_private = false WHERE id = '${H_SHARED_A}'`).ok
+    && mustSql(`SELECT count(*) FROM public.couple_highlight_items WHERE highlight_id = '${highlightId2}'`, '058 no resurrection') === '1',
+  '058 private-to-shared does not resurrect a removed selection',
+);
+check(
+  asUser(B, `DELETE FROM public.daily_records WHERE id = '${H_SHARED_B}'`).ok
+    && mustSql(`SELECT count(*) FROM public.couple_highlights WHERE id = '${highlightId2}'`, '058 empty highlight') === '0',
+  '058 deleting the last selected record removes the empty highlight',
+);
+check(
+  !asAnon(`SELECT count(*) FROM public.couple_highlights`).ok
+    && !asAnon(`SELECT public.save_couple_highlight(NULL, 'anon', ARRAY['${H_SHARED_A}']::uuid[], 0)`).ok,
+  '058 anon cannot read or write highlights',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '058 former partner');
+check(
+  (asUser(B, `SELECT count(*) FROM public.couple_highlights`).ok
+    && asUser(B, `SELECT count(*) FROM public.couple_highlights`).stdout.trim() === '0')
+    && !asUser(B, `SELECT public.save_couple_highlight(NULL, 'former', ARRAY['${H_SHARED_A}']::uuid[], 0)`).ok,
+  '058 former partner cannot read or write the old highlight workspace',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '058 restore partner');
+
+const partnerUsernameUpdate = asUser(B,
+  `SELECT public.set_partner_username('alpha_partner')`);
+check(
+  partnerUsernameUpdate.ok
+    && mustSql(`SELECT username FROM public.profiles WHERE id = '${A}'`, '059 partner username') === 'alpha_partner',
+  '059 active partner can set the other profile username',
+);
+const ownerUsernameUpdate = asUser(A, `UPDATE public.profiles SET username = 'owner_try' WHERE id = '${A}'`);
+check(
+  !ownerUsernameUpdate.ok
+    && mustSql(`SELECT username FROM public.profiles WHERE id = '${A}'`, '059 owner username') === 'alpha_partner',
+  '059 the profile owner cannot change the global username directly',
+);
+const nullActorUsernameUpdate = sql(`UPDATE public.profiles SET username = 'null_actor_try' WHERE id = '${A}'`);
+check(
+  !nullActorUsernameUpdate.ok
+    && mustSql(`SELECT username FROM public.profiles WHERE id = '${A}'`, '059 null actor username') === 'alpha_partner',
+  '059 a NULL actor cannot change a username',
+);
+check(
+  !asUser(B, `SELECT public.set_partner_username('beta_user')`).ok
+    && mustSql(`SELECT username FROM public.profiles WHERE id = '${A}'`, '059 collision username') === 'alpha_partner',
+  '059 username collisions fail atomically',
+);
+check(
+  !asUser(C, `SELECT public.set_partner_username('third_party')`).ok
+    && !asAnon(`SELECT public.set_partner_username('anon_user')`).ok,
+  '059 unrelated and anon actors cannot use the partner username RPC',
+);
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '059 former partner');
+check(!asUser(B, `SELECT public.set_partner_username('former_try')`).ok, '059 former partner cannot rename the old partner');
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '059 restore partner');
 
 // ---------------------------------------------------------------------------
 // Report

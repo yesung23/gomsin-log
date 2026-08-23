@@ -5,6 +5,7 @@ import { visibleRecordsForViewer } from '@/lib/privacy';
 import { fetchEventsResultFromDB } from '@/lib/events';
 import { fetchTripsResultFromDB } from '@/lib/trips';
 import { fetchTalkAboutMarksResultFromDB } from '@/lib/talkAbout';
+import { fetchCoupleHighlightsResultFromDB } from '@/lib/highlights';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 
 export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
@@ -289,7 +290,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
      * waiting saw their entries vanish on the next load.
      */
     const coupleSpaceId = couple.coupleId;
-    const [recordsResult, eventsResult, tripsResult, talkAboutResult] = await Promise.all([
+    const [recordsResult, eventsResult, tripsResult, talkAboutResult, highlightsResult] = await Promise.all([
       coupleSpaceId
         ? fetchRecordsResultFromDB(coupleSpaceId)
         : Promise.resolve({ ok: true as const, records: [] as DailyRecord[] }),
@@ -302,6 +303,9 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       coupleSpaceId
         ? fetchTalkAboutMarksResultFromDB(coupleSpaceId)
         : Promise.resolve({ ok: true as const, marks: [] as TalkAboutMark[] }),
+      coupleSpaceId
+        ? fetchCoupleHighlightsResultFromDB(coupleSpaceId)
+        : Promise.resolve({ ok: true as const, highlights: [] }),
     ]);
     if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok || !talkAboutResult.ok) {
       // Prefer a definite cause over a generic one: `forbidden` from a slice read
@@ -346,6 +350,9 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
         events,
         trips,
         talkAboutMarks: talkAboutResult.marks,
+        // Highlights are additive. An older deployment without migration 058
+        // must keep the account usable while the rest of the workspace hydrates.
+        coupleHighlights: highlightsResult.ok ? highlightsResult.highlights : [],
         setupComplete: !!profileData.onboarding_completed_at,
       },
     };

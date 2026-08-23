@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Camera, Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -59,10 +59,9 @@ export function AvatarPicker({
    * Whether the edit controls are showing.
    *
    * Only meaningful once a photo is set. A photo is content, so it is shown clean;
-   * a permanent camera badge sat on top of someone's face and made the screen look
-   * like an editor rather than a profile. The default artwork keeps its badge,
-   * because without one the feature is undiscoverable -- which is exactly how the
-   * original fixed illustration was experienced.
+   * a permanent edit badge sat on top of someone's face and made the screen look
+   * like an editor rather than a profile. The profile action row and accessible
+   * button label keep the edit action discoverable without painting an icon over it.
    */
   const [revealed, setRevealed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -132,8 +131,7 @@ export function AvatarPicker({
     >
       {/*
         One control, two jobs depending on state:
-          - no photo  -> opens the file picker straight away, and carries a camera
-                         badge so the feature can be found at all
+          - no photo  -> opens the file picker straight away
           - photo set -> reveals the edit controls, because the photo is content and
                          should be shown without anything painted over it
         `aria-expanded` is only set in the second case, since only then does the
@@ -164,16 +162,6 @@ export function AvatarPicker({
             {children}
           </span>
         )}
-
-        {/* Discoverability hint, shown only while there is no photo to obscure. */}
-        {!dataUrl ? (
-          <span
-            aria-hidden="true"
-            className="absolute bottom-0 inset-x-0 flex items-center justify-center bg-foreground/45 py-0.5"
-          >
-            <Camera size={Math.max(10, Math.round(size * 0.18))} className="text-background" />
-          </span>
-        ) : null}
 
         {/* Revealed state: a scrim so the two icons stay legible on any photo. */}
         {dataUrl && revealed ? (
@@ -213,7 +201,7 @@ export function AvatarPicker({
               "before:absolute before:-inset-3 before:content-['']",
             )}
           >
-            <Camera size={Math.max(14, Math.round(size * 0.34))} />
+            <Pencil size={Math.max(14, Math.round(size * 0.34))} />
           </button>
 
           <button

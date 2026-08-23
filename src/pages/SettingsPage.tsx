@@ -9,9 +9,9 @@ import { AppBar } from '@/components/ui/AppBar';
 import {
   Shield, Unlink, Trash2, User, FileText, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
-  CalendarDays, Plane,
+  CalendarDays, Plane, X,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import { ContactHoursSection } from '@/components/ContactHoursSection';
@@ -60,8 +60,10 @@ export function SettingsPage() {
     invitationExpiresAt,
     refreshCoupleLifecycle,
     recoverExpiredSession,
+    setPartnerUsername,
   } = useStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile, records } = state;
   const settingsIdentityKey = state.authenticatedUser?.id || '';
   const identityRef = useRef(settingsIdentityKey);
@@ -266,12 +268,20 @@ export function SettingsPage() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [isSavingPartnerUsername, setIsSavingPartnerUsername] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(() => searchParams.get('profile') === 'edit');
   const [editName, setEditName] = useState(profile.myName);
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
-  const [editUsername, setEditUsername] = useState(profile.username || '');
   const [editProfileCaption, setEditProfileCaption] = useState(profile.profileCaption || '');
   const [editProfileDateType, setEditProfileDateType] = useState<ProfileDateType | ''>(profile.profileDateType || '');
+  const [editPartnerUsername, setEditPartnerUsername] = useState('');
+
+  const closeProfileModal = useCallback(() => {
+    setShowProfileModal(false);
+    if (searchParams.get('profile') === 'edit') {
+      navigate('/settings', { replace: true });
+    }
+  }, [navigate, searchParams]);
 
   useEscapeKey(() => {
     if (showDeleteAccountModal) {
@@ -285,7 +295,7 @@ export function SettingsPage() {
     } else if (showPWAModal) {
       setShowPWAModal(false);
     } else if (showProfileModal) {
-      if (!isSavingProfile) setShowProfileModal(false);
+      if (!isSavingProfile) closeProfileModal();
     }
   }, showDeleteAccountModal || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
 
@@ -340,18 +350,12 @@ export function SettingsPage() {
       toast.error('닉네임은 2~12자로 입력해 주세요.');
       return;
     }
-    const nextUsername = normalizeUsername(editUsername);
-    if (nextUsername && !isValidUsername(nextUsername)) {
-      toast.error('아이디는 소문자 영문으로 시작하는 3~20자여야 해요.');
-      return;
-    }
     const identity = captureIdentity();
     setIsSavingProfile(true);
     try {
       const saved = await updateProfile({
         myName: nextName,
         couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
-        username: nextUsername || undefined,
         profileCaption: editProfileCaption.trim() || undefined,
         profileDateType: editProfileDateType || undefined,
       });
@@ -360,10 +364,33 @@ export function SettingsPage() {
         toast.error('프로필을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
         return;
       }
-      setShowProfileModal(false);
+      closeProfileModal();
       toast.success('프로필이 저장되었습니다.');
     } finally {
       if (isCurrentIdentity(identity)) setIsSavingProfile(false);
+    }
+  };
+
+  const handleSavePartnerUsername = async () => {
+    if (isSavingPartnerUsername) return;
+    const nextUsername = normalizeUsername(editPartnerUsername);
+    if (!isValidUsername(nextUsername)) {
+      toast.error('아이디는 소문자 영문으로 시작하는 3~20자여야 해요.');
+      return;
+    }
+    const identity = captureIdentity();
+    setIsSavingPartnerUsername(true);
+    try {
+      const saved = await setPartnerUsername(nextUsername);
+      if (!isCurrentIdentity(identity)) return;
+      if (!saved) {
+        toast.error('상대방 아이디를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      setEditPartnerUsername('');
+      toast.success('상대방 아이디를 바꿨어요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsSavingPartnerUsername(false);
     }
   };
 
@@ -692,7 +719,6 @@ export function SettingsPage() {
               onClick={() => {
                 setEditName(profile.myName);
                 setEditAnniversary(profile.couple.anniversaryDate || '');
-                setEditUsername(profile.username || '');
                 setEditProfileCaption(profile.profileCaption || '');
                 setEditProfileDateType(profile.profileDateType || '');
                 setShowProfileModal(true);
@@ -722,6 +748,39 @@ export function SettingsPage() {
             </PressableRow>
           </RowGroup>
         </section>
+
+        {profile.couple.connected ? (
+          <section className="space-y-2" data-testid="partner-username-settings">
+            <SectionHeader title="상대방 아이디" />
+            <div className="rounded-surface border border-border bg-card p-4 space-y-3">
+              <div>
+                <h2 className="text-label font-semibold text-foreground">{profile.role === 'gomsin' ? '군화' : '곰신'}의 아이디 정하기</h2>
+                <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
+                  내 아이디는 상대방 계정에서, 상대방 아이디는 이 화면에서 정해요.
+                </p>
+              </div>
+              <label htmlFor="partner-username" className="sr-only">상대방 영어 아이디</label>
+              <input
+                id="partner-username"
+                value={editPartnerUsername}
+                onChange={(event) => setEditPartnerUsername(event.target.value.toLowerCase().slice(0, 20))}
+                maxLength={20}
+                autoCapitalize="none"
+                autoCorrect="off"
+                placeholder="상대방 아이디 입력"
+                className="h-11 w-full rounded-control border border-border bg-background px-3 text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+              />
+              <button
+                type="button"
+                onClick={() => void handleSavePartnerUsername()}
+                disabled={isSavingPartnerUsername || !editPartnerUsername.trim()}
+                className="press-response w-full min-h-11 rounded-control bg-foreground px-4 text-label font-semibold text-background disabled:opacity-50"
+              >
+                {isSavingPartnerUsername ? '저장 중…' : '상대방 아이디 저장'}
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         {/*
           Durable entry points to the non-tab routes.
@@ -857,7 +916,18 @@ export function SettingsPage() {
         {showProfileModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
-              <h3 id="profile-modal-title" className="text-heading text-foreground">내 프로필 수정</h3>
+              <div className="flex items-center justify-between">
+                <h3 id="profile-modal-title" className="text-heading text-foreground">내 프로필 수정</h3>
+                <button
+                  type="button"
+                  onClick={closeProfileModal}
+                  disabled={isSavingProfile}
+                  className="press-response inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="프로필 수정 닫기"
+                >
+                  <X size={18} aria-hidden="true" />
+                </button>
+              </div>
 
               <div className="space-y-2">
                 <label htmlFor="edit-nickname" className="text-label font-semibold text-muted-foreground">
@@ -872,21 +942,10 @@ export function SettingsPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="edit-username" className="text-label font-semibold text-muted-foreground">
-                  영어 아이디 (3~20자)
-                </label>
-                <input
-                  id="edit-username"
-                  value={editUsername}
-                  onChange={(event) => setEditUsername(event.target.value.toLowerCase().slice(0, 20))}
-                  maxLength={20}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  placeholder="예: gomsin_log"
-                  className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
-                />
-                <p className="text-caption text-muted-foreground">소문자 영문으로 시작하고 영문·숫자·밑줄만 사용할 수 있어요.</p>
+              <div className="rounded-control border border-border bg-muted px-3 py-2">
+                <p className="text-caption text-muted-foreground">내 아이디</p>
+                <p className="mt-0.5 text-label font-semibold text-foreground">@{profile.username || '아직 정해지지 않았어요'}</p>
+                <p className="mt-1 text-caption text-muted-foreground">아이디는 상대방이 정해요. 별명은 이 화면에서 바꿀 수 있어요.</p>
               </div>
 
               <ProfileCaptionEditor
@@ -914,7 +973,7 @@ export function SettingsPage() {
 
               <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => setShowProfileModal(false)}
+                  onClick={closeProfileModal}
                   disabled={isSavingProfile}
                   className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
                 >

@@ -16,7 +16,8 @@ import { StoryViewer, type StoryMode } from '@/features/story/StoryViewer';
  *     /story/partner            상대의 현재 구간, 속표지부터
  *     /story/partner?at=<id>    그 정확한 순간부터
  *     /story/mine               내가 오늘 남긴 것
- *     /story/day/<YYYY-MM-DD>   보관 스토리 (우리 격자 · 하이라이트)
+ *     /story/day/<YYYY-MM-DD>   보관 스토리 (우리 격자)
+ *     /story/highlight/<id>     사용자가 고른 공유 사진 묶음
  *
  * ## 왜 라우트여야 하는가
  *
@@ -53,6 +54,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   const { surface, todayStr, acknowledge } = usePartnerDay({ persist: mode === 'today' });
 
   const dateParam = params.date;
+  const highlightId = params.highlightId;
   const focusRecordId = searchParams.get('at') || undefined;
 
   const visible = useMemo(
@@ -67,13 +69,21 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
         .filter((record) => isOwnRecord(record, viewer) && record.date === todayStr)
         .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     }
+    if (mode === 'highlight') {
+      const highlight = (state.coupleHighlights ?? []).find((item) => item.id === highlightId);
+      if (!highlight) return [];
+      const order = new Map(highlight.recordIds.map((id, index) => [id, index]));
+      return visible
+        .filter((record) => !record.isPrivate && order.has(record.id))
+        .sort((a, b) => (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    }
     // 보관: 그 날짜의 기록 전부. 내 비공개 기록도 나에게는 보인다 --
     // 본인에게 본인 기록을 숨기는 것은 프라이버시가 아니다.
     if (!dateParam || !isCalendarDate(dateParam)) return [];
     return visible
       .filter((record) => record.date === dateParam)
       .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-  }, [mode, surface, visible, viewer, todayStr, dateParam]);
+  }, [dateParam, highlightId, mode, state.coupleHighlights, surface, todayStr, visible, viewer]);
 
   const projection = useMemo(
     () => projectStory({
@@ -81,20 +91,23 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       todayStr,
       focusRecordId,
       // 보관 스토리에는 목차를 붙이지 않는다. 지나간 하루는 훑는 것이 아니라 넘기는 것이다.
-      withCover: mode !== 'archive',
+      withCover: mode !== 'archive' && mode !== 'highlight',
     }),
     [records, todayStr, focusRecordId, mode],
   );
 
   const title = useMemo(() => {
     if (mode === 'mine') return '나의 오늘';
+    if (mode === 'highlight') {
+      return (state.coupleHighlights ?? []).find((item) => item.id === highlightId)?.title || '하이라이트';
+    }
     if (mode === 'archive' && dateParam) {
       const [, month, day] = dateParam.split('-');
       return `${Number(month)}월 ${Number(day)}일`;
     }
     const multiDay = records.some((record) => record.date !== todayStr);
     return multiDay ? `${partnerName}의 놓친 하루` : `${partnerName}의 오늘`;
-  }, [mode, dateParam, records, todayStr, partnerName]);
+  }, [highlightId, mode, dateParam, records, state.coupleHighlights, todayStr, partnerName]);
 
   const markedRecordIds = useMemo(
     () => new Set(
@@ -157,7 +170,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background px-8 text-center">
         <p className="text-body text-muted-foreground">
-          {mode === 'mine' ? '오늘 남긴 기록이 아직 없어요' : '여기에는 볼 수 있는 기록이 없어요'}
+          {mode === 'mine' ? '오늘 남긴 기록이 아직 없어요' : mode === 'highlight' ? '이 하이라이트에는 볼 수 있는 사진이 없어요' : '여기에는 볼 수 있는 기록이 없어요'}
         </p>
         <button
           type="button"
@@ -181,7 +194,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       onClose={close}
       onOpenRecord={openRecord}
       onJumpToRecord={jumpToRecord}
-      onToggleBookmark={mode === 'archive' ? undefined : toggleBookmark}
+      onToggleBookmark={mode === 'archive' || mode === 'highlight' ? undefined : toggleBookmark}
       onAcknowledge={mode === 'today' ? confirm : undefined}
       bookmarkDisabledReason={isOffline ? '연결되면 표시할 수 있어요' : undefined}
       acknowledgeDisabledReason={

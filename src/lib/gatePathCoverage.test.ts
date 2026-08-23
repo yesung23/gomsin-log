@@ -158,6 +158,18 @@ const STORE_GATED: Record<string, { functions: string[]; reason: string }> = {
       + 'call ensureNotPendingBeforeServerCall() before the first request. Enforced '
       + 'by the import-boundary assertion.',
   },
+  'highlights.ts': {
+    functions: ['saveCoupleHighlightToDB', 'deleteCoupleHighlightFromDB'],
+    reason:
+      'Gated at the store.tsx call site: highlight mutations pass through the '
+      + 'store pre-flight deletion gate. Read access is explicitly classified below.',
+  },
+  'partnerUsername.ts': {
+    functions: ['setPartnerUsernameInDB'],
+    reason:
+      'Gated at the store.tsx call site: partner username mutation passes through '
+      + 'the store pre-flight deletion gate.',
+  },
 };
 
 /**
@@ -186,6 +198,10 @@ const STORE_GATED_EXEMPTIONS: Record<string, Record<string, string>> = {
     fetchEventsResultFromDB: 'Read-only: fetches events without mutation',
     fetchEventsFromDB: 'Read-only: wrapper around fetchEventsResultFromDB',
   },
+  'highlights.ts': {
+    fetchCoupleHighlightsResultFromDB: 'Read-only: fetches shared highlight metadata',
+  },
+  'partnerUsername.ts': {},
 };
 
 /**

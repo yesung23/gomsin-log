@@ -127,10 +127,41 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`복무율 ${progress!.percent}%`);
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${progress!.elapsedDays}일 경과`);
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${progress!.remainingDays}일 남음`);
-    expect(screen.getByTestId('service-level')).toHaveTextContent(`복무 레벨 ${level!.level} · ${level!.label}`);
+    expect(screen.getByTestId('service-level')).toHaveTextContent(
+      level!.isPreEnlistment ? '입대 대기' : `현재 계급 · ${level!.label}`,
+    );
     expect(screen.getByTestId('service-level-guide')).toHaveTextContent(level!.nextLabel!);
+    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(`${level!.remainingDaysToNext}일 남음`);
+    expect(screen.getByTestId('service-rank-rail')).toBeInTheDocument();
+    expect(screen.getByTestId('service-rank-step-1')).toHaveTextContent('이등병');
+    expect(screen.getByTestId('service-rank-step-2')).toHaveTextContent('일병');
+    expect(screen.getByTestId('service-rank-step-3')).toHaveTextContent('상병');
+    expect(screen.getByTestId('service-rank-step-4')).toHaveTextContent('병장');
     expect(screen.getByText(/평일 18:00–21:00/)).toBeInTheDocument();
     expect(screen.queryByTestId('cycle-tracker-section')).not.toBeInTheDocument();
+  });
+
+  it('입대 전에는 전역까지가 아니라 입대까지의 실제 D-day를 보여준다', () => {
+    const plannedMilitary: MilitaryInfo = {
+      branch: 'army',
+      militaryStatus: 'serving',
+      enlistmentDate: '2099-01-01',
+      expectedDischargeDate: '2100-07-01',
+      dischargeDateSource: 'manual',
+    };
+    currentState = stateWith({ role: 'soldier', military: plannedMilitary });
+    renderSearch();
+
+    const progress = computeServiceProgress(plannedMilitary, localToday());
+    expect(progress?.isBeforeEnlistment).toBe(true);
+    expect(progress?.daysUntilEnlistment).toBeGreaterThan(0);
+    expect(screen.getByText(`입대 D-${progress!.daysUntilEnlistment}`)).toBeInTheDocument();
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
+      `입대까지 ${progress!.daysUntilEnlistment}일`,
+    );
+    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(
+      `입대까지 ${progress!.daysUntilEnlistment}일`,
+    );
   });
 
   it('인라인 복무 정보의 수정 버튼은 /service 로 이동한다', () => {
@@ -193,8 +224,53 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
 
     expect(screen.getByText('전역했어요')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '복무 정보 입력하기' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('service-level')).toHaveTextContent('복무 레벨 5 · 완주');
+    expect(screen.getByTestId('service-level')).toHaveTextContent('현재 계급 · 전역');
     expect(screen.getByTestId('service-level-guide')).toHaveTextContent('복무를 마쳤어요.');
+  });
+
+  it('계급별 단계(이등병·일병·상병·병장) 레일에서 현재 계급과 이전 계급이 시각적으로 구분된다', () => {
+    // 2025-09-01 입대, 2027-05-31 전역 (총 637일)
+    // today가 2026-08-24 기준 약 357일 경과 (56% -> 상병)
+    currentState = stateWith({
+      role: 'soldier',
+      military: {
+        branch: 'army',
+        militaryStatus: 'serving',
+        enlistmentDate: '2025-09-01',
+        expectedDischargeDate: '2027-05-31',
+        dischargeDateSource: 'manual',
+      },
+    });
+    renderSearch();
+
+    const level = computeServiceLevel(computeServiceProgress(currentState.profile.military, localToday()));
+    expect(screen.getByTestId('service-level')).toHaveTextContent(`현재 계급 · ${level!.label}`);
+    expect(screen.getByTestId('service-level')).toHaveTextContent(level!.levelBadge);
+    expect(screen.getByTestId('service-rank-rail')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: '현재 계급 경험치 진행률' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' })).toHaveAttribute('aria-valuenow');
+
+    const step3 = screen.getByTestId('service-rank-step-3');
+    expect(step3).toHaveTextContent('상병');
+    expect(step3).toHaveTextContent('50%');
+  });
+
+  it('전역한 군화는 계급 경험치 프로그레스바를 별도로 노출하지 않고 전역 완료 상태를 제공한다', () => {
+    currentState = stateWith({
+      role: 'soldier',
+      military: {
+        branch: 'army',
+        militaryStatus: 'discharged',
+        enlistmentDate: '2024-01-01',
+        expectedDischargeDate: '2025-07-01',
+        dischargeDateSource: 'manual',
+      },
+    });
+    renderSearch();
+
+    expect(screen.getByTestId('service-level')).toHaveTextContent('MAX');
+    expect(screen.getByTestId('service-level')).toHaveTextContent('현재 계급 · 전역');
+    expect(screen.queryByRole('progressbar', { name: '현재 계급 경험치 진행률' })).not.toBeInTheDocument();
   });
 });
 

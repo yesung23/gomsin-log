@@ -1,5 +1,6 @@
 import { createContext } from 'react';
 import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent, Role } from '@/types';
+import type { CoupleHighlightDraft, HighlightMutationResult } from '@/lib/highlights';
 import type { AccountDeletionOutcome, DeletionStatus } from '@/lib/accountDeletion';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { AuthSyncStage } from '@/lib/sync';
@@ -128,6 +129,9 @@ export interface StoreContextType {
     profileUpdates: Partial<UserProfile>,
     options?: { persist?: boolean },
   ) => Promise<boolean>;
+  saveCoupleHighlight: (draft: CoupleHighlightDraft) => Promise<HighlightMutationResult>;
+  deleteCoupleHighlight: (highlightId: string) => Promise<boolean>;
+  setPartnerUsername: (username: string) => Promise<boolean>;
   addRecord: (record: Omit<DailyRecord, 'id' | 'createdAt'>) => Promise<boolean>;
   addRecordWithMedia: (
     record: Omit<DailyRecord, 'id' | 'createdAt'>,

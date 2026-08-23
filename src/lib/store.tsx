@@ -44,6 +44,13 @@ import {
 } from '@/lib/events';
 import { fetchTripsResultFromDB, reconcileParentTrips } from '@/lib/trips';
 import {
+  deleteCoupleHighlightFromDB,
+  fetchCoupleHighlightsResultFromDB,
+  saveCoupleHighlightToDB,
+  type CoupleHighlightDraft,
+} from '@/lib/highlights';
+import { setPartnerUsernameInDB } from '@/lib/partnerUsername';
+import {
   fetchTalkAboutMarksResultFromDB,
   markTalkAboutInDB,
   unmarkTalkAboutInDB,
@@ -114,7 +121,7 @@ import {
 } from '@/lib/accountDeletion';
 
 /** Which slice of shared state a realtime notification affects. */
-type SyncSlice = 'records' | 'events' | 'trips' | 'talk-about';
+type SyncSlice = 'records' | 'events' | 'trips' | 'talk-about' | 'highlights' | 'profile';
 type ActiveIdentity = { userId: string; generation: number };
 type ActiveWorkspace = ActiveIdentity & { coupleId: string };
 
@@ -253,6 +260,7 @@ const DEFAULT_STATE: AppState = {
   records: [],
   events: [],
   trips: [],
+  coupleHighlights: [],
   talkAboutMarks: [],
   widgetLayout: DEFAULT_LAYOUT_BY_ROLE.gomsin,
   soldierWidgetLayout: DEFAULT_LAYOUT_BY_ROLE.soldier,
@@ -1299,6 +1307,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   records: [],
                   events: [],
                   trips: [],
+                  coupleHighlights: [],
                 };
               }
 
@@ -1312,6 +1321,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   records: [],
                   events: [],
                   trips: [],
+                  coupleHighlights: [],
                 };
               }
 
@@ -1492,6 +1502,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       events: current.events.filter((event) =>
         event.isPrivate && event.createdBy === expected.userId),
       trips: [],
+      coupleHighlights: [],
     };
     replaceStateImmediately(nextState);
     return true;
@@ -1559,6 +1570,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       events: current.events.filter((event) =>
         event.isPrivate && event.createdBy === current.authenticatedUser?.id),
       trips: [],
+      coupleHighlights: [],
     };
     replaceStateImmediately(nextState);
     return true;
@@ -1603,11 +1615,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       // Recovery is never snapshot-based: every shared slice must be read again
       // through the caller's current RLS policy after membership is confirmed.
-      const [recordsResult, eventsResult, tripsResult, talkAboutResult] = await Promise.all([
+      const [recordsResult, eventsResult, tripsResult, talkAboutResult, highlightsResult] = await Promise.all([
         fetchRecordsResultFromDB(workspace.coupleId),
         fetchEventsResultFromDB(workspace.coupleId),
         fetchTripsResultFromDB(workspace.coupleId),
         fetchTalkAboutMarksResultFromDB(workspace.coupleId),
+        fetchCoupleHighlightsResultFromDB(workspace.coupleId),
       ]);
       if (!isLatestCurrentWorkspace()) return false;
       if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
@@ -1635,6 +1648,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // removed. Preserve the last authorized list and let the next
         // invalidation/manual refresh retry it.
         talkAboutMarks: talkAboutResult.ok ? talkAboutResult.marks : current.talkAboutMarks,
+        coupleHighlights: highlightsResult.ok ? highlightsResult.highlights : current.coupleHighlights,
       };
       quarantinedWorkspaceRef.current = null;
       // Shared data is authoritative again. Whether it will keep itself up to
@@ -1709,6 +1723,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         && !isWorkspaceQuarantined()
         && membershipReconciliationRef.current === authorizationRevision;
       try {
+        if (slice === 'profile') {
+          const result = await fetchFullStateResultFromDB(authUserId);
+          if (!isCurrentRefresh() || !result.ok || !result.state?.profile) return;
+          updateStateImmediately((current) =>
+            isCurrentRefresh()
+              ? { ...current, profile: result.state!.profile! }
+              : current,
+          );
+          return;
+        }
         if (slice === 'records') {
           const result = await fetchRecordsResultFromDB(coupleId);
           if (!isCurrentRefresh()) return;
@@ -1777,6 +1801,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
           updateStateImmediately((current) =>
             isCurrentRefresh() ? { ...current, talkAboutMarks: marks } : current,
+          );
+          return;
+        }
+        if (slice === 'highlights') {
+          const result = await fetchCoupleHighlightsResultFromDB(coupleId);
+          if (!isCurrentRefresh()) return;
+          // Migration 058 is additive. A client deployed before it exists must
+          // keep the already-authorized profile usable and retry later.
+          if (!result.ok) return;
+          updateStateImmediately((current) =>
+            isCurrentRefresh()
+              ? { ...current, coupleHighlights: result.highlights }
+              : current,
           );
           return;
         }
@@ -1887,6 +1924,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const invalidation = payload.new as Record<string, unknown>;
           if (invalidation.slice === 'events') scheduleRefresh('events');
           if (invalidation.slice === 'talk_about') scheduleRefresh('talk-about');
+          if (invalidation.slice === 'highlights') scheduleRefresh('highlights');
+          if (invalidation.slice === 'profile') scheduleRefresh('profile');
         },
       )
       .on(
@@ -2181,6 +2220,55 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       console.error('[gomsinlog] Failed to update profile settings:', error);
       return false;
     }
+  };
+
+  const saveCoupleHighlight = async (draft: CoupleHighlightDraft) => {
+    const workspace = captureActiveWorkspace();
+    if (!workspace || draft.coupleId !== workspace.coupleId) {
+      return { ok: false as const, reason: 'forbidden' as const };
+    }
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
+      return { ok: false as const, reason: 'forbidden' as const };
+    }
+    if (!isCurrentWorkspace(workspace)) {
+      return { ok: false as const, reason: 'forbidden' as const };
+    }
+    const result = await saveCoupleHighlightToDB(draft);
+    if (result.ok && result.highlight && isCurrentWorkspace(workspace)) {
+      updateStateImmediately((current) => {
+        const currentHighlights = current.coupleHighlights ?? [];
+        const withoutSaved = currentHighlights.filter((item) => item.id !== result.highlight?.id);
+        return {
+          ...current,
+          coupleHighlights: [...withoutSaved, result.highlight!]
+            .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt)),
+        };
+      });
+    }
+    return result;
+  };
+
+  const deleteCoupleHighlight = async (highlightId: string): Promise<boolean> => {
+    const workspace = captureActiveWorkspace();
+    if (!workspace || !highlightId) return false;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!isCurrentWorkspace(workspace)) return false;
+    const deleted = await deleteCoupleHighlightFromDB(workspace.coupleId, highlightId);
+    if (deleted && isCurrentWorkspace(workspace)) {
+      updateStateImmediately((current) => ({
+        ...current,
+        coupleHighlights: (current.coupleHighlights ?? []).filter((item) => item.id !== highlightId),
+      }));
+    }
+    return deleted;
+  };
+
+  const setPartnerUsername = async (username: string): Promise<boolean> => {
+    const workspace = captureActiveWorkspace();
+    if (!workspace) return false;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (!isCurrentWorkspace(workspace)) return false;
+    return setPartnerUsernameInDB(username);
   };
 
   const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {
@@ -3577,6 +3665,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         retryAccountDeletion,
         retrySharedAccess,
         updateProfile,
+        saveCoupleHighlight,
+        deleteCoupleHighlight,
+        setPartnerUsername,
         addRecord,
         addRecordWithMedia,
         queueRecordForLater,

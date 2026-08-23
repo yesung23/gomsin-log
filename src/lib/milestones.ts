@@ -69,6 +69,15 @@ export interface ServiceProgress {
   totalDays: number;
   remainingDays: number;
   isDischarged: boolean;
+  /** Days until enlistment when today is before the entered enlistment date. */
+  daysUntilEnlistment?: number;
+  /** True when today is before the entered enlistment date. */
+  isBeforeEnlistment?: boolean;
+}
+
+/** Prefer an explicitly recorded actual discharge date over an estimate. */
+export function effectiveDischargeDate(military: MilitaryInfo | undefined): string | undefined {
+  return military?.dischargeDate || military?.expectedDischargeDate;
 }
 
 /**
@@ -80,7 +89,7 @@ export function computeServiceProgress(
   todayStr: string,
 ): ServiceProgress | null {
   const enlistment = military?.enlistmentDate;
-  const discharge = military?.expectedDischargeDate;
+  const discharge = effectiveDischargeDate(military);
   if (!enlistment || !discharge) return null;
   if (military?.militaryStatus === 'unknown') return null;
 
@@ -90,6 +99,7 @@ export function computeServiceProgress(
   const elapsedRaw = daysBetweenLocal(enlistment, todayStr);
   const elapsedDays = Math.min(Math.max(elapsedRaw, 0), totalDays);
   const remainingDays = Math.max(daysBetweenLocal(todayStr, discharge), 0);
+  const daysUntilEnlistment = Math.max(-elapsedRaw, 0);
 
   return {
     percent: Math.round((elapsedDays / totalDays) * 1000) / 10,
@@ -97,6 +107,8 @@ export function computeServiceProgress(
     totalDays,
     remainingDays,
     isDischarged: remainingDays === 0 && elapsedRaw >= totalDays,
+    daysUntilEnlistment,
+    isBeforeEnlistment: elapsedRaw < 0,
   };
 }
 

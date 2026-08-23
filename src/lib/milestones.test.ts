@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   nextAnniversaryMilestone,
   computeServiceProgress,
+  effectiveDischargeDate,
   nextUpcomingEvent,
   findMemories,
 } from '@/lib/milestones';
@@ -59,6 +60,15 @@ function military(overrides: Partial<MilitaryInfo> = {}): MilitaryInfo {
 }
 
 describe('computeServiceProgress', () => {
+  it('prefers an actual discharge date over an estimate', () => {
+    const militaryInfo = military({
+      expectedDischargeDate: '2027-01-01',
+      dischargeDate: '2026-12-15',
+    });
+    expect(effectiveDischargeDate(militaryInfo)).toBe('2026-12-15');
+    expect(computeServiceProgress(militaryInfo, '2026-12-01')?.remainingDays).toBe(14);
+  });
+
   it('returns null when the dates are unknown', () => {
     expect(computeServiceProgress(undefined, '2026-07-31')).toBeNull();
     expect(computeServiceProgress(military({ enlistmentDate: undefined }), '2026-07-31')).toBeNull();
@@ -97,8 +107,11 @@ describe('computeServiceProgress', () => {
   it('clamps to the 0-100 range outside the service window', () => {
     const before = computeServiceProgress(military(), '2025-06-01');
     expect(before?.percent).toBe(0);
+    expect(before?.daysUntilEnlistment).toBe(214);
+    expect(before?.isBeforeEnlistment).toBe(true);
     const after = computeServiceProgress(military(), '2030-01-01');
     expect(after?.percent).toBe(100);
+    expect(after?.daysUntilEnlistment).toBe(0);
     expect(after?.isDischarged).toBe(true);
   });
 

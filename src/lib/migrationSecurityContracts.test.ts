@@ -69,6 +69,8 @@ const CLIENT_RPCS = [
   'public.create_couple_and_invitation(text, text)',
   'public.reorder_trip_items(uuid[], integer[])',
   'public.disconnect_couple()',
+  'public.save_couple_highlight(uuid, text, uuid[], integer)',
+  'public.set_partner_username(text)',
 ] as const;
 
 describe('every SECURITY DEFINER function ends up with a pinned search_path', () => {

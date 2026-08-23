@@ -373,6 +373,7 @@ export function App() {
           <Route path="/story/partner" element={<StoryRoute mode="today" />} />
           <Route path="/story/mine" element={<StoryRoute mode="mine" />} />
           <Route path="/story/day/:date" element={<StoryRoute mode="archive" />} />
+          <Route path="/story/highlight/:highlightId" element={<StoryRoute mode="highlight" />} />
           {!state.setupComplete ? (
             <>
               <Route path="/onboarding" element={<OnboardingPage />} />

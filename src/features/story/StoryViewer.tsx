@@ -36,7 +36,7 @@ import { cn } from '@/lib/utils';
  * 액션 줄에 붙이면 된다.
  */
 
-export type StoryMode = 'today' | 'mine' | 'archive';
+export type StoryMode = 'today' | 'mine' | 'archive' | 'highlight';
 
 export interface StoryViewerProps {
   cards: StoryCard[];
@@ -218,7 +218,7 @@ export function StoryViewer({
 
       {card.kind === 'moment' ? (
         <div className={cn('flex items-center gap-1 border-t border-border px-3 py-2 transition-opacity', bare && 'opacity-0')}>
-          {mode !== 'archive' && onToggleBookmark ? (
+          {mode !== 'archive' && mode !== 'highlight' && onToggleBookmark ? (
             <Bookmark
               marked={marked}
               onToggle={() => onToggleBookmark(card.record.id, !marked)}

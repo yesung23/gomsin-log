@@ -114,6 +114,287 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-24 · Codex · Gemini 3.7 Flash 독립 감사 반영 및 인스타그램형 프로필/복무 표면 최종 로컬 게이트
+
+#### PLAN POSITION
+- Phase: V4 product-surface completion / 찾기·마이·공유 프로필
+- Workstream: engineering — functionality, data integrity, privacy, authorization, synchronization, testing
+- Step: 독립 기능별 감사 결과 반영 및 현재 working tree의 최종 로컬 게이트
+- Previous Gate: 찾기 복무 레벨·프로필 설정 진입의 로컬 checkpoint
+- This Gate: 복무 날짜 진실성, 공유 하이라이트/프로필 탭, partner-managed username 권한, RLS 계약, 렌더링 경로를 통합 검증
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — 고객·수익화·저장 전략을 변경하지 않음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/AI_SESSION_PROTOCOL.md`, `docs/skills/feature-build.md`, `docs/skills/migration-gate.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, 현재 코드, `bash scripts/agent/session-start.sh`, 현재 branch/HEAD/origin/Production probe
+- Latest relevant Work Log checked: 2026-08-24 복무 계급 레일 및 우리 프로필 설정 진입 기록
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? YES — 사용자가 요청한 물리적 폰 전용 전역 username 변경 의미에 한정
+- If YES, what conflict: 브라우저/서버 세션은 물리적 기기를 증명할 수 없고 기존 `profiles.username`은 계정 소유 필드다. 따라서 활성 커플의 인증된 반대편 세션을 검증하는 별도 RPC만 구현했으며 물리적 폰이라는 주장은 하지 않음
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: primary GPT-5/Codex; independent delegated reviewer `google-antigravity/gemini-3.7-flash`
+- Role: primary integrator; bounded implementation owner; independent feature/privacy/security reviewer
+- PR: none
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- Old HEAD: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- New/Reviewed HEAD: same commit plus the current uncommitted working-tree diff
+
+#### CHANGED / REVIEWED
+- file: `src/lib/milestones.ts`, `src/lib/serviceLevel.ts`, `src/features/search/SearchPage.tsx`, `src/pages/ServicePage.tsx`, `src/components/CoupleStatsRow.tsx`
+- function/component/migration: effective discharge date, service progression, search/service surfaces
+- what changed/reviewed: actual 전역일이 있으면 예상 전역일보다 우선하고, 이등병·일병·상병·병장 레일과 복무 진행률/남은 기간을 입대 전·복무 중·전역 상태에 맞게 표시
+- why: 찾기에서 실제 입력값으로 개인 복무 진행을 게임처럼 보여주되 관계 점수·애정 점수로 해석하지 않기 위해
+- file: `src/features/us/SharedProfile.tsx`, `src/features/us/PaperProfile.tsx`, `src/components/AvatarPicker.tsx`, `src/components/ProfileIdentity.tsx`, `src/pages/SettingsPage.tsx`
+- function/component/migration: 공유 프로필, 프로필 편집, 아바타, 하이라이트 rail, 프로필 탭
+- what changed/reviewed: 한 커플의 공유 프로필만 렌더하고 `@username`·별명·문구를 분리했으며, 카메라 배지를 제거하고 커스텀 하이라이트와 격자·사진·여행 표면을 제공
+- why: 마이 탭을 익숙한 Instagram 프로필 흐름으로 단순화하고 private 기록·관계 점수·조회 수를 노출하지 않기 위해
+- file: `src/lib/highlights.ts`, `src/lib/store.tsx`, `src/lib/sync.ts`, `src/types/index.ts`, `src/features/story/StoryRoute.tsx`, `src/features/story/StoryViewer.tsx`, `src/App.tsx`
+- function/component/migration: 공유 하이라이트 CRUD·동기화·highlight story route
+- what changed/reviewed: 공유 기록만 선택하는 독립 하이라이트 생성·수정·삭제·cover-by-first-item·저장 순서 story viewer와 profile/highlights additive refresh 경로를 연결
+- why: 기념일·일정·전역 원본에 묶이지 않는 Instagram식 하이라이트를 만들되 private 콘텐츠를 재공유하지 않기 위해
+- file: `src/lib/partnerUsername.ts`, `supabase/migrations/058_couple_highlights.sql`, `supabase/migrations/059_partner_managed_username.sql`
+- function/component/migration: partner username RPC, highlight tables/RLS/save RPC/cleanup trigger
+- what changed/reviewed: 활성 커플·반대편 세션·삭제 상태·충돌·former partner·anon 경계를 검증하는 로컬 migration 계약을 추가; 본인 직접 username 변경은 막음
+- why: 사용자의 “서로의 ID를 정한다” 요구를 계정 소유권을 무너뜨리지 않는 서버 권한 경계로 제한하기 위해
+- file: `scripts/phase0/storage-authz-harness.mjs`, 관련 `src/**/*.test.*`
+- function/component/migration: 058/059 fresh-chain 계약 및 rank/profile/highlight/story/caption 회귀 테스트
+- what changed/reviewed: NULL actor username 변경 거부, 실제 전역일, 만남 토큰 범위, highlight 선택 순서, 사진 탭 중복 제거를 검증
+- why: Gemini 3.7 Flash의 기능별 독립 감사에서 지적된 결함을 코드와 negative contract로 재확인하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 사용자 콘텐츠 E2EE 의미와 키 프로토콜은 변경하지 않음
+- DB/migration semantics: 058·059를 새로 작성하고 fresh throwaway chain에서 검증했지만 원격 Supabase에는 적용하지 않음; 하이라이트 제목은 현재 shared metadata로 저장되므로 별도 privacy/E2EE 결정이 남음
+- product semantics: 관계/애정 점수·조회 수·본 사람 목록·출혈량 공유·물리적 폰 증명을 추가하지 않음
+- Production: commit, push, merge, Vercel 재배포, 원격 Supabase mutation 모두 하지 않음
+
+#### VERIFICATION
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 현재 working tree의 typecheck, ESLint warnings-as-errors, Vitest 230 files / 3275 tests, Vite production build가 exit code 0으로 완료됨. 기존 large-chunk warning은 남아 있음
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: throwaway PostgreSQL 17에서 001–059 fresh chain, 57 migrations / 328 assertions 및 058·059의 active couple/partner/private/former/anon/collision/NULL actor 경계를 통과함
+- command: `npm test -- --run src/lib/milestones.test.ts src/lib/profileCaption.test.ts src/lib/highlights.test.ts src/features/us/paperProfile.test.tsx src/features/story/storyRoutes.test.tsx src/lib/migration059.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 6 files / 53 tests
+- what it actually proves: 독립 감사에서 수정한 실제 전역일·만남 토큰·하이라이트 순서·사진 탭·NULL actor 계약을 집중 검증함
+- command: local in-app browser at `http://127.0.0.1:5173/us`, `/search`, `/settings?profile=edit`
+- PASS / FAIL / UNVERIFIED: PASS — 렌더된 프로필 header/stats/highlights/tabs, 찾기 복무 rail, profile edit/partner username 영역, 사진 탭을 DOM과 screenshot으로 확인했고 관찰 중 browser console error는 없었음
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 현재 working-tree diff의 whitespace 오류가 없음
+- command: `git ls-remote origin refs/heads/master`, `gh pr view 88`, production HTTP probe, `supabase projects list`, read-only table/column probes, and a non-mutating anonymous RPC negative probe for the 058/059 objects
+- PASS / FAIL / UNVERIFIED: PASS for the live probes; full remote schema dump is BLOCKED
+- what it actually proves: `origin/master`와 local HEAD는 `7f4886bcbe32034bfabb454c85378532b14cb261`, unrelated PR #88 is OPEN/CONFLICTING at `a7c2d5c5f441e75c64d07052330cd7e78991d1d2`, linked Supabase project `xzlorqsjajokrlkunxhr` is `ACTIVE_HEALTHY`, and Production `/us` returns HTTP 200. The remote table/column probes returned `404 PGRST205` for `couple_highlights`, `400 42703` for `profiles.profile_caption`, and the anonymous non-mutating RPC probe returned `404 PGRST202` for `set_partner_username`, confirming these local identity/highlight objects are not applied. `supabase db dump --linked` could not run because Docker Desktop is unavailable, so unrelated catalog details remain UNVERIFIED.
+- command: `npm run test:e2e`, two authenticated real accounts/devices, full remote Supabase schema dump
+- PASS / FAIL / UNVERIFIED: UNVERIFIED for e2e/two-device; BLOCKED for the full dump because Docker Desktop is unavailable
+- what it actually proves: production authenticated sync, physical-phone authority, realtime cross-device parity, and the complete remote migration catalog remain unproven; the targeted absence probes above are the only remote schema evidence in this gate
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: FULL
+- whether an earlier review is stale: 058·059 authorization/schema semantics와 공유 프로필 데이터 경계가 추가되었으므로 이전 presentation-only review는 현재 HEAD에 자동 승계하지 않음. Gemini 3.7 Flash 독립 감사 결과를 반영한 현재 diff 기준으로 재검토함
+
+#### BLOCKERS
+- code: 아바타는 기기 로컬이며 서버 동기화가 없음; `DailyRecord`에 `trip_id`가 없어 여행 탭은 날짜 범위 추정이고 같은 날 일반 기록이 섞일 수 있음; 하이라이트 제목의 plaintext shared metadata 경계를 production privacy 결정 전 확인해야 함
+- environment: 058·059 대상 객체는 읽기 전용 REST로 원격 미적용을 확인했지만, 전체 remote catalog dump는 Docker Desktop 부재로 BLOCKED
+- external/manual: 두 실계정·두 기기 realtime/profile/highlight 동기화, 실제 “상대 폰” 물리 증명, authenticated production browser/e2e는 미검증
+
+#### STOPPED AT
+- exact completed boundary: 현재 브랜치의 uncommitted implementation, fresh local migration/security gate, full local verify, local rendered path inspection, and live origin/production status recheck; no remote mutation
+
+#### REMAINING
+- not completed: remote/staging migration gate, two-account/two-device sync proof, cross-device avatar design, explicit travel-record association design, and final production deployment
+
+#### NEXT ACTION
+- next owner: user-approved migration/security workstream
+- tool/model: Architect or Reviewer first; then Gemini 3.7 Flash bounded worker/verifier if implementation is approved
+- 기준 SHA: `7f4886bcbe32034bfabb454c85378532b14cb261` plus this uncommitted diff
+- exact next task: 여행 기록과 `trip_id`를 명시적으로 연결할지 먼저 결정하고, 그 다음 058·059를 staging에서 actor/RLS/realtime 두 계정으로 검증하는 가장 작은 gate를 연다
+
+#### DO NOT ADVANCE UNTIL
+- partner-assigned identity is confirmed as a couple-scoped alias or the global username semantics are explicitly approved
+- migration 058·059 are reviewed with rollback and real actor evidence before any remote application
+- two-account/two-device privacy and synchronization checks pass; private records remain absent from all shared profile surfaces
+
+#### PRODUCTION
+- NOT APPLIED — no commit, push, merge, Vercel deployment, or remote Supabase change was performed
+
+### 2026-08-24 · Codex · 원격 Supabase 057–059 readiness 재확인 및 릴리스 전 게이트
+
+#### PLAN POSITION
+- Phase: V4 product-surface completion / release gate
+- Workstream: engineering — migration safety, verification, commit, PR, deployment
+- Step: user-reported Supabase completion recheck before committing the local implementation
+- Previous Gate: 059 out-of-order `42703` diagnosis
+- This Gate: 057–059 object resolution, full local verify, Phase 0, and release preparation
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — no strategy change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/skills/migration-gate.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, current branch/HEAD/origin, Supabase REST probes
+- Latest relevant Work Log checked: 059 execution-order diagnosis immediately below
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5/Codex; prior independent feature audit by `google-antigravity/gemini-3.7-flash`
+- Role: primary release integrator
+- PR: none at this gate
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- Old HEAD: same
+- New/Reviewed HEAD: same commit plus staged implementation diff pending commit
+
+#### CHANGED / REVIEWED
+- file: remote Supabase schema endpoints for `profiles`, `couple_highlights`, and `set_partner_username(text)`
+- function/component/migration: 057–059 remote readiness
+- what changed/reviewed: targeted probes resolved all requested objects and returned `401/42501` for anonymous access
+- why: confirm the user's Supabase completion without exposing content or using service-role credentials
+- file: current working-tree implementation and tests
+- function/component/migration: service rank, shared profile/highlights, partner username, migration harness
+- what changed/reviewed: re-ran full local verification before release preparation
+- why: do not commit an unverified working tree
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: no remote SQL was executed by this agent; user-reported Supabase application was only rechecked
+- product semantics: none beyond the staged implementation already recorded above
+- Production: not deployed at this point
+
+#### VERIFICATION
+- command: targeted PostgREST probes for `profiles.username`, `profiles.profile_caption`, `couple_highlights`, `set_partner_username(text)`
+- PASS / FAIL / UNVERIFIED: PASS for object resolution and anon denial; full migration ledger UNVERIFIED
+- what it actually proves: all requested remote objects resolve and reject the publishable-key anonymous caller with `401/42501`
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, lint, 230 Vitest files / 3275 tests, and build
+- what it actually proves: current staged implementation builds and passes the repository's local suite
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — 57 migrations / 328 assertions on throwaway PostgreSQL 17
+- what it actually proves: fresh-chain RLS/RPC/privacy contracts, including 057–059, pass locally
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: staged diff has no whitespace errors
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: FULL release gate remains required after the commit because this is the first exact PR HEAD
+- whether an earlier review is stale: earlier local review applies to the implementation content but not to the future commit/PR/deployment HEAD
+
+#### BLOCKERS
+- code: none for local release gate
+- environment: full remote migration ledger and authenticated two-account browser sync remain unverified
+- external/manual: Vercel deployment and PR CI still pending
+
+#### STOPPED AT
+- exact completed boundary: remote readiness recheck and local verification complete; commit/push/PR/deploy next
+
+#### REMAINING
+- not completed: commit, push, PR CI, deployment, production rendered verification
+
+#### NEXT ACTION
+- next owner: Codex
+- tool/model: git/GitHub/Vercel release path; Gemini review result already integrated
+- 기준 SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- exact next task: commit the named staged implementation, push the branch, create PR, wait for CI, deploy, and verify live routes
+
+#### DO NOT ADVANCE UNTIL
+- staged diff is reviewed and excludes stale untracked reports
+- PR CI passes on the exact commit
+- live `/us`, `/search`, `/settings` are inspected after deployment
+
+#### PRODUCTION
+- NOT APPLIED at this checkpoint
+
+### 2026-08-24 · Codex · 원격 059 실행 순서 오류 진단
+
+#### PLAN POSITION
+- Phase: V4 product-surface completion / migration application diagnosis
+- Workstream: engineering — migration safety and remote-state evidence
+- Step: Supabase SQL Editor의 059 `42703` 오류 원인 확인 및 적용 순서 정리
+- Previous Gate: 058·059 로컬 fresh-chain 검증 및 원격 미적용 확인
+- This Gate: 원격 오류의 의존성 확인, 현재 객체 상태 재조회, 안전한 수동 적용 순서 안내
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — 제품 범위 변경 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/skills/migration-gate.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, migrations 057–059, linked Supabase REST probes
+- Latest relevant Work Log checked: 2026-08-24 local profile/service gate
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5/Codex
+- Role: read-only remote diagnosis; no remote mutation
+- PR: none
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- Old HEAD: same
+- New/Reviewed HEAD: same commit plus existing uncommitted working-tree changes
+
+#### CHANGED / REVIEWED
+- file: `supabase/migrations/057_profile_identity_and_caption.sql`, `supabase/migrations/058_couple_highlights.sql`, `supabase/migrations/059_partner_managed_username.sql`
+- function/component/migration: migration dependency order
+- what changed/reviewed: confirmed 057 creates `profiles.username`; 059 creates a trigger using `BEFORE UPDATE OF username` and therefore cannot run before 057
+- why: explain the SQL Editor `42703` without weakening migration ordering or duplicating schema ownership
+- file: `docs/CURRENT_STATE.md`, `supabase/migrations/README.md`
+- function/component/migration: current-state and migration-runbook notes
+- what changed/reviewed: recorded the observed remote error and safe 057 → optional 058 → 059 sequence
+- why: prevent an out-of-order retry and accidental duplicate 058 execution
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: no migration file changed and no remote SQL was executed by this diagnosis
+- product semantics: none
+- Production: no change
+
+#### VERIFICATION
+- command: user-provided Supabase SQL Editor result for 059
+- PASS / FAIL / UNVERIFIED: FAIL — `42703: column "username" of relation "profiles" does not exist`
+- what it actually proves: the remote `profiles` relation did not expose `username` when 059 was run
+- command: targeted REST probes after the error
+- PASS / FAIL / UNVERIFIED: PASS for the probes; full remote catalog remains UNVERIFIED
+- what it actually proves: `profiles.profile_caption` returned `400 42703`, anonymous `set_partner_username` returned `404 PGRST202`, and the user subsequently confirmed `has_highlights = true` in the SQL Editor; 058 is present while 057/059 still need ordered verification
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: documentation-only follow-up introduced no whitespace errors
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: NONE — diagnosis and runbook documentation only
+- whether an earlier review is stale: no code or migration semantics changed
+
+#### BLOCKERS
+- code: none
+- environment: remote migration history is not fully cataloged; Docker-based schema dump remains unavailable
+- external/manual: user must run the read-only catalog query and apply the migrations in order from the Supabase SQL Editor
+
+#### STOPPED AT
+- exact completed boundary: cause identified and safe manual order documented; no remote retry performed
+
+#### REMAINING
+- not completed: applying 057/optional 058/059 to remote Supabase and verifying with two authenticated accounts
+
+#### NEXT ACTION
+- next owner: user-approved Supabase operator
+- tool/model: Supabase SQL Editor, read-only check first
+- 기준 SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- exact next task: run the catalog query, apply 057 first, skip 058 if its objects already exist, then apply 059 and rerun the catalog query
+
+#### DO NOT ADVANCE UNTIL
+- `profiles.username`, `profile_caption`, and `profile_date_type` exist before running 059
+- `set_partner_username(text)` exists after 059 and the migration error is not merely hidden by a partial retry
+- remote actor/RLS checks are run before production use
+
+#### PRODUCTION
+- NOT APPLIED — no remote mutation was performed by this diagnosis
+
 ### 2026-08-24 · LV · 찾기 복무 레벨·프로필 정체성·하이라이트 원본 연결
 
 #### PLAN POSITION
@@ -415,6 +696,103 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 #### DO NOT ADVANCE UNTIL
 - delta re-review 승인 전 #76 merge 금지 · #74보다 먼저 merge 금지
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-24 · Codex · 복무 계급 게임 요소 및 인스타식 프로필 2차 다듬기
+
+#### PLAN POSITION
+- Phase: V4 product-surface completion / profile and service information
+- Workstream: engineering — functionality, data integrity, privacy, authorization, synchronization, testing
+- Step: make the rank rail honest for pre-enlistment users and remove remaining profile clutter
+- Previous Gate: local uncommitted checkpoint above; `npm run verify` rerun after the 2차 changes
+- This Gate: focused tests, full verify, local rendered paths, remote/origin/production recheck, and documentation update
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — no customer, monetization, or storage strategy change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: `docs/WORK_LOG.md`
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? YES — only for partner-phone-only mutation of a global `profiles.username`
+- If YES, what conflict: the current authenticated session cannot prove a physical phone and current RLS makes the global username owner-managed; no cross-account write was added
+
+#### OWNERSHIP
+- Tool: Codex primary with bounded Gemini 3.7 Flash design, implementation, and review delegation
+- Model: primary GPT-5/Codex; delegated `google-antigravity/gemini-3.7-flash`
+- Role: primary integrator; rank/profile implementation owner; independent auth/privacy boundary reviewer
+- PR: none
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- Old HEAD: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- New HEAD / Reviewed HEAD: same commit with the uncommitted working-tree diff
+
+#### CHANGED / REVIEWED
+- file: `src/lib/milestones.ts`, `src/lib/serviceLevel.ts`, `src/features/search/SearchPage.tsx`, `src/pages/ServicePage.tsx`
+- function/component/migration: service progress and `InlineServiceInfo`
+- what changed/reviewed: added a truth-preserving before-enlistment state (`대기 · 입대 대기`), current-tier EXP percentage/days, four connected rank nodes, and a local-midnight/focus refresh
+- why: give the requested game-like progression using actual enlistment/discharge dates without inventing progress before enlistment or turning service into a relationship score
+- file: `src/features/us/PaperProfile.tsx`, `src/components/ProfileIdentity.tsx`, `src/components/AvatarPicker.tsx`, `src/pages/SettingsPage.tsx`
+- function/component/migration: profile header, identity block, avatar picker, profile edit modal
+- what changed/reviewed: removed the permanent camera badge and redundant header search entry, kept a single profile-edit action, made highlight settings a plus-style rail entry with a bottom sheet, and kept nickname/caption/global username separate in the owner-managed modal
+- why: reduce clutter and match familiar Instagram profile interaction patterns while preserving existing source-data/privacy boundaries
+- file: `src/lib/serviceLevel.test.ts`, `src/features/search/searchPage.test.tsx`, `src/features/us/paperProfile.test.tsx`
+- function/component/migration: rank, search, profile component tests
+- what changed/reviewed: covered rank boundaries, pre-enlistment lock state, EXP rail, discharged state, no header search clutter, profile edit routing, highlight settings dialog, and original-source edit routing
+- why: protect the requested user paths and prevent an honest-date regression
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none; no migration created or applied
+- product semantics: no relationship/affection score; no global cross-account username write; no independent highlight name/cover CRUD without a data model
+- Production: no remote change
+
+#### VERIFICATION
+- command: `npm test -- src/lib/milestones.test.ts src/lib/serviceLevel.test.ts src/features/search/searchPage.test.tsx src/features/us/paperProfile.test.tsx src/pages/keyboardOperableCards.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 5 files / 69 tests
+- what it actually proves: the changed rank, search, profile, highlight, and keyboard paths pass locally
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, lint, 226 Vitest files / 3247 tests, and production build; existing large-chunk warning only
+- what it actually proves: repository-wide local correctness gates and a successful production bundle for this working tree
+- command: local in-app browser at `http://127.0.0.1:5173/us`, `/search`, and `/settings?profile=edit`
+- PASS / FAIL / UNVERIFIED: PASS — DOM snapshots and rendered screenshots inspected
+- what it actually proves: the actual shell renders one profile, the plus-style highlight settings dialog, the profile modal, the bottom Find tab, and the pre-enlistment rank rail
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: no whitespace errors in the working-tree diff
+- command: `git ls-remote origin refs/heads/master`, `gh pr view 88`, and production HTTP probe
+- PASS / FAIL / UNVERIFIED: PASS for the commands; remote Supabase catalog/application state remains UNVERIFIED
+- what it actually proves: origin/master is still `7f4886b`, PR #88 is OPEN/CONFLICTING at `a7c2d5c`, and current production `/us` returns HTTP 200; it does not prove this branch is deployed
+- command: `npm run test:e2e`, `npm run test:phase0`, physical-device verification
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — not run in this gate
+- what it actually proves: no authenticated production browser matrix, fresh migration/security chain, or physical cross-device synchronization evidence
+
+#### REVIEW IMPACT
+- DELTA — this gate changes service-derived presentation and profile navigation only; no authorization, RLS, crypto, or migration semantics changed. The partner-assigned global username request remains a reviewed product/security boundary, not an implemented cross-account mutation.
+
+#### BLOCKERS
+- code: partner-set display aliases, independent highlight creation/name/cover editing, and cross-device avatar sync remain outside this safe no-migration gate
+- environment: remote Supabase catalog/application state is UNVERIFIED; production serves the origin/master deployment, not this uncommitted branch
+- external/manual: physical-phone authority cannot be established by browser code; cross-device behavior is UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: local implementation, full verification, rendered local browser inspection, and documentation; no commit, push, PR update, merge, migration, or deployment
+
+#### REMAINING
+- not completed: a couple-scoped partner-assigned alias model with explicit RLS/RPC/negative tests, independent highlight CRUD/cover data, and remote/device verification
+
+#### NEXT ACTION
+- next owner: user / separately approved security-migration workstream
+- tool/model: Architect or Reviewer first, then Gemini 3.7 Flash bounded worker and verifier
+- 기준 SHA: `7f4886b` plus the current uncommitted diff
+- exact next task: approve the meaning of a couple-scoped “상대가 정한 별칭” separate from the global English username, then design its migration/RLS/RPC before implementation
+
+#### DO NOT ADVANCE UNTIL
+- the alias is explicitly separate from the account-owned global username
+- active-couple, owner, partner, former-partner, unrelated-user, and anon boundaries have negative tests
+- remote migration application is separately approved with rollback evidence
 
 #### PRODUCTION
 - NOT APPLIED
@@ -5217,3 +5595,97 @@ e2e · Postgres 계약 · Deno).
 - Supabase production data: not touched
 - migrations: none created or applied
 - physical-device verification: not run
+
+### 2026-08-24 · Codex · 찾기 복무 계급 레일 및 우리 프로필 설정 진입
+
+#### PLAN POSITION
+- Phase: V4 product-surface completion / profile and service information
+- Workstream: engineering — functionality, data integrity, privacy, authorization, synchronization, testing
+- Step: find-tab rank progression and my-tab profile/highlight settings entry points
+- Previous Gate: live repository/branch/origin master preflight at `7f4886b`; PR #88 separately confirmed OPEN and CONFLICTING
+- This Gate: local implementation, full verify, rendered local browser paths, and remote-state recheck complete; no remote mutation
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — no monetization, customer, or storage strategy change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: `docs/WORK_LOG.md`
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? YES — the requested partner-phone-only mutation of a global `profiles.username` conflicts with current auth ownership/RLS; the UI work itself does not conflict
+- If YES, what conflict: a client/session cannot prove which physical phone is being used, and the current profile row is owner-managed. No cross-account global username write was added; a couple-scoped alias needs a separate approved data model and security gate
+
+#### OWNERSHIP
+- Tool: Codex primary with delegated Gemini 3.7 Flash implementation/review
+- Model: primary GPT-5/Codex; worker/reviewer `google-antigravity/gemini-3.7-flash`
+- Role: primary integrator; bounded implementation worker; independent UI/security review
+- PR: none
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- Old HEAD: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- New HEAD / Reviewed HEAD: same commit with the uncommitted nine-file implementation diff
+
+#### CHANGED / REVIEWED
+- file: `src/lib/serviceLevel.ts`, `src/features/search/SearchPage.tsx`
+- function/component/migration: `computeServiceLevel`, `InlineServiceInfo`, search page date refresh
+- what changed/reviewed: date-derived personal progression now uses 이등병·일병·상병·병장·전역, next-rank remaining percent/days, a four-step rail, and a midnight/focus refresh with an animated width transition
+- why: make personal service information immediately readable and game-like without turning it into a relationship score
+- file: `src/components/AvatarPicker.tsx`, `src/components/ProfileIdentity.tsx`, `src/features/us/PaperProfile.tsx`, `src/pages/SettingsPage.tsx`
+- function/component/migration: avatar control, profile identity links, PaperProfile actions, profile modal routing
+- what changed/reviewed: removed the persistent camera badge, kept photo editing discoverable through the profile action, added direct profile editing and highlight-settings entry points, and opened/cleared the existing profile modal through `?profile=edit`
+- why: reduce profile clutter and make the existing owner-managed settings reachable like a familiar profile surface
+- file: `src/lib/serviceLevel.test.ts`, `src/features/search/searchPage.test.tsx`, `src/features/us/paperProfile.test.tsx`
+- function/component/migration: focused unit/component coverage
+- what changed/reviewed: rank boundaries, remaining-day calculations, rail labels, profile edit routing, highlight settings dialog, and original-source edit routing are covered
+- why: protect the new user paths and the existing highlight source boundary
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none; no migration was created or applied
+- product semantics: no relationship/affection score; no partner mutation of global username; no independent highlight name/cover CRUD without a data model
+- Production: no remote change
+
+#### VERIFICATION
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: typecheck, lint, full Vitest suite, and production build completed with exit code 0; build emitted only the existing large-chunk warning
+- command: `npm test -- src/pages/keyboardOperableCards.test.tsx src/features/us/paperProfile.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: keyboard-operability regression and profile/highlight component paths pass after the modal backdrop correction
+- command: local in-app browser on `http://127.0.0.1:5173/search`, `/us`, `/settings?profile=edit`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: rendered rank rail, profile edit dialog, and highlight settings dialog were inspected; the temporary dev server was stopped afterward
+- command: `npm run test:e2e`
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: not run in this task
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: not run because this change has no migration or remote database mutation
+
+#### REVIEW IMPACT
+- DELTA — service/profile presentation and date-refresh logic changed; no authorization, RLS, crypto, or migration semantics changed. The requested global cross-account username authority was independently reviewed and intentionally blocked.
+
+#### BLOCKERS
+- code: partner-assigned global username and physical-phone-only enforcement are not implemented; they require a couple-scoped alias design and explicit authorization tests
+- environment: remote Supabase catalog/application state remains UNVERIFIED for this task; the production deployment serves the origin/master baseline, not this uncommitted branch
+- external/manual: cross-device avatar synchronization and physical-device behavior remain UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: local uncommitted implementation and validation on `codex/service-rank-profile-settings-impl`; no commit, push, PR update, merge, or deployment
+
+#### REMAINING
+- not completed: partner-set display aliases, independent highlight creation/name/cover editing, cross-device avatar sync, and production/browser authenticated verification of this branch
+
+#### NEXT ACTION
+- next owner: user / PR owner
+- tool/model: design review followed by a separate migration/security gate; use Gemini 3.7 Flash for bounded implementation/review if authorized
+- 기준 SHA: `7f4886b` plus this uncommitted diff
+- exact next task: decide whether the product means a couple-scoped “상대가 정한 별칭” separate from the owner’s global English username; if yes, design migration/RLS/RPC and negative tests before implementation
+
+#### DO NOT ADVANCE UNTIL
+- product semantics explicitly accept a separate couple-scoped alias rather than changing account ownership of `profiles.username`
+- the authorization design derives the target member from the active couple and proves owner/partner/former-partner/anon boundaries
+- remote migration application is separately approved and verified
+
+#### PRODUCTION
+- NOT APPLIED

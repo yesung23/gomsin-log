@@ -1,4 +1,4 @@
-import type { CoupleEvent, MilitaryInfo, ProfileDateType } from '@/types';
+import type { CoupleEvent, EventType, MilitaryInfo, ProfileDateType } from '@/types';
 import { togetherDays } from '@/lib/coupleStats';
 import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
 
@@ -21,6 +21,7 @@ export type ProfileCaptionResult =
   | { status: 'ready'; text: string; missing: [] };
 
 const DEFAULT_PROFILE_CAPTION = '일째 같은 하늘 아래';
+const MEETING_EVENT_TYPES: EventType[] = ['visit', 'vacation', 'date', 'trip'];
 
 export function normalizeUsername(value: string): string {
   return value.trim().toLowerCase();
@@ -42,7 +43,7 @@ function valueForToken(token: ProfileCaptionToken, input: ProfileCaptionInput): 
   }
 
   if (token === 'meeting') {
-    const event = nextUpcomingEvent(input.events, input.todayStr);
+    const event = nextUpcomingEvent(input.events, input.todayStr, MEETING_EVENT_TYPES);
     return event ? formatCaptionDate(event.startDate) : null;
   }
 

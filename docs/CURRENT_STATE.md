@@ -358,3 +358,105 @@ Beta gate B1 전에는 Storage policy catalog와 실제 signed-URL 동작을 모
 - 제품 의도는 `PRODUCT_V3.md`, 구현 순서는 `ENGINEERING_ROADMAP.md`에 쓴다.
 - remote 상태 주장은 날짜·증거 출처와 함께 적고, 확인할 수 없으면 `UNVERIFIED`다.
 - active PR/HEAD/CI는 checkpoint일 뿐이며 다음 세션에서 live 재검증한다.
+
+## 8. 2026-08-24 local implementation checkpoint
+
+This section describes the current local checkout only. It is not a claim about
+`origin/master`, Production, or the remote Supabase catalog.
+
+- Branch: `codex/service-rank-profile-settings-impl`, based on `7f4886b`.
+- Find tab: the existing date-derived service card now shows the personal rank rail
+  `이등병 → 일병 → 상병 → 병장`, next-rank percentage/days, and refreshes at local
+  midnight or when the page regains focus. It does not compare partners or score the
+  relationship.
+- My tab: the single profile surface has direct `프로필 편집` and `하이라이트 설정`
+  entry points. The persistent camera badge was removed; the existing avatar storage
+  is still device-local. Highlight rows still edit their existing source anniversary,
+  schedule, or service data; independent highlight creation/name/cover data does not
+  exist yet.
+- Profile identity: the existing owner-managed English username remains separate from
+  the nickname and is reachable through the direct profile modal. Partner-phone-only
+  mutation of the global username is intentionally not implemented because the current
+  auth/RLS model cannot prove a physical phone and does not authorize one user to update
+  another user's profile row.
+- Verification for this local checkpoint: `npm run verify` PASS; focused keyboard/profile
+  tests PASS; local rendered `/search`, `/us`, and `/settings?profile=edit` paths PASS.
+- 2차 refinement: before-enlistment users now see `대기 · 입대 대기` with a locked rank rail;
+  serving users receive current-tier EXP percentage/days, and the profile no longer shows a
+  persistent camera badge or a redundant header search entry. The latest local verify is
+  `226` Vitest files / `3247` tests PASS.
+- Remote boundary: no migration, Supabase mutation, commit, push, merge, or deployment was
+  performed. Live remote check at this checkpoint: `origin/master` is `7f4886b`, PR #88 is
+  OPEN/CONFLICTING with head `a7c2d5c`, and Production `/us` returned HTTP 200 for its
+  existing deployment. The branch changes are therefore not in Production.
+
+## 9. 2026-08-24 refinement checkpoint — supersedes section 8 for this working tree
+
+This section is the current local checkout truth. It does not claim that the
+uncommitted work is present on `origin/master`, Production, or the remote
+Supabase project.
+
+- Working tree: branch `codex/service-rank-profile-settings-impl`; repository HEAD
+  remains `7f4886bcbe32034bfabb454c85378532b14cb261` and the implementation is
+  uncommitted.
+- Find tab: `/search` shows date-derived enlistment/discharge dates, D-day,
+  service percentage, and a personal `이등병 → 일병 → 상병 → 병장` progression
+  rail. The percentage is for service progress only, never a relationship score.
+  Pre-enlistment state is shown as `입대 대기` with a locked rail; serving state
+  refreshes on local midnight/focus.
+- My tab: `/us` now has one shared couple profile surface with an Instagram-like
+  header, English `@username`, separate nickname/caption, three counts, one
+  profile edit entry, a custom highlight rail, and `격자`/`사진`/`여행` views.
+  The persistent camera UI and the old status/diary controls are absent from
+  this surface. Avatar selection is still intentionally device-local and says so
+  to the user; cross-device avatar sync is not implemented.
+- Highlights: `couple_highlights` plus ordered items provide independent shared
+  highlight title, selected shared photos, cover-by-first-item, edit, delete, and
+  story-viewer routes. Private records are excluded in both client filters and
+  the database child-row policy/trigger path.
+- Shared profile views: grid/photo/travel content is derived from the couple's
+  shared records/trips, not a single owner's private records. Realtime/profile
+  invalidation refreshes profile and highlights additively.
+- Partner username: the local UI removes owner-side username editing and offers
+  a connected-user field to set the active partner's English username. Migration
+  `059_partner_managed_username.sql` enforces this through a locked active-couple
+  SECURITY DEFINER RPC, collision validation, deletion gating, and an owner-update
+  trigger. A server session can prove the active partner relationship; it cannot
+  prove a physical phone, so that phrase is not enforced beyond the authenticated
+  partner session.
+- Database boundary: migration 058's highlight object is now confirmed by the
+  user's SQL Editor query (`has_highlights = true`). A later targeted PostgREST
+  probe resolved both `profiles.username`/`profile_caption`, the highlight table,
+  and `set_partner_username(text)`, returning `401/42501` for anon access. This
+  confirms the requested 057–059 objects are present and protected remotely;
+  the full migration ledger remains unverified. A full remote schema dump was
+  `BLOCKED` because Docker Desktop is unavailable.
+- Verification: latest `npm run verify` passed with typecheck, lint, 230 Vitest
+  files / 3275 tests, and build. Local rendered `/search`, `/us`,
+  `/settings?profile=edit`, highlight creation dialog, and photo tab were
+  inspected with no browser console errors observed. Phase 0 was previously
+  passed at 57 migrations / 328 assertions; the final phase0 rerun also passed.
+
+### 10. 2026-08-24 remote migration order diagnosis
+
+The Supabase SQL editor rejected `059_partner_managed_username.sql` with
+`42703: column "username" of relation "profiles" does not exist`. This is an
+ordering/dependency error: migration 057 creates `profiles.username`,
+`profile_caption`, and `profile_date_type`; migration 059 only creates the
+partner-managed trigger/RPC and assumes those columns already exist.
+
+- A post-error REST probe still returns `400 42703` for `profiles.profile_caption`.
+- The anonymous negative probe for `set_partner_username` returns `404 PGRST202`.
+- The user confirmed `has_highlights = true` in the SQL Editor, so 058's object is
+  present remotely. The exact migration ledger remains separately unverified.
+- No automatic retry or remote mutation was performed by this diagnosis.
+
+### 11. 2026-08-24 remote migration readiness recheck
+
+- The user reported that Supabase application was completed.
+- Targeted PostgREST probes resolved `profiles.username`, `profile_caption`,
+  `couple_highlights`, and `set_partner_username(text)` and returned `401/42501`
+  for anonymous access, confirming the requested objects and their deny boundary.
+- The full remote migration ledger was not dumped; Docker-based inspection remains
+  `BLOCKED`. The user's SQL Editor is the source for the applied-migration action;
+  this agent performed no remote mutation.

@@ -1,5 +1,6 @@
 import type { CoupleEvent, MilitaryInfo } from '@/types';
 import { daysBetweenLocal, parseLocalDate, toLocalDateString } from '@/lib/utils';
+import { effectiveDischargeDate } from '@/lib/milestones';
 
 /**
  * 하이라이트 — 인스타의 원형 커버 자리에 마일스톤을 놓는다.
@@ -132,7 +133,7 @@ export function buildHighlights({
     끝나는 날이자 아카이브 가치가 최대인 날이라 다른 무엇보다 앞선다.
   */
   const upcoming: Highlight | null = (() => {
-    const discharge = military?.expectedDischargeDate;
+    const discharge = effectiveDischargeDate(military);
     if (discharge && discharge > todayStr && military?.militaryStatus !== 'discharged') {
       return {
         label: '전역', date: discharge, reached: false,

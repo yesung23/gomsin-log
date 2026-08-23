@@ -231,6 +231,23 @@ export interface TripChecklist {
   completed: boolean;
 }
 
+/**
+ * A couple-owned Instagram-like story collection.
+ *
+ * Only record ids cross the metadata boundary. The record rows and their media
+ * remain protected by the existing daily-record and storage policies.
+ */
+export interface CoupleHighlight {
+  id: string;
+  coupleId: string;
+  title: string;
+  coverRecordId?: string;
+  recordIds: string[];
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CycleSettings {
   userId: string;
   averageCycleLength: number;
@@ -472,6 +489,8 @@ export interface AppState {
   records: DailyRecord[];
   events: CoupleEvent[];
   trips: Trip[];
+  /** Shared highlight metadata. Optional for old test fixtures and pre-058 state. */
+  coupleHighlights?: CoupleHighlight[];
   /**
    * "이따 이야기하기" marks for the active couple (migration 038).
    *

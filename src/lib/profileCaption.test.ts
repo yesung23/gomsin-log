@@ -37,6 +37,14 @@ describe('renderProfileCaption', () => {
     })).toEqual({ status: 'needs_setup', text: null, missing: ['meeting'] });
   });
 
+  it('does not treat an unrelated event as the next meeting', () => {
+    expect(renderProfileCaption({
+      ...base,
+      events: [{ ...base.events[0], eventType: 'other', startDate: '2026-08-24' }],
+      template: '다음 만남은 (만남)',
+    })).toEqual({ status: 'needs_setup', text: null, missing: ['meeting'] });
+  });
+
   it('returns a truthful empty state for no caption', () => {
     expect(renderProfileCaption({ ...base })).toEqual({
       status: 'ready',

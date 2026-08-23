@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { AppState, DailyRecord, Trip, CoupleEvent } from '@/types';
+import type { AppState, DailyRecord, Trip } from '@/types';
 
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -13,9 +13,17 @@ vi.mock('react-router-dom', async () => {
 });
 
 let storeState: AppState;
+const saveCoupleHighlight = vi.fn();
+const deleteCoupleHighlight = vi.fn();
 
 vi.mock('@/lib/useStore', () => ({
-  useStore: () => ({ state: storeState, isReady: true, coupleLifecycle: 'connected' }),
+  useStore: () => ({
+    state: storeState,
+    isReady: true,
+    coupleLifecycle: 'connected',
+    saveCoupleHighlight,
+    deleteCoupleHighlight,
+  }),
 }));
 
 beforeAll(() => {
@@ -84,6 +92,8 @@ describe('PaperProfile (우리 화면)', () => {
   beforeEach(() => {
     mockNavigate.mockReset();
     storeState = baseState();
+    saveCoupleHighlight.mockReset().mockResolvedValue({ ok: true });
+    deleteCoupleHighlight.mockReset().mockResolvedValue(true);
   });
 
   it('상단 영역(헤더, 커플 상태 배너, 통계, 소개)이 렌더된다', () => {
@@ -93,13 +103,15 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByText('춘향')).toHaveLength(2);
+    expect(screen.getByText('춘향')).toBeInTheDocument();
     expect(screen.getByText('@chunhyang')).toBeInTheDocument();
     expect(screen.getByText('오늘도 우리답게')).toBeInTheDocument();
     expect(screen.queryByText('춘향 ♥ 몽룡')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '내 프로필 사진 고르기' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '프로필 편집' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '기록 남기기' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '기록 찾기' })).toBeInTheDocument();
+    // The bottom navigation owns the Find tab; this component test does not mount the app shell.
+    expect(screen.queryByRole('button', { name: '기록 찾기' })).not.toBeInTheDocument();
   });
 
   it('기념일이 있으면 profileCaption이 없어도 기본 문구를 유지한다', () => {
@@ -136,20 +148,18 @@ describe('PaperProfile (우리 화면)', () => {
 
     expect(screen.getByText('아이디 설정하기')).toBeInTheDocument();
     expect(screen.getByText('기념일 미설정')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '아이디 설정하기' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/settings?profile=edit');
   });
 
-  it('하이라이트 원본 열기와 별도 편집 버튼을 연결하고 버튼을 중첩하지 않는다', () => {
-    const event: CoupleEvent = {
-      id: 'visit-first',
-      coupleId: 'couple-1',
-      createdBy: 'user-me',
-      title: '첫 면회',
-      eventType: 'visit',
-      startDate: '2026-02-01',
-      isPrivate: false,
-      createdAt: '2026-02-01T00:00:00Z',
-    };
-    storeState = { ...baseState(), events: [event] };
+  it('하이라이트는 날짜 파생값이 아니라 공유 사진을 직접 고르는 편집기다', async () => {
+    const record = makeRecord({
+      id: 'highlight-record',
+      date: '2026-02-01',
+      attachments: [{ type: 'photo', name: 'cover.jpg', url: 'https://example.test/cover.jpg' }],
+    });
+    storeState = { ...baseState(), records: [record] };
 
     render(
       <MemoryRouter>
@@ -157,15 +167,16 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    const editButton = screen.getByRole('button', { name: '첫 면회 일정 원본 편집' });
-    fireEvent.click(editButton);
-    expect(mockNavigate).toHaveBeenCalledWith('/schedule');
-
-    fireEvent.click(screen.getByRole('button', { name: '첫 면회 2026-02-01' }));
-    expect(mockNavigate).toHaveBeenCalledWith('/story/day/2026-02-01');
-    for (const button of screen.getAllByRole('button')) {
-      expect(button.querySelector('button')).toBeNull();
-    }
+    fireEvent.click(screen.getByRole('button', { name: '하이라이트 만들기' }));
+    expect(screen.getByRole('dialog', { name: '새 하이라이트' })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('예: 우리의 봄'), { target: { value: '우리의 봄' } });
+    fireEvent.click(screen.getByRole('button', { name: /2026-02-01 사진 선택/ }));
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await waitFor(() => expect(saveCoupleHighlight).toHaveBeenCalledWith(expect.objectContaining({
+      title: '우리의 봄',
+      recordIds: ['highlight-record'],
+      coverRecordId: 'highlight-record',
+    })));
   });
 
   it('게시물 격자 탭은 여행 중인 사진 게시물만 노출하고 누르면 사진 상세를 연다', () => {
@@ -228,12 +239,12 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/아직 여행 사진이 없어요/)).toBeInTheDocument();
+    expect(screen.getByText(/여행에서 함께 공개한 사진이 여기 모여요/)).toBeInTheDocument();
   });
 
-  it('사진 탭을 누르면 모든 기존 기록을 읽을 수 있고 RecordPage로 이어지는 액션을 제공한다', () => {
-    const record1 = makeRecord({ id: 'rec-1', date: '2026-08-01', log: '첫 번째 일상 이야기' });
-    const record2 = makeRecord({ id: 'rec-2', date: '2026-08-02', log: '두 번째 이야기' });
+  it('사진 탭은 비공개 기록을 제외한 공유 기록 목록을 사용한다', () => {
+    const record1 = makeRecord({ id: 'rec-1', date: '2026-08-01', log: '첫 번째 일상 이야기', attachments: [{ type: 'photo', name: 'one.jpg', url: 'https://example.test/one.jpg' }] });
+    const record2 = makeRecord({ id: 'rec-2', date: '2026-08-02', log: '두 번째 이야기', isPrivate: true, attachments: [{ type: 'photo', name: 'two.jpg', url: 'https://example.test/two.jpg' }] });
 
     storeState = {
       ...baseState(),
@@ -250,20 +261,11 @@ describe('PaperProfile (우리 화면)', () => {
     const photoTab = screen.getByRole('button', { name: '사진' });
     fireEvent.click(photoTab);
 
-    // 기존 기록 목록이 렌더되고 내용을 읽을 수 있음
-    expect(screen.getByTestId('profile-records-list')).toBeInTheDocument();
-    expect(screen.getByText('첫 번째 일상 이야기')).toBeInTheDocument();
-    expect(screen.getByText('두 번째 이야기')).toBeInTheDocument();
-
-    // 타임라인 전체 보기 버튼 클릭 시 /record 로 이동
-    const timelineBtn = screen.getByText('타임라인 전체 보기');
-    fireEvent.click(timelineBtn);
-    expect(mockNavigate).toHaveBeenCalledWith('/record');
-
-    // 특정 기록 자세히 보기 클릭 시 /record?record=... 로 이동
-    const detailButtons = screen.getAllByText('기록 자세히 보기');
-    fireEvent.click(detailButtons[0]);
-    expect(mockNavigate).toHaveBeenCalledWith('/record?record=rec-2');
+    expect(screen.getByTestId('profile-record-list')).toBeInTheDocument();
+    expect(screen.getByTestId('profile-record-rec-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('profile-record-rec-2')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('profile-record-rec-1'));
+    expect(mockNavigate).toHaveBeenCalledWith('/record?record=rec-1');
   });
 
   it('여행 탭을 누르면 간단한 여행 목록과 상세 진입을 제공한다', () => {

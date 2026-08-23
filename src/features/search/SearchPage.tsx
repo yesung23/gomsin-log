@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, CalendarDays, SquarePen, Shield, Calendar, Clock, ChevronRight } from 'lucide-react';
+import { Search, X, CalendarDays, SquarePen, Shield, Calendar, Clock, ChevronRight, Check } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { searchRecords, excerptAround, type SearchResult } from '@/lib/recordSearch';
 import { localToday } from '@/lib/cycle';
-import { computeServiceProgress, nextUpcomingEvent } from '@/lib/milestones';
+import { computeServiceProgress, effectiveDischargeDate, nextUpcomingEvent } from '@/lib/milestones';
 import { computeServiceLevel } from '@/lib/serviceLevel';
-import { daysBetweenLocal, formatLocalDate } from '@/lib/utils';
+import { cn, daysBetweenLocal, formatLocalDate } from '@/lib/utils';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
 import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent, Branch, MilitaryStatus } from '@/types';
@@ -88,17 +88,24 @@ function InlineServiceInfo({
   const level = computeServiceLevel(progress);
   if (!level) return null;
 
-  const nextGuide = level.nextPercent === null
+  const daysUntilEnlistment = progress.daysUntilEnlistment ?? 0;
+  const nextGuide = level.isPreEnlistment
+    ? `입대까지 ${daysUntilEnlistment}일`
+    : level.nextPercent === null
     ? '복무를 마쳤어요.'
-    : `다음 레벨 ${level.nextLevel} · ${level.nextLabel}까지 ${formatPercent(Math.max(level.nextPercent - progress.percent, 0))}%`;
+    : `다음 ${level.nextLabel}까지 ${formatPercent(level.remainingPercent!)}% · ${level.remainingDaysToNext}일 남음`;
 
   return (
-    <section className="rounded-control border border-border bg-card p-4" data-testid="soldier-service-info">
+    <section className="rounded-control border border-border bg-card p-4 space-y-3.5 shadow-sm" data-testid="soldier-service-info">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2">
-          <Shield size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <div className="flex min-w-0 items-start gap-2.5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-coral/10 text-coral-strong">
+            <Shield size={18} aria-hidden="true" />
+          </div>
           <div className="min-w-0">
-            <div className="text-label font-bold text-card-foreground">내 복무</div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-label font-bold text-card-foreground">내 복무</span>
+            </div>
             <div className="text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
               <span data-testid="service-status">
@@ -107,19 +114,27 @@ function InlineServiceInfo({
             </div>
           </div>
         </div>
-        <span className="shrink-0 text-heading font-bold text-card-foreground tabular-nums">
-          {progress.isDischarged ? '전역' : `D-${progress.remainingDays}`}
-        </span>
+        <div className="text-right">
+          <span className="text-heading font-bold text-card-foreground tabular-nums">
+            {progress.isDischarged
+              ? '전역'
+              : level.isPreEnlistment
+                ? `입대 D-${daysUntilEnlistment}`
+                : `D-${progress.remainingDays}`}
+          </span>
+        </div>
       </div>
 
-      <div className="mt-4 space-y-2">
+      <div className="space-y-2">
         <div
           className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-label font-semibold text-card-foreground"
           data-testid="service-progress-summary"
         >
           <span>복무율 {formatPercent(progress.percent)}%</span>
-          <span className="text-muted-foreground">
-            {progress.elapsedDays}일 경과 · {progress.remainingDays}일 남음
+          <span className="text-muted-foreground tabular-nums">
+            {level.isPreEnlistment
+              ? `입대까지 ${daysUntilEnlistment}일`
+              : `${progress.elapsedDays}일 경과 · ${progress.remainingDays}일 남음`}
           </span>
         </div>
         <div
@@ -128,29 +143,125 @@ function InlineServiceInfo({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={progress.percent}
-          className="h-1.5 overflow-hidden rounded-full bg-muted"
+          aria-valuetext={`복무율 ${formatPercent(progress.percent)}%, 현재 ${level.label}, ${nextGuide}`}
+          className="h-2 overflow-hidden rounded-full bg-muted"
         >
-          <div className="h-full rounded-full bg-coral-strong" style={{ width: `${progress.percent}%` }} />
+          <div
+            className="h-full rounded-full bg-coral-strong transition-[width] duration-700 ease-out"
+            style={{ width: `${progress.percent}%` }}
+          />
         </div>
         <div className="flex justify-between gap-3 text-caption text-muted-foreground">
           <span>입대 {formatLocalDate(military.enlistmentDate!)}</span>
-          <span>전역 {formatLocalDate(military.expectedDischargeDate!)}</span>
+          <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
         </div>
       </div>
 
-      <div className="mt-4 border-t border-border/60 pt-3">
+      {/* Level Tier, EXP & Connected Roadmap Track */}
+      <div className="rounded-xl border border-border/70 bg-muted/20 p-3.5 space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-label font-bold text-card-foreground" data-testid="service-level">
-            복무 레벨 {level.level} · {level.label}
-          </span>
+          <div className="flex items-center gap-1.5" data-testid="service-level">
+            <span className="rounded bg-coral/20 px-1.5 py-0.5 text-caption font-extrabold text-coral-strong">
+              {level.levelBadge}
+            </span>
+            <span className="text-label font-bold text-card-foreground">
+              {level.isPreEnlistment ? '입대 대기' : `현재 계급 · ${level.label}`}
+            </span>
+          </div>
           <span className="text-caption text-muted-foreground" data-testid="service-level-guide">
             {nextGuide}
           </span>
         </div>
+
+        {/* Current Rank EXP Gauge */}
+        {!level.isDischarged && !level.isPreEnlistment && level.nextLabel ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-caption text-muted-foreground">
+              <span className="font-medium">{level.label} 경험치</span>
+              <span className="font-semibold text-card-foreground tabular-nums">
+                {formatPercent(level.rankExpPercent)}% (다음 계급까지 {level.remainingDaysToNext}일)
+              </span>
+            </div>
+            <div
+              role="progressbar"
+              aria-label="현재 계급 경험치 진행률"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={level.rankExpPercent}
+              className="h-1.5 overflow-hidden rounded-full bg-muted"
+            >
+              <div
+                className="h-full rounded-full bg-coral-strong transition-[width] duration-700 ease-out"
+                style={{ width: `${level.rankExpPercent}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Connected Step Track Roadmap */}
+        <div className="relative pt-2 pb-1" data-testid="service-rank-rail" aria-label="복무 계급 단계">
+          {/* Background track */}
+          <div className="absolute top-[26px] left-[12.5%] right-[12.5%] h-0.5 -translate-y-1/2 bg-border" />
+          {/* Active progress rail */}
+          <div
+            className="absolute top-[26px] left-[12.5%] h-0.5 -translate-y-1/2 bg-coral-strong transition-[width] duration-700 ease-out"
+            style={{
+              width: level.isDischarged
+                ? '75%'
+                : `${Math.min(75, Math.max(0, ((level.level - 1) + (level.rankExpPercent / 100)) * 25))}%`,
+            }}
+          />
+
+          <div className="relative grid grid-cols-4 gap-1">
+            {level.stages.map((stage) => {
+              const isCurrent = !level.isPreEnlistment && !level.isDischarged && level.level === stage.level;
+              const isPast = !level.isPreEnlistment && (level.isDischarged || level.level > stage.level);
+              const isFuture = !isCurrent && !isPast;
+
+              return (
+                <div
+                  key={stage.level}
+                  data-testid={`service-rank-step-${stage.level}`}
+                  className={cn(
+                    'flex flex-col items-center justify-center text-center transition-all',
+                    isCurrent && 'scale-105',
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'mb-1.5 flex h-7 w-7 items-center justify-center rounded-full text-caption font-bold transition-all',
+                      isCurrent && 'bg-coral-strong text-white ring-4 ring-coral/20 shadow-sm',
+                      isPast && 'bg-coral-strong text-white',
+                      isFuture && 'bg-card border border-border text-muted-foreground',
+                    )}
+                  >
+                    {isPast ? (
+                      <Check size={13} strokeWidth={3} aria-hidden="true" />
+                    ) : (
+                      <span>{stage.levelBadge}</span>
+                    )}
+                  </div>
+
+                  <span
+                    className={cn(
+                      'text-caption leading-tight',
+                      isCurrent ? 'font-bold text-coral-strong' : isPast ? 'font-semibold text-card-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    {stage.label}
+                  </span>
+                  <span className="text-caption text-muted-foreground tabular-nums">
+                    {stage.thresholdPercent}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {contact.enabled ? (
-        <p className="mt-3 flex items-center gap-1.5 text-caption text-muted-foreground">
+        <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
           <Clock size={13} aria-hidden="true" />
           평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
         </p>
@@ -159,7 +270,7 @@ function InlineServiceInfo({
       <button
         type="button"
         onClick={onOpenService}
-        className="mt-3 text-caption font-semibold text-coral-strong"
+        className="text-caption font-semibold text-coral-strong"
       >
         복무 정보 수정
       </button>
@@ -309,7 +420,36 @@ function SearchPageBody() {
     [state.records, state.profile.id, state.profile.role],
   );
 
-  const today = localToday();
+  const [today, setToday] = useState(() => localToday());
+
+  useEffect(() => {
+    const updateToday = () => {
+      const current = localToday();
+      setToday((prev) => (prev !== current ? current : prev));
+    };
+
+    const now = new Date();
+    const nextMidnight = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1,
+      0,
+      0,
+      0,
+      50,
+    );
+    const delay = Math.max(1000, nextMidnight.getTime() - now.getTime());
+
+    const timer = window.setTimeout(updateToday, delay);
+    const onFocus = () => updateToday();
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [today]);
+
   const result = useMemo(() => searchRecords(records, query, today), [records, query, today]);
   const isSoldier = state.profile.role === 'soldier';
 

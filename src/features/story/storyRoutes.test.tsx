@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { StoryRoute } from '@/features/story/StoryRoute';
-import type { DailyRecord } from '@/types';
+import type { CoupleHighlight, DailyRecord } from '@/types';
 
 /*
   라우트가 무엇을 여는가.
@@ -27,11 +27,13 @@ const unmarkTalkAbout = vi.fn(async () => ({ ok: true }));
 const acknowledge = vi.fn(() => true);
 let surface: DailyRecord[] = [];
 let records: DailyRecord[] = [];
+let coupleHighlights: CoupleHighlight[] = [];
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: {
       records,
+      coupleHighlights,
       talkAboutMarks: [],
       profile: {
         id: 'me', role: 'soldier',
@@ -61,6 +63,7 @@ function open(path: string) {
         <Route path="/story/partner" element={<StoryRoute mode="today" />} />
         <Route path="/story/mine" element={<StoryRoute mode="mine" />} />
         <Route path="/story/day/:date" element={<StoryRoute mode="archive" />} />
+        <Route path="/story/highlight/:highlightId" element={<StoryRoute mode="highlight" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -70,6 +73,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   surface = [];
   records = [];
+  coupleHighlights = [];
 });
 
 describe('/story/partner', () => {
@@ -170,5 +174,24 @@ describe('/story/day/:date', () => {
     open('/story/day/2026-08-14');
     expect(screen.queryByRole('button', { name: '이따 이야기하기' })).toBeNull();
     expect(screen.queryByTestId('story-acknowledge')).toBeNull();
+  });
+});
+
+describe('/story/highlight/:highlightId', () => {
+  it('replays the saved highlight order instead of sorting by clock time', async () => {
+    records = [
+      record({ id: 'late', time: '18:00', log: '두 번째로 고른 사진' }),
+      record({ id: 'early', time: '09:00', log: '첫 번째로 고른 사진' }),
+    ];
+    coupleHighlights = [{
+      id: 'summer', coupleId: 'c1', title: '여름', recordIds: ['late', 'early'],
+      coverRecordId: 'late', sortOrder: 0, createdAt: '2026-08-01', updatedAt: '2026-08-01',
+    }];
+
+    open('/story/highlight/summer');
+    expect(screen.getByRole('dialog', { name: '여름' })).toBeTruthy();
+    expect(screen.getByText('두 번째로 고른 사진')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('첫 번째로 고른 사진')).toBeTruthy();
   });
 });

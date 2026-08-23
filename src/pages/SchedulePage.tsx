@@ -21,6 +21,7 @@ import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import { MobileShell } from '@/components/MobileShell';
+import { groupIntoRuns, describeRuns, nextDay, type DateRun } from '@/lib/dateRuns';
 import { PlanSectionNav } from '@/components/PlanSectionNav';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -116,12 +117,36 @@ export function SchedulePage() {
     않는다. 손가락을 빠르게 튕기면 `pointerup` 이 그 렌더보다 먼저 도착하고, 그때 state
     는 아직 비어 있어 방금 잡은 범위가 통째로 사라진다.
   */
+  /*
+    ## 범위 하나에서 **고른 날들**로 (2026-08-23)
+
+    앞의 판은 연속 범위 하나만 가질 수 있었다. 이번 달에 면회가 세 번인 사람은 같은
+    일을 세 번 반복해야 했고, 그것이 "여러 개 선택해서 한 번에" 라는 요청의 내용이다.
+
+    이제 상태는 **고른 날들의 집합**이다. 끌면 그 구간이 집합에 더해지고, 톡 누르면 그
+    하루가 켜지고 꺼진다. 저장할 때 `groupIntoRuns` 가 연속 구간으로 잘라 주고 구간
+    하나가 일정 하나가 된다 -- 붙은 날은 기간 하나로, 흩어진 날은 각각 하루로.
+  */
   const [picking, setPicking] = useState(false);
-  const [pickFrom, setPickFrom] = useState<string | null>(null);
-  const [pickTo, setPickTo] = useState<string | null>(null);
+  const [pickedDays, setPickedDays] = useState<string[]>([]);
+  /** 손가락이 지나가는 동안의 구간. 놓을 때 집합에 합쳐진다. */
+  const [dragFrom, setDragFrom] = useState<string | null>(null);
+  const [dragTo, setDragTo] = useState<string | null>(null);
   const pickAnchor = useRef<string | null>(null);
   const pickEnd = useRef<string | null>(null);
   const pickDragged = useRef(false);
+  /*
+    확정값을 ref 에도 둔다. `pointermove` 는 continuous 이벤트여서 그 안의 setState 가
+    즉시 flush 되지 않고, 손가락을 빠르게 튕기면 `pointerup` 이 그 렌더보다 먼저
+    도착한다. 그때 state 는 아직 비어 있다.
+  */
+  const dragRange = useRef<[string, string] | null>(null);
+  /*
+    구간이 여럿일 때만 채워진다. 폼은 제목·종류·공개 범위 하나만 받고 이것이 날짜를
+    들고 있다가, 저장할 때 구간마다 한 건씩 만든다. 하나뿐이면 `null` 이고 앞의
+    경로가 그대로 돈다 -- 대부분의 일정은 여전히 한 건이다.
+  */
+  const [pendingRuns, setPendingRuns] = useState<DateRun[] | null>(null);
 
   const [eventStartDate, setEventStartDate] = useState(today);
   const [eventEndDate, setEventEndDate] = useState('');
@@ -238,8 +263,9 @@ export function SchedulePage() {
     pickAnchor.current = date;
     pickEnd.current = date;
     pickDragged.current = false;
-    setPickFrom(date);
-    setPickTo(date);
+    dragRange.current = null;
+    setDragFrom(null);
+    setDragTo(null);
   };
 
   const onGridMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -249,33 +275,49 @@ export function SchedulePage() {
     pickDragged.current = true;
     pickEnd.current = date;
     const [from, to] = [pickAnchor.current, date].sort();
-    setPickFrom(from);
-    setPickTo(to);
+    dragRange.current = [from, to];
+    setDragFrom(from);
+    setDragTo(to);
   };
 
+  /*
+    놓는 순간 지나온 구간이 **집합에 합쳐진다.** 끌기는 지우지 않는다 -- 지우는 것은
+    톡 누르는 쪽의 일이다. 끌어서 지우게 하면 손가락이 스치기만 해도 고른 날이
+    사라지고, 그러면 여러 날을 모으는 동안 마음 놓고 끌 수 없다.
+  */
   const onGridUp = () => {
     if (!picking) return;
+    const range = dragRange.current;
     pickAnchor.current = null;
+    dragRange.current = null;
+    setDragFrom(null);
+    setDragTo(null);
+    if (!range) return;
+    const [from, to] = range;
+    setPickedDays((current) => {
+      const next = new Set(current);
+      for (let day = from; day <= to; day = nextDay(day)) next.add(day);
+      return [...next].sort();
+    });
   };
 
   const cancelPicking = () => {
     setPicking(false);
-    setPickFrom(null);
-    setPickTo(null);
+    setPickedDays([]);
+    setDragFrom(null);
+    setDragTo(null);
     pickAnchor.current = null;
     pickEnd.current = null;
     pickDragged.current = false;
+    dragRange.current = null;
   };
 
-  /** 고른 범위를 사람이 읽는 말로. 하루면 하루라고, 여러 날이면 며칠인지. */
-  const pickedLabel = (() => {
-    if (!pickFrom) return '날짜를 골라 주세요';
-    if (!pickTo || pickTo === pickFrom) return `${pickFrom.slice(5)} 하루`;
-    const span = Math.round(
-      (Date.parse(`${pickTo}T00:00:00`) - Date.parse(`${pickFrom}T00:00:00`)) / 86400000,
-    ) + 1;
-    return `${pickFrom.slice(5)} – ${pickTo.slice(5)} · ${span}일`;
-  })();
+  /**
+   * 고른 것을 사람이 읽는 말로. 며칠인지와 **몇 건이 되는지**를 둘 다 말한다 --
+   * 흩어진 날을 고른 사람은 저장 전에 그것이 여러 건이 된다는 것을 알아야 한다.
+   */
+  const pickedLabel = describeRuns(pickedDays);
+  const pickedSet = new Set(pickedDays);
 
   /*
     고른 범위로 폼을 연다.
@@ -283,13 +325,22 @@ export function SchedulePage() {
     하루만 골랐으면 `endDate` 를 비운다 -- 시작일과 같은 종료일을 저장하면 하루짜리
     일정이 기간 일정처럼 읽히고, 기존 데이터와도 모양이 달라진다.
   */
+  /*
+    고른 날들로 폼을 연다.
+
+    구간이 하나면 앞과 똑같다 -- 시작일과 종료일이 폼에 들어가고 한 건이 저장된다.
+    구간이 여럿이면 폼은 제목·종류·공개 범위만 받고, 날짜는 `pendingRuns` 가 들고
+    있다가 저장할 때 구간마다 한 건씩 만든다.
+  */
   const openCreateFromPick = () => {
-    if (!pickFrom) return;
+    const runs = groupIntoRuns(pickedDays);
+    if (runs.length === 0) return;
     setEditingEventId(null);
     setTitle('');
     setEventType('visit');
-    setEventStartDate(pickFrom);
-    setEventEndDate(pickTo && pickTo !== pickFrom ? pickTo : '');
+    setEventStartDate(runs[0].start);
+    setEventEndDate(runs[0].end ?? '');
+    setPendingRuns(runs.length > 1 ? runs : null);
     setIsPrivate(!activeCouple);
     setTalkAbout(false);
     setFormError(null);
@@ -300,6 +351,7 @@ export function SchedulePage() {
   const openCreateModal = () => {
     if (!hasCoupleSpace) return;
     setEditingEventId(null);
+    setPendingRuns(null);
     setTitle('');
     setEventType('visit');
     setEventStartDate(selectedDate);
@@ -312,6 +364,7 @@ export function SchedulePage() {
 
   const openEditModal = (event: CoupleEvent) => {
     if (event.createdBy !== authenticatedUser?.id) return;
+    setPendingRuns(null);
     setEditingEventId(event.id);
     setTitle(event.title);
     setEventType(event.eventType);
@@ -382,6 +435,49 @@ export function SchedulePage() {
     };
 
     try {
+      /*
+        여러 구간을 한 번에.
+
+        구간마다 한 건이므로 **일부만 성공할 수 있다.** 전부 성공한 것처럼 말하면
+        사용자는 격자를 보고서야 빠진 것을 알게 되고, 그때는 무엇이 빠졌는지 스스로
+        세어야 한다. 그래서 몇 건이 되었고 몇 건이 안 되었는지 그대로 말한다.
+
+        하나라도 성공하면 폼은 닫는다 -- 남은 것을 다시 넣게 하려고 열어 두면 이미
+        저장된 것까지 한 번 더 만들기 쉽다.
+      */
+      if (pendingRuns && !editingEventId) {
+        const results = [];
+        for (const run of pendingRuns) {
+          const created = await addEvent({
+            coupleId: profile.couple.coupleId!,
+            createdBy: authenticatedUser.id,
+            ...changes,
+            startDate: run.start,
+            endDate: run.end,
+          });
+          results.push(Boolean(created));
+        }
+        if (!isCurrentAccess(access)) return;
+        const done = results.filter(Boolean).length;
+        if (done === 0) {
+          const message = '일정을 저장하지 못했습니다. 입력 내용은 유지되니 다시 시도해 주세요.';
+          setFormError(message);
+          toast.error(message);
+          return;
+        }
+        if (done < results.length) {
+          toast.warning(`${results.length}건 중 ${done}건만 등록했어요. 나머지는 다시 시도해 주세요.`);
+        } else {
+          toast.success(`일정 ${done}건을 등록했습니다.`);
+        }
+        setSelectedDate(pendingRuns[0].start);
+        setPendingRuns(null);
+        setPickedDays([]);
+        setShowEventModal(false);
+        setEditingEventId(null);
+        return;
+      }
+
       const saved = editingEventId
         ? await updateEvent(editingEventId, changes)
         : await addEvent({
@@ -629,8 +725,7 @@ export function SchedulePage() {
                       onClick={() => {
                         if (!hasCoupleSpace) return;
                         setPicking(true);
-                        setPickFrom(null);
-                        setPickTo(null);
+                        setPickedDays([]);
                       }}
                       disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
                       className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control disabled:opacity-40"
@@ -660,7 +755,12 @@ export function SchedulePage() {
                   const dayEvents = eventsOnDate(events, date);
                   const dayTasks = tasks.filter((task) => task.dueDate === date && !task.completed);
                   const isToday = date === today;
-                  const inPick = Boolean(picking && pickFrom && date >= pickFrom && date <= (pickTo || pickFrom));
+                  /*
+                    고른 날 **또는** 지금 손가락이 지나고 있는 구간. 끌기는 놓아야
+                    집합에 들어가므로, 그 전까지는 미리보기로만 켜진다.
+                  */
+                  const inDrag = Boolean(dragFrom && date >= dragFrom && date <= (dragTo || dragFrom));
+                  const inPick = picking && (pickedSet.has(date) || inDrag);
                   const isSelected = picking ? inPick : date === selectedDate;
                   return (
                     <button
@@ -668,16 +768,22 @@ export function SchedulePage() {
                       key={date}
                       data-cal-date={date}
                       /*
-                        고르는 동안에는 탭이 그 하루를 잡는다. 끌기가 끝난 뒤 브라우저가
-                        보내는 click 은 anchor 가 이미 비어 있어도 도착하므로, 끌었을
-                        때는 삼킨다 -- 안 그러면 놓은 순간 범위가 하루로 줄어든다.
+                        고르는 동안 탭은 그 하루를 **켜고 끈다.** 끌기가 끝난 뒤
+                        브라우저가 보내는 click 은 anchor 가 이미 비어 있어도 도착하므로
+                        끌었을 때는 삼킨다 -- 안 그러면 방금 끌어 담은 구간의 끝 날이
+                        곧바로 꺼진다.
+
+                        토글이어야 하는 이유: 여러 날을 모으는 일에는 **잘못 누르는 일**이
+                        딸려 온다. 되돌리는 길이 전체 취소밖에 없으면 열두 번 고른 사람이
+                        열세 번째에 잘못 눌렀을 때 처음부터 다시 해야 한다.
                       */
                       onClick={() => {
                         if (!picking) { setSelectedDate(date); return; }
                         if (pickDragged.current) { pickDragged.current = false; return; }
-                        setPickFrom(date);
-                        setPickTo(date);
                         pickEnd.current = date;
+                        setPickedDays((current) => (current.includes(date)
+                          ? current.filter((one) => one !== date)
+                          : [...current, date].sort()));
                       }}
                       aria-label={picking
                         ? `${date}${inPick ? ', 선택됨' : ''}`
@@ -740,14 +846,14 @@ export function SchedulePage() {
                     variant="primary"
                     size="sm"
                     onClick={openCreateFromPick}
-                    disabled={!pickFrom}
+                    disabled={pickedDays.length === 0}
                   >
                     <span>다음</span>
                   </Button>
                 </div>
               ) : (
                 <p className="mt-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
-                  일정 추가를 누르고 날짜를 끌면 여러 날이 한 번에 잡혀요
+                  일정 추가를 누르고 날짜를 끌면 여러 날이 한 번에 잡혀요. 떨어진 날은 하나씩 눌러 더할 수 있어요
                 </p>
               )}
             </section>

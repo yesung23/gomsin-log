@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, MilitaryInfo, CoupleEvent } from '@/types';
 import { computeServiceProgress } from '@/lib/milestones';
-import { computeServiceLevel } from '@/lib/serviceLevel';
+import { computeServiceExp, serviceDateAtMs } from '@/lib/serviceLevel';
 import { localToday } from '@/lib/cycle';
 
 let currentState: AppState;
@@ -118,25 +118,30 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
 
-    const progress = computeServiceProgress(SERVING_MILITARY, localToday());
-    const level = computeServiceLevel(progress);
+    const exp = computeServiceExp(SERVING_MILITARY);
 
     expect(screen.getByTestId('soldier-service-info')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '내 복무 현황 열기' })).not.toBeInTheDocument();
     expect(screen.getByText('내 복무')).toBeInTheDocument();
-    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`복무율 ${progress!.percent}%`);
-    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${progress!.elapsedDays}일 경과`);
-    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${progress!.remainingDays}일 남음`);
-    expect(screen.getByTestId('service-level')).toHaveTextContent(
-      level!.isPreEnlistment ? '입대 대기' : `현재 계급 · ${level!.label}`,
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
+      new RegExp(`복무율 \\d+\\.\\d{4}%`),
     );
-    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(level!.nextLabel!);
-    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(`${level!.remainingDaysToNext}일 남음`);
-    expect(screen.getByTestId('service-rank-rail')).toBeInTheDocument();
-    expect(screen.getByTestId('service-rank-step-1')).toHaveTextContent('이등병');
-    expect(screen.getByTestId('service-rank-step-2')).toHaveTextContent('일병');
-    expect(screen.getByTestId('service-rank-step-3')).toHaveTextContent('상병');
-    expect(screen.getByTestId('service-rank-step-4')).toHaveTextContent('병장');
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${exp!.elapsedDays}일 경과`);
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${exp!.remainingDays}일 남음`);
+    expect(screen.getByTestId('service-level')).toHaveTextContent(
+      exp!.isPreEnlistment ? '입대 대기' : `LV ${exp!.tier.level} ${exp!.tier.label}`,
+    );
+    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(`LV ${exp!.nextTier!.level} ${exp!.nextTier!.label}`);
+    expect(screen.getByTestId('service-tier-rail')).toBeInTheDocument();
+    expect(screen.getByTestId('service-tier-step-1')).toHaveTextContent('신병');
+    expect(screen.getByTestId('service-tier-step-2')).toHaveTextContent('일초');
+    expect(screen.getByTestId('service-tier-step-3')).toHaveTextContent('일꺾');
+    expect(screen.getByTestId('service-tier-step-4')).toHaveTextContent('일말');
+    expect(screen.getByTestId('service-tier-step-5')).toHaveTextContent('상초');
+    expect(screen.getByTestId('service-tier-step-6')).toHaveTextContent('상꺾');
+    expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
+    expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
+    expect(screen.getByTestId('service-today-exp')).toBeInTheDocument();
     expect(screen.getByText(/평일 18:00–21:00/)).toBeInTheDocument();
     expect(screen.queryByTestId('cycle-tracker-section')).not.toBeInTheDocument();
   });
@@ -224,11 +229,11 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
 
     expect(screen.getByText('전역했어요')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '복무 정보 입력하기' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('service-level')).toHaveTextContent('현재 계급 · 전역');
+    expect(screen.getByTestId('service-level')).toHaveTextContent('LV 7 왕고');
     expect(screen.getByTestId('service-level-guide')).toHaveTextContent('복무를 마쳤어요.');
   });
 
-  it('계급별 단계(이등병·일병·상병·병장) 레일에서 현재 계급과 이전 계급이 시각적으로 구분된다', () => {
+  it('복무 레벨 7단계(신병·일초·일꺾·일말·상초·상꺾·왕고) 레일에서 현재 단계와 이전 단계를 구분한다', () => {
     // 2025-09-01 입대, 2027-05-31 전역 (총 637일)
     // today가 2026-08-24 기준 약 357일 경과 (56% -> 상병)
     currentState = stateWith({
@@ -243,16 +248,45 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     });
     renderSearch();
 
-    const level = computeServiceLevel(computeServiceProgress(currentState.profile.military, localToday()));
-    expect(screen.getByTestId('service-level')).toHaveTextContent(`현재 계급 · ${level!.label}`);
-    expect(screen.getByTestId('service-level')).toHaveTextContent(level!.levelBadge);
-    expect(screen.getByTestId('service-rank-rail')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: '현재 계급 경험치 진행률' })).toBeInTheDocument();
+    const exp = computeServiceExp(currentState.profile.military);
+    expect(screen.getByTestId('service-level')).toHaveTextContent(`LV ${exp!.tier.level} ${exp!.tier.label}`);
+    expect(screen.getByTestId('service-tier-rail')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: '현재 복무 레벨 경험치 진행률' })).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' })).toHaveAttribute('aria-valuenow');
 
-    const step3 = screen.getByTestId('service-rank-step-3');
-    expect(step3).toHaveTextContent('상병');
-    expect(step3).toHaveTextContent('50%');
+    const step4 = screen.getByTestId('service-tier-step-4');
+    expect(step4).toHaveTextContent('일말');
+    expect(screen.getByTestId('service-tier-description')).toHaveTextContent('실제 행정 진급·관계 점수가 아니에요');
+  });
+
+  it('일꺾 전환은 번개 연출 상태를 내보낸다', () => {
+    vi.useFakeTimers();
+    try {
+      const enlistmentDate = '2025-01-01';
+      const expectedDischargeDate = '2026-07-02';
+      const military: MilitaryInfo = {
+        branch: 'army',
+        militaryStatus: 'serving',
+        enlistmentDate,
+        expectedDischargeDate,
+        dischargeDateSource: 'calculated',
+      };
+      const startMs = serviceDateAtMs(enlistmentDate)!;
+      const totalMs = 547 * 86400 * 1000;
+      currentState = stateWith({ role: 'soldier', military });
+      vi.setSystemTime(startMs + totalMs * 0.24);
+      renderSearch();
+
+      vi.setSystemTime(startMs + totalMs * 0.25);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(screen.getByTestId('service-feedback')).toHaveTextContent('LV 3 일꺾 달성');
+      expect(screen.getByTestId('service-feedback')).toHaveAttribute('data-tier-effect', 'bent');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('전역한 군화는 계급 경험치 프로그레스바를 별도로 노출하지 않고 전역 완료 상태를 제공한다', () => {
@@ -268,9 +302,9 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     });
     renderSearch();
 
-    expect(screen.getByTestId('service-level')).toHaveTextContent('MAX');
-    expect(screen.getByTestId('service-level')).toHaveTextContent('현재 계급 · 전역');
-    expect(screen.queryByRole('progressbar', { name: '현재 계급 경험치 진행률' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('service-level')).toHaveTextContent('LV 7 왕고');
+    expect(screen.queryByRole('progressbar', { name: '현재 복무 레벨 경험치 진행률' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-today-exp')).not.toBeInTheDocument();
   });
 });
 
@@ -394,5 +428,61 @@ describe('개인정보 보호 필터', () => {
     expect(screen.getByText('1개 찾았어요')).toBeInTheDocument();
     expect(screen.getByText(/상대방의 공개 일기/)).toBeInTheDocument();
     expect(screen.queryByText(/상대방의 나만 보기 일기/)).not.toBeInTheDocument();
+  });
+});
+
+describe('복무 EXP 실시간 및 다군 지원', () => {
+  it('해군·공군·해병대 등 다군 branch에 대해 각 군 명칭과 레벨/경험치를 정상 렌더링한다', () => {
+    const navyMilitary: MilitaryInfo = {
+      branch: 'navy',
+      militaryStatus: 'serving',
+      enlistmentDate: '2025-01-01',
+      expectedDischargeDate: '2026-09-01',
+      dischargeDateSource: 'manual',
+    };
+    currentState = stateWith({ role: 'soldier', military: navyMilitary });
+    renderSearch();
+
+    expect(screen.getByText(/해군/)).toBeInTheDocument();
+    expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
+    expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
+  });
+
+  it('실시간 EXP 영역에 정수 EXP 카운터와 소수점 4자리 퍼센트가 표기된다', () => {
+    currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
+    renderSearch();
+
+    const readout = screen.getByTestId('service-exp-readout');
+    expect(readout).toBeInTheDocument();
+    // EXP formatted with / and %
+    expect(readout).toHaveTextContent(/EXP/);
+    expect(readout).toHaveTextContent(/%/);
+  });
+
+  it('화면이 숨겨지면 EXP ticker를 멈추고 다시 보이면 즉시 재개한다', () => {
+    const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+
+    try {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      const view = renderSearch();
+      expect(setIntervalSpy).toHaveBeenCalled();
+
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(clearIntervalSpy).toHaveBeenCalled();
+
+      const intervalsBeforeResume = setIntervalSpy.mock.calls.length;
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(setIntervalSpy.mock.calls.length).toBeGreaterThan(intervalsBeforeResume);
+
+      view.unmount();
+      expect(clearIntervalSpy).toHaveBeenCalled();
+    } finally {
+      if (originalHidden) Object.defineProperty(document, 'hidden', originalHidden);
+      vi.restoreAllMocks();
+    }
   });
 });

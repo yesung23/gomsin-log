@@ -48,6 +48,51 @@ function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
   return platform === 'ios' || platform === 'android' ? platform : null;
 }
 
+function PartnerUsernameEditor({
+  inputId,
+  value,
+  currentUsername,
+  partnerLabel,
+  isSaving,
+  onChange,
+  onSave,
+}: {
+  inputId: string;
+  value: string;
+  currentUsername?: string;
+  partnerLabel: string;
+  isSaving: boolean;
+  onChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-caption text-muted-foreground">
+        현재 아이디: @{currentUsername || '아직 정해지지 않았어요'}
+      </p>
+      <label htmlFor={inputId} className="sr-only">{partnerLabel} 영어 아이디</label>
+      <input
+        id={inputId}
+        value={value}
+        onChange={(event) => onChange(event.target.value.toLowerCase().slice(0, 20))}
+        maxLength={20}
+        autoCapitalize="none"
+        autoCorrect="off"
+        placeholder={`${partnerLabel} 아이디 입력`}
+        className="h-11 w-full rounded-control border border-border bg-background px-3 text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+      />
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={isSaving || !value.trim()}
+        className="press-response w-full min-h-11 rounded-control bg-foreground px-4 text-label font-semibold text-background disabled:opacity-50"
+      >
+        {isSaving ? '저장 중…' : '상대방 아이디 저장'}
+      </button>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const {
     state,
@@ -274,7 +319,7 @@ export function SettingsPage() {
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
   const [editProfileCaption, setEditProfileCaption] = useState(profile.profileCaption || '');
   const [editProfileDateType, setEditProfileDateType] = useState<ProfileDateType | ''>(profile.profileDateType || '');
-  const [editPartnerUsername, setEditPartnerUsername] = useState('');
+  const [editPartnerUsername, setEditPartnerUsername] = useState(profile.couple.partnerUsername || '');
 
   const closeProfileModal = useCallback(() => {
     setShowProfileModal(false);
@@ -387,7 +432,7 @@ export function SettingsPage() {
         toast.error('상대방 아이디를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
         return;
       }
-      setEditPartnerUsername('');
+      setEditPartnerUsername(nextUsername);
       toast.success('상대방 아이디를 바꿨어요.');
     } finally {
       if (isCurrentIdentity(identity)) setIsSavingPartnerUsername(false);
@@ -721,6 +766,7 @@ export function SettingsPage() {
                 setEditAnniversary(profile.couple.anniversaryDate || '');
                 setEditProfileCaption(profile.profileCaption || '');
                 setEditProfileDateType(profile.profileDateType || '');
+                setEditPartnerUsername(profile.couple.partnerUsername || '');
                 setShowProfileModal(true);
               }}
               leading={<User size={18} className="text-coral" />}
@@ -756,28 +802,18 @@ export function SettingsPage() {
               <div>
                 <h2 className="text-label font-semibold text-foreground">{profile.role === 'gomsin' ? '군화' : '곰신'}의 아이디 정하기</h2>
                 <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
-                  내 아이디는 상대방 계정에서, 상대방 아이디는 이 화면에서 정해요.
+                  상대방 계정의 아이디를 이 화면에서 정해요. 내 아이디는 상대방이 정해요.
                 </p>
               </div>
-              <label htmlFor="partner-username" className="sr-only">상대방 영어 아이디</label>
-              <input
-                id="partner-username"
+              <PartnerUsernameEditor
+                inputId="partner-username"
                 value={editPartnerUsername}
-                onChange={(event) => setEditPartnerUsername(event.target.value.toLowerCase().slice(0, 20))}
-                maxLength={20}
-                autoCapitalize="none"
-                autoCorrect="off"
-                placeholder="상대방 아이디 입력"
-                className="h-11 w-full rounded-control border border-border bg-background px-3 text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                currentUsername={profile.couple.partnerUsername}
+                partnerLabel={profile.role === 'gomsin' ? '군화' : '곰신'}
+                isSaving={isSavingPartnerUsername}
+                onChange={setEditPartnerUsername}
+                onSave={() => void handleSavePartnerUsername()}
               />
-              <button
-                type="button"
-                onClick={() => void handleSavePartnerUsername()}
-                disabled={isSavingPartnerUsername || !editPartnerUsername.trim()}
-                className="press-response w-full min-h-11 rounded-control bg-foreground px-4 text-label font-semibold text-background disabled:opacity-50"
-              >
-                {isSavingPartnerUsername ? '저장 중…' : '상대방 아이디 저장'}
-              </button>
             </div>
           </section>
         ) : null}
@@ -947,6 +983,26 @@ export function SettingsPage() {
                 <p className="mt-0.5 text-label font-semibold text-foreground">@{profile.username || '아직 정해지지 않았어요'}</p>
                 <p className="mt-1 text-caption text-muted-foreground">아이디는 상대방이 정해요. 별명은 이 화면에서 바꿀 수 있어요.</p>
               </div>
+
+              {profile.couple.connected ? (
+                <div className="rounded-control border border-border bg-muted p-3 space-y-2">
+                  <div>
+                    <p className="text-caption text-muted-foreground">상대방 아이디 정하기</p>
+                    <p className="mt-0.5 text-caption text-muted-foreground">
+                      {profile.role === 'gomsin' ? '군화' : '곰신'}의 아이디를 내가 정해요.
+                    </p>
+                  </div>
+                  <PartnerUsernameEditor
+                    inputId="profile-modal-partner-username"
+                    value={editPartnerUsername}
+                    currentUsername={profile.couple.partnerUsername}
+                    partnerLabel={profile.role === 'gomsin' ? '군화' : '곰신'}
+                    isSaving={isSavingPartnerUsername}
+                    onChange={setEditPartnerUsername}
+                    onSave={() => void handleSavePartnerUsername()}
+                  />
+                </div>
+              ) : null}
 
               <ProfileCaptionEditor
                 caption={editProfileCaption}

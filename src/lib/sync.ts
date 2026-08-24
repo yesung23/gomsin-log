@@ -40,6 +40,26 @@ export type FullStateResult =
 const PROFILE_COLUMNS = 'id, display_name, role, avatar_path, military_info, onboarding_completed_at';
 const PROFILE_IDENTITY_COLUMNS = `${PROFILE_COLUMNS}, username, profile_caption, profile_date_type`;
 
+type PartnerProfileRow = {
+  display_name?: string | null;
+  role?: string | null;
+  avatar_path?: string | null;
+  username?: string | null;
+};
+
+/**
+ * Read the partner's public couple-facing identity without widening profiles RLS.
+ *
+ * The username projection is additive. During the migration window, an older
+ * deployment may only have `get_partner_profile()`, so only a confirmed missing
+ * RPC gets the legacy fallback; auth/RLS/server failures remain failures.
+ */
+async function fetchPartnerProfile(): Promise<{ data: PartnerProfileRow[] | null; error: any }> {
+  const extended = await supabase!.rpc('get_partner_profile_with_username');
+  if (!extended.error || extended.error?.code !== 'PGRST202') return extended;
+  return supabase!.rpc('get_partner_profile');
+}
+
 async function fetchProfileRow(userId: string) {
   const profiles = supabase!;
   let result: {
@@ -215,18 +235,23 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       }
 
       // Fetch Partner Profile
-      const { data: partnerData, error: partnerError } = await supabase.rpc('get_partner_profile');
+      const { data: partnerData, error: partnerError } = await fetchPartnerProfile();
       if (partnerError) return syncFailure('partner', partnerError);
       
       const hasPartner = !!(partnerData && partnerData.length > 0);
       let partnerName = '';
+      let partnerUsername: string | undefined;
       if (hasPartner) {
-        partnerName = partnerData[0].display_name;
+        partnerName = partnerData[0].display_name || '';
+        if (typeof partnerData[0].username === 'string' && partnerData[0].username.trim()) {
+          partnerUsername = partnerData[0].username;
+        }
       }
 
       couple = {
         coupleId: memberData.couple_id,
         partnerName,
+        ...(partnerUsername ? { partnerUsername } : {}),
         anniversaryDate: coupleData?.anniversary_date || '',
         coupleCode: '',
         connected: hasPartner,

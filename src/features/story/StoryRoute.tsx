@@ -128,6 +128,10 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     navigate(`/record?record=${recordId}`);
   }, [navigate, setHighlightedRecordId]);
 
+  const addToHighlight = useCallback((recordId: string) => {
+    navigate(`/us?highlightRecord=${encodeURIComponent(recordId)}`);
+  }, [navigate]);
+
   /** 속표지의 줄 → 그 카드. 라우트를 바꿔야 새로고침에도 같은 자리가 열린다. */
   const jumpToRecord = useCallback((recordId: string) => {
     const next = new URLSearchParams(searchParams);
@@ -193,6 +197,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       markedRecordIds={markedRecordIds}
       onClose={close}
       onOpenRecord={openRecord}
+      onAddToHighlight={mode === 'highlight' ? undefined : addToHighlight}
       onJumpToRecord={jumpToRecord}
       onToggleBookmark={mode === 'archive' || mode === 'highlight' ? undefined : toggleBookmark}
       onAcknowledge={mode === 'today' ? confirm : undefined}

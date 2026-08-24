@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { X, ChevronLeft, ChevronRight, ArrowUpRight, Check } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ArrowUpRight, BookmarkPlus, Check } from 'lucide-react';
 import type { StoryCard } from '@/features/story/storyProjection';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { PaperCard, Bookmark, FoldDivider } from '@/components/paper';
@@ -47,6 +47,8 @@ export interface StoryViewerProps {
   onClose: () => void;
   /** 정확한 원본으로. 근사치로 대체하지 않는다. */
   onOpenRecord: (recordId: string) => void;
+  /** 사진 스토리의 원본을 프로필 하이라이트 편집기로 가져온다. */
+  onAddToHighlight?: (recordId: string) => void;
   /** 속표지의 줄을 눌렀을 때. 그 줄이 가리키는 카드로 이동한다. */
   onJumpToRecord?: (recordId: string) => void;
   /** 책갈피 토글. `archive`에서는 넘기지 않는다. */
@@ -67,6 +69,7 @@ export function StoryViewer({
   title,
   onClose,
   onOpenRecord,
+  onAddToHighlight,
   onJumpToRecord,
   onToggleBookmark,
   markedRecordIds,
@@ -227,6 +230,17 @@ export function StoryViewer({
             />
           ) : null}
           <span className="flex-1" />
+          {onAddToHighlight && !card.record.isPrivate && card.record.attachments?.some((attachment) => attachment.type === 'photo') ? (
+            <button
+              type="button"
+              onClick={() => onAddToHighlight(card.record.id)}
+              aria-label="하이라이트에 추가"
+              className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
+            >
+              <BookmarkPlus size={16} aria-hidden="true" />
+              하이라이트
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => onOpenRecord(card.record.id)}

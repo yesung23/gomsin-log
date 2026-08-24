@@ -5,6 +5,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { StoryRoute } from '@/features/story/StoryRoute';
 import type { CoupleHighlight, DailyRecord } from '@/types';
 
+const mockNavigate = vi.hoisted(() => vi.fn());
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 /*
   라우트가 무엇을 여는가.
 
@@ -126,6 +132,17 @@ describe('/story/partner', () => {
     open('/story/partner');
     await userEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
     await waitFor(() => expect(markTalkAbout).toHaveBeenCalledWith('a'));
+  });
+
+  it('사진 스토리에서 정확한 원본을 하이라이트 편집기로 가져온다', async () => {
+    surface = [record({
+      id: 'photo-story',
+      attachments: [{ type: 'photo', name: 'story.jpg', url: 'https://example.test/story.jpg' }],
+    })];
+    records = surface;
+    open('/story/partner');
+    await userEvent.click(screen.getByRole('button', { name: '하이라이트에 추가' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/us?highlightRecord=photo-story');
   });
 });
 

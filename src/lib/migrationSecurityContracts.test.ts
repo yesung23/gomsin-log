@@ -63,6 +63,7 @@ const SEARCH_PATH_EXEMPTIONS: Record<string, string> = {};
 const CLIENT_RPCS = [
   'public.get_my_couple_state()',
   'public.get_partner_profile()',
+  'public.get_partner_profile_with_username()',
   'public.get_my_active_couple_id()',
   'public.redeem_invitation(text)',
   'public.regenerate_invitation(text)',

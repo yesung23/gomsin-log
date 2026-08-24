@@ -1,4 +1,4 @@
-import type { Attachment, CoupleEvent, DailyRecord, Trip } from '@/types';
+import type { Attachment, DailyRecord } from '@/types';
 
 /*
   `postTiles.ts` 이지 `postGrid.ts` 가 아니다.
@@ -10,17 +10,17 @@ import type { Attachment, CoupleEvent, DailyRecord, Trip } from '@/types';
 */
 
 /**
- * 여행 게시물 격자에 들어갈 칸 하나. **하루가 아니라 기록 하나가 한 칸이다.**
+ * 사진 게시물 격자에 들어갈 칸 하나. **하루가 아니라 기록 하나가 한 칸이다.**
  *
- * ## 왜 여행 게시물로 좁히는가
+ * ## 왜 사진 기록으로 좁히는가
  *
  * 앞의 판은 한 달의 모든 날을 7열로 그렸다. 날짜 순이고 요일 정렬이 아니라는 이유로
  * "달력이 아니라 질감" 이라고 적혀 있었지만, **쓰는 사람에게는 달력으로 읽힌다** --
  * 날짜가 적혀 있고 빈 칸이 있으면 그것은 달력이다. 지금은 그 자리를 인스타그램처럼
- * 여행 중 남긴 기록 게시물에만 사용한다.
+ * 공유 사진 기록 게시물에 사용한다.
  *
- * 인스타의 프로필 격자는 날이 아니라 **게시물**을 센다. 여기서는 그 게시물의 범위를
- * 여행 기간으로 먼저 좁힌다. 일반 기록은 사진 탭의 기존 기록 목록에서 본다.
+ * 인스타의 프로필 격자는 날이 아니라 **게시물**을 센다. 일반 기록은 사진 탭의 기존
+ * 기록 목록에서 본다.
  *
  * ## 사진이 있는 기록만 칸이 된다
  *
@@ -44,32 +44,6 @@ export function getPhotoAttachments(
   record: Pick<DailyRecord, 'attachments'>,
 ): Attachment[] {
   return record.attachments?.filter((attachment) => attachment.type === 'photo') ?? [];
-}
-
-/**
- * 여행과 연결된 기록인지 판별한다.
- *
- * 현재 `DailyRecord` 데이터 구조에는 여행(`trip_id`)을 가리키는 외래키 필드가 없다.
- * 따라서 DB 스키마/마이그레이션을 임의로 추가하지 않고, 기존 코드에서 확인 가능한
- * 여행 목록(`trips`)의 기간(`startDate` ~ `endDate`) 및 여행 일정 이벤트(`events` 중 `eventType === 'trip'`)의
- * 기간 내에 작성된 기록인지를 날짜 기준으로 매칭한다.
- *
- * [한계점]
- * 동일 날짜에 여러 여행이 겹치거나 여행 당일 일상 메모를 작성한 경우 여행 기록으로 함께 분류될 수 있는
- * 한계가 있으며, 향후 레코드 단위 외래키 필드가 도입되기 전까지 날짜 기반 매칭을 최소 범위로 적용한다.
- */
-export function isTravelRecord(
-  record: Pick<DailyRecord, 'date'>,
-  trips: readonly Trip[],
-  events: readonly CoupleEvent[] = [],
-): boolean {
-  const inTrip = trips.some((trip) => trip.startDate <= record.date && record.date <= trip.endDate);
-  if (inTrip) return true;
-  return events.some((event) => {
-    if (event.eventType !== 'trip') return false;
-    const end = event.endDate || event.startDate;
-    return event.startDate <= record.date && record.date <= end;
-  });
 }
 
 /**

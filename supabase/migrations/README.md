@@ -194,6 +194,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `057_profile_identity_and_caption.sql` | profiles에 nullable `username`·`profile_caption`·`profile_date_type`을 추가하고 username 형식, caption 길이, 날짜 타입 CHECK와 `lower(username)` 대소문자 무시 UNIQUE index를 추가한다. 기존 owner-only profiles RLS 정책과 shared projection/RPC는 변경하지 않는다 | **신규 / 운영 미적용 — fresh chain 001→057에 적용, `npm run test:phase0`에서 55 migrations·309 assertions 통과. 운영 Supabase는 변경하지 않음** |
 | `058_couple_highlights.sql` | 독립적인 couple highlight parent/item 모델, 활성 커플 shared-only RLS, SECURITY DEFINER 저장 RPC, private 전환·삭제 시 항목 pruning trigger, `highlights` invalidation slice | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
 | `059_partner_managed_username.sql` | 본인 username 직접 수정 차단, 활성 커플의 상대방 username만 갱신하는 SECURITY DEFINER RPC, username 형식·중복·삭제 상태·커플 row lock·`profile` invalidation 검증 | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
+| `060_partner_username_projection.sql` | 활성 커플의 상대방 username만 기존 파트너 프로필 projection에 추가로 반환한다. profiles 직접 SELECT/RLS는 넓히지 않고 authenticated 전용 SECURITY DEFINER RPC로 제한한다 | **신규 / 운영 미적용 — fresh chain 001→060에 포함, phase0 actor/RLS 계약 검증 완료** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
@@ -784,12 +785,15 @@ supabase functions deploy delete-account
 ## 022 — V3 cycle tables
 `022_cycle_v3_schema.sql`은 생리 기간(`cycle_periods`), 일별 컨디션(`cycle_daily_logs`), 민감정보 동의(`user_sensitive_consents`), 공유 옵션(`cycle_sharing_preferences`) 테이블을 생성하고 legacy 데이터를 안전하게 이관합니다. (신규 / 원격 적용 미확인)
 
-## 057–059 원격 상태 확인 (2026-08-24)
+## 057–060 원격 상태 확인 (2026-08-24)
 
 - `057_profile_identity_and_caption.sql`, `058_couple_highlights.sql`,
-  `059_partner_managed_username.sql`은 저장소에 존재하며 fresh-chain 계약에서 검증됩니다.
-- 사용자는 Supabase SQL Editor에서 해당 작업을 완료했다고 보고했습니다. 이 에이전트는
-  운영 Supabase에 SQL을 실행하지 않았습니다.
+  `059_partner_managed_username.sql`, `060_partner_username_projection.sql`은 저장소에
+  존재하며 fresh-chain 계약에서 검증됩니다. 060에는 실제 A/B/C/anon actor probe도
+  포함됩니다.
+- 사용자는 Supabase SQL Editor에서 057–059 작업을 완료했다고 보고했습니다. 이 에이전트는
+  운영 Supabase에 SQL을 실행하지 않았습니다. 060은 이번 작업에서 새로 추가했으며 원격
+  적용 여부는 **UNVERIFIED / NOT APPLIED by this agent**입니다.
 - 사후 익명 PostgREST probe에서 `profiles.username`, `profiles.profile_caption`,
   `couple_highlights`, `set_partner_username(text)`가 모두 해석되고 `401/42501`로
   익명 접근이 거부되었습니다. 따라서 요청 객체의 현재 존재·anon 차단은 확인되지만,

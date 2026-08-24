@@ -2268,7 +2268,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!workspace) return false;
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
     if (!isCurrentWorkspace(workspace)) return false;
-    return setPartnerUsernameInDB(username);
+    const saved = await setPartnerUsernameInDB(username);
+    if (saved && isCurrentWorkspace(workspace)) {
+      updateStateImmediately((current) => ({
+        ...current,
+        profile: {
+          ...current.profile,
+          couple: {
+            ...current.profile.couple,
+            partnerUsername: normalizeUsername(username),
+          },
+        },
+      }));
+    }
+    return saved;
   };
 
   const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {

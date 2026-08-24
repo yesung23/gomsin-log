@@ -2,12 +2,12 @@
 
 > AI 에이전트가 수행한 작업의 누적 기록. `CLAUDE.md`의 지시에 따라 유지한다.
 >
-> **이 문서는 "무엇을 했는가"의 기록이다.** 제품 의도는
-> [`PRODUCT_V3.md`](PRODUCT_V3.md), 저장소 현실은
+> **이 문서는 "무엇을 했는가"의 기록이다.** 제품 의도는 최신 사용자 승인 V4 방향과
+> [`V4_AS_BUILT.md`](V4_AS_BUILT.md)/[`V4_BACKLOG.md`](V4_BACKLOG.md), 저장소 현실은
 > [`CURRENT_STATE.md`](CURRENT_STATE.md), 구현 순서는
 > [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md), 사업전략은
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
-> 여기에 제품 결정을 새로 쓰지 않는다.
+> 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
 ## 앞으로 사용할 표준 세션 원장 형식
 
@@ -788,6 +788,293 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 #### DO NOT ADVANCE UNTIL
 - delta re-review 승인 전 #76 merge 금지 · #74보다 먼저 merge 금지
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-24 · Codex · BrowserStack GitHub 학생 로그인 후 Pixel 6 실기기 검증
+
+#### PLAN POSITION
+- Phase: V4 browser/device verification
+- Workstream: production browser verification — BrowserStack Live
+- Step: authenticate through the BrowserStack GitHub Students route, start a real Android Chrome session, and verify deployed entry routes
+- Previous Gate: BrowserStack sign-in was blocked before device allocation
+- This Gate: BrowserStack authentication and device session PASS; authenticated app feature verification BLOCKED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: no product, customer, pricing, storage, or business change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: `docs/WORK_LOG.md`
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary + BrowserStack Live through Codex In-app Browser
+- Model: primary Codex; no subagent used for external browser session
+- Role: read-only production browser verifier
+- PR: none
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261` (`origin/master`)
+- Old HEAD: `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+- New HEAD / Reviewed HEAD: unchanged `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+
+#### CHANGED / REVIEWED
+- file: `control-tower/reports/codex/2026-08-24_browserstack-live-pixel6-auth-gate-verification_codex.md`
+- function/component/migration: BrowserStack external verification gate
+- what changed/reviewed: recorded GitHub student authentication, BrowserStack Live session start, unavailable Nexus 6 substitution, and production route screenshots
+- why: distinguish actual remote-device evidence from the requested but unavailable device and from unauthenticated app limitations
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none
+- product semantics: none
+- Production: no Supabase, Vercel, user-data, PR, or deployment mutation; only an external BrowserStack testing session was started
+
+#### VERIFICATION
+- command: `https://www.browserstack.com/github-students` → `Sign Up with GitHub`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: GitHub student authentication completed and BrowserStack Live dashboard opened
+- command: Android device selection and session start
+- PASS / FAIL / UNVERIFIED: PASS with substitution
+- what it actually proves: requested Nexus 6 / Android 6.0 was unavailable; Google Pixel 6 / Android 12 / Chrome session started
+- command: deployed `https://gomsin-log.vercel.app/search`, `/us`, `/settings` on the remote device
+- PASS / FAIL / UNVERIFIED: PASS for app load and unauthenticated guard; BLOCKED for authenticated feature screens
+- what it actually proves: all three routes rendered the 곰신로그 authentication screen with consent checkboxes and Google sign-in entry; no blank/error page was observed; no app account was entered
+
+#### REVIEW IMPACT
+- NONE — no application code, database, authorization, or deployment semantics changed
+
+#### BLOCKERS
+- code: none observed in the unauthenticated entry guard
+- environment: requested Nexus 6 / Android 6.0 is not listed by current BrowserStack Live inventory
+- external/manual: remote device has no 곰신로그 authentication session; OAuth/consent and account credentials require user action
+
+#### STOPPED AT
+- exact completed boundary: GitHub-authenticated BrowserStack Pixel 6 session with `/search`, `/us`, and `/settings` unauthenticated route checks
+
+#### REMAINING
+- not completed: service rank UI, My profile UI, record creation, photo detail, highlights, and cross-account synchronization after app authentication
+
+#### NEXT ACTION
+- next owner: user for app login, then Codex verifier
+- tool/model: BrowserStack Live; Flash model setting is not applicable to the external device interaction
+- 기준 SHA: unchanged `c16537047924ec5e164fb36b8dad1aa2fb661b52`; evidence is for deployed production, not the dirty local worktree
+- exact next task: user logs into 곰신로그 on the marked BrowserStack Pixel 6 session using a test account, then run authenticated route and interaction matrix
+
+#### DO NOT ADVANCE UNTIL
+- test account authentication is completed without sharing credentials in chat
+- the intended deployment commit is identified separately from local HEAD
+- authenticated screens and mutations are checked with PASS/FAIL/BLOCKED/UNVERIFIED evidence
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-24 · Codex · 복무 은어 7단계 레벨 및 전환 연출 최종 로컬 검증
+
+#### PLAN POSITION
+- Phase: V4 feature implementation / local verification
+- Workstream: service information and bounded UI feedback
+- Step: replace generic game wording with seven military-slang service tiers, add transition effects, rerun full verification
+- Previous Gate: local EXP V1 with six-stage formal rail and unresolved final Sol Max review
+- This Gate: seven-tier local implementation, focused/full verification, exact repository-state recheck, and report recording
+
+#### DIRECTION CHECK
+- Product source checked: latest user-approved request and `gomsin.game.zip`; `docs/PRODUCT_V3.md` remains legacy
+- Business source checked / NOT APPLICABLE: no customer, pricing, storage, monetization, or media-business change
+- Engineering source checked: `AGENTS.md`, `CLAUDE.md`, `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: prior 2026-08-24 EXP/profile and independent-verification entries
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary; Gemini implementation dispatch attempted; Sol Max review attempted
+- Model: primary GPT-5/Codex; requested `google-antigravity/gemini-3.7-flash` max; requested `main/gpt-5.6-sol` max review
+- Role: primary integrator and local verification owner
+- PR: none updated; no merge
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261` (`origin/master` live check)
+- Old HEAD: `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+- New HEAD / Reviewed HEAD: same committed HEAD plus the current uncommitted working-tree diff
+
+#### CHANGED / REVIEWED
+- file: `src/lib/serviceLevel.ts`
+- function/component/migration: `SERVICE_TIERS`, `buildServiceTierStops`, `computeServiceExp`
+- what changed/reviewed: added visible `LV 1 신병`, `LV 2 일초`, `LV 3 일꺾`, `LV 4 일말`, `LV 5 상초`, `LV 6 상꺾`, `LV 7 왕고` tiers at 0/10/25/40/55/70/85% while preserving internal 1-second EXP and date precedence
+- why: make the game feedback natural for Korean users without presenting inferred administrative promotion as fact
+- file: `src/features/search/SearchPage.tsx`
+- function/component/migration: `InlineServiceInfo`
+- what changed/reviewed: replaced user-facing generic wording with 복무 레벨, added seven-stop rail, lightning feedback on bent tiers, crown/emphasis for 왕고, and reduced-motion-safe animation utility; internal 1–200 EXP is not shown as a conflicting second level
+- why: increase immediate feedback while keeping the card connection-first and non-competitive
+- file: `src/lib/serviceLevel.test.ts`, `src/features/search/searchPage.test.tsx`
+- function/component/migration: tier boundaries, rail rendering, transition feedback, accessibility and existing search/privacy regressions
+- what changed/reviewed: added seven-tier boundary/metadata tests and `일꺾` feedback effect test; updated 6-stage expectations to 7-stage expectations
+- why: protect the named user path and prevent the previous generic/ambiguous copy from returning
+- file: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/CURRENT_STATE.md`
+- function/component/migration: active V4 state and backlog
+- what changed/reviewed: recorded the seven-tier display and the unbuilt gomsin projection boundary
+- why: keep implementation and non-implementation explicit for the next agent
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none; no migration created or applied
+- product semantics: no relationship/affection score, ranking, reward, push trigger, partner health exposure, or global nickname color mutation
+- Production: no Supabase, Vercel, PR, push, merge, or deployment action
+
+#### VERIFICATION
+- command: `npm test -- --run src/lib/serviceLevel.test.ts src/features/search/searchPage.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 2 files / 36 tests
+- what it actually proves: seven tier boundaries, 1-second EXP, discharge handling, search card, timer cleanup and bent-tier feedback pass
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — 231 Vitest files / 3287 tests, typecheck, lint, and build; existing large-chunk warning only
+- what it actually proves: current local repository code and build complete successfully; it does not prove remote or production behavior
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current dirty diff has no whitespace errors
+- command: branch/HEAD/origin check
+- PASS / FAIL / UNVERIFIED: PASS — branch `codex/service-rank-profile-settings-impl`, HEAD `c16537047924ec5e164fb36b8dad1aa2fb661b52`, `origin/master` `7f4886bcbe32034bfabb454c85378532b14cb261`
+- what it actually proves: current repository identity and remote master reference were rechecked; it does not prove PR or deployment status
+- command: Gemini 3.7 Flash Max and Sol Max independent agents
+- PASS / FAIL / UNVERIFIED: BLOCKED/UNVERIFIED — provider failure/no bounded completion; no delegated completion claim accepted
+- what it actually proves: only that the requested agent attempts did not yield evidence
+- command: authenticated browser, Playwright, remote Supabase actor/RLS, Vercel deployment
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — this dirty branch was not deployed and no remote mutation was authorized
+- what it actually proves: nothing about production
+
+#### REVIEW IMPACT
+- FULL for the new service-tier UI slice; the prior six-stage review is stale after the tier/copy/effect change
+- final Sol Max exact-content verdict: unavailable; report as UNVERIFIED rather than inherited
+
+#### BLOCKERS
+- code: none found by local tests/typecheck/lint; final independent Sol Max verdict unavailable
+- environment: server-authoritative clock and remote production state are not part of this display-only V1
+- external/manual: browser/production/two-account partner projection remains unverified and unbuilt
+
+#### STOPPED AT
+- exact completed boundary: local seven-tier service card, tests, docs, and report; no remote mutation or deployment
+
+#### REMAINING
+- not completed: gomsin-facing allowlisted partner service projection, server clock RPC, production/browser verification, and final independent Sol Max verdict
+
+#### NEXT ACTION
+- next owner: Codex after product/security design gate
+- tool/model: architect or `main/gpt-5.6-sol` for allowlist/RLS design; Gemini 3.7 Flash for a bounded implementation only if provider is available
+- 기준 SHA: `c16537047924ec5e164fb36b8dad1aa2fb661b52` plus current dirty diff
+- exact next task: design the active-couple `partner_service_projection` RPC/RLS contract and actor-negative tests before rendering it for 곰신 in `/search`
+
+#### DO NOT ADVANCE UNTIL
+- the projection allowlist excludes health/cycle/flow/memo and proves active-couple authorization
+- former partner, unrelated user, and anon reads are denied in actor tests
+- remote migration application and production deployment are separately approved and verified
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-24 · Codex · 복무 EXP 표시형 V1 및 곰신 위치 결정
+
+#### PLAN POSITION
+- Phase: V4 feature implementation / independent review / local verification
+- Workstream: service information and game-style service growth presentation
+- Step: implement → edge-case repair → full local verification → independent Sol review
+- Previous Gate: whole-repository independent report FAIL; previous narrow EXP review FAIL
+- This Gate: local EXP V1 verification completed; remote release gate not opened
+
+#### DIRECTION CHECK
+- Product source checked: latest user-approved request and `gomsin.game.zip`; `docs/PRODUCT_V3.md` was explicitly superseded by the product owner on 2026-08-24
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no customer, pricing, storage, or monetization change
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, feature-build and release-validation procedures
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: `docs/WORK_LOG.md`
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO — the product-owner override moved V3 to legacy; engineering/privacy constraints remain active
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary with bounded subagents
+- Model: `google-antigravity/gemini-3.7-flash` max implementation; `main/gpt-5.6-sol` high independent review, with final max review pending
+- Role: primary integrator, implementation owner, and verification owner
+- PR: #89 inspected only; not modified or merged
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261` (`origin/master` at session start)
+- Old HEAD: `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+- New HEAD / Reviewed HEAD: unchanged `c16537047924ec5e164fb36b8dad1aa2fb661b52`; local dirty worktree only
+
+#### CHANGED / REVIEWED
+- file: `src/lib/serviceLevel.ts`
+- function/component/migration: `computeServiceExp`, stage/rail builders, fixed `Asia/Seoul` calendar conversion, formatters
+- what changed/reviewed: 1 second = 1 EXP, actual/effective discharge precedence, Lv.200 curve, six game-style stages, custom-period scaling, stale planned-state repair, malformed-date rejection, post-discharge TODAY stop
+- why: make the search-tab service card visibly progress without relationship scores, rewards, or invented dates
+- file: `src/features/search/SearchPage.tsx`
+- function/component/migration: inline soldier service surface
+- what changed/reviewed: 1-second refresh, visibility pause/resume, live percentage/EXP rail, game-style wording, accessible labels, no post-discharge TODAY gauge
+- why: keep the core service feedback visible while preserving the existing local search, schedule, contact, and privacy paths
+- file: `src/lib/serviceLevel.test.ts`, `src/features/search/searchPage.test.tsx`
+- function/component/migration: EXP/date/visibility and search regression tests
+- what changed/reviewed: 34 focused tests including planned-state, exact boundaries, actual discharge, custom short periods, malformed dates, fixed Seoul timeline, visibility cleanup, and privacy/search preservation
+- why: cover the failures found by the independent Sol review
+- file: `docs/PRODUCT_V3.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/CURRENT_STATE.md`
+- function/component/migration: active-direction and current-state records
+- what changed/reviewed: V3 marked legacy; EXP V1 scope and the recommended gomsin placement recorded; partner military projection explicitly left unbuilt pending RLS/RPC design
+- why: prevent a later agent from treating superseded V3 or an unimplemented partner projection as current reality
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none; no EXP migration or partner-military projection migration created
+- product semantics: no rewards, push, feed sharing, ranking, “전우 게이지,” or relationship/affection score
+- Production: no Supabase, Vercel, PR, push, merge, or user-data mutation
+
+#### VERIFICATION
+- command: `npm test -- --run src/lib/serviceLevel.test.ts src/features/search/searchPage.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 2 files / 34 focused tests passed
+- command: `npm run lint`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: repository ESLint completed with zero warnings
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript project build check completed
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: typecheck, lint, 231 Vitest files / 3285 tests, and production Vite build completed; existing large-chunk warning remains
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current local diff has no whitespace errors
+- command: Sol independent review after implementation fixes
+- PASS / FAIL / UNVERIFIED: HOLD on the first high review; stale review findings were repaired (fixed Seoul timeline, accessible wording, documentation conflict, visibility test); final max review is pending
+- what it actually proves: no P0/P1 remained in the high review; final exact-content review is still required
+- command: browser / Playwright / remote Supabase / production deployment
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: none; local build is not production or browser evidence
+
+#### REVIEW IMPACT
+- DELTA — the earlier whole-repository FAIL remains valid for unrelated profile/highlight/migration/browser issues; this EXP slice requires its own final exact-content review
+- whether an earlier review is stale: the first EXP review is stale after code/doc changes and is not inherited
+
+#### BLOCKERS
+- code: no P0/P1 found after the high review; final max review still pending
+- environment: server-authoritative clock offset is not implemented; this is display-only V1 using the fixed Seoul timeline and device `Date.now()`
+- external/manual: partner-facing military projection needs active-couple allowlist RPC/RLS and negative actor tests; remote Supabase and production state remain unverified
+
+#### STOPPED AT
+- exact completed boundary: local service EXP V1 implementation, edge repairs, full local verify, and gomsin placement decision; no remote mutation or deployment
+
+#### REMAINING
+- not completed: gomsin-facing partner service projection, server clock authority, authenticated browser proof, remote migration/RLS design and application
+
+#### NEXT ACTION
+- next owner: Codex after final independent review
+- tool/model: `main/gpt-5.6-sol` max read-only review, then a separate DB/RLS design gate before any partner projection
+- 기준 SHA: `c16537047924ec5e164fb36b8dad1aa2fb661b52` plus current local dirty files
+- exact next task: review exact current EXP diff; if PASS, separately design the allowlisted gomsin partner-service projection for `/search`
+
+#### DO NOT ADVANCE UNTIL
+- final max Sol review passes the current code and docs
+- partner projection has an explicit allowlist, active-couple authorization, former-partner denial, anon denial, and rollback plan
+- remote Supabase application and production deployment are separately approved and verified
 
 #### PRODUCTION
 - NOT APPLIED
@@ -5883,6 +6170,177 @@ e2e · Postgres 계약 · Deno).
 - product semantics explicitly accept a separate couple-scoped alias rather than changing account ownership of `profiles.username`
 - the authorization design derives the target member from the active couple and proves owner/partner/former-partner/anon boundaries
 - remote migration application is separately approved and verified
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-24 · Codex · 저장소 전체 독립 검증 보고서 Obsidian 보관
+
+#### PLAN POSITION
+- Phase: V4 independent verification / release readiness
+- Workstream: engineering audit — functionality, data integrity, privacy, authorization, database, browser, deployment state
+- Step: read-only whole-repository verification result documented in the Obsidian control-tower vault
+- Previous Gate: local implementation audit on `codex/service-rank-profile-settings-impl`
+- This Gate: FAIL report recorded; no implementation or remote mutation
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — no customer, business, pricing, or storage-strategy change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: `docs/WORK_LOG.md`
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? YES
+- If YES, what conflict: canonical `PRODUCT_V3` says search is not a tab, while `V4_AS_BUILT` and runtime expose `/search` as the second tab; product decision is required before further implementation
+
+#### OWNERSHIP
+- Tool: Codex primary
+- Model: primary Codex; requested `main/gpt-5.6-sol` reasoning `max` independent completion BLOCKED by provider failure/non-completion
+- Role: independent read-only verifier and documentation owner
+- PR: #89 inspected only; not modified
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261` (`origin/master`)
+- Old HEAD: `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+- New HEAD / Reviewed HEAD: unchanged `c16537047924ec5e164fb36b8dad1aa2fb661b52`; audit covered the preserved dirty worktree separately from committed CI evidence
+
+#### CHANGED / REVIEWED
+- file: `control-tower/reports/codex/2026-08-24_1137_full-repository-independent-verification_codex.md`
+- function/component/migration: full repository audit report
+- what changed/reviewed: recorded PASS/FAIL/BLOCKED/UNVERIFIED evidence for search, profile, posts, highlights, privacy/RLS, migrations 057–060, local/production browser, Vercel, CI, and tests
+- why: preserve the independent result in the Obsidian vault without treating docs, local code, remote state, and production as equivalent
+- file: `docs/WORK_LOG.md`
+- function/component/migration: mandatory work-ledger index
+- what changed/reviewed: added this verification gate and report path
+- why: keep substantial verification discoverable without turning the report into canonical product state
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none; no migration created or applied
+- product semantics: none; the navigation/rank conflict is reported, not resolved
+- Production: no Supabase, Vercel, user-data, PR, or deployment change
+
+#### VERIFICATION
+- command: focused Vitest 24 files
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 340 relevant local tests passed
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: typecheck, lint, 231 Vitest files / 3279 tests, and build passed; existing large-chunk warning remained
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: local PostgreSQL 17 fresh chain, 58 migrations, 333 actor/mutation assertions; not remote application
+- command: targeted Playwright (`usArchiveShots`, `realUsability`, `coupleMatrix`)
+- PASS / FAIL / UNVERIFIED: FAIL
+- what it actually proves: 49 planned, 4 passed, 2 failed, 43 not run; mock backend lacks the new partner-profile RPC and repeated timeout forced exit 130
+- command: `git diff --check` for the documentation delta
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: the Obsidian report and Work Log delta contain no whitespace errors
+
+#### REVIEW IMPACT
+- FULL — the report supersedes the earlier narrower profile/story note for release readiness. No prior code review is inherited across a changed HEAD or dirty worktree.
+
+#### BLOCKERS
+- code: rank semantics are not truthful; highlight sync can hide errors; highlight replay lacks a photo-only defense; browser fixture lacks migration-060 RPC
+- environment: requested Sol Max run did not complete; authenticated multi-actor production browser credentials were unavailable
+- external/manual: remote migration history is unavailable; migration 060 and `clear_my_unseen()` are absent; current worktree is not deployed
+
+#### STOPPED AT
+- exact completed boundary: read-only audit result saved to `control-tower/reports/codex/2026-08-24_1137_full-repository-independent-verification_codex.md`; no code or remote fix
+
+#### REMAINING
+- not completed: product decision, P1/P2 repairs, exact-HEAD re-review, migration-060 release gate, missing unseen RPC repair, deployment, real two-account browser verification
+
+#### NEXT ACTION
+- next owner: user-approved implementation owner
+- tool/model: strong implementation model for bounded local fixes, then independent max-reasoning reviewer for DB/privacy gate
+- 기준 SHA: `c16537047924ec5e164fb36b8dad1aa2fb661b52` plus preserved dirty worktree
+- exact next task: decide search/rank semantics, then implement only the smallest report-backed P1/P2 fixes and rerun the stated gates
+
+#### DO NOT ADVANCE UNTIL
+- canonical navigation/rank decision is explicit
+- targeted Playwright completes
+- migration 060 is applied only through an approved remote gate and actor-tested
+- production two-account refresh and unauthorized cases are verified
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-24 · Codex · BrowserStack GitHub 로그인 실기기 검증 시도
+
+#### PLAN POSITION
+- Phase: V4 browser/device verification
+- Workstream: production browser verification — BrowserStack Live
+- Step: open the supplied BrowserStack Live URL and authenticate before testing deployed user paths
+- Previous Gate: repository independent verification recorded FAIL/BLOCKED/UNVERIFIED boundaries
+- This Gate: BrowserStack authentication BLOCKED before device session start
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: no product, customer, pricing, storage, or business change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: `docs/WORK_LOG.md`
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary + BrowserStack Live through Codex In-app Browser
+- Model: primary Codex; no subagent used for external browser authentication
+- Role: read-only production browser verifier
+- PR: none
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261` (`origin/master`)
+- Old HEAD: `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+- New HEAD / Reviewed HEAD: unchanged `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+
+#### CHANGED / REVIEWED
+- file: `control-tower/reports/codex/2026-08-24_browserstack-github-login-blocked_codex.md`
+- function/component/migration: BrowserStack authentication gate
+- what changed/reviewed: recorded that the supplied URL redirects to BrowserStack sign-in and exposes Google or business email/password, with no GitHub option; also checked the supplied GitHub Education link and the authenticated Education benefits page
+- why: preserve the exact external blocker without treating the open GitHub tab as BrowserStack authentication
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: none
+- product semantics: none
+- Production: no BrowserStack session, Supabase, Vercel, user-data, PR, or deployment mutation
+
+#### VERIFICATION
+- command: BrowserStack Live navigation to the user-provided URL
+- PASS / FAIL / UNVERIFIED: PASS for login-page inspection; BLOCKED for app verification
+- what it actually proves: BrowserStack redirected to its sign-in page; the visible login methods did not include GitHub; no remote Android session was started
+- command: DOM snapshot of the BrowserStack sign-in page
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: visible controls were Google sign-in and business email/password; GitHub sign-in was not present in the inspected DOM
+- command: `https://education.github.com/pack/redeem/browserstack-student` followed by GitHub Education benefits
+- PASS / FAIL / UNVERIFIED: PASS for GitHub session/benefits inspection; BLOCKED for BrowserStack redemption
+- what it actually proves: the supplied URL redirects to the Student Developer Pack root; GitHub benefits are available, but BrowserStack was not present in the loaded offer list and no BrowserStack session was authenticated
+
+#### REVIEW IMPACT
+- NONE — no application code or security semantics changed; this is an external verification gate only
+
+#### BLOCKERS
+- code: none observed
+- environment: BrowserStack authentication path does not expose GitHub login; GitHub Education is authenticated but no BrowserStack session is available and the supplied redemption URL does not expose a BrowserStack offer
+- external/manual: user must authenticate to BrowserStack using a supported account method before the remote device can be started
+
+#### STOPPED AT
+- exact completed boundary: BrowserStack sign-in page inspection; before device allocation and app navigation
+
+#### REMAINING
+- not completed: actual Android 6.0 / Google Nexus 6 / Chrome app verification, authenticated app flows, screenshots, and production runtime findings
+
+#### NEXT ACTION
+- next owner: user or Codex after user completes BrowserStack login
+- tool/model: Codex BrowserStack verifier; Flash model setting is not applicable to the browser authentication gate
+- 기준 SHA: unchanged `c16537047924ec5e164fb36b8dad1aa2fb661b52`; production deployment must be identified separately
+- exact next task: complete BrowserStack login in the open tab, then verify deployed `/search`, `/us`, `/settings`, record creation, and photo detail paths
+
+#### DO NOT ADVANCE UNTIL
+- BrowserStack has an authenticated session and a real Android device session is visible
+- the exact deployed app URL is loaded on the remote device
+- each checked path is reported as PASS, FAIL, BLOCKED, or UNVERIFIED with device evidence
 
 #### PRODUCTION
 - NOT APPLIED

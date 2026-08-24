@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildPostTiles, getPhotoAttachments, isTravelRecord } from '@/features/us/postTiles';
-import type { CoupleEvent, DailyRecord, Trip } from '@/types';
+import { buildPostTiles, getPhotoAttachments } from '@/features/us/postTiles';
+import type { DailyRecord } from '@/types';
 
 const record = (over: Partial<DailyRecord> & { id: string; date: string }): DailyRecord => ({
   authorRole: 'gomsin',
@@ -106,62 +106,5 @@ describe('게시물 격자는 사진 게시물을 센다', () => {
         { type: 'voice', name: '음성.m4a' },
       ],
     })).toEqual([{ type: 'photo', name: '사진.jpg' }]);
-  });
-});
-
-describe('여행 기록 판별 (isTravelRecord)', () => {
-  const trips: Trip[] = [
-    {
-      id: 'trip-jeju',
-      coupleId: 'couple-1',
-      createdBy: 'user-1',
-      title: '제주도 여행',
-      startDate: '2026-08-10',
-      endDate: '2026-08-13',
-      status: 'planned',
-      createdAt: '2026-08-01T00:00:00Z',
-    },
-  ];
-
-  const events: CoupleEvent[] = [
-    {
-      id: 'event-busan',
-      coupleId: 'couple-1',
-      createdBy: 'user-1',
-      title: '부산 1박2일',
-      eventType: 'trip',
-      startDate: '2026-08-20',
-      endDate: '2026-08-21',
-      isPrivate: false,
-      createdAt: '2026-08-01T00:00:00Z',
-    },
-    {
-      id: 'event-date',
-      coupleId: 'couple-1',
-      createdBy: 'user-1',
-      title: '영화 데이트',
-      eventType: 'date',
-      startDate: '2026-08-25',
-      endDate: '2026-08-25',
-      isPrivate: false,
-      createdAt: '2026-08-01T00:00:00Z',
-    },
-  ];
-
-  it('여행 기간 내의 기록은 여행 기록으로 판별된다', () => {
-    expect(isTravelRecord({ date: '2026-08-10' }, trips, events)).toBe(true);
-    expect(isTravelRecord({ date: '2026-08-12' }, trips, events)).toBe(true);
-    expect(isTravelRecord({ date: '2026-08-13' }, trips, events)).toBe(true);
-  });
-
-  it('trip 타입의 이벤트 기간 내 기록도 여행 기록으로 판별된다', () => {
-    expect(isTravelRecord({ date: '2026-08-20' }, trips, events)).toBe(true);
-    expect(isTravelRecord({ date: '2026-08-21' }, trips, events)).toBe(true);
-  });
-
-  it('여행이나 trip 이벤트가 없는 일반 날짜의 기록은 제외된다', () => {
-    expect(isTravelRecord({ date: '2026-08-09' }, trips, events)).toBe(false);
-    expect(isTravelRecord({ date: '2026-08-14' }, trips, events)).toBe(false);
-    expect(isTravelRecord({ date: '2026-08-25' }, trips, events)).toBe(false); // date 이벤트는 제외
   });
 });

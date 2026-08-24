@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
@@ -7,7 +7,7 @@ import { visibleRecordsForViewer } from '@/lib/privacy';
 import { buildCoupleStats } from '@/lib/coupleStats';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { PostGrid } from '@/features/us/PostGrid';
-import { getPhotoAttachments, isTravelRecord } from '@/features/us/postTiles';
+import { getPhotoAttachments } from '@/features/us/postTiles';
 import { ProfileIdentity } from '@/components/ProfileIdentity';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
@@ -25,6 +25,7 @@ type ProfileTab = 'grid' | 'photo' | 'trip';
 
 export function SharedProfile() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { state, saveCoupleHighlight, deleteCoupleHighlight } = useStore();
   const { profile } = state;
   const todayStr = localToday();
@@ -51,10 +52,6 @@ export function SharedProfile() {
   const photoRecords = useMemo(
     () => sharedRecords.filter((record) => getPhotoAttachments(record).length > 0),
     [sharedRecords],
-  );
-  const travelRecords = useMemo(
-    () => photoRecords.filter((record) => isTravelRecord(record, state.trips ?? [], sharedEvents)),
-    [photoRecords, sharedEvents, state.trips],
   );
   const selectedPost = selectedPostId
     ? photoRecords.find((record) => record.id === selectedPostId) ?? null
@@ -96,6 +93,22 @@ export function SharedProfile() {
     setHighlightRecordIds(recordIds);
     setHighlightCoverId(recordIds.includes(highlight.coverRecordId || '') ? highlight.coverRecordId : recordIds[0]);
   };
+
+  /** A photo selected from a story returns to this same editor by record id. */
+  useEffect(() => {
+    const recordId = searchParams.get('highlightRecord');
+    if (!recordId || editingHighlightId !== undefined) return;
+    if (!photoRecords.some((record) => record.id === recordId)) return;
+
+    setEditingHighlightId(null);
+    setHighlightTitle('');
+    setHighlightRecordIds([recordId]);
+    setHighlightCoverId(recordId);
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('highlightRecord');
+    setSearchParams(next, { replace: true });
+  }, [editingHighlightId, photoRecords, searchParams, setSearchParams]);
   const toggleHighlightRecord = (recordId: string) => {
     setHighlightRecordIds((current) => {
       if (current.includes(recordId)) {
@@ -249,11 +262,11 @@ export function SharedProfile() {
         <SharedRecordList records={sharedRecords} coupleId={profile.couple.coupleId} onOpen={(id) => navigate(`/record?record=${encodeURIComponent(id)}`)} />
       ) : (
         <PostGrid
-          records={travelRecords}
+          records={photoRecords}
           coupleId={profile.couple.coupleId}
           onOpen={setSelectedPostId}
-          emptyMessage="여행에서 함께 공개한 사진이 여기 모여요."
-          ariaLabel="여행 사진 격자"
+          emptyMessage="함께 공개한 사진이 아직 없어요."
+          ariaLabel="사진 게시물 격자"
         />
       )}
 
@@ -395,7 +408,9 @@ function HighlightEditor({
           이름
           <input value={title} onChange={(event) => setTitle(event.target.value.slice(0, 20))} maxLength={20} autoFocus className="mt-1 h-11 w-full rounded-control border border-border bg-background px-3 text-body font-normal outline-none focus:ring-2 focus:ring-coral/40" placeholder="예: 우리의 봄" />
         </label>
-        <p className="mt-3 text-caption text-muted-foreground">사진을 고르고 대표 커버를 눌러 주세요.</p>
+        <p className="mt-3 text-caption leading-relaxed text-muted-foreground">
+          게시물 격자에서 고르거나, 스토리를 보다가 ‘하이라이트에 추가’를 눌러 가져올 수 있어요.
+        </p>
         <div className="mt-2 grid max-h-[38dvh] grid-cols-3 gap-1 overflow-y-auto">
           {records.map((record) => (
             <HighlightPickerTile key={record.id} record={record} coupleId={coupleId} selected={selectedIds.includes(record.id)} cover={coverId === record.id} onToggle={() => onToggle(record.id)} onSetCover={() => onSetCover(record.id)} />

@@ -450,6 +450,8 @@ export type ProfileDateType = (typeof PROFILE_DATE_TYPES)[number];
 export interface CoupleInfo {
   coupleId?: string;
   partnerName: string;
+  /** The active partner-selected username, when the server exposes it. */
+  partnerUsername?: string;
   anniversaryDate?: string; // YYYY-MM-DD (사귄 날짜 - null 가능)
   coupleCode: string;
   connected: boolean;

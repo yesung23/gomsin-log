@@ -334,12 +334,39 @@ describe('fetchFullStateFromDB', () => {
     });
 
     // Partner found
-    mockRpc.mockResolvedValue({ data: [{ display_name: 'Partner' }], error: null });
+    mockRpc.mockResolvedValue({ data: [{ display_name: 'Partner', username: 'partner_id' }], error: null });
 
     const result = requireState(await fetchFullStateFromDB(userId));
 
     expect(result.profile!.couple.connected).toBe(true);
     expect(result.profile!.couple.status).toBe('active');
+    expect(result.profile!.couple.partnerUsername).toBe('partner_id');
+  });
+
+  it('falls back to the existing partner profile RPC before migration 060 is applied', async () => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    const contactChain = setupContactMock();
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc
+      .mockResolvedValueOnce({ data: null, error: { code: 'PGRST202' } })
+      .mockResolvedValueOnce({ data: [{ display_name: 'Partner' }], error: null });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile!.couple.connected).toBe(true);
+    expect(result.profile!.couple.partnerUsername).toBeUndefined();
+    expect(mockRpc).toHaveBeenNthCalledWith(1, 'get_partner_profile_with_username');
+    expect(mockRpc).toHaveBeenNthCalledWith(2, 'get_partner_profile');
   });
 
   it('fetches records and trips for a pending couple', async () => {

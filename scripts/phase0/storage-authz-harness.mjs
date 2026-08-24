@@ -116,6 +116,7 @@ const ORDER = [
   '057_profile_identity_and_caption.sql',
   '058_couple_highlights.sql',
   '059_partner_managed_username.sql',
+  '060_partner_username_projection.sql',
 ];
 
 /**
@@ -3229,9 +3230,39 @@ check(
     && !asAnon(`SELECT public.set_partner_username('anon_user')`).ok,
   '059 unrelated and anon actors cannot use the partner username RPC',
 );
+
+check(
+  asUser(A, `SELECT public.set_partner_username('bravo_user')`).ok,
+  '060 fixture gives the second active member a username',
+);
+const projectionAsA = asUser(A,
+  `SELECT display_name || '|' || role || '|' || COALESCE(username, '')
+     FROM public.get_partner_profile_with_username()`);
+check(
+  projectionAsA.ok && projectionAsA.stdout.trim() === 'B|soldier|bravo_user',
+  '060 the active caller sees only the active partner username projection',
+);
+const projectionAsB = asUser(B,
+  `SELECT display_name || '|' || role || '|' || COALESCE(username, '')
+     FROM public.get_partner_profile_with_username()`);
+check(
+  projectionAsB.ok && projectionAsB.stdout.trim() === 'A|gomsin|alpha_partner',
+  '060 the projection is reciprocal for the active partner and returns the username',
+);
+const projectionAsC = asUser(C, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
+const projectionAsAnon = asAnon(`SELECT * FROM public.get_partner_profile_with_username()`);
+check(
+  projectionAsC.ok && projectionAsC.stdout.trim() === '0' && !projectionAsAnon.ok,
+  '060 unrelated and anon actors cannot read the partner username projection',
+);
 mustSql(`UPDATE public.couple_members SET status = 'disconnected'
          WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '059 former partner');
 check(!asUser(B, `SELECT public.set_partner_username('former_try')`).ok, '059 former partner cannot rename the old partner');
+const projectionAfterDisconnect = asUser(A, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
+check(
+  projectionAfterDisconnect.ok && projectionAfterDisconnect.stdout.trim() === '0',
+  '060 a disconnected partner is not returned by the username projection',
+);
 mustSql(`UPDATE public.couple_members SET status = 'active'
          WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '059 restore partner');
 

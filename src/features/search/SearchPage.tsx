@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, CalendarDays, SquarePen, Shield, Calendar, Clock, ChevronRight, Check } from 'lucide-react';
+import { Search, X, CalendarDays, SquarePen, Shield, Calendar, Clock, ChevronRight, Check, Sparkles, Zap, Crown } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { searchRecords, excerptAround, type SearchResult } from '@/lib/recordSearch';
 import { localToday } from '@/lib/cycle';
 import { computeServiceProgress, effectiveDischargeDate, nextUpcomingEvent } from '@/lib/milestones';
-import { computeServiceLevel } from '@/lib/serviceLevel';
+import {
+  computeServiceExp,
+  formatExpNumber,
+  formatExpPercent,
+  type ServiceTierStop,
+} from '@/lib/serviceLevel';
 import { cn, daysBetweenLocal, formatLocalDate } from '@/lib/utils';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
@@ -74,33 +79,159 @@ function formatPercent(value: number): string {
   return Number(value.toFixed(1)).toString();
 }
 
+function RankInsignia({ bars, size = 32 }: { bars: number; size?: number }) {
+  const w = size;
+  const h = size * 0.85;
+  const barH = h / 6.2;
+  const gap = barH * 0.55;
+  const block = bars * barH + Math.max(0, bars - 1) * gap;
+  const top = (h - block) / 2;
+
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true" className="shrink-0">
+      {bars === 0 ? (
+        <rect
+          x={w * 0.16}
+          y={h * 0.28}
+          width={w * 0.68}
+          height={h * 0.44}
+          rx={2}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeDasharray="3 3"
+          className="text-muted-foreground opacity-60"
+        />
+      ) : (
+        Array.from({ length: bars }).map((_, i) => {
+          const y = top + i * (barH + gap);
+          const inset = w * 0.14 + i * (w * 0.012);
+          return (
+            <polygon
+              key={i}
+              points={`${inset},${y} ${w - inset},${y} ${w - inset - w * 0.05},${y + barH} ${inset + w * 0.05},${y + barH}`}
+              className="fill-coral-strong"
+            />
+          );
+        })
+      )}
+    </svg>
+  );
+}
+
 function InlineServiceInfo({
   military,
   contact,
-  progress,
   onOpenService,
 }: {
   military: MilitaryInfo;
   contact: ContactPreferences;
-  progress: NonNullable<ReturnType<typeof computeServiceProgress>>;
   onOpenService: () => void;
 }) {
-  const level = computeServiceLevel(progress);
-  if (!level) return null;
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [feedback, setFeedback] = useState<{ kind: 'promo'; text: string; isBent: boolean } | null>(null);
+  const prevRef = useRef<{ tierKey: string; ready: boolean }>({
+    tierKey: '',
+    ready: false,
+  });
 
-  const daysUntilEnlistment = progress.daysUntilEnlistment ?? 0;
-  const nextGuide = level.isPreEnlistment
+  useEffect(() => {
+    let interval: number | undefined;
+    const syncNow = () => setNowMs(Date.now());
+    const stopInterval = () => {
+      if (interval !== undefined) {
+        window.clearInterval(interval);
+        interval = undefined;
+      }
+    };
+    const startInterval = () => {
+      stopInterval();
+      syncNow();
+      interval = window.setInterval(syncNow, 1000);
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) stopInterval();
+      else startInterval();
+    };
+
+    if (document.hidden) stopInterval();
+    else startInterval();
+    window.addEventListener('focus', syncNow);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopInterval();
+      window.removeEventListener('focus', syncNow);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
+
+  const expState = useMemo(() => computeServiceExp(military, nowMs), [military, nowMs]);
+  const expTierKey = expState?.tier.key;
+  const expTierLabel = expState?.tier.label;
+  const expIsBeforeEnlistment = expState?.isBeforeEnlistment;
+
+  useEffect(() => {
+    if (expTierKey === undefined || expTierLabel === undefined) {
+      prevRef.current = { tierKey: '', ready: false };
+      return;
+    }
+    const prev = prevRef.current;
+    if (prev.ready && !expIsBeforeEnlistment) {
+      if (expTierKey !== prev.tierKey && prev.tierKey) {
+        const isBent = expTierKey === 'ilkkak' || expTierKey === 'sangkkak';
+        setFeedback({
+          kind: 'promo',
+          text: `LV ${expState?.tier.level} ${expTierLabel} 달성! 복무 게이지가 이어지고 있어요.`,
+          isBent,
+        });
+      }
+    }
+    prevRef.current = { tierKey: expTierKey, ready: true };
+  }, [expTierKey, expTierLabel, expIsBeforeEnlistment, expState?.tier.level]);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => setFeedback(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
+
+  if (!expState) return null;
+
+  const daysUntilEnlistment = expState.daysUntilEnlistment;
+  const nextGuide = expState.isBeforeEnlistment
     ? `입대까지 ${daysUntilEnlistment}일`
-    : level.nextPercent === null
+    : expState.nextTier === null
     ? '복무를 마쳤어요.'
-    : `다음 ${level.nextLabel}까지 ${formatPercent(level.remainingPercent!)}% · ${level.remainingDaysToNext}일 남음`;
+    : `다음 LV ${expState.nextTier.level} ${expState.nextTier.label}까지 ${formatPercent(expState.remainingPercentToNextTier ?? 0)}% · ${expState.remainingDaysToNextTier ?? 0}일 남음`;
+  const currentTier = expState.tier;
 
   return (
-    <section className="rounded-control border border-border bg-card p-4 space-y-3.5 shadow-sm" data-testid="soldier-service-info">
+    <section className="rounded-control border border-border bg-card p-4 space-y-3.5 relative overflow-hidden" data-testid="soldier-service-info">
+      {/* Level-up / Promo Accessible Feedback */}
+      {feedback ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            'flex items-center gap-1.5 rounded-lg border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong transition-all duration-300',
+            feedback.isBent && 'ring-2 ring-coral/20 motion-safe:animate-pulse',
+          )}
+          data-testid="service-feedback"
+          data-tier-effect={feedback.isBent ? 'bent' : 'none'}
+        >
+          {feedback.isBent ? (
+            <Zap size={15} className="shrink-0" aria-hidden="true" />
+          ) : (
+            <Sparkles size={14} className="shrink-0" aria-hidden="true" />
+          )}
+          <span>{feedback.text}</span>
+        </div>
+      ) : null}
+
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-coral/10 text-coral-strong">
-            <Shield size={18} aria-hidden="true" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-coral/10 text-coral-strong p-1">
+            <RankInsignia bars={expState.rank.bars} size={32} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
@@ -109,18 +240,23 @@ function InlineServiceInfo({
             <div className="text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
               <span data-testid="service-status">
-                {military.militaryStatus === 'discharged' ? '전역했어요' : STATUS_LABELS[military.militaryStatus]}
-              </span>
+                {expState.isDischarged
+                  ? '전역했어요'
+                  : expState.isBeforeEnlistment
+                    ? STATUS_LABELS[military.militaryStatus]
+                    : '복무 중'}
+              </span>{' '}
+              · <span className="opacity-80">복무 레벨</span>
             </div>
           </div>
         </div>
         <div className="text-right">
           <span className="text-heading font-bold text-card-foreground tabular-nums">
-            {progress.isDischarged
+            {expState.isDischarged
               ? '전역'
-              : level.isPreEnlistment
+              : expState.isBeforeEnlistment
                 ? `입대 D-${daysUntilEnlistment}`
-                : `D-${progress.remainingDays}`}
+                : `D-${expState.remainingDays}`}
           </span>
         </div>
       </div>
@@ -130,11 +266,11 @@ function InlineServiceInfo({
           className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-label font-semibold text-card-foreground"
           data-testid="service-progress-summary"
         >
-          <span>복무율 {formatPercent(progress.percent)}%</span>
+          <span>복무율 {formatExpPercent(expState.totalPercent, 4)}</span>
           <span className="text-muted-foreground tabular-nums">
-            {level.isPreEnlistment
+            {expState.isBeforeEnlistment
               ? `입대까지 ${daysUntilEnlistment}일`
-              : `${progress.elapsedDays}일 경과 · ${progress.remainingDays}일 남음`}
+              : `${expState.elapsedDays}일 경과 · ${expState.remainingDays}일 남음`}
           </span>
         </div>
         <div
@@ -142,13 +278,13 @@ function InlineServiceInfo({
           aria-label="개인 복무 진행률"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={progress.percent}
-          aria-valuetext={`복무율 ${formatPercent(progress.percent)}%, 현재 ${level.label}, ${nextGuide}`}
+          aria-valuenow={expState.totalPercent}
+          aria-valuetext={`복무율 ${formatExpPercent(expState.totalPercent, 4)}, 현재 복무 레벨 LV ${currentTier.level} ${currentTier.label}, ${nextGuide}`}
           className="h-2 overflow-hidden rounded-full bg-muted"
         >
           <div
             className="h-full rounded-full bg-coral-strong transition-[width] duration-700 ease-out"
-            style={{ width: `${progress.percent}%` }}
+            style={{ width: `${expState.totalPercent}%` }}
           />
         </div>
         <div className="flex justify-between gap-3 text-caption text-muted-foreground">
@@ -157,101 +293,130 @@ function InlineServiceInfo({
         </div>
       </div>
 
-      {/* Level Tier, EXP & Connected Roadmap Track */}
+      {/* Service tier, real-time EXP and connected roadmap track */}
       <div className="rounded-xl border border-border/70 bg-muted/20 p-3.5 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1.5" data-testid="service-level">
-            <span className="rounded bg-coral/20 px-1.5 py-0.5 text-caption font-extrabold text-coral-strong">
-              {level.levelBadge}
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 rounded bg-coral/20 px-1.5 py-0.5 text-caption font-extrabold text-coral-strong tabular-nums',
+                currentTier.isMax && 'bg-coral-strong text-coral-strong-foreground',
+              )}
+              data-tier-key={currentTier.key}
+            >
+              {currentTier.isMax ? <Crown size={12} aria-hidden="true" /> : null}
+              <span>LV {currentTier.level}</span>
             </span>
-            <span className="text-label font-bold text-card-foreground">
-              {level.isPreEnlistment ? '입대 대기' : `현재 계급 · ${level.label}`}
+            {' '}
+            <span className={cn('text-label font-bold text-card-foreground', currentTier.isMax && 'text-coral-strong')}>
+              {expState.isPreEnlistment ? '입대 대기' : currentTier.label}
             </span>
           </div>
           <span className="text-caption text-muted-foreground" data-testid="service-level-guide">
             {nextGuide}
           </span>
         </div>
+        <p className="text-caption text-muted-foreground" data-testid="service-tier-description">
+          {currentTier.description} 입력한 복무 날짜 기준이며 실제 행정 진급·관계 점수가 아니에요.
+        </p>
 
-        {/* Current Rank EXP Gauge */}
-        {!level.isDischarged && !level.isPreEnlistment && level.nextLabel ? (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-caption text-muted-foreground">
-              <span className="font-medium">{level.label} 경험치</span>
-              <span className="font-semibold text-card-foreground tabular-nums">
-                {formatPercent(level.rankExpPercent)}% (다음 계급까지 {level.remainingDaysToNext}일)
-              </span>
+        {/* Real-time EXP Readout */}
+        <div className="rounded-lg border border-border/60 bg-card/60 p-2.5 space-y-1.5" data-testid="service-exp-readout">
+          <div className="flex items-baseline justify-between gap-2">
+            <div className="flex items-baseline gap-1 text-label font-bold text-card-foreground tabular-nums">
+              <span className="font-extrabold text-coral-strong">{formatExpNumber(expState.elapsedSec)}</span>
+              <span className="text-caption font-normal text-muted-foreground">/ {formatExpNumber(expState.totalSec)} EXP</span>
             </div>
-            <div
-              role="progressbar"
-              aria-label="현재 계급 경험치 진행률"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={level.rankExpPercent}
-              className="h-1.5 overflow-hidden rounded-full bg-muted"
-            >
-              <div
-                className="h-full rounded-full bg-coral-strong transition-[width] duration-700 ease-out"
-                style={{ width: `${level.rankExpPercent}%` }}
-              />
-            </div>
+            <span className="text-label font-extrabold text-coral-strong tabular-nums">
+              {formatExpPercent(expState.totalPercent, 4)}
+            </span>
           </div>
-        ) : null}
 
-        {/* Connected Step Track Roadmap */}
-        <div className="relative pt-2 pb-1" data-testid="service-rank-rail" aria-label="복무 계급 단계">
+          {!expState.isDischarged && !expState.isBeforeEnlistment ? (
+            <div className="space-y-1">
+              <div
+                role="progressbar"
+                aria-label="현재 복무 레벨 경험치 진행률"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={expState.tierExpPercent}
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+              >
+                <div
+                  className="h-full rounded-full bg-coral-strong transition-[width] duration-300 ease-out"
+                  style={{ width: `${expState.tierExpPercent}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-caption text-muted-foreground tabular-nums">
+                <span>LV {currentTier.level} 진행 {formatExpPercent(expState.tierExpPercent, 1)}</span>
+                <span>{expState.nextTier ? `다음 LV ${expState.nextTier.level}까지 ${expState.remainingDaysToNextTier ?? 0}일` : '복무 완료'}</span>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Daily Today EXP */}
+          {!expState.isBeforeEnlistment && !expState.isDischarged ? (
+            <div className="pt-1.5 border-t border-border/40 flex items-center justify-between text-caption text-muted-foreground tabular-nums" data-testid="service-today-exp">
+              <span>오늘 획득</span>
+              <span className="font-semibold text-card-foreground">{formatExpNumber(expState.todayExp)} / 86,400 EXP</span>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Connected service tier track */}
+        <div className="relative pt-2 pb-1" data-testid="service-tier-rail" aria-label="복무 레벨 성장 단계">
           {/* Background track */}
-          <div className="absolute top-[26px] left-[12.5%] right-[12.5%] h-0.5 -translate-y-1/2 bg-border" />
+          <div className="absolute top-[26px] left-[7.14%] right-[7.14%] h-0.5 -translate-y-1/2 bg-border" />
           {/* Active progress rail */}
           <div
-            className="absolute top-[26px] left-[12.5%] h-0.5 -translate-y-1/2 bg-coral-strong transition-[width] duration-700 ease-out"
+            className="absolute top-[26px] left-[7.14%] h-0.5 -translate-y-1/2 bg-coral-strong transition-[width] duration-700 ease-out"
             style={{
-              width: level.isDischarged
-                ? '75%'
-                : `${Math.min(75, Math.max(0, ((level.level - 1) + (level.rankExpPercent / 100)) * 25))}%`,
+              width: expState.isDischarged
+                ? '85.72%'
+                : `${Math.min(85.72, Math.max(0, (expState.totalPercent / 100) * 85.72))}%`,
             }}
           />
 
-          <div className="relative grid grid-cols-4 gap-1">
-            {level.stages.map((stage) => {
-              const isCurrent = !level.isPreEnlistment && !level.isDischarged && level.level === stage.level;
-              const isPast = !level.isPreEnlistment && (level.isDischarged || level.level > stage.level);
-              const isFuture = !isCurrent && !isPast;
-
+          <div className="relative grid grid-cols-7 gap-0.5">
+            {expState.tierStops.map((stage: ServiceTierStop, idx: number) => {
               return (
                 <div
-                  key={stage.level}
-                  data-testid={`service-rank-step-${stage.level}`}
+                  key={stage.key}
+                  data-testid={`service-tier-step-${idx + 1}`}
+                  data-tier-key={stage.key}
                   className={cn(
-                    'flex flex-col items-center justify-center text-center transition-all',
-                    isCurrent && 'scale-105',
+                    'flex flex-col items-center justify-center text-center transition-all px-0.5',
+                    stage.isCurrent && 'scale-105',
                   )}
                 >
                   <div
                     className={cn(
                       'mb-1.5 flex h-7 w-7 items-center justify-center rounded-full text-caption font-bold transition-all',
-                      isCurrent && 'bg-coral-strong text-white ring-4 ring-coral/20 shadow-sm',
-                      isPast && 'bg-coral-strong text-white',
-                      isFuture && 'bg-card border border-border text-muted-foreground',
+                      stage.isCurrent && 'bg-coral-strong text-coral-strong-foreground ring-4 ring-coral/20',
+                      stage.isPast && 'bg-coral-strong text-coral-strong-foreground',
+                      stage.isCurrent && stage.isMax && 'ring-coral/30',
+                      stage.isFuture && 'bg-card border border-border text-muted-foreground',
                     )}
                   >
-                    {isPast ? (
+                    {stage.isCurrent && stage.isMax ? (
+                      <Crown size={13} strokeWidth={2.5} aria-hidden="true" />
+                    ) : stage.isPast ? (
                       <Check size={13} strokeWidth={3} aria-hidden="true" />
                     ) : (
-                      <span>{stage.levelBadge}</span>
+                      <span>LV {stage.level}</span>
                     )}
                   </div>
 
                   <span
                     className={cn(
-                      'text-caption leading-tight',
-                      isCurrent ? 'font-bold text-coral-strong' : isPast ? 'font-semibold text-card-foreground' : 'text-muted-foreground',
+                      'text-caption leading-tight truncate w-full',
+                      stage.isCurrent ? 'font-bold text-coral-strong' : stage.isPast ? 'font-semibold text-card-foreground' : 'text-muted-foreground',
                     )}
                   >
                     {stage.label}
                   </span>
                   <span className="text-caption text-muted-foreground tabular-nums">
-                    {stage.thresholdPercent}%
+                    {stage.minPercent}%
                   </span>
                 </div>
               );
@@ -297,7 +462,6 @@ function SoldierSearchSurface({
         <InlineServiceInfo
           military={military}
           contact={contact}
-          progress={progress}
           onOpenService={onOpenService}
         />
       ) : discharged ? (

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, Role } from '@/types';
@@ -29,6 +29,7 @@ import type { AppState, Role } from '@/types';
  */
 
 const navigate = vi.hoisted(() => vi.fn());
+const setPartnerUsername = vi.hoisted(() => vi.fn());
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
@@ -98,6 +99,7 @@ vi.mock('@/lib/useStore', () => ({
     setTheme: vi.fn(),
     refreshInvitation: vi.fn(),
     exportMyData: vi.fn(),
+    setPartnerUsername,
   }),
 }));
 
@@ -121,6 +123,7 @@ const ORPHANED_ROUTES = [
 describe('H-4: settings offers a durable route to every non-tab feature', () => {
   beforeEach(() => {
     navigate.mockReset();
+    setPartnerUsername.mockReset().mockResolvedValue(true);
     currentRole = 'gomsin';
   });
 
@@ -152,6 +155,19 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
   it('groups them under a labelled shortcut section', () => {
     renderSettings();
     expect(screen.getByText('바로가기')).toBeTruthy();
+  });
+
+  it('프로필 편집 안에서 상대방 아이디를 저장할 수 있다', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole('button', { name: '내 프로필 수정' }));
+
+    const dialog = screen.getByRole('dialog', { name: '내 프로필 수정' });
+    const input = within(dialog).getByRole('textbox', { name: '군화 영어 아이디' });
+    await user.type(input, 'partner_name');
+    await user.click(within(dialog).getByRole('button', { name: '상대방 아이디 저장' }));
+
+    expect(setPartnerUsername).toHaveBeenCalledWith('partner_name');
   });
 });
 

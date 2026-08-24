@@ -1,7 +1,8 @@
 # 곰신로그 CURRENT STATE — 저장소 현실
 
-> **이 문서는 현시점의 저장소 현실을 기술한다.** 제품 정의는
-> [`PRODUCT_V3.md`](PRODUCT_V3.md), 구현 순서는
+> **이 문서는 현시점의 저장소 현실을 기술한다.** `PRODUCT_V3.md`는 2026-08-24
+> 제품 오너 결정으로 legacy가 되었고, 활성 제품 방향은 최신 사용자 승인 요청과
+> [`V4_AS_BUILT.md`](V4_AS_BUILT.md)에서 확인한다. 구현 순서는
 > [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)가 소유한다.
 >
 > 이 문서는 default branch reality와 active development checkpoint를 분리한다.
@@ -22,6 +23,26 @@
 | `LEGACY` | LEGACY TO DEPRECATE |
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
+
+## 0A. Active working checkpoint — 2026-08-24
+
+- The product owner explicitly moved `docs/PRODUCT_V3.md` to **legacy**. Do not use
+  that document to reactivate superseded navigation or product decisions.
+- On branch `codex/service-rank-profile-settings-impl`, the current dirty working
+  tree contains a local display-only service EXP slice: 1 second = 1 EXP, a live
+  four-decimal progress percentage, an internal 200-level EXP curve, and seven
+  user-facing service tiers (신병·일초·일꺾·일말·상초·상꺾·왕고). The tier is
+  date-progress decoration only; it has no administrative-promotion, reward,
+  push, share, ranking, nickname, or relationship-score semantics.
+- The EXP calculation uses the user-entered enlistment/effective discharge dates
+  on a fixed `Asia/Seoul` calendar timeline. Missing, unknown, malformed, or
+  non-positive date ranges do not produce invented progress.
+- The current `/search` surface renders this service card for the soldier role.
+  A partner-facing service projection for the gomsin role is **not implemented**:
+  the current sync path exposes partner identity only, not `military_info`. Adding
+  that projection requires a separate privacy/RLS/RPC design and remote gate.
+- Database migrations, remote Supabase, Vercel production, PR merge/push, and
+  authenticated browser evidence for this local slice remain **NOT APPLIED / UNVERIFIED**.
 
 ## 0. Default-branch reality
 
@@ -355,7 +376,8 @@ Beta gate B1 전에는 Storage policy catalog와 실제 signed-URL 동작을 모
 ## 7. 이 문서의 유지
 
 - 항목이 해소되면 삭제한다. 완료 이력을 여기에 쌓지 않는다.
-- 제품 의도는 `PRODUCT_V3.md`, 구현 순서는 `ENGINEERING_ROADMAP.md`에 쓴다.
+- 제품 의도는 최신 사용자 승인 V4 방향과 `V4_AS_BUILT.md`/`V4_BACKLOG.md`에 쓴다.
+  `PRODUCT_V3.md`는 legacy 역사 기록이다. 구현 순서는 `ENGINEERING_ROADMAP.md`에 쓴다.
 - remote 상태 주장은 날짜·증거 출처와 함께 적고, 확인할 수 없으면 `UNVERIFIED`다.
 - active PR/HEAD/CI는 checkpoint일 뿐이며 다음 세션에서 live 재검증한다.
 
@@ -490,3 +512,40 @@ present in `origin/master` or Production.
 - Remaining release risks: PR merge, two-account/two-device realtime parity, and
   cross-device avatar synchronization remain unverified. The two stale untracked
   control-tower reports are preserved and are not part of the PR.
+
+## 13. 2026-08-24 username / post / story-highlight refinement
+
+This is the current local checkout truth for the latest working tree. It does not
+claim that these uncommitted changes are in `origin/master`, Production, or the
+remote Supabase project.
+
+- Branch: `codex/service-rank-profile-settings-impl`; repository HEAD is
+  `c16537047924ec5e164fb36b8dad1aa2fb661b52c` after two shared-memory commits
+  (`80ad8b2`, `c165370`). The latest application implementation remains
+  uncommitted on top of that docs-only history.
+- Partner username: `/settings` and the profile edit modal now expose the active
+  partner username field. A successful save updates the current couple projection;
+  the server RPC still derives the target from the active couple and does not widen
+  direct `profiles` RLS. The current web auth model proves the partner account/session,
+  not a physical-phone identity.
+- Username reload projection: local sync calls the additive
+  `get_partner_profile_with_username()` RPC and falls back only on missing-RPC
+  `PGRST202`. Migration `060_partner_username_projection.sql` is present locally,
+  but this agent did not apply it remotely; remote application is **UNVERIFIED**.
+- My tab: the profile grid now contains every couple-shared record with a photo, not
+  only records inside a travel period. The photo tab and travel tab retain their
+  separate meanings. The obsolete travel-only classifier was removed from runtime.
+- Highlights: highlight data remains separate from the grid. The editor can select
+  grid photos, and a shared photo story can open the same editor with its exact record
+  preselected. Private records remain excluded. The existing record-level model means
+  a multi-photo record is selected as one item and uses its first photo as cover.
+- Verification: focused path tests **PASS** (7 files / 171 tests); `npm run verify`
+  **PASS** (231 Vitest files / 3279 tests plus typecheck, lint, build); phase0
+  **PASS** with 58 migrations and 333 actor/security assertions after the 060 probes.
+- Sol Max: three explicit `kiro/gpt-5.6-sol` + `max` dispatches failed with provider
+  `502` (`Kiro does not support parallel tool calls`). No Sol result is claimed; the
+  failure and the primary manual review are recorded in
+  `control-tower/reports/codex/2026-08-24_sol-max-profile-story-review.md`.
+- Production boundary: this task performed no Supabase, Vercel, push, merge, or
+  deployment mutation. The deployed runtime remains the earlier release candidate
+  until this working tree is separately approved and released.

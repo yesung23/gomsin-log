@@ -179,7 +179,25 @@ describe('PaperProfile (우리 화면)', () => {
     })));
   });
 
-  it('게시물 격자 탭은 여행 중인 사진 게시물만 노출하고 누르면 사진 상세를 연다', () => {
+  it('스토리에서 돌아온 사진 id로 하이라이트 편집기를 연다', async () => {
+    const record = makeRecord({
+      id: 'story-photo',
+      date: '2026-02-02',
+      attachments: [{ type: 'photo', name: 'story.jpg', url: 'https://example.test/story.jpg' }],
+    });
+    storeState = { ...baseState(), records: [record] };
+
+    render(
+      <MemoryRouter initialEntries={['/us?highlightRecord=story-photo']}>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: '새 하이라이트' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /2026-02-02 사진 선택 해제/ })).toBeInTheDocument();
+  });
+
+  it('게시물 격자 탭은 여행과 무관하게 모든 공유 사진을 노출하고 누르면 사진 상세를 연다', () => {
     const trip: Trip = {
       id: 'trip-jeju',
       coupleId: 'couple-1',
@@ -191,7 +209,12 @@ describe('PaperProfile (우리 화면)', () => {
       createdAt: '2026-08-01T00:00:00Z',
     };
 
-    const normalRecord = makeRecord({ id: 'rec-normal', date: '2026-08-05', log: '평범한 하루' });
+    const normalRecord = makeRecord({
+      id: 'rec-normal',
+      date: '2026-08-05',
+      log: '평범한 하루',
+      attachments: [{ type: 'photo', name: 'normal.jpg', url: 'https://example.test/normal.jpg' }],
+    });
     const travelRecord = makeRecord({
       id: 'rec-travel',
       date: '2026-08-11',
@@ -211,11 +234,10 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    // 여행 중 사진 게시물만 격자에 존재해야 함
+    // 여행 여부와 무관하게 공유 사진 게시물이 격자에 존재해야 함
     expect(screen.getByTestId('post-tile-rec-travel')).toBeInTheDocument();
-    expect(screen.queryByTestId('post-tile-rec-normal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('post-tile-rec-normal')).toBeInTheDocument();
     expect(screen.getByTestId('post-tile-rec-travel')).toHaveAttribute('data-kind', 'photo');
-    expect(screen.queryByText('평범한 하루')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('post-tile-rec-travel'));
     const viewer = screen.getByTestId('photo-post-viewer');
@@ -239,7 +261,7 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/여행에서 함께 공개한 사진이 여기 모여요/)).toBeInTheDocument();
+    expect(screen.getByText(/함께 공개한 사진이 아직 없어요/)).toBeInTheDocument();
   });
 
   it('사진 탭은 비공개 기록을 제외한 공유 기록 목록을 사용한다', () => {

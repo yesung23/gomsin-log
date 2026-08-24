@@ -353,7 +353,8 @@ during convergence.
 
 | Question | Canonical source |
 |---|---|
-| What should the product do? | `docs/PRODUCT_V3.md` |
+| What should the active product do? | latest user-approved V4 direction + `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md` |
+| What did the superseded product direction say? | `docs/PRODUCT_V3.md` (legacy history only) |
 | What is the approved business strategy? | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |
 | What is currently implemented / blocked? | the repository, then `docs/CURRENT_STATE.md` |
 | What order do we build in? | `docs/ENGINEERING_ROADMAP.md` |

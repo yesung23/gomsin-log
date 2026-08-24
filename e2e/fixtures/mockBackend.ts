@@ -27,6 +27,8 @@ export type Scenario = {
   /** Whether `get_partner_profile` returns a partner (drives connected vs pending). */
   partnerPresent: boolean;
   partnerName?: string;
+  /** Username projection returned by migration 060 when the partner exists. */
+  partnerUsername?: string;
   anniversaryDate?: string;
   records?: RecordRow[];
   /**
@@ -444,6 +446,22 @@ export async function installMockBackend(
     if (path === '/rest/v1/cycle_support_signals') return rows(route, []);
 
     // ---- RPCs ------------------------------------------------------------
+    if (path === '/rest/v1/rpc/get_partner_profile_with_username') {
+      const failure = failureFor(scenario, 'get_partner_profile_with_username');
+      if (failure) return json(route, failure, failure.status);
+      return json(
+        route,
+        scenario.partnerPresent
+          ? [{
+            display_name: scenario.partnerName ?? '파트너',
+            role: scenario.role === 'gomsin' ? 'soldier' : 'gomsin',
+            avatar_path: null,
+            username: scenario.partnerUsername ?? null,
+          }]
+          : [],
+      );
+    }
+
     if (path === '/rest/v1/rpc/get_partner_profile') {
       const failure = failureFor(scenario, 'get_partner_profile');
       if (failure) return json(route, failure, failure.status);

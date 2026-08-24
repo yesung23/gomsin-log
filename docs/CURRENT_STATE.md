@@ -467,7 +467,9 @@ This is the current release-candidate truth. It does not claim that an open PR i
 present in `origin/master` or Production.
 
 - Branch: `codex/service-rank-profile-settings-impl`.
-- Exact HEAD: `895b2ada43d8f2640912eed4058358b5a8758b32` (`fix: expand username touch target`).
+- Production deployment source: `a33499e179a163f87d0efae94ca3262f445fc00b` (`docs: record PR release gate status`).
+- The later PR commits are documentation-only release bookkeeping; they do not change the
+  deployed runtime bundle.
 - PR: [#89](https://github.com/yesung23/gomsin-log/pull/89), OPEN, non-draft, mergeable; not merged.
 - Remote CI: PASS at the exact HEAD, including the real-browser creator/partner matrix,
   typecheck/lint/Vitest/build, PostgreSQL security contracts, Deno, Android, iOS,

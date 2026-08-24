@@ -792,6 +792,111 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 #### PRODUCTION
 - NOT APPLIED
 
+### 2026-08-24 · Codex · 상대 아이디 권한 및 게시물·스토리·하이라이트 분리
+
+#### PLAN POSITION
+- Phase: V4 product-surface completion / profile identity and shared media
+- Workstream: engineering — functionality, data integrity, privacy, authorization, synchronization, testing
+- Step: make partner username setting discoverable, remove travel-only grid scope, and connect shared photo stories to independent highlights
+- Previous Gate: local branch `b12af2a1cc2a6ce422eff8b68484a54753bb4861`; PR #89 release candidate and production boundary were already recorded
+- This Gate: local implementation, actor-based fresh-chain verification, full local verification, and independent review attempt; no remote mutation
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V3.md`, `docs/V4_AS_BUILT.md`, `docs/WHAT_IS_GOMSINLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — no customer, monetization, storage, or media-business change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `AGENTS.md`, `CLAUDE.md`, and `docs/skills/feature-build.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, `bash scripts/agent/session-start.sh`, live branch/origin state
+- Latest relevant Work Log checked: previous 2026-08-24 profile/service and 2026-08-23 shared-profile entries
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO relative to `PRODUCT_V3` and the business direction; the prior V4 as-built note described a travel-only implementation, which the user's explicit new requirement supersedes and this local documentation now records
+- If YES, what conflict: NOT APPLICABLE
+
+#### OWNERSHIP
+- Tool: Codex primary; explicit Sol Max dispatch attempted through multi-agent orchestration
+- Model: primary GPT-5/Codex; requested `kiro/gpt-5.6-sol` with `max` failed twice at the provider boundary
+- Role: primary integrator, bounded data/security implementation, independent manual reviewer after delegated reviewer failure
+- PR: existing #89; this refinement is not pushed to that PR
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `b12af2a1cc2a6ce422eff8b68484a54753bb4861`
+- Old HEAD: `b12af2a1cc2a6ce422eff8b68484a54753bb4861`
+- New HEAD / Reviewed HEAD: same repository HEAD with the described uncommitted working-tree changes
+
+#### CHANGED / REVIEWED
+- file: `src/pages/SettingsPage.tsx`, `src/lib/store.tsx`, `src/lib/sync.ts`, `src/types/index.ts`
+- function/component/migration: `PartnerUsernameEditor`, `setPartnerUsername`, partner profile sync projection
+- what changed/reviewed: the active connected user can set the partner's English username from the profile edit modal or settings; successful saves update local state; reload reads the additive partner username projection with a missing-RPC-only fallback
+- why: the previous field was too deep and did not display the saved partner value, while owner-side username authority must remain separate
+- file: `supabase/migrations/060_partner_username_projection.sql`, `scripts/phase0/storage-authz-harness.mjs`, `src/lib/migration060.test.ts`, `src/lib/migrationSecurityContracts.test.ts`
+- function/component/migration: `get_partner_profile_with_username()` and its contracts
+- what changed/reviewed: added authenticated-only, active-partner-only username projection without widening `profiles` RLS; pinned `search_path`, revokes/grant, PostgREST reload, structural test, and actor probes for A/B/C/anon/disconnected states
+- why: display the partner-selected username after reload without exposing the owner-managed profile row
+- file: `src/features/us/SharedProfile.tsx`, `src/features/us/PostGrid.tsx`, `src/features/us/postTiles.ts`, `src/features/story/StoryViewer.tsx`, `src/features/story/StoryRoute.tsx`
+- function/component/migration: shared profile grid and story highlight action
+- what changed/reviewed: grid uses all shared photo records; story photo moments can navigate with the exact record ID to the highlight editor; highlight mode and private records do not expose the action; obsolete travel-only classifier was removed
+- why: keep grid and highlights separate while allowing both requested source surfaces without inventing a duplicate media model
+- file: `src/features/us/paperProfile.test.tsx`, `src/features/story/storyRoutes.test.tsx`, `src/pages/settingsRouteReachability.test.tsx`, `src/lib/sync.test.ts`, `src/features/us/postTiles.test.ts`
+- function/component/migration: focused user-path and data-flow tests
+- what changed/reviewed: partner edit reachability, all-photo grid, story-to-highlight query handoff, reload fallback, and projection mapping are covered
+- why: protect the exact user paths and prevent a travel-only regression
+- file: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/CURRENT_STATE.md`, `supabase/migrations/README.md`, `control-tower/reports/codex/2026-08-24_sol-max-profile-story-review.md`
+- function/component/migration: current-state and review records
+- what changed/reviewed: documented the new grid/highlight semantics, migration 060 boundary, review attempts, remaining device/media limitations, and production separation
+- why: keep repository reality distinct from remote application and deployment claims
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: no existing migration changed; 060 is additive and was not applied remotely; no attachment-level highlight table was invented
+- product semantics: no likes, followers, views, relationship/affection score, physical-phone claim, or private health-data exposure
+- Production: no Supabase SQL, Vercel deployment, push, merge, or remote mutation
+
+#### VERIFICATION
+- command: `npm test -- --run src/features/us/postTiles.test.ts src/features/us/paperProfile.test.tsx src/features/story/storyRoutes.test.tsx src/pages/settingsRouteReachability.test.tsx src/lib/sync.test.ts src/lib/migration060.test.ts src/lib/migrationSecurityContracts.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 7 files / 171 tests
+- what it actually proves: partner settings reachability, grid semantics, story route handoff, sync fallback, 060 contract, and effective RPC security contracts pass in the local test environment
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — fresh throwaway PostgreSQL 17 chain, 58 migrations / 333 assertions; includes active A/B projection, reciprocal username, unrelated/anon denial, and disconnected-partner exclusion
+- what it actually proves: the migration chain and actor-based authorization probes pass locally; it does not prove the production Supabase catalog is the same
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, lint, full Vitest suite, and production build completed with exit code 0; existing large-chunk warning only
+- what it actually proves: current local application code passes repository-wide static, unit/component, and build checks; it does not prove Production or real Supabase
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: no whitespace errors in the current diff
+- command: Sol Max dispatch (`kiro/gpt-5.6-sol`, `max`), two attempts
+- PASS / FAIL / UNVERIFIED: FAIL — both provider calls returned `502 Provider unreachable: Kiro does not support parallel tool calls`
+- what it actually proves: the requested independent Sol reviewer did not execute; no Sol finding is treated as evidence
+- command: authenticated production browser / two-account real-device check for this working tree
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — this branch is not deployed, 060 was not applied by this agent, and no two-account device session was available for this delta
+- what it actually proves: nothing about current Production behavior; previous release-candidate evidence remains limited to the earlier deployed commit
+
+#### REVIEW IMPACT
+- FULL within the requested profile/grid/highlight slice; the earlier review is stale for this uncommitted diff. Security-sensitive migration 060 received structural plus actor-based fresh-chain verification. Sol Max review was attempted but unavailable.
+
+#### BLOCKERS
+- code: physical-phone-only authority is not expressible by the current web session model; multi-photo records are selected at record level, not individual attachment level
+- environment: migration 060 remote application and full remote migration ledger are UNVERIFIED
+- external/manual: two-account/two-device username and highlight synchronization, plus cross-device avatar synchronization, remain unverified
+
+#### STOPPED AT
+- exact completed boundary: local uncommitted implementation, documentation, actor-based verification, and manual review on `codex/service-rank-profile-settings-impl`; no commit/push/PR update/merge/deployment
+
+#### REMAINING
+- not completed: apply and verify migration 060 remotely; run real A/B browser/device matrix; decide whether attachment-level highlight selection merits a separate data-model gate; decide whether avatar sync is in scope
+
+#### NEXT ACTION
+- next owner: user / release owner
+- tool/model: approved Supabase SQL process, then browser matrix; use Sol Max again only when the provider accepts the model request
+- 기준 SHA: `b12af2a1cc2a6ce422eff8b68484a54753bb4861` plus this working tree
+- exact next task: apply `060_partner_username_projection.sql` after approval, verify A/B/former/third-party/anon behavior, then decide whether to commit and update PR #89
+
+#### DO NOT ADVANCE UNTIL
+- migration 060 application is approved and its remote state is confirmed
+- authenticated A/B and former-partner negative paths pass in the target Supabase project
+- the user approves committing/pushing this uncommitted refinement and updating the release path
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-24 · Codex · 복무 계급 게임 요소 및 인스타식 프로필 2차 다듬기
 
 #### PLAN POSITION

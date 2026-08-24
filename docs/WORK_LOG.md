@@ -6344,3 +6344,113 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED
+
+### 2026-08-24 · Codex · Dirty-worktree verification repair and master promotion
+
+#### PLAN POSITION
+- Phase: V4 release repair and promotion
+- Workstream: profile identity, search service level, shared photo/highlight surfaces, verification
+- Step: repair the failed exact-HEAD verification, rerun local and remote gates, promote the verified commit to `master`
+- Previous Gate: independent repository verification was FAIL because the dirty worktree mock did not route the migration-060 partner-profile RPC; PR #89 CI covered only `c165370`
+- This Gate: the repaired exact SHA passed local checks and all PR #89 CI, then was pushed to and merged in `master`
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, latest user-approved V4 direction
+- Business source checked / NOT APPLICABLE: no customer, pricing, storage, or monetization change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `AGENTS.md`, `CLAUDE.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: `docs/WORK_LOG.md`
+- MASTER PLAN version / 기준일: V4 working direction / 2026-08-24
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary, Sol architect consultation, GitHub Actions, Vercel
+- Model: primary Codex; `main/gpt-5.6-sol` architect consultation
+- Role: implementation integrator, verifier, release owner
+- PR: #89 — MERGED
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `7f4886bcbe32034bfabb454c85378532b14cb261`
+- Old HEAD: `c16537047924ec5e164fb36b8dad1aa2fb661b52`
+- New HEAD / Reviewed HEAD: `b2ca94f2e185c694a3d930bde06f8432e1f66c01`
+
+#### CHANGED / REVIEWED
+- file: `e2e/fixtures/mockBackend.ts`
+- function/component/migration: migration-060 partner profile mock route
+- what changed/reviewed: added the `get_partner_profile_with_username` route and optional partner username projection to the browser fixture
+- why: the new production call path must be represented by the real-browser mock; otherwise the app fell into `PARTNER-UNKNOWN` during the full suite
+- file: `src/lib/sync.ts`
+- function/component/migration: partner profile hydration
+- what changed/reviewed: calls the username projection and falls back only for `PGRST202`
+- why: older remote deployments remain usable without hiding auth, RLS, or server failures
+- file: `supabase/migrations/060_partner_username_projection.sql`
+- function/component/migration: migration 060
+- what changed/reviewed: committed the authenticated active-partner username projection with fixed search path and no direct profiles RLS widening
+- why: cross-device partner username hydration needs a narrow server projection
+- file: Search/My/profile/story/grid code and tests
+- function/component/migration: V4 service tiers, profile identity, shared photo grid/highlights, route tests
+- what changed/reviewed: included the already-approved working-tree implementation and its tests in the promoted commit
+- why: preserve one exact release boundary instead of leaving tested feature code outside `master`
+- file: `control-tower/reports/codex/2026-08-24_release-repair-and-master-promotion_codex.md`
+- function/component/migration: release evidence
+- what changed/reviewed: recorded exact commands, commit, CI, deployment, Supabase boundary, and remaining risks
+- why: separate repository/CI proof from remote database and authenticated production proof
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: none
+- DB/migration semantics: migration 060 committed; no remote SQL applied
+- product semantics: no new product direction beyond the already approved V4 working tree
+- Production: master push and PR promotion were applied; no Supabase mutation
+
+#### VERIFICATION
+- command: `git diff --cached --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: staged release diff had no whitespace errors
+- command: `npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: typecheck, lint, 231 Vitest files / 3279 tests, and build passed
+- command: `npm run test:e2e` (first run)
+- PASS / FAIL / UNVERIFIED: FAIL — 97/99
+- what it actually proves: two 390px couple-matrix layout cases timed out in the full-suite run
+- command: isolated retry of the two failed couple-matrix cases
+- PASS / FAIL / UNVERIFIED: PASS — 2/2
+- what it actually proves: both cases pass when isolated after the mock route repair
+- command: `npm run test:e2e` (second full run)
+- PASS / FAIL / UNVERIFIED: PASS — 99/99
+- what it actually proves: the complete local browser suite passes on the repaired fixture and bundle
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — 333 assertions
+- what it actually proves: 58 migrations on fresh PostgreSQL 17, including actor checks for 060; not remote Supabase application
+- command: PR #89 exact-SHA GitHub checks
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: web/native builds, real-browser matrix, PostgreSQL, Deno, Android, iOS, Capacitor, audit, boundary, secret scan, and Vercel preview passed for `b2ca94f`
+- command: `curl https://gomsin-log.vercel.app/us`
+- PASS / FAIL / UNVERIFIED: PASS — HTTP 200
+- what it actually proves: production URL responds; it does not prove authenticated two-account parity
+
+#### REVIEW IMPACT
+- FULL — the earlier dirty-worktree FAIL is superseded for the promoted exact SHA; the first full E2E run remains recorded as a transient FAIL, with the second full run PASS
+
+#### BLOCKERS
+- code: no P0/P1/P2 blocker found by the available exact-SHA gates
+- environment: BrowserStack physical-device authentication remains blocked in its separate report
+- external/manual: remote Supabase 060 application and authenticated two-account production refresh remain UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: `b2ca94f` pushed to `origin/master`, PR #89 shown as MERGED, production `/us` returned HTTP 200
+
+#### REMAINING
+- not completed: remote migration 060 application and actor probes; authenticated partner username save → refresh → re-login production proof; BrowserStack device proof
+
+#### NEXT ACTION
+- next owner: approved Supabase release operator
+- tool/model: Supabase migration gate, then authenticated browser verifier
+- 기준 SHA: `b2ca94f2e185c694a3d930bde06f8432e1f66c01`
+- exact next task: apply only migration 060 after catalog/backup review, reload schema, and run active-partner/unrelated/anon/disconnected probes
+
+#### DO NOT ADVANCE UNTIL
+- remote migration 060 is applied through the approved gate
+- authenticated two-account save/refresh/re-login evidence is captured
+
+#### PRODUCTION
+- APPLIED for master push and Vercel HTTP 200; Supabase remains NOT APPLIED / UNVERIFIED

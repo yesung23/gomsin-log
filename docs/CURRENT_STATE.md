@@ -28,8 +28,10 @@
 
 - The product owner explicitly moved `docs/PRODUCT_V3.md` to **legacy**. Do not use
   that document to reactivate superseded navigation or product decisions.
-- On branch `codex/service-rank-profile-settings-impl`, the current dirty working
-  tree contains a local display-only service EXP slice: 1 second = 1 EXP, a live
+- On branch `codex/service-rank-profile-settings-impl`, release commit `b2ca94f`
+  is now present in `origin/master`. The current working tree still contains
+  excluded local assets, while the committed product slice includes a display-only
+  service EXP model: 1 second = 1 EXP, a live
   four-decimal progress percentage, an internal 200-level EXP curve, and seven
   user-facing service tiers (신병·일초·일꺾·일말·상초·상꺾·왕고). The tier is
   date-progress decoration only; it has no administrative-promotion, reward,
@@ -41,8 +43,11 @@
   A partner-facing service projection for the gomsin role is **not implemented**:
   the current sync path exposes partner identity only, not `military_info`. Adding
   that projection requires a separate privacy/RLS/RPC design and remote gate.
-- Database migrations, remote Supabase, Vercel production, PR merge/push, and
-  authenticated browser evidence for this local slice remain **NOT APPLIED / UNVERIFIED**.
+- Migration 060 is committed and pushed, PR #89 is merged, and the exact-SHA
+  web/native/security/real-browser CI is PASS. Remote Supabase 060 was not
+  applied by this task and remains **UNVERIFIED**. Production `/us` returned HTTP
+  200, but authenticated two-account production refresh and physical-device
+  evidence remain **UNVERIFIED**.
 
 ## 0. Default-branch reality
 
@@ -515,14 +520,13 @@ present in `origin/master` or Production.
 
 ## 13. 2026-08-24 username / post / story-highlight refinement
 
-This is the current local checkout truth for the latest working tree. It does not
-claim that these uncommitted changes are in `origin/master`, Production, or the
-remote Supabase project.
+This is the current release truth for the latest working tree. Repository code is
+in `origin/master`; remote Supabase application and authenticated production
+parity remain separate gates.
 
-- Branch: `codex/service-rank-profile-settings-impl`; repository HEAD is
-  `c16537047924ec5e164fb36b8dad1aa2fb661b52c` after two shared-memory commits
-  (`80ad8b2`, `c165370`). The latest application implementation remains
-  uncommitted on top of that docs-only history.
+- Branch: `codex/service-rank-profile-settings-impl`; release HEAD is
+  `b2ca94f2e185c694a3d930bde06f8432e1f66c01`, present in `origin/master` and
+  feature ref. PR #89 is merged.
 - Partner username: `/settings` and the profile edit modal now expose the active
   partner username field. A successful save updates the current couple projection;
   the server RPC still derives the target from the active couple and does not widen
@@ -539,13 +543,31 @@ remote Supabase project.
   grid photos, and a shared photo story can open the same editor with its exact record
   preselected. Private records remain excluded. The existing record-level model means
   a multi-photo record is selected as one item and uses its first photo as cover.
-- Verification: focused path tests **PASS** (7 files / 171 tests); `npm run verify`
-  **PASS** (231 Vitest files / 3279 tests plus typecheck, lint, build); phase0
+- Verification: focused path tests **PASS** (7 files / 171 tests); the first full
+  E2E run was 97/99 because two layout cases timed out, their isolated retry was
+  2/2, and the second full E2E run was **99/99 PASS**. `npm run verify` is
+  **PASS** (231 Vitest files / 3279 tests plus typecheck, lint, build). Phase 0 is
   **PASS** with 58 migrations and 333 actor/security assertions after the 060 probes.
 - Sol Max: three explicit `kiro/gpt-5.6-sol` + `max` dispatches failed with provider
   `502` (`Kiro does not support parallel tool calls`). No Sol result is claimed; the
   failure and the primary manual review are recorded in
   `control-tower/reports/codex/2026-08-24_sol-max-profile-story-review.md`.
-- Production boundary: this task performed no Supabase, Vercel, push, merge, or
-  deployment mutation. The deployed runtime remains the earlier release candidate
-  until this working tree is separately approved and released.
+- Release boundary: master push and PR merge are **APPLIED/MERGED**. The exact-SHA
+  Vercel preview passed and `https://gomsin-log.vercel.app/us` returned HTTP 200.
+  No remote Supabase mutation was performed; authenticated two-account production
+  parity remains **UNVERIFIED**.
+
+## 14. 2026-08-24 release repair and master promotion
+
+- The dirty-worktree failure was repaired by routing
+  `get_partner_profile_with_username` in `e2e/fixtures/mockBackend.ts`; the
+  production sync fallback remains limited to `PGRST202`.
+- Migration `060_partner_username_projection.sql` and its contract test are
+  committed. Phase 0 confirms the 060 active-partner/reciprocal/unrelated/anon/
+  disconnected actor boundary on a fresh local chain.
+- Exact release commit: `b2ca94f2e185c694a3d930bde06f8432e1f66c01`.
+- PR #89 is `MERGED`; exact-SHA CI is PASS, including the real-browser creator/
+  partner matrix, PostgreSQL, native, and Vercel checks.
+- `master` push is APPLIED. Production `/us` returned HTTP 200. Supabase 060 is
+  not applied by this task and remains UNVERIFIED.
+- Detailed evidence: [`release repair report`](../control-tower/reports/codex/2026-08-24_release-repair-and-master-promotion_codex.md).

@@ -10,6 +10,8 @@
   - **FAIL** — provider returned `502 Bad Gateway: Provider unreachable: Kiro does not support parallel tool calls`.
 - Attempt 2: agent `01a0313c-f293-7dd0-8ba1-ebc7816ef76e`, `fork_context: false`.
   - **FAIL** — the same provider `502` error.
+- Attempt 3: agent `01a03149-8db0-7673-8850-1adea76754f6`, `fork_context: false`, with an explicit instruction to use one tool call at a time.
+  - **FAIL** — the same provider `502` error: `Kiro does not support parallel tool calls`.
 - No Sol Max completion, finding, or PASS result is claimed. The failed dispatches were closed after recording the errors.
 
 ## PRIMARY READ-ONLY REVIEW

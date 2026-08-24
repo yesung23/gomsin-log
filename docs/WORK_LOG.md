@@ -862,8 +862,8 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 - command: `git diff --check`
 - PASS / FAIL / UNVERIFIED: PASS
 - what it actually proves: no whitespace errors in the current diff
-- command: Sol Max dispatch (`kiro/gpt-5.6-sol`, `max`), two attempts
-- PASS / FAIL / UNVERIFIED: FAIL — both provider calls returned `502 Provider unreachable: Kiro does not support parallel tool calls`
+- command: Sol Max dispatch (`kiro/gpt-5.6-sol`, `max`), three attempts
+- PASS / FAIL / UNVERIFIED: FAIL — all three provider calls returned `502 Provider unreachable: Kiro does not support parallel tool calls`
 - what it actually proves: the requested independent Sol reviewer did not execute; no Sol finding is treated as evidence
 - command: authenticated production browser / two-account real-device check for this working tree
 - PASS / FAIL / UNVERIFIED: UNVERIFIED — this branch is not deployed, 060 was not applied by this agent, and no two-account device session was available for this delta

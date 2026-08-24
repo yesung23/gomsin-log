@@ -472,11 +472,12 @@ present in `origin/master` or Production.
 - Remote CI: PASS at the exact HEAD, including the real-browser creator/partner matrix,
   typecheck/lint/Vitest/build, PostgreSQL security contracts, Deno, Android, iOS,
   Capacitor, audit, boundary, and secret scans.
-- Vercel: the PR preview deployment completed successfully. The production CLI had no
-  credentials and the browser redirected to login, so production promotion is
-  `BLOCKED`; no production deployment was applied by this agent.
-- Production URL: `https://gomsin-log.vercel.app/us` returned HTTP 200, but its cached
-  existing deployment is not evidence that `895b2ad` is live.
+- Vercel: the PR preview was promoted through the authenticated dashboard. Production
+  deployment `8RZXxyM31uykxXwMAxDKzZofVycz` is `Ready`, aliases
+  `gomsin-log.vercel.app`, and cites exact source commit `a33499e`.
+- Production URL: `https://gomsin-log.vercel.app/us?release=a33499e` returned HTTP 200
+  with a fresh cache miss. The authenticated production browser rendered `/us`,
+  `/search`, and `/settings?profile=edit`, including the new profile and service surfaces.
 - Supabase: the user reported SQL Editor completion. Targeted anonymous probes resolve
   `profiles.username`, `profiles.profile_caption`, `couple_highlights`, and
   `set_partner_username(text)` and return `401/42501`; the full migration ledger remains
@@ -484,7 +485,6 @@ present in `origin/master` or Production.
 - Local verification: `npm run verify`, `npm run test:phase0`, and `git diff --check`
   are PASS. Local `npm run test:e2e` is BLOCKED because Playwright Chromium is absent;
   the remote real-browser matrix is PASS.
-- Remaining release risks: production promotion, authenticated production route review,
-  two-account/two-device realtime parity, and cross-device avatar synchronization remain
-  unverified. The two stale untracked control-tower reports are preserved and are not part
-  of the PR.
+- Remaining release risks: PR merge, two-account/two-device realtime parity, and
+  cross-device avatar synchronization remain unverified. The two stale untracked
+  control-tower reports are preserved and are not part of the PR.

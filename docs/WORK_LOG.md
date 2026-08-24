@@ -121,7 +121,7 @@
 - Workstream: engineering — commit, PR, CI, deployment evidence, documentation
 - Step: exact HEAD release validation after the username touch-target correction
 - Previous Gate: PR #89 browser matrix failed only on `아이디 설정하기` measuring 95x22
-- This Gate: correction committed and pushed; all PR checks passed; production deployment path audited
+- This Gate: correction committed and pushed; all PR checks passed; exact code commit promoted to Production and live routes verified
 
 #### DIRECTION CHECK
 - Product source checked: `docs/PRODUCT_V3.md`, `docs/V4_AS_BUILT.md`
@@ -157,7 +157,7 @@
 - crypto semantics: none
 - DB/migration semantics: no migration file or remote SQL changed in this release correction
 - product semantics: none; this is a touch-target-only correction
-- Production: production deployment was not applied; PR was not merged
+- Production: promoted through Vercel from the verified preview; PR was not merged
 
 #### VERIFICATION
 - command: `npm run verify`
@@ -172,8 +172,10 @@
 - PASS / FAIL / UNVERIFIED: BLOCKED — local Playwright Chromium executable is not installed; the remote browser matrix is the executed browser evidence
 - command: targeted Supabase PostgREST probes
 - PASS / FAIL / UNVERIFIED: PASS for object resolution and anonymous denial; full migration ledger remains UNVERIFIED. The user applied SQL in Supabase; this agent performed no remote SQL mutation
-- command: Vercel production CLI/browser auth check and `curl -I https://gomsin-log.vercel.app/us`
-- PASS / FAIL / UNVERIFIED: BLOCKED for production deployment — CLI had no credentials and the browser redirected to Vercel login; production returned HTTP 200 for the existing deployment, not proof of this branch
+- command: Vercel promotion of deployment `GKTRtwFckFM3smgYcXLHug1umEHY` and `curl -I https://gomsin-log.vercel.app/us?release=a33499e`
+- PASS / FAIL / UNVERIFIED: PASS — Vercel created Production deployment `8RZXxyM31uykxXwMAxDKzZofVycz` from exact source `a33499e`; the custom domain returned HTTP 200 with a fresh cache miss
+- command: authenticated in-app browser on Production `/us`, `/search`, `/settings?profile=edit`
+- PASS / FAIL / UNVERIFIED: PASS — the shared profile, service-rank rail, partner username form, and profile edit dialog rendered on the live domain
 
 #### REVIEW IMPACT
 - NONE / DELTA / FULL: DELTA — one presentation touch-target class change; prior feature/privacy review remains semantically applicable, while CI was rerun on the new exact HEAD
@@ -181,20 +183,20 @@
 
 #### BLOCKERS
 - code: none for the committed PR scope
-- environment: Vercel production credentials/session are unavailable in this environment
+- environment: none for the Vercel promotion path; browser session was available
 - external/manual: PR #89 remains OPEN and unmerged; authenticated production browser and two-device sync remain unverified
 
 #### STOPPED AT
-- exact completed boundary: commit `895b2ad`, push, PR #89, all remote checks PASS, preview deployment PASS, production deployment not applied
+- exact completed boundary: commit `a33499e`, push, PR #89, all remote checks PASS, preview deployment PASS, Vercel Production promotion `8RZXxyM31…` PASS, live routes verified
 
 #### REMAINING
-- not completed: production promotion of PR #89 and authenticated production/two-device verification
+- not completed: PR #89 merge and authenticated two-account/two-device realtime verification
 
 #### NEXT ACTION
 - next owner: user / PR owner
 - tool/model: Vercel-authenticated release owner; merge only with explicit approval
-- 기준 SHA: `895b2ada43d8f2640912eed4058358b5a8758b32`
-- exact next task: authenticate Vercel or explicitly approve the repository's normal production promotion path, then verify `/us`, `/search`, and `/settings?profile=edit` on the resulting production deployment
+- 기준 SHA: `a33499e179a163f87d0efae94ca3262f445fc00b`
+- exact next task: if desired, merge PR #89 separately; otherwise run two-account/two-device realtime and avatar synchronization verification against the live deployment
 
 #### DO NOT ADVANCE UNTIL
 - the intended production promotion path and rollback target are confirmed
@@ -202,7 +204,7 @@
 - Supabase full migration ledger or authenticated actor evidence is separately captured if required
 
 #### PRODUCTION
-- NOT APPLIED — preview deployment completed; production CLI/browser deployment was blocked by missing Vercel authentication
+- APPLIED — Vercel Production deployment `8RZXxyM31uykxXwMAxDKzZofVycz` from `a33499e`; PR #89 remains open and unmerged
 
 ### 2026-08-24 · Codex · Gemini 3.7 Flash 독립 감사 반영 및 인스타그램형 프로필/복무 표면 최종 로컬 게이트
 

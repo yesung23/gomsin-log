@@ -16,9 +16,10 @@
 > production 완료 선언이 아니며, 상점·결제 범위는 여전히 별도 게이트다.
 
 > **2026-08-24 release-candidate note.** 구현은 PR #89의 exact HEAD
-> `895b2ad`에 커밋되었고 전체 원격 CI와 real-browser matrix가 PASS했다. PR은 아직
-> merge되지 않았으며 Vercel production promotion은 인증 부재로 `BLOCKED`다. 따라서
-> 이 문서의 구현 상태는 운영 반영 완료를 의미하지 않는다.
+> `a33499e`에 커밋되었고 전체 원격 CI와 real-browser matrix가 PASS했다. PR은 아직
+> merge되지 않았지만 Vercel Production 배포 `8RZXxyM31…`이 완료되어 운영 URL의
+> `/us`, `/search`, `/settings?profile=edit`를 확인했다. PR merge와 Supabase 전체
+> migration ledger 확인은 별도 상태다.
 
 ---
 

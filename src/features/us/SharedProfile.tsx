@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, SquarePen, X } from 'lucide-react';
+import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Plus, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
@@ -8,6 +8,7 @@ import { buildCoupleStats } from '@/lib/coupleStats';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { PostGrid } from '@/features/us/PostGrid';
 import { getPhotoAttachments } from '@/features/us/postTiles';
+import { PostComposerSheet } from '@/features/us/PostComposerSheet';
 import { ProfileIdentity } from '@/components/ProfileIdentity';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
@@ -26,7 +27,7 @@ type ProfileTab = 'grid' | 'photo' | 'trip';
 export function SharedProfile() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { state, saveCoupleHighlight, deleteCoupleHighlight } = useStore();
+  const { state, saveCoupleHighlight, deleteCoupleHighlight, addRecordWithMedia } = useStore();
   const { profile } = state;
   const todayStr = localToday();
   const [tab, setTab] = useState<ProfileTab>('grid');
@@ -36,8 +37,63 @@ export function SharedProfile() {
   const [highlightRecordIds, setHighlightRecordIds] = useState<string[]>([]);
   const [highlightCoverId, setHighlightCoverId] = useState<string | undefined>();
   const [isSavingHighlight, setIsSavingHighlight] = useState(false);
+  const [composingPost, setComposingPost] = useState(false);
+  const [isPublishingPost, setIsPublishingPost] = useState(false);
   const closeHighlightEditor = () => {
     if (!isSavingHighlight) setEditingHighlightId(undefined);
+  };
+
+  /**
+   * 게시물을 올린다. **새 테이블을 만들지 않는다.**
+   *
+   * 프로필 격자는 이미 사진이 붙은 기록으로 만들어지므로(`postTiles.ts`), 게시물은 사진이
+   * 붙은 기록 하나다. 그래서 기존 `addRecordWithMedia` 를 그대로 쓴다 -- 그 경로가 이미
+   * 커플 권한, 보호 게이트, 오프라인 큐, 파일별 실패를 다룬다. 게시물 전용 저장 경로를
+   * 새로 만들면 그 네 가지를 처음부터 다시 맞춰야 하고, 하나라도 빠지면 게시물만 권한
+   * 검사가 약한 문이 된다.
+   *
+   * 여행·스토리에서 고른 사진은 이미 서버에 있으므로 다시 올리지 않고 글로 잇는다. 사본을
+   * 만들면 원본을 지웠을 때 게시물의 사진이 어떻게 되는지 답할 수 없다.
+   */
+  const publishPost = async (input: {
+    caption: string;
+    isPrivate: boolean;
+    files: File[];
+    reusedRecordIds: string[];
+  }) => {
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setIsPublishingPost(true);
+    let result: Awaited<ReturnType<typeof addRecordWithMedia>>;
+    try {
+      result = await addRecordWithMedia({
+        date: todayStr,
+        time,
+        authorRole: profile.role,
+        log: input.caption,
+        isPrivate: input.isPrivate,
+        talkAbout: false,
+        emotionFlow: [],
+        emotionUpdatedAt: null,
+      }, input.files);
+    } finally {
+      setIsPublishingPost(false);
+    }
+
+    if (result.queued) {
+      setComposingPost(false);
+      toast.success('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 올라가요.');
+      return;
+    }
+    if (!result.ok) {
+      toast.error(result.error || '게시물을 올리지 못했어요.');
+      return;
+    }
+    if (result.failedFiles.length > 0) {
+      toast.error(`사진 ${result.failedFiles.length}장을 올리지 못했어요.`);
+    }
+    setComposingPost(false);
+    toast.success('게시물을 올렸어요.');
   };
 
   const sharedRecords = useMemo(
@@ -167,15 +223,26 @@ export function SharedProfile() {
   return (
     <div className="min-h-full pb-8">
       <header className="flex h-14 items-center gap-2 px-4" style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}>
-        {profile.username ? (
-          <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
-        ) : (
-          <button type="button" onClick={() => navigate('/settings?profile=edit')} className="inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
-            아이디 설정하기
-          </button>
-        )}
-        <Lock size={13} className="shrink-0" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
-        <span className="flex-1" />
+        {/*
+          왼쪽 끝이 게시물 만들기다.
+
+          인스타의 `＋` 는 탭바 가운데에 있지만 곰신로그의 탭바 가운데는 이미 기록이
+          차지하고 있다. 마이 화면에서 만드는 것은 **이 프로필의 게시물**이므로 이 화면의
+          헤더가 그 자리다. 아이디를 가운데로 옮겨 좌우 무게를 맞춘다.
+        */}
+        <button type="button" aria-label="게시물 만들기" data-testid="open-post-composer" onClick={() => setComposingPost(true)} className="flex h-11 w-11 shrink-0 items-center justify-center">
+          <Plus size={22} color="var(--ink)" aria-hidden="true" />
+        </button>
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
+          {profile.username ? (
+            <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
+          ) : (
+            <button type="button" onClick={() => navigate('/settings?profile=edit')} className="inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
+              아이디 설정하기
+            </button>
+          )}
+          <Lock size={13} className="shrink-0" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
+        </div>
         <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
           <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
         </button>
@@ -272,6 +339,18 @@ export function SharedProfile() {
 
       {selectedPost ? (
         <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
+      ) : null}
+
+      {composingPost ? (
+        <PostComposerSheet
+          records={sharedRecords}
+          trips={state.trips ?? []}
+          coupleId={profile.couple.coupleId}
+          connected={profile.couple.connected}
+          busy={isPublishingPost}
+          onClose={() => { if (!isPublishingPost) setComposingPost(false); }}
+          onSubmit={(input) => { void publishPost(input); }}
+        />
       ) : null}
     </div>
   );

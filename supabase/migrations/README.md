@@ -194,8 +194,8 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `057_profile_identity_and_caption.sql` | profiles에 nullable `username`·`profile_caption`·`profile_date_type`을 추가하고 username 형식, caption 길이, 날짜 타입 CHECK와 `lower(username)` 대소문자 무시 UNIQUE index를 추가한다. 기존 owner-only profiles RLS 정책과 shared projection/RPC는 변경하지 않는다 | **신규 / 운영 미적용 — fresh chain 001→057에 적용, `npm run test:phase0`에서 55 migrations·309 assertions 통과. 운영 Supabase는 변경하지 않음** |
 | `058_couple_highlights.sql` | 독립적인 couple highlight parent/item 모델, 활성 커플 shared-only RLS, SECURITY DEFINER 저장 RPC, private 전환·삭제 시 항목 pruning trigger, `highlights` invalidation slice | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
 | `059_partner_managed_username.sql` | 본인 username 직접 수정 차단, 활성 커플의 상대방 username만 갱신하는 SECURITY DEFINER RPC, username 형식·중복·삭제 상태·커플 row lock·`profile` invalidation 검증 | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
-| `060_partner_username_projection.sql` | 활성 커플의 상대방 username만 기존 파트너 프로필 projection에 추가로 반환한다. profiles 직접 SELECT/RLS는 넓히지 않고 authenticated 전용 SECURITY DEFINER RPC로 제한한다 | **신규 / 운영 미적용 — fresh chain 001→060에 포함, phase0 actor/RLS 계약 검증 완료** |
-| `061_reject_null_partner_profile_actor.sql` | PostgREST 호출 시 JWT subject가 없는 NULL actor(`auth.uid() IS NULL`)를 명시적으로 fail-closed(`42501`) 거부하도록 060 함수를 보강한다. 060 반환 형태와 활성 커플 프로젝션은 유지하되, 060 적용 후 순서대로 적용한다 | **신규 / 운영 미적용 — fresh chain 001→061에 포함, phase0 actor/RLS 계약 검증 완료** |
+| `060_partner_username_projection.sql` | 활성 커플의 상대방 username만 기존 파트너 프로필 projection에 추가로 반환한다. profiles 직접 SELECT/RLS는 넓히지 않고 authenticated 전용 SECURITY DEFINER RPC로 제한한다 | **운영 적용 (2026-08-25) — 사용자가 SQL Editor로 적용, anon probe로 함수 존재·스키마 캐시 반영·anon 거부 확인. fresh chain 001→060 및 phase0 계약 검증 완료** |
+| `061_reject_null_partner_profile_actor.sql` | PostgREST 호출 시 JWT subject가 없는 NULL actor(`auth.uid() IS NULL`)를 명시적으로 fail-closed(`42501`) 거부하도록 060 함수를 보강한다. 060 반환 형태와 활성 커플 프로젝션은 유지하되, 060 적용 후 순서대로 적용한다 | **운영 적용 보고됨 (2026-08-25) — 함수 존재는 확인. 다만 본문이 060판인지 061판인지는 anon 경로로 구분 불가하며 인증 actor matrix는 UNVERIFIED. fresh chain 001→061 및 phase0 계약 검증 완료** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
@@ -805,5 +805,25 @@ supabase functions deploy delete-account
   `couple_highlights`, `set_partner_username(text)`가 모두 해석되고 `401/42501`로
   익명 접근이 거부되어 057–059 대상 객체는 원격에 존재합니다. 그러나 `get_partner_profile_with_username`
   함수는 없으며, 060과 061은 원격에 **UNVERIFIED / NOT APPLIED by this agent**입니다.
+- **2026-08-25 갱신 — 060/061 원격 적용 확인 (APPLIED).** 사용자가 SQL Editor로 060 → 061을
+  적용했다고 보고했고, project `xzlorqsjajokrlkunxhr`(저장소 `.env`의 `VITE_SUPABASE_URL`과
+  동일)에 대해 anon PostgREST probe로 독립 확인했습니다. 판정 근거는 **없는 함수와 있는
+  함수의 응답이 다르다**는 점입니다.
+
+  | probe | 응답 | 의미 |
+  |---|---|---|
+  | `get_partner_profile_with_username` | `401 / 42501 permission denied for function` | 함수 존재 + 스키마 캐시 반영 + anon EXECUTE 없음 |
+  | `get_partner_profile` (legacy) | `401 / 42501` | 기존 함수 유지 |
+  | `set_partner_username` (`p_username`) | `401 / 42501` | 059 객체 유지 |
+  | `get_my_couple_state` | `401 / 42501` | 016 객체 유지 |
+  | `definitely_not_a_real_function_zz` (대조군) | `404 / PGRST202 not found in the schema cache` | 미존재 함수는 다른 코드로 응답 |
+  | `GET /rest/v1/profiles` | `401 / 42501 permission denied for table profiles` | 소유자 전용 SELECT 경계 유지 |
+
+  즉 `060`이 만든 함수가 원격에 존재하며 PostgREST 스키마 캐시가 reload된 상태입니다.
+  `anon`에는 EXECUTE가 없고 `profiles` 직접 읽기도 계속 차단됩니다.
+  **아직 확인되지 않은 것:** 이 함수의 본문이 060판인지 061판(NULL actor를 `42501`
+  예외로 명시 거부)인지는 anon 경로로 구분할 수 없습니다. 두 판 모두 anon에게는 동일한
+  `permission denied`를 반환하기 때문입니다. 또한 실제 인증된 A/B/전 파트너/비관련 사용자
+  actor matrix는 **UNVERIFIED**입니다. 이 두 항목은 인증 세션이 있는 검증에서 닫아야 합니다.
 - CLI `supabase_migrations.schema_migrations` 추적 테이블이 비어 있으므로 `supabase db push`
   등의 일괄 배포 명령을 사용하면 안 되며, 개별 SQL을 SQL Editor에서 순서대로 적용해야 합니다.

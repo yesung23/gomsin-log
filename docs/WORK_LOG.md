@@ -114,6 +114,122 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-25 · 하루 요약 5개 초과 progressive disclosure와 상대 신원 권위 결속
+
+#### PLAN POSITION
+- Phase: App Store release candidate preparation / M6 최소 실증
+- Workstream: iOS on-device AI UX, privacy boundary, release reliability
+- Step: 온디바이스 요약 P2 폐쇄 + 5개 초과 UX progressive disclosure + 로컬 출시 게이트 재검증
+- Previous Gate: default-off Foundation Models adapter 구현과 simulator 검증
+- This Gate: 로컬 구현·브라우저 실렌더·독립 검토 완료; 원격/실기기 게이트는 여전히 닫힘
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, 사용자 승인 iPhone-first 지시
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — AI가 중요 기억을 고르지 않는 경계 확인
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/skills/` feature-build/security-review/release-validation
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-25 iPhone 온디바이스 요약과 App Store 출시 준비 항목
+- MASTER PLAN version / 기준일: V4 + Business Memory Roadmap V1 / 2026-08-25
+- Does this task conflict with canonical direction? NO — AI는 문장만 다듬고 항목 선택은 시간순 규칙이 소유한다. 관계/감정 점수, 서버 AI, 새 DB 모델을 만들지 않았다.
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + multi-agent 독립 검토
+- Model: Codex(주), `kiro/gpt-5.6-sol` high(개인정보·보안), `kiro/claude-opus-5` high(제품·네이티브), `google-antigravity/gemini-3.7-flash` high(테스트 커버리지)
+- Role: 구현·통합·최종 diff 확인은 주 에이전트, 보안 승인은 독립 검토자
+- PR: none (local branch delta)
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `f7e8fbf5ebc4adcc575bb91edee147c5477fe1f0`
+- Old HEAD: `f7e8fbf5ebc4adcc575bb91edee147c5477fe1f0`
+- New HEAD / Reviewed HEAD: uncommitted working tree on `f7e8fbf`
+
+#### CHANGED / REVIEWED
+- file: `src/features/story/storyProjection.ts`, `StoryRoute.tsx`, `StoryViewer.tsx`
+- function/component/migration: `projectStory`, `CoverCard`
+- what changed/reviewed: 상대의 오늘 표지가 적격 기록 전부를 담고, 화면은 5줄 + `N개 더 보기`로 펼친다. 다일 판정을 입력 `records` 전체 기준으로 교정.
+- why: 8개 중 뒤 3개가 표지에서 사라지던 불완전한 "하루 전체 요약"을 AI 선택 없이 해결하기 위해
+- file: `src/lib/dailySummary/contract.ts`, `corpus.ts`, `rules.ts`, `useOnDeviceDailySummary.ts`
+- function/component/migration: `ON_DEVICE_SUMMARY_BATCH_SIZE`, `buildAllOnDeviceBatches`, `selectDailySummaryCorpus`, `useOnDeviceDailySummary`
+- what changed/reviewed: 임의 상한 제거 후 5개 고정 순차 배치, 훅 전체 단일 4초 예산, 배치 실패 시 전체 결정론 fallback, `payloadKey` 태깅으로 stale refinement 동기 차단, corpus가 정확한 `partnerUserId` 일치 요구
+- why: 부분 적용·stale 혼합·배치별 timeout 누적·"내가 아님"만으로 상대를 추정하는 것을 막기 위해
+- file: `src/lib/coupleTimeline.ts`, `coupleLifecycle.ts`, `store.tsx`, `src/types/index.ts`
+- function/component/migration: `fetchPartnerMembership`, `bindPartnerMembership`, `mergeCoupleState`, `CoupleInfo.partnerUserId`
+- what changed/reviewed: active `couple_members`에서 상대 `user_id`를 읽고, 요청 커플 ID·active 상태를 재검증한 뒤에만 결속. 커플 변경/pending/disconnect에서 신원 삭제. effect를 coupleId로 키잉하고 취소 가능하게.
+- why: 커플 A→B 전환 중 A의 늦은 응답이나 캐시가 B의 AI 입력 권위로 쓰이는 것을 막기 위해
+- file: `src/lib/partnerDay.ts`
+- function/component/migration: `byTime`
+- what changed/reviewed: 동일 시각을 record ID로 안정 정렬. tie-break를 `localeCompare`에서 사전식 비교로 변경.
+- why: 정렬 안정성을 유지하면서 수천 건 정렬 비용을 회복하기 위해 (단독 시뮬레이션 84s FAIL → 35.8s PASS)
+- file: `e2e/dailySummaryOverflow.spec.ts`(신규), `e2e/fixtures/mockBackend.ts`, `e2e/scenarios.ts`
+- function/component/migration: 브라우저 회귀와 membership fixture
+- what changed/reviewed: 390×840에서 8개 → 5 + 3개 더 보기, 펼치기/접기, `?at=` 정확 이동, 44px 검증. fixture가 `neq.user_id` 질의에 실제 파트너 행 응답.
+- why: fixture가 새 identity 경로를 건너뛰면 브라우저 증거가 의미를 잃기 때문
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: 새 migration 없음. migration 001의 기존 `couple_members` SELECT 정책만 사용.
+- product semantics: AI 중요 기억 선정 없음, 관계/애정 점수 없음, 서버 AI 없음, Android 웹/PWA 유지, Google Play 범위 밖
+- Production: Supabase SQL/Auth, Vercel, App Store Connect, TestFlight, provider console 전부 미변경
+
+#### VERIFICATION
+- command: focused Vitest 12 files
+- PASS / FAIL / UNVERIFIED: PASS — 280 tests
+- what it actually proves: 0/1/5/6/8 경계, 5+N 펼치기/접기, 정확 원본 이동, private/own/unrelated/former/draft/multi-day 제외, 실패·timeout·취소·검증실패·Segmenter 부재 전체 fallback, flag 기본 OFF, Android no-model (mocked native)
+- command: `npm run typecheck`, 대상 `npx eslint` 23 files, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 타입·lint·공백
+- command: `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,161 modules
+- what it actually proves: production 번들
+- command: `npx cap sync ios` + unsigned `xcodebuild`
+- PASS / FAIL / UNVERIFIED: PASS — 추적 iOS diff 없음, `BUILD SUCCEEDED`
+- what it actually proves: Swift 플러그인 컴파일·링크. 서명·실기기 모델 런타임 증거는 아님
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — 59 migrations / 344 assertions
+- what it actually proves: 로컬 PostgreSQL 17 actor/RLS/function 계약. 원격 Supabase 증거는 아님
+- command: Playwright `e2e/dailySummaryOverflow.spec.ts` (390×844, system Chrome, mock Supabase)
+- PASS / FAIL / UNVERIFIED: PASS — 1 test, 스크린샷 `ui-audit-results/after/daily-summary-8-expanded-390.png`
+- what it actually proves: 실제 레이아웃·hit-testing·라우팅. 실기기 증거는 아님
+- command: `src/lib/partnerDaySimulation.test.ts` 단독
+- PASS / FAIL / UNVERIFIED: PASS — 12/12, 35.8s
+- what it actually proves: 정렬 최적화 후 1000일 시뮬레이션 stranded=0
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: FAIL — typecheck·전체 lint PASS 후 전체 Vitest에서 timeout 집계
+- what it actually proves: 전체 병렬 부하에서 장기 시뮬레이션과 무관 파일(composerEmotionPrivacy 2건, cycleV3DataPath 3건, deviceKeyPort 1건)이 5초 제한을 넘긴다. assertion 실패는 없었고, 시뮬레이션 파일은 단독 12/12 PASS. timeout 값이나 무관 테스트를 수정하지 않았다.
+- command: 실물 iPhone Foundation Models
+- PASS / FAIL / UNVERIFIED: BLOCKED — 실기기 미연결
+- what it actually proves: nothing about actual model quality or on-device runtime
+
+#### REVIEW IMPACT
+- FULL — 개인정보 경계와 상대 신원 권위가 바뀌었다. `kiro/gpt-5.6-sol` high가 P1 2건(현재 파트너 증명, stale 혼합), 추가로 lifecycle race를 HOLD로 잡았고 전부 수정 후 재검토를 실행했다. 이전 review는 stale.
+
+#### BLOCKERS
+- code: 없음 (검토가 제기한 P1 전부 수정, focused 재검증 PASS)
+- environment: 실기기 오프라인; 전체 verify가 병렬 부하에서 timeout
+- external/manual: Apple provider 비활성, native redirect allowlist 미확인, 원격 060/061 미적용, Vercel 인증 미확인
+
+#### STOPPED AT
+- exact completed boundary: 로컬 구현·focused 테스트·브라우저 실렌더·build·cap sync·simulator build·phase0·문서 기록 완료. 커밋 전이고 push/deploy/원격 변경 없음.
+
+#### REMAINING
+- 이번 변경만 담은 분리 커밋
+- 실물 iPhone Foundation Models 한국어/오프라인/성능/44px 실측
+- 원격 backup·catalog 확인 후 exact 060 → exact 061 → PostgREST reload → actor matrix
+- Apple provider 활성화와 query-aware `sb_flow_id` redirect allowlist
+- 서명 Archive → TestFlight → 심사 메타데이터
+
+#### NEXT ACTION
+- next owner: 사용자 승인 후 Codex(커밋), 이후 승인된 Supabase 운영자
+- tool/model: Codex 커밋 → migration gate → 실기기 검증자
+- 기준 SHA: `f7e8fbf5ebc4adcc575bb91edee147c5477fe1f0`
+- exact next task: 이번 diff를 분리 커밋한 뒤, 원격 상태를 live 재조회하고 backup 확인 후 060→061 순차 적용을 사용자 확인과 함께 진행. `supabase db push` 금지(ledger 비어 있음). 다음 migration 번호는 062.
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 원격 변경 직전 현재 상태·blast radius·rollback을 제시하고 사용자 action-time 확인을 받는다. 실기기 증거 없이 실기기 동작을 PASS로 적지 않는다.
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED — 원격 Supabase·OAuth provider·Vercel·Apple 설정 미조회·미변경
+
 ### 2026-08-25 · OAuth callback canonical 구현·검증과 Sol Max HOLD
 
 #### PLAN POSITION

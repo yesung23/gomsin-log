@@ -117,6 +117,7 @@ const ORDER = [
   '058_couple_highlights.sql',
   '059_partner_managed_username.sql',
   '060_partner_username_projection.sql',
+  '061_reject_null_partner_profile_actor.sql',
 ];
 
 /**
@@ -268,6 +269,11 @@ function asUser(userId, text) {
     '-c', `DO $harness$ BEGIN PERFORM set_config('request.jwt.claim.sub', '${userId}', false); END $harness$`,
     '-c', text,
   ]);
+}
+
+/** Run as authenticated with no JWT subject, the malformed-session boundary. */
+function asAuthenticatedWithoutSubject(text) {
+  return psql(['-At', '-c', 'SET ROLE authenticated', '-c', text]);
 }
 
 /** Run SQL as the anon role, with no JWT subject at all. */
@@ -3249,6 +3255,22 @@ check(
   projectionAsB.ok && projectionAsB.stdout.trim() === 'A|gomsin|alpha_partner',
   '060 the projection is reciprocal for the active partner and returns the username',
 );
+const projectionAsNullActor = asAuthenticatedWithoutSubject(`
+  DO $harness$
+  BEGIN
+    BEGIN
+      PERFORM 1 FROM public.get_partner_profile_with_username();
+      RAISE EXCEPTION 'expected_42501';
+    EXCEPTION
+      WHEN SQLSTATE '42501' THEN NULL;
+    END;
+  END
+  $harness$;
+`);
+check(
+  projectionAsNullActor.ok,
+  '061 authenticated without a JWT subject is rejected with exact SQLSTATE 42501',
+);
 const projectionAsC = asUser(C, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
 const projectionAsAnon = asAnon(`SELECT * FROM public.get_partner_profile_with_username()`);
 check(
@@ -3259,12 +3281,103 @@ mustSql(`UPDATE public.couple_members SET status = 'disconnected'
          WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '059 former partner');
 check(!asUser(B, `SELECT public.set_partner_username('former_try')`).ok, '059 former partner cannot rename the old partner');
 const projectionAfterDisconnect = asUser(A, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
+const projectionForFormerPartner = asUser(B, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
 check(
   projectionAfterDisconnect.ok && projectionAfterDisconnect.stdout.trim() === '0',
-  '060 a disconnected partner is not returned by the username projection',
+  '061 a disconnected target is not returned by the username projection',
+);
+check(
+  projectionForFormerPartner.ok && projectionForFormerPartner.stdout.trim() === '0',
+  '061 a former partner cannot call through a stale membership to read the old partner',
 );
 mustSql(`UPDATE public.couple_members SET status = 'active'
          WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '059 restore partner');
+
+/*
+ * Mutation proof for the 061 controls.
+ *
+ * Each mutation replaces exactly one predicate in the real migration, applies
+ * that altered function to this throwaway database, and proves the matching
+ * attack becomes observable. If another layer still refused the probe, the
+ * natural assertion above would be vacuous. The pristine 061 definition is
+ * reapplied after every mutation.
+ */
+const projectionMigration = readFileSync(
+  join(MIGRATIONS, '061_reject_null_partner_profile_actor.sql'),
+  'utf8',
+);
+
+function proveProjectionMutation({ label, find, replace, probe }) {
+  const occurrences = projectionMigration.split(find).length - 1;
+  if (!check(occurrences === 1, `061 mutation "${label}" matches exactly one predicate`)) return;
+
+  const applied = psqlScript(projectionMigration.replace(find, replace));
+  if (!applied.ok) {
+    failures.push(`061 mutation "${label}" failed to apply:\n    ${applied.stderr.trim()}`);
+    return;
+  }
+
+  check(probe(), `061 mutation "${label}" lets the forbidden projection through`);
+
+  const restored = psqlScript(projectionMigration);
+  if (!restored.ok) {
+    throw new Error(`061 restore after mutation "${label}" failed:\n${restored.stderr.trim()}`);
+  }
+}
+
+proveProjectionMutation({
+  label: 'NULL actor guard',
+  find: '  IF v_uid IS NULL THEN',
+  replace: '  IF false THEN',
+  probe: () => {
+    const result = asAuthenticatedWithoutSubject(
+      `SELECT count(*) FROM public.get_partner_profile_with_username()`,
+    );
+    return result.ok && result.stdout.trim() === '0';
+  },
+});
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '061 mutation former partner');
+proveProjectionMutation({
+  label: 'active target membership',
+  find: "  WHERE partner_cm.status = 'active'",
+  replace: '  WHERE true',
+  probe: () => {
+    const result = asUser(A, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
+    return result.ok && result.stdout.trim() === '1';
+  },
+});
+proveProjectionMutation({
+  label: 'active caller membership',
+  find: "        AND caller_cm.status = 'active'",
+  replace: '        AND true',
+  probe: () => {
+    const result = asUser(B, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
+    return result.ok && result.stdout.trim() === '1';
+  },
+});
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '061 mutation restore partner');
+
+proveProjectionMutation({
+  label: 'other-member exclusion',
+  find: '    AND p.id <> v_uid;',
+  replace: '    AND true;',
+  probe: () => {
+    const result = asUser(A, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
+    return result.ok && result.stdout.trim() === '2';
+  },
+});
+
+const projectionAfterMutationRestore = asUser(
+  A,
+  `SELECT count(*) FROM public.get_partner_profile_with_username()`,
+);
+check(
+  projectionAfterMutationRestore.ok && projectionAfterMutationRestore.stdout.trim() === '1',
+  '061 mutation tests restore the exact one-partner projection',
+);
 
 // ---------------------------------------------------------------------------
 // Report

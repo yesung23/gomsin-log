@@ -4,7 +4,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, MilitaryInfo, CoupleEvent } from '@/types';
 import { computeServiceProgress } from '@/lib/milestones';
-import { computeServiceExp, serviceDateAtMs } from '@/lib/serviceLevel';
+import { computeServiceExp, formatExpNumber, serviceDateAtMs } from '@/lib/serviceLevel';
 import { localToday } from '@/lib/cycle';
 
 let currentState: AppState;
@@ -132,6 +132,15 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
       exp!.isPreEnlistment ? '입대 대기' : `LV ${exp!.tier.level} ${exp!.tier.label}`,
     );
     expect(screen.getByTestId('service-level-guide')).toHaveTextContent(`LV ${exp!.nextTier!.level} ${exp!.nextTier!.label}`);
+    const tierToggle = screen.getByRole('button', { name: '전체 단계' });
+    expect(tierToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(tierToggle).toHaveAttribute('aria-controls', 'service-tier-rail');
+    expect(tierToggle).toHaveClass('min-h-11');
+    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
+    expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
+    fireEvent.click(tierToggle);
+    expect(tierToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
     expect(screen.getByTestId('service-tier-rail')).toBeInTheDocument();
     expect(screen.getByTestId('service-tier-step-1')).toHaveTextContent('신병');
     expect(screen.getByTestId('service-tier-step-2')).toHaveTextContent('일초');
@@ -140,6 +149,9 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(screen.getByTestId('service-tier-step-5')).toHaveTextContent('상초');
     expect(screen.getByTestId('service-tier-step-6')).toHaveTextContent('상꺾');
     expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
+    fireEvent.click(screen.getByRole('button', { name: '단계 접기' }));
+    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
+    expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
     expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
     expect(screen.getByTestId('service-today-exp')).toBeInTheDocument();
     expect(screen.getByText(/평일 18:00–21:00/)).toBeInTheDocument();
@@ -250,6 +262,10 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
 
     const exp = computeServiceExp(currentState.profile.military);
     expect(screen.getByTestId('service-level')).toHaveTextContent(`LV ${exp!.tier.level} ${exp!.tier.label}`);
+    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
+    expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '전체 단계' }));
+    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
     expect(screen.getByTestId('service-tier-rail')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '현재 복무 레벨 경험치 진행률' })).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' })).toHaveAttribute('aria-valuenow');
@@ -432,6 +448,24 @@ describe('개인정보 보호 필터', () => {
 });
 
 describe('복무 EXP 실시간 및 다군 지원', () => {
+  it('화면을 보고 있는 동안 실제 시간 1초마다 EXP가 1씩 오른다', () => {
+    vi.useFakeTimers();
+    try {
+      const startMs = serviceDateAtMs(SERVING_MILITARY.enlistmentDate!)!;
+      vi.setSystemTime(startMs + 12_345_000);
+      currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
+      renderSearch();
+
+      const readout = screen.getByTestId('service-exp-readout');
+      expect(readout).toHaveTextContent(formatExpNumber(12_345));
+
+      act(() => vi.advanceTimersByTime(1000));
+      expect(readout).toHaveTextContent(formatExpNumber(12_346));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('해군·공군·해병대 등 다군 branch에 대해 각 군 명칭과 레벨/경험치를 정상 렌더링한다', () => {
     const navyMilitary: MilitaryInfo = {
       branch: 'navy',
@@ -445,6 +479,7 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
 
     expect(screen.getByText(/해군/)).toBeInTheDocument();
     expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '전체 단계' }));
     expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
   });
 

@@ -197,6 +197,28 @@ describe('timeout', () => {
     expect(plugin.cancel).toHaveBeenCalledTimes(1);
     expect(plugin.refineLines).not.toHaveBeenCalled();
   });
+
+  it('지원 확인과 생성이 하나의 시간 예산을 나눠 쓴다', async () => {
+    vi.useFakeTimers();
+    let releaseAvailability: (() => void) | undefined;
+    const plugin = stubPlugin({
+      availability: vi.fn(() => new Promise((resolve) => {
+        releaseAvailability = () => resolve({ available: true, reason: 'ready' });
+      })),
+      refineLines: vi.fn(() => new Promise(() => undefined)),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+
+    const pending = refineOnDeviceSummary(ITEMS, { timeoutMs: 100 });
+    await vi.advanceTimersByTimeAsync(80);
+    releaseAvailability?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plugin.refineLines).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await pending).toEqual({ ok: false, reason: 'timeout' });
+    expect(plugin.cancel).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('취소와 single-flight', () => {

@@ -139,7 +139,17 @@ export function collapseSummaryText(raw: string): string {
 export function normalizeSummaryLineText(raw: string): string {
   const collapsed = collapseSummaryText(raw);
   if (collapsed.length <= MAX_DAILY_SUMMARY_LINE_CHARS) return collapsed;
-  return `${collapsed.slice(0, MAX_DAILY_SUMMARY_LINE_CHARS - 1).trimEnd()}…`;
+  const budget = MAX_DAILY_SUMMARY_LINE_CHARS - 1;
+  const segments = typeof Intl.Segmenter === 'function'
+    ? [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(collapsed)]
+      .map(({ segment }) => segment)
+    : Array.from(collapsed);
+  let prefix = '';
+  for (const segment of segments) {
+    if (prefix.length + segment.length > budget) break;
+    prefix += segment;
+  }
+  return `${prefix.trimEnd()}…`;
 }
 
 /**

@@ -101,6 +101,20 @@ describe('40자 상한', () => {
     expect(once).toBe('오늘 시험 끝났어');
     expect(normalizeSummaryLineText(once)).toBe(once);
   });
+
+  it('상한에서 emoji·결합 문자·ZWJ grapheme을 중간 절단하지 않는다', () => {
+    const emoji = normalizeSummaryLineText(`${'a'.repeat(38)}😀b`);
+    const nfd = normalizeSummaryLineText(`${'a'.repeat(38)}e\u0301b`);
+    const family = normalizeSummaryLineText(`${'a'.repeat(30)}👨‍👩‍👧‍👦b`);
+
+    expect(emoji).toBe(`${'a'.repeat(38)}…`);
+    expect(nfd).toBe(`${'a'.repeat(38)}…`);
+    expect(family).toBe(`${'a'.repeat(30)}…`);
+    for (const text of [emoji, nfd, family]) {
+      expect(text.length).toBeLessThanOrEqual(MAX_DAILY_SUMMARY_LINE_CHARS);
+      expect(text).not.toContain('\uFFFD');
+    }
+  });
 });
 
 describe('collapseSummaryText는 접기만 하고 자르지 않는다', () => {

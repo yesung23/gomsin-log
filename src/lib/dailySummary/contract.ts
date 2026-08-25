@@ -134,16 +134,17 @@ export function collapseSummaryText(raw: string): string {
  *
  * `momentSummaryText`와 같은 방식으로 자른다(39자 + `…`). 규칙 결과는 이미 40자 이하이므로
  * 실제로는 멱등이고, 이 함수는 그 불변식이 깨지더라도 40자를 넘는 문장이 경계를 넘지 않게
- * 하는 마지막 관문이다.
+ * 하는 마지막 관문이다. `Intl.Segmenter`가 없는 환경에서는 grapheme 경계를 안전하게
+ * 계산할 수 없으므로 `null`을 반환한다. 호출부는 그 배치의 온디바이스 refinement를 포기하고
+ * 이미 화면에 있는 결정론적 요약을 유지해야 한다.
  */
-export function normalizeSummaryLineText(raw: string): string {
+export function normalizeSummaryLineText(raw: string): string | null {
   const collapsed = collapseSummaryText(raw);
   if (collapsed.length <= MAX_DAILY_SUMMARY_LINE_CHARS) return collapsed;
+  if (typeof Intl.Segmenter !== 'function') return null;
   const budget = MAX_DAILY_SUMMARY_LINE_CHARS - 1;
-  const segments = typeof Intl.Segmenter === 'function'
-    ? [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(collapsed)]
-      .map(({ segment }) => segment)
-    : Array.from(collapsed);
+  const segments = [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(collapsed)]
+    .map(({ segment }) => segment);
   let prefix = '';
   for (const segment of segments) {
     if (prefix.length + segment.length > budget) break;
@@ -161,7 +162,11 @@ export function normalizeSummaryLineText(raw: string): string {
 export function buildOnDeviceItems(
   lines: readonly DailySummaryLine[],
 ): OnDeviceSummaryItem[] {
-  return lines
-    .slice(0, MAX_DAILY_SUMMARY_LINES)
-    .map((line, index) => ({ index, text: normalizeSummaryLineText(line.text) }));
+  const items: OnDeviceSummaryItem[] = [];
+  for (const [index, line] of lines.slice(0, MAX_DAILY_SUMMARY_LINES).entries()) {
+    const text = normalizeSummaryLineText(line.text);
+    if (text === null) return [];
+    items.push({ index, text });
+  }
+  return items;
 }

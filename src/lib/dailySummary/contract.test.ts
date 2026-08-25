@@ -84,8 +84,9 @@ describe('모델 payload에는 index와 text만 들어간다', () => {
 describe('40자 상한', () => {
   it('넘치면 자르고 말줄임표를 붙인다', () => {
     const text = normalizeSummaryLineText('가'.repeat(120));
-    expect(text.length).toBeLessThanOrEqual(MAX_DAILY_SUMMARY_LINE_CHARS);
-    expect(text.endsWith('…')).toBe(true);
+    expect(text).not.toBeNull();
+    expect(text!.length).toBeLessThanOrEqual(MAX_DAILY_SUMMARY_LINE_CHARS);
+    expect(text!.endsWith('…')).toBe(true);
   });
 
   it('payload의 모든 텍스트가 상한 안에 있다', () => {
@@ -111,8 +112,21 @@ describe('40자 상한', () => {
     expect(nfd).toBe(`${'a'.repeat(38)}…`);
     expect(family).toBe(`${'a'.repeat(30)}…`);
     for (const text of [emoji, nfd, family]) {
-      expect(text.length).toBeLessThanOrEqual(MAX_DAILY_SUMMARY_LINE_CHARS);
-      expect(text).not.toContain('\uFFFD');
+      expect(text).not.toBeNull();
+      expect(text!.length).toBeLessThanOrEqual(MAX_DAILY_SUMMARY_LINE_CHARS);
+      expect(text!).not.toContain('\uFFFD');
+    }
+  });
+
+  it('Segmenter가 없으면 결합 문자를 자르지 않고 배치 refinement를 포기한다', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+    try {
+      const text = `${'a'.repeat(38)}e\u0301b`;
+      expect(normalizeSummaryLineText(text)).toBeNull();
+      expect(buildOnDeviceItems([line({ text }), line({ text: '짧다' })])).toEqual([]);
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
     }
   });
 });

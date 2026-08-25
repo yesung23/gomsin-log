@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { projectStory, storyRangeLabel, momentSummaryText } from '@/features/story/storyProjection';
+import { buildOnDeviceItems } from '@/lib/dailySummary/contract';
+import { deterministicSummaryLines } from '@/lib/dailySummary/rules';
 import type { DailyRecord } from '@/types';
 
 const TODAY = '2026-08-22';
@@ -134,5 +136,64 @@ describe('본문이 없는 순간', () => {
     const text = momentSummaryText(record({ log: '가'.repeat(80) }));
     expect(text.length).toBeLessThanOrEqual(40);
     expect(text.endsWith('…')).toBe(true);
+  });
+});
+
+describe('Unicode 및 온디바이스 연계 회귀 방지', () => {
+  const LONE_SURROGATE_REGEX = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+  it('Intl.Segmenter가 있을 때 emoji·NFD·ZWJ 절단 시 서로게이트를 쪼개지 않는다', () => {
+    const emojiRecord = record({ log: `${'a'.repeat(38)}😀b` });
+    const nfdRecord = record({ log: `${'a'.repeat(38)}e\u0301b` });
+    const zwjRecord = record({ log: `${'a'.repeat(30)}👨‍👩‍👧‍👦b` });
+
+    for (const rec of [emojiRecord, nfdRecord, zwjRecord]) {
+      const summary = momentSummaryText(rec);
+      expect(summary.length).toBeLessThanOrEqual(40);
+      expect(summary.endsWith('…')).toBe(true);
+      expect(LONE_SURROGATE_REGEX.test(summary)).toBe(false);
+    }
+  });
+
+  it('Intl.Segmenter 부재 시 momentSummaryText -> deterministicSummaryLines -> buildOnDeviceItems 경로에서 서로게이트가 payload에 가지 않고 배치가 비워지며 결정론적 텍스트는 온전히 유지된다', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+
+    try {
+      const emojiLog = `${'a'.repeat(38)}😀b`;
+      const nfdLog = `${'a'.repeat(38)}e\u0301b`;
+      const zwjLog = `${'a'.repeat(30)}👨‍👩‍👧‍👦b`;
+
+      const records = [
+        record({ id: 'r-emoji', log: emojiLog }),
+        record({ id: 'r-nfd', log: nfdLog }),
+        record({ id: 'r-zwj', log: zwjLog }),
+      ];
+
+      // 1. momentSummaryText는 Segmenter 부재 시 자르지 않고 원문(접힌 본문)을 그대로 보존
+      expect(momentSummaryText(records[0])).toBe(emojiLog);
+      expect(momentSummaryText(records[1])).toBe(nfdLog);
+      expect(momentSummaryText(records[2])).toBe(zwjLog);
+
+      // 2. deterministicSummaryLines 결과도 원문 텍스트가 유지되며 lone surrogate가 없음
+      const lines = deterministicSummaryLines(records);
+      expect(lines).toHaveLength(3);
+      expect(lines[0].text).toBe(emojiLog);
+      expect(lines[1].text).toBe(nfdLog);
+      expect(lines[2].text).toBe(zwjLog);
+      for (const line of lines) {
+        expect(LONE_SURROGATE_REGEX.test(line.text)).toBe(false);
+      }
+
+      // 3. buildOnDeviceItems 호출 시 40자 초과 + Segmenter 부재로 인해 배치가 비워짐 (refinement 포기)
+      const payloadItems = buildOnDeviceItems(lines);
+      expect(payloadItems).toEqual([]);
+
+      // 4. payload wire format에 lone surrogate가 절대 도달하지 않음
+      const wire = JSON.stringify(payloadItems);
+      expect(LONE_SURROGATE_REGEX.test(wire)).toBe(false);
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+    }
   });
 });

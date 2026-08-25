@@ -1,4 +1,5 @@
 import type { DailyRecord } from '@/types';
+import { collapseSummaryText, normalizeSummaryLineText } from '@/lib/dailySummary/contract';
 import { isRecordContentAvailable } from '@/lib/recordAvailability';
 
 /**
@@ -72,8 +73,8 @@ export function storyRangeLabel(records: DailyRecord[], todayStr: string): strin
  * 첨부 종류를 사실대로 말한다. 앱이 이야기를 지어내지 않는다(PRODUCT_V3 §6.2).
  */
 export function momentSummaryText(record: DailyRecord): string {
-  const body = (record.log ?? '').replace(/\s+/g, ' ').trim();
-  if (body) return body.length <= 40 ? body : `${body.slice(0, 39).trimEnd()}…`;
+  const body = collapseSummaryText(record.log ?? '');
+  if (body) return normalizeSummaryLineText(body) ?? body;
   const kinds = new Set((record.attachments ?? []).map((attachment) => attachment.type));
   if (kinds.has('photo')) return '사진을 남겼어요';
   if (kinds.has('voice')) return '목소리를 남겼어요';

@@ -61,15 +61,80 @@ describe('속표지', () => {
     expect(archive.cards.some((c) => c.kind === 'cover')).toBe(false);
   });
 
-  it('다섯 줄을 넘지 않고, 줄마다 원본 id를 갖는다', () => {
+  it('상대 오늘 단일 날짜 스토리는 모든 적격 줄을 유지하고, 다일 구간은 최대 5줄을 유지한다', () => {
+    const records = Array.from({ length: 8 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00` }));
+    const { cards } = projectStory({
+      records,
+      todayStr: TODAY,
+      withCover: true,
+      showAllTodayCoverLines: true,
+    });
+    const cover = cards[0];
+    expect(cover.kind).toBe('cover');
+    if (cover.kind !== 'cover') return;
+    // 오늘 단일 날짜: 8개 줄 모두 유지
+    expect(cover.lines).toHaveLength(8);
+    for (const line of cover.lines) expect(line.recordId).toBeTruthy();
+
+    // 다일(놓친 하루) 구간: 최대 5줄 유지
+    const multiDayRecords = [
+      record({ id: 'r-past', date: '2026-08-20', time: '08:00' }),
+      ...Array.from({ length: 7 }, (_, i) => record({ id: `r-today-${i}`, time: `0${i}:00` })),
+    ];
+    const multiDay = projectStory({
+      records: multiDayRecords,
+      todayStr: TODAY,
+      withCover: true,
+      showAllTodayCoverLines: true,
+    });
+    const multiCover = multiDay.cards[0];
+    expect(multiCover.kind).toBe('cover');
+    if (multiCover.kind === 'cover') {
+      expect(multiCover.lines).toHaveLength(5);
+    }
+  });
+
+  it('명시적으로 켜지 않은 다른 표지는 기존 최대 5줄을 유지한다', () => {
     const records = Array.from({ length: 8 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00` }));
     const { cards } = projectStory({ records, todayStr: TODAY, withCover: true });
     const cover = cards[0];
     expect(cover.kind).toBe('cover');
+    if (cover.kind === 'cover') expect(cover.lines).toHaveLength(5);
+  });
+
+  it('과거 기록을 열 수 없어도 다일 구간으로 유지하고 최대 5줄만 표시한다', () => {
+    const records = [
+      record({
+        id: 'past-unreadable',
+        date: '2026-08-20',
+        contentUnavailable: 'key_unavailable',
+      } as Partial<DailyRecord>),
+      ...Array.from({ length: 6 }, (_, i) => record({ id: `today-${i}`, time: `0${i}:00` })),
+    ];
+    const { cards } = projectStory({
+      records,
+      todayStr: TODAY,
+      withCover: true,
+      showAllTodayCoverLines: true,
+    });
+    const cover = cards[0];
+    expect(cover.kind).toBe('cover');
     if (cover.kind !== 'cover') return;
+    expect(cover.rangeLabel).toBe('8/20 – 8/22');
     expect(cover.lines).toHaveLength(5);
-    // 줄이 원본으로 가려면 id가 있어야 한다. 인덱스로는 갈 수 없다.
-    for (const line of cover.lines) expect(line.recordId).toBeTruthy();
+  });
+
+  it('원본 스토리 순간(moment) 카드들은 모두 시간순으로 유지된다', () => {
+    const records = Array.from({ length: 8 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00` }));
+    const { cards } = projectStory({
+      records,
+      todayStr: TODAY,
+      withCover: true,
+      showAllTodayCoverLines: true,
+    });
+    const moments = cards.filter((c): c is Extract<typeof c, { kind: 'moment' }> => c.kind === 'moment');
+    expect(moments).toHaveLength(8);
+    expect(moments.map((m) => m.record.id)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
   });
 });
 

@@ -59,7 +59,7 @@ import {
 import { revokeOwnPushTokens, clearOwnUnseen } from '@/lib/pushTokens';
 import { setUpPushNotifications } from '@/lib/pushNotifications';
 import { recordProductEvent } from '@/lib/productEvents';
-import { fetchPartnerJoinedAt } from '@/lib/coupleTimeline';
+import { bindPartnerMembership, fetchPartnerMembership } from '@/lib/coupleTimeline';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import {
   applyDeliveryOutcome,
@@ -1042,6 +1042,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (coupleLifecycle !== 'connected') return;
+    let cancelled = false;
     void setUpPushNotifications();
 
     /*
@@ -1053,17 +1054,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const identity = captureActiveIdentity();
     const coupleId = stateRef.current.profile.couple.coupleId;
     if (identity && coupleId) {
-      void fetchPartnerJoinedAt(coupleId, identity.userId).then((joinedAt) => {
-        if (!joinedAt || !isCurrentIdentity(identity)) return;
-        updateStateImmediately((prev) => (
-          prev.profile.couple.partnerJoinedAt === joinedAt ? prev : {
+      void fetchPartnerMembership(coupleId, identity.userId).then((partner) => {
+        if (cancelled || !partner || !isCurrentIdentity(identity)) return;
+        updateStateImmediately((prev) => {
+          if (prev.authenticatedUser?.id !== identity.userId) return prev;
+          const nextCouple = bindPartnerMembership(prev.profile.couple, coupleId, partner);
+          return nextCouple === prev.profile.couple ? prev : {
             ...prev,
             profile: {
               ...prev.profile,
-              couple: { ...prev.profile.couple, partnerJoinedAt: joinedAt },
+              couple: nextCouple,
             },
-          }
-        ));
+          };
+        });
       });
     }
     /*
@@ -1074,16 +1077,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     */
     void recordProductEvent({ kind: 'couple_connected' });
     /*
-      Keyed on the lifecycle transition alone, deliberately.
+      Keyed on lifecycle and exact couple workspace.
 
       The three helpers this reads are stable per render but not referentially
       stable, so listing them would re-run this on every state change: a second
       permission prompt, a duplicate `couple_connected` event, and a join-time
-      fetch on every keystroke. The transition into `connected` is the event; the
-      helpers are how it is handled.
+      fetch on every keystroke. A connected A→connected B transition must rerun,
+      so the stable couple id is the second key.
     */
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coupleLifecycle]);
+  }, [coupleLifecycle, state.profile.couple.coupleId]);
 
   useEffect(() => {
     if (!supabase || !isHydrated) return;

@@ -1,9 +1,6 @@
 import type { DailyRecord } from '@/types';
 import { momentSummaryText, type StoryCard } from '@/features/story/storyProjection';
-import {
-  MAX_DAILY_SUMMARY_LINES,
-  type DailySummaryLine,
-} from '@/lib/dailySummary/contract';
+import type { DailySummaryLine } from '@/lib/dailySummary/contract';
 
 /**
  * 규칙만으로 만든 요약. **동기적이고, 항상 존재한다.**
@@ -19,7 +16,7 @@ import {
 export function deterministicSummaryLines(
   records: readonly DailyRecord[],
 ): DailySummaryLine[] {
-  return records.slice(0, MAX_DAILY_SUMMARY_LINES).map((record) => ({
+  return records.map((record) => ({
     recordId: record.id,
     text: momentSummaryText(record),
     time: record.time,

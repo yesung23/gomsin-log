@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CoupleStatus, DailyRecord } from '@/types';
 import type { StoryMode } from '@/features/story/StoryViewer';
-import { buildOnDeviceItems, type DailySummaryLine } from '@/lib/dailySummary/contract';
+import {
+  buildAllOnDeviceBatches,
+  type DailySummaryLine,
+} from '@/lib/dailySummary/contract';
 import { selectDailySummaryCorpus } from '@/lib/dailySummary/corpus';
 import { deterministicSummaryLines } from '@/lib/dailySummary/rules';
 import {
   cancelOnDeviceSummary,
   isOnDeviceDailySummaryEnabled,
+  ON_DEVICE_SUMMARY_TIMEOUT_MS,
   refineOnDeviceSummary,
 } from '@/lib/dailySummary/nativeOnDeviceSummary';
 import { verifyAndBindRefinedLines } from '@/lib/dailySummary/verify';
@@ -41,6 +45,7 @@ export interface UseOnDeviceDailySummaryInput {
   /** 이 스토리가 담은 기록. 이미 권한 판정을 통과한 목록이다. */
   records: readonly DailyRecord[];
   viewerUserId?: string;
+  partnerUserId?: string;
   todayStr: string;
   coupleConnected: boolean;
   coupleStatus?: CoupleStatus;
@@ -49,8 +54,11 @@ export interface UseOnDeviceDailySummaryInput {
 export function useOnDeviceDailySummary(
   input: UseOnDeviceDailySummaryInput,
 ): ReadonlyMap<string, string> {
-  const { mode, records, viewerUserId, todayStr, coupleConnected, coupleStatus } = input;
-  const [refined, setRefined] = useState<ReadonlyMap<string, string>>(NO_REFINEMENT);
+  const { mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus } = input;
+  const [refined, setRefined] = useState<{
+    payloadKey: string;
+    values: ReadonlyMap<string, string>;
+  }>({ payloadKey: '[]', values: NO_REFINEMENT });
 
   /*
     내용에서 유도한 키.
@@ -63,6 +71,7 @@ export function useOnDeviceDailySummary(
     const corpus = selectDailySummaryCorpus({
       records,
       viewerUserId,
+      partnerUserId,
       todayStr,
       coupleConnected,
       coupleStatus,
@@ -71,18 +80,18 @@ export function useOnDeviceDailySummary(
     return JSON.stringify(
       deterministicSummaryLines(corpus.records).map((line) => [line.recordId, line.text]),
     );
-  }, [mode, records, viewerUserId, todayStr, coupleConnected, coupleStatus]);
+  }, [mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
 
   useEffect(() => {
     const pairs = JSON.parse(payloadKey) as [string, string][];
     if (pairs.length === 0) {
-      setRefined(NO_REFINEMENT);
+      setRefined({ payloadKey, values: NO_REFINEMENT });
       return;
     }
     // flag가 꺼져 있으면 네이티브 경계를 건드리지도 않는다. `refineOnDeviceSummary`가 같은
     // 판정을 다시 하지만, 기본값 OFF에서 브리지 객체조차 만들지 않는 편이 낫다.
     if (!isOnDeviceDailySummaryEnabled()) {
-      setRefined(NO_REFINEMENT);
+      setRefined({ payloadKey, values: NO_REFINEMENT });
       return;
     }
 
@@ -93,18 +102,45 @@ export function useOnDeviceDailySummary(
       time: '',
       date: '',
     }));
-    const items = buildOnDeviceItems(lines);
+
+    const batches = buildAllOnDeviceBatches(lines);
+    if (!batches) {
+      setRefined({ payloadKey, values: NO_REFINEMENT });
+      return;
+    }
 
     let active = true;
     void (async () => {
-      const outcome = await refineOnDeviceSummary(items);
-      if (!active) return;
-      if (!outcome.ok) {
-        setRefined(NO_REFINEMENT);
-        return;
+      const merged = new Map<string, string>();
+      const deadline = Date.now() + ON_DEVICE_SUMMARY_TIMEOUT_MS;
+      for (const batch of batches) {
+        if (!active) return;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          setRefined({ payloadKey, values: NO_REFINEMENT });
+          return;
+        }
+        const outcome = await refineOnDeviceSummary(batch.items, { timeoutMs: remainingMs });
+        if (!active) return;
+        if (!outcome.ok) {
+          setRefined({ payloadKey, values: NO_REFINEMENT });
+          return;
+        }
+        const bound = verifyAndBindRefinedLines(outcome.items, batch.lines, batch.items);
+        if (!bound.ok) {
+          setRefined({ payloadKey, values: NO_REFINEMENT });
+          return;
+        }
+        for (const [recordId, refinedText] of bound.refined.entries()) {
+          merged.set(recordId, refinedText);
+        }
       }
-      const bound = verifyAndBindRefinedLines(outcome.items, lines, items);
-      setRefined(bound.ok ? bound.refined : NO_REFINEMENT);
+      if (!active) return;
+      if (merged.size === lines.length) {
+        setRefined({ payloadKey, values: merged });
+      } else {
+        setRefined({ payloadKey, values: NO_REFINEMENT });
+      }
     })();
 
     return () => {
@@ -113,5 +149,7 @@ export function useOnDeviceDailySummary(
     };
   }, [payloadKey]);
 
-  return refined;
+  // payload가 바뀐 렌더에서는 effect가 실행되기 전부터 이전 모델 결과를 숨긴다. 현재 키와
+  // 결과 키가 일치할 때만 노출하므로 오래된 다듬기와 새 규칙 문장이 섞이는 프레임이 없다.
+  return refined.payloadKey === payloadKey ? refined.values : NO_REFINEMENT;
 }

@@ -380,7 +380,11 @@ export function eligibleSharedPartnerRecords(
 
 /** Chronological order, the order the partner's day actually happened in. */
 function byTime(a: DailyRecord, b: DailyRecord): number {
-  return `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`);
+  const aChronology = `${a.date} ${a.time || ''}`;
+  const bChronology = `${b.date} ${b.time || ''}`;
+  if (aChronology < bChronology) return -1;
+  if (aChronology > bChronology) return 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /** Set equality, ignoring order. Used only to decide whether a write is needed. */

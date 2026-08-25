@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  MAX_DAILY_SUMMARY_LINES,
+  ON_DEVICE_SUMMARY_BATCH_SIZE,
   MAX_DAILY_SUMMARY_LINE_CHARS,
 } from '@/lib/dailySummary/contract';
 import { ON_DEVICE_SUMMARY_PLUGIN_NAME } from '@/lib/dailySummary/nativeOnDeviceSummary';
@@ -222,7 +222,7 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
   });
 
   it('경계 상한이 TypeScript 상한과 같은 숫자다', () => {
-    expect(swiftEngine).toContain(`static let maxLines = ${MAX_DAILY_SUMMARY_LINES}`);
+    expect(swiftEngine).toContain(`static let maxLines = ${ON_DEVICE_SUMMARY_BATCH_SIZE}`);
     expect(swiftEngine).toContain(`static let maxLineCharacters = ${MAX_DAILY_SUMMARY_LINE_CHARS}`);
   });
 

@@ -26,6 +26,8 @@ export type Scenario = {
   coupleId: string | null;
   /** Whether `get_partner_profile` returns a partner (drives connected vs pending). */
   partnerPresent: boolean;
+  /** Active couple_members row returned for the other member when queried. */
+  partnerUserId?: string;
   partnerName?: string;
   /** Username projection returned by migration 060 when the partner exists. */
   partnerUsername?: string;
@@ -304,8 +306,18 @@ export async function installMockBackend(
       const failure = failureFor(scenario, 'couple_members');
       if (failure) return json(route, failure, failure.status);
       if (!scenario.coupleId) return rows(route, []);
+      const userFilter = url.searchParams.get('user_id') ?? '';
+      if (userFilter.startsWith('neq.')) {
+        if (!scenario.partnerPresent || !scenario.partnerUserId) return rows(route, []);
+        return rows(route, [{
+          couple_id: scenario.coupleId,
+          user_id: scenario.partnerUserId,
+          joined_at: '2026-01-02T00:00:00Z',
+          status: 'active',
+        }]);
+      }
       return rows(route, [
-        { couple_id: scenario.coupleId, status: 'active', role: scenario.role },
+        { couple_id: scenario.coupleId, user_id: scenario.userId, status: 'active', role: scenario.role },
       ]);
     }
 

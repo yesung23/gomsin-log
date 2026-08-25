@@ -52,6 +52,7 @@ export const CREATOR: Scenario = {
   role: 'gomsin',
   coupleId: 'couple-1',
   partnerPresent: true,
+  partnerUserId: 'user-partner',
   partnerName: '몽룡',
   records: RECORDS,
 };
@@ -60,6 +61,7 @@ export const CREATOR: Scenario = {
 export const PARTNER: Scenario = {
   ...CREATOR,
   userId: 'user-partner',
+  partnerUserId: 'user-creator',
   displayName: '몽룡',
   role: 'soldier',
   partnerName: '춘향',

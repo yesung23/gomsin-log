@@ -449,6 +449,8 @@ export type ProfileDateType = (typeof PROFILE_DATE_TYPES)[number];
 
 export interface CoupleInfo {
   coupleId?: string;
+  /** Active membership에서 직접 확인한 현재 상대 계정 ID. 온디바이스 privacy gate에 사용한다. */
+  partnerUserId?: string;
   partnerName: string;
   /** The active partner-selected username, when the server exposes it. */
   partnerUsername?: string;

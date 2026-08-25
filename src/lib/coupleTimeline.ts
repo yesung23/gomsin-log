@@ -1,22 +1,53 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import type { CoupleInfo } from '@/types';
+
+export interface PartnerMembershipSnapshot {
+  userId: string;
+  joinedAt?: string;
+}
+
+/** 요청을 시작한 active workspace와 여전히 같을 때만 상대 신원을 결속한다. */
+export function bindPartnerMembership(
+  couple: CoupleInfo,
+  requestedCoupleId: string,
+  partner: PartnerMembershipSnapshot,
+): CoupleInfo {
+  if (
+    couple.coupleId !== requestedCoupleId
+    || !couple.connected
+    || couple.status !== 'active'
+    || !partner.userId
+  ) {
+    return couple;
+  }
+  if (
+    couple.partnerUserId === partner.userId
+    && couple.partnerJoinedAt === partner.joinedAt
+  ) {
+    return couple;
+  }
+  const next = { ...couple, partnerUserId: partner.userId };
+  if (partner.joinedAt) next.partnerJoinedAt = partner.joinedAt;
+  else delete next.partnerJoinedAt;
+  return next;
+}
 
 /**
- * When the other member joined.
+ * The active partner membership facts this client needs.
  *
  * A single canonical fact, read rather than derived: `couple_members.joined_at`
  * has existed since migration 001, and the SELECT policy from the same migration
- * lets an active member read the partner's row. §7.6 needs it to tell which
- * records predate the partner, and having it means the one-time reveal prompt
- * needs no "already asked" flag stored anywhere.
+ * lets an active member read the partner's row. The user id proves which exact
+ * author may enter on-device summarization; §7.6 uses the join time to tell which
+ * records predate the partner without an "already asked" flag.
  *
- * Nothing else about the partner is selected. The one column answers the one
- * question, and a wider select would be a place for partner data to leak into a
- * client that has no product reason to hold it.
+ * Nothing else about the partner is selected. These two membership facts answer
+ * the two product questions, and a wider select would have no purpose.
  */
-export async function fetchPartnerJoinedAt(
+export async function fetchPartnerMembership(
   coupleId: string,
   myUserId: string,
-): Promise<string | undefined> {
+): Promise<PartnerMembershipSnapshot | undefined> {
   if (!isSupabaseConfigured || !supabase || !coupleId || !myUserId) return undefined;
 
   /*
@@ -35,7 +66,7 @@ export async function fetchPartnerJoinedAt(
   try {
     const { data, error } = await supabase
       .from('couple_members')
-      .select('joined_at')
+      .select('user_id, joined_at')
       .eq('couple_id', coupleId)
       .eq('status', 'active')
       .neq('user_id', myUserId)
@@ -45,9 +76,21 @@ export async function fetchPartnerJoinedAt(
       console.warn('[gomsinlog] Could not read the partner join time:', error.message);
       return undefined;
     }
-    return typeof data?.joined_at === 'string' ? data.joined_at : undefined;
+    if (typeof data?.user_id !== 'string' || !data.user_id) return undefined;
+    return {
+      userId: data.user_id,
+      ...(typeof data.joined_at === 'string' ? { joinedAt: data.joined_at } : {}),
+    };
   } catch (thrown) {
     console.warn('[gomsinlog] The partner join-time lookup threw:', thrown);
     return undefined;
   }
+}
+
+/** 기존 호출부를 위한 최소 projection. */
+export async function fetchPartnerJoinedAt(
+  coupleId: string,
+  myUserId: string,
+): Promise<string | undefined> {
+  return (await fetchPartnerMembership(coupleId, myUserId))?.joinedAt;
 }

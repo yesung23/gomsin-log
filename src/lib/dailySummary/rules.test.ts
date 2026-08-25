@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { StoryCard } from '@/features/story/storyProjection';
-import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
+import { applyRefinedCoverText, deterministicSummaryLines } from '@/lib/dailySummary/rules';
+import type { DailyRecord } from '@/types';
 
 /**
  * 대체는 텍스트에만 닿는다.
@@ -88,5 +89,21 @@ describe('applyRefinedCoverText', () => {
   it('빈 지도면 같은 배열을 그대로 돌려준다', () => {
     const cards: StoryCard[] = [cover()];
     expect(applyRefinedCoverText(cards, new Map())).toBe(cards);
+  });
+
+  it('deterministicSummaryLines는 임의의 상한 없이 모든 기록을 매핑한다', () => {
+    const records: DailyRecord[] = Array.from({ length: 8 }, (_, i) => ({
+      id: `r${i}`,
+      userId: 'partner',
+      date: '2026-08-22',
+      time: `0${i}:00`,
+      authorRole: 'gomsin',
+      log: `기록 ${i}`,
+      isPrivate: false,
+      createdAt: '2026-08-22T00:00:00.000Z',
+    }));
+    const lines = deterministicSummaryLines(records);
+    expect(lines).toHaveLength(8);
+    expect(lines.map((l) => l.recordId)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
   });
 });

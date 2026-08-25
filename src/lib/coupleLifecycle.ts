@@ -114,8 +114,11 @@ export function mergeCoupleState(
   if (remote === undefined) return local;
 
   if (remote === null || !remote.coupleId) {
+    const cleared = { ...local };
+    delete cleared.partnerUserId;
+    delete cleared.partnerJoinedAt;
     return {
-      ...local,
+      ...cleared,
       coupleId: undefined,
       partnerName: '',
       coupleCode: '',
@@ -125,6 +128,14 @@ export function mergeCoupleState(
   }
 
   const sameCouple = local.coupleId === remote.coupleId;
+  const keepsVerifiedPartner = sameCouple
+    && remote.partnerPresent
+    && (!remote.memberStatus || remote.memberStatus === 'active');
+  const base = { ...local };
+  if (!keepsVerifiedPartner) {
+    delete base.partnerUserId;
+    delete base.partnerJoinedAt;
+  }
   /**
    * The cached plaintext is only worth keeping while it can still be redeemed.
    *
@@ -138,7 +149,7 @@ export function mergeCoupleState(
   const keepCode = sameCouple && !remote.partnerPresent && remote.invitationActive;
 
   return {
-    ...local,
+    ...base,
     coupleId: remote.coupleId,
     // The partner's display name comes from `get_partner_profile`, not from here.
     partnerName: remote.partnerPresent ? local.partnerName : '',

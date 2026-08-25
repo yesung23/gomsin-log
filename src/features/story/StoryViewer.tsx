@@ -293,12 +293,18 @@ function CoverCard({
   card: Extract<StoryCard, { kind: 'cover' }>;
   onJump?: (recordId: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const total = card.lines.length;
+  const hasMore = total > 5;
+  const visibleLines = hasMore && !expanded ? card.lines.slice(0, 5) : card.lines;
+  const remainingCount = total - 5;
+
   return (
     <PaperCard className="mt-2">
       <p className="text-caption text-muted-foreground">{card.rangeLabel}</p>
       <FoldDivider className="my-4" />
       <ul className="space-y-3">
-        {card.lines.map((line) => (
+        {visibleLines.map((line) => (
           <li key={line.recordId}>
             <button
               type="button"
@@ -312,6 +318,18 @@ function CoverCard({
           </li>
         ))}
       </ul>
+      {hasMore ? (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setExpanded((prev) => !prev)}
+            aria-expanded={expanded}
+            className="press-response-row flex w-full min-h-11 items-center justify-center rounded-control text-caption text-muted-foreground"
+          >
+            {expanded ? '접기' : `${remainingCount}개 더 보기`}
+          </button>
+        </div>
+      ) : null}
     </PaperCard>
   );
 }

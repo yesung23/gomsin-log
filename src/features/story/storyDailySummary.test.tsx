@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { StoryRoute } from '@/features/story/StoryRoute';
@@ -70,7 +70,13 @@ vi.mock('@/lib/useStore', () => ({
       profile: {
         id: ME,
         role: 'soldier',
-        couple: { connected: true, status: coupleStatus, coupleId: 'c1', partnerName: '춘향' },
+        couple: {
+          connected: true,
+          status: coupleStatus,
+          coupleId: 'c1',
+          partnerUserId: PARTNER,
+          partnerName: '춘향',
+        },
       },
       authenticatedUser: { id: ME },
     },
@@ -139,6 +145,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   __setOnDeviceSummaryPluginForTests(null);
   vi.unstubAllEnvs();
 });
@@ -305,6 +312,225 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     open('/story/partner');
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+  });
+
+  it('5/6/8개 기록 처리: 5개는 1회 호출, 6개는 2회(5+1), 8개는 2회(5+3) 순차 배치 처리', async () => {
+    const plugin = stubPlugin({
+      refineLines: vi.fn(async (options) => ({
+        requestId: options.requestId,
+        items: options.items.map((item) => ({ index: item.index, text: `다듬은 ${item.index}번` })),
+      })),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+
+    const records8 = Array.from({ length: 8 }, (_, i) =>
+      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
+    );
+    surface = records8;
+    records = surface;
+
+    const view = open('/story/partner');
+    // 8개는 2개 배치 (5 + 3)
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
+
+    const calls = vi.mocked(plugin.refineLines).mock.calls;
+    // 첫 번째 배치: 5개 항목, index 0..4
+    expect(calls[0][0].items).toHaveLength(5);
+    expect(calls[0][0].items.map((it) => it.index)).toEqual([0, 1, 2, 3, 4]);
+    // 두 번째 배치: 3개 항목, index 0..2 (records 6~8인 r5, r6, r7에 해당)
+    expect(calls[1][0].items).toHaveLength(3);
+    expect(calls[1][0].items.map((it) => it.index)).toEqual([0, 1, 2]);
+
+    // 펼친 후 확인
+    const moreBtn = await screen.findByRole('button', { name: '3개 더 보기' });
+    await userEvent.click(moreBtn);
+    // 8개 모두 다듬어진 문장이 정상 반영됨
+    expect(screen.getAllByRole('button', { name: /다듬은/ })).toHaveLength(8);
+    view.unmount();
+  });
+
+  it('배치 2가 실패하면 모든 줄이 결정론적 규칙 결과로 유지된다', async () => {
+    let callCount = 0;
+    const plugin = stubPlugin({
+      refineLines: vi.fn(async (options) => {
+        callCount++;
+        if (callCount === 1) {
+          // 배치 1은 성공
+          return {
+            requestId: options.requestId,
+            items: options.items.map((item) => ({ index: item.index, text: `다듬은 ${item.index}번` })),
+          };
+        }
+        // 배치 2는 실패
+        throw new Error('E_ON_DEVICE_SUMMARY');
+      }),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+
+    const records8 = Array.from({ length: 8 }, (_, i) =>
+      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
+    );
+    surface = records8;
+    records = surface;
+
+    open('/story/partner');
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
+
+    // 배치 2 실패로 인해 첫 번째 배치의 내용도 섞이지 않고 전체가 규칙 원문으로 유지됨
+    expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /원문 1/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /다듬은 0번/ })).toBeNull();
+  });
+
+  it('여러 배치가 있어도 전체 4초 예산 하나만 쓰고 남은 시간이 없으면 전체 fallback한다', async () => {
+    vi.useFakeTimers();
+    let callCount = 0;
+    const plugin = stubPlugin({
+      refineLines: vi.fn((options) => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Promise((resolve) => {
+            setTimeout(() => resolve({
+              requestId: options.requestId,
+              items: options.items.map((item) => ({ index: item.index, text: `첫 ${item.index}번` })),
+            }), 3000);
+          });
+        }
+        return new Promise(() => undefined);
+      }),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = Array.from({ length: 8 }, (_, i) =>
+      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
+    );
+    records = surface;
+
+    const view = open('/story/partner');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(plugin.refineLines).toHaveBeenCalledTimes(2);
+
+    // 두 번째 배치는 새 4초가 아니라 첫 배치가 쓰고 남긴 약 1초만 받는다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1001);
+    });
+    expect(plugin.cancel).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /첫 0번/ })).toBeNull();
+    view.unmount();
+  });
+
+  it('화면을 떠나면 진행 중인 배치를 취소하고 다음 배치를 시작하지 않는다', async () => {
+    let resolveFirst: ((value: { requestId: string; items: { index: number; text: string }[] }) => void) | undefined;
+    const plugin = stubPlugin({
+      refineLines: vi.fn((options) => new Promise((resolve) => {
+        resolveFirst = resolve;
+      })),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+
+    surface = Array.from({ length: 8 }, (_, i) =>
+      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
+    );
+    records = surface;
+
+    const view = open('/story/partner');
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
+    const firstOptions = vi.mocked(plugin.refineLines).mock.calls[0][0];
+    view.unmount();
+    await waitFor(() => expect(plugin.cancel).toHaveBeenCalledWith({ requestId: firstOptions.requestId }));
+
+    resolveFirst?.({
+      requestId: firstOptions.requestId,
+      items: firstOptions.items.map((item) => ({ index: item.index, text: `늦은 ${item.index}번` })),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(plugin.refineLines).toHaveBeenCalledTimes(1);
+  });
+
+  it('기존 5개 refinement 뒤 6번째가 추가되면 새 배치 완료 전부터 이전 결과를 숨긴다', async () => {
+    let resolveUpdatedFirstBatch:
+      | ((value: { requestId: string; items: { index: number; text: string }[] }) => void)
+      | undefined;
+    let callCount = 0;
+    const plugin = stubPlugin({
+      refineLines: vi.fn(async (options) => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            requestId: options.requestId,
+            items: options.items.map((item) => ({ index: item.index, text: `기존 ${item.index}번` })),
+          };
+        }
+        return new Promise((resolve) => {
+          resolveUpdatedFirstBatch = resolve;
+        });
+      }),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+
+    surface = Array.from({ length: 5 }, (_, i) =>
+      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
+    );
+    records = surface;
+    const view = open('/story/partner');
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /기존/ })).toHaveLength(5));
+
+    surface = [
+      ...surface,
+      record({ id: 'r5', time: '05:00', log: '새 원문 5' }),
+    ];
+    records = surface;
+    view.rerender(
+      <MemoryRouter initialEntries={['/story/partner']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/story/partner" element={<StoryRoute mode="today" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // effect가 새 요청을 시작하기 전 렌더부터 stale map의 payloadKey가 달라 즉시 숨겨진다.
+    expect(screen.queryByRole('button', { name: /기존/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: /기존/ })).toBeNull();
+
+    const updatedOptions = vi.mocked(plugin.refineLines).mock.calls[1][0];
+    resolveUpdatedFirstBatch?.({
+      requestId: updatedOptions.requestId,
+      items: updatedOptions.items.map((item) => ({ index: item.index, text: `새 ${item.index}번` })),
+    });
+    view.unmount();
+  });
+
+  it('나중 배치에 Segmenter 부재로 인한 정규화 실패 시 네이티브 플러그인을 아예 호출하지 않는다', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+
+    try {
+      const longLog = `${'a'.repeat(38)}e\u0301b`;
+      const records8 = [
+        ...Array.from({ length: 5 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00`, log: `짧은 원문 ${i}` })),
+        record({ id: 'r5', time: '05:00', log: longLog }),
+        record({ id: 'r6', time: '06:00', log: '짧은 원문 6' }),
+      ];
+      surface = records8;
+      records = surface;
+
+      open('/story/partner');
+      await Promise.resolve();
+      // 배치 검증이 사전에 실패하여 플러그인을 단 한 번도 호출하지 않음
+      expect(plugin.refineLines).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: /짧은 원문 0/ })).toBeTruthy();
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+    }
   });
 });
 

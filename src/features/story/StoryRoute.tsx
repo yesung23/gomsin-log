@@ -94,6 +94,9 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       focusRecordId,
       // 보관 스토리에는 목차를 붙이지 않는다. 지나간 하루는 훑는 것이 아니라 넘기는 것이다.
       withCover: mode !== 'archive' && mode !== 'highlight',
+      // 전체 요약은 상대의 오늘에만 적용한다. mine/archive/highlight와 놓친 다일 구간은
+      // 기존 표지 상한을 유지한다.
+      showAllTodayCoverLines: mode === 'today',
     }),
     [records, todayStr, focusRecordId, mode],
   );
@@ -109,6 +112,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     mode,
     records,
     viewerUserId: viewer.userId,
+    partnerUserId: profile.couple.partnerUserId,
     todayStr,
     coupleConnected: profile.couple.connected,
     coupleStatus: profile.couple.status,

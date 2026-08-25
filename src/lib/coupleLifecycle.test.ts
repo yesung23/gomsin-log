@@ -187,9 +187,14 @@ describe('mergeCoupleState', () => {
   });
 
   it('drops the code when the couple id changed', () => {
-    const merged = mergeCoupleState(local(), remote({ coupleId: 'couple-2' }));
+    const merged = mergeCoupleState(
+      local({ partnerUserId: 'partner-a', partnerJoinedAt: '2026-01-01T00:00:00Z' }),
+      remote({ coupleId: 'couple-2' }),
+    );
     expect(merged.coupleId).toBe('couple-2');
     expect(merged.coupleCode).toBe('');
+    expect(merged.partnerUserId).toBeUndefined();
+    expect(merged.partnerJoinedAt).toBeUndefined();
   });
 
   it('clears the couple space on an authoritative no-membership answer', () => {
@@ -202,6 +207,27 @@ describe('mergeCoupleState', () => {
     expect(merged.partnerName).toBe('');
     expect(merged.connected).toBe(false);
     expect(merged.status).toBe('disconnected');
+    expect(merged.partnerUserId).toBeUndefined();
+    expect(merged.partnerJoinedAt).toBeUndefined();
+  });
+
+  it('pending이나 비활성 응답은 캐시된 상대 신원을 지운다', () => {
+    const current = local({
+      connected: true,
+      status: 'active',
+      partnerUserId: 'partner-a',
+      partnerJoinedAt: '2026-01-01T00:00:00Z',
+    });
+    const pending = mergeCoupleState(current, remote({ partnerPresent: false }));
+    expect(pending.partnerUserId).toBeUndefined();
+    expect(pending.partnerJoinedAt).toBeUndefined();
+
+    const disconnected = mergeCoupleState(current, remote({
+      partnerPresent: true,
+      memberStatus: 'disconnected',
+    }));
+    expect(disconnected.partnerUserId).toBeUndefined();
+    expect(disconnected.partnerJoinedAt).toBeUndefined();
   });
 
   it('adopts a couple id local state did not have', () => {

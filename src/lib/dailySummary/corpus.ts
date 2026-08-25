@@ -1,10 +1,7 @@
 import type { CoupleStatus, DailyRecord } from '@/types';
 import { isOwnRecord } from '@/lib/privacy';
 import { isRecordContentAvailable } from '@/lib/recordAvailability';
-import {
-  MAX_DAILY_SUMMARY_LINES,
-  type DailySummaryCorpusRejection,
-} from '@/lib/dailySummary/contract';
+import type { DailySummaryCorpusRejection } from '@/lib/dailySummary/contract';
 
 /**
  * 온디바이스 모델이 볼 수 있는 기록의 전부.
@@ -43,6 +40,8 @@ export interface DailySummaryCorpusInput {
   records: readonly DailyRecord[];
   /** 보는 사람. `userId`가 없으면 판정하지 않는다. */
   viewerUserId?: string;
+  /** active couple membership에서 직접 확인한 현재 상대. 없으면 판정하지 않는다. */
+  partnerUserId?: string;
   todayStr: string;
   coupleConnected: boolean;
   coupleStatus?: CoupleStatus;
@@ -58,13 +57,15 @@ export function isPersistedRecord(record: DailyRecord): boolean {
 }
 
 export function selectDailySummaryCorpus(input: DailySummaryCorpusInput): DailySummaryCorpus {
-  const { records, viewerUserId, todayStr, coupleConnected, coupleStatus } = input;
+  const { records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus } = input;
 
   // 연결이 끊긴/보류 중인 관계의 기록을 다듬지 않는다. `settingsFacts.ts`와 같은 판정이다.
   if (!coupleConnected || coupleStatus !== 'active') {
     return { ok: false, rejection: 'couple_not_active' };
   }
-  if (!viewerUserId) return { ok: false, rejection: 'identity_unresolved' };
+  if (!viewerUserId || !partnerUserId || partnerUserId === viewerUserId) {
+    return { ok: false, rejection: 'identity_unresolved' };
+  }
   if (!todayStr) return { ok: false, rejection: 'identity_unresolved' };
 
   /*
@@ -81,7 +82,8 @@ export function selectDailySummaryCorpus(input: DailySummaryCorpusInput): DailyS
 
   const eligible = records.filter((record) => (
     isPersistedRecord(record)
-    // `role` fallback을 타지 않도록 `userId`만 넘긴다. 위에서 두 값이 모두 있음을 보장했다.
+    // active membership에서 확인한 정확한 현재 상대만 허용한다. "내가 아님"은 충분하지 않다.
+    && record.userId === partnerUserId
     && !isOwnRecord(record, { userId: viewerUserId })
     && !record.isPrivate
     && isRecordContentAvailable(record)
@@ -96,5 +98,5 @@ export function selectDailySummaryCorpus(input: DailySummaryCorpusInput): DailyS
     (a.time || '').localeCompare(b.time || '') || a.id.localeCompare(b.id)
   ));
 
-  return { ok: true, records: chronological.slice(0, MAX_DAILY_SUMMARY_LINES) };
+  return { ok: true, records: chronological };
 }

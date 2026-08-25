@@ -209,6 +209,69 @@ describe('부재와 목차', () => {
     expect(onJumpToRecord).toHaveBeenCalledWith('b');
   });
 
+  it('5개 이하 줄이면 더 보기 버튼 없이 모든 줄이 표시된다', () => {
+    const lines = Array.from({ length: 5 }, (_, i) => ({
+      recordId: `r${i}`,
+      text: `줄 ${i}`,
+      time: `0${i}:00`,
+      date: '2026-08-22',
+    }));
+    view({
+      cards: [{ kind: 'cover', rangeLabel: '오늘', lines }, ...CARDS],
+      initialIndex: 0,
+    });
+    for (let i = 0; i < 5; i++) {
+      expect(screen.getByText(`줄 ${i}`)).toBeTruthy();
+    }
+    expect(screen.queryByRole('button', { name: /더 보기|접기/ })).toBeNull();
+  });
+
+  it('정확히 8개 줄: 초기 5개 + 3개 더 보기, 펼치기/접기 및 확장 줄 이동 검증', async () => {
+    const onJumpToRecord = vi.fn();
+    const lines = Array.from({ length: 8 }, (_, i) => ({
+      recordId: `r${i}`,
+      text: `줄 ${i}`,
+      time: `0${i}:00`,
+      date: '2026-08-22',
+    }));
+    view({
+      cards: [{ kind: 'cover', rangeLabel: '오늘', lines }, ...CARDS],
+      initialIndex: 0,
+      onJumpToRecord,
+    });
+
+    // 초기 상태: 0~4번 5개 노출, 5~7번 미노출
+    for (let i = 0; i < 5; i++) {
+      expect(screen.getByText(`줄 ${i}`)).toBeTruthy();
+    }
+    expect(screen.queryByText('줄 5')).toBeNull();
+    expect(screen.queryByText('줄 7')).toBeNull();
+
+    const moreButton = screen.getByRole('button', { name: '3개 더 보기' });
+    expect(moreButton).toBeTruthy();
+    expect(moreButton).toHaveAttribute('aria-expanded', 'false');
+    expect(moreButton.className).toContain('min-h-11');
+
+    // 펼치기
+    await userEvent.click(moreButton);
+    expect(screen.getByText('줄 5')).toBeTruthy();
+    expect(screen.getByText('줄 7')).toBeTruthy();
+    const foldButton = screen.getByRole('button', { name: '접기' });
+    expect(foldButton).toBeTruthy();
+    expect(foldButton).toHaveAttribute('aria-expanded', 'true');
+    expect(foldButton.className).toContain('min-h-11');
+
+    // 확장된 줄(예: 8번째 줄, r7) 클릭 시 원본 점프
+    await userEvent.click(screen.getByText('줄 7'));
+    expect(onJumpToRecord).toHaveBeenCalledWith('r7');
+
+    // 접기
+    await userEvent.click(foldButton);
+    expect(screen.getByRole('button', { name: '3개 더 보기' })).toBeTruthy();
+    expect(screen.queryByText('줄 5')).toBeNull();
+    expect(screen.queryByText('줄 7')).toBeNull();
+  });
+
   it('열 수 없는 기록 수를 닫는 카드에서 말한다', () => {
     view({ cards: [{ kind: 'closing', momentCount: 2, unreadableCount: 3 }], initialIndex: 0 });
     expect(screen.getByText('열 수 없는 기록 3개')).toBeTruthy();

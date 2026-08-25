@@ -151,4 +151,32 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  it('두 번째 배치(batch 2, index 0..2)가 records 6..8에 정확히 매핑된다', () => {
+    const batch2Lines: DailySummaryLine[] = [
+      { recordId: 'rec-6', text: '여섯째 기록', time: '14:00', date: '2026-08-22' },
+      { recordId: 'rec-7', text: '일곱째 기록', time: '15:00', date: '2026-08-22' },
+      { recordId: 'rec-8', text: '여덟째 기록', time: '16:00', date: '2026-08-22' },
+    ];
+    const batch2Items = buildOnDeviceItems(batch2Lines);
+    expect(batch2Items.map((it) => it.index)).toEqual([0, 1, 2]);
+
+    const bound = verifyAndBindRefinedLines(
+      [
+        { index: 0, text: '다듬은 여섯째' },
+        { index: 1, text: '다듬은 일곱째' },
+        { index: 2, text: '다듬은 여덟째' },
+      ],
+      batch2Lines,
+      batch2Items,
+    );
+
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    expect([...bound.refined.entries()]).toEqual([
+      ['rec-6', '다듬은 여섯째'],
+      ['rec-7', '다듬은 일곱째'],
+      ['rec-8', '다듬은 여덟째'],
+    ]);
+  });
 });

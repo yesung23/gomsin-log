@@ -1036,6 +1036,17 @@ describe('a record that leaves this device and comes back', () => {
   });
 });
 
+describe('partner-day surface order', () => {
+  it('같은 날짜와 시각이면 record ID로 안정적으로 정렬한다', () => {
+    const sameTime = [
+      record({ id: 'c', time: '09:00' }),
+      record({ id: 'a', time: '09:00' }),
+      record({ id: 'b', time: '09:00' }),
+    ];
+    expect(ids(projectPartnerDay(context(), sameTime, null).surface)).toEqual(['a', 'b', 'c']);
+  });
+});
+
 /* ------------------------------------------------------------------------- */
 /* Privacy                                                                   */
 /* ------------------------------------------------------------------------- */

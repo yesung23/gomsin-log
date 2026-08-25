@@ -12,7 +12,7 @@
  *    온디바이스 결과는 준비되었을 때 **텍스트만** 갈아 끼운다. 모델이 없거나 느리거나 틀린
  *    답을 주면 화면은 규칙 결과 그대로다.
  * 2. **모델은 무엇이 중요한지 고르지 않는다.** 어떤 기록이 요약에 들어가는지는
- *    `corpus.ts`가 시간순·개수 상한으로만 정한다. 모델은 항목을 추가·삭제·재배열할 수 없다.
+ *    `corpus.ts`가 시간순으로 정한다. 모델은 항목을 추가·삭제·재배열할 수 없다.
  * 3. **정확한 원본 매핑은 모델을 통과하지 않는다.** `recordId`는 모델 payload에 들어가지
  *    않는다. 나가는 것은 서수 index와 정규화된 텍스트뿐이고, 돌아온 index를 JS가 검증한 뒤
  *    원래 `recordId`에 다시 붙인다. 그래서 모델이 무엇을 하든 요약 줄이 다른 기록을 가리킬
@@ -25,8 +25,8 @@
  * 주기·건강·통증·기분 관련 구조화 필드, 비공개 기록, 상대가 아닌 사람의 기록.
  */
 
-/** §6.2 "한 줄은 한 사건, 최대 5줄". `projectStory`의 속표지 상한과 같은 값이다. */
-export const MAX_DAILY_SUMMARY_LINES = 5;
+/** Foundation Models 네이티브 호출 한 번에 전달하는 고정 배치 크기. */
+export const ON_DEVICE_SUMMARY_BATCH_SIZE = 5;
 
 /** `momentSummaryText`가 이미 지키는 상한. 모델 출력에도 똑같이 강제한다. */
 export const MAX_DAILY_SUMMARY_LINE_CHARS = 40;
@@ -52,6 +52,11 @@ export interface DailySummaryLine {
 export interface OnDeviceSummaryItem {
   index: number;
   text: string;
+}
+
+export interface DailySummaryBatch {
+  lines: DailySummaryLine[];
+  items: OnDeviceSummaryItem[];
 }
 
 /** 온디바이스 경로가 쓰이지 못한 이유. 콘텐츠 없는 안정 코드만. */
@@ -163,10 +168,31 @@ export function buildOnDeviceItems(
   lines: readonly DailySummaryLine[],
 ): OnDeviceSummaryItem[] {
   const items: OnDeviceSummaryItem[] = [];
-  for (const [index, line] of lines.slice(0, MAX_DAILY_SUMMARY_LINES).entries()) {
+  for (const [index, line] of lines.slice(0, ON_DEVICE_SUMMARY_BATCH_SIZE).entries()) {
     const text = normalizeSummaryLineText(line.text);
     if (text === null) return [];
     items.push({ index, text });
   }
   return items;
+}
+
+/**
+ * 모든 요약 줄을 5개 단위의 고정 배치들로 구성한다.
+ *
+ * 정규화 실패(Segmenter 부재 등)가 단 한 줄이라도 있으면 null을 반환하여
+ * 어떤 배치도 네이티브에 전송되지 않도록 한다.
+ */
+export function buildAllOnDeviceBatches(
+  lines: readonly DailySummaryLine[],
+): DailySummaryBatch[] | null {
+  const batches: DailySummaryBatch[] = [];
+  for (let i = 0; i < lines.length; i += ON_DEVICE_SUMMARY_BATCH_SIZE) {
+    const batchLines = lines.slice(i, i + ON_DEVICE_SUMMARY_BATCH_SIZE);
+    const items = buildOnDeviceItems(batchLines);
+    if (items.length !== batchLines.length) {
+      return null;
+    }
+    batches.push({ lines: batchLines, items });
+  }
+  return batches;
 }

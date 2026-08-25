@@ -94,6 +94,7 @@ export function projectStory({
   todayStr,
   focusRecordId,
   withCover,
+  showAllTodayCoverLines = false,
 }: {
   /** 이미 권한 판정을 통과한 기록. 시간순(오래된 것부터). */
   records: DailyRecord[];
@@ -102,6 +103,8 @@ export function projectStory({
   focusRecordId?: string;
   /** 순간이 2개 이상일 때만 속표지를 붙인다. 하나뿐이면 목차가 목차 노릇을 못 한다. */
   withCover: boolean;
+  /** 상대의 오늘 표지에서만 전체 줄을 유지한다. 다른 스토리 모드는 기존 최대 5줄이다. */
+  showAllTodayCoverLines?: boolean;
 }): StoryProjection {
   const readable = records.filter(isRecordContentAvailable);
   const unreadableCount = records.length - readable.length;
@@ -109,11 +112,14 @@ export function projectStory({
   const cards: StoryCard[] = [];
 
   if (withCover && readable.length > 1) {
+    // 열 수 없는 과거 기록도 이 스토리가 다일 구간이라는 사실에는 포함된다. readable만
+    // 보면 "과거 unreadable + 오늘 readable"을 오늘 하루로 오판해 전체 줄을 펼치게 된다.
+    const isTodayOnly = records.every((record) => record.date === todayStr);
+    const coverRecords = showAllTodayCoverLines && isTodayOnly ? readable : readable.slice(0, 5);
     cards.push({
       kind: 'cover',
-      rangeLabel: storyRangeLabel(readable, todayStr),
-      // 최대 5줄. §6.2 "한 줄은 한 사건, 최대 5줄".
-      lines: readable.slice(0, 5).map((record) => ({
+      rangeLabel: storyRangeLabel(records, todayStr),
+      lines: coverRecords.map((record) => ({
         recordId: record.id,
         text: momentSummaryText(record),
         time: record.time,

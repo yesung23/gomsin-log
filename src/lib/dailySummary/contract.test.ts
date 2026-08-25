@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import type { DailyRecord } from '@/types';
 import {
   MAX_DAILY_SUMMARY_LINE_CHARS,
-  MAX_DAILY_SUMMARY_LINES,
+  ON_DEVICE_SUMMARY_BATCH_SIZE,
+  buildAllOnDeviceBatches,
   buildOnDeviceItems,
   collapseSummaryText,
   normalizeSummaryLineText,
@@ -51,7 +52,7 @@ describe('모델 payload에는 index와 text만 들어간다', () => {
 
   it('다섯 개를 넘겨 보내지 않는다', () => {
     const lines = Array.from({ length: 12 }, (_, i) => line({ recordId: `r${i}` }));
-    expect(buildOnDeviceItems(lines)).toHaveLength(MAX_DAILY_SUMMARY_LINES);
+    expect(buildOnDeviceItems(lines)).toHaveLength(ON_DEVICE_SUMMARY_BATCH_SIZE);
   });
 
   it('구조화된 감정·주기·건강 필드는 payload에 들어갈 자리가 없다', () => {
@@ -145,5 +146,59 @@ describe('collapseSummaryText는 접기만 하고 자르지 않는다', () => {
   it('40자를 넘겨도 자르지 않는다 -- 검증이 거부할 수 있어야 한다', () => {
     const long = collapseSummaryText('가'.repeat(80));
     expect(long).toHaveLength(80);
+  });
+});
+
+describe('buildAllOnDeviceBatches (5개 단위 고정 배치 분할)', () => {
+  it('0, 1, 5, 6, 8, 12개 라인을 5개 단위 고정 배치로 분할한다', () => {
+    expect(buildAllOnDeviceBatches([])).toEqual([]);
+
+    const b1 = buildAllOnDeviceBatches([line({ recordId: 'r0' })]);
+    expect(b1).toHaveLength(1);
+    expect(b1![0].items).toEqual([{ index: 0, text: '오늘 시험 끝났어' }]);
+
+    const lines5 = Array.from({ length: 5 }, (_, i) => line({ recordId: `r${i}` }));
+    const b5 = buildAllOnDeviceBatches(lines5);
+    expect(b5).toHaveLength(1);
+    expect(b5![0].items).toHaveLength(5);
+    expect(b5![0].items.map((it) => it.index)).toEqual([0, 1, 2, 3, 4]);
+
+    const lines6 = Array.from({ length: 6 }, (_, i) => line({ recordId: `r${i}` }));
+    const b6 = buildAllOnDeviceBatches(lines6);
+    expect(b6).toHaveLength(2);
+    expect(b6![0].items).toHaveLength(5);
+    expect(b6![1].items).toEqual([{ index: 0, text: '오늘 시험 끝났어' }]);
+
+    const lines8 = Array.from({ length: 8 }, (_, i) => line({ recordId: `r${i}` }));
+    const b8 = buildAllOnDeviceBatches(lines8);
+    expect(b8).toHaveLength(2);
+    expect(b8![0].items).toHaveLength(5);
+    expect(b8![0].items.map((it) => it.index)).toEqual([0, 1, 2, 3, 4]);
+    expect(b8![1].items).toHaveLength(3);
+    expect(b8![1].items.map((it) => it.index)).toEqual([0, 1, 2]);
+    expect(b8![1].lines.map((l) => l.recordId)).toEqual(['r5', 'r6', 'r7']);
+
+    const lines12 = Array.from({ length: 12 }, (_, i) => line({ recordId: `r${i}` }));
+    const b12 = buildAllOnDeviceBatches(lines12);
+    expect(b12).toHaveLength(3);
+    expect(b12![0].items).toHaveLength(5);
+    expect(b12![1].items).toHaveLength(5);
+    expect(b12![2].items).toHaveLength(2);
+  });
+
+  it('Segmenter 부재 시 나중 배치(batch 2 등)에 긴 줄이 있으면 전체 배치를 null로 반환한다', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+    try {
+      const longText = `${'a'.repeat(38)}e\u0301b`;
+      const lines = [
+        ...Array.from({ length: 5 }, (_, i) => line({ recordId: `r${i}`, text: '짧은 줄' })),
+        line({ recordId: 'r5', text: longText }),
+        line({ recordId: 'r6', text: '짧은 줄' }),
+      ];
+      expect(buildAllOnDeviceBatches(lines)).toBeNull();
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+    }
   });
 });

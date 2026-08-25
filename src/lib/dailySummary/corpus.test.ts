@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import type { DailyRecord } from '@/types';
 import { selectDailySummaryCorpus, isPersistedRecord } from '@/lib/dailySummary/corpus';
 import { deterministicSummaryLines } from '@/lib/dailySummary/rules';
-import { MAX_DAILY_SUMMARY_LINES } from '@/lib/dailySummary/contract';
 
 /**
  * 무엇이 모델에 들어갈 수 있는가.
@@ -34,6 +33,7 @@ function select(records: DailyRecord[], over: Partial<Parameters<typeof selectDa
   return selectDailySummaryCorpus({
     records,
     viewerUserId: ME,
+    partnerUserId: PARTNER,
     todayStr: TODAY,
     coupleConnected: true,
     coupleStatus: 'active',
@@ -68,13 +68,25 @@ describe('코퍼스는 상대의 오늘 공유 기록만 담는다', () => {
     expect(result.records.map((r) => r.id)).toEqual(['a', 'b']);
   });
 
-  it('다섯 개를 넘지 않고, 넘치면 이른 것부터 남는다', () => {
+  it('임의의 상한 없이 오늘의 모든 적격 기록을 시간순으로 담는다 (0/1/5/6/8/9개)', () => {
     const records = Array.from({ length: 9 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00` }));
     const result = select(records);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.records).toHaveLength(MAX_DAILY_SUMMARY_LINES);
-    expect(result.records.map((r) => r.id)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4']);
+    expect(result.records).toHaveLength(9);
+    expect(result.records.map((r) => r.id)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8']);
+
+    const result8 = select(records.slice(0, 8));
+    expect(result8.ok).toBe(true);
+    if (result8.ok) expect(result8.records).toHaveLength(8);
+
+    const result6 = select(records.slice(0, 6));
+    expect(result6.ok).toBe(true);
+    if (result6.ok) expect(result6.records).toHaveLength(6);
+
+    const result5 = select(records.slice(0, 5));
+    expect(result5.ok).toBe(true);
+    if (result5.ok) expect(result5.records).toHaveLength(5);
   });
 });
 
@@ -87,6 +99,23 @@ describe('코퍼스에 들어갈 수 없는 것', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.records.map((r) => r.id)).not.toContain('mine');
+  });
+
+  it('현재 파트너가 아닌 제3자·전 파트너 기록', () => {
+    const result = select([
+      ...twoPartnerRecords(),
+      record({ id: 'unrelated', userId: 'unrelated-user' }),
+      record({ id: 'former', userId: 'former-partner' }),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.records.map((r) => r.id)).toEqual(['a', 'b']);
+
+    // 현재 파트너 기록이 하나도 없으면 제3자 두 개만으로 코퍼스를 만들지 못한다.
+    expect(select([
+      record({ id: 'x', userId: 'unrelated-user' }),
+      record({ id: 'y', userId: 'unrelated-user', time: '13:00' }),
+    ])).toEqual({ ok: false, rejection: 'too_few_moments' });
   });
 
   it('비공개 기록', () => {
@@ -148,6 +177,15 @@ describe('판정할 수 없으면 코퍼스를 만들지 않는다', () => {
     expect(select(twoPartnerRecords(), { viewerUserId: undefined }))
       .toEqual({ ok: false, rejection: 'identity_unresolved' });
     expect(select(twoPartnerRecords(), { viewerUserId: '' }))
+      .toEqual({ ok: false, rejection: 'identity_unresolved' });
+  });
+
+  it('active membership에서 확인한 partner userId가 없거나 viewer와 같으면', () => {
+    expect(select(twoPartnerRecords(), { partnerUserId: undefined }))
+      .toEqual({ ok: false, rejection: 'identity_unresolved' });
+    expect(select(twoPartnerRecords(), { partnerUserId: '' }))
+      .toEqual({ ok: false, rejection: 'identity_unresolved' });
+    expect(select(twoPartnerRecords(), { partnerUserId: ME }))
       .toEqual({ ok: false, rejection: 'identity_unresolved' });
   });
 

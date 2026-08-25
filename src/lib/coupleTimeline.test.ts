@@ -25,11 +25,18 @@ vi.mock('@/lib/supabase', () => ({
   isSupabaseConfigured: true,
 }));
 
-const { fetchPartnerJoinedAt } = await import('@/lib/coupleTimeline');
+const {
+  bindPartnerMembership,
+  fetchPartnerJoinedAt,
+  fetchPartnerMembership,
+} = await import('@/lib/coupleTimeline');
 
 beforeEach(() => {
   from.mockClear();
-  maybeSingle.mockReset().mockResolvedValue({ data: { joined_at: '2026-08-20T12:00:00Z' }, error: null });
+  maybeSingle.mockReset().mockResolvedValue({
+    data: { user_id: 'partner', joined_at: '2026-08-20T12:00:00Z' },
+    error: null,
+  });
 });
 
 describe('reading the join time', () => {
@@ -38,15 +45,53 @@ describe('reading the join time', () => {
     expect(from).toHaveBeenCalledWith('couple_members');
   });
 
-  it('asks for one column and nothing else', () => {
+  it('returns the active partner identity and optional join time together', async () => {
+    await expect(fetchPartnerMembership('couple-1', 'me')).resolves.toEqual({
+      userId: 'partner',
+      joinedAt: '2026-08-20T12:00:00Z',
+    });
+  });
+
+  it('asks only for the two membership facts used by the product', () => {
     /*
       A wider select would be a place partner data could reach a client that has
       no product reason to hold it. Asserted on the source: the chain is mocked
       here, so a runtime check would be checking the mock.
     */
     const text = readFileSync(resolve(process.cwd(), 'src/lib/coupleTimeline.ts'), 'utf8');
-    expect(text).toContain(".select('joined_at')");
+    expect(text).toContain(".select('user_id, joined_at')");
     expect(text.match(/\.select\(/g) ?? []).toHaveLength(1);
+  });
+});
+
+describe('binding belongs to the exact active workspace', () => {
+  const partner = { userId: 'partner-a', joinedAt: '2026-08-20T12:00:00Z' };
+  const active = {
+    coupleId: 'couple-a',
+    partnerName: '상대',
+    coupleCode: '',
+    connected: true,
+    status: 'active' as const,
+  };
+
+  it('요청 당시와 같은 active couple에만 상대 신원을 붙인다', () => {
+    expect(bindPartnerMembership(active, 'couple-a', partner)).toMatchObject({
+      partnerUserId: 'partner-a',
+      partnerJoinedAt: partner.joinedAt,
+    });
+  });
+
+  it('A의 지연 응답을 connected B에 붙이지 않는다', () => {
+    const connectedB = { ...active, coupleId: 'couple-b' };
+    expect(bindPartnerMembership(connectedB, 'couple-a', partner)).toBe(connectedB);
+    expect(bindPartnerMembership(connectedB, 'couple-a', partner).partnerUserId).toBeUndefined();
+  });
+
+  it('같은 ID라도 pending/disconnected에는 붙이지 않는다', () => {
+    const pending = { ...active, connected: false, status: 'pending' as const };
+    expect(bindPartnerMembership(pending, 'couple-a', partner)).toBe(pending);
+    const disconnected = { ...active, connected: false, status: 'disconnected' as const };
+    expect(bindPartnerMembership(disconnected, 'couple-a', partner)).toBe(disconnected);
   });
 });
 

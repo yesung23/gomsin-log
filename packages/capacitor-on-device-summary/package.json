@@ -1,0 +1,14 @@
+{
+  "name": "@gomsinlog/capacitor-on-device-summary",
+  "version": "0.1.0",
+  "description": "iOS-only on-device rewriting of already-computed daily summary lines. No network, no storage, no logging.",
+  "private": true,
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "capacitor": {
+    "ios": { "src": "ios" }
+  },
+  "peerDependencies": { "@capacitor/core": "^7.0.0" },
+  "files": ["dist/", "ios/", "GomsinlogCapacitorOnDeviceSummary.podspec"]
+}

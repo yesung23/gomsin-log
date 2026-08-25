@@ -41,6 +41,7 @@
     "@dnd-kit/sortable": "^8.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@gomsinlog/capacitor-device-keys": "file:packages/capacitor-device-keys",
+    "@gomsinlog/capacitor-on-device-summary": "file:packages/capacitor-on-device-summary",
     "@supabase/supabase-js": "2.111.0",
     "@tailwindcss/vite": "^4.2.1",
     "lucide-react": "^0.575.0",

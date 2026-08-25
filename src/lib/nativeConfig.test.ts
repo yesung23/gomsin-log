@@ -689,10 +689,15 @@ describe('both platforms are installed and reproducible from the lockfile', () =
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
     // The count is what keeps the loop below from passing vacuously on a regex
-    // that stopped matching. Six since Gate 3 added CapacitorPushNotifications.
-    expect(pods.length).toBe(6);
+    // that stopped matching. Seven since the iOS-only on-device summary plugin
+    // was added (six after Gate 3 added CapacitorPushNotifications).
+    expect(pods.length).toBe(7);
+    const firstPartyPaths = [
+      '../../packages/capacitor-device-keys',
+      '../../packages/capacitor-on-device-summary',
+    ];
     for (const [, , path] of pods) {
-      expect(path.startsWith('../../node_modules/') || path === '../../packages/capacitor-device-keys').toBe(true);
+      expect(path.startsWith('../../node_modules/') || firstPartyPaths.includes(path)).toBe(true);
     }
     const lock = read('ios/App/Podfile.lock');
     for (const [, name] of pods) expect(lock, name).toContain(`${name}:`);

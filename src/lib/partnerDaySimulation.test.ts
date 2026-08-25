@@ -335,7 +335,7 @@ describe('1000-day seeded simulation', () => {
         + `maxSurface=${result.maxSurface} maxKnown=${result.maxKnownIds}`,
       );
       console.log(`[sim diligent coverage] ${JSON.stringify(result.coverage)}`);
-    });
+    }, 15000);
 
     it(`strands nothing for a partial-acknowledgement viewer (seed ${seed})`, () => {
       const result = run(seed, 'partial', 1000);

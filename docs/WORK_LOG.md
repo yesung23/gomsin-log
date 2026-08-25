@@ -114,6 +114,445 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-25 · OAuth callback canonical 구현·검증과 Sol Max HOLD
+
+#### PLAN POSITION
+- Phase: OAuth callback security hardening
+- Workstream: authentication/session security
+- Step: Opus 별도 worktree의 변경을 canonical repository에서 재구성·보완하고 fresh independent review 수행
+- Previous Gate: Opus 변경의 native token-pair 차단은 확인됐으나 queue/Toaster/web callback 검토가 미완료
+- This Gate: 로컬 구현·브라우저·테스트 완료, Sol Max 최종 판정 HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·수익화·저장 전략을 변경하지 않음
+- Engineering source checked: `CLAUDE.md`, `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, live branch/HEAD/worktree/origin-master
+- Latest relevant Work Log checked: `docs/WORK_LOG.md` 최신 OAuth/native 관련 기록
+- MASTER PLAN version / 기준일: V4 / 2026-08-25
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary; Gemini 3.7 Flash High bounded worker; GPT-5.6 Sol Max independent reviewer
+- Model: Codex orchestrator, `google-antigravity/gemini-3.7-flash` high, `main/gpt-5.6-sol` max
+- Role: implementation integrator / independent final security reviewer 분리
+- PR: 없음
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a`
+- Old HEAD: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a`
+- New/Reviewed HEAD: 동일 HEAD 위 uncommitted working-tree diff
+
+#### CHANGED / REVIEWED
+- file: `src/lib/deepLinks.ts`, `src/lib/deepLinks.test.ts`
+- function/component/migration: native OAuth callback handler와 deferred failure sink
+- what changed/reviewed: implicit `setSession` 제거, code-only exchange, route guard 유지, 직렬 queue와 bounded state, duplicate·throw·eviction negative tests
+- why: PKCE 검증 없는 token-pair session swapping과 callback queue 고착을 차단
+- file: `src/main.tsx`, `src/components/ThemedToaster.tsx`, `src/components/themedToasterActivation.test.tsx`
+- function/component/migration: cold-start OAuth failure delivery
+- what changed/reviewed: Sonner subscription 이후 두 번째 React commit에서 bounded failure sink 활성화
+- why: native cold start failure가 mount ordering 때문에 유실되지 않도록 함
+- file: `src/pages/AuthCallbackPage.tsx`, `src/pages/authCallbackPkceRace.test.tsx`
+- function/component/migration: web OAuth PKCE callback
+- what changed/reviewed: implicit token fallback 제거, static logging, throw isolation, StrictMode delayed `getSession` recovery
+- why: web에서도 token pair를 fail closed하고 spinner 고착·이중 exchange를 방지
+- file: `src/pages/OnboardingPage.tsx`, `src/lib/authErrorFromUrl.ts`, `src/lib/authErrorFromUrl.test.ts`
+- function/component/migration: root OAuth error logging contract
+- what changed/reviewed: raw provider code를 로그에 쓰지 않는 계약과 source guard
+- why: callback 밖의 실제 root landing path에서도 민감 auth metadata를 노출하지 않기 위함
+- file: `control-tower/reports/codex/2026-08-25_oauth-callback-canonical-implementation-verification_codex.md`
+- function/component/migration: Obsidian-readable implementation and verification report
+- what changed/reviewed: exact evidence, FAIL/BLOCKED/UNVERIFIED, Sol Max HOLD와 다음 gate 기록
+- why: 코드 존재·로컬 실행·원격/실기기 증거를 분리
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; `src/crypto` diff 없음
+- DB/migration semantics: 변경 없음; migration/remote Supabase 미적용
+- product semantics: 로그인 제품 흐름과 UI 디자인 변경 없음
+- Production: commit/push/PR/merge/Vercel deploy/OAuth console/remote Supabase mutation 없음
+
+#### VERIFICATION
+- command: focused Vitest 5 files
+- PASS / FAIL / UNVERIFIED: PASS — 5 files / 68 tests
+- what it actually proves: mocked native/web callback refusal, serialization, bounds, throw recovery, StrictMode lifecycle
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current TypeScript project graph compiles
+- command: 대상 ESLint `--max-warnings 0`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: scoped changed files lint clean
+- command: `LANG=en_US.UTF-8 npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,154 modules; existing large chunk warning
+- what it actually proves: production bundle can be generated in this local environment
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: FAIL — 232/233 test files, 3,323/3,326 tests passed; `partnerDaySimulation.test.ts` diligent seeds 20260819/7/991 timeout; chained build not executed
+- what it actually proves: OAuth focused tests and almost all suite pass, but repository verify gate is not green
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 58 migrations / 333 assertions
+- what it actually proves: throwaway DB actor/security harness; remote Supabase와 OAuth callback은 증명하지 않음
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 96 tests
+- what it actually proves: native static contract tests; simulator/physical device proof 아님
+- command: local in-app browser fake fragment token callback
+- PASS / FAIL / UNVERIFIED: PASS — token pair refusal UI와 2.5초 redirect 렌더 확인; fake token console 비노출
+- what it actually proves: localhost web failure path only; real provider/session success path 아님
+- command: `git diff --check`, untracked `--no-index --check`, forbidden native-path diff
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: whitespace clean, native project/package/Supabase/crypto 파일 미변경
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: FULL — authentication/session semantics changed
+- whether an earlier review is stale: 이전 Opus/Sol 판정은 현재 canonical diff의 fresh approval이 아님; 새 Sol Max review는 HOLD
+
+#### BLOCKERS
+- code: P1 missing `sb_flow_id` flow binding; P1 cancellable하지 않은 web timeout의 late-session race; P2 non-settling `getSession`/native exchange
+- environment: real provider, iOS/Android physical device, remote redirect allow-list UNVERIFIED
+- external/manual: parameterized redirect URL의 원격 Supabase allow-list 호환 proof 필요
+
+#### STOPPED AT
+- exact completed boundary: scoped uncommitted implementation, local browser/tests, Obsidian report, independent Sol Max HOLD; remote와 Git mutation 없음
+
+#### REMAINING
+- not completed: flow-correlation design, late-session-safe lifecycle, 관련 mutation tests, real provider/device/remote proof
+
+#### NEXT ACTION
+- next owner: auth/security implementer 후 separate Sol Max reviewer
+- tool/model: Sol High/Max 설계 검토 → bounded worker → Sol Max fresh independent review
+- 기준 SHA: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a` + 현재 scoped uncommitted diff
+- exact next task: `sb_flow_id` redirect/allow-list 계약과 late-session race를 먼저 해결하고 negative test 추가
+
+#### DO NOT ADVANCE UNTIL
+- missing/mismatched/stale callback이 다른 flow verifier를 소비하지 않음
+- timeout/retry 뒤 늦은 세션 설치가 불가능하거나 안전하게 소유권 검증됨
+- remote allow-list가 parameterized web/native callback을 허용한다는 증거 확보
+- focused/full required verification와 실기기 OAuth, fresh Sol Max review 완료
+
+#### PRODUCTION
+- NOT APPLIED — remote Supabase/Vercel/OAuth console 변경 없음; production behavior UNVERIFIED
+
+### 2026-08-25 · OAuth HOLD 코드 폐쇄와 fresh Sol Max 승인
+
+#### PLAN POSITION
+- Phase: OAuth callback security hardening / App Store release prerequisite
+- Workstream: authentication/session security
+- Step: 첫 Sol HOLD의 flow 결속·late-session·pending·listener/drop 결함을 최소 구현과 mutation proof로 폐쇄
+- Previous Gate: flow binding은 구현됐지만 response body 지연 P1과 listener/queue-full·raw log P3가 남아 CODE HOLD
+- This Gate: 로컬 OAuth dirty snapshot CODE APPROVE, 원격 allow-list·provider·실기기 때문에 RELEASE HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·AI 역할·수익화·저장 전략 변경 없음
+- Engineering source checked: `CLAUDE.md`, `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, live branch/HEAD/worktree/origin-master, installed Auth SDK 2.111 source, Supabase Dashboard read-only state
+- Latest relevant Work Log checked: 바로 앞 OAuth HOLD와 Search/M6 기록
+- MASTER PLAN version / 기준일: V4 / 2026-08-25
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary; Kiro CLI Claude Opus 5 bounded worker; Gemini 3.7 Flash High timeout worker; GPT-5.6 Sol Max independent final reviewer
+- Model: `claude-opus-5`, `google-antigravity/gemini-3.7-flash` high, `main/gpt-5.6-sol` max
+- Role: implementation / small deterministic test stabilization / independent security approval 분리
+- PR: 없음
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a`
+- Old HEAD: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a`
+- New HEAD / Reviewed HEAD: 동일 HEAD 위 current uncommitted dirty snapshot
+
+#### CHANGED / REVIEWED
+- file: `src/lib/oauthPkce.ts`, `src/lib/oauthPkce.test.ts`, `src/lib/supabase.ts`
+- function/component/migration: PKCE flow binding과 token transport
+- what changed/reviewed: SDK flow ID를 callback에 추가하고 explicit verifier slot에 결속; 15초 deadline이 response header와 body 전체 소비를 덮으며 abort 뒤 늦은 body 성공을 거부; OAuth 시작 raw exception log를 static message로 전환
+- why: forged/stale flow 혼동, 영구 pending, timeout 뒤 late-session, 민감 provider detail 로그를 막기 위함
+- file: `src/lib/deepLinks.ts`, `src/lib/deepLinks.test.ts`
+- function/component/migration: native callback queue와 listener lifecycle
+- what changed/reviewed: bounded serialized queue, duplicate guard, throw recovery, queue-full Browser close+failure report, listener 등록·해제 rejection 격리와 negative tests
+- why: callback 하나의 오류·고착·drop이 다음 로그인이나 사용자 복귀를 막지 않게 함
+- file: `src/pages/AuthCallbackPage.tsx`, `src/pages/authCallbackPkceRace.test.tsx`, `src/main.tsx`, `src/components/ThemedToaster.tsx`, `src/components/themedToasterActivation.test.tsx`, `src/lib/authErrorFromUrl.ts`, `src/pages/OnboardingPage.tsx`
+- function/component/migration: web callback·cold-start failure·로그 경계
+- what changed/reviewed: code-only explicit exchange, code path session bypass 금지, code-less session read timeout, lifecycle-safe failure delivery, static auth logs
+- why: web/native 모두 PKCE 없는 session 교체를 fail closed하고 실패 UI를 유실하지 않기 위함
+- file: `src/lib/partnerDaySimulation.test.ts`
+- function/component/migration: diligent 1,000-day simulation timeout
+- what changed/reviewed: seed·logic·assertions 불변, diligent test에만 15초 명시 timeout
+- why: 실제 실행시간 5.3~6.7초인 deterministic simulation이 기본 5초 test runner ceiling 때문에 전체 gate를 거짓 실패시키지 않도록 함
+- file: `control-tower/reports/codex/2026-08-25_oauth-callback-canonical-implementation-verification_codex.md`
+- function/component/migration: Obsidian-readable security evidence report
+- what changed/reviewed: local/SDK/remote/device 경계, exact commands, CODE APPROVE와 RELEASE HOLD 기록
+- why: 코드 존재·로컬 성공·원격 출시 가능성을 분리
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; `src/crypto` diff 없음
+- DB/migration semantics: 변경 없음; migration/remote Supabase 미적용
+- product semantics: 로그인 방식·화면 디자인·계정 데이터 의미 불변
+- Production: commit/push/PR/merge/Vercel deploy/OAuth console/Supabase remote mutation 없음
+
+#### VERIFICATION
+- command: focused OAuth Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 5 files / 88 tests
+- what it actually proves: flow binding, token refusal, header+body timeout, late success 거부, queue/listener/Browser/sink/StrictMode mocked behavior
+- command: Opus isolated negative mutations
+- PASS / FAIL / UNVERIFIED: PASS — body defense 제거 시 4 failures, queue/listener defense 제거 시 5 failures
+- what it actually proves: 새 tests가 방어의 실제 동작을 잡으며 정적 문자열만 검사하지 않음
+- command: 대상 ESLint `--max-warnings 0` + `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: scoped lint와 current TypeScript graph
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, 전체 lint, 234 files / 3,360 tests, build 2,155 modules
+- what it actually proves: current dirty snapshot의 전체 로컬 repository gate; 실제 provider/device/production은 아님
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 58 migrations / 333 actor assertions
+- what it actually proves: throwaway DB 권한 baseline; OAuth와 remote 적용은 아님
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 96 tests
+- what it actually proves: native 정적 계약; simulator/physical device proof 아님
+- command: fresh Sol Max read-only final review
+- PASS / FAIL / UNVERIFIED: PASS — P0/P1/P2/P3 NONE, CODE APPROVE
+- what it actually proves: current OAuth dirty snapshot의 독립 security review; scoped file 변경 시 stale
+- command: Supabase Dashboard URL Configuration read-only
+- PASS / FAIL / UNVERIFIED: BLOCKED — exact 4 redirect entries, `sb_flow_id` query wildcard 없음
+- what it actually proves: 원격 설정을 바꾸지 않은 현재 allow-list에서는 parameterized callback 성공이 아직 증명되지 않음
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: FULL — authentication/session semantics 변경
+- whether an earlier review is stale: 첫 HOLD는 이 delta로 폐쇄됐고 fresh Sol Max가 current snapshot을 APPROVE; 이후 OAuth scoped file 변경 시 다시 stale
+
+#### BLOCKERS
+- code: current reviewed OAuth snapshot에 P0~P3 finding 없음
+- environment: 실제 Google/Apple/email provider와 iOS/Android physical device 미검증
+- external/manual: remote Supabase parameterized redirect allow-list 승인·적용·rollback과 실제 성공 경로 필요
+
+#### STOPPED AT
+- exact completed boundary: OAuth local code blockers CLOSED, full verify PASS, Sol Max CODE APPROVE; remote와 Git mutation 없음
+
+#### REMAINING
+- not completed: remote allow-list, provider account success/cancel/error, native cold/warm return, actual Custom Tab close, App Store release validation
+
+#### NEXT ACTION
+- next owner: Kiro Claude Opus 5 release architect, then Gemini 3.7 Flash High bounded implementation, security delta는 Sol Max
+- tool/model: Kiro Opus 5 → Gemini 3.7 Flash High → Sol High/Max where security-sensitive
+- 기준 SHA: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a` + current reviewed dirty snapshot
+- exact next task: App Store readiness를 native metadata/privacy/runtime/UI evidence로 감사하고 remote/device BLOCKED를 분리한 최소 수정 순서 작성
+
+#### DO NOT ADVANCE UNTIL
+- OAuth scoped file이 바뀌면 fresh Sol review 재수행
+- remote allow-list 변경은 necessity·exact entry·rollback·실제 provider test 계획 승인 후에만 수행
+- 실기기·원격 미검증을 PASS로 기록하지 않음
+
+#### PRODUCTION
+- NOT APPLIED — remote Supabase/Vercel/OAuth provider/App Store/Git 상태 변경 없음
+
+### 2026-08-25 · App Store 준비도·iOS 실렌더·인증 로그 DELTA 폐쇄
+
+#### PLAN POSITION
+- Phase: M5 release readiness / OAuth final delta
+- Workstream: iOS packaging, accessibility, authentication logging
+- Step: Kiro Opus 감사 → Gemini bounded accessibility fix → Sol logging fix/review → final local/native verification
+- Previous Gate: OAuth code APPROVE이나 remote/device HOLD; iOS generated public stale; Search disclosure aria-controls 무효; email catch raw object log P3
+- This Gate: local code APPROVE, iOS simulator build/render PASS, remote/provider/physical device 때문에 RELEASE HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — AI 역할/M6 경계 확인
+- Engineering source checked: `CLAUDE.md`, `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, release/security procedures
+- Current-state checked: `docs/CURRENT_STATE.md`, live Git, iOS project, SDK/toolchain, final simulator
+- Latest relevant Work Log checked: OAuth HOLD closure와 Search/M6 entry
+- MASTER PLAN version / 기준일: V4 / 2026-08-25
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary; Kiro CLI; multi-agent Gemini/Sol; Xcode Simulator
+- Model: Kiro `claude-opus-5`; Gemini 3.7 Flash High; GPT-5.6 Sol High/Max
+- Role: architect/reviewer, bounded implementation, security implementation, independent delta review, primary integration
+- PR: 없음
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a`
+- Old HEAD: 동일
+- New HEAD / Reviewed HEAD: 동일 HEAD 위 current uncommitted dirty snapshot
+
+#### CHANGED / REVIEWED
+- file: `src/features/search/SearchPage.tsx`, `src/features/search/searchPage.test.tsx`
+- function/component/migration: service tier disclosure accessibility
+- what changed/reviewed: collapsed 상태에서도 aria-controls 대상 wrapper를 유지하고 내부 tier rail만 조건 렌더; 회귀 테스트 추가
+- why: 스크린리더 참조 무효를 없애면서 현재 rank/EXP와 progressive disclosure를 보존
+- file: `src/lib/supabase.ts`, `src/lib/supabaseAuthLogging.test.ts`
+- function/component/migration: `SupabaseAuthRepository.signInWithEmail` throw logging
+- what changed/reviewed: raw exception object를 정적 한 인자 log로 교체; email/token/code/nested detail runtime rejection canary 추가
+- why: 잠재 민감 auth metadata가 WebView/browser console에 노출되는 P3를 닫기 위함
+- file: `control-tower/reports/codex/2026-08-25_app-store-readiness-korean-ios-validation_codex.md`
+- function/component/migration: Obsidian release evidence
+- what changed/reviewed: Kiro findings, Sol delta, final tests, iOS build/render, external gates 기록
+- why: repository proof와 remote/provider/device/App Store proof를 분리
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음; remote 미적용
+- product semantics: 관계 점수·새 AI·새 로그인 방식·새 DB 모델 없음
+- Production: commit/push/PR/merge/deploy/Supabase/provider/App Store Connect mutation 없음
+
+#### VERIFICATION
+- command: Search focused Vitest / OAuth+logging focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 21 tests / 6 files 89 tests
+- what it actually proves: disclosure DOM contract와 mocked auth callback/logging 방어
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — 235 files / 3,361 tests + production build
+- what it actually proves: current dirty snapshot local type/lint/unit/build gate
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 58 migrations / 333 actor assertions
+- what it actually proves: throwaway DB security baseline, remote state 아님
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 96 tests
+- what it actually proves: tracked native static contract
+- command: final `npx cap sync ios` + unsigned `xcodebuild`
+- PASS / FAIL / UNVERIFIED: PASS — final dist sync, `BUILD SUCCEEDED`
+- what it actually proves: local iOS simulator bundle compilation, signing/physical device 아님
+- command: `simctl install`, `simctl launch`, screenshot
+- PASS / FAIL / UNVERIFIED: PASS — iPhone 17 Pro 온보딩 실렌더
+- what it actually proves: first-run native rendering only; authenticated paths/provider/push 아님
+- command: fresh Sol Max logging DELTA review
+- PASS / FAIL / UNVERIFIED: PASS — P0~P3 NONE, raw-log P3 CLOSED, CODE APPROVE
+- what it actually proves: newest auth logging delta only; release remote gates 별도
+- command: first background full test and first Xcode attempt
+- PASS / FAIL / UNVERIFIED: FAIL/BLOCKED — 5초 simulation timeout 1건; 사용자 중단으로 BUILD INTERRUPTED
+- what it actually proves: 중간 시도를 숨기지 않음; final full verify/build PASS가 이후 evidence
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — auth/session semantics 불변, logging security와 Search accessibility만 변경
+- whether an earlier review is stale: email logging 범위의 이전 판정은 fresh Sol Max DELTA로 갱신; OAuth PKCE 전체 의미는 불변
+
+#### BLOCKERS
+- code: current scoped snapshot에 P0~P3 finding 없음
+- environment: real provider와 iOS/Android physical device 미검증
+- external/manual: remote parameterized redirect allow-list, App Store Connect/signing/privacy/legal URL gate
+
+#### STOPPED AT
+- exact completed boundary: local code APPROVE, final full verify/phase0/native/Xcode/simulator PASS, remote·Git mutation 없음
+
+#### REMAINING
+- not completed: remote allow-list, Google/Apple/email real flow, native cold/warm return, APNs, signing/archive/TestFlight, authenticated iOS core paths
+
+#### NEXT ACTION
+- next owner: approved release operator + Kiro Opus release architect + Sol reviewer
+- tool/model: Kiro Opus for release sequence; Sol for allow-list/auth security; Codex for evidence integration
+- 기준 SHA: current dirty snapshot, commit 후에는 새 exact SHA
+- exact next task: immutable review SHA를 만든 뒤 remote allow-list 변경 승인·rollback과 real provider/device validation
+
+#### DO NOT ADVANCE UNTIL
+- remote allow-list 변경이 necessity/exact entries/rollback/Sol review를 통과
+- Sign in with Apple 포함 real provider success/cancel/error 확인
+- physical iOS/Android cold/warm callback과 App Store metadata/legal/privacy gate 완료
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-25 · 찾기 탭 복무 EXP 단계 공개와 온디바이스 하루 요약 설계
+
+#### PLAN POSITION
+- Phase: V4 찾기 탭 정보 위계 보완 / M6 온디바이스 AI 사전 설계
+- Workstream: product UI and privacy-preserving AI
+- Step: 복무 EXP의 실시간성은 유지하고 전체 단계만 progressive disclosure로 전환; 실제 모델 구현 전 입력·출력·fallback 계약 확정
+- Previous Gate: 전체 7단계가 항상 보여 현재 단계와 실시간 EXP의 초점이 약했음; 현재 neural on-device model은 없음
+- This Gate: 로컬 구현·focused/full 검증·실제 브라우저·독립 Gemini 검토와 설계 문서 완료
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7 — 사실 요약 허용, 관계 점수·숨은 감정 분석·자동 중요 기억 선택 금지, M6 on-device 우선
+- Engineering source checked: `CLAUDE.md`, `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/feature-build.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, live branch/HEAD/worktree/origin-master, current Search implementation
+- Latest relevant Work Log checked: 2026-08-24 찾기 탭 복무 정보/브라우저 검증 기록과 2026-08-25 OAuth 기록
+- MASTER PLAN version / 기준일: V4 / 2026-08-25
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary; Gemini 3.7 Flash High read-only exploration and independent verification
+- Model: Codex orchestrator, `google-antigravity/gemini-3.7-flash` high
+- Role: scoped implementation / privacy-product design / independent verifier
+- PR: 없음
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a`
+- Old HEAD: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a`
+- New/Reviewed HEAD: 동일 HEAD 위 uncommitted working-tree diff
+
+#### CHANGED / REVIEWED
+- file: `src/features/search/SearchPage.tsx`
+- function/component/migration: `SearchPage` 복무 단계 레일
+- what changed/reviewed: 현재 단계·다음 단계·누적/오늘 EXP는 기본 표시하고, 전체 7단계 레일은 `전체 단계` 44px 토글을 눌러야 렌더하도록 변경
+- why: 게임형 진행감의 핵심인 현재 EXP에 초점을 두고 전체 등급은 필요할 때만 확인하게 함
+- file: `src/features/search/searchPage.test.tsx`
+- function/component/migration: 복무 EXP/단계 disclosure 회귀 테스트
+- what changed/reviewed: 기본 숨김, ARIA·44px, 펼침/접힘, 실제 1초 경과 후 EXP +1을 검증
+- why: 시각적 문구가 아니라 실제 ticker와 disclosure 동작을 고정
+- file: `docs/CURRENT_STATE.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- function/component/migration: 현재 구현·제품 backlog 사실 기록
+- what changed/reviewed: 전체 단계가 기본 숨김이고 버튼으로만 열린다는 현재 현실을 반영
+- why: 문서와 코드의 불일치 방지
+- file: `control-tower/reports/codex/2026-08-25_service-exp-and-on-device-daily-summary_codex.md`
+- function/component/migration: Obsidian-readable 구현·M6 설계 보고서
+- what changed/reviewed: 현재 neural model 미구현 사실, active-partner/public/readable/same-day 입력 allowlist, private·health·inference hard exclude, 각 bullet의 exact `sourceRecordId`, 비저장·비네트워크, Apple Foundation Models availability/locale와 rules fallback 계약
+- why: 모델이 없는 상태를 AI 구현으로 오인하지 않으면서 향후 Xcode/Capacitor 구현의 개인정보 경계를 먼저 고정
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 스키마·migration·RLS 변경 없음
+- product semantics: 복무 단계 계산식·레벨 경계·날짜/기록 검색·연락 시간·D-day 흐름 변경 없음; 관계 점수나 자동 중요 기억 선택 추가 없음
+- Production: commit/push/PR/merge/Vercel deploy/remote Supabase/native project 변경 없음
+
+#### VERIFICATION
+- command: focused Vitest `searchPage.test.tsx`, `searchPageRenders.test.tsx`, `serviceLevel.test.ts`, `milestones.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 60 tests
+- what it actually proves: 단계 계산·현재/다음 단계·기본 숨김·토글과 관련 Search 렌더 경로
+- command: additional `searchPage.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 1 file / 21 tests
+- what it actually proves: fake timer가 아닌 컴포넌트의 실제 1초 interval 경로로 표시 EXP가 1 증가
+- command: 대상 ESLint `--max-warnings 0` + `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: scoped lint와 현재 TypeScript graph
+- command: `LANG=en_US.UTF-8 npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,154 modules; 기존 500kB 이상 chunk warning만 존재
+- what it actually proves: 현재 Search/doc diff를 포함한 로컬 production bundle 생성
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — 최종 재실행에서 234/234 files, 3,360/3,360 tests, build 2,155 modules; diligent simulation은 assertions·seed·logic 불변인 채 15초 명시 timeout으로 실제 완주
+- what it actually proves: current Search/OAuth/PartnerDay dirty snapshot의 전체 로컬 gate; remote·실기기·production은 아님
+- command: authenticated local in-app browser `/search`, 390x844 visual inspection
+- PASS / FAIL / UNVERIFIED: PASS — 실제 군화 입대 예정 데이터에서 기본 접힘, `aria-expanded` 전환, 7단계 펼침/재접힘, 기존 dark/coral paper tone 확인
+- what it actually proves: 실제 렌더·클릭·모바일 viewport; 해당 계정은 입대 전이어서 활동 복무 중 초 단위 숫자 이동의 시각 증거는 아님
+- command: Gemini 3.7 Flash High read-only independent review + `npx vitest run src/features/search/searchPage.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — findings 없음, 21/21
+- what it actually proves: scoped diff와 AI 문서 경계의 독립 재검토; real device model availability는 증명하지 않음
+
+#### REVIEW IMPACT
+- NONE / DELTA / FULL: DELTA — Search presentation disclosure와 테스트/문서만 변경; service calculation·DB·privacy enforcement semantics는 변경하지 않음
+- whether an earlier review is stale: 기존 단계 계산 검증은 유지되며 새 disclosure 경로를 focused test와 독립 review로 추가 검증함; OAuth code HOLD는 뒤의 fresh Sol Max continuation에서 CODE APPROVE로 폐쇄됐지만 RELEASE HOLD는 유지
+
+#### BLOCKERS
+- code: Search 범위 blocker 없음; 전체 repository gate PASS
+- environment: Apple Intelligence 지원 실제 기기와 native Foundation Models runtime이 없어 model availability/locale/quality/latency UNVERIFIED
+- external/manual: M6 native plugin 구현 전 실제 기기 matrix와 privacy/security review 필요
+
+#### STOPPED AT
+- exact completed boundary: Search UI·테스트·실제 브라우저·문서와 M6 privacy/output contract; 실제 neural model/native plugin은 의도적으로 미구현
+
+#### REMAINING
+- not completed: Capacitor Swift bridge, Foundation Models guided generation, JS source-id allowlist validator, unsupported-device rules fallback 연결, 실제 기기 품질·성능·개인정보 검증
+
+#### NEXT ACTION
+- next owner: M6 native implementation owner 후 independent privacy/security verifier
+- tool/model: Swift/Capacitor worker + Sol High privacy review; 최종 보안 승인은 separate Sol Max
+- 기준 SHA: `f02e93a26e9b6d73073cd42f6247a8ab30f2971a` + 현재 scoped uncommitted diff
+- exact next task: 보고서의 입력 allowlist와 exact-source output contract를 먼저 테스트로 고정한 뒤 최소 Swift bridge prototype을 실제 지원 iPhone에서 검증
+
+#### DO NOT ADVANCE UNTIL
+- private/unreadable/draft/deleted/cycle-health 데이터가 모델 입력 전에 코드로 배제됨
+- 모든 생성 bullet의 `sourceRecordId`가 허용 입력 집합의 정확한 record로 검증됨
+- unsupported/disabled/not-ready/unsupported-locale에서 규칙 기반 fallback이 작동함
+- 요약 plaintext가 서버·DB·analytics·logs에 저장/전송되지 않음
+- 실제 지원 기기에서 latency, locale, cancellation, memory pressure와 output quality를 검증함
+
+#### PRODUCTION
+- NOT APPLIED — Search와 AI 설계 모두 로컬 uncommitted; remote/production/native runtime UNVERIFIED
+
 ### 2026-08-24 · Codex · PR #89 릴리스 게이트 및 운영 배포 경계 확인
 
 #### PLAN POSITION
@@ -6434,23 +6873,128 @@ e2e · Postgres 계약 · Deno).
 #### BLOCKERS
 - code: no P0/P1/P2 blocker found by the available exact-SHA gates
 - environment: BrowserStack physical-device authentication remains blocked in its separate report
-- external/manual: remote Supabase 060 application and authenticated two-account production refresh remain UNVERIFIED
+- external/manual: remote Supabase 060/061 application and authenticated two-account production refresh remain UNVERIFIED
 
 #### STOPPED AT
 - exact completed boundary: `b2ca94f` pushed to `origin/master`, PR #89 shown as MERGED, production `/us` returned HTTP 200
 
 #### REMAINING
-- not completed: remote migration 060 application and actor probes; authenticated partner username save → refresh → re-login production proof; BrowserStack device proof
+- not completed: remote migration 060 and 061 sequential application and actor probes; authenticated partner username save → refresh → re-login production proof; BrowserStack device proof
 
 #### NEXT ACTION
 - next owner: approved Supabase release operator
 - tool/model: Supabase migration gate, then authenticated browser verifier
 - 기준 SHA: `b2ca94f2e185c694a3d930bde06f8432e1f66c01`
-- exact next task: apply only migration 060 after catalog/backup review, reload schema, and run active-partner/unrelated/anon/disconnected probes
+- exact next task: verify backup and live catalog before applying (remote has profiles identity columns / highlight tables / set_partner_username function, but lacks get_partner_profile_with_username function; 057-059 objects exist, 060 absent, migration ledger empty; remote changes remain NOT APPLIED). Apply 060, then 061 sequentially using exact SQL after review, reload PostgREST schema (`NOTIFY pgrst, 'reload schema'`), and verify the active-partner/unrelated/anon/disconnected actor matrix. Prohibit full history replay via `supabase db push`. Next migration number is 062.
 
 #### DO NOT ADVANCE UNTIL
-- remote migration 060 is applied through the approved gate
+- remote migrations 060 and 061 are applied in sequence through the approved gate
 - authenticated two-account save/refresh/re-login evidence is captured
 
 #### PRODUCTION
 - APPLIED for master push and Vercel HTTP 200; Supabase remains NOT APPLIED / UNVERIFIED
+
+### 2026-08-25 · Codex/Kiro/Flash/Sol · iPhone 온디바이스 요약과 App Store 출시 준비
+
+#### PLAN POSITION
+- Phase: App Store release candidate preparation / M6 최소 실증 pull-forward
+- Workstream: iOS on-device AI, release reliability, DB security gate
+- Step: default-off Foundation Models adapter 구현, 로컬 검증, 독립 검토, 출시 계획 고정
+- Previous Gate: OAuth PKCE hardening, 복무 EXP disclosure, migration 061 local security implementation
+- This Gate: local implementation and simulator validation complete; remote/device gates remain closed
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, user-approved iPhone-first request
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §§7–8, §13
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/skills/release-validation.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-24 release repair/master promotion entry
+- MASTER PLAN version / 기준일: V4 + Business Memory Roadmap V1 / 2026-08-25
+- Does this task conflict with canonical direction? NO — 제품 오너가 M6 최소 구현을 명시적으로 앞당겼고, AI 역할은 문장 다듬기 보조·default-off이며 규칙 fallback과 플랫폼 중립 공유 경로를 유지한다
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator; Kiro CLI; multi-agent Gemini/Sol/Reviewer
+- Model: Kiro `claude-opus-5` max implementer; Gemini 3.7 Flash High docs worker; Sol architect security/privacy reviewers; Codex integrator
+- Role: architecture implementation, integration, independent verification and release planning
+- PR: none for this local branch delta
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `2bca80244ec7f6e01fd1d2aa46f109383bf77f88`
+- Old HEAD: `2bca80244ec7f6e01fd1d2aa46f109383bf77f88`
+- New HEAD / Reviewed HEAD: implementation `bfc7423fe77d78bd3fc52896f73968e4d3d541f6`; Unicode follow-up `483e085`; final docs/review commit pending
+
+#### CHANGED / REVIEWED
+- file: `packages/capacitor-on-device-summary/**`, `ios/App/Podfile*`
+- function/component/migration: iOS Foundation Models Capacitor adapter
+- what changed/reviewed: iOS 26 availability, Korean locale, fresh session, guided output, actor cancellation, content-free error boundary
+- why: already-authorised deterministic daily lines만 기기 안에서 다듬고 서버 AI와 식별자 전송을 피하기 위해
+- file: `src/lib/dailySummary/**`, `src/features/story/StoryRoute.tsx`
+- function/component/migration: corpus, deterministic fallback, native gate, verifier, exact record jump
+- what changed/reviewed: active partner/today/public/readable/persisted 최대 5줄, `{index,text}` payload, count/order/index/length fail-closed, one total timeout, stale/cancel handling, grapheme-safe limit
+- why: AI가 중요도를 고르거나 private/health data를 받지 못하고 실패해도 기존 화면이 항상 옳게 유지되도록
+- file: `scripts/phase0/storage-authz-harness.mjs`, `supabase/migrations/README.md`
+- function/component/migration: migration 061 evidence wording and ledger
+- what changed/reviewed: four mutations의 실제 observable effect를 구분하고 060→061/next 062/remote NOT APPLIED를 기록
+- why: NULL/self-exclusion contract mutation을 forbidden-row exposure로 과장하지 않기 위해
+- file: `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, V4/current/roadmap/native guide/report
+- function/component/migration: Obsidian-compatible App Store release plan and current reality
+- what changed/reviewed: iPhone-first, Android web/PWA, no active Google Play gate, no implemented iCloud, physical/remote/TestFlight gates
+- why: code existence와 실제 출시 준비를 분리하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: migration 061 SQL unchanged; harness labels/docs only after implementation commit
+- product semantics: AI 중요 기억 선정·관계/감정/건강 추론 없음; Android web/PWA 유지
+- Production: Supabase SQL/Auth, Vercel deploy/env, App Store Connect, TestFlight, provider console 모두 미변경
+
+#### VERIFICATION
+- command: focused daily summary/story/native Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 9 files / 185 tests; Unicode/total-budget follow-up 2 files / 31 tests PASS
+- what it actually proves: deterministic-first UI, corpus exclusion, bridge shape, timeout/cancel/stale response, exact source jump, Unicode boundary
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, full lint, 243 files / 3470 tests, build 2161 modules
+- what it actually proves: repository-wide local web/type/lint/test/build regression only
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17 fresh chain 59 migrations / 344 assertions, twice after evidence wording correction
+- what it actually proves: local actor/RLS/function and mutation contracts; not remote Supabase
+- command: unsigned iOS Simulator `xcodebuild`
+- PASS / FAIL / UNVERIFIED: PASS — `BUILD SUCCEEDED`, Xcode 26.6 / SDK 26.5
+- what it actually proves: CocoaPods/Swift/Foundation Models symbol compile and link; not signed/physical model runtime
+- command: native permission/privacy focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 87 tests
+- what it actually proves: current no-microphone-permission gate, privacy manifest scan, legacy audio playback declaration consistency
+- command: physical iPhone Foundation Models and OAuth
+- PASS / FAIL / UNVERIFIED: BLOCKED — attached iPhone offline; Apple provider disabled; query-aware redirect not configured/verified
+- what it actually proves: nothing about actual model quality or OAuth runtime
+
+#### REVIEW IMPACT
+- FULL — on-device privacy boundary and migration 061 have independent reviews; exact final docs/delta commit still needs freshness check
+
+#### BLOCKERS
+- code: Reviewer found P2 UTF-16 split at `bfc7423`; fixed in `483e085`, delta re-review pending
+- environment: eligible physical iPhone offline; Vercel CLI unauthenticated; signing/TestFlight unavailable in this gate
+- external/manual: Apple provider disabled; native query-aware redirect pending; remote 060/061 not applied; production support email/env unverified
+
+#### STOPPED AT
+- exact completed boundary: local code commits, full verify, phase0, simulator build, docs and release plan; before remote Supabase/Auth/Vercel/TestFlight mutation
+
+#### REMAINING
+- fresh independent verdict for `483e085` and final docs/evidence delta
+- remote backup/catalog then exact 060→061, PostgREST reload, real actor matrix
+- Apple provider/redirect setup and actual iPhone PKCE
+- physical Foundation Models Korean/offline/performance gate
+- exact production deploy, two-account smoke, signed archive/TestFlight, App Store metadata
+
+#### NEXT ACTION
+- next owner: Sol independent delta reviewer, then approved production operator
+- tool/model: Sol security review → Supabase/Auth gate → physical iPhone/TestFlight verifier
+- 기준 SHA: `483e085` plus final docs/evidence commit
+- exact next task: close independent review, then obtain action-time confirmation before remote Auth/DB mutations
+
+#### DO NOT ADVANCE UNTIL
+- no open P0/P1/P2 code finding remains on exact final SHA
+- Supabase backup/catalog and rollback are confirmed immediately before SQL
+- physical iPhone and Apple login are available for runtime verification
+
+#### PRODUCTION
+- NOT APPLIED — no Supabase, Auth provider, redirect, Vercel, TestFlight, App Store Connect, push, merge, or deploy mutation

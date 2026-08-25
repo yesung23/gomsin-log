@@ -3307,7 +3307,7 @@ const projectionMigration = readFileSync(
   'utf8',
 );
 
-function proveProjectionMutation({ label, find, replace, probe }) {
+function proveProjectionMutation({ label, find, replace, probe, observedEffect }) {
   const occurrences = projectionMigration.split(find).length - 1;
   if (!check(occurrences === 1, `061 mutation "${label}" matches exactly one predicate`)) return;
 
@@ -3317,7 +3317,7 @@ function proveProjectionMutation({ label, find, replace, probe }) {
     return;
   }
 
-  check(probe(), `061 mutation "${label}" lets the forbidden projection through`);
+  check(probe(), `061 mutation "${label}" ${observedEffect}`);
 
   const restored = psqlScript(projectionMigration);
   if (!restored.ok) {
@@ -3329,6 +3329,7 @@ proveProjectionMutation({
   label: 'NULL actor guard',
   find: '  IF v_uid IS NULL THEN',
   replace: '  IF false THEN',
+  observedEffect: 'turns a NULL-subject invocation into a successful empty result',
   probe: () => {
     const result = asAuthenticatedWithoutSubject(
       `SELECT count(*) FROM public.get_partner_profile_with_username()`,
@@ -3343,6 +3344,7 @@ proveProjectionMutation({
   label: 'active target membership',
   find: "  WHERE partner_cm.status = 'active'",
   replace: '  WHERE true',
+  observedEffect: 'returns the disconnected target row',
   probe: () => {
     const result = asUser(A, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
     return result.ok && result.stdout.trim() === '1';
@@ -3352,6 +3354,7 @@ proveProjectionMutation({
   label: 'active caller membership',
   find: "        AND caller_cm.status = 'active'",
   replace: '        AND true',
+  observedEffect: 'lets the former partner read through stale membership',
   probe: () => {
     const result = asUser(B, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
     return result.ok && result.stdout.trim() === '1';
@@ -3364,6 +3367,7 @@ proveProjectionMutation({
   label: 'other-member exclusion',
   find: '    AND p.id <> v_uid;',
   replace: '    AND true;',
+  observedEffect: 'returns the caller profile alongside the partner row',
   probe: () => {
     const result = asUser(A, `SELECT count(*) FROM public.get_partner_profile_with_username()`);
     return result.ok && result.stdout.trim() === '2';

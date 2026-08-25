@@ -65,7 +65,7 @@
 		  OtherUserContent   diary text, one-line records, schedule and trip
 		                     notes, confirmed emotion tags
 		  PhotosorVideos     record attachments in Supabase Storage
-		  AudioData          voice records captured by MediaRecorder
+		  AudioData          legacy voice attachments remain playable; new capture/upload is gated
 		  Health             menstrual-cycle entries and settings
 		                     (supabase/migrations/004_create_cycle_tables.sql);
 		                     raw cycle rows are owner-only and are never shared

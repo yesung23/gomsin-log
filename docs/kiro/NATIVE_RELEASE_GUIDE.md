@@ -127,7 +127,7 @@ not expected to match each other.
 | `applicationId` | `app.gomsinlog` | Immutable after the first Play release. |
 | Label | `곰신로그` (`app_name`, `title_activity_main`) | Korean-only product. |
 | Deep link | one VIEW filter, `scheme=gomsinlog` `host=auth` `path=/callback` | Exact-match path. A scheme-only filter would claim every `gomsinlog://` URL from any app or web page and hand it to the OAuth token exchange. |
-| Permissions | `INTERNET`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` | See below. |
+| Permissions | `INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` | `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS` are deliberately undeclared while voice recording/upload is inactive until P6. See below. |
 | `android:exported` | explicit on every component | Required from API 31, and explicit beats inherited. |
 | `allowBackup` | `false`, plus `backup_rules.xml` and `data_extraction_rules.xml` excluding everything from cloud backup AND device transfer | A phone backup or a device-to-device transfer must not be a plaintext copy of a private diary. Cost: moving phones means signing in again and re-syncing from Supabase. |
 | Network security | `usesCleartextTraffic="false"`, `network_security_config.xml` with `<certificates src="system" />` only | Everything is https/wss. Omitting the user store means an MDM- or user-installed root cannot terminate TLS for this app. Cost: debugging traffic with mitmproxy needs a temporary debug-only override. |
@@ -137,31 +137,23 @@ not expected to match each other.
 
 ### Microphone (audit item C-2)
 
-`src/components/widgets/TodayLogWidget.tsx` records voice notes with the **Web**
-`getUserMedia` + `MediaRecorder` APIs, not a Capacitor plugin. Inside a WebView
-that surfaces as `WebChromeClient.onPermissionRequest` with
-`android.webkit.resource.AUDIO_CAPTURE`. Capacitor implements that callback and
-requests both `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS` before calling
-`request.grant()`:
+Voice recording and voice note upload in the composer are currently **inactive**
+until P6 (photo-only upload gate). Existing voice attachment playback and past
+audio records remain supported, but no code calls `getUserMedia({ audio: true })`
+in the active composer path.
 
-> `node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/BridgeWebChromeClient.java`
-> lines 102–124.
+An unused microphone permission in the store binary is a review and privacy audit
+flag. Therefore, `RECORD_AUDIO` and `MODIFY_AUDIO_SETTINGS` are deliberately
+**not declared** in `AndroidManifest.xml`, and `NSMicrophoneUsageDescription` is
+**deliberately absent** in `Info.plist` until P6 re-admits voice recording.
 
-An undeclared runtime permission is denied without ever prompting, so both must
-be in the manifest or recording fails silently. On iOS the same call reaches
-`webView(_:requestMediaCapturePermissionFor:initiatedByFrame:type:decisionHandler:)`,
-which Capacitor grants
-(`node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift`,
-the `requestMediaCapturePermissionFor` override), but the OS still requires
-`NSMicrophoneUsageDescription` or the process is terminated.
+When voice recording is re-admitted at P6 using Web `getUserMedia` +
+`MediaRecorder`, Capacitor routes that through `WebChromeClient.onPermissionRequest`
+(`AUDIO_CAPTURE`) on Android and `requestMediaCapturePermissionFor` on iOS, which
+will require restoring the permissions.
 
-The user-facing half lives in `src/lib/nativePermissions.ts`:
-
-* `MICROPHONE_RATIONALE` is shown in the composer before the first recording, so
-  the reason is on screen before the OS prompt.
-* `microphoneDeniedMessage()` no longer says "브라우저 설정에서 허용해 주세요" on
-  native, where there is no browser settings screen. It names the phone's
-  settings and the app instead.
+The user-facing strings in `src/lib/nativePermissions.ts` (`MICROPHONE_RATIONALE`
+and `microphoneDeniedMessage()`) remain parked for that future release.
 
 ### Camera (audit item H-2)
 
@@ -216,7 +208,7 @@ GATE** — no emulator is available here (`/dev/kvm` is absent).
 | `PRODUCT_BUNDLE_IDENTIFIER` | `app.gomsinlog` | Same id as Play; immutable. |
 | `CFBundleDisplayName` | `곰신로그` | Literal UTF-8 in a file declaring `encoding="UTF-8"`. Not XML entities, not transliterated. `CFBundleDevelopmentRegion` is `ko`. |
 | `CFBundleURLTypes` | one entry, scheme `gomsinlog`, `CFBundleURLName` `app.gomsinlog.auth`, `LSHandlerRank` `Owner` | iOS cannot filter a custom scheme by host or path, so `isNativeAuthCallbackUrl()` in `src/lib/platform.ts` is what makes iOS behave like the Android intent-filter. Without it any app could hand an arbitrary `gomsinlog://` URL to the token exchange. |
-| `NSMicrophoneUsageDescription` | Korean, specific | See C-2 above. |
+| `NSMicrophoneUsageDescription` | **absent** | Voice recording/upload is inactive until P6; undeclared to avoid unused permission review flags. See C-2 above. |
 | `NSCameraUsageDescription` | Korean, specific | Required by the in-process capture UI that `capture="environment"` triggers. See H-2. |
 | `NSPhotoLibraryUsageDescription` | **absent** | The gallery path goes through the out-of-process PHPicker / UIDocumentPicker, which returns only the chosen file and needs no library authorisation. No code reads or writes the photo library. |
 | App Transport Security | `NSAppTransportSecurity` **absent** | Omission is the secure default: TLS 1.2+, forward secrecy, no arbitrary loads. Supabase is https/wss only. An empty dictionary would just invite someone to relax it. |
@@ -322,10 +314,10 @@ dimensions and colour type, including that the 1024 App Store icon has no alpha.
 | Android JVM config tests | `./gradlew :app:testDebugUnitTest` | PASS locally (SDK provisioned by hand) and in CI |
 | Android lint | `./gradlew :app:lintDebug` | PASS |
 | Android compile + bundle | `./gradlew :app:assembleDebug :app:bundleDebug` | PASS (debug only; release is unsigned by design) |
-| iOS compile | macOS CI job, `xcodebuild -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO` | **BLOCKED locally** — the dev environment is Linux. The macOS CI job is the only iOS build proof. |
-| CocoaPods resolution | macOS CI job, `pod install --deployment` | **BLOCKED locally** — CocoaPods is not installed and cannot run on this host. |
+| iOS compile | macOS local + CI, `xcodebuild -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO` | **LOCAL PASS 2026-08-25** with Xcode 26.6 / iOS Simulator SDK 26.5, including the Foundation Models plugin. Signed archive and CI remain separate gates. |
+| CocoaPods resolution | `Podfile.lock` + simulator build | **LOCAL PASS 2026-08-25** — the locked pods, including both first-party Capacitor plugins, resolved and linked. Clean CI resolution remains a release gate. |
 | Deep-link round trip on a real device | manual | **DEVICE GATE** |
-| Microphone prompt and denial copy on device | manual | **DEVICE GATE** |
+| Microphone prompt and denial copy on device | manual | **DEVICE GATE** (parked for P6 voice) |
 | File picker / camera launch from a real tap | manual | **DEVICE GATE** — no `/dev/kvm`, so no emulator either. |
 | `NSFileProtectionComplete` behaviour while locked | manual, signed build | **DEVICE GATE** — simulator builds with `CODE_SIGNING_ALLOWED=NO` ignore entitlements. |
 | Backup / device-transfer exclusion actually holding | manual | **DEVICE GATE** |

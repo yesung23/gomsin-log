@@ -14,8 +14,8 @@ import { clearAllComposerDrafts } from '@/lib/composerDraft';
  *
  * 1. `navigator.onLine === false`. The composer refused up front with
  *    `OFFLINE_READONLY_MESSAGE`. Honest about the network and wrong about the
- *    record: the text, and any voice memo synthesised into an in-memory `File` by
- *    `stopRecording`, existed nowhere on disk, so closing the app lost them.
+ *    record text existed nowhere on disk, so closing the app lost it. Voice
+ *    capture is currently parked until P6.
  * 2. `navigator.onLine === true` on a flaky connection. The refusal was skipped,
  *    the write was attempted, it failed, and `addRecordWithMedia` returned
  *    `{ ok: false }` with the payload discarded -- reported as an error toast and

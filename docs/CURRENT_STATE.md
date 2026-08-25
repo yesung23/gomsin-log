@@ -24,7 +24,7 @@
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
 
-## 0A. Active working checkpoint — 2026-08-24
+## 0A. Active working checkpoint — 2026-08-25
 
 - The product owner explicitly moved `docs/PRODUCT_V3.md` to **legacy**. Do not use
   that document to reactivate superseded navigation or product decisions.
@@ -40,6 +40,8 @@
   on a fixed `Asia/Seoul` calendar timeline. Missing, unknown, malformed, or
   non-positive date ranges do not produce invented progress.
 - The current `/search` surface renders this service card for the soldier role.
+  Its default view now keeps the current tier, next target, and live EXP visible
+  while the complete seven-tier rail is hidden behind an accessible 44px disclosure.
   A partner-facing service projection for the gomsin role is **not implemented**:
   the current sync path exposes partner identity only, not `military_info`. Adding
   that projection requires a separate privacy/RLS/RPC design and remote gate.
@@ -48,6 +50,23 @@
   applied by this task and remains **UNVERIFIED**. Production `/us` returned HTTP
   200, but authenticated two-account production refresh and physical-device
   evidence remain **UNVERIFIED**.
+- Commit `bfc7423` adds an iOS-only Foundation Models adapter for the partner-today
+  story cover. The app still builds the authorised, deterministic maximum-five-line
+  corpus first; native code receives only ordinal index and normalised text, and
+  JavaScript rejects the whole model batch if count, order, index, or length changes.
+  The flag `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED` is default-off. Web, Android,
+  unsupported devices, timeout, cancellation, and invalid output keep the existing
+  rules result. Simulator compilation is **PASS**; actual Korean model quality,
+  offline networking observation, latency, heat, and battery on an eligible physical
+  iPhone remain **UNVERIFIED**.
+- Launch sequencing is iPhone App Store first. Android users retain the platform-neutral
+  web/PWA and Supabase-backed shared data path; Google Play packaging is not an active
+  release gate. iCloud/CloudKit is not implemented and is not the source of truth.
+  It remains a possible later, optional encrypted backup layer only.
+- Remote Supabase still has the 057–059 target objects but lacks the 060 projection;
+  061 therefore is also not applied. The linked migration ledger is empty, so bulk
+  `supabase db push` is prohibited. Exact 060 then 061, PostgREST reload, and the
+  authenticated actor matrix remain a separate production gate.
 
 ## 0. Default-branch reality
 

@@ -3,9 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 /**
  * C-2: a permission denial has a different remedy in a browser and in an app.
  *
- * The composer records voice notes through the Web `getUserMedia` /
- * `MediaRecorder` APIs, which run identically in the PWA and inside both
- * Capacitor shells. The failure copy did not: it said
+ * Voice capture is parked until P6, but these strings remain ready for the Web
+ * `getUserMedia` / `MediaRecorder` path that will be re-admitted then. The old
+ * failure copy said
  *
  *   '마이크 권한이 필요해요. 브라우저 설정에서 허용해 주세요.'
  *
@@ -90,8 +90,8 @@ describe('MICROPHONE_RATIONALE', () => {
   });
 
   it('does not promise anything the app cannot keep', () => {
-    // No claim of local-only storage: voice notes are uploaded to Supabase
-    // Storage when the record is saved.
+    // When P6 re-admits voice it will upload to Supabase Storage, so the parked
+    // rationale must not claim that audio stays only on-device.
     expect(MICROPHONE_RATIONALE).not.toContain('저장하지 않');
     expect(MICROPHONE_RATIONALE).not.toContain('업로드하지 않');
   });

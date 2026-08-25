@@ -191,6 +191,13 @@ gate다. M-stage가 P-stage를 대체하거나, 사업계획서의 개발 예정
 **M5 Basic Memory Archive ≠ P9 Advanced Moment/Archive.** M5는 텍스트·사진 중심의
 기본 기록축적과 기억상품 검증을 뜻하고, P9는 이후 고급 Moment/Archive 기술·제품 단계다.
 
+> **2026-08-25 pull-forward checkpoint.** 제품 오너가 iPhone 우선 출시 준비 안에서 M6의
+> 최소 구현을 앞당겼다. `bfc7423`은 기존 규칙 요약을 대체하지 않는 default-off iOS 문장
+> 다듬기 후보이며, M6 실증 완료나 Production 활성화를 뜻하지 않는다. 실제 지원 iPhone의
+> 한국어 품질·오프라인·지연·발열·배터리 gate가 끝날 때까지 규칙 경로가 확정 제품 동작이다.
+> 첫 스토어 출시는 iOS만 준비하고 Android는 웹/PWA를 유지한다. Google Play는 후속 판단이며,
+> 플랫폼 중립 공유 경로나 Android/비iOS 사용자 지원을 폐기하는 결정이 아니다.
+
 M3와 M7은 사업 검증 단계이지만 각각 engineering 산출물을 요구한다. 그 산출물의 소유자는
 아래 `LV`와 `P-MP` 단계다. 두 단계 모두 P10 Beta/Production gate를 대체하지 않는다.
 

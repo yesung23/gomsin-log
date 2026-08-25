@@ -29,7 +29,7 @@
 > 실행하지 않은 것: `test:p5` · `test:write-floor` · `test:rollback` 체인에는 넣지
 > 않았다. 057은 `daily_records` 의 write floor 와 무관하다.
 >
-> 다음 사용 가능 번호: **060**.
+> 다음 사용 가능 번호: **062**.
 
 > **📄 058·059 작성됨 · 운영 미적용 (2026-08-24).** `058_couple_highlights.sql`은
 > 활성 커플에 한정된 독립 하이라이트와 순서형 사진 항목, shared-only child RLS,
@@ -195,6 +195,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `058_couple_highlights.sql` | 독립적인 couple highlight parent/item 모델, 활성 커플 shared-only RLS, SECURITY DEFINER 저장 RPC, private 전환·삭제 시 항목 pruning trigger, `highlights` invalidation slice | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
 | `059_partner_managed_username.sql` | 본인 username 직접 수정 차단, 활성 커플의 상대방 username만 갱신하는 SECURITY DEFINER RPC, username 형식·중복·삭제 상태·커플 row lock·`profile` invalidation 검증 | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
 | `060_partner_username_projection.sql` | 활성 커플의 상대방 username만 기존 파트너 프로필 projection에 추가로 반환한다. profiles 직접 SELECT/RLS는 넓히지 않고 authenticated 전용 SECURITY DEFINER RPC로 제한한다 | **신규 / 운영 미적용 — fresh chain 001→060에 포함, phase0 actor/RLS 계약 검증 완료** |
+| `061_reject_null_partner_profile_actor.sql` | PostgREST 호출 시 JWT subject가 없는 NULL actor(`auth.uid() IS NULL`)를 명시적으로 fail-closed(`42501`) 거부하도록 060 함수를 보강한다. 060 반환 형태와 활성 커플 프로젝션은 유지하되, 060 적용 후 순서대로 적용한다 | **신규 / 운영 미적용 — fresh chain 001→061에 포함, phase0 actor/RLS 계약 검증 완료** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
@@ -785,18 +786,24 @@ supabase functions deploy delete-account
 ## 022 — V3 cycle tables
 `022_cycle_v3_schema.sql`은 생리 기간(`cycle_periods`), 일별 컨디션(`cycle_daily_logs`), 민감정보 동의(`user_sensitive_consents`), 공유 옵션(`cycle_sharing_preferences`) 테이블을 생성하고 legacy 데이터를 안전하게 이관합니다. (신규 / 원격 적용 미확인)
 
-## 057–060 원격 상태 확인 (2026-08-24)
+## 057–061 원격 상태 확인 및 적용 순서 (2026-08-24 / 2026-08-25)
 
 - `057_profile_identity_and_caption.sql`, `058_couple_highlights.sql`,
-  `059_partner_managed_username.sql`, `060_partner_username_projection.sql`은 저장소에
-  존재하며 fresh-chain 계약에서 검증됩니다. 060에는 실제 A/B/C/anon actor probe도
-  포함됩니다.
-- 사용자는 Supabase SQL Editor에서 057–059 작업을 완료했다고 보고했습니다. 이 에이전트는
-  운영 Supabase에 SQL을 실행하지 않았습니다. 060은 이번 작업에서 새로 추가했으며 원격
-  적용 여부는 **UNVERIFIED / NOT APPLIED by this agent**입니다.
-- 사후 익명 PostgREST probe에서 `profiles.username`, `profiles.profile_caption`,
+  `059_partner_managed_username.sql`, `060_partner_username_projection.sql`,
+  `061_reject_null_partner_profile_actor.sql`은 저장소에 존재하며 fresh-chain
+  계약에서 검증됩니다. 060/061에는 실제 A/B/C/anon actor probe도 포함됩니다.
+- 060과 061의 역할 및 순서:
+  - **060 (`060_partner_username_projection.sql`)**: `get_partner_profile_with_username()`
+    RPC를 생성하여 활성 파트너의 영문 username 프로젝션을 제공합니다 (authenticated 전용, fixed `search_path`).
+  - **061 (`061_reject_null_partner_profile_actor.sql`)**: 060 함수에 명시적 NULL actor
+    검사(`auth.uid() IS NULL`)를 추가하여 PostgREST 호출 시 익명/NULL JWT subject를
+    `42501`로 fail-closed 거부하도록 보안을 강화합니다.
+  - **적용 순서**: 원격 카탈로그에 057–059 대상 객체가 존재하는 상태에서, **060 적용 후
+    061을 exact SQL로 순서대로 적용**하고 `NOTIFY pgrst, 'reload schema'` 및 actor
+    matrix를 검증합니다.
+- 원격 상태: 사후 익명 PostgREST probe에서 `profiles.username`, `profiles.profile_caption`,
   `couple_highlights`, `set_partner_username(text)`가 모두 해석되고 `401/42501`로
-  익명 접근이 거부되었습니다. 따라서 요청 객체의 현재 존재·anon 차단은 확인되지만,
-  전체 migration ledger와 authenticated actor별 동작은 `UNVERIFIED`입니다.
-- Docker Desktop 부재로 `supabase db dump --linked`를 실행할 수 없으므로 이 probe를
-  전체 원격 스키마 감사의 대체 증거로 사용하지 않습니다.
+  익명 접근이 거부되어 057–059 대상 객체는 원격에 존재합니다. 그러나 `get_partner_profile_with_username`
+  함수는 없으며, 060과 061은 원격에 **UNVERIFIED / NOT APPLIED by this agent**입니다.
+- CLI `supabase_migrations.schema_migrations` 추적 테이블이 비어 있으므로 `supabase db push`
+  등의 일괄 배포 명령을 사용하면 안 되며, 개별 SQL을 SQL Editor에서 순서대로 적용해야 합니다.

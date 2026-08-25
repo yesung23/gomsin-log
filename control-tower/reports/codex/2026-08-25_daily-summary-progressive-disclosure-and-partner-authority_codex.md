@@ -42,6 +42,22 @@ progressive disclosure로 바꿨다. AI는 여전히 무엇이 중요한지 고�
 새 DB 모델도, 서버 AI도, 새 migration도 만들지 않았다. 상대 신원은 migration 001부터
 존재하는 `couple_members` SELECT 정책으로 이미 읽을 수 있는 행에서 온다.
 
+### 커밋 대상 fresh 보안 판정
+
+커밋 `2ea4acc`(부모 `f7e8fbf`)에 대해 `kiro/gpt-5.6-sol` high가 **PASS**를 냈다. 검토자는
+작업 트리가 아니라 `git show 2ea4acc:<path>` 커밋 객체를 기준으로 9개 불변식을 확인했다.
+
+payload 2필드 한정(Swift 경계 포함), active couple + 정확한 `partnerUserId` 일치,
+`bindPartnerMembership`의 coupleId/active 재검증, lifecycle의 신원 삭제, store의 이중
+identity 확인과 coupleId 키잉/취소, 단일 4초 deadline과 all-or-nothing, 배열 위치 기반
+`recordId` 재결합, flag `'true'` 한정과 non-iOS 종료, 모델 경로에 네트워크·저장·analytics·
+콘텐츠 로그 없음 — 전부 PASS.
+
+검토자가 범위 구분으로 남긴 사실: 상대 신원 권위를 준비하는 store 경로에 Supabase
+`couple_members` 메타데이터 조회 1회(`user_id`, `joined_at`만)와 기존 콘텐츠 없는
+`couple_connected` analytics가 있다. 둘 다 요약 문장이나 기록 콘텐츠를 받거나 보내지
+않는다. 이 판정은 정적 코드 경로에만 해당하고 실기기·원격·production은 UNVERIFIED다.
+
 ## 3. 개인정보 불변식
 
 모델 payload는 `{ index, text }` 두 필드뿐이다. 다음은 들어가지 않는다.

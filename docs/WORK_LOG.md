@@ -201,10 +201,21 @@
 - what it actually proves: nothing about actual model quality or on-device runtime
 
 #### REVIEW IMPACT
-- FULL — 개인정보 경계와 상대 신원 권위가 바뀌었다. `kiro/gpt-5.6-sol` high가 P1 2건(현재 파트너 증명, stale 혼합), 추가로 lifecycle race를 HOLD로 잡았고 전부 수정 후 재검토를 실행했다. 이전 review는 stale.
+- FULL — 개인정보 경계와 상대 신원 권위가 바뀌었다. `kiro/gpt-5.6-sol` high가 P1 2건(현재 파트너 증명, stale 혼합), 추가로 lifecycle race를 HOLD로 잡았고 전부 수정했다. 이전 review는 stale.
+- 커밋 `2ea4acc`에 대한 fresh 판정: `kiro/gpt-5.6-sol` high **PASS** (9개 불변식 전부).
+  검토자는 작업 트리가 아니라 `git show 2ea4acc:<path>` 커밋 객체를 기준으로 판정했고,
+  부모가 `f7e8fbf`임을 확인했다. 확인된 항목: payload 2필드 한정(Swift 경계 포함),
+  active couple + 정확한 `partnerUserId` 일치, `bindPartnerMembership`의 coupleId/active
+  재검증, lifecycle의 신원 삭제, store의 이중 identity 확인과 coupleId 키잉/취소,
+  단일 4초 deadline과 all-or-nothing, 배열 위치 기반 `recordId` 재결합, flag `'true'`
+  한정과 non-iOS 종료, 모델 경로에 네트워크/저장/analytics/콘텐츠 로그 없음.
+- 검토자가 범위 구분으로 남긴 사실: 상대 신원 권위를 준비하는 store 경로에 Supabase
+  `couple_members` 메타데이터 조회 1회(`user_id`, `joined_at`만)와 기존 콘텐츠 없는
+  `couple_connected` analytics가 있다. 둘 다 요약 문장이나 기록 콘텐츠를 받거나 보내지
+  않는다. 이 판정은 정적 코드 경로에만 해당하며 실기기·원격·production은 UNVERIFIED.
 
 #### BLOCKERS
-- code: 없음 (검토가 제기한 P1 전부 수정, focused 재검증 PASS)
+- code: 없음 (검토가 제기한 P1 전부 수정, focused 재검증 PASS, 커밋 대상 Sol High PASS)
 - environment: 실기기 오프라인; 전체 verify가 병렬 부하에서 timeout
 - external/manual: Apple provider 비활성, native redirect allowlist 미확인, 원격 060/061 미적용, Vercel 인증 미확인
 

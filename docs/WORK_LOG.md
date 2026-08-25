@@ -114,6 +114,121 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-25 · 시뮬레이터 인증 세션 검증과 우발적 partner username 변경 (INCIDENT)
+
+#### PLAN POSITION
+- Phase: App Store release candidate preparation
+- Workstream: 인증 actor matrix 검증, 실기기 게이트
+- Step: 시뮬레이터 인증 세션으로 060/061 실동작 확인
+- Previous Gate: 060/061 anon probe 확인 (`fde5ebd`)
+- This Gate: 인증 경로 일부 PASS, 5+N 실기기 확인은 데이터 부재로 미완
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 검증만, 제품 범위 변경 없음
+- Engineering source checked: `docs/skills/` release-validation, `supabase/migrations/README.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-08-25 progressive disclosure 항목
+- MASTER PLAN version / 기준일: V4 / 2026-08-25
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary
+- Model: Codex
+- Role: 검증 실행 및 사고 보고
+- PR: none
+- Branch: `codex/service-rank-profile-settings-impl`
+- Base SHA: `fde5ebd`
+- Old HEAD: `fde5ebd`
+- New HEAD / Reviewed HEAD: docs-only 후속 커밋
+
+#### CHANGED / REVIEWED
+- file: 코드 변경 없음
+- function/component/migration: 검증 대상은 `get_partner_profile_with_username`(060/061),
+  `couple_members` SELECT 정책, `daily_records` RLS, `StoryRailWidget` 진입 게이트
+- what changed/reviewed: 시뮬레이터 최신 빌드 재설치 후 인증 JWT로 PostgREST 실호출
+- why: 그동안 UNVERIFIED였던 인증 actor 경로를 닫기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: 스키마·정책 변경 없음
+- product semantics: unchanged
+- Production: **부분 APPLIED — 아래 BLOCKERS의 우발적 쓰기 참조**
+
+#### VERIFICATION
+- command: 인증 JWT로 `rpc/get_partner_profile_with_username`
+- PASS / FAIL / UNVERIFIED: PASS — HTTP 200, 1행, 컬럼 정확히 4개
+- what it actually proves: 060 함수가 실제 인증 사용자에게 정상 동작하고 반환 형태가 계약과 일치
+- command: 동일 함수 JWT 없음 / anon JWT
+- PASS / FAIL / UNVERIFIED: PASS — 양쪽 `401 / 42501`
+- what it actually proves: NULL actor와 anon 거부. 단 EXECUTE 권한 단계에서 막히므로 061 내부 게이트 도달은 증명하지 못함
+- command: 인증 사용자로 `GET /rest/v1/profiles`
+- PASS / FAIL / UNVERIFIED: PASS — 자기 행 1개만 반환
+- what it actually proves: 060이 의도한 대로 소유자 SELECT 경계를 넓히지 않고 함수만 통로가 된다
+- command: 파트너 private `daily_records` 조회 / 남의 user_id로 INSERT
+- PASS / FAIL / UNVERIFIED: PASS — 0건 / HTTP 403
+- what it actually proves: private 경계와 대리 작성 차단이 원격에서 실제 작동
+- command: `couple_members` active 조회
+- PASS / FAIL / UNVERIFIED: PASS — 2행, partner user_id 확인
+- what it actually proves: 이번 세션이 도입한 `partnerUserId` 권위 경로가 원격에 실존
+- command: 앱 재설치 후 세션 확인
+- PASS / FAIL / UNVERIFIED: PASS — 로그인 유지
+- what it actually proves: 세션 복구가 실기기 컨테이너에서 작동
+- command: 로컬 localStorage 키 목록
+- PASS / FAIL / UNVERIFIED: PASS — device-pref 4개만
+- what it actually proves: 로컬 저장소 allowlist가 실기기에서 지켜진다
+- command: 접근성 자동클릭으로 파트너 스토리 아바타 탭
+- PASS / FAIL / UNVERIFIED: PASS — 화면 전환 없음이 정상
+- what it actually proves: 오늘 기록 0건이면 `StoryRailWidget`이 진입을 막는다(`disabled` + 힌트)
+- command: 5개 초과 UX 실기기 확인
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — 커플 전체 기록 4건, 파트너 오늘 0건, 6건 이상인 날짜 없음
+- what it actually proves: nothing. 데이터 부재로 미실행
+- command: Foundation Models 실동작
+- PASS / FAIL / UNVERIFIED: BLOCKED — flag 기본 OFF, 시뮬레이터에 Apple Intelligence 모델 없음
+- what it actually proves: nothing about model quality
+
+#### REVIEW IMPACT
+- DELTA — 코드 변경이 없으므로 `2ea4acc`의 Sol High PASS는 유효하다. 다만 060/061 원격
+  상태 판정이 anon-only에서 인증 경로 일부 PASS로 강화됐고, 061 본문 판별은 여전히 열려 있다.
+
+#### BLOCKERS
+- code: 없음
+- environment: 두 번째 계정 미로그인, 파트너 오늘 기록 0건, 시뮬레이터에 온디바이스 모델 없음
+- external/manual: **우발적 production 쓰기 1건.** negative test로 `set_partner_username`을
+  호출했는데 이 함수는 읽기가 아니라 상대의 username을 바꾸는 쓰기였다. partner
+  `profiles.username`이 `NULL` → `probe_self_zz`로 변경됐다. 다른 필드·테이블은 무영향.
+  059가 `NULL`을 거부하므로 API 복구 경로가 없고 SQL Editor의
+  `UPDATE public.profiles SET username = NULL WHERE id = '<partner uuid>';`가 원상복구다.
+  사용자 결정 대기 중이며 에이전트가 임의 실행하지 않았다.
+  재발 방지: RPC probe 전에 해당 migration에서 시그니처와 부수효과를 먼저 읽고,
+  `set_`/`update_`/`delete_` 계열은 production negative test 대상으로 삼지 않는다.
+
+#### STOPPED AT
+- exact completed boundary: 인증 read 경로 검증과 자동클릭 진입 게이트 확인까지. 파트너
+  계정 로그인과 테스트 기록 작성 전에 멈췄다.
+
+#### REMAINING
+- partner username 원상복구 (사용자 결정)
+- iPhone 17 Pro 파트너 계정 로그인 → 오늘 기록 6~8건 → 5+N 실기기 확인 및 A↔B matrix
+- 실물 iPhone Foundation Models 한국어·오프라인·성능·44px 실측
+- 061 본문 판별 (`prosrc LIKE '%not_authenticated%'`)
+
+#### NEXT ACTION
+- next owner: 사용자(username 복구 결정, 파트너 로그인) → Codex
+- tool/model: Codex + 시뮬레이터 자동클릭
+- 기준 SHA: `fde5ebd`
+- exact next task: username 복구 방향 확정 후 파트너 계정 로그인, 오늘 기록 6~8건 작성,
+  상대 스토리에서 5줄 + `3개 더 보기`와 펼친 줄의 정확한 원본 이동을 캡처
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: partner username 상태가 사용자 의도대로 정리될 것. production 쓰기는
+  blast radius와 rollback을 제시하고 확인받은 뒤에만 수행할 것.
+
+#### PRODUCTION
+- APPLIED / NOT APPLIED / UNVERIFIED: **부분 APPLIED (의도하지 않음)** — partner
+  `profiles.username` 1건. 그 외 스키마·정책·데이터 변경 없음.
+
 ### 2026-08-25 · 하루 요약 5개 초과 progressive disclosure와 상대 신원 권위 결속
 
 #### PLAN POSITION

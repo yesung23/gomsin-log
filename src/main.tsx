@@ -1,16 +1,28 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+import { toast } from 'sonner';
 import { StoreProvider } from '@/lib/store';
 import { App } from '@/App';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemedToaster } from '@/components/ThemedToaster';
-import { registerAuthDeepLinkHandler } from '@/lib/deepLinks';
+import { createDeferredFailureSink, registerAuthDeepLinkHandler } from '@/lib/deepLinks';
 import { isNativePlatform } from '@/lib/platform';
 import '@/styles/index.css';
 
 // Handles `gomsinlog://auth/callback` in the Capacitor shell. No-op on the web.
-registerAuthDeepLinkHandler();
+const authFailures = createDeferredFailureSink();
+registerAuthDeepLinkHandler(authFailures.report);
+
+function showAuthFailures() {
+  authFailures.activate((message) => {
+    try {
+      toast.error(message);
+    } catch {
+      console.error('[gomsinlog] Could not display toast.');
+    }
+  });
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -18,7 +30,7 @@ createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <StoreProvider>
           <App />
-          <ThemedToaster />
+          <ThemedToaster onReady={showAuthFailures} />
         </StoreProvider>
       </BrowserRouter>
     </ErrorBoundary>

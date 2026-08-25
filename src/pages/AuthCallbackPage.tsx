@@ -3,12 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { AUTH_CALLBACK_TIMEOUT_MS, withTimeout } from '@/lib/async';
+import { validatePkceFlowId } from '@/lib/oauthPkce';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 
 /**
  * Reads a parameter from either the query string or the URL fragment.
- * Supabase uses the query string for the PKCE flow and the fragment for the
- * implicit flow, and returns provider errors in whichever one it used.
  */
 function readAuthParam(name: string): string | null {
   const search = new URLSearchParams(window.location.search);
@@ -37,7 +36,11 @@ export function AuthCallbackPage() {
       if (cancelled) return;
       cancelled = true;
       setErrorMsg(message);
-      toast.error(message);
+      try {
+        toast.error(message);
+      } catch {
+        console.error('[AuthCallback] Failed to display toast error.');
+      }
       timers.push(window.setTimeout(() => navigate('/', { replace: true }), 2500));
     };
 
@@ -54,91 +57,87 @@ export function AuthCallbackPage() {
     };
 
     async function handleAuthCallback() {
-      if (!isSupabaseConfigured || !supabase) {
-        fail('Supabase 환경설정이 필요합니다.');
-        return;
-      }
+      try {
+        if (!isSupabaseConfigured || !supabase) {
+          fail('Supabase 환경설정이 필요합니다.');
+          return;
+        }
+        const client = supabase;
 
-      // 1. The provider may have redirected back with an error instead of a code.
-      const providerError = readAuthParam('error') || readAuthParam('error_code');
-      if (providerError) {
-        const description = readAuthParam('error_description');
-        console.error('[AuthCallback] Provider returned an error:', providerError, description);
-        fail(
-          providerError === 'access_denied'
-            ? '로그인이 취소되었습니다. 다시 시도해 주세요.'
-            : '로그인 제공자에서 오류가 발생했습니다. 다시 시도해 주세요.',
-        );
-        return;
-      }
+        // 1. The provider may have redirected back with an error instead of a code.
+        const providerError = readAuthParam('error') || readAuthParam('error_code');
+        if (providerError) {
+          console.error('[AuthCallback] Provider returned an error.');
+          fail(
+            providerError === 'access_denied'
+              ? '로그인이 취소되었습니다. 다시 시도해 주세요.'
+              : '로그인 제공자에서 오류가 발생했습니다. 다시 시도해 주세요.',
+          );
+          return;
+        }
 
-      // 2. Read the PKCE code before replacing the callback URL.
-      const code = readAuthParam('code');
+        // 2. Read the PKCE callback parameters before replacing the callback URL.
+        const code = readAuthParam('code');
+        if (code) {
+          const flowId = validatePkceFlowId(readAuthParam('sb_flow_id'));
+          if (!flowId) {
+            fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
+            return;
+          }
 
-      // 3. A session may already exist (e.g. the user re-opened the callback URL).
-      const { data: existing } = await supabase.auth.getSession();
-      if (existing.session) {
-        succeed();
-        return;
-      }
+          // Keep the store informed when the explicit exchange publishes the
+          // signed-in session.
+          const { data: sub } = client.auth.onAuthStateChange((event, session) => {
+            if (event !== 'SIGNED_IN' || !session) return;
+            succeed();
+          });
+          unsubscribe = () => sub.subscription.unsubscribe();
 
-      // 4. Keep the store informed when the explicit exchange publishes the
-      //    signed-in session. The callback page itself owns the exchange; the
-      //    Supabase client has detectSessionInUrl disabled so this listener can
-      //    never race a second consumer of the same one-time code.
-      const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (!session) return;
-        succeed();
-      });
-      unsubscribe = () => sub.subscription.unsubscribe();
+          // Defer one microtask so StrictMode cleanup can cancel its first effect
+          // before the single-use authorization code is consumed.
+          await Promise.resolve();
+          if (cancelled) return;
 
-      // 5. Exchange a PKCE authorization code exactly once. Bound the request so
-      //    a network failure cannot leave the user on a permanent spinner.
-      if (code) {
-        const result = await withTimeout<{ error: unknown }>(
-          supabase.auth.exchangeCodeForSession(code),
+          const result = await client.auth.exchangeCodeForSession(code, { flowId });
+          if (cancelled) return;
+
+          if (result.error) {
+            console.error('[AuthCallback] Code exchange failed.');
+            fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
+            return;
+          }
+
+          succeed();
+          return;
+        }
+
+        // 3. A code-less callback may be a harmless re-open after login. Bound
+        //    the session read so a broken storage adapter cannot strand the UI.
+        const existing = await withTimeout(
+          Promise.resolve()
+            .then(() => client.auth.getSession())
+            .catch(() => ({ data: { session: null } })),
           AUTH_CALLBACK_TIMEOUT_MS,
-          { error: new Error('OAuth code exchange timed out') },
+          { data: { session: null } },
         );
         if (cancelled) return;
-
-        if (result.error) {
-          console.error('[AuthCallback] Code exchange failed:', result.error);
-          fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
+        if (existing.data.session) {
+          succeed();
           return;
         }
 
-        succeed();
-        return;
+        fail('로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
+      } catch {
+        console.error('[AuthCallback] Unexpected error during authentication callback.');
+        fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
       }
-
-      // 6. Defensive support for an old implicit-flow link. New Google, Apple
-      //    and email links use PKCE, but accepting a complete legacy token pair
-      //    avoids breaking a link that was issued before this deployment.
-      const accessToken = readAuthParam('access_token');
-      const refreshToken = readAuthParam('refresh_token');
-      if (accessToken && refreshToken) {
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-        if (cancelled) return;
-        if (error) {
-          console.error('[AuthCallback] Legacy token session failed:', error);
-          fail('로그인 처리에 실패했습니다. 다시 시도해 주세요.');
-          return;
-        }
-        succeed();
-        return;
-      }
-
-      fail('로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
     }
 
     void handleAuthCallback();
 
     return () => {
       cancelled = true;
+      hasHandledCallback.current = false;
       for (const timer of timers) window.clearTimeout(timer);
       unsubscribe?.();
     };

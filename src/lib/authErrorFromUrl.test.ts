@@ -112,6 +112,7 @@ describe('the login screen is wired to the reader', () => {
     expect(onboarding).toContain('readAuthErrorFromUrl');
     expect(onboarding).toContain('clearAuthErrorFromUrl');
     expect(onboarding).toContain('role="alert"');
+    expect(onboarding).not.toContain('authUrlError.code');
   });
 
   it('initialises from the url rather than in an effect, so the message is in the first paint', () => {

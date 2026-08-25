@@ -16,6 +16,7 @@ import {
 } from '@/lib/serverErrors';
 import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
 import type { AuthUser, IAuthRepository, Role } from '@/types';
+import { createPkceTimeoutFetch } from '@/lib/oauthPkce';
 
 /**
  * Supabase environment variables configuration.
@@ -88,6 +89,12 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
         // Pinned explicitly so every OAuth callback carries an authorization
         // code that AuthCallbackPage can exchange exactly once.
         flowType: 'pkce',
+        experimental: {
+          appendPkceFlowIdToRedirects: true,
+        },
+      },
+      global: {
+        fetch: createPkceTimeoutFetch(globalThis.fetch.bind(globalThis)),
       },
     })
   : null;
@@ -729,8 +736,10 @@ export class SupabaseAuthRepository implements IAuthRepository {
         await Browser.open({ url: data.url, presentationStyle: 'popover' });
       }
       return {};
-    } catch (error) {
-      console.error(`[gomsinlog] ${provider} OAuth start failed:`, error);
+    } catch {
+      // Static message only: the caught value can carry request/provider detail,
+      // and the user-facing copy below already says everything they need.
+      console.error('[gomsinlog] OAuth start failed.');
       return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
     }
   }
@@ -757,8 +766,8 @@ export class SupabaseAuthRepository implements IAuthRepository {
           ? '매직링크를 보내지 못했어요. 이메일 주소를 확인하고 다시 시도해 주세요.'
           : undefined,
       };
-    } catch (error) {
-      console.error('[gomsinlog] Magic-link request failed:', error);
+    } catch {
+      console.error('[gomsinlog] Magic-link request failed.');
       return { error: '매직링크를 보내지 못했어요. 잠시 후 다시 시도해 주세요.' };
     }
   }

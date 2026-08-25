@@ -45,7 +45,7 @@ export function OnboardingPage() {
   const [authUrlError] = useState(() => readAuthErrorFromUrl());
   useEffect(() => {
     if (authUrlError) {
-      console.error('[Onboarding] OAuth failure returned to the app root:', authUrlError.code);
+      console.error('[Onboarding] OAuth failure returned to the app root.');
       clearAuthErrorFromUrl();
     }
   }, [authUrlError]);

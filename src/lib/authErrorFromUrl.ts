@@ -30,7 +30,7 @@
 const ERROR_KEYS = ['error', 'error_code'] as const;
 
 export interface AuthUrlError {
-  /** The raw code, kept for logging rather than for display. */
+  /** The raw code is used for local classification only and must never be logged. */
   code: string;
   /** Korean copy safe to show a user. */
   message: string;

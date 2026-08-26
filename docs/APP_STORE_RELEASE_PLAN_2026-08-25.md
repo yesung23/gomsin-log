@@ -15,14 +15,14 @@
 | 단계 | 완료 조건 | 2026-08-27 live 상태 |
 |---|---|---|
 | 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 254 files / 3630 tests, phase0 63 migrations / 392 assertions, iPhone 16 Pro iOS 26.5 arm64 simulator `BUILD SUCCEEDED` |
-| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **BLOCKED** — 연결된 iPhone이 offline; production flag는 기본 OFF 유지 |
+| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **BLOCKED** — iOS 27 iPhone 16 Pro는 연결·pairing됐지만 서명 설치가 codesign에서 끝나지 않아 앱/모델 실기기 동작은 미검증; production flag는 기본 OFF 유지 |
 | 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — 062 RPC는 live, 063 없음, 064 미적용으로 `authenticated`에 `TRUNCATE` 잔존, 065 hardening marker 없음; ledger가 비어 있어 bulk push 금지 |
 | 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — live Google ON / Apple OFF / Email ON; redirect allowlist와 Apple 실제 왕복 미검증 |
-| 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — Vercel CLI 미인증; 배포 exact SHA와 지원 이메일 미검증 |
-| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **UNVERIFIED** |
+| 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — Vercel Preview는 `415e183` READY, Production은 `d9a2eb0`; Production용 법적 운영자명·개인정보 연락 이메일 env가 없어 새 Production build는 fail-closed |
+| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **BLOCKED** — Apple Developer 멤버십 결제 처리 중, provisioning profile 없음, signed install/Archive/TestFlight 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
-- PR #90 exact feature HEAD `73f6b4576f91c0595c2cce9c33a203b4574a8515`: **PASS** — boundary, two full typecheck/lint/Vitest/build jobs, PostgreSQL security chain, real-browser creator/partner matrix, Android, Capacitor sync cleanliness, unsigned iOS simulator build, secret/signing scan, Vercel Preview가 모두 성공했다. 이는 Production 배포나 실기기 증거가 아니다.
+- PR #90의 이전 exact feature HEAD `415e183123c145cbd60c3e1964409696cd5f9d96`: **PASS** — required checks와 exact Vercel Preview가 성공했다. 마이탭 중앙 정렬 보정 commit `78f8402`는 로컬 full verify와 390px E2E가 PASS했으며, push 후 새 exact-HEAD CI를 다시 받아야 한다. 이는 Production 배포나 실기기 증거가 아니다.
 
 ### 2026-08-26/27 게이트 상태 점검 메모
 
@@ -57,6 +57,16 @@
 - live Auth: Google true, Apple false, Email true, Phone false, signup enabled. Google을 기본 로그인으로 제공하므로 Apple Review Guideline 4.8 대응을 위해 Apple web OAuth가 실제 iPhone에서 작동하기 전 제출하지 않는다.
 - 현재 Apple 구현은 Supabase browser OAuth + custom-scheme PKCE다. `ASAuthorizationAppleIDProvider`를 사용하지 않으므로 binary `com.apple.developer.applesignin` entitlement는 추가하지 않는다. Portal App ID/Services ID/provider 설정과 profile은 별도 운영 gate다.
 - Production SQL/Auth/Vercel/TestFlight/App Store Connect mutation: **NOT APPLIED**.
+
+### 2026-08-27 실제 기기·원격 운영 gate 갱신
+
+- 마이탭 헤더는 좌우 88px 대칭 슬롯으로 고쳐 `+` 왼쪽, 아이디/자물쇠 화면 정중앙, 작성/설정 오른쪽을 유지한다. 390px 실제 렌더에서 중심 오차 1px 이하와 각 44px 터치 타깃을 E2E로 확인했다.
+- 이 보정 뒤 `LANG=en_US.UTF-8 npm run verify`는 exit 0으로 다시 통과했다. 254 files / 3,630 tests, 전체 lint/typecheck, production build가 포함되며 과거 `deviceKeyPort` 병렬 timeout은 재발하지 않았다.
+- iOS 27.0 iPhone 16 Pro는 Mac에 연결·pairing됐고 Developer Mode도 켜져 있다. 원본 workspace의 physical-device build는 compile/link 후 Capacitor framework codesign에서 장시간 끝나지 않아 중지했다. signed install, 앱 실행, Foundation Models, Secure Enclave, airplane-mode 평가는 **UNVERIFIED**다.
+- Apple Developer 포털은 멤버십 구매를 아직 처리 중이라고 표시한다. App ID/Services ID/key/profile, Supabase Apple provider, Archive/TestFlight/App Store Connect는 활성화 전까지 **BLOCKED**다.
+- live Vercel에서 feature Preview `415e183`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
+- live `delete-account` Edge Function은 ACTIVE(version 6, JWT required)이고 Production origin preflight 200, 무인증 POST 401을 확인했다. 실제 계정 삭제는 희생 계정을 영구 삭제하므로 별도 action-time 승인 전까지 **UNVERIFIED**다.
+- 현재 디스크 여유는 약 3.8GB라 signed Archive에 부족할 수 있다. 사용자 파일을 임의 삭제하지 않으며 Archive 전에 최소 약 10GB를 확보한다.
 
 ## 온디바이스 요약의 출시 계약
 

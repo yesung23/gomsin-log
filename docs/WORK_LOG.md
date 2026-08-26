@@ -7898,3 +7898,102 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — feature branch and Vercel Preview only; Supabase/Auth/Apple/master/Vercel production/TestFlight unchanged
+
+### 2026-08-27 · 마이탭 실제 중앙 정렬 및 원격·실기기 출시 gate 재확인
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate
+- Workstream: release UX correction and external gate validation
+- Step: profile header geometry closure, fresh full verify, live Vercel/Apple/device preflight
+- Previous Gate: PR #90 previous exact HEAD checks PASS; Production HOLD
+- This Gate: local centering delta PASS; Production/Apple/TestFlight remain HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — connection-first, usable posting and exact records
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, release/security procedures
+- Current-state checked: branch/HEAD/status/origin master, live Vercel/Supabase Auth/Edge Function, Apple Developer status, Xcode/device process state
+- Latest relevant Work Log checked: 2026-08-27 PR #90 release CI closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator; Gemini 3.7 Flash High bounded UI worker
+- Model: primary integration/verifier; Flash High implementation
+- Role: orchestrator, final diff owner and verifier
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `415e183123c145cbd60c3e1964409696cd5f9d96`
+- Old HEAD: `415e183123c145cbd60c3e1964409696cd5f9d96`
+- New HEAD / Reviewed HEAD: `78f8402` code delta; docs ledger commit pending
+
+#### CHANGED / REVIEWED
+- file: `src/features/us/SharedProfile.tsx`
+- function/component/migration: My profile header
+- what changed/reviewed: replaced asymmetric flex distribution with symmetric 88px left/right grid slots; plus remains left, handle/lock is true viewport center, compose/settings remain right
+- why: satisfy the user-visible identity placement without changing navigation or post semantics
+- file: `e2e/postComposer.spec.ts`
+- function/component/migration: 390px rendered geometry proof
+- what changed/reviewed: asserts handle center within 1px of 195px, preserves plus 44px target, captures screenshot
+- why: prevent regression from visually plausible but mathematically off-center flex layouts
+- file: live external systems
+- function/component/migration: read-only launch preflight
+- what changed/reviewed: exact Vercel Preview/Production SHA and env names, Apple membership processing, connected iOS 27 device, active delete-account CORS/JWT boundary
+- why: separate repository readiness from deploy, signing and destructive runtime proof
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no SQL applied
+- product semantics: post creation and identity semantics unchanged
+- Production: no Supabase/Auth/Vercel/Apple/TestFlight/App Store mutation; no master merge
+
+#### VERIFICATION
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npx playwright test e2e/postComposer.spec.ts`
+- PASS / FAIL / UNVERIFIED: PASS, 2/2 in 19.7s
+- what it actually proves: 390px rendered header center, plus 44px target, post protection flow under mocked backend
+- command: focused post composer Vitest
+- PASS / FAIL / UNVERIFIED: PASS, 2 files / 41 tests
+- what it actually proves: composition helper/sheet behavior after header-only change
+- command: scoped ESLint, `npm run typecheck`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: changed local delta type/lint/whitespace integrity
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; typecheck, full lint, 254 files / 3,630 tests, production build
+- what it actually proves: full local web regression; not Production or physical-device runtime
+- command: original workspace physical iPhone build
+- PASS / FAIL / UNVERIFIED: BLOCKED after compile/link; codesign did not finish and build was stopped safely
+- what it actually proves: connected iOS 27 device and compilation through signing stage, not signed install or app runtime
+- command: live Vercel/Apple/Supabase Auth and Edge Function read-only checks
+- PASS / FAIL / UNVERIFIED: PASS for observed state only
+- what it actually proves: Preview `415e183` READY, Production `d9a2eb0`, legal env missing; Apple membership processing; Apple provider OFF; delete-account active/CORS 200/unauth 401
+
+#### REVIEW IMPACT
+- DELTA: presentation geometry and E2E only; no auth/DB/privacy/crypto semantics changed. Existing Sol security review remains applicable; fresh PR exact-HEAD CI is required after push.
+
+#### BLOCKERS
+- code: no open local finding
+- environment: about 3.8GB disk free, likely insufficient for Archive
+- external/manual: Production 064 → 065 → 063 action-time approval; exact legal operator/contact values; Apple membership activation/provider/key/profile; signed install/TestFlight/two-account physical-device matrix
+
+#### STOPPED AT
+- exact completed boundary: isolated code commit `78f8402`, fresh local full verify and rendered geometry proof; before branch push and all Production mutations
+
+#### REMAINING
+- push code/docs and require fresh PR exact-HEAD CI/Preview
+- action-time approved exact remote SQL and actor matrix
+- approved legal env, master/Production deploy, Apple OAuth, signed TestFlight and physical-device checks
+
+#### NEXT ACTION
+- next owner: Codex release operator after explicit user confirmation for each external action
+- tool/model: primary operator; independent security delta review only if security semantics change
+- 기준 SHA: `78f8402` plus docs ledger commit
+- exact next task: push feature branch, await exact-HEAD checks; execute 064 → 065 → 063 only if user replies with the requested action-time approval
+
+#### DO NOT ADVANCE UNTIL
+- `.DS_Store`, `control-tower/Now.md`, credentials and ignored signing config remain excluded
+- fresh PR checks pass for new exact HEAD
+- Production SQL and legal/account operations have explicit action-time approval and rollback evidence
+
+#### PRODUCTION
+- NOT APPLIED — read-only checks and local commit only

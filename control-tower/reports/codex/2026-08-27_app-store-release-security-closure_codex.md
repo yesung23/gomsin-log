@@ -6,7 +6,7 @@
 - Overall App Store release: **CONDITIONAL PASS / HOLD**
 - Branch: `codex/profile-post-composer`
 - Reviewed base HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
-- Resulting code HEAD: `cf922df` (`9d12bc8` feature/security, `cf922df` iOS packaging)
+- Resulting code HEAD: `73f6b4576f91c0595c2cce9c33a203b4574a8515` (`9d12bc8` feature/security, `cf922df` iOS packaging, `73f6b45` CI closure)
 - Production mutation in this session: **NOT APPLIED**
 - Git remote: reviewed commits pushed to `origin/codex/profile-post-composer`; `origin/master` and deploy remain unchanged
 
@@ -40,6 +40,9 @@
 - `git diff --check`: PASS.
 - Sol High security closure: PASS, P0/P1/P2 0.
 - Terra High final dirty-delta review: PASS, P0–P3 0; narrow 22 files / 483 tests PASS.
+- Gitleaks 8.24.3 exact PR-history scan: PASS, 0 findings. The only exemption requires the exact `ios/App/Podfile.lock` path and exact `GomsinlogCapacitorDeviceKeys: <40 lowercase hex>` checksum line with AND semantics; Terra independent delta review PASS, P0–P3 0.
+- UTC and Asia/Seoul focused `searchPage` reruns: PASS, 25/25 in each timezone. The pre-enlistment D-day test now freezes the same clock used by the rendered service EXP calculation.
+- PR #90 exact HEAD `73f6b4576f91c0595c2cce9c33a203b4574a8515`: PASS. Both full typecheck/lint/Vitest/build jobs, boundary, PostgreSQL chain, real-browser two-account matrix, Android, Capacitor sync cleanliness, unsigned iOS build, secret/signing scan and Vercel Preview all completed successfully.
 
 ## Live remote preflight
 
@@ -54,15 +57,15 @@
 
 - Exact 064 → 065 → 063 Production application and real actor matrix: NOT APPLIED.
 - Apple App ID/Services ID/key, Supabase Apple provider, redirect allowlist including query-aware PKCE, and actual Apple round-trip: BLOCKED/UNVERIFIED.
-- Vercel production exact deployed SHA and release env: UNVERIFIED.
+- Vercel Preview for PR #90: PASS. Vercel production exact deployed SHA and release env: UNVERIFIED.
 - Signed Archive, TestFlight processing, App Store metadata/review accounts: UNVERIFIED.
 - Physical iPhone Foundation Models, Secure Enclave, offline/heat/battery/reinstall/recovery: UNVERIFIED.
 
 ## Safe next action and rollback
 
-1. Commit the exact reviewed local delta without `.DS_Store` or ignored signing secrets.
-2. At action time, confirm the live catalog and backup, then apply exact 064 → 065 → 063 only; never replay the empty ledger.
-3. Reload PostgREST and run authenticated/anon/unrelated/former-partner/NULL-actor matrices.
+1. At action time, confirm the live catalog and backup, then apply exact 064 → 065 → 063 only; never replay the empty ledger.
+2. Reload PostgREST, re-read schema/ACL/function markers, and run authenticated/anon/unrelated/former-partner/NULL-actor matrices.
+3. Merge PR #90 to `master` only after the remote gate passes.
 4. Configure Apple web OAuth and validate Google/Apple PKCE on a real iPhone.
 5. Deploy the exact commit, create signed Archive/TestFlight, and run the two-account release checklist.
 

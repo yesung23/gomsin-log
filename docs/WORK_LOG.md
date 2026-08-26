@@ -7803,3 +7803,98 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — read-only catalog/Auth/backup operations and feature-branch push only; no SQL/provider/master/deploy/TestFlight change
+
+### 2026-08-27 · PR #90 release CI closure and Production action gate
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate
+- Workstream: release validation and Production preflight
+- Step: exact feature HEAD CI closure before Production SQL/master
+- Previous Gate: local product/security/native PASS; first PR run HOLD
+- This Gate: PR #90 exact code HEAD all checks PASS; Production remains NOT APPLIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — connection-first, no AI ranking or relationship score
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, release/security procedures
+- Current-state checked: branch/HEAD/status/origin master, PR #90 checks, live Supabase schema/Auth/counts, external backup hashes
+- Latest relevant Work Log checked: 2026-08-27 App Store local RC closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator
+- Model: primary integration/verifier; Terra High independent Gitleaks allowlist reviewer
+- Role: CI diagnosis, minimal test/config remediation, independent release review
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `d9a2eb0a22b657c6384d59d1a53aa668fdb286f0` (`origin/master`)
+- Old HEAD: `7cf679c9199c9f1b6be0e4c5336dc983ffc40a37`
+- New HEAD / Reviewed HEAD: `73f6b4576f91c0595c2cce9c33a203b4574a8515`
+
+#### CHANGED / REVIEWED
+- file: `.gitleaks.toml`
+- function/component/migration: rule-specific `generic-api-key` allowlist
+- what changed/reviewed: exact `ios/App/Podfile.lock` path plus exact local DeviceKeys pod 40-lowercase-hex checksum line must both match
+- why: CI Gitleaks 8.24.3 mistook a CocoaPods SHA-1 checksum for an API key; no scanner or path-wide exclusion was added
+- file: `src/features/search/searchPage.test.tsx`
+- function/component/migration: pre-enlistment D-day render test
+- what changed/reviewed: fixed UTC/KST-independent clock and expected value from the same service EXP calculation rendered by the component
+- why: both CI workflows reproduced a one-day mismatch because the test compared date-only local time with an exact Asia/Seoul instant
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; 063/064/065 files untouched
+- product semantics: unchanged; only CI scanner config and test determinism
+- Production: no SQL/Auth/Apple/Vercel production/master/TestFlight/App Store mutation
+
+#### VERIFICATION
+- command: Gitleaks 8.24.3 exact first-parent PR-history detect
+- PASS / FAIL / UNVERIFIED: PASS, 5 commits scanned, 0 findings
+- what it actually proves: exact CI scanner version accepts only the reviewed checksum exception on the feature history
+- command: `TZ=UTC npx vitest run src/features/search/searchPage.test.tsx`; `TZ=Asia/Seoul ...`
+- PASS / FAIL / UNVERIFIED: PASS, 25/25 in each timezone
+- what it actually proves: the failed D-day assertion is stable across runner and product timezones
+- command: target ESLint, `npm run typecheck`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: changed test/config delta has no lint/type/whitespace regression
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; typecheck, full lint, 254 files / 3,630 tests, production build
+- what it actually proves: fresh local full regression after the CI fix
+- command: Terra High read-only Gitleaks delta review
+- PASS / FAIL / UNVERIFIED: PASS, P0/P1/P2/P3 0
+- what it actually proves: path+line AND allowlist remains narrow under Gitleaks 8.24.3 semantics; scanner upgrade requires revalidation
+- command: PR #90 exact HEAD checks
+- PASS / FAIL / UNVERIFIED: PASS — boundary, two full verify/build jobs, PostgreSQL chain, real-browser creator/partner matrix, Android, Capacitor sync, unsigned iOS build, secret/signing scan, Vercel Preview
+- what it actually proves: GitHub/Vercel Preview release gates are green for `73f6b45`; not Production or physical-device proof
+
+#### REVIEW IMPACT
+- DELTA: CI-only config/test changes. Terra independently PASSed the security scanner exception. Earlier product/Sol/Terra reviews remain valid because product, crypto and DB semantics did not change.
+
+#### BLOCKERS
+- code: none on exact code HEAD `73f6b45`
+- environment: Supabase migration ledger remains empty; `db push` prohibited
+- external/manual: action-time approval for exact Production 064 → 065 → 063; Apple provider/redirect/real round-trip; master/production deploy; physical iPhone; signed Archive/TestFlight/App Store metadata
+
+#### STOPPED AT
+- exact completed boundary: PR #90 exact code HEAD all checks PASS and live Production blast/backup rechecked; before Production mutation and master merge
+
+#### REMAINING
+- user action-time confirmation then exact 064 → 065 → 063, reload and actor matrix
+- PR #90 master merge/production deploy after remote gate PASS
+- Apple web OAuth, physical-device and signed TestFlight/App Store submission gates
+
+#### NEXT ACTION
+- next owner: Codex release operator after user action-time confirmation
+- tool/model: primary operator; Sol/Terra delta review only if security semantics change
+- 기준 SHA: `73f6b4576f91c0595c2cce9c33a203b4574a8515`
+- exact next task: apply only exact 064 → 065 → 063, verify live ACL/functions/actors, then separately confirm master merge
+
+#### DO NOT ADVANCE UNTIL
+- external backup remains hash-valid and current live counts/ACL/function markers are recorded
+- user confirms the exact Production SQL action at execution time
+- empty ledger is not replayed or repaired implicitly
+
+#### PRODUCTION
+- NOT APPLIED — feature branch and Vercel Preview only; Supabase/Auth/Apple/master/Vercel production/TestFlight unchanged

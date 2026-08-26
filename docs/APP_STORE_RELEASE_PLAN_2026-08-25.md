@@ -22,6 +22,8 @@
 | 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **UNVERIFIED** |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
+- PR #90 exact feature HEAD `73f6b4576f91c0595c2cce9c33a203b4574a8515`: **PASS** — boundary, two full typecheck/lint/Vitest/build jobs, PostgreSQL security chain, real-browser creator/partner matrix, Android, Capacitor sync cleanliness, unsigned iOS simulator build, secret/signing scan, Vercel Preview가 모두 성공했다. 이는 Production 배포나 실기기 증거가 아니다.
+
 ### 2026-08-26/27 게이트 상태 점검 메모
 
 - **로컬 RC / 복무 성장 / 063 투영 및 로컬 remediation**:
@@ -79,8 +81,8 @@
 
 1. exact release SHA와 rollback 문서를 고정한다.
 2. Supabase backup과 함수/권한/catalog를 다시 읽는다.
-3. `060_partner_username_projection.sql`을 exact SQL로 적용한다.
-4. `061_reject_null_partner_profile_actor.sql`을 exact SQL로 적용한다.
+3. 비어 있는 migration ledger를 replay하지 말고 exact `064_lock_crypto_pairings_table_privileges.sql`을 적용한다.
+4. exact `065_harden_e2ee_pairing_rpc.sql`을 적용한 뒤 exact `063_partner_service_projection.sql`을 적용한다.
 5. PostgREST schema를 reload한다.
 6. owner, active partner, former partner, unrelated, anon/NULL actor를 실제 세션으로 검증한다.
 7. Apple provider와 redirect URL을 설정하고 Google/Apple PKCE 왕복을 실제 iPhone에서 확인한다.
@@ -100,5 +102,5 @@
 ## App Store 제출 가능 판정
 
 코드가 존재하거나 simulator가 빌드되는 것만으로 제출 가능하지 않다. 단계 2–7의 실제 증거가
-모두 PASS여야 한다. 특히 Apple 로그인, 원격 060/061 actor matrix, signed TestFlight,
+모두 PASS여야 한다. 특히 Apple 로그인, 원격 064/065/063 actor matrix, signed TestFlight,
 지원 iPhone 온디바이스 품질이 끝나기 전에는 최종 판정을 `CONDITIONAL`보다 높이지 않는다.

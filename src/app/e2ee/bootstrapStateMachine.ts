@@ -110,6 +110,9 @@ export type BootstrapFacts = {
   coupleKeysReady: boolean;
   runtimeReady: boolean;
   floorActive: boolean;
+  /** Exact-scope floor facts keep personal setup separate from couple pairing. */
+  personalFloorActive?: boolean;
+  coupleFloorActive?: boolean;
   /** A current couple scope exists; key availability is separate from floor state. */
   hasCoupleScope?: boolean;
   error?: boolean;

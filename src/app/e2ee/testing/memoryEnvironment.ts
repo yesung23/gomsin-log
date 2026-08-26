@@ -504,7 +504,105 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
     },
     approveDeviceEnrollment: async (input) => runApproveDevice(server, userId, input),
 
-    getPairing: async (coupleId) => server.pairings.find((p) => p.coupleId === coupleId) ?? null,
+    getPairing: async (coupleId) => server.pairings.find((p) => p.coupleId === coupleId
+      && !['TRANSCRIPT_EXPIRED', 'TRANSCRIPT_REJECTED', 'UNLINKED'].includes(p.state)) ?? null,
+    startPairing: async (proposal) => {
+      let row = server.pairings.find((pairing) => pairing.coupleId === proposal.coupleId
+        && !['TRANSCRIPT_EXPIRED', 'TRANSCRIPT_REJECTED', 'UNLINKED'].includes(pairing.state));
+      if (row?.expiresAt && Date.parse(row.expiresAt) <= server.now() && row.state !== 'CRYPTO_ACTIVE') {
+        row.state = 'TRANSCRIPT_EXPIRED';
+        row = undefined;
+      }
+      if (!row) {
+        row = {
+          id: crypto.randomUUID(),
+          coupleId: proposal.coupleId,
+          state: 'TRANSCRIPT_PROPOSED',
+          pairingNonce: proposal.pairingNonce,
+          transcript: proposal.transcript,
+          transcriptHash: proposal.transcriptHash,
+          confirmedLowSignature: null,
+          confirmedLowDeviceId: null,
+          confirmedHighSignature: null,
+          confirmedHighDeviceId: null,
+          createdAt: proposal.createdAt,
+          expiresAt: proposal.expiresAt,
+        };
+        server.pairings.push(row);
+      } else if (row.state === 'CRYPTO_PENDING'
+        && row.pairingNonce === null
+        && row.transcript === null
+        && row.transcriptHash === null) {
+        row.state = 'TRANSCRIPT_PROPOSED';
+        row.pairingNonce = proposal.pairingNonce;
+        row.transcript = proposal.transcript;
+        row.transcriptHash = proposal.transcriptHash;
+        row.createdAt = proposal.createdAt;
+        row.expiresAt = proposal.expiresAt;
+      } else if (!row.pairingNonce || !row.transcript || !row.transcriptHash
+        || !equalBytes(row.pairingNonce, proposal.pairingNonce)
+        || !equalBytes(row.transcript, proposal.transcript)
+        || !equalBytes(row.transcriptHash, proposal.transcriptHash)) {
+        reject('live_pairing_already_exists');
+      }
+      return row.id;
+    },
+    confirmPairing: async ({ pairingId, deviceId, signature }) => {
+      const row = server.pairings.find((pairing) => pairing.id === pairingId);
+      if (!row) reject('E2EE_UNKNOWN_PAIRING');
+      const members = server.activeMembers.get(row.coupleId) ?? [];
+      if (!members.includes(userId)) reject('E2EE_NOT_ACTIVE_MEMBER');
+      if (row.state === 'TRANSCRIPT_EXPIRED') reject('E_TRANSCRIPT_EXPIRED');
+      if ((!row.expiresAt || Date.parse(row.expiresAt) <= server.now())
+        && row.state !== 'CRYPTO_ACTIVE') {
+        row.state = 'TRANSCRIPT_EXPIRED';
+        reject('E_TRANSCRIPT_EXPIRED');
+      }
+      if (!['TRANSCRIPT_PROPOSED', 'CONFIRMED_ONE', 'CONFIRMED_BOTH'].includes(row.state)) {
+        reject('pairing_not_confirmable');
+      }
+      if (!server.devices.some(
+        (device) => device.id === deviceId && device.userId === userId && device.status === 'ACTIVE',
+      )) {
+        reject('confirming_device_not_active_owner');
+      }
+      const lowUserId = [...members].sort()[0];
+      if (userId === lowUserId) {
+        if (row.confirmedLowSignature
+          && (row.confirmedLowDeviceId !== deviceId || !equalBytes(row.confirmedLowSignature, signature))) {
+          reject('pairing_confirmation_already_bound');
+        }
+        row.confirmedLowDeviceId = deviceId;
+        row.confirmedLowSignature = signature;
+      } else {
+        if (row.confirmedHighSignature
+          && (row.confirmedHighDeviceId !== deviceId || !equalBytes(row.confirmedHighSignature, signature))) {
+          reject('pairing_confirmation_already_bound');
+        }
+        row.confirmedHighDeviceId = deviceId;
+        row.confirmedHighSignature = signature;
+      }
+      row.state = row.confirmedLowSignature && row.confirmedHighSignature
+        ? 'CONFIRMED_BOTH'
+        : 'CONFIRMED_ONE';
+    },
+    markPairingActive: async ({ pairingId, scopeKeyId }) => {
+      const row = server.pairings.find((pairing) => pairing.id === pairingId);
+      if (!row) reject('E2EE_UNKNOWN_PAIRING');
+      const members = server.activeMembers.get(row.coupleId) ?? [];
+      if (!members.includes(userId)) reject('E2EE_NOT_ACTIVE_MEMBER');
+      if ([...members].sort()[0] !== userId) reject('canonical_pairing_owner_required');
+      if (!row.pairingNonce || !row.transcript || !row.transcriptHash
+        || row.state !== 'CONFIRMED_BOTH'
+        || !row.confirmedLowSignature || !row.confirmedHighSignature) {
+        reject('pairing_not_fully_confirmed');
+      }
+      const scope = server.scopeKeys.find((key) => key.id === scopeKeyId);
+      if (!scope || scope.domain !== 'couple' || scope.scopeId !== row.coupleId || scope.state !== 'ACTIVE') {
+        reject('E2EE_ACTIVE_COUPLE_SCOPE_REQUIRED');
+      }
+      row.state = 'CRYPTO_ACTIVE';
+    },
     getCoupleAuthorizationSnapshot: async (coupleId): Promise<CoupleAuthorizationSnapshot> => {
       const activeUserIds = server.activeMembers.get(coupleId) ?? server.couples.get(coupleId) ?? [];
       return {
@@ -575,12 +673,6 @@ export function createMemoryRepository(server: MemoryServer, userId: string): E2
       if (missingCoverage(deviceId).length > 0) reject('E2EE_PROVISIONING_INCOMPLETE');
       device.status = 'ACTIVE';
     },
-    setPairingState: async (id, state) => {
-      const row = server.pairings.find((p) => p.id === id);
-      if (!row) reject('E2EE_UNKNOWN_PAIRING');
-      row.state = state;
-    },
-
     listRevocations: async (owner) =>
       server.revocations
         .filter((r) => r.userId === owner)
@@ -1157,11 +1249,13 @@ export function linkCouple(server: MemoryServer, a: string, b: string): string {
     coupleId,
     state: 'CRYPTO_PENDING',
     pairingNonce: null,
+    transcript: null,
     transcriptHash: null,
     confirmedLowSignature: null,
     confirmedLowDeviceId: null,
     confirmedHighSignature: null,
     confirmedHighDeviceId: null,
+    createdAt: new Date(server.now()).toISOString(),
     expiresAt: null,
   });
   return coupleId;

@@ -45,7 +45,20 @@ test('capture the onboarding wizard as 곰신', async ({ browser }) => {
   // Step 3 — couple space
   await expect(page.getByText('우리 둘만의 로그를 시작해볼까요?')).toBeVisible();
   await shot(page, '3-space');
-  await page.getByText('초대 코드가 있어요').click();
+  await page.getByRole('button', { name: '다음' }).click();
+
+  const codeLocator = page.getByText(/^\d{6}$/);
+  await expect(codeLocator).toBeVisible();
+
+  const shareButton = page.getByRole('button', { name: '초대장 보내기' });
+  await expect(shareButton).toBeVisible();
+  const shareBox = await shareButton.boundingBox();
+  expect(shareBox).not.toBeNull();
+  expect(shareBox!.width).toBeGreaterThanOrEqual(44);
+  expect(shareBox!.height).toBeGreaterThanOrEqual(44);
+  await shot(page, '3-space-code');
+
+  await page.getByRole('button', { name: /초대 코드가 있어요/ }).click();
   await shot(page, '3-space-join');
 
   await context.close();

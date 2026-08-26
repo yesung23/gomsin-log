@@ -8,7 +8,7 @@
  * no JSON and no canonicalization step to disagree about.
  */
 
-import { concat, equalBytes, u64be, utf8 } from './bytes';
+import { concat, equalBytes, readU64be, u64be, utf8 } from './bytes';
 import { sha256 } from './suite';
 import { PROTOCOL_ID, SUITE_ID } from './versions';
 
@@ -149,6 +149,55 @@ export function encodePairingTranscript(t: PairingTranscript): Uint8Array {
     u64be(t.createdAtMs),
     u64be(t.expiresAtMs),
   );
+}
+
+/**
+ * Decode the one fixed-width pairing transcript format we persist.
+ *
+ * The database stores the canonical bytes, not JSON. Both devices decode these
+ * bytes and independently rebuild the same transcript from verified devices
+ * before a confirmation is ever signed.
+ */
+export function decodePairingTranscript(bytes: Uint8Array): PairingTranscript {
+  const label = utf8('gomsinlog/pairing/v1');
+  const expectedLength = label.length + 2 + 16 + 32 + (161 * 2) + 32 + 8 + 8;
+  if (bytes.length !== expectedLength) fail('E_TRANSCRIPT_LENGTH', 'pairing transcript has the wrong length');
+  let at = 0;
+  const take = (width: number): Uint8Array => {
+    const end = at + width;
+    if (end > bytes.length) fail('E_TRANSCRIPT_LENGTH', 'pairing transcript ended early');
+    const value = bytes.slice(at, end);
+    at = end;
+    return value;
+  };
+  if (!equalBytes(take(label.length), label)) fail('E_TRANSCRIPT_LABEL', 'pairing transcript label is invalid');
+  const protocolId = take(1)[0];
+  const suiteId = take(1)[0];
+  if (protocolId !== PROTOCOL_ID || suiteId !== SUITE_ID) {
+    fail('E_TRANSCRIPT_VERSION', 'pairing transcript version is unsupported');
+  }
+  const decodeSide = (): PairingSide => ({
+    userId: take(16),
+    deviceBundleHash: take(32),
+    recoveryIdentityId: take(16),
+    recoveryVersion: take(1)[0],
+    rootRecSigPubFp: take(32),
+    recoveryBundleFp: take(32),
+    revocationLogHead: take(32),
+  });
+  const coupleId = take(16);
+  const serverOriginId = take(32);
+  const low = decodeSide();
+  const high = decodeSide();
+  const pairingNonce = take(32);
+  const createdAtMs = readU64be(bytes, at); at += 8;
+  const expiresAtMs = readU64be(bytes, at); at += 8;
+  if (at !== bytes.length) fail('E_TRANSCRIPT_LENGTH', 'pairing transcript has trailing bytes');
+  const ordered = orderPairingSides(low, high);
+  if (!equalBytes(ordered.low.userId, low.userId)) {
+    fail('E_TRANSCRIPT_ORDER', 'pairing transcript sides are not canonical');
+  }
+  return { coupleId, serverOriginId, low, high, pairingNonce, createdAtMs, expiresAtMs };
 }
 
 export async function pairingTranscriptHash(t: PairingTranscript): Promise<Uint8Array> {

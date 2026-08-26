@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { AppState, UserProfile, CoupleInfo, MilitaryInfo, ContactPreferences, DailyRecord, CoupleEvent, Trip, Role, TalkAboutMark } from '@/types';
+import { AppState, UserProfile, CoupleInfo, MilitaryInfo, PartnerServiceInfo, ContactPreferences, DailyRecord, CoupleEvent, Trip, Role, TalkAboutMark } from '@/types';
 import { fetchRecordsResultFromDB } from '@/lib/records';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { fetchEventsResultFromDB } from '@/lib/events';
@@ -46,6 +46,56 @@ type PartnerProfileRow = {
   avatar_path?: string | null;
   username?: string | null;
 };
+
+type PartnerServiceRow = {
+  branch?: string | null;
+  military_status?: string | null;
+  enlistment_date?: string | null;
+  expected_discharge_date?: string | null;
+  discharge_date?: string | null;
+  discharge_date_source?: string | null;
+};
+
+const BRANCHES = new Set<MilitaryInfo['branch']>([
+  'army', 'navy', 'airforce', 'marine', 'reserve', 'social_service', 'other',
+]);
+const MILITARY_STATUSES = new Set<MilitaryInfo['militaryStatus']>([
+  'planned', 'serving', 'discharge_soon', 'discharged', 'unknown',
+]);
+const DISCHARGE_SOURCES = new Set<MilitaryInfo['dischargeDateSource']>([
+  'calculated', 'manual', 'unknown',
+]);
+
+function isValidCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function partnerMilitaryFromRow(row: PartnerServiceRow | undefined): PartnerServiceInfo | undefined {
+  if (!row
+    || !BRANCHES.has(row.branch as MilitaryInfo['branch'])
+    || !MILITARY_STATUSES.has(row.military_status as MilitaryInfo['militaryStatus'])
+    || !DISCHARGE_SOURCES.has(row.discharge_date_source as MilitaryInfo['dischargeDateSource'])) {
+    return undefined;
+  }
+
+  const military: PartnerServiceInfo = {
+    branch: row.branch as MilitaryInfo['branch'],
+    militaryStatus: row.military_status as MilitaryInfo['militaryStatus'],
+    dischargeDateSource: row.discharge_date_source as MilitaryInfo['dischargeDateSource'],
+  };
+  if (isValidCalendarDate(row.enlistment_date)) {
+    military.enlistmentDate = row.enlistment_date;
+  }
+  if (isValidCalendarDate(row.expected_discharge_date)) {
+    military.expectedDischargeDate = row.expected_discharge_date;
+  }
+  if (isValidCalendarDate(row.discharge_date)) {
+    military.dischargeDate = row.discharge_date;
+  }
+  return military;
+}
 
 /**
  * Read the partner's public couple-facing identity without widening profiles RLS.
@@ -248,10 +298,21 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
         }
       }
 
+      let partnerMilitary: PartnerServiceInfo | undefined;
+      const currentRole = memberData.role || profileData.role;
+      if (hasPartner && currentRole === 'gomsin') {
+        const serviceResult = await supabase.rpc('get_partner_service_info');
+        if (serviceResult.error && serviceResult.error.code !== 'PGRST202') {
+          return syncFailure('partner', serviceResult.error);
+        }
+        partnerMilitary = partnerMilitaryFromRow(serviceResult.data?.[0]);
+      }
+
       couple = {
         coupleId: memberData.couple_id,
         partnerName,
         ...(partnerUsername ? { partnerUsername } : {}),
+        ...(partnerMilitary ? { partnerMilitary } : {}),
         anniversaryDate: coupleData?.anniversary_date || '',
         coupleCode: '',
         connected: hasPartner,

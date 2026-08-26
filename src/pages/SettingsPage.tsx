@@ -35,6 +35,12 @@ import {
   getDeviceProtectionPorts,
   type DeviceProtectionPlatform,
 } from '@/app/e2ee/deviceProtectionFlow';
+import {
+  confirmCoupleProtectionCeremony,
+  prepareCoupleProtectionCeremony,
+  type CoupleProtectionCeremony,
+} from '@/app/e2ee/coupleProtectionFlow';
+import { installE2eeRuntimeForAuthenticatedSession } from '@/app/e2ee/runtimeSession';
 import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { formatRecoveryKitArtifact, parseRecoveryKitArtifact } from '@/app/e2ee/recoveryKitArtifact';
 import type { BootstrapResult } from '@/app/e2ee/useCases';
@@ -144,6 +150,23 @@ export function SettingsPage() {
   const [recoveryArtifactInput, setRecoveryArtifactInput] = useState('');
   const [showProtectionDialog, setShowProtectionDialog] = useState(false);
   const [protectionDialogMode, setProtectionDialogMode] = useState<'setup' | 'recover'>('setup');
+  const [pairingCeremony, setPairingCeremony] = useState<CoupleProtectionCeremony | null>(null);
+  const [showPairingDialog, setShowPairingDialog] = useState(false);
+  const dialogIdentityRef = useRef(settingsIdentityKey);
+
+  useLayoutEffect(() => {
+    if (dialogIdentityRef.current === settingsIdentityKey) return;
+    dialogIdentityRef.current = settingsIdentityKey;
+    // A SAS belongs to one exact authenticated account and couple. Never leave
+    // the previous account's ceremony visible across a session transition.
+    setShowPairingDialog(false);
+    setPairingCeremony(null);
+    setShowProtectionDialog(false);
+    setSetupResult(null);
+    setRecoveryCodeInput('');
+    setRecoveryArtifactInput('');
+    setIsProtectionBusy(false);
+  }, [settingsIdentityKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,7 +188,7 @@ export function SettingsPage() {
     return () => { cancelled = true; };
   }, [protectionCoupleId, settingsIdentityKey]);
 
-  const loadDeviceProtectionFlow = async (identity = captureIdentity()) => {
+  const loadDeviceProtectionDependencies = async (identity = captureIdentity()) => {
     if (!identity.userId || !supabase || !isCurrentIdentity(identity)) {
       throw new Error('E_PROTECTION_SESSION');
     }
@@ -180,11 +203,9 @@ export function SettingsPage() {
     });
     if (!isCurrentIdentity(identity)) throw new Error('E_PROTECTION_SESSION_STALE');
     if (!localState) throw new Error('E_PROTECTION_STORAGE_UNAVAILABLE');
-    return createDeviceProtectionFlow({
-      userId: identity.userId,
+    return {
       platform,
       localKeys,
-      isCurrentSession: () => isCurrentIdentity(identity),
       deps: {
         repository: createSupabaseE2eeRepository(supabase),
         localState,
@@ -193,6 +214,17 @@ export function SettingsPage() {
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
       },
+    };
+  };
+
+  const loadDeviceProtectionFlow = async (identity = captureIdentity()) => {
+    const loaded = await loadDeviceProtectionDependencies(identity);
+    return createDeviceProtectionFlow({
+      userId: identity.userId,
+      platform: loaded.platform,
+      localKeys: loaded.localKeys,
+      isCurrentSession: () => isCurrentIdentity(identity),
+      deps: loaded.deps,
     });
   };
 
@@ -270,6 +302,90 @@ export function SettingsPage() {
     setShowProtectionDialog(true);
   };
 
+  const finishPairingRuntime = async (
+    identity: { userId: string; generation: number },
+  ) => {
+    const result = await installE2eeRuntimeForAuthenticatedSession({
+      userId: identity.userId,
+      supabaseClient: supabase,
+      activeCoupleId: protectionCoupleId,
+      isCurrentSession: () => isCurrentIdentity(identity),
+    });
+    if (result.status !== 'installed' || result.coupleProtection !== 'activated') {
+      throw new Error('E_COUPLE_RUNTIME_NOT_ACTIVE');
+    }
+    await refreshProtectionSnapshot(identity);
+  };
+
+  const openCoupleProtection = async () => {
+    if (!protectionCoupleId || isProtectionBusy) return;
+    const identity = captureIdentity();
+    setIsProtectionBusy(true);
+    try {
+      const { deps } = await loadDeviceProtectionDependencies(identity);
+      let ceremony = await prepareCoupleProtectionCeremony(deps, {
+        coupleId: protectionCoupleId,
+        ownUserId: identity.userId,
+        startIfMissing: true,
+      });
+      if (ceremony.canonicalOwner && ceremony.ownConfirmed
+          && ceremony.partnerConfirmed && !ceremony.cryptoActive) {
+        ceremony = await confirmCoupleProtectionCeremony(deps, {
+          coupleId: protectionCoupleId,
+          ownUserId: identity.userId,
+        });
+      }
+      if (!isCurrentIdentity(identity)) return;
+      setPairingCeremony(ceremony);
+      setShowPairingDialog(true);
+      if (ceremony.cryptoActive) {
+        await finishPairingRuntime(identity);
+        setShowPairingDialog(false);
+        toast.success('둘의 기록 보호를 연결했어요.');
+      }
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      const code = error instanceof Error ? error.message : '';
+      toast.error(code.includes('E_PARTNER_PROTECTION_REQUIRED')
+        ? '상대방도 자기 기기에서 기록 보호 설정을 먼저 마쳐야 해요.'
+        : code.includes('E_PAIRING_TRANSCRIPT_MISMATCH')
+          ? '두 기기의 보호 정보가 달라 연결을 멈췄어요. 앱을 다시 열고 확인해 주세요.'
+          : '둘의 기록 보호 연결을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsProtectionBusy(false);
+    }
+  };
+
+  const confirmCoupleProtection = async () => {
+    if (!protectionCoupleId || isProtectionBusy) return;
+    const identity = captureIdentity();
+    setIsProtectionBusy(true);
+    try {
+      const { deps } = await loadDeviceProtectionDependencies(identity);
+      const ceremony = await confirmCoupleProtectionCeremony(deps, {
+        coupleId: protectionCoupleId,
+        ownUserId: identity.userId,
+      });
+      if (!isCurrentIdentity(identity)) return;
+      setPairingCeremony(ceremony);
+      if (ceremony.cryptoActive) {
+        await finishPairingRuntime(identity);
+        setShowPairingDialog(false);
+        toast.success('둘의 기록 보호를 연결했어요.');
+      } else {
+        toast.success('내 확인을 저장했어요. 상대방의 확인을 기다릴게요.');
+      }
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return;
+      const code = error instanceof Error ? error.message : '';
+      toast.error(code.includes('E_TRANSCRIPT_EXPIRED')
+        ? '보호 코드가 만료됐어요. 창을 닫고 다시 시작해 주세요.'
+        : '보호 코드 확인을 저장하지 못했어요. 다시 시도해 주세요.');
+    } finally {
+      if (isCurrentIdentity(identity)) setIsProtectionBusy(false);
+    }
+  };
+
   const recoverProtection = async () => {
     if (isProtectionBusy) return;
     const identity = captureIdentity();
@@ -329,7 +445,11 @@ export function SettingsPage() {
   }, [navigate, searchParams]);
 
   useEscapeKey(() => {
-    if (showDeleteAccountModal) {
+    if (showPairingDialog) {
+      if (!isProtectionBusy) setShowPairingDialog(false);
+    } else if (showProtectionDialog) {
+      if (!isProtectionBusy) setShowProtectionDialog(false);
+    } else if (showDeleteAccountModal) {
       if (isDeletingAccount) return;
       setShowDeleteAccountModal(false);
       setDeleteAccountConfirmation('');
@@ -342,7 +462,8 @@ export function SettingsPage() {
     } else if (showProfileModal) {
       if (!isSavingProfile) closeProfileModal();
     }
-  }, showDeleteAccountModal || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
+  }, showPairingDialog || showProtectionDialog || showDeleteAccountModal
+    || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
 
   useLayoutEffect(() => {
     instanceActiveRef.current = true;
@@ -608,6 +729,7 @@ export function SettingsPage() {
         <DeviceProtectionSection
           status={protectionSnapshot.status}
           onStart={startProtectionSetup}
+          onPair={openCoupleProtection}
           onRecover={startProtectionRecovery}
           busy={isProtectionBusy}
         />
@@ -1256,6 +1378,51 @@ export function SettingsPage() {
                 onClick={() => setShowPWAModal(false)}>
                 확인
               </Button>
+            </div>
+          </div>
+        )}
+
+        {showPairingDialog && pairingCeremony && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="pairing-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+              <div className="flex items-center gap-2 text-foreground text-heading">
+                <Shield size={20} className="text-coral" aria-hidden="true" />
+                <span id="pairing-dialog-title">둘의 보호 코드 확인</span>
+              </div>
+              <p className="text-caption text-muted-foreground leading-relaxed">
+                상대방 기기에도 이 화면을 열고, 아래 코드의 모든 묶음이 같은지 직접 확인해 주세요.
+                하나라도 다르면 확인하지 마세요.
+              </p>
+              <p className="rounded-control bg-muted px-4 py-4 text-center font-mono text-heading font-bold tracking-wider text-foreground select-text" data-testid="couple-protection-sas">
+                {pairingCeremony.sas}
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-caption">
+                <p className="rounded-control border border-border px-3 py-2 text-center text-foreground">
+                  내 기기 {pairingCeremony.ownConfirmed ? '확인 완료' : '확인 전'}
+                </p>
+                <p className="rounded-control border border-border px-3 py-2 text-center text-foreground">
+                  상대 기기 {pairingCeremony.partnerConfirmed ? '확인 완료' : '확인 전'}
+                </p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowPairingDialog(false)}
+                  disabled={isProtectionBusy}
+                  className="press-response-row flex-1 min-h-11 rounded-control bg-muted px-3 text-label font-bold text-foreground"
+                >
+                  닫기
+                </button>
+                {pairingCeremony.ownConfirmed ? (
+                  <Button variant="primary" className="flex-1" onClick={openCoupleProtection} disabled={isProtectionBusy}>
+                    {isProtectionBusy ? '확인 중…' : '상태 새로고침'}
+                  </Button>
+                ) : (
+                  <Button variant="primary" className="flex-1" onClick={confirmCoupleProtection} disabled={isProtectionBusy}>
+                    {isProtectionBusy ? '확인 중…' : '코드가 같아요'}
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         )}

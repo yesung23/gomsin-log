@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useInRouterContext, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { Button } from '@/components/ui/Button';
@@ -22,7 +23,25 @@ import { toast } from 'sonner';
 import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { addMonths } from '@/lib/utils';
 
-export function OnboardingPage() {
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  return 'name' in error && (error as { name: unknown }).name === 'AbortError';
+}
+
+function buildInviteShareText(code: string): string {
+  return `[곰신로그] 초대 코드: ${code}\n'초대 코드가 있어요'에 코드를 입력해 주세요.`;
+}
+
+function OnboardingWithRouter() {
+  const navigate = useNavigate();
+  return <OnboardingContent navigate={navigate} />;
+}
+
+interface OnboardingContentProps {
+  navigate?: (to: string) => void;
+}
+
+function OnboardingContent({ navigate }: OnboardingContentProps) {
   const {
     state,
     updateProfile,
@@ -92,21 +111,29 @@ export function OnboardingPage() {
     if (typeof window === 'undefined') return false;
     return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   }, []);
-  // Safe fallbacks for the current production setup. Apple starts hidden and is
-  // revealed only after GoTrue confirms it is enabled, preventing a dead button
-  // on iPhone when the provider has not been configured yet.
+  // Fail-closed default: all providers remain disabled until GoTrue explicitly
+  // confirms availability. If the availability check fails (null) or is pending,
+  // no provider buttons are offered to prevent dead buttons and failed logins.
   const [authProviders, setAuthProviders] = useState({
-    google: true,
+    google: false,
     apple: false,
-    email: true,
+    email: false,
   });
 
   useEffect(() => {
     if (step !== 0) return;
     let active = true;
-    void fetchAuthProviderAvailability().then((availability) => {
-      if (active && availability) setAuthProviders(availability);
-    });
+    void fetchAuthProviderAvailability()
+      .then((availability) => {
+        if (active) {
+          setAuthProviders(availability ?? { google: false, apple: false, email: false });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAuthProviders({ google: false, apple: false, email: false });
+        }
+      });
     return () => {
       active = false;
     };
@@ -164,6 +191,7 @@ export function OnboardingPage() {
   const [weekdayEnd, setWeekdayEnd] = useState('21:00');
   const [weekendStart, setWeekendStart] = useState('12:00');
   const [weekendEnd, setWeekendEnd] = useState('21:00');
+  const [contactEnabled, setContactEnabled] = useState(true);
 
   const legalGatePassed = ageConfirmed && legalAccepted;
   const requireLegalGate = () => {
@@ -394,7 +422,7 @@ export function OnboardingPage() {
   const handleNext = async () => {
     // Auth gate: step 0 cannot advance without a verified account.
     if (step === 0 && !state.authenticatedUser) {
-      toast.error('Google로 로그인해 주세요.');
+      toast.error('로그인 후 진행해 주세요.');
       return;
     }
 
@@ -466,44 +494,82 @@ export function OnboardingPage() {
         }
       } else if (spaceMode === 'join') {
         const cleanCode = inviteCodeInput.trim();
-        if (!/^\d{6}$/.test(cleanCode)) {
-          toast.error('숫자 6자리 초대 코드를 입력해 주세요.');
-          return;
+        let targetCoupleId = createdCoupleId;
+        if (!targetCoupleId) {
+          if (!/^\d{6}$/.test(cleanCode)) {
+            toast.error('숫자 6자리 초대 코드를 입력해 주세요.');
+            return;
+          }
+          setIsVerifyingCode(true);
+          try {
+            const res = await consumeCoupleInvitation(cleanCode);
+            if (!isCurrentIdentity(identity)) return;
+            if (res.error || !res.coupleId) {
+              // The server can report that the SESSION, not the code, is the
+              // problem. Retrying the code cannot fix that, so hand the session to
+              // the store's recovery instead of only showing copy about it.
+              if (res.reason === 'auth_expired') void recoverExpiredSession();
+              toast.error(res.error || '커플 공간에 연결하지 못했습니다.');
+              return;
+            }
+            targetCoupleId = res.coupleId;
+            setCreatedCoupleId(res.coupleId);
+          } catch (error) {
+            if (!isCurrentIdentity(identity)) return;
+            console.error('[Onboarding] Invitation verification failed:', error);
+            toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+            return;
+          } finally {
+            if (isCurrentIdentity(identity)) setIsVerifyingCode(false);
+          }
         }
+
         setIsVerifyingCode(true);
         try {
-          const res = await consumeCoupleInvitation(cleanCode);
+          const lifecycleResult = await fetchMyCoupleState();
           if (!isCurrentIdentity(identity)) return;
-          if (res.error || !res.coupleId) {
-            // The server can report that the SESSION, not the code, is the
-            // problem. Retrying the code cannot fix that, so hand the session to
-            // the store's recovery instead of only showing copy about it.
-            if (res.reason === 'auth_expired') void recoverExpiredSession();
-            toast.error(res.error || '커플 공간에 연결하지 못했습니다.');
+          if (!lifecycleResult || !lifecycleResult.ok || !lifecycleResult.state) {
+            toast.error('커플 공간 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
             return;
           }
 
-          setCreatedCoupleId(res.coupleId);
+          const serverState = lifecycleResult.state;
+          const isValidRole = serverState.role === 'gomsin' || serverState.role === 'soldier';
+          if (
+            serverState.coupleId !== targetCoupleId
+            || serverState.memberStatus !== 'active'
+            || !isValidRole
+            || !serverState.partnerPresent
+          ) {
+            toast.error('커플 공간 정보가 올바르지 않습니다. 다시 시도해 주세요.');
+            return;
+          }
+
+          const authoritativeRole = serverState.role as Role;
+          setRole(authoritativeRole);
+
           if (supabase) {
             try {
               const { data: partnerRows, error: partnerError } = await supabase.rpc('get_partner_profile');
               if (!isCurrentIdentity(identity)) return;
               if (partnerError) {
-                console.error('[Onboarding] Partner profile lookup failed:', partnerError);
+                // Ignore partner lookup failure in onboarding
               } else if (partnerRows?.[0]?.display_name) {
                 setJoinedPartnerName(partnerRows[0].display_name);
               }
-            } catch (error) {
-              if (!isCurrentIdentity(identity)) return;
-              console.error('[Onboarding] Partner profile lookup failed:', error);
-            }
+            } catch {}
           }
-          if (!isCurrentIdentity(identity)) return;
           toast.success('커플 공간 연결 성공!');
+          if (authoritativeRole === 'soldier') {
+            setStep(5);
+          } else {
+            setStep(6);
+          }
+          return;
         } catch (error) {
           if (!isCurrentIdentity(identity)) return;
-          console.error('[Onboarding] Invitation verification failed:', error);
-          toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          console.error('[Onboarding] Authority verification failed:', error);
+          toast.error('커플 공간 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
           return;
         } finally {
           if (isCurrentIdentity(identity)) setIsVerifyingCode(false);
@@ -521,15 +587,74 @@ export function OnboardingPage() {
       setStep(6);
       return;
     }
+    if (step === 6) {
+      handleCompleteContactHours();
+      return;
+    }
     setStep((s) => s + 1);
   };
 
   const handleBack = () => {
     if (role === 'gomsin' && step === 6) {
       setStep(4);
+      if (spaceMode === 'join') {
+        setStep(3);
+      }
+      return;
+    }
+    if (role === 'soldier' && step === 6) {
+      setStep(5);
+      return;
+    }
+    if (step === 5) {
+      if (spaceMode === 'join') {
+        setStep(3);
+      } else {
+        setStep(4);
+      }
       return;
     }
     setStep((s) => Math.max(0, s - 1));
+  };
+
+  const handleCompleteContactHours = () => {
+    if (weekdayStart >= weekdayEnd || weekendStart >= weekendEnd) {
+      toast.error('확인 종료 시간은 시작 시간보다 늦어야 해요.');
+      return;
+    }
+    setContactEnabled(true);
+    setStep(7);
+  };
+
+  const handleSkipContactHours = () => {
+    setContactEnabled(false);
+    setStep(7);
+  };
+
+  const handleShareInvite = () => {
+    if (!/^\d{6}$/.test(createdInviteCode)) return;
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      const sharePayload = {
+        text: buildInviteShareText(createdInviteCode),
+      };
+      try {
+        const sharePromise = navigator.share(sharePayload);
+        if (sharePromise && typeof sharePromise.catch === 'function') {
+          sharePromise.catch((error: unknown) => {
+            if (isAbortError(error)) return;
+            toast.error('초대장을 공유하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          });
+        }
+      } catch (error) {
+        if (!isAbortError(error)) {
+          toast.error('초대장을 공유하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        }
+      }
+      return;
+    }
+
+    void handleCopyCode();
   };
 
   const handleCopyCode = async () => {
@@ -592,23 +717,6 @@ export function OnboardingPage() {
       return;
     }
 
-    const anniversaryDate = skipAnniversary ? undefined : anniversary || undefined;
-    const statesServicePeriod = role === 'soldier' && militaryStatus !== 'unknown';
-    const statedEnlistment = statesServicePeriod ? enlistmentDate || undefined : undefined;
-    const statedDischarge = statesServicePeriod ? expectedDischargeDate || undefined : undefined;
-    const military = {
-      branch,
-      militaryStatus,
-      enlistmentDate: statedEnlistment,
-      expectedDischargeDate: statedDischarge,
-      // Provenance describes a derivation that actually happened. With no
-      // enlistment date there is nothing to derive from, so neither
-      // 'calculated' nor 'manual' is true of the absent value.
-      dischargeDateSource: statedEnlistment ? dischargeDateSource : 'unknown',
-      memo: '',
-    };
-    const contact = { weekdayStart, weekdayEnd, weekendStart, weekendEnd, enabled: true };
-
     setIsFinishing(true);
     // Set when the shared anniversary row could not be written, so the success
     // path can tell the truth instead of implying the partner will see it.
@@ -624,10 +732,53 @@ export function OnboardingPage() {
         // for an account whose data the server has already removed.
         if (await serverCallBlockedByPendingDeletion()) return;
         if (!isCurrentIdentity(identity)) return;
+
+        // Re-validate authority state before any server/local mutation
+        const authorityResult = await fetchMyCoupleState();
+        if (!isCurrentIdentity(identity)) return;
+        if (!authorityResult || !authorityResult.ok || !authorityResult.state) {
+          toast.error('커플 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+          return;
+        }
+
+        const authState = authorityResult.state;
+        const isValidRole = authState.role === 'gomsin' || authState.role === 'soldier';
+        const isTargetCouple = !!createdCoupleId && authState.coupleId === createdCoupleId;
+        const isActiveMember = authState.memberStatus === 'active';
+        const isPartnerValid = spaceMode === 'create' ? true : authState.partnerPresent;
+
+        if (!isTargetCouple || !isActiveMember || !isValidRole || !isPartnerValid) {
+          toast.error('커플 정보가 올바르지 않습니다. 다시 확인해 주세요.');
+          return;
+        }
+
+        const authoritativeRole: Role = authState.role as Role;
+        const authoritativePartnerPresent = authState.partnerPresent;
+
+        const anniversaryDate = spaceMode === 'create' && !skipAnniversary ? anniversary || undefined : undefined;
+        const statesServicePeriod = authoritativeRole === 'soldier' && militaryStatus !== 'unknown';
+        const statedEnlistment = statesServicePeriod ? enlistmentDate || undefined : undefined;
+        const statedDischarge = statesServicePeriod ? expectedDischargeDate || undefined : undefined;
+        const military = {
+          branch,
+          militaryStatus,
+          enlistmentDate: statedEnlistment,
+          expectedDischargeDate: statedDischarge,
+          dischargeDateSource: statedEnlistment ? dischargeDateSource : 'unknown',
+          memo: '',
+        };
+        const contact = {
+          weekdayStart,
+          weekdayEnd,
+          weekendStart,
+          weekendEnd,
+          enabled: contactEnabled,
+        };
+
         const { error: profileError } = await supabase.from('profiles').upsert({
           id: userId,
           display_name: finalNickname,
-          role,
+          role: authoritativeRole,
           military_info: military,
           onboarding_completed_at: nowIso,
           updated_at: nowIso,
@@ -642,20 +793,22 @@ export function OnboardingPage() {
           return;
         }
 
-        const { error: contactError } = await supabase.from('contact_preferences').upsert({
-          user_id: userId,
-          weekday_start: weekdayStart,
-          weekday_end: weekdayEnd,
-          weekend_start: weekendStart,
-          weekend_end: weekendEnd,
-        });
-        if (!isCurrentIdentity(identity)) return;
-        if (contactError) {
-          // Non-blocking: contact hours are editable later from settings.
-          console.error('[Onboarding] Contact preferences save failed:', contactError);
+        if (contactEnabled) {
+          const { error: contactError } = await supabase.from('contact_preferences').upsert({
+            user_id: userId,
+            weekday_start: weekdayStart,
+            weekday_end: weekdayEnd,
+            weekend_start: weekendStart,
+            weekend_end: weekendEnd,
+          });
+          if (!isCurrentIdentity(identity)) return;
+          if (contactError) {
+            // Non-blocking: contact hours are editable later from settings.
+            console.error('[Onboarding] Contact preferences save failed:', contactError);
+          }
         }
 
-        if (createdCoupleId && anniversaryDate) {
+        if (spaceMode === 'create' && createdCoupleId && anniversaryDate) {
           const anniversarySaved = await saveCoupleAnniversary(createdCoupleId, anniversaryDate);
           if (!isCurrentIdentity(identity)) return;
           if (!anniversarySaved) {
@@ -668,36 +821,37 @@ export function OnboardingPage() {
             anniversaryNotSaved = true;
           }
         }
-      }
 
-      if (!isCurrentIdentity(identity)) return;
-      // Only now mirror it into local state.
-      await updateProfile({
-        myName: finalNickname,
-        role,
-        onboardingCompletedAt: nowIso,
-        couple: {
-          ...state.profile.couple,
-          coupleId: createdCoupleId || undefined,
-          // No invented partner name: it is filled in for real once the partner joins.
-          partnerName: joinedPartnerName || '',
-          anniversaryDate,
-          // Only the space creator holds a shareable code.
-          coupleCode: spaceMode === 'create' ? createdInviteCode : '',
-          connected: spaceMode === 'join',
-          status: spaceMode === 'join' ? 'active' : 'pending',
-        },
-        military,
-        contact,
-      }, { persist: false });
+        await updateProfile({
+          myName: finalNickname,
+          role: authoritativeRole,
+          onboardingCompletedAt: nowIso,
+          couple: {
+            ...state.profile.couple,
+            coupleId: createdCoupleId || undefined,
+            // No invented partner name: it is filled in for real once the partner joins.
+            partnerName: joinedPartnerName || '',
+            anniversaryDate: spaceMode === 'create' ? anniversaryDate : undefined,
+            // Only the space creator holds a shareable code.
+            coupleCode: spaceMode === 'create' ? createdInviteCode : '',
+            connected: authoritativePartnerPresent,
+            status: authoritativePartnerPresent ? 'active' : 'pending',
+          },
+          military,
+          contact,
+        }, { persist: false });
 
-      if (!isCurrentIdentity(identity)) return;
-      if (anniversaryNotSaved) {
-        toast.warning(
-          '기념일을 두 사람의 공간에 저장하지 못했어요. 설정에서 다시 입력해 주세요.',
-        );
+        if (!isCurrentIdentity(identity)) return;
+        if (anniversaryNotSaved) {
+          toast.warning(
+            '기념일을 두 사람의 공간에 저장하지 못했어요. 설정에서 다시 입력해 주세요.',
+          );
+        }
+        setSetupComplete(true);
+        if (authoritativeRole === 'gomsin' && navigate) {
+          navigate('/compose');
+        }
       }
-      setSetupComplete(true);
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
       console.error('[Onboarding] Final setup failed:', error);
@@ -797,9 +951,14 @@ export function OnboardingPage() {
                   <CoupleAvatar size={84} />
                 </div>
                 <h1 className="text-display tracking-tight text-foreground">곰신로그</h1>
-                <p className="text-muted-foreground text-body font-medium leading-relaxed break-keep">
-                  답장이 늦어도, 서로의 하루는 놓치지 않도록.
-                </p>
+                <div className="space-y-1">
+                  <p className="text-foreground text-body font-semibold leading-relaxed break-keep">
+                    함께하지 못한 하루를 서로 이어주고, 둘만의 기억으로 남겨요.
+                  </p>
+                  <p className="text-muted-foreground text-body font-medium leading-relaxed break-keep">
+                    답장이 늦어도, 서로의 하루는 놓치지 않도록.
+                  </p>
+                </div>
 
                 {/*
                   What signing in actually commits you to.
@@ -923,7 +1082,7 @@ export function OnboardingPage() {
                 {/* `email` is deliberately absent: a provider the screen does not
                     offer must not count as a way in, or a project configured for
                     email alone would show no button and no explanation either. */}
-                {!authProviders.google && !authProviders.apple && (
+                {!authProviders.google && !(isIOS && authProviders.apple) && (
                   <p role="alert" className="text-caption text-destructive text-center font-semibold">
                     현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.
                   </p>
@@ -1142,6 +1301,17 @@ export function OnboardingPage() {
                           {copiedCode ? <Check size={20} /> : <Copy size={20} />}
                         </button>
                       </div>
+                      {/^\d{6}$/.test(createdInviteCode) && (
+                        <Button
+                          variant="primary"
+                          size="md"
+                          full
+                          onClick={handleShareInvite}
+                          className="min-h-[44px]"
+                        >
+                          초대장 보내기
+                        </Button>
+                      )}
                       <p className="text-caption text-muted-foreground text-center">
                         상대방이 앱을 설치하고 [초대 코드가 있어요] 메뉴에 위 코드를 입력하면 1:1 커플 공간이 연결됩니다.
                       </p>
@@ -1224,11 +1394,13 @@ export function OnboardingPage() {
 
                 {!skipAnniversary ? (
                   <div className="space-y-2">
-                    <label className="text-label font-semibold text-muted-foreground">사귄 날짜</label>
+                    <label htmlFor="onboarding-anniversary" className="text-label font-semibold text-muted-foreground">사귄 날짜</label>
                     <input
+                      id="onboarding-anniversary"
                       type="date"
                       value={anniversary}
                       onChange={(e) => setAnniversary(e.target.value)}
+                      aria-label="사귄 날짜"
                       className="w-full h-13 px-4 rounded-control bg-card border border-border text-body outline-none"
                     />
                   </div>
@@ -1240,7 +1412,7 @@ export function OnboardingPage() {
 
                 <button
                   onClick={() => setSkipAnniversary(!skipAnniversary)}
-                  className="press-response text-label text-coral-strong font-semibold underline min-h-[36px]"
+                  className="press-response text-label text-coral-strong font-semibold underline min-h-11 flex items-center"
                 >
                   {skipAnniversary ? '사귄 날짜 입력하기' : '아직 정확히 기억나지 않아요'}
                 </button>
@@ -1284,7 +1456,9 @@ export function OnboardingPage() {
                       ].map((st) => (
                         <button
                           key={st.key}
+                          type="button"
                           onClick={() => setMilitaryStatus(st.key as MilitaryStatus)}
+                          aria-pressed={militaryStatus === st.key}
                           className={`press-response py-2 px-2 rounded-control text-label font-semibold border transition min-h-11 ${
                             militaryStatus === st.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
@@ -1310,7 +1484,9 @@ export function OnboardingPage() {
                       ].map((b) => (
                         <button
                           key={b.key}
+                          type="button"
                           onClick={() => handleBranchChange(b.key as Branch)}
+                          aria-pressed={branch === b.key}
                           className={`press-response py-2 px-1 rounded-control text-label font-semibold border transition min-h-11 ${
                             branch === b.key ? 'bg-coral-fill text-coral-fill-foreground border-coral-strong' : 'bg-card border-border text-muted-foreground'
                           }`}
@@ -1323,22 +1499,26 @@ export function OnboardingPage() {
 
                   {/* Enlistment date */}
                   <div>
-                    <label className="text-label font-semibold text-muted-foreground">입대일 / 입대 예정일</label>
+                    <label htmlFor="onboarding-enlistment-date" className="text-label font-semibold text-muted-foreground">입대일 / 입대 예정일</label>
                     <input
+                      id="onboarding-enlistment-date"
                       type="date"
                       value={enlistmentDate}
                       onChange={(e) => handleEnlistmentChange(e.target.value)}
+                      aria-label="입대일 / 입대 예정일"
                       className="w-full h-11 px-3 mt-1 rounded-control bg-card border border-border text-body outline-none"
                     />
                   </div>
 
                   {/* Expected Discharge */}
                   <div>
-                    <label className="text-label font-semibold text-muted-foreground">예상 전역일 (자동 계산 / 수동 수정 가능)</label>
+                    <label htmlFor="onboarding-discharge-date" className="text-label font-semibold text-muted-foreground">예상 전역일 (자동 계산 / 수동 수정 가능)</label>
                     <input
+                      id="onboarding-discharge-date"
                       type="date"
                       value={expectedDischargeDate}
                       onChange={(e) => handleManualDischargeChange(e.target.value)}
+                      aria-label="예상 전역일 (자동 계산 / 수동 수정 가능)"
                       className="w-full h-11 px-3 mt-1 rounded-control bg-card border border-border text-body outline-none"
                     />
                   </div>
@@ -1382,38 +1562,46 @@ export function OnboardingPage() {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="text-label font-semibold text-muted-foreground">평일 확인 가능 시간</label>
+                    <label htmlFor="weekday-start-time" className="text-label font-semibold text-muted-foreground">평일 확인 가능 시간</label>
                     <div className="flex items-center gap-2 mt-1">
                       <input
+                        id="weekday-start-time"
                         type="time"
                         value={weekdayStart}
                         onChange={(e) => setWeekdayStart(e.target.value)}
+                        aria-label="평일 확인 시작 시간"
                         className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                       <span>~</span>
                       <input
+                        id="weekday-end-time"
                         type="time"
                         value={weekdayEnd}
                         onChange={(e) => setWeekdayEnd(e.target.value)}
+                        aria-label="평일 확인 종료 시간"
                         className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-label font-semibold text-muted-foreground">주말·휴일 확인 가능 시간</label>
+                    <label htmlFor="weekend-start-time" className="text-label font-semibold text-muted-foreground">주말·휴일 확인 가능 시간</label>
                     <div className="flex items-center gap-2 mt-1">
                       <input
+                        id="weekend-start-time"
                         type="time"
                         value={weekendStart}
                         onChange={(e) => setWeekendStart(e.target.value)}
+                        aria-label="주말·휴일 확인 시작 시간"
                         className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                       <span>~</span>
                       <input
+                        id="weekend-end-time"
                         type="time"
                         value={weekendEnd}
                         onChange={(e) => setWeekendEnd(e.target.value)}
+                        aria-label="주말·휴일 확인 종료 시간"
                         className="flex-1 h-11 px-3 rounded-control bg-card border border-border text-body outline-none"
                       />
                     </div>
@@ -1423,12 +1611,13 @@ export function OnboardingPage() {
 
               <div className="space-y-2">
                 <Button variant="primary" size="lg" full
-                onClick={handleNext}>
+                onClick={handleCompleteContactHours}>
                   완료하기
                 </Button>
                 <button
-                  onClick={handleNext}
-                  className="press-response-row w-full py-3 text-label text-muted-foreground font-medium text-center min-h-[36px]"
+                  type="button"
+                  onClick={handleSkipContactHours}
+                  className="press-response-row w-full py-3 text-label text-muted-foreground font-medium text-center min-h-11 flex items-center justify-center"
                 >
                   지금은 설정하지 않을래요
                 </button>
@@ -1469,4 +1658,12 @@ export function OnboardingPage() {
       </div>
     </div>
   );
+}
+
+export function OnboardingPage() {
+  const inRouter = useInRouterContext();
+  if (inRouter) {
+    return <OnboardingWithRouter />;
+  }
+  return <OnboardingContent />;
 }

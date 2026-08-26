@@ -118,6 +118,10 @@ const ORDER = [
   '059_partner_managed_username.sql',
   '060_partner_username_projection.sql',
   '061_reject_null_partner_profile_actor.sql',
+  '062_e2ee_pairing_ceremony_rpc.sql',
+  '063_partner_service_projection.sql',
+  '064_lock_crypto_pairings_table_privileges.sql',
+  '065_harden_e2ee_pairing_rpc.sql',
 ];
 
 /**
@@ -378,6 +382,33 @@ for (const file of ORDER) {
     const pre = psql(['-c', PRE_002_RECURSION_DROPS]);
     if (!pre.ok) throw new Error(`002 pre-drop failed:\n${pre.stderr}`);
   }
+  if (file === '065_harden_e2ee_pairing_rpc.sql') {
+    const legacy062Fixture = psqlScript(`
+      INSERT INTO auth.users (id, email) VALUES
+        ('65000000-0000-4000-8000-00000000000a', 'legacy062-a@example.test'),
+        ('65000000-0000-4000-8000-00000000000b', 'legacy062-b@example.test');
+      INSERT INTO public.profiles (id, display_name, role) VALUES
+        ('65000000-0000-4000-8000-00000000000a', 'Legacy A', 'gomsin'),
+        ('65000000-0000-4000-8000-00000000000b', 'Legacy B', 'soldier');
+      INSERT INTO public.couples (id) VALUES ('65000000-0000-4000-8000-00000000000c');
+      INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES
+        ('65000000-0000-4000-8000-00000000000c', '65000000-0000-4000-8000-00000000000a', 'gomsin', 'active'),
+        ('65000000-0000-4000-8000-00000000000c', '65000000-0000-4000-8000-00000000000b', 'soldier', 'active');
+      INSERT INTO public.crypto_pairings (
+        id, couple_id, state, pairing_nonce, transcript, transcript_hash,
+        proposed_by_user_id, expires_at, created_at, updated_at
+      ) VALUES (
+        '65000000-0000-4000-8000-00000000000d',
+        '65000000-0000-4000-8000-00000000000c',
+        'CRYPTO_ACTIVE', NULL, NULL, NULL,
+        '65000000-0000-4000-8000-00000000000a',
+        clock_timestamp() + interval '5 minutes', clock_timestamp(), clock_timestamp()
+      );
+    `);
+    if (!legacy062Fixture.ok) {
+      throw new Error(`062-era malformed pairing fixture failed:\n${legacy062Fixture.stderr}`);
+    }
+  }
   const applied = psqlScript(readFileSync(join(MIGRATIONS, file), 'utf8'));
   if (!applied.ok) {
     console.error(`MIGRATION FAILED: ${file}\n${applied.stderr}`);
@@ -398,6 +429,9 @@ const COUPLE2 = '22222222-0000-4000-8000-000000000002';
 const SHARED = '5ha5ed00-0000-4000-8000-00000000000f'.replace(/[^0-9a-f-]/g, '0');
 const PRIVATE = 'da7a0000-0000-4000-8000-0000000000f1';
 const OTHER = 'c0c0c0c0-0000-4000-8000-0000000000c2';
+const LEGACY_062_A = '65000000-0000-4000-8000-00000000000a';
+const LEGACY_062_COUPLE = '65000000-0000-4000-8000-00000000000c';
+const LEGACY_062_PAIRING = '65000000-0000-4000-8000-00000000000d';
 
 mustSql(`
   INSERT INTO auth.users (id, email) VALUES
@@ -3381,6 +3415,455 @@ const projectionAfterMutationRestore = asUser(
 check(
   projectionAfterMutationRestore.ok && projectionAfterMutationRestore.stdout.trim() === '1',
   '061 mutation tests restore the exact one-partner projection',
+);
+
+// ---------------------------------------------------------------------------
+// 062 — actor-bound two-person pairing ceremony
+// ---------------------------------------------------------------------------
+
+const PAIR_DEVICE_A = 'a0620000-0000-4000-8000-00000000000a';
+const PAIR_DEVICE_B = 'b0620000-0000-4000-8000-00000000000b';
+const PAIR_NONCE = "decode(repeat('62', 32), 'hex')";
+const PAIR_TRANSCRIPT = "decode(repeat('63', 440), 'hex')";
+const PAIR_HASH = "decode(repeat('64', 32), 'hex')";
+const PAIR_SIG_A = "decode(repeat('65', 64), 'hex')";
+const PAIR_SIG_B = "decode(repeat('66', 64), 'hex')";
+const startPairing = (actor, transcript = PAIR_TRANSCRIPT) => asUser(actor, `
+  SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${PAIR_NONCE}, ${transcript}, ${PAIR_HASH},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )
+`);
+
+mustSql(`
+  DELETE FROM public.crypto_pairings WHERE couple_id = '${COUPLE1}';
+  INSERT INTO public.devices (id, user_id, sig_spki, kem_spki, platform, assurance, status)
+  VALUES
+    ('${PAIR_DEVICE_A}', '${A}', ${spki('62')}, ${spki('63')}, 'ios', 'secure_enclave', 'ACTIVE'),
+    ('${PAIR_DEVICE_B}', '${B}', ${spki('64')}, ${spki('65')}, 'ios', 'secure_enclave', 'ACTIVE');
+`, '062 pairing fixture');
+
+const nullStart = asAuthenticatedWithoutSubject(`
+  SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${PAIR_NONCE}, ${PAIR_TRANSCRIPT}, ${PAIR_HASH},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )
+`);
+check(
+  !nullStart.ok && /not_authenticated/.test(nullStart.stderr),
+  '062 a NULL-subject authenticated caller cannot start a pairing',
+);
+check(
+  !asAnon(`SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${PAIR_NONCE}, ${PAIR_TRANSCRIPT}, ${PAIR_HASH},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )`).ok,
+  '062 anon has no EXECUTE grant on pairing start',
+);
+check(
+  !startPairing(C).ok,
+  '062 an unrelated authenticated user cannot start another couple pairing',
+);
+check(
+  !startPairing(A, "decode(repeat('63', 439), 'hex')").ok,
+  '062 a malformed transcript is refused before persistence',
+);
+
+const startedPairing = startPairing(A);
+check(startedPairing.ok, '062 an active member can start a valid pairing');
+const PAIRING_ID = startedPairing.stdout.trim();
+check(
+  startPairing(B).ok && startPairing(B).stdout.trim() === PAIRING_ID,
+  '062 the matching proposal is idempotent for the active partner',
+);
+
+check(
+  !asUser(A, `INSERT INTO public.crypto_pairings (couple_id) VALUES ('${COUPLE1}')`).ok,
+  '062 authenticated members cannot directly insert pairing rows',
+);
+check(
+  !asUser(A, `UPDATE public.crypto_pairings SET state = 'CRYPTO_ACTIVE' WHERE id = '${PAIRING_ID}'`).ok,
+  '062 authenticated members cannot directly forge pairing state',
+);
+check(
+  !asUser(C, `SELECT public.e2ee_confirm_couple_pairing(
+    '${PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+  )`).ok,
+  '062 an unrelated user cannot confirm another couple pairing',
+);
+
+const confirmedA = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  confirmedA.ok && confirmedA.stdout.trim() === 'CONFIRMED_ONE',
+  '062 the first active member can bind only their own confirmation slot',
+);
+check(
+  !asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+    '${PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+  )`).ok,
+  '062 one member cannot confirm with the partner device',
+);
+check(
+  mustSql(`SELECT confirmed_high_signature IS NULL FROM public.crypto_pairings
+           WHERE id = '${PAIRING_ID}'`, '062 untouched partner slot') === 't',
+  '062 the first member cannot populate the partner confirmation slot',
+);
+check(
+  !asUser(A, `SELECT public.e2ee_mark_couple_pairing_active(
+    '${PAIRING_ID}', (SELECT id FROM public.scope_keys
+      WHERE owner_couple_id = '${COUPLE1}' AND state = 'ACTIVE' LIMIT 1)
+  )`).ok,
+  '062 a single confirmation cannot activate couple protection',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '062 former partner');
+check(
+  !asUser(B, `SELECT public.e2ee_confirm_couple_pairing(
+    '${PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+  )`).ok,
+  '062 a former partner cannot confirm pairing evidence',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '062 restore partner');
+
+const confirmedB = asUser(B, `SELECT public.e2ee_confirm_couple_pairing(
+  '${PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+)`);
+check(
+  confirmedB.ok && confirmedB.stdout.trim() === 'CONFIRMED_BOTH',
+  '062 the second active member completes the two-sided confirmation',
+);
+check(
+  !asUser(B, `SELECT public.e2ee_mark_couple_pairing_active(
+    '${PAIRING_ID}', (SELECT id FROM public.scope_keys
+      WHERE owner_couple_id = '${COUPLE1}' AND state = 'ACTIVE' LIMIT 1)
+  )`).ok,
+  '062 the non-canonical member cannot publish the active authority',
+);
+
+const activeScopeKeyId = mustSql(`
+  SELECT id::text FROM public.scope_keys
+  WHERE owner_couple_id = '${COUPLE1}' AND domain = 'couple' AND state = 'ACTIVE'
+  ORDER BY key_epoch DESC LIMIT 1
+`, '062 active couple scope key');
+const markedActive = asUser(A, `SELECT public.e2ee_mark_couple_pairing_active(
+  '${PAIRING_ID}', '${activeScopeKeyId}'
+)`);
+check(markedActive.ok, '062 the canonical member can activate after both confirmations and an active CSK');
+check(
+  mustSql(`SELECT state FROM public.crypto_pairings WHERE id = '${PAIRING_ID}'`, '062 active state') === 'CRYPTO_ACTIVE',
+  '062 the pairing reaches CRYPTO_ACTIVE only through the guarded RPC',
+);
+
+// ---------------------------------------------------------------------------
+// 063 — minimal partner service projection
+// ---------------------------------------------------------------------------
+
+mustSql(`
+  UPDATE public.profiles
+  SET military_info = jsonb_build_object(
+    'branch', 'army',
+    'militaryStatus', 'serving',
+    'enlistmentDate', '2026-01-01',
+    'expectedDischargeDate', '2027-07-01',
+    'dischargeDateSource', 'manual',
+    'memo', 'owner-only free-form note'
+  )
+  WHERE id = '${B}';
+`, '063 soldier military fixture');
+
+const serviceAsGomsin = asUser(A, `
+  SELECT row_to_json(service)::text
+  FROM public.get_partner_service_info() service
+`);
+check(
+  serviceAsGomsin.ok
+    && serviceAsGomsin.stdout.includes('"branch":"army"')
+    && serviceAsGomsin.stdout.includes('"military_status":"serving"')
+    && !serviceAsGomsin.stdout.includes('memo')
+    && !serviceAsGomsin.stdout.includes('owner-only free-form note'),
+  '063 active gomsin sees only the soldier service allowlist and never the memo',
+);
+
+const serviceAsSoldier = asUser(B, `SELECT count(*) FROM public.get_partner_service_info()`);
+const serviceAsUnrelated = asUser(C, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceAsSoldier.ok && serviceAsSoldier.stdout.trim() === '0'
+    && serviceAsUnrelated.ok && serviceAsUnrelated.stdout.trim() === '0',
+  '063 soldier and unrelated users receive no partner service row',
+);
+check(
+  !asAnon(`SELECT * FROM public.get_partner_service_info()`).ok,
+  '063 anon has no EXECUTE grant on partner service projection',
+);
+const serviceAsNullActor = asAuthenticatedWithoutSubject(`
+  SELECT count(*) FROM public.get_partner_service_info()
+`);
+check(
+  !serviceAsNullActor.ok && /not_authenticated/.test(serviceAsNullActor.stderr),
+  '063 authenticated without a JWT subject is rejected',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '063 former partner');
+const serviceAfterDisconnect = asUser(A, `SELECT count(*) FROM public.get_partner_service_info()`);
+const serviceForFormerPartner = asUser(B, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceAfterDisconnect.ok && serviceAfterDisconnect.stdout.trim() === '0'
+    && serviceForFormerPartner.ok && serviceForFormerPartner.stdout.trim() === '0',
+  '063 disconnected and former partners receive no service row',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '063 restore partner');
+
+const ANOMALOUS_THIRD_MEMBER = '63636363-0000-4000-8000-000000000063';
+mustSql(`
+  INSERT INTO auth.users (id, email) VALUES ('${ANOMALOUS_THIRD_MEMBER}', 'anomaly63@example.test');
+  INSERT INTO public.profiles (id, display_name, role) VALUES ('${ANOMALOUS_THIRD_MEMBER}', 'Anomaly', 'soldier');
+  INSERT INTO public.couple_members (couple_id, user_id, role, status)
+  VALUES ('${COUPLE1}', '${ANOMALOUS_THIRD_MEMBER}', 'soldier', 'active');
+`, '063 anomalous third active member fixture');
+
+const serviceWithThirdMember = asUser(A, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceWithThirdMember.ok && serviceWithThirdMember.stdout.trim() === '0',
+  '063 an anomalous third active member causes get_partner_service_info to return zero',
+);
+
+mustSql(`
+  DELETE FROM public.couple_members WHERE couple_id = '${COUPLE1}' AND user_id = '${ANOMALOUS_THIRD_MEMBER}';
+  DELETE FROM public.profiles WHERE id = '${ANOMALOUS_THIRD_MEMBER}';
+  DELETE FROM auth.users WHERE id = '${ANOMALOUS_THIRD_MEMBER}';
+`, '063 remove anomalous third member');
+
+const serviceAfterAnomalyRemoved = asUser(A, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceAfterAnomalyRemoved.ok && serviceAfterAnomalyRemoved.stdout.trim() === '1',
+  '063 removing the anomalous third member restores the partner service projection',
+);
+
+// ---------------------------------------------------------------------------
+// 064 — lock crypto_pairings table privileges
+// ---------------------------------------------------------------------------
+
+const authPrivs = mustSql(`
+  SELECT concat_ws(',',
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'SELECT'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'INSERT'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'UPDATE'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'DELETE'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'TRUNCATE'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'TRIGGER'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'REFERENCES')
+  )
+`, '064 authenticated table privileges');
+check(
+  authPrivs === 't,f,f,f,f,f,f',
+  '064 authenticated has SELECT true and INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER/REFERENCES false on crypto_pairings',
+);
+
+const anonPrivs = mustSql(`
+  SELECT concat_ws(',',
+    has_table_privilege('anon', 'public.crypto_pairings', 'SELECT'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'INSERT'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'UPDATE'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'DELETE'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'TRUNCATE'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'TRIGGER'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'REFERENCES')
+  )
+`, '064 anon table privileges');
+check(
+  anonPrivs === 'f,f,f,f,f,f,f',
+  '064 anon has no table privileges on crypto_pairings',
+);
+
+const publicPrivs = mustSql(`
+  SELECT concat_ws(',',
+    has_table_privilege('public', 'public.crypto_pairings', 'SELECT'),
+    has_table_privilege('public', 'public.crypto_pairings', 'INSERT'),
+    has_table_privilege('public', 'public.crypto_pairings', 'UPDATE'),
+    has_table_privilege('public', 'public.crypto_pairings', 'DELETE'),
+    has_table_privilege('public', 'public.crypto_pairings', 'TRUNCATE'),
+    has_table_privilege('public', 'public.crypto_pairings', 'TRIGGER'),
+    has_table_privilege('public', 'public.crypto_pairings', 'REFERENCES')
+  )
+`, '064 PUBLIC has no table privileges on crypto_pairings');
+check(
+  publicPrivs === 'f,f,f,f,f,f,f',
+  '064 PUBLIC has no table privileges on crypto_pairings',
+);
+
+const pairingCountBeforeTruncate = mustSql(
+  `SELECT count(*) FROM public.crypto_pairings`,
+  '064 pairing count before truncate',
+);
+const truncateAttempt = asUser(A, `TRUNCATE TABLE public.crypto_pairings`);
+check(
+  !truncateAttempt.ok && /permission denied/.test(truncateAttempt.stderr),
+  '064 authenticated TRUNCATE attempt fails with permission denied',
+);
+const pairingCountAfterTruncate = mustSql(
+  `SELECT count(*) FROM public.crypto_pairings`,
+  '064 pairing count after truncate',
+);
+check(
+  pairingCountAfterTruncate === pairingCountBeforeTruncate && parseInt(pairingCountAfterTruncate, 10) > 0,
+  '064 crypto_pairings fixture remains intact after denied TRUNCATE attempt',
+);
+
+const selectPairing = asUser(A, `SELECT count(*) FROM public.crypto_pairings WHERE id = '${PAIRING_ID}'`);
+check(
+  selectPairing.ok && selectPairing.stdout.trim() === '1',
+  '064 authenticated member can still SELECT from crypto_pairings',
+);
+
+// ---------------------------------------------------------------------------
+// 065 — NULL-safe evidence and durable transcript expiration
+// ---------------------------------------------------------------------------
+
+check(
+  mustSql(`SELECT state FROM public.crypto_pairings WHERE id = '${LEGACY_062_PAIRING}'`,
+    '065 062-era malformed row state') === 'TRANSCRIPT_EXPIRED',
+  '065 quarantines an incomplete CRYPTO_ACTIVE row created before the forward upgrade',
+);
+const legacyConfirm = asUser(LEGACY_062_A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${LEGACY_062_PAIRING}', '65000000-0000-4000-8000-00000000000e', ${PAIR_SIG_A}
+)`);
+check(
+  legacyConfirm.ok && legacyConfirm.stdout.trim() === 'TRANSCRIPT_EXPIRED',
+  '065 returns the quarantined state idempotently without accepting a confirmation',
+);
+const freshAfterLegacyUpgrade = asUser(LEGACY_062_A, `SELECT public.e2ee_start_couple_pairing(
+  '${LEGACY_062_COUPLE}', decode(repeat('6a', 32), 'hex'),
+  decode(repeat('6b', 440), 'hex'), decode(repeat('6c', 32), 'hex'),
+  clock_timestamp(), clock_timestamp() + interval '5 minutes'
+)`);
+check(
+  freshAfterLegacyUpgrade.ok && freshAfterLegacyUpgrade.stdout.trim() !== LEGACY_062_PAIRING,
+  '065 permits a fresh valid ceremony after quarantining 062-era malformed authority',
+);
+
+mustSql(`UPDATE public.crypto_pairings SET state = 'UNLINKED' WHERE id = '${PAIRING_ID}'`,
+  '065 retire earlier pairing fixture');
+
+const pairingCountBeforeNullEvidence = mustSql(
+  `SELECT count(*) FROM public.crypto_pairings`,
+  '065 pairing count before NULL evidence attempts',
+);
+for (const [label, nonce, transcript, hash] of [
+  ['nonce', 'NULL', "decode(repeat('70', 440), 'hex')", "decode(repeat('71', 32), 'hex')"],
+  ['transcript', "decode(repeat('72', 32), 'hex')", 'NULL', "decode(repeat('73', 32), 'hex')"],
+  ['hash', "decode(repeat('74', 32), 'hex')", "decode(repeat('75', 440), 'hex')", 'NULL'],
+]) {
+  const result = asUser(A, `SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${nonce}, ${transcript}, ${hash},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )`);
+  check(
+    !result.ok && /invalid_pairing_evidence/.test(result.stderr),
+    `065 NULL ${label} is rejected before persistence`,
+  );
+}
+check(
+  mustSql(`SELECT count(*) FROM public.crypto_pairings`, '065 count after NULL evidence')
+    === pairingCountBeforeNullEvidence,
+  '065 NULL start evidence creates no pairing row',
+);
+
+const EXPIRED_PAIRING_ID = '65000000-0000-4000-8000-000000000065';
+mustSql(`
+  INSERT INTO public.crypto_pairings (
+    id, couple_id, state, pairing_nonce, transcript, transcript_hash,
+    proposed_by_user_id, expires_at, created_at, updated_at
+  ) VALUES (
+    '${EXPIRED_PAIRING_ID}', '${COUPLE1}', 'TRANSCRIPT_PROPOSED',
+    decode(repeat('76', 32), 'hex'), decode(repeat('77', 440), 'hex'),
+    decode(repeat('78', 32), 'hex'), '${A}',
+    clock_timestamp() - interval '1 minute',
+    clock_timestamp() - interval '6 minutes', clock_timestamp()
+  );
+`, '065 expired pairing fixture');
+
+const nullSignature = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', NULL
+)`);
+check(
+  !nullSignature.ok && /invalid_pairing_signature/.test(nullSignature.stderr),
+  '065 NULL signature is rejected',
+);
+check(
+  mustSql(`SELECT state || ',' || (confirmed_low_signature IS NULL)::text
+           FROM public.crypto_pairings WHERE id = '${EXPIRED_PAIRING_ID}'`,
+    '065 NULL signature state') === 'TRANSCRIPT_PROPOSED,true',
+  '065 NULL signature leaves state and confirmation slot unchanged',
+);
+
+const unrelatedExpired = asUser(C, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  !unrelatedExpired.ok && /not_active_couple_member/.test(unrelatedExpired.stderr),
+  '065 unrelated actor cannot mutate an expired pairing',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '065 former partner');
+const formerExpired = asUser(B, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+)`);
+check(
+  !formerExpired.ok && /not_active_couple_member/.test(formerExpired.stderr),
+  '065 former partner cannot mutate an expired pairing',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '065 restore partner');
+check(
+  mustSql(`SELECT state FROM public.crypto_pairings WHERE id = '${EXPIRED_PAIRING_ID}'`,
+    '065 denied actors leave expired fixture unchanged') === 'TRANSCRIPT_PROPOSED',
+  '065 denied actors do not persist an expiration transition',
+);
+
+const expireResult = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  expireResult.ok && expireResult.stdout.trim() === 'TRANSCRIPT_EXPIRED',
+  '065 active actor receives TRANSCRIPT_EXPIRED without a rollback exception',
+);
+check(
+  mustSql(`SELECT state || ','
+              || (confirmed_low_signature IS NULL)::text || ','
+              || (confirmed_high_signature IS NULL)::text
+           FROM public.crypto_pairings WHERE id = '${EXPIRED_PAIRING_ID}'`,
+    '065 persisted expiration') === 'TRANSCRIPT_EXPIRED,true,true',
+  '065 expiration persists without writing either confirmation slot',
+);
+const repeatExpired = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  repeatExpired.ok && repeatExpired.stdout.trim() === 'TRANSCRIPT_EXPIRED',
+  '065 repeated expiration confirmation is idempotent',
+);
+
+const freshAfterExpired = asUser(A, `SELECT public.e2ee_start_couple_pairing(
+  '${COUPLE1}', decode(repeat('79', 32), 'hex'), decode(repeat('7a', 440), 'hex'),
+  decode(repeat('7b', 32), 'hex'), clock_timestamp(),
+  clock_timestamp() + interval '5 minutes'
+)`);
+check(
+  freshAfterExpired.ok && freshAfterExpired.stdout.trim() !== EXPIRED_PAIRING_ID,
+  '065 an expired row no longer blocks a fresh pairing ceremony',
+);
+
+const truncateAfter065 = asUser(A, `TRUNCATE TABLE public.crypto_pairings`);
+check(
+  !truncateAfter065.ok && /permission denied/.test(truncateAfter065.stderr),
+  '065 preserves the 064 authenticated TRUNCATE denial',
 );
 
 // ---------------------------------------------------------------------------

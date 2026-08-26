@@ -1,8 +1,13 @@
+import { Capacitor } from '@capacitor/core';
+
 /**
- * Device bootstrap can change irreversible server authority, so it stays
- * explicitly opt-in per build until the native integration gate is closed.
- * This is a public boolean, never a credential.
+ * Record protection is a native product capability. Web/PWA remains unable to
+ * start a key ceremony because it has no approved device-bound keystore.
+ *
+ * `false` is retained as an emergency build-time kill switch; an omitted flag
+ * no longer ships an iPhone UI that can only tell the user the feature is off.
  */
 export function isDeviceProtectionEnabled(): boolean {
-  return import.meta.env.VITE_E2EE_DEVICE_PROTECTION_ENABLED === 'true';
+  return Capacitor.isNativePlatform()
+    && import.meta.env.VITE_E2EE_DEVICE_PROTECTION_ENABLED !== 'false';
 }

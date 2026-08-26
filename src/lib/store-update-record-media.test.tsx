@@ -139,7 +139,8 @@ function Probe({
   addFiles = [] as File[],
   removePaths = [] as string[],
   recordId = 'rec-1',
-}: { addFiles?: File[]; removePaths?: string[]; recordId?: string }) {
+  allOrNothing = false,
+}: { addFiles?: File[]; removePaths?: string[]; recordId?: string; allOrNothing?: boolean }) {
   const { state, isReady, updateRecordMedia } = useStore();
   const record = state.records.find((r) => r.id === 'rec-1');
   return (
@@ -150,7 +151,7 @@ function Probe({
       </span>
       <button
         onClick={() => {
-          void updateRecordMedia(recordId, { addFiles, removePaths }).then((result) => {
+          void updateRecordMedia(recordId, { addFiles, removePaths, allOrNothing }).then((result) => {
             lastResult = result;
           });
         }}
@@ -379,6 +380,35 @@ describe('updateRecordMedia', () => {
     await waitFor(() =>
       expect(screen.getByTestId('attachments')).toHaveTextContent('couple-1/rec-1/good.png'),
     );
+  });
+
+  it('all-or-nothing mode rolls back every new upload and leaves the row untouched', async () => {
+    uploadRecordMedia.mockImplementation(async (file: File) =>
+      file.name === 'bad.png'
+        ? { error: '파일을 올리지 못했어요.' }
+        : { attachment: { type: 'photo', name: file.name, path: `couple-1/rec-1/${file.name}` } },
+    );
+    await setup({
+      addFiles: [pngFile('good.png'), pngFile('bad.png')],
+      allOrNothing: true,
+    });
+
+    await act(async () => {
+      screen.getByText('edit-media').click();
+    });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toEqual({
+      ok: true,
+      failedFiles: ['good.png', 'bad.png'],
+    });
+    expect(callOrder).toEqual([
+      'upload:good.png',
+      'upload:bad.png',
+      'remove:couple-1/rec-1/good.png',
+    ]);
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
   });
 
   it('refuses to touch a record that is not in local state', async () => {

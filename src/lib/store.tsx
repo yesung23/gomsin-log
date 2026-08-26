@@ -1496,6 +1496,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSharedSyncStatus('unavailable');
     const nextState: AppState = {
       ...current,
+      profile: {
+        ...current.profile,
+        couple: {
+          ...current.profile.couple,
+          partnerMilitary: undefined,
+        },
+      },
       highlightedRecordId: undefined,
       records: [],
       // Couple-scoped coordination metadata goes with the workspace. The
@@ -2393,12 +2400,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
      * an endless cycle -- the outbox decides what happens to a failed entry, and it
      * has the attempt count to do that with.
      */
-    options?: { recordId?: string; allowQueue?: boolean; expectedCoupleId?: string },
+    options?: {
+      recordId?: string;
+      allowQueue?: boolean;
+      expectedCoupleId?: string;
+      allOrNothingMedia?: boolean;
+    },
   ): Promise<{
     ok: boolean;
     failedFiles: string[];
     error?: string;
     queued?: boolean;
+    recordId?: string;
     /**
      * The classified cause, for the outbox to decide with. Absent on success and on
      * the stale/no-workspace paths, which a retry cannot change either way, so the
@@ -2476,6 +2489,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       error?: string;
       queued?: boolean;
       reason?: RecordMutationReason;
+      recordId?: string;
     }> => {
       const message = recordFailureMessage(reason);
       const persistence = outboxRef.current;
@@ -2497,7 +2511,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, failedFiles: files.map((file) => file.name), error: message, reason };
       }
       setOutboxCounts(await countOutbox(persistence, workspace.userId));
-      return { ok: false, queued: true, failedFiles: [], reason };
+      return { ok: false, queued: true, failedFiles: [], reason, recordId };
     };
 
     let authoritativeRevision = 1;
@@ -2575,6 +2589,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (result.attachment.path) uploadedPaths.push(result.attachment.path);
     }
 
+    /*
+     * A profile post promises that the first selected photo stays the cover.
+     * Committing only the successful subset would make a later retry append the
+     * missing photos at the end and silently change that order. For this caller,
+     * roll every uploaded object back and keep the text-only row as the retry
+     * target. The normal composer keeps its existing D-05 partial-success mode.
+     */
+    if (options?.allOrNothingMedia && failedFiles.length > 0) {
+      if (uploadedPaths.length > 0) {
+        try {
+          await removeRecordMedia(uploadedPaths);
+        } catch {
+          /* best-effort; the row never references these objects */
+        }
+      }
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      updateStateImmediately((current) =>
+        isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
+          ? { ...current, records: [...current.records, savedRecord] }
+          : current,
+      );
+      return {
+        ok: true,
+        failedFiles: files.map((file) => file.name),
+        recordId,
+      };
+    }
+
     let finalRecord: DailyRecord = { ...savedRecord, attachments };
     if (attachments.length > 0) {
       try {
@@ -2629,7 +2671,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         : current,
     );
     return isCurrentLinkedCouple(workspace)
-      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
+      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)), recordId }
       : staleResult;
   };
 
@@ -3029,7 +3071,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const updateRecordMedia = async (
     id: string,
-    changes: { addFiles?: File[]; removePaths?: string[] },
+    changes: { addFiles?: File[]; removePaths?: string[]; allOrNothing?: boolean },
   ): Promise<{ ok: boolean; failedFiles: string[]; error?: string }> => {
     const addFiles = changes.addFiles || [];
     const removePaths = changes.removePaths || [];
@@ -3095,8 +3137,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       added.push(result.attachment);
       if (result.attachment.path) uploadedPaths.push(result.attachment.path);
     }
-
-    const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
     const rollbackUploads = async () => {
       if (uploadedPaths.length === 0) return;
       try {
@@ -3105,6 +3145,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         console.error('[gomsinlog] Failed to roll back uploaded media:', error);
       }
     };
+
+    if (changes.allOrNothing && failedFiles.length > 0) {
+      await rollbackUploads();
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      return { ok: true, failedFiles: allFileNames };
+    }
+
+    const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
 
     let authoritativeRevision = existing.contentRevision ?? 1;
     try {

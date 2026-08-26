@@ -117,6 +117,7 @@ export function mergeCoupleState(
     const cleared = { ...local };
     delete cleared.partnerUserId;
     delete cleared.partnerJoinedAt;
+    delete cleared.partnerMilitary;
     return {
       ...cleared,
       coupleId: undefined,
@@ -135,6 +136,7 @@ export function mergeCoupleState(
   if (!keepsVerifiedPartner) {
     delete base.partnerUserId;
     delete base.partnerJoinedAt;
+    delete base.partnerMilitary;
   }
   /**
    * The cached plaintext is only worth keeping while it can still be redeemed.

@@ -48,6 +48,7 @@ import type {
   NewRecoveryAnchor,
   NewRecoveryIdentity,
   NewScopeKey,
+  NewPairingProposal,
   PairingRecord,
   PartnerRecoveryAnchorRecord,
   RecoveryAnchorRecord,
@@ -177,10 +178,15 @@ const ENROLLMENT_COLUMNS = [
   'transcript_hash', 'approval_signature', 'created_at', 'expires_at', 'approved_at', 'consumed_at',
 ].join(',');
 const PAIRING_COLUMNS = [
-  'id', 'couple_id', 'state', 'pairing_nonce', 'transcript_hash',
+  'id', 'couple_id', 'state', 'pairing_nonce', 'transcript', 'transcript_hash',
   'confirmed_low_signature', 'confirmed_low_device_id',
-  'confirmed_high_signature', 'confirmed_high_device_id', 'expires_at',
+  'confirmed_high_signature', 'confirmed_high_device_id', 'created_at', 'expires_at',
 ].join(',');
+
+const LIVE_PAIRING_STATES = [
+  'CRYPTO_PENDING', 'TRANSCRIPT_PROPOSED', 'CONFIRMED_ONE',
+  'CONFIRMED_BOTH', 'EPOCH_PREPARING', 'CRYPTO_ACTIVE',
+] as const;
 const REVOCATION_COLUMNS = [
   'id', 'user_id', 'revoked_device_id', 'revoker_device_id', 'reason',
   'statement', 'signature', 'sequence::text', 'log_head',
@@ -355,6 +361,7 @@ function toPairing(row: Row): PairingRecord {
     coupleId: requireString(row.couple_id, 'crypto_pairings.couple_id'),
     state: requireString(row.state, 'crypto_pairings.state'),
     pairingNonce: decodeByteaOrNull(row.pairing_nonce, 'crypto_pairings.pairing_nonce'),
+    transcript: decodeByteaOrNull(row.transcript, 'crypto_pairings.transcript'),
     transcriptHash: decodeByteaOrNull(row.transcript_hash, 'crypto_pairings.transcript_hash'),
     confirmedLowSignature: decodeByteaOrNull(
       row.confirmed_low_signature,
@@ -369,6 +376,7 @@ function toPairing(row: Row): PairingRecord {
       row.confirmed_high_device_id,
       'crypto_pairings.confirmed_high_device_id',
     ),
+    createdAt: requireString(row.created_at, 'crypto_pairings.created_at'),
     expiresAt: optionalString(row.expires_at, 'crypto_pairings.expires_at'),
   };
 }
@@ -809,9 +817,64 @@ export class SupabaseE2eeRepository implements E2eeRepository {
       this.db.from('crypto_pairings')
         .select(PAIRING_COLUMNS)
         .eq('couple_id', coupleId)
+        .in('state', LIVE_PAIRING_STATES)
         .maybeSingle(),
     );
     return row ? toPairing(row) : null;
+  }
+
+  async startPairing(record: NewPairingProposal): Promise<string> {
+    const data = await unwrap(
+      'rpc.e2ee_start_couple_pairing',
+      this.db.rpc('e2ee_start_couple_pairing', {
+        p_couple_id: record.coupleId,
+        p_pairing_nonce: encodeBytea(record.pairingNonce),
+        p_transcript: encodeBytea(record.transcript),
+        p_transcript_hash: encodeBytea(record.transcriptHash),
+        p_created_at: record.createdAt,
+        p_expires_at: record.expiresAt,
+      }),
+    );
+    return requireString(data, 'e2ee_start_couple_pairing');
+  }
+
+  async confirmPairing(input: {
+    pairingId: string;
+    deviceId: string;
+    signature: Uint8Array;
+  }): Promise<void> {
+    const state = await unwrap(
+      'rpc.e2ee_confirm_couple_pairing',
+      this.db.rpc('e2ee_confirm_couple_pairing', {
+        p_pairing_id: input.pairingId,
+        p_device_id: input.deviceId,
+        p_signature: encodeBytea(input.signature),
+      }),
+    );
+    if (state === 'TRANSCRIPT_EXPIRED') {
+      fail(
+        'E_TRANSCRIPT_EXPIRED',
+        'rpc.e2ee_confirm_couple_pairing',
+        'the pairing transcript expired',
+      );
+    }
+    if (state !== 'CONFIRMED_ONE' && state !== 'CONFIRMED_BOTH') {
+      fail(
+        'E_DB_SHAPE',
+        'rpc.e2ee_confirm_couple_pairing',
+        'unexpected pairing confirmation state',
+      );
+    }
+  }
+
+  async markPairingActive(input: { pairingId: string; scopeKeyId: string }): Promise<void> {
+    await unwrap(
+      'rpc.e2ee_mark_couple_pairing_active',
+      this.db.rpc('e2ee_mark_couple_pairing_active', {
+        p_pairing_id: input.pairingId,
+        p_scope_key_id: input.scopeKeyId,
+      }),
+    );
   }
 
   async getCoupleAuthorizationSnapshot(coupleId: string): Promise<CoupleAuthorizationSnapshot> {
@@ -832,17 +895,6 @@ export class SupabaseE2eeRepository implements E2eeRepository {
       activeUserIds: members.map((row, index) => requireString(row.user_id, `couple_members[${index}].user_id`)),
       pairingState: pairing?.state ?? null,
     };
-  }
-
-  async setPairingState(pairingId: string, state: string): Promise<void> {
-    await requiredRow(
-      'crypto_pairings.setState',
-      this.db.from('crypto_pairings')
-        .update({ state, updated_at: new Date().toISOString() })
-        .eq('id', pairingId)
-        .select('id')
-        .single(),
-    );
   }
 
   // --- server-authoritative provisioning and scope discovery ---------------

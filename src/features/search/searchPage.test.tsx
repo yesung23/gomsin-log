@@ -64,11 +64,13 @@ function createRecord(over: Partial<DailyRecord> = {}): DailyRecord {
 function stateWith({
   role = 'soldier',
   military = SERVING_MILITARY,
+  partnerMilitary,
   records = [],
   events = [],
 }: {
   role?: 'soldier' | 'gomsin';
   military?: MilitaryInfo;
+  partnerMilitary?: MilitaryInfo;
   records?: DailyRecord[];
   events?: CoupleEvent[];
 } = {}): AppState {
@@ -87,6 +89,7 @@ function stateWith({
         coupleCode: 'CP1234',
         connected: true,
         status: 'active',
+        ...(partnerMilitary ? { partnerMilitary } : {}),
       },
       military,
       contact: {
@@ -335,6 +338,51 @@ describe('곰신(gomsin) 기본 주 콘텐츠', () => {
     expect(screen.queryByTestId('soldier-search-surface')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /복무 현황 열기/ })).not.toBeInTheDocument();
   });
+
+  it('곰신은 활성 군인 파트너의 복무를 같은 레벨별 EXP 카드로 보되 수정할 수 없다', () => {
+    currentState = stateWith({ role: 'gomsin', partnerMilitary: SERVING_MILITARY });
+    renderSearch();
+
+    expect(screen.getByText('지수의 복무')).toBeInTheDocument();
+    expect(screen.getByTestId('soldier-service-info')).toBeInTheDocument();
+    expect(screen.getByTestId('service-exp-readout')).toHaveTextContent('EXP');
+    expect(screen.queryByRole('button', { name: '복무 정보 수정' })).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole('button', { name: '전체 단계' });
+    expect(toggle).toHaveClass('min-h-11');
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
+  });
+
+  it('파트너 복무 projection이 없으면 날짜나 D-day를 지어내지 않는다', () => {
+    currentState = stateWith({ role: 'gomsin' });
+    renderSearch();
+
+    expect(screen.queryByTestId('soldier-service-info')).not.toBeInTheDocument();
+    expect(screen.queryByText(/의 복무/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('cycle-tracker-section')).toBeInTheDocument();
+  });
+
+  it('연결이 해제되었거나 미연결 상태면 잔존 partnerMilitary가 있어도 상대 복무 카드를 렌더링하지 않는다', () => {
+    const base = stateWith({ role: 'gomsin', partnerMilitary: SERVING_MILITARY });
+    currentState = {
+      ...base,
+      profile: {
+        ...base.profile,
+        couple: {
+          ...base.profile.couple,
+          connected: false,
+          status: 'disconnected',
+          partnerMilitary: SERVING_MILITARY,
+        },
+      },
+    } as unknown as AppState;
+    renderSearch();
+
+    expect(screen.queryByTestId('soldier-service-info')).not.toBeInTheDocument();
+    expect(screen.queryByText(/의 복무/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('cycle-tracker-section')).toBeInTheDocument();
+  });
 });
 
 describe('검색 입력 및 네비게이션', () => {
@@ -492,6 +540,26 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
     // EXP formatted with / and %
     expect(readout).toHaveTextContent(/EXP/);
     expect(readout).toHaveTextContent(/%/);
+  });
+
+  it('누적 전체 EXP 대신 현재 복무 레벨 안에서 채운 EXP를 표시한다', () => {
+    vi.useFakeTimers();
+    try {
+      const startMs = serviceDateAtMs(SERVING_MILITARY.enlistmentDate!)!;
+      const totalSec = computeServiceExp(SERVING_MILITARY, startMs)!.totalSec;
+      vi.setSystemTime(startMs + totalSec * 0.2 * 1000);
+      currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
+      renderSearch();
+
+      const readout = screen.getByTestId('service-exp-readout');
+      expect(readout).toHaveTextContent(new RegExp(
+        `${formatExpNumber(totalSec * 0.1)}\\s*/\\s*${formatExpNumber(totalSec * 0.15)} EXP`,
+      ));
+      expect(readout).toHaveTextContent('66.6667%');
+      expect(screen.getByTestId('service-progress-summary')).toHaveTextContent('복무율 20.0000%');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('화면이 숨겨지면 EXP ticker를 멈추고 다시 보이면 즉시 재개한다', () => {

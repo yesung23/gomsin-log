@@ -128,6 +128,8 @@ export interface ServiceExpResult {
   nextRank: ServiceRank | null;
   tier: ServiceTier;
   nextTier: ServiceTier | null;
+  tierElapsedSec: number;
+  tierTotalSec: number;
   tierExpPercent: number;
   remainingPercentToNextTier: number | null;
   remainingDaysToNextTier: number | null;
@@ -346,6 +348,8 @@ export function computeServiceExp(
       nextRank,
       tier,
       nextTier: tier,
+      tierElapsedSec: 0,
+      tierTotalSec: (SERVICE_TIERS[1].minPercent / 100) * totalSec,
       tierExpPercent: 0,
       remainingPercentToNextTier: 0,
       remainingDaysToNextTier: daysUntilEnlistment,
@@ -394,6 +398,8 @@ export function computeServiceExp(
       nextRank: null,
       tier,
       nextTier: null,
+      tierElapsedSec: ((100 - tier.minPercent) / 100) * totalSec,
+      tierTotalSec: ((100 - tier.minPercent) / 100) * totalSec,
       tierExpPercent: 100,
       remainingPercentToNextTier: null,
       remainingDaysToNextTier: null,
@@ -500,6 +506,8 @@ export function computeServiceExp(
     nextRank,
     tier,
     nextTier,
+    tierElapsedSec,
+    tierTotalSec: tierSpanSec,
     tierExpPercent,
     remainingPercentToNextTier,
     remainingDaysToNextTier,

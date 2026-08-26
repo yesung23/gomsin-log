@@ -13,18 +13,31 @@ import type { AppState, DailyRecord } from '@/types';
  *    사용자가 매일 틀리는 종류의 변경이다.
  * 2. **사진만 올라간다.** 영상 경로는 E2EE 이전에 열지 않기로 한 결정이므로 이 표면이
  *    그것을 우회하지 못해야 한다.
- * 3. **기존 기록 경로로 저장된다.** 게시물 전용 저장 경로를 만들지 않았으므로 커플 권한과
- *    보호 게이트가 그대로 적용된다.
+ * 3. **기존 사진도 새 기록 아래로 안전하게 복사된다.** 예전 기록의 Storage 경로를 새
+ *    기록에 붙이지 않아 canonical path와 삭제 수명 경계를 지킨다.
  */
 
 const mockNavigate = vi.fn();
+const { downloadRecordPhotoForReuse } = vi.hoisted(() => ({
+  downloadRecordPhotoForReuse: vi.fn(),
+}));
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
+vi.mock('@/lib/records', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/records')>('@/lib/records');
+  return { ...actual, downloadRecordPhotoForReuse };
+});
+
 let storeState: AppState;
-const addRecordWithMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
+const addRecordWithMedia = vi.fn(async () => ({
+  ok: true,
+  failedFiles: [] as string[],
+  recordId: 'post-1',
+}));
+const updateRecordMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
@@ -34,6 +47,7 @@ vi.mock('@/lib/useStore', () => ({
     saveCoupleHighlight: vi.fn(),
     deleteCoupleHighlight: vi.fn(),
     addRecordWithMedia,
+    updateRecordMedia,
   }),
 }));
 
@@ -104,7 +118,11 @@ function open() {
 beforeEach(() => {
   vi.clearAllMocks();
   storeState = baseState();
-  addRecordWithMedia.mockResolvedValue({ ok: true, failedFiles: [] });
+  addRecordWithMedia.mockResolvedValue({ ok: true, failedFiles: [], recordId: 'post-1' });
+  updateRecordMedia.mockResolvedValue({ ok: true, failedFiles: [] });
+  downloadRecordPhotoForReuse.mockResolvedValue({
+    file: new File(['photo'], 'a.jpg', { type: 'image/jpeg' }),
+  });
 });
 
 describe('마이탭 헤더 배치', () => {
@@ -160,7 +178,7 @@ describe('게시물 만들기 3단계', () => {
     expect(screen.getByText('고를 수 있는 사진이 아직 없어요.')).toBeTruthy();
   });
 
-  it('기존 사진을 고르면 순서 단계로 넘어가 대표 사진을 알려준다', async () => {
+  it('사진 한 장이면 불필요한 순서 단계를 건너뛴다', async () => {
     storeState.records = [record({
       id: 'r1',
       attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
@@ -169,14 +187,14 @@ describe('게시물 만들기 3단계', () => {
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
     await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
-    expect(screen.getByText('순서 정하기')).toBeTruthy();
-    expect(screen.getByText('대표 사진')).toBeTruthy();
+    expect(screen.getByText('글 쓰기')).toBeTruthy();
+    expect(screen.queryByText('순서 정하기')).toBeNull();
   });
 
   it('두 장이면 키보드로도 순서를 바꿀 수 있다', async () => {
     storeState.records = [
-      record({ id: 'r1', time: '09:00', attachments: [{ type: 'photo', name: 'a.jpg', path: 'p/a.jpg' }] } as Partial<DailyRecord> & { id: string }),
-      record({ id: 'r2', time: '10:00', attachments: [{ type: 'photo', name: 'b.jpg', path: 'p/b.jpg' }] } as Partial<DailyRecord> & { id: string }),
+      record({ id: 'r1', time: '09:00', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }] } as Partial<DailyRecord> & { id: string }),
+      record({ id: 'r2', time: '10:00', attachments: [{ type: 'photo', name: 'b.jpg', path: 'couple-1/r2/b.jpg' }] } as Partial<DailyRecord> & { id: string }),
     ];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
@@ -187,48 +205,67 @@ describe('게시물 만들기 3단계', () => {
     // 2번째를 앞으로 보내면 대표가 바뀐다.
     await userEvent.click(screen.getByRole('button', { name: '2번째 사진을 앞으로' }));
     expect(screen.getAllByRole('listitem').length).toBeGreaterThanOrEqual(2);
+
+    downloadRecordPhotoForReuse.mockImplementation(async (attachment: { name: string }) => ({
+      file: new File(['photo'], attachment.name, { type: 'image/jpeg' }),
+    }));
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    await userEvent.click(screen.getByTestId('post-share'));
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalled());
+    const files = addRecordWithMedia.mock.calls[0][1] as File[];
+    expect(files.map((file) => file.name)).toEqual(['a.jpg', 'b.jpg']);
   });
 
   it('사진을 뺄 수 있다', async () => {
-    storeState.records = [record({
-      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'p/a.jpg' }],
-    } as Partial<DailyRecord> & { id: string })];
+    storeState.records = [
+      record({ id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }] } as Partial<DailyRecord> & { id: string }),
+      record({ id: 'r2', attachments: [{ type: 'photo', name: 'b.jpg', path: 'couple-1/r2/b.jpg' }] } as Partial<DailyRecord> & { id: string }),
+    ];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
     await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[1]);
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.click(screen.getByRole('button', { name: '1번째 사진 빼기' }));
-    expect(screen.queryByText('대표 사진')).toBeNull();
+    expect(screen.getAllByRole('button', { name: /사진 빼기/ })).toHaveLength(1);
   });
 
-  it('글을 쓰고 공유하면 기존 기록 경로로 저장된다', async () => {
+  it('글을 쓰고 공유하면 기존 사진을 새 파일로 복사해 저장한다', async () => {
     storeState.records = [record({
-      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'p/a.jpg' }],
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
     } as Partial<DailyRecord> & { id: string })];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
     await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
-    await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.type(screen.getByTestId('post-caption'), '우리 첫 게시물');
     await userEvent.click(screen.getByTestId('post-share'));
 
     await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalledTimes(1));
-    const [draft] = addRecordWithMedia.mock.calls[0] as unknown as [Record<string, unknown>];
+    const [draft, files, options] = addRecordWithMedia.mock.calls[0] as unknown as [
+      Record<string, unknown>, File[], Record<string, unknown>,
+    ];
     expect(draft.log).toBe('우리 첫 게시물');
     expect(draft.isPrivate).toBe(false);
     // 게시물은 감정 추론을 하지 않는다.
     expect(draft.emotionFlow).toEqual([]);
+    expect(downloadRecordPhotoForReuse).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'couple-1/r1/a.jpg' }),
+      'couple-1',
+      'r1',
+    );
+    expect(files).toHaveLength(1);
+    expect(files[0]).toBeInstanceOf(File);
+    expect(options).toEqual({ expectedCoupleId: 'couple-1', allOrNothingMedia: true });
   });
 
   it('나만 보기를 켜면 비공개로 저장된다', async () => {
     storeState.records = [record({
-      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'p/a.jpg' }],
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
     } as Partial<DailyRecord> & { id: string })];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
     await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
-    await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.click(screen.getByRole('switch', { name: /나만 보기/ }));
     await userEvent.click(screen.getByTestId('post-share'));
@@ -236,13 +273,137 @@ describe('게시물 만들기 3단계', () => {
     const [draft] = addRecordWithMedia.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(draft.isPrivate).toBe(true);
   });
+
+  it('기존 사진 다운로드가 실패하면 기록을 만들지 않고 초안을 보존한다', async () => {
+    storeState.records = [record({
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    downloadRecordPhotoForReuse.mockResolvedValueOnce({ error: '기존 사진을 불러오지 못했어요.' });
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    await userEvent.type(screen.getByTestId('post-caption'), '보존할 글');
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(downloadRecordPhotoForReuse).toHaveBeenCalled());
+    expect(addRecordWithMedia).not.toHaveBeenCalled();
+    expect(screen.getByTestId('post-composer')).toBeTruthy();
+    expect((screen.getByTestId('post-caption') as HTMLTextAreaElement).value).toBe('보존할 글');
+  });
+
+  it('사진 업로드 실패는 같은 기록에 전부 다시 붙이고 중복 기록을 만들지 않는다', async () => {
+    storeState.records = [record({
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['a.jpg'],
+      recordId: 'post-retry-1',
+    });
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    await userEvent.type(screen.getByTestId('post-caption'), '한 번만 저장할 글');
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(screen.getByText(/글은 이미 저장했어요/)).toBeTruthy());
+    expect(screen.getByTestId('post-share').textContent).toContain('사진 다시 올리기');
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalledWith('post-retry-1', {
+      addFiles: expect.any(Array),
+      allOrNothing: true,
+    }));
+    expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
+  });
+});
+
+describe('작성 중 초안은 리렌더에도 살아남는다', () => {
+  /**
+   * 실기기에서 관찰한 결함의 회귀 테스트.
+   *
+   * 초안 상태가 시트 안에 있으면 부모 리렌더로 시트가 리마운트될 때 고른 사진과 쓰던 글이
+   * 사라지고, 언마운트 cleanup 이 `revokeObjectURL` 을 호출해 아직 올리지 않은 파일의
+   * 미리보기까지 죽었다. 증상은 "공유를 눌렀는데 글이 placeholder 로 돌아가고 아무것도
+   * 저장되지 않는다" 였다. 그래서 초안은 부모가 소유한다.
+   */
+  it('스토어가 갱신돼 다시 렌더돼도 담은 사진과 쓴 글이 유지된다', async () => {
+    storeState.records = [record({
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    const view = open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    await userEvent.type(screen.getByTestId('post-caption'), '살아남아야 하는 글');
+
+    // 스토어 갱신을 모사한 재렌더. 초안이 시트 안에 있으면 여기서 전부 사라졌다.
+    storeState = { ...storeState, records: [...storeState.records] } as AppState;
+    view.rerender(<MemoryRouter><PaperProfile /></MemoryRouter>);
+
+    expect((screen.getByTestId('post-caption') as HTMLTextAreaElement).value)
+      .toBe('살아남아야 하는 글');
+    // 담은 사진도 그대로 있으므로 공유가 가능한 상태여야 한다.
+    expect(screen.getByTestId('post-share')).toBeTruthy();
+  });
+
+  it('배경을 눌러도 작성 중 초안이 사라지지 않는다', async () => {
+    /*
+      실기기에서 관찰한 결함의 회귀 테스트.
+
+      단계마다 시트 높이가 달라지므로(순서 정하기는 사진 수만큼 길고 글 쓰기는 짧다) 같은
+      자리를 눌렀는데 앞 단계에서는 시트 안, 뒤 단계에서는 배경이 된다. 그 한 번의 탭으로
+      고른 사진과 쓰던 글이 전부 사라졌고, 사용자에게는 "공유를 눌렀는데 저장이 안 된다"로
+      보였다. 버리는 문은 ✕ 하나여야 한다.
+    */
+    storeState.records = [record({
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    await userEvent.type(screen.getByTestId('post-caption'), '배경을 눌러도 남아야 한다');
+
+    // 시트 밖 배경(dialog 의 부모)을 누른다.
+    const backdrop = screen.getByTestId('post-composer').parentElement!;
+    await userEvent.click(backdrop);
+
+    // 시트가 그대로 열려 있고 글도 남아 있어야 한다.
+    expect(screen.getByTestId('post-composer')).toBeTruthy();
+    expect((screen.getByTestId('post-caption') as HTMLTextAreaElement).value)
+      .toBe('배경을 눌러도 남아야 한다');
+  });
+
+  it('닫으면 초안이 비워져 다음에 열 때 빈 상태로 시작한다', async () => {
+    storeState.records = [
+      record({ id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }] } as Partial<DailyRecord> & { id: string }),
+      record({ id: 'r2', attachments: [{ type: 'photo', name: 'b.jpg', path: 'couple-1/r2/b.jpg' }] } as Partial<DailyRecord> & { id: string }),
+    ];
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[1]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    expect(screen.getByText('대표 사진')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: '이전 단계' }));
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기 닫기' }));
+
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    // 담은 것이 없으므로 순서 단계로 갈 "다음" 버튼이 없다.
+    expect(screen.queryByRole('button', { name: '다음' })).toBeNull();
+  });
 });
 
 describe('프라이버시 경계', () => {
   it('비공개 기록의 사진은 고를 수 없다', async () => {
     storeState.records = [
-      record({ id: 'shared', attachments: [{ type: 'photo', name: 'a.jpg', path: 'p/a.jpg' }] } as Partial<DailyRecord> & { id: string }),
-      record({ id: 'secret', isPrivate: true, attachments: [{ type: 'photo', name: 's.jpg', path: 'p/s.jpg' }] } as Partial<DailyRecord> & { id: string }),
+      record({ id: 'shared', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/shared/a.jpg' }] } as Partial<DailyRecord> & { id: string }),
+      record({ id: 'secret', isPrivate: true, attachments: [{ type: 'photo', name: 's.jpg', path: 'couple-1/secret/s.jpg' }] } as Partial<DailyRecord> & { id: string }),
     ];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
@@ -253,12 +414,11 @@ describe('프라이버시 경계', () => {
   it('연결 전에는 공개 범위를 고를 수 없고 비공개로 저장된다고 알린다', async () => {
     storeState.profile.couple.connected = false;
     storeState.records = [record({
-      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'p/a.jpg' }],
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
     } as Partial<DailyRecord> & { id: string })];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
     await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
-    await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     expect(screen.queryByRole('switch', { name: /나만 보기/ })).toBeNull();
     expect(screen.getByText(/나만 볼 수 있게 저장돼요/)).toBeTruthy();

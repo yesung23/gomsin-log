@@ -19,6 +19,12 @@ export const SUPABASE_URL = 'https://example.supabase.co';
 /** supabase-js derives its storage key from the project ref (first host label). */
 export const AUTH_STORAGE_KEY = 'sb-example-auth-token';
 
+/** Valid 1x1 PNG used when the app downloads an existing photo for safe re-upload. */
+const MOCK_PHOTO_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=',
+  'base64',
+);
+
 export type Scenario = {
   userId: string;
   displayName: string;
@@ -31,6 +37,15 @@ export type Scenario = {
   partnerName?: string;
   /** Username projection returned by migration 060 when the partner exists. */
   partnerUsername?: string;
+  /** Sanitized migration-063 projection for a gomsin viewing the soldier. */
+  partnerMilitary?: {
+    branch: string;
+    militaryStatus: string;
+    enlistmentDate?: string;
+    expectedDischargeDate?: string;
+    dischargeDate?: string;
+    dischargeDateSource: string;
+  };
   anniversaryDate?: string;
   records?: RecordRow[];
   /**
@@ -268,6 +283,9 @@ export async function installMockBackend(
     }
 
     // ---- GoTrue ----------------------------------------------------------
+    if (path === '/auth/v1/settings') {
+      return json(route, { external: { google: true, apple: true, email: true } });
+    }
     if (path === '/auth/v1/user') return json(route, authUser(scenario));
     if (path === '/auth/v1/token') return json(route, seededSession(scenario));
     if (path === '/auth/v1/logout') return json(route, {});
@@ -485,6 +503,22 @@ export async function installMockBackend(
       );
     }
 
+    if (path === '/rest/v1/rpc/get_partner_service_info') {
+      const failure = failureFor(scenario, 'get_partner_service_info');
+      if (failure) return json(route, failure, failure.status);
+      if (scenario.role !== 'gomsin' || !scenario.partnerPresent || !scenario.partnerMilitary) {
+        return json(route, []);
+      }
+      return json(route, [{
+        branch: scenario.partnerMilitary.branch,
+        military_status: scenario.partnerMilitary.militaryStatus,
+        enlistment_date: scenario.partnerMilitary.enlistmentDate ?? null,
+        expected_discharge_date: scenario.partnerMilitary.expectedDischargeDate ?? null,
+        discharge_date: scenario.partnerMilitary.dischargeDate ?? null,
+        discharge_date_source: scenario.partnerMilitary.dischargeDateSource,
+      }]);
+    }
+
     // The partner view calls this on every render, so leaving it unrouted made
     // the mock answer 500 and the app log "Failed to fetch partner cycle
     // projection" — which failed the layout matrix's console-error assertion at
@@ -613,6 +647,13 @@ export async function installMockBackend(
       return json(route, { signedURL: signedStub() });
     }
     if (path.startsWith('/storage/v1/object/')) {
+      if (method === 'GET') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'image/png',
+          body: MOCK_PHOTO_BYTES,
+        });
+      }
       const failure = failureFor(scenario, 'storage_upload');
       if (failure) return json(route, failure, failure.status);
       if (method === 'POST' || method === 'PUT') {

@@ -96,10 +96,12 @@ describe('패키징: iOS 전용 로컬 플러그인 하나', () => {
     expect(manifest.files).toContain('GomsinlogCapacitorOnDeviceSummary.podspec');
   });
 
-  it('iOS 14 배포 대상을 올리지 않는다', () => {
-    // FoundationModels는 `canImport` + `@available`로 도달하므로 floor를 올릴 이유가 없다.
-    expect(podspec).toMatch(/s\.ios\.deployment_target\s*=\s*'14\.0'/);
-    expect(iosPodfile).toMatch(/platform :ios, '14\.0'/);
+  it('Podfile과 on-device-summary podspec이 15.0으로 정렬되었고 FoundationModels는 canImport/@available iOS26 runtime gate다', () => {
+    // Xcode 27 경고 remediation에 따라 배포 대상 floor는 iOS 15.0으로 정렬되었고 FoundationModels는 canImport/@available iOS26 runtime gate 계약을 따른다.
+    expect(podspec).toMatch(/s\.ios\.deployment_target\s*=\s*'15\.0'/);
+    expect(iosPodfile).toMatch(/platform :ios, '15\.0'/);
+    expect(swiftEngine).toContain('#if canImport(FoundationModels)');
+    expect(swiftEngine).toMatch(/@available\(iOS 26\.0, \*\)/);
   });
 });
 
@@ -137,7 +139,7 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
     expect(swiftEngine).toMatch(/@available\(iOS 26\.0, \*\)/);
     /*
       모든 `import FoundationModels`가 canImport 게이트 뒤에 있어야 한다. 게이트 밖의 import는
-      프레임워크 없는 SDK에서 컴파일을 깨뜨리고, 그것은 iOS 14 배포 대상을 유지한다는 계약을
+      프레임워크 없는 SDK에서 컴파일을 깨뜨리고, 그것은 iOS 15 배포 대상을 유지한다는 계약을
       깨는 것과 같다.
     */
     const guardAt = engineCode.indexOf('#if canImport(FoundationModels)');

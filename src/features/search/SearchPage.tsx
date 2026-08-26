@@ -123,10 +123,12 @@ function InlineServiceInfo({
   military,
   contact,
   onOpenService,
+  title = '내 복무',
 }: {
   military: MilitaryInfo;
-  contact: ContactPreferences;
-  onOpenService: () => void;
+  contact?: ContactPreferences;
+  onOpenService?: () => void;
+  title?: string;
 }) {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [showAllTiers, setShowAllTiers] = useState(false);
@@ -236,7 +238,7 @@ function InlineServiceInfo({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-label font-bold text-card-foreground">내 복무</span>
+              <span className="text-label font-bold text-card-foreground">{title}</span>
             </div>
             <div className="text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
@@ -341,11 +343,11 @@ function InlineServiceInfo({
         <div className="rounded-lg border border-border/60 bg-card/60 p-2.5 space-y-1.5" data-testid="service-exp-readout">
           <div className="flex items-baseline justify-between gap-2">
             <div className="flex items-baseline gap-1 text-label font-bold text-card-foreground tabular-nums">
-              <span className="font-extrabold text-coral-strong">{formatExpNumber(expState.elapsedSec)}</span>
-              <span className="text-caption font-normal text-muted-foreground">/ {formatExpNumber(expState.totalSec)} EXP</span>
+              <span className="font-extrabold text-coral-strong">{formatExpNumber(expState.tierElapsedSec)}</span>
+              <span className="text-caption font-normal text-muted-foreground">/ {formatExpNumber(expState.tierTotalSec)} EXP</span>
             </div>
             <span className="text-label font-extrabold text-coral-strong tabular-nums">
-              {formatExpPercent(expState.totalPercent, 4)}
+              {formatExpPercent(expState.tierExpPercent, 4)}
             </span>
           </div>
 
@@ -357,6 +359,7 @@ function InlineServiceInfo({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={expState.tierExpPercent}
+                aria-valuetext={`LV ${currentTier.level} ${currentTier.label} 경험치 ${formatExpPercent(expState.tierExpPercent, 4)}`}
                 className="h-1.5 overflow-hidden rounded-full bg-muted"
               >
                 <div
@@ -446,20 +449,22 @@ function InlineServiceInfo({
         </div>
       </div>
 
-      {contact.enabled ? (
+      {contact?.enabled ? (
         <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
           <Clock size={13} aria-hidden="true" />
           평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
         </p>
       ) : null}
 
-      <button
-        type="button"
-        onClick={onOpenService}
-        className="text-caption font-semibold text-coral-strong"
-      >
-        복무 정보 수정
-      </button>
+      {onOpenService ? (
+        <button
+          type="button"
+          onClick={onOpenService}
+          className="min-h-11 text-caption font-semibold text-coral-strong"
+        >
+          복무 정보 수정
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -551,14 +556,25 @@ function GomsinSearchSurface({
   userId,
   coupleId,
   connected,
+  partnerName,
+  partnerMilitary,
 }: {
   authenticated: boolean;
   userId?: string;
   coupleId?: string;
   connected: boolean;
+  partnerName: string;
+  partnerMilitary?: MilitaryInfo;
 }) {
+  const hasPartnerService = connected && computeServiceProgress(partnerMilitary, localToday()) !== null;
   return (
     <div className="space-y-4" data-testid="gomsin-search-surface">
+      {hasPartnerService ? (
+        <InlineServiceInfo
+          military={partnerMilitary!}
+          title={partnerName ? `${partnerName}의 복무` : '상대 복무'}
+        />
+      ) : null}
       {/* 내 배려/컨디션 신호 */}
       <CycleSupportSection
         key={`mine:${userId || 'signed-out'}`}
@@ -704,6 +720,8 @@ function SearchPageBody() {
               userId={state.authenticatedUser?.id}
               coupleId={state.profile.couple?.coupleId}
               connected={Boolean(state.profile.couple?.connected)}
+              partnerName={state.profile.couple?.partnerName || ''}
+              partnerMilitary={state.profile.couple?.partnerMilitary}
             />
           )}
         </div>

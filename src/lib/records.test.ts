@@ -7,6 +7,7 @@ import {
   MEDIA_POLICY_REFUSAL,
   isCanonicalRecordMediaPath,
   deleteRecordFromDB,
+  downloadRecordPhotoForReuse,
   saveRecordToDB,
   setRecordCryptoEnvironment,
 } from '@/lib/records';
@@ -17,10 +18,16 @@ import {
   requireCoupleProtection,
 } from '@/app/e2ee/coupleProtectionBarrier';
 
-const { mockFrom, mockSupabase } = vi.hoisted(() => {
+const { mockFrom, mockStorageDownload, mockSupabase } = vi.hoisted(() => {
   const mockFrom = vi.fn();
-  const mockSupabase = { from: mockFrom };
-  return { mockFrom, mockSupabase };
+  const mockStorageDownload = vi.fn();
+  const mockSupabase = {
+    from: mockFrom,
+    storage: {
+      from: vi.fn(() => ({ download: mockStorageDownload })),
+    },
+  };
+  return { mockFrom, mockStorageDownload, mockSupabase };
 });
 
 vi.mock('@/lib/supabase', () => ({
@@ -226,6 +233,77 @@ describe('isCanonicalRecordMediaPath', () => {
 
   it('rejects when recordId is empty string', () => {
     expect(isCanonicalRecordMediaPath(`${couple}/${record}/file.jpg`, couple, '')).toBe(false);
+  });
+});
+
+describe('downloadRecordPhotoForReuse', () => {
+  afterEach(() => {
+    mockStorageDownload.mockReset();
+  });
+
+  it('downloads only a canonical source photo and returns a new File', async () => {
+    mockStorageDownload.mockResolvedValue({
+      data: new Blob(['photo'], { type: 'image/jpeg' }),
+      error: null,
+    });
+
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-1/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(mockStorageDownload).toHaveBeenCalledWith(
+      'couple-1/record-1/source.jpg',
+      {},
+      { cache: 'no-store' },
+    );
+    expect(result).toHaveProperty('file');
+    expect((result as { file: File }).file.name).toBe('source.jpg');
+    expect((result as { file: File }).file.type).toBe('image/jpeg');
+  });
+
+  it('rejects a path owned by another record before touching Storage', async () => {
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-other/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(result).toHaveProperty('error');
+    expect(mockStorageDownload).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Storage returns non-photo bytes', async () => {
+    mockStorageDownload.mockResolvedValue({
+      data: new Blob(['<html>'], { type: 'text/html' }),
+      error: null,
+    });
+
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-1/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(result).toHaveProperty('error');
+  });
+
+  it('classifies an RLS rejection instead of blaming the connection', async () => {
+    mockStorageDownload.mockResolvedValue({
+      data: null,
+      error: { code: '42501', message: 'permission denied' },
+    });
+
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-1/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(result).toEqual({
+      error: '기존 사진을 불러오지 못했어요. 권한이 없어요. 커플 공간 연결 상태를 확인해 주세요.',
+    });
   });
 });
 

@@ -9,12 +9,14 @@ import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { PostGrid } from '@/features/us/PostGrid';
 import { getPhotoAttachments } from '@/features/us/postTiles';
 import { PostComposerSheet } from '@/features/us/PostComposerSheet';
+import type { PostDraftItem } from '@/features/us/postComposition';
 import { ProfileIdentity } from '@/components/ProfileIdentity';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { InkCircle, PenFace } from '@/components/paper';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
+import { downloadRecordPhotoForReuse } from '@/lib/records';
 import { renderProfileCaption } from '@/lib/profileCaption';
 import { effectiveDischargeDate } from '@/lib/milestones';
 import { localToday } from '@/lib/cycle';
@@ -27,7 +29,13 @@ type ProfileTab = 'grid' | 'photo' | 'trip';
 export function SharedProfile() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { state, saveCoupleHighlight, deleteCoupleHighlight, addRecordWithMedia } = useStore();
+  const {
+    state,
+    saveCoupleHighlight,
+    deleteCoupleHighlight,
+    addRecordWithMedia,
+    updateRecordMedia,
+  } = useStore();
   const { profile } = state;
   const todayStr = localToday();
   const [tab, setTab] = useState<ProfileTab>('grid');
@@ -39,6 +47,38 @@ export function SharedProfile() {
   const [isSavingHighlight, setIsSavingHighlight] = useState(false);
   const [composingPost, setComposingPost] = useState(false);
   const [isPublishingPost, setIsPublishingPost] = useState(false);
+  /*
+    작성 중인 초안은 **이 화면이 소유한다.**
+
+    시트 안에 두면 이 화면이 리렌더되어 시트가 리마운트되는 순간 고른 사진과 쓰던 글이
+    사라지고, 언마운트 cleanup 이 `revokeObjectURL` 을 호출해 아직 올리지 않은 파일의
+    미리보기까지 죽는다. 실제로 그 증상을 관찰했다 -- 공유를 눌렀을 때 글이 placeholder 로
+    돌아가고 아무것도 저장되지 않았다.
+  */
+  const [postItems, setPostItems] = useState<PostDraftItem[]>([]);
+  const [postCaption, setPostCaption] = useState('');
+  const [postRetryRecordId, setPostRetryRecordId] = useState<string | null>(null);
+  const postItemsRef = useRef(postItems);
+
+  useEffect(() => {
+    postItemsRef.current = postItems;
+  }, [postItems]);
+
+  useEffect(() => () => {
+    for (const item of postItemsRef.current) {
+      if (item.kind === 'file') URL.revokeObjectURL(item.previewUrl);
+    }
+  }, []);
+
+  /** 초안을 버릴 때만 미리보기 URL 을 놓아 준다. */
+  const discardPostDraft = () => {
+    for (const item of postItems) {
+      if (item.kind === 'file') URL.revokeObjectURL(item.previewUrl);
+    }
+    setPostItems([]);
+    setPostCaption('');
+    setPostRetryRecordId(null);
+  };
   const closeHighlightEditor = () => {
     if (!isSavingHighlight) setEditingHighlightId(undefined);
   };
@@ -52,21 +92,77 @@ export function SharedProfile() {
    * 새로 만들면 그 네 가지를 처음부터 다시 맞춰야 하고, 하나라도 빠지면 게시물만 권한
    * 검사가 약한 문이 된다.
    *
-   * 여행·스토리에서 고른 사진은 이미 서버에 있으므로 다시 올리지 않고 글로 잇는다. 사본을
-   * 만들면 원본을 지웠을 때 게시물의 사진이 어떻게 되는지 답할 수 없다.
+   * 여행·스토리에서 고른 사진은 현재 사용자의 Storage 권한으로 다시 읽은 뒤 새 record id
+   * 아래에 독립 사본으로 올린다. 기존 path를 그대로 붙이면 canonical path/RLS를 깨고,
+   * 원본 삭제가 새 게시물까지 깨뜨린다. 다운로드와 업로드 사이에는 시작한 couple id를
+   * 고정해 연결 해제·계정 전환 중 예전 사진이 새 커플로 넘어가지 못하게 한다.
    */
   const publishPost = async (input: {
     caption: string;
     isPrivate: boolean;
-    files: File[];
-    reusedRecordIds: string[];
+    items: PostDraftItem[];
   }) => {
+    const expectedCoupleId = profile.couple.coupleId;
+    if (!expectedCoupleId) {
+      toast.error('커플 공간을 확인하지 못해 게시물을 올리지 않았어요.');
+      return;
+    }
+
     const now = new Date();
     const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     setIsPublishingPost(true);
-    let result: Awaited<ReturnType<typeof addRecordWithMedia>>;
     try {
-      result = await addRecordWithMedia({
+      const files: File[] = [];
+      for (const item of input.items) {
+        if (item.kind === 'file') {
+          files.push(item.file);
+          continue;
+        }
+
+        // Re-check the selected source against the latest authorised projection.
+        const source = sharedRecords.find((record) => record.id === item.sourceRecordId);
+        const stillAttached = source?.attachments?.some((attachment) => (
+          attachment.type === 'photo'
+          && attachment.path === item.attachment.path
+          && attachment.name === item.attachment.name
+        ));
+        if (!source || source.isPrivate || source.contentUnavailable || !stillAttached) {
+          toast.error('고른 사진의 공유 상태가 바뀌어 게시물을 올리지 않았어요.');
+          return;
+        }
+
+        const downloaded = await downloadRecordPhotoForReuse(
+          item.attachment,
+          expectedCoupleId,
+          item.sourceRecordId,
+        );
+        if ('error' in downloaded) {
+          toast.error(downloaded.error);
+          return;
+        }
+        files.push(downloaded.file);
+      }
+
+      if (postRetryRecordId) {
+        const retried = await updateRecordMedia(postRetryRecordId, {
+          addFiles: files,
+          allOrNothing: true,
+        });
+        if (!retried.ok) {
+          toast.error(retried.error || '사진을 다시 올리지 못했어요.');
+          return;
+        }
+        if (retried.failedFiles.length > 0) {
+          toast.warning('사진을 아직 올리지 못했어요. 고른 순서를 유지한 채 다시 시도해 주세요.');
+          return;
+        }
+        setComposingPost(false);
+        discardPostDraft();
+        toast.success('게시물을 올렸어요.');
+        return;
+      }
+
+      const result = await addRecordWithMedia({
         date: todayStr,
         time,
         authorRole: profile.role,
@@ -75,25 +171,46 @@ export function SharedProfile() {
         talkAbout: false,
         emotionFlow: [],
         emotionUpdatedAt: null,
-      }, input.files);
+      }, files, {
+        expectedCoupleId,
+        allOrNothingMedia: true,
+      });
+
+      if (result.queued) {
+        setComposingPost(false);
+        discardPostDraft();
+        toast.success('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 올라가요.');
+        return;
+      }
+      if (!result.ok) {
+        if (result.reason === 'protection_required') {
+          toast.error(result.error || '이 기기에서 기록 보호 설정이 필요해요.', {
+            duration: 8_000,
+            action: {
+              label: '설정 열기',
+              onClick: () => navigate('/settings'),
+            },
+          });
+        } else {
+          toast.error(result.error || '게시물을 올리지 못했어요.');
+        }
+        return;
+      }
+      if (result.failedFiles.length > 0) {
+        if (!result.recordId) {
+          toast.error('사진 재시도 대상을 확인하지 못했어요. 초안은 그대로 두었어요.');
+          return;
+        }
+        setPostRetryRecordId(result.recordId);
+        toast.warning('글은 저장했지만 사진은 아직 붙이지 못했어요. 고른 순서 그대로 다시 시도해 주세요.');
+        return;
+      }
+      setComposingPost(false);
+      discardPostDraft();
+      toast.success('게시물을 올렸어요.');
     } finally {
       setIsPublishingPost(false);
     }
-
-    if (result.queued) {
-      setComposingPost(false);
-      toast.success('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 올라가요.');
-      return;
-    }
-    if (!result.ok) {
-      toast.error(result.error || '게시물을 올리지 못했어요.');
-      return;
-    }
-    if (result.failedFiles.length > 0) {
-      toast.error(`사진 ${result.failedFiles.length}장을 올리지 못했어요.`);
-    }
-    setComposingPost(false);
-    toast.success('게시물을 올렸어요.');
   };
 
   const sharedRecords = useMemo(
@@ -109,6 +226,15 @@ export function SharedProfile() {
     () => sharedRecords.filter((record) => getPhotoAttachments(record).length > 0),
     [sharedRecords],
   );
+  /*
+    `state.trips ?? []` 를 JSX 안에서 직접 쓰지 않는다.
+
+    그 표현식은 렌더마다 **새 배열**을 만들고, 그것을 prop 으로 받는
+    `PostComposerSheet` 안의 `useMemo(..., [trips])` 는 매번 무효화된다. 사진을 고르는
+    동안 스토어가 한 번이라도 갱신되면(realtime 패치, 포커스 복귀) 시트가 계산을 다시 하고,
+    작성 중이던 입력이 흔들린다. 안정된 참조로 고정한다.
+  */
+  const allTrips = useMemo(() => state.trips ?? [], [state.trips]);
   const selectedPost = selectedPostId
     ? photoRecords.find((record) => record.id === selectedPostId) ?? null
     : null;
@@ -344,11 +470,20 @@ export function SharedProfile() {
       {composingPost ? (
         <PostComposerSheet
           records={sharedRecords}
-          trips={state.trips ?? []}
+          trips={allTrips}
           coupleId={profile.couple.coupleId}
           connected={profile.couple.connected}
           busy={isPublishingPost}
-          onClose={() => { if (!isPublishingPost) setComposingPost(false); }}
+          retryingMedia={postRetryRecordId !== null}
+          items={postItems}
+          setItems={setPostItems}
+          caption={postCaption}
+          setCaption={setPostCaption}
+          onClose={() => {
+            if (isPublishingPost) return;
+            setComposingPost(false);
+            discardPostDraft();
+          }}
           onSubmit={(input) => { void publishPost(input); }}
         />
       ) : null}

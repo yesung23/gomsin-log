@@ -85,6 +85,28 @@ describe('computeServiceExp', () => {
     });
   });
 
+  it('resets visible EXP to zero at each service tier while total service progress keeps accumulating', () => {
+    const startMs = serviceDateAtMs(ARMY_SAMPLE.enlistmentDate!)!;
+    const totalSec = 547 * SECONDS_PER_DAY;
+    const withinLevelTwo = computeServiceExp(ARMY_SAMPLE, startMs + totalSec * 0.2 * 1000);
+    const atLevelThree = computeServiceExp(ARMY_SAMPLE, startMs + totalSec * 0.25 * 1000);
+
+    expect(withinLevelTwo).toMatchObject({
+      totalPercent: 20,
+      tier: { level: 2, label: '일초' },
+      tierElapsedSec: totalSec * 0.1,
+      tierTotalSec: totalSec * 0.15,
+    });
+    expect(withinLevelTwo?.tierExpPercent).toBeCloseTo(66.666666, 5);
+    expect(atLevelThree).toMatchObject({
+      totalPercent: 25,
+      tier: { level: 3, label: '일꺾' },
+      tierElapsedSec: 0,
+      tierTotalSec: totalSec * 0.15,
+      tierExpPercent: 0,
+    });
+  });
+
   it('correctly maps all 7 phases and rank transitions for army (547 days)', () => {
     const startMs = serviceDateAtMs(ARMY_SAMPLE.enlistmentDate!)!;
 
@@ -286,6 +308,55 @@ describe('computeServiceExp', () => {
       const res = computeServiceExp(ARMY_SAMPLE, startMs + day * SECONDS_PER_DAY * 1000);
       expect(res?.elapsedSec).toBeGreaterThanOrEqual(lastExp);
       lastExp = res!.elapsedSec;
+    }
+  });
+
+  it('exhaustive tier-reset matrix: all branches, leap years, and boundaries maintain strict bounds', () => {
+    const branches = ['army', 'navy', 'airforce', 'marine', 'social_service'] as const;
+
+    // 1. Leap year enlistment on Feb 29
+    const leapDischarge = parseLocalDate('2024-02-29');
+    leapDischarge.setDate(leapDischarge.getDate() + 547);
+    const leapEnlistment: MilitaryInfo = {
+      branch: 'army',
+      militaryStatus: 'serving',
+      enlistmentDate: '2024-02-29',
+      expectedDischargeDate: toLocalDateString(leapDischarge),
+      dischargeDateSource: 'manual',
+    };
+    const leapStartMs = serviceDateAtMs(leapEnlistment.enlistmentDate!)!;
+    const leapResult = computeServiceExp(leapEnlistment, leapStartMs + 100 * SECONDS_PER_DAY * 1000);
+    expect(leapResult).not.toBeNull();
+    expect(Number.isNaN(leapResult?.tierExpPercent)).toBe(false);
+
+    // 2. All branches across 100 evenly-spaced samples from 0% to 100%
+    for (const branch of branches) {
+      const discharge = parseLocalDate('2025-01-01');
+      const days = branch === 'navy' ? 608 : (branch === 'airforce' || branch === 'social_service') ? 639 : 547;
+      discharge.setDate(discharge.getDate() + days);
+      const sample: MilitaryInfo = {
+        branch,
+        militaryStatus: 'serving',
+        enlistmentDate: '2025-01-01',
+        expectedDischargeDate: toLocalDateString(discharge),
+        dischargeDateSource: 'manual',
+      };
+      const startMs = serviceDateAtMs(sample.enlistmentDate!)!;
+      const totalSec = computeServiceExp(sample, startMs)!.totalSec;
+
+      for (let step = 0; step <= 100; step++) {
+        const fraction = step / 100;
+        const sampleMs = startMs + Math.round(fraction * totalSec * 1000);
+        const res = computeServiceExp(sample, sampleMs);
+        expect(res).not.toBeNull();
+        expect(res?.tierTotalSec).toBeGreaterThan(0);
+        expect(res?.tierElapsedSec).toBeGreaterThanOrEqual(0);
+        expect(res?.tierElapsedSec).toBeLessThanOrEqual(res!.tierTotalSec);
+        expect(res?.tierExpPercent).toBeGreaterThanOrEqual(0);
+        expect(res?.tierExpPercent).toBeLessThanOrEqual(100);
+        expect(Number.isNaN(res?.tierExpPercent)).toBe(false);
+        expect(Number.isNaN(res?.totalPercent)).toBe(false);
+      }
     }
   });
 });

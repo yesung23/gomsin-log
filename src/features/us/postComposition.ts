@@ -18,14 +18,15 @@ import { parseLocalDate, toLocalDateString } from '@/lib/utils';
  * 세워 놓고 순서를 정한다. 곰신로그에서 "어디서 왔는지"는 세 가지다: 기기 앨범(새 파일),
  * 여행 사진(기존 기록), 스토리 사진(기존 기록).
  *
- * `sourceRecordId` 가 있으면 이미 서버에 있는 사진이다. 그 사진은 **다시 올리지 않는다** --
- * 같은 파일을 두 번 저장하면 저장 비용이 두 배가 되고, 원본 기록과 새 게시물이 서로 다른
- * 사본을 가리켜 하나를 지웠을 때 다른 하나가 어떻게 되는지 답할 수 없게 된다.
+ * `sourceRecordId` 가 있으면 이미 서버에 있는 사진이다. 선택 중에는 원본을 가리키지만,
+ * 게시할 때 현재 권한으로 다시 읽고 새 record id 아래에 독립 사본으로 올린다. 새 기록이
+ * 예전 기록의 Storage 경로를 참조하면 canonical path/RLS 경계를 깨고 원본 삭제에도
+ * 종속되기 때문이다.
  */
 export type PostDraftItem =
   /** 기기에서 새로 고른 사진. 업로드해야 한다. */
   | { kind: 'file'; id: string; file: File; previewUrl: string }
-  /** 이미 서버에 있는 사진. 원본 기록을 가리킨다. */
+  /** 이미 서버에 있는 사진. 게시 전 재검증·복사할 원본 기록을 가리킨다. */
   | { kind: 'existing'; id: string; sourceRecordId: string; attachment: Attachment };
 
 /**

@@ -68,6 +68,8 @@ export async function produceBootstrapFacts(input: BootstrapFactInput): Promise<
     coupleKeysReady,
     runtimeReady,
     floorActive: personalFloor >= 1 && (!input.coupleId || coupleFloor >= 1),
+    personalFloorActive: personalFloor >= 1,
+    coupleFloorActive: !!input.coupleId && coupleFloor >= 1,
     hasCoupleScope: !!input.coupleId,
   };
 }

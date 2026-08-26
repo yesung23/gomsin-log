@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, GripVertical, Image as ImageIcon, Plane, Sparkles, Upload, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronUp, GripVertical, Image as ImageIcon, Plane, Sparkles, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { MEDIA_ACCEPT, MEDIA_POLICY_REFUSAL, classifyMediaFile } from '@/lib/records';
 import { formatLocalDate } from '@/lib/utils';
@@ -32,10 +32,11 @@ import type { Attachment, DailyRecord, Trip } from '@/types';
  * - **위치.** 여행 기능이 장소를 소유한다. 같은 개념을 두 곳에 두지 않고 "여행에서 고르기" 로 잇는다.
  * - **필터.** 시각 정체성은 디자인 워크스트림 소유이고, 이 표면은 기능만 담당한다.
  *
- * ## 이미 서버에 있는 사진은 다시 올리지 않는다
+ * ## 이미 서버에 있는 사진도 새 게시물의 독립 사본이 된다
  *
- * 여행·스토리에서 고른 사진은 `existing` 항목이 되어 원본 기록을 가리킨다. 사본을 만들면
- * 저장 비용이 두 배가 되고, 원본을 지웠을 때 게시물의 사진이 어떻게 되는지 답할 수 없다.
+ * 여행·스토리에서 고른 사진은 선택 중에는 `existing` 항목으로 원본을 가리킨다. 저장할 때는
+ * 현재 권한으로 다시 읽고 새 record id 아래로 안전하게 올린다. 다른 기록의 Storage 경로를
+ * 그대로 붙이면 canonical path/RLS 경계를 깨고, 원본 삭제가 새 게시물을 깨뜨리기 때문이다.
  */
 
 type Step = 'source' | 'arrange' | 'caption';
@@ -48,12 +49,25 @@ export interface PostComposerSheetProps {
   /** 연결 전에는 공개 범위를 고를 수 없고 항상 비공개로 저장된다. */
   connected: boolean;
   busy?: boolean;
+  /** 사진 업로드 실패 뒤 이미 생성된 같은 기록에 다시 붙이는 단계. */
+  retryingMedia?: boolean;
+  /**
+   * 작성 중인 초안. **부모가 소유한다.**
+   *
+   * 시트 안에 두면 부모가 리렌더될 때 시트가 리마운트되는 상황에서 고른 사진과 쓰던 글이
+   * 사라진다. 더 나쁜 것은 언마운트 cleanup 이 `revokeObjectURL` 을 호출해 아직 올리지
+   * 않은 `File` 의 미리보기가 죽는다는 것이다. 실제로 그 증상을 관찰했다: 공유를 눌렀을
+   * 때 글이 placeholder 로 돌아가고 아무것도 저장되지 않았다.
+   */
+  items: PostDraftItem[];
+  setItems: (next: PostDraftItem[] | ((prev: PostDraftItem[]) => PostDraftItem[])) => void;
+  caption: string;
+  setCaption: (value: string) => void;
   onClose: () => void;
   onSubmit: (input: {
     caption: string;
     isPrivate: boolean;
-    files: File[];
-    reusedRecordIds: string[];
+    items: PostDraftItem[];
   }) => void;
 }
 
@@ -63,30 +77,30 @@ export function PostComposerSheet({
   coupleId,
   connected,
   busy = false,
+  retryingMedia = false,
+  items,
+  setItems,
+  caption,
+  setCaption,
   onClose,
   onSubmit,
 }: PostComposerSheetProps) {
   const [step, setStep] = useState<Step>('source');
-  const [items, setItems] = useState<PostDraftItem[]>([]);
-  const [caption, setCaption] = useState('');
   const [isPrivate, setIsPrivate] = useState(!connected);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const createdUrls = useRef<string[]>([]);
 
   useEffect(() => closeRef.current?.focus(), []);
 
   /*
-    미리보기 URL 은 이 시트가 만든 자원이므로 이 시트가 놓아준다.
+    미리보기 URL 해제는 이 시트가 하지 않는다.
 
-    `createObjectURL` 은 문서가 사라질 때까지 살아 있다. 사진 열 장을 고르고 시트를 닫는
-    동작을 몇 번 반복하면 그만큼의 파일이 메모리에 남고, PWA 는 사용자가 며칠씩 열어 두는
-    앱이다.
+    `createObjectURL` 은 문서가 사라질 때까지 살아 있으므로 언젠가는 놓아 주어야 하지만,
+    그 시점은 **초안이 끝나는 때**이지 이 컴포넌트가 언마운트되는 때가 아니다. 여기서
+    해제하면 리마운트만으로 아직 올리지 않은 사진의 미리보기가 죽는다. 초안을 소유한
+    부모가 초안을 버릴 때 해제한다.
   */
-  useEffect(() => () => {
-    for (const url of createdUrls.current) URL.revokeObjectURL(url);
-  }, []);
 
   const tripDates = useMemo(() => tripDateSet(trips), [trips]);
   const storyPhotos = useMemo(() => selectablePhotos(records), [records]);
@@ -116,7 +130,6 @@ export function PostComposerSheet({
         continue;
       }
       const previewUrl = URL.createObjectURL(file);
-      createdUrls.current.push(previewUrl);
       accepted.push({
         kind: 'file',
         id: `file-${Date.now()}-${accepted.length}-${file.name}`,
@@ -127,8 +140,8 @@ export function PostComposerSheet({
     if (refused) toast.error(MEDIA_POLICY_REFUSAL);
     if (accepted.length === 0) return;
     setItems((prev) => [...prev, ...accepted]);
-    setStep('arrange');
-  }, [items]);
+    setStep(items.length + accepted.length === 1 ? 'caption' : 'arrange');
+  }, [items, setItems]);
 
   const addExisting = useCallback((photo: SelectablePhoto) => {
     setItems((prev) => {
@@ -147,7 +160,7 @@ export function PostComposerSheet({
         attachment: photo.attachment,
       }];
     });
-  }, []);
+  }, [setItems]);
 
   const submit = () => {
     if (items.length === 0) {
@@ -157,17 +170,23 @@ export function PostComposerSheet({
     onSubmit({
       caption: caption.trim(),
       isPrivate: connected ? isPrivate : true,
-      files: items.filter((item) => item.kind === 'file').map((item) => item.file),
-      reusedRecordIds: [...new Set(
-        items.filter((item) => item.kind === 'existing').map((item) => item.sourceRecordId),
-      )],
+      items: [...items],
     });
   };
 
   return (
     <div
       className="fixed inset-0 z-[60] flex items-end justify-center bg-foreground/40 sm:items-center sm:p-4"
-      onPointerDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}
+      /*
+        배경을 눌러도 닫지 않는다.
+
+        실기기에서 관찰한 문제다. 단계마다 시트 높이가 달라지므로(순서 정하기는 사진 수만큼
+        길고 글 쓰기는 짧다) 같은 자리를 눌렀는데 앞 단계에서는 시트 안, 뒤 단계에서는 배경이
+        된다. 그 한 번의 탭으로 고른 사진과 쓰던 글이 전부 사라졌다.
+
+        인스타그램도 작성 중에는 배경 탭으로 버리지 않는다. 버리는 문은 ✕ 하나로 충분하고,
+        그 문은 사용자가 의도해서만 누른다.
+      */
     >
       <div
         role="dialog"
@@ -182,11 +201,11 @@ export function PostComposerSheet({
             <button ref={closeRef} type="button" onClick={onClose} disabled={busy} aria-label="게시물 만들기 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground">
               <X size={19} aria-hidden="true" />
             </button>
-          ) : (
-            <button type="button" onClick={() => setStep(step === 'caption' ? 'arrange' : 'source')} disabled={busy} aria-label="이전 단계" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground">
-              <ChevronLeft size={20} aria-hidden="true" />
-            </button>
-          )}
+         ) : (
+            <button type="button" onClick={() => setStep(step === 'caption' ? (items.length <= 1 ? 'source' : 'arrange') : 'source')} disabled={busy} aria-label="이전 단계" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground">
+             <ChevronLeft size={20} aria-hidden="true" />
+           </button>
+         )}
           <h2 id="post-composer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">
             {step === 'source' ? '새 게시물' : step === 'arrange' ? '순서 정하기' : '글 쓰기'}
           </h2>
@@ -196,10 +215,10 @@ export function PostComposerSheet({
             </button>
           ) : step === 'caption' ? (
             <button type="button" onClick={submit} disabled={busy || items.length === 0} data-testid="post-share" className="press-response min-h-11 rounded-control px-3 text-label font-semibold text-coral-strong disabled:opacity-40">
-              {busy ? '올리는 중…' : '공유'}
+              {busy ? '올리는 중…' : retryingMedia ? '사진 다시 올리기' : '공유'}
             </button>
           ) : items.length > 0 ? (
-            <button type="button" onClick={() => setStep('arrange')} className="press-response min-h-11 rounded-control px-3 text-label font-semibold text-coral-strong">
+            <button type="button" onClick={() => setStep(items.length === 1 ? 'caption' : 'arrange')} className="press-response min-h-11 rounded-control px-3 text-label font-semibold text-coral-strong">
               다음
             </button>
           ) : null}
@@ -218,11 +237,17 @@ export function PostComposerSheet({
           <ArrangeStep
             items={items}
             coupleId={coupleId}
-            dragIndex={dragIndex}
-            setDragIndex={setDragIndex}
-            onMove={(from, to) => setItems((prev) => movePostItem(prev, from, to))}
-            onRemove={(id) => setItems((prev) => removePostItem(prev, id))}
-            onAddMore={() => setStep('source')}
+           dragIndex={dragIndex}
+           setDragIndex={setDragIndex}
+           onMove={(from, to) => setItems((prev) => movePostItem(prev, from, to))}
+            onRemove={(id) => setItems((prev) => {
+              const target = prev.find((item) => item.id === id);
+              if (target && target.kind === 'file') {
+                URL.revokeObjectURL(target.previewUrl);
+              }
+              return removePostItem(prev, id);
+            })}
+           onAddMore={() => setStep('source')}
           />
         ) : (
           <CaptionStep
@@ -233,6 +258,7 @@ export function PostComposerSheet({
             connected={connected}
             isPrivate={isPrivate}
             setIsPrivate={setIsPrivate}
+            retryingMedia={retryingMedia}
           />
         )}
 
@@ -396,8 +422,8 @@ function ArrangeStep({
               키보드로도 순서를 바꿀 수 있어야 한다. 드래그만 제공하면 포인터가 없는
               사용자에게 이 화면의 유일한 기능이 사라진다.
             */}
-            <button type="button" onClick={() => onMove(index, index - 1)} disabled={index === 0} aria-label={`${index + 1}번째 사진을 앞으로`} className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-label disabled:opacity-30" style={{ color: 'var(--ink)' }}>↑</button>
-            <button type="button" onClick={() => onMove(index, index + 1)} disabled={index === items.length - 1} aria-label={`${index + 1}번째 사진을 뒤로`} className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-label disabled:opacity-30" style={{ color: 'var(--ink)' }}>↓</button>
+            <button type="button" onClick={() => onMove(index, index - 1)} disabled={index === 0} aria-label={`${index + 1}번째 사진을 앞으로`} className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-label disabled:opacity-30" style={{ color: 'var(--ink)' }}><ChevronUp size={18} aria-hidden="true" /></button>
+            <button type="button" onClick={() => onMove(index, index + 1)} disabled={index === items.length - 1} aria-label={`${index + 1}번째 사진을 뒤로`} className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-label disabled:opacity-30" style={{ color: 'var(--ink)' }}><ChevronDown size={18} aria-hidden="true" /></button>
             <button type="button" onClick={() => onRemove(item.id)} aria-label={`${index + 1}번째 사진 빼기`} className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground">
               <X size={16} aria-hidden="true" />
             </button>
@@ -421,6 +447,7 @@ function CaptionStep({
   connected,
   isPrivate,
   setIsPrivate,
+  retryingMedia,
 }: {
   items: PostDraftItem[];
   coupleId?: string;
@@ -429,6 +456,7 @@ function CaptionStep({
   connected: boolean;
   isPrivate: boolean;
   setIsPrivate: (value: boolean) => void;
+  retryingMedia: boolean;
 }) {
   return (
     <div className="pt-3">
@@ -437,28 +465,34 @@ function CaptionStep({
           <li key={item.id} className="shrink-0"><DraftThumb item={item} coupleId={coupleId} /></li>
         ))}
       </ul>
-      <label className="mt-3 block">
-        <span className="text-caption font-medium text-muted-foreground">글</span>
-        <textarea
-          value={caption}
-          onChange={(event) => setCaption(event.target.value)}
-          rows={4}
-          maxLength={2000}
-          placeholder="이 순간에 대해 남기고 싶은 말"
-          data-testid="post-caption"
-          className="hand-text mt-1 w-full rounded-control border border-border bg-background px-3 py-2 text-body text-foreground"
-        />
-      </label>
-      {connected ? (
+      {retryingMedia ? (
+        <p className="mt-3 rounded-control border border-border px-3 py-3 text-caption leading-relaxed text-muted-foreground">
+          글은 이미 저장했어요. 사진은 아직 한 장도 붙이지 않았으니 그대로 다시 올릴게요.
+        </p>
+      ) : (
+        <label className="mt-3 block">
+          <span className="text-caption font-medium text-muted-foreground">글</span>
+          <textarea
+            value={caption}
+            onChange={(event) => setCaption(event.target.value)}
+            rows={4}
+            maxLength={2000}
+            placeholder="이 순간에 대해 남기고 싶은 말"
+            data-testid="post-caption"
+            className="hand-text mt-1 w-full rounded-control border border-border bg-background px-3 py-2 text-body text-foreground"
+          />
+        </label>
+      )}
+      {!retryingMedia && connected ? (
         <button type="button" role="switch" aria-checked={isPrivate} onClick={() => setIsPrivate(!isPrivate)} className="press-response-row mt-2 flex min-h-11 w-full items-center justify-between rounded-control px-3" style={{ border: 'var(--stroke-thin) solid var(--ink-faint)' }}>
           <span className="text-label" style={{ color: 'var(--ink)' }}>나만 보기</span>
           <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>{isPrivate ? '켜짐' : '꺼짐'}</span>
         </button>
-      ) : (
+      ) : !retryingMedia ? (
         <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
           아직 둘이 연결되지 않아 이 게시물은 나만 볼 수 있게 저장돼요.
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

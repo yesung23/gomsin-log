@@ -32,12 +32,13 @@ import React from 'react';
 const FABRICATED_ENLISTMENT = '2025-03-10';
 const FABRICATED_DISCHARGE = '2026-09-09';
 
-const { mockSupabase, profileUpserts, contactUpserts, createCoupleInvitation } = vi.hoisted(() => {
+const { mockSupabase, profileUpserts, contactUpserts, createCoupleInvitation, fetchMyCoupleState } = vi.hoisted(() => {
   const profileUpserts: Record<string, unknown>[] = [];
   const contactUpserts: Record<string, unknown>[] = [];
   return {
     profileUpserts,
     contactUpserts,
+    fetchMyCoupleState: vi.fn(),
     createCoupleInvitation: vi.fn(),
     mockSupabase: {
       rpc: vi.fn(),
@@ -62,7 +63,7 @@ vi.mock('@/lib/supabase', () => ({
   },
   createCoupleInvitation: (...args: unknown[]) => createCoupleInvitation(...(args as [])),
   consumeCoupleInvitation: vi.fn(),
-  fetchMyCoupleState: vi.fn(),
+  fetchMyCoupleState: (...args: unknown[]) => fetchMyCoupleState(...(args as [])),
   fetchAuthProviderAvailability: vi.fn().mockResolvedValue({
     google: true,
     apple: false,
@@ -222,6 +223,17 @@ describe('M-1: onboarding does not pre-fill a fabricated service period', () => 
       coupleId: 'couple-1',
       code: '123456',
       expiresAt: null,
+    });
+    fetchMyCoupleState.mockReset().mockResolvedValue({
+      ok: true,
+      state: {
+        coupleId: 'couple-1',
+        role: 'soldier',
+        memberStatus: 'active',
+        partnerPresent: false,
+        invitationActive: true,
+        invitationExpiresAt: null,
+      },
     });
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
     vi.spyOn(console, 'error').mockImplementation(() => {});

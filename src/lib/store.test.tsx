@@ -193,10 +193,19 @@ const { registerE2eeRuntimeTeardown } = await import('@/app/e2ee/runtimeLifecycl
 const { fetchTripsResultFromDB: fetchTripsResultFromDBMock } = await import('@/lib/trips') as unknown as { fetchTripsResultFromDB: ReturnType<typeof vi.fn> };
 const STORE_KEY = 'gomsinlog.state.v2';
 
-let lastMediaResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
+let lastMediaResult: {
+  ok: boolean;
+  failedFiles: string[];
+  error?: string;
+  reason?: string;
+  recordId?: string;
+} | null = null;
 let lastFlushResult: { delivered: number; requeued: number; blocked: number } | null = null;
 
-function Probe({ files = [] as File[] }: { files?: File[] }) {
+function Probe({
+  files = [] as File[],
+  allOrNothingMedia = false,
+}: { files?: File[]; allOrNothingMedia?: boolean }) {
   const {
     state,
     isReady,
@@ -225,6 +234,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
       <span data-testid="username">{state.profile.username ?? 'none'}</span>
       <span data-testid="couple">{state.profile.couple.coupleId ?? 'none'}</span>
       <span data-testid="partner">{state.profile.couple.partnerName || 'none'}</span>
+      <span data-testid="partnerMilitary">{state.profile.couple.partnerMilitary ? 'present' : 'none'}</span>
       <span data-testid="anniversary">{state.profile.couple.anniversaryDate ?? 'none'}</span>
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
       <span data-testid="events">{state.events.map((event) => event.id).join(',')}</span>
@@ -249,6 +259,7 @@ function Probe({ files = [] as File[] }: { files?: File[] }) {
               isPrivate: false,
             },
             files,
+            allOrNothingMedia ? { allOrNothingMedia: true } : undefined,
           ).then((result) => {
             lastMediaResult = result;
           });
@@ -1182,6 +1193,63 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
   });
 
+  it('post mode rolls back successful media when any file fails and returns the same row id', async () => {
+    callOrder.length = 0;
+    lastMediaResult = null;
+    uploadRecordMedia.mockImplementation(async (file: File) => {
+      if (file.name === 'broken.png') {
+        callOrder.push('upload:fail');
+        return { error: '파일을 올리지 못했어요.' };
+      }
+      callOrder.push(`upload:${file.name}`);
+      return {
+        attachment: {
+          type: 'photo' as const,
+          name: file.name,
+          path: `couple-1/generated-record/${file.name}`,
+        },
+      };
+    });
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(
+      <StoreProvider>
+        <Probe
+          files={[
+            new File(['a'], 'good.png', { type: 'image/png' }),
+            new File(['b'], 'broken.png', { type: 'image/png' }),
+          ]}
+          allOrNothingMedia
+        />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult?.ok).toBe(true);
+    expect(lastMediaResult?.failedFiles).toEqual(['good.png', 'broken.png']);
+    expect(lastMediaResult?.recordId).toBeTruthy();
+    expect(removeRecordMedia).toHaveBeenCalledWith([
+      expect.stringContaining('/good.png'),
+    ]);
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+    expect(screen.getByTestId('attachments')).toHaveTextContent('');
+  });
+
   it('refuses to create a record when no couple space is connected', async () => {
     lastMediaResult = null;
     // An AUTHORITATIVE negative: the server confirms there is no couple space, so
@@ -1320,7 +1388,14 @@ describe('StoreProvider auth lifecycle', () => {
         profile: {
           myName: '춘향',
           role: 'gomsin',
-          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          couple: {
+            coupleId: 'couple-1',
+            partnerName: '몽룡',
+            coupleCode: '',
+            connected: true,
+            status: 'active',
+            partnerMilitary: { branch: 'army', militaryStatus: 'serving', dischargeDateSource: 'calculated' },
+          },
           military: {} as never,
           contact: {} as never,
         } as never,
@@ -1332,6 +1407,7 @@ describe('StoreProvider auth lifecycle', () => {
     await act(async () => emitAuth('SIGNED_IN', 'user-a'));
     await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
     expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+    expect(screen.getByTestId('partnerMilitary')).toHaveTextContent('present');
 
     const channel = createdChannels.find((c) => c.name === 'couple-sync:couple-1')!;
     const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
@@ -1341,6 +1417,7 @@ describe('StoreProvider auth lifecycle', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable'));
+    expect(screen.getByTestId('partnerMilitary')).toHaveTextContent('none');
 
     await act(async () => emitAuth('SIGNED_IN', 'user-b'));
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-b'));

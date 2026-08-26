@@ -54,6 +54,13 @@ export const CREATOR: Scenario = {
   partnerPresent: true,
   partnerUserId: 'user-partner',
   partnerName: '몽룡',
+  partnerMilitary: {
+    branch: 'army',
+    militaryStatus: 'serving',
+    enlistmentDate: '2026-01-01',
+    expectedDischargeDate: '2027-07-01',
+    dischargeDateSource: 'manual',
+  },
   records: RECORDS,
 };
 

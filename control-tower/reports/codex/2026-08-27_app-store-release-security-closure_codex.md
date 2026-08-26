@@ -8,7 +8,7 @@
 - Reviewed base HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
 - Resulting code HEAD: `78f8402` (`9d12bc8` feature/security, `cf922df` iOS packaging, `73f6b45` CI closure, `78f8402` exact profile-header centering)
 - Production mutation in this session: **NOT APPLIED**
-- Git remote: through `415e183` pushed to `origin/codex/profile-post-composer`; `78f8402` local pending push at this report update; `origin/master` and Production remain unchanged
+- Git remote: reviewed code and ledger through `b2090d1` pushed to `origin/codex/profile-post-composer`; `origin/master` and Production remain unchanged
 
 ## User-visible behavior in the release candidate
 
@@ -55,14 +55,14 @@
 - Fresh external public backup: `/Users/han-yejun/Desktop/gomsinlog-production-backups/2026-08-27-pre-release-065/`; directory 700, files 600, custom dump/list/schema/SHA256 verified.
 - Live schema: 062 pairing functions exist. 063 is absent. 064 is absent because authenticated still has `REFERENCES, SELECT, TRIGGER, TRUNCATE` on `crypto_pairings`. 065 hardening marker is absent. Pairing/scope/device tables currently have zero rows.
 - Live Edge Function: `delete-account` is ACTIVE, version 6, JWT verification enabled. Production-origin OPTIONS returned 200 with the exact origin and unauthenticated POST returned 401; destructive account deletion itself remains unverified.
-- Live Vercel: exact feature Preview `415e183` is READY; Production remains `d9a2eb0`. Production env lacks `VITE_LEGAL_OPERATOR_NAME` and `VITE_PRIVACY_CONTACT_EMAIL`, so legal values must be supplied and approved before master/Production deployment.
+- Live Vercel: exact feature Preview `b2090d1` is READY at `https://gomsin-fnqovk6rn-nabbvn.vercel.app`; Production remains `d9a2eb0`. Production env lacks `VITE_LEGAL_OPERATOR_NAME` and `VITE_PRIVACY_CONTACT_EMAIL`, so legal values must be supplied and approved before master/Production deployment.
 - Live Apple/device: Apple Developer membership purchase is still processing. An iOS 27.0 iPhone 16 Pro is connected and paired, but the physical build was stopped after compile/link while codesign did not finish; no signed install, Archive, TestFlight, or app runtime proof exists.
 
 ## Blocked / unverified
 
 - Exact 064 → 065 → 063 Production application and real actor matrix: NOT APPLIED.
 - Apple App ID/Services ID/key, Supabase Apple provider, redirect allowlist including query-aware PKCE, and actual Apple round-trip: BLOCKED/UNVERIFIED.
-- Vercel Preview `415e183`: PASS. Current local `78f8402` needs push and fresh exact-HEAD Preview/CI. Vercel Production exact SHA is known as old master `d9a2eb0`; required legal env and authenticated smoke remain BLOCKED.
+- PR #90 code+ledger HEAD `b2090d1`: PASS. Both required workflows and exact Vercel Preview are green. Vercel Production exact SHA is known as old master `d9a2eb0`; required legal env and authenticated smoke remain BLOCKED.
 - Signed Archive, TestFlight processing, App Store metadata/review accounts: UNVERIFIED.
 - Physical iPhone Foundation Models, Secure Enclave, offline/heat/battery/reinstall/recovery: UNVERIFIED. Device connectivity alone is not runtime proof.
 - Apple Developer activation, provisioning profile and available disk for Archive: BLOCKED. Current free disk is about 3.8GB; no user files were deleted.
@@ -71,10 +71,9 @@
 
 1. At action time, confirm the live catalog and backup, then apply exact 064 → 065 → 063 only; never replay the empty ledger.
 2. Reload PostgREST, re-read schema/ACL/function markers, and run authenticated/anon/unrelated/former-partner/NULL-actor matrices.
-3. Push `78f8402` plus docs, then require fresh PR #90 checks and exact Preview for the new HEAD.
-4. Obtain the exact public legal operator name and monitored privacy email, then configure Vercel only with user-approved values.
-5. Merge PR #90 to `master` only after the remote gate and Production env gate pass.
-6. After Apple membership activates, configure Apple web OAuth and validate Google/Apple PKCE on a real iPhone.
-7. Free sufficient disk, deploy the exact commit, create signed Archive/TestFlight, and run the two-account release checklist.
+3. Obtain the exact public legal operator name and monitored privacy email, then configure Vercel only with user-approved values.
+4. Merge PR #90 to `master` only after the remote gate and Production env gate pass.
+5. After Apple membership activates, configure Apple web OAuth and validate Google/Apple PKCE on a real iPhone.
+6. Free sufficient disk, deploy the exact commit, create signed Archive/TestFlight, and run the two-account release checklist.
 
 Database rollback is forward-only: do not restore authenticated mutation/TRUNCATE privileges or the weaker 062 pairing bodies. Reapply 064/065 as the repair. Local code rollback is `git revert` of the isolated commits. Apple/provider/Vercel changes must retain their previous settings for console rollback.

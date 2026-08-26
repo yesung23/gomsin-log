@@ -22,7 +22,7 @@
 | 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **BLOCKED** — Apple Developer 멤버십 결제 처리 중, provisioning profile 없음, signed install/Archive/TestFlight 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
-- PR #90의 이전 exact feature HEAD `415e183123c145cbd60c3e1964409696cd5f9d96`: **PASS** — required checks와 exact Vercel Preview가 성공했다. 마이탭 중앙 정렬 보정 commit `78f8402`는 로컬 full verify와 390px E2E가 PASS했으며, push 후 새 exact-HEAD CI를 다시 받아야 한다. 이는 Production 배포나 실기기 증거가 아니다.
+- PR #90의 code+ledger HEAD `b2090d1dc55b8854475bb0388b9f71d309bc391c`: **PASS** — 두 required workflow의 전체 job과 exact Vercel Preview가 성공했다. 마이탭 중앙 정렬 보정 commit `78f8402`의 로컬 full verify와 390px E2E도 PASS했다. 이는 Production 배포나 실기기 증거가 아니다.
 
 ### 2026-08-26/27 게이트 상태 점검 메모
 
@@ -64,7 +64,7 @@
 - 이 보정 뒤 `LANG=en_US.UTF-8 npm run verify`는 exit 0으로 다시 통과했다. 254 files / 3,630 tests, 전체 lint/typecheck, production build가 포함되며 과거 `deviceKeyPort` 병렬 timeout은 재발하지 않았다.
 - iOS 27.0 iPhone 16 Pro는 Mac에 연결·pairing됐고 Developer Mode도 켜져 있다. 원본 workspace의 physical-device build는 compile/link 후 Capacitor framework codesign에서 장시간 끝나지 않아 중지했다. signed install, 앱 실행, Foundation Models, Secure Enclave, airplane-mode 평가는 **UNVERIFIED**다.
 - Apple Developer 포털은 멤버십 구매를 아직 처리 중이라고 표시한다. App ID/Services ID/key/profile, Supabase Apple provider, Archive/TestFlight/App Store Connect는 활성화 전까지 **BLOCKED**다.
-- live Vercel에서 feature Preview `415e183`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
+- live Vercel에서 feature Preview `b2090d1`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
 - live `delete-account` Edge Function은 ACTIVE(version 6, JWT required)이고 Production origin preflight 200, 무인증 POST 401을 확인했다. 실제 계정 삭제는 희생 계정을 영구 삭제하므로 별도 action-time 승인 전까지 **UNVERIFIED**다.
 - 현재 디스크 여유는 약 3.8GB라 signed Archive에 부족할 수 있다. 사용자 파일을 임의 삭제하지 않으며 Archive 전에 최소 약 10GB를 확보한다.
 

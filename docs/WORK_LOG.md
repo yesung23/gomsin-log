@@ -7966,7 +7966,10 @@ e2e · Postgres 계약 · Deno).
 - what it actually proves: connected iOS 27 device and compilation through signing stage, not signed install or app runtime
 - command: live Vercel/Apple/Supabase Auth and Edge Function read-only checks
 - PASS / FAIL / UNVERIFIED: PASS for observed state only
-- what it actually proves: Preview `415e183` READY, Production `d9a2eb0`, legal env missing; Apple membership processing; Apple provider OFF; delete-account active/CORS 200/unauth 401
+- what it actually proves: Preview `b2090d1` READY, Production `d9a2eb0`, legal env missing; Apple membership processing; Apple provider OFF; delete-account active/CORS 200/unauth 401
+- command: GitHub Actions runs `33012021120`, `33012020494` for exact code+ledger HEAD `b2090d1`
+- PASS / FAIL / UNVERIFIED: PASS, both workflows exit success
+- what it actually proves: boundary, two full typecheck/lint/Vitest/build directions, PostgreSQL fresh-chain security, real-browser creator/partner matrix, Deno, audit, secret/signing scan, Capacitor sync, unsigned iOS build and Android debug build on the pushed candidate
 
 #### REVIEW IMPACT
 - DELTA: presentation geometry and E2E only; no auth/DB/privacy/crypto semantics changed. Existing Sol security review remains applicable; fresh PR exact-HEAD CI is required after push.
@@ -7977,22 +7980,21 @@ e2e · Postgres 계약 · Deno).
 - external/manual: Production 064 → 065 → 063 action-time approval; exact legal operator/contact values; Apple membership activation/provider/key/profile; signed install/TestFlight/two-account physical-device matrix
 
 #### STOPPED AT
-- exact completed boundary: isolated code commit `78f8402`, fresh local full verify and rendered geometry proof; before branch push and all Production mutations
+- exact completed boundary: isolated code commit `78f8402`, ledger `b2090d1`, branch push, fresh local full verify, rendered geometry proof, both GitHub workflows and exact Vercel Preview PASS; before all Production mutations
 
 #### REMAINING
-- push code/docs and require fresh PR exact-HEAD CI/Preview
 - action-time approved exact remote SQL and actor matrix
 - approved legal env, master/Production deploy, Apple OAuth, signed TestFlight and physical-device checks
 
 #### NEXT ACTION
 - next owner: Codex release operator after explicit user confirmation for each external action
 - tool/model: primary operator; independent security delta review only if security semantics change
-- 기준 SHA: `78f8402` plus docs ledger commit
-- exact next task: push feature branch, await exact-HEAD checks; execute 064 → 065 → 063 only if user replies with the requested action-time approval
+- 기준 SHA: code `78f8402`, code+ledger `b2090d1`
+- exact next task: execute 064 → 065 → 063 only if user replies with the requested action-time approval
 
 #### DO NOT ADVANCE UNTIL
 - `.DS_Store`, `control-tower/Now.md`, credentials and ignored signing config remain excluded
-- fresh PR checks pass for new exact HEAD
+- code-bearing PR HEAD `b2090d1` checks and exact Preview remain green
 - Production SQL and legal/account operations have explicit action-time approval and rollback evidence
 
 #### PRODUCTION

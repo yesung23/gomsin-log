@@ -8,6 +8,7 @@
 - Reviewed base HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
 - Resulting code HEAD: `cf922df` (`9d12bc8` feature/security, `cf922df` iOS packaging)
 - Production mutation in this session: **NOT APPLIED**
+- Git remote: reviewed commits pushed to `origin/codex/profile-post-composer`; `origin/master` and deploy remain unchanged
 
 ## User-visible behavior in the release candidate
 

@@ -7742,7 +7742,7 @@ e2e · Postgres 계약 · Deno).
 - crypto semantics: no algorithm or trust-authority invention beyond reviewed 062/064/065 ceremony hardening
 - DB/migration semantics: no existing migration edited; 062–065 are forward files; empty remote ledger not repaired
 - product semantics: no AI record ranking, relationship score, server AI, CloudKit, Google Play scope
-- Production: no SQL, Auth provider, Vercel, Apple, TestFlight, App Store Connect, merge, or push applied in this closure
+- Production: no SQL, Auth provider, Vercel, Apple, TestFlight, App Store Connect, master merge, or deploy; reviewed commits pushed only to `origin/codex/profile-post-composer`
 
 #### VERIFICATION
 - command: `LANG=en_US.UTF-8 npm run verify`
@@ -7802,4 +7802,4 @@ e2e · Postgres 계약 · Deno).
 - Apple/TestFlight/physical-device items stay UNVERIFIED until actually run
 
 #### PRODUCTION
-- NOT APPLIED — read-only catalog/Auth/backup operations only; no SQL/provider/deploy/TestFlight change
+- NOT APPLIED — read-only catalog/Auth/backup operations and feature-branch push only; no SQL/provider/master/deploy/TestFlight change

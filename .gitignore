@@ -82,6 +82,7 @@ keystore.properties
 *.mobileprovision
 *.provisionprofile
 /ios/App/ExportOptions.plist
+/ios/App/LocalSigning.xcconfig
 /fastlane/
 
 # TypeScript incremental build cache (build artifact)

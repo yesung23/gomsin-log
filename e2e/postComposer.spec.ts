@@ -61,6 +61,11 @@ test('스토리 사진은 비공개 새 기록 아래로 복사되어 게시물 
   const plusBox = await page.getByRole('button', { name: '게시물 만들기' }).boundingBox();
   expect(plusBox?.width).toBeGreaterThanOrEqual(44);
   expect(plusBox?.height).toBeGreaterThanOrEqual(44);
+  const headerCenterBox = await page.getByTestId('profile-header-center').boundingBox();
+  expect(headerCenterBox).toBeTruthy();
+  expect(Math.abs((headerCenterBox!.x + headerCenterBox!.width / 2) - 390 / 2)).toBeLessThanOrEqual(1);
+  const headerShotPath = testInfo.outputPath('us-header-390.png');
+  await page.screenshot({ path: headerShotPath, fullPage: false });
 
   // 1단계: 시트 열기
   await page.getByRole('button', { name: '게시물 만들기' }).click();

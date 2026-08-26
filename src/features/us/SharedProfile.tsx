@@ -348,18 +348,20 @@ export function SharedProfile() {
 
   return (
     <div className="min-h-full pb-8">
-      <header className="flex h-14 items-center gap-2 px-4" style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}>
+      <header className="grid h-14 grid-cols-[88px_1fr_88px] items-center px-4" style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}>
         {/*
           왼쪽 끝이 게시물 만들기다.
 
           인스타의 `＋` 는 탭바 가운데에 있지만 곰신로그의 탭바 가운데는 이미 기록이
           차지하고 있다. 마이 화면에서 만드는 것은 **이 프로필의 게시물**이므로 이 화면의
-          헤더가 그 자리다. 아이디를 가운데로 옮겨 좌우 무게를 맞춘다.
+          헤더가 그 자리다. 좌우 88px 슬롯으로 대칭을 맞춰 아이디가 뷰포트 정중앙에 온다.
         */}
-        <button type="button" aria-label="게시물 만들기" data-testid="open-post-composer" onClick={() => setComposingPost(true)} className="flex h-11 w-11 shrink-0 items-center justify-center">
-          <Plus size={22} color="var(--ink)" aria-hidden="true" />
-        </button>
-        <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
+        <div className="flex items-center justify-start">
+          <button type="button" aria-label="게시물 만들기" data-testid="open-post-composer" onClick={() => setComposingPost(true)} className="flex h-11 w-11 shrink-0 items-center justify-center">
+            <Plus size={22} color="var(--ink)" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="flex min-w-0 items-center justify-center gap-1.5" data-testid="profile-header-center">
           {profile.username ? (
             <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
           ) : (
@@ -369,12 +371,14 @@ export function SharedProfile() {
           )}
           <Lock size={13} className="shrink-0" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
         </div>
-        <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
-          <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
-        </button>
-        <button type="button" aria-label="설정" onClick={() => navigate('/settings')} className="flex h-11 w-11 items-center justify-center">
-          <Menu size={22} color="var(--ink)" aria-hidden="true" />
-        </button>
+        <div className="flex items-center justify-end">
+          <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
+            <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
+          </button>
+          <button type="button" aria-label="설정" onClick={() => navigate('/settings')} className="flex h-11 w-11 items-center justify-center">
+            <Menu size={22} color="var(--ink)" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <div className="px-4"><CoupleStatusBanner /></div>

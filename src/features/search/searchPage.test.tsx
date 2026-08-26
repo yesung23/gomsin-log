@@ -3,9 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, MilitaryInfo, CoupleEvent } from '@/types';
-import { computeServiceProgress } from '@/lib/milestones';
 import { computeServiceExp, formatExpNumber, serviceDateAtMs } from '@/lib/serviceLevel';
-import { localToday } from '@/lib/cycle';
 
 let currentState: AppState;
 const mockNavigate = vi.fn();
@@ -162,6 +160,9 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
   });
 
   it('입대 전에는 전역까지가 아니라 입대까지의 실제 D-day를 보여준다', () => {
+    const nowMs = Date.parse('2026-08-27T03:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(nowMs);
     const plannedMilitary: MilitaryInfo = {
       branch: 'army',
       militaryStatus: 'serving',
@@ -170,18 +171,23 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
       dischargeDateSource: 'manual',
     };
     currentState = stateWith({ role: 'soldier', military: plannedMilitary });
-    renderSearch();
+    const view = renderSearch();
 
-    const progress = computeServiceProgress(plannedMilitary, localToday());
-    expect(progress?.isBeforeEnlistment).toBe(true);
-    expect(progress?.daysUntilEnlistment).toBeGreaterThan(0);
-    expect(screen.getByText(`입대 D-${progress!.daysUntilEnlistment}`)).toBeInTheDocument();
-    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
-      `입대까지 ${progress!.daysUntilEnlistment}일`,
-    );
-    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(
-      `입대까지 ${progress!.daysUntilEnlistment}일`,
-    );
+    try {
+      const exp = computeServiceExp(plannedMilitary, nowMs);
+      expect(exp?.isBeforeEnlistment).toBe(true);
+      expect(exp?.daysUntilEnlistment).toBeGreaterThan(0);
+      expect(screen.getByText(`입대 D-${exp!.daysUntilEnlistment}`)).toBeInTheDocument();
+      expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
+        `입대까지 ${exp!.daysUntilEnlistment}일`,
+      );
+      expect(screen.getByTestId('service-level-guide')).toHaveTextContent(
+        `입대까지 ${exp!.daysUntilEnlistment}일`,
+      );
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it('인라인 복무 정보의 수정 버튼은 /service 로 이동한다', () => {

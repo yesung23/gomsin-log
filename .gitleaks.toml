@@ -67,3 +67,26 @@ paths = [
 regexes = [
   '''^signatureP1363$''',
 ]
+
+# -------------------------------------------------------------
+# 3. CocoaPods checksum false positive
+# -------------------------------------------------------------
+# CocoaPods records deterministic SHA-1 spec checksums in Podfile.lock. The
+# default generic-api-key rule mistakes the local pod name ending in
+# `DeviceKeys` for a credential label and captures its 40-hex checksum as a
+# secret. This rule-specific exemption requires BOTH the exact lockfile path
+# and the exact checksum line, so the rest of Podfile.lock remains scanned and
+# values with any non-hex credential shape are still reported.
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Exact CocoaPods checksum for the local DeviceKeys pod"
+  condition = "AND"
+  regexTarget = "line"
+  paths = [
+    '''^ios/App/Podfile\.lock$''',
+  ]
+  regexes = [
+    '''^  GomsinlogCapacitorDeviceKeys: [0-9a-f]{40}$''',
+  ]

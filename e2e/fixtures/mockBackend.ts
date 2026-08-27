@@ -98,6 +98,7 @@ export type RecordRow = {
   record_time: string;
   log_text: string;
   is_private: boolean;
+  is_profile_post?: boolean;
   reaction?: string | null;
   attachments?: unknown[];
   emotion_flow?: unknown[];

@@ -11,9 +11,8 @@ for (const width of [320, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 844 } });
     await installMockBackend(context, {
       ...PARTNER,
-      // 이 화면의 게시물 격자는 모든 기록이 아니라 여행 기간의 사진 게시물만 보여준다.
-      // 기존 PARTNER fixture의 기록은 모두 TODAY에 있으므로, 그 날짜를 여행 기간으로
-      // 열어 실제 여행 사진 게시물·상세 보기 경로를 브라우저에서 확인한다.
+      // 게시물 격자는 사용자가 프로필에 명시적으로 발행한 사진 기록만 보여준다.
+      // 여행 목록도 함께 검증하기 위해 같은 날짜의 여행 fixture를 둔다.
       trips: [{
         id: 'trip-browser',
         couple_id: 'couple-1',
@@ -30,6 +29,7 @@ for (const width of [320, 390]) {
           // Record media paths use the same canonical ASCII filename rule as
           // production storage; a Korean filename would be rejected before the
           // photo ever reaches the grid.
+          is_profile_post: true,
           attachments: [{ type: 'photo', name: 'trip-photo.jpg', path: 'couple-1/rec-shared/trip-photo.jpg' }],
         }
         : record),

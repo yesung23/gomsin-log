@@ -123,6 +123,7 @@ const ORDER = [
   '064_lock_crypto_pairings_table_privileges.sql',
   '065_harden_e2ee_pairing_rpc.sql',
   '066_atomic_push_delivery_claims.sql',
+  '067_profile_post_intent.sql',
 ];
 
 /**
@@ -4003,6 +4004,67 @@ check(stateAfterMark === 'false|true|true',
 
 // Cleanup
 mustSql(`DELETE FROM public.device_push_tokens WHERE user_id = '${A}'`, '066 cleanup tokens');
+
+// ---------------------------------------------------------------------------
+// 067 — explicit profile post intent, with unchanged record authorization
+// ---------------------------------------------------------------------------
+
+mustSql(`UPDATE public.couple_members SET status = 'active' WHERE couple_id = '${COUPLE1}' AND user_id IN ('${A}', '${B}')`, '067 restore couple1');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private, is_profile_post) VALUES
+    ('67000000-0000-4000-8000-000000000001', '${A}', '${COUPLE1}', CURRENT_DATE, 'ordinary story', false, false),
+    ('67000000-0000-4000-8000-000000000002', '${A}', '${COUPLE1}', CURRENT_DATE, 'profile post', false, true),
+    ('67000000-0000-4000-8000-000000000003', '${A}', '${COUPLE1}', CURRENT_DATE, 'private post', true, true)
+`, '067 profile post fixtures');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('67000000-0000-4000-8000-000000000004', '${A}', '${COUPLE1}', CURRENT_DATE, 'legacy client insert', false)
+`, '067 legacy insert omits marker');
+check(
+  mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000004'`, '067 inspect legacy default') === 'f',
+  '067 legacy insert omission uses the false default',
+);
+
+const ownerProfilePosts = asUser(A, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%' AND is_profile_post`);
+check(ownerProfilePosts.ok && ownerProfilePosts.stdout.trim() === '2',
+  '067 owner sees both of their explicit profile-post markers');
+const partnerProfilePosts = asUser(B, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%' AND is_profile_post`);
+check(partnerProfilePosts.ok && partnerProfilePosts.stdout.trim() === '1',
+  '067 active partner sees the shared profile post but not the private post');
+const unrelatedProfilePosts = asUser(C, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%'`);
+check(unrelatedProfilePosts.ok && unrelatedProfilePosts.stdout.trim() === '0',
+  '067 unrelated user sees no profile-post rows');
+const anonProfilePosts = asAnon(`SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%'`);
+check(
+  !anonProfilePosts.ok || anonProfilePosts.stdout.trim() === '0',
+  '067 anon sees no profile-post rows',
+);
+const legacyOwnerUpdate = asUser(A, `UPDATE public.daily_records SET log_text = 'legacy edit' WHERE id = '67000000-0000-4000-8000-000000000002'`);
+check(
+  legacyOwnerUpdate.ok
+    && mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000002'`, '067 inspect after legacy update') === 't',
+  '067 legacy update omission preserves an existing true marker',
+);
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '067 former partner');
+const formerProfilePosts = asUser(B, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%'`);
+check(
+  formerProfilePosts.ok && formerProfilePosts.stdout.trim() === '0',
+  '067 former partner sees no profile-post rows from the old couple',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '067 restore active partner');
+asUser(B, `UPDATE public.daily_records SET is_profile_post = false WHERE id = '67000000-0000-4000-8000-000000000002'`);
+check(
+  mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000002'`, '067 inspect after partner update') === 't',
+  '067 partner cannot change the author profile-post marker',
+);
+const ownerClearsProfilePost = asUser(A, `UPDATE public.daily_records SET is_profile_post = false WHERE id = '67000000-0000-4000-8000-000000000002'`);
+check(
+  ownerClearsProfilePost.ok
+    && mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000002'`, '067 inspect after owner update') === 'f',
+  '067 author can change their own profile-post marker',
+);
 
 // ---------------------------------------------------------------------------
 // Report

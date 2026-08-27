@@ -13,8 +13,9 @@ import type { DailyRecord } from '@/types';
  *
  *     upload -> patch row -> remove old objects
  *
- * If the patch fails, the newly uploaded objects must be deleted again and the row
- * left untouched: no orphaned bytes, and no phantom success.
+ * Once the patch request is issued, a failed response is ambiguous: deleting the
+ * new object can break a row whose response was merely lost. Read back before
+ * claiming success, and prefer a possible orphan over user-visible data loss.
  */
 
 const {
@@ -22,6 +23,7 @@ const {
   saveRecordToDB,
   uploadRecordMedia,
   removeRecordMedia,
+  fetchRecordsResultFromDB,
   fetchMyCoupleState,
   fetchFullStateFromDB,
   callOrder,
@@ -36,6 +38,7 @@ const {
     saveRecordToDB: vi.fn(),
     uploadRecordMedia: vi.fn(),
     removeRecordMedia: vi.fn(),
+    fetchRecordsResultFromDB: vi.fn(),
     fetchMyCoupleState: vi.fn(),
     fetchFullStateFromDB: vi.fn(),
     mockSupabase: {
@@ -90,7 +93,7 @@ vi.mock('@/lib/records', () => ({
   },
   deleteRecordFromDB: vi.fn().mockResolvedValue({ ok: true }),
   fetchRecordsFromDB: vi.fn().mockResolvedValue([]),
-  fetchRecordsResultFromDB: vi.fn().mockResolvedValue({ ok: true, records: [] }),
+  fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
   uploadRecordMedia: (...args: unknown[]) => {
     callOrder.push(`upload:${(args[0] as File).name}`);
     return uploadRecordMedia(...(args as []));
@@ -239,6 +242,7 @@ describe('updateRecordMedia', () => {
       attachment: { type: 'photo', name: file.name, path: `couple-1/rec-1/${file.name}` },
     }));
     removeRecordMedia.mockReset().mockResolvedValue(undefined);
+    fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     fetchMyCoupleState.mockReset().mockResolvedValue({ ok: false, reason: 'server' });
     fetchFullStateFromDB.mockReset();
     mockSupabase.auth.getUser.mockReset().mockResolvedValue({
@@ -271,7 +275,7 @@ describe('updateRecordMedia', () => {
     expect(screen.getByTestId('attachments')).not.toHaveTextContent('existing.png');
   });
 
-  it('rolls back uploaded objects and leaves the row untouched when the patch fails', async () => {
+  it('rolls back uploads after an authoritative forbidden patch failure', async () => {
     saveRecordToDB.mockResolvedValue({ ok: false, reason: 'forbidden' });
     await setup({ addFiles: [pngFile('new.png')], removePaths: [EXISTING_PATH] });
 
@@ -281,16 +285,56 @@ describe('updateRecordMedia', () => {
     await waitFor(() => expect(lastResult).not.toBeNull());
 
     expect(lastResult?.ok).toBe(false);
-    // The newly uploaded object is deleted again...
     expect(callOrder).toEqual([
       'upload:new.png',
       'patchRow',
       'remove:couple-1/rec-1/new.png',
     ]);
-    // ...and the object the user asked to remove is NOT deleted, because the row
-    // still references it.
+    expect(removeRecordMedia).toHaveBeenCalledWith(['couple-1/rec-1/new.png']);
+    // The object the user asked to remove is also retained because the row may
+    // still reference it.
     expect(removeRecordMedia).not.toHaveBeenCalledWith([EXISTING_PATH]);
     // Local state is unchanged: no phantom success.
+    expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
+  });
+
+  it('accepts a committed media patch when only its response was lost', async () => {
+    saveRecordToDB.mockResolvedValue({ ok: false, reason: 'offline' });
+    fetchRecordsResultFromDB.mockResolvedValue({
+      ok: true,
+      records: [{
+        ...baseRecord,
+        contentRevision: 2,
+        attachments: [{
+          type: 'photo',
+          name: 'new.png',
+          path: 'couple-1/rec-1/new.png',
+        }],
+      }],
+    });
+    await setup({ addFiles: [pngFile('new.png')], removePaths: [EXISTING_PATH] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult?.ok).toBe(true);
+    expect(removeRecordMedia).not.toHaveBeenCalledWith(['couple-1/rec-1/new.png']);
+    expect(removeRecordMedia).toHaveBeenCalledWith([EXISTING_PATH]);
+    await waitFor(() =>
+      expect(screen.getByTestId('attachments')).toHaveTextContent('couple-1/rec-1/new.png'),
+    );
+  });
+
+  it('keeps uncertain uploads when response loss cannot be reconciled', async () => {
+    saveRecordToDB.mockResolvedValue({ ok: false, reason: 'unreachable' });
+    fetchRecordsResultFromDB.mockResolvedValue({ ok: false, records: [], error: new Error('unreachable') });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult?.ok).toBe(false);
+    expect(removeRecordMedia).not.toHaveBeenCalledWith(['couple-1/rec-1/new.png']);
     expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
   });
 

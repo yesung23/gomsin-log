@@ -3,6 +3,10 @@ import {
   applyHandwritingAttribute,
   loadHandwritingEnabled,
 } from '@/lib/handwritingPreference';
+import {
+  applyPaperTextureAttribute,
+  loadPaperTexture,
+} from '@/lib/paperTexturePreference';
 import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
@@ -309,6 +313,7 @@ export function App() {
   const viewerId = state.authenticatedUser?.id || state.profile.id || '';
   useEffect(() => {
     applyHandwritingAttribute(loadHandwritingEnabled(viewerId));
+    applyPaperTextureAttribute(loadPaperTexture(viewerId));
   }, [viewerId]);
 
   if (!isReady) {

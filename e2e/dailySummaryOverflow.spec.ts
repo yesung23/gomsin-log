@@ -24,7 +24,7 @@ test('파트너 오늘 8개는 5개에서 펼쳐지고 확장 줄도 정확한 �
   const page = await context.newPage();
 
   await page.goto('/story/partner');
-  const dialog = page.getByRole('dialog', { name: '춘향의 오늘' });
+  const dialog = page.getByRole('dialog', { name: '오늘' });
   await expect(dialog).toBeVisible({ timeout: 20_000 });
 
   for (let index = 1; index <= 5; index += 1) {

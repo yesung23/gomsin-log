@@ -21,6 +21,7 @@ export function record(over: Partial<RecordRow> & { id: string; user_id: string 
     record_time: '10:00',
     log_text: '기록',
     is_private: false,
+    is_profile_post: false,
     attachments: [],
     emotion_flow: [],
     created_at: `${TODAY}T10:00:00Z`,

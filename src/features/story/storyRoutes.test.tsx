@@ -87,14 +87,14 @@ describe('/story/partner', () => {
     surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00', log: '점심' })];
     records = surface;
     open('/story/partner');
-    expect(screen.getByRole('dialog', { name: '춘향의 오늘' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '오늘' })).toBeTruthy();
   });
 
   it('여러 날이 밀렸으면 놓친 하루라고 부른다', () => {
     surface = [record({ id: 'a', date: '2026-08-20' }), record({ id: 'b' })];
     records = surface;
     open('/story/partner');
-    expect(screen.getByRole('dialog', { name: '춘향의 놓친 하루' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '놓친 하루' })).toBeTruthy();
   });
 
   it('?at= 이 그 정확한 카드를 연다', () => {

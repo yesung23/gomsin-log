@@ -178,7 +178,7 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
           other by `src/lib/astryxFoundation.test.ts`.
         */
         data-astryx-theme="gomsin"
-        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        className="relative h-screen h-[100dvh] w-full max-w-[430px] overflow-hidden shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
         style={{
           background: 'var(--paper)',
           ...(hideNav
@@ -216,7 +216,7 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
           ref={mainRef}
           tabIndex={-1}
           className={cn(
-            'notebook flex-1 overflow-y-auto focus:outline-none',
+            'notebook min-h-0 flex-1 overflow-y-auto focus:outline-none',
             hideNav ? 'pb-[max(env(safe-area-inset-bottom,0px),1.5rem)]' : 'pb-20',
           )}
         >

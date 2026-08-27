@@ -55,6 +55,7 @@ export function getPhotoAttachments(
  */
 export function buildPostTiles(records: readonly DailyRecord[]): PostTile[] {
   return records
+    .filter((record) => record.isProfilePost === true)
     .map((record) => ({ record, photos: getPhotoAttachments(record) }))
     .filter(({ photos }) => photos.length > 0)
     .map((record) => {

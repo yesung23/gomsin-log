@@ -68,6 +68,29 @@
   `supabase db push` is prohibited. Exact 060 then 061, PostgREST reload, and the
   authenticated actor matrix remain a separate production gate.
 
+## 0B. Active UI/profile-post checkpoint — 2026-08-28
+
+- Branch `codex/profile-post-composer`, base HEAD `5b3133f2`: Story는 작성자 이름을 반복하지
+  않고 `HH:mm` 시각, 17px 본문, 원본 비율 사진과 콘텐츠 아래 액션을 사용한다. Home과
+  My 헤더는 root 스크롤 안에서 고정된다. 설정에는 계정별 기기 로컬 `무지 종이 / 줄 종이`
+  선택이 있고 재실행·계정 전환 시 다시 읽는다.
+- My의 게시물 격자는 모든 Story 사진을 자동 수집하지 않는다. `+` 게시물 작성기에서 사진이
+  완전히 저장된 마지막 업데이트에 `is_profile_post=true`가 붙은 공유 사진 기록만 보인다.
+  일반 Story 사진과 이전 기록은 `사진` 목록에 보존되고, 타일·상세·원본은 같은 record ID를
+  계속 사용한다. 기존 행은 발행 의도를 추측 backfill하지 않는다.
+- Migration 067은 `BOOLEAN NOT NULL DEFAULT false` 한 열만 추가하고 새 RLS/RPC/index를
+  만들지 않는다. 로컬 PostgreSQL 17 fresh chain은 65 migrations / 420 assertions PASS다.
+  일반 기록은 새 필드를 생략하므로 DB-first 전환 중 기존 CRUD의 blast radius를 줄인다.
+- `LANG=en_US.UTF-8 npm run verify`는 260 files / 3,753 tests, 전체 typecheck/lint와 2,166
+  modules build까지 PASS했다. 320/390px Playwright 5/5와 Xcode 27 beta / iPhoneSimulator
+  27.0 unsigned build도 PASS했다. 이 결과는 실물 iPhone·Production·TestFlight 증거가 아니다.
+- 2026-08-28 read-only live 확인에서 Supabase 프로젝트는 `ACTIVE_HEALTHY`, migration ledger는
+  계속 비어 있다. 062 pairing RPC 3종은 실제 존재하고 anon 호출은 권한 거부되지만,
+  `daily_records.is_profile_post` 조회는 PostgreSQL `42703`으로 실패해 067 미적용을 확인했다.
+  이 클라이언트도 **Production NOT APPLIED**다. 안전한 순서는 live backup/catalog 및
+  063–066 상태 확인 → exact 067 → PostgREST reload → 실제 actor matrix → 새 앱 배포다.
+  원격 적용 전 프로필 게시물 기능의 출시 판정은 HOLD다.
+
 ## 0. Default-branch reality
 
 ### Latest live checkpoint — 2026-08-23

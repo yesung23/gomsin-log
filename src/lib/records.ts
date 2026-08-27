@@ -335,6 +335,7 @@ async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
           .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
       : [],
     isPrivate: row.is_private,
+    ...(row.is_profile_post === true ? { isProfilePost: true } : {}),
     ...(row.talk_about === true ? { talkAbout: true } : {}),
     emotionFlow: row.emotion_flow || [],
     emotionUpdatedAt: row.emotion_updated_at || null,
@@ -435,8 +436,11 @@ export async function saveRecordToDB(
    * Metadata the server keeps in the clear either way.
    *
    * `record_date` is accepted leakage (ordering), `talk_about` is bilateral
-   * coordination metadata, and `emotion_updated_at` is a timestamp. Architecture
-   * V2.1 §10 lists all three; nothing here adds to that set.
+   * coordination metadata, `is_profile_post` is the author's explicit profile
+   * publication intent, and `emotion_updated_at` is a timestamp. The marker carries
+   * no text or media and remains subject to the row's existing private/shared RLS.
+   * Omit the new column unless the caller explicitly carries the marker: ordinary
+   * records must remain writable while a DB-first rollout is still in progress.
    */
   const metadata = {
     id: record.id,
@@ -444,6 +448,9 @@ export async function saveRecordToDB(
     couple_id: coupleId,
     record_date: record.date,
     is_private: record.isPrivate,
+    ...(record.isProfilePost !== undefined
+      ? { is_profile_post: record.isProfilePost }
+      : {}),
     talk_about: !record.isPrivate && record.talkAbout === true,
     emotion_updated_at: record.emotionUpdatedAt || null,
     updated_at: new Date().toISOString(),

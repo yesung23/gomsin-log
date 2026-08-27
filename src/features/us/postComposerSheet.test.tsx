@@ -263,6 +263,7 @@ describe('게시물 만들기 3단계', () => {
     ];
     expect(draft.log).toBe('우리 첫 게시물');
     expect(draft.isPrivate).toBe(false);
+    expect(draft.isProfilePost).toBe(true);
     // 게시물은 감정 추론을 하지 않는다.
     expect(draft.emotionFlow).toEqual([]);
     expect(downloadRecordPhotoForReuse).toHaveBeenCalledWith(
@@ -359,7 +360,10 @@ describe('게시물 만들기 3단계', () => {
       addFiles: expect.any(Array),
       allOrNothing: true,
     }));
-    expect(updateRecord).toHaveBeenLastCalledWith('post-retry-1', { isPrivate: false });
+    expect(updateRecord).toHaveBeenLastCalledWith('post-retry-1', {
+      isPrivate: false,
+      isProfilePost: true,
+    });
     expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
   });
@@ -403,7 +407,10 @@ describe('게시물 만들기 3단계', () => {
       addFiles: expect.any(Array),
       allOrNothing: true,
     }));
-    expect(updateRecord).toHaveBeenLastCalledWith('post-retry-1', { isPrivate: false });
+    expect(updateRecord).toHaveBeenLastCalledWith('post-retry-1', {
+      isPrivate: false,
+      isProfilePost: true,
+    });
     await waitFor(() => expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toBeNull());
   });
 
@@ -432,7 +439,10 @@ describe('게시물 만들기 3단계', () => {
       addFiles: expect.any(Array),
       allOrNothing: true,
     }));
-    expect(updateRecord).toHaveBeenCalledWith('post-retry-1', { isPrivate: false });
+    expect(updateRecord).toHaveBeenCalledWith('post-retry-1', {
+      isPrivate: false,
+      isProfilePost: true,
+    });
     expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
   });

@@ -49,6 +49,7 @@ const FORWARD = [
   '044_unlink_crypto_pairing_authority.sql',
   '045_harden_e2ee_write_floor_activation.sql',
   '046_require_actor_for_device_provisioning.sql',
+  '067_profile_post_intent.sql',
 ];
 
 const keep = process.argv.includes('--keep');
@@ -541,6 +542,93 @@ try {
   const replay = asUser(A, sharedEncrypted({ id: lifecycleId }));
   checkRefused(replay, 'duplicate key|already exists',
     'reject: lost-response CREATE replay uses INSERT and cannot silently overwrite the row');
+
+  // =========================================================================
+  // Scenario 2B — explicit profile publication across the active write floor
+  // =========================================================================
+  console.log('› Scenario 2B: encrypted profile-post staging and publication');
+
+  const profilePostId = nextId();
+  const profileStaging = asUser(A, privateEncrypted({ id: profilePostId }));
+  check(profileStaging.ok,
+    'encrypted profile-post staging INSERT succeeds as a private personal-domain row');
+  const stagedProfileShape = mustSql(`
+    SELECT is_private || '|' || is_profile_post || '|' || key_domain || '|' || content_revision
+    FROM public.daily_records WHERE id = '${profilePostId}'`, 'profile staging shape');
+  check(stagedProfileShape === 'true|false|personal|1',
+    `staging omits the marker and PostgreSQL stores false (saw ${stagedProfileShape})`);
+
+  const publishProfilePost = asUser(A, `
+    UPDATE public.daily_records
+    SET is_private = false,
+        is_profile_post = true,
+        key_domain = 'couple',
+        key_epoch = 1,
+        content_envelope = ${envelope(DOMAIN_WIRE.couple, 1, { plaintextBytes: 128 })},
+        content_revision = 2
+    WHERE id = '${profilePostId}'`);
+  check(publishProfilePost.ok,
+    'final encrypted media update atomically switches visibility, key domain and profile marker');
+  const publishedProfileShape = mustSql(`
+    SELECT is_private || '|' || is_profile_post || '|' || key_domain || '|' || content_revision
+    FROM public.daily_records WHERE id = '${profilePostId}'`, 'published profile shape');
+  check(publishedProfileShape === 'false|true|couple|2',
+    `published profile post is shared, marked and revision 2 (saw ${publishedProfileShape})`);
+
+  const ordinaryEncryptedEdit = asUser(A, `
+    UPDATE public.daily_records
+    SET content_envelope = ${envelope(DOMAIN_WIRE.couple, 1, { plaintextBytes: 144 })},
+        content_revision = 3
+    WHERE id = '${profilePostId}'`);
+  check(ordinaryEncryptedEdit.ok, 'ordinary encrypted edit may omit the profile marker');
+  check(
+    mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '${profilePostId}'`,
+      'profile marker after ordinary edit') === 't',
+    'ordinary encrypted edit omission preserves the existing true marker',
+  );
+
+  const privateProfileId = nextId();
+  mustAsUser(A, privateEncrypted({ id: privateProfileId }), 'private marked fixture create');
+  mustAsUser(A, `
+    UPDATE public.daily_records
+    SET is_profile_post = true,
+        content_envelope = ${envelope(DOMAIN_WIRE.personal, 2, { plaintextBytes: 80 })},
+        content_revision = 2
+    WHERE id = '${privateProfileId}'`, 'private marked fixture update');
+
+  check(
+    mustAsUser(B, `SELECT count(*) FROM public.daily_records
+      WHERE id = '${profilePostId}' AND is_profile_post`, 'active partner reads marked post') === '1',
+    'active partner reads the shared encrypted profile post',
+  );
+  check(
+    mustAsUser(B, `SELECT count(*) FROM public.daily_records
+      WHERE id = '${privateProfileId}'`, 'active partner private marker probe') === '0',
+    'active partner cannot read a private encrypted row even when its marker is true',
+  );
+  check(
+    mustAsUser(C, `SELECT count(*) FROM public.daily_records
+      WHERE id = '${profilePostId}'`, 'unrelated profile marker probe') === '0',
+    'unrelated user cannot read the encrypted profile post',
+  );
+  check(
+    mustAsUser(D, `SELECT count(*) FROM public.daily_records
+      WHERE id = '${profilePostId}'`, 'former profile marker probe') === '0',
+    'former partner cannot read the encrypted profile post',
+  );
+  checkRefused(
+    asAnon(`SELECT count(*) FROM public.daily_records WHERE id = '${profilePostId}'`),
+    'permission denied',
+    'reject: anon reads the encrypted profile post',
+  );
+
+  asUser(B, `UPDATE public.daily_records SET is_profile_post = false
+    WHERE id = '${profilePostId}'`);
+  check(
+    mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '${profilePostId}'`,
+      'profile marker after partner update') === 't',
+    'active partner cannot change the author profile marker',
+  );
 
   // =========================================================================
   // Scenario 3 — no plaintext residue on an encrypted row

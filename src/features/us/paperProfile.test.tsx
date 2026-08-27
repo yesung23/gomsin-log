@@ -110,6 +110,7 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.getByRole('button', { name: '내 프로필 사진 고르기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '프로필 편집' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '기록 남기기' })).toBeInTheDocument();
+    expect(screen.getByTestId('profile-sticky-header').className).toContain('sticky');
     // The bottom navigation owns the Find tab; this component test does not mount the app shell.
     expect(screen.queryByRole('button', { name: '기록 찾기' })).not.toBeInTheDocument();
   });
@@ -197,7 +198,7 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.getByRole('button', { name: /2026-02-02 사진 선택 해제/ })).toBeInTheDocument();
   });
 
-  it('게시물 격자 탭은 여행과 무관하게 모든 공유 사진을 노출하고 누르면 사진 상세를 연다', () => {
+  it('게시물 격자는 명시적으로 발행한 사진만 노출하고 일반 스토리 사진은 제외한다', () => {
     const trip: Trip = {
       id: 'trip-jeju',
       coupleId: 'couple-1',
@@ -219,6 +220,7 @@ describe('PaperProfile (우리 화면)', () => {
       id: 'rec-travel',
       date: '2026-08-11',
       log: '제주도 바다 도착!',
+      isProfilePost: true,
       attachments: [{ type: 'photo', name: '제주도.jpg', url: 'https://example.test/jeju.jpg' }],
     });
 
@@ -234,9 +236,9 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    // 여행 여부와 무관하게 공유 사진 게시물이 격자에 존재해야 함
+    // 스토리 사진은 자동으로 들어오지 않고, 명시적으로 발행한 게시물만 보인다.
     expect(screen.getByTestId('post-tile-rec-travel')).toBeInTheDocument();
-    expect(screen.getByTestId('post-tile-rec-normal')).toBeInTheDocument();
+    expect(screen.queryByTestId('post-tile-rec-normal')).not.toBeInTheDocument();
     expect(screen.getByTestId('post-tile-rec-travel')).toHaveAttribute('data-kind', 'photo');
 
     fireEvent.click(screen.getByTestId('post-tile-rec-travel'));
@@ -261,7 +263,7 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/함께 공개한 사진이 아직 없어요/)).toBeInTheDocument();
+    expect(screen.getByText(/아직 게시물이 없어요/)).toBeInTheDocument();
   });
 
   it('사진 탭은 비공개 기록을 제외한 공유 기록 목록을 사용한다', () => {

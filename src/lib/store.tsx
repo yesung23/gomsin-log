@@ -126,6 +126,15 @@ type SyncSlice = 'records' | 'events' | 'trips' | 'talk-about' | 'highlights' | 
 type ActiveIdentity = { userId: string; generation: number };
 type ActiveWorkspace = ActiveIdentity & { coupleId: string };
 
+function persistedMediaKey(attachment: Attachment): string {
+  return `${attachment.type}\u0000${attachment.name}\u0000${attachment.path ?? ''}`;
+}
+
+function hasSamePersistedMedia(actual: DailyRecord, expected: DailyRecord): boolean {
+  return JSON.stringify((actual.attachments || []).map(persistedMediaKey))
+    === JSON.stringify((expected.attachments || []).map(persistedMediaKey));
+}
+
 /**
  * The couple space this account belongs to, whether or not a partner has joined.
  *
@@ -2463,8 +2472,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const stagesPublicMediaPrivately = options?.allOrNothingMedia === true
       && files.length > 0
       && record.isPrivate === false;
+    const stagesProfilePostMarker = options?.allOrNothingMedia === true
+      && files.length > 0
+      && record.isProfilePost === true;
+    const { isProfilePost: intendedProfilePost, ...recordWithoutProfilePost } = record;
     const baseRecord: DailyRecord = {
-      ...record,
+      ...(stagesProfilePostMarker ? recordWithoutProfilePost : record),
       isPrivate: stagesPublicMediaPrivately ? true : record.isPrivate,
       id: recordId,
       createdAt: new Date().toISOString(),
@@ -2666,8 +2679,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       attachments,
       // Publish a staged post only in the same row update that commits all media.
       isPrivate: stagesPublicMediaPrivately ? record.isPrivate : savedRecord.isPrivate,
+      ...(stagesProfilePostMarker ? { isProfilePost: intendedProfilePost } : {}),
     };
     if (attachments.length > 0) {
+      const reconcileAttachmentPatch = async (reason: RecordMutationReason): Promise<boolean> => {
+        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return false;
+        const remote = await fetchRecordsResultFromDB(workspace.coupleId);
+        if (!isCurrentLinkedCouple(workspace) || !remote.ok) return false;
+        const persisted = remote.records.find((candidate) =>
+          candidate.id === recordId && candidate.userId === workspace.userId);
+        if (!persisted || !hasSamePersistedMedia(persisted, finalRecord)) return false;
+        finalRecord = persisted;
+        return true;
+      };
       try {
         const patched = await saveRecordToDB(
           finalRecord,
@@ -2684,20 +2708,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // which is worse than leaving objects an operator can sweep.
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (!patched.ok) {
-          try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-          if (!isCurrentLinkedCouple(workspace)) return staleResult;
-          failedFiles.push(...files.map((file) => file.name));
-          finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+          const reason = recordSaveFailureReason(patched);
+          if (!await reconcileAttachmentPatch(reason)) {
+            // The UPDATE may have committed even when its response was lost. Once
+            // issued, deleting uploads can break a live row; leave uncertain bytes
+            // for a later orphan sweep instead of risking user-visible data loss.
+            if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+              try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
+            }
+            failedFiles.push(...files.map((file) => file.name));
+            finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+          }
         } else {
           finalRecord = { ...finalRecord, contentRevision: patched.contentRevision };
         }
       } catch (error) {
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         console.error('[gomsinlog] Failed to attach media to record:', error);
-        try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        failedFiles.push(...files.map((file) => file.name));
-        finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+        const reason = classifyServerError(error).kind;
+        if (!await reconcileAttachmentPatch(reason)) {
+          if (!isCurrentLinkedCouple(workspace)) return staleResult;
+          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+            try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
+          }
+          failedFiles.push(...files.map((file) => file.name));
+          finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+        }
       }
     }
 
@@ -2884,11 +2920,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   reason: 'post_staging_missing',
                   message: '임시 보관한 게시물을 확인하지 못했어요.',
                 };
-              } else if (refreshedPost.isPrivate !== queuedRecord.isPrivate) {
-                const privacy = await updateRecord(entry.id, { isPrivate: queuedRecord.isPrivate });
-                deliveryOutcome = privacy.ok
+              } else if (
+                refreshedPost.isPrivate !== queuedRecord.isPrivate
+                || refreshedPost.isProfilePost !== queuedRecord.isProfilePost
+              ) {
+                const publication = await updateRecord(entry.id, {
+                  isPrivate: queuedRecord.isPrivate,
+                  ...(queuedRecord.isProfilePost !== undefined
+                    ? { isProfilePost: queuedRecord.isProfilePost }
+                    : {}),
+                });
+                deliveryOutcome = publication.ok
                   ? { ok: true }
-                  : { ok: false, reason: privacy.reason, message: privacy.error };
+                  : { ok: false, reason: publication.reason, message: publication.error };
               } else {
                 deliveryOutcome = { ok: true };
               }
@@ -3303,7 +3347,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
 
+    const reconcileMediaUpdate = async (reason: RecordMutationReason): Promise<DailyRecord | null> => {
+      if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return null;
+      const remote = await fetchRecordsResultFromDB(workspace.coupleId);
+      if (!isCurrentLinkedCouple(workspace) || !remote.ok) return null;
+      const persisted = remote.records.find((candidate) =>
+        candidate.id === id && candidate.userId === workspace.userId);
+      return persisted && hasSamePersistedMedia(persisted, patchedRecord) ? persisted : null;
+    };
+
     let authoritativeRevision = existing.contentRevision ?? 1;
+    let reconciledRecord: DailyRecord | null = null;
     try {
       const patched = await saveRecordToDB(
         patchedRecord,
@@ -3312,10 +3366,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
       );
       if (!patched.ok) {
-        await rollbackUploads();
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (patched.reason === 'auth_expired') void handleAuthExpired();
         const reason = recordSaveFailureReason(patched);
+        reconciledRecord = await reconcileMediaUpdate(reason);
+        if (!reconciledRecord) {
+          // Do not delete uploaded objects after an issued UPDATE: a lost response
+          // is not proof that the row still lacks them.
+          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+            await rollbackUploads();
+          }
+          return {
+            ok: false,
+            failedFiles: allFileNames,
+            error: recordFailureMessage(reason),
+            reason,
+          };
+        }
+        authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+      } else {
+        authoritativeRevision = patched.contentRevision;
+      }
+    } catch (error) {
+      console.error('[gomsinlog] Failed to patch record media:', error);
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      reconciledRecord = await reconcileMediaUpdate(reason);
+      if (!reconciledRecord) {
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
+        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+          await rollbackUploads();
+        }
         return {
           ok: false,
           failedFiles: allFileNames,
@@ -3323,19 +3403,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           reason,
         };
       }
-      authoritativeRevision = patched.contentRevision;
-    } catch (error) {
-      console.error('[gomsinlog] Failed to patch record media:', error);
-      await rollbackUploads();
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      const reason = classifyServerError(error).kind;
-      if (reason === 'auth_expired') void handleAuthExpired();
-      return {
-        ok: false,
-        failedFiles: allFileNames,
-        error: recordFailureMessage(reason),
-        reason,
-      };
+      authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
     }
 
     // The row no longer references these objects, so removing them now cannot
@@ -3351,7 +3419,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
     let committed: DailyRecord = {
-      ...patchedRecord,
+      ...(reconciledRecord ?? patchedRecord),
       contentRevision: authoritativeRevision,
     };
     if (committed.attachments?.length) {

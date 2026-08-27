@@ -8834,3 +8834,112 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — physical development install only; TestFlight/App Store Connect unchanged
+
+### 2026-08-28 — 스토리 가독성·무지 종이·고정 헤더·명시적 프로필 게시물 로컬 클로저
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Story/Profile presentation, data integrity, local release validation
+- Step: 요청 UI와 profile-post 발행 의도 구현 후 전체 로컬·독립 보안 gate
+- Previous Gate: 기록 작성 사진 미리보기와 Xcode 27 beta development install
+- This Gate: Story/Profile/paper local release candidate와 migration 067 적용 전 HOLD 경계
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/WHAT_IS_GOMSINLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; AI 선별·유료 개인정보 기능 추가 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, 관련 feature-build/security-review/migration-gate/release-validation 절차
+- Current-state checked: repository, `docs/CURRENT_STATE.md`, branch/HEAD/status/origin master live 확인
+- Latest relevant Work Log checked: 2026-08-27 기록 작성 사진·보호 경로와 2026-08-28 Xcode 27 beta 항목
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/verifier, independent UI reviewer, Sol Architect security closure
+- Model: primary; independent security reviewer `gpt-5.6-sol`
+- Role: bounded implementation, rendered/full local validation, independent privacy/RLS review
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `5b3133f2fed5f0cda00908cde32ae632233256b0`
+- Old HEAD: `5b3133f2fed5f0cda00908cde32ae632233256b0`
+- New HEAD / Reviewed HEAD: 이 항목을 포함한 feature commit; 보안 review는 Old HEAD 기반 exact dirty delta
+
+#### CHANGED / REVIEWED
+- file: `src/features/story/StoryRoute.tsx`, `StoryViewer.tsx`, `RecordMediaGallery.tsx`
+- function/component/migration: Story presentation and exact-source actions
+- what changed/reviewed: 이름 반복 제거, `HH:mm`, 17px 본문, contain 사진, 콘텐츠 아래 action; pointer event 분리
+- why: 기록 집중도와 읽기 흐름을 높이면서 exact original navigation을 유지
+- file: `src/lib/paperTexturePreference.ts`, `HandwritingSection.tsx`, `App.tsx`, `paper.css`
+- function/component/migration: account-scoped device-local paper preference
+- what changed/reviewed: 44px `무지 종이 / 줄 종이`, reload/account-switch 재적용, 서버 전송 없음
+- why: 괘선 집중 분산을 사용자가 되돌릴 수 있게 함
+- file: `MobileShell.tsx`, `PaperHome.tsx`, `SharedProfile.tsx`
+- function/component/migration: single root scroller and sticky Home/My headers
+- what changed/reviewed: 100dvh shell 안에서 main만 scroll하고 상단 메뉴는 sticky
+- why: 스크롤 중 핵심 상단 작업을 안정적으로 유지
+- file: records/store/postTiles, `067_profile_post_intent.sql`, P5/phase0 harness
+- function/component/migration: explicit profile-post marker and all-or-nothing media publication
+- what changed/reviewed: staging private/false, complete media+visibility+true final update, ordinary omission preservation, response-loss read-back, actor denials
+- why: 일반 Story 사진을 격자에서 제외하면서 사용자 발행 의도·원본 기록·Storage 정합성을 보존
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: key authority/format/write-floor/plaintext refusal 변경 없음
+- DB/migration semantics: 067 로컬 파일 외 기존 schema/RLS/RPC 의미 변경 없음
+- product semantics: AI가 중요 기록을 선별하지 않으며 Story/사진 원본을 삭제하지 않음
+- Production: Supabase/Auth/Vercel/Apple/TestFlight/App Store와 git remote 변경 없음
+
+#### VERIFICATION
+- command: related focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS, final marker 범위 3 files / 112 tests; 관련 전체 묶음 PASS
+- what it actually proves: Story/paper/sticky/profile filtering, exact ID, save/retry/fallback 계약
+- command: focused Playwright 320px/390px
+- PASS / FAIL / UNVERIFIED: PASS, 5/5
+- what it actually proves: 8개 요약의 5+3 펼치기, Story/Profile/paper/sticky 렌더와 44px 상호작용
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS, PostgreSQL 17 / 65 migrations / 420 assertions
+- what it actually proves: local fresh-chain migration/RLS actor contract; remote 적용 증거 아님
+- command: `npm run test:p5`
+- PASS / FAIL / UNVERIFIED: PASS, 105 assertions
+- what it actually proves: E2EE staging/final marker ordering, active/private/unrelated/former/anon/partner-update 경계
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, typecheck/full lint/260 files/3,753 tests/build 2,166 modules
+- what it actually proves: complete local web regression; 이전 deviceKeyPort timeout 미재발(12/12, 약 221ms)
+- command: target ESLint, `git diff --check`, `npx cap sync ios`, Xcode 27 beta unsigned simulator build
+- PASS / FAIL / UNVERIFIED: PASS, 5 plugins, tracked iOS diff 0, `BUILD SUCCEEDED`
+- what it actually proves: latest web/native adapter packages and compiles for iPhoneSimulator 27.0
+- command: independent UI review and Sol security closure
+- PASS / FAIL / UNVERIFIED: local UI PASS / Production HOLD; security PASS with no remaining concrete finding
+- what it actually proves: reviewed dirty delta의 local UX/security gate; Production 승인 아님
+- command: read-only Supabase project/list/probes, Vercel `whoami`
+- PASS / FAIL / UNVERIFIED: Supabase `ACTIVE_HEALTHY`, empty ledger, 062 RPC present/anon denied, 067 `42703` absent; Vercel CLI logged out
+- what it actually proves: 067 Production NOT APPLIED와 current CLI auth state; 063–066 full catalog/provider/deployed SHA는 UNVERIFIED
+
+#### REVIEW IMPACT
+- FULL for the new profile-post metadata/write ordering and actor boundary; independent Sol closure PASS. 이후 Work Log/report/remote-state wording은 security semantics 없는 docs-only DELTA.
+
+#### BLOCKERS
+- code: local reviewed delta에 열린 P0-P3 finding 없음
+- environment: 최신 delta 실물 iPhone safe-area/gesture/Foundation Models 미검증
+- external/manual: 067 원격 미적용, Apple provider/redirect·실제 OAuth 왕복·두 계정 smoke·Archive/TestFlight/App Store 미완료
+
+#### STOPPED AT
+- exact completed boundary: implementation, rendered E2E, full verify, local DB/P5, native sync/simulator build와 독립 security closure 완료; Production 067 적용 직전
+
+#### REMAINING
+- action-time backup/catalog 후 exact 067, PostgREST reload, 실제 actor matrix
+- latest exact commit의 실물 iPhone/두 계정 profile post와 Foundation Models 검증
+- provider/redirect, Archive/Internal TestFlight, App Store metadata/submission
+
+#### NEXT ACTION
+- next owner: user-confirmed Codex release operator plus independent security verifier
+- tool/model: primary operator; Sol은 Production DB/Auth delta 독립 검토에만 사용
+- 기준 SHA: 이 항목을 포함한 feature commit
+- exact next task: 063–066 live catalog와 backup/rollback을 재확인하고 exact 067 action-time 적용안을 사용자에게 제시
+
+#### DO NOT ADVANCE UNTIL
+- 067 적용 전 current backup/catalog/blast radius/rollback과 사용자 확인
+- 적용 후 PostgREST reload와 real authenticated/partner/unrelated/former/anon actor matrix PASS
+- App Store 제출 전 latest exact commit의 physical iPhone 및 두 계정 smoke
+
+#### PRODUCTION
+- NOT APPLIED — read-only Supabase/Vercel 확인과 로컬 source/test/docs만 수행

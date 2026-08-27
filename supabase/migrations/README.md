@@ -29,7 +29,7 @@
 > 실행하지 않은 것: `test:p5` · `test:write-floor` · `test:rollback` 체인에는 넣지
 > 않았다. 057은 `daily_records` 의 write floor 와 무관하다.
 >
-> 다음 사용 가능 번호: **066**.
+> 다음 사용 가능 번호: **068**.
 
 > **📄 058·059 작성됨 · 운영 미적용 (2026-08-24).** `058_couple_highlights.sql`은
 > 활성 커플에 한정된 독립 하이라이트와 순서형 사진 항목, shared-only child RLS,
@@ -895,3 +895,31 @@ supabase functions deploy delete-account
 - **원격 적용 상태: NOT APPLIED (LOCAL FILE ONLY).** 운영 적용 전 064를 우선 적용하고,
   exact 065 SQL·실제 actor matrix·기존 pairing 행 검사를 별도 수행해야 합니다.
   빈 migration ledger 때문에 `supabase db push`는 계속 금지합니다.
+
+## 066 — 푸시 발송 후보 원자적 claim (2026-08-27)
+
+- `066_atomic_push_delivery_claims.sql`은 후보 선정과 lease 획득을 하나의
+  SECURITY DEFINER 함수 안에서 처리하고, 같은 claim ID를 가진 호출만 발송 완료 또는
+  release를 수행하게 합니다.
+- 로컬 fresh-chain actor 계약은 authenticated/anon 직접 실행 거부, 다른 claim의
+  완료·release 거부, lease 중복 선정 차단, 만료 후 재선정과 정상 완료를 검증합니다.
+- **원격 적용 상태: UNVERIFIED / NOT APPLIED by this task.** 빈 migration ledger 때문에
+  `supabase db push`는 계속 금지합니다.
+
+## 067 — 명시적 프로필 게시물 의도 (2026-08-28)
+
+- `067_profile_post_intent.sql`은 `daily_records.is_profile_post BOOLEAN NOT NULL DEFAULT
+  false`를 추가합니다. 글·사진·선택 출처를 복제하지 않고, 사용자가 프로필 격자에
+  게시물로 발행했다는 불리언 의도만 기존 기록 행에 둡니다.
+- 기존 사진 기록은 backfill하지 않습니다. 이전 스키마에는 스토리 사진과 명시적 게시물을
+  구별할 증거가 없으므로 추측해서 프로필 격자에 올리지 않습니다.
+- 로컬 PostgreSQL 17 fresh-chain 결과: 65 migrations / 420 assertions PASS. 067 범위는
+  owner가 marker를 읽고 바꾸는 성공 경로, active partner의 shared-only 읽기, private 차단,
+  unrelated/anon 차단, partner의 author marker 변경 거부를 실제 actor로 확인합니다.
+- P5 E2EE actor 하네스도 staging 시 marker `false`, complete-media와 intended visibility를
+  함께 확정하는 최종 발행, 일반 수정의 marker 보존과 private/former/unrelated/anon 거부를
+  실제 PostgreSQL에서 105 assertions로 PASS했습니다.
+- **원격 적용 상태: NOT APPLIED.** 새 클라이언트 배포 전에 exact 067과 PostgREST reload가
+  필요하며, 운영 적용 직전 backup/catalog·blast radius·rollback을 다시 제시하고 사용자
+  확인을 받아야 합니다. 롤백은 먼저 이전 클라이언트로 되돌린 뒤 unused column을 후속
+  forward migration으로 정리하는 순서입니다.

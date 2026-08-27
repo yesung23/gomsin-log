@@ -130,6 +130,8 @@ export interface DailyRecord {
   reaction?: ReactionType;
   attachments?: Attachment[];
   isPrivate: boolean; // false = 우리 둘에게 공유, true = 나에게만
+  /** True only when the author explicitly published this record to the profile grid. */
+  isProfilePost?: boolean;
   /** Explicitly saved by the author as a topic for the next call. */
   talkAbout?: boolean;
   emotionFlow?: EmotionFlowItem[];

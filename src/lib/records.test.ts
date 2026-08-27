@@ -8,6 +8,7 @@ import {
   isCanonicalRecordMediaPath,
   deleteRecordFromDB,
   downloadRecordPhotoForReuse,
+  fetchRecordsFromDB,
   saveRecordToDB,
   setRecordCryptoEnvironment,
 } from '@/lib/records';
@@ -307,6 +308,38 @@ describe('downloadRecordPhotoForReuse', () => {
   });
 });
 
+describe('fetchRecordsFromDB profile-post metadata', () => {
+  afterEach(() => mockFrom.mockReset());
+
+  it('maps explicit profile posts without changing the stored record time', async () => {
+    const secondOrder = vi.fn().mockResolvedValue({
+      data: [{
+        id: 'record-1',
+        user_id: 'user-1',
+        record_date: '2026-08-28',
+        record_time: '09:07:33',
+        log_text: '아침 기록',
+        attachments: [],
+        is_private: false,
+        is_profile_post: true,
+        created_at: '2026-08-28T00:07:33.000Z',
+        content_revision: 1,
+        cipher_format: 0,
+      }],
+      error: null,
+    });
+    const firstOrder = vi.fn().mockReturnValue({ order: secondOrder });
+    const eq = vi.fn().mockReturnValue({ order: firstOrder });
+    const select = vi.fn().mockReturnValue({ eq });
+    mockFrom.mockReturnValue({ select });
+
+    const [mapped] = await fetchRecordsFromDB('couple-1');
+
+    expect(mapped.time).toBe('09:07:33');
+    expect(mapped.isProfilePost).toBe(true);
+  });
+});
+
 describe('deleteRecordFromDB', () => {
   const recordId = 'rec-001';
   const userId = 'user-001';
@@ -404,11 +437,25 @@ describe('saveRecordToDB', () => {
   }
 
   it('reports ok on a successful upsert', async () => {
-    mockUpsert(null);
+    const insert = mockUpsert(null);
     expect(await saveRecordToDB(record, 'couple-001', 'user-001')).toEqual({
       ok: true,
       contentRevision: 1,
     });
+    const payload = insert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('is_profile_post');
+  });
+
+  it('persists explicit profile publication as clear routing metadata', async () => {
+    const insert = mockUpsert(null);
+    await saveRecordToDB({ ...record, isProfilePost: true }, 'couple-001', 'user-001');
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ is_profile_post: true }));
+  });
+
+  it('can explicitly clear profile publication without changing record identity', async () => {
+    const insert = mockUpsert(null);
+    await saveRecordToDB({ ...record, isProfilePost: false }, 'couple-001', 'user-001');
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ is_profile_post: false }));
   });
 
   it('reports forbidden for an RLS rejection, never a connection failure', async () => {
@@ -496,6 +543,7 @@ describe('saveRecordToDB', () => {
       emotion_flow: [],
       record_time: null,
     });
+    expect(first.insert.mock.calls[0][0]).not.toHaveProperty('is_profile_post');
 
     const second = mockEncryptedResponse({ content_revision: 2 });
     const edited = await saveRecordToDB(

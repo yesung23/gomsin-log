@@ -208,8 +208,19 @@ scope (an encrypted write with no floor is refused, which forces the ordering).
 
 Protected `daily_records` content: `log_text`, `reaction`, `attachments`,
 `emotion_flow`, `record_time`. Accepted leakage: `record_date` (ordering),
-`emotion_updated_at`, `talk_about`. Server metadata: ids, `is_private`,
-timestamps, cipher routing columns.
+`emotion_updated_at`, `talk_about`, `is_profile_post`. Server metadata: ids,
+`is_private`, timestamps, cipher routing columns.
+
+`is_profile_post` is one cleartext publication-intent bit set only after the
+author's complete photo attachment update succeeds. It is a presentation selector,
+not an authorization grant: private/shared access remains governed by the existing
+row and Storage RLS. An E2EE-enabled server can still learn whether a record was
+selected for the profile grid and can tamper with that inclusion bit; this can alter
+shared-content presentation but cannot grant decryption of private content. The
+client omits `is_profile_post` from ordinary and staging writes; PostgreSQL stores
+`false` through the `NOT NULL` default. The client sends `true` only with the final
+complete-media and intended-visibility update. This ordering is an application
+invariant, not a database-enforced attachment constraint.
 
 After activation: an old client cannot INSERT plaintext, cannot modify a legacy
 row while leaving any protected field plaintext, and no client can downgrade

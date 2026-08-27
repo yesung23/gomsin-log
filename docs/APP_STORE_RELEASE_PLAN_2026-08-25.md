@@ -12,13 +12,13 @@
 
 ## 출시 단계와 현재 상태
 
-| 단계 | 완료 조건 | 2026-08-27 live 상태 |
+| 단계 | 완료 조건 | 2026-08-28 live 상태 |
 |---|---|---|
-| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 최신 기록 작성 델타 포함 258 files / 3,735 tests, phase0 64 migrations / 411 assertions, web build 2,165 modules, Xcode 26.6 / `iphonesimulator26.5` `BUILD SUCCEEDED`; 2026-08-28 Xcode 27.0 beta 6 / iPhoneOS 27.0 SDK signed device build·설치·unlock 후 launch PASS. post-install 화면 캡처는 UNVERIFIED |
+| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 스토리/무지 종이/고정 헤더/명시적 프로필 게시물 후보에서 260 files / 3,753 tests, phase0 65 migrations / 420 assertions, web build 2,166 modules, Xcode 27 beta / `iphonesimulator27.0` unsigned `BUILD SUCCEEDED`; 실제 iPhone의 이 최신 UI와 profile-post 왕복은 UNVERIFIED |
 | 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — UIScene 수정 commit `34b6e4c`를 Xcode 27 SDK로 iPhone 16 Pro / iOS 27에 signed build·설치했다. 첫 실행·종료 후 재실행·30초 이상 프로세스 생존과 온보딩 렌더 PASS, 검정 화면 재발 없음. cold callback 오류 토스트 및 Google OAuth 시스템 브라우저 진입 PASS. 실제 계정 로그인 완료, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
-| 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — 062 RPC는 live, 063 없음, 064 미적용으로 `authenticated`에 `TRUNCATE` 잔존, 065 hardening marker 없음; ledger가 비어 있어 bulk push 금지 |
-| 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — 실물 iPhone에서 Google CTA가 `accounts.google.com` 시스템 브라우저까지 진입하는 것은 PASS. 계정 선택 이후 callback/session 완결은 자동 입력하지 않아 UNVERIFIED. live Google ON / Apple OFF / Email ON; redirect allowlist와 Apple 실제 왕복 미검증 |
-| 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — Vercel Preview는 `415e183` READY, Production은 `d9a2eb0`; Production용 법적 운영자명·개인정보 연락 이메일 env가 없어 새 Production build는 fail-closed |
+| 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — 2026-08-28 read-only live 확인에서 프로젝트는 `ACTIVE_HEALTHY`, migration ledger는 계속 비어 있다. 062 RPC 3종은 존재하고 anon 실행은 거부되지만, 067의 `daily_records.is_profile_post`는 실제로 없다. bulk push는 금지하며 action-time backup/catalog와 exact 선행 순서 확인 뒤 067·reload·actor matrix를 적용한다 |
+| 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — 실물 iPhone에서 Google CTA가 `accounts.google.com` 시스템 브라우저까지 진입하는 것은 PASS. 계정 선택 이후 callback/session 완결은 자동 입력하지 않아 UNVERIFIED. 2026-08-27 마지막 확인은 Google ON / Apple OFF / Email ON이며, 이번 closure에서 provider/redirect를 다시 판정하지 않았다 |
+| 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — 2026-08-27 마지막 확인은 Preview `415e183` READY, Production `d9a2eb0`이었다. 2026-08-28 Vercel CLI는 logged out이므로 현재 exact deployed SHA·env는 UNVERIFIED이며 배포하지 않았다 |
 | 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **PARTIAL** — Apple Developer 팀 활성/Admin, Apple Development 인증서와 `app.gomsinlog` development profile 사용. UIScene 수정 commit `34b6e4c`의 Xcode 27 signed physical-device build·install·launch·relaunch PASS. Distribution/Archive validation, TestFlight 업로드와 two-account smoke는 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
@@ -104,6 +104,10 @@
    AI는 무엇이 중요한지 고르지 않으며, 펼친 줄도 정확한 원본 하나를 계속 가리킨다.
    전체 줄 유지는 상대의 오늘에만 적용되고, 나의 오늘·보관·하이라이트·여러 날이 밀린
    구간은 기존 최대 5줄을 유지한다.
+9. 추론은 앱 실행·기록 저장·백그라운드가 아니라 사용자가 **상대의 오늘 스토리**를 열었을
+   때만 시작한다. 규칙 문장을 먼저 그린 뒤 선택적 네이티브 다듬기를 적용한다. 같은 payload는
+   다시 실행하지 않고, 화면 이탈 시 취소한다. 지원 iPhone에서 지연·발열·배터리를 측정하기
+   전에는 prewarm이나 자동 백그라운드 추론을 추가하지 않는다.
 
 ## 원격 작업의 안전 순서
 

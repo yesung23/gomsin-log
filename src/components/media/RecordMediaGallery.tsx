@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Expand, Mic } from 'lucide-react';
 import { Carousel } from '@astryxdesign/core/Carousel';
-import { AspectRatio } from '@astryxdesign/core/AspectRatio';
+import { AspectRatio, type AspectRatioFit } from '@astryxdesign/core/AspectRatio';
 import { Lightbox, type LightboxMedia } from '@astryxdesign/core/Lightbox';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
 import { serverErrorMessage } from '@/lib/serverErrors';
@@ -136,6 +136,7 @@ function VisualSlide({
   recordId,
   index,
   inCarousel,
+  fit,
   onResolved,
   onExpand,
 }: {
@@ -145,6 +146,7 @@ function VisualSlide({
   index: number;
   /** Slides need an explicit width; a lone photo just fills its parent. */
   inCarousel: boolean;
+  fit: AspectRatioFit;
   onResolved: (index: number, slide: ResolvedSlide | undefined) => void;
   onExpand: (index: number) => void;
 }) {
@@ -173,14 +175,14 @@ function VisualSlide({
 
   return (
     <AttachmentFrame type={attachment.type} className={inCarousel ? SLIDE_WIDTH : 'w-full'}>
-      <AspectRatio ratio={PORTRAIT_RATIO} fit="cover">
+      <AspectRatio ratio={PORTRAIT_RATIO} fit={fit}>
         {url && !isVideo && (
           <img
             src={url}
             alt={attachment.name}
             loading="lazy"
             onError={reportLoadFailure}
-            className="w-full h-full object-cover"
+            className={cn('w-full h-full', fit === 'cover' ? 'object-cover' : 'object-contain')}
           />
         )}
         {url && isVideo && (
@@ -196,7 +198,7 @@ function VisualSlide({
             preload="metadata"
             aria-label={`${attachment.name} 동영상`}
             onError={reportLoadFailure}
-            className="w-full h-full object-cover bg-foreground"
+            className={cn('w-full h-full bg-foreground', fit === 'cover' ? 'object-cover' : 'object-contain')}
           />
         )}
         {!url && (
@@ -293,6 +295,8 @@ export interface RecordMediaGalleryProps {
   coupleId?: string;
   recordId: string;
   className?: string;
+  /** Story uses contain so portrait and landscape originals remain fully visible. */
+  fit?: AspectRatioFit;
 }
 
 export function RecordMediaGallery({
@@ -300,6 +304,7 @@ export function RecordMediaGallery({
   coupleId,
   recordId,
   className,
+  fit = 'cover',
 }: RecordMediaGalleryProps) {
   const { visual, voices } = useMemo(() => {
     const visualItems: Attachment[] = [];
@@ -360,6 +365,7 @@ export function RecordMediaGallery({
       recordId={recordId}
       index={index}
       inCarousel={isCarousel}
+      fit={fit}
       onResolved={onResolved}
       onExpand={openLightbox}
     />

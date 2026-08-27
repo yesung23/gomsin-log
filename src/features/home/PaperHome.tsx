@@ -132,8 +132,9 @@ export function PaperHome() {
     */
     <div className="min-h-full pb-6" data-testid="home-core">
       <header
-        className="flex h-14 items-center justify-between px-4"
-        style={{ marginTop: 'env(safe-area-inset-top, 0px)', background: 'var(--paper)' }}
+        data-testid="home-sticky-header"
+        className="sticky top-0 z-40 flex h-14 items-center justify-between px-4"
+        style={{ background: 'var(--paper)' }}
       >
         {/*
           로고 자리. 이 앱의 이름은 손글씨다 -- 인스타의 로고가 그 앱의 손글씨인 것과

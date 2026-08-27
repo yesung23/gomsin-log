@@ -166,13 +166,13 @@ export function SharedProfile() {
   };
 
   /**
-   * 게시물을 올린다. **새 테이블을 만들지 않는다.**
+   * 게시물을 올린다. **새 테이블이나 업로드 경로를 만들지 않는다.**
    *
-   * 프로필 격자는 이미 사진이 붙은 기록으로 만들어지므로(`postTiles.ts`), 게시물은 사진이
-   * 붙은 기록 하나다. 그래서 기존 `addRecordWithMedia` 를 그대로 쓴다 -- 그 경로가 이미
+   * 기존 `addRecordWithMedia` 를 그대로 쓴다 -- 그 경로가 이미
    * 커플 권한, 보호 게이트, 오프라인 큐, 파일별 실패를 다룬다. 게시물 전용 저장 경로를
    * 새로 만들면 그 네 가지를 처음부터 다시 맞춰야 하고, 하나라도 빠지면 게시물만 권한
-   * 검사가 약한 문이 된다.
+   * 검사가 약한 문이 된다. `isProfilePost`는 이 기존 기록을 사용자가 프로필 격자에
+   * 명시적으로 발행했다는 표시만 남긴다.
    *
    * 여행·스토리에서 고른 사진은 현재 사용자의 Storage 권한으로 다시 읽은 뒤 새 record id
    * 아래에 독립 사본으로 올린다. 기존 path를 그대로 붙이면 canonical path/RLS를 깨고,
@@ -238,8 +238,11 @@ export function SharedProfile() {
           toast.warning('사진을 아직 올리지 못했어요. 고른 순서를 유지한 채 다시 시도해 주세요.');
           return;
         }
-        const privacy = await updateRecord(postRetryRecordId, { isPrivate: input.isPrivate });
-        if (!privacy.ok) {
+        const publication = await updateRecord(postRetryRecordId, {
+          isPrivate: input.isPrivate,
+          isProfilePost: true,
+        });
+        if (!publication.ok) {
           const recordId = postRetryRecordId;
           setComposingPost(false);
           discardPostDraft();
@@ -264,6 +267,7 @@ export function SharedProfile() {
         authorRole: profile.role,
         log: input.caption,
         isPrivate: input.isPrivate,
+        isProfilePost: true,
         talkAbout: false,
         emotionFlow: [],
         emotionUpdatedAt: null,
@@ -362,6 +366,10 @@ export function SharedProfile() {
     () => sharedRecords.filter((record) => getPhotoAttachments(record).length > 0),
     [sharedRecords],
   );
+  const profilePostRecords = useMemo(
+    () => photoRecords.filter((record) => record.isProfilePost === true),
+    [photoRecords],
+  );
   /*
     `state.trips ?? []` 를 JSX 안에서 직접 쓰지 않는다.
 
@@ -372,7 +380,7 @@ export function SharedProfile() {
   */
   const allTrips = useMemo(() => state.trips ?? [], [state.trips]);
   const selectedPost = selectedPostId
-    ? photoRecords.find((record) => record.id === selectedPostId) ?? null
+    ? profilePostRecords.find((record) => record.id === selectedPostId) ?? null
     : null;
   const highlights = state.coupleHighlights ?? [];
   const effectiveMilitary = resolveEffectiveMilitary(profile);
@@ -485,7 +493,7 @@ export function SharedProfile() {
 
   return (
     <div className="min-h-full pb-8">
-      <header className="grid h-14 grid-cols-[88px_1fr_88px] items-center px-4" style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}>
+      <header data-testid="profile-sticky-header" className="sticky top-0 z-40 grid h-14 grid-cols-[88px_1fr_88px] items-center px-4" style={{ background: 'var(--paper)' }}>
         {/*
           왼쪽 끝이 게시물 만들기다.
 
@@ -596,10 +604,10 @@ export function SharedProfile() {
         <SharedRecordList records={sharedRecords} coupleId={profile.couple.coupleId} onOpen={(id) => navigate(`/record?record=${encodeURIComponent(id)}`)} />
       ) : (
         <PostGrid
-          records={photoRecords}
+          records={profilePostRecords}
           coupleId={profile.couple.coupleId}
           onOpen={setSelectedPostId}
-          emptyMessage="함께 공개한 사진이 아직 없어요."
+          emptyMessage="아직 게시물이 없어요."
           ariaLabel="사진 게시물 격자"
         />
       )}

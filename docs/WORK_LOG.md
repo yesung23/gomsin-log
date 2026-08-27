@@ -114,6 +114,109 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-27 · Xcode 27 Apple Development 서명·실물 iPhone 설치 gate
+
+#### PLAN POSITION
+- Phase: App Store Release Candidate
+- Workstream: Apple signing and physical-device packaging
+- Step: Xcode 27 beta, 활성 Apple Developer 팀, development certificate/profile을 통한 실물 iPhone signed build·install 증명
+- Previous Gate: Apple Developer 등록 완료, Xcode 27 beta 설치 확인
+- This Gate: development signing/install/process PASS; release artifact·Archive·TestFlight·실기기 기능 검증은 후속
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 제품·수익·저장전략 변경 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/release-validation.md`
+- Current-state checked: live branch/HEAD/status, Xcode Apple Accounts, Keychain identities, CoreDevice device/app/process state
+- Latest relevant Work Log checked: 2026-08-27 App Store 첫 출시 백엔드 유지·이전 준비 판단
+- MASTER PLAN version / 기준일: App Store Release Plan / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary, Computer Use, local CLI
+- Model: current primary model
+- Role: Apple release operator and verifier
+- PR: 없음
+- Branch: `codex/profile-post-composer`
+- Base SHA: `654194cb7128f1af70107dabaabc0e4c81d07b22`
+- Old HEAD: `654194cb7128f1af70107dabaabc0e4c81d07b22`
+- New HEAD / Reviewed HEAD: working-tree documentation delta; native Team ID is ignored local config only
+
+#### CHANGED / REVIEWED
+- file: Apple Developer team / Mac Keychain / local provisioning state
+- function/component/migration: Apple Development certificate, `app.gomsinlog` iOS Team Provisioning Profile
+- what changed/reviewed: 활성 Admin 팀에서 새 Development 인증서 1개를 생성하고 Xcode 자동 서명으로 development profile을 생성했다. 기존 인증서는 삭제하지 않았다.
+- why: iOS 27 실물 기기 signed build/install을 가능하게 하기 위해서다.
+- file: `ios/App/LocalSigning.xcconfig` (gitignored)
+- function/component/migration: `DEVELOPMENT_TEAM`
+- what changed/reviewed: 실제 Team ID를 로컬 ignored 설정에만 기록했다. 추적되는 `project.pbxproj`에는 Team ID를 남기지 않았다.
+- why: 로컬 서명은 재현하되 계정별 signing material을 저장소에 커밋하지 않기 위해서다.
+- file: `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `control-tower/reports/codex/2026-08-27_apple-development-signing-physical-device_codex.md`
+- function/component/migration: release gate evidence
+- what changed/reviewed: membership/signing/install 단계의 live 상태를 PARTIAL로 갱신했다.
+- why: 과거 BLOCKED 상태를 실제 증거로 교체하고 기능/Archive 미검증을 분리하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: 변경 없음
+- Production: Supabase/Vercel/Auth provider/TestFlight/App Store 배포 변경 없음
+
+#### VERIFICATION
+- command: beta Xcode `xcodebuild -version`, `xcrun --sdk iphoneos --show-sdk-version`
+- PASS / FAIL / UNVERIFIED: PASS — Xcode 27.0 build 27A5252f, iOS SDK 27.0
+- what it actually proves: iOS 27 toolchain 존재. 앱 동작 증거는 아님.
+- command: `xcrun devicectl list devices`
+- PASS / FAIL / UNVERIFIED: PASS — physical iPhone 16 Pro connected
+- what it actually proves: CoreDevice 연결. 앱 설치/실행은 별도 증거.
+- command: `security find-identity -v -p codesigning`
+- PASS / FAIL / UNVERIFIED: PASS — Apple Development identity 2개 valid
+- what it actually proves: 이 Mac Keychain에서 development codesign 가능.
+- command: Xcode GUI automatic signing + `xcrun devicectl device info apps --search app.gomsinlog`
+- PASS / FAIL / UNVERIFIED: PASS — 곰신로그 0.1.0(1), bundle `app.gomsinlog`, Developer App 설치 확인
+- what it actually proves: signed install. fresh release web artifact나 화면 기능은 증명하지 않음.
+- command: `xcrun devicectl device process launch ... app.gomsinlog`, device process/path와 installed app path 대조
+- PASS / FAIL / UNVERIFIED: PASS — launch 성공, `App.app/App` 실행 경로 일치
+- what it actually proves: 앱 프로세스 시작. 화면·로그인·온디바이스 모델 동작은 증명하지 않음.
+- command: beta Xcode physical destination signed Debug `xcodebuild ... build`
+- PASS / FAIL / UNVERIFIED: PASS — `BUILD SUCCEEDED`, development profile 사용
+- what it actually proves: tracked Team ID 없이 ignored LocalSigning 설정으로 서명 빌드 재현.
+- command: `npx vitest run src/lib/nativeConfig.test.ts src/lib/iosPrivacyManifest.test.ts`
+- PASS / FAIL / UNVERIFIED: 초기 FAIL 2/74 → remediation 후 PASS 74/74
+- what it actually proves: 초기 tracked `DEVELOPMENT_TEAM` 위반을 검출했고, ignored LocalSigning 방식으로 교정됨.
+- command: `git diff --check`, `git check-ignore -v ios/App/LocalSigning.xcconfig`, `git status --short`
+- PASS / FAIL / UNVERIFIED: PASS — signing 설정은 ignored, 기존 `.DS_Store` 외 추적 native diff 없음
+- what it actually proves: Team ID/signing material이 Git에 새로 노출되지 않음.
+
+#### REVIEW IMPACT
+- DELTA
+- whether an earlier review is stale: 코드·DB·crypto 의미는 unchanged. release gate의 signing/physical-install 상태만 새 증거로 갱신한다.
+
+#### BLOCKERS
+- code: Supabase publishable key가 없어 fresh `build:release` 미실행
+- environment: 없음 — Xcode 27/iOS 27 development signing은 준비됨
+- external/manual: 실제 화면 조작, Apple OAuth, Foundation Models/airplane mode, Distribution certificate, Archive/TestFlight/App Store Connect
+
+#### STOPPED AT
+- exact completed boundary: Apple Development certificate/profile 생성, signed physical-device build/install/process verification 완료. Supabase key 생성 전.
+
+#### REMAINING
+- not completed: fresh release web artifact, release iOS sync, 실기기 기능 경로, Archive validation, TestFlight two-account smoke
+
+#### NEXT ACTION
+- next owner: 사용자 action-time 승인 후 Codex release operator
+- tool/model: primary operator; auth/provider 변경 시 independent security review
+- 기준 SHA: `654194cb7128f1af70107dabaabc0e4c81d07b22`
+- exact next task: Supabase publishable key 1개 생성 후 ignored local release env에만 설정하고 `build:release` → `cap:release:ios` → signed iPhone build를 검증
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: key 생성 action-time 승인, 값 비노출, Vercel/Apple provider/Production SQL은 각각 별도 확인
+
+#### PRODUCTION
+- APPLIED — Apple Development certificate와 development provisioning profile, local physical-device install only
+- NOT APPLIED — Supabase/Vercel/Auth provider/TestFlight/App Store distribution
+
 ### 2026-08-27 · App Store 첫 출시 백엔드 유지·이전 준비 판단
 
 #### PLAN POSITION

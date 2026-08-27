@@ -15,11 +15,11 @@
 | 단계 | 완료 조건 | 2026-08-27 live 상태 |
 |---|---|---|
 | 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 254 files / 3630 tests, phase0 63 migrations / 392 assertions, iPhone 16 Pro iOS 26.5 arm64 simulator `BUILD SUCCEEDED` |
-| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **BLOCKED** — iOS 27 iPhone 16 Pro는 연결·pairing됐지만 서명 설치가 codesign에서 끝나지 않아 앱/모델 실기기 동작은 미검증; production flag는 기본 OFF 유지 |
+| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — Xcode 27/iOS 27 SDK로 iPhone 16 Pro signed build·설치·프로세스 실행은 PASS. 화면 조작, Foundation Models 한국어 품질, airplane mode, timeout/cancel, latency/heat/battery는 여전히 UNVERIFIED; production flag는 기본 OFF 유지 |
 | 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — 062 RPC는 live, 063 없음, 064 미적용으로 `authenticated`에 `TRUNCATE` 잔존, 065 hardening marker 없음; ledger가 비어 있어 bulk push 금지 |
 | 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — live Google ON / Apple OFF / Email ON; redirect allowlist와 Apple 실제 왕복 미검증 |
 | 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — Vercel Preview는 `415e183` READY, Production은 `d9a2eb0`; Production용 법적 운영자명·개인정보 연락 이메일 env가 없어 새 Production build는 fail-closed |
-| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **BLOCKED** — Apple Developer 멤버십 결제 처리 중, provisioning profile 없음, signed install/Archive/TestFlight 미실행 |
+| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **PARTIAL** — Apple Developer 팀 활성/Admin, Apple Development 인증서와 `app.gomsinlog` development profile 생성, signed physical-device build·install PASS. Distribution/Archive validation/TestFlight 업로드와 two-account smoke는 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
 - PR #90의 code+ledger HEAD `b2090d1dc55b8854475bb0388b9f71d309bc391c`: **PASS** — 두 required workflow의 전체 job과 exact Vercel Preview가 성공했다. 마이탭 중앙 정렬 보정 commit `78f8402`의 로컬 full verify와 390px E2E도 PASS했다. 이는 Production 배포나 실기기 증거가 아니다.
@@ -62,8 +62,8 @@
 
 - 마이탭 헤더는 좌우 88px 대칭 슬롯으로 고쳐 `+` 왼쪽, 아이디/자물쇠 화면 정중앙, 작성/설정 오른쪽을 유지한다. 390px 실제 렌더에서 중심 오차 1px 이하와 각 44px 터치 타깃을 E2E로 확인했다.
 - 이 보정 뒤 `LANG=en_US.UTF-8 npm run verify`는 exit 0으로 다시 통과했다. 254 files / 3,630 tests, 전체 lint/typecheck, production build가 포함되며 과거 `deviceKeyPort` 병렬 timeout은 재발하지 않았다.
-- iOS 27.0 iPhone 16 Pro는 Mac에 연결·pairing됐고 Developer Mode도 켜져 있다. 원본 workspace의 physical-device build는 compile/link 후 Capacitor framework codesign에서 장시간 끝나지 않아 중지했다. signed install, 앱 실행, Foundation Models, Secure Enclave, airplane-mode 평가는 **UNVERIFIED**다.
-- Apple Developer 포털은 멤버십 구매를 아직 처리 중이라고 표시한다. App ID/Services ID/key/profile, Supabase Apple provider, Archive/TestFlight/App Store Connect는 활성화 전까지 **BLOCKED**다.
+- iOS 27.0 iPhone 16 Pro는 Xcode 27.0 build `27A5252f`/iOS 27 SDK에서 `connected`로 확인됐다. 활성 Apple Developer 팀과 새 Apple Development 인증서를 연결하고, ignored `ios/App/LocalSigning.xcconfig`를 통해 Team ID를 저장소에 남기지 않은 채 `app.gomsinlog` development profile을 생성했다. signed Debug build가 `BUILD SUCCEEDED`, 실물 기기 설치 목록의 `곰신로그` 0.1.0(1)과 실행 중 `App.app/App` 프로세스 경로 일치까지 PASS했다.
+- 위 증거는 native signing/install/process gate다. 설치된 웹 자산은 아직 publishable-key를 사용하는 fresh release artifact가 아니며, 화면 조작·Foundation Models·Secure Enclave·airplane mode는 **UNVERIFIED**다. Supabase Apple provider, Services ID/key, Distribution/Archive/TestFlight/App Store Connect는 여전히 별도 **BLOCKED/PENDING** gate다.
 - live Vercel에서 feature Preview `b2090d1`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
 - live `delete-account` Edge Function은 ACTIVE(version 6, JWT required)이고 Production origin preflight 200, 무인증 POST 401을 확인했다. 실제 계정 삭제는 희생 계정을 영구 삭제하므로 별도 action-time 승인 전까지 **UNVERIFIED**다.
 - 현재 디스크 여유는 약 3.8GB라 signed Archive에 부족할 수 있다. 사용자 파일을 임의 삭제하지 않으며 Archive 전에 최소 약 10GB를 확보한다.

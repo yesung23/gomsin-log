@@ -8428,3 +8428,113 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — no remote database, Auth provider, Edge Function, Vercel or Apple change
+
+### 2026-08-27 · iOS 27 UIScene 검정 화면 진단 및 로컬 수정 (Local PASS / Physical UNVERIFIED)
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / native runtime compatibility
+- Workstream: physical-device launch blocker and native OAuth return reliability
+- Step: reproduce Xcode 27 launch fatal, adopt UIScene, preserve cold/foreground PKCE callback, local regression and independent review
+- Previous Gate: signed physical build/install/process PASS but screen interaction UNVERIFIED
+- This Gate: simulator launch and callback PASS; patched physical-device build remains UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — customer, product scope, AI role, storage and monetization unchanged
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/README.md` feature-build/security-review/migration-gate/release-validation
+- Current-state checked: live repository branch/HEAD/status, `docs/CURRENT_STATE.md`, Xcode 27 simulator logs, Capacitor native source
+- Latest relevant Work Log checked: 2026-08-27 App Store RC 통합·게시물 재전송 안전성 최종 검증
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/integrator/verifier
+- Model: primary; independent `google-antigravity/gemini-3.1-pro` High and `google-antigravity/gemini-3.7-flash` High read-only reviewers
+- Role: native diagnosis, implementation, local simulator verification, final diff ownership; independent reviewer finding check
+- PR: none; local branch only
+- Branch: `codex/profile-post-composer`
+- Base SHA: `45b32586ad24b70188fd2265ab225972c6edf372`
+- Old HEAD: `45b32586ad24b70188fd2265ab225972c6edf372`
+- New HEAD / Reviewed HEAD: pre-commit working tree based on `45b32586ad24b70188fd2265ab225972c6edf372`; final local commit recorded in git history
+
+#### CHANGED / REVIEWED
+- file: `ios/App/App.xcodeproj/project.pbxproj`, `ios/App/App/AppDelegate.swift`, `ios/App/App/Info.plist`, new `ios/App/App/SceneDelegate.swift`
+- function/component/migration: iOS application/scene life cycle and Capacitor callback forwarding
+- what changed/reviewed: single-window scene manifest and configuration; cold/foreground custom URL and universal link forwarding; Main storyboard and existing bridge retained
+- why: Xcode 27 SDK refuses to launch the legacy AppDelegate-only app and produced the physical-device black screen
+- file: `src/lib/deepLinks.ts`, `src/lib/deepLinks.test.ts`, native/privacy/platform contract tests
+- function/component/migration: cold-launch OAuth URL recovery
+- what changed/reviewed: install live listener first, then recover Capacitor `getLaunchUrl()` through the same exact-route/PKCE/dedupe/bounded serialized callback path; tests cover cold launch, duplicate delivery, invalid route and lookup failure
+- why: UIScene receives a cold callback before the JavaScript listener exists; forwarding alone would otherwise lose the login return
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged; no key, encryption, recovery or trust-authority change
+- DB/migration semantics: unchanged; no SQL or remote schema action
+- product semantics: unchanged; no UI redesign or feature-scope change
+- Production: no Supabase, Auth, Vercel, Apple provider, TestFlight or App Store mutation
+
+#### VERIFICATION
+- command: focused Vitest after native/cold-launch change
+- PASS / FAIL / UNVERIFIED: PASS, 3 files / 117 tests; final delta 2 files / 53 tests
+- what it actually proves: static native contract and JS cold/live callback behavior including route, PKCE and duplicate guards
+- command: `npm run typecheck`, target ESLint, `plutil -lint ios/App/App/Info.plist`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript, lint, plist syntax and whitespace integrity on the local change
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS, 4 files / 106 tests
+- what it actually proves: native configuration, privacy manifest and bridge contracts remain green
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS, PostgreSQL 17 / 64 migrations / 411 assertions
+- what it actually proves: unchanged local DB/RLS migration chain still passes; not remote Production proof
+- command: `npm run build`, `npx cap sync ios`, Xcode 27 unsigned simulator build
+- PASS / FAIL / UNVERIFIED: PASS, 2,165 modules; five plugins; `BUILD SUCCEEDED` with `iphonesimulator27.0`
+- what it actually proves: local web artifact synchronizes and native app compiles for the current simulator SDK
+- command: iOS 27 and iOS 26.5 simulator launches
+- PASS / FAIL / UNVERIFIED: PASS, onboarding visibly rendered on both; UIScene launch fatal absent
+- what it actually proves: local simulator runtime closure, not patched physical iPhone runtime
+- command: iOS 27 cold-start and foreground fake custom-scheme callbacks
+- PASS / FAIL / UNVERIFIED: PASS, both displayed the expected Korean cancellation message
+- what it actually proves: native scene callback reaches the shared JS failure UX in both lifecycle states without remote auth mutation
+- command: initial `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: FAIL, 257/258 files and 3,729/3,730 tests; only stale exact source-string assertion failed, build not reached
+- what it actually proves: failure was recorded and not silently upgraded; no product test failed
+- command: final `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, typecheck/lint, 258 files / 3,730 tests, production build 2,165 modules; keystore 12/12 PASS
+- what it actually proves: complete current local regression passes and prior parallel keystore timeout did not recur
+- command: Gemini 3.1 Pro High independent read-only review
+- PASS / FAIL / UNVERIFIED: PASS, no finding
+- what it actually proves: an independent reviewer found no P1/P2 in the scene/cold-start diff; it is not physical-device or Production evidence
+- command: Gemini 3.7 Flash High final independent read-only verification
+- PASS / FAIL / UNVERIFIED: PASS, P1 0 / P2 0; focused Vitest 4 files / 130 tests, native verify 4 files / 106 tests, typecheck, target ESLint, plist lint and Xcode workspace build all PASS
+- what it actually proves: a second independent verifier inspected the complete diff including untracked `SceneDelegate.swift`, reran the bounded native/callback checks, and found no release-blocking local issue; it is not physical-device or Production evidence
+
+#### REVIEW IMPACT
+- DELTA: native packaging and OAuth cold-start delivery changed. Prior DB/RLS/crypto reviews are unaffected. Kiro/Sol review was not executed because its model route failed; no Kiro/Sol approval is claimed.
+
+#### BLOCKERS
+- code: no open finding in the reviewed local delta
+- environment: physical iPhone disconnected; patched signed build/runtime unavailable
+- external/manual: real Google/Apple provider OAuth, query-aware redirect allow-list, Archive/TestFlight and two-account physical smoke remain unverified
+
+#### STOPPED AT
+- exact completed boundary: UIScene fatal reproduced and fixed; iOS 27/26.5 simulator rendering, cold/foreground callback, full local verify, native build and independent review complete; before physical-device reinstall or any remote mutation
+
+#### REMAINING
+- reconnect physical iPhone and install the patched signed build
+- verify first launch/relaunch and real Google/Apple OAuth cold/foreground return on device
+- complete strict release artifact, Archive/TestFlight and two-account release smoke under their existing gates
+
+#### NEXT ACTION
+- next owner: Codex release operator when physical iPhone is reconnected
+- tool/model: primary operator; Gemini 3.7 Flash High for bounded device-flow verification if delegated
+- 기준 SHA: final local commit containing this entry
+- exact next task: signed install of the patched build followed by launch, relaunch and real OAuth callback checks on the physical iPhone
+
+#### DO NOT ADVANCE UNTIL
+- patched physical build visibly renders and remains stable on relaunch
+- real provider OAuth callback is verified without weakening PKCE or redirect boundaries
+- `.DS_Store` remains preserved and uncommitted
+
+#### PRODUCTION
+- NOT APPLIED — no remote database, Auth, Vercel, Apple provider, TestFlight or App Store mutation

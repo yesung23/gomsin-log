@@ -72,6 +72,8 @@ const generatedAndroidSettings = read('android/capacitor.settings.gradle');
 const generatedAndroidBuild = read('android/app/capacitor.build.gradle');
 const strings = read('android/app/src/main/res/values/strings.xml');
 const infoPlist = read('ios/App/App/Info.plist');
+const appDelegate = read('ios/App/App/AppDelegate.swift');
+const sceneDelegate = read('ios/App/App/SceneDelegate.swift');
 const iosPodfile = read('ios/App/Podfile');
 const entitlements = read('ios/App/App/App.entitlements');
 const privacyManifest = read('ios/App/App/PrivacyInfo.xcprivacy');
@@ -133,6 +135,32 @@ describe('the deep-link scheme agrees everywhere it is registered', () => {
       .toEqual(['gomsinlog']);
     // Universal Links are not used, so no associated domain may appear.
     expect(withoutComments(entitlements)).not.toContain('com.apple.developer.associated-domains');
+  });
+});
+
+describe('iOS: the scene life cycle launches the Capacitor shell on current SDKs', () => {
+  it('declares one storyboard-backed scene and wires its delegate into the target', () => {
+    expect(infoPlist).toContain('<key>UIApplicationSceneManifest</key>');
+    expect(infoPlist).toMatch(
+      /<key>UIApplicationSupportsMultipleScenes<\/key>\s*<false\/>/,
+    );
+    expect(infoPlist).toContain('$(PRODUCT_MODULE_NAME).SceneDelegate');
+    expect(infoPlist).toMatch(/<key>UISceneStoryboardFile<\/key>\s*<string>Main<\/string>/);
+    expect(pbxproj).toContain('SceneDelegate.swift in Sources');
+  });
+
+  it('returns the scene configuration iOS 27 requires', () => {
+    expect(appDelegate).toContain('configurationForConnecting connectingSceneSession');
+    expect(appDelegate).toContain('UISceneConfiguration(');
+    expect(appDelegate).toContain('name: "Default Configuration"');
+  });
+
+  it('forwards both cold-start and foreground links to Capacitor', () => {
+    expect(sceneDelegate).toContain('connectionOptions.urlContexts');
+    expect(sceneDelegate).toContain('connectionOptions.userActivities');
+    expect(sceneDelegate).toContain('openURLContexts URLContexts');
+    expect(sceneDelegate).toContain('continue userActivity');
+    expect(sceneDelegate.match(/ApplicationDelegateProxy\.shared\.application/g)).toHaveLength(2);
   });
 });
 
@@ -535,8 +563,6 @@ describe('iOS: the APNs token can actually reach the plugin waiting for it', () 
     device, after credentials, after an entitlement, after TestFlight -- with three
     external gates to blame before this file.
   */
-  const appDelegate = read('ios/App/App/AppDelegate.swift');
-
   it('forwards a successful registration', () => {
     expect(appDelegate).toContain('didRegisterForRemoteNotificationsWithDeviceToken');
     expect(appDelegate).toContain('.capacitorDidRegisterForRemoteNotifications');

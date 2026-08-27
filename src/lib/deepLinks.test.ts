@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   listener: undefined as ((event: { url: string }) => unknown) | undefined,
   listenerRemove: vi.fn(async () => {}),
   addListenerRejection: null as unknown,
+  launchUrl: null as string | null,
+  getLaunchUrlRejection: null as unknown,
 }));
 
 const { exchangeCodeForSession, setSession, browserClose, listenerRemove } = mocks;
@@ -20,6 +22,10 @@ vi.mock('@capacitor/app', () => ({
       if (mocks.addListenerRejection) throw mocks.addListenerRejection;
       mocks.listener = handler;
       return { remove: mocks.listenerRemove };
+    }),
+    getLaunchUrl: vi.fn(async () => {
+      if (mocks.getLaunchUrlRejection) throw mocks.getLaunchUrlRejection;
+      return mocks.launchUrl ? { url: mocks.launchUrl } : undefined;
     }),
   },
 }));
@@ -69,6 +75,8 @@ function callback(code: string, flowId = FLOW_ID): string {
 beforeEach(() => {
   mocks.listener = undefined;
   mocks.addListenerRejection = null;
+  mocks.launchUrl = null;
+  mocks.getLaunchUrlRejection = null;
   exchangeCodeForSession.mockReset().mockResolvedValue({ error: null });
   setSession.mockReset().mockResolvedValue({ error: null });
   browserClose.mockReset().mockResolvedValue(undefined);
@@ -150,6 +158,54 @@ describe('the successful return', () => {
     expect(exchangeCodeForSession).toHaveBeenCalledWith('abc123', { flowId: FLOW_ID });
     expect(handler.onFailure).not.toHaveBeenCalled();
     expect(browserClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a native cold-start OAuth return', () => {
+  it('handles the launch URL after installing the live listener', async () => {
+    mocks.launchUrl = callback('cold-start');
+    const handler = register();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(exchangeCodeForSession).toHaveBeenCalledTimes(1);
+    expect(exchangeCodeForSession).toHaveBeenCalledWith('cold-start', { flowId: FLOW_ID });
+    expect(handler.onFailure).not.toHaveBeenCalled();
+  });
+
+  it('exchanges once when the launch lookup and live event carry the same callback', async () => {
+    mocks.launchUrl = callback('same-return');
+    const handler = register();
+
+    await handler.send(callback('same-return'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(exchangeCodeForSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies the same exact-route and PKCE checks to the launch URL', async () => {
+    mocks.launchUrl = 'gomsinlog://evil/callback?code=attacker&sb_flow_id=flow-id-123';
+    const handler = register();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(setSession).not.toHaveBeenCalled();
+    expect(handler.onFailure).not.toHaveBeenCalled();
+  });
+
+  it('keeps the live listener usable when the launch lookup throws', async () => {
+    mocks.getLaunchUrlRejection = new Error('private plugin detail');
+    const handler = register();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(handler.onFailure).toHaveBeenCalledWith(OAUTH_RETURN_MESSAGES.exchangeFailed);
+
+    await handler.send(callback('after-launch-lookup-failure'));
+    expect(exchangeCodeForSession).toHaveBeenCalledWith(
+      'after-launch-lookup-failure',
+      { flowId: FLOW_ID },
+    );
   });
 });
 

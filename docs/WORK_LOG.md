@@ -8538,3 +8538,101 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — no remote database, Auth, Vercel, Apple provider, TestFlight or App Store mutation
+
+### 2026-08-27 · 실물 iPhone iOS 27 UIScene 수정 빌드 검증 (Physical Launch PASS)
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / physical-device runtime gate
+- Workstream: Xcode 27 black-screen closure
+- Step: signed build, install, first launch, relaunch, stability, cold callback and provider-entry verification
+- Previous Gate: simulator PASS; patched physical-device runtime UNVERIFIED
+- This Gate: patched physical launch/relaunch PASS; provider auth completion remains UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no product/business direction change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/README.md` release-validation
+- Current-state checked: branch `codex/profile-post-composer`, HEAD `34b6e4c1b8817abdfa39a1e4497a252591cde257`, dirty `.DS_Store` preserved, physical CoreDevice state and screenshots
+- Latest relevant Work Log checked: 2026-08-27 iOS 27 UIScene 검정 화면 진단 및 로컬 수정
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary verifier/operator
+- Model: primary
+- Role: physical-device build/install/runtime verification and evidence ownership
+- PR: none; local branch only
+- Branch: `codex/profile-post-composer`
+- Base SHA: `34b6e4c1b8817abdfa39a1e4497a252591cde257`
+- Old HEAD: `34b6e4c1b8817abdfa39a1e4497a252591cde257`
+- New HEAD / Reviewed HEAD: code unchanged; documentation commit pending
+
+#### CHANGED / REVIEWED
+- file: no product code change; ignored/generated `dist`, Capacitor iOS public assets and isolated `/tmp` DerivedData only
+- function/component/migration: physical iOS 27 scene lifecycle runtime
+- what changed/reviewed: built commit `34b6e4c` with Xcode 27 SDK, installed `app.gomsinlog` 0.1.0(1), launched and relaunched on iPhone 16 Pro / iOS 27
+- why: close the exact physical black-screen blocker with rendered evidence rather than process-only evidence
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged
+- Production: no remote database, Auth, Vercel, Apple, TestFlight or App Store mutation
+
+#### VERIFICATION
+- command: `npm run build`, `npx cap sync ios`
+- PASS / FAIL / UNVERIFIED: PASS, 2,165 modules and five plugins
+- what it actually proves: current web artifact was bundled into the native project; not strict release artifact proof
+- command: Xcode 27.0 `27A5252f` signed Debug build for connected iPhone
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; code signature verify PASS
+- what it actually proves: commit `34b6e4c` compiles and signs against iPhoneOS 27.0 for the registered physical device
+- command: CoreDevice install and app listing
+- PASS / FAIL / UNVERIFIED: PASS, `app.gomsinlog` 0.1.0(1), developer app, container accessible
+- what it actually proves: signed build is installed on the physical iPhone; no App Store/TestFlight distribution proof
+- command: first launch, screenshot, process listing
+- PASS / FAIL / UNVERIFIED: PASS, onboarding visibly rendered and process alive; black screen absent
+- what it actually proves: physical first-launch closure for the UIScene fatal
+- command: terminate-existing relaunch, screenshot, process listing
+- PASS / FAIL / UNVERIFIED: PASS, onboarding visibly rendered again with a new process
+- what it actually proves: relaunch is not relying on one stale process or simulator-only state
+- command: 30-second stability and app listing
+- PASS / FAIL / UNVERIFIED: PASS, app process remained alive and installed version matched
+- what it actually proves: app did not immediately crash after rendering; not long-duration soak proof
+- command: cold-start fixed error callback
+- PASS / FAIL / UNVERIFIED: PASS with visual limitation, top error toast displayed but active-call Dynamic Island obscured part of copy
+- what it actually proves: physical cold callback reached app UI without changing a remote session
+- command: Google CTA/provider entry
+- PASS / FAIL / UNVERIFIED: PARTIAL PASS, `accounts.google.com` system browser reached; account selection/callback/session UNVERIFIED
+- what it actually proves: provider launch path works on device, not complete OAuth
+
+#### REVIEW IMPACT
+- DELTA evidence only: no code/security semantics changed. The prior exact-code reviewers remain applicable; physical launch evidence upgrades only the runtime gate.
+
+#### BLOCKERS
+- code: no physical launch blocker observed
+- environment: strict release artifact/Archive/TestFlight not produced; about 9.1GB disk free
+- external/manual: Google callback/session completion, Apple provider/round-trip, two-account pairing, Foundation Models and full user path
+
+#### STOPPED AT
+- exact completed boundary: signed physical install, first launch, relaunch, 30-second stability, cold callback UI and Google provider entry complete; before credential input or any Production mutation
+
+#### REMAINING
+- complete Google OAuth manually and verify PKCE callback/session restoration
+- enable/configure and verify Apple OAuth under action-time approval
+- run two-account physical/simulator user-path matrix and Foundation Models device gate
+- produce strict release artifact, Archive validation and Internal TestFlight when release blockers close
+
+#### NEXT ACTION
+- next owner: Codex plus user for credential-bearing account choice
+- tool/model: primary operator; independent security review only if auth/config semantics change
+- 기준 SHA: `34b6e4c1b8817abdfa39a1e4497a252591cde257`
+- exact next task: user completes Google account selection while Codex verifies callback/session without observing or recording credentials
+
+#### DO NOT ADVANCE UNTIL
+- real Google callback/session is observed without token-pair fallback
+- Apple provider and redirect allow-list are configured and verified separately
+- `.DS_Store` remains preserved and uncommitted
+
+#### PRODUCTION
+- NOT APPLIED — physical development install only; no remote mutation

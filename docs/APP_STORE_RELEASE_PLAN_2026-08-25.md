@@ -15,11 +15,11 @@
 | 단계 | 완료 조건 | 2026-08-27 live 상태 |
 |---|---|---|
 | 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 258 files / 3,730 tests, phase0 64 migrations / 411 assertions, web build 2,165 modules, Xcode 27 `iphonesimulator27.0` `BUILD SUCCEEDED`; iOS 27 및 26.5 simulator 렌더 PASS |
-| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — 기존 빌드는 Xcode 27/iOS 27 SDK로 iPhone 16 Pro signed build·설치·프로세스 실행까지 됐지만 화면은 검정 상태였다. 원인은 UIScene 미채택으로 재현했고 로컬 수정 빌드는 iOS 27/26.5 simulator에서 렌더 및 cold/foreground callback PASS. 수정 빌드의 실물 iPhone 재설치·화면 조작·Foundation Models 품질/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
+| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — UIScene 수정 commit `34b6e4c`를 Xcode 27 SDK로 iPhone 16 Pro / iOS 27에 signed build·설치했다. 첫 실행·종료 후 재실행·30초 이상 프로세스 생존과 온보딩 렌더 PASS, 검정 화면 재발 없음. cold callback 오류 토스트 및 Google OAuth 시스템 브라우저 진입 PASS. 실제 계정 로그인 완료, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
 | 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — 062 RPC는 live, 063 없음, 064 미적용으로 `authenticated`에 `TRUNCATE` 잔존, 065 hardening marker 없음; ledger가 비어 있어 bulk push 금지 |
-| 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — live Google ON / Apple OFF / Email ON; redirect allowlist와 Apple 실제 왕복 미검증 |
+| 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — 실물 iPhone에서 Google CTA가 `accounts.google.com` 시스템 브라우저까지 진입하는 것은 PASS. 계정 선택 이후 callback/session 완결은 자동 입력하지 않아 UNVERIFIED. live Google ON / Apple OFF / Email ON; redirect allowlist와 Apple 실제 왕복 미검증 |
 | 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — Vercel Preview는 `415e183` READY, Production은 `d9a2eb0`; Production용 법적 운영자명·개인정보 연락 이메일 env가 없어 새 Production build는 fail-closed |
-| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **PARTIAL** — Apple Developer 팀 활성/Admin, Apple Development 인증서와 `app.gomsinlog` development profile 생성, 기존 빌드의 signed physical-device build·install PASS. 다만 기존 빌드는 검정 화면이었고 UIScene 수정 빌드의 실기기 재검증, Distribution/Archive validation, TestFlight 업로드와 two-account smoke는 미실행 |
+| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **PARTIAL** — Apple Developer 팀 활성/Admin, Apple Development 인증서와 `app.gomsinlog` development profile 사용. UIScene 수정 commit `34b6e4c`의 Xcode 27 signed physical-device build·install·launch·relaunch PASS. Distribution/Archive validation, TestFlight 업로드와 two-account smoke는 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
 - PR #90의 code+ledger HEAD `b2090d1dc55b8854475bb0388b9f71d309bc391c`: **PASS** — 두 required workflow의 전체 job과 exact Vercel Preview가 성공했다. 마이탭 중앙 정렬 보정 commit `78f8402`의 로컬 full verify와 390px E2E도 PASS했다. 이는 Production 배포나 실기기 증거가 아니다.
@@ -64,10 +64,10 @@
 - 이 보정 뒤 `LANG=en_US.UTF-8 npm run verify`는 exit 0으로 다시 통과했다. 254 files / 3,630 tests, 전체 lint/typecheck, production build가 포함되며 과거 `deviceKeyPort` 병렬 timeout은 재발하지 않았다.
 - iOS 27.0 iPhone 16 Pro는 Xcode 27.0 build `27A5252f`/iOS 27 SDK에서 `connected`로 확인됐다. 활성 Apple Developer 팀과 새 Apple Development 인증서를 연결하고, ignored `ios/App/LocalSigning.xcconfig`를 통해 Team ID를 저장소에 남기지 않은 채 `app.gomsinlog` development profile을 생성했다. signed Debug build가 `BUILD SUCCEEDED`, 실물 기기 설치 목록의 `곰신로그` 0.1.0(1)과 실행 중 `App.app/App` 프로세스 경로 일치까지 PASS했다.
 - 위 증거는 native signing/install/process gate다. 설치된 웹 자산은 아직 publishable-key를 사용하는 fresh release artifact가 아니며, 화면 조작·Foundation Models·Secure Enclave·airplane mode는 **UNVERIFIED**다. Supabase Apple provider, Services ID/key, Distribution/Archive/TestFlight/App Store Connect는 여전히 별도 **BLOCKED/PENDING** gate다.
-- 설치 후 사용자가 보고한 검정 화면은 Xcode 27 로그의 `UIScene life cycle is required for apps built with this SDK` fatal로 iOS 27 및 26.5 simulator에서 재현했다. 단일-window `SceneDelegate`와 scene manifest를 추가한 로컬 빌드는 두 simulator에서 온보딩을 렌더했고, cold-start 및 foreground custom-scheme callback이 공통 PKCE 처리 경로에 도달해 사용자 오류 안내를 표시했다. 수정 빌드의 실물 iPhone 실행은 기기 분리로 **UNVERIFIED**다.
+- 설치 후 사용자가 보고한 검정 화면은 Xcode 27 로그의 `UIScene life cycle is required for apps built with this SDK` fatal로 iOS 27 및 26.5 simulator에서 재현했다. 단일-window `SceneDelegate`와 scene manifest를 추가한 commit `34b6e4c`는 simulator에 이어 실물 iPhone 16 Pro / iOS 27에서도 온보딩을 실제 렌더했고, 종료 후 재실행 및 30초 이상 프로세스 생존에도 검정 화면이 재발하지 않았다. cold-start custom-scheme 취소 callback은 오류 토스트를 표시했다. 실제 provider 로그인 완료는 **UNVERIFIED**다.
 - live Vercel에서 feature Preview `b2090d1`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
 - live `delete-account` Edge Function은 ACTIVE(version 6, JWT required)이고 Production origin preflight 200, 무인증 POST 401을 확인했다. 실제 계정 삭제는 희생 계정을 영구 삭제하므로 별도 action-time 승인 전까지 **UNVERIFIED**다.
-- 현재 디스크 여유는 약 3.8GB라 signed Archive에 부족할 수 있다. 사용자 파일을 임의 삭제하지 않으며 Archive 전에 최소 약 10GB를 확보한다.
+- 2026-08-27 실물 재검증 시점 디스크 여유는 약 9.1GB다. 사용자 파일을 임의 삭제하지 않으며 Archive 전에 최소 약 10GB를 확보한다.
 
 ## 온디바이스 요약의 출시 계약
 

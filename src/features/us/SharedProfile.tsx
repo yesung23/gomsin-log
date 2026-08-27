@@ -23,6 +23,7 @@ import { localToday } from '@/lib/cycle';
 import { formatLocalDate } from '@/lib/utils';
 import { TRIP_PHASE_ORDER, TRIP_PHASE_PILL, groupTripsByPhase, type TripPhase } from '@/lib/tripPhase';
 import type { Attachment, CoupleHighlight, DailyRecord, Trip } from '@/types';
+import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
 
@@ -93,6 +94,7 @@ export function SharedProfile() {
   const [isSavingHighlight, setIsSavingHighlight] = useState(false);
   const [composingPost, setComposingPost] = useState(false);
   const [isPublishingPost, setIsPublishingPost] = useState(false);
+  const publishPostInFlightRef = useRef(false);
   /*
     작성 중인 초안은 **이 화면이 소유한다.**
 
@@ -177,7 +179,7 @@ export function SharedProfile() {
    * 원본 삭제가 새 게시물까지 깨뜨린다. 다운로드와 업로드 사이에는 시작한 couple id를
    * 고정해 연결 해제·계정 전환 중 예전 사진이 새 커플로 넘어가지 못하게 한다.
    */
-  const publishPost = async (input: {
+  const runPublishPost = async (input: {
     caption: string;
     isPrivate: boolean;
     items: PostDraftItem[];
@@ -278,11 +280,13 @@ export function SharedProfile() {
       }
       if (!result.ok) {
         if (result.reason === 'protection_required') {
-          toast.error(result.error || '이 기기에서 기록 보호 설정이 필요해요.', {
+          toast.error(result.error || '지금은 이 기록을 안전하게 저장할 수 없어요.', {
             duration: 8_000,
             action: {
-              label: '설정 열기',
-              onClick: () => navigate('/settings'),
+              label: isDeviceProtectionEnabled() ? '설정 열기' : '다시 시도',
+              onClick: isDeviceProtectionEnabled()
+                ? () => navigate('/settings')
+                : () => { void publishPost(input); },
             },
           });
         } else {
@@ -315,6 +319,22 @@ export function SharedProfile() {
       setIsPublishingPost(false);
     }
   };
+
+  async function publishPost(input: {
+    caption: string;
+    isPrivate: boolean;
+    items: PostDraftItem[];
+  }) {
+    // `busy` reaches the sheet on the next render. Hold a synchronous lock so
+    // rapid share/retry taps cannot duplicate the record or its media copy.
+    if (publishPostInFlightRef.current) return;
+    publishPostInFlightRef.current = true;
+    try {
+      await runPublishPost(input);
+    } finally {
+      publishPostInFlightRef.current = false;
+    }
+  }
 
   const closePostComposer = async () => {
     if (isPublishingPost) return;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord } from '@/types';
@@ -273,6 +273,29 @@ describe('게시물 만들기 3단계', () => {
     expect(files).toHaveLength(1);
     expect(files[0]).toBeInstanceOf(File);
     expect(options).toEqual({ expectedCoupleId: 'couple-1', allOrNothingMedia: true });
+  });
+
+  it('같은 프레임에 공유를 두 번 눌러도 게시물은 한 번만 만든다', async () => {
+    storeState.records = [record({
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    let release: (() => void) | undefined;
+    addRecordWithMedia.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ ok: true, failedFiles: [], recordId: 'post-1' });
+    }));
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+
+    const share = screen.getByTestId('post-share');
+    act(() => {
+      share.click();
+      share.click();
+    });
+
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalledTimes(1));
+    await act(async () => { release?.(); });
   });
 
   it('나만 보기를 켜면 비공개로 저장된다', async () => {

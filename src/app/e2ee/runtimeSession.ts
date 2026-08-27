@@ -53,13 +53,18 @@ export type CoupleProtectionOutcomeReason =
 function floorGuard(repository: E2eeRepository): RecordCryptoEnvironment {
   return {
     // If the floor cannot be read, treating it as active is the only honest
-    // answer.  This prevents an offline/forbidden error from becoming a
-    // plaintext write attempt.
+    // answer. A single transient PostgREST/schema-cache failure gets one bounded
+    // retry first; both failures still become floor=1, so availability never
+    // turns into a plaintext downgrade.
     floorFor: async (domain, scopeId) => {
       try {
         return await repository.getWriteFloor(domain, scopeId);
       } catch {
-        return 1;
+        try {
+          return await repository.getWriteFloor(domain, scopeId);
+        } catch {
+          return 1;
+        }
       }
     },
     epochsFor: async () => [],

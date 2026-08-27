@@ -347,7 +347,9 @@ function recordFailureMessage(reason: RecordMutationReason): string {
     case 'couple_changed':
       return '기록을 남겨 둔 커플 공간과 현재 공간이 달라 자동으로 보내지 않았어요.';
     case 'protection_required':
-      return '이 기기에서 기록 보호 설정이 필요해요. 설정에서 먼저 준비해 주세요.';
+      // This result covers both a real active write floor with no usable key and
+      // an unavailable floor lookup. Do not invent which one happened here.
+      return '지금은 이 기록을 안전하게 저장할 수 없어요. 앱을 다시 연 뒤 재시도하고, 계속되면 고객지원에 알려 주세요.';
     case 'deletion_pending':
       return '탈퇴 처리가 진행 중이어서 기록을 저장할 수 없어요.';
     default:

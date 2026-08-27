@@ -14,7 +14,7 @@
 
 | 단계 | 완료 조건 | 2026-08-27 live 상태 |
 |---|---|---|
-| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 258 files / 3,730 tests, phase0 64 migrations / 411 assertions, web build 2,165 modules, Xcode 27 `iphonesimulator27.0` `BUILD SUCCEEDED`; iOS 27 및 26.5 simulator 렌더 PASS |
+| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 최신 기록 작성 델타 포함 258 files / 3,735 tests, phase0 64 migrations / 411 assertions, web build 2,165 modules, Xcode 26.6 / `iphonesimulator26.5` `BUILD SUCCEEDED`; iOS 27 실물 기기 온보딩 렌더 PASS |
 | 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — UIScene 수정 commit `34b6e4c`를 Xcode 27 SDK로 iPhone 16 Pro / iOS 27에 signed build·설치했다. 첫 실행·종료 후 재실행·30초 이상 프로세스 생존과 온보딩 렌더 PASS, 검정 화면 재발 없음. cold callback 오류 토스트 및 Google OAuth 시스템 브라우저 진입 PASS. 실제 계정 로그인 완료, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
 | 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — 062 RPC는 live, 063 없음, 064 미적용으로 `authenticated`에 `TRUNCATE` 잔존, 065 hardening marker 없음; ledger가 비어 있어 bulk push 금지 |
 | 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — 실물 iPhone에서 Google CTA가 `accounts.google.com` 시스템 브라우저까지 진입하는 것은 PASS. 계정 선택 이후 callback/session 완결은 자동 입력하지 않아 UNVERIFIED. live Google ON / Apple OFF / Email ON; redirect allowlist와 Apple 실제 왕복 미검증 |
@@ -68,6 +68,23 @@
 - live Vercel에서 feature Preview `b2090d1`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
 - live `delete-account` Edge Function은 ACTIVE(version 6, JWT required)이고 Production origin preflight 200, 무인증 POST 401을 확인했다. 실제 계정 삭제는 희생 계정을 영구 삭제하므로 별도 action-time 승인 전까지 **UNVERIFIED**다.
 - 2026-08-27 실물 재검증 시점 디스크 여유는 약 9.1GB다. 사용자 파일을 임의 삭제하지 않으며 Archive 전에 최소 약 10GB를 확보한다.
+- 기록 작성 화면은 선택한 사진을 저장 전 글 바로 아래에서 기기 내부 Blob URL로 보여 주고,
+  각 사진을 44px 삭제 버튼으로 제외할 수 있다. 미리보기 URL은 삭제·저장·화면 이탈 때 해제하며,
+  저장 전 서버 업로드가 없음을 390px Playwright로 확인했다.
+- 출시 기본값(`VITE_E2EE_DEVICE_PROTECTION_ENABLED=false`)과 원격 write floor가 모두 비활성인
+  계정은 기존 Supabase RLS 기록 경로를 계속 사용한다. write-floor 조회는 일시 실패에 한 번만
+  재시도하고 두 번 모두 실패하거나 실제 floor가 활성인 경우에는 평문으로 낮추지 않는다.
+  닫힌 기록보호 설정으로 보내는 CTA는 flag OFF에서 제거하고 `다시 시도`로 바꿨다.
+- 같은 working tree를 Xcode 26.5 SDK로 iOS 27 실물 iPhone에 signed Debug build·덮어 설치하고
+  `App.app/App` 프로세스와 온보딩 실제 렌더를 확인했다. 검정 화면은 재발하지 않았다. 약관 동의,
+  실제 OAuth 완료와 로그인 후 기록 저장은 사용자 세션이 필요한 별도 수동 gate로 남는다.
+- 2026-08-28 재확인에서 앱 설정에는 원격 `server.url`이 없고 설치된 `app.gomsinlog`의
+  `App.app/App`가 실행됐다. Xcode 26.6 / iPhoneOS 26.5 SDK signed Debug 결과물을 iOS 27
+  실물 기기에 다시 덮어 설치했고 1초 후 온보딩이 정상 렌더됐다. 시스템 브라우저는 OAuth
+  provider 화면에만 사용한다.
+- 기록 작성 델타의 첫 독립 검토에서 같은 프레임의 기본/재시도 중복 제출 P1이 발견됐고,
+  세 작성 진입점 모두 동기식 in-flight guard를 사용하도록 보완했다. fresh Terra High closure는
+  exact uncommitted delta에 P0-P3 0건으로 **PASS**했다.
 
 ## 온디바이스 요약의 출시 계약
 

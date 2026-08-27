@@ -8636,3 +8636,117 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — physical development install only; no remote mutation
+
+### 2026-08-27 · 기록 사진 미리보기·출시 저장 경로·실물 iPhone 재설치 검증
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / 기록 작성 핵심 경로
+- Workstream: compose usability, launch protection compatibility, physical-device smoke
+- Step: 사진 선택 피드백, 닫힌 설정 CTA 제거, fail-closed floor retry, 최신 빌드 재설치
+- Previous Gate: UIScene 검정 화면 수정의 physical launch PASS; 로그인 후 기록 작성 문제 보고
+- This Gate: 로컬 전체 회귀·렌더링 E2E·signed physical launch PASS; 로그인 후 실물 작성은 UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 기록 작성의 기존 제품 가치를 복구하며 고객·범위·과금·AI 역할을 바꾸지 않음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: branch `codex/profile-post-composer`, base HEAD `02fd3f898c2c1c84c76f9ac088367121a4620a3c`, dirty `.DS_Store`와 claim 보존
+- Latest relevant Work Log checked: 2026-08-27 iOS 27 UIScene 수정 및 physical launch 항목
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/verifier, Terra High independent final reviewer
+- Model: primary + `main/gpt-5.6-terra` Reviewer
+- Role: bounded implementation, full local validation, physical-device operator, independent delta review
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `02fd3f898c2c1c84c76f9ac088367121a4620a3c`
+- Old HEAD: `02fd3f898c2c1c84c76f9ac088367121a4620a3c`
+- New HEAD / Reviewed HEAD: pre-commit working tree based on the Old HEAD; final commit recorded in git history
+
+#### CHANGED / REVIEWED
+- file: `src/features/compose/ComposePage.tsx`, `e2e/composeUsability.spec.ts`
+- function/component/migration: full-screen record composer photo selection and save UX
+- what changed/reviewed: selected photos render immediately below the text, can be removed through 44px controls, reuse the existing media classifier, and release all object URLs; launch flag OFF uses retry instead of a closed Settings route
+- why: the installed app showed only a photo count and gave no confidence about the selected upload; an unavailable protection setup route stranded normal users
+- file: `src/app/e2ee/runtimeSession.ts`, `src/app/e2ee/runtimeSession.test.ts`
+- function/component/migration: record crypto write-floor lookup guard
+- what changed/reviewed: one bounded retry for a transient floor lookup; two failures and active floors still resolve fail-closed and never authorize plaintext
+- why: a single transient schema-cache/PostgREST lookup failure could block all normal launch writes even when no floor existed
+- file: `src/components/widgets/TodayLogWidget.tsx`, `src/features/us/SharedProfile.tsx`, `src/lib/store.tsx`, focused tests
+- function/component/migration: alternate record/post composer error recovery and shared error copy
+- what changed/reviewed: flag OFF offers retry with draft preserved; flag ON retains Settings recovery; error copy no longer invents an unavailable-device-setup cause
+- why: all creation entry points must avoid the same dead-end while preserving the security boundary
+- file: `e2e/coupleMatrix.spec.ts`
+- function/component/migration: creator/partner launch-write contract
+- what changed/reviewed: connected creator and partner both save through the existing RLS path only when launch flag and write floor are off
+- why: prove the repaired path for both members rather than one UI role
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: active write floors, missing key refusal, protected payload format and trust authority unchanged; no plaintext fallback on unknown floor
+- DB/migration semantics: unchanged; no SQL file or remote schema change
+- product semantics: private/shared selection, author ownership and existing media sanitization unchanged
+- Production: no Supabase, Auth, Vercel, Apple, TestFlight or App Store mutation
+
+#### VERIFICATION
+- command: focused Vitest for runtime session, composer queue, media, store and records
+- PASS / FAIL / UNVERIFIED: PASS, 6 files / 129 tests
+- what it actually proves: floor retry/fail-closed behavior, flag-aware recovery, media classification/sanitization and record failure mapping
+- command: 최초 `npm run test:p0-security`는 package script 부재로 FAIL; 실제 정의된 `npm run test:p0`, `npm run test:p5`, `npm run test:write-floor`로 재실행
+- PASS / FAIL / UNVERIFIED: PASS, 76 + 93 + 39 assertions
+- what it actually proves: 첫 실패는 명령 이름 드리프트이며, 실제 local P0/P5/write-floor security contracts는 모두 green; not remote Production proof
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS, PostgreSQL 17 / 64 migrations / 411 assertions
+- what it actually proves: complete local migration/RLS harness passes; no remote application claim
+- command: target ESLint and `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: changed TypeScript/E2E files and whitespace pass local static checks
+- command: focused Playwright after final changes
+- PASS / FAIL / UNVERIFIED: PASS, 4/4 on `chromium-390`
+- what it actually proves: photo preview position, remove/44px, Blob cleanup, no pre-save upload, successful save, repeated floor-failure refusal, retry CTA and creator/partner normal-save path in rendered mock-backed flows
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; typecheck, full lint, 258 files / 3,735 tests, production build 2,165 modules
+- what it actually proves: complete current local TypeScript/test/build regression passes; prior `deviceKeyPort` timeout did not recur (12/12, about 0.43s)
+- command: `npx cap sync ios`, unsigned Xcode simulator build
+- PASS / FAIL / UNVERIFIED: PASS, five plugins, no tracked iOS diff, `BUILD SUCCEEDED` with iPhoneSimulator 26.5 SDK
+- what it actually proves: latest web artifact synchronizes and compiles in the native workspace
+- command: signed Debug build/install/launch/screenshot/process check on iPhone 16 Pro / iOS 27
+- PASS / FAIL / UNVERIFIED: PASS for build/install/launch/render/process; `App.app/App` alive and onboarding visible, black screen absent
+- what it actually proves: latest local working tree runs as a native app on the connected physical device; not login, record-save, OAuth-completion, TestFlight or App Store proof
+- command: Terra High independent read-only final delta review
+- PASS / FAIL / UNVERIFIED: initial FAIL/HOLD on same-frame duplicate-submit P1; remediated; fresh closure PASS with P0-P3 0
+- what it actually proves: all three primary/retry authoring paths use a synchronous in-flight guard and the reviewed delta preserves Blob cleanup, no pre-save upload, write-floor fail-closed and private/shared semantics; no Production approval
+- command: 2026-08-28 Xcode 26.6 / iPhoneOS 26.5 SDK signed build, `devicectl` install, terminate-existing launch, 1-second screenshot and process check
+- PASS / FAIL / UNVERIFIED: PASS; latest build installed, `app.gomsinlog` ran as `App.app/App` and rendered onboarding after one second
+- what it actually proves: the packaged native app loads its bundled WebView rather than launching a website; provider OAuth still intentionally uses the system browser
+
+#### REVIEW IMPACT
+- DELTA: record composer UX and authenticated floor-lookup availability changed. Existing RLS/crypto protocol reviews remain applicable because no schema, authority, key or encryption format changed; this exact dirty delta receives a fresh independent review.
+
+#### BLOCKERS
+- code: no open P0-P3 finding in the reviewed local delta
+- environment: installed app is currently at pre-consent onboarding; authenticated physical record creation cannot be completed without the user's legal consent and account session
+- external/manual: real Google/Apple OAuth callback, two-account pairing, photo persistence across both accounts, Archive/TestFlight and App Store metadata remain UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: implementation, full local regression, local DB/security suites, rendered E2E, native sync/build and latest physical install/launch complete; before credential-bearing login or any Production mutation
+
+#### REMAINING
+- user completes required consent and login, then physical record text/photo save and partner visibility are manually verified
+- close Apple provider/redirect and two-account release gates under action-time approval
+- produce Archive/Internal TestFlight only after remote/auth gates are closed
+
+#### NEXT ACTION
+- next owner: user plus Codex release operator
+- tool/model: primary operator; Terra/Sol only if consequential release/security semantics change
+- 기준 SHA: final commit containing this entry
+- exact next task: authenticate on the installed iPhone, verify one photo record from compose to exact original/partner view, then continue Apple OAuth release gate
+
+#### DO NOT ADVANCE UNTIL
+- authenticated physical save and exact partner visibility are recorded as PASS or explicitly remain UNVERIFIED
+- `.DS_Store` remains preserved and uncommitted
+
+#### PRODUCTION
+- NOT APPLIED — local code, tests and physical development install only

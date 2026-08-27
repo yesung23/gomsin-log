@@ -44,6 +44,85 @@ describe('authenticated E2EE runtime session', () => {
     })).resolves.toEqual({ mode: 'refused', reason: 'no_active_epoch' });
   });
 
+  it('retries one transient floor lookup failure and keeps an unprotected scope writable', async () => {
+    const server = createMemoryServer();
+    const account = createMemoryAccount(server);
+    const device = account.devices[0];
+    const originalGetWriteFloor = device.deps.repository.getWriteFloor.bind(device.deps.repository);
+    const getWriteFloor = vi.fn()
+      .mockRejectedValueOnce(new Error('transient schema cache failure'))
+      .mockImplementation(originalGetWriteFloor);
+    device.deps.repository.getWriteFloor = getWriteFloor;
+
+    await installE2eeRuntimeForSession({
+      userId: account.userId,
+      repository: device.deps.repository,
+      localState: account.localState,
+      deviceKeys: null,
+      localKeys: null,
+      installationId: 'test-session',
+    });
+
+    await expect(decideRecordWrite(getRecordCryptoEnvironment()!, {
+      isPrivate: true,
+      ownerUserId: account.userId,
+      coupleId: crypto.randomUUID(),
+    })).resolves.toEqual({ mode: 'plaintext' });
+    expect(getWriteFloor).toHaveBeenCalledTimes(2);
+  });
+
+  it('still refuses after both bounded floor lookup attempts fail', async () => {
+    const server = createMemoryServer();
+    const account = createMemoryAccount(server);
+    const device = account.devices[0];
+    const getWriteFloor = vi.fn().mockRejectedValue(new Error('floor unavailable'));
+    device.deps.repository.getWriteFloor = getWriteFloor;
+
+    await installE2eeRuntimeForSession({
+      userId: account.userId,
+      repository: device.deps.repository,
+      localState: account.localState,
+      deviceKeys: null,
+      localKeys: null,
+      installationId: 'test-session',
+    });
+
+    await expect(decideRecordWrite(getRecordCryptoEnvironment()!, {
+      isPrivate: false,
+      ownerUserId: account.userId,
+      coupleId: crypto.randomUUID(),
+    })).resolves.toEqual({ mode: 'refused', reason: 'no_active_epoch' });
+    expect(getWriteFloor).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an active floor fail-closed when the first lookup fails transiently', async () => {
+    const server = createMemoryServer();
+    const account = createMemoryAccount(server);
+    const device = account.devices[0];
+    server.writeFloors.set(`personal:${account.userId}`, 1);
+    const originalGetWriteFloor = device.deps.repository.getWriteFloor.bind(device.deps.repository);
+    const getWriteFloor = vi.fn()
+      .mockRejectedValueOnce(new Error('transient schema cache failure'))
+      .mockImplementation(originalGetWriteFloor);
+    device.deps.repository.getWriteFloor = getWriteFloor;
+
+    await installE2eeRuntimeForSession({
+      userId: account.userId,
+      repository: device.deps.repository,
+      localState: account.localState,
+      deviceKeys: null,
+      localKeys: null,
+      installationId: 'test-session',
+    });
+
+    await expect(decideRecordWrite(getRecordCryptoEnvironment()!, {
+      isPrivate: true,
+      ownerUserId: account.userId,
+      coupleId: crypto.randomUUID(),
+    })).resolves.toEqual({ mode: 'refused', reason: 'no_active_epoch' });
+    expect(getWriteFloor).toHaveBeenCalledTimes(2);
+  });
+
   it('installs the authenticated-wrapper guard while protected-state creation is still pending', async () => {
     const localKeys = {
       load: vi.fn(),

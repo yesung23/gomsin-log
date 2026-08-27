@@ -159,6 +159,8 @@ test('sub-screens', async ({ browser }) => {
     ['/settings', 'settings'],
     ['/service', 'service'],
     ['/legal/privacy', 'legal'],
+    ['/legal/terms', 'terms'],
+    ['/support', 'support'],
   ] as const) {
     await page.goto(path);
     await page.waitForTimeout(900);
@@ -166,3 +168,26 @@ test('sub-screens', async ({ browser }) => {
   }
   await page.context().close();
 });
+
+/** Mobile 320/390 overflow and screenshot audit for public utility pages (/support and /legal/terms). */
+for (const width of [320, 390] as const) {
+  test(`public utility pages — /support & /legal/terms at ${width}px: no overflow and capture audit shot`, async ({ browser }) => {
+    const page = await boot(browser, CREATOR);
+    await page.setViewportSize({ width, height: 844 });
+
+    for (const [path, name] of [
+      ['/support', 'support'],
+      ['/legal/terms', 'terms'],
+    ] as const) {
+      await page.goto(path);
+      await page.waitForTimeout(900);
+      const overflow = await page.evaluate(() => {
+        const doc = document.documentElement;
+        return Math.max(0, doc.scrollWidth - doc.clientWidth);
+      });
+      expect(overflow, `${path} at ${width}px should not overflow horizontally`).toBeLessThanOrEqual(1);
+      await shot(page, `audit-${name}-${width}`);
+    }
+    await page.context().close();
+  });
+}

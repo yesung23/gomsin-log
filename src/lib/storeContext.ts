@@ -191,7 +191,13 @@ export interface StoreContextType {
       /** Keep the existing row unchanged unless every added file succeeds. */
       allOrNothing?: boolean;
     },
-  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string }>;
+  ) => Promise<{
+    ok: boolean;
+    failedFiles: string[];
+    error?: string;
+    /** Preserves retryable transport causes for offline post replay. */
+    reason?: RecordMutationReason;
+  }>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
   updateEvent: (
     id: string,

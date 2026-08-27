@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   userId: 'aaaaaaaa-0000-4000-8000-00000000000a',
+  isDeviceProtectionEnabled: true,
 }));
 
 vi.mock('@capacitor/core', () => ({
@@ -56,7 +57,9 @@ vi.mock('@/app/e2ee/runtimeSession', () => ({
   installE2eeRuntimeForAuthenticatedSession: mocks.installRuntime,
 }));
 
-vi.mock('@/app/e2ee/featureFlag', () => ({ isDeviceProtectionEnabled: () => true }));
+vi.mock('@/app/e2ee/featureFlag', () => ({
+  isDeviceProtectionEnabled: () => mocks.isDeviceProtectionEnabled,
+}));
 vi.mock('@/app/e2ee/protectedLocalState', () => ({
   createProtectedE2eeLocalState: async () => ({}),
 }));
@@ -138,6 +141,7 @@ describe('Settings two-account record-protection flow', () => {
     mocks.toastSuccess.mockReset();
     mocks.toastError.mockReset();
     mocks.userId = 'aaaaaaaa-0000-4000-8000-00000000000a';
+    mocks.isDeviceProtectionEnabled = true;
     mocks.loadFacts
       .mockResolvedValueOnce({ status: 'PAIRING_REQUIRED' })
       .mockResolvedValue({ status: 'PROTECTED' });
@@ -218,5 +222,41 @@ describe('Settings two-account record-protection flow', () => {
       expect(screen.queryByRole('dialog', { name: '둘의 보호 코드 확인' })).toBeNull();
     });
     expect(screen.queryByTestId('couple-protection-sas')).toBeNull();
+  });
+
+  it('does not render device protection section or entry points and skips bootstrap when disabled', () => {
+    mocks.isDeviceProtectionEnabled = false;
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId('device-protection')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '기록 보호' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /둘의 기록 보호 연결/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /보호 설정 시작/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /기록 보호 복구/ })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: '둘의 보호 코드 확인' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: /기록 보호|복구 수단/ })).toBeNull();
+    expect(mocks.loadFacts).not.toHaveBeenCalled();
+  });
+
+  it('renders device protection section and performs bootstrap when enabled', async () => {
+    mocks.isDeviceProtectionEnabled = true;
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('device-protection')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '기록 보호' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /둘의 기록 보호 연결/ })).toBeInTheDocument();
+    expect(mocks.loadFacts).toHaveBeenCalledWith({
+      userId: mocks.userId,
+      coupleId: '11111111-0000-4000-8000-000000000001',
+      supabaseClient: expect.anything(),
+    });
   });
 });

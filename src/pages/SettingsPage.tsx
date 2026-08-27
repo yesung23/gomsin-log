@@ -9,7 +9,7 @@ import { AppBar } from '@/components/ui/AppBar';
 import {
   Shield, Unlink, Trash2, User, FileText, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
-  CalendarDays, Plane, X,
+  CalendarDays, Plane, X, HelpCircle,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -141,6 +141,7 @@ export function SettingsPage() {
   const ownRecords = records.filter((record) => record.userId === settingsIdentityKey);
   const hasCoupleSpace = !!profile.couple.coupleId;
   const protectionCoupleId = activeCoupleScopeId(profile.couple);
+  const deviceProtectionEnabled = isDeviceProtectionEnabled();
   const [protectionSnapshot, setProtectionSnapshot] = useState<DeviceProtectionSnapshot>({
     status: 'TEMPORARILY_UNAVAILABLE',
   });
@@ -169,6 +170,7 @@ export function SettingsPage() {
   }, [settingsIdentityKey]);
 
   useEffect(() => {
+    if (!deviceProtectionEnabled) return;
     let cancelled = false;
     setProtectionSnapshot({ status: 'TEMPORARILY_UNAVAILABLE' });
     const userId = settingsIdentityKey;
@@ -186,7 +188,7 @@ export function SettingsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [protectionCoupleId, settingsIdentityKey]);
+  }, [deviceProtectionEnabled, protectionCoupleId, settingsIdentityKey]);
 
   const loadDeviceProtectionDependencies = async (identity = captureIdentity()) => {
     if (!identity.userId || !supabase || !isCurrentIdentity(identity)) {
@@ -229,6 +231,7 @@ export function SettingsPage() {
   };
 
   const refreshProtectionSnapshot = async (identity = captureIdentity()) => {
+    if (!deviceProtectionEnabled) return;
     if (!identity.userId || !supabase) return;
     const snapshot = await loadSettingsBootstrapFacts({
       userId: identity.userId,
@@ -240,7 +243,7 @@ export function SettingsPage() {
 
   const startProtectionSetup = async () => {
     if (isProtectionBusy) return;
-    if (!isDeviceProtectionEnabled()) {
+    if (!deviceProtectionEnabled) {
       toast.error('이 빌드에서는 기록 보호 설정이 아직 열려 있지 않아요.');
       return;
     }
@@ -295,6 +298,7 @@ export function SettingsPage() {
   };
 
   const startProtectionRecovery = () => {
+    if (!deviceProtectionEnabled) return;
     setSetupResult(null);
     setRecoveryCodeInput('');
     setRecoveryArtifactInput('');
@@ -318,6 +322,7 @@ export function SettingsPage() {
   };
 
   const openCoupleProtection = async () => {
+    if (!deviceProtectionEnabled) return;
     if (!protectionCoupleId || isProtectionBusy) return;
     const identity = captureIdentity();
     setIsProtectionBusy(true);
@@ -357,6 +362,7 @@ export function SettingsPage() {
   };
 
   const confirmCoupleProtection = async () => {
+    if (!deviceProtectionEnabled) return;
     if (!protectionCoupleId || isProtectionBusy) return;
     const identity = captureIdentity();
     setIsProtectionBusy(true);
@@ -387,6 +393,7 @@ export function SettingsPage() {
   };
 
   const recoverProtection = async () => {
+    if (!deviceProtectionEnabled) return;
     if (isProtectionBusy) return;
     const identity = captureIdentity();
     setIsProtectionBusy(true);
@@ -726,13 +733,15 @@ export function SettingsPage() {
           </div>
         </section>
 
-        <DeviceProtectionSection
-          status={protectionSnapshot.status}
-          onStart={startProtectionSetup}
-          onPair={openCoupleProtection}
-          onRecover={startProtectionRecovery}
-          busy={isProtectionBusy}
-        />
+        {deviceProtectionEnabled && (
+          <DeviceProtectionSection
+            status={protectionSnapshot.status}
+            onStart={startProtectionSetup}
+            onPair={openCoupleProtection}
+            onRecover={startProtectionRecovery}
+            busy={isProtectionBusy}
+          />
+        )}
 
         <NotificationPreferencesSection userId={settingsIdentityKey} />
 
@@ -1031,6 +1040,14 @@ export function SettingsPage() {
         <section className="space-y-2">
           <SectionHeader title="계정" />
           <RowGroup boxed>
+            <PressableRow
+              onClick={() => navigate('/support')}
+              leading={<HelpCircle size={18} className="text-muted-foreground" />}
+              trailing={<ChevronRight size={16} className="text-muted-foreground" />}
+            >
+              <span className="text-label font-semibold text-foreground">고객지원</span>
+            </PressableRow>
+
             <PressableRow
               onClick={() => navigate('/legal/terms')}
               leading={<FileText size={18} className="text-muted-foreground" />}
@@ -1382,7 +1399,7 @@ export function SettingsPage() {
           </div>
         )}
 
-        {showPairingDialog && pairingCeremony && (
+        {deviceProtectionEnabled && showPairingDialog && pairingCeremony && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div role="dialog" aria-modal="true" aria-labelledby="pairing-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground text-heading">
@@ -1427,7 +1444,7 @@ export function SettingsPage() {
           </div>
         )}
 
-        {showProtectionDialog && (
+        {deviceProtectionEnabled && showProtectionDialog && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border max-h-[90vh] overflow-y-auto">
               {protectionDialogMode === 'setup' && setupResult ? (

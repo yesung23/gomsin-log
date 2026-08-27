@@ -837,3 +837,40 @@ describe('iOS: minimum deployment target is consistently set to iOS 15.0', () =>
     }
   });
 });
+
+describe('iOS: targeted device family is restricted to iPhone only', () => {
+  it('sets TARGETED_DEVICE_FAMILY = 1 for both Debug and Release configurations in project.pbxproj', () => {
+    const targetDebug = pbxproj.slice(
+      pbxproj.indexOf('504EC3171FED79650016851F /* Debug */'),
+      pbxproj.indexOf('504EC3181FED79650016851F /* Release */'),
+    );
+    const targetRelease = pbxproj.slice(
+      pbxproj.indexOf('504EC3181FED79650016851F /* Release */'),
+      pbxproj.indexOf('/* End XCBuildConfiguration section */'),
+    );
+
+    for (const [configName, block] of [
+      ['Debug', targetDebug],
+      ['Release', targetRelease],
+    ] as const) {
+      const match = block.match(/TARGETED_DEVICE_FAMILY\s*=\s*([^;]+);/);
+      expect(match, configName + ' configuration must declare TARGETED_DEVICE_FAMILY').not.toBeNull();
+      const value = match![1].replace(/['"]/g, '').trim();
+      expect(value, configName + ' configuration must declare only iPhone family 1').toBe('1');
+      expect(value, configName + ' configuration must not include iPad family 2').not.toContain('2');
+    }
+  });
+
+  it('does not include iPad family 2 in any TARGETED_DEVICE_FAMILY declaration', () => {
+    const declaredFamilies = [...pbxproj.matchAll(/TARGETED_DEVICE_FAMILY\s*=\s*([^;]+);/g)].map((m) =>
+      m[1].replace(/['"]/g, '').trim(),
+    );
+    expect(declaredFamilies.length).toBe(2);
+    for (const family of declaredFamilies) {
+      expect(family).toBe('1');
+      expect(family.split(',')).not.toContain('2');
+    }
+    expect(pbxproj).not.toContain('TARGETED_DEVICE_FAMILY = "1,2";');
+    expect(pbxproj).not.toMatch(/TARGETED_DEVICE_FAMILY\s*=\s*["']?[^;"']*2[^;"']*["']?;/);
+  });
+});

@@ -22,6 +22,8 @@ export type BuildEnvironment = {
   VITE_PRIVACY_CONTACT_EMAIL?: string;
   /** Vercel sets this to `production` only for the public production target. */
   deploymentTarget?: string;
+  /** Explicit release signal (e.g. GOMSINLOG_RELEASE=true or build:release command). */
+  isRelease?: boolean;
 };
 
 export type ValidatedBuildEnvironment = {
@@ -42,7 +44,8 @@ function fail(message: string): never {
  * permanently demo-mode artifact. It now fails, naming the missing variable.
  */
 export function validateBuildEnvironment(env: BuildEnvironment): ValidatedBuildEnvironment {
-  if (env.deploymentTarget === 'production') {
+  const isProductionTarget = env.deploymentTarget === 'production' || env.isRelease === true;
+  if (isProductionTarget) {
     const operatorName = (env.VITE_LEGAL_OPERATOR_NAME || '').trim();
     const privacyEmail = (env.VITE_PRIVACY_CONTACT_EMAIL || '').trim();
     if (!operatorName || /^(?:your-name-or-business-name|곰신로그 운영자)$/i.test(operatorName)) {
@@ -50,6 +53,20 @@ export function validateBuildEnvironment(env: BuildEnvironment): ValidatedBuildE
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(privacyEmail) || privacyEmail === 'privacy@example.com') {
       fail('VITE_PRIVACY_CONTACT_EMAIL must contain a real monitored privacy-contact email for production.');
+    }
+
+    const prodPublishableKey = (env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
+    if (!prodPublishableKey) {
+      fail(
+        'VITE_SUPABASE_PUBLISHABLE_KEY is required for production builds. '
+        + 'VITE_SUPABASE_ANON_KEY fallback is forbidden for production deployments.',
+      );
+    }
+    if (!prodPublishableKey.startsWith('sb_publishable_') || prodPublishableKey.length <= 'sb_publishable_'.length) {
+      fail(
+        'Production deployment requires VITE_SUPABASE_PUBLISHABLE_KEY to use the `sb_publishable_` format. '
+        + 'Legacy JWT and anon key fallbacks cannot be used for production artifacts.',
+      );
     }
   }
 
@@ -94,7 +111,7 @@ export function validateBuildEnvironment(env: BuildEnvironment): ValidatedBuildE
     fail(
       'VITE_SUPABASE_PUBLISHABLE_KEY does not look like a Supabase API key. Expected a '
       + 'JWT beginning `eyJ` with three dot-separated parts, or a key beginning '
-      + `\`sb_publishable_\`. Got ${key.length} characters starting "${key.slice(0, 12)}".`,
+      + '`sb_publishable_`.',
     );
   }
   /*

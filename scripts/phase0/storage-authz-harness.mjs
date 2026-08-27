@@ -122,6 +122,7 @@ const ORDER = [
   '063_partner_service_projection.sql',
   '064_lock_crypto_pairings_table_privileges.sql',
   '065_harden_e2ee_pairing_rpc.sql',
+  '066_atomic_push_delivery_claims.sql',
 ];
 
 /**
@@ -1681,17 +1682,17 @@ check(mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE token = 'tok
 mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e'`, 'reset handover');
 check(asUser(E, `SELECT public.register_push_token('ios', 'token-e')`).ok, '048 re-registered');
 
-check(!asUser(D, 'SELECT * FROM public.push_delivery_candidates()').ok,
+check(!asUser(D, "SELECT * FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid)").ok,
   '048 an authenticated user CANNOT ask who is due a notification');
 // The grant is not the only gate (029's shape): EXECUTE without the service_role
 // claim is still refused, so a mis-issued GRANT cannot expose the schedule.
 check(!psql(['-At',
-  '-c', 'GRANT EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) TO authenticated',
+  '-c', 'GRANT EXECUTE ON FUNCTION public.push_delivery_candidates(UUID, TIMESTAMPTZ, INTEGER) TO authenticated',
   '-c', 'SET ROLE authenticated',
-  '-c', 'SELECT * FROM public.push_delivery_candidates()']).ok,
+  '-c', "SELECT * FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid)"]).ok,
   '048 EXECUTE without the service_role claim is refused in the body');
-mustSql('REVOKE EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) FROM authenticated', 'restore grant');
-check(!asAnon('SELECT * FROM public.push_delivery_candidates()').ok,
+mustSql('REVOKE EXECUTE ON FUNCTION public.push_delivery_candidates(UUID, TIMESTAMPTZ, INTEGER) FROM authenticated', 'restore grant');
+check(!asAnon("SELECT * FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid)").ok,
   '048 anon CANNOT ask who is due a notification');
 
 // 20:00 KST on a Wednesday sits inside the migration-001 weekday default window.
@@ -1699,12 +1700,12 @@ const INSIDE = `TIMESTAMPTZ '2026-08-19 20:00+09'`;
 const OUTSIDE = `TIMESTAMPTZ '2026-08-19 03:00+09'`;
 
 const dueInside = mustAsServiceRole(
-  `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+  `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid, ${INSIDE}) WHERE user_id = '${E}'`,
   '048 candidates inside window');
 check(dueInside === '1', '048 service_role CAN ask, and a raised flag inside contact hours is due');
 
 const dueOutside = mustAsServiceRole(
-  `SELECT count(*) FROM public.push_delivery_candidates(${OUTSIDE}) WHERE user_id = '${E}'`,
+  `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid, ${OUTSIDE}) WHERE user_id = '${E}'`,
   '048 candidates outside window');
 check(dueOutside === '0', '048 nobody is notified outside the hours they typed in');
 
@@ -1726,11 +1727,11 @@ check(
 
 // --- at most one send per recipient per day ---------------------------------
 
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '048 mark delivered');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '00000000-0000-4000-8000-000000000048'::uuid)`, '048 mark delivered');
 check(unseenOf(E) === 'f', '048 delivering lowers the flag');
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000049'::uuid, ${INSIDE}) WHERE user_id = '${E}'`,
     '048 second look') === '0',
   '048 a delivered recipient is not due again',
 );
@@ -1739,16 +1740,17 @@ check(
 mustSql(`UPDATE public.push_delivery_state SET has_unseen = TRUE WHERE user_id = '${E}'`, 'raise again');
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-19 21:00+09') WHERE user_id = '${E}'`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-00000000004a'::uuid, TIMESTAMPTZ '2026-08-19 21:00+09') WHERE user_id = '${E}'`,
     '048 same day') === '0',
   '048 a SECOND act on the same day earns no second notification',
 );
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-20 20:00+09') WHERE user_id = '${E}'`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-00000000004b'::uuid, TIMESTAMPTZ '2026-08-20 20:00+09') WHERE user_id = '${E}'`,
     '048 next day') === '1',
   '048 the next Korean-local day starts a new allowance',
 );
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '00000000-0000-4000-8000-00000000004b'::uuid)`, '048 release cleanup');
 
 // --- clearing one's own flag -------------------------------------------------
 
@@ -1808,7 +1810,7 @@ check(
 );
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id IN ('${D}', '${E}')`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-00000000004c'::uuid, ${INSIDE}) WHERE user_id IN ('${D}', '${E}')`,
     'candidates after unlink') === '0',
   '048 a disconnected relationship produces no delivery candidates',
 );
@@ -2149,6 +2151,8 @@ function resetPendingFixture(label) {
            WHERE couple_id = '${COUPLE3}' AND user_id IN ('${D}', '${E}')`, `${label} membership`);
   mustSql(`DELETE FROM public.daily_records WHERE couple_id = '${COUPLE3}'`, `${label} records`);
   mustSql(`DELETE FROM public.push_delivery_state WHERE user_id IN ('${D}', '${E}')`, `${label} state`);
+  mustSql(`DELETE FROM public.device_push_tokens WHERE user_id IN ('${D}', '${E}')`, `${label} delete tokens`);
+  mustSql(`INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES ('${E}', 'ios', 'token-e-fixed')`, `${label} token`);
 }
 function shareRecord(id, note, label) {
   mustSql(`INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
@@ -2220,10 +2224,13 @@ check(
 // --- case 5: a delivery lands between two acts ------------------------------
 resetPendingFixture('053-5');
 shareRecord('e5300000-0000-4000-8000-00000000000a', 'B1', '053-5 B1');
+mustSql(`ALTER TABLE public.daily_records DISABLE TRIGGER trg_daily_records_shared_at;
+         UPDATE public.daily_records SET shared_at = ${INSIDE} - interval '1 minute' WHERE id = 'e5300000-0000-4000-8000-00000000000a';
+         ALTER TABLE public.daily_records ENABLE TRIGGER trg_daily_records_shared_at;`, '053-5 B1 stamp');
 check(unseenOf(E) === 't', '053 (delivery case) the first act raises the flag');
-// 055 made the decision time a required argument. `now()` is the honest value
-// here: nothing is shared between this line and the previous one.
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now())`, '053-5 deliver');
+const CLAIM_053_5 = '00000000-0000-4000-8000-000000000053';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_053_5}'::uuid, ${INSIDE})`, '053-5 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_053_5}'::uuid)`, '053-5 deliver');
 check(unseenOf(E) === 'f', '053 delivery lowers the flag');
 shareRecord('e5300000-0000-4000-8000-00000000000b', 'B2', '053-5 B2');
 check(unseenOf(E) === 't', '053 an act after delivery is pending again');
@@ -2381,8 +2388,8 @@ const NEXT_DAY = `TIMESTAMPTZ '2026-08-20 20:00+09'`;
 const boundaryOf = (userId) =>
   mustSql(`SELECT COALESCE(notified_through::text, 'NULL') FROM public.push_delivery_state
             WHERE user_id = '${userId}'`, 'boundary');
-const dueAt = (whenSql) => mustAsServiceRole(
-  `SELECT count(*) FROM public.push_delivery_candidates(${whenSql}) WHERE user_id = '${E}'`,
+const dueAt = (whenSql, claimId = '00000000-0000-4000-8000-000000000055') => mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${claimId}'::uuid, ${whenSql}) WHERE user_id = '${E}'`,
   '055 due');
 
 // --- the decision instant comes back with the batch --------------------------
@@ -2390,8 +2397,8 @@ resetPendingFixture('055-0');
 shareRecord('e5500000-0000-4000-8000-000000000001', 'D0', '055-0 D0');
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE})
-      WHERE user_id = '${E}' AND decided_at = ${INSIDE}`, '055-0 decided_at') === '1',
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000550'::uuid, ${INSIDE})
+      WHERE user_id = '${E}' AND decided_at = ${INSIDE} AND claim_id = '00000000-0000-4000-8000-000000000550'::uuid`, '055-0 decided_at') === '1',
   '055 push_delivery_candidates hands back the instant it decided',
 );
 
@@ -2399,9 +2406,12 @@ check(
 resetPendingFixture('055-A');
 shareRecord('e5500000-0000-4000-8000-00000000000a', 'R1', '055-A R1');
 check(unseenOf(E) === 't', '055 (case A) the first act raises the flag');
+const CLAIM_055_A = '00000000-0000-4000-8000-00000000055a';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_A}'::uuid, ${INSIDE})`, '055-A claim');
 // The send is decided HERE. R2 is shared after it, so no notification issued
 // from this decision could have been about R2.
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-A mark');
+shareRecord('e5500000-0000-4000-8000-000000000002', 'R2', '055-A R2');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_A}'::uuid)`, '055-A mark');
 check(
   unseenOf(E) === 't',
   '055 (case A) an act shared after the send decision SURVIVES the mark',
@@ -2425,8 +2435,10 @@ check(
 resetPendingFixture('055-A-neg');
 shareRecord('e5500000-0000-4000-8000-00000000000b', 'R1', '055-A-neg R1');
 const negDecision = mustSql('SELECT now()', '055-A-neg decide');
+const CLAIM_055_A_NEG = '00000000-0000-4000-8000-00000000055b';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_A_NEG}'::uuid, ${INSIDE})`, '055-A-neg claim');
 shareRecord('e5500000-0000-4000-8000-00000000000c', 'R2', '055-A-neg R2');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now())`, '055-A-neg mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now(), '${CLAIM_055_A_NEG}'::uuid)`, '055-A-neg mark');
 check(
   unseenOf(E) === 'f' && negDecision !== '',
   '055 NEGATIVE PROOF: marking against the MARK-time clock still loses the racing act',
@@ -2435,23 +2447,29 @@ check(
 // --- case E: the daily cap and the race, together ----------------------------
 resetPendingFixture('055-E');
 shareRecord('e5500000-0000-4000-8000-00000000000e', 'R2 racing', '055-E R2');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-E mark');
+const CLAIM_055_E = '00000000-0000-4000-8000-00000000055e';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_E}'::uuid, ${INSIDE})`, '055-E claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_E}'::uuid)`, '055-E mark');
 check(unseenOf(E) === 't', '055 (case E) the racing act leaves the flag raised');
 check(
   dueAt(INSIDE_LATER) === '0',
   '055 (case E) the raised flag does NOT buy a second send the same day -- the cap holds',
 );
+const CLAIM_055_E_NEXT = '00000000-0000-4000-8000-000000000551';
 check(
-  dueAt(NEXT_DAY) === '1',
+  dueAt(NEXT_DAY, CLAIM_055_E_NEXT) === '1',
   '055 (case E) and the act is delivered on the NEXT run, which is the point: it waits, it is not erased',
 );
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '${CLAIM_055_E_NEXT}'::uuid)`, '055-E cleanup');
 
 // --- case D: the racing act is withdrawn during delivery ---------------------
 resetPendingFixture('055-D');
 shareRecord('e5500000-0000-4000-8000-0000000000d1', 'retracted', '055-D R');
+const CLAIM_055_D = '00000000-0000-4000-8000-00000000055d';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_D}'::uuid, ${INSIDE})`, '055-D claim');
 mustSql(`UPDATE public.daily_records SET is_private = true
          WHERE id = 'e5500000-0000-4000-8000-0000000000d1'`, '055-D retract');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-D mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_D}'::uuid)`, '055-D mark');
 check(
   unseenOf(E) === 'f',
   '055 (case D) an act RETRACTED before the mark leaves nothing pending, so no invitation to nothing',
@@ -2459,9 +2477,11 @@ check(
 
 resetPendingFixture('055-D2');
 shareRecord('e5500000-0000-4000-8000-0000000000d2', 'deleted', '055-D2 R');
+const CLAIM_055_D2 = '00000000-0000-4000-8000-000000000552';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_D2}'::uuid, ${INSIDE})`, '055-D2 claim');
 mustSql(`DELETE FROM public.daily_records
           WHERE id = 'e5500000-0000-4000-8000-0000000000d2'`, '055-D2 delete');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-D2 mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_D2}'::uuid)`, '055-D2 mark');
 check(
   unseenOf(E) === 'f',
   '055 (case D) and the same when it is DELETED rather than retracted',
@@ -2481,20 +2501,24 @@ check(
                  WHERE user_id = '${E}'`, '055-B stamp') === 't',
   '055 (case B) a send that was never marked stamps neither the day nor the boundary',
 );
-check(dueAt(INSIDE) === '1', '055 (case B) so the next run still owes them -- delivery failure is retry-safe');
+const CLAIM_055_B = '00000000-0000-4000-8000-00000000055b';
+check(dueAt(INSIDE, CLAIM_055_B) === '1', '055 (case B) so the next run still owes them -- delivery failure is retry-safe');
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '${CLAIM_055_B}'::uuid)`, '055-B cleanup');
 
 // --- case C: several devices, one decision, one mark -------------------------
 resetPendingFixture('055-C');
 shareRecord('e5500000-0000-4000-8000-0000000000c1', 'R1', '055-C R1');
 check(asUser(E, `SELECT public.register_push_token('android', 'token-e-2')`).ok,
   '055 (case C) a second device registers');
+const CLAIM_055_C = '00000000-0000-4000-8000-00000000055c';
 const perDevice = mustAsServiceRole(
-  `SELECT count(*)::text || '/' || count(DISTINCT decided_at)::text
-     FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`, '055-C rows');
+  `SELECT count(*)::text || '/' || count(DISTINCT decided_at)::text || '/' || count(DISTINCT claim_id)::text
+     FROM public.push_delivery_candidates('${CLAIM_055_C}'::uuid, ${INSIDE}) WHERE user_id = '${E}'`, '055-C rows');
 check(
-  perDevice === '2/1',
-  '055 (case C) two devices are two rows carrying ONE decision instant, so the boundary cannot differ per device',
+  perDevice === '2/1/1',
+  '055 (case C) two devices are two rows carrying ONE decision instant and ONE claim ID, so the boundary and lease cannot differ per device',
 );
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '${CLAIM_055_C}'::uuid)`, '055-C cleanup');
 mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e-2'`, '055-C cleanup');
 
 // --- the recipient's own look outranks a late mark ---------------------------
@@ -2507,9 +2531,11 @@ mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e-2'`, '055-
 */
 resetPendingFixture('055-G');
 shareRecord('e5500000-0000-4000-8000-0000000000g1'.replace(/g/g, '9'), 'R1', '055-G R1');
+const CLAIM_055_G = '00000000-0000-4000-8000-000000000559';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_G}'::uuid, ${INSIDE})`, '055-G claim');
 clearAsRecipient('055-G');
 const lookedAt = boundaryOf(E);
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-G late mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_G}'::uuid)`, '055-G late mark');
 check(
   boundaryOf(E) === lookedAt,
   '055 a recipient\'s own look outranks a late mark: the boundary never moves backwards',
@@ -2549,13 +2575,17 @@ const stampOf = (userId) =>
 
 resetPendingFixture('055-H');
 shareRecord('e5500000-0000-4000-8000-0000000000h1'.replace(/h/g, '8'), 'R1', '055-H R1');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H W2 mark');
+const CLAIM_055_H_W2 = '00000000-0000-4000-8000-000000000582';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_H_W2}'::uuid, ${D2_DECISION})`, '055-H W2 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION}, '${CLAIM_055_H_W2}'::uuid)`, '055-H W2 mark');
 const stampAfterD2 = mustSql(
   `SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
     WHERE user_id = '${E}'`, '055-H D2 stamp');
 shareRecord('e5500000-0000-4000-8000-0000000000h2'.replace(/h/g, '8'), 'R2 on D2', '055-H R2');
 check(unseenOf(E) === 't', '055 (case H) the D2 act raises the flag, so a second D2 send is only barred by the cap');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H W1 delayed mark');
+const CLAIM_055_H_W1 = '00000000-0000-4000-8000-000000000581';
+mustSql(`UPDATE public.push_delivery_state SET claim_id = '${CLAIM_055_H_W1}'::uuid, claimed_at = ${D1_DECISION}, claimed_until = ${D1_DECISION} + interval '300 seconds' WHERE user_id = '${E}'`, '055-H W1 seed');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION}, '${CLAIM_055_H_W1}'::uuid)`, '055-H W1 delayed mark');
 
 check(
   stampAfterD2 === 't'
@@ -2563,8 +2593,9 @@ check(
                  WHERE user_id = '${E}'`, '055-H stamp holds') === 't',
   `055 (case H) a DELAYED OLDER mark does not drag last_notified_at backwards (stamp now ${stampOf(E)})`,
 );
+const CLAIM_055_H_LATER = '00000000-0000-4000-8000-000000000583';
 check(
-  dueAt(D2_LATER) === '0',
+  mustAsServiceRole(`SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_055_H_LATER}'::uuid, ${D2_LATER}) WHERE user_id = '${E}'`) === '0',
   '055 (case H) so the day it already spent stays spent: no SECOND notification on D2',
 );
 check(
@@ -2580,13 +2611,20 @@ check(
 */
 resetPendingFixture('055-H2');
 shareRecord('e5500000-0000-4000-8000-0000000000h3'.replace(/h/g, '8'), 'R1', '055-H2 R1');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H2 D1 mark');
-check(dueAt(INSIDE_LATER) === '0', '055 (case H) a normal D1 send still spends D1');
+const CLAIM_055_H2_D1 = '00000000-0000-4000-8000-000000000584';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_H2_D1}'::uuid, ${D1_DECISION})`, '055-H2 D1 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION}, '${CLAIM_055_H2_D1}'::uuid)`, '055-H2 D1 mark');
+const CLAIM_055_H2_LATER = '00000000-0000-4000-8000-000000000585';
 check(
-  dueAt(D2_DECISION) === '1',
+  mustAsServiceRole(`SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_055_H2_LATER}'::uuid, ${INSIDE_LATER}) WHERE user_id = '${E}'`) === '0',
+  '055 (case H) a normal D1 send still spends D1',
+);
+const CLAIM_055_H2_D2 = '00000000-0000-4000-8000-000000000586';
+check(
+  mustAsServiceRole(`SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_055_H2_D2}'::uuid, ${D2_DECISION}) WHERE user_id = '${E}'`) === '1',
   '055 (case H) and D1 -> D2 still opens exactly one D2 batch, so the guard bars only BACKWARD movement',
 );
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H2 D2 mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION}, '${CLAIM_055_H2_D2}'::uuid)`, '055-H2 D2 mark');
 check(
   mustSql(`SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
             WHERE user_id = '${E}'`, '055-H2 forward') === 't',
@@ -2600,10 +2638,14 @@ check(
 */
 resetPendingFixture('055-H3');
 shareRecord('e5500000-0000-4000-8000-0000000000h4'.replace(/h/g, '8'), 'R1', '055-H3 R1');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H3 D2 mark');
+const CLAIM_055_H3_D2 = '00000000-0000-4000-8000-000000000587';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_H3_D2}'::uuid, ${D2_DECISION})`, '055-H3 D2 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION}, '${CLAIM_055_H3_D2}'::uuid)`, '055-H3 D2 mark');
 clearAsRecipient('055-H3');
 const boundaryAfterLook = boundaryOf(E);
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H3 late D1 mark');
+const CLAIM_055_H3_D1 = '00000000-0000-4000-8000-000000000588';
+mustSql(`UPDATE public.push_delivery_state SET claim_id = '${CLAIM_055_H3_D1}'::uuid, claimed_at = ${D1_DECISION}, claimed_until = ${D1_DECISION} + interval '300 seconds' WHERE user_id = '${E}'`, '055-H3 W1 seed');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION}, '${CLAIM_055_H3_D1}'::uuid)`, '055-H3 late D1 mark');
 check(
   boundaryOf(E) === boundaryAfterLook
     && mustSql(`SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
@@ -2613,11 +2655,11 @@ check(
 
 // --- what the sender still cannot do -----------------------------------------
 check(
-  !asUser(D, `SELECT public.mark_push_delivered('${E}', now())`).ok,
+  !asUser(D, `SELECT public.mark_push_delivered('${E}', now(), '00000000-0000-4000-8000-000000000055'::uuid)`).ok,
   '055 an authenticated account still CANNOT mark anyone delivered',
 );
 check(
-  !asAnon(`SELECT public.mark_push_delivered('${E}', now())`).ok,
+  !asAnon(`SELECT public.mark_push_delivered('${E}', now(), '00000000-0000-4000-8000-000000000055'::uuid)`).ok,
   '055 and neither can anon',
 );
 /*
@@ -2676,17 +2718,20 @@ function functionContract(schemaName, functionName) {
 */
 const SECURE = 'true ;; search_path=public, pg_temp';
 const CANDIDATES_CONTRACT =
-  '1 ;; p_now timestamp with time zone ;; 1 ;; '
-  + 'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone)'
+  '1 ;; p_claim_id uuid, p_now timestamp with time zone, p_lease_seconds integer ;; 2 ;; '
+  + 'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone, claim_id uuid)'
   + ' ;; ' + SECURE;
 const MARK_CONTRACT =
-  '1 ;; p_user_id uuid, p_decided_at timestamp with time zone ;; 0 ;; void'
+  '1 ;; p_user_id uuid, p_decided_at timestamp with time zone, p_claim_id uuid ;; 0 ;; void'
+  + ' ;; ' + SECURE;
+const RELEASE_CONTRACT =
+  '1 ;; p_user_id uuid, p_claim_id uuid ;; 0 ;; void'
   + ' ;; ' + SECURE;
 
 const candidatesContract = functionContract('public', 'push_delivery_candidates');
 check(
   candidatesContract === CANDIDATES_CONTRACT,
-  `055 push_delivery_candidates has EXACTLY one signature, one defaulted argument, that exact result type,`
+  `066 push_delivery_candidates has EXACTLY one signature, two defaulted arguments, that exact result type,`
     + ` and is SECURITY DEFINER with a pinned search_path`
     + ` -- so an extra OUT column or a stale overload is a failure, not a shrug (got: ${candidatesContract})`,
 );
@@ -2709,10 +2754,16 @@ check(
 const markContract = functionContract('public', 'mark_push_delivered');
 check(
   markContract === MARK_CONTRACT,
-  `055 mark_push_delivered has EXACTLY one signature, ZERO defaulted arguments, returns void,`
+  `066 mark_push_delivered has EXACTLY one signature, ZERO defaulted arguments, returns void,`
     + ` and is SECURITY DEFINER with a pinned search_path`
-    + ` -- pronargdefaults = 0 is the whole point: a caller that forgets the decision instant must FAIL,`
+    + ` -- pronargdefaults = 0 is the whole point: a caller that forgets the decision instant or claim ID must FAIL,`
     + ` not silently receive now() (got: ${markContract})`,
+);
+const releaseContract = functionContract('public', 'release_push_claim');
+check(
+  releaseContract === RELEASE_CONTRACT,
+  `066 release_push_claim has EXACTLY one signature, ZERO defaulted arguments, returns void,`
+    + ` and is SECURITY DEFINER with a pinned search_path (got: ${releaseContract})`,
 );
 check(
   mustSql(`SELECT count(*) FROM information_schema.tables
@@ -2731,8 +2782,8 @@ check(
 */
 check(
   candidatesContract.includes(
-    ' ;; TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone) ;; '),
-  `055 the sender's view gains a clock reading and NOTHING else -- compared whole, so a column`
+    ' ;; TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone, claim_id uuid) ;; '),
+  `066 the sender's view gains a clock reading and claim UUID and NOTHING else -- compared whole, so a column`
     + ` nobody thought to forbid fails too (got: ${candidatesContract})`,
 );
 
@@ -3865,6 +3916,93 @@ check(
   !truncateAfter065.ok && /permission denied/.test(truncateAfter065.stderr),
   '065 preserves the 064 authenticated TRUNCATE denial',
 );
+
+// ---------------------------------------------------------------------------
+// 066 — atomic push delivery claims and crash recovery
+// ---------------------------------------------------------------------------
+const CLAIM_066_A = '66000000-0000-4000-8000-00000000000a';
+const CLAIM_066_B = '66000000-0000-4000-8000-00000000000b';
+const CLAIM_066_WRONG = '66000000-0000-4000-8000-00000000000f';
+
+// 1. Authorization: authenticated and anon cannot execute claim/mark/release
+check(!asUser(A, `SELECT * FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid)`).ok,
+  '066 authenticated cannot execute push_delivery_candidates');
+check(!asAnon(`SELECT * FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid)`).ok,
+  '066 anon cannot execute push_delivery_candidates');
+check(!asUser(A, `SELECT public.mark_push_delivered('${A}', now(), '${CLAIM_066_A}'::uuid)`).ok,
+  '066 authenticated cannot execute mark_push_delivered');
+check(!asAnon(`SELECT public.mark_push_delivered('${A}', now(), '${CLAIM_066_A}'::uuid)`).ok,
+  '066 anon cannot execute mark_push_delivered');
+check(!asUser(A, `SELECT public.release_push_claim('${A}', '${CLAIM_066_A}'::uuid)`).ok,
+  '066 authenticated cannot execute release_push_claim');
+check(!asAnon(`SELECT public.release_push_claim('${A}', '${CLAIM_066_A}'::uuid)`).ok,
+  '066 anon cannot execute release_push_claim');
+
+// 2. Owner-only state visibility preserved
+mustSql(`UPDATE public.couple_members SET status = 'active' WHERE couple_id = '${COUPLE1}' AND user_id IN ('${A}', '${B}')`, '066 restore couple1');
+const partnerSeesState = asUser(B, `SELECT count(*) FROM public.push_delivery_state WHERE user_id = '${A}'`);
+check(!partnerSeesState.ok || partnerSeesState.stdout.trim() === '0',
+  '066 partner cannot view other partner push_delivery_state');
+const ownerSeesState = asUser(A, `SELECT count(*) FROM public.push_delivery_state WHERE user_id = '${A}'`);
+check(ownerSeesState.ok, '066 owner can view their own push_delivery_state');
+
+// Set up recipient A with active device and pending act
+mustSql(`DELETE FROM public.daily_records WHERE couple_id = '${COUPLE1}'`, '066 clear records');
+mustSql(`DELETE FROM public.device_push_tokens WHERE user_id = '${A}'`, '066 reset tokens');
+check(asUser(A, `SELECT public.register_push_token('ios', 'token-a-066')`).ok, '066 register token A');
+mustSql(`INSERT INTO public.push_delivery_state (user_id, has_unseen, last_notified_at, notified_through, claim_id, claimed_at, claimed_until)
+         VALUES ('${A}', TRUE, NULL, NULL, NULL, NULL, NULL)
+         ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE, last_notified_at = NULL, notified_through = NULL, claim_id = NULL, claimed_at = NULL, claimed_until = NULL`,
+  '066 reset push state A');
+
+// 3. First service claim returns recipient + exact claim, second different claim sees 0 (atomic isolation)
+const claim1Result = mustAsServiceRole(
+  `SELECT user_id::text || '|' || claim_id::text FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 first claim');
+check(claim1Result === `${A}|${CLAIM_066_A}`,
+  '066 first service claim returns recipient with exact claim UUID');
+
+const claim2Result = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_066_B}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 second concurrent claim');
+check(claim2Result === '0',
+  '066 second different claim while active lease is unexpired returns 0 candidates');
+
+// 4. Wrong claim cannot mark or release
+const wrongMark = asServiceRole(`SELECT public.mark_push_delivered('${A}', ${INSIDE}, '${CLAIM_066_WRONG}'::uuid)`);
+check(!wrongMark.ok, '066 wrong claim ID cannot mark push delivered');
+const wrongRelease = asServiceRole(`SELECT public.release_push_claim('${A}', '${CLAIM_066_WRONG}'::uuid)`);
+check(!wrongRelease.ok, '066 wrong claim ID cannot release push claim');
+
+// 5. Correct failed release makes recipient immediately reclaimable
+const correctRelease = asServiceRole(`SELECT public.release_push_claim('${A}', '${CLAIM_066_A}'::uuid)`);
+check(correctRelease.ok, '066 matching claim can release');
+const reclaimAfterRelease = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_066_B}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 reclaim after release');
+check(reclaimAfterRelease === '1',
+  '066 recipient is immediately reclaimable after explicit claim release');
+
+// 6. Expired lease reclaims (simulate expiry: claimed_until in the past)
+mustSql(`UPDATE public.push_delivery_state SET claimed_at = ${INSIDE} - interval '600 seconds', claimed_until = ${INSIDE} - interval '300 seconds' WHERE user_id = '${A}'`, '066 expire lease');
+const reclaimAfterExpiry = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 reclaim after expiry');
+check(reclaimAfterExpiry === '1',
+  '066 expired lease is automatically reclaimable on next run');
+
+// 7. Successful matching mark clears claim and preserves decision timestamp
+const markSuccess = asServiceRole(`SELECT public.mark_push_delivered('${A}', ${INSIDE}, '${CLAIM_066_A}'::uuid)`);
+check(markSuccess.ok, '066 matching claim successfully marks push delivered');
+const stateAfterMark = mustSql(
+  `SELECT has_unseen::text || '|' || (claim_id IS NULL)::text || '|' || (last_notified_at = ${INSIDE})::text
+   FROM public.push_delivery_state WHERE user_id = '${A}'`,
+  '066 state after mark');
+check(stateAfterMark === 'false|true|true',
+  `066 mark_push_delivered clears claim fields, lowers unseen flag, and records decided_at timestamp (got: ${stateAfterMark})`);
+
+// Cleanup
+mustSql(`DELETE FROM public.device_push_tokens WHERE user_id = '${A}'`, '066 cleanup tokens');
 
 // ---------------------------------------------------------------------------
 // Report

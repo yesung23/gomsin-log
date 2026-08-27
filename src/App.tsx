@@ -48,6 +48,9 @@ const ServicePage = lazy(() =>
 const LegalPage = lazy(() =>
   import('@/pages/LegalPage').then((m) => ({ default: m.LegalPage })),
 );
+const SupportPage = lazy(() =>
+  import('@/pages/SupportPage').then((m) => ({ default: m.SupportPage })),
+);
 const ComposePage = lazy(() =>
   import('@/features/compose/ComposePage').then((m) => ({ default: m.ComposePage })),
 );
@@ -325,6 +328,7 @@ export function App() {
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/legal/:doc" element={<LegalPage />} />
+          <Route path="/support" element={<SupportPage />} />
           <Route path="*" element={<AccountDeletionRecovery />} />
         </Routes>
       </Suspense>
@@ -337,6 +341,7 @@ export function App() {
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/legal/:doc" element={<LegalPage />} />
+          <Route path="/support" element={<SupportPage />} />
           <Route
             path="*"
             element={(
@@ -362,18 +367,7 @@ export function App() {
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           {/* Legal documents must be reachable before sign-in too (store listing requirement). */}
           <Route path="/legal/:doc" element={<LegalPage />} />
-          {/*
-            스토리.
-
-            PRODUCT_V3 §7.5 -- 기록은 라우트로 주소 지정 가능해야 한다. 휘발성 앱 상태로만
-            대상을 지정하면 새로고침·딥링크·알림에서 원본에 도달할 수 없다. `?at=`은
-            인덱스가 아니라 `recordId`이며, 그래야 기록 하나가 지워져도 옆 기록이 열리지
-            않는다(§4.2 근사치 금지).
-          */}
-          <Route path="/story/partner" element={<StoryRoute mode="today" />} />
-          <Route path="/story/mine" element={<StoryRoute mode="mine" />} />
-          <Route path="/story/day/:date" element={<StoryRoute mode="archive" />} />
-          <Route path="/story/highlight/:highlightId" element={<StoryRoute mode="highlight" />} />
+          <Route path="/support" element={<SupportPage />} />
           {!state.setupComplete ? (
             <>
               <Route path="/onboarding" element={<OnboardingPage />} />
@@ -381,6 +375,18 @@ export function App() {
             </>
           ) : (
             <>
+              {/*
+                스토리.
+
+                PRODUCT_V3 §7.5 -- 기록은 라우트로 주소 지정 가능해야 한다. 휘발성 앱 상태로만
+                대상을 지정하면 새로고침·딥링크·알림에서 원본에 도달할 수 없다. `?at=`은
+                인덱스가 아니라 `recordId`이며, 그래야 기록 하나가 지워져도 옆 기록이 열리지
+                않는다(§4.2 근사치 금지).
+              */}
+              <Route path="/story/partner" element={<StoryRoute mode="today" />} />
+              <Route path="/story/mine" element={<StoryRoute mode="mine" />} />
+              <Route path="/story/day/:date" element={<StoryRoute mode="archive" />} />
+              <Route path="/story/highlight/:highlightId" element={<StoryRoute mode="highlight" />} />
               <Route path="/" element={<HomePage />} />
               <Route path="/home" element={<HomePage />} />
               <Route path="/record" element={<RecordPage />} />

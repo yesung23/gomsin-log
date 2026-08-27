@@ -84,7 +84,16 @@ const TABS = [
   },
 ] as const;
 
-export function MobileShell({ children }: { children: ReactNode }) {
+export interface MobileShellProps {
+  children: ReactNode;
+  /**
+   * Hide bottom navigation and tab-specific banners on public utility routes
+   * (/support, /legal/:doc) so unauthenticated users do not see authenticated app tabs.
+   */
+  hideNav?: boolean;
+}
+
+export function MobileShell({ children, hideNav = false }: MobileShellProps) {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
   const navRef = useRef<HTMLElement>(null);
@@ -111,6 +120,10 @@ export function MobileShell({ children }: { children: ReactNode }) {
    * 56-60px plus the inset) without touching the banner or the floating CTAs.
    */
   useEffect(() => {
+    if (hideNav) {
+      setTabBarHeight(0);
+      return;
+    }
     const nav = navRef.current;
     if (!nav) return;
     const apply = () => setTabBarHeight(nav.getBoundingClientRect().height);
@@ -119,7 +132,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
     const observer = new ResizeObserver(apply);
     observer.observe(nav);
     return () => observer.disconnect();
-  }, []);
+  }, [hideNav]);
 
   /**
    * Tell a screen reader the screen changed, and put focus at the top of it.
@@ -168,9 +181,11 @@ export function MobileShell({ children }: { children: ReactNode }) {
         className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
         style={{
           background: 'var(--paper)',
-          ...(tabBarHeight > 0
-            ? ({ '--gomsin-tabbar-height': `${tabBarHeight}px` } as CSSProperties)
-            : {}),
+          ...(hideNav
+            ? ({ '--gomsin-tabbar-height': '0px' } as CSSProperties)
+            : tabBarHeight > 0
+              ? ({ '--gomsin-tabbar-height': `${tabBarHeight}px` } as CSSProperties)
+              : {}),
         }}
       >
         {/*
@@ -200,11 +215,14 @@ export function MobileShell({ children }: { children: ReactNode }) {
           id="main-content"
           ref={mainRef}
           tabIndex={-1}
-          className="notebook flex-1 pb-20 overflow-y-auto focus:outline-none"
+          className={cn(
+            'notebook flex-1 overflow-y-auto focus:outline-none',
+            hideNav ? 'pb-[max(env(safe-area-inset-bottom,0px),1.5rem)]' : 'pb-20',
+          )}
         >
           {/* Shown above every tab, because a stale or withheld shared workspace
               affects the timeline, the calendar and the trip list alike. */}
-          <SharedSyncBanner />
+          {!hideNav && <SharedSyncBanner />}
           {children}
         </main>
 
@@ -221,10 +239,10 @@ export function MobileShell({ children }: { children: ReactNode }) {
         */}
 
         {/* iOS Safari Standalone Install Banner Prompt */}
-        <InstallPromptBanner />
+        {!hideNav && <InstallPromptBanner />}
 
         {/* Offline indicator – sits visually above the tab bar */}
-        <OfflineBanner />
+        {!hideNav && <OfflineBanner />}
 
         {/*
           다섯 칸: 홈 | 찾기 | 남기기 | 일정 | 우리.
@@ -236,6 +254,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
           밤은 세 단위 차이). 그래서 이 바는 옛 화면 아래에서도 어색하지 않고, 화면을
           하나씩 옮기는 동안 바를 두 번 고칠 필요가 없다.
         */}
+        {!hideNav && (
         <nav
           ref={navRef}
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] z-50"
@@ -299,6 +318,7 @@ export function MobileShell({ children }: { children: ReactNode }) {
             })}
           </ul>
         </nav>
+        )}
       </div>
     </div>
   );

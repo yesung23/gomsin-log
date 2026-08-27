@@ -18,7 +18,7 @@ import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
 import { downloadRecordPhotoForReuse } from '@/lib/records';
 import { renderProfileCaption } from '@/lib/profileCaption';
-import { effectiveDischargeDate } from '@/lib/milestones';
+import { effectiveDischargeDate, resolveEffectiveMilitary } from '@/lib/milestones';
 import { localToday } from '@/lib/cycle';
 import { formatLocalDate } from '@/lib/utils';
 import { TRIP_PHASE_ORDER, TRIP_PHASE_PILL, groupTripsByPhase, type TripPhase } from '@/lib/tripPhase';
@@ -26,14 +26,60 @@ import type { Attachment, CoupleHighlight, DailyRecord, Trip } from '@/types';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
 
+const POST_RETRY_KEY_PREFIX = 'gomsinlog.post-retry.v1';
+
+interface StoredPostRetry {
+  recordId: string;
+  coupleId: string;
+  desiredPrivate: boolean;
+}
+
+function postRetryKey(userId: string): string {
+  return `${POST_RETRY_KEY_PREFIX}:${userId}`;
+}
+
+function readStoredPostRetry(userId: string): StoredPostRetry | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(postRetryKey(userId)) || 'null') as unknown;
+    if (!value || typeof value !== 'object') return null;
+    const candidate = value as Partial<StoredPostRetry>;
+    if (typeof candidate.recordId !== 'string'
+      || typeof candidate.coupleId !== 'string'
+      || typeof candidate.desiredPrivate !== 'boolean') return null;
+    return candidate as StoredPostRetry;
+  } catch {
+    return null;
+  }
+}
+
+function storePostRetry(userId: string, retry: StoredPostRetry): void {
+  try {
+    localStorage.setItem(postRetryKey(userId), JSON.stringify(retry));
+  } catch {
+    /* The private server row remains fail-closed even without local recovery. */
+  }
+}
+
+function clearStoredPostRetry(userId?: string): void {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(postRetryKey(userId));
+  } catch {
+    /* best-effort local cleanup */
+  }
+}
+
 export function SharedProfile() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     state,
+    isReady,
     saveCoupleHighlight,
     deleteCoupleHighlight,
     addRecordWithMedia,
+    updateRecord,
+    deleteRecord,
     updateRecordMedia,
   } = useStore();
   const { profile } = state;
@@ -58,11 +104,43 @@ export function SharedProfile() {
   const [postItems, setPostItems] = useState<PostDraftItem[]>([]);
   const [postCaption, setPostCaption] = useState('');
   const [postRetryRecordId, setPostRetryRecordId] = useState<string | null>(null);
+  const [postRetryDesiredPrivate, setPostRetryDesiredPrivate] = useState<boolean | null>(null);
   const postItemsRef = useRef(postItems);
 
   useEffect(() => {
     postItemsRef.current = postItems;
   }, [postItems]);
+
+  /*
+   * A failed post keeps its exact server row private. Persist only the opaque row
+   * id and intended visibility, never caption or media. After a reload the owner
+   * can pick the photos again and attach them to that same row instead of creating
+   * a duplicate. A different account or couple can never inherit the retry.
+   */
+  useEffect(() => {
+    const userId = state.authenticatedUser?.id;
+    const coupleId = profile.couple.coupleId;
+    if (!isReady || !userId || !coupleId || postRetryRecordId) return;
+    const stored = readStoredPostRetry(userId);
+    if (!stored) return;
+    if (stored.coupleId !== coupleId) {
+      clearStoredPostRetry(userId);
+      return;
+    }
+    const retryRecord = state.records.find((record) => (
+      record.id === stored.recordId
+      && record.userId === userId
+      && record.isPrivate
+      && !record.contentUnavailable
+    ));
+    if (!retryRecord) {
+      clearStoredPostRetry(userId);
+      return;
+    }
+    setPostRetryRecordId(retryRecord.id);
+    setPostRetryDesiredPrivate(stored.desiredPrivate);
+    setPostCaption(retryRecord.log);
+  }, [isReady, postRetryRecordId, profile.couple.coupleId, state.authenticatedUser?.id, state.records]);
 
   useEffect(() => () => {
     for (const item of postItemsRef.current) {
@@ -78,6 +156,8 @@ export function SharedProfile() {
     setPostItems([]);
     setPostCaption('');
     setPostRetryRecordId(null);
+    setPostRetryDesiredPrivate(null);
+    clearStoredPostRetry(state.authenticatedUser?.id);
   };
   const closeHighlightEditor = () => {
     if (!isSavingHighlight) setEditingHighlightId(undefined);
@@ -156,6 +236,20 @@ export function SharedProfile() {
           toast.warning('사진을 아직 올리지 못했어요. 고른 순서를 유지한 채 다시 시도해 주세요.');
           return;
         }
+        const privacy = await updateRecord(postRetryRecordId, { isPrivate: input.isPrivate });
+        if (!privacy.ok) {
+          const recordId = postRetryRecordId;
+          setComposingPost(false);
+          discardPostDraft();
+          toast.error('사진은 저장했지만 공개 범위를 확인하지 못했어요. 원본 기록에서 확인해 주세요.', {
+            duration: 8_000,
+            action: {
+              label: '원본 열기',
+              onClick: () => navigate(`/record?record=${encodeURIComponent(recordId)}`),
+            },
+          });
+          return;
+        }
         setComposingPost(false);
         discardPostDraft();
         toast.success('게시물을 올렸어요.');
@@ -202,7 +296,16 @@ export function SharedProfile() {
           return;
         }
         setPostRetryRecordId(result.recordId);
-        toast.warning('글은 저장했지만 사진은 아직 붙이지 못했어요. 고른 순서 그대로 다시 시도해 주세요.');
+        setPostRetryDesiredPrivate(input.isPrivate);
+        const userId = state.authenticatedUser?.id;
+        if (userId) {
+          storePostRetry(userId, {
+            recordId: result.recordId,
+            coupleId: expectedCoupleId,
+            desiredPrivate: input.isPrivate,
+          });
+        }
+        toast.warning('사진은 아직 붙이지 못했고 글은 나만 보기로 보관했어요. 사진을 다시 골라도 같은 기록에 이어서 올려요.');
         return;
       }
       setComposingPost(false);
@@ -211,6 +314,19 @@ export function SharedProfile() {
     } finally {
       setIsPublishingPost(false);
     }
+  };
+
+  const closePostComposer = async () => {
+    if (isPublishingPost) return;
+    if (postRetryRecordId) {
+      const removed = await deleteRecord(postRetryRecordId);
+      if (!removed.ok) {
+        toast.error('나만 보기 초안을 지우지 못했어요. 다시 시도하거나 사진을 이어서 올려 주세요.');
+        return;
+      }
+    }
+    setComposingPost(false);
+    discardPostDraft();
   };
 
   const sharedRecords = useMemo(
@@ -239,26 +355,27 @@ export function SharedProfile() {
     ? photoRecords.find((record) => record.id === selectedPostId) ?? null
     : null;
   const highlights = state.coupleHighlights ?? [];
-  const hasMilitary = Boolean(effectiveDischargeDate(profile.military));
+  const effectiveMilitary = resolveEffectiveMilitary(profile);
+  const hasMilitary = Boolean(effectiveDischargeDate(effectiveMilitary));
   const stats = useMemo(
     () => buildCoupleStats({
-      anniversaryDate: profile.couple.anniversaryDate,
+      anniversaryDate: profile.couple?.anniversaryDate,
       events: sharedEvents,
-      military: profile.military,
+      military: effectiveMilitary,
       todayStr,
       thirdSlot: loadThirdSlot(profile.id || '', hasMilitary),
     }),
-    [hasMilitary, profile.couple.anniversaryDate, profile.id, profile.military, sharedEvents, todayStr],
+    [effectiveMilitary, hasMilitary, profile.couple?.anniversaryDate, profile.id, sharedEvents, todayStr],
   );
   const caption = useMemo(
     () => renderProfileCaption({
       template: profile.profileCaption,
-      anniversaryDate: profile.couple.anniversaryDate,
+      anniversaryDate: profile.couple?.anniversaryDate,
       events: sharedEvents,
-      military: profile.military,
+      military: effectiveMilitary,
       todayStr,
     }),
-    [profile.couple.anniversaryDate, profile.military, profile.profileCaption, sharedEvents, todayStr],
+    [effectiveMilitary, profile.couple?.anniversaryDate, profile.profileCaption, sharedEvents, todayStr],
   );
 
   const openCreateHighlight = () => {
@@ -357,7 +474,7 @@ export function SharedProfile() {
           헤더가 그 자리다. 좌우 88px 슬롯으로 대칭을 맞춰 아이디가 뷰포트 정중앙에 온다.
         */}
         <div className="flex items-center justify-start">
-          <button type="button" aria-label="게시물 만들기" data-testid="open-post-composer" onClick={() => setComposingPost(true)} className="flex h-11 w-11 shrink-0 items-center justify-center">
+          <button type="button" aria-label={postRetryRecordId ? '게시물 사진 이어서 올리기' : '게시물 만들기'} data-testid="open-post-composer" onClick={() => setComposingPost(true)} className="flex h-11 w-11 shrink-0 items-center justify-center">
             <Plus size={22} color="var(--ink)" aria-hidden="true" />
           </button>
         </div>
@@ -479,15 +596,12 @@ export function SharedProfile() {
           connected={profile.couple.connected}
           busy={isPublishingPost}
           retryingMedia={postRetryRecordId !== null}
+          initialPrivate={postRetryDesiredPrivate ?? !profile.couple.connected}
           items={postItems}
           setItems={setPostItems}
           caption={postCaption}
           setCaption={setPostCaption}
-          onClose={() => {
-            if (isPublishingPost) return;
-            setComposingPost(false);
-            discardPostDraft();
-          }}
+          onClose={() => { void closePostComposer(); }}
           onSubmit={(input) => { void publishPost(input); }}
         />
       ) : null}

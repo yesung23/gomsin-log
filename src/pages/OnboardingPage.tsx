@@ -114,30 +114,41 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   // Fail-closed default: all providers remain disabled until GoTrue explicitly
   // confirms availability. If the availability check fails (null) or is pending,
   // no provider buttons are offered to prevent dead buttons and failed logins.
+  // The error alert renders only after the check resolves/settles with no usable provider.
   const [authProviders, setAuthProviders] = useState({
     google: false,
     apple: false,
     email: false,
   });
+  const [authProvidersResolved, setAuthProvidersResolved] = useState(false);
+  const [authAvailabilityReloadIndex, setAuthAvailabilityReloadIndex] = useState(0);
 
   useEffect(() => {
-    if (step !== 0) return;
+    if (step !== 0) {
+      setAuthProviders({ google: false, apple: false, email: false });
+      setAuthProvidersResolved(false);
+      return;
+    }
     let active = true;
+    setAuthProviders({ google: false, apple: false, email: false });
+    setAuthProvidersResolved(false);
     void fetchAuthProviderAvailability()
       .then((availability) => {
         if (active) {
           setAuthProviders(availability ?? { google: false, apple: false, email: false });
+          setAuthProvidersResolved(true);
         }
       })
       .catch(() => {
         if (active) {
           setAuthProviders({ google: false, apple: false, email: false });
+          setAuthProvidersResolved(true);
         }
       });
     return () => {
       active = false;
     };
-  }, [step]);
+  }, [step, authAvailabilityReloadIndex]);
 
   // Form State
   const [ageConfirmed, setAgeConfirmed] = useState(false);
@@ -1055,7 +1066,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 )}
 
                 {/* Primary Auth CTAs */}
-                {isIOS && authProviders.apple && (
+                {authProvidersResolved && isIOS && authProviders.apple && (
                   <button
                     onClick={handleAppleLogin}
                     disabled={isStartingSocialLogin}
@@ -1067,7 +1078,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   </button>
                 )}
 
-                {authProviders.google && (
+                {authProvidersResolved && authProviders.google && (
                   <button
                     onClick={handleGoogleLogin}
                     disabled={isStartingSocialLogin}
@@ -1082,10 +1093,19 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 {/* `email` is deliberately absent: a provider the screen does not
                     offer must not count as a way in, or a project configured for
                     email alone would show no button and no explanation either. */}
-                {!authProviders.google && !(isIOS && authProviders.apple) && (
-                  <p role="alert" className="text-caption text-destructive text-center font-semibold">
-                    현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.
-                  </p>
+                {authProvidersResolved && !authProviders.google && !(isIOS && authProviders.apple) && (
+                  <div className="space-y-3 text-center">
+                    <p role="alert" className="text-caption text-destructive text-center font-semibold">
+                      현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setAuthAvailabilityReloadIndex((k) => k + 1)}
+                      className="press-response-row w-full min-h-11 rounded-control border border-border bg-card px-4 text-label font-semibold text-foreground flex items-center justify-center"
+                    >
+                      다시 시도
+                    </button>
+                  </div>
                 )}
 
               </div>

@@ -38,16 +38,19 @@ describe('C3 - a misconfigured production build cannot produce an artifact', () 
   it('refuses a public production deployment with anonymous legal ownership or no monitored contact', () => {
     expect(() => validateBuildEnvironment({
       ...VALID,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_prod_mock_key',
       deploymentTarget: 'production',
     })).toThrow(/VITE_LEGAL_OPERATOR_NAME/);
     expect(() => validateBuildEnvironment({
       ...VALID,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_prod_mock_key',
       deploymentTarget: 'production',
       VITE_LEGAL_OPERATOR_NAME: '곰신로그 운영자',
       VITE_PRIVACY_CONTACT_EMAIL: 'privacy@example.com',
     })).toThrow(/VITE_LEGAL_OPERATOR_NAME/);
     expect(() => validateBuildEnvironment({
       ...VALID,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_prod_mock_key',
       deploymentTarget: 'production',
       VITE_LEGAL_OPERATOR_NAME: '테스트 운영자',
     })).toThrow(/VITE_PRIVACY_CONTACT_EMAIL/);
@@ -56,10 +59,76 @@ describe('C3 - a misconfigured production build cannot produce an artifact', () 
   it('accepts real legal ownership details for the public production target', () => {
     expect(() => validateBuildEnvironment({
       ...VALID,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_prod_mock_key',
       deploymentTarget: 'production',
       VITE_LEGAL_OPERATOR_NAME: '테스트 운영자',
       VITE_PRIVACY_CONTACT_EMAIL: 'privacy@gomsinlog.app',
     })).not.toThrow();
+  });
+
+  it('production fails closed with legacy JWT, anon-key fallback, or missing sb_publishable_ key', () => {
+    const prodBase = {
+      VITE_SUPABASE_URL: VALID.VITE_SUPABASE_URL,
+      deploymentTarget: 'production',
+      VITE_LEGAL_OPERATOR_NAME: '테스트 운영자',
+      VITE_PRIVACY_CONTACT_EMAIL: 'privacy@gomsinlog.app',
+    };
+
+    // Legacy JWT is rejected for production artifacts
+    expect(() => validateBuildEnvironment({
+      ...prodBase,
+      VITE_SUPABASE_PUBLISHABLE_KEY: VALID.VITE_SUPABASE_PUBLISHABLE_KEY,
+    })).toThrow(/sb_publishable_/);
+
+    // VITE_SUPABASE_ANON_KEY fallback is rejected for production
+    expect(() => validateBuildEnvironment({
+      ...prodBase,
+      VITE_SUPABASE_ANON_KEY: 'sb_publishable_prod_key',
+    })).toThrow(/VITE_SUPABASE_PUBLISHABLE_KEY is required for production/);
+
+    // Missing or invalid format is rejected
+    expect(() => validateBuildEnvironment({
+      ...prodBase,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'invalid_format_key',
+    })).toThrow(BuildEnvironmentError);
+  });
+
+  it('isRelease signal triggers strict production key and ownership validation', () => {
+    const releaseBase = {
+      VITE_SUPABASE_URL: VALID.VITE_SUPABASE_URL,
+      isRelease: true,
+      VITE_LEGAL_OPERATOR_NAME: '테스트 운영자',
+      VITE_PRIVACY_CONTACT_EMAIL: 'privacy@gomsinlog.app',
+    };
+
+    // Legacy JWT rejected under explicit release signal
+    expect(() => validateBuildEnvironment({
+      ...releaseBase,
+      VITE_SUPABASE_PUBLISHABLE_KEY: VALID.VITE_SUPABASE_PUBLISHABLE_KEY,
+    })).toThrow(/sb_publishable_/);
+
+    // Anon fallback rejected under explicit release signal
+    expect(() => validateBuildEnvironment({
+      ...releaseBase,
+      VITE_SUPABASE_ANON_KEY: 'sb_publishable_prod_key',
+    })).toThrow(/VITE_SUPABASE_PUBLISHABLE_KEY is required for production/);
+
+    // Valid sb_publishable_ key accepted under release signal
+    expect(() => validateBuildEnvironment({
+      ...releaseBase,
+      VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_release_valid_token',
+    })).not.toThrow();
+  });
+
+  it('keeps development sync usable while release build commands enforce the release signal', () => {
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts['build:release']).toBeDefined();
+    expect(pkg.scripts['build:release']).toContain('GOMSINLOG_RELEASE=true');
+    expect(pkg.scripts['cap:sync:ios']).not.toContain('GOMSINLOG_RELEASE=true');
+    expect(pkg.scripts['cap:release:ios']).toContain('GOMSINLOG_RELEASE=true');
+    expect(pkg.scripts['cap:assemble']).toContain('GOMSINLOG_RELEASE=true');
   });
 
   it('fails when VITE_SUPABASE_URL is missing or empty, naming the variable', () => {
@@ -222,6 +291,21 @@ describe('the key is checked for shape, not just for presence', () => {
     expect(run).toThrow(/rotate/);
   });
 
+  it('error message on invalid key shape never leaks key candidate, prefix, or length', () => {
+    const badKey = 'my_super_secret_invalid_key_value_12345';
+    let thrown: Error | null = null;
+    try {
+      validateBuildEnvironment({ ...VALID, VITE_SUPABASE_PUBLISHABLE_KEY: badKey });
+    } catch (e) {
+      thrown = e as Error;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown!.message).not.toContain(badKey);
+    expect(thrown!.message).not.toContain(badKey.slice(0, 10));
+    expect(thrown!.message).not.toMatch(/\d+\s+characters/i);
+    expect(thrown!.message).not.toMatch(/starting/i);
+  });
+
   it('accepts both key formats Supabase issues', () => {
     // Legacy anon JWT.
     expect(() => validateBuildEnvironment(VALID)).not.toThrow();
@@ -257,15 +341,27 @@ describe('the key is checked for shape, not just for presence', () => {
       ).filter((value) => value.length > 0);
 
       expect(values.length, workflow).toBeGreaterThan(0);
-      for (const value of values) {
-        expect(
-          () => validateBuildEnvironment({
-            VITE_SUPABASE_URL: 'https://ci-placeholder.supabase.co',
-            VITE_SUPABASE_PUBLISHABLE_KEY: value,
-          }),
-          `${workflow}: ${value}`,
-        ).not.toThrow();
-      }
+    for (const value of values) {
+      expect(
+        () => validateBuildEnvironment({
+          VITE_SUPABASE_URL: 'https://ci-placeholder.supabase.co',
+          VITE_SUPABASE_PUBLISHABLE_KEY: value,
+        }),
+        `${workflow}: ${value}`,
+      ).not.toThrow();
     }
+  }
+});
+
+describe('supabase/config.toml function verification configuration', () => {
+  it('declares explicit verify_jwt configuration for all edge functions', () => {
+    const configPath = resolve(process.cwd(), 'supabase', 'config.toml');
+    const config = readFileSync(configPath, 'utf8');
+    expect(config).toMatch(/\[functions\.send-push\]\s*verify_jwt\s*=\s*false/);
+    expect(config).toMatch(/\[functions\.delete-account\]\s*verify_jwt\s*=\s*true/);
+    expect(config).toMatch(/\[functions\.approve-device\]\s*verify_jwt\s*=\s*true/);
+    expect(config).toMatch(/\[functions\.issue-recovery-challenge\]\s*verify_jwt\s*=\s*true/);
+    expect(config).toMatch(/\[functions\.verify-recovery\]\s*verify_jwt\s*=\s*true/);
   });
+});
 });

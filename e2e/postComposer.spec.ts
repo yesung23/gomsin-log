@@ -135,7 +135,7 @@ test('스토리 사진은 비공개 새 기록 아래로 복사되어 게시물 
   await context.close();
 });
 
-test('보호 설정 전 공개 게시물은 쓰지 않고 설정 경로를 안내한다', async ({ browser }) => {
+test('기록 보호 출시 플래그가 꺼져 있어도 공개 게시물은 정상 저장된다', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const { dailyRecordWrites } = await installMockBackend(context, {
     userId: 'user-creator',
@@ -152,14 +152,15 @@ test('보호 설정 전 공개 게시물은 쓰지 않고 설정 경로를 안�
   await page.goto('/us');
   // 첫 테스트와 같은 이유로 공유 워크스페이스가 열릴 때까지 기다린다.
   await expect(page.getByRole('button', { name: /사진 게시물 열기/ })).toBeVisible({ timeout: 20_000 });
+  const postsBefore = await page.getByRole('button', { name: /사진 게시물 열기/ }).count();
   await page.getByRole('button', { name: '게시물 만들기' }).click();
   await page.getByTestId('post-source-photo').first().click();
   await page.getByRole('button', { name: '다음' }).click();
   await page.getByTestId('post-share').click();
 
-  await expect(page.getByTestId('post-composer')).toBeVisible();
-  await expect(page.getByText(/기록 보호 설정이 필요해요/)).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole('button', { name: '설정 열기' })).toBeVisible();
-  expect(dailyRecordWrites).toHaveLength(0);
+  await expect(page.getByTestId('post-composer')).toBeHidden({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: /사진 게시물 열기/ })).toHaveCount(postsBefore + 1, { timeout: 20_000 });
+  expect(dailyRecordWrites.length).toBeGreaterThan(0);
+  expect(dailyRecordWrites.at(-1)?.is_private).toBe(false);
   await context.close();
 });

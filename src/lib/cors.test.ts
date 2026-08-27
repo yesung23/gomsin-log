@@ -86,7 +86,7 @@ function makeDeps(admin: unknown, env: Record<string, string | undefined> = {}) 
     env: (key: string) => ({
       ALLOWED_ORIGINS: ALLOWED,
       SUPABASE_URL: 'https://project.supabase.co',
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+      SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_admin_key' }),
       ...env,
     })[key],
     createAdmin: () => admin,
@@ -267,7 +267,7 @@ describe('C2 - the delete-account function applies the table end to end', () => 
 
     const misconfigured = await handleDeleteAccountRequest(
       makeRequest('POST', 'https://gomsinlog.app', 'Bearer token'),
-      makeDeps(makeAdmin(), { SUPABASE_SERVICE_ROLE_KEY: undefined }),
+      makeDeps(makeAdmin(), { SUPABASE_SECRET_KEYS: undefined }),
     );
     expect(misconfigured.status).toBe(500);
     expect(misconfigured.headers.get('Vary')).toBe('Origin');

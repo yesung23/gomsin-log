@@ -12,7 +12,7 @@ import { handleDeleteAccountRequest } from '../../supabase/functions/delete-acco
 const ENV: Record<string, string | undefined> = {
   ALLOWED_ORIGINS: 'https://gomsinlog.app',
   SUPABASE_URL: 'https://project.supabase.co',
-  SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+  SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_admin_key' }),
 };
 
 const EXISTING_APP_METADATA = {
@@ -247,5 +247,101 @@ describe('delete-account - the server-authoritative pending flag', () => {
       expect(payload).toHaveProperty('app_metadata');
       expect(payload).not.toHaveProperty('user_metadata');
     }
+  });
+});
+
+describe('delete-account - server configuration failure fails closed', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  const postWithEnv = (envOverrides: Record<string, string | undefined>, admin: unknown) => {
+    return handleDeleteAccountRequest(
+      new Request('https://edge.example/delete-account', {
+        method: 'POST',
+        headers: { Origin: 'https://gomsinlog.app', Authorization: 'Bearer token' },
+      }),
+      {
+        env: (key: string) => ({ ...ENV, ...envOverrides })[key],
+        createAdmin: () => admin,
+      },
+    );
+  };
+
+  it('fails closed with 500 when SUPABASE_SECRET_KEYS is missing or empty', async () => {
+    for (const val of [undefined, '', '   ']) {
+      const admin = makeAdmin();
+      const response = await postWithEnv({ SUPABASE_SECRET_KEYS: val }, admin);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: 'Server configuration error' });
+      expect(admin.calls).toEqual([]);
+    }
+  });
+
+  it('fails closed with 500 on malformed JSON', async () => {
+    const admin = makeAdmin();
+    const response = await postWithEnv({ SUPABASE_SECRET_KEYS: '{ bad json' }, admin);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Server configuration error' });
+    expect(admin.calls).toEqual([]);
+  });
+
+  it('fails closed with 500 on wrong shape (array, primitive, missing/non-string default)', async () => {
+    for (const val of [
+      '123',
+      'true',
+      '"sb_secret_str"',
+      '[]',
+      '["sb_secret_str"]',
+      '{}',
+      JSON.stringify({ default: 12345 }),
+      JSON.stringify({ default: null }),
+      JSON.stringify({ default: '' }),
+      JSON.stringify({ default: '   ' }),
+      JSON.stringify({ default: 'sb_secret_' }),
+    ]) {
+      const admin = makeAdmin();
+      const response = await postWithEnv({ SUPABASE_SECRET_KEYS: val }, admin);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: 'Server configuration error' });
+      expect(admin.calls).toEqual([]);
+    }
+  });
+
+  it('fails closed when only legacy SUPABASE_SERVICE_ROLE_KEY is in env', async () => {
+    const admin = makeAdmin();
+    const response = await postWithEnv({
+      SUPABASE_SECRET_KEYS: undefined,
+      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    }, admin);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Server configuration error' });
+    expect(admin.calls).toEqual([]);
+  });
+
+  it('fails closed on non-secret format (legacy service_role, JWT, publishable key)', async () => {
+    for (const defaultVal of [
+      'service-role-key',
+      'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.sig',
+      'sb_publishable_test_key',
+    ]) {
+      const admin = makeAdmin();
+      const response = await postWithEnv({
+        SUPABASE_SECRET_KEYS: JSON.stringify({ default: defaultVal }),
+      }, admin);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: 'Server configuration error' });
+      expect(admin.calls).toEqual([]);
+    }
+  });
+
+  it('proceeds to admin verification when valid SUPABASE_SECRET_KEYS JSON is provided', async () => {
+    const admin = makeAdmin();
+    const response = await postWithEnv({
+      SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_live_admin_key' }),
+    }, admin);
+    expect(response.status).toBe(200);
+    expect(admin.calls).toContain('auth.getUser');
   });
 });

@@ -88,6 +88,11 @@ export type QueuedRecord = {
    */
   blocked?: { reason: string; message: string; at: string };
   /**
+   * Preserve the profile post's ordered-media contract across offline replay.
+   * Legacy entries omit this and retain the normal partial-media behaviour.
+   */
+  allOrNothingMedia?: boolean;
+  /**
    * The queued record.
    *
    * Present in the clear only for an entry queued before outbox encryption

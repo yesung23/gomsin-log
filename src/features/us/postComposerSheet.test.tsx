@@ -18,8 +18,17 @@ import type { AppState, DailyRecord } from '@/types';
  */
 
 const mockNavigate = vi.fn();
+const toastWarning = vi.hoisted(() => vi.fn());
 const { downloadRecordPhotoForReuse } = vi.hoisted(() => ({
   downloadRecordPhotoForReuse: vi.fn(),
+}));
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: toastWarning,
+    info: vi.fn(),
+  },
 }));
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -38,6 +47,8 @@ const addRecordWithMedia = vi.fn(async () => ({
   recordId: 'post-1',
 }));
 const updateRecordMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
+const updateRecord = vi.fn(async () => ({ ok: true as const }));
+const deleteRecord = vi.fn(async () => ({ ok: true as const }));
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
@@ -47,6 +58,8 @@ vi.mock('@/lib/useStore', () => ({
     saveCoupleHighlight: vi.fn(),
     deleteCoupleHighlight: vi.fn(),
     addRecordWithMedia,
+    updateRecord,
+    deleteRecord,
     updateRecordMedia,
   }),
 }));
@@ -117,9 +130,12 @@ function open() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   storeState = baseState();
   addRecordWithMedia.mockResolvedValue({ ok: true, failedFiles: [], recordId: 'post-1' });
   updateRecordMedia.mockResolvedValue({ ok: true, failedFiles: [] });
+  updateRecord.mockResolvedValue({ ok: true });
+  deleteRecord.mockResolvedValue({ ok: true });
   downloadRecordPhotoForReuse.mockResolvedValue({
     file: new File(['photo'], 'a.jpg', { type: 'image/jpeg' }),
   });
@@ -292,7 +308,7 @@ describe('게시물 만들기 3단계', () => {
     expect((screen.getByTestId('post-caption') as HTMLTextAreaElement).value).toBe('보존할 글');
   });
 
-  it('사진 업로드 실패는 같은 기록에 전부 다시 붙이고 중복 기록을 만들지 않는다', async () => {
+  it('사진 업로드 실패는 같은 비공개 기록으로 재시도하고 중복 기록을 만들지 않는다', async () => {
     storeState.records = [record({
       id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
     } as Partial<DailyRecord> & { id: string })];
@@ -308,7 +324,11 @@ describe('게시물 만들기 3단계', () => {
     await userEvent.type(screen.getByTestId('post-caption'), '한 번만 저장할 글');
     await userEvent.click(screen.getByTestId('post-share'));
 
-    await waitFor(() => expect(screen.getByText(/글은 이미 저장했어요/)).toBeTruthy());
+    await waitFor(() => expect(toastWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/나만 보기로 보관했어요/),
+    ));
+    expect(updateRecord).not.toHaveBeenCalled();
+    expect(deleteRecord).not.toHaveBeenCalled();
     expect(screen.getByTestId('post-share').textContent).toContain('사진 다시 올리기');
     await userEvent.click(screen.getByTestId('post-share'));
 
@@ -316,6 +336,80 @@ describe('게시물 만들기 3단계', () => {
       addFiles: expect.any(Array),
       allOrNothing: true,
     }));
+    expect(updateRecord).toHaveBeenLastCalledWith('post-retry-1', { isPrivate: false });
+    expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
+  });
+
+  it('새로고침 뒤에도 비공개 초안의 exact record id와 공개 의도를 복구한다', async () => {
+    storeState.records = [record({
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['a.jpg'],
+      recordId: 'post-retry-1',
+    });
+    const first = open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    await userEvent.type(screen.getByTestId('post-caption'), '새로고침 뒤에도 남을 글');
+    await userEvent.click(screen.getByTestId('post-share'));
+    await waitFor(() => expect(toastWarning).toHaveBeenCalled());
+
+    first.unmount();
+    storeState.records = [
+      record({
+        id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+      } as Partial<DailyRecord> & { id: string }),
+      record({ id: 'post-retry-1', log: '새로고침 뒤에도 남을 글', isPrivate: true }),
+    ];
+    open();
+    const resume = await screen.findByRole('button', { name: '게시물 사진 이어서 올리기' });
+    expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toBeTruthy();
+    await userEvent.click(resume);
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    expect(screen.getAllByTestId('post-source-photo')[0].getAttribute('aria-pressed')).toBe('true');
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    expect(screen.getByTestId('post-composer').textContent).toContain('글 쓰기');
+    expect(screen.getByText(/글은 이미 저장했어요/)).toBeTruthy();
+    expect(screen.getByTestId('post-share').textContent).toContain('사진 다시 올리기');
+    await userEvent.click(screen.getByTestId('post-share'));
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalledWith('post-retry-1', {
+      addFiles: expect.any(Array),
+      allOrNothing: true,
+    }));
+    expect(updateRecord).toHaveBeenLastCalledWith('post-retry-1', { isPrivate: false });
+    await waitFor(() => expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toBeNull());
+  });
+
+  it('재시도 사진은 저장됐지만 공개 범위 복원이 실패하면 비공개 원본으로 안내한다', async () => {
+    storeState.records = [record({
+      id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['a.jpg'],
+      recordId: 'post-retry-1',
+    });
+    updateRecord.mockResolvedValueOnce({ ok: false, reason: 'server', error: '공개 실패' });
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    await userEvent.type(screen.getByTestId('post-caption'), '한 번만 저장할 글');
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(toastWarning).toHaveBeenCalled());
+    expect(screen.getByTestId('post-share').textContent).toContain('사진 다시 올리기');
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalledWith('post-retry-1', {
+      addFiles: expect.any(Array),
+      allOrNothing: true,
+    }));
+    expect(updateRecord).toHaveBeenCalledWith('post-retry-1', { isPrivate: false });
     expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
   });

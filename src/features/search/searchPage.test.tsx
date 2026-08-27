@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, MilitaryInfo, CoupleEvent } from '@/types';
-import { computeServiceExp, formatExpNumber, serviceDateAtMs } from '@/lib/serviceLevel';
+import { computeServiceExp, formatExpNumber, formatExpPercent, serviceDateAtMs } from '@/lib/serviceLevel';
 
 let currentState: AppState;
 const mockNavigate = vi.fn();
@@ -130,9 +130,9 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${exp!.elapsedDays}일 경과`);
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${exp!.remainingDays}일 남음`);
     expect(screen.getByTestId('service-level')).toHaveTextContent(
-      exp!.isPreEnlistment ? '입대 대기' : `LV ${exp!.tier.level} ${exp!.tier.label}`,
+      exp!.isPreEnlistment ? '입대 대기' : `${exp!.levelBadge} ${exp!.tier.label}`,
     );
-    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(`LV ${exp!.nextTier!.level} ${exp!.nextTier!.label}`);
+    expect(screen.getByTestId('service-level-guide')).toHaveTextContent(`다음 Lv.${exp!.level + 1}까지`);
     const tierToggle = screen.getByRole('button', { name: '전체 단계' });
     expect(tierToggle).toHaveAttribute('aria-expanded', 'false');
     expect(tierToggle).toHaveAttribute('aria-controls', 'service-tier-rail');
@@ -250,7 +250,7 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
 
     expect(screen.getByText('전역했어요')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '복무 정보 입력하기' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('service-level')).toHaveTextContent('LV 7 왕고');
+    expect(screen.getByTestId('service-level')).toHaveTextContent('MAX 왕고');
     expect(screen.getByTestId('service-level-guide')).toHaveTextContent('복무를 마쳤어요.');
   });
 
@@ -270,7 +270,7 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     renderSearch();
 
     const exp = computeServiceExp(currentState.profile.military);
-    expect(screen.getByTestId('service-level')).toHaveTextContent(`LV ${exp!.tier.level} ${exp!.tier.label}`);
+    expect(screen.getByTestId('service-level')).toHaveTextContent(`${exp!.levelBadge} ${exp!.tier.label}`);
     expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
     expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '전체 단계' }));
@@ -307,7 +307,7 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
         vi.advanceTimersByTime(1000);
       });
 
-      expect(screen.getByTestId('service-feedback')).toHaveTextContent('LV 3 일꺾 달성');
+      expect(screen.getByTestId('service-feedback')).toHaveTextContent('일꺾 달성');
       expect(screen.getByTestId('service-feedback')).toHaveAttribute('data-tier-effect', 'bent');
     } finally {
       vi.useRealTimers();
@@ -327,7 +327,7 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     });
     renderSearch();
 
-    expect(screen.getByTestId('service-level')).toHaveTextContent('LV 7 왕고');
+    expect(screen.getByTestId('service-level')).toHaveTextContent('MAX 왕고');
     expect(screen.queryByRole('progressbar', { name: '현재 복무 레벨 경험치 진행률' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('service-today-exp')).not.toBeInTheDocument();
   });
@@ -379,6 +379,27 @@ describe('곰신(gomsin) 기본 주 콘텐츠', () => {
           ...base.profile.couple,
           connected: false,
           status: 'disconnected',
+          partnerMilitary: SERVING_MILITARY,
+        },
+      },
+    } as unknown as AppState;
+    renderSearch();
+
+    expect(screen.queryByTestId('soldier-service-info')).not.toBeInTheDocument();
+    expect(screen.queryByText(/의 복무/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('cycle-tracker-section')).toBeInTheDocument();
+  });
+
+  it('connected가 true여도 status가 pending(또는 비활성)이면 잔존 partnerMilitary가 있어도 상대 복무 카드를 렌더링하지 않는다', () => {
+    const base = stateWith({ role: 'gomsin', partnerMilitary: SERVING_MILITARY });
+    currentState = {
+      ...base,
+      profile: {
+        ...base.profile,
+        couple: {
+          ...base.profile.couple,
+          connected: true,
+          status: 'pending',
           partnerMilitary: SERVING_MILITARY,
         },
       },
@@ -553,16 +574,49 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
     try {
       const startMs = serviceDateAtMs(SERVING_MILITARY.enlistmentDate!)!;
       const totalSec = computeServiceExp(SERVING_MILITARY, startMs)!.totalSec;
-      vi.setSystemTime(startMs + totalSec * 0.2 * 1000);
+      const sampleMs = startMs + totalSec * 0.2 * 1000;
+      vi.setSystemTime(sampleMs);
       currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
       renderSearch();
 
+      const exp = computeServiceExp(SERVING_MILITARY, sampleMs)!;
       const readout = screen.getByTestId('service-exp-readout');
       expect(readout).toHaveTextContent(new RegExp(
-        `${formatExpNumber(totalSec * 0.1)}\\s*/\\s*${formatExpNumber(totalSec * 0.15)} EXP`,
+        `${formatExpNumber(exp.intoLevelSec)}\\s*/\\s*${formatExpNumber(exp.secPerLevel)} EXP`,
       ));
-      expect(readout).toHaveTextContent('66.6667%');
+      expect(readout).toHaveTextContent(formatExpPercent(exp.levelExpPercent, 4));
       expect(screen.getByTestId('service-progress-summary')).toHaveTextContent('복무율 20.0000%');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('레벨업 경계에서 분자·분모와 경험치 바가 새 숫자 레벨(Lv.N+1) 기준으로 리셋된다', () => {
+    vi.useFakeTimers();
+    try {
+      const startMs = serviceDateAtMs(SERVING_MILITARY.enlistmentDate!)!;
+      const initialExp = computeServiceExp(SERVING_MILITARY, startMs)!;
+      const secPerLevel = initialExp.secPerLevel;
+
+      // 레벨 1 완료 1초 직전
+      vi.setSystemTime(startMs + (secPerLevel - 0.5) * 1000);
+      currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
+      renderSearch();
+
+      expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.1');
+      expect(screen.getByTestId('service-level-guide')).toHaveTextContent('다음 Lv.2까지');
+
+      // 1초 뒤 Lv.2 달성 -> 경험치 바 및 분자 리셋
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.2');
+      expect(screen.getByTestId('service-level-guide')).toHaveTextContent('다음 Lv.3까지');
+      const newExp = computeServiceExp(SERVING_MILITARY, startMs + (secPerLevel + 0.5) * 1000)!;
+      const readout = screen.getByTestId('service-exp-readout');
+      expect(readout).toHaveTextContent(new RegExp(`${formatExpNumber(newExp.intoLevelSec)}\\s*/\\s*${formatExpNumber(newExp.secPerLevel)} EXP`));
+      expect(readout).toHaveTextContent(formatExpPercent(newExp.levelExpPercent, 4));
     } finally {
       vi.useRealTimers();
     }

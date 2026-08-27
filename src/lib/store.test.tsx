@@ -3,9 +3,19 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import type { AppState } from '@/types';
 import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
 import {
+  clearCoupleProtectionRequirement,
   clearAllCoupleProtectionRequirements,
   isCoupleProtectionRequired,
+  requireCoupleProtection,
 } from '@/app/e2ee/coupleProtectionBarrier';
+
+const featureFlagMock = vi.hoisted(() => ({
+  isDeviceProtectionEnabled: false,
+}));
+
+vi.mock('@/app/e2ee/featureFlag', () => ({
+  isDeviceProtectionEnabled: () => featureFlagMock.isDeviceProtectionEnabled,
+}));
 
 type AuthCallback = (event: string, session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } } | null) => void;
 
@@ -247,6 +257,7 @@ function Probe({
           .join(',')}
       </span>
       <span data-testid="logs">{state.records.map((r) => r.log).join('|')}</span>
+      <span data-testid="privacy">{state.records.map((r) => r.isPrivate ? 'private' : 'public').join(',')}</span>
       <span data-testid="outbox">{outboxWaiting}:{outboxBlocked}</span>
       <button
         onClick={() => {
@@ -334,6 +345,7 @@ describe('StoreProvider auth lifecycle', () => {
     localStorage.clear();
     outboxEntries.clear();
     clearAllCoupleProtectionRequirements();
+    featureFlagMock.isDeviceProtectionEnabled = false;
     enforceProtectionBarrierInStoreMock = false;
     setOutboxLocalCacheKey(null);
     lastFlushResult = null;
@@ -1079,7 +1091,79 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
   });
 
+  it('stages a public all-or-nothing post privately and publishes it with the complete media patch', async () => {
+    callOrder.length = 0;
+    saveRecordToDB.mockClear();
+    lastMediaResult = null;
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(
+      <StoreProvider>
+        <Probe files={[new File(['a'], 'post.png', { type: 'image/png' })]} allOrNothingMedia />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    const savedVersions = saveRecordToDB.mock.calls.map((call) => call[0] as DailyRecord);
+    expect(savedVersions).toHaveLength(2);
+    expect(savedVersions[0].isPrivate).toBe(true);
+    expect(savedVersions[0].attachments).toBeUndefined();
+    expect(savedVersions[1].isPrivate).toBe(false);
+    expect(savedVersions[1].attachments?.map((attachment) => attachment.name)).toEqual(['post.png']);
+    expect(screen.getByTestId('privacy')).toHaveTextContent('public');
+  });
+
+  it('preserves all-or-nothing post intent when the initial save is queued', async () => {
+    lastMediaResult = null;
+    saveRecordToDB.mockImplementationOnce(async () => ({
+      ok: false as const,
+      reason: 'offline' as const,
+    }));
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+
+    render(
+      <StoreProvider>
+        <Probe files={[new File(['a'], 'post.png', { type: 'image/png' })]} allOrNothingMedia />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult?.queued).toBe(true));
+
+    const queued = Array.from(outboxEntries.values());
+    expect(queued).toHaveLength(1);
+    expect(queued[0].allOrNothingMedia).toBe(true);
+    expect(queued[0].files.map((file) => file.name)).toEqual(['post.png']);
+  });
+
   it('blocks an immediate shared save while connected couple protection is pending', async () => {
+    featureFlagMock.isDeviceProtectionEnabled = true;
     lastMediaResult = null;
     enforceProtectionBarrierInStoreMock = true;
     let resolveActivation!: (outcome: 'activated' | 'unavailable') => void;
@@ -1148,6 +1232,56 @@ describe('StoreProvider auth lifecycle', () => {
     lastMediaResult = null;
     await act(async () => screen.getByText('post').click());
     await waitFor(() => expect(lastMediaResult?.ok).toBe(true));
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+  });
+
+  it('does not activate or retain couple protection barrier when feature is disabled and allows shared save', async () => {
+    featureFlagMock.isDeviceProtectionEnabled = false;
+    lastMediaResult = null;
+    enforceProtectionBarrierInStoreMock = true;
+    requireCoupleProtection('user-a', 'couple-1');
+    expect(isCoupleProtectionRequired('user-a', 'couple-1')).toBe(true);
+
+    fetchFullStateFromDB.mockResolvedValue(
+      serverState({
+        profile: {
+          myName: '춘향',
+          role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never,
+          contact: {} as never,
+        } as never,
+      }),
+    );
+    fetchMyCoupleState.mockResolvedValue({
+      ok: true,
+      state: {
+        coupleId: 'couple-1',
+        role: 'gomsin',
+        memberStatus: 'active',
+        partnerPresent: true,
+        invitationActive: false,
+        invitationExpiresAt: null,
+      },
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+
+    expect(activateCoupleProtectionForAuthenticatedSession).not.toHaveBeenCalled();
+    expect(isCoupleProtectionRequired('user-a', 'couple-1')).toBe(false);
+
+    await act(async () => {
+      screen.getByText('refresh-lifecycle').click();
+    });
+    expect(activateCoupleProtectionForAuthenticatedSession).not.toHaveBeenCalled();
+    expect(isCoupleProtectionRequired('user-a', 'couple-1')).toBe(false);
+
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+    expect(lastMediaResult?.ok).toBe(true);
     expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
   });
 
@@ -1248,6 +1382,8 @@ describe('StoreProvider auth lifecycle', () => {
     ]);
     expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
+    expect((saveRecordToDB.mock.calls[0]?.[0] as DailyRecord).isPrivate).toBe(true);
+    expect(screen.getByTestId('privacy')).toHaveTextContent('private');
   });
 
   it('refuses to create a record when no couple space is connected', async () => {

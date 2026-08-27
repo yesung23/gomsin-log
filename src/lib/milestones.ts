@@ -1,4 +1,12 @@
-import type { CoupleEvent, DailyRecord, EventType, MilitaryInfo } from '@/types';
+import type {
+  CoupleEvent,
+  CoupleStatus,
+  DailyRecord,
+  EventType,
+  MilitaryInfo,
+  PartnerServiceInfo,
+  Role,
+} from '@/types';
 import { daysBetweenLocal, parseLocalDate, toLocalDateString } from '@/lib/utils';
 
 /**
@@ -73,6 +81,37 @@ export interface ServiceProgress {
   daysUntilEnlistment?: number;
   /** True when today is before the entered enlistment date. */
   isBeforeEnlistment?: boolean;
+}
+
+/**
+ * Resolves the authoritative military info for service-derived UI.
+ *
+ * - Soldier: always uses their own `profile.military`.
+ * - Gomsin: uses sanitized `profile.couple.partnerMilitary` ONLY when the couple space
+ *   is currently connected and active.
+ * - Disconnected / inactive / non-member / absent: fails closed (`undefined`).
+ */
+export function resolveEffectiveMilitary(profile: {
+  role?: Role;
+  military?: MilitaryInfo;
+  couple?: {
+    connected?: boolean;
+    status?: CoupleStatus;
+    partnerMilitary?: PartnerServiceInfo;
+  };
+} | null | undefined): MilitaryInfo | undefined {
+  if (!profile) return undefined;
+  if (profile.role === 'soldier') {
+    return profile.military;
+  }
+  if (profile.role === 'gomsin') {
+    const isConnectedActive = Boolean(
+      profile.couple?.connected === true && profile.couple?.status === 'active',
+    );
+    if (!isConnectedActive) return undefined;
+    return profile.couple?.partnerMilitary;
+  }
+  return undefined;
 }
 
 /** Prefer an explicitly recorded actual discharge date over an estimate. */

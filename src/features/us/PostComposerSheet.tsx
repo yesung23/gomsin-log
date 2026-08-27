@@ -51,6 +51,8 @@ export interface PostComposerSheetProps {
   busy?: boolean;
   /** 사진 업로드 실패 뒤 이미 생성된 같은 기록에 다시 붙이는 단계. */
   retryingMedia?: boolean;
+  /** Reloaded retries restore the visibility the owner chose before staging. */
+  initialPrivate?: boolean;
   /**
    * 작성 중인 초안. **부모가 소유한다.**
    *
@@ -78,6 +80,7 @@ export function PostComposerSheet({
   connected,
   busy = false,
   retryingMedia = false,
+  initialPrivate = !connected,
   items,
   setItems,
   caption,
@@ -86,7 +89,7 @@ export function PostComposerSheet({
   onSubmit,
 }: PostComposerSheetProps) {
   const [step, setStep] = useState<Step>('source');
-  const [isPrivate, setIsPrivate] = useState(!connected);
+  const [isPrivate, setIsPrivate] = useState(initialPrivate);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);

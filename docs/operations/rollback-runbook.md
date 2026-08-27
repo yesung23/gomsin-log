@@ -108,3 +108,38 @@ UPDATE를 실행하지 않는다.
 - 원격 Supabase, Vercel, App Store/TestFlight 각각의 실제 적용 여부
 
 로컬 fresh-chain PASS는 원격 적용이나 Production 정상화를 증명하지 않는다.
+
+## 7. 일회성 운영 백업 관리 및 폐기 통제 (7일 원칙)
+
+현재 제공업체의 정기 관리형 백업이나 시점 복구(PITR)는 운영하지 않으며, 안전한 시스템
+변경·마이그레이션·장애 복구를 위한 백업은 서비스 운영자가 직접 일회성으로 생성·관리한다.
+
+### 운영 통제 원칙
+
+- **소유 및 보관 위치**: 서비스 운영자 소유 장비의 저장소 외부(repo 밖 디렉터리)에 저장한다.
+- **접근 권한 제한**: 백업 디렉터리는 `700` (`drwx------`), 내부 파일은 `600` (`-rw-------`)으로 설정한다.
+- **메타데이터 기록**: 생성 목적, 생성 시각, 검증 완료 또는 작업 취소 시점, 최장 폐기 기한(delete-by, 생성 후 7일 이내)을 기록한다.
+- **삭제 절차**:
+  1. 삭제 직전 exact path를 재확인한다.
+  2. recoverable trash 이동이 가능한 경우 우선 적용한다.
+  3. 삭제 후 경로 부재 상태와 작업 기록을 확인·기록한다.
+- **RELEASE HOLD**: 백업이 delete-by 만료일까지 미삭제 상태로 남아있으면 후속 릴리스 및 프로덕션 배포를 중단(RELEASE HOLD)한다.
+- **비밀 보호**: 백업 목록 및 문서에는 파일 내용, 해시, 암호화 키, DB 행 값을 절대 포함하지 않는다.
+
+### 활성 일회성 운영 백업 현황 (Redacted Inventory)
+
+- `/Users/han-yejun/Desktop/gomsinlog-production-backups/2026-08-26-pre-record-protection`
+  - 생성 목적: record protection 마이그레이션 전 백업
+  - 생성 시각: 2026-08-26 16:04 KST
+  - 검증 또는 취소 시점: 검증/취소 확인 중
+  - delete-by: 2026-09-02 16:04 KST
+  - 상태: 아직 필요 / 미삭제 (migration/security change 검증 또는 취소 후 7일 내 삭제 예정)
+- `/Users/han-yejun/Desktop/gomsinlog-production-backups/2026-08-27-pre-release-065`
+  - 생성 목적: release-065 적용 전 백업
+  - 생성 시각: 2026-08-27 04:03 KST
+  - 검증 또는 취소 시점: 검증/취소 확인 중
+  - delete-by: 2026-09-03 04:03 KST
+  - 상태: 아직 필요 / 미삭제 (migration/security change 검증 또는 취소 후 7일 내 삭제 예정)
+
+두 백업 모두 현재 마이그레이션 및 보안 변경 검증을 위해 아직 필요하여 삭제되지 않은 상태이며,
+migration/security change 검증 또는 취소 후 7일 내 삭제하고 확인 기록을 남긴다.

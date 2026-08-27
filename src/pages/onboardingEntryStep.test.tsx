@@ -200,9 +200,7 @@ describe('onboarding entry step', () => {
 
       expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
-      expect(screen.getByRole('alert')).toHaveTextContent(
-        '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
-      );
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 
     it('fails closed and keeps Google button hidden when availability fetch returns null', async () => {
@@ -210,11 +208,12 @@ describe('onboarding entry step', () => {
       render(<OnboardingPage />);
 
       await waitFor(() => expect(fetchAuthProviderAvailability).toHaveBeenCalledOnce());
-      expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
-      expect(screen.getByRole('alert')).toHaveTextContent(
+      expect(await screen.findByRole('alert')).toHaveTextContent(
         '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
       );
+      expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
     });
 
     it('fails closed and keeps Google button hidden when availability fetch rejects', async () => {
@@ -222,10 +221,11 @@ describe('onboarding entry step', () => {
       render(<OnboardingPage />);
 
       await waitFor(() => expect(fetchAuthProviderAvailability).toHaveBeenCalledOnce());
-      expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
-      expect(screen.getByRole('alert')).toHaveTextContent(
+      expect(await screen.findByRole('alert')).toHaveTextContent(
         '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
       );
+      expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
     });
 
     it('maintains provider-aware UI when provider availability check succeeds', async () => {
@@ -249,10 +249,122 @@ describe('onboarding entry step', () => {
       render(<OnboardingPage />);
 
       await waitFor(() => expect(fetchAuthProviderAvailability).toHaveBeenCalledOnce());
-      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
-      expect(screen.getByRole('alert')).toHaveTextContent(
+      expect(await screen.findByRole('alert')).toHaveTextContent(
         '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
       );
+      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+    });
+
+    it('fails closed on re-entering step 0 and prevents stale Google/Apple CTA during pending recheck', async () => {
+      Object.defineProperty(navigator, 'userAgent', {
+        configurable: true,
+        value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+      });
+      fetchAuthProviderAvailability.mockResolvedValueOnce({
+        google: true,
+        apple: true,
+        email: true,
+      });
+
+      const view = render(<OnboardingPage />);
+      expect(await screen.findByRole('button', { name: /Google로 계속하기/ })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /Apple로 계속하기/ })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      // Step exit: Authenticate and advance to role step
+      state.authenticatedUser = { id: 'user-reentry', email: 'reentry@example.com', provider: 'google' };
+      view.rerender(<OnboardingPage />);
+
+      expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+
+      // Next check is pending
+      let resolvePending: (val: unknown) => void = () => {};
+      fetchAuthProviderAvailability.mockImplementationOnce(
+        () => new Promise((resolve) => { resolvePending = resolve; }),
+      );
+
+      // User session clears and navigates back to step 0
+      state.authenticatedUser = null;
+      const { default: userEvent } = await import('@testing-library/user-event');
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: '이전 단계' }));
+
+      // Pending re-entry: must fail closed, NO stale CTAs, NO prematurely displayed alert
+      expect(screen.queryByText(ROLE_STEP)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      // When recheck settles, providers are rendered
+      resolvePending({
+        google: true,
+        apple: true,
+        email: true,
+      });
+
+      expect(await screen.findByRole('button', { name: /Google로 계속하기/ })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /Apple로 계속하기/ })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('allows retrying provider availability and prevents stale responses from overwriting active retry', async () => {
+      fetchAuthProviderAvailability.mockRejectedValueOnce(new Error('Initial failure'));
+      const view = render(<OnboardingPage />);
+
+      await waitFor(() => expect(fetchAuthProviderAvailability).toHaveBeenCalledTimes(1));
+      const retryButton = await screen.findByRole('button', { name: '다시 시도' });
+      expect(retryButton).toBeInTheDocument();
+      expect(retryButton.className).toContain('min-h-11');
+
+      let resolveStaleFetch: (val: unknown) => void = () => {};
+      let resolveActiveFetch: (val: unknown) => void = () => {};
+
+      fetchAuthProviderAvailability.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveStaleFetch = resolve; }),
+      );
+      fetchAuthProviderAvailability.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveActiveFetch = resolve; }),
+      );
+
+      const { default: userEvent } = await import('@testing-library/user-event');
+      const user = userEvent.setup();
+
+      // Click retry
+      await user.click(retryButton);
+
+      // While retry is pending, CTAs, alert, and retry button are all hidden
+      expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
+
+      // Navigate away and back to step 0 to create a second in-flight active check
+      state.authenticatedUser = { id: 'user-retry-stale', email: 'retry@example.com', provider: 'google' };
+      view.rerender(<OnboardingPage />);
+      expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
+
+      state.authenticatedUser = null;
+      await user.click(screen.getByRole('button', { name: '이전 단계' }));
+
+      // The earlier stale fetch resolves with failure AFTER cleanup
+      resolveStaleFetch(null);
+
+      // Stale response must NOT show the alert or modify pending state
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
+
+      // Now active fetch resolves with valid google provider
+      resolveActiveFetch({
+        google: true,
+        apple: false,
+        email: true,
+      });
+
+      expect(await screen.findByRole('button', { name: /Google로 계속하기/ })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
     });
   });
 });

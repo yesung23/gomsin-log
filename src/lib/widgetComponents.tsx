@@ -5,6 +5,7 @@ import { generateDailySummary, generateEmotionFlowBriefing, summaryTargetRecordI
 import { localToday, toLocalDateString, formatLocalDate } from '@/lib/utils';
 import {
   computeServiceProgress,
+  resolveEffectiveMilitary,
   nextAnniversaryMilestone,
   nextUpcomingEvent,
   findMemories,
@@ -145,7 +146,8 @@ export const ServiceProgressWidget = () => {
   const { state } = useStore();
   const navigate = useNavigate();
   const todayStr = toLocalDateString(localToday());
-  const progress = computeServiceProgress(state.profile.military, todayStr);
+  const military = resolveEffectiveMilitary(state.profile);
+  const progress = computeServiceProgress(military, todayStr);
 
   return (
     <WidgetCard title="복무 진행률" onClick={() => navigate('/service')}>

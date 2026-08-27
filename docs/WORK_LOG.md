@@ -114,6 +114,86 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-27 · App Store 첫 출시 백엔드 유지·이전 준비 판단
+
+#### PLAN POSITION
+- Phase: App Store Release Candidate
+- Workstream: backend operations and portability
+- Step: GitHub Student Developer Pack 대체 스택과 현재 Supabase 결합도를 비교해 첫 출시 백엔드 결정
+- Previous Gate: 로컬 App Store RC 통합 검증 완료, Apple Developer 등록 완료 보고
+- This Gate: 첫 출시까지 managed Supabase 유지, 즉시 self-host/Appwrite/Azure 이전은 중단
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §8
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` ARCH-P6, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, live branch/HEAD/status, current Supabase Auth/DB/RPC/Storage/Edge Function call paths
+- Latest relevant Work Log checked: 2026-08-27 App Store RC 통합·게시물 재전송 안전성 최종 검증
+- MASTER PLAN version / 기준일: App Store Release Plan / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. 첫 출시 직전 백엔드 교체는 현재 출시 순서와 충돌하므로 채택하지 않았다.
+
+#### OWNERSHIP
+- Tool: Codex primary
+- Model: current primary model
+- Role: architecture assessment and release sequencing
+- PR: 없음
+- Branch: `codex/profile-post-composer`
+- Base SHA: `8d0e0d45f578056ae5c5a2772e8af63f77f6a1de`
+- Old HEAD: `8d0e0d45f578056ae5c5a2772e8af63f77f6a1de`
+- New HEAD / Reviewed HEAD: working-tree documentation delta
+
+#### CHANGED / REVIEWED
+- file: `src/**`, `supabase/functions/**`, `package.json`
+- function/component/migration: Supabase Auth, PostgREST table calls, RPC, Storage, Edge Functions, OAuth/session paths
+- what changed/reviewed: 코드는 변경하지 않고 실제 런타임 결합도를 읽었다. 곰신로그는 PostgreSQL 테이블만이 아니라 인증·커플 권한·RLS/RPC·사진 Storage·계정 삭제·푸시·복구 함수까지 Supabase 계약을 사용한다.
+- why: PostgreSQL 스키마 이동 가능성만 보고 첫 출시 직전에 백엔드를 교체하는 잘못된 범위 판단을 막기 위해서다.
+- file: `control-tower/reports/codex/2026-08-27_backend-stack-launch-decision_codex.md`
+- function/component/migration: launch backend decision
+- what changed/reviewed: 학생 팩 후보와 공식 제약, 유지 결정, portability guardrail, 향후 전환 trigger를 기록했다.
+- why: 무료 크레딧 만료나 단일 게시글이 출시 아키텍처를 흔들지 않도록 근거를 남기기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: 공통 source of truth와 커플 공유 경로 유지
+- Production: Supabase/Vercel/Apple/App Store Connect 변경 없음
+
+#### VERIFICATION
+- command: `rg`로 현재 Supabase Auth/DB/RPC/Storage/Edge Function 호출 경로 확인
+- PASS / FAIL / UNVERIFIED: PASS — 다수의 직접 런타임 의존성을 확인함
+- what it actually proves: 현재 이전 범위가 단순 PostgreSQL 테이블 복사가 아님을 증명한다. 트래픽·비용 예측은 증명하지 않는다.
+- command: GitHub Education, Appwrite Education, Azure for Students, Supabase pricing/self-host/restore 공식 문서 확인
+- PASS / FAIL / UNVERIFIED: PASS — 2026-08-27 공개 조건 기준
+- what it actually proves: Appwrite Education은 상업적 사용 불가, Azure는 기간성 크레딧, managed Supabase와 self-host의 운영 책임 및 복원 범위를 확인했다.
+
+#### REVIEW IMPACT
+- NONE
+- whether an earlier review is stale: 코드·DB·보안 의미 변경이 없어 기존 코드 리뷰를 stale하게 만들지 않는다.
+
+#### BLOCKERS
+- code: 없음 — 백엔드 교체는 출시 blocker가 아니라 의도적으로 미채택한 범위다.
+- environment: Supabase release publishable key와 Xcode signing identity는 별도 기존 gate다.
+- external/manual: Apple/Supabase/Vercel의 지속 상태 변경은 각 작업 직전 action-time 확인 필요
+
+#### STOPPED AT
+- exact completed boundary: launch backend를 managed Supabase로 유지하는 판단과 근거 기록. 원격 변경 전.
+
+#### REMAINING
+- not completed: 독립 logical backup 자동화, Storage/Auth/Edge 설정 복구 runbook, 실제 트래픽 기반 비용 trigger 계측
+
+#### NEXT ACTION
+- next owner: Codex release operator
+- tool/model: primary operator, 보안·권한 delta가 생기면 독립 security reviewer
+- 기준 SHA: `8d0e0d45f578056ae5c5a2772e8af63f77f6a1de`
+- exact next task: Supabase publishable key와 Xcode signing을 각각 action-time 승인 후 설정하고 release build/실기기 경로를 검증
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 키를 저장소·로그·리포트에 노출하지 않고, Apple/Supabase Production 변경마다 현재 상태·blast radius·rollback을 제시한다.
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-26 · 복무 레벨 티어별 EXP 리셋(0→100%) 및 누적 복무율 분리 검증
 
 #### PLAN POSITION

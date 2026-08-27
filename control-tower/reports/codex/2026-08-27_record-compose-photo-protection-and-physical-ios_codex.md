@@ -87,3 +87,12 @@ exact original 이동을 확인한다. 이 증거 전에는 App Store 제출 가
 - Supabase: remote mutation 없음; 이 작업에서 live catalog를 재판정하지 않음
 - P6: NOT AUTHORIZED / NOT CHANGED
 - next owner / next action: 사용자 로그인 후 Codex가 실물 사진 기록 저장 → 상대 표시 → exact original을 검증
+
+## 2026-08-28 Xcode 27 beta 재확인
+
+- 이전 기록 작성 수정본의 실물 설치는 `/Applications/Xcode.app`의 Xcode 26.6으로 만든 development Debug 빌드였다. TestFlight beta 업로드가 아니었고 Xcode 27 beta 산출물도 아니었다.
+- `/Users/han-yejun/Downloads/Xcode-27-Beta.app`을 직접 지정해 Xcode 27.0 beta 6 (`27A5252f`), iPhoneOS 27.0 SDK로 production web build, Capacitor sync, signed physical-device Debug build를 재실행했다. 모두 PASS했고 `BUILD SUCCEEDED`였다.
+- 새 `App.app`에는 `ComposePage` 사진 미리보기 marker `compose-photo-previews`가 포함된 것을 확인했다.
+- iPhone 16 Pro에 `app.gomsinlog`를 덮어 설치했다. installation URL은 `BA3AEE35-C8A1-48AD-ACE7-D74D78D2930B`로 갱신됐고 app database UUID `2024C2D0-D802-41C0-B34A-5075B8576066`는 유지돼 앱 컨테이너 연속성을 확인했다.
+- 설치 직후 원격 launch는 iPhone 잠금으로 iOS가 거부했으나, 잠금 해제 후 같은 beta `devicectl` launch가 PASS했다. 물리 기기 화면 캡처는 `devicectl`에 제공되지 않고 iPhone 미러링은 Mac의 iCloud 동기화 미완료로 사용할 수 없어 post-install 화면 렌더는 UNVERIFIED다.
+- 실제 계정의 사진 미리보기·저장도 아직 UNVERIFIED다. App Store Connect/TestFlight, Vercel, Supabase, Apple provider 변경은 NOT APPLIED다.

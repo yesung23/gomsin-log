@@ -14,7 +14,7 @@
 
 | 단계 | 완료 조건 | 2026-08-27 live 상태 |
 |---|---|---|
-| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 최신 기록 작성 델타 포함 258 files / 3,735 tests, phase0 64 migrations / 411 assertions, web build 2,165 modules, Xcode 26.6 / `iphonesimulator26.5` `BUILD SUCCEEDED`; iOS 27 실물 기기 온보딩 렌더 PASS |
+| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 최신 기록 작성 델타 포함 258 files / 3,735 tests, phase0 64 migrations / 411 assertions, web build 2,165 modules, Xcode 26.6 / `iphonesimulator26.5` `BUILD SUCCEEDED`; 2026-08-28 Xcode 27.0 beta 6 / iPhoneOS 27.0 SDK signed device build·설치·unlock 후 launch PASS. post-install 화면 캡처는 UNVERIFIED |
 | 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — UIScene 수정 commit `34b6e4c`를 Xcode 27 SDK로 iPhone 16 Pro / iOS 27에 signed build·설치했다. 첫 실행·종료 후 재실행·30초 이상 프로세스 생존과 온보딩 렌더 PASS, 검정 화면 재발 없음. cold callback 오류 토스트 및 Google OAuth 시스템 브라우저 진입 PASS. 실제 계정 로그인 완료, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
 | 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — 062 RPC는 live, 063 없음, 064 미적용으로 `authenticated`에 `TRUNCATE` 잔존, 065 hardening marker 없음; ledger가 비어 있어 bulk push 금지 |
 | 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — 실물 iPhone에서 Google CTA가 `accounts.google.com` 시스템 브라우저까지 진입하는 것은 PASS. 계정 선택 이후 callback/session 완결은 자동 입력하지 않아 UNVERIFIED. live Google ON / Apple OFF / Email ON; redirect allowlist와 Apple 실제 왕복 미검증 |

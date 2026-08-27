@@ -8750,3 +8750,87 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — local code, tests and physical development install only
+
+### 2026-08-28 — Xcode 27 beta 기록 작성 수정본 실물 재설치 확인
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: iOS physical-device packaging verification
+- Step: 기록 작성 수정본을 Xcode 27 beta로 명시 빌드·재설치
+- Previous Gate: Xcode 26.6 development build 실물 설치 PASS
+- This Gate: Xcode 27.0 beta 6 / iPhoneOS 27.0 SDK signed build·install
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, 기록 작성 exact-source 흐름
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 패키징 재검증
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`
+- Current-state checked: branch `codex/profile-post-composer`, HEAD `843a218bd528976725948e40d2939d75cd733364`
+- Latest relevant Work Log checked: 2026-08-27 기록 작성 사진·보호 설정 closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary verifier/operator
+- Model: primary
+- Role: live toolchain diagnosis, signed build, physical install
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `843a218bd528976725948e40d2939d75cd733364`
+- Old HEAD: `843a218bd528976725948e40d2939d75cd733364`
+- New HEAD / Reviewed HEAD: docs-only follow-up commit to be recorded in git history
+
+#### CHANGED / REVIEWED
+- file: no application source change
+- function/component/migration: Xcode toolchain selection and installed app artifact
+- what changed/reviewed: Xcode 26.6 was selected live; Xcode 27 beta existed in Downloads. Xcode 27 beta was explicitly selected for a fresh signed build and physical reinstall.
+- why: correct the prior ambiguous beta claim and ensure the photo-preview bundle is on the connected iOS 27 device
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged
+- Production: no TestFlight/App Store/Supabase/Vercel mutation
+
+#### VERIFICATION
+- command: explicit `DEVELOPER_DIR=.../Xcode-27-Beta.app/Contents/Developer xcodebuild -version`, iPhoneOS/Simulator SDK query
+- PASS / FAIL / UNVERIFIED: PASS — Xcode 27.0 beta 6 build `27A5252f`, SDK 27.0
+- what it actually proves: the requested beta toolchain is installed and callable; the system default remains Xcode 26.6
+- command: `npm run build`, `npx cap sync ios`, signed physical `xcodebuild` with explicit beta `DEVELOPER_DIR`
+- PASS / FAIL / UNVERIFIED: PASS — web build 2,165 modules, five plugins synced, `BUILD SUCCEEDED`
+- what it actually proves: current source and photo-preview chunk compile into an iPhoneOS 27.0 signed development app
+- command: beta `devicectl device install app`
+- PASS / FAIL / UNVERIFIED: PASS — `app.gomsinlog` installed at new bundle URL; database UUID unchanged
+- what it actually proves: the new beta-SDK development bundle replaced the previous installed bundle without deleting its data container
+- command: beta `devicectl device process launch --terminate-existing`
+- PASS / FAIL / UNVERIFIED: 최초 BLOCKED — device locked, iOS `RequestDenied`; 잠금 해제 후 재실행 PASS
+- what it actually proves: Xcode 27 beta로 재설치된 앱 프로세스가 iOS에서 시작됨; 물리 화면 캡처와 post-install 렌더는 증명하지 않음
+- command: iPhone Mirroring read-only inspection
+- PASS / FAIL / UNVERIFIED: BLOCKED — Mac의 iCloud 동기화 미완료
+- what it actually proves: 앱 문제가 아니라 Mac의 미러링 준비 상태 때문에 원격 화면 증거를 얻지 못함
+
+#### REVIEW IMPACT
+- NONE — packaging verification and docs only; application/security semantics unchanged
+
+#### BLOCKERS
+- code: none found in this verification
+- environment: physical launch PASS; `devicectl` physical screenshot 미지원, iPhone Mirroring은 Mac iCloud 동기화 미완료
+- external/manual: TestFlight upload and authenticated photo-record round trip remain unexecuted
+
+#### STOPPED AT
+- exact completed boundary: Xcode 27 beta signed build, physical overwrite install and unlock 후 launch complete; post-install visual capture unavailable
+
+#### REMAINING
+- iPhone에서 열린 앱을 확인하고, 사진을 선택해 preview/save를 authenticated account에서 검증
+
+#### NEXT ACTION
+- next owner: user plus Codex operator
+- tool/model: primary
+- 기준 SHA: docs-only follow-up commit
+- exact next task: 사용자가 기기에서 열린 앱을 확인한 뒤 record composer에서 사진 선택; Codex가 결과를 이어서 판정
+
+#### DO NOT ADVANCE UNTIL
+- beta-installed app의 화면 렌더와 authenticated photo compose가 PASS 또는 명시적 UNVERIFIED로 기록됨
+
+#### PRODUCTION
+- NOT APPLIED — physical development install only; TestFlight/App Store Connect unchanged

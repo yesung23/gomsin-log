@@ -14,7 +14,6 @@ import {
 import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
-import { HomePage } from '@/pages/HomePage';
 import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { AuthSyncStage } from '@/lib/sync';
@@ -79,6 +78,9 @@ const SearchPage = lazy(() =>
 );
 const StoryRoute = lazy(() =>
   import('@/features/story/StoryRoute').then((m) => ({ default: m.StoryRoute })),
+);
+const HomePage = lazy(() =>
+  import('@/pages/HomePage').then((m) => ({ default: m.HomePage })),
 );
 
 function PageLoader() {

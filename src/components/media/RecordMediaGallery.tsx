@@ -181,6 +181,7 @@ function VisualSlide({
             src={url}
             alt={attachment.name}
             loading="lazy"
+            decoding="async"
             onError={reportLoadFailure}
             className={cn('w-full h-full', fit === 'cover' ? 'object-cover' : 'object-contain')}
           />

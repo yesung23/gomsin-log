@@ -64,7 +64,13 @@ describe('C5 - no module is both statically and dynamically imported', () => {
 
 describe('C5 - vendor chunk splitting', () => {
   const viteConfig = read('vite.config.ts');
+  const app = read('src/App.tsx');
   const pkg = JSON.parse(read('package.json')) as { dependencies: Record<string, string> };
+
+  it('keeps the authenticated home out of the pre-auth entry chunk', () => {
+    expect(app).not.toContain("import { HomePage } from '@/pages/HomePage';");
+    expect(app).toMatch(/const HomePage = lazy\(\(\) =>\s*import\('@\/pages\/HomePage'\)/);
+  });
 
   it('splits by import identity so the entry chunk clears the warning threshold', () => {
     expect(viteConfig).toContain('manualChunks');

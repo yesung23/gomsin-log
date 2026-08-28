@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { CoupleStatus, DailyRecord } from '@/types';
+import type { BriefingLocale } from './contract';
 import { FakeBriefingProvider } from './provider';
 import {
   usePartnerBriefing,
@@ -586,6 +587,264 @@ describe('usePartnerBriefing (Phase B1)', () => {
 
       // Provider call count should strictly remain 1
       expect(provider.getCallHistory()).toHaveLength(1);
+    });
+  });
+
+  describe('Locale Support (Gate L3c)', () => {
+    it('defaults to Korean baseline byte-for-byte when locale is unspecified', () => {
+      const surface: DailyRecord[] = [
+        makeValidRecord({
+          id: 'rec_kor_1',
+          date: '2026-08-27',
+          time: '09:00',
+          log: '첫째 날 아침입니다.',
+        }),
+        makeValidRecord({
+          id: 'rec_kor_2',
+          date: '2026-08-28',
+          time: '19:00',
+          log: '둘째 날 저녁입니다.',
+        }),
+      ];
+
+      const { result } = renderHook(() =>
+        usePartnerBriefing(
+          makeDefaultInput({
+            surface,
+            provider: null,
+            locale: undefined,
+          }),
+        ),
+      );
+
+      expect(result.current.status).toBe('ready');
+      expect(result.current.briefing).not.toBeNull();
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.briefing?.rangeLabel).toBe('8월 27일 ~ 8월 28일');
+      expect(result.current.briefing?.overview.text).toBe(
+        '2일 동안 총 2개의 기록이 있습니다.',
+      );
+      expect(result.current.briefing?.overview.sourceRecordIds).toEqual([
+        'rec_kor_1',
+        'rec_kor_2',
+      ]);
+      expect(result.current.briefing?.days[0].date).toBe('2026-08-27');
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        '“첫째 날 아침입니다.”라고 기록했어요.',
+      );
+      expect(result.current.briefing?.days[0].sections[0].items[0].sourceRecordId).toBe(
+        'rec_kor_1',
+      );
+    });
+
+    it('builds synchronous deterministic baseline in English when locale is en', () => {
+      const surface: DailyRecord[] = [
+        makeValidRecord({
+          id: 'rec_en_1',
+          date: '2026-08-27',
+          time: '09:00',
+          log: 'Completed morning roll call smoothly.',
+        }),
+        makeValidRecord({
+          id: 'rec_en_2',
+          date: '2026-08-28',
+          time: '19:00',
+          log: 'Had dinner and relaxing now.',
+        }),
+      ];
+
+      const { result } = renderHook(() =>
+        usePartnerBriefing(
+          makeDefaultInput({
+            surface,
+            provider: null,
+            locale: 'en',
+          }),
+        ),
+      );
+
+      expect(result.current.status).toBe('ready');
+      expect(result.current.briefing).not.toBeNull();
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.briefing?.rangeLabel).toBe('August 27 – August 28');
+      expect(result.current.briefing?.overview.text).toBe(
+        'Over 2 days: 2 records in total.',
+      );
+      expect(result.current.briefing?.overview.sourceRecordIds).toEqual([
+        'rec_en_1',
+        'rec_en_2',
+      ]);
+      expect(result.current.briefing?.days[0].date).toBe('2026-08-27');
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “Completed morning roll call smoothly.”',
+      );
+      expect(result.current.briefing?.days[0].sections[0].items[0].sourceRecordId).toBe(
+        'rec_en_1',
+      );
+      expect(result.current.briefing?.days[1].date).toBe('2026-08-28');
+      expect(result.current.briefing?.days[1].sections[0].items[0].text).toBe(
+        'They wrote: “Had dinner and relaxing now.”',
+      );
+      expect(result.current.briefing?.days[1].sections[0].items[0].sourceRecordId).toBe(
+        'rec_en_2',
+      );
+    });
+
+    it('upgrades to on_device with English attributed text after provider success when locale is en', async () => {
+      const provider = new FakeBriefingProvider({
+        delayMs: 20,
+      });
+
+      const { result } = renderHook(() =>
+        usePartnerBriefing(
+          makeDefaultInput({
+            surface: [
+              makeValidRecord({
+                id: 'rec_en_prov',
+                date: '2026-08-28',
+                log: 'Great training day today. Heading to rest!',
+              }),
+            ],
+            provider,
+            locale: 'en',
+          }),
+        ),
+      );
+
+      // Immediate English deterministic baseline
+      expect(result.current.status).toBe('ready');
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.briefing?.rangeLabel).toBe('August 28');
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “Great training day today.”',
+      );
+
+      // Asynchronous upgrade to on_device
+      await waitFor(() => {
+        expect(result.current.briefing?.generation).toBe('on_device');
+      });
+
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “Great training day today.”',
+      );
+      expect(result.current.briefing?.days[0].sections[0].items[0].sourceRecordId).toBe(
+        'rec_en_prov',
+      );
+    });
+
+    it('on same records, switching ko to en immediately shows English baseline, restarts provider run, and late ko cannot overwrite it', async () => {
+      const provider = new FakeBriefingProvider({
+        delayMs: 150,
+      });
+
+      const record = makeValidRecord({
+        id: 'rec_switch',
+        date: '2026-08-28',
+        log: '오늘 하루도 수고했어.',
+      });
+
+      const { result, rerender } = renderHook(
+        (props: UsePartnerBriefingInput) => usePartnerBriefing(props),
+        {
+          initialProps: makeDefaultInput({
+            surface: [record],
+            provider,
+            locale: 'ko' as BriefingLocale,
+          }),
+        },
+      );
+
+      // Initial Korean baseline
+      expect(result.current.status).toBe('ready');
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.briefing?.rangeLabel).toBe('8월 28일');
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        '“오늘 하루도 수고했어.”라고 기록했어요.',
+      );
+
+      // Confirm first Korean run reached provider selectExtracts
+      await waitFor(() => {
+        expect(provider.getCallHistory()).toHaveLength(1);
+      });
+
+      // Switch locale to 'en' while Korean provider run is in-flight
+      act(() => {
+        rerender(
+          makeDefaultInput({
+            surface: [record],
+            provider,
+            locale: 'en' as BriefingLocale,
+          }),
+        );
+      });
+
+      // Immediately shows English baseline synchronously
+      expect(result.current.status).toBe('ready');
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.briefing?.rangeLabel).toBe('August 28');
+      expect(result.current.briefing?.overview.text).toBe('1 record in total.');
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “오늘 하루도 수고했어.”',
+      );
+
+      // Confirm English provider run started
+      await waitFor(() => {
+        expect(provider.getCallHistory()).toHaveLength(2);
+      });
+
+      // Wait for the English run to complete
+      await waitFor(() => {
+        expect(result.current.briefing?.generation).toBe('on_device');
+      });
+
+      // Ensure English attributed format remains active
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “오늘 하루도 수고했어.”',
+      );
+
+      // Wait past delayed Korean background execution time
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Confirm late Korean result NEVER overwrote the English state
+      expect(result.current.briefing?.rangeLabel).toBe('August 28');
+      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “오늘 하루도 수고했어.”',
+      );
+    });
+
+    it('serialized provider request contains zero locale, record IDs, dates, or timestamps', async () => {
+      const provider = new FakeBriefingProvider();
+      const record = makeValidRecord({
+        id: 'rec_secret_id_999',
+        date: '2026-08-28',
+        log: '훈련 무사히 마쳤어.',
+      });
+
+      const { result } = renderHook(() =>
+        usePartnerBriefing(
+          makeDefaultInput({
+            surface: [record],
+            provider,
+            locale: 'en',
+          }),
+        ),
+      );
+
+      await waitFor(() => {
+        expect(result.current.briefing?.generation).toBe('on_device');
+      });
+
+      const history = provider.getCallHistory();
+      expect(history).toHaveLength(1);
+
+      const serializedRequest = JSON.stringify(history[0]);
+      expect(serializedRequest).not.toContain('locale');
+      expect(serializedRequest).not.toContain('en');
+      expect(serializedRequest).not.toContain('ko');
+      expect(serializedRequest).not.toContain('rec_secret_id_999');
+      expect(serializedRequest).not.toContain('2026-08-28');
+      expect(serializedRequest).not.toContain('partner_456');
+      expect(serializedRequest).not.toContain('viewer_123');
     });
   });
 });

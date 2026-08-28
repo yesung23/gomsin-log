@@ -20,7 +20,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CoupleStatus, DailyRecord } from '@/types';
-import type { PartnerBriefing } from './contract';
+import {
+  DEFAULT_BRIEFING_LOCALE,
+  type BriefingLocale,
+  type PartnerBriefing,
+} from './contract';
 import { selectPartnerBriefingCorpus } from './corpus';
 import {
   normalizePartnerBriefingCorpus,
@@ -47,6 +51,7 @@ export interface UsePartnerBriefingInput {
   readonly coupleStatus?: CoupleStatus | null;
   readonly provider?: BriefingProvider | null;
   readonly timeoutMs?: number;
+  readonly locale?: BriefingLocale;
 }
 
 export interface UsePartnerBriefingResult {
@@ -68,6 +73,7 @@ function evaluateSynchronousBriefing(
   partnerUserId: string | null | undefined,
   coupleConnected: boolean,
   coupleStatus: CoupleStatus | null | undefined,
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
 ): SynchronousEvaluation {
   if (!enabled) {
     return {
@@ -118,9 +124,11 @@ function evaluateSynchronousBriefing(
     events: normResult.events,
     sources: normResult.sources,
     days: normResult.days,
+    locale,
   });
 
   const inputKey = JSON.stringify({
+    locale,
     sources: normResult.sources,
     days: normResult.days,
     events: normResult.events,
@@ -146,6 +154,7 @@ export function usePartnerBriefing(
     coupleStatus,
     provider,
     timeoutMs,
+    locale = DEFAULT_BRIEFING_LOCALE,
   } = input;
 
   const syncEval = useMemo(() => {
@@ -156,6 +165,7 @@ export function usePartnerBriefing(
       partnerUserId,
       coupleConnected,
       coupleStatus,
+      locale,
     );
   }, [
     enabled,
@@ -164,6 +174,7 @@ export function usePartnerBriefing(
     partnerUserId,
     coupleConnected,
     coupleStatus,
+    locale,
   ]);
 
   const [refined, setRefined] = useState<{
@@ -216,6 +227,7 @@ export function usePartnerBriefing(
           provider,
           timeoutMs: effectiveTimeoutMs,
           signal: abortController.signal,
+          locale,
         });
 
         if (!isMounted || abortController.signal.aborted || !result) {
@@ -243,6 +255,7 @@ export function usePartnerBriefing(
     provider,
     effectiveTimeoutMs,
     runner,
+    locale,
   ]);
 
   if (syncEval.status !== 'ready') {

@@ -9439,3 +9439,87 @@ e2e · Postgres 계약 · Deno).
 #### PRODUCTION
 - APPLIED — none
 - NOT APPLIED — TestFlight/App Store, Vercel Production, Supabase SQL/Auth/provider
+
+### 2026-08-28 · Partner Briefing Gate 0 amendments and isolated Pre-A1
+
+#### PLAN POSITION
+- Phase: Partner Briefing
+- Workstream: architecture lock
+- Step: Gate 0 review amendments and isolated Pre-A1 baseline
+- Previous Gate: Gate 0 APPROVED
+- This Gate: Gate 0 APPROVED WITH AMENDMENTS; A1 not started
+
+#### DIRECTION CHECK
+- Product source checked: latest user-approved Partner Briefing master prompt and Gate 0 review; `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` AI-as-assistant, fact-only summary, no automatic important-memory selection
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`
+- Current-state checked: live `origin/master`, branch/worktree/status/claims, PartnerDay/Story/dailySummary/E2EE/native call paths
+- Latest relevant Work Log checked: 2026-08-25 daily-summary overflow and on-device summary entries; 2026-08-28 release entries
+- MASTER PLAN version / 기준일: Partner Briefing Orchestrator Master Prompt FINAL + Gate 0 review / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. The latest approved direction replaces the older today-only refinement goal while preserving exact original, raw records, privacy, and explicit acknowledgement.
+
+#### OWNERSHIP
+- Tool: Codex primary
+- Model: current primary acting as the requested Sol High orchestrator
+- Role: architect/orchestrator; no Worker implementation
+- PR: 없음
+- Branch: `codex/partner-briefing`
+- Base SHA: `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- Old HEAD: `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- New HEAD / Reviewed HEAD: Pre-A1 documentation delta; production baseline unchanged
+
+#### CHANGED / REVIEWED
+- file: `docs/PARTNER_BRIEFING_ARCHITECTURE.md`
+- function/component/migration: Partner Briefing architecture contract
+- what changed/reviewed: locked supplied-surface responsibility, canonical identities, exact ordinal partition, semantic-safety separation, per-leaf fallback, deterministic budget, active Story integration, and rollback.
+- why: incorporate all seven Gate 0 review amendments before A1 types are written.
+- file: dedicated branch/worktree and `control-tower/Now.md`
+- function/component/migration: work isolation and claim
+- what changed/reviewed: created `codex/partner-briefing` at exact `origin/master`; released the duplicate Gate 0 claim and acquired `sol-partner-briefing` in the isolated worktree.
+- why: preserve the original dirty checkout and prevent overlapping Worker writes.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no migration created
+- product semantics: no runtime behavior changed; architecture only
+- Production: no Supabase, Vercel, Apple, TestFlight, or App Store action
+
+#### VERIFICATION
+- command: live branch/HEAD/status/worktree/claim inspection
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: isolated branch is based on exact current `origin/master`; original dirty checkout remains separate.
+- command: focused Gate 0 Vitest runs before isolation
+- PASS / FAIL / UNVERIFIED: PASS — 13 files / 337 tests
+- what it actually proves: existing PartnerDay, Story, dailySummary, and native contracts were green before A1; it does not test new Partner Briefing code.
+- command: architecture contract review plus `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: documentation consistency only.
+
+#### REVIEW IMPACT
+- NONE — production code and security semantics unchanged; this locks the future review target.
+
+#### BLOCKERS
+- code: 없음 for A1
+- environment: native iOS/Android and physical devices are later gates
+- external/manual: none for A1
+
+#### STOPPED AT
+- exact completed boundary: isolated Pre-A1 worktree and amended architecture contract; A1 Worker not started
+
+#### REMAINING
+- independent final check of the documentation delta and clean A1 file scope
+- A1 contract implementation by one Gemini 3.7 Flash High Worker
+
+#### NEXT ACTION
+- next owner: Gemini 3.7 Flash High Worker after orchestrator READY
+- tool/model: Google Antigravity Gemini 3.7 Flash / High
+- 기준 SHA: Pre-A1 architecture documentation commit on `codex/partner-briefing`
+- exact next task: implement only `src/lib/partnerBriefing/contract.ts` and `contract.test.ts`
+
+#### DO NOT ADVANCE UNTIL
+- Pre-A1 branch/worktree/claim/status are reported and Gate A1 is READY
+- Worker receives the narrow common rules and does not implement corpus or later phases
+
+#### PRODUCTION
+- NOT APPLIED

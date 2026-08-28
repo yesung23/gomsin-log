@@ -62,7 +62,6 @@ export type BriefingProviderErrorCode =
 export interface BriefingProviderCapability {
   readonly envelope: BriefingProviderEnvelope;
 }
-
 /**
  * Model-safe summarize request sent to a briefing provider.
  * Contains only requestId and the model-safe chunk.
@@ -502,4 +501,3 @@ export class FakeBriefingProvider implements BriefingProvider {
     };
   }
 }
-

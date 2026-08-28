@@ -507,4 +507,3 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
     });
   });
 });
-

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ON_DEVICE_BRIEFING_PLUGIN_NAME,
   __setOnDeviceBriefingPluginForTests,
-  iosOnDeviceBriefingProvider,
+  nativeOnDeviceBriefingProvider,
 } from './nativeOnDeviceBriefing';
 import type { BriefingExtractRequest } from './provider';
 
@@ -65,43 +65,50 @@ afterEach(() => {
   __setOnDeviceBriefingPluginForTests(null);
 });
 
-describe('iOS native gate', () => {
+describe('native platform gate', () => {
   it.each([
     [false, 'web'],
-    [true, 'android'],
+    [false, 'ios'],
+    [false, 'android'],
+    [true, 'electron'],
+    [true, 'unknown'],
   ])('returns unsupported without registering on native=%s platform=%s', async (native, name) => {
     platform.native = native;
     platform.name = name;
     platform.pluginAvailable = true;
-    expect(await iosOnDeviceBriefingProvider.getAvailability()).toBe('unsupported');
+    expect(await nativeOnDeviceBriefingProvider.getAvailability()).toBe('unsupported');
     expect(platform.register).not.toHaveBeenCalled();
   });
 
-  it('returns unsupported when the iOS plugin is missing', async () => {
+  it.each(['ios', 'android'])('returns unsupported when the plugin is missing on %s', async (name) => {
     platform.native = true;
-    platform.name = 'ios';
-    expect(await iosOnDeviceBriefingProvider.getAvailability()).toBe('unsupported');
+    platform.name = name;
+    platform.pluginAvailable = false;
+    expect(await nativeOnDeviceBriefingProvider.getAvailability()).toBe('unsupported');
     expect(platform.register).not.toHaveBeenCalled();
   });
 
-  it('registers the exact bridge name only after the iOS/plugin gates pass', async () => {
-    const port = plugin();
-    platform.native = true;
-    platform.name = 'ios';
-    platform.pluginAvailable = true;
-    platform.register.mockReturnValue(port);
-    expect(await iosOnDeviceBriefingProvider.getAvailability()).toBe('ready');
-    expect(platform.register).toHaveBeenCalledTimes(1);
-    expect(platform.register).toHaveBeenCalledWith(ON_DEVICE_BRIEFING_PLUGIN_NAME);
-  });
+  it.each(['ios', 'android'])(
+    'registers the exact bridge name only after the %s native and plugin gates pass',
+    async (name) => {
+      const port = plugin();
+      platform.native = true;
+      platform.name = name;
+      platform.pluginAvailable = true;
+      platform.register.mockReturnValue(port);
+      expect(await nativeOnDeviceBriefingProvider.getAvailability()).toBe('ready');
+      expect(platform.register).toHaveBeenCalledTimes(1);
+      expect(platform.register).toHaveBeenCalledWith(ON_DEVICE_BRIEFING_PLUGIN_NAME);
+    },
+  );
 });
 
 describe('fixed native contract', () => {
   it('forwards Korean and English locale without putting it inside the domain request', async () => {
     const port = plugin();
     __setOnDeviceBriefingPluginForTests(port);
-    await iosOnDeviceBriefingProvider.getAvailability({ locale: 'ko' });
-    await iosOnDeviceBriefingProvider.selectExtracts(request, { locale: 'en' });
+    await nativeOnDeviceBriefingProvider.getAvailability({ locale: 'ko' });
+    await nativeOnDeviceBriefingProvider.selectExtracts(request, { locale: 'en' });
     expect(port.availability).toHaveBeenCalledWith({ locale: 'ko' });
     expect(port.selectExtracts).toHaveBeenCalledWith({ ...request, locale: 'en' });
     expect(request).not.toHaveProperty('locale');
@@ -110,7 +117,7 @@ describe('fixed native contract', () => {
   it('sends only request-local ordinals and exact-source candidates', async () => {
     const port = plugin();
     __setOnDeviceBriefingPluginForTests(port);
-    await iosOnDeviceBriefingProvider.selectExtracts(request, { locale: 'ko' });
+    await nativeOnDeviceBriefingProvider.selectExtracts(request, { locale: 'ko' });
     const payload = vi.mocked(port.selectExtracts).mock.calls[0][0];
     expect(Object.keys(payload).sort()).toEqual(['items', 'locale', 'requestId']);
     expect(Object.keys(payload.items[0]).sort()).toEqual(['candidates', 'itemOrdinal']);
@@ -148,7 +155,7 @@ describe('fixed native contract', () => {
       selectExtracts: vi.fn(async () => ({ requestId: request.requestId, output })),
     });
     __setOnDeviceBriefingPluginForTests(port);
-    expect(await iosOnDeviceBriefingProvider.selectExtracts(request)).toEqual({
+    expect(await nativeOnDeviceBriefingProvider.selectExtracts(request)).toEqual({
       ok: true,
       requestId: request.requestId,
       output,
@@ -161,10 +168,10 @@ describe('fixed native contract', () => {
       selectExtracts: vi.fn(async () => { throw { code: 'SENSITIVE_DETAIL', message: 'content' }; }),
     });
     __setOnDeviceBriefingPluginForTests(port);
-    await expect(iosOnDeviceBriefingProvider.getCapability()).rejects.toThrow(
+    await expect(nativeOnDeviceBriefingProvider.getCapability()).rejects.toThrow(
       'on-device briefing capability unavailable',
     );
-    expect(await iosOnDeviceBriefingProvider.selectExtracts(request)).toEqual({
+    expect(await nativeOnDeviceBriefingProvider.selectExtracts(request)).toEqual({
       ok: false,
       requestId: request.requestId,
       code: 'native_error',
@@ -174,7 +181,7 @@ describe('fixed native contract', () => {
   it('maps malformed availability to model_unavailable', async () => {
     const port = plugin({ availability: vi.fn(async () => ({ availability: 'future_state' })) });
     __setOnDeviceBriefingPluginForTests(port);
-    expect(await iosOnDeviceBriefingProvider.getAvailability()).toBe('model_unavailable');
+    expect(await nativeOnDeviceBriefingProvider.getAvailability()).toBe('model_unavailable');
   });
 });
 
@@ -184,7 +191,7 @@ describe('cancellation', () => {
     __setOnDeviceBriefingPluginForTests(port);
     const controller = new AbortController();
     controller.abort();
-    expect(await iosOnDeviceBriefingProvider.selectExtracts(request, controller.signal)).toEqual({
+    expect(await nativeOnDeviceBriefingProvider.selectExtracts(request, controller.signal)).toEqual({
       ok: false,
       requestId: request.requestId,
       code: 'cancelled',
@@ -199,7 +206,7 @@ describe('cancellation', () => {
     });
     __setOnDeviceBriefingPluginForTests(port);
     const controller = new AbortController();
-    const pending = iosOnDeviceBriefingProvider.selectExtracts(request, controller.signal);
+    const pending = nativeOnDeviceBriefingProvider.selectExtracts(request, controller.signal);
     await Promise.resolve();
     controller.abort();
     expect(await pending).toEqual({
@@ -221,7 +228,7 @@ describe('cancellation', () => {
   it('isolates a native cancel rejection', async () => {
     const port = plugin({ cancel: vi.fn(async () => { throw new Error('no detail crosses'); }) });
     __setOnDeviceBriefingPluginForTests(port);
-    await expect(iosOnDeviceBriefingProvider.cancel(request.requestId)).resolves.toBeUndefined();
+    await expect(nativeOnDeviceBriefingProvider.cancel(request.requestId)).resolves.toBeUndefined();
   });
 });
 

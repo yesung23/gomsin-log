@@ -40,9 +40,11 @@ const AVAILABILITY = new Set<BriefingProviderAvailability>([
 let registeredPlugin: NativeBriefingPlugin | null = null;
 let injectedPlugin: NativeBriefingPlugin | null = null;
 
-function isIOSNative(): boolean {
+function isSupportedNativePlatform(): boolean {
   try {
-    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
+    if (!Capacitor.isNativePlatform()) return false;
+    const platform = Capacitor.getPlatform();
+    return platform === 'ios' || platform === 'android';
   } catch {
     return false;
   }
@@ -50,7 +52,7 @@ function isIOSNative(): boolean {
 
 function nativePlugin(): NativeBriefingPlugin | null {
   if (injectedPlugin) return injectedPlugin;
-  if (!isIOSNative()) return null;
+  if (!isSupportedNativePlatform()) return null;
   try {
     if (!Capacitor.isPluginAvailable(ON_DEVICE_BRIEFING_PLUGIN_NAME)) return null;
     registeredPlugin ??= registerPlugin<NativeBriefingPlugin>(ON_DEVICE_BRIEFING_PLUGIN_NAME);
@@ -117,7 +119,7 @@ function successResult(
   };
 }
 
-export const iosOnDeviceBriefingProvider: BriefingProvider = {
+export const nativeOnDeviceBriefingProvider: BriefingProvider = {
   async getAvailability(options) {
     const signal = signalFrom(options);
     if (signal?.aborted) return 'model_unavailable';
@@ -194,7 +196,7 @@ export const iosOnDeviceBriefingProvider: BriefingProvider = {
   },
 };
 
-/** Test-only bridge seam. Production callers use `iosOnDeviceBriefingProvider`. */
+/** Test-only bridge seam. Production callers use `nativeOnDeviceBriefingProvider`. */
 export function __setOnDeviceBriefingPluginForTests(
   port: NativeBriefingPlugin | null,
 ): void {

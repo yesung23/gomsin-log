@@ -12,7 +12,7 @@ import { StoryViewer, type StoryMode } from '@/features/story/StoryViewer';
 import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
 import { useOnDeviceDailySummary } from '@/lib/dailySummary/useOnDeviceDailySummary';
 import { usePartnerBriefing } from '@/lib/partnerBriefing/usePartnerBriefing';
-import { iosOnDeviceBriefingProvider } from '@/lib/partnerBriefing/nativeOnDeviceBriefing';
+import { nativeOnDeviceBriefingProvider } from '@/lib/partnerBriefing/nativeOnDeviceBriefing';
 
 /**
  * 스토리로 들어가는 세 개의 문.
@@ -114,7 +114,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     coupleConnected: profile.couple.connected,
     coupleStatus: profile.couple.status,
     locale: briefingLocale,
-    provider: partnerBriefingEnabled ? iosOnDeviceBriefingProvider : null,
+    provider: partnerBriefingEnabled ? nativeOnDeviceBriefingProvider : null,
   });
   const briefing = partnerBriefingResult.status === 'ready'
     ? partnerBriefingResult.briefing

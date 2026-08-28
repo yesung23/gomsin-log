@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { StoryRoute } from '@/features/story/StoryRoute';
 import type { CoupleHighlight, DailyRecord } from '@/types';
+import { __setOnDeviceBriefingPluginForTests } from '@/lib/partnerBriefing/nativeOnDeviceBriefing';
 
 const mockNavigate = vi.hoisted(() => vi.fn());
 vi.mock('react-router-dom', async () => {
@@ -97,6 +98,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  __setOnDeviceBriefingPluginForTests(null);
 });
 
 describe('/story/partner', () => {
@@ -170,7 +172,37 @@ describe('/story/partner', () => {
       createdAt: `2026-08-22T${String(index).padStart(2, '0')}:00:00.000Z`,
     }));
 
+    function nativeBriefingPlugin() {
+      return {
+        availability: vi.fn(async () => ({ availability: 'ready' })),
+        capability: vi.fn(async () => ({
+          envelope: {
+            maxContextUtf8Bytes: 4096,
+            promptOverheadUtf8Bytes: 256,
+            responseReserveUtf8Bytes: 512,
+            maxInputTextGraphemes: 1000,
+          },
+        })),
+        selectExtracts: vi.fn(async (options: {
+          requestId: string;
+          items: readonly { itemOrdinal: number }[];
+        }) => ({
+          requestId: options.requestId,
+          output: {
+            version: 1,
+            choices: options.items.map((item) => ({
+              itemOrdinal: item.itemOrdinal,
+              candidateOrdinal: 0,
+            })),
+          },
+        })),
+        cancel: vi.fn(async () => undefined),
+      };
+    }
+
     it('기본 OFF에서는 기존 표지를 유지하고 브리핑을 넣지 않는다', () => {
+      const plugin = nativeBriefingPlugin();
+      __setOnDeviceBriefingPluginForTests(plugin);
       surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00', log: '점심' })];
       records = surface;
 
@@ -179,6 +211,28 @@ describe('/story/partner', () => {
       expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
       expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
       expect(screen.getByRole('button', { name: /점심/ })).toBeTruthy();
+      expect(plugin.availability).not.toHaveBeenCalled();
+    });
+
+    it('ON에서는 iOS provider를 호출하되 원본 이동과 확인 의미론을 바꾸지 않는다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      const plugin = nativeBriefingPlugin();
+      __setOnDeviceBriefingPluginForTests(plugin);
+      surface = [record({ id: 'native-a', log: '정확한 원본 A' }), record({
+        id: 'native-b',
+        time: '13:00',
+        log: '정확한 원본 B',
+      })];
+      records = surface;
+
+      open('/story/partner');
+
+      await waitFor(() => expect(plugin.selectExtracts).toHaveBeenCalled());
+      expect(acknowledge).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByTestId('partner-briefing-expand'));
+      await userEvent.click(screen.getAllByRole('button', { name: '원본 보기' })[0]);
+      expect(mockNavigate).toHaveBeenCalledWith('/record?record=native-a');
+      expect(acknowledge).not.toHaveBeenCalled();
     });
 
     it('ON에서는 브리핑 한 장 뒤에 8개 원본을 모두 보존하고 기존 표지는 겹치지 않는다', async () => {

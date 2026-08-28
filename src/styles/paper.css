@@ -138,6 +138,12 @@
       );
   }
 
+  /* Device-local display preference: keep the warm paper, remove every rule. */
+  [data-paper='plain'] .notebook,
+  [data-theme='dark'][data-paper='plain'] .notebook {
+    background-image: none;
+  }
+
   /* 손으로 그린 상자. 네 모서리가 서로 다르다. */
   .ink-box {
     border: var(--stroke) solid var(--ink);

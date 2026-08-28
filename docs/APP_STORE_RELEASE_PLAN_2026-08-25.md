@@ -12,15 +12,113 @@
 
 ## 출시 단계와 현재 상태
 
-| 단계 | 완료 조건 | 2026-08-25 상태 |
+| 단계 | 완료 조건 | 2026-08-28 live 상태 |
 |---|---|---|
-| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 243 files / 3470 tests, phase0 59 migrations / 344 assertions, simulator `BUILD SUCCEEDED` |
-| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **BLOCKED** — 연결된 iPhone이 offline; production flag는 기본 OFF 유지 |
-| 3. Supabase schema | backup/catalog 확인 후 exact 060 → 061, reload, actor matrix | **NOT APPLIED** — 원격은 057–059 객체만 확인; migration ledger가 비어 있어 bulk push 금지 |
-| 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — Apple provider disabled; redirect allowlist 보강 전 |
-| 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — Vercel CLI 미인증; 배포 exact SHA와 지원 이메일 미검증 |
-| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **UNVERIFIED** |
+| 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 글자 크기/알림 위치/startup 최적화 후보에서 264 files / 3,761 tests, 전체 lint/typecheck, browser smoke·media·story 10건, web build 2,168 modules PASS. phase0 65 migrations / 420 assertions와 Xcode 27 beta simulator PASS는 직전 gate 증거이며 이번 UI/perf delta가 DB를 변경하지 않음. 실제 iPhone의 최신 UI 왕복은 UNVERIFIED |
+| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — `044d324` runtime을 live Supabase publishable key로 fresh release build하고 Xcode 27 beta/iPhoneOS 27로 signed build·덮어 설치·launch했다. `dist`→iOS `public`→signed `App.app` asset hash 일치와 process 생존 PASS. 실제 화면, 로그인, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
+| 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **CONDITIONAL PASS** — 암호화 public backup의 격리 PostgreSQL 17 실제 복원 뒤 사용자 action-time 승인으로 exact 064 → 065 → 067 → 063을 적용했다. 파일별 catalog, PostgREST reload, rollback-only Production actor matrix PASS. 064 P0 권한은 닫혔고 067 기존 5행은 false로 보존됐다. live device/scope key가 0이라 065 실제 두 기기 정상 ceremony와 real JWT HTTP matrix는 UNVERIFIED. 066은 NOT APPLIED 유지 |
+| 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — live Email/Google ON, Apple OFF. custom-scheme/web `sb_flow_id` redirect는 존재하지만 Apple Client IDs/Secret은 비어 있다. 앱은 Supabase browser OAuth 후 custom-scheme PKCE로 복귀한다. Apple 설정과 Google/Apple 실제 iPhone 왕복은 미완료 |
+| 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — live Vercel Production은 master `d9a2eb0` Ready, feature Preview `044d324` Ready. Production 배포와 authenticated smoke는 실행하지 않았다 |
+| 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **PARTIAL** — Apple Developer 팀 활성/Admin. Xcode 27 beta에서 `app.gomsinlog` signed Release Archive `0.1.0 (2026082801)`와 App Store Connect용 10MB IPA export PASS. TestFlight 업로드·처리·원격 설치와 two-account smoke는 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
+
+- PR #90 Production 문서 closure commit `928d778`: 15개 GitHub/Vercel 검사가 모두 PASS했다. 실제 Chromium
+  creator/partner 행렬은 110/110 PASS했고, typecheck/lint/Vitest/build, PostgreSQL,
+  Android, iOS simulator, secret scan, boundary, Capacitor sync와 Vercel Preview도 PASS다.
+  이는 Production 배포나 실물 사용자 경로 증거가 아니다.
+
+### 2026-08-26/27 게이트 상태 점검 메모
+
+- **로컬 RC / 복무 성장 / 063 투영 및 로컬 remediation**:
+  - 초기 Terra 최종 검토 HOLD (P1 전체 verify 미재실행, P2 V4 문서 모순, P2 E2E 군화 RPC 미호출 관측 공백) 및 초기 Sol 보안 검토 HOLD (P2 격리/연결해제 후 stale partnerMilitary 잔존, P3 regex만 사용한 비정상 날짜 허용 취약점) 지적사항에 대한 로컬 remediation 완료.
+  - 로컬 조치 내역: 격리(`store.tsx`) 및 커플 라이프사이클 negative membership/연결해제(`coupleLifecycle.ts`) 시 `partnerMilitary` 명시적 제거, `SearchPage.tsx` 비연결 상태 렌더링 방어(`connected` 필수), `sync.ts` strict UTC round-trip 날짜 검증(`isValidCalendarDate`), `e2e/serviceGrowth.spec.ts` 실제 RPC 호출 네트워크 관측(군화 0회, 곰신 1회), V4 문서 정합성 정렬.
+  - 집중 remediation 테스트(8개 파일 / 147개 테스트) PASS, typecheck PASS, scoped lint PASS, Playwright serviceGrowth 2건 PASS, `git diff --check` PASS.
+  - 최신 전체 회귀 실행 `LANG=en_US.UTF-8 npm run verify` **PASS** (exit code 0): typecheck PASS, full lint PASS, Vitest 252/252개 파일 및 3586/3586개 테스트 전수 PASS, 프로덕션 빌드 2164개 모듈 통과. `partnerDay` seed 991이 전체 스위트에서 정상 통과, `nativeConfig` 57개 테스트 PASS.
+  - PostgreSQL 17 phase0 하네스 61개 마이그레이션(001..063) 369개 assertion PASS 유지.
+  - 중요한 최종 Terra/Sol delta re-review는 현재 문서 작성 시점 기준 **PENDING** 상태.
+- **Xcode 27 경고 해결 및 네이티브 패키징 델타 검증**:
+  - Source iOS 최소 배포 타깃(iOS floor)을 14.0에서 15.0으로 상향: `ios/App/Podfile`, App 프로젝트의 4개 deployment-target 설정(Debug/Release의 Project 및 Target 레벨), 2개 로컬 플러그인 podspec(`GomsinlogCapacitorDeviceKeys.podspec`, `GomsinlogCapacitorOnDeviceSummary.podspec`) 반영 완료. `pod install`을 통해 `Podfile.lock` 체크섬 재생성.
+  - `Podfile`의 `post_install` 훅을 통해 생성된 third-party pod target들을 일괄 15.0으로 정규화(생성된 Pods 프로젝트 직접 수기 수정 없음).
+  - Xcode의 광범위한 "recommended settings" 자동 적용 버튼은 프로젝트 무결성 보존을 위해 사용하지 않음.
+  - `[CP] Embed Pods Frameworks` no-output 경고는 Podfile에서 의도적으로 `disable_input_output_paths`를 사용하고 CocoaPods가 생성한 스크립트이므로 무해/non-blocking 상태 유지(생성된 스크립트 직접 수정 없음).
+  - 포커스드 네이티브 테스트 127/127 PASS; 주석 정리 후 `nativeConfig` 61/61 PASS; `pod install` PASS; `npx cap sync ios` PASS; `xcodebuild -showBuildSettings`에서 deployment target 및 recommended target 모두 15.0 보고; 무서명 `App.xcworkspace` generic simulator 클린 빌드 `** BUILD SUCCEEDED **`; 미지원 14.0 경고 0건; `git diff --check` PASS.
+  - 본 패키징 델타는 이미 문서화된 전체 verify PASS 이후에 수행됨. 2차 전체 verify를 주장하지 않으며 타깃 네이티브 델타 검증(targeted native delta validation)으로 명시.
+  - 최종 Terra/Sol delta review는 여전히 PENDING 상태. 프로덕션 변경 없음(Production unchanged).
+- **전체 App Store 릴리즈 판정**: 로컬 게이트 PASS에도 불구하고 **HOLD / CONDITIONAL** 유지.
+- **Supabase 스키마 (단계 3)**: 이 2026-08-26/27 메모의 LOCAL FILE ONLY 상태는
+  2026-08-28 Production closure로 대체됐다. 063/064/065/067은 **APPLIED**, 066은
+  **NOT APPLIED**다.
+- **인증 / 프로덕션 웹 / 실기기 (단계 2, 4, 5, 6, 7)**: Vercel 배포 exact SHA 및 환경변수 UNVERIFIED, Apple provider 및 redirect allowlist UNVERIFIED, 지원 iPhone 실기기(온디바이스 AI, Secure Enclave) 및 TestFlight 아카이브/서명 UNVERIFIED / BLOCKED. 프로덕션 mutation 일체 없음(no commit, no push, no deploy).
+
+### 2026-08-27 최종 로컬 closure 및 live preflight
+
+- `LANG=en_US.UTF-8 npm run verify`: **PASS** — typecheck, 전체 lint, Vitest 254 files / 3,630 tests, production build 모두 exit 0. 과거 전체 병렬 부하의 `deviceKeyPort` timeout은 재발하지 않았다.
+- PostgreSQL 17 phase0: **PASS** — 63 migrations / 392 assertions. P0 76, P5 93, write-floor 39, rollback 모두 PASS.
+- 실제 390px 렌더: 하루 요약 8개(초기 5 + 3개 더 보기, 접기, 8번째 exact record 이동), 게시물 작성/비공개 저장/보호 gate, 곰신·군화 복무 카드, 로그인 landing을 포함한 Playwright 10건 PASS. 로그인 화면은 제품 가치, 필수 동의, 48px Google CTA 활성 전/후를 320px/390px에서 캡처했다.
+- `npx cap sync ios`: PASS. Xcode GUI가 과거 `/tmp` probe workspace 충돌 모달을 잡고 있어 원본 workspace CLI가 대기했으나, 소스를 바꾸지 않은 별도 임시 workspace에서 iPhone 16 Pro / iOS 26.5 / arm64 / unsigned build가 `BUILD SUCCEEDED`로 끝났다. 실기기·서명 Archive 증거는 아니다.
+- Sol High 보안 closure: **PASS**, P0/P1/P2 0. Terra High 전체 dirty delta: **PASS**, P0–P3 0. Production 승인이나 실기기 증거로 승계하지 않는다.
+- live Supabase: `ACTIVE_HEALTHY`, PostgreSQL 17 preview, migration ledger 0행, managed backup/PITR 없음. 2026-08-27 public schema+data custom dump, schema SQL, restore list, SHA256을 저장소 밖 mode 600으로 만들고 검증했다.
+- live schema delta: 060/061 marker와 062 pairing RPC 3개는 존재한다. 063–067은 없고,
+  064 미적용으로 `authenticated`에 `SELECT, REFERENCES, TRIGGER, TRUNCATE`가 남아 있다.
+  065 영향 pairing/malformed active 행은 모두 0이고 067 대상 `daily_records`는 5행이다.
+  `push_delivery_state`와 `send-push`가 없어 066은 보류한다. 안전한 다음 SQL은 exact
+  064 → 065 → 067 → 063이며 파일마다 catalog 검증 후 reload/actor matrix를 수행한다.
+  실행 직전 사용자 확인이 필요하다.
+- live Auth: Google true, Apple false, Email true, Phone false, signup enabled. Google을 기본 로그인으로 제공하므로 Apple Review Guideline 4.8 대응을 위해 Apple web OAuth가 실제 iPhone에서 작동하기 전 제출하지 않는다.
+- 현재 Apple 구현은 Supabase browser OAuth + custom-scheme PKCE다. `ASAuthorizationAppleIDProvider`를 사용하지 않으므로 binary `com.apple.developer.applesignin` entitlement는 추가하지 않는다. Portal App ID/Services ID/provider 설정과 profile은 별도 운영 gate다.
+- Production SQL: exact 064/065/067/063 **APPLIED (2026-08-28)**. Auth provider,
+  Vercel Production, 066, TestFlight, App Store Connect mutation은 **NOT APPLIED**.
+
+### 2026-08-28 Production Supabase closure
+
+- exact repository 파일 SHA를 고정하고 `supabase db push` 없이 `064 → 065 → 067 → 063`을
+  한 파일씩 적용했다. 각 트랜잭션 직후 catalog를 확인했고 최종 통합 재확인도 PASS했다.
+- 064: `crypto_pairings`의 authenticated 권한은 `SELECT` only, anon SELECT false,
+  pairing 0행이다. 과거 P0 `TRUNCATE/TRIGGER/REFERENCES` 권한은 제거됐다.
+- 065: RPC 3개는 authenticated-only, SECURITY DEFINER, fixed `search_path`, `auth.uid()`
+  bound다. rollback-only negative actor 검증은 PASS했지만 live active device와 couple
+  scope key가 0이어서 실제 두 기기 confirm→activate 정상 경로는 **UNVERIFIED**다.
+- 067: `is_profile_post BOOLEAN NOT NULL DEFAULT false`; 기존 5행은 false, NULL 0행이다.
+  owner/partner/private/former/unrelated 경계와 rollback 후 행·marker 불변을 확인했다.
+- 063: 허용 목록 6개만 반환하고 memo는 제외한다. gomsin 1행,
+  soldier/former/unrelated 0행, anon `401/42501`을 확인했다.
+- migration ledger relation은 여전히 없고 066의 선행 테이블/sender도 없으므로
+  `supabase db push`와 066은 계속 금지/보류한다. public archive는 실제 복원됐지만 Auth
+  rows와 Storage blobs는 포함하지 않으므로 전체 재해복구 PASS로 부르지 않는다.
+
+### 2026-08-27 실제 기기·원격 운영 gate 갱신
+
+- 마이탭 헤더는 좌우 88px 대칭 슬롯으로 고쳐 `+` 왼쪽, 아이디/자물쇠 화면 정중앙, 작성/설정 오른쪽을 유지한다. 390px 실제 렌더에서 중심 오차 1px 이하와 각 44px 터치 타깃을 E2E로 확인했다.
+- 이 보정 뒤 `LANG=en_US.UTF-8 npm run verify`는 exit 0으로 다시 통과했다. 254 files / 3,630 tests, 전체 lint/typecheck, production build가 포함되며 과거 `deviceKeyPort` 병렬 timeout은 재발하지 않았다.
+- iOS 27.0 iPhone 16 Pro는 Xcode 27.0 build `27A5252f`/iOS 27 SDK에서 `connected`로 확인됐다. 활성 Apple Developer 팀과 새 Apple Development 인증서를 연결하고, ignored `ios/App/LocalSigning.xcconfig`를 통해 Team ID를 저장소에 남기지 않은 채 `app.gomsinlog` development profile을 생성했다. signed Debug build가 `BUILD SUCCEEDED`, 실물 기기 설치 목록의 `곰신로그` 0.1.0(1)과 실행 중 `App.app/App` 프로세스 경로 일치까지 PASS했다.
+- 2026-08-28 fresh release 재설치로 과거 “publishable-key release artifact 아님” 상태는
+  종료됐다. 첫 시도는 `.env`의 legacy key 때문에 의도대로 abort했고, live Supabase
+  publishable key를 메모리로만 전달한 재시도는 2,166 modules build, 5 plugins sync,
+  `dist`/iOS `public`/signed `App.app` index hash 일치, Xcode 27 beta `BUILD SUCCEEDED`,
+  overwrite install·launch·process 생존까지 PASS했다. 화면 조작·Foundation Models·Secure
+  Enclave·airplane mode는 **UNVERIFIED**다. Supabase Apple provider, Services ID/key,
+  Distribution/Archive/TestFlight/App Store Connect는 여전히 별도 **BLOCKED/PENDING** gate다.
+- 설치 후 사용자가 보고한 검정 화면은 Xcode 27 로그의 `UIScene life cycle is required for apps built with this SDK` fatal로 iOS 27 및 26.5 simulator에서 재현했다. 단일-window `SceneDelegate`와 scene manifest를 추가한 commit `34b6e4c`는 simulator에 이어 실물 iPhone 16 Pro / iOS 27에서도 온보딩을 실제 렌더했고, 종료 후 재실행 및 30초 이상 프로세스 생존에도 검정 화면이 재발하지 않았다. cold-start custom-scheme 취소 callback은 오류 토스트를 표시했다. 실제 provider 로그인 완료는 **UNVERIFIED**다.
+- live Vercel에서 feature Preview `b2090d1`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
+- live `delete-account` Edge Function은 ACTIVE(version 6, JWT required)이고 Production origin preflight 200, 무인증 POST 401을 확인했다. 실제 계정 삭제는 희생 계정을 영구 삭제하므로 별도 action-time 승인 전까지 **UNVERIFIED**다.
+- 2026-08-27 실물 재검증 시점 디스크 여유는 약 9.1GB다. 사용자 파일을 임의 삭제하지 않으며 Archive 전에 최소 약 10GB를 확보한다.
+- 기록 작성 화면은 선택한 사진을 저장 전 글 바로 아래에서 기기 내부 Blob URL로 보여 주고,
+  각 사진을 44px 삭제 버튼으로 제외할 수 있다. 미리보기 URL은 삭제·저장·화면 이탈 때 해제하며,
+  저장 전 서버 업로드가 없음을 390px Playwright로 확인했다.
+- 출시 기본값(`VITE_E2EE_DEVICE_PROTECTION_ENABLED=false`)과 원격 write floor가 모두 비활성인
+  계정은 기존 Supabase RLS 기록 경로를 계속 사용한다. write-floor 조회는 일시 실패에 한 번만
+  재시도하고 두 번 모두 실패하거나 실제 floor가 활성인 경우에는 평문으로 낮추지 않는다.
+  닫힌 기록보호 설정으로 보내는 CTA는 flag OFF에서 제거하고 `다시 시도`로 바꿨다.
+- 같은 working tree를 Xcode 26.5 SDK로 iOS 27 실물 iPhone에 signed Debug build·덮어 설치하고
+  `App.app/App` 프로세스와 온보딩 실제 렌더를 확인했다. 검정 화면은 재발하지 않았다. 약관 동의,
+  실제 OAuth 완료와 로그인 후 기록 저장은 사용자 세션이 필요한 별도 수동 gate로 남는다.
+- 2026-08-28 재확인에서 앱 설정에는 원격 `server.url`이 없고 설치된 `app.gomsinlog`의
+  `App.app/App`가 실행됐다. Xcode 26.6 / iPhoneOS 26.5 SDK signed Debug 결과물을 iOS 27
+  실물 기기에 다시 덮어 설치했고 1초 후 온보딩이 정상 렌더됐다. 시스템 브라우저는 OAuth
+  provider 화면에만 사용한다.
+- 기록 작성 델타의 첫 독립 검토에서 같은 프레임의 기본/재시도 중복 제출 P1이 발견됐고,
+  세 작성 진입점 모두 동기식 in-flight guard를 사용하도록 보완했다. fresh Terra High closure는
+  exact uncommitted delta에 P0-P3 0건으로 **PASS**했다.
 
 ## 온디바이스 요약의 출시 계약
 
@@ -40,19 +138,23 @@
    AI는 무엇이 중요한지 고르지 않으며, 펼친 줄도 정확한 원본 하나를 계속 가리킨다.
    전체 줄 유지는 상대의 오늘에만 적용되고, 나의 오늘·보관·하이라이트·여러 날이 밀린
    구간은 기존 최대 5줄을 유지한다.
+9. 추론은 앱 실행·기록 저장·백그라운드가 아니라 사용자가 **상대의 오늘 스토리**를 열었을
+   때만 시작한다. 규칙 문장을 먼저 그린 뒤 선택적 네이티브 다듬기를 적용한다. 같은 payload는
+   다시 실행하지 않고, 화면 이탈 시 취소한다. 지원 iPhone에서 지연·발열·배터리를 측정하기
+   전에는 prewarm이나 자동 백그라운드 추론을 추가하지 않는다.
 
 ## 원격 작업의 안전 순서
 
-1. exact release SHA와 rollback 문서를 고정한다.
-2. Supabase backup과 함수/권한/catalog를 다시 읽는다.
-3. `060_partner_username_projection.sql`을 exact SQL로 적용한다.
-4. `061_reject_null_partner_profile_actor.sql`을 exact SQL로 적용한다.
-5. PostgREST schema를 reload한다.
-6. owner, active partner, former partner, unrelated, anon/NULL actor를 실제 세션으로 검증한다.
-7. Apple provider와 redirect URL을 설정하고 Google/Apple PKCE 왕복을 실제 iPhone에서 확인한다.
-8. production deploy 후 `/us`, `/search`, `/settings`, 기록 작성, 사진 상세, 스토리, 계정 삭제를
+1. **완료:** exact release SHA와 rollback 문서를 고정하고 public backup을 실제 복원한다.
+2. **완료:** Supabase 함수/권한/catalog를 다시 읽고 사용자 action-time 승인을 받는다.
+3. **완료:** 빈 ledger를 replay하지 않고 exact 064 → 065 → 067 → 063을 파일별 적용·검증한다.
+4. **완료:** PostgREST reload와 rollback-only owner/partner/former/unrelated/anon 경계를
+   확인한다. 065 실제 두 기기 정상 ceremony는 기기/scope key가 생긴 뒤 별도 검증한다.
+5. **다음:** PR #90을 merge하고 Apple provider/redirect를 설정한 뒤 Google/Apple PKCE
+   왕복을 실제 iPhone에서 확인한다.
+6. production deploy 후 `/us`, `/search`, `/settings`, 기록 작성, 사진 상세, 스토리, 계정 삭제를
    두 계정으로 확인한다.
-9. TestFlight에서 같은 경로와 온디바이스 모델의 기기 gate를 다시 수행한다.
+7. TestFlight에서 같은 경로와 온디바이스 모델의 기기 gate를 다시 수행한다.
 
 ## 지금 수정하지 말아야 할 것
 
@@ -66,5 +168,5 @@
 ## App Store 제출 가능 판정
 
 코드가 존재하거나 simulator가 빌드되는 것만으로 제출 가능하지 않다. 단계 2–7의 실제 증거가
-모두 PASS여야 한다. 특히 Apple 로그인, 원격 060/061 actor matrix, signed TestFlight,
+모두 PASS여야 한다. 특히 Apple 로그인, 원격 064/065/063 actor matrix, signed TestFlight,
 지원 iPhone 온디바이스 품질이 끝나기 전에는 최종 판정을 `CONDITIONAL`보다 높이지 않는다.

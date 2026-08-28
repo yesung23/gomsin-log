@@ -154,8 +154,8 @@ export function registerAuthDeepLinkHandler(
     }
   }
 
-  const listenerPromise = App.addListener('appUrlOpen', ({ url }) => {
-    if (!isNativeAuthCallbackUrl(url)) return;
+  function enqueueCallback(url: string): Promise<void> {
+    if (!isNativeAuthCallbackUrl(url)) return Promise.resolve();
 
     if (pendingCount >= MAX_PENDING_CALLBACKS) {
       console.warn('[gomsinlog] Pending OAuth callback queue full; dropping callback.');
@@ -178,12 +178,33 @@ export function registerAuthDeepLinkHandler(
         pendingCount -= 1;
       });
     return queue;
-  }).catch(() => {
+  }
+
+  // Install the live listener first so an OAuth return cannot slip between
+  // startup and the cold-launch lookup. If both paths surface the same URL,
+  // the existing callback-key memory below exchanges it only once.
+  const listenerPromise = App.addListener('appUrlOpen', ({ url }) =>
+    enqueueCallback(url),
+  ).catch(() => {
     // Without this listener the native OAuth return can never complete, so say
     // so once rather than leaving an unhandled rejection and a silent dead end.
     console.error('[gomsinlog] Could not register the OAuth deep link listener.');
     reportSafely(onFailure, OAUTH_RETURN_MESSAGES.exchangeFailed);
     return null;
+  });
+
+  void listenerPromise.then(async (listener) => {
+    if (!listener) return;
+
+    try {
+      const launch = await App.getLaunchUrl();
+      if (launch?.url) await enqueueCallback(launch.url);
+    } catch {
+      // Keep the live listener usable even if the one-time cold-start lookup
+      // is unavailable, and never print the callback URL or plugin error.
+      console.error('[gomsinlog] Could not inspect the native launch URL.');
+      reportSafely(onFailure, OAUTH_RETURN_MESSAGES.exchangeFailed);
+    }
   });
 
   return () => {

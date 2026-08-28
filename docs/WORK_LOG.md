@@ -114,6 +114,282 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-27 · Xcode 27 Apple Development 서명·실물 iPhone 설치 gate
+
+#### PLAN POSITION
+- Phase: App Store Release Candidate
+- Workstream: Apple signing and physical-device packaging
+- Step: Xcode 27 beta, 활성 Apple Developer 팀, development certificate/profile을 통한 실물 iPhone signed build·install 증명
+- Previous Gate: Apple Developer 등록 완료, Xcode 27 beta 설치 확인
+- This Gate: development signing/install/process PASS; release artifact·Archive·TestFlight·실기기 기능 검증은 후속
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 제품·수익·저장전략 변경 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/release-validation.md`
+- Current-state checked: live branch/HEAD/status, Xcode Apple Accounts, Keychain identities, CoreDevice device/app/process state
+- Latest relevant Work Log checked: 2026-08-27 App Store 첫 출시 백엔드 유지·이전 준비 판단
+- MASTER PLAN version / 기준일: App Store Release Plan / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary, Computer Use, local CLI
+- Model: current primary model
+- Role: Apple release operator and verifier
+- PR: 없음
+- Branch: `codex/profile-post-composer`
+- Base SHA: `654194cb7128f1af70107dabaabc0e4c81d07b22`
+- Old HEAD: `654194cb7128f1af70107dabaabc0e4c81d07b22`
+- New HEAD / Reviewed HEAD: working-tree documentation delta; native Team ID is ignored local config only
+
+#### CHANGED / REVIEWED
+- file: Apple Developer team / Mac Keychain / local provisioning state
+- function/component/migration: Apple Development certificate, `app.gomsinlog` iOS Team Provisioning Profile
+- what changed/reviewed: 활성 Admin 팀에서 새 Development 인증서 1개를 생성하고 Xcode 자동 서명으로 development profile을 생성했다. 기존 인증서는 삭제하지 않았다.
+- why: iOS 27 실물 기기 signed build/install을 가능하게 하기 위해서다.
+- file: `ios/App/LocalSigning.xcconfig` (gitignored)
+- function/component/migration: `DEVELOPMENT_TEAM`
+- what changed/reviewed: 실제 Team ID를 로컬 ignored 설정에만 기록했다. 추적되는 `project.pbxproj`에는 Team ID를 남기지 않았다.
+- why: 로컬 서명은 재현하되 계정별 signing material을 저장소에 커밋하지 않기 위해서다.
+- file: `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `control-tower/reports/codex/2026-08-27_apple-development-signing-physical-device_codex.md`
+- function/component/migration: release gate evidence
+- what changed/reviewed: membership/signing/install 단계의 live 상태를 PARTIAL로 갱신했다.
+- why: 과거 BLOCKED 상태를 실제 증거로 교체하고 기능/Archive 미검증을 분리하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: 변경 없음
+- Production: Supabase/Vercel/Auth provider/TestFlight/App Store 배포 변경 없음
+
+#### VERIFICATION
+- command: beta Xcode `xcodebuild -version`, `xcrun --sdk iphoneos --show-sdk-version`
+- PASS / FAIL / UNVERIFIED: PASS — Xcode 27.0 build 27A5252f, iOS SDK 27.0
+- what it actually proves: iOS 27 toolchain 존재. 앱 동작 증거는 아님.
+- command: `xcrun devicectl list devices`
+- PASS / FAIL / UNVERIFIED: PASS — physical iPhone 16 Pro connected
+- what it actually proves: CoreDevice 연결. 앱 설치/실행은 별도 증거.
+- command: `security find-identity -v -p codesigning`
+- PASS / FAIL / UNVERIFIED: PASS — Apple Development identity 2개 valid
+- what it actually proves: 이 Mac Keychain에서 development codesign 가능.
+- command: Xcode GUI automatic signing + `xcrun devicectl device info apps --search app.gomsinlog`
+- PASS / FAIL / UNVERIFIED: PASS — 곰신로그 0.1.0(1), bundle `app.gomsinlog`, Developer App 설치 확인
+- what it actually proves: signed install. fresh release web artifact나 화면 기능은 증명하지 않음.
+- command: `xcrun devicectl device process launch ... app.gomsinlog`, device process/path와 installed app path 대조
+- PASS / FAIL / UNVERIFIED: PASS — launch 성공, `App.app/App` 실행 경로 일치
+- what it actually proves: 앱 프로세스 시작. 화면·로그인·온디바이스 모델 동작은 증명하지 않음.
+- command: beta Xcode physical destination signed Debug `xcodebuild ... build`
+- PASS / FAIL / UNVERIFIED: PASS — `BUILD SUCCEEDED`, development profile 사용
+- what it actually proves: tracked Team ID 없이 ignored LocalSigning 설정으로 서명 빌드 재현.
+- command: `npx vitest run src/lib/nativeConfig.test.ts src/lib/iosPrivacyManifest.test.ts`
+- PASS / FAIL / UNVERIFIED: 초기 FAIL 2/74 → remediation 후 PASS 74/74
+- what it actually proves: 초기 tracked `DEVELOPMENT_TEAM` 위반을 검출했고, ignored LocalSigning 방식으로 교정됨.
+- command: `git diff --check`, `git check-ignore -v ios/App/LocalSigning.xcconfig`, `git status --short`
+- PASS / FAIL / UNVERIFIED: PASS — signing 설정은 ignored, 기존 `.DS_Store` 외 추적 native diff 없음
+- what it actually proves: Team ID/signing material이 Git에 새로 노출되지 않음.
+
+#### REVIEW IMPACT
+- DELTA
+- whether an earlier review is stale: 코드·DB·crypto 의미는 unchanged. release gate의 signing/physical-install 상태만 새 증거로 갱신한다.
+
+#### BLOCKERS
+- code: Supabase publishable key가 없어 fresh `build:release` 미실행
+- environment: 없음 — Xcode 27/iOS 27 development signing은 준비됨
+- external/manual: 실제 화면 조작, Apple OAuth, Foundation Models/airplane mode, Distribution certificate, Archive/TestFlight/App Store Connect
+
+#### STOPPED AT
+- exact completed boundary: Apple Development certificate/profile 생성, signed physical-device build/install/process verification 완료. Supabase key 생성 전.
+
+#### REMAINING
+- not completed: fresh release web artifact, release iOS sync, 실기기 기능 경로, Archive validation, TestFlight two-account smoke
+
+#### NEXT ACTION
+- next owner: 사용자 action-time 승인 후 Codex release operator
+- tool/model: primary operator; auth/provider 변경 시 independent security review
+- 기준 SHA: `654194cb7128f1af70107dabaabc0e4c81d07b22`
+- exact next task: Supabase publishable key 1개 생성 후 ignored local release env에만 설정하고 `build:release` → `cap:release:ios` → signed iPhone build를 검증
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: key 생성 action-time 승인, 값 비노출, Vercel/Apple provider/Production SQL은 각각 별도 확인
+
+#### PRODUCTION
+- APPLIED — Apple Development certificate와 development provisioning profile, local physical-device install only
+- NOT APPLIED — Supabase/Vercel/Auth provider/TestFlight/App Store distribution
+
+### 2026-08-27 · App Store 첫 출시 백엔드 유지·이전 준비 판단
+
+#### PLAN POSITION
+- Phase: App Store Release Candidate
+- Workstream: backend operations and portability
+- Step: GitHub Student Developer Pack 대체 스택과 현재 Supabase 결합도를 비교해 첫 출시 백엔드 결정
+- Previous Gate: 로컬 App Store RC 통합 검증 완료, Apple Developer 등록 완료 보고
+- This Gate: 첫 출시까지 managed Supabase 유지, 즉시 self-host/Appwrite/Azure 이전은 중단
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §8
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` ARCH-P6, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, live branch/HEAD/status, current Supabase Auth/DB/RPC/Storage/Edge Function call paths
+- Latest relevant Work Log checked: 2026-08-27 App Store RC 통합·게시물 재전송 안전성 최종 검증
+- MASTER PLAN version / 기준일: App Store Release Plan / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. 첫 출시 직전 백엔드 교체는 현재 출시 순서와 충돌하므로 채택하지 않았다.
+
+#### OWNERSHIP
+- Tool: Codex primary
+- Model: current primary model
+- Role: architecture assessment and release sequencing
+- PR: 없음
+- Branch: `codex/profile-post-composer`
+- Base SHA: `8d0e0d45f578056ae5c5a2772e8af63f77f6a1de`
+- Old HEAD: `8d0e0d45f578056ae5c5a2772e8af63f77f6a1de`
+- New HEAD / Reviewed HEAD: working-tree documentation delta
+
+#### CHANGED / REVIEWED
+- file: `src/**`, `supabase/functions/**`, `package.json`
+- function/component/migration: Supabase Auth, PostgREST table calls, RPC, Storage, Edge Functions, OAuth/session paths
+- what changed/reviewed: 코드는 변경하지 않고 실제 런타임 결합도를 읽었다. 곰신로그는 PostgreSQL 테이블만이 아니라 인증·커플 권한·RLS/RPC·사진 Storage·계정 삭제·푸시·복구 함수까지 Supabase 계약을 사용한다.
+- why: PostgreSQL 스키마 이동 가능성만 보고 첫 출시 직전에 백엔드를 교체하는 잘못된 범위 판단을 막기 위해서다.
+- file: `control-tower/reports/codex/2026-08-27_backend-stack-launch-decision_codex.md`
+- function/component/migration: launch backend decision
+- what changed/reviewed: 학생 팩 후보와 공식 제약, 유지 결정, portability guardrail, 향후 전환 trigger를 기록했다.
+- why: 무료 크레딧 만료나 단일 게시글이 출시 아키텍처를 흔들지 않도록 근거를 남기기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: 공통 source of truth와 커플 공유 경로 유지
+- Production: Supabase/Vercel/Apple/App Store Connect 변경 없음
+
+#### VERIFICATION
+- command: `rg`로 현재 Supabase Auth/DB/RPC/Storage/Edge Function 호출 경로 확인
+- PASS / FAIL / UNVERIFIED: PASS — 다수의 직접 런타임 의존성을 확인함
+- what it actually proves: 현재 이전 범위가 단순 PostgreSQL 테이블 복사가 아님을 증명한다. 트래픽·비용 예측은 증명하지 않는다.
+- command: GitHub Education, Appwrite Education, Azure for Students, Supabase pricing/self-host/restore 공식 문서 확인
+- PASS / FAIL / UNVERIFIED: PASS — 2026-08-27 공개 조건 기준
+- what it actually proves: Appwrite Education은 상업적 사용 불가, Azure는 기간성 크레딧, managed Supabase와 self-host의 운영 책임 및 복원 범위를 확인했다.
+
+#### REVIEW IMPACT
+- NONE
+- whether an earlier review is stale: 코드·DB·보안 의미 변경이 없어 기존 코드 리뷰를 stale하게 만들지 않는다.
+
+#### BLOCKERS
+- code: 없음 — 백엔드 교체는 출시 blocker가 아니라 의도적으로 미채택한 범위다.
+- environment: Supabase release publishable key와 Xcode signing identity는 별도 기존 gate다.
+- external/manual: Apple/Supabase/Vercel의 지속 상태 변경은 각 작업 직전 action-time 확인 필요
+
+#### STOPPED AT
+- exact completed boundary: launch backend를 managed Supabase로 유지하는 판단과 근거 기록. 원격 변경 전.
+
+#### REMAINING
+- not completed: 독립 logical backup 자동화, Storage/Auth/Edge 설정 복구 runbook, 실제 트래픽 기반 비용 trigger 계측
+
+#### NEXT ACTION
+- next owner: Codex release operator
+- tool/model: primary operator, 보안·권한 delta가 생기면 독립 security reviewer
+- 기준 SHA: `8d0e0d45f578056ae5c5a2772e8af63f77f6a1de`
+- exact next task: Supabase publishable key와 Xcode signing을 각각 action-time 승인 후 설정하고 release build/실기기 경로를 검증
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 키를 저장소·로그·리포트에 노출하지 않고, Apple/Supabase Production 변경마다 현재 상태·blast radius·rollback을 제시한다.
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-26 · 복무 레벨 티어별 EXP 리셋(0→100%) 및 누적 복무율 분리 검증
+
+#### PLAN POSITION
+- Phase: V4 찾기 탭 군화 복무 표면 정교화
+- Workstream: product UI and service level calculation
+- Step: 7단계 복무 티어 경계별 실시간 EXP 리셋(0→100%) 적용 및 누적 복무율 분리 동작 검증 기록
+- Previous Gate: 2026-08-25 progressive disclosure 및 찾기 탭 복무 EXP 7단계 disclosure 도입
+- This Gate: 티어별 EXP 리셋(0→100%), 1초=1 EXP, 전체 복무율 분리, 실제 날짜 기준/관계 점수 배제 로컬 검증 완료
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md` (§3.4), `docs/V4_BACKLOG.md` (A3)
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7 — 관계 점수·애정도 분석 금지, 실제 입대/전역일 사실 기반 경험치 원칙 준수
+- Engineering source checked: `CLAUDE.md`, `AGENTS.md` (§2, §16, §17, §18), `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, branch `codex/profile-post-composer`, committed HEAD `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- Latest relevant Work Log checked: 2026-08-25 찾기 탭 복무 EXP 단계 공개 항목
+- MASTER PLAN version / 기준일: V4 / 2026-08-26
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary / Gemini 3.7 Flash
+- Model: `gemini-3.7-flash`
+- Role: Bounded Doc Worker & Local Verification Recording
+- PR: 없음
+- Branch: `codex/profile-post-composer`
+- Base SHA: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- Old HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- New HEAD / Reviewed HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21` (uncommitted working tree docs update)
+
+#### CHANGED / REVIEWED
+- file: `docs/V4_AS_BUILT.md`
+- function/component/migration: §3.4 찾기 복무 카드 동작 설명
+- what changed/reviewed: 전체 복무율과 분리된 7단계 복무 티어 경계(0/10/25/40/55/70/85/100%)별 실시간 EXP 0→100% 리셋 동작, 1초=1 EXP, 실제 날짜 기준/관계 점수 미포함 사실 명시
+- why: 실제 구현 및 검증된 동작을 canonical 지도에 반영
+- file: `docs/V4_BACKLOG.md`
+- function/component/migration: A3 찾기 탭 군화 복무 표면 상태
+- what changed/reviewed: 군화 표시형 V1.1(티어별 EXP 리셋 0→100% 및 복무율 분리) DONE (2026-08-26) 갱신, 곰신 상대 복무 projection NOT BUILT 유지
+- why: 제품 백로그 현황을 실제 구현 상태와 동기화
+- file: `control-tower/reports/gemini/2026-08-26-service-tier-exp-reset.md`
+- function/component/migration: 복무 레벨 티어별 EXP 리셋 독립 검증 보고서
+- what changed/reviewed: 제품 동작 검증 사실(티어 리셋, 복무율 분리, 1초=1 EXP, 실제 날짜 기준), 독립 실행 검증 결과(focused 2개 파일/39개 테스트, typecheck, targeted ESLint, 전 군/티어 경계 시뮬레이션, git diff check), 비주장 항목(스크린샷, full verify, 프로덕션/원격, 실기기, 커밋/푸시 미주장) 기록
+- why: Control Tower 공유 기억 보고서 생성
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 암호화·키 교환·E2EE 프로토콜 변경 없음
+- DB/migration semantics: 데이터베이스 스키마, migration 파일, RLS 정책 변경 없음
+- product semantics: 7단계 티어 정의(신병·일초·일꺾·일말·상초·상꺾·왕고) 및 경계(0/10/25/40/55/70/85/100%) 불변, 실제 입대/전역일 기준 불변, 관계 점수 미포함 원칙 불변
+- Production: 커밋, 푸시, PR, Vercel 배포, 원격 Supabase 마이그레이션 적용 없음
+
+#### VERIFICATION
+- command: `npx vitest run src/lib/serviceLevel.test.ts src/features/search/searchPage.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS (2 files, 39 tests passed)
+- what it actually proves: 티어별 EXP 리셋(0→100%), 경계 도달 시 0 리셋, tierElapsedSec/tierTotalSec/tierExpPercent 계산, SearchPage 복무 경험치 인라인 UI 표시 및 summary 복무율(totalPercent) 분리 표시 검증
+- command: `npm run typecheck` (`tsc -b --force`)
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript 타입 시스템 정합성 (ServiceExpResult의 tierElapsedSec, tierTotalSec 포함)
+- command: `npx eslint src/lib/serviceLevel.ts src/lib/serviceLevel.test.ts src/features/search/SearchPage.tsx src/features/search/searchPage.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 변경 및 관련 파일의 ESLint 린트 규칙 준수 (0 errors, 0 warnings)
+- command: all-branch/all-boundary simulation (`serviceLevel.test.ts` multi-branch 및 7단계 티어 경계 0/10/25/40/55/70/85/100% 매핑 시뮬레이션)
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 육군, 해군, 공군, 해병대, 사회복무요원 등 전 군종 및 전 티어 경계에서 단조 증가 및 구간별 정상 리셋 검증
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 공백 오류, 충돌 마커 등 diff 이상 없음
+- unverified: 스크린샷 캡처 미실시(UI 렌더 변경 미수행), `npm run verify` 전체 검증 미실시(focused 검증만 수행), 원격 Supabase/프로덕션 미적용, 실기기(iOS/Android) 미실행, commit/push 미수행
+
+#### REVIEW IMPACT
+- NONE: 문서 및 보고서 기록 작업으로 보안/암호화/DB 영향 없음. 기존 보안 리뷰 효력 유지
+
+#### BLOCKERS
+- code: 없음
+- environment: 없음
+- external/manual: 없음
+
+#### STOPPED AT
+- exact completed boundary: `docs/WORK_LOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `control-tower/reports/gemini/2026-08-26-service-tier-exp-reset.md` 작성 및 기존 작업트리 보존 완료
+
+#### REMAINING
+- not completed: 곰신 상대 복무 projection (RLS/RPC 및 동기화 모델 설계 필요), 프로덕션 배포 및 커밋/푸시
+
+#### NEXT ACTION
+- next owner: 사용자 / 후속 에이전트
+- tool/model: TBD
+- 기준 SHA: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- exact next task: working tree 변경사항 통합 검토 및 후속 작업 계획 수립
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 곰신 상대 복무 표시 작업 시 partner projection RLS 및 allowlist 보안 설계 선행
+
+#### PRODUCTION
+- NOT APPLIED (문서 기록 및 로컬 검증만 수행)
+
 ### 2026-08-25 · 시뮬레이터 인증 세션 검증과 우발적 partner username 변경 (INCIDENT)
 
 #### PLAN POSITION
@@ -7240,3 +7516,1926 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — no Supabase, Auth provider, redirect, Vercel, TestFlight, App Store Connect, push, merge, or deploy mutation
+
+### 2026-08-26 · Codex/Sol · 기록 보호 실제 제품 경로 복구 (local HOLD)
+
+#### PLAN POSITION
+- Phase: iPhone/App Store release blocker repair
+- Workstream: native record protection, two-account couple-key ceremony, DB authorization
+- Step: disabled/unreachable protection UI를 첫 기기 설정 → 두 계정 SAS 확인 → one-CSK 활성화 경로로 연결하고 local gate를 실행
+- Previous Gate: 암호 코어와 설정 표시는 있었지만 feature flag default OFF, 두 계정 pairing UI/caller 부재, remote 039/040 미적용으로 실제 기록 보호가 작동하지 않음
+- This Gate: local code/DB actor/build gate와 독립 Luna verification PASS; independent Sol final verdict, remote migration, two logged-in simulator/physical iPhone proof remain HOLD/BLOCKED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, user request to make record protection operational
+- Business source checked / NOT APPLICABLE: no pricing, customer, cloud-storage, AI-role, or monetization change
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/feature-build.md`, `security-review.md`, `migration-gate.md`, `release-validation.md`
+- Current-state checked: repository, `docs/CURRENT_STATE.md`, live branch/HEAD/status, remote read-only catalog
+- Latest relevant Work Log checked: 2026-08-25 iPhone on-device summary/App Store preparation
+- MASTER PLAN version / 기준일: V4 / 2026-08-26
+- Does this task conflict with canonical direction? NO — explicit user request authorizes this E2EE phase; no premium privacy gate or server-held decryption key was introduced
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator; Gemini 3.7 Flash High UI/session verifier; Claude Opus independent security review; Luna High verifier; Sol architect review attempts
+- Model: primary Codex; `google-antigravity/gemini-3.7-flash` high; Claude Opus thinking; `main/gpt-5.6-luna` high; `main/gpt-5.6-sol` only for the security gate
+- Role: implementation integrator/local verifier; bounded independent reviewers/verifier; final Sol reviewer unavailable due transport failure
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- Old HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- New HEAD / Reviewed HEAD: no commit; dirty working-tree delta on the same base SHA
+
+#### CHANGED / REVIEWED
+- file: `src/app/e2ee/coupleProtectionFlow.ts`, `src/pages/SettingsPage.tsx`, `src/components/DeviceProtectionSection.tsx`
+- function/component/migration: native two-account record-protection product flow
+- what changed/reviewed: both devices independently rebuild one 440-byte transcript, display the same SAS, persist each actor's own confirmation, let only canonical low create one CSK, then install runtime and activate the exact couple floor
+- why: existing cryptographic primitives had no reachable product caller, so the settings control could not complete shared-record protection
+- file: `supabase/migrations/062_e2ee_pairing_ceremony_rpc.sql`, repository ports/adapter
+- function/component/migration: actor-bound pairing writers
+- what changed/reviewed: removed direct authenticated pairing DML and introduced start/confirm/mark-active RPCs with NULL actor, active couple, exact-two-member, device ownership, expiry, canonical owner, active-CSK gates
+- why: one client must never write the partner's confirmation or directly forge `CRYPTO_ACTIVE`
+- file: `src/app/e2ee/coupleProtectionFlow.ts`, `src/data/e2ee/SupabaseE2eeRepository.ts`, memory parity tests
+- function/component/migration: canonical confirmer refresh and live pairing lookup
+- what changed/reviewed: already-confirmed canonical actor reuses the persisted signature instead of generating a new non-deterministic ECDSA signature; repository reads only live pairing states so an expired/rejected historical row cannot make `.maybeSingle()` fail when a replacement exists
+- why: the first confirmer otherwise could fail activation after the partner confirmed, and a renewed ceremony could fail from multiple same-couple rows
+- file: `src/app/e2ee/coupleProtectionFlow.ts`, `src/app/e2ee/coupleProtectionFlow.test.ts`
+- function/component/migration: active authority lifetime
+- what changed/reviewed: the five-minute TTL still blocks late human confirmation and CSK creation, but a `CRYPTO_ACTIVE` transcript remains cryptographically verifiable after activation instead of expiring the installed couple authority
+- why: applying proposal TTL to an already-active pairing would make record protection fail on app reopen after five minutes
+- file: feature flag/status/transcript decoder and tests
+- function/component/migration: native default-on kill switch, `PAIRING_REQUIRED`, strict persisted transcript decoding
+- what changed/reviewed: web/PWA always off; native defaults on unless explicit false; settings distinguishes first-device setup from couple pairing; malformed/non-canonical transcript fails closed
+- why: iPhone could previously ship a permanently unavailable control even when native keystore support existed
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: no new algorithm or custom primitive; existing P-256/HKDF/AES-GCM/certificate/revocation/SAS code reused
+- DB/migration semantics: local migration 062 added; remote DB unchanged
+- product semantics: no server-side plaintext fallback, no health/cycle projection, no AI, no partner-private visibility
+- Production: no SQL, Vercel, OAuth, Apple, deploy, push, merge, or TestFlight mutation
+
+#### VERIFICATION
+- command: focused Vitest for the complete current E2EE path
+- PASS / FAIL / UNVERIFIED: PASS — 16 files / 123 tests
+- what it actually proves: two memory accounts see the same SAS; one confirmation creates no CSK; first confirmer refresh activates without re-signing; conflicting/expired proposals and foreign devices fail closed; adapter/UI/session/status contracts hold
+- command: independent Luna verification of the broader E2EE corpus
+- PASS / FAIL / UNVERIFIED: PASS — 25 files / 484 tests; typecheck, targeted lint, phase0, diff check PASS
+- what it actually proves: an independent verifier inspected the dirty delta and reproduced the broader local E2EE and database gates; it does not grant Production security approval
+- command: final Luna TTL delta verification
+- PASS / FAIL / UNVERIFIED: PASS — focused 3/3, broader E2EE/crypto corpus ALL PASS, TypeScript 0 errors
+- what it actually proves: TTL still rejects pre-activation confirmation/CSK creation while an independently signature/certificate/revocation-verified `CRYPTO_ACTIVE` authority survives later app launches
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: first FAIL — unrelated C passed start due SQL NULL comparison; repaired; final PASS — PostgreSQL 17, 60 migrations, 362 assertions
+- what it actually proves: actual actor/RLS/RPC behavior on a fresh local PostgreSQL chain, including anon/unrelated/former partner/direct-DML/single-confirmation/canonical-owner negatives; not remote Supabase
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, full lint, 251 files / 3567 tests, production build 2164 modules
+- what it actually proves: complete current dirty-worktree local regression gate; includes pre-existing post-composer changes and is not an isolated committed SHA
+- command: `npx cap sync ios`
+- PASS / FAIL / UNVERIFIED: PASS; tracked iOS diff none
+- what it actually proves: web bundle/plugin wiring syncs into iOS without generated-project drift
+- command: unsigned generic iOS Simulator `xcodebuild`
+- PASS / FAIL / UNVERIFIED: first FAIL when incorrectly targeting `App.xcodeproj` (`Unable to resolve module dependency: Capacitor`); correct CocoaPods `App.xcworkspace` command PASS — `BUILD SUCCEEDED`
+- what it actually proves: correct workspace에서 native project/Capacitor device-key plugin compile and link; not logged-in runtime or physical Secure Enclave behavior
+- command: independent review
+- PASS / FAIL / UNVERIFIED: Claude conditional PASS with no P0/P1 and P2 fake-parity findings repaired; exact-final-diff Sol and later live-catalog final gate each ended `stream disconnected before completion`; no further Sol retry
+- what it actually proves: Claude의 조건부 독립 판정과 Luna의 재현 증거는 있으나, exact final diff에 대한 Sol 최종 승인은 없으며 구현자가 이를 대신 승인하지 않음
+
+#### REVIEW IMPACT
+- FULL — new auth/RPC/privacy-sensitive pairing path requires a fresh independent Sol review before commit/release
+
+#### BLOCKERS
+- code: no open local test failure; final Sol security verdict missing, so Production/release status remains HOLD
+- environment: 2026-08-26 final live catalog refresh superseded the earlier snapshot: 039 content envelope, 040 exact-scope floor, 043/044/045, 046 NULL-actor guards, 060/061, and all 062 RPC/grant effects are present; migration ledger remains blank; physical iPhone Secure Enclave runtime not tested
+- external/manual: Supabase Billing is Free Plan and managed backups are unavailable. A repository-external mode-600 `public` schema+data custom dump, schema SQL, restore list, hashes, and pre-change catalog snapshots were created under `/Users/han-yejun/Desktop/gomsinlog-production-backups/2026-08-26-pre-record-protection`; Auth/Storage managed backup is not available. Two real authenticated accounts/simulators must still complete the same SAS ceremony
+
+#### STOPPED AT
+- exact completed boundary: local implementation, fresh-chain actor matrix, independent Luna verification, full verify, Capacitor sync, unsigned simulator build; before commit, remote SQL, and authenticated runtime proof
+
+#### REMAINING
+- successful independent Sol security verdict and any resulting repair
+- no migration application remains: the exact required effects already exist remotely, so do not replay 039→040→044→045→046→062 and do not repair the blank ledger by guessing
+- two logged-in iPhone simulators: first-device setup on both, same SAS, one-side wait, second confirmation, canonical refresh, protected shared record round-trip/exact partner decrypt
+- physical iPhone Secure Enclave/reinstall/recovery/unlink checks
+
+#### NEXT ACTION
+- next owner: Sol independent reviewer, then approved production operator
+- tool/model: `main/gpt-5.6-sol` read-only FULL review → migration gate → two-account simulator verifier
+- 기준 SHA: dirty delta on `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`; commit only after review closure
+- exact next task: obtain an actual Sol verdict; if PASS, run the authenticated two-account actor/product matrix against the already-applied remote functions, then commit the isolated local implementation
+
+#### DO NOT ADVANCE UNTIL
+- independent Sol returns no open P0/P1/P2 finding on the exact diff
+- the existing public backup/catalog snapshot remains readable and private; managed Auth/Storage backup limitation is explicit
+- any future Production SQL mutation requires a new live delta and user confirmation; this session has no SQL to apply
+
+#### PRODUCTION
+- NOT APPLIED in this session — live catalog shows required effects were already present, so no duplicate SQL was executed
+### 2026-08-26 · 시뮬레이터 두 계정 실측 검증 및 프로필 게시물/보안 전수 검사
+
+#### PLAN POSITION
+- Phase: App Store release candidate verification
+- Workstream: 2-account simulator runtime, post composer, 062 E2EE ceremony validation
+- Step: 두 시뮬레이터(iPhone 17, iPhone 16 Pro) 실제 로그인 계정 실측, 마이탭 + 버튼 및 중앙 아이디, 사진 업로더 팝오버, 062 로컬/원격 정합성 전수 검증
+- Previous Gate: 복무 EXP 리셋 검증, 기록 보호 062 RPC 로컬 구현 (local HOLD)
+- This Gate: 두 계정 실측 렌더링 확인, Vitest 251개 파일 3569개 전수 PASS, phase0 60개 마이그레이션 362개 PASS, Xcode 시뮬레이터 빌드 SUCCEEDED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `AGENTS.md`, `docs/skills/` release-validation
+- Current-state checked: repository live state, 2 booted simulators (iPhone 17, iPhone 16 Pro)
+- Latest relevant Work Log checked: 2026-08-26 복무 티어별 EXP 리셋 항목
+- MASTER PLAN version / 기준일: V4 / 2026-08-26
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator
+- Model: gemini-3.7-flash (Default mode)
+- Role: 전수 검사 및 시뮬레이터 런타임 실측 검증
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- Old HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- New HEAD / Reviewed HEAD: uncommitted working tree
+
+#### CHANGED / REVIEWED
+- file: `src/features/us/PostComposerSheet.tsx`
+- function/component/migration: PostComposerSheet 1장 선택 뒤로가기 경로 및 사진 개별 제거 시 URL.revokeObjectURL 메모리 누수 수정
+- what changed/reviewed: 1장 선택 시 source로 즉시 복귀, onRemove 시 file 타입이면 URL.revokeObjectURL 즉시 호출
+- why: P2 네비게이션 불일치 및 Blob 메모리 누수 방지
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 암호화 알고리즘/프로토콜 변경 없음
+- DB/migration semantics: 062 SQL 스키마 변경 없음 (사용자 원격 적용 확인 완료)
+- product semantics: V4 인스타 문법 및 공책 디자인 보존
+- Production: 원격 Supabase 변경을 에이전트가 직접 수행하지 않음 (사용자 콘솔 적용)
+
+#### VERIFICATION
+- command: `npx vitest run --reporter=basic`
+- PASS / FAIL / UNVERIFIED: PASS (251 files, 3,569 tests passed, 0 failures)
+- what it actually proves: 프로젝트 전체 단위/통합 회귀 테스트 100% 통과
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS (PostgreSQL 17, 60 migrations, 362 assertions)
+- what it actually proves: 001부터 062까지의 DB RLS/RPC 권한 및 격리 계약 증명
+- command: `npm run test:write-floor`, `test:p5`, `test:p0`, `test:rollback`
+- PASS / FAIL / UNVERIFIED: PASS (39 + 93 + 76 + 3 = 211 assertions)
+- what it actually proves: E2EE 암호문 쓰기 바닥, 기기 승인, 권한 회수, 롤백 불가 불변식 증명
+- command: `npm run typecheck` && `npm run lint`
+- PASS / FAIL / UNVERIFIED: PASS (TypeScript 0 errors, ESLint 0 warnings)
+- command: `xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`
+- PASS / FAIL / UNVERIFIED: PASS (`** BUILD SUCCEEDED **`)
+- what it actually proves: iOS 시뮬레이터용 네이티브 프로젝트/코코아팟 컴파일 및 링킹 성공
+- command: 시뮬레이터 2계정(iPhone 17, iPhone 16 Pro) 실제 UI 검증 및 스크린샷
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves:
+  - iPhone 17 (c8a64be7, nhmdd94@gmail.com): @iwannasex, 파트너 예성 표시, 우리 화면 헤더 좌측 + 버튼, 중앙 ID @iwannasex 🔒, 정상 렌더링 확인
+  - iPhone 16 Pro (71d7da6b, hys030205@gmail.com): @probe_self_zz, 파트너 예1 표시, 우리 화면 헤더 좌측 + 버튼, 중앙 ID @probe_self_zz 🔒, 설정 화면 정상 렌더링 확인
+  - 시뮬레이터 상에서 + 버튼 탭 시 게시물 작성 바텀 시트(PostComposerSheet) 열림 확인
+  - 앨범에서 올리기 탭 시 iOS 네이티브 사진/파일 선택기 팝오버(사진 보관함/사진 찍기/파일 선택) 트리거 실측 확인
+
+#### REVIEW IMPACT
+- NONE: Sol 미사용 지침 준수. 로컬 하네스 및 실측 시뮬레이터 검증 결과 기록
+
+#### BLOCKERS
+- environment: 시뮬레이터 환경에는 Apple Secure Enclave 하드웨어가 없어 설정의 기록 보호 카드가 실기기(iPhone)에서만 활성화됨 (정상적인 플랫폼 제약)
+- external: TestFlight 서명 및 앱스토어 심사 계정 등록
+
+#### NEXT ACTION
+- next owner: 사용자 및 릴리즈 운영자
+- exact next task: 완료된 작업트리 커밋 후, 실제 아이폰 기기에서 TestFlight 빌드 테스트
+
+### 2026-08-26/27 · 복무 성장 UI 및 파트너 복무 프로젝션 063 + 로컬 iOS 서명 및 Xcode 27 경고 remediation 검증
+
+#### PLAN POSITION
+- Phase: App Store release candidate verification & V4 Search/My service refinement
+- Workstream: service-growth UI, migration 063 partner projection, local iOS signing configuration
+ - Step: 복무 7티어 EXP/누적 복무율 분리 UI, 063 군화 복무 타임라인 allowlist RPC, 로컬 signing 분리 및 Xcode 27 경고 remediation(iOS 15.0 floor 상향) 포커스드 검증 기록
+- Previous Gate: 2026-08-26 시뮬레이터 두 계정 실측 검증 및 프로필 게시물/보안 전수 검사
+ - This Gate: 복무 7티어 및 063 로컬 하네스(PostgreSQL 17 61개 마이그레이션 369개 assertion) PASS, 포커스드 remediation Vitest 8개 파일 147개 PASS, fresh full verify(LANG=en_US.UTF-8 npm run verify, 252 files / 3586 tests, build 2164 modules, partnerDay seed 991 pass, nativeConfig 57 pass) PASS with exit 0, 로컬 signing 시크릿 분리 확인. 후속 Xcode 27 경고 해결 네이티브 패키징 델타(iOS 15.0 floor 상향, 포커스드 네이티브 127/127 PASS, nativeConfig 61/61 PASS, pod install/cap sync PASS, xcodebuild 15.0 확인, 무서명 simulator clean build SUCCEEDED, 14.0 경고 0건) 타깃 델타 검증 PASS. Sol High 최종 보안/개인정보 델타 PASS (P0/P1/P2/P3 all 0, 커밋된 HEAD fbbd35496fcd1c848f2f7437bb6a85ffb2399f21 + dirty 작업트리 유효, Production approval not granted, 063 NOT APPLIED, remote UNVERIFIED). Terra High 최종 로컬 릴리즈/네이티브 델타 초기 P3 stale README iOS 14 지적 -> packages/capacitor-on-device-summary/README.md를 iOS 15 floor + iOS 26 FoundationModels runtime gate로 수정 후 narrow recheck PASS (P0-P2 0건 유지, P3 closed, git diff check PASS). 로컬 feature/security/native gate verdict PASS. 전체 App Store 릴리즈 판정은 원격 Supabase/Vercel/Apple 설정, 실기기 iPhone, 서명 아카이브/TestFlight 미검증으로 CONDITIONAL PASS/HOLD 유지. commit/push/deploy/Production mutation 없음.
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — 실제 날짜 및 개인 꾸미기 기반 게이미피케이션 원칙 준수, 관계 점수/애정도 분석/AI 순위 배제
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, branch `codex/profile-post-composer`, exact committed HEAD `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`, `origin/master` `d9a2eb0a22b657c6384d59d1a53aa668fdb286f0`
+- Latest relevant Work Log checked: 2026-08-26 시뮬레이터 두 계정 실측 검증 및 프로필 게시물/보안 전수 검사
+- MASTER PLAN version / 기준일: V4 / 2026-08-26
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: 없음. 복무 게이미피케이션은 실제 입대/전역일 사실 기반이며 관계 점수를 추가하지 않음. 파트너 프로젝션은 읽기 전용 정제 데이터임.
+
+#### OWNERSHIP
+- Tool: Codex narrow documentation worker
+- Model: gemini-3.7-flash
+- Role: 복무 성장/063 프로젝션/로컬 서명 분리 결과 및 릴리즈 게이트 문서 기록
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- Old HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- New HEAD / Reviewed HEAD: uncommitted working tree (HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`)
+
+#### CHANGED / REVIEWED
+- file: `src/lib/serviceLevel.ts`, `src/lib/serviceLevel.test.ts`, `src/features/search/SearchPage.tsx`, `src/features/search/searchPage.test.tsx`
+- function/component/migration: 복무 레벨 계산 및 찾기 탭 UI
+ - what changed/reviewed: 7티어(신병/일초/일꺾/일말/상초/상꺾/왕고), 1초=1 EXP, 티어 내 EXP 리셋(0→100%)과 전체 누적 복무율 분리, 전체 티어 목록 progressive disclosure, 군화 본인 복무 편집 가능 및 연결된 곰신 파트너 복무 읽기 전용 표면, 44px 터치 타깃, AI 순위/관계 점수 배제. Remediation: 비연결(disconnected) 시 상대 복무를 렌더링하지 않고 반드시 connected 상태를 요구하도록 방어 로직 강화 (`hasPartnerService = connected && ...`)
+- why: V4 찾기 탭 군화 복무 표면 정교화 및 불필요한 점수화 배제 원칙 준수
+- file: `supabase/migrations/063_partner_service_projection.sql`, `src/lib/sync.ts`, `src/lib/sync.test.ts`, `src/lib/migration063.test.ts`, `src/lib/migrationSecurityContracts.test.ts`
+- function/component/migration: `get_partner_service_info()` RPC 및 동기화 계층
+ - what changed/reviewed: 곰신이 연결된 활성 군화의 복무 타임라인만 읽는 allowlist 프로젝션 (`branch`, `military_status`, `enlistment_date`, `expected_discharge_date`, `discharge_date`, `discharge_date_source`). memo 및 profiles 행 비공개 유지, NULL actor 거부, 활성 곰신+활성 군화 및 정확히 2명 활성 커플 멤버 검증, 고정 search_path
+ - why: 곰신 화면에서 군화 복무 타임라인 표시에 필요한 최소 권한 정제 데이터 제공. Remediation: `isValidCalendarDate`에 strict UTC round-trip 검증(`new Date(...)T00:00:00Z` 파싱 후 ISO 일치 확인)을 추가하여 regex만으로는 걸러지지 않는 불가능한 날짜(예: 2026-02-30) 엄격 차단
+- file: `ios/App/Config.xcconfig`, `ios/App/LocalSigning.xcconfig.example`, `.gitignore`, `src/lib/nativeConfig.test.ts`
+- function/component/migration: iOS Xcode 빌드 설정 및 로컬 서명 분리
+- what changed/reviewed: `Config.xcconfig`에서 `#include? "LocalSigning.xcconfig"`를 선택적 include하도록 구성하고, `.gitignore`에 `LocalSigning.xcconfig`를 등록하여 개발자 Team ID 시크릿 유출 방지. 예시 파일에는 placeholder(`YOUR_TEAM_ID`)만 유지.
+- why: 공개 저장소에 실제 Apple Developer Team ID 및 프로비저닝 정보가 커밋되지 않도록 격리
+- file: `src/lib/coupleLifecycle.ts`, `src/lib/store.tsx`
+- function/component/migration: 커플 라이프사이클 및 로컬 스토어 상태 관리
+- what changed/reviewed: Remediation: 격리(quarantine) 진입 시 및 라이프사이클 negative membership / disconnect 시 stale `partnerMilitary`를 명시적으로 제거(`delete partnerMilitary`, `partnerMilitary: undefined`)하여 이전 파트너 복무 데이터 잔존 방지
+- why: Sol 보안 검토 P2 지적사항(stale partnerMilitary survived quarantine/disconnect) 해결
+- file: `e2e/serviceGrowth.spec.ts`
+- function/component/migration: Playwright E2E 복무 성장 테스트
+- what changed/reviewed: Remediation: 군화 본인 화면 접속 시 `get_partner_service_info` RPC 미호출(`partnerServiceRpcCalls === 0`) 및 곰신 화면에서 1회 호출(`partnerServiceRpcCalls === 1`)을 실제 네트워크 요청 관측으로 검증
+- why: Terra 최종 검토 P2 지적사항(E2E soldier RPC non-call observation gap) 해결
+- file: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- function/component/migration: V4 제품 스펙 및 백로그 문서
+- what changed/reviewed: Remediation: 곰신 상대 복무 projection의 로컬 구현/검증 상태, 미배포·미출시(LOCAL FILE ONLY / NOT APPLIED), 7티어 EXP 리셋 및 복무율 분리 명시 등 문서 모순 정합성 정렬
+- why: Terra 최종 검토 P2 지적사항(V4 docs contradiction) 해결
+- file: `ios/App/Podfile`, `ios/App/Podfile.lock`, `ios/App/App.xcodeproj/project.pbxproj`, `packages/capacitor-device-keys/GomsinlogCapacitorDeviceKeys.podspec`, `packages/capacitor-on-device-summary/GomsinlogCapacitorOnDeviceSummary.podspec`, `src/lib/nativeConfig.test.ts`
+- function/component/migration: Xcode 27 경고 remediation 및 네이티브 deployment target floor 정규화
+- what changed/reviewed: Source iOS floor changed 14.0 -> 15.0 in `ios/App/Podfile`, 4 App project deployment-target settings (`project.pbxproj`), and two local plugin podspecs (`GomsinlogCapacitorDeviceKeys.podspec`, `GomsinlogCapacitorOnDeviceSummary.podspec`). `Podfile.lock` checksums regenerated by `pod install`. `Podfile` `post_install` normalizes generated third-party pod targets to 15.0; generated Pods project was not manually edited. Broad Xcode recommended settings button was not used. `[CP] Embed Pods Frameworks` no-output warning remains harmless/non-blocking because Podfile intentionally uses `disable_input_output_paths` and CocoaPods generates it; no generated script edit. `src/lib/nativeConfig.test.ts` updated with minimum deployment target assertions and comment cleanup (now 61 tests).
+- why: Xcode 27 unsupported 14.0 deployment target 경고 해결 및 프로젝트/포드 설정 일관성 확보
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 암호화 프로토콜/E2EE 키 교환 의미 변경 없음
+- DB/migration semantics: 마이그레이션 001..062의 기존 시맨틱 변경 없음
+- product semantics: 7단계 복무 티어는 실제 날짜 기반이며 관계/애정도 점수화 없음, 원본 기록 플로우 유지
+- Production: 원격 Supabase, Vercel, Apple 등에 일체 변경 적용하지 않음 (LOCAL ONLY)
+
+#### VERIFICATION
+- Initial review findings:
+  - Initial final Terra review HOLD: P1 full verify not rerun; P2 V4 docs contradiction; P2 E2E soldier RPC non-call observation gap.
+  - Initial Sol security review HOLD: P2 stale partnerMilitary survived quarantine/disconnect; P3 regex-only impossible dates.
+- Remediation implemented locally:
+  - `partnerMilitary` cleared in quarantine (`store.tsx`) and lifecycle negative membership / disconnect (`coupleLifecycle.ts`)
+  - Disconnected render strictly requires `connected` in `SearchPage.tsx` (`hasPartnerService = connected && ...`)
+  - Strict UTC round-trip calendar date validation in `sync.ts` (`isValidCalendarDate`)
+  - Real E2E request observation in Playwright (`e2e/serviceGrowth.spec.ts`, soldier 0 calls, gomsin 1 call)
+  - V4 docs aligned (`docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`)
+- command: `npx vitest run src/lib/sync.test.ts src/lib/coupleLifecycle.test.ts src/lib/store.test.tsx src/features/search/searchPage.test.tsx src/lib/serviceLevel.test.ts src/lib/migration063.test.ts src/lib/migrationSecurityContracts.test.ts src/lib/nativeConfig.test.ts` (focused remediation tests)
+- PASS / FAIL / UNVERIFIED: PASS (8 files, 147 tests passed)
+- what it actually proves: quarantine/disconnect 시 partnerMilitary 정리, strict UTC calendar date 검증, 063 동기화/보안 계약 및 네이티브 서명 격리 통과
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript 컴파일 에러 없음
+- command: `npx eslint src/lib/serviceLevel.ts src/lib/serviceLevel.test.ts src/features/search/SearchPage.tsx src/features/search/searchPage.test.tsx src/lib/sync.ts src/lib/sync.test.ts src/lib/migration063.test.ts src/lib/nativeConfig.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS
+ - what it actually proves: 관련 변경 파일 ESLint scoped lint 통과
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS (PostgreSQL 17, 61 migrations 001..063, 369 assertions)
+- what it actually proves: 001부터 063까지 전체 DB 마이그레이션 체인 및 actor matrix(gomsin, soldier, anon, unrelated, former partner, NULL actor, 3인 커플 이상치) 권한 격리 검증 완료
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 공백 및 충돌 마커 에러 없음
+ - command: `npx playwright test e2e/serviceGrowth.spec.ts`
+- PASS / FAIL / UNVERIFIED: PASS (2 passed)
+ - what it actually proves: 브라우저 목(mock) 환경에서 군화 본인 복무(390px) 및 곰신 파트너 복무(390px) 화면 렌더링 확인 (`ui-audit-results/service-growth/` 스크린샷 2건 확보), 군화 0회 / 곰신 1회 RPC 호출 실제 네트워크 관측 검증 완료. 실기기 iPhone 증거 아님.
+- command: `npm run build` && `npx cap sync ios` && unsigned generic iOS Simulator `xcodebuild` (선행 실측)
+- PASS / FAIL / UNVERIFIED: PASS (`BUILD SUCCEEDED`)
+- what it actually proves: 웹 번들 빌드(2164 모듈), Capacitor iOS 동기화 및 Xcode 시뮬레이터 무서명 컴파일/링크 성공
+ - command: `LANG=en_US.UTF-8 npm run verify` (fresh exact command)
+ - PASS / FAIL / UNVERIFIED: PASS (exit code 0)
+ - what it actually proves: typecheck PASS, full lint PASS, Vitest 252/252 files and 3586/3586 tests PASS, production build PASS with 2164 modules. `partnerDay` seed 991이 전체 스위트 실행에서 정상 통과(passed in full suite); `nativeConfig` 57 tests passed.
+- Xcode 27 경고 해결 및 네이티브 패키징 델타 검증:
+  - Note: 본 패키징 델타는 이미 문서화된 전체 verify PASS 이후에 수행됨. 2차 전체 verify를 주장하지 않으며 타깃 네이티브 델타 검증(targeted native delta validation)으로 명시.
+  - command: focused native tests
+  - PASS / FAIL / UNVERIFIED: PASS (127/127 tests passed; `src/lib/nativeConfig.test.ts` now 61/61 PASS after comment cleanup)
+  - what it actually proves: 네이티브 설정, 서명 분리, 배포 타깃 일관성(15.0), 디바이스 키/온디바이스 요약 단위 계약 검증
+  - command: `pod install` && `npx cap sync ios`
+  - PASS / FAIL / UNVERIFIED: PASS
+  - what it actually proves: CocoaPods 의존성 설치 성공, `Podfile.lock` 체크섬 갱신, Capacitor iOS 동기화 클린 완료
+  - command: `xcodebuild -workspace ios/App/App.xcworkspace -scheme App -showBuildSettings`
+  - PASS / FAIL / UNVERIFIED: PASS
+  - what it actually proves: `IPHONEOS_DEPLOYMENT_TARGET = 15.0` 및 `RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET = 15.0` 정상 반영 확인
+  - command: unsigned generic iOS Simulator clean build (`xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO clean build`)
+  - PASS / FAIL / UNVERIFIED: PASS (`** BUILD SUCCEEDED **`)
+  - what it actually proves: 무서명 시뮬레이터 클린 빌드 성공, 미지원 14.0 경고 0건, `[CP] Embed Pods Frameworks` no-output 경고는 `disable_input_output_paths` 의도적 사용에 따른 무해/non-blocking 상태 증명
+  - command: `git diff --check`
+  - PASS / FAIL / UNVERIFIED: PASS
+  - what it actually proves: 공백 오류 및 머지 충돌 마커 없음
+- Sol High 최종 보안/개인정보 델타 검토:
+  - PASS / FAIL / UNVERIFIED: PASS (P0/P1/P2/P3 all 0)
+  - what it actually proves: 커밋된 HEAD `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21` 및 현재 dirty 작업트리에 대해 보안/개인정보 보호 계약 유효. Production 승인은 미부여(Production approval not granted); migration 063 NOT APPLIED, 원격 Supabase는 UNVERIFIED.
+- Terra High 최종 로컬 릴리즈/네이티브 델타 검토:
+  - PASS / FAIL / UNVERIFIED: PASS (P0-P2: 0, P3 closed)
+  - what it actually proves: 초기 검토 시 `packages/capacitor-on-device-summary/README.md`의 P3 stale README iOS 14 표기 1건 발견. 이를 iOS 15 floor + iOS 26 FoundationModels runtime gate로 즉시 수정 후 narrow recheck 실행하여 PASS (P0-P2 0건 유지, P3 closed, `git diff --check` PASS).
+- 로컬 게이트 및 릴리즈 최종 판정:
+  - Local feature/security/native gate verdict: PASS.
+  - Overall App Store release verdict: CONDITIONAL PASS/HOLD (원격 Supabase/Vercel/Apple 설정, 실기기 iPhone 온디바이스 AI/Secure Enclave, 서명된 아카이브 및 TestFlight가 unverified 상태이므로 전체 릴리즈 판정은 CONDITIONAL PASS/HOLD 유지).
+  - Production mutation: no commit, no push, no deploy, no Production mutation.
+
+#### REVIEW IMPACT
+ - DELTA: Sol High 최종 보안/개인정보 델타 PASS (P0/P1/P2/P3 all 0, 커밋된 HEAD `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21` + dirty 작업트리 유효, Production approval not granted, 063 NOT APPLIED, remote UNVERIFIED). Terra High 최종 로컬 릴리즈/네이티브 델타 PASS (초기 P3 stale README iOS 14 지적 -> `packages/capacitor-on-device-summary/README.md`를 iOS 15 floor + iOS 26 FoundationModels runtime gate로 수정 후 narrow recheck PASS, P0-P2 0건 유지, P3 closed, `git diff --check` PASS). 로컬 feature/security/native gate verdict는 PASS이며, 원격 Supabase/Vercel/Apple 설정, 실기기 iPhone, 서명 아카이브/TestFlight 미검증으로 전체 App Store 릴리즈 판정은 CONDITIONAL PASS/HOLD 유지. Production unchanged; no commit/push/deploy/Production mutation.
+
+#### BLOCKERS
+- code: 없음 (포커스드 테스트 및 phase0 전수 통과)
+- environment: 원격 Supabase 현재 상태 UNVERIFIED, migration 063 NOT APPLIED. Vercel 배포 exact SHA 및 Apple provider / redirect allowlist UNVERIFIED.
+ - external/manual: 실기기 iPhone(온디바이스 AI 및 Secure Enclave), 실제 Apple 로그인, 배포용 아카이브/TestFlight 서명 및 업로드 UNVERIFIED. 전체 App Store 릴리즈 판정은 로컬 게이트 PASS에도 불구하고 HOLD / CONDITIONAL 유지.
+
+#### STOPPED AT
+ - exact completed boundary: 로컬 복무 성장 UI, migration 063 SQL/동기화, 로컬 signing 분리, Xcode 27 경고 remediation(iOS 15.0 floor 상향 및 네이티브 델타 검증), 포커스드 테스트/phase0 검증, Sol High final security/privacy delta PASS, Terra High final local release/native delta PASS (P3 README 수정 및 recheck PASS 완료) 및 릴리즈 게이트 문서화 완료. 커밋, 푸시, 배포, 원격 Supabase/Vercel/Apple 변경 없음.
+
+#### REMAINING
+- 명명된 변경 사항의 격리 커밋 (선택적 작업)
+- 원격 배포 전 백업 상태 확인, blast radius 검토, 롤백 절차 확인 및 사용자 명시적 승인 후 적용
+- 실제 iPhone 기기 및 TestFlight 상에서의 인증/서명/배포 검증
+
+#### NEXT ACTION
+ - next owner: 사용자 및 승인된 배포 운영자
+ - tool/model: Git CLI / Xcode / Supabase CLI
+- 기준 SHA: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21` 기반 dirty 작업트리
+ - exact next task: 로컬 게이트 통과 후 필요 시 명명된 파일 격리 커밋 및 원격 Supabase/Apple 배포 게이트 준비 (사용자 명시적 승인 및 백업 확인 선행)
+
+#### DO NOT ADVANCE UNTIL
+- migration 063 원격 적용 전 Supabase 백업 확인 및 사용자 작업 시점 명시적 승인 획득
+- 실제 Team ID가 Git에 커밋되지 않도록 로컬 서명 파일 격리 상태 유지
+ - 실기기 테스트 및 TestFlight 배포 전 Apple Developer 서명/프로비저닝 라이브 구성 확인
+
+#### PRODUCTION
+ - NOT APPLIED: migration 063은 LOCAL FILE ONLY이며 원격 프로덕션에 일체 적용되지 않음. Production unchanged.
+
+### 2026-08-27 · App Store 로컬 RC closure, Sol/Terra 최종 PASS, live Supabase 064/065 gap 확인
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate
+- Workstream: connection-first product completion, local release validation, Production preflight
+- Step: 전체 dirty delta 검증, 보안 closure, 렌더/Xcode 검증, live schema/auth/backup 확인
+- Previous Gate: 복무 성장/063/iOS 15 delta local PASS, remote/device HOLD
+- This Gate: local feature/security/native PASS; Production 064/065/063와 Apple/TestFlight는 HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — connection-first, factual personalization, no relationship score or AI ranking
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/` feature/security/migration/release procedures
+- Current-state checked: repository/branch/HEAD/status, live Supabase project/auth/catalog/backups
+- Latest relevant Work Log checked: 2026-08-26/27 service growth and record-protection entries
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator
+- Model: primary integration; Sol High independent security; Terra High independent final reviewer; Gemini 3.7 Flash High worker attempts failed with 429 and changed no files
+- Role: orchestrator/integrator/verifier; independent security and release review
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- Old HEAD: `fbbd35496fcd1c848f2f7437bb6a85ffb2399f21`
+- New HEAD / Reviewed HEAD: code HEAD `cf922df` (`9d12bc8` product/security + `cf922df` iOS packaging); final ledger commit pending
+
+#### CHANGED / REVIEWED
+- file: daily-summary contract/bridge/story tests and existing StoryViewer path
+- function/component/migration: grapheme-safe native refinement and progressive disclosure
+- what changed/reviewed: no Segmenter means deterministic all-line fallback; all eligible rows retained, first 5 shown, `N개 더 보기`, exact record navigation
+- why: avoid Unicode corruption and silent loss/AI ranking
+- file: `src/features/us/*`, record/store paths, E2E fixture/specs
+- function/component/migration: profile post composer
+- what changed/reviewed: upload/trip/story sources, reorder/caption/privacy, copy media to exact new record path, 44px action proof
+- why: make My profile posting usable without weakening record protection
+- file: service-level/search/sync and migration 063
+- function/component/migration: seven-tier factual service EXP and sanitized partner projection
+- what changed/reviewed: tier-local EXP resets, overall progress separate, gomsin read-only allowlist projection, stale partner data cleared
+- why: game-like growth without relationship scoring or raw military memo exposure
+- file: E2EE use cases/repository/memory parity, migrations 062/064/065, phase0 harness
+- function/component/migration: couple pairing ceremony hardening
+- what changed/reviewed: missing pairing fails closed; server activation precedes local activation; malformed evidence quarantined; direct authenticated TRUNCATE removed in 064
+- why: make record protection work without plaintext or local-authority fallback
+- file: onboarding/provider paths and `e2e/onboardingLandingShots.spec.ts`
+- function/component/migration: connection-first login and provider availability
+- what changed/reviewed: fail-closed providers, non-iOS Apple-only empty state, value proposition, required consents, 48px Google CTA before/after activation screenshots
+- why: advertise only working login paths while showing the product value before account creation
+- file: iOS project/Podfile/podspecs/config/native tests
+- function/component/migration: iOS 15 floor and local signing isolation
+- what changed/reviewed: unsupported 14.0 target removed, local Team ID ignored, Capacitor/native plugins synced
+- why: Xcode 26/27 simulator compatibility without committing signing secrets
+- file: live remote catalog and external backup
+- function/component/migration: read-only Production preflight
+- what changed/reviewed: 062 present; 063 absent; 064 absent with authenticated TRUNCATE; 065 marker absent; fresh mode-600 dump/hash verified
+- why: repository migrations and Production reality must remain separate
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm or trust-authority invention beyond reviewed 062/064/065 ceremony hardening
+- DB/migration semantics: no existing migration edited; 062–065 are forward files; empty remote ledger not repaired
+- product semantics: no AI record ranking, relationship score, server AI, CloudKit, Google Play scope
+- Production: no SQL, Auth provider, Vercel, Apple, TestFlight, App Store Connect, master merge, or deploy; reviewed commits pushed only to `origin/codex/profile-post-composer`
+
+#### VERIFICATION
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; typecheck, full lint, 254 files / 3,630 tests, production build
+- what it actually proves: current local TypeScript/web/test bundle; not remote or device
+- command: JSON full Vitest rerun
+- PASS / FAIL / UNVERIFIED: PASS, 254 files / 3,630 passed / 0 failed / 0 pending
+- what it actually proves: exact test totals and no recurrence of the historical parallel keystore timeout
+- command: `npm run test:phase0`, `test:p0`, `test:p5`, `test:write-floor`, `test:rollback`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 63 migrations / 392 assertions; 76 + 93 + 39 assertions; rollback PASS
+- what it actually proves: fresh local actor/RLS/RPC/write-floor chain; not remote application
+- command: focused Playwright product flows and landing
+- PASS / FAIL / UNVERIFIED: PASS — 8/8 + 2/2
+- what it actually proves: 390px daily-summary/post/service flows and 320/390 login consent/CTA rendered behavior with mocked backend
+- command: `npx cap sync ios`; Xcode iPhone 16 Pro iOS 26.5 arm64 unsigned build
+- PASS / FAIL / UNVERIFIED: PASS; `BUILD SUCCEEDED`
+- what it actually proves: synced native source compiles/links for simulator; not signing, physical iPhone, Archive, or TestFlight
+- command: Sol High final security review
+- PASS / FAIL / UNVERIFIED: PASS — P0/P1/P2 0; focused 12 files / 253 tests and phase0 392 assertions
+- what it actually proves: local security closure; not Production approval
+- command: Terra High final dirty-delta review
+- PASS / FAIL / UNVERIFIED: PASS — P0–P3 0; narrow 22 files / 483 tests
+- what it actually proves: independent local release delta review; not Production/device proof
+- command: live `projects list`, `migration list`, `backups list`, Auth settings, table stats, external pg_dump/hash/restore-list verification
+- PASS / FAIL / UNVERIFIED: PASS for read-only observation and backup integrity
+- what it actually proves: current project healthy; ledger/backups empty; Auth Google ON/Apple OFF; 062 exists; 063/064/065 absent by exact schema markers/ACL; public backup recoverable at file level
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: no whitespace/conflict-marker errors
+
+#### REVIEW IMPACT
+- FULL: prior reviews were stale after ceremony hardening; fresh Sol and Terra independently PASSed the exact dirty delta. Final docs-only ledger/report changes are review-neutral.
+
+#### BLOCKERS
+- code: no open local P0–P3 finding
+- environment: Xcode GUI is stopped on a stale `/tmp` workspace conflict modal; source-safe temporary workspace build passed. Disk remains tight but build caches created by this session were removed.
+- external/manual: 064/065/063 Production application and actor matrix; Apple provider/redirect/real round-trip; Vercel exact SHA; physical iPhone; signed Archive/TestFlight/App Store metadata
+
+#### STOPPED AT
+- exact completed boundary: verified local release candidate, independent security/release PASS, fresh Production public backup, exact live delta, and named-file code/native commits; before Production mutation
+
+#### REMAINING
+- action-time confirmation then exact 064 → 065 → 063, PostgREST reload and actor matrix
+- Apple web OAuth setup and physical iPhone PKCE test
+- exact production deploy, signed Archive/TestFlight, two-account/review metadata checks
+
+#### NEXT ACTION
+- next owner: Codex release operator after user action-time confirmation
+- tool/model: primary operator; Sol/Terra delta only if migration or security semantics change
+- 기준 SHA: `cf922df` plus final docs-only ledger commit
+- exact next task: present live state/blast/rollback, then apply exact 064 → 065 → 063 only after confirmation
+
+#### DO NOT ADVANCE UNTIL
+- commits exclude `.DS_Store`, credentials and ignored `LocalSigning.xcconfig`
+- 064/065/063 SQL text matches the reviewed commit and fresh backup remains readable
+- user confirms the Production mutation at action time
+- Apple/TestFlight/physical-device items stay UNVERIFIED until actually run
+
+#### PRODUCTION
+- NOT APPLIED — read-only catalog/Auth/backup operations and feature-branch push only; no SQL/provider/master/deploy/TestFlight change
+
+### 2026-08-27 · PR #90 release CI closure and Production action gate
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate
+- Workstream: release validation and Production preflight
+- Step: exact feature HEAD CI closure before Production SQL/master
+- Previous Gate: local product/security/native PASS; first PR run HOLD
+- This Gate: PR #90 exact code HEAD all checks PASS; Production remains NOT APPLIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — connection-first, no AI ranking or relationship score
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, release/security procedures
+- Current-state checked: branch/HEAD/status/origin master, PR #90 checks, live Supabase schema/Auth/counts, external backup hashes
+- Latest relevant Work Log checked: 2026-08-27 App Store local RC closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator
+- Model: primary integration/verifier; Terra High independent Gitleaks allowlist reviewer
+- Role: CI diagnosis, minimal test/config remediation, independent release review
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `d9a2eb0a22b657c6384d59d1a53aa668fdb286f0` (`origin/master`)
+- Old HEAD: `7cf679c9199c9f1b6be0e4c5336dc983ffc40a37`
+- New HEAD / Reviewed HEAD: `73f6b4576f91c0595c2cce9c33a203b4574a8515`
+
+#### CHANGED / REVIEWED
+- file: `.gitleaks.toml`
+- function/component/migration: rule-specific `generic-api-key` allowlist
+- what changed/reviewed: exact `ios/App/Podfile.lock` path plus exact local DeviceKeys pod 40-lowercase-hex checksum line must both match
+- why: CI Gitleaks 8.24.3 mistook a CocoaPods SHA-1 checksum for an API key; no scanner or path-wide exclusion was added
+- file: `src/features/search/searchPage.test.tsx`
+- function/component/migration: pre-enlistment D-day render test
+- what changed/reviewed: fixed UTC/KST-independent clock and expected value from the same service EXP calculation rendered by the component
+- why: both CI workflows reproduced a one-day mismatch because the test compared date-only local time with an exact Asia/Seoul instant
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; 063/064/065 files untouched
+- product semantics: unchanged; only CI scanner config and test determinism
+- Production: no SQL/Auth/Apple/Vercel production/master/TestFlight/App Store mutation
+
+#### VERIFICATION
+- command: Gitleaks 8.24.3 exact first-parent PR-history detect
+- PASS / FAIL / UNVERIFIED: PASS, 5 commits scanned, 0 findings
+- what it actually proves: exact CI scanner version accepts only the reviewed checksum exception on the feature history
+- command: `TZ=UTC npx vitest run src/features/search/searchPage.test.tsx`; `TZ=Asia/Seoul ...`
+- PASS / FAIL / UNVERIFIED: PASS, 25/25 in each timezone
+- what it actually proves: the failed D-day assertion is stable across runner and product timezones
+- command: target ESLint, `npm run typecheck`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: changed test/config delta has no lint/type/whitespace regression
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; typecheck, full lint, 254 files / 3,630 tests, production build
+- what it actually proves: fresh local full regression after the CI fix
+- command: Terra High read-only Gitleaks delta review
+- PASS / FAIL / UNVERIFIED: PASS, P0/P1/P2/P3 0
+- what it actually proves: path+line AND allowlist remains narrow under Gitleaks 8.24.3 semantics; scanner upgrade requires revalidation
+- command: PR #90 exact HEAD checks
+- PASS / FAIL / UNVERIFIED: PASS — boundary, two full verify/build jobs, PostgreSQL chain, real-browser creator/partner matrix, Android, Capacitor sync, unsigned iOS build, secret/signing scan, Vercel Preview
+- what it actually proves: GitHub/Vercel Preview release gates are green for `73f6b45`; not Production or physical-device proof
+
+#### REVIEW IMPACT
+- DELTA: CI-only config/test changes. Terra independently PASSed the security scanner exception. Earlier product/Sol/Terra reviews remain valid because product, crypto and DB semantics did not change.
+
+#### BLOCKERS
+- code: none on exact code HEAD `73f6b45`
+- environment: Supabase migration ledger remains empty; `db push` prohibited
+- external/manual: action-time approval for exact Production 064 → 065 → 063; Apple provider/redirect/real round-trip; master/production deploy; physical iPhone; signed Archive/TestFlight/App Store metadata
+
+#### STOPPED AT
+- exact completed boundary: PR #90 exact code HEAD all checks PASS and live Production blast/backup rechecked; before Production mutation and master merge
+
+#### REMAINING
+- user action-time confirmation then exact 064 → 065 → 063, reload and actor matrix
+- PR #90 master merge/production deploy after remote gate PASS
+- Apple web OAuth, physical-device and signed TestFlight/App Store submission gates
+
+#### NEXT ACTION
+- next owner: Codex release operator after user action-time confirmation
+- tool/model: primary operator; Sol/Terra delta review only if security semantics change
+- 기준 SHA: `73f6b4576f91c0595c2cce9c33a203b4574a8515`
+- exact next task: apply only exact 064 → 065 → 063, verify live ACL/functions/actors, then separately confirm master merge
+
+#### DO NOT ADVANCE UNTIL
+- external backup remains hash-valid and current live counts/ACL/function markers are recorded
+- user confirms the exact Production SQL action at execution time
+- empty ledger is not replayed or repaired implicitly
+
+#### PRODUCTION
+- NOT APPLIED — feature branch and Vercel Preview only; Supabase/Auth/Apple/master/Vercel production/TestFlight unchanged
+
+### 2026-08-27 · 마이탭 실제 중앙 정렬 및 원격·실기기 출시 gate 재확인
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate
+- Workstream: release UX correction and external gate validation
+- Step: profile header geometry closure, fresh full verify, live Vercel/Apple/device preflight
+- Previous Gate: PR #90 previous exact HEAD checks PASS; Production HOLD
+- This Gate: local centering delta PASS; Production/Apple/TestFlight remain HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — connection-first, usable posting and exact records
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, release/security procedures
+- Current-state checked: branch/HEAD/status/origin master, live Vercel/Supabase Auth/Edge Function, Apple Developer status, Xcode/device process state
+- Latest relevant Work Log checked: 2026-08-27 PR #90 release CI closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator; Gemini 3.7 Flash High bounded UI worker
+- Model: primary integration/verifier; Flash High implementation
+- Role: orchestrator, final diff owner and verifier
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `415e183123c145cbd60c3e1964409696cd5f9d96`
+- Old HEAD: `415e183123c145cbd60c3e1964409696cd5f9d96`
+- New HEAD / Reviewed HEAD: `78f8402` code delta; docs ledger commit pending
+
+#### CHANGED / REVIEWED
+- file: `src/features/us/SharedProfile.tsx`
+- function/component/migration: My profile header
+- what changed/reviewed: replaced asymmetric flex distribution with symmetric 88px left/right grid slots; plus remains left, handle/lock is true viewport center, compose/settings remain right
+- why: satisfy the user-visible identity placement without changing navigation or post semantics
+- file: `e2e/postComposer.spec.ts`
+- function/component/migration: 390px rendered geometry proof
+- what changed/reviewed: asserts handle center within 1px of 195px, preserves plus 44px target, captures screenshot
+- why: prevent regression from visually plausible but mathematically off-center flex layouts
+- file: live external systems
+- function/component/migration: read-only launch preflight
+- what changed/reviewed: exact Vercel Preview/Production SHA and env names, Apple membership processing, connected iOS 27 device, active delete-account CORS/JWT boundary
+- why: separate repository readiness from deploy, signing and destructive runtime proof
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no SQL applied
+- product semantics: post creation and identity semantics unchanged
+- Production: no Supabase/Auth/Vercel/Apple/TestFlight/App Store mutation; no master merge
+
+#### VERIFICATION
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npx playwright test e2e/postComposer.spec.ts`
+- PASS / FAIL / UNVERIFIED: PASS, 2/2 in 19.7s
+- what it actually proves: 390px rendered header center, plus 44px target, post protection flow under mocked backend
+- command: focused post composer Vitest
+- PASS / FAIL / UNVERIFIED: PASS, 2 files / 41 tests
+- what it actually proves: composition helper/sheet behavior after header-only change
+- command: scoped ESLint, `npm run typecheck`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: changed local delta type/lint/whitespace integrity
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; typecheck, full lint, 254 files / 3,630 tests, production build
+- what it actually proves: full local web regression; not Production or physical-device runtime
+- command: original workspace physical iPhone build
+- PASS / FAIL / UNVERIFIED: BLOCKED after compile/link; codesign did not finish and build was stopped safely
+- what it actually proves: connected iOS 27 device and compilation through signing stage, not signed install or app runtime
+- command: live Vercel/Apple/Supabase Auth and Edge Function read-only checks
+- PASS / FAIL / UNVERIFIED: PASS for observed state only
+- what it actually proves: Preview `b2090d1` READY, Production `d9a2eb0`, legal env missing; Apple membership processing; Apple provider OFF; delete-account active/CORS 200/unauth 401
+- command: GitHub Actions runs `33012021120`, `33012020494` for exact code+ledger HEAD `b2090d1`
+- PASS / FAIL / UNVERIFIED: PASS, both workflows exit success
+- what it actually proves: boundary, two full typecheck/lint/Vitest/build directions, PostgreSQL fresh-chain security, real-browser creator/partner matrix, Deno, audit, secret/signing scan, Capacitor sync, unsigned iOS build and Android debug build on the pushed candidate
+
+#### REVIEW IMPACT
+- DELTA: presentation geometry and E2E only; no auth/DB/privacy/crypto semantics changed. Existing Sol security review remains applicable; fresh PR exact-HEAD CI is required after push.
+
+#### BLOCKERS
+- code: no open local finding
+- environment: about 3.8GB disk free, likely insufficient for Archive
+- external/manual: Production 064 → 065 → 063 action-time approval; exact legal operator/contact values; Apple membership activation/provider/key/profile; signed install/TestFlight/two-account physical-device matrix
+
+#### STOPPED AT
+- exact completed boundary: isolated code commit `78f8402`, ledger `b2090d1`, branch push, fresh local full verify, rendered geometry proof, both GitHub workflows and exact Vercel Preview PASS; before all Production mutations
+
+#### REMAINING
+- action-time approved exact remote SQL and actor matrix
+- approved legal env, master/Production deploy, Apple OAuth, signed TestFlight and physical-device checks
+
+#### NEXT ACTION
+- next owner: Codex release operator after explicit user confirmation for each external action
+- tool/model: primary operator; independent security delta review only if security semantics change
+- 기준 SHA: code `78f8402`, code+ledger `b2090d1`
+- exact next task: execute 064 → 065 → 063 only if user replies with the requested action-time approval
+
+#### DO NOT ADVANCE UNTIL
+- `.DS_Store`, `control-tower/Now.md`, credentials and ignored signing config remain excluded
+- code-bearing PR HEAD `b2090d1` checks and exact Preview remain green
+- Production SQL and legal/account operations have explicit action-time approval and rollback evidence
+
+#### PRODUCTION
+- NOT APPLIED — read-only checks and local commit only
+
+### 2026-08-27 · 복무 UX 확장 및 E2EE 출시 옵트인 제어 검증 (Local CONDITIONAL PASS / Production HOLD)
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / V4 release validation
+- Workstream: service UX extension, E2EE launch flag gating, and release verification
+- Step: service UX & partner projection verification, E2EE launch flag opt-in isolation, Settings UI gate, and remote/native preflight
+- Previous Gate: 2026-08-27 profile header geometry closure PASS; Production HOLD
+- This Gate: local feature/verification CONDITIONAL PASS; Production/Apple/TestFlight remain HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md` — connection-first V4 core flow (가볍게 기록 → 상대방의 오늘 → summary item → exact original record → 자연스러운 대화)
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — checked because E2EE launch policy changes trust model; privacy and user-content protection retained without premium gates or admin escrow
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md`, `docs/skills/README.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, branch `codex/profile-post-composer`, HEAD `a633ccb0d194159d81c061add70fab4aa348eda1`, origin/master `d9a2eb0a22b657c6384d59d1a53aa668fdb286f0`, dirty worktree preserved
+- Latest relevant Work Log checked: 2026-08-27 마이탭 실제 중앙 정렬 및 원격·실기기 출시 gate 재확인
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A — E2EE remains staged; new activation is explicit opt-in (OFF at launch); no admin escrow/master key; existing protected-data no-downgrade retained; core connection-first product flow preserved
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator & documentation worker
+- Model: gemini-3.7-flash (documentation-only worker)
+- Role: documentation-only worker & ledger recorder
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `d9a2eb0a22b657c6384d59d1a53aa668fdb286f0` (origin/master)
+- Old HEAD: `a633ccb0d194159d81c061add70fab4aa348eda1`
+- New HEAD / Reviewed HEAD: `a633ccb0d194159d81c061add70fab4aa348eda1` (dirty worktree preserved, no code/commit mutation)
+
+#### CHANGED / REVIEWED
+- file: `src/features/search/SearchPage.tsx`, `src/pages/ServicePage.tsx`, `src/features/us/SharedProfile.tsx`, `src/lib/widgetComponents.tsx`, `src/lib/milestones.ts`
+- function/component/migration: Service UX & Partner Service Projection
+- what changed/reviewed: connected gomsin sees partner service info read-only across `/search`, `/service`, `/us` and home widget; per-level Lv.1..199 then MAX EXP resets each level; soldier retains edit authority; disconnected/pending couple states fail closed
+- why: provide factual service progression and partner visibility while strictly preserving soldier edit ownership and fail-closed security
+- file: `src/app/e2ee/featureFlag.ts`, `src/lib/store.tsx`, `src/pages/SettingsPage.tsx`, `src/components/MobileShell.tsx`, `src/App.tsx`
+- function/component/migration: E2EE Launch Opt-In Gating & Settings UI Isolation
+- what changed/reviewed: env omitted/false/web disabled; only native exact 'true' activates; store new barrier/activation paths gated; runtime floor guard stays unconditional; recoverWithKit and all E2EE use cases are blocked while flag OFF; latest Settings delta hides DeviceProtectionSection/dialogs and skips bootstrap while OFF; ON behavior fully preserved
+- why: decouple general App Store launch from active E2EE rollout while keeping zero crypto downgrade on existing data and zero plaintext leakage
+- file: `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-08-27_release-resume-service-e2ee-validation_codex.md`
+- function/component/migration: documentation & ledger synchronization
+- what changed/reviewed: appended mandatory ledger entry and created comprehensive validation report capturing exact evidence without upgrading unverified checks
+- why: preserve engineering audit trail across multi-agent sessions without code mutation
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged; no crypto downgrade; runtime floor guard remains unconditional; key algorithms and pairing ceremony semantics unchanged
+- DB/migration semantics: unchanged; no migrations applied remotely; Supabase migration ledger remains empty; 063 and 066 unapplied
+- product semantics: unchanged; core connection-first daily record, partner's today, and exact record flows preserved
+- Production: no Supabase, Auth, Vercel, Apple Developer, TestFlight, or production database mutation; origin/master untouched
+
+#### VERIFICATION
+- command: service focused Vitest (4 files / 81 tests)
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: service tier calculations, EXP progression, milestones, and read-only projection logic operate correctly in isolation
+- command: service Playwright `e2e/serviceGrowth.spec.ts` (system Chrome)
+- PASS / FAIL / UNVERIFIED: PASS, 2/2 tests with screenshots `ui-audit-results/service-growth/gomsin-partner-service-390.png` and `soldier-own-service-390.png`
+- what it actually proves: rendered 390px mobile viewport geometry, 44px touch target on toggle, connected gomsin read-only view vs soldier edit controls under mocked backend
+- command: E2EE/settings focused latest Vitest (8 files / 95 tests)
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: feature flag evaluation (native-only exact true, web/omitted/false disabled), store barrier gating, SettingsPage hiding DeviceProtectionSection when flag OFF, and preservation of ON paths
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript type safety across the entire codebase
+- command: target ESLint
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: code style and lint rules satisfied on modified paths
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: no whitespace errors or merge marker conflicts in working tree
+- command: `LANG=en_US.UTF-8 npm run verify` (outside sandbox)
+- PASS / FAIL / UNVERIFIED: PASS (258 files / 3,716 tests, 0 failures; old keystore timeout did not recur: 12/12 in ~0.5s; rollback PG test 17/17 PASS; production build PASS 2,165 modules; only >500KB chunk warning)
+- what it actually proves: complete local web regression, build integrity, and test suite green outside sandbox
+- command: `npm run test:phase0` (PostgreSQL 17)
+- PASS / FAIL / UNVERIFIED: PASS (64 migrations 001..066, 041/042 frozen, 411 assertions)
+- what it actually proves: database schema migration chain 001 through 066 succeeds against clean throwaway PG17 with all security/RLS assertions passing locally
+- command: `npx cap sync ios`
+- PASS / FAIL / UNVERIFIED: PASS (5 plugins synced; tracked iOS diff hash unchanged: 918b7224...)
+- what it actually proves: Capacitor native iOS synchronization produces no unexpected tracked git diffs
+- command: unsigned iOS 27.0 simulator Debug xcodebuild
+- PASS / FAIL / UNVERIFIED: PASS (`BUILD SUCCEEDED`; latest app install/launch PASS)
+- what it actually proves: builds and launches on iOS 27.0 simulator; however, simulator session is logged-out onboarding only
+- command: signed generic iPhone Release build with Apple Development identity
+- PASS / FAIL / UNVERIFIED: PASS (exit 0; deprecation/script warnings only)
+- what it actually proves: native code compiles and links with a development profile for arm64; this is NOT App Store Archive, TestFlight, or distribution proof
+- command: independent narrow reviewer review of five-file E2EE delta
+- PASS / FAIL / UNVERIFIED: PASS (narrow reviewer verdict PASS, but Sol/Kiro final security route unavailable: Kiro claude-sonnet-5 returned INVALID_MODEL_ID; earlier Kiro opus/sol also unavailable; do not claim Sol review)
+- what it actually proves: independent narrow review passed, but formal Sol Max / Kiro security gate could not be executed
+- command: remote Supabase live read-only audit
+- PASS / FAIL / UNVERIFIED: UNVERIFIED / NOT APPLIED
+- what it actually proves: migration ledger empty (db push forbidden); table stats estimates: profiles 5, couple_members 5, couples 6, daily_records 4, scope_keys/key_envelopes/devices/recovery_identities/crypto_pairings/crypto_deployment/crypto_write_floor estimated 0; Dashboard function search shows get_partner_profile_with_username exists (060), e2ee_start/confirm/mark pairing functions exist (062 family), get_partner_service_info absent (063 NOT APPLIED), push_delivery_candidates absent (066 NOT APPLIED); exact 061/064/065 semantics UNVERIFIED; Auth live: Email Enabled, Google Enabled, Apple Disabled, signups enabled, email confirmation enabled; Site URL https://gomsin-log.vercel.app, redirects localhost, 127.0.0.1, gomsinlog://auth/callback, production web callback; query-aware sb_flow_id allow-list adequacy UNVERIFIED
+- command: Vercel production & physical device read-only audit
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: Vercel controlled tab required login, CLI unavailable/not authenticated, production env/deployed SHA UNVERIFIED; physical iPhone unavailable, real Apple OAuth, cold start, two-account, and physical Foundation Models UNVERIFIED
+
+#### REVIEW IMPACT
+- DELTA: E2EE launch flag isolation, Settings UI gate, and service UX extension. Independent narrow reviewer verdict PASS for five-file E2EE delta; however, Sol/Kiro final security route unavailable (Kiro claude-sonnet-5 returned INVALID_MODEL_ID; earlier Kiro opus/sol also unavailable; Sol review NOT claimed). Previous Sol reviews remain valid for earlier code commits, but latest delta lacks independent Sol signoff.
+
+#### BLOCKERS
+- code: none open locally
+- environment: Supabase migration ledger empty; db push forbidden; Vercel CLI not authenticated; physical iPhone unavailable
+- external/manual: action-time approval required before applying exact 063 to production; 066 and Edge Function deployment separate gate; Apple provider enablement requires credentials/config and separate approval; query-aware sb_flow_id redirect allow-list verification; physical device testing (real Apple OAuth, cold start, two-account, physical Foundation Models)
+
+#### STOPPED AT
+- exact completed boundary: local code and tests fully validated (258 files / 3716 tests PASS, PG17 64 migrations PASS, iOS simulator & generic iPhone release build PASS); documentation ledger updated; dirty worktree preserved; before any remote Supabase, Vercel, or Apple mutation
+
+#### REMAINING
+- action-time approval and execution of exact migration 063 (with pre-flight backup, blast radius analysis, rollback plan, PostgREST reload, and real actor matrix)
+- separate gates for migration 066 and Edge Function deployment
+- Apple Developer credentials, OAuth provider enablement, and redirect allow-list validation
+- Vercel production environment variables and deployed SHA verification
+- physical iPhone validation (Apple OAuth, cold start, two-account pairing, Foundation Models)
+- App Store Archive and TestFlight distribution build
+
+#### NEXT ACTION
+- next owner: Codex release operator after explicit user confirmation for each external action
+- tool/model: primary operator; Sol Max security review if model route restored
+- 기준 SHA: a633ccb0d194159d81c061add70fab4aa348eda1
+- exact next task: obtain user action-time approval for exact 063 application before any remote mutation
+
+#### DO NOT ADVANCE UNTIL
+- user grants explicit action-time approval for exact 063 application
+- pre-migration backup and live catalog state are recorded
+- `.DS_Store`, `control-tower/Now.md`, and local dirty worktree remain uncommitted and unstaged
+- Apple Developer credentials/configuration are confirmed
+
+#### PRODUCTION
+- NOT APPLIED — local verification and documentation only; no remote database, auth, hosting, or App Store mutations
+
+### 2026-08-27 · App Store RC 통합·게시물 재전송 안전성 최종 검증 (Local CONDITIONAL PASS / Release HOLD)
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / final local integration gate
+- Workstream: daily summary closure, service growth, profile posts, release hardening, security/backend preparation
+- Step: exact-row post retry closure, full local regression, native sync/build, release configuration preflight
+- Previous Gate: local feature/verification CONDITIONAL PASS; Production/Apple/TestFlight HOLD
+- This Gate: code commit `d6650fd` and independent post-replay delta PASS; release artifact remains HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — connection-first product value, AI does not select memories, E2EE remains staged/default OFF
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md`, `docs/skills/README.md`
+- Current-state checked: repository, branch, HEAD, dirty status, origin/master, local/remote/native boundaries
+- Latest relevant Work Log checked: 2026-08-27 복무 UX 확장 및 E2EE 출시 옵트인 제어 검증
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/integrator/verifier; Terra independent read-only reviewer only where material
+- Model: primary; `main/gpt-5.6-terra` High final post-replay delta review
+- Role: implementation, final diff ownership, release validation; independent P1/P2 review
+- PR: #90 context; latest local commit not pushed
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a633ccb0d194159d81c061add70fab4aa348eda1`
+- Old HEAD: `a633ccb0d194159d81c061add70fab4aa348eda1`
+- New HEAD / Reviewed HEAD: code `d6650fd`; documentation commit pending
+
+#### CHANGED / REVIEWED
+- file: `src/lib/outbox.ts`, `src/lib/store.tsx`, `src/lib/storeContext.ts`, post/store tests
+- function/component/migration: all-or-nothing profile-post staging and offline replay
+- what changed/reviewed: outbox preserves ordered-media mode; public media posts stage private; failures keep the exact row and queue; retryable media-patch causes remain retryable; final visibility is restored only after complete media attachment
+- why: prevent public text-only/partial posts and prevent queued photo intent from being silently discarded
+- file: service/search/My/home components and tests
+- function/component/migration: per-level Lv.1..199 service EXP and sanitized partner projection
+- what changed/reviewed: actual date-derived progression, per-level reset, connected gomsin read-only views, soldier-only edit ownership, stale partner projection removal
+- why: make service progress useful and game-like without inventing relationship scores
+- file: daily-summary contracts/native adapter/story tests
+- function/component/migration: more-than-five progressive disclosure and deterministic fallback
+- what changed/reviewed: all eligible records retained, five initially visible, `N개 더 보기`, exact record navigation, sequential native batches, Segmenter-safe fallback
+- why: preserve the whole day without AI ranking or privacy-boundary expansion
+- file: release/support/legal/build/Supabase Edge Function/migration 066 paths
+- function/component/migration: fail-closed release config, support/legal routes, admin-secret validation, atomic push claim preparation
+- what changed/reviewed: production artifacts require Supabase publishable-key format; backend entrypoints and push claims are test-covered; remote application remains separate
+- why: close local release blockers while keeping Production changes action-time gated
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm/key-authority/admin-escrow change; E2EE native explicit opt-in remains default OFF and existing encrypted data never downgrades
+- DB/migration semantics: migration 066 added locally and tested; no remote migration applied
+- product semantics: AI never selects important records; Google Play excluded; no server AI or new DB summary model
+- Production: no Supabase/Auth/Vercel/Apple/TestFlight/App Store mutation; no master push/merge
+
+#### VERIFICATION
+- command: final post/store focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS, 4 files / 78 tests
+- what it actually proves: private staging, queue-mode preservation, initial upload failure, retryable patch failure, exact-row replay, visibility restoration
+- command: independent Terra latest-delta review
+- PASS / FAIL / UNVERIFIED: PASS, no P1/P2
+- what it actually proves: previous outbox HOLD findings closed by current source; reviewer did not rerun tests
+- command: `npm run typecheck`, target ESLint, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: final TypeScript/lint/whitespace integrity on changed paths
+- command: sandboxed `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: FAIL, 257/258 files and 3,722/3,723 tests; only throwaway PostgreSQL `initdb` denied by sandbox; keystore 12/12 PASS
+- what it actually proves: failure is environment-specific, not silently upgraded to PASS
+- command: outside-sandbox `LANG=en_US.UTF-8 npm run test`
+- PASS / FAIL / UNVERIFIED: PASS, 258 files / 3,723 tests
+- what it actually proves: complete Vitest suite including rollback PostgreSQL 17/17 and keystore 12/12 passes when `initdb` is permitted
+- command: `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS, 2,165 modules; existing >500KB chunk warning only
+- what it actually proves: production-mode web bundle compiles; not the stricter release-config artifact
+- command: `npm run build:release`
+- PASS / FAIL / UNVERIFIED: FAIL CLOSED before artifact creation
+- what it actually proves: current local environment lacks an `sb_publishable_...` Supabase key and the legacy anon JWT cannot enter a release artifact
+- command: `npm run test:phase0`, `npm run test:edge`
+- PASS / FAIL / UNVERIFIED: PASS, PostgreSQL 17 / 64 migrations / 411 assertions; Edge 18/18
+- what it actually proves: local migration/security and Edge entrypoint behavior; not remote deployment
+- command: final `npx cap sync ios`
+- PASS / FAIL / UNVERIFIED: PASS, five plugins; tracked iOS diff hash unchanged `918b7224dd8a904158e1031103fa10f9164ef0551a9783139f595d30a7837939`
+- what it actually proves: latest normal build sync introduces no unexpected tracked native diff
+- command: final unsigned generic iOS Simulator Debug xcodebuild
+- PASS / FAIL / UNVERIFIED: PASS, `BUILD SUCCEEDED`, SDK `iphonesimulator26.5`; existing Embed Pods Frameworks warning only
+- what it actually proves: latest synced code compiles for simulator; not signing, Archive, TestFlight or physical iPhone runtime
+- command: prior focused Playwright release paths
+- PASS / FAIL / UNVERIFIED: PASS, five mobile paths including 8-record summary 5+3, exact original navigation, story photo copy, E2EE flag OFF public post, gomsin/soldier service views
+- what it actually proves: mocked-backend rendered behavior and screenshots, not live two-account Production
+
+#### REVIEW IMPACT
+- FULL local integration delta for release candidate; Terra post/outbox P1/P2 PASS. Formal Sol/Kiro final security route unavailable, so Production security signoff is not claimed.
+
+#### BLOCKERS
+- code: no open P1/P2 in latest independent post delta
+- environment: no Supabase publishable key exists; strict release build cannot be produced
+- external/manual: publishable-key creation confirmation; Vercel env/deployed SHA; exact remote 063/066 and Edge deployment; Apple provider/signing/Archive/TestFlight; physical iPhone two-account/OAuth/Foundation Models validation
+
+#### STOPPED AT
+- exact completed boundary: code committed as `d6650fd`; local tests/build/native compile and independent post delta review complete; before release-key creation, remote mutation, master push or App Store distribution
+
+#### REMAINING
+- create one Supabase publishable key only with action-time confirmation, configure local/Vercel without logging it, rerun release build and release iOS sync
+- separately approve/apply exact remote migrations and Edge functions with backup/catalog/rollback/actor matrix
+- Apple provider, signed Archive, TestFlight and physical-device user-path validation
+
+#### NEXT ACTION
+- next owner: Codex release operator after explicit user action-time confirmation
+- tool/model: primary operator; formal Sol final security review if route becomes available
+- 기준 SHA: `d6650fd`
+- exact next task: create one Supabase publishable key and configure only the release environment, then prove `npm run build:release` and `npm run cap:release:ios`
+
+#### DO NOT ADVANCE UNTIL
+- API-key creation receives action-time confirmation
+- key value is never committed, printed or copied into reports
+- Production SQL/Edge/Auth/Vercel actions each have current state, blast radius and rollback recorded
+- `.DS_Store` and `control-tower/Now.md` remain uncommitted
+
+#### PRODUCTION
+- NOT APPLIED — no remote database, Auth provider, Edge Function, Vercel or Apple change
+
+### 2026-08-27 · iOS 27 UIScene 검정 화면 진단 및 로컬 수정 (Local PASS / Physical UNVERIFIED)
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / native runtime compatibility
+- Workstream: physical-device launch blocker and native OAuth return reliability
+- Step: reproduce Xcode 27 launch fatal, adopt UIScene, preserve cold/foreground PKCE callback, local regression and independent review
+- Previous Gate: signed physical build/install/process PASS but screen interaction UNVERIFIED
+- This Gate: simulator launch and callback PASS; patched physical-device build remains UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — customer, product scope, AI role, storage and monetization unchanged
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/README.md` feature-build/security-review/migration-gate/release-validation
+- Current-state checked: live repository branch/HEAD/status, `docs/CURRENT_STATE.md`, Xcode 27 simulator logs, Capacitor native source
+- Latest relevant Work Log checked: 2026-08-27 App Store RC 통합·게시물 재전송 안전성 최종 검증
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/integrator/verifier
+- Model: primary; independent `google-antigravity/gemini-3.1-pro` High and `google-antigravity/gemini-3.7-flash` High read-only reviewers
+- Role: native diagnosis, implementation, local simulator verification, final diff ownership; independent reviewer finding check
+- PR: none; local branch only
+- Branch: `codex/profile-post-composer`
+- Base SHA: `45b32586ad24b70188fd2265ab225972c6edf372`
+- Old HEAD: `45b32586ad24b70188fd2265ab225972c6edf372`
+- New HEAD / Reviewed HEAD: pre-commit working tree based on `45b32586ad24b70188fd2265ab225972c6edf372`; final local commit recorded in git history
+
+#### CHANGED / REVIEWED
+- file: `ios/App/App.xcodeproj/project.pbxproj`, `ios/App/App/AppDelegate.swift`, `ios/App/App/Info.plist`, new `ios/App/App/SceneDelegate.swift`
+- function/component/migration: iOS application/scene life cycle and Capacitor callback forwarding
+- what changed/reviewed: single-window scene manifest and configuration; cold/foreground custom URL and universal link forwarding; Main storyboard and existing bridge retained
+- why: Xcode 27 SDK refuses to launch the legacy AppDelegate-only app and produced the physical-device black screen
+- file: `src/lib/deepLinks.ts`, `src/lib/deepLinks.test.ts`, native/privacy/platform contract tests
+- function/component/migration: cold-launch OAuth URL recovery
+- what changed/reviewed: install live listener first, then recover Capacitor `getLaunchUrl()` through the same exact-route/PKCE/dedupe/bounded serialized callback path; tests cover cold launch, duplicate delivery, invalid route and lookup failure
+- why: UIScene receives a cold callback before the JavaScript listener exists; forwarding alone would otherwise lose the login return
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged; no key, encryption, recovery or trust-authority change
+- DB/migration semantics: unchanged; no SQL or remote schema action
+- product semantics: unchanged; no UI redesign or feature-scope change
+- Production: no Supabase, Auth, Vercel, Apple provider, TestFlight or App Store mutation
+
+#### VERIFICATION
+- command: focused Vitest after native/cold-launch change
+- PASS / FAIL / UNVERIFIED: PASS, 3 files / 117 tests; final delta 2 files / 53 tests
+- what it actually proves: static native contract and JS cold/live callback behavior including route, PKCE and duplicate guards
+- command: `npm run typecheck`, target ESLint, `plutil -lint ios/App/App/Info.plist`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript, lint, plist syntax and whitespace integrity on the local change
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS, 4 files / 106 tests
+- what it actually proves: native configuration, privacy manifest and bridge contracts remain green
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS, PostgreSQL 17 / 64 migrations / 411 assertions
+- what it actually proves: unchanged local DB/RLS migration chain still passes; not remote Production proof
+- command: `npm run build`, `npx cap sync ios`, Xcode 27 unsigned simulator build
+- PASS / FAIL / UNVERIFIED: PASS, 2,165 modules; five plugins; `BUILD SUCCEEDED` with `iphonesimulator27.0`
+- what it actually proves: local web artifact synchronizes and native app compiles for the current simulator SDK
+- command: iOS 27 and iOS 26.5 simulator launches
+- PASS / FAIL / UNVERIFIED: PASS, onboarding visibly rendered on both; UIScene launch fatal absent
+- what it actually proves: local simulator runtime closure, not patched physical iPhone runtime
+- command: iOS 27 cold-start and foreground fake custom-scheme callbacks
+- PASS / FAIL / UNVERIFIED: PASS, both displayed the expected Korean cancellation message
+- what it actually proves: native scene callback reaches the shared JS failure UX in both lifecycle states without remote auth mutation
+- command: initial `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: FAIL, 257/258 files and 3,729/3,730 tests; only stale exact source-string assertion failed, build not reached
+- what it actually proves: failure was recorded and not silently upgraded; no product test failed
+- command: final `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, typecheck/lint, 258 files / 3,730 tests, production build 2,165 modules; keystore 12/12 PASS
+- what it actually proves: complete current local regression passes and prior parallel keystore timeout did not recur
+- command: Gemini 3.1 Pro High independent read-only review
+- PASS / FAIL / UNVERIFIED: PASS, no finding
+- what it actually proves: an independent reviewer found no P1/P2 in the scene/cold-start diff; it is not physical-device or Production evidence
+- command: Gemini 3.7 Flash High final independent read-only verification
+- PASS / FAIL / UNVERIFIED: PASS, P1 0 / P2 0; focused Vitest 4 files / 130 tests, native verify 4 files / 106 tests, typecheck, target ESLint, plist lint and Xcode workspace build all PASS
+- what it actually proves: a second independent verifier inspected the complete diff including untracked `SceneDelegate.swift`, reran the bounded native/callback checks, and found no release-blocking local issue; it is not physical-device or Production evidence
+
+#### REVIEW IMPACT
+- DELTA: native packaging and OAuth cold-start delivery changed. Prior DB/RLS/crypto reviews are unaffected. Kiro/Sol review was not executed because its model route failed; no Kiro/Sol approval is claimed.
+
+#### BLOCKERS
+- code: no open finding in the reviewed local delta
+- environment: physical iPhone disconnected; patched signed build/runtime unavailable
+- external/manual: real Google/Apple provider OAuth, query-aware redirect allow-list, Archive/TestFlight and two-account physical smoke remain unverified
+
+#### STOPPED AT
+- exact completed boundary: UIScene fatal reproduced and fixed; iOS 27/26.5 simulator rendering, cold/foreground callback, full local verify, native build and independent review complete; before physical-device reinstall or any remote mutation
+
+#### REMAINING
+- reconnect physical iPhone and install the patched signed build
+- verify first launch/relaunch and real Google/Apple OAuth cold/foreground return on device
+- complete strict release artifact, Archive/TestFlight and two-account release smoke under their existing gates
+
+#### NEXT ACTION
+- next owner: Codex release operator when physical iPhone is reconnected
+- tool/model: primary operator; Gemini 3.7 Flash High for bounded device-flow verification if delegated
+- 기준 SHA: final local commit containing this entry
+- exact next task: signed install of the patched build followed by launch, relaunch and real OAuth callback checks on the physical iPhone
+
+#### DO NOT ADVANCE UNTIL
+- patched physical build visibly renders and remains stable on relaunch
+- real provider OAuth callback is verified without weakening PKCE or redirect boundaries
+- `.DS_Store` remains preserved and uncommitted
+
+#### PRODUCTION
+- NOT APPLIED — no remote database, Auth, Vercel, Apple provider, TestFlight or App Store mutation
+
+### 2026-08-27 · 실물 iPhone iOS 27 UIScene 수정 빌드 검증 (Physical Launch PASS)
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / physical-device runtime gate
+- Workstream: Xcode 27 black-screen closure
+- Step: signed build, install, first launch, relaunch, stability, cold callback and provider-entry verification
+- Previous Gate: simulator PASS; patched physical-device runtime UNVERIFIED
+- This Gate: patched physical launch/relaunch PASS; provider auth completion remains UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no product/business direction change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/README.md` release-validation
+- Current-state checked: branch `codex/profile-post-composer`, HEAD `34b6e4c1b8817abdfa39a1e4497a252591cde257`, dirty `.DS_Store` preserved, physical CoreDevice state and screenshots
+- Latest relevant Work Log checked: 2026-08-27 iOS 27 UIScene 검정 화면 진단 및 로컬 수정
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary verifier/operator
+- Model: primary
+- Role: physical-device build/install/runtime verification and evidence ownership
+- PR: none; local branch only
+- Branch: `codex/profile-post-composer`
+- Base SHA: `34b6e4c1b8817abdfa39a1e4497a252591cde257`
+- Old HEAD: `34b6e4c1b8817abdfa39a1e4497a252591cde257`
+- New HEAD / Reviewed HEAD: code unchanged; documentation commit pending
+
+#### CHANGED / REVIEWED
+- file: no product code change; ignored/generated `dist`, Capacitor iOS public assets and isolated `/tmp` DerivedData only
+- function/component/migration: physical iOS 27 scene lifecycle runtime
+- what changed/reviewed: built commit `34b6e4c` with Xcode 27 SDK, installed `app.gomsinlog` 0.1.0(1), launched and relaunched on iPhone 16 Pro / iOS 27
+- why: close the exact physical black-screen blocker with rendered evidence rather than process-only evidence
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged
+- Production: no remote database, Auth, Vercel, Apple, TestFlight or App Store mutation
+
+#### VERIFICATION
+- command: `npm run build`, `npx cap sync ios`
+- PASS / FAIL / UNVERIFIED: PASS, 2,165 modules and five plugins
+- what it actually proves: current web artifact was bundled into the native project; not strict release artifact proof
+- command: Xcode 27.0 `27A5252f` signed Debug build for connected iPhone
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; code signature verify PASS
+- what it actually proves: commit `34b6e4c` compiles and signs against iPhoneOS 27.0 for the registered physical device
+- command: CoreDevice install and app listing
+- PASS / FAIL / UNVERIFIED: PASS, `app.gomsinlog` 0.1.0(1), developer app, container accessible
+- what it actually proves: signed build is installed on the physical iPhone; no App Store/TestFlight distribution proof
+- command: first launch, screenshot, process listing
+- PASS / FAIL / UNVERIFIED: PASS, onboarding visibly rendered and process alive; black screen absent
+- what it actually proves: physical first-launch closure for the UIScene fatal
+- command: terminate-existing relaunch, screenshot, process listing
+- PASS / FAIL / UNVERIFIED: PASS, onboarding visibly rendered again with a new process
+- what it actually proves: relaunch is not relying on one stale process or simulator-only state
+- command: 30-second stability and app listing
+- PASS / FAIL / UNVERIFIED: PASS, app process remained alive and installed version matched
+- what it actually proves: app did not immediately crash after rendering; not long-duration soak proof
+- command: cold-start fixed error callback
+- PASS / FAIL / UNVERIFIED: PASS with visual limitation, top error toast displayed but active-call Dynamic Island obscured part of copy
+- what it actually proves: physical cold callback reached app UI without changing a remote session
+- command: Google CTA/provider entry
+- PASS / FAIL / UNVERIFIED: PARTIAL PASS, `accounts.google.com` system browser reached; account selection/callback/session UNVERIFIED
+- what it actually proves: provider launch path works on device, not complete OAuth
+
+#### REVIEW IMPACT
+- DELTA evidence only: no code/security semantics changed. The prior exact-code reviewers remain applicable; physical launch evidence upgrades only the runtime gate.
+
+#### BLOCKERS
+- code: no physical launch blocker observed
+- environment: strict release artifact/Archive/TestFlight not produced; about 9.1GB disk free
+- external/manual: Google callback/session completion, Apple provider/round-trip, two-account pairing, Foundation Models and full user path
+
+#### STOPPED AT
+- exact completed boundary: signed physical install, first launch, relaunch, 30-second stability, cold callback UI and Google provider entry complete; before credential input or any Production mutation
+
+#### REMAINING
+- complete Google OAuth manually and verify PKCE callback/session restoration
+- enable/configure and verify Apple OAuth under action-time approval
+- run two-account physical/simulator user-path matrix and Foundation Models device gate
+- produce strict release artifact, Archive validation and Internal TestFlight when release blockers close
+
+#### NEXT ACTION
+- next owner: Codex plus user for credential-bearing account choice
+- tool/model: primary operator; independent security review only if auth/config semantics change
+- 기준 SHA: `34b6e4c1b8817abdfa39a1e4497a252591cde257`
+- exact next task: user completes Google account selection while Codex verifies callback/session without observing or recording credentials
+
+#### DO NOT ADVANCE UNTIL
+- real Google callback/session is observed without token-pair fallback
+- Apple provider and redirect allow-list are configured and verified separately
+- `.DS_Store` remains preserved and uncommitted
+
+#### PRODUCTION
+- NOT APPLIED — physical development install only; no remote mutation
+
+### 2026-08-27 · 기록 사진 미리보기·출시 저장 경로·실물 iPhone 재설치 검증
+
+#### PLAN POSITION
+- Phase: iPhone App Store release candidate / 기록 작성 핵심 경로
+- Workstream: compose usability, launch protection compatibility, physical-device smoke
+- Step: 사진 선택 피드백, 닫힌 설정 CTA 제거, fail-closed floor retry, 최신 빌드 재설치
+- Previous Gate: UIScene 검정 화면 수정의 physical launch PASS; 로그인 후 기록 작성 문제 보고
+- This Gate: 로컬 전체 회귀·렌더링 E2E·signed physical launch PASS; 로그인 후 실물 작성은 UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 기록 작성의 기존 제품 가치를 복구하며 고객·범위·과금·AI 역할을 바꾸지 않음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: branch `codex/profile-post-composer`, base HEAD `02fd3f898c2c1c84c76f9ac088367121a4620a3c`, dirty `.DS_Store`와 claim 보존
+- Latest relevant Work Log checked: 2026-08-27 iOS 27 UIScene 수정 및 physical launch 항목
+- MASTER PLAN version / 기준일: V4 / 2026-08-27
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/verifier, Terra High independent final reviewer
+- Model: primary + `main/gpt-5.6-terra` Reviewer
+- Role: bounded implementation, full local validation, physical-device operator, independent delta review
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `02fd3f898c2c1c84c76f9ac088367121a4620a3c`
+- Old HEAD: `02fd3f898c2c1c84c76f9ac088367121a4620a3c`
+- New HEAD / Reviewed HEAD: pre-commit working tree based on the Old HEAD; final commit recorded in git history
+
+#### CHANGED / REVIEWED
+- file: `src/features/compose/ComposePage.tsx`, `e2e/composeUsability.spec.ts`
+- function/component/migration: full-screen record composer photo selection and save UX
+- what changed/reviewed: selected photos render immediately below the text, can be removed through 44px controls, reuse the existing media classifier, and release all object URLs; launch flag OFF uses retry instead of a closed Settings route
+- why: the installed app showed only a photo count and gave no confidence about the selected upload; an unavailable protection setup route stranded normal users
+- file: `src/app/e2ee/runtimeSession.ts`, `src/app/e2ee/runtimeSession.test.ts`
+- function/component/migration: record crypto write-floor lookup guard
+- what changed/reviewed: one bounded retry for a transient floor lookup; two failures and active floors still resolve fail-closed and never authorize plaintext
+- why: a single transient schema-cache/PostgREST lookup failure could block all normal launch writes even when no floor existed
+- file: `src/components/widgets/TodayLogWidget.tsx`, `src/features/us/SharedProfile.tsx`, `src/lib/store.tsx`, focused tests
+- function/component/migration: alternate record/post composer error recovery and shared error copy
+- what changed/reviewed: flag OFF offers retry with draft preserved; flag ON retains Settings recovery; error copy no longer invents an unavailable-device-setup cause
+- why: all creation entry points must avoid the same dead-end while preserving the security boundary
+- file: `e2e/coupleMatrix.spec.ts`
+- function/component/migration: creator/partner launch-write contract
+- what changed/reviewed: connected creator and partner both save through the existing RLS path only when launch flag and write floor are off
+- why: prove the repaired path for both members rather than one UI role
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: active write floors, missing key refusal, protected payload format and trust authority unchanged; no plaintext fallback on unknown floor
+- DB/migration semantics: unchanged; no SQL file or remote schema change
+- product semantics: private/shared selection, author ownership and existing media sanitization unchanged
+- Production: no Supabase, Auth, Vercel, Apple, TestFlight or App Store mutation
+
+#### VERIFICATION
+- command: focused Vitest for runtime session, composer queue, media, store and records
+- PASS / FAIL / UNVERIFIED: PASS, 6 files / 129 tests
+- what it actually proves: floor retry/fail-closed behavior, flag-aware recovery, media classification/sanitization and record failure mapping
+- command: 최초 `npm run test:p0-security`는 package script 부재로 FAIL; 실제 정의된 `npm run test:p0`, `npm run test:p5`, `npm run test:write-floor`로 재실행
+- PASS / FAIL / UNVERIFIED: PASS, 76 + 93 + 39 assertions
+- what it actually proves: 첫 실패는 명령 이름 드리프트이며, 실제 local P0/P5/write-floor security contracts는 모두 green; not remote Production proof
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS, PostgreSQL 17 / 64 migrations / 411 assertions
+- what it actually proves: complete local migration/RLS harness passes; no remote application claim
+- command: target ESLint and `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: changed TypeScript/E2E files and whitespace pass local static checks
+- command: focused Playwright after final changes
+- PASS / FAIL / UNVERIFIED: PASS, 4/4 on `chromium-390`
+- what it actually proves: photo preview position, remove/44px, Blob cleanup, no pre-save upload, successful save, repeated floor-failure refusal, retry CTA and creator/partner normal-save path in rendered mock-backed flows
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; typecheck, full lint, 258 files / 3,735 tests, production build 2,165 modules
+- what it actually proves: complete current local TypeScript/test/build regression passes; prior `deviceKeyPort` timeout did not recur (12/12, about 0.43s)
+- command: `npx cap sync ios`, unsigned Xcode simulator build
+- PASS / FAIL / UNVERIFIED: PASS, five plugins, no tracked iOS diff, `BUILD SUCCEEDED` with iPhoneSimulator 26.5 SDK
+- what it actually proves: latest web artifact synchronizes and compiles in the native workspace
+- command: signed Debug build/install/launch/screenshot/process check on iPhone 16 Pro / iOS 27
+- PASS / FAIL / UNVERIFIED: PASS for build/install/launch/render/process; `App.app/App` alive and onboarding visible, black screen absent
+- what it actually proves: latest local working tree runs as a native app on the connected physical device; not login, record-save, OAuth-completion, TestFlight or App Store proof
+- command: Terra High independent read-only final delta review
+- PASS / FAIL / UNVERIFIED: initial FAIL/HOLD on same-frame duplicate-submit P1; remediated; fresh closure PASS with P0-P3 0
+- what it actually proves: all three primary/retry authoring paths use a synchronous in-flight guard and the reviewed delta preserves Blob cleanup, no pre-save upload, write-floor fail-closed and private/shared semantics; no Production approval
+- command: 2026-08-28 Xcode 26.6 / iPhoneOS 26.5 SDK signed build, `devicectl` install, terminate-existing launch, 1-second screenshot and process check
+- PASS / FAIL / UNVERIFIED: PASS; latest build installed, `app.gomsinlog` ran as `App.app/App` and rendered onboarding after one second
+- what it actually proves: the packaged native app loads its bundled WebView rather than launching a website; provider OAuth still intentionally uses the system browser
+
+#### REVIEW IMPACT
+- DELTA: record composer UX and authenticated floor-lookup availability changed. Existing RLS/crypto protocol reviews remain applicable because no schema, authority, key or encryption format changed; this exact dirty delta receives a fresh independent review.
+
+#### BLOCKERS
+- code: no open P0-P3 finding in the reviewed local delta
+- environment: installed app is currently at pre-consent onboarding; authenticated physical record creation cannot be completed without the user's legal consent and account session
+- external/manual: real Google/Apple OAuth callback, two-account pairing, photo persistence across both accounts, Archive/TestFlight and App Store metadata remain UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: implementation, full local regression, local DB/security suites, rendered E2E, native sync/build and latest physical install/launch complete; before credential-bearing login or any Production mutation
+
+#### REMAINING
+- user completes required consent and login, then physical record text/photo save and partner visibility are manually verified
+- close Apple provider/redirect and two-account release gates under action-time approval
+- produce Archive/Internal TestFlight only after remote/auth gates are closed
+
+#### NEXT ACTION
+- next owner: user plus Codex release operator
+- tool/model: primary operator; Terra/Sol only if consequential release/security semantics change
+- 기준 SHA: final commit containing this entry
+- exact next task: authenticate on the installed iPhone, verify one photo record from compose to exact original/partner view, then continue Apple OAuth release gate
+
+#### DO NOT ADVANCE UNTIL
+- authenticated physical save and exact partner visibility are recorded as PASS or explicitly remain UNVERIFIED
+- `.DS_Store` remains preserved and uncommitted
+
+#### PRODUCTION
+- NOT APPLIED — local code, tests and physical development install only
+
+### 2026-08-28 — Xcode 27 beta 기록 작성 수정본 실물 재설치 확인
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: iOS physical-device packaging verification
+- Step: 기록 작성 수정본을 Xcode 27 beta로 명시 빌드·재설치
+- Previous Gate: Xcode 26.6 development build 실물 설치 PASS
+- This Gate: Xcode 27.0 beta 6 / iPhoneOS 27.0 SDK signed build·install
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, 기록 작성 exact-source 흐름
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 패키징 재검증
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`
+- Current-state checked: branch `codex/profile-post-composer`, HEAD `843a218bd528976725948e40d2939d75cd733364`
+- Latest relevant Work Log checked: 2026-08-27 기록 작성 사진·보호 설정 closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary verifier/operator
+- Model: primary
+- Role: live toolchain diagnosis, signed build, physical install
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `843a218bd528976725948e40d2939d75cd733364`
+- Old HEAD: `843a218bd528976725948e40d2939d75cd733364`
+- New HEAD / Reviewed HEAD: docs-only follow-up commit to be recorded in git history
+
+#### CHANGED / REVIEWED
+- file: no application source change
+- function/component/migration: Xcode toolchain selection and installed app artifact
+- what changed/reviewed: Xcode 26.6 was selected live; Xcode 27 beta existed in Downloads. Xcode 27 beta was explicitly selected for a fresh signed build and physical reinstall.
+- why: correct the prior ambiguous beta claim and ensure the photo-preview bundle is on the connected iOS 27 device
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged
+- Production: no TestFlight/App Store/Supabase/Vercel mutation
+
+#### VERIFICATION
+- command: explicit `DEVELOPER_DIR=.../Xcode-27-Beta.app/Contents/Developer xcodebuild -version`, iPhoneOS/Simulator SDK query
+- PASS / FAIL / UNVERIFIED: PASS — Xcode 27.0 beta 6 build `27A5252f`, SDK 27.0
+- what it actually proves: the requested beta toolchain is installed and callable; the system default remains Xcode 26.6
+- command: `npm run build`, `npx cap sync ios`, signed physical `xcodebuild` with explicit beta `DEVELOPER_DIR`
+- PASS / FAIL / UNVERIFIED: PASS — web build 2,165 modules, five plugins synced, `BUILD SUCCEEDED`
+- what it actually proves: current source and photo-preview chunk compile into an iPhoneOS 27.0 signed development app
+- command: beta `devicectl device install app`
+- PASS / FAIL / UNVERIFIED: PASS — `app.gomsinlog` installed at new bundle URL; database UUID unchanged
+- what it actually proves: the new beta-SDK development bundle replaced the previous installed bundle without deleting its data container
+- command: beta `devicectl device process launch --terminate-existing`
+- PASS / FAIL / UNVERIFIED: 최초 BLOCKED — device locked, iOS `RequestDenied`; 잠금 해제 후 재실행 PASS
+- what it actually proves: Xcode 27 beta로 재설치된 앱 프로세스가 iOS에서 시작됨; 물리 화면 캡처와 post-install 렌더는 증명하지 않음
+- command: iPhone Mirroring read-only inspection
+- PASS / FAIL / UNVERIFIED: BLOCKED — Mac의 iCloud 동기화 미완료
+- what it actually proves: 앱 문제가 아니라 Mac의 미러링 준비 상태 때문에 원격 화면 증거를 얻지 못함
+
+#### REVIEW IMPACT
+- NONE — packaging verification and docs only; application/security semantics unchanged
+
+#### BLOCKERS
+- code: none found in this verification
+- environment: physical launch PASS; `devicectl` physical screenshot 미지원, iPhone Mirroring은 Mac iCloud 동기화 미완료
+- external/manual: TestFlight upload and authenticated photo-record round trip remain unexecuted
+
+#### STOPPED AT
+- exact completed boundary: Xcode 27 beta signed build, physical overwrite install and unlock 후 launch complete; post-install visual capture unavailable
+
+#### REMAINING
+- iPhone에서 열린 앱을 확인하고, 사진을 선택해 preview/save를 authenticated account에서 검증
+
+#### NEXT ACTION
+- next owner: user plus Codex operator
+- tool/model: primary
+- 기준 SHA: docs-only follow-up commit
+- exact next task: 사용자가 기기에서 열린 앱을 확인한 뒤 record composer에서 사진 선택; Codex가 결과를 이어서 판정
+
+#### DO NOT ADVANCE UNTIL
+- beta-installed app의 화면 렌더와 authenticated photo compose가 PASS 또는 명시적 UNVERIFIED로 기록됨
+
+#### PRODUCTION
+- NOT APPLIED — physical development install only; TestFlight/App Store Connect unchanged
+
+### 2026-08-28 — 스토리 가독성·무지 종이·고정 헤더·명시적 프로필 게시물 로컬 클로저
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Story/Profile presentation, data integrity, local release validation
+- Step: 요청 UI와 profile-post 발행 의도 구현 후 전체 로컬·독립 보안 gate
+- Previous Gate: 기록 작성 사진 미리보기와 Xcode 27 beta development install
+- This Gate: Story/Profile/paper local release candidate와 migration 067 적용 전 HOLD 경계
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/WHAT_IS_GOMSINLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; AI 선별·유료 개인정보 기능 추가 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, 관련 feature-build/security-review/migration-gate/release-validation 절차
+- Current-state checked: repository, `docs/CURRENT_STATE.md`, branch/HEAD/status/origin master live 확인
+- Latest relevant Work Log checked: 2026-08-27 기록 작성 사진·보호 경로와 2026-08-28 Xcode 27 beta 항목
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/verifier, independent UI reviewer, Sol Architect security closure
+- Model: primary; independent security reviewer `gpt-5.6-sol`
+- Role: bounded implementation, rendered/full local validation, independent privacy/RLS review
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `5b3133f2fed5f0cda00908cde32ae632233256b0`
+- Old HEAD: `5b3133f2fed5f0cda00908cde32ae632233256b0`
+- New HEAD / Reviewed HEAD: 이 항목을 포함한 feature commit; 보안 review는 Old HEAD 기반 exact dirty delta
+
+#### CHANGED / REVIEWED
+- file: `src/features/story/StoryRoute.tsx`, `StoryViewer.tsx`, `RecordMediaGallery.tsx`
+- function/component/migration: Story presentation and exact-source actions
+- what changed/reviewed: 이름 반복 제거, `HH:mm`, 17px 본문, contain 사진, 콘텐츠 아래 action; pointer event 분리
+- why: 기록 집중도와 읽기 흐름을 높이면서 exact original navigation을 유지
+- file: `src/lib/paperTexturePreference.ts`, `HandwritingSection.tsx`, `App.tsx`, `paper.css`
+- function/component/migration: account-scoped device-local paper preference
+- what changed/reviewed: 44px `무지 종이 / 줄 종이`, reload/account-switch 재적용, 서버 전송 없음
+- why: 괘선 집중 분산을 사용자가 되돌릴 수 있게 함
+- file: `MobileShell.tsx`, `PaperHome.tsx`, `SharedProfile.tsx`
+- function/component/migration: single root scroller and sticky Home/My headers
+- what changed/reviewed: 100dvh shell 안에서 main만 scroll하고 상단 메뉴는 sticky
+- why: 스크롤 중 핵심 상단 작업을 안정적으로 유지
+- file: records/store/postTiles, `067_profile_post_intent.sql`, P5/phase0 harness
+- function/component/migration: explicit profile-post marker and all-or-nothing media publication
+- what changed/reviewed: staging private/false, complete media+visibility+true final update, ordinary omission preservation, response-loss read-back, actor denials
+- why: 일반 Story 사진을 격자에서 제외하면서 사용자 발행 의도·원본 기록·Storage 정합성을 보존
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: key authority/format/write-floor/plaintext refusal 변경 없음
+- DB/migration semantics: 067 로컬 파일 외 기존 schema/RLS/RPC 의미 변경 없음
+- product semantics: AI가 중요 기록을 선별하지 않으며 Story/사진 원본을 삭제하지 않음
+- Production: Supabase/Auth/Vercel/Apple/TestFlight/App Store와 git remote 변경 없음
+
+#### VERIFICATION
+- command: related focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS, final marker 범위 3 files / 112 tests; 관련 전체 묶음 PASS
+- what it actually proves: Story/paper/sticky/profile filtering, exact ID, save/retry/fallback 계약
+- command: focused Playwright 320px/390px
+- PASS / FAIL / UNVERIFIED: PASS, 5/5
+- what it actually proves: 8개 요약의 5+3 펼치기, Story/Profile/paper/sticky 렌더와 44px 상호작용
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS, PostgreSQL 17 / 65 migrations / 420 assertions
+- what it actually proves: local fresh-chain migration/RLS actor contract; remote 적용 증거 아님
+- command: `npm run test:p5`
+- PASS / FAIL / UNVERIFIED: PASS, 105 assertions
+- what it actually proves: E2EE staging/final marker ordering, active/private/unrelated/former/anon/partner-update 경계
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS, typecheck/full lint/260 files/3,753 tests/build 2,166 modules
+- what it actually proves: complete local web regression; 이전 deviceKeyPort timeout 미재발(12/12, 약 221ms)
+- command: target ESLint, `git diff --check`, `npx cap sync ios`, Xcode 27 beta unsigned simulator build
+- PASS / FAIL / UNVERIFIED: PASS, 5 plugins, tracked iOS diff 0, `BUILD SUCCEEDED`
+- what it actually proves: latest web/native adapter packages and compiles for iPhoneSimulator 27.0
+- command: independent UI review and Sol security closure
+- PASS / FAIL / UNVERIFIED: local UI PASS / Production HOLD; security PASS with no remaining concrete finding
+- what it actually proves: reviewed dirty delta의 local UX/security gate; Production 승인 아님
+- command: read-only Supabase project/list/probes, Vercel `whoami`
+- PASS / FAIL / UNVERIFIED: Supabase `ACTIVE_HEALTHY`, empty ledger, 062 RPC present/anon denied, 067 `42703` absent; Vercel CLI logged out
+- what it actually proves: 067 Production NOT APPLIED와 current CLI auth state; 063–066 full catalog/provider/deployed SHA는 UNVERIFIED
+
+#### REVIEW IMPACT
+- FULL for the new profile-post metadata/write ordering and actor boundary; independent Sol closure PASS. 이후 Work Log/report/remote-state wording은 security semantics 없는 docs-only DELTA.
+
+#### BLOCKERS
+- code: local reviewed delta에 열린 P0-P3 finding 없음
+- environment: 최신 delta 실물 iPhone safe-area/gesture/Foundation Models 미검증
+- external/manual: 067 원격 미적용, Apple provider/redirect·실제 OAuth 왕복·두 계정 smoke·Archive/TestFlight/App Store 미완료
+
+#### STOPPED AT
+- exact completed boundary: implementation, rendered E2E, full verify, local DB/P5, native sync/simulator build와 독립 security closure 완료; Production 067 적용 직전
+
+#### REMAINING
+- action-time backup/catalog 후 exact 067, PostgREST reload, 실제 actor matrix
+- latest exact commit의 실물 iPhone/두 계정 profile post와 Foundation Models 검증
+- provider/redirect, Archive/Internal TestFlight, App Store metadata/submission
+
+#### NEXT ACTION
+- next owner: user-confirmed Codex release operator plus independent security verifier
+- tool/model: primary operator; Sol은 Production DB/Auth delta 독립 검토에만 사용
+- 기준 SHA: 이 항목을 포함한 feature commit
+- exact next task: 063–066 live catalog와 backup/rollback을 재확인하고 exact 067 action-time 적용안을 사용자에게 제시
+
+#### DO NOT ADVANCE UNTIL
+- 067 적용 전 current backup/catalog/blast radius/rollback과 사용자 확인
+- 적용 후 PostgREST reload와 real authenticated/partner/unrelated/former/anon actor matrix PASS
+- App Store 제출 전 latest exact commit의 physical iPhone 및 두 계정 smoke
+
+#### PRODUCTION
+- NOT APPLIED — read-only Supabase/Vercel 확인과 로컬 source/test/docs만 수행
+
+### 2026-08-28 — Production release gate live catalog·backup restore·PR browser repair
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Production Supabase/Auth/Vercel/iPhone release gate
+- Step: exact remote catalog와 복구 가능성 확인, 063–067 적용 순서 확정, PR #90 fresh gate 복구
+- Previous Gate: 스토리/프로필 게시물 로컬 closure와 067 적용 전 HOLD
+- This Gate: action-time Production SQL 승인 직전 CONDITIONAL PASS
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, migration/security/release procedures
+- Current-state checked: repository, `docs/CURRENT_STATE.md`, live branch/HEAD/status/origin master, Supabase/Auth/Vercel/PR/iPhone
+- Latest relevant Work Log checked: 2026-08-28 스토리·프로필 게시물 로컬 closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary release operator, independent Sol Architect
+- Model: primary; `gpt-5.6-sol` High read-only security review
+- Role: live read-only catalog, backup/restore, regression repair, release gate integration
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `044d32442cc7c1952f8916875dc32adec7157620`
+- Old HEAD: `044d32442cc7c1952f8916875dc32adec7157620`
+- New HEAD / Reviewed HEAD: browser fixture `e382d34`; docs-only follow-up in git history
+
+#### CHANGED / REVIEWED
+- file: `e2e/postComposer.spec.ts`
+- function/component/migration: pre-existing photo-post fixture
+- what changed/reviewed: explicit profile-post contract에 맞춰 기존 grid post에 `is_profile_post=true` 한 줄 추가
+- why: 제품이 Story 사진 자동수집을 중단했는데 E2E fixture만 이전 암묵 계약을 유지해 full browser job 2건이 실패함
+- file: Supabase live catalog and encrypted off-repository backup
+- function/component/migration: 060–067 state, pairing impact, public restore
+- what changed/reviewed: 060/061/062 present, 063–067 absent, 066 prerequisite absent; 065 영향 0행; public archive를 격리 PostgreSQL 17에 실제 restore
+- why: 빈 ledger에서 bulk replay 없이 exact 최소 Production delta와 복구 경계를 증명
+- file: `docs/CURRENT_STATE.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `supabase/migrations/README.md`, release report
+- function/component/migration: live release truth
+- what changed/reviewed: Supabase/Auth/Vercel/iPhone/PR 상태, rollback과 가장 작은 다음 단계 기록
+- why: 코드 존재·Preview·실물 process·Production 적용을 분리
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged; vulnerable 062 body/privileges를 롤백 경로로 사용하지 않음
+- DB/migration semantics: local SQL files unchanged
+- product semantics: Story/Profile/복무/온디바이스 AI 계약 unchanged
+- Production: SQL/Auth provider/Vercel Production/Apple/TestFlight/App Store unchanged
+
+#### VERIFICATION
+- command: encrypted public custom archive → isolated PostgreSQL 17 pre-data/data/post-data restore
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; daily_records 5, public tables 39, functions 69, validated FKs 53, profiles 5, crypto_pairings 0
+- what it actually proves: public schema+data archive 구조와 데이터가 복원 가능함; Auth rows/Storage blobs 복구는 증명하지 않음
+- command: live read-only 065 impact SQL
+- PASS / FAIL / UNVERIFIED: PASS, total 0 / malformed live 0 / malformed CRYPTO_ACTIVE 0 at `2026-08-28T00:45:25Z`
+- what it actually proves: exact 065의 현재 data-row quarantine blast radius가 0
+- command: live Supabase catalog/auth/edge checks
+- PASS / FAIL / UNVERIFIED: PASS for observed catalog; 064 P0 privilege live, 063/065/067 absent, 066 prerequisite absent, Google/Email ON, Apple OFF, query-aware redirects present
+- what it actually proves: action-time schema/provider starting state; 실제 authenticated actor matrix와 OAuth 왕복은 아님
+- command: `npx playwright test e2e/postComposer.spec.ts --project=chromium-390`
+- PASS / FAIL / UNVERIFIED: PASS, 2/2 after fixture repair
+- what it actually proves: explicit existing post, private/public publication save, 44px plus, ordered media copy on Chromium 390 fixture backend
+- command: Xcode 27 beta latest signed physical build/install/launch
+- PASS / FAIL / UNVERIFIED: PASS for build/install/process; rendered/authenticated flows UNVERIFIED
+- what it actually proves: current source packages and starts on connected iPhone, not that every user path works
+- command: PR #90 CI at final audited HEAD `2470f24`
+- PASS / FAIL / UNVERIFIED: PASS, 15/15 GitHub/Vercel checks; full Chromium creator/partner matrix 110/110
+- what it actually proves: fixture repair, typecheck/lint/Vitest/build, PostgreSQL, Android, iOS simulator, secret/boundary/sync checks and Preview are green on the integrated branch; Production/physical flows are separate
+- command: independent Sol High migration/live review
+- PASS / FAIL / UNVERIFIED: initial HOLD; restore and 065-impact prerequisites now closed. SQL source 064/065/067 has no new P0/P1 finding
+- what it actually proves: independent security review of the proposed exact set; Production execution/actor proof remains separate
+
+#### REVIEW IMPACT
+- DELTA: one test fixture and live/docs truth only; application, RLS, migration, and crypto source semantics unchanged. Any Production SQL creates a new exact-state review boundary.
+
+#### BLOCKERS
+- code: no open CI failure at `2470f24`
+- environment: physical rendered UI, Foundation Models Korean/offline/performance, authenticated two-account device flow UNVERIFIED
+- external/manual: Production 064/065/067/063 action-time approval and actor matrix; Apple provider credentials/OAuth; Distribution Archive/TestFlight/App Store metadata
+
+#### STOPPED AT
+- exact completed boundary: encrypted public backup actual restore, live migration impact/catalog, Auth/Vercel/iPhone/package evidence, independent security review and focused browser repair complete; before Production mutation
+
+#### REMAINING
+- action-time approval, exact 064 → 065 → 067 → 063 per-file apply/check, reload, real actor matrix
+- Apple Services ID/secret/provider, real Google/Apple callback, TestFlight two-account and physical AI gate
+
+#### NEXT ACTION
+- next owner: user-confirmed Codex release operator
+- tool/model: primary operator; independent Sol review if Production result deviates from plan
+- 기준 SHA: docs follow-up commit on `codex/profile-post-composer`
+- exact next task: present current state/blast/rollback and request one action-time confirmation for exact 064 → 065 → 067 → 063; keep 066 deferred
+
+#### DO NOT ADVANCE UNTIL
+- exact Production SQL action-time confirmation
+- post-apply catalog/reload/real actor matrix PASS before merge/deploy
+
+#### PRODUCTION
+- NOT APPLIED — read-only live queries only; backup ciphertext is local/off-repository
+
+### 2026-08-28 — Production Supabase 064→065→067→063 적용·actor closure
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Production Supabase schema/security release gate
+- Step: 승인된 exact migration 적용, 파일별 catalog, reload, actor boundary, 사후 독립 검토
+- Previous Gate: 암호화 public backup 실제 복원과 action-time Production HOLD
+- This Gate: Production DB delta CONDITIONAL PASS; 실제 두 기기 ceremony·Apple/TestFlight는 후속
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, migration/security/release procedures
+- Current-state checked: live branch/HEAD/status/origin master, exact migration files/SHA, Production catalog/data counts, PostgREST/Edge Function state
+- Latest relevant Work Log checked: 2026-08-28 Production release gate live catalog·backup restore·PR browser repair
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary Production operator; independent Sol read-only reviewer
+- Model: primary; requested `kiro/gpt-5.6-sol` High failed `INVALID_MODEL_ID`, fallback `main/gpt-5.6-sol` High
+- Role: action-time apply, primary verification, independent security/release review
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `b85b7573a31b7c6c7ad9b9542545676e7c84f571`
+- Old HEAD: `b85b7573a31b7c6c7ad9b9542545676e7c84f571`
+- New HEAD / Reviewed HEAD: Production truth closure `928d778872eb0c142de6f301f44638dedc40ec47`
+
+#### CHANGED / REVIEWED
+- file: Production Supabase exact `064_lock_crypto_pairings_table_privileges.sql`
+- function/component/migration: `crypto_pairings` table privileges
+- what changed/reviewed: authenticated 권한을 SELECT-only로 고정하고 anon/PUBLIC broad privilege를 제거
+- why: RLS를 우회하는 live TRUNCATE P0 권한을 닫기 위해서다.
+- file: Production Supabase exact `065_harden_e2ee_pairing_rpc.sql`
+- function/component/migration: pairing start/confirm/mark-active RPC 3개
+- what changed/reviewed: NULL evidence/signature, expiry, canonical activation 경계와 authenticated-only EXECUTE를 forward hardening
+- why: 062의 fail-open/invalid-state 가능성을 broad table write 없이 닫기 위해서다.
+- file: Production Supabase exact `067_profile_post_intent.sql`
+- function/component/migration: `daily_records.is_profile_post`
+- what changed/reviewed: boolean NOT NULL DEFAULT false 열을 추가하고 기존 5행을 false로 보존
+- why: Story 사진을 자동 profile grid에 넣지 않고 사용자의 명시적 발행 의도만 저장하기 위해서다.
+- file: Production Supabase exact `063_partner_service_projection.sql`
+- function/component/migration: `get_partner_service_info()`
+- what changed/reviewed: active gomsin에게 active soldier의 allow-listed 복무 타임라인 6필드만 projection
+- why: 곰신도 기다림/복무 성장 정보를 보되 memo와 profiles 원본 행은 비공개로 유지하기 위해서다.
+- file: `docs/CURRENT_STATE.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `supabase/migrations/README.md`, Control Tower reports
+- function/component/migration: Production release truth
+- what changed/reviewed: APPLIED/NOT APPLIED, actor evidence, backup 한계, rollback, 다음 gate 기록
+- why: 저장소 코드·Production schema·실기기·배포 증거를 분리하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: migration 065 exact reviewed forward-hardening 외 protocol/키/recovery 설계 변경 없음
+- DB/migration semantics: repository SQL 파일은 수정하지 않고 exact SHA 파일만 실행
+- product semantics: AI 중요도 선정/서버 AI/관계 점수 없음; profile post와 복무 projection 기존 계약 유지
+- Production: 066, Apple provider, Vercel Production, PR merge, TestFlight/App Store는 변경하지 않음
+
+#### VERIFICATION
+- command: exact SHA 확인 후 linked `psql`, `SET ROLE postgres`, `ON_ERROR_STOP=1`, 064→065→067→063 파일별 실행
+- PASS / FAIL / UNVERIFIED: PASS — 네 트랜잭션 COMMIT, 파일별 post-check PASS
+- what it actually proves: 승인한 exact SQL이 지정 순서로 Production catalog에 적용됨
+- command: final integrated catalog at `2026-08-28T01:20:51Z`
+- PASS / FAIL / UNVERIFIED: PASS — 063 함수 1, 065 함수 3, all fixed search path/security definer/auth-only; 064 authenticated `[SELECT]`, anon false; 067 5 false/0 null; pairing 0; 066 absent; ledger absent
+- what it actually proves: partial/misordered 적용이 남지 않았고 066/db-push가 실행되지 않음
+- command: PostgREST anon probes for 063/065/067
+- PASS / FAIL / UNVERIFIED: PASS — `401/42501`, schema-missing false
+- what it actually proves: schema cache가 새 객체를 알고 anon 호출을 거부함; authenticated 정상 경로는 별도
+- command: Production membership 기반 rollback-only 063/067 actor matrix
+- PASS / FAIL / UNVERIFIED: PASS — gomsin 1, soldier/former/unrelated 0; owner update 1, partner update 0; shared/private/former/unrelated 경계; rollback 후 5행/marker 불변
+- what it actually proves: 실제 Production membership/data 위 권한·projection 경계, 영구 데이터 변경 없음
+- command: Production rollback-only 065 actor probes
+- PASS / FAIL / UNVERIFIED: CONDITIONAL PASS — valid start 후 rollback, NULL 22023, former/unrelated 42501, noncanonical 42501, unconfirmed 22023; 실제 two-device confirm→activate는 active device/scope key 0으로 UNVERIFIED
+- what it actually proves: 현재 가능한 negative/partial normal 경계; 전체 정상 ceremony는 아님
+- command: `npx supabase functions list --project-ref xzlorqsjajokrlkunxhr --output json`
+- PASS / FAIL / UNVERIFIED: PASS — `delete-account` only, ACTIVE v6, JWT required
+- what it actually proves: 066 sender가 배포되지 않았고 066 보류 판단이 유지됨
+- command: independent post-apply `main/gpt-5.6-sol` High read-only review
+- PASS / FAIL / UNVERIFIED: Production DB delta PASS / 전체 출시 CONDITIONAL PASS; P0 0, P1 0, SQL-source P2 0
+- what it actually proves: reviewer가 `2026-08-28T01:26:05Z`에 Production을 독립 재조회해 이전 HOLD 종료를 확인. 유일한 P2는 `b85b757` 문서의 적용 전 상태이며 이 docs closure가 해결
+- command: PR #90 checks at Production truth closure `928d778`
+- PASS / FAIL / UNVERIFIED: PASS — 15/15 GitHub/Vercel checks, failure/pending 0
+- what it actually proves: 문서 P2 closure를 포함한 branch에서 typecheck/lint/Vitest/build, PostgreSQL, real-browser, Android, iOS simulator, secret/boundary/sync, Vercel Preview 전체 green
+
+#### REVIEW IMPACT
+- FULL for Production DB/security exact state. 로컬 app/migration source는 unchanged지만 remote C-class schema/authz delta이므로 사후 보안 review를 다시 수행한다.
+
+#### BLOCKERS
+- code: PR #90 Production truth closure `928d778` 15/15 checks PASS; open P0/P1/P2 없음
+- environment: Production active device/scope key 0, phone disconnected
+- external/manual: real JWT HTTP actor matrix, two-device ceremony, Apple provider/Services ID/secret, real Google/Apple iPhone OAuth, Vercel Production, Archive/TestFlight/App Store
+
+#### STOPPED AT
+- exact completed boundary: exact four Production migrations, per-file/final catalog, PostgREST, rollback-only actor evidence, independent post-apply PASS, docs closure commit/push/15 checks complete
+
+#### REMAINING
+- PR merge, Apple/provider/iPhone OAuth, Production web, TestFlight는 별도 gate
+
+#### NEXT ACTION
+- next owner: Codex primary after independent review
+- tool/model: primary integration; `main/gpt-5.6-sol` High review result
+- 기준 SHA: `b85b7573a31b7c6c7ad9b9542545676e7c84f571` plus docs-only closure
+- exact next task: PR merge 전 Vercel Production 자동 배포 영향 확인, 그 뒤 별도 action-time merge 결정
+
+#### DO NOT ADVANCE UNTIL
+- Apple/provider/Production deploy/TestFlight는 각각 별도 action-time 상태 확인
+
+#### PRODUCTION
+- APPLIED — exact 064/065/067/063 only
+- NOT APPLIED — 066, Auth provider, Vercel Production, PR merge, TestFlight/App Store
+
+### 2026-08-28 — fresh release asset sync·Xcode 27 실물 덮어 설치
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: iOS physical packaging and install
+- Step: stale iOS web bundle 진단 → publishable-key release build → sync → signed reinstall
+- Previous Gate: Production DB closure, 사용자 “앱이 그대로” 보고
+- This Gate: packaging/install PASS; physical render UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 제품/과금/저장 전략 변경 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, release-validation procedure
+- Current-state checked: branch/HEAD/status, dist/iOS asset hashes, Capacitor config, Xcode toolchains, connected device/install/process
+- Latest relevant Work Log checked: 2026-08-28 Production Supabase closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary packaging operator
+- Model: primary
+- Role: diagnose, release build, native sync, physical reinstall verification
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `fee58233df7c66acef2704e4719353be1f7e25d8`
+- Old HEAD: `fee58233df7c66acef2704e4719353be1f7e25d8`
+- New HEAD / Reviewed HEAD: docs-only follow-up commit
+
+#### CHANGED / REVIEWED
+- file: generated/ignored `dist`, `ios/App/App/public`, isolated `/tmp` DerivedData, physical installed app
+- function/component/migration: release asset delivery chain
+- what changed/reviewed: live publishable key를 메모리로만 전달해 fresh build·sync하고 Xcode 27 signed app을 덮어 설치
+- why: 최신 web asset이 iOS bundle과 설치본에 들어가지 않아 앱이 그대로 보이던 상태를 해결
+- file: release docs/report
+- function/component/migration: physical packaging truth
+- what changed/reviewed: stale bundle root cause, warning 판정, build/install 증거와 render 한계 기록
+- why: code existence·bundle sync·physical install·physical render를 분리하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged
+- Production: Supabase/Vercel/Auth/TestFlight/App Store mutation 없음
+
+#### VERIFICATION
+- command: initial `npm run cap:release:ios`
+- PASS / FAIL / UNVERIFIED: expected FAIL — legacy key format으로 release build abort
+- what it actually proves: production artifact가 legacy anon/JWT key로 만들어지지 않음
+- command: live publishable key memory injection + `npm run cap:release:ios`
+- PASS / FAIL / UNVERIFIED: PASS — 2,166 modules, 5 plugins
+- what it actually proves: strict release env를 만족한 current web bundle이 iOS project로 복사됨
+- command: SHA-256 comparison
+- PASS / FAIL / UNVERIFIED: PASS — dist/iOS public/signed App.app index hash exact match
+- what it actually proves: 빌드·native project·설치 대상 artifact가 같은 web entry를 포함
+- command: Xcode 27 beta physical signed build
+- PASS / FAIL / UNVERIFIED: PASS — `BUILD SUCCEEDED`, signature verify PASS
+- what it actually proves: iPhoneOS 27 signed bundle 생성 가능; Archive/TestFlight 증거는 아님
+- command: `devicectl install app`, terminate-existing launch, 5-second process query
+- PASS / FAIL / UNVERIFIED: PASS — new bundle URL installed, PID 4433 running from that URL
+- what it actually proves: fresh signed bundle 설치·프로세스 생존; 화면 내용은 아님
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 106 tests
+- what it actually proves: native config, iOS privacy manifest, app assets, native permissions 계약 유지
+- command: `git diff --check`, final status
+- PASS / FAIL / UNVERIFIED: PASS — tracked native diff 없음, 사용자 변경 보존
+- what it actually proves: generated sync가 추적 source/config를 오염시키지 않음
+
+#### REVIEW IMPACT
+- NONE — packaging/docs only; app/security/DB source semantics unchanged
+
+#### BLOCKERS
+- code: 없음
+- environment: physical screenshot/mirroring unavailable; 설치 전후 data container path가 달라 session 보존 UNVERIFIED
+- external/manual: 사용자가 실제 화면 표지 확인, Apple OAuth, two-account, Foundation Models, Archive/TestFlight
+
+#### STOPPED AT
+- exact completed boundary: strict release build, iOS sync, Xcode 27 signed physical overwrite install, launch/process verification 완료
+
+#### REMAINING
+- physical rendered latest UI와 authenticated path 확인
+- 다음 distributable build에서 build number 증가
+
+#### NEXT ACTION
+- next owner: user + Codex verifier
+- tool/model: user visual check, primary evidence integration
+- 기준 SHA: `fee58233df7c66acef2704e4719353be1f7e25d8`
+- exact next task: 현재 열린 iPhone에서 최신 UI 표지 4개 확인 후 PASS/FAIL 보고
+
+#### DO NOT ADVANCE UNTIL
+- TestFlight 전 physical render/auth smoke와 build number 증가
+
+#### PRODUCTION
+- APPLIED — local physical development app overwrite install only
+- NOT APPLIED — Vercel Production, Auth provider, TestFlight/App Store, additional Supabase mutation
+
+### 2026-08-28 — 홈 사진 포스트 이름·순서·분 단위 시각 정리
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Home/Story presentation
+- Step: 실물 첨부 화면에서 확인된 이전 포스트 레이아웃 수정과 재설치
+- Previous Gate: fresh release asset sync·Xcode 27 실물 덮어 설치
+- This Gate: browser render PASS, physical install PASS, physical Home render 사용자 확인 대기
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·과금·저장·AI 역할 변경 없음
+- Engineering source checked: `AGENTS.md`, Story exact-original contract
+- Current-state checked: branch/HEAD/status, `PaperHome` 실제 라우트와 StoryViewer/legacy feed sibling
+- Latest relevant Work Log checked: 2026-08-28 Story/Profile local closure와 fresh physical reinstall
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/verifier
+- Model: primary
+- Role: root-path UI fix, focused/unit/browser/native packaging verification
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `958d02ff8ac4eff132931caad534c07ae3e840b0`
+- Old HEAD: `958d02ff8ac4eff132931caad534c07ae3e840b0`
+- New HEAD / Reviewed HEAD: `d40d7ee0a9e47f92fe6610d62ee302014b673451`
+
+#### CHANGED / REVIEWED
+- file: `src/features/home/PaperHome.tsx`, `src/pages/HomePage.tsx`
+- function/component/migration: `Post`, `timeAgo`, Home route contract comment
+- what changed/reviewed: visible author row/caption prefix 제거, 사진→글→하단 시간·원본·책갈피 순서, `HH:mm:ss`→`HH:mm`
+- why: 첨부된 실물 화면에서 이름 반복, 책갈피 선행, 초 단위 노출이 실제 사용자 읽기 흐름을 방해함
+- file: `src/features/home/PaperHome.test.tsx`, `e2e/mediaGallery.spec.ts`
+- function/component/migration: DOM/order/time regression and 390px rendered geometry
+- what changed/reviewed: 이름 부재, exact 순서, 초 제거, 44px target, horizontal overflow와 screenshot을 자동 단언
+- why: 코드 존재가 아니라 공통 Home Post의 실제 렌더 결과를 고정하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: exact original navigation/bookmark write와 Story selection unchanged
+- Production: Supabase/Vercel/Auth/TestFlight/App Store mutation 없음
+
+#### VERIFICATION
+- command: focused Vitest `PaperHome`, `StoryViewer`, `PaperFeedWidget`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 43 tests
+- what it actually proves: 현재 홈·전체 Story·legacy feed의 표시/이동/책갈피 계약
+- command: target ESLint, `npm run typecheck`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 변경 TypeScript/React 정적 계약과 diff 무결성
+- command: Playwright 390px exact Home photo-post regression
+- PASS / FAIL / UNVERIFIED: PASS — 1/1
+- what it actually proves: 사진→이름 없는 글→분 단위 시간·원본·책갈피, 44px targets, overflow 0; screenshot `ui-audit-results/after/home-post-clean-390.png`
+- command: strict release build + Capacitor iOS sync
+- PASS / FAIL / UNVERIFIED: PASS — 2,166 modules, 5 plugins, dist/iOS index SHA `6123fa...` exact match
+- what it actually proves: 새 Home bundle이 native project에 포함됨
+- command: Xcode 27 beta physical signed build/install/launch + `devicectl` screenshot
+- PASS / FAIL / UNVERIFIED: PASS for build/install/launch; Home render UNVERIFIED
+- what it actually proves: 새 bundle이 iPhone에 설치·실행되고 Search 화면이 실제 캡처됨. 설치 직후 기기가 Search 탭에 있어 Home 포스트 자체는 실물 캡처하지 못함
+
+#### REVIEW IMPACT
+- DELTA — presentation/order only; DB/auth/privacy/crypto semantic review freshness unchanged
+
+#### BLOCKERS
+- code: 없음
+- environment: 실물 캡처 당시 앱이 Search 탭에 있어 Home 렌더는 사용자 탭 전환 후 확인 필요
+- external/manual: TestFlight/App Store와 무관한 로컬 development install만 완료
+
+#### STOPPED AT
+- exact completed boundary: code/test/browser screenshot/release sync/Xcode 27 physical reinstall·launch 완료
+
+#### REMAINING
+- 사용자가 iPhone 하단 Home을 눌러 실제 사진 포스트 1개 확인
+- PR #90 CI 재검증과 merge는 별도 gate
+
+#### NEXT ACTION
+- next owner: user + Codex verifier
+- tool/model: physical visual confirmation + primary evidence integration
+- 기준 SHA: `d40d7ee0a9e47f92fe6610d62ee302014b673451` plus docs closure
+- exact next task: iPhone Home에서 해당 사진 포스트를 확인하고 동일 배치인지 보고
+
+#### DO NOT ADVANCE UNTIL
+- TestFlight 전 physical Home/auth smoke와 build number 증가
+
+#### PRODUCTION
+- APPLIED — local physical development app overwrite install only
+- NOT APPLIED — Vercel Production, Supabase, Auth provider, TestFlight/App Store
+
+### 2026-08-28 — 게시물·Story 글자 크기, 알림 safe-area, startup 최적화와 TestFlight 사전 검증
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: readability, launch performance, signed distribution preflight
+- Step: 계정별 글자 크기 → 알림 위치 → startup/media 최적화 → Archive/IPA export
+- Previous Gate: Home photo-post layout/browser/physical install
+- This Gate: local RC + signed Archive/export PASS; TestFlight upload NOT APPLIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·과금·AI·저장 전략 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, release-validation procedure
+- Current-state checked: branch/HEAD/status, actual Home/Story/My/feed call paths, bundle output, Xcode settings
+- Latest relevant Work Log checked: 2026-08-28 Home photo-post layout/physical install
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary
+- Model: primary
+- Role: implementer, integration owner, verifier, packaging operator
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a64ecadd4b6833c9c5a8db255c8a3c5a2fd39a57`
+- Old HEAD: `a64ecadd4b6833c9c5a8db255c8a3c5a2fd39a57`
+- New HEAD / Reviewed HEAD: `5b15685` plus docs closure
+
+#### CHANGED / REVIEWED
+- file: `src/lib/recordTextSizePreference.ts`, `HandwritingSection`, App/CSS, Home/Story/My/feed
+- function/component/migration: account-local Small/Default/Large record-copy setting
+- what changed/reviewed: 15/17/20px 본문 선택을 계정별 localStorage에 저장하고 네 surface에 적용
+- why: Story/게시물 가독성을 사용자가 직접 조절하되 UI/시간/법적 문구는 흔들지 않기 위해서다.
+- file: `ThemedToaster`, `NotificationReentryBridge`
+- function/component/migration: top offset
+- what changed/reviewed: safe area + fixed header 64px 아래로 이동, z-index 보강
+- why: iPhone 상태바/다이내믹 아일랜드/고정 헤더 뒤에 알림이 가려지는 문제를 닫기 위해서다.
+- file: `index.html`, `App.tsx`, `RecordMediaGallery.tsx`
+- function/component/migration: boot surface, lazy Home, async image decode
+- what changed/reviewed: React 전 cream progress, Home/media route split, async decoding
+- why: 빈 검정 프레임 위험과 pre-auth parse 비용을 줄이고 사진 디코딩이 main thread를 덜 막게 한다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: record count/order/privacy/exact original unchanged
+- Production: Vercel/Supabase SQL/Auth/TestFlight/App Store mutation 없음
+
+#### VERIFICATION
+- command: focused Vitest groups
+- PASS / FAIL / UNVERIFIED: PASS — readability 59, type/handwriting 34, notifications 12, startup/media/CSP 45
+- what it actually proves: 설정 저장/계정 분리/네 surface 연결, alert offset, pre-React shell, image contract
+- command: full Vitest dot reporter
+- PASS / FAIL / UNVERIFIED: PASS — 264 files / 3,761 tests / 175.69s
+- what it actually proves: 전체 JS/TS 회귀; 과거 deviceKeyPort timeout 미재발
+- command: full ESLint, typecheck, production build, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 정적 계약, 빌드 가능성, diff 무결성
+- command: Playwright smoke + media/story/settings
+- PASS / FAIL / UNVERIFIED: PASS — 10/10
+- what it actually proves: authenticated boot, photo/lightbox, 320/390px, 17→20px, persistence, Home propagation, 44px
+- command: before/after production bundle measurement
+- PASS / FAIL / UNVERIFIED: PASS — entry 657.02→437.01KB, gzip 197.58→133.18KB; large chunk warning 제거
+- what it actually proves: pre-auth startup parse/download 부담 감소; physical iPhone telemetry는 아님
+- command: live publishable key memory injection + `npm run cap:release:ios`
+- PASS / FAIL / UNVERIFIED: first expected FAIL on legacy key, then PASS — 2,168 modules / 5 plugins
+- what it actually proves: release artifact safety guard와 current bundle iOS sync
+- command: Xcode 27 beta signed generic iOS archive + App Store Connect export
+- PASS / FAIL / UNVERIFIED: PASS — `app.gomsinlog` 0.1.0(2026082801), 30MB archive, 10MB IPA
+- what it actually proves: 서명·Archive·IPA 생성 가능. TestFlight upload/processing/install 증거는 아님
+
+#### REVIEW IMPACT
+- DELTA — UI/local preference/performance/package only; auth/DB/RLS/crypto review freshness unchanged
+
+#### BLOCKERS
+- code: 없음
+- environment: phone disconnected; latest physical render and remote TestFlight install UNVERIFIED
+- external/manual: Apple provider/Services ID, TestFlight processing, two-account real OAuth/session, Foundation Models
+
+#### STOPPED AT
+- exact completed boundary: optimized current source → strict Release sync → signed Archive → IPA export 완료; upload 직전 중지
+
+#### REMAINING
+- TestFlight upload and Apple processing
+- remote iPhone install, two-account and full release user-path smoke
+
+#### NEXT ACTION
+- next owner: Codex primary with user action-time instruction
+- tool/model: primary packaging operator; consequential security review only if auth/data scope changes
+- 기준 SHA: docs closure commit on top of `5b15685`
+- exact next task: 사용자가 재개하면 validated Archive/IPA를 TestFlight에 업로드하고 처리 상태 확인
+
+#### DO NOT ADVANCE UNTIL
+- upload 직전 exact HEAD/status와 App Store Connect app record/agreements 상태 재확인
+
+#### PRODUCTION
+- APPLIED — none
+- NOT APPLIED — TestFlight/App Store, Vercel Production, Supabase SQL/Auth/provider

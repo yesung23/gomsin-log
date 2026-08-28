@@ -118,6 +118,12 @@ const ORDER = [
   '059_partner_managed_username.sql',
   '060_partner_username_projection.sql',
   '061_reject_null_partner_profile_actor.sql',
+  '062_e2ee_pairing_ceremony_rpc.sql',
+  '063_partner_service_projection.sql',
+  '064_lock_crypto_pairings_table_privileges.sql',
+  '065_harden_e2ee_pairing_rpc.sql',
+  '066_atomic_push_delivery_claims.sql',
+  '067_profile_post_intent.sql',
 ];
 
 /**
@@ -378,6 +384,33 @@ for (const file of ORDER) {
     const pre = psql(['-c', PRE_002_RECURSION_DROPS]);
     if (!pre.ok) throw new Error(`002 pre-drop failed:\n${pre.stderr}`);
   }
+  if (file === '065_harden_e2ee_pairing_rpc.sql') {
+    const legacy062Fixture = psqlScript(`
+      INSERT INTO auth.users (id, email) VALUES
+        ('65000000-0000-4000-8000-00000000000a', 'legacy062-a@example.test'),
+        ('65000000-0000-4000-8000-00000000000b', 'legacy062-b@example.test');
+      INSERT INTO public.profiles (id, display_name, role) VALUES
+        ('65000000-0000-4000-8000-00000000000a', 'Legacy A', 'gomsin'),
+        ('65000000-0000-4000-8000-00000000000b', 'Legacy B', 'soldier');
+      INSERT INTO public.couples (id) VALUES ('65000000-0000-4000-8000-00000000000c');
+      INSERT INTO public.couple_members (couple_id, user_id, role, status) VALUES
+        ('65000000-0000-4000-8000-00000000000c', '65000000-0000-4000-8000-00000000000a', 'gomsin', 'active'),
+        ('65000000-0000-4000-8000-00000000000c', '65000000-0000-4000-8000-00000000000b', 'soldier', 'active');
+      INSERT INTO public.crypto_pairings (
+        id, couple_id, state, pairing_nonce, transcript, transcript_hash,
+        proposed_by_user_id, expires_at, created_at, updated_at
+      ) VALUES (
+        '65000000-0000-4000-8000-00000000000d',
+        '65000000-0000-4000-8000-00000000000c',
+        'CRYPTO_ACTIVE', NULL, NULL, NULL,
+        '65000000-0000-4000-8000-00000000000a',
+        clock_timestamp() + interval '5 minutes', clock_timestamp(), clock_timestamp()
+      );
+    `);
+    if (!legacy062Fixture.ok) {
+      throw new Error(`062-era malformed pairing fixture failed:\n${legacy062Fixture.stderr}`);
+    }
+  }
   const applied = psqlScript(readFileSync(join(MIGRATIONS, file), 'utf8'));
   if (!applied.ok) {
     console.error(`MIGRATION FAILED: ${file}\n${applied.stderr}`);
@@ -398,6 +431,9 @@ const COUPLE2 = '22222222-0000-4000-8000-000000000002';
 const SHARED = '5ha5ed00-0000-4000-8000-00000000000f'.replace(/[^0-9a-f-]/g, '0');
 const PRIVATE = 'da7a0000-0000-4000-8000-0000000000f1';
 const OTHER = 'c0c0c0c0-0000-4000-8000-0000000000c2';
+const LEGACY_062_A = '65000000-0000-4000-8000-00000000000a';
+const LEGACY_062_COUPLE = '65000000-0000-4000-8000-00000000000c';
+const LEGACY_062_PAIRING = '65000000-0000-4000-8000-00000000000d';
 
 mustSql(`
   INSERT INTO auth.users (id, email) VALUES
@@ -1647,17 +1683,17 @@ check(mustSql(`SELECT count(*) FROM public.device_push_tokens WHERE token = 'tok
 mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e'`, 'reset handover');
 check(asUser(E, `SELECT public.register_push_token('ios', 'token-e')`).ok, '048 re-registered');
 
-check(!asUser(D, 'SELECT * FROM public.push_delivery_candidates()').ok,
+check(!asUser(D, "SELECT * FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid)").ok,
   '048 an authenticated user CANNOT ask who is due a notification');
 // The grant is not the only gate (029's shape): EXECUTE without the service_role
 // claim is still refused, so a mis-issued GRANT cannot expose the schedule.
 check(!psql(['-At',
-  '-c', 'GRANT EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) TO authenticated',
+  '-c', 'GRANT EXECUTE ON FUNCTION public.push_delivery_candidates(UUID, TIMESTAMPTZ, INTEGER) TO authenticated',
   '-c', 'SET ROLE authenticated',
-  '-c', 'SELECT * FROM public.push_delivery_candidates()']).ok,
+  '-c', "SELECT * FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid)"]).ok,
   '048 EXECUTE without the service_role claim is refused in the body');
-mustSql('REVOKE EXECUTE ON FUNCTION public.push_delivery_candidates(TIMESTAMPTZ) FROM authenticated', 'restore grant');
-check(!asAnon('SELECT * FROM public.push_delivery_candidates()').ok,
+mustSql('REVOKE EXECUTE ON FUNCTION public.push_delivery_candidates(UUID, TIMESTAMPTZ, INTEGER) FROM authenticated', 'restore grant');
+check(!asAnon("SELECT * FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid)").ok,
   '048 anon CANNOT ask who is due a notification');
 
 // 20:00 KST on a Wednesday sits inside the migration-001 weekday default window.
@@ -1665,12 +1701,12 @@ const INSIDE = `TIMESTAMPTZ '2026-08-19 20:00+09'`;
 const OUTSIDE = `TIMESTAMPTZ '2026-08-19 03:00+09'`;
 
 const dueInside = mustAsServiceRole(
-  `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+  `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid, ${INSIDE}) WHERE user_id = '${E}'`,
   '048 candidates inside window');
 check(dueInside === '1', '048 service_role CAN ask, and a raised flag inside contact hours is due');
 
 const dueOutside = mustAsServiceRole(
-  `SELECT count(*) FROM public.push_delivery_candidates(${OUTSIDE}) WHERE user_id = '${E}'`,
+  `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000048'::uuid, ${OUTSIDE}) WHERE user_id = '${E}'`,
   '048 candidates outside window');
 check(dueOutside === '0', '048 nobody is notified outside the hours they typed in');
 
@@ -1692,11 +1728,11 @@ check(
 
 // --- at most one send per recipient per day ---------------------------------
 
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '048 mark delivered');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '00000000-0000-4000-8000-000000000048'::uuid)`, '048 mark delivered');
 check(unseenOf(E) === 'f', '048 delivering lowers the flag');
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000049'::uuid, ${INSIDE}) WHERE user_id = '${E}'`,
     '048 second look') === '0',
   '048 a delivered recipient is not due again',
 );
@@ -1705,16 +1741,17 @@ check(
 mustSql(`UPDATE public.push_delivery_state SET has_unseen = TRUE WHERE user_id = '${E}'`, 'raise again');
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-19 21:00+09') WHERE user_id = '${E}'`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-00000000004a'::uuid, TIMESTAMPTZ '2026-08-19 21:00+09') WHERE user_id = '${E}'`,
     '048 same day') === '0',
   '048 a SECOND act on the same day earns no second notification',
 );
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(TIMESTAMPTZ '2026-08-20 20:00+09') WHERE user_id = '${E}'`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-00000000004b'::uuid, TIMESTAMPTZ '2026-08-20 20:00+09') WHERE user_id = '${E}'`,
     '048 next day') === '1',
   '048 the next Korean-local day starts a new allowance',
 );
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '00000000-0000-4000-8000-00000000004b'::uuid)`, '048 release cleanup');
 
 // --- clearing one's own flag -------------------------------------------------
 
@@ -1774,7 +1811,7 @@ check(
 );
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id IN ('${D}', '${E}')`,
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-00000000004c'::uuid, ${INSIDE}) WHERE user_id IN ('${D}', '${E}')`,
     'candidates after unlink') === '0',
   '048 a disconnected relationship produces no delivery candidates',
 );
@@ -2115,6 +2152,8 @@ function resetPendingFixture(label) {
            WHERE couple_id = '${COUPLE3}' AND user_id IN ('${D}', '${E}')`, `${label} membership`);
   mustSql(`DELETE FROM public.daily_records WHERE couple_id = '${COUPLE3}'`, `${label} records`);
   mustSql(`DELETE FROM public.push_delivery_state WHERE user_id IN ('${D}', '${E}')`, `${label} state`);
+  mustSql(`DELETE FROM public.device_push_tokens WHERE user_id IN ('${D}', '${E}')`, `${label} delete tokens`);
+  mustSql(`INSERT INTO public.device_push_tokens (user_id, platform, token) VALUES ('${E}', 'ios', 'token-e-fixed')`, `${label} token`);
 }
 function shareRecord(id, note, label) {
   mustSql(`INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
@@ -2186,10 +2225,13 @@ check(
 // --- case 5: a delivery lands between two acts ------------------------------
 resetPendingFixture('053-5');
 shareRecord('e5300000-0000-4000-8000-00000000000a', 'B1', '053-5 B1');
+mustSql(`ALTER TABLE public.daily_records DISABLE TRIGGER trg_daily_records_shared_at;
+         UPDATE public.daily_records SET shared_at = ${INSIDE} - interval '1 minute' WHERE id = 'e5300000-0000-4000-8000-00000000000a';
+         ALTER TABLE public.daily_records ENABLE TRIGGER trg_daily_records_shared_at;`, '053-5 B1 stamp');
 check(unseenOf(E) === 't', '053 (delivery case) the first act raises the flag');
-// 055 made the decision time a required argument. `now()` is the honest value
-// here: nothing is shared between this line and the previous one.
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now())`, '053-5 deliver');
+const CLAIM_053_5 = '00000000-0000-4000-8000-000000000053';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_053_5}'::uuid, ${INSIDE})`, '053-5 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_053_5}'::uuid)`, '053-5 deliver');
 check(unseenOf(E) === 'f', '053 delivery lowers the flag');
 shareRecord('e5300000-0000-4000-8000-00000000000b', 'B2', '053-5 B2');
 check(unseenOf(E) === 't', '053 an act after delivery is pending again');
@@ -2347,8 +2389,8 @@ const NEXT_DAY = `TIMESTAMPTZ '2026-08-20 20:00+09'`;
 const boundaryOf = (userId) =>
   mustSql(`SELECT COALESCE(notified_through::text, 'NULL') FROM public.push_delivery_state
             WHERE user_id = '${userId}'`, 'boundary');
-const dueAt = (whenSql) => mustAsServiceRole(
-  `SELECT count(*) FROM public.push_delivery_candidates(${whenSql}) WHERE user_id = '${E}'`,
+const dueAt = (whenSql, claimId = '00000000-0000-4000-8000-000000000055') => mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${claimId}'::uuid, ${whenSql}) WHERE user_id = '${E}'`,
   '055 due');
 
 // --- the decision instant comes back with the batch --------------------------
@@ -2356,8 +2398,8 @@ resetPendingFixture('055-0');
 shareRecord('e5500000-0000-4000-8000-000000000001', 'D0', '055-0 D0');
 check(
   mustAsServiceRole(
-    `SELECT count(*) FROM public.push_delivery_candidates(${INSIDE})
-      WHERE user_id = '${E}' AND decided_at = ${INSIDE}`, '055-0 decided_at') === '1',
+    `SELECT count(*) FROM public.push_delivery_candidates('00000000-0000-4000-8000-000000000550'::uuid, ${INSIDE})
+      WHERE user_id = '${E}' AND decided_at = ${INSIDE} AND claim_id = '00000000-0000-4000-8000-000000000550'::uuid`, '055-0 decided_at') === '1',
   '055 push_delivery_candidates hands back the instant it decided',
 );
 
@@ -2365,9 +2407,12 @@ check(
 resetPendingFixture('055-A');
 shareRecord('e5500000-0000-4000-8000-00000000000a', 'R1', '055-A R1');
 check(unseenOf(E) === 't', '055 (case A) the first act raises the flag');
+const CLAIM_055_A = '00000000-0000-4000-8000-00000000055a';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_A}'::uuid, ${INSIDE})`, '055-A claim');
 // The send is decided HERE. R2 is shared after it, so no notification issued
 // from this decision could have been about R2.
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-A mark');
+shareRecord('e5500000-0000-4000-8000-000000000002', 'R2', '055-A R2');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_A}'::uuid)`, '055-A mark');
 check(
   unseenOf(E) === 't',
   '055 (case A) an act shared after the send decision SURVIVES the mark',
@@ -2391,8 +2436,10 @@ check(
 resetPendingFixture('055-A-neg');
 shareRecord('e5500000-0000-4000-8000-00000000000b', 'R1', '055-A-neg R1');
 const negDecision = mustSql('SELECT now()', '055-A-neg decide');
+const CLAIM_055_A_NEG = '00000000-0000-4000-8000-00000000055b';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_A_NEG}'::uuid, ${INSIDE})`, '055-A-neg claim');
 shareRecord('e5500000-0000-4000-8000-00000000000c', 'R2', '055-A-neg R2');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now())`, '055-A-neg mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', now(), '${CLAIM_055_A_NEG}'::uuid)`, '055-A-neg mark');
 check(
   unseenOf(E) === 'f' && negDecision !== '',
   '055 NEGATIVE PROOF: marking against the MARK-time clock still loses the racing act',
@@ -2401,23 +2448,29 @@ check(
 // --- case E: the daily cap and the race, together ----------------------------
 resetPendingFixture('055-E');
 shareRecord('e5500000-0000-4000-8000-00000000000e', 'R2 racing', '055-E R2');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-E mark');
+const CLAIM_055_E = '00000000-0000-4000-8000-00000000055e';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_E}'::uuid, ${INSIDE})`, '055-E claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_E}'::uuid)`, '055-E mark');
 check(unseenOf(E) === 't', '055 (case E) the racing act leaves the flag raised');
 check(
   dueAt(INSIDE_LATER) === '0',
   '055 (case E) the raised flag does NOT buy a second send the same day -- the cap holds',
 );
+const CLAIM_055_E_NEXT = '00000000-0000-4000-8000-000000000551';
 check(
-  dueAt(NEXT_DAY) === '1',
+  dueAt(NEXT_DAY, CLAIM_055_E_NEXT) === '1',
   '055 (case E) and the act is delivered on the NEXT run, which is the point: it waits, it is not erased',
 );
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '${CLAIM_055_E_NEXT}'::uuid)`, '055-E cleanup');
 
 // --- case D: the racing act is withdrawn during delivery ---------------------
 resetPendingFixture('055-D');
 shareRecord('e5500000-0000-4000-8000-0000000000d1', 'retracted', '055-D R');
+const CLAIM_055_D = '00000000-0000-4000-8000-00000000055d';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_D}'::uuid, ${INSIDE})`, '055-D claim');
 mustSql(`UPDATE public.daily_records SET is_private = true
          WHERE id = 'e5500000-0000-4000-8000-0000000000d1'`, '055-D retract');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-D mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_D}'::uuid)`, '055-D mark');
 check(
   unseenOf(E) === 'f',
   '055 (case D) an act RETRACTED before the mark leaves nothing pending, so no invitation to nothing',
@@ -2425,9 +2478,11 @@ check(
 
 resetPendingFixture('055-D2');
 shareRecord('e5500000-0000-4000-8000-0000000000d2', 'deleted', '055-D2 R');
+const CLAIM_055_D2 = '00000000-0000-4000-8000-000000000552';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_D2}'::uuid, ${INSIDE})`, '055-D2 claim');
 mustSql(`DELETE FROM public.daily_records
           WHERE id = 'e5500000-0000-4000-8000-0000000000d2'`, '055-D2 delete');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-D2 mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_D2}'::uuid)`, '055-D2 mark');
 check(
   unseenOf(E) === 'f',
   '055 (case D) and the same when it is DELETED rather than retracted',
@@ -2447,20 +2502,24 @@ check(
                  WHERE user_id = '${E}'`, '055-B stamp') === 't',
   '055 (case B) a send that was never marked stamps neither the day nor the boundary',
 );
-check(dueAt(INSIDE) === '1', '055 (case B) so the next run still owes them -- delivery failure is retry-safe');
+const CLAIM_055_B = '00000000-0000-4000-8000-00000000055b';
+check(dueAt(INSIDE, CLAIM_055_B) === '1', '055 (case B) so the next run still owes them -- delivery failure is retry-safe');
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '${CLAIM_055_B}'::uuid)`, '055-B cleanup');
 
 // --- case C: several devices, one decision, one mark -------------------------
 resetPendingFixture('055-C');
 shareRecord('e5500000-0000-4000-8000-0000000000c1', 'R1', '055-C R1');
 check(asUser(E, `SELECT public.register_push_token('android', 'token-e-2')`).ok,
   '055 (case C) a second device registers');
+const CLAIM_055_C = '00000000-0000-4000-8000-00000000055c';
 const perDevice = mustAsServiceRole(
-  `SELECT count(*)::text || '/' || count(DISTINCT decided_at)::text
-     FROM public.push_delivery_candidates(${INSIDE}) WHERE user_id = '${E}'`, '055-C rows');
+  `SELECT count(*)::text || '/' || count(DISTINCT decided_at)::text || '/' || count(DISTINCT claim_id)::text
+     FROM public.push_delivery_candidates('${CLAIM_055_C}'::uuid, ${INSIDE}) WHERE user_id = '${E}'`, '055-C rows');
 check(
-  perDevice === '2/1',
-  '055 (case C) two devices are two rows carrying ONE decision instant, so the boundary cannot differ per device',
+  perDevice === '2/1/1',
+  '055 (case C) two devices are two rows carrying ONE decision instant and ONE claim ID, so the boundary and lease cannot differ per device',
 );
+mustAsServiceRole(`SELECT public.release_push_claim('${E}', '${CLAIM_055_C}'::uuid)`, '055-C cleanup');
 mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e-2'`, '055-C cleanup');
 
 // --- the recipient's own look outranks a late mark ---------------------------
@@ -2473,9 +2532,11 @@ mustSql(`DELETE FROM public.device_push_tokens WHERE token = 'token-e-2'`, '055-
 */
 resetPendingFixture('055-G');
 shareRecord('e5500000-0000-4000-8000-0000000000g1'.replace(/g/g, '9'), 'R1', '055-G R1');
+const CLAIM_055_G = '00000000-0000-4000-8000-000000000559';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_G}'::uuid, ${INSIDE})`, '055-G claim');
 clearAsRecipient('055-G');
 const lookedAt = boundaryOf(E);
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE})`, '055-G late mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${INSIDE}, '${CLAIM_055_G}'::uuid)`, '055-G late mark');
 check(
   boundaryOf(E) === lookedAt,
   '055 a recipient\'s own look outranks a late mark: the boundary never moves backwards',
@@ -2515,13 +2576,17 @@ const stampOf = (userId) =>
 
 resetPendingFixture('055-H');
 shareRecord('e5500000-0000-4000-8000-0000000000h1'.replace(/h/g, '8'), 'R1', '055-H R1');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H W2 mark');
+const CLAIM_055_H_W2 = '00000000-0000-4000-8000-000000000582';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_H_W2}'::uuid, ${D2_DECISION})`, '055-H W2 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION}, '${CLAIM_055_H_W2}'::uuid)`, '055-H W2 mark');
 const stampAfterD2 = mustSql(
   `SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
     WHERE user_id = '${E}'`, '055-H D2 stamp');
 shareRecord('e5500000-0000-4000-8000-0000000000h2'.replace(/h/g, '8'), 'R2 on D2', '055-H R2');
 check(unseenOf(E) === 't', '055 (case H) the D2 act raises the flag, so a second D2 send is only barred by the cap');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H W1 delayed mark');
+const CLAIM_055_H_W1 = '00000000-0000-4000-8000-000000000581';
+mustSql(`UPDATE public.push_delivery_state SET claim_id = '${CLAIM_055_H_W1}'::uuid, claimed_at = ${D1_DECISION}, claimed_until = ${D1_DECISION} + interval '300 seconds' WHERE user_id = '${E}'`, '055-H W1 seed');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION}, '${CLAIM_055_H_W1}'::uuid)`, '055-H W1 delayed mark');
 
 check(
   stampAfterD2 === 't'
@@ -2529,8 +2594,9 @@ check(
                  WHERE user_id = '${E}'`, '055-H stamp holds') === 't',
   `055 (case H) a DELAYED OLDER mark does not drag last_notified_at backwards (stamp now ${stampOf(E)})`,
 );
+const CLAIM_055_H_LATER = '00000000-0000-4000-8000-000000000583';
 check(
-  dueAt(D2_LATER) === '0',
+  mustAsServiceRole(`SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_055_H_LATER}'::uuid, ${D2_LATER}) WHERE user_id = '${E}'`) === '0',
   '055 (case H) so the day it already spent stays spent: no SECOND notification on D2',
 );
 check(
@@ -2546,13 +2612,20 @@ check(
 */
 resetPendingFixture('055-H2');
 shareRecord('e5500000-0000-4000-8000-0000000000h3'.replace(/h/g, '8'), 'R1', '055-H2 R1');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H2 D1 mark');
-check(dueAt(INSIDE_LATER) === '0', '055 (case H) a normal D1 send still spends D1');
+const CLAIM_055_H2_D1 = '00000000-0000-4000-8000-000000000584';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_H2_D1}'::uuid, ${D1_DECISION})`, '055-H2 D1 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION}, '${CLAIM_055_H2_D1}'::uuid)`, '055-H2 D1 mark');
+const CLAIM_055_H2_LATER = '00000000-0000-4000-8000-000000000585';
 check(
-  dueAt(D2_DECISION) === '1',
+  mustAsServiceRole(`SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_055_H2_LATER}'::uuid, ${INSIDE_LATER}) WHERE user_id = '${E}'`) === '0',
+  '055 (case H) a normal D1 send still spends D1',
+);
+const CLAIM_055_H2_D2 = '00000000-0000-4000-8000-000000000586';
+check(
+  mustAsServiceRole(`SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_055_H2_D2}'::uuid, ${D2_DECISION}) WHERE user_id = '${E}'`) === '1',
   '055 (case H) and D1 -> D2 still opens exactly one D2 batch, so the guard bars only BACKWARD movement',
 );
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H2 D2 mark');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION}, '${CLAIM_055_H2_D2}'::uuid)`, '055-H2 D2 mark');
 check(
   mustSql(`SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
             WHERE user_id = '${E}'`, '055-H2 forward') === 't',
@@ -2566,10 +2639,14 @@ check(
 */
 resetPendingFixture('055-H3');
 shareRecord('e5500000-0000-4000-8000-0000000000h4'.replace(/h/g, '8'), 'R1', '055-H3 R1');
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION})`, '055-H3 D2 mark');
+const CLAIM_055_H3_D2 = '00000000-0000-4000-8000-000000000587';
+mustAsServiceRole(`SELECT public.push_delivery_candidates('${CLAIM_055_H3_D2}'::uuid, ${D2_DECISION})`, '055-H3 D2 claim');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D2_DECISION}, '${CLAIM_055_H3_D2}'::uuid)`, '055-H3 D2 mark');
 clearAsRecipient('055-H3');
 const boundaryAfterLook = boundaryOf(E);
-mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION})`, '055-H3 late D1 mark');
+const CLAIM_055_H3_D1 = '00000000-0000-4000-8000-000000000588';
+mustSql(`UPDATE public.push_delivery_state SET claim_id = '${CLAIM_055_H3_D1}'::uuid, claimed_at = ${D1_DECISION}, claimed_until = ${D1_DECISION} + interval '300 seconds' WHERE user_id = '${E}'`, '055-H3 W1 seed');
+mustAsServiceRole(`SELECT public.mark_push_delivered('${E}', ${D1_DECISION}, '${CLAIM_055_H3_D1}'::uuid)`, '055-H3 late D1 mark');
 check(
   boundaryOf(E) === boundaryAfterLook
     && mustSql(`SELECT last_notified_at = ${D2_DECISION} FROM public.push_delivery_state
@@ -2579,11 +2656,11 @@ check(
 
 // --- what the sender still cannot do -----------------------------------------
 check(
-  !asUser(D, `SELECT public.mark_push_delivered('${E}', now())`).ok,
+  !asUser(D, `SELECT public.mark_push_delivered('${E}', now(), '00000000-0000-4000-8000-000000000055'::uuid)`).ok,
   '055 an authenticated account still CANNOT mark anyone delivered',
 );
 check(
-  !asAnon(`SELECT public.mark_push_delivered('${E}', now())`).ok,
+  !asAnon(`SELECT public.mark_push_delivered('${E}', now(), '00000000-0000-4000-8000-000000000055'::uuid)`).ok,
   '055 and neither can anon',
 );
 /*
@@ -2642,17 +2719,20 @@ function functionContract(schemaName, functionName) {
 */
 const SECURE = 'true ;; search_path=public, pg_temp';
 const CANDIDATES_CONTRACT =
-  '1 ;; p_now timestamp with time zone ;; 1 ;; '
-  + 'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone)'
+  '1 ;; p_claim_id uuid, p_now timestamp with time zone, p_lease_seconds integer ;; 2 ;; '
+  + 'TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone, claim_id uuid)'
   + ' ;; ' + SECURE;
 const MARK_CONTRACT =
-  '1 ;; p_user_id uuid, p_decided_at timestamp with time zone ;; 0 ;; void'
+  '1 ;; p_user_id uuid, p_decided_at timestamp with time zone, p_claim_id uuid ;; 0 ;; void'
+  + ' ;; ' + SECURE;
+const RELEASE_CONTRACT =
+  '1 ;; p_user_id uuid, p_claim_id uuid ;; 0 ;; void'
   + ' ;; ' + SECURE;
 
 const candidatesContract = functionContract('public', 'push_delivery_candidates');
 check(
   candidatesContract === CANDIDATES_CONTRACT,
-  `055 push_delivery_candidates has EXACTLY one signature, one defaulted argument, that exact result type,`
+  `066 push_delivery_candidates has EXACTLY one signature, two defaulted arguments, that exact result type,`
     + ` and is SECURITY DEFINER with a pinned search_path`
     + ` -- so an extra OUT column or a stale overload is a failure, not a shrug (got: ${candidatesContract})`,
 );
@@ -2675,10 +2755,16 @@ check(
 const markContract = functionContract('public', 'mark_push_delivered');
 check(
   markContract === MARK_CONTRACT,
-  `055 mark_push_delivered has EXACTLY one signature, ZERO defaulted arguments, returns void,`
+  `066 mark_push_delivered has EXACTLY one signature, ZERO defaulted arguments, returns void,`
     + ` and is SECURITY DEFINER with a pinned search_path`
-    + ` -- pronargdefaults = 0 is the whole point: a caller that forgets the decision instant must FAIL,`
+    + ` -- pronargdefaults = 0 is the whole point: a caller that forgets the decision instant or claim ID must FAIL,`
     + ` not silently receive now() (got: ${markContract})`,
+);
+const releaseContract = functionContract('public', 'release_push_claim');
+check(
+  releaseContract === RELEASE_CONTRACT,
+  `066 release_push_claim has EXACTLY one signature, ZERO defaulted arguments, returns void,`
+    + ` and is SECURITY DEFINER with a pinned search_path (got: ${releaseContract})`,
 );
 check(
   mustSql(`SELECT count(*) FROM information_schema.tables
@@ -2697,8 +2783,8 @@ check(
 */
 check(
   candidatesContract.includes(
-    ' ;; TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone) ;; '),
-  `055 the sender's view gains a clock reading and NOTHING else -- compared whole, so a column`
+    ' ;; TABLE(user_id uuid, platform text, token text, decided_at timestamp with time zone, claim_id uuid) ;; '),
+  `066 the sender's view gains a clock reading and claim UUID and NOTHING else -- compared whole, so a column`
     + ` nobody thought to forbid fails too (got: ${candidatesContract})`,
 );
 
@@ -3381,6 +3467,603 @@ const projectionAfterMutationRestore = asUser(
 check(
   projectionAfterMutationRestore.ok && projectionAfterMutationRestore.stdout.trim() === '1',
   '061 mutation tests restore the exact one-partner projection',
+);
+
+// ---------------------------------------------------------------------------
+// 062 — actor-bound two-person pairing ceremony
+// ---------------------------------------------------------------------------
+
+const PAIR_DEVICE_A = 'a0620000-0000-4000-8000-00000000000a';
+const PAIR_DEVICE_B = 'b0620000-0000-4000-8000-00000000000b';
+const PAIR_NONCE = "decode(repeat('62', 32), 'hex')";
+const PAIR_TRANSCRIPT = "decode(repeat('63', 440), 'hex')";
+const PAIR_HASH = "decode(repeat('64', 32), 'hex')";
+const PAIR_SIG_A = "decode(repeat('65', 64), 'hex')";
+const PAIR_SIG_B = "decode(repeat('66', 64), 'hex')";
+const startPairing = (actor, transcript = PAIR_TRANSCRIPT) => asUser(actor, `
+  SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${PAIR_NONCE}, ${transcript}, ${PAIR_HASH},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )
+`);
+
+mustSql(`
+  DELETE FROM public.crypto_pairings WHERE couple_id = '${COUPLE1}';
+  INSERT INTO public.devices (id, user_id, sig_spki, kem_spki, platform, assurance, status)
+  VALUES
+    ('${PAIR_DEVICE_A}', '${A}', ${spki('62')}, ${spki('63')}, 'ios', 'secure_enclave', 'ACTIVE'),
+    ('${PAIR_DEVICE_B}', '${B}', ${spki('64')}, ${spki('65')}, 'ios', 'secure_enclave', 'ACTIVE');
+`, '062 pairing fixture');
+
+const nullStart = asAuthenticatedWithoutSubject(`
+  SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${PAIR_NONCE}, ${PAIR_TRANSCRIPT}, ${PAIR_HASH},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )
+`);
+check(
+  !nullStart.ok && /not_authenticated/.test(nullStart.stderr),
+  '062 a NULL-subject authenticated caller cannot start a pairing',
+);
+check(
+  !asAnon(`SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${PAIR_NONCE}, ${PAIR_TRANSCRIPT}, ${PAIR_HASH},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )`).ok,
+  '062 anon has no EXECUTE grant on pairing start',
+);
+check(
+  !startPairing(C).ok,
+  '062 an unrelated authenticated user cannot start another couple pairing',
+);
+check(
+  !startPairing(A, "decode(repeat('63', 439), 'hex')").ok,
+  '062 a malformed transcript is refused before persistence',
+);
+
+const startedPairing = startPairing(A);
+check(startedPairing.ok, '062 an active member can start a valid pairing');
+const PAIRING_ID = startedPairing.stdout.trim();
+check(
+  startPairing(B).ok && startPairing(B).stdout.trim() === PAIRING_ID,
+  '062 the matching proposal is idempotent for the active partner',
+);
+
+check(
+  !asUser(A, `INSERT INTO public.crypto_pairings (couple_id) VALUES ('${COUPLE1}')`).ok,
+  '062 authenticated members cannot directly insert pairing rows',
+);
+check(
+  !asUser(A, `UPDATE public.crypto_pairings SET state = 'CRYPTO_ACTIVE' WHERE id = '${PAIRING_ID}'`).ok,
+  '062 authenticated members cannot directly forge pairing state',
+);
+check(
+  !asUser(C, `SELECT public.e2ee_confirm_couple_pairing(
+    '${PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+  )`).ok,
+  '062 an unrelated user cannot confirm another couple pairing',
+);
+
+const confirmedA = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  confirmedA.ok && confirmedA.stdout.trim() === 'CONFIRMED_ONE',
+  '062 the first active member can bind only their own confirmation slot',
+);
+check(
+  !asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+    '${PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+  )`).ok,
+  '062 one member cannot confirm with the partner device',
+);
+check(
+  mustSql(`SELECT confirmed_high_signature IS NULL FROM public.crypto_pairings
+           WHERE id = '${PAIRING_ID}'`, '062 untouched partner slot') === 't',
+  '062 the first member cannot populate the partner confirmation slot',
+);
+check(
+  !asUser(A, `SELECT public.e2ee_mark_couple_pairing_active(
+    '${PAIRING_ID}', (SELECT id FROM public.scope_keys
+      WHERE owner_couple_id = '${COUPLE1}' AND state = 'ACTIVE' LIMIT 1)
+  )`).ok,
+  '062 a single confirmation cannot activate couple protection',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '062 former partner');
+check(
+  !asUser(B, `SELECT public.e2ee_confirm_couple_pairing(
+    '${PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+  )`).ok,
+  '062 a former partner cannot confirm pairing evidence',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '062 restore partner');
+
+const confirmedB = asUser(B, `SELECT public.e2ee_confirm_couple_pairing(
+  '${PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+)`);
+check(
+  confirmedB.ok && confirmedB.stdout.trim() === 'CONFIRMED_BOTH',
+  '062 the second active member completes the two-sided confirmation',
+);
+check(
+  !asUser(B, `SELECT public.e2ee_mark_couple_pairing_active(
+    '${PAIRING_ID}', (SELECT id FROM public.scope_keys
+      WHERE owner_couple_id = '${COUPLE1}' AND state = 'ACTIVE' LIMIT 1)
+  )`).ok,
+  '062 the non-canonical member cannot publish the active authority',
+);
+
+const activeScopeKeyId = mustSql(`
+  SELECT id::text FROM public.scope_keys
+  WHERE owner_couple_id = '${COUPLE1}' AND domain = 'couple' AND state = 'ACTIVE'
+  ORDER BY key_epoch DESC LIMIT 1
+`, '062 active couple scope key');
+const markedActive = asUser(A, `SELECT public.e2ee_mark_couple_pairing_active(
+  '${PAIRING_ID}', '${activeScopeKeyId}'
+)`);
+check(markedActive.ok, '062 the canonical member can activate after both confirmations and an active CSK');
+check(
+  mustSql(`SELECT state FROM public.crypto_pairings WHERE id = '${PAIRING_ID}'`, '062 active state') === 'CRYPTO_ACTIVE',
+  '062 the pairing reaches CRYPTO_ACTIVE only through the guarded RPC',
+);
+
+// ---------------------------------------------------------------------------
+// 063 — minimal partner service projection
+// ---------------------------------------------------------------------------
+
+mustSql(`
+  UPDATE public.profiles
+  SET military_info = jsonb_build_object(
+    'branch', 'army',
+    'militaryStatus', 'serving',
+    'enlistmentDate', '2026-01-01',
+    'expectedDischargeDate', '2027-07-01',
+    'dischargeDateSource', 'manual',
+    'memo', 'owner-only free-form note'
+  )
+  WHERE id = '${B}';
+`, '063 soldier military fixture');
+
+const serviceAsGomsin = asUser(A, `
+  SELECT row_to_json(service)::text
+  FROM public.get_partner_service_info() service
+`);
+check(
+  serviceAsGomsin.ok
+    && serviceAsGomsin.stdout.includes('"branch":"army"')
+    && serviceAsGomsin.stdout.includes('"military_status":"serving"')
+    && !serviceAsGomsin.stdout.includes('memo')
+    && !serviceAsGomsin.stdout.includes('owner-only free-form note'),
+  '063 active gomsin sees only the soldier service allowlist and never the memo',
+);
+
+const serviceAsSoldier = asUser(B, `SELECT count(*) FROM public.get_partner_service_info()`);
+const serviceAsUnrelated = asUser(C, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceAsSoldier.ok && serviceAsSoldier.stdout.trim() === '0'
+    && serviceAsUnrelated.ok && serviceAsUnrelated.stdout.trim() === '0',
+  '063 soldier and unrelated users receive no partner service row',
+);
+check(
+  !asAnon(`SELECT * FROM public.get_partner_service_info()`).ok,
+  '063 anon has no EXECUTE grant on partner service projection',
+);
+const serviceAsNullActor = asAuthenticatedWithoutSubject(`
+  SELECT count(*) FROM public.get_partner_service_info()
+`);
+check(
+  !serviceAsNullActor.ok && /not_authenticated/.test(serviceAsNullActor.stderr),
+  '063 authenticated without a JWT subject is rejected',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '063 former partner');
+const serviceAfterDisconnect = asUser(A, `SELECT count(*) FROM public.get_partner_service_info()`);
+const serviceForFormerPartner = asUser(B, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceAfterDisconnect.ok && serviceAfterDisconnect.stdout.trim() === '0'
+    && serviceForFormerPartner.ok && serviceForFormerPartner.stdout.trim() === '0',
+  '063 disconnected and former partners receive no service row',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '063 restore partner');
+
+const ANOMALOUS_THIRD_MEMBER = '63636363-0000-4000-8000-000000000063';
+mustSql(`
+  INSERT INTO auth.users (id, email) VALUES ('${ANOMALOUS_THIRD_MEMBER}', 'anomaly63@example.test');
+  INSERT INTO public.profiles (id, display_name, role) VALUES ('${ANOMALOUS_THIRD_MEMBER}', 'Anomaly', 'soldier');
+  INSERT INTO public.couple_members (couple_id, user_id, role, status)
+  VALUES ('${COUPLE1}', '${ANOMALOUS_THIRD_MEMBER}', 'soldier', 'active');
+`, '063 anomalous third active member fixture');
+
+const serviceWithThirdMember = asUser(A, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceWithThirdMember.ok && serviceWithThirdMember.stdout.trim() === '0',
+  '063 an anomalous third active member causes get_partner_service_info to return zero',
+);
+
+mustSql(`
+  DELETE FROM public.couple_members WHERE couple_id = '${COUPLE1}' AND user_id = '${ANOMALOUS_THIRD_MEMBER}';
+  DELETE FROM public.profiles WHERE id = '${ANOMALOUS_THIRD_MEMBER}';
+  DELETE FROM auth.users WHERE id = '${ANOMALOUS_THIRD_MEMBER}';
+`, '063 remove anomalous third member');
+
+const serviceAfterAnomalyRemoved = asUser(A, `SELECT count(*) FROM public.get_partner_service_info()`);
+check(
+  serviceAfterAnomalyRemoved.ok && serviceAfterAnomalyRemoved.stdout.trim() === '1',
+  '063 removing the anomalous third member restores the partner service projection',
+);
+
+// ---------------------------------------------------------------------------
+// 064 — lock crypto_pairings table privileges
+// ---------------------------------------------------------------------------
+
+const authPrivs = mustSql(`
+  SELECT concat_ws(',',
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'SELECT'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'INSERT'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'UPDATE'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'DELETE'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'TRUNCATE'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'TRIGGER'),
+    has_table_privilege('authenticated', 'public.crypto_pairings', 'REFERENCES')
+  )
+`, '064 authenticated table privileges');
+check(
+  authPrivs === 't,f,f,f,f,f,f',
+  '064 authenticated has SELECT true and INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER/REFERENCES false on crypto_pairings',
+);
+
+const anonPrivs = mustSql(`
+  SELECT concat_ws(',',
+    has_table_privilege('anon', 'public.crypto_pairings', 'SELECT'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'INSERT'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'UPDATE'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'DELETE'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'TRUNCATE'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'TRIGGER'),
+    has_table_privilege('anon', 'public.crypto_pairings', 'REFERENCES')
+  )
+`, '064 anon table privileges');
+check(
+  anonPrivs === 'f,f,f,f,f,f,f',
+  '064 anon has no table privileges on crypto_pairings',
+);
+
+const publicPrivs = mustSql(`
+  SELECT concat_ws(',',
+    has_table_privilege('public', 'public.crypto_pairings', 'SELECT'),
+    has_table_privilege('public', 'public.crypto_pairings', 'INSERT'),
+    has_table_privilege('public', 'public.crypto_pairings', 'UPDATE'),
+    has_table_privilege('public', 'public.crypto_pairings', 'DELETE'),
+    has_table_privilege('public', 'public.crypto_pairings', 'TRUNCATE'),
+    has_table_privilege('public', 'public.crypto_pairings', 'TRIGGER'),
+    has_table_privilege('public', 'public.crypto_pairings', 'REFERENCES')
+  )
+`, '064 PUBLIC has no table privileges on crypto_pairings');
+check(
+  publicPrivs === 'f,f,f,f,f,f,f',
+  '064 PUBLIC has no table privileges on crypto_pairings',
+);
+
+const pairingCountBeforeTruncate = mustSql(
+  `SELECT count(*) FROM public.crypto_pairings`,
+  '064 pairing count before truncate',
+);
+const truncateAttempt = asUser(A, `TRUNCATE TABLE public.crypto_pairings`);
+check(
+  !truncateAttempt.ok && /permission denied/.test(truncateAttempt.stderr),
+  '064 authenticated TRUNCATE attempt fails with permission denied',
+);
+const pairingCountAfterTruncate = mustSql(
+  `SELECT count(*) FROM public.crypto_pairings`,
+  '064 pairing count after truncate',
+);
+check(
+  pairingCountAfterTruncate === pairingCountBeforeTruncate && parseInt(pairingCountAfterTruncate, 10) > 0,
+  '064 crypto_pairings fixture remains intact after denied TRUNCATE attempt',
+);
+
+const selectPairing = asUser(A, `SELECT count(*) FROM public.crypto_pairings WHERE id = '${PAIRING_ID}'`);
+check(
+  selectPairing.ok && selectPairing.stdout.trim() === '1',
+  '064 authenticated member can still SELECT from crypto_pairings',
+);
+
+// ---------------------------------------------------------------------------
+// 065 — NULL-safe evidence and durable transcript expiration
+// ---------------------------------------------------------------------------
+
+check(
+  mustSql(`SELECT state FROM public.crypto_pairings WHERE id = '${LEGACY_062_PAIRING}'`,
+    '065 062-era malformed row state') === 'TRANSCRIPT_EXPIRED',
+  '065 quarantines an incomplete CRYPTO_ACTIVE row created before the forward upgrade',
+);
+const legacyConfirm = asUser(LEGACY_062_A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${LEGACY_062_PAIRING}', '65000000-0000-4000-8000-00000000000e', ${PAIR_SIG_A}
+)`);
+check(
+  legacyConfirm.ok && legacyConfirm.stdout.trim() === 'TRANSCRIPT_EXPIRED',
+  '065 returns the quarantined state idempotently without accepting a confirmation',
+);
+const freshAfterLegacyUpgrade = asUser(LEGACY_062_A, `SELECT public.e2ee_start_couple_pairing(
+  '${LEGACY_062_COUPLE}', decode(repeat('6a', 32), 'hex'),
+  decode(repeat('6b', 440), 'hex'), decode(repeat('6c', 32), 'hex'),
+  clock_timestamp(), clock_timestamp() + interval '5 minutes'
+)`);
+check(
+  freshAfterLegacyUpgrade.ok && freshAfterLegacyUpgrade.stdout.trim() !== LEGACY_062_PAIRING,
+  '065 permits a fresh valid ceremony after quarantining 062-era malformed authority',
+);
+
+mustSql(`UPDATE public.crypto_pairings SET state = 'UNLINKED' WHERE id = '${PAIRING_ID}'`,
+  '065 retire earlier pairing fixture');
+
+const pairingCountBeforeNullEvidence = mustSql(
+  `SELECT count(*) FROM public.crypto_pairings`,
+  '065 pairing count before NULL evidence attempts',
+);
+for (const [label, nonce, transcript, hash] of [
+  ['nonce', 'NULL', "decode(repeat('70', 440), 'hex')", "decode(repeat('71', 32), 'hex')"],
+  ['transcript', "decode(repeat('72', 32), 'hex')", 'NULL', "decode(repeat('73', 32), 'hex')"],
+  ['hash', "decode(repeat('74', 32), 'hex')", "decode(repeat('75', 440), 'hex')", 'NULL'],
+]) {
+  const result = asUser(A, `SELECT public.e2ee_start_couple_pairing(
+    '${COUPLE1}', ${nonce}, ${transcript}, ${hash},
+    clock_timestamp(), clock_timestamp() + interval '5 minutes'
+  )`);
+  check(
+    !result.ok && /invalid_pairing_evidence/.test(result.stderr),
+    `065 NULL ${label} is rejected before persistence`,
+  );
+}
+check(
+  mustSql(`SELECT count(*) FROM public.crypto_pairings`, '065 count after NULL evidence')
+    === pairingCountBeforeNullEvidence,
+  '065 NULL start evidence creates no pairing row',
+);
+
+const EXPIRED_PAIRING_ID = '65000000-0000-4000-8000-000000000065';
+mustSql(`
+  INSERT INTO public.crypto_pairings (
+    id, couple_id, state, pairing_nonce, transcript, transcript_hash,
+    proposed_by_user_id, expires_at, created_at, updated_at
+  ) VALUES (
+    '${EXPIRED_PAIRING_ID}', '${COUPLE1}', 'TRANSCRIPT_PROPOSED',
+    decode(repeat('76', 32), 'hex'), decode(repeat('77', 440), 'hex'),
+    decode(repeat('78', 32), 'hex'), '${A}',
+    clock_timestamp() - interval '1 minute',
+    clock_timestamp() - interval '6 minutes', clock_timestamp()
+  );
+`, '065 expired pairing fixture');
+
+const nullSignature = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', NULL
+)`);
+check(
+  !nullSignature.ok && /invalid_pairing_signature/.test(nullSignature.stderr),
+  '065 NULL signature is rejected',
+);
+check(
+  mustSql(`SELECT state || ',' || (confirmed_low_signature IS NULL)::text
+           FROM public.crypto_pairings WHERE id = '${EXPIRED_PAIRING_ID}'`,
+    '065 NULL signature state') === 'TRANSCRIPT_PROPOSED,true',
+  '065 NULL signature leaves state and confirmation slot unchanged',
+);
+
+const unrelatedExpired = asUser(C, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  !unrelatedExpired.ok && /not_active_couple_member/.test(unrelatedExpired.stderr),
+  '065 unrelated actor cannot mutate an expired pairing',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '065 former partner');
+const formerExpired = asUser(B, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_B}', ${PAIR_SIG_B}
+)`);
+check(
+  !formerExpired.ok && /not_active_couple_member/.test(formerExpired.stderr),
+  '065 former partner cannot mutate an expired pairing',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '065 restore partner');
+check(
+  mustSql(`SELECT state FROM public.crypto_pairings WHERE id = '${EXPIRED_PAIRING_ID}'`,
+    '065 denied actors leave expired fixture unchanged') === 'TRANSCRIPT_PROPOSED',
+  '065 denied actors do not persist an expiration transition',
+);
+
+const expireResult = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  expireResult.ok && expireResult.stdout.trim() === 'TRANSCRIPT_EXPIRED',
+  '065 active actor receives TRANSCRIPT_EXPIRED without a rollback exception',
+);
+check(
+  mustSql(`SELECT state || ','
+              || (confirmed_low_signature IS NULL)::text || ','
+              || (confirmed_high_signature IS NULL)::text
+           FROM public.crypto_pairings WHERE id = '${EXPIRED_PAIRING_ID}'`,
+    '065 persisted expiration') === 'TRANSCRIPT_EXPIRED,true,true',
+  '065 expiration persists without writing either confirmation slot',
+);
+const repeatExpired = asUser(A, `SELECT public.e2ee_confirm_couple_pairing(
+  '${EXPIRED_PAIRING_ID}', '${PAIR_DEVICE_A}', ${PAIR_SIG_A}
+)`);
+check(
+  repeatExpired.ok && repeatExpired.stdout.trim() === 'TRANSCRIPT_EXPIRED',
+  '065 repeated expiration confirmation is idempotent',
+);
+
+const freshAfterExpired = asUser(A, `SELECT public.e2ee_start_couple_pairing(
+  '${COUPLE1}', decode(repeat('79', 32), 'hex'), decode(repeat('7a', 440), 'hex'),
+  decode(repeat('7b', 32), 'hex'), clock_timestamp(),
+  clock_timestamp() + interval '5 minutes'
+)`);
+check(
+  freshAfterExpired.ok && freshAfterExpired.stdout.trim() !== EXPIRED_PAIRING_ID,
+  '065 an expired row no longer blocks a fresh pairing ceremony',
+);
+
+const truncateAfter065 = asUser(A, `TRUNCATE TABLE public.crypto_pairings`);
+check(
+  !truncateAfter065.ok && /permission denied/.test(truncateAfter065.stderr),
+  '065 preserves the 064 authenticated TRUNCATE denial',
+);
+
+// ---------------------------------------------------------------------------
+// 066 — atomic push delivery claims and crash recovery
+// ---------------------------------------------------------------------------
+const CLAIM_066_A = '66000000-0000-4000-8000-00000000000a';
+const CLAIM_066_B = '66000000-0000-4000-8000-00000000000b';
+const CLAIM_066_WRONG = '66000000-0000-4000-8000-00000000000f';
+
+// 1. Authorization: authenticated and anon cannot execute claim/mark/release
+check(!asUser(A, `SELECT * FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid)`).ok,
+  '066 authenticated cannot execute push_delivery_candidates');
+check(!asAnon(`SELECT * FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid)`).ok,
+  '066 anon cannot execute push_delivery_candidates');
+check(!asUser(A, `SELECT public.mark_push_delivered('${A}', now(), '${CLAIM_066_A}'::uuid)`).ok,
+  '066 authenticated cannot execute mark_push_delivered');
+check(!asAnon(`SELECT public.mark_push_delivered('${A}', now(), '${CLAIM_066_A}'::uuid)`).ok,
+  '066 anon cannot execute mark_push_delivered');
+check(!asUser(A, `SELECT public.release_push_claim('${A}', '${CLAIM_066_A}'::uuid)`).ok,
+  '066 authenticated cannot execute release_push_claim');
+check(!asAnon(`SELECT public.release_push_claim('${A}', '${CLAIM_066_A}'::uuid)`).ok,
+  '066 anon cannot execute release_push_claim');
+
+// 2. Owner-only state visibility preserved
+mustSql(`UPDATE public.couple_members SET status = 'active' WHERE couple_id = '${COUPLE1}' AND user_id IN ('${A}', '${B}')`, '066 restore couple1');
+const partnerSeesState = asUser(B, `SELECT count(*) FROM public.push_delivery_state WHERE user_id = '${A}'`);
+check(!partnerSeesState.ok || partnerSeesState.stdout.trim() === '0',
+  '066 partner cannot view other partner push_delivery_state');
+const ownerSeesState = asUser(A, `SELECT count(*) FROM public.push_delivery_state WHERE user_id = '${A}'`);
+check(ownerSeesState.ok, '066 owner can view their own push_delivery_state');
+
+// Set up recipient A with active device and pending act
+mustSql(`DELETE FROM public.daily_records WHERE couple_id = '${COUPLE1}'`, '066 clear records');
+mustSql(`DELETE FROM public.device_push_tokens WHERE user_id = '${A}'`, '066 reset tokens');
+check(asUser(A, `SELECT public.register_push_token('ios', 'token-a-066')`).ok, '066 register token A');
+mustSql(`INSERT INTO public.push_delivery_state (user_id, has_unseen, last_notified_at, notified_through, claim_id, claimed_at, claimed_until)
+         VALUES ('${A}', TRUE, NULL, NULL, NULL, NULL, NULL)
+         ON CONFLICT (user_id) DO UPDATE SET has_unseen = TRUE, last_notified_at = NULL, notified_through = NULL, claim_id = NULL, claimed_at = NULL, claimed_until = NULL`,
+  '066 reset push state A');
+
+// 3. First service claim returns recipient + exact claim, second different claim sees 0 (atomic isolation)
+const claim1Result = mustAsServiceRole(
+  `SELECT user_id::text || '|' || claim_id::text FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 first claim');
+check(claim1Result === `${A}|${CLAIM_066_A}`,
+  '066 first service claim returns recipient with exact claim UUID');
+
+const claim2Result = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_066_B}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 second concurrent claim');
+check(claim2Result === '0',
+  '066 second different claim while active lease is unexpired returns 0 candidates');
+
+// 4. Wrong claim cannot mark or release
+const wrongMark = asServiceRole(`SELECT public.mark_push_delivered('${A}', ${INSIDE}, '${CLAIM_066_WRONG}'::uuid)`);
+check(!wrongMark.ok, '066 wrong claim ID cannot mark push delivered');
+const wrongRelease = asServiceRole(`SELECT public.release_push_claim('${A}', '${CLAIM_066_WRONG}'::uuid)`);
+check(!wrongRelease.ok, '066 wrong claim ID cannot release push claim');
+
+// 5. Correct failed release makes recipient immediately reclaimable
+const correctRelease = asServiceRole(`SELECT public.release_push_claim('${A}', '${CLAIM_066_A}'::uuid)`);
+check(correctRelease.ok, '066 matching claim can release');
+const reclaimAfterRelease = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_066_B}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 reclaim after release');
+check(reclaimAfterRelease === '1',
+  '066 recipient is immediately reclaimable after explicit claim release');
+
+// 6. Expired lease reclaims (simulate expiry: claimed_until in the past)
+mustSql(`UPDATE public.push_delivery_state SET claimed_at = ${INSIDE} - interval '600 seconds', claimed_until = ${INSIDE} - interval '300 seconds' WHERE user_id = '${A}'`, '066 expire lease');
+const reclaimAfterExpiry = mustAsServiceRole(
+  `SELECT count(*) FROM public.push_delivery_candidates('${CLAIM_066_A}'::uuid, ${INSIDE}, 300) WHERE user_id = '${A}'`,
+  '066 reclaim after expiry');
+check(reclaimAfterExpiry === '1',
+  '066 expired lease is automatically reclaimable on next run');
+
+// 7. Successful matching mark clears claim and preserves decision timestamp
+const markSuccess = asServiceRole(`SELECT public.mark_push_delivered('${A}', ${INSIDE}, '${CLAIM_066_A}'::uuid)`);
+check(markSuccess.ok, '066 matching claim successfully marks push delivered');
+const stateAfterMark = mustSql(
+  `SELECT has_unseen::text || '|' || (claim_id IS NULL)::text || '|' || (last_notified_at = ${INSIDE})::text
+   FROM public.push_delivery_state WHERE user_id = '${A}'`,
+  '066 state after mark');
+check(stateAfterMark === 'false|true|true',
+  `066 mark_push_delivered clears claim fields, lowers unseen flag, and records decided_at timestamp (got: ${stateAfterMark})`);
+
+// Cleanup
+mustSql(`DELETE FROM public.device_push_tokens WHERE user_id = '${A}'`, '066 cleanup tokens');
+
+// ---------------------------------------------------------------------------
+// 067 — explicit profile post intent, with unchanged record authorization
+// ---------------------------------------------------------------------------
+
+mustSql(`UPDATE public.couple_members SET status = 'active' WHERE couple_id = '${COUPLE1}' AND user_id IN ('${A}', '${B}')`, '067 restore couple1');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private, is_profile_post) VALUES
+    ('67000000-0000-4000-8000-000000000001', '${A}', '${COUPLE1}', CURRENT_DATE, 'ordinary story', false, false),
+    ('67000000-0000-4000-8000-000000000002', '${A}', '${COUPLE1}', CURRENT_DATE, 'profile post', false, true),
+    ('67000000-0000-4000-8000-000000000003', '${A}', '${COUPLE1}', CURRENT_DATE, 'private post', true, true)
+`, '067 profile post fixtures');
+mustSql(`
+  INSERT INTO public.daily_records (id, user_id, couple_id, record_date, log_text, is_private)
+  VALUES ('67000000-0000-4000-8000-000000000004', '${A}', '${COUPLE1}', CURRENT_DATE, 'legacy client insert', false)
+`, '067 legacy insert omits marker');
+check(
+  mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000004'`, '067 inspect legacy default') === 'f',
+  '067 legacy insert omission uses the false default',
+);
+
+const ownerProfilePosts = asUser(A, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%' AND is_profile_post`);
+check(ownerProfilePosts.ok && ownerProfilePosts.stdout.trim() === '2',
+  '067 owner sees both of their explicit profile-post markers');
+const partnerProfilePosts = asUser(B, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%' AND is_profile_post`);
+check(partnerProfilePosts.ok && partnerProfilePosts.stdout.trim() === '1',
+  '067 active partner sees the shared profile post but not the private post');
+const unrelatedProfilePosts = asUser(C, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%'`);
+check(unrelatedProfilePosts.ok && unrelatedProfilePosts.stdout.trim() === '0',
+  '067 unrelated user sees no profile-post rows');
+const anonProfilePosts = asAnon(`SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%'`);
+check(
+  !anonProfilePosts.ok || anonProfilePosts.stdout.trim() === '0',
+  '067 anon sees no profile-post rows',
+);
+const legacyOwnerUpdate = asUser(A, `UPDATE public.daily_records SET log_text = 'legacy edit' WHERE id = '67000000-0000-4000-8000-000000000002'`);
+check(
+  legacyOwnerUpdate.ok
+    && mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000002'`, '067 inspect after legacy update') === 't',
+  '067 legacy update omission preserves an existing true marker',
+);
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '067 former partner');
+const formerProfilePosts = asUser(B, `SELECT count(*) FROM public.daily_records WHERE id::text LIKE '67000000-%'`);
+check(
+  formerProfilePosts.ok && formerProfilePosts.stdout.trim() === '0',
+  '067 former partner sees no profile-post rows from the old couple',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '067 restore active partner');
+asUser(B, `UPDATE public.daily_records SET is_profile_post = false WHERE id = '67000000-0000-4000-8000-000000000002'`);
+check(
+  mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000002'`, '067 inspect after partner update') === 't',
+  '067 partner cannot change the author profile-post marker',
+);
+const ownerClearsProfilePost = asUser(A, `UPDATE public.daily_records SET is_profile_post = false WHERE id = '67000000-0000-4000-8000-000000000002'`);
+check(
+  ownerClearsProfilePost.ok
+    && mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000002'`, '067 inspect after owner update') === 'f',
+  '067 author can change their own profile-post marker',
 );
 
 // ---------------------------------------------------------------------------

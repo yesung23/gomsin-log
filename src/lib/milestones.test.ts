@@ -3,6 +3,7 @@ import {
   nextAnniversaryMilestone,
   computeServiceProgress,
   effectiveDischargeDate,
+  resolveEffectiveMilitary,
   nextUpcomingEvent,
   findMemories,
 } from '@/lib/milestones';
@@ -223,5 +224,91 @@ describe('findMemories', () => {
       '2026-07-31',
     );
     expect(memory?.records).toHaveLength(2);
+  });
+});
+
+describe('resolveEffectiveMilitary', () => {
+  const soldierMilitary: MilitaryInfo = {
+    branch: 'army',
+    militaryStatus: 'serving',
+    enlistmentDate: '2025-03-10',
+    expectedDischargeDate: '2026-09-09',
+    dischargeDateSource: 'calculated',
+  };
+
+  const partnerMilitary = {
+    branch: 'navy' as const,
+    militaryStatus: 'serving' as const,
+    enlistmentDate: '2025-06-01',
+    expectedDischargeDate: '2027-02-01',
+    dischargeDateSource: 'manual' as const,
+  };
+
+  it('returns undefined for empty / undefined profile', () => {
+    expect(resolveEffectiveMilitary(undefined)).toBeUndefined();
+    expect(resolveEffectiveMilitary(null)).toBeUndefined();
+  });
+
+  it('soldier always preserves own profile.military regardless of couple state', () => {
+    expect(
+      resolveEffectiveMilitary({
+        role: 'soldier',
+        military: soldierMilitary,
+        couple: { connected: false, status: 'disconnected' },
+      }),
+    ).toEqual(soldierMilitary);
+  });
+
+  it('connected active gomsin resolves sanitized partnerMilitary', () => {
+    expect(
+      resolveEffectiveMilitary({
+        role: 'gomsin',
+        military: { branch: 'army', militaryStatus: 'unknown', dischargeDateSource: 'unknown' },
+        couple: {
+          connected: true,
+          status: 'active',
+          partnerMilitary,
+        },
+      }),
+    ).toEqual(partnerMilitary);
+  });
+
+  it('gomsin fails closed when couple is disconnected even if stale partnerMilitary exists', () => {
+    expect(
+      resolveEffectiveMilitary({
+        role: 'gomsin',
+        couple: {
+          connected: false,
+          status: 'disconnected',
+          partnerMilitary,
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('gomsin fails closed when couple is pending invitation', () => {
+    expect(
+      resolveEffectiveMilitary({
+        role: 'gomsin',
+        couple: {
+          connected: false,
+          status: 'pending',
+          partnerMilitary,
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('gomsin fails closed when partnerMilitary is absent', () => {
+    expect(
+      resolveEffectiveMilitary({
+        role: 'gomsin',
+        couple: {
+          connected: true,
+          status: 'active',
+          partnerMilitary: undefined,
+        },
+      }),
+    ).toBeUndefined();
   });
 });

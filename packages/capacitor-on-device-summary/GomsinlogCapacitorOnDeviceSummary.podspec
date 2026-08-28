@@ -10,10 +10,9 @@ Pod::Spec.new do |s|
   s.author = 'GomsinLog'
   s.source = { :git => 'https://github.com/yesung23/gomsin-log', :tag => s.version.to_s }
   s.source_files = 'ios/Sources/**/*.{swift,h,m}'
-  # Unchanged from the app's floor. FoundationModels is reached through
-  # `#if canImport` plus `@available(iOS 26.0, *)`, so raising the deployment
-  # target would drop iOS 14-17 devices to buy nothing.
-  s.ios.deployment_target = '14.0'
+  # iOS 15.0 matches the app and Xcode-supported floor. FoundationModels remains
+  # runtime-gated by `#if canImport` and `@available(iOS 26.0, *)`.
+  s.ios.deployment_target = '15.0'
   s.dependency 'Capacitor'
   s.swift_version = '5.9'
 end

@@ -22,6 +22,9 @@ describe('ThemedToaster activation ordering', () => {
     expect(
       await screen.findByText('로그인을 마치지 못했어요. 다시 시도해 주세요.'),
     ).toBeTruthy();
+    const toaster = document.querySelector<HTMLOListElement>('[data-sonner-toaster]');
+    expect(toaster?.style.getPropertyValue('--offset-top')).toBe('calc(env(safe-area-inset-top, 0px) + 4rem)');
+    expect(toaster?.style.getPropertyValue('--mobile-offset-top')).toBe('calc(env(safe-area-inset-top, 0px) + 4rem)');
   });
 
   it('shows a failure reported after mount in StrictMode', async () => {

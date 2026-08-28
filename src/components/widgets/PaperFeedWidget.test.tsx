@@ -141,6 +141,8 @@ describe('오늘은 지면에 없다', () => {
     const { container } = feed();
     const bodies = [...container.querySelectorAll('.hand-text')].map((n) => n.textContent);
     expect(bodies).toEqual(['내 기록', '상대 기록']);
+    expect(screen.getByText('내 기록')).toHaveClass('record-copy');
+    expect(screen.getByText('상대 기록')).toHaveClass('record-copy');
   });
 });
 

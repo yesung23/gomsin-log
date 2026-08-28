@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, SquarePen, X } from 'lucide-react';
+import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Plus, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
@@ -8,25 +8,81 @@ import { buildCoupleStats } from '@/lib/coupleStats';
 import { loadThirdSlot } from '@/lib/thirdSlotPreference';
 import { PostGrid } from '@/features/us/PostGrid';
 import { getPhotoAttachments } from '@/features/us/postTiles';
+import { PostComposerSheet } from '@/features/us/PostComposerSheet';
+import type { PostDraftItem } from '@/features/us/postComposition';
 import { ProfileIdentity } from '@/components/ProfileIdentity';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { InkCircle, PenFace } from '@/components/paper';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
+import { downloadRecordPhotoForReuse } from '@/lib/records';
 import { renderProfileCaption } from '@/lib/profileCaption';
-import { effectiveDischargeDate } from '@/lib/milestones';
+import { effectiveDischargeDate, resolveEffectiveMilitary } from '@/lib/milestones';
 import { localToday } from '@/lib/cycle';
 import { formatLocalDate } from '@/lib/utils';
 import { TRIP_PHASE_ORDER, TRIP_PHASE_PILL, groupTripsByPhase, type TripPhase } from '@/lib/tripPhase';
 import type { Attachment, CoupleHighlight, DailyRecord, Trip } from '@/types';
+import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
+
+const POST_RETRY_KEY_PREFIX = 'gomsinlog.post-retry.v1';
+
+interface StoredPostRetry {
+  recordId: string;
+  coupleId: string;
+  desiredPrivate: boolean;
+}
+
+function postRetryKey(userId: string): string {
+  return `${POST_RETRY_KEY_PREFIX}:${userId}`;
+}
+
+function readStoredPostRetry(userId: string): StoredPostRetry | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(postRetryKey(userId)) || 'null') as unknown;
+    if (!value || typeof value !== 'object') return null;
+    const candidate = value as Partial<StoredPostRetry>;
+    if (typeof candidate.recordId !== 'string'
+      || typeof candidate.coupleId !== 'string'
+      || typeof candidate.desiredPrivate !== 'boolean') return null;
+    return candidate as StoredPostRetry;
+  } catch {
+    return null;
+  }
+}
+
+function storePostRetry(userId: string, retry: StoredPostRetry): void {
+  try {
+    localStorage.setItem(postRetryKey(userId), JSON.stringify(retry));
+  } catch {
+    /* The private server row remains fail-closed even without local recovery. */
+  }
+}
+
+function clearStoredPostRetry(userId?: string): void {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(postRetryKey(userId));
+  } catch {
+    /* best-effort local cleanup */
+  }
+}
 
 export function SharedProfile() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { state, saveCoupleHighlight, deleteCoupleHighlight } = useStore();
+  const {
+    state,
+    isReady,
+    saveCoupleHighlight,
+    deleteCoupleHighlight,
+    addRecordWithMedia,
+    updateRecord,
+    deleteRecord,
+    updateRecordMedia,
+  } = useStore();
   const { profile } = state;
   const todayStr = localToday();
   const [tab, setTab] = useState<ProfileTab>('grid');
@@ -36,8 +92,265 @@ export function SharedProfile() {
   const [highlightRecordIds, setHighlightRecordIds] = useState<string[]>([]);
   const [highlightCoverId, setHighlightCoverId] = useState<string | undefined>();
   const [isSavingHighlight, setIsSavingHighlight] = useState(false);
+  const [composingPost, setComposingPost] = useState(false);
+  const [isPublishingPost, setIsPublishingPost] = useState(false);
+  const publishPostInFlightRef = useRef(false);
+  /*
+    작성 중인 초안은 **이 화면이 소유한다.**
+
+    시트 안에 두면 이 화면이 리렌더되어 시트가 리마운트되는 순간 고른 사진과 쓰던 글이
+    사라지고, 언마운트 cleanup 이 `revokeObjectURL` 을 호출해 아직 올리지 않은 파일의
+    미리보기까지 죽는다. 실제로 그 증상을 관찰했다 -- 공유를 눌렀을 때 글이 placeholder 로
+    돌아가고 아무것도 저장되지 않았다.
+  */
+  const [postItems, setPostItems] = useState<PostDraftItem[]>([]);
+  const [postCaption, setPostCaption] = useState('');
+  const [postRetryRecordId, setPostRetryRecordId] = useState<string | null>(null);
+  const [postRetryDesiredPrivate, setPostRetryDesiredPrivate] = useState<boolean | null>(null);
+  const postItemsRef = useRef(postItems);
+
+  useEffect(() => {
+    postItemsRef.current = postItems;
+  }, [postItems]);
+
+  /*
+   * A failed post keeps its exact server row private. Persist only the opaque row
+   * id and intended visibility, never caption or media. After a reload the owner
+   * can pick the photos again and attach them to that same row instead of creating
+   * a duplicate. A different account or couple can never inherit the retry.
+   */
+  useEffect(() => {
+    const userId = state.authenticatedUser?.id;
+    const coupleId = profile.couple.coupleId;
+    if (!isReady || !userId || !coupleId || postRetryRecordId) return;
+    const stored = readStoredPostRetry(userId);
+    if (!stored) return;
+    if (stored.coupleId !== coupleId) {
+      clearStoredPostRetry(userId);
+      return;
+    }
+    const retryRecord = state.records.find((record) => (
+      record.id === stored.recordId
+      && record.userId === userId
+      && record.isPrivate
+      && !record.contentUnavailable
+    ));
+    if (!retryRecord) {
+      clearStoredPostRetry(userId);
+      return;
+    }
+    setPostRetryRecordId(retryRecord.id);
+    setPostRetryDesiredPrivate(stored.desiredPrivate);
+    setPostCaption(retryRecord.log);
+  }, [isReady, postRetryRecordId, profile.couple.coupleId, state.authenticatedUser?.id, state.records]);
+
+  useEffect(() => () => {
+    for (const item of postItemsRef.current) {
+      if (item.kind === 'file') URL.revokeObjectURL(item.previewUrl);
+    }
+  }, []);
+
+  /** 초안을 버릴 때만 미리보기 URL 을 놓아 준다. */
+  const discardPostDraft = () => {
+    for (const item of postItems) {
+      if (item.kind === 'file') URL.revokeObjectURL(item.previewUrl);
+    }
+    setPostItems([]);
+    setPostCaption('');
+    setPostRetryRecordId(null);
+    setPostRetryDesiredPrivate(null);
+    clearStoredPostRetry(state.authenticatedUser?.id);
+  };
   const closeHighlightEditor = () => {
     if (!isSavingHighlight) setEditingHighlightId(undefined);
+  };
+
+  /**
+   * 게시물을 올린다. **새 테이블이나 업로드 경로를 만들지 않는다.**
+   *
+   * 기존 `addRecordWithMedia` 를 그대로 쓴다 -- 그 경로가 이미
+   * 커플 권한, 보호 게이트, 오프라인 큐, 파일별 실패를 다룬다. 게시물 전용 저장 경로를
+   * 새로 만들면 그 네 가지를 처음부터 다시 맞춰야 하고, 하나라도 빠지면 게시물만 권한
+   * 검사가 약한 문이 된다. `isProfilePost`는 이 기존 기록을 사용자가 프로필 격자에
+   * 명시적으로 발행했다는 표시만 남긴다.
+   *
+   * 여행·스토리에서 고른 사진은 현재 사용자의 Storage 권한으로 다시 읽은 뒤 새 record id
+   * 아래에 독립 사본으로 올린다. 기존 path를 그대로 붙이면 canonical path/RLS를 깨고,
+   * 원본 삭제가 새 게시물까지 깨뜨린다. 다운로드와 업로드 사이에는 시작한 couple id를
+   * 고정해 연결 해제·계정 전환 중 예전 사진이 새 커플로 넘어가지 못하게 한다.
+   */
+  const runPublishPost = async (input: {
+    caption: string;
+    isPrivate: boolean;
+    items: PostDraftItem[];
+  }) => {
+    const expectedCoupleId = profile.couple.coupleId;
+    if (!expectedCoupleId) {
+      toast.error('커플 공간을 확인하지 못해 게시물을 올리지 않았어요.');
+      return;
+    }
+
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setIsPublishingPost(true);
+    try {
+      const files: File[] = [];
+      for (const item of input.items) {
+        if (item.kind === 'file') {
+          files.push(item.file);
+          continue;
+        }
+
+        // Re-check the selected source against the latest authorised projection.
+        const source = sharedRecords.find((record) => record.id === item.sourceRecordId);
+        const stillAttached = source?.attachments?.some((attachment) => (
+          attachment.type === 'photo'
+          && attachment.path === item.attachment.path
+          && attachment.name === item.attachment.name
+        ));
+        if (!source || source.isPrivate || source.contentUnavailable || !stillAttached) {
+          toast.error('고른 사진의 공유 상태가 바뀌어 게시물을 올리지 않았어요.');
+          return;
+        }
+
+        const downloaded = await downloadRecordPhotoForReuse(
+          item.attachment,
+          expectedCoupleId,
+          item.sourceRecordId,
+        );
+        if ('error' in downloaded) {
+          toast.error(downloaded.error);
+          return;
+        }
+        files.push(downloaded.file);
+      }
+
+      if (postRetryRecordId) {
+        const retried = await updateRecordMedia(postRetryRecordId, {
+          addFiles: files,
+          allOrNothing: true,
+        });
+        if (!retried.ok) {
+          toast.error(retried.error || '사진을 다시 올리지 못했어요.');
+          return;
+        }
+        if (retried.failedFiles.length > 0) {
+          toast.warning('사진을 아직 올리지 못했어요. 고른 순서를 유지한 채 다시 시도해 주세요.');
+          return;
+        }
+        const publication = await updateRecord(postRetryRecordId, {
+          isPrivate: input.isPrivate,
+          isProfilePost: true,
+        });
+        if (!publication.ok) {
+          const recordId = postRetryRecordId;
+          setComposingPost(false);
+          discardPostDraft();
+          toast.error('사진은 저장했지만 공개 범위를 확인하지 못했어요. 원본 기록에서 확인해 주세요.', {
+            duration: 8_000,
+            action: {
+              label: '원본 열기',
+              onClick: () => navigate(`/record?record=${encodeURIComponent(recordId)}`),
+            },
+          });
+          return;
+        }
+        setComposingPost(false);
+        discardPostDraft();
+        toast.success('게시물을 올렸어요.');
+        return;
+      }
+
+      const result = await addRecordWithMedia({
+        date: todayStr,
+        time,
+        authorRole: profile.role,
+        log: input.caption,
+        isPrivate: input.isPrivate,
+        isProfilePost: true,
+        talkAbout: false,
+        emotionFlow: [],
+        emotionUpdatedAt: null,
+      }, files, {
+        expectedCoupleId,
+        allOrNothingMedia: true,
+      });
+
+      if (result.queued) {
+        setComposingPost(false);
+        discardPostDraft();
+        toast.success('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 올라가요.');
+        return;
+      }
+      if (!result.ok) {
+        if (result.reason === 'protection_required') {
+          toast.error(result.error || '지금은 이 기록을 안전하게 저장할 수 없어요.', {
+            duration: 8_000,
+            action: {
+              label: isDeviceProtectionEnabled() ? '설정 열기' : '다시 시도',
+              onClick: isDeviceProtectionEnabled()
+                ? () => navigate('/settings')
+                : () => { void publishPost(input); },
+            },
+          });
+        } else {
+          toast.error(result.error || '게시물을 올리지 못했어요.');
+        }
+        return;
+      }
+      if (result.failedFiles.length > 0) {
+        if (!result.recordId) {
+          toast.error('사진 재시도 대상을 확인하지 못했어요. 초안은 그대로 두었어요.');
+          return;
+        }
+        setPostRetryRecordId(result.recordId);
+        setPostRetryDesiredPrivate(input.isPrivate);
+        const userId = state.authenticatedUser?.id;
+        if (userId) {
+          storePostRetry(userId, {
+            recordId: result.recordId,
+            coupleId: expectedCoupleId,
+            desiredPrivate: input.isPrivate,
+          });
+        }
+        toast.warning('사진은 아직 붙이지 못했고 글은 나만 보기로 보관했어요. 사진을 다시 골라도 같은 기록에 이어서 올려요.');
+        return;
+      }
+      setComposingPost(false);
+      discardPostDraft();
+      toast.success('게시물을 올렸어요.');
+    } finally {
+      setIsPublishingPost(false);
+    }
+  };
+
+  async function publishPost(input: {
+    caption: string;
+    isPrivate: boolean;
+    items: PostDraftItem[];
+  }) {
+    // `busy` reaches the sheet on the next render. Hold a synchronous lock so
+    // rapid share/retry taps cannot duplicate the record or its media copy.
+    if (publishPostInFlightRef.current) return;
+    publishPostInFlightRef.current = true;
+    try {
+      await runPublishPost(input);
+    } finally {
+      publishPostInFlightRef.current = false;
+    }
+  }
+
+  const closePostComposer = async () => {
+    if (isPublishingPost) return;
+    if (postRetryRecordId) {
+      const removed = await deleteRecord(postRetryRecordId);
+      if (!removed.ok) {
+        toast.error('나만 보기 초안을 지우지 못했어요. 다시 시도하거나 사진을 이어서 올려 주세요.');
+        return;
+      }
+    }
+    setComposingPost(false);
+    discardPostDraft();
   };
 
   const sharedRecords = useMemo(
@@ -53,30 +366,44 @@ export function SharedProfile() {
     () => sharedRecords.filter((record) => getPhotoAttachments(record).length > 0),
     [sharedRecords],
   );
+  const profilePostRecords = useMemo(
+    () => photoRecords.filter((record) => record.isProfilePost === true),
+    [photoRecords],
+  );
+  /*
+    `state.trips ?? []` 를 JSX 안에서 직접 쓰지 않는다.
+
+    그 표현식은 렌더마다 **새 배열**을 만들고, 그것을 prop 으로 받는
+    `PostComposerSheet` 안의 `useMemo(..., [trips])` 는 매번 무효화된다. 사진을 고르는
+    동안 스토어가 한 번이라도 갱신되면(realtime 패치, 포커스 복귀) 시트가 계산을 다시 하고,
+    작성 중이던 입력이 흔들린다. 안정된 참조로 고정한다.
+  */
+  const allTrips = useMemo(() => state.trips ?? [], [state.trips]);
   const selectedPost = selectedPostId
-    ? photoRecords.find((record) => record.id === selectedPostId) ?? null
+    ? profilePostRecords.find((record) => record.id === selectedPostId) ?? null
     : null;
   const highlights = state.coupleHighlights ?? [];
-  const hasMilitary = Boolean(effectiveDischargeDate(profile.military));
+  const effectiveMilitary = resolveEffectiveMilitary(profile);
+  const hasMilitary = Boolean(effectiveDischargeDate(effectiveMilitary));
   const stats = useMemo(
     () => buildCoupleStats({
-      anniversaryDate: profile.couple.anniversaryDate,
+      anniversaryDate: profile.couple?.anniversaryDate,
       events: sharedEvents,
-      military: profile.military,
+      military: effectiveMilitary,
       todayStr,
       thirdSlot: loadThirdSlot(profile.id || '', hasMilitary),
     }),
-    [hasMilitary, profile.couple.anniversaryDate, profile.id, profile.military, sharedEvents, todayStr],
+    [effectiveMilitary, hasMilitary, profile.couple?.anniversaryDate, profile.id, sharedEvents, todayStr],
   );
   const caption = useMemo(
     () => renderProfileCaption({
       template: profile.profileCaption,
-      anniversaryDate: profile.couple.anniversaryDate,
+      anniversaryDate: profile.couple?.anniversaryDate,
       events: sharedEvents,
-      military: profile.military,
+      military: effectiveMilitary,
       todayStr,
     }),
-    [profile.couple.anniversaryDate, profile.military, profile.profileCaption, sharedEvents, todayStr],
+    [effectiveMilitary, profile.couple?.anniversaryDate, profile.profileCaption, sharedEvents, todayStr],
   );
 
   const openCreateHighlight = () => {
@@ -166,22 +493,37 @@ export function SharedProfile() {
 
   return (
     <div className="min-h-full pb-8">
-      <header className="flex h-14 items-center gap-2 px-4" style={{ marginTop: 'env(safe-area-inset-top, 0px)' }}>
-        {profile.username ? (
-          <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
-        ) : (
-          <button type="button" onClick={() => navigate('/settings?profile=edit')} className="inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
-            아이디 설정하기
+      <header data-testid="profile-sticky-header" className="sticky top-0 z-40 grid h-14 grid-cols-[88px_1fr_88px] items-center px-4" style={{ background: 'var(--paper)' }}>
+        {/*
+          왼쪽 끝이 게시물 만들기다.
+
+          인스타의 `＋` 는 탭바 가운데에 있지만 곰신로그의 탭바 가운데는 이미 기록이
+          차지하고 있다. 마이 화면에서 만드는 것은 **이 프로필의 게시물**이므로 이 화면의
+          헤더가 그 자리다. 좌우 88px 슬롯으로 대칭을 맞춰 아이디가 뷰포트 정중앙에 온다.
+        */}
+        <div className="flex items-center justify-start">
+          <button type="button" aria-label={postRetryRecordId ? '게시물 사진 이어서 올리기' : '게시물 만들기'} data-testid="open-post-composer" onClick={() => setComposingPost(true)} className="flex h-11 w-11 shrink-0 items-center justify-center">
+            <Plus size={22} color="var(--ink)" aria-hidden="true" />
           </button>
-        )}
-        <Lock size={13} className="shrink-0" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
-        <span className="flex-1" />
-        <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
-          <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
-        </button>
-        <button type="button" aria-label="설정" onClick={() => navigate('/settings')} className="flex h-11 w-11 items-center justify-center">
-          <Menu size={22} color="var(--ink)" aria-hidden="true" />
-        </button>
+        </div>
+        <div className="flex min-w-0 items-center justify-center gap-1.5" data-testid="profile-header-center">
+          {profile.username ? (
+            <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
+          ) : (
+            <button type="button" onClick={() => navigate('/settings?profile=edit')} className="inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
+              아이디 설정하기
+            </button>
+          )}
+          <Lock size={13} className="shrink-0" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
+        </div>
+        <div className="flex items-center justify-end">
+          <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
+            <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
+          </button>
+          <button type="button" aria-label="설정" onClick={() => navigate('/settings')} className="flex h-11 w-11 items-center justify-center">
+            <Menu size={22} color="var(--ink)" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <div className="px-4"><CoupleStatusBanner /></div>
@@ -262,16 +604,34 @@ export function SharedProfile() {
         <SharedRecordList records={sharedRecords} coupleId={profile.couple.coupleId} onOpen={(id) => navigate(`/record?record=${encodeURIComponent(id)}`)} />
       ) : (
         <PostGrid
-          records={photoRecords}
+          records={profilePostRecords}
           coupleId={profile.couple.coupleId}
           onOpen={setSelectedPostId}
-          emptyMessage="함께 공개한 사진이 아직 없어요."
+          emptyMessage="아직 게시물이 없어요."
           ariaLabel="사진 게시물 격자"
         />
       )}
 
       {selectedPost ? (
         <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
+      ) : null}
+
+      {composingPost ? (
+        <PostComposerSheet
+          records={sharedRecords}
+          trips={allTrips}
+          coupleId={profile.couple.coupleId}
+          connected={profile.couple.connected}
+          busy={isPublishingPost}
+          retryingMedia={postRetryRecordId !== null}
+          initialPrivate={postRetryDesiredPrivate ?? !profile.couple.connected}
+          items={postItems}
+          setItems={setPostItems}
+          caption={postCaption}
+          setCaption={setPostCaption}
+          onClose={() => { void closePostComposer(); }}
+          onSubmit={(input) => { void publishPost(input); }}
+        />
       ) : null}
     </div>
   );
@@ -474,5 +834,5 @@ function PhotoPostViewer({ record, coupleId, onClose, onOpenRecord }: { record: 
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
   if (photos.length === 0) return null;
-  return <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="photo-post-viewer-title" data-testid="photo-post-viewer" className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface" onPointerDown={(event) => event.stopPropagation()}><header className="flex min-h-11 items-center gap-3"><h2 id="photo-post-viewer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">{formatLocalDate(record.date)}{record.time ? ` ${record.time}` : ''}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="사진 게시물 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button></header><div className="pt-3"><RecordMediaGallery attachments={photos} coupleId={coupleId} recordId={record.id} /></div>{record.contentUnavailable ? <p className="pt-3 text-caption leading-relaxed text-muted-foreground">이 기록의 글은 이 기기에서 아직 열 수 없어요.</p> : record.log.trim() ? <p className="hand-text whitespace-pre-wrap break-keep pt-3 text-body text-card-foreground">{record.log}</p> : null}<div className="flex justify-end pt-3"><button type="button" onClick={() => onOpenRecord(record.id)} className="ink-chip min-h-9 px-3 text-caption font-semibold" style={{ color: 'var(--ink)' }}>원본 보기</button></div></div></div>;
+  return <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="photo-post-viewer-title" data-testid="photo-post-viewer" className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface" onPointerDown={(event) => event.stopPropagation()}><header className="flex min-h-11 items-center gap-3"><h2 id="photo-post-viewer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">{formatLocalDate(record.date)}{record.time ? ` ${record.time}` : ''}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="사진 게시물 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button></header><div className="pt-3"><RecordMediaGallery attachments={photos} coupleId={coupleId} recordId={record.id} /></div>{record.contentUnavailable ? <p className="pt-3 text-caption leading-relaxed text-muted-foreground">이 기록의 글은 이 기기에서 아직 열 수 없어요.</p> : record.log.trim() ? <p className="hand-text record-copy whitespace-pre-wrap break-keep pt-3 text-card-foreground">{record.log}</p> : null}<div className="flex justify-end pt-3"><button type="button" onClick={() => onOpenRecord(record.id)} className="ink-chip min-h-9 px-3 text-caption font-semibold" style={{ color: 'var(--ink)' }}>원본 보기</button></div></div></div>;
 }

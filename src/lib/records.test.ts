@@ -7,6 +7,8 @@ import {
   MEDIA_POLICY_REFUSAL,
   isCanonicalRecordMediaPath,
   deleteRecordFromDB,
+  downloadRecordPhotoForReuse,
+  fetchRecordsFromDB,
   saveRecordToDB,
   setRecordCryptoEnvironment,
 } from '@/lib/records';
@@ -17,10 +19,16 @@ import {
   requireCoupleProtection,
 } from '@/app/e2ee/coupleProtectionBarrier';
 
-const { mockFrom, mockSupabase } = vi.hoisted(() => {
+const { mockFrom, mockStorageDownload, mockSupabase } = vi.hoisted(() => {
   const mockFrom = vi.fn();
-  const mockSupabase = { from: mockFrom };
-  return { mockFrom, mockSupabase };
+  const mockStorageDownload = vi.fn();
+  const mockSupabase = {
+    from: mockFrom,
+    storage: {
+      from: vi.fn(() => ({ download: mockStorageDownload })),
+    },
+  };
+  return { mockFrom, mockStorageDownload, mockSupabase };
 });
 
 vi.mock('@/lib/supabase', () => ({
@@ -229,6 +237,109 @@ describe('isCanonicalRecordMediaPath', () => {
   });
 });
 
+describe('downloadRecordPhotoForReuse', () => {
+  afterEach(() => {
+    mockStorageDownload.mockReset();
+  });
+
+  it('downloads only a canonical source photo and returns a new File', async () => {
+    mockStorageDownload.mockResolvedValue({
+      data: new Blob(['photo'], { type: 'image/jpeg' }),
+      error: null,
+    });
+
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-1/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(mockStorageDownload).toHaveBeenCalledWith(
+      'couple-1/record-1/source.jpg',
+      {},
+      { cache: 'no-store' },
+    );
+    expect(result).toHaveProperty('file');
+    expect((result as { file: File }).file.name).toBe('source.jpg');
+    expect((result as { file: File }).file.type).toBe('image/jpeg');
+  });
+
+  it('rejects a path owned by another record before touching Storage', async () => {
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-other/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(result).toHaveProperty('error');
+    expect(mockStorageDownload).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Storage returns non-photo bytes', async () => {
+    mockStorageDownload.mockResolvedValue({
+      data: new Blob(['<html>'], { type: 'text/html' }),
+      error: null,
+    });
+
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-1/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(result).toHaveProperty('error');
+  });
+
+  it('classifies an RLS rejection instead of blaming the connection', async () => {
+    mockStorageDownload.mockResolvedValue({
+      data: null,
+      error: { code: '42501', message: 'permission denied' },
+    });
+
+    const result = await downloadRecordPhotoForReuse(
+      { type: 'photo', name: 'source.jpg', path: 'couple-1/record-1/source.jpg' },
+      'couple-1',
+      'record-1',
+    );
+
+    expect(result).toEqual({
+      error: '기존 사진을 불러오지 못했어요. 권한이 없어요. 커플 공간 연결 상태를 확인해 주세요.',
+    });
+  });
+});
+
+describe('fetchRecordsFromDB profile-post metadata', () => {
+  afterEach(() => mockFrom.mockReset());
+
+  it('maps explicit profile posts without changing the stored record time', async () => {
+    const secondOrder = vi.fn().mockResolvedValue({
+      data: [{
+        id: 'record-1',
+        user_id: 'user-1',
+        record_date: '2026-08-28',
+        record_time: '09:07:33',
+        log_text: '아침 기록',
+        attachments: [],
+        is_private: false,
+        is_profile_post: true,
+        created_at: '2026-08-28T00:07:33.000Z',
+        content_revision: 1,
+        cipher_format: 0,
+      }],
+      error: null,
+    });
+    const firstOrder = vi.fn().mockReturnValue({ order: secondOrder });
+    const eq = vi.fn().mockReturnValue({ order: firstOrder });
+    const select = vi.fn().mockReturnValue({ eq });
+    mockFrom.mockReturnValue({ select });
+
+    const [mapped] = await fetchRecordsFromDB('couple-1');
+
+    expect(mapped.time).toBe('09:07:33');
+    expect(mapped.isProfilePost).toBe(true);
+  });
+});
+
 describe('deleteRecordFromDB', () => {
   const recordId = 'rec-001';
   const userId = 'user-001';
@@ -326,11 +437,25 @@ describe('saveRecordToDB', () => {
   }
 
   it('reports ok on a successful upsert', async () => {
-    mockUpsert(null);
+    const insert = mockUpsert(null);
     expect(await saveRecordToDB(record, 'couple-001', 'user-001')).toEqual({
       ok: true,
       contentRevision: 1,
     });
+    const payload = insert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('is_profile_post');
+  });
+
+  it('persists explicit profile publication as clear routing metadata', async () => {
+    const insert = mockUpsert(null);
+    await saveRecordToDB({ ...record, isProfilePost: true }, 'couple-001', 'user-001');
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ is_profile_post: true }));
+  });
+
+  it('can explicitly clear profile publication without changing record identity', async () => {
+    const insert = mockUpsert(null);
+    await saveRecordToDB({ ...record, isProfilePost: false }, 'couple-001', 'user-001');
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ is_profile_post: false }));
   });
 
   it('reports forbidden for an RLS rejection, never a connection failure', async () => {
@@ -418,6 +543,7 @@ describe('saveRecordToDB', () => {
       emotion_flow: [],
       record_time: null,
     });
+    expect(first.insert.mock.calls[0][0]).not.toHaveProperty('is_profile_post');
 
     const second = mockEncryptedResponse({ content_revision: 2 });
     const edited = await saveRecordToDB(

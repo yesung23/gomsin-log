@@ -173,12 +173,24 @@ export type PairingRecord = {
   coupleId: string;
   state: string;
   pairingNonce: Uint8Array | null;
+  /** Canonical 440-byte `gomsinlog/pairing/v1` transcript. */
+  transcript: Uint8Array | null;
   transcriptHash: Uint8Array | null;
   confirmedLowSignature: Uint8Array | null;
   confirmedLowDeviceId: string | null;
   confirmedHighSignature: Uint8Array | null;
   confirmedHighDeviceId: string | null;
+  createdAt: string;
   expiresAt: string | null;
+};
+
+export type NewPairingProposal = {
+  coupleId: string;
+  pairingNonce: Uint8Array;
+  transcript: Uint8Array;
+  transcriptHash: Uint8Array;
+  createdAt: string;
+  expiresAt: string;
 };
 
 /**
@@ -285,8 +297,14 @@ export interface E2eeRepository {
 
   // --- pairing -------------------------------------------------------------
   getPairing(coupleId: string): Promise<PairingRecord | null>;
+  startPairing(record: NewPairingProposal): Promise<string>;
+  confirmPairing(input: {
+    pairingId: string;
+    deviceId: string;
+    signature: Uint8Array;
+  }): Promise<void>;
+  markPairingActive(input: { pairingId: string; scopeKeyId: string }): Promise<void>;
   getCoupleAuthorizationSnapshot(coupleId: string): Promise<CoupleAuthorizationSnapshot>;
-  setPairingState(pairingId: string, state: string): Promise<void>;
 
   /**
    * Every couple scope this account holds that requires rotation.

@@ -89,6 +89,7 @@ import {
   clearCoupleProtectionRequirement,
   requireCoupleProtection,
 } from '@/app/e2ee/coupleProtectionBarrier';
+import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { emitNotification, unseenPartnerTalkAboutMarks } from '@/lib/notifications';
 import {
   saveRecordToDB,
@@ -124,6 +125,15 @@ import {
 type SyncSlice = 'records' | 'events' | 'trips' | 'talk-about' | 'highlights' | 'profile';
 type ActiveIdentity = { userId: string; generation: number };
 type ActiveWorkspace = ActiveIdentity & { coupleId: string };
+
+function persistedMediaKey(attachment: Attachment): string {
+  return `${attachment.type}\u0000${attachment.name}\u0000${attachment.path ?? ''}`;
+}
+
+function hasSamePersistedMedia(actual: DailyRecord, expected: DailyRecord): boolean {
+  return JSON.stringify((actual.attachments || []).map(persistedMediaKey))
+    === JSON.stringify((expected.attachments || []).map(persistedMediaKey));
+}
 
 /**
  * The couple space this account belongs to, whether or not a partner has joined.
@@ -346,7 +356,9 @@ function recordFailureMessage(reason: RecordMutationReason): string {
     case 'couple_changed':
       return '기록을 남겨 둔 커플 공간과 현재 공간이 달라 자동으로 보내지 않았어요.';
     case 'protection_required':
-      return '이 기기에서 기록 보호 설정이 필요해요. 설정에서 먼저 준비해 주세요.';
+      // This result covers both a real active write floor with no usable key and
+      // an unavailable floor lookup. Do not invent which one happened here.
+      return '지금은 이 기록을 안전하게 저장할 수 없어요. 앱을 다시 연 뒤 재시도하고, 계속되면 고객지원에 알려 주세요.';
     case 'deletion_pending':
       return '탈퇴 처리가 진행 중이어서 기록을 저장할 수 없어요.';
     default:
@@ -634,6 +646,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * the old attempt through the captured identity and exact scope checks.
    */
   const startCoupleProtection = useCallback((identity: ActiveIdentity, coupleId: string) => {
+    if (!isDeviceProtectionEnabled()) {
+      clearCoupleProtectionRequirement(identity.userId, coupleId);
+      return Promise.resolve<CoupleProtectionOutcomeReason>('unavailable');
+    }
     requireCoupleProtection(identity.userId, coupleId);
     const key = `${identity.userId}:${identity.generation}:${coupleId}`;
     const existing = coupleProtectionFlightRef.current;
@@ -736,7 +752,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (connectedCoupleId) {
       // Install the barrier before publishing connected state. A synchronous
       // record action can therefore never observe floor=0 as a legacy scope.
-      requireCoupleProtection(identity.userId, connectedCoupleId);
+      if (isDeviceProtectionEnabled()) {
+        requireCoupleProtection(identity.userId, connectedCoupleId);
+      } else {
+        clearCoupleProtectionRequirement(identity.userId, connectedCoupleId);
+      }
       if (previousCoupleId && previousCoupleId !== connectedCoupleId) {
         clearCoupleProtectionRequirement(identity.userId, previousCoupleId);
       }
@@ -758,7 +778,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     );
     if (lifecycle === 'connected') {
       const coupleId = remote?.coupleId;
-      if (coupleId) void startCoupleProtection(identity, coupleId);
+      if (coupleId) {
+        if (isDeviceProtectionEnabled()) {
+          void startCoupleProtection(identity, coupleId);
+        } else {
+          clearCoupleProtectionRequirement(identity.userId, coupleId);
+        }
+      }
     }
     return lifecycle;
   }, [captureActiveIdentity, handleAuthExpired, isCurrentIdentity, startCoupleProtection, updateStateImmediately]);
@@ -1362,7 +1388,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               // A cached server snapshot may already say connected before the
               // fresh lifecycle probe returns. Keep the shared write path closed
               // during that honest-but-not-yet-activated interval.
-              requireCoupleProtection(sessionUser.id, nextState.profile.couple.coupleId);
+              if (isDeviceProtectionEnabled()) {
+                requireCoupleProtection(sessionUser.id, nextState.profile.couple.coupleId);
+              } else {
+                clearCoupleProtectionRequirement(sessionUser.id, nextState.profile.couple.coupleId);
+              }
             }
             replaceStateImmediately(nextState);
 
@@ -1496,6 +1526,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSharedSyncStatus('unavailable');
     const nextState: AppState = {
       ...current,
+      profile: {
+        ...current.profile,
+        couple: {
+          ...current.profile.couple,
+          partnerMilitary: undefined,
+        },
+      },
       highlightedRecordId: undefined,
       records: [],
       // Couple-scoped coordination metadata goes with the workspace. The
@@ -2077,11 +2114,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         }));
         setCoupleLifecycle('connected');
-        requireCoupleProtection(authUserId, coupleId);
-        void startCoupleProtection(
-          { userId: authUserId, generation: sessionGenerationRef.current },
-          coupleId,
-        );
+        if (isDeviceProtectionEnabled()) {
+          requireCoupleProtection(authUserId, coupleId);
+          void startCoupleProtection(
+            { userId: authUserId, generation: sessionGenerationRef.current },
+            coupleId,
+          );
+        } else {
+          clearCoupleProtectionRequirement(authUserId, coupleId);
+        }
         setInvitationExpiresAt(null);
         return; // Connected: stop polling.
       }
@@ -2360,8 +2401,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const lifecycle = deriveCoupleLifecycle(remote, stateRef.current.profile.couple);
     setCoupleLifecycle(lifecycle);
     if (lifecycle === 'connected') {
-      requireCoupleProtection(identity.userId, coupleId);
-      void startCoupleProtection(identity, coupleId);
+      if (isDeviceProtectionEnabled()) {
+        requireCoupleProtection(identity.userId, coupleId);
+        void startCoupleProtection(identity, coupleId);
+      } else {
+        clearCoupleProtectionRequirement(identity.userId, coupleId);
+      }
     } else {
       clearCoupleProtectionRequirement(identity.userId, coupleId);
     }
@@ -2393,12 +2438,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
      * an endless cycle -- the outbox decides what happens to a failed entry, and it
      * has the attempt count to do that with.
      */
-    options?: { recordId?: string; allowQueue?: boolean; expectedCoupleId?: string },
+    options?: {
+      recordId?: string;
+      allowQueue?: boolean;
+      expectedCoupleId?: string;
+      allOrNothingMedia?: boolean;
+    },
   ): Promise<{
     ok: boolean;
     failedFiles: string[];
     error?: string;
     queued?: boolean;
+    recordId?: string;
     /**
      * The classified cause, for the outbox to decide with. Absent on success and on
      * the stale/no-workspace paths, which a retry cannot change either way, so the
@@ -2408,8 +2459,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }> => {
     const recordId = options?.recordId ?? crypto.randomUUID();
     const allowQueue = options?.allowQueue !== false;
+    /*
+     * A profile post is public only after every selected photo is attached.
+     *
+     * Storage RLS requires the row to exist before upload, so inserting the
+     * caller's public value first can expose a text-only post when upload and
+     * client cleanup both fail. Stage that one row as private; the attachment
+     * UPDATE below publishes the intended visibility together with the complete
+     * ordered media set. An offline outbox keeps the original intent and reaches
+     * this same staging path when replayed.
+     */
+    const stagesPublicMediaPrivately = options?.allOrNothingMedia === true
+      && files.length > 0
+      && record.isPrivate === false;
+    const stagesProfilePostMarker = options?.allOrNothingMedia === true
+      && files.length > 0
+      && record.isProfilePost === true;
+    const { isProfilePost: intendedProfilePost, ...recordWithoutProfilePost } = record;
     const baseRecord: DailyRecord = {
-      ...record,
+      ...(stagesProfilePostMarker ? recordWithoutProfilePost : record),
+      isPrivate: stagesPublicMediaPrivately ? true : record.isPrivate,
       id: recordId,
       createdAt: new Date().toISOString(),
     };
@@ -2476,6 +2545,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       error?: string;
       queued?: boolean;
       reason?: RecordMutationReason;
+      recordId?: string;
     }> => {
       const message = recordFailureMessage(reason);
       const persistence = outboxRef.current;
@@ -2491,13 +2561,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           coupleId: workspace.coupleId,
           record,
           files,
+          allOrNothingMedia: options?.allOrNothingMedia === true || undefined,
         });
       } catch (error) {
         console.error('[gomsinlog] Failed to queue record for later delivery:', error);
         return { ok: false, failedFiles: files.map((file) => file.name), error: message, reason };
       }
       setOutboxCounts(await countOutbox(persistence, workspace.userId));
-      return { ok: false, queued: true, failedFiles: [], reason };
+      return { ok: false, queued: true, failedFiles: [], reason, recordId };
     };
 
     let authoritativeRevision = 1;
@@ -2575,8 +2646,52 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (result.attachment.path) uploadedPaths.push(result.attachment.path);
     }
 
-    let finalRecord: DailyRecord = { ...savedRecord, attachments };
+    /*
+     * A profile post promises that the first selected photo stays the cover.
+     * Committing only the successful subset would make a later retry append the
+     * missing photos at the end and silently change that order. For this caller,
+     * roll every uploaded object back and keep the text-only row as the retry
+     * target. The normal composer keeps its existing D-05 partial-success mode.
+     */
+    if (options?.allOrNothingMedia && failedFiles.length > 0) {
+      if (uploadedPaths.length > 0) {
+        try {
+          await removeRecordMedia(uploadedPaths);
+        } catch {
+          /* best-effort; the row never references these objects */
+        }
+      }
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      updateStateImmediately((current) =>
+        isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
+          ? { ...current, records: [...current.records, savedRecord] }
+          : current,
+      );
+      return {
+        ok: true,
+        failedFiles: files.map((file) => file.name),
+        recordId,
+      };
+    }
+
+    let finalRecord: DailyRecord = {
+      ...savedRecord,
+      attachments,
+      // Publish a staged post only in the same row update that commits all media.
+      isPrivate: stagesPublicMediaPrivately ? record.isPrivate : savedRecord.isPrivate,
+      ...(stagesProfilePostMarker ? { isProfilePost: intendedProfilePost } : {}),
+    };
     if (attachments.length > 0) {
+      const reconcileAttachmentPatch = async (reason: RecordMutationReason): Promise<boolean> => {
+        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return false;
+        const remote = await fetchRecordsResultFromDB(workspace.coupleId);
+        if (!isCurrentLinkedCouple(workspace) || !remote.ok) return false;
+        const persisted = remote.records.find((candidate) =>
+          candidate.id === recordId && candidate.userId === workspace.userId);
+        if (!persisted || !hasSamePersistedMedia(persisted, finalRecord)) return false;
+        finalRecord = persisted;
+        return true;
+      };
       try {
         const patched = await saveRecordToDB(
           finalRecord,
@@ -2593,20 +2708,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // which is worse than leaving objects an operator can sweep.
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (!patched.ok) {
-          try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-          if (!isCurrentLinkedCouple(workspace)) return staleResult;
-          failedFiles.push(...files.map((file) => file.name));
-          finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+          const reason = recordSaveFailureReason(patched);
+          if (!await reconcileAttachmentPatch(reason)) {
+            // The UPDATE may have committed even when its response was lost. Once
+            // issued, deleting uploads can break a live row; leave uncertain bytes
+            // for a later orphan sweep instead of risking user-visible data loss.
+            if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+              try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
+            }
+            failedFiles.push(...files.map((file) => file.name));
+            finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+          }
         } else {
           finalRecord = { ...finalRecord, contentRevision: patched.contentRevision };
         }
       } catch (error) {
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
         console.error('[gomsinlog] Failed to attach media to record:', error);
-        try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        failedFiles.push(...files.map((file) => file.name));
-        finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+        const reason = classifyServerError(error).kind;
+        if (!await reconcileAttachmentPatch(reason)) {
+          if (!isCurrentLinkedCouple(workspace)) return staleResult;
+          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+            try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
+          }
+          failedFiles.push(...files.map((file) => file.name));
+          finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+        }
       }
     }
 
@@ -2629,7 +2756,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         : current,
     );
     return isCurrentLinkedCouple(workspace)
-      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
+      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)), recordId }
       : staleResult;
   };
 
@@ -2741,17 +2868,98 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           continue;
         }
 
-        const attempt = await addRecordWithMedia(queuedRecord, entry.files, {
-          recordId: entry.id,
-          allowQueue: false,
-          expectedCoupleId: entry.coupleId,
-        });
+        let deliveryOutcome: { ok: true } | { ok: false; reason: string; message: string } = {
+          ok: false,
+          reason: 'unknown',
+          message: '게시물 재전송 결과를 확인하지 못했어요.',
+        };
+        const existingPost = entry.allOrNothingMedia
+          ? stateRef.current.records.find((record) => record.id === entry.id)
+          : undefined;
+
+        if (entry.allOrNothingMedia && existingPost) {
+          if (existingPost.userId !== identity.userId) {
+            deliveryOutcome = {
+              ok: false,
+              reason: 'not_owner',
+              message: recordFailureMessage('not_owner'),
+            };
+          } else {
+            const expectedNames = entry.files.map((file) => file.name);
+            const currentNames = (existingPost.attachments || []).map((attachment) => attachment.name);
+            let mediaReady = currentNames.length === expectedNames.length
+              && currentNames.every((name, index) => name === expectedNames[index]);
+
+            if (!mediaReady) {
+              const media = await updateRecordMedia(entry.id, {
+                addFiles: entry.files,
+                allOrNothing: true,
+              });
+              if (!media.ok) {
+                deliveryOutcome = {
+                  ok: false,
+                  reason: media.reason ?? 'unknown',
+                  message: media.error || '게시물 사진을 다시 올리지 못했어요.',
+                };
+              } else if (media.failedFiles.length > 0) {
+                deliveryOutcome = {
+                  ok: false,
+                  reason: 'unreachable',
+                  message: '게시물 사진을 모두 올리지 못해 다시 시도할게요.',
+                };
+              } else {
+                mediaReady = true;
+              }
+            }
+
+            if (mediaReady) {
+              const refreshedPost = stateRef.current.records.find((record) => record.id === entry.id);
+              if (!refreshedPost) {
+                deliveryOutcome = {
+                  ok: false,
+                  reason: 'post_staging_missing',
+                  message: '임시 보관한 게시물을 확인하지 못했어요.',
+                };
+              } else if (
+                refreshedPost.isPrivate !== queuedRecord.isPrivate
+                || refreshedPost.isProfilePost !== queuedRecord.isProfilePost
+              ) {
+                const publication = await updateRecord(entry.id, {
+                  isPrivate: queuedRecord.isPrivate,
+                  ...(queuedRecord.isProfilePost !== undefined
+                    ? { isProfilePost: queuedRecord.isProfilePost }
+                    : {}),
+                });
+                deliveryOutcome = publication.ok
+                  ? { ok: true }
+                  : { ok: false, reason: publication.reason, message: publication.error };
+              } else {
+                deliveryOutcome = { ok: true };
+              }
+            }
+          }
+        } else {
+          const attempt = await addRecordWithMedia(queuedRecord, entry.files, {
+            recordId: entry.id,
+            allowQueue: false,
+            expectedCoupleId: entry.coupleId,
+            allOrNothingMedia: entry.allOrNothingMedia === true,
+          });
+          deliveryOutcome = attempt.ok
+            && (!entry.allOrNothingMedia || attempt.failedFiles.length === 0)
+            ? { ok: true }
+            : {
+                ok: false,
+                reason: attempt.ok ? 'unreachable' : attempt.reason ?? 'unknown',
+                message: attempt.ok
+                  ? '게시물 사진을 모두 올리지 못해 다시 시도할게요.'
+                  : attempt.error ?? '',
+              };
+        }
         const disposition = await applyDeliveryOutcome(
           persistence,
           entry,
-          attempt.ok
-            ? { ok: true }
-            : { ok: false, reason: attempt.reason ?? 'unknown', message: attempt.error ?? '' },
+          deliveryOutcome,
         );
         if (disposition === 'delivered') result.delivered += 1;
         else if (disposition === 'requeued') result.requeued += 1;
@@ -3029,24 +3237,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const updateRecordMedia = async (
     id: string,
-    changes: { addFiles?: File[]; removePaths?: string[] },
-  ): Promise<{ ok: boolean; failedFiles: string[]; error?: string }> => {
+    changes: { addFiles?: File[]; removePaths?: string[]; allOrNothing?: boolean },
+  ): Promise<{
+    ok: boolean;
+    failedFiles: string[];
+    error?: string;
+    reason?: RecordMutationReason;
+  }> => {
     const addFiles = changes.addFiles || [];
     const removePaths = changes.removePaths || [];
     const allFileNames = addFiles.map((file) => file.name);
     const initial = stateRef.current;
     const existing = initial.records.find((record) => record.id === id);
     if (!existing) {
-      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage('missing') };
+      return {
+        ok: false,
+        failedFiles: allFileNames,
+        error: recordFailureMessage('missing'),
+        reason: 'missing',
+      };
     }
     if (addFiles.length === 0 && removePaths.length === 0) return { ok: true, failedFiles: [] };
 
     const workspace = captureLinkedCouple() ?? await resolveWorkspaceOnDemand();
     if (!('coupleId' in workspace)) {
-      return { ok: false, failedFiles: allFileNames, error: workspace.error };
+      return {
+        ok: false,
+        failedFiles: allFileNames,
+        error: workspace.error,
+        reason: workspace.reason,
+      };
     }
     if (existing.userId !== workspace.userId) {
-      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage('not_owner') };
+      return {
+        ok: false,
+        failedFiles: allFileNames,
+        error: recordFailureMessage('not_owner'),
+        reason: 'not_owner',
+      };
     }
 
     // Never accept a path from outside this record's own namespace, even though
@@ -3062,6 +3290,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ok: false,
         failedFiles: allFileNames,
         error: '첨부 파일 경로가 올바르지 않아 삭제하지 않았어요.',
+        reason: 'unknown',
       };
     }
 
@@ -3069,10 +3298,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ok: false,
       failedFiles: allFileNames,
       error: recordFailureMessage('stale'),
+      reason: 'stale' as const,
     };
 
     if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
-      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage('deletion_pending') };
+      return {
+        ok: false,
+        failedFiles: allFileNames,
+        error: recordFailureMessage('deletion_pending'),
+        reason: 'deletion_pending',
+      };
     }
     if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
@@ -3095,8 +3330,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       added.push(result.attachment);
       if (result.attachment.path) uploadedPaths.push(result.attachment.path);
     }
-
-    const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
     const rollbackUploads = async () => {
       if (uploadedPaths.length === 0) return;
       try {
@@ -3106,7 +3339,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    if (changes.allOrNothing && failedFiles.length > 0) {
+      await rollbackUploads();
+      if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      return { ok: true, failedFiles: allFileNames };
+    }
+
+    const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
+
+    const reconcileMediaUpdate = async (reason: RecordMutationReason): Promise<DailyRecord | null> => {
+      if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return null;
+      const remote = await fetchRecordsResultFromDB(workspace.coupleId);
+      if (!isCurrentLinkedCouple(workspace) || !remote.ok) return null;
+      const persisted = remote.records.find((candidate) =>
+        candidate.id === id && candidate.userId === workspace.userId);
+      return persisted && hasSamePersistedMedia(persisted, patchedRecord) ? persisted : null;
+    };
+
     let authoritativeRevision = existing.contentRevision ?? 1;
+    let reconciledRecord: DailyRecord | null = null;
     try {
       const patched = await saveRecordToDB(
         patchedRecord,
@@ -3115,23 +3366,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
       );
       if (!patched.ok) {
-        await rollbackUploads();
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
         if (patched.reason === 'auth_expired') void handleAuthExpired();
+        const reason = recordSaveFailureReason(patched);
+        reconciledRecord = await reconcileMediaUpdate(reason);
+        if (!reconciledRecord) {
+          // Do not delete uploaded objects after an issued UPDATE: a lost response
+          // is not proof that the row still lacks them.
+          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+            await rollbackUploads();
+          }
+          return {
+            ok: false,
+            failedFiles: allFileNames,
+            error: recordFailureMessage(reason),
+            reason,
+          };
+        }
+        authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+      } else {
+        authoritativeRevision = patched.contentRevision;
+      }
+    } catch (error) {
+      console.error('[gomsinlog] Failed to patch record media:', error);
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      reconciledRecord = await reconcileMediaUpdate(reason);
+      if (!reconciledRecord) {
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
+        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
+          await rollbackUploads();
+        }
         return {
           ok: false,
           failedFiles: allFileNames,
-          error: recordFailureMessage(recordSaveFailureReason(patched)),
+          error: recordFailureMessage(reason),
+          reason,
         };
       }
-      authoritativeRevision = patched.contentRevision;
-    } catch (error) {
-      console.error('[gomsinlog] Failed to patch record media:', error);
-      await rollbackUploads();
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      const reason = classifyServerError(error).kind;
-      if (reason === 'auth_expired') void handleAuthExpired();
-      return { ok: false, failedFiles: allFileNames, error: recordFailureMessage(reason) };
+      authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
     }
 
     // The row no longer references these objects, so removing them now cannot
@@ -3147,7 +3419,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
     let committed: DailyRecord = {
-      ...patchedRecord,
+      ...(reconciledRecord ?? patchedRecord),
       contentRevision: authoritativeRevision,
     };
     if (committed.attachments?.length) {

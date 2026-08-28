@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 export type DeviceProtectionSectionProps = {
   status: DeviceProtectionStatus;
   onStart?: () => void;
+  onPair?: () => void;
   onRecover?: () => void;
   busy?: boolean;
   errorMessage?: string;
@@ -14,12 +15,14 @@ export type DeviceProtectionSectionProps = {
 export function DeviceProtectionSection({
   status,
   onStart,
+  onPair,
   onRecover,
   busy = false,
   errorMessage,
 }: DeviceProtectionSectionProps) {
   const protectedOnThisDevice = status === 'PROTECTED';
   const setupRequired = status === 'SETUP_REQUIRED';
+  const pairingRequired = status === 'PAIRING_REQUIRED';
   const recoveryRequired = status === 'RECOVERY_REQUIRED';
   const storageUnavailable = status === 'SECURE_STORAGE_UNAVAILABLE';
 
@@ -34,6 +37,8 @@ export function DeviceProtectionSection({
               ? '이 기기에서 기록 보호를 사용할 수 있어요.'
               : setupRequired
                 ? '이 기기의 보안 저장소를 이용해 기록 보호를 설정해 주세요.'
+                : pairingRequired
+                  ? '두 사람의 화면에서 같은 보호 코드를 확인하면 공유 기록도 안전하게 저장할 수 있어요.'
                 : recoveryRequired
                   ? '이 기기에서는 기록 보호를 복구해야 해요.'
                   : storageUnavailable
@@ -53,6 +58,12 @@ export function DeviceProtectionSection({
                 onClick={onStart}
           disabled={busy}>
           {busy ? '준비 중...' : '보호 설정 시작'}
+          {!busy && <ChevronRight size={16} aria-hidden="true" />}
+        </Button>
+      )}
+      {pairingRequired && onPair && (
+        <Button variant="primary" full onClick={onPair} disabled={busy}>
+          {busy ? '확인 중...' : '둘의 기록 보호 연결'}
           {!busy && <ChevronRight size={16} aria-hidden="true" />}
         </Button>
       )}

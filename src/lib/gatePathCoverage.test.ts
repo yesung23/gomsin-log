@@ -181,6 +181,8 @@ const STORE_GATED_EXEMPTIONS: Record<string, Record<string, string>> = {
     fetchRecordsResultFromDB: 'Read-only: fetches records without mutation',
     fetchRecordsFromDB: 'Read-only: wrapper around fetchRecordsResultFromDB',
     resolveAttachmentUrls: 'Read-only: signs existing paths, creates nothing',
+    downloadRecordPhotoForReuse:
+      'Read-only: downloads one RLS-authorized canonical photo; the store owns any later write',
     isCanonicalRecordMediaPath: 'Pure utility: validates a storage path locally',
     classifyMediaFile: 'Pure utility: validates MIME type and size locally',
     buildMediaPath: 'Pure utility: builds a path string',

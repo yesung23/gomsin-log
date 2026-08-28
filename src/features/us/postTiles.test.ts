@@ -7,6 +7,7 @@ const record = (over: Partial<DailyRecord> & { id: string; date: string }): Dail
   log: '오늘도 보고 싶어',
   time: '09:00',
   isPrivate: false,
+  isProfilePost: true,
   talkAbout: false,
   ...over,
 } as DailyRecord);
@@ -18,6 +19,16 @@ describe('게시물 격자는 사진 게시물을 센다', () => {
   */
   it('사진 없는 기록은 칸이 되지 않는다', () => {
     const tiles = buildPostTiles([record({ id: 'a', date: '2026-08-20' })]);
+    expect(tiles).toEqual([]);
+  });
+
+  it('일반 스토리 사진은 사용자가 게시물로 발행하지 않으면 칸이 되지 않는다', () => {
+    const tiles = buildPostTiles([record({
+      id: 'story',
+      date: '2026-08-20',
+      isProfilePost: false,
+      attachments: [{ type: 'photo', name: 'story.jpg' }],
+    })]);
     expect(tiles).toEqual([]);
   });
 

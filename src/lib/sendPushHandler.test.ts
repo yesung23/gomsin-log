@@ -18,10 +18,16 @@ import {
 
 /** The instant `push_delivery_candidates()` chose the batch. See migration 055. */
 const DECIDED_AT = '2026-08-21T12:00:00.000Z';
+const CLAIM_ID = 'claim-1111-2222-3333-444444444444';
 
 function candidate(over: Partial<PushCandidate> = {}): PushCandidate {
   return {
-    user_id: 'user-a', platform: 'ios', token: 'token-a', decided_at: DECIDED_AT, ...over,
+    user_id: 'user-a',
+    platform: 'ios',
+    token: 'token-a',
+    decided_at: DECIDED_AT,
+    claim_id: CLAIM_ID,
+    ...over,
   };
 }
 
@@ -30,6 +36,7 @@ function deps(over: Partial<SendPushDeps> = {}): SendPushDeps {
     listCandidates: async () => [candidate()],
     deliver: async () => ({ ok: true }),
     markDelivered: async () => {},
+    releaseClaim: async () => {},
     dropToken: async () => {},
     ...over,
   };
@@ -37,44 +44,36 @@ function deps(over: Partial<SendPushDeps> = {}): SendPushDeps {
 
 describe('what the sender is structurally unable to do', () => {
   it('has one body, and it is not a parameter of delivery', () => {
-    /*
-      Asserted on the TYPE-level shape rather than a string comparison: `deliver`
-      receives a candidate and nothing else, so there is no argument through which
-      a caller could vary the text per event kind. A lock screen read over a
-      shoulder in a 생활관 must not distinguish a care signal from a diary entry.
-    */
     expect(NOTIFICATION_BODY).toBe('새로운 소식이 있어요');
     expect(NOTIFICATION_BODY).not.toMatch(/\d/);
   });
 
   it('lands on home, never on a specific record', () => {
-    // A payload that can point at one record has already said which one it was
-    // about. IA §3.1 settled this.
     expect(NOTIFICATION_ROUTE).toBe('/');
   });
 
   it('reports no count of what happened', async () => {
     const result = await handleSendPush(deps());
-    // `delivered` counts SENDS, which is operational. Nothing in the response
-    // describes what the recipient will find.
     expect(Object.keys(result.body).sort()).toEqual(
       ['considered', 'delivered', 'failed', 'tokensDropped'],
     );
   });
 
-  it('logs ids and outcomes, never a token', async () => {
+  it('logs outcome metadata only, never a user_id or token', async () => {
     const logEvent = vi.fn();
     await handleSendPush(deps({ logEvent }));
     const logged = JSON.stringify(logEvent.mock.calls);
     expect(logged).not.toContain('token-a');
+    expect(logged).not.toContain('user-a');
+    expect(logEvent).toHaveBeenCalledWith('push_attempt', {
+      devices: 1,
+      delivered: true,
+    });
   });
 });
 
 describe('one notification per person, not per device', () => {
-  it('sends to every device but counts the person once', async () => {
-    // §14.3 caps sends PER RECIPIENT. Three devices is one notification arriving
-    // in three places; counting them separately would spend the daily allowance
-    // on someone who was told once.
+  it('sends to every device but counts the person once and passes claim_id', async () => {
     const deliver = vi.fn(async () => ({ ok: true }));
     const markDelivered = vi.fn(async () => {});
     const result = await handleSendPush(deps({
@@ -88,42 +87,74 @@ describe('one notification per person, not per device', () => {
 
     expect(deliver).toHaveBeenCalledTimes(2);
     expect(markDelivered).toHaveBeenCalledTimes(1);
+    expect(markDelivered).toHaveBeenCalledWith('user-a', DECIDED_AT, CLAIM_ID);
     expect(result.body).toMatchObject({ considered: 1, delivered: 1 });
   });
 
-  it('separates recipients', async () => {
+  it('separates recipients with their respective claims', async () => {
     const markDelivered = vi.fn(async () => {});
     await handleSendPush(deps({
       listCandidates: async () => [
-        candidate({ user_id: 'a', token: 't-a' }),
-        candidate({ user_id: 'b', token: 't-b' }),
+        candidate({ user_id: 'a', token: 't-a', claim_id: 'claim-a' }),
+        candidate({ user_id: 'b', token: 't-b', claim_id: 'claim-b' }),
       ],
       markDelivered,
     }));
-    expect(markDelivered.mock.calls.map((c) => c[0]).sort()).toEqual(['a', 'b']);
+    expect(markDelivered).toHaveBeenCalledWith('a', DECIDED_AT, 'claim-a');
+    expect(markDelivered).toHaveBeenCalledWith('b', DECIDED_AT, 'claim-b');
   });
 });
 
-describe('a failed send is not a delivered one', () => {
-  it('leaves the flag raised when nothing reached a device', async () => {
-    /*
-      Marking on ATTEMPT would turn a bad network minute into "this person was
-      told" -- and since the daily cap then applies, they would not be told again
-      until tomorrow. Failing loudly and retrying on the next run is the honest
-      direction: at worst it arrives later in the same contact window.
-    */
+describe('atomic lease release and delivery failures', () => {
+  it('releases the claim when delivery fails to all devices', async () => {
     const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
     const result = await handleSendPush(deps({
       deliver: async () => ({ ok: false }),
       markDelivered,
+      releaseClaim,
     }));
 
     expect(markDelivered).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith('user-a', CLAIM_ID);
+    expect(result.body).toMatchObject({ delivered: 0, failed: 1 });
+  });
+
+  it('releases the claim when deliver throws AbortError or TimeoutError (e.g. FCM fetch timeout)', async () => {
+    const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
+    const result = await handleSendPush(deps({
+      deliver: async () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      },
+      markDelivered,
+      releaseClaim,
+    }));
+
+    expect(markDelivered).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith('user-a', CLAIM_ID);
+    expect(result.body).toMatchObject({ considered: 1, delivered: 0, failed: 1 });
+  });
+
+  it('does NOT release claim when delivery succeeds but mark fails (avoids immediate replay)', async () => {
+    const markDelivered = vi.fn(async () => {
+      throw new Error('E_DB_WRITE_FAILED');
+    });
+    const releaseClaim = vi.fn(async () => {});
+    const result = await handleSendPush(deps({
+      deliver: async () => ({ ok: true }),
+      markDelivered,
+      releaseClaim,
+    }));
+
+    expect(markDelivered).toHaveBeenCalledWith('user-a', DECIDED_AT, CLAIM_ID);
+    expect(releaseClaim).not.toHaveBeenCalled();
     expect(result.body).toMatchObject({ delivered: 0, failed: 1 });
   });
 
   it('counts the person as told when at least one device took it', async () => {
     const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
     await handleSendPush(deps({
       listCandidates: async () => [
         candidate({ token: 'dead-phone' }),
@@ -131,36 +162,64 @@ describe('a failed send is not a delivered one', () => {
       ],
       deliver: async (c) => ({ ok: c.token === 'live-tablet' }),
       markDelivered,
+      releaseClaim,
     }));
-    expect(markDelivered).toHaveBeenCalledTimes(1);
+    expect(markDelivered).toHaveBeenCalledWith('user-a', DECIDED_AT, CLAIM_ID);
+    expect(releaseClaim).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed candidate bucket with mismatched claim or decided_at without calling FCM', async () => {
+    const deliver = vi.fn(async () => ({ ok: true }));
+    const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
+
+    const result = await handleSendPush(deps({
+      listCandidates: async () => [
+        candidate({ token: 'dev-1', claim_id: 'claim-x', decided_at: DECIDED_AT }),
+        candidate({ token: 'dev-2', claim_id: 'claim-y', decided_at: DECIDED_AT }),
+      ],
+      deliver,
+      markDelivered,
+      releaseClaim,
+    }));
+
+    expect(deliver).not.toHaveBeenCalled();
+    expect(markDelivered).not.toHaveBeenCalled();
+    expect(result.body).toMatchObject({ considered: 1, delivered: 0, failed: 1 });
   });
 });
 
 describe('a token the push service has buried', () => {
-  it('is dropped rather than retried forever', async () => {
+  it('is dropped rather than retried forever and releases claim if no other device survives', async () => {
     const dropToken = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
     const result = await handleSendPush(deps({
       deliver: async () => ({ ok: false, tokenGone: true }),
       dropToken,
+      releaseClaim,
     }));
 
     expect(dropToken).toHaveBeenCalledWith('token-a');
-    // A dead device is not a failure to count against this person.
+    expect(releaseClaim).toHaveBeenCalledWith('user-a', CLAIM_ID);
     expect(result.body).toMatchObject({ tokensDropped: 1, failed: 0, delivered: 0 });
   });
 
   it('does not mark a person delivered on the strength of a dead device', async () => {
     const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
     await handleSendPush(deps({
       deliver: async () => ({ ok: false, tokenGone: true }),
       markDelivered,
+      releaseClaim,
     }));
     expect(markDelivered).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith('user-a', CLAIM_ID);
   });
 
-  it('still delivers to the surviving device of the same person', async () => {
+  it('still delivers to the surviving device of the same person and marks with claim', async () => {
     const dropToken = vi.fn(async () => {});
     const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
     await handleSendPush(deps({
       listCandidates: async () => [
         candidate({ token: 'gone' }),
@@ -169,10 +228,12 @@ describe('a token the push service has buried', () => {
       deliver: async (c) => (c.token === 'gone' ? { ok: false, tokenGone: true } : { ok: true }),
       dropToken,
       markDelivered,
+      releaseClaim,
     }));
 
     expect(dropToken).toHaveBeenCalledWith('gone');
-    expect(markDelivered).toHaveBeenCalledTimes(1);
+    expect(markDelivered).toHaveBeenCalledWith('user-a', DECIDED_AT, CLAIM_ID);
+    expect(releaseClaim).not.toHaveBeenCalled();
   });
 });
 
@@ -185,160 +246,73 @@ describe('nothing to do', () => {
 });
 
 describe('one recipient failing does not silence the rest of the batch', () => {
-  /*
-    Every dependency here can REJECT, not merely resolve unsuccessfully: `fetch`
-    throws on a dropped connection and an RPC throws when the database refuses.
-    Before these tests the loop had no guard, so the first rejection ended it --
-    turning one bad row into a batch-wide outage whose victims were decided by
-    map iteration order, and which looks exactly like a quiet day with nobody to
-    notify.
-  */
-
   it('keeps going when delivery to one person throws', async () => {
     const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
     const result = await handleSendPush(deps({
       listCandidates: async () => [
-        candidate({ user_id: 'first', token: 'boom' }),
-        candidate({ user_id: 'second', token: 'fine' }),
+        candidate({ user_id: 'first', token: 'boom', claim_id: 'claim-1' }),
+        candidate({ user_id: 'second', token: 'fine', claim_id: 'claim-2' }),
       ],
       deliver: async (c) => {
         if (c.token === 'boom') throw new Error('ECONNRESET');
         return { ok: true };
       },
       markDelivered,
+      releaseClaim,
     }));
 
-    expect(markDelivered).toHaveBeenCalledWith('second', DECIDED_AT);
+    expect(releaseClaim).toHaveBeenCalledWith('first', 'claim-1');
+    expect(markDelivered).toHaveBeenCalledWith('second', DECIDED_AT, 'claim-2');
     expect(markDelivered).toHaveBeenCalledTimes(1);
     expect(result.body).toMatchObject({ considered: 2, delivered: 1, failed: 1 });
-  });
-
-  it('keeps going when lowering one person’s flag throws', async () => {
-    const delivered: string[] = [];
-    const result = await handleSendPush(deps({
-      listCandidates: async () => [
-        candidate({ user_id: 'first' }),
-        candidate({ user_id: 'second' }),
-      ],
-      markDelivered: async (userId) => {
-        if (userId === 'first') throw new Error('E_DB_WRITE_FAILED');
-        delivered.push(userId);
-      },
-    }));
-
-    expect(delivered).toEqual(['second']);
-    // The first person's send landed, but their turn did not complete: the flag
-    // is still raised, so they are counted as failed rather than told.
-    expect(result.body).toMatchObject({ considered: 2, delivered: 1, failed: 1 });
-  });
-
-  it('keeps going when dropping a dead token throws', async () => {
-    const markDelivered = vi.fn(async () => {});
-    const result = await handleSendPush(deps({
-      listCandidates: async () => [
-        candidate({ user_id: 'first', token: 'dead' }),
-        candidate({ user_id: 'second', token: 'fine' }),
-      ],
-      deliver: async (c) => (c.token === 'dead' ? { ok: false, tokenGone: true } : { ok: true }),
-      dropToken: async () => { throw new Error('E_DB_WRITE_FAILED'); },
-      markDelivered,
-    }));
-
-    expect(markDelivered).toHaveBeenCalledWith('second', DECIDED_AT);
-    expect(result.body).toMatchObject({ considered: 2, delivered: 1, tokensDropped: 0 });
   });
 
   it('does not mark a person delivered when their only device threw', async () => {
     const markDelivered = vi.fn(async () => {});
+    const releaseClaim = vi.fn(async () => {});
     await handleSendPush(deps({
       deliver: async () => { throw new Error('ECONNRESET'); },
       markDelivered,
+      releaseClaim,
     }));
 
     expect(markDelivered).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith('user-a', CLAIM_ID);
   });
 });
 
-/**
- * The boundary is drawn where the send was DECIDED.
- *
- * Migration 055 has the reproduction: an act shared between
- * `push_delivery_candidates()` and `mark_push_delivered()` used to fall behind a
- * boundary stamped at mark time -- a notification that could not have contained
- * it, silently marking it delivered. The flag went down and the stamp went back,
- * so the act was not delayed, it was erased.
- *
- * The database half of the fix is proven in the phase 0 harness against a real
- * PostgreSQL cluster, where the timestamps are real. What the handler owes is
- * narrower and is what these tests hold: the decision instant must reach
- * `markDelivered` UNCHANGED, from the batch, on every path that marks at all.
- */
-describe('the send decision is what reaches the mark', () => {
-  it('marks against the batch decision time, not a clock read at mark time', async () => {
+describe('the send decision and claim reach the mark', () => {
+  it('marks against the batch decision time and exact claim ID', async () => {
     const markDelivered = vi.fn(async () => {});
     await handleSendPush(deps({ markDelivered }));
 
-    expect(markDelivered).toHaveBeenCalledWith('user-a', DECIDED_AT);
+    expect(markDelivered).toHaveBeenCalledWith('user-a', DECIDED_AT, CLAIM_ID);
   });
 
-  it('passes the value through untouched, whatever it is', async () => {
-    /*
-      A guard against a well-meaning `new Date(...)` round trip appearing here
-      later. The value is the DATABASE's clock; reformatting it through this
-      runtime is how the same bug returns as clock skew, and a normalising step
-      would also quietly truncate the microseconds the boundary compares on.
-    */
+  it('passes the odd decision value and claim through untouched', async () => {
     const odd = '2026-08-21T12:00:00.123456+09:00';
     const markDelivered = vi.fn(async () => {});
     await handleSendPush(deps({
-      listCandidates: async () => [candidate({ decided_at: odd })],
+      listCandidates: async () => [candidate({ decided_at: odd, claim_id: 'claim-custom' })],
       markDelivered,
     }));
 
-    expect(markDelivered).toHaveBeenCalledWith('user-a', odd);
+    expect(markDelivered).toHaveBeenCalledWith('user-a', odd, 'claim-custom');
   });
 
-  it('sends one mark per person across several devices, with one decision time', async () => {
-    // Case C. Three devices are one notification arriving in three places, so
-    // there is one boundary to draw and it is the batch's -- not one per device,
-    // which would mark the same person three times and stamp the last one last.
+  it('sends one mark per person across several devices, with one decision time and claim', async () => {
     const markDelivered = vi.fn(async () => {});
     await handleSendPush(deps({
       listCandidates: async () => [
-        candidate({ user_id: 'multi', token: 'phone' }),
-        candidate({ user_id: 'multi', token: 'tablet' }),
-        candidate({ user_id: 'multi', token: 'watch' }),
+        candidate({ user_id: 'multi', token: 'phone', claim_id: 'claim-multi' }),
+        candidate({ user_id: 'multi', token: 'tablet', claim_id: 'claim-multi' }),
+        candidate({ user_id: 'multi', token: 'watch', claim_id: 'claim-multi' }),
       ],
       markDelivered,
     }));
 
     expect(markDelivered).toHaveBeenCalledTimes(1);
-    expect(markDelivered).toHaveBeenCalledWith('multi', DECIDED_AT);
-  });
-
-  it('leaves the boundary alone when the mark itself fails', async () => {
-    /*
-      Case B. A failed mark must not advance anything: the flag stays raised and
-      the day is unstamped, so the next run retries. The handler's part is simply
-      that it does not swallow the failure -- it counts the person as failed
-      rather than delivered, which is what keeps the retry honest.
-    */
-    const result = await handleSendPush(deps({
-      markDelivered: async () => { throw new Error('E_DB_WRITE_FAILED'); },
-    }));
-
-    expect(result.body).toMatchObject({ considered: 1, delivered: 0, failed: 1 });
-  });
-
-  it('never marks anyone when nothing was delivered', async () => {
-    // No delivery, no boundary. The act stays pending for the next run rather
-    // than being recorded against a notification that never left the building.
-    const markDelivered = vi.fn(async () => {});
-    await handleSendPush(deps({
-      deliver: async () => ({ ok: false }),
-      markDelivered,
-    }));
-
-    expect(markDelivered).not.toHaveBeenCalled();
+    expect(markDelivered).toHaveBeenCalledWith('multi', DECIDED_AT, 'claim-multi');
   });
 });

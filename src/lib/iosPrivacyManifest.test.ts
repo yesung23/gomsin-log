@@ -9,8 +9,8 @@ import { join, resolve } from 'node:path';
  * Apple's required-reason API list is not something to guess at from a blog post:
  * declaring a reason the binary does not use is as much a review finding as
  * omitting one it does. So instead of trusting the comment in the manifest, this
- * suite scans the ACTUAL iOS source that ends up in the binary -- the one
- * first-party Swift file plus the four pods named in ios/App/Podfile -- for every
+ * suite scans the ACTUAL iOS source that ends up in the binary -- the
+ * first-party Swift files plus the pods named in ios/App/Podfile -- for every
  * symbol in the five required-reason categories.
  *
  * If a plugin that touches UserDefaults, file timestamps, boot time, disk space
@@ -96,7 +96,11 @@ const REQUIRED_REASON_SYMBOLS: Record<string, string[]> = {
   'Active keyboards (3EC4.1)': ['activeInputModes'],
 };
 
-const roots = ['ios/App/App/AppDelegate.swift', ...podSourceRoots()];
+const roots = [
+  'ios/App/App/AppDelegate.swift',
+  'ios/App/App/SceneDelegate.swift',
+  ...podSourceRoots(),
+];
 const files = roots.flatMap(sourceFiles);
 const corpus = files.map((file) => ({
   file,
@@ -106,6 +110,7 @@ const corpus = files.map((file) => ({
 describe('the iOS required-reason API scan that the privacy manifest rests on', () => {
   it('scans a real, non-trivial corpus (a silently empty scan would prove nothing)', () => {
     expect(roots).toContain('ios/App/App/AppDelegate.swift');
+    expect(roots).toContain('ios/App/App/SceneDelegate.swift');
     expect(roots).toContain('node_modules/@capacitor/ios');
     expect(roots).toContain('node_modules/@capacitor/app');
     expect(roots).toContain('node_modules/@capacitor/browser');

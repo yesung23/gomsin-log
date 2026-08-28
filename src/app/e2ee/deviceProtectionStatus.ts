@@ -10,6 +10,7 @@ import type { BootstrapFacts } from './bootstrapStateMachine';
 export type DeviceProtectionStatus =
   | 'PROTECTED'
   | 'SETUP_REQUIRED'
+  | 'PAIRING_REQUIRED'
   | 'RECOVERY_REQUIRED'
   | 'SECURE_STORAGE_UNAVAILABLE'
   | 'TEMPORARILY_UNAVAILABLE';
@@ -42,6 +43,17 @@ export function deviceProtectionStatusFromFacts(input: {
     && facts.floorActive
     && (!facts.hasCoupleScope || facts.coupleKeysReady)) {
     return 'PROTECTED';
+  }
+
+  if (facts.hasLocalIdentity
+    && facts.recoveryConfirmed
+    && facts.deviceEnrolled
+    && facts.personalKeysReady
+    && facts.runtimeReady
+    && facts.personalFloorActive === true
+    && facts.hasCoupleScope
+    && !facts.coupleKeysReady) {
+    return 'PAIRING_REQUIRED';
   }
 
   // Once bootstrap is complete, missing runtime/floor/current-couple key facts

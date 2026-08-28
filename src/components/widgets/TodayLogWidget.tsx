@@ -22,6 +22,7 @@ import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
 import type { ReactionType, EmotionFlowItem } from '@/types';
 import type { RecordMutationReason } from '@/lib/storeContext';
 import { basicEmotionLabelOf } from '@/lib/basicEmotions';
+import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 
 /**
  * The author's own one-tap description of their day.
@@ -416,10 +417,12 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       // permission and membership failures, which sent users into an endless retry
       // loop instead of telling them what to fix.
       if (result.reason === 'protection_required') {
-        toast.error(result.error || '기록 보호 설정이 필요해요.', {
+        toast.error(result.error || '지금은 이 기록을 안전하게 저장할 수 없어요.', {
           action: {
-            label: '설정 열기',
-            onClick: () => navigate('/settings'),
+            label: isDeviceProtectionEnabled() ? '설정 열기' : '다시 시도',
+            onClick: isDeviceProtectionEnabled()
+              ? () => navigate('/settings')
+              : () => { void handlePost(); },
           },
         });
       } else {

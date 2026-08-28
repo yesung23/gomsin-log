@@ -422,14 +422,14 @@ test('an RLS denial is reported as a permission problem, not as being offline', 
 });
 
 // ---------------------------------------------------------------------------
-// 11. Connected unprovisioned couple must refuse online save (protection_required)
+// 11. Launch build: connected couple remains usable while no write floor exists
 // ---------------------------------------------------------------------------
-// A connected couple with no E2EE bootstrap must refuse the write as
-// protection_required. The draft must remain, no plaintext daily_record is
-// written, and the user is guided to Settings. This is the required follow-up
-// coverage identified by the red-team review of 34515b457.
+// The launch flag is OFF on web/PWA and on native unless explicitly enabled.
+// The mock backend reports no crypto_write_floor row, so the normal RLS-protected
+// record path must remain usable. The flag-ON protection barrier and floor-active
+// refusal remain covered at the store/content-crypto boundary.
 for (const [label, scenario] of [['creator', CREATOR], ['partner', PARTNER]] as const) {
-  test(`connected ${label} refuses online save as protection_required (no plaintext write)`, async ({ browser }) => {
+  test(`connected ${label} saves normally when launch protection flag and write floor are both off`, async ({ browser }) => {
     const { context, page, errors, unrouted, dailyRecordWrites } = await open(browser, scenario);
 
     /*
@@ -452,16 +452,11 @@ for (const [label, scenario] of [['creator', CREATOR], ['partner', PARTNER]] as 
 
     await save.click();
 
-    // A. User state: draft must remain (composer not cleared).
-    await expect(page.getByPlaceholder('오늘 어땠어?')).toBeVisible({ timeout: 10_000 });
-
-    // B. Security UX: protection_required guidance appears with Settings CTA.
-    await expect(page.getByText('기록 보호 설정이 필요해요', { exact: false })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole('button', { name: '설정 열기' })).toBeVisible();
-
-    // C. No plaintext persist: the application must refuse before writing.
-    // The mock records every POST/PUT daily_records payload for test observation.
-    expect(dailyRecordWrites.length, 'no daily_records write may be attempted for a protection_required connected save').toBe(0);
+    await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
+    expect(dailyRecordWrites.length).toBeGreaterThan(0);
+    expect(dailyRecordWrites.at(-1)?.log_text).toBe('보호가 필요한 기록');
+    await expect(page.getByText('기록 보호 설정이 필요해요', { exact: false })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '설정 열기' })).toHaveCount(0);
 
     // No unexpected errors or unrouted calls.
     expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);

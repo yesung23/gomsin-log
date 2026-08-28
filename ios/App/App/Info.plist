@@ -124,6 +124,31 @@
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
 	<!--
+		iOS 27 requires the scene life cycle for apps built with the current SDK.
+		The app remains single-window; Main.storyboard still instantiates the
+		CAPBridgeViewController, while SceneDelegate forwards custom-scheme and
+		universal-link callbacks that no longer arrive at AppDelegate.
+	-->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<!--
 		arm64, not the template's armv7: IPHONEOS_DEPLOYMENT_TARGET is 14.0, and
 		no 32-bit device can run iOS 11 or later. Leaving armv7 declares a
 		capability no supported device has.

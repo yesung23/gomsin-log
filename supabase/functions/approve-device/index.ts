@@ -1,6 +1,7 @@
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2.111.0';
 import { MAX_CHAIN_DEPTH, handleApproveDevice, type CertificateRow } from './handler.ts';
 import { decodePgBytea, encodePgBytea } from '../_shared/e2eeVerify.ts';
+import { parseAdminSecretKey, createAdminClientFetch } from '../_shared/adminSecret.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
 
 const DB_READ_FAILURE = 'E_DB_READ_FAILED';
@@ -45,11 +46,23 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({ error: 'E_ORIGIN_NOT_ALLOWED' }), { status: 403, headers: cors.headers });
   }
 
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const secretKey = parseAdminSecretKey(Deno.env.get('SUPABASE_SECRET_KEYS'));
+  if (!supabaseUrl || !secretKey) {
+    return new Response(JSON.stringify({ error: 'Server configuration error' }), {
+      status: 500,
+      headers: { ...cors.headers, 'Content-Type': 'application/json' },
+    });
+  }
+
   const authorization = request.headers.get('Authorization') ?? '';
   const admin = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
+    supabaseUrl,
+    secretKey,
+    {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: createAdminClientFetch(supabaseUrl, secretKey) },
+    },
   );
   const { data: caller } = await admin.auth.getUser(authorization.replace('Bearer ', ''));
   if (!caller?.user) {

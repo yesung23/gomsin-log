@@ -20,6 +20,8 @@ export function ThemedToaster({ onReady }: { onReady?: () => void } = {}) {
     <div aria-live="polite" aria-atomic="true">
       <Toaster
         position="top-center"
+        offset={{ top: 'calc(env(safe-area-inset-top, 0px) + 4rem)' }}
+        mobileOffset={{ top: 'calc(env(safe-area-inset-top, 0px) + 4rem)' }}
         theme={state.theme === 'dark' ? 'dark' : 'light'}
         richColors={false}
       />

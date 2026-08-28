@@ -116,7 +116,7 @@ describe('isNativeAuthCallbackUrl', () => {
   it('is what deepLinks.ts gates the token exchange on', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync('src/lib/deepLinks.ts', 'utf8');
-    expect(source).toContain('if (!isNativeAuthCallbackUrl(url)) return;');
+    expect(source).toContain('if (!isNativeAuthCallbackUrl(url)) return');
     // The old guard accepted any URL with the scheme.
     expect(source).not.toContain('url?.startsWith(`${NATIVE_URL_SCHEME}://`)');
   });

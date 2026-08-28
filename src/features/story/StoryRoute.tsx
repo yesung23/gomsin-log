@@ -41,7 +41,6 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   const isOffline = !useOnlineStatus();
 
   const { profile } = state;
-  const partnerName = profile.couple.partnerName || '상대방';
   const viewer = useMemo(
     () => ({ userId: profile.id, role: profile.role }),
     [profile.id, profile.role],
@@ -130,7 +129,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   );
 
   const title = useMemo(() => {
-    if (mode === 'mine') return '나의 오늘';
+    if (mode === 'mine') return '오늘';
     if (mode === 'highlight') {
       return (state.coupleHighlights ?? []).find((item) => item.id === highlightId)?.title || '하이라이트';
     }
@@ -139,8 +138,8 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       return `${Number(month)}월 ${Number(day)}일`;
     }
     const multiDay = records.some((record) => record.date !== todayStr);
-    return multiDay ? `${partnerName}의 놓친 하루` : `${partnerName}의 오늘`;
-  }, [highlightId, mode, dateParam, records, state.coupleHighlights, todayStr, partnerName]);
+    return multiDay ? '놓친 하루' : '오늘';
+  }, [highlightId, mode, dateParam, records, state.coupleHighlights, todayStr]);
 
   const markedRecordIds = useMemo(
     () => new Set(

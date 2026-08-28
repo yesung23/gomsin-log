@@ -64,6 +64,26 @@ describe('deviceProtectionStatusFromFacts', () => {
     })).toBe('PROTECTED');
   });
 
+  it('offers the two-account pairing action only after personal protection is actually active', () => {
+    const facts: BootstrapFacts = {
+      ...setupFacts,
+      hasLocalIdentity: true,
+      recoveryCreated: true,
+      recoveryConfirmed: true,
+      deviceEnrolled: true,
+      personalKeysReady: true,
+      runtimeReady: true,
+      personalFloorActive: true,
+      hasCoupleScope: true,
+    };
+    expect(deviceProtectionStatusFromFacts({ facts, hasServerRecoveryIdentity: true }))
+      .toBe('PAIRING_REQUIRED');
+    expect(deviceProtectionStatusFromFacts({
+      facts: { ...facts, personalFloorActive: false },
+      hasServerRecoveryIdentity: true,
+    })).toBe('TEMPORARILY_UNAVAILABLE');
+  });
+
   it('treats a completed bootstrap with missing local identity as recovery-required', () => {
     expect(deviceProtectionStatusFromFacts({
       facts: { ...setupFacts, recoveryConfirmed: true },

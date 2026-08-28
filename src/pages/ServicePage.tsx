@@ -6,7 +6,12 @@ import { Button } from '@/components/ui/Button';
 import { useStore } from '@/lib/useStore';
 import { useEscapeKey } from '@/lib/hooks';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
-import { computeServiceProgress, effectiveDischargeDate, nextUpcomingEvent } from '@/lib/milestones';
+import {
+  computeServiceProgress,
+  effectiveDischargeDate,
+  nextUpcomingEvent,
+  resolveEffectiveMilitary,
+} from '@/lib/milestones';
 import { Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Branch, MilitaryStatus, DischargeDateSource } from '@/types';
@@ -68,46 +73,46 @@ export function ServicePage() {
   const { state, updateProfile } = useStore();
   const navigate = useNavigate();
   const { profile } = state;
-  const military = profile.military;
+  const isSoldier = profile.role === 'soldier';
+  const soldierName = isSoldier ? profile.myName || '나' : profile.couple?.partnerName || '군화';
+  const military = resolveEffectiveMilitary(profile);
   const todayStr = toLocalDateString(localToday());
 
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [editBranch, setEditBranch] = useState<Branch>(military?.branch || 'army');
+  const [editBranch, setEditBranch] = useState<Branch>(profile.military?.branch || 'army');
   const [editStatus, setEditStatus] = useState<MilitaryStatus>(
-    editableStatus(military?.militaryStatus),
+    editableStatus(profile.military?.militaryStatus),
   );
   // No invented defaults: an empty field stays empty until the user fills it in.
-  const [editEnlistDate, setEditEnlistDate] = useState(military?.enlistmentDate || '');
+  const [editEnlistDate, setEditEnlistDate] = useState(profile.military?.enlistmentDate || '');
   const [editExpectedDischarge, setEditExpectedDischarge] = useState(
-    military?.expectedDischargeDate || military?.dischargeDate || '',
+    profile.military?.expectedDischargeDate || profile.military?.dischargeDate || '',
   );
   const [editDischargeSource, setEditDischargeSource] = useState<DischargeDateSource>(
-    editableSource(military?.dischargeDateSource),
+    editableSource(profile.military?.dischargeDateSource),
   );
 
   useEscapeKey(() => {
     if (!isSaving) setIsEditing(false);
   }, isEditing);
 
-  const isSoldier = profile.role === 'soldier';
-  const soldierName = isSoldier ? profile.myName || '나' : profile.couple.partnerName || '군화';
-
   // Real progress, or null when the dates needed to compute it are missing.
   const progress = computeServiceProgress(military, todayStr);
   const nextLeave = nextUpcomingEvent(state.events, todayStr, ['vacation', 'visit']);
 
   const openEditor = () => {
-    setEditBranch(military?.branch || 'army');
-    setEditStatus(editableStatus(military?.militaryStatus));
-    setEditEnlistDate(military?.enlistmentDate || '');
-    setEditExpectedDischarge(military?.expectedDischargeDate || military?.dischargeDate || '');
-    setEditDischargeSource(editableSource(military?.dischargeDateSource));
+    if (!isSoldier) return;
+    setEditBranch(profile.military?.branch || 'army');
+    setEditStatus(editableStatus(profile.military?.militaryStatus));
+    setEditEnlistDate(profile.military?.enlistmentDate || '');
+    setEditExpectedDischarge(profile.military?.expectedDischargeDate || profile.military?.dischargeDate || '');
+    setEditDischargeSource(editableSource(profile.military?.dischargeDateSource));
     setIsEditing(true);
   };
 
   const handleSaveEdit = async () => {
-    if (isSaving) return;
+    if (isSaving || !isSoldier) return;
     if (editStatus !== 'unknown') {
       if (!editEnlistDate) {
         toast.error('입대일을 입력해 주세요.');
@@ -127,7 +132,7 @@ export function ServicePage() {
     try {
       const saved = await updateProfile({
         military: {
-          ...military,
+          ...profile.military,
           branch: editBranch,
           militaryStatus: editStatus,
           enlistmentDate: editStatus === 'unknown' ? undefined : editEnlistDate,
@@ -166,9 +171,11 @@ export function ServicePage() {
           onBack={() => navigate(-1)}
           backLabel="뒤로가기"
           actions={
-            <AppBarAction onClick={openEditor} aria-label="복무 정보 수정">
-              <Edit2 size={18} aria-hidden="true" />
-            </AppBarAction>
+            isSoldier ? (
+              <AppBarAction onClick={openEditor} aria-label="복무 정보 수정">
+                <Edit2 size={18} aria-hidden="true" />
+              </AppBarAction>
+            ) : undefined
           }
         />
 
@@ -228,17 +235,21 @@ export function ServicePage() {
             <div>
               <h2 className="text-heading text-foreground">복무 정보가 아직 없어요</h2>
               <p className="text-caption text-muted-foreground mt-1 leading-relaxed break-keep">
-                입대일과 예상 전역일을 입력하면 남은 날짜와 복무율을 계산해 드려요.
+                {isSoldier
+                  ? '입대일과 예상 전역일을 입력하면 남은 날짜와 복무율을 계산해 드려요.'
+                  : '군화가 복무 정보를 입력하면 남은 날짜와 복무율을 확인할 수 있어요.'}
               </p>
             </div>
-            <Button variant="primary" size="sm"
-                onClick={openEditor}>
-              복무 정보 입력하기
-            </Button>
+            {isSoldier ? (
+              <Button variant="primary" size="sm" onClick={openEditor}>
+                복무 정보 입력하기
+              </Button>
+            ) : null}
           </div>
         )}
 
         {/* Contact window, from the soldier's saved preferences. */}
+        {isSoldier ? (
         <Card>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-lilac/30 rounded-full flex items-center justify-center text-foreground shrink-0">
@@ -253,6 +264,21 @@ export function ServicePage() {
             </div>
           </div>
         </Card>
+        ) : (
+          <Card>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-lilac/30 rounded-full flex items-center justify-center text-foreground shrink-0">
+                <Phone className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-label font-bold text-foreground">연락 가능 시간</div>
+                <p className="text-caption text-muted-foreground mt-0.5 leading-relaxed break-keep">
+                  군화의 연락 가능 시간은 아직 연동되지 않아요.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {/* Next leave / visit, read from real events. */}
         <Card className="space-y-3">
@@ -289,7 +315,7 @@ export function ServicePage() {
       </div>
 
       {/* Edit Modal */}
-      {isEditing && (
+      {isSoldier && isEditing && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="service-edit-modal-title" className="bg-card border border-border w-full max-w-md rounded-surface p-6 shadow-xl space-y-4 max-h-[90dvh] overflow-y-auto">
             <h3 id="service-edit-modal-title" className="text-heading text-foreground">복무 정보 수정</h3>

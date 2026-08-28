@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -28,7 +28,7 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/lib/supabase', () => ({
   authRepository: { signInWithGoogle, signInWithApple, signInWithEmail },
-  fetchAuthProviderAvailability: async () => ({ google: true, apple: false, email: true }),
+  fetchAuthProviderAvailability: async () => ({ google: true, apple: true, email: true }),
   createCoupleInvitation: vi.fn(),
   consumeCoupleInvitation: vi.fn(),
   fetchMyCoupleState: vi.fn(),
@@ -75,23 +75,23 @@ function renderLanding() {
   return render(<MemoryRouter><OnboardingPage /></MemoryRouter>);
 }
 
-const google = () => screen.getByRole('button', { name: /Google로 계속하기/ });
+const google = () => screen.findByRole('button', { name: /Google로 계속하기/ });
 const agreeAll = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByRole('checkbox', { name: /만 14세/ }));
   await user.click(screen.getByRole('checkbox', { name: /이용약관/ }));
 };
 
 describe('the sign-in buttons do not claim they will work before they will', () => {
-  it('marks them unavailable, and says why, while consent is missing', () => {
+  it('marks them unavailable, and says why, while consent is missing', async () => {
     renderLanding();
-    expect(google()).toHaveAttribute('aria-disabled', 'true');
+    expect(await google()).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText('위 두 항목에 동의하면 로그인할 수 있어요.')).toBeInTheDocument();
   });
 
   it('does not start a sign-in when consent is missing', async () => {
     const user = userEvent.setup();
     renderLanding();
-    await user.click(google());
+    await user.click(await google());
     expect(signInWithGoogle).not.toHaveBeenCalled();
   });
 
@@ -103,31 +103,34 @@ describe('the sign-in buttons do not claim they will work before they will', () 
    * Staying reachable is what lets the same tap surface the same explanation for
    * everyone, instead of only for people who can see it greyed out.
    */
-  it('stays reachable so the reason can be discovered by using it', () => {
+  it('stays reachable so the reason can be discovered by using it', async () => {
     renderLanding();
-    expect(google()).not.toBeDisabled();
-    expect(google()).toHaveAttribute('aria-describedby', 'legal-gate-reason');
+    const btn = await google();
+    expect(btn).not.toBeDisabled();
+    expect(btn).toHaveAttribute('aria-describedby', 'legal-gate-reason');
   });
 
   it('becomes available once both boxes are ticked', async () => {
     const user = userEvent.setup();
     renderLanding();
+    const btn = await google();
     await agreeAll(user);
 
-    expect(google()).toHaveAttribute('aria-disabled', 'false');
+    expect(btn).toHaveAttribute('aria-disabled', 'false');
     expect(screen.queryByText('위 두 항목에 동의하면 로그인할 수 있어요.')).not.toBeInTheDocument();
 
-    await user.click(google());
+    await user.click(btn);
     expect(signInWithGoogle).toHaveBeenCalledTimes(1);
   });
 
   it('requires BOTH, so one tick is not enough', async () => {
     const user = userEvent.setup();
     renderLanding();
+    const btn = await google();
     await user.click(screen.getByRole('checkbox', { name: /만 14세/ }));
 
-    expect(google()).toHaveAttribute('aria-disabled', 'true');
-    await user.click(google());
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    await user.click(btn);
     expect(signInWithGoogle).not.toHaveBeenCalled();
   });
 });
@@ -146,6 +149,7 @@ describe('email sign-in is gone', () => {
 describe('it says what the app is before asking for an account', () => {
   it('names the problem rather than the category', () => {
     renderLanding();
+    expect(screen.getByText('함께하지 못한 하루를 서로 이어주고, 둘만의 기억으로 남겨요.')).toBeInTheDocument();
     expect(screen.getByText('답장이 늦어도, 서로의 하루는 놓치지 않도록.')).toBeInTheDocument();
   });
 
@@ -154,5 +158,59 @@ describe('it says what the app is before asking for an account', () => {
     // discovering at step 3 that the app is unusable alone.
     renderLanding();
     expect(screen.getByText('상대를 초대하면')).toBeInTheDocument();
+  });
+});
+
+describe('Apple sign-in on iOS obeys the legal consent gate', () => {
+  const originalUserAgent = navigator.userAgent;
+
+  beforeEach(() => {
+    signInWithApple.mockClear();
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value: originalUserAgent,
+      configurable: true,
+    });
+  });
+
+  it('marks Apple button unavailable and does not call signInWithApple before legal consent', async () => {
+    const user = userEvent.setup();
+    renderLanding();
+    const appleBtn = await screen.findByRole('button', { name: /Apple로 계속하기/ });
+
+    expect(appleBtn).toHaveAttribute('aria-disabled', 'true');
+    expect(appleBtn).not.toBeDisabled();
+    expect(appleBtn).toHaveAttribute('aria-describedby', 'legal-gate-reason');
+
+    await user.click(appleBtn);
+    expect(signInWithApple).not.toHaveBeenCalled();
+  });
+
+  it('calls signInWithApple once both legal checkboxes are checked', async () => {
+    const user = userEvent.setup();
+    renderLanding();
+    const appleBtn = await screen.findByRole('button', { name: /Apple로 계속하기/ });
+    await agreeAll(user);
+
+    expect(appleBtn).toHaveAttribute('aria-disabled', 'false');
+    await user.click(appleBtn);
+    expect(signInWithApple).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks Apple sign-in when only age is confirmed without terms agreement', async () => {
+    const user = userEvent.setup();
+    renderLanding();
+    const appleBtn = await screen.findByRole('button', { name: /Apple로 계속하기/ });
+    await user.click(screen.getByRole('checkbox', { name: /만 14세/ }));
+
+    expect(appleBtn).toHaveAttribute('aria-disabled', 'true');
+    await user.click(appleBtn);
+    expect(signInWithApple).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { parseAllowedOrigins, resolveCors } from './_shared/cors.ts';
+import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
 
 /**
  * Account deletion is deliberately split across service boundaries:
@@ -73,7 +74,7 @@ type StorageEntry = { name: string; id: string | null };
 
 export type HandlerDeps = {
   env: (key: string) => string | undefined;
-  createAdmin: (url: string, serviceRoleKey: string) => Admin;
+  createAdmin: (url: string, adminSecretKey: string) => Admin;
 };
 
 /** Every entry directly under `folder`, across all pages. */
@@ -194,13 +195,13 @@ export async function handleDeleteAccountRequest(
   }
 
   const supabaseUrl = deps.env('SUPABASE_URL');
-  const serviceRoleKey = deps.env('SUPABASE_SERVICE_ROLE_KEY');
-  if (!supabaseUrl || !serviceRoleKey) {
-    console.error('[delete-account] Missing server environment variables');
+  const secretKey = parseAdminSecretKey(deps.env('SUPABASE_SECRET_KEYS'));
+  if (!supabaseUrl || !secretKey) {
+    console.error('[delete-account] Missing or invalid server configuration');
     return jsonResponse({ error: 'Server configuration error' }, 500, cors.headers);
   }
 
-  const admin = deps.createAdmin(supabaseUrl, serviceRoleKey);
+  const admin = deps.createAdmin(supabaseUrl, secretKey);
 
   const token = authorization.slice('Bearer '.length);
   const { data: { user }, error: userError } = await admin.auth.getUser(token);

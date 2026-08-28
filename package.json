@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",
+    "build:release": "tsc -b && GOMSINLOG_RELEASE=true vite build --configLoader runner",
     "preview": "vite preview",
     "preview:design": "vite --config design-preview/vite.config.ts",
     "preview:v4": "vite --config design-preview/vite.config.ts --host",
@@ -14,8 +15,8 @@
     "typecheck": "tsc -b --force",
     "test": "vitest run --config vitest.config.ts --configLoader runner",
     "test:e2e": "playwright test --config playwright.config.ts",
-    "check:edge": "deno check supabase/functions/delete-account/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts supabase/functions/_shared/e2eeVerify.ts supabase/functions/_shared/e2eeTranscript.ts supabase/functions/approve-device/handler.ts supabase/functions/approve-device/index.ts supabase/functions/verify-recovery/handler.ts supabase/functions/verify-recovery/index.ts supabase/functions/issue-recovery-challenge/handler.ts supabase/functions/issue-recovery-challenge/index.ts supabase/functions/send-push/handler.ts supabase/functions/send-push/googleAuth.ts supabase/functions/send-push/index.ts",
-    "test:edge": "deno test --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts",
+    "check:edge": "deno check supabase/functions/_shared/adminSecret.ts supabase/functions/_shared/entrypointHarness.ts supabase/functions/delete-account/_shared/cors.ts supabase/functions/delete-account/handler.ts supabase/functions/delete-account/index.ts supabase/functions/_shared/e2eeVerify.ts supabase/functions/_shared/e2eeTranscript.ts supabase/functions/approve-device/handler.ts supabase/functions/approve-device/index.ts supabase/functions/verify-recovery/handler.ts supabase/functions/verify-recovery/index.ts supabase/functions/issue-recovery-challenge/handler.ts supabase/functions/issue-recovery-challenge/index.ts supabase/functions/send-push/handler.ts supabase/functions/send-push/googleAuth.ts supabase/functions/send-push/index.ts",
+    "test:edge": "deno test --allow-net --allow-env --allow-read --allow-run supabase/functions/delete-account/entrypoint_test.ts supabase/functions/approve-device/entrypoint_test.ts supabase/functions/issue-recovery-challenge/entrypoint_test.ts supabase/functions/verify-recovery/entrypoint_test.ts supabase/functions/send-push/entrypoint_test.ts",
     "test:rollback": "node scripts/e2ee/rollback-harness.mjs",
     "test:write-floor": "node scripts/e2ee/write-floor-scope-harness.mjs",
     "test:p0": "node scripts/e2ee/p0-harness.mjs",
@@ -27,9 +28,10 @@
     "verify:assets": "node scripts/assets/generate-app-assets.mjs --check",
     "cap:sync": "npm run build && cap sync android",
     "cap:sync:ios": "npm run build && cap sync ios",
+    "cap:release:ios": "GOMSINLOG_RELEASE=true npm run build && cap sync ios",
     "cap:open": "cap open android",
     "cap:open:ios": "cap open ios",
-    "cap:assemble": "npm run cap:sync && cd android && ./gradlew bundleRelease"
+    "cap:assemble": "GOMSINLOG_RELEASE=true npm run cap:sync && cd android && ./gradlew bundleRelease"
   },
   "dependencies": {
     "@astryxdesign/core": "^0.4.5",

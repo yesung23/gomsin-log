@@ -46,7 +46,7 @@ export function NotificationReentryBridge() {
   };
 
   return (
-    <aside className="fixed top-[max(env(safe-area-inset-top,0px),8px)] left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-[398px] z-40 space-y-2" aria-label="새 알림">
+    <aside className="fixed top-[calc(env(safe-area-inset-top,0px)+4rem)] left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-[398px] z-[60] space-y-2" aria-label="새 알림">
       {visibleItems.map((item) => (
         <div key={item.id} className="flex items-center gap-2 rounded-surface border border-border bg-card/95 p-3 shadow-lg backdrop-blur-sm" role="status">
           <Bell size={17} className="shrink-0 text-coral" aria-hidden="true" />

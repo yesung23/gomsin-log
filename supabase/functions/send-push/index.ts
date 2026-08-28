@@ -1,10 +1,17 @@
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2.111.0';
+import {
+  parseAdminSecretKey,
+  parseSchedulerSecret,
+  timingSafeEqualSecret,
+  createAdminClientFetch,
+} from '../_shared/adminSecret.ts';
 import { fetchAccessToken, type ServiceAccount } from './googleAuth.ts';
 import {
   NOTIFICATION_BODY,
   NOTIFICATION_ROUTE,
   handleSendPush,
   type PushCandidate,
+  type SendResult,
 } from './handler.ts';
 
 /**
@@ -13,10 +20,14 @@ import {
  *
  * ## Who may call this
  *
- * A scheduler, with the service key. There is no user-facing path, because
- * "notify my partner" is not an action anyone gets to take. The database refuses
- * regardless -- `push_delivery_candidates()` carries an in-body service-role gate
- * -- so a mis-deployed route fails closed rather than quietly working.
+ * A scheduler, authenticating with the named `push` secret key. There is no
+ * user-facing path, because "notify my partner" is not an action anyone gets to take.
+ * The database refuses regardless -- `push_delivery_candidates()` carries an in-body
+ * service-role gate -- so a mis-deployed route fails closed rather than quietly working.
+ *
+ * ## Deployment requirement: `verify_jwt = false`
+ * Hosted function must be deployed with `verify_jwt=false` so the edge gateway passes
+ * scheduler requests through to this handler where the named scheduler key is validated.
  *
  * ## What the payload may contain
  *
@@ -42,16 +53,116 @@ const FCM_ENDPOINT = 'https://fcm.googleapis.com/v1/projects';
 /** FCM verdicts meaning "this token is dead", as opposed to "try again later". */
 const DEAD_TOKEN_CODES = new Set(['UNREGISTERED', 'INVALID_ARGUMENT']);
 
+/**
+ * Migration 066 default claim lease is 300s (5 minutes).
+ * Enforce a strict per-request fetch timeout including headers and body consumption
+ * that is significantly shorter than the DB lease window (30s) to prevent hanging
+ * requests from triggering duplicate dispatches after lease expiration.
+ */
+export const FCM_FETCH_TIMEOUT_MS = 30_000;
+export const DEFAULT_PUSH_LEASE_SECONDS = 300;
+
+export interface DeliverFcmParams {
+  endpoint?: string;
+  projectId: string;
+  bearer: string;
+  candidate: PushCandidate;
+  timeoutMs?: number;
+  fetchFn?: typeof fetch;
+}
+
+export async function deliverFcmMessage(params: DeliverFcmParams): Promise<SendResult> {
+  const {
+    endpoint = FCM_ENDPOINT,
+    projectId,
+    bearer,
+    candidate,
+    timeoutMs = FCM_FETCH_TIMEOUT_MS,
+    fetchFn = fetch,
+  } = params;
+
+  const response = await fetchFn(`${endpoint}/${projectId}/messages:send`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+    body: JSON.stringify({
+      message: {
+        token: candidate.token,
+        // One sentence, identical for every event kind. No title, because a
+        // title is a second string that could start varying.
+        notification: { body: NOTIFICATION_BODY },
+        data: { route: NOTIFICATION_ROUTE },
+        apns: {
+          payload: {
+            aps: {
+              alert: { body: NOTIFICATION_BODY },
+              // No badge. A number on the app icon is a debt counter, which
+              // is the same thing §14.3 forbids inside the payload.
+              sound: 'default',
+            },
+          },
+        },
+      },
+    }),
+  });
+
+  if (response.ok) {
+    await response.text().catch(() => '');
+    return { ok: true };
+  }
+
+  const detail = await response.json().catch(() => ({})) as {
+    error?: { details?: Array<{ errorCode?: string }> };
+  };
+  const code = detail.error?.details?.find((d) => d.errorCode)?.errorCode ?? '';
+  // 404 is FCM's other way of saying the token no longer exists.
+  return {
+    ok: false,
+    tokenGone: response.status === 404 || DEAD_TOKEN_CODES.has(code),
+  };
+}
+
 Deno.serve(async (request: Request) => {
   // Scheduler-only. No CORS surface, because no browser is meant to reach this.
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'E_METHOD_NOT_ALLOWED' }), { status: 405 });
   }
 
+  // 1. Validate scheduler secret configuration. Standalone PUSH_SCHEDULER_SECRET is required.
+  const schedulerSecret = parseSchedulerSecret(Deno.env.get('PUSH_SCHEDULER_SECRET'));
+  if (!schedulerSecret) {
+    return new Response(JSON.stringify({ error: 'E_PUSH_NOT_CONFIGURED' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // 2. Validate caller authentication against scheduler secret before admin client / FCM / RPC.
+  const callerKey = request.headers.get('x-push-scheduler-secret');
+  if (!callerKey || !(await timingSafeEqualSecret(callerKey, schedulerSecret))) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // 3. Setup Supabase admin client using default secret key.
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const adminSecretKey = parseAdminSecretKey(Deno.env.get('SUPABASE_SECRET_KEYS'));
+  if (!supabaseUrl || !adminSecretKey) {
+    return new Response(JSON.stringify({ error: 'E_PUSH_NOT_CONFIGURED' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const admin = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
+    supabaseUrl,
+    adminSecretKey,
+    {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: createAdminClientFetch(supabaseUrl, adminSecretKey) },
+    },
   );
 
   let bearer: string;
@@ -77,62 +188,44 @@ Deno.serve(async (request: Request) => {
 
   let outcome;
   try {
+    const invocationClaimId = crypto.randomUUID();
     outcome = await handleSendPush({
       listCandidates: async () => {
-        const { data, error } = await admin.rpc('push_delivery_candidates');
+        const { data, error } = await admin.rpc('push_delivery_candidates', {
+          p_claim_id: invocationClaimId,
+        });
         if (error) throw new Error('E_DB_READ_FAILED');
         return (data ?? []) as PushCandidate[];
       },
 
-      deliver: async (candidate) => {
-        const response = await fetch(`${FCM_ENDPOINT}/${projectId}/messages:send`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: {
-              token: candidate.token,
-              // One sentence, identical for every event kind. No title, because a
-              // title is a second string that could start varying.
-              notification: { body: NOTIFICATION_BODY },
-              data: { route: NOTIFICATION_ROUTE },
-              apns: {
-                payload: {
-                  aps: {
-                    alert: { body: NOTIFICATION_BODY },
-                    // No badge. A number on the app icon is a debt counter, which
-                    // is the same thing §14.3 forbids inside the payload.
-                    sound: 'default',
-                  },
-                },
-              },
-            },
-          }),
-        });
+      deliver: (candidate) => deliverFcmMessage({
+        projectId,
+        bearer,
+        candidate,
+      }),
 
-        if (response.ok) return { ok: true };
-
-        const detail = await response.json().catch(() => ({})) as {
-          error?: { details?: Array<{ errorCode?: string }> };
-        };
-        const code = detail.error?.details?.find((d) => d.errorCode)?.errorCode ?? '';
-        // 404 is FCM's other way of saying the token no longer exists.
-        return {
-          ok: false,
-          tokenGone: response.status === 404 || DEAD_TOKEN_CODES.has(code),
-        };
-      },
-
-      markDelivered: async (userId, decidedAt) => {
+      markDelivered: async (userId, decidedAt, claimId) => {
         /*
           `p_decided_at` is the instant `push_delivery_candidates()` chose this
           batch, carried back unchanged. Passing this runtime's clock instead --
           or letting SQL default it to its own `now()`, which is what shipped
           before 055 -- draws the boundary after the decision and erases anything
           shared in between. See migration 055.
+
+          `p_claim_id` (migration 066) enforces the matching lease claim and clears it.
         */
         const { error } = await admin.rpc('mark_push_delivered', {
           p_user_id: userId,
           p_decided_at: decidedAt,
+          p_claim_id: claimId,
+        });
+        if (error) throw new Error('E_DB_WRITE_FAILED');
+      },
+
+      releaseClaim: async (userId, claimId) => {
+        const { error } = await admin.rpc('release_push_claim', {
+          p_user_id: userId,
+          p_claim_id: claimId,
         });
         if (error) throw new Error('E_DB_WRITE_FAILED');
       },

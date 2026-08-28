@@ -199,7 +199,16 @@ describe('mergeCoupleState', () => {
 
   it('clears the couple space on an authoritative no-membership answer', () => {
     const merged = mergeCoupleState(
-      local({ connected: true, status: 'active', partnerName: '몽룡' }),
+      local({
+        connected: true,
+        status: 'active',
+        partnerName: '몽룡',
+        partnerMilitary: {
+          branch: 'army',
+          militaryStatus: 'serving',
+          dischargeDateSource: 'calculated',
+        },
+      }),
       null,
     );
     expect(merged.coupleId).toBeUndefined();
@@ -209,6 +218,7 @@ describe('mergeCoupleState', () => {
     expect(merged.status).toBe('disconnected');
     expect(merged.partnerUserId).toBeUndefined();
     expect(merged.partnerJoinedAt).toBeUndefined();
+    expect(merged.partnerMilitary).toBeUndefined();
   });
 
   it('pending이나 비활성 응답은 캐시된 상대 신원을 지운다', () => {
@@ -217,10 +227,16 @@ describe('mergeCoupleState', () => {
       status: 'active',
       partnerUserId: 'partner-a',
       partnerJoinedAt: '2026-01-01T00:00:00Z',
+      partnerMilitary: {
+        branch: 'army',
+        militaryStatus: 'serving',
+        dischargeDateSource: 'calculated',
+      },
     });
     const pending = mergeCoupleState(current, remote({ partnerPresent: false }));
     expect(pending.partnerUserId).toBeUndefined();
     expect(pending.partnerJoinedAt).toBeUndefined();
+    expect(pending.partnerMilitary).toBeUndefined();
 
     const disconnected = mergeCoupleState(current, remote({
       partnerPresent: true,
@@ -228,6 +244,7 @@ describe('mergeCoupleState', () => {
     }));
     expect(disconnected.partnerUserId).toBeUndefined();
     expect(disconnected.partnerJoinedAt).toBeUndefined();
+    expect(disconnected.partnerMilitary).toBeUndefined();
   });
 
   it('adopts a couple id local state did not have', () => {

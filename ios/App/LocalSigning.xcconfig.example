@@ -1,0 +1,5 @@
+// Local Apple Developer signing configuration example.
+// Copy this file to LocalSigning.xcconfig and replace YOUR_TEAM_ID with your 10-character Apple Developer Team ID.
+// LocalSigning.xcconfig is ignored by git and must never be committed.
+
+DEVELOPMENT_TEAM = YOUR_TEAM_ID

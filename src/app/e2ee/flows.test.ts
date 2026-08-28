@@ -20,7 +20,11 @@ import { sealScopeKeyForRecipient } from '@/crypto/keyring/scopeKeys';
 import { verifyCertificateChain } from '@/crypto/deviceCertificate';
 import { decodeHeader, splitEnvelope } from '@/crypto/glk2';
 import { buildPairingSide, proposePairing } from '@/crypto/protocol/pairing';
-import { pairingConfirmMessage, partnerAssistConfirmMessage } from '@/crypto/transcripts';
+import {
+  encodePairingTranscript,
+  pairingConfirmMessage,
+  partnerAssistConfirmMessage,
+} from '@/crypto/transcripts';
 import { revocationLogGenesis } from '@/crypto/revocation';
 import { createVerifiedRecordCryptoEnvironment } from './runtime';
 import { clearE2eeRuntime } from './runtimeLifecycle';
@@ -59,7 +63,7 @@ let alice: MemoryAccount;
 
 beforeEach(() => {
   server = createMemoryServer();
-  alice = createMemoryAccount(server);
+  alice = createMemoryAccount(server, '10000000-0000-4000-8000-000000000001');
 });
 
 /** Bootstrap one account to COMPLETE and return its first device. */
@@ -452,6 +456,17 @@ async function pairAccounts(
     `dev_sig:${bDeviceId}`, pairingConfirmMessage(proposed.transcriptHash, uuidToBytes(bDeviceId)),
   );
 
+  const pairingId = await aDevice.deps.repository.startPairing({
+    coupleId,
+    pairingNonce: proposed.transcript.pairingNonce,
+    transcript: encodePairingTranscript(proposed.transcript),
+    transcriptHash: proposed.transcriptHash,
+    createdAt: new Date(Number(proposed.transcript.createdAtMs)).toISOString(),
+    expiresAt: new Date(Number(proposed.transcript.expiresAtMs)).toISOString(),
+  });
+  await aDevice.deps.repository.confirmPairing({ pairingId, deviceId: aDeviceId, signature: signatureA });
+  await bDevice.deps.repository.confirmPairing({ pairingId, deviceId: bDeviceId, signature: signatureB });
+
   return {
     proposed,
     sideA,
@@ -468,7 +483,7 @@ describe('Scenario C — couple pairing', () => {
   let bobDeviceId: string;
 
   beforeEach(async () => {
-    bob = createMemoryAccount(server);
+    bob = createMemoryAccount(server, 'f0000000-0000-4000-8000-000000000002');
     aliceDeviceId = (await bootstrapAccount(alice)).result.deviceId;
     bobDeviceId = (await bootstrapAccount(bob)).result.deviceId;
     coupleId = linkCouple(server, alice.userId, bob.userId);
@@ -526,6 +541,26 @@ describe('Scenario C — couple pairing', () => {
     expect((await alice.localState.loadCoupleAuthority(coupleId))?.state).toBe('UNLINKED');
     await expect(alice.localState.pinCoupleAuthority({ ...authority!, state: 'CRYPTO_ACTIVE' }))
       .rejects.toThrow(/E_COUPLE_AUTHORITY_STATE/);
+  });
+
+  it('does not mark local authority active when the confirmed server pairing disappears', async () => {
+    const ceremony = await pairAccounts(alice, bob, aliceDeviceId, bobDeviceId, coupleId);
+    server.pairings.length = 0;
+
+    await expect(completeCouplePairing(alice.devices[0].deps, {
+      coupleId,
+      ownUserId: alice.userId,
+      partnerUserId: bob.userId,
+      transcriptHash: ceremony.proposed.transcriptHash,
+      ownSide: ceremony.sideA,
+      partnerSide: ceremony.sideB,
+      ownConfirmation: ceremony.confirmationA,
+      partnerConfirmation: ceremony.confirmationB,
+      senderDeviceId: aliceDeviceId,
+      expiresAtMs: BigInt(server.now() + 600_000),
+    })).rejects.toThrow(/E_PAIRING_NOT_FOUND/);
+
+    expect((await alice.localState.loadCoupleAuthority(coupleId))?.state).not.toBe('CRYPTO_ACTIVE');
   });
 
   it('activates the couple write floor from the session once a real CSK exists', async () => {
@@ -696,7 +731,7 @@ describe('Scenario D — revocation executes rotation', () => {
   let enrolledEnv: DeviceEnvironment;
 
   beforeEach(async () => {
-    bob = createMemoryAccount(server);
+    bob = createMemoryAccount(server, 'f0000000-0000-4000-8000-000000000002');
     rootDevice = (await bootstrapAccount(alice)).result.deviceId;
     bobDeviceId = (await bootstrapAccount(bob)).result.deviceId;
     coupleId = linkCouple(server, alice.userId, bob.userId);
@@ -955,7 +990,7 @@ describe('Scenario F — partner assist is CSK-only', () => {
   let bobDeviceId: string;
 
   beforeEach(async () => {
-    bob = createMemoryAccount(server);
+    bob = createMemoryAccount(server, 'f0000000-0000-4000-8000-000000000002');
     aliceDeviceId = (await bootstrapAccount(alice)).result.deviceId;
     bobDeviceId = (await bootstrapAccount(bob)).result.deviceId;
     coupleId = linkCouple(server, alice.userId, bob.userId);

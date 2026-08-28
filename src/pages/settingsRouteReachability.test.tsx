@@ -157,6 +157,23 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
     expect(screen.getByText('바로가기')).toBeTruthy();
   });
 
+  it('navigates to /support when clicking 고객지원', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole('button', { name: '고객지원' }));
+    expect(navigate).toHaveBeenCalledWith('/support');
+  });
+
+  it('navigates to legal terms and privacy from account section', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByRole('button', { name: '서비스 이용약관' }));
+    expect(navigate).toHaveBeenCalledWith('/legal/terms');
+
+    await user.click(screen.getByRole('button', { name: '개인정보 처리방침' }));
+    expect(navigate).toHaveBeenCalledWith('/legal/privacy');
+  });
+
   it('프로필 편집 안에서 상대방 아이디를 저장할 수 있다', async () => {
     const user = userEvent.setup();
     renderSettings();
@@ -266,10 +283,16 @@ describe('H-4: the entry point survives the conditions that caused the stranding
       .flatMap((match) => [...match[1].matchAll(/'([^']+)'/g)].map((inner) => inner[1]));
     expect(prefixes.length, 'matchPrefixes 를 못 읽었다').toBeGreaterThan(5);
 
+    // 셸 밖에서 그려지는 public utility route 예외 집합.
+    // /support 는 /auth/callback 및 /legal/:doc 처럼 비로그인·인증 오류·계정삭제 복구 상태에서도
+    // 셸(MobileShell) 외부에서 열리는 의도적인 공개 지원 유틸리티 경로이며 탭바 소속이 아니다.
+    // App.tsx 의 3개 상태 분기에 반복되어도 이 예외 집합을 통해 일괄 제외된다.
+    const PUBLIC_UTILITY_ROUTE_PREFIXES = ['/auth', '/legal', '/support'] as const;
+
     const routes = [...app.matchAll(/<Route path="(\/[a-z][a-z/:-]*)"/g)]
       .map((match) => match[1])
       // 셸 밖에서 그려지는 것들. 탭바가 없으므로 걸릴 탭도 없다.
-      .filter((path) => !path.startsWith('/auth') && !path.startsWith('/legal')
+      .filter((path) => !PUBLIC_UTILITY_ROUTE_PREFIXES.some((prefix) => path.startsWith(prefix))
         && !path.startsWith('/onboarding') && !path.startsWith('/story'))
       /*
         가운데 칸은 **장소가 아니라 동작**이다.

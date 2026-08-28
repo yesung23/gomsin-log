@@ -1,0 +1,14 @@
+[functions.send-push]
+verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = true
+
+[functions.approve-device]
+verify_jwt = true
+
+[functions.issue-recovery-challenge]
+verify_jwt = true
+
+[functions.verify-recovery]
+verify_jwt = true

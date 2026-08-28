@@ -21,6 +21,7 @@ export function record(over: Partial<RecordRow> & { id: string; user_id: string 
     record_time: '10:00',
     log_text: '기록',
     is_private: false,
+    is_profile_post: false,
     attachments: [],
     emotion_flow: [],
     created_at: `${TODAY}T10:00:00Z`,
@@ -54,6 +55,13 @@ export const CREATOR: Scenario = {
   partnerPresent: true,
   partnerUserId: 'user-partner',
   partnerName: '몽룡',
+  partnerMilitary: {
+    branch: 'army',
+    militaryStatus: 'serving',
+    enlistmentDate: '2026-01-01',
+    expectedDischargeDate: '2027-07-01',
+    dischargeDateSource: 'manual',
+  },
   records: RECORDS,
 };
 

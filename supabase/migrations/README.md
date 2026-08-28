@@ -29,7 +29,7 @@
 > 실행하지 않은 것: `test:p5` · `test:write-floor` · `test:rollback` 체인에는 넣지
 > 않았다. 057은 `daily_records` 의 write floor 와 무관하다.
 >
-> 다음 사용 가능 번호: **062**.
+> 다음 사용 가능 번호: **068**.
 
 > **📄 058·059 작성됨 · 운영 미적용 (2026-08-24).** `058_couple_highlights.sql`은
 > 활성 커플에 한정된 독립 하이라이트와 순서형 사진 항목, shared-only child RLS,
@@ -196,6 +196,12 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `059_partner_managed_username.sql` | 본인 username 직접 수정 차단, 활성 커플의 상대방 username만 갱신하는 SECURITY DEFINER RPC, username 형식·중복·삭제 상태·커플 row lock·`profile` invalidation 검증 | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
 | `060_partner_username_projection.sql` | 활성 커플의 상대방 username만 기존 파트너 프로필 projection에 추가로 반환한다. profiles 직접 SELECT/RLS는 넓히지 않고 authenticated 전용 SECURITY DEFINER RPC로 제한한다 | **운영 적용 (2026-08-25) — 사용자가 SQL Editor로 적용, anon probe로 함수 존재·스키마 캐시 반영·anon 거부 확인. fresh chain 001→060 및 phase0 계약 검증 완료** |
 | `061_reject_null_partner_profile_actor.sql` | PostgREST 호출 시 JWT subject가 없는 NULL actor(`auth.uid() IS NULL`)를 명시적으로 fail-closed(`42501`) 거부하도록 060 함수를 보강한다. 060 반환 형태와 활성 커플 프로젝션은 유지하되, 060 적용 후 순서대로 적용한다 | **운영 적용 보고됨 (2026-08-25) — 함수 존재는 확인. 다만 본문이 060판인지 061판인지는 anon 경로로 구분 불가하며 인증 actor matrix는 UNVERIFIED. fresh chain 001→061 및 phase0 계약 검증 완료** |
+| `062_e2ee_pairing_ceremony_rpc.sql` | 두 계정 기록 보호 페어링 RPC (`e2ee_start_couple_pairing`, `e2ee_confirm_couple_pairing`, `e2ee_mark_couple_pairing_active`), crypto_pairings 직접 write 차단 및 canonical member/slot 분리 | **운영 객체 존재 확인 (2026-08-28) — RPC 3종은 live catalog에 있으나 migration ledger relation이 없어 exact 적용 이력은 재구성하지 않음. fresh chain/actor 계약 검증 완료** |
+| `063_partner_service_projection.sql` | 곰신 대상 활성 군화 복무 타임라인 프로젝션 RPC (`get_partner_service_info`), 군 복무 메모(memo) 비공개 유지, 활성 2인 커플 gomsin→soldier 호출만 허용 | **운영 적용 (2026-08-28) — exact SQL·SHA 확인 후 적용. live catalog, PostgREST reload, gomsin/soldier/former/unrelated/anon 경계 검증 PASS** |
+| `064_lock_crypto_pairings_table_privileges.sql` | `crypto_pairings` 테이블의 모든 권한을 `PUBLIC, anon, authenticated`로부터 회수 후 `authenticated`에 `SELECT`만 재부여. 062에서 잔존했던 TRUNCATE/TRIGGER/REFERENCES 권한을 완전 차단하여 RLS 우회 위험(P0) 원천 제거 | **운영 적용 (2026-08-28) — authenticated=SELECT only, anon=none, pairing 0행 확인. broad privilege는 복원하지 않음** |
+| `065_harden_e2ee_pairing_rpc.sql` | 062 페어링 RPC의 NULL evidence/signature, 만료·확정·활성화 경계를 forward hardening | **운영 적용 (2026-08-28) — RPC 3개 catalog·negative actor 검증 PASS. live active device/scope key가 0이라 실제 두 기기 정상 ceremony는 UNVERIFIED** |
+| `066_atomic_push_delivery_claims.sql` | 푸시 발송 후보의 원자적 claim/lease와 claim 소유자 완료·release | **운영 미적용 — live 선행 테이블과 sender가 없어 명시적으로 보류** |
+| `067_profile_post_intent.sql` | 기존 기록에 명시적 프로필 게시물 의도 `is_profile_post`를 추가하고 과거 사진은 추측 backfill하지 않음 | **운영 적용 (2026-08-28) — boolean NOT NULL DEFAULT false, 기존 5행 false, actor·rollback 검증 PASS** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
@@ -827,3 +833,112 @@ supabase functions deploy delete-account
   actor matrix는 **UNVERIFIED**입니다. 이 두 항목은 인증 세션이 있는 검증에서 닫아야 합니다.
 - CLI `supabase_migrations.schema_migrations` 추적 테이블이 비어 있으므로 `supabase db push`
   등의 일괄 배포 명령을 사용하면 안 되며, 개별 SQL을 SQL Editor에서 순서대로 적용해야 합니다.
+
+## 062 — 두 계정 기록 보호 페어링 RPC (2026-08-26)
+
+- `062_e2ee_pairing_ceremony_rpc.sql`은 기존 `crypto_pairings` 테이블의
+  authenticated 직접 `INSERT/UPDATE/DELETE` 권한을 회수합니다.
+- 대신 `auth.uid()`로 actor를 결정하는 세 RPC만 엽니다.
+  - `e2ee_start_couple_pairing`: 정확히 두 명의 active 커플에서만 440-byte
+    canonical transcript를 제안
+  - `e2ee_confirm_couple_pairing`: 각 actor가 자신의 active device와 canonical
+    low/high 확인 칸만 기록
+  - `e2ee_mark_couple_pairing_active`: 두 확인과 active couple scope key가 모두
+    있을 때 canonical low actor만 `CRYPTO_ACTIVE`로 전환
+- fresh PostgreSQL 17에서 001→062 전체 체인과 A/B/C/anon/전 파트너
+  actor matrix 362개 assertion을 실행했습니다. 첫 실행에서 active couple이
+  없는 C가 SQL `NULL` 비교로 시작 RPC를 통과하는 결함을 발견했고,
+  세 active-couple 비교를 모두 `IS DISTINCT FROM`으로 고친 후 362/362 PASS했습니다.
+- **원격 적용 상태: NOT APPLIED.** 2026-08-26 read-only catalog 확인에서
+  `daily_records.content_envelope`가 없고 `e2ee_floor_for`가 예전 2-argument
+  signature여서 039/040이 원격에 없음을 확인했습니다. 추가 함수 본문
+  probe는 043 효과는 있지만 044/045/046 강화 효과와 062는 없음을 확인했습니다.
+  따라서 062만 단독 적용하지 마세요. backup/catalog/rollback을 확인한 뒤 exact
+  039→040→044→045→046→062 순서를 적용 직전 다시 검토하고 사용자 확인을
+ 받아야 합니다. 빈 migration ledger 때문에 `supabase db push`는 계속 금지합니다.
+
+## 063 — 곰신 대상 활성 군화 복무 타임라인 프로젝션 RPC (2026-08-26)
+
+- `063_partner_service_projection.sql`은 곰신이 연결된 활성 군화 파트너의 복무 타임라인 정보만 읽을 수 있도록 허용 목록(allowlist)만 반환하는 `get_partner_service_info()` SECURITY DEFINER 함수를 정의합니다.
+- 반환 허용 목록(allowlist): `branch`, `military_status`, `enlistment_date`, `expected_discharge_date`, `discharge_date`, `discharge_date_source` 6개 필드만 프로젝션하며, 자유 형식 군 복무 메모(`memo`) 및 `profiles` 소유자 전용 행 전체는 비공개로 유지합니다.
+- 보안 불변식:
+  - `auth.uid()`가 NULL인 경우 `42501 not_authenticated` 예외로 즉시 거부
+  - 호출자는 반드시 활성 상태의 `gomsin` (`status = 'active' AND role = 'gomsin'`)
+  - 대상 파트너는 반드시 활성 상태의 `soldier` (`status = 'active' AND role = 'soldier'`)
+  - 동일 커플의 활성 멤버 수가 정확히 2명이어야 함 (3인 이상 비정상 커플 시 0행 반환)
+  - `anon`, 비관련 사용자, 이전(former) 파트너, 군화 본인 호출 시 0행(zero rows) 반환 또는 거부
+  - `SET search_path = public, pg_temp` 고정 및 `REVOKE ALL FROM PUBLIC, anon, authenticated` 후 `authenticated`에만 최소 EXECUTE 권한 부여
+- 로컬 하네스 검증: throwaway PostgreSQL 17 환경에서 001부터 063까지 61개 마이그레이션 전체 체인 및 369개 assertion 전수 PASS (`npm run test:phase0`).
+- **원격 적용 상태: APPLIED (2026-08-28).** exact 파일 SHA를 확인한 뒤 운영 Supabase에
+  적용했습니다. live catalog는 함수 1개, authenticated-only EXECUTE, fixed
+  `search_path`, `auth.uid()`·active gomsin→soldier 경계, memo 제외를 확인했습니다.
+  rollback-only actor matrix는 gomsin 1행, soldier/former/unrelated 0행이었고 anon
+  PostgREST는 `401/42501`로 거부됐습니다. migration ledger relation은 여전히 없으므로
+  `supabase db push`는 계속 금지합니다.
+
+## 064 — crypto_pairings 테이블 권한 잠금 및 TRUNCATE 차단 (2026-08-27)
+
+- `064_lock_crypto_pairings_table_privileges.sql`은 `public.crypto_pairings` 테이블에 대해 `PUBLIC`, `anon`, `authenticated`로부터 `ALL PRIVILEGES`를 회수한 뒤, `authenticated`에 오직 `SELECT` 권한만 재부여합니다.
+- 배경: `062`에서 `REVOKE INSERT, UPDATE, DELETE ... FROM authenticated`를 적용했으나, PostgreSQL 기본 권한 구조상 `TRUNCATE`, `REFERENCES`, `TRIGGER` 권한이 잔존했습니다. 특히 `TRUNCATE`는 RLS를 우회하므로 인증된 사용자가 전체 페어링 데이터를 삭제할 수 있는 P0 결함이었습니다.
+- 보안 불변식:
+  - `authenticated`는 `SELECT`만 가능(`has_table_privilege` = `true`), `INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER/REFERENCES`는 모두 `false`
+  - `anon` 및 `PUBLIC`은 모든 테이블 권한이 `false`
+  - 인증된 사용자의 직접적인 `TRUNCATE` 시도는 `42501 permission denied`로 즉시 거부되고 기존 데이터는 온전히 보존됨
+  - 테이블 변경은 오직 `062`의 SECURITY DEFINER RPC 3종(`e2ee_start_couple_pairing`, `e2ee_confirm_couple_pairing`, `e2ee_mark_couple_pairing_active`)을 통해서만 수행 가능
+  - PostgREST 스키마 캐시 reload (`NOTIFY pgrst, 'reload schema'`)
+- 롤백 방침: 광범위한 권한(TRUNCATE/REFERENCES/TRIGGER/INSERT/UPDATE/DELETE)을 복원하지 않으며, 필요 시 `SELECT`만 재부여하는 forward repair 방식으로 안전하게 대응합니다.
+- 로컬 하네스 검증: throwaway PostgreSQL 17 환경에서 001부터 064까지 62개 마이그레이션 전체 체인 및 375개 assertion 전수 PASS (`npm run test:phase0`).
+- **원격 적용 상태: APPLIED (2026-08-28).** live `authenticated` 권한은 정확히
+  `SELECT`만 남았고 anon `SELECT`는 false입니다. 적용 전후 pairing은 0행입니다.
+  이 보안 변경은 rollback 시 broad privilege를 복원하지 않고 forward repair합니다.
+  migration ledger relation은 여전히 없으므로 `supabase db push`는 계속 금지합니다.
+
+## 065 — 페어링 RPC NULL·만료 상태 forward hardening (2026-08-27)
+
+- 원격에 적용된 062를 재작성하지 않고 동일 RPC signature를 `CREATE OR REPLACE`
+  하는 forward migration입니다.
+- 시작 RPC는 nonce·transcript·hash의 NULL과 잘못된 길이를 모두 거부하고,
+  확인 RPC는 NULL signature를 거부합니다.
+- 만료된 확인은 예외로 UPDATE를 rollback하지 않습니다. 행을
+  `TRANSCRIPT_EXPIRED`로 저장하고 같은 상태 문자열을 반환하며, 클라이언트 adapter가
+  이를 기존 `E_TRANSCRIPT_EXPIRED` 오류로 변환합니다.
+- 064의 SELECT-only table privilege와 authenticated-only RPC 권한을 재확인합니다.
+- **원격 적용 상태: APPLIED (2026-08-28).** 064 다음 exact SQL로 적용했습니다. live
+  catalog에서 RPC 3개가 모두 SECURITY DEFINER, fixed `search_path`, `auth.uid()` bound,
+  authenticated-only EXECUTE임을 확인했습니다. rollback-only actor 검증은 정상 start,
+  NULL evidence/signature 거부, former/unrelated 거부, 비정상 activate 거부를 PASS했습니다.
+  다만 live active device와 couple scope key가 각각 0이어서 실제 두 기기
+  confirm→activate 정상 경로는 **UNVERIFIED**입니다. 빈 ledger 때문에
+  `supabase db push`는 계속 금지합니다.
+
+## 066 — 푸시 발송 후보 원자적 claim (2026-08-27)
+
+- `066_atomic_push_delivery_claims.sql`은 후보 선정과 lease 획득을 하나의
+  SECURITY DEFINER 함수 안에서 처리하고, 같은 claim ID를 가진 호출만 발송 완료 또는
+  release를 수행하게 합니다.
+- 로컬 fresh-chain actor 계약은 authenticated/anon 직접 실행 거부, 다른 claim의
+  완료·release 거부, lease 중복 선정 차단, 만료 후 재선정과 정상 완료를 검증합니다.
+- **원격 적용 상태: NOT APPLIED.** 2026-08-28 live catalog에는 선행
+  `public.push_delivery_state`가 없고 `send-push` Edge Function도 배포되어 있지 않아 exact
+  066은 현재 첫 `ALTER TABLE`에서 실패합니다. 048–055 dependency chain과 sender를 함께
+  준비할 때까지 명시적으로 보류하며, 빈 ledger에서 `supabase db push`는 계속 금지합니다.
+
+## 067 — 명시적 프로필 게시물 의도 (2026-08-28)
+
+- `067_profile_post_intent.sql`은 `daily_records.is_profile_post BOOLEAN NOT NULL DEFAULT
+  false`를 추가합니다. 글·사진·선택 출처를 복제하지 않고, 사용자가 프로필 격자에
+  게시물로 발행했다는 불리언 의도만 기존 기록 행에 둡니다.
+- 기존 사진 기록은 backfill하지 않습니다. 이전 스키마에는 스토리 사진과 명시적 게시물을
+  구별할 증거가 없으므로 추측해서 프로필 격자에 올리지 않습니다.
+- 로컬 PostgreSQL 17 fresh-chain 결과: 65 migrations / 420 assertions PASS. 067 범위는
+  owner가 marker를 읽고 바꾸는 성공 경로, active partner의 shared-only 읽기, private 차단,
+  unrelated/anon 차단, partner의 author marker 변경 거부를 실제 actor로 확인합니다.
+- P5 E2EE actor 하네스도 staging 시 marker `false`, complete-media와 intended visibility를
+  함께 확정하는 최종 발행, 일반 수정의 marker 보존과 private/former/unrelated/anon 거부를
+  실제 PostgreSQL에서 105 assertions로 PASS했습니다.
+- **원격 적용 상태: APPLIED (2026-08-28).** exact SQL 적용 뒤 live 열은 `boolean NOT
+  NULL DEFAULT false`이고 기존 5행은 모두 false, NULL 0행입니다. rollback-only actor
+  matrix에서 owner marker update 1행, partner update 0행, shared/private/former/unrelated
+  읽기 경계와 rollback 후 5행·marker 불변을 확인했습니다. anon PostgREST는
+  `401/42501`로 거부됐습니다. 롤백은 먼저 이전 클라이언트로 되돌리고 열은 남긴 뒤
+  필요하면 후속 forward migration으로 정리합니다.

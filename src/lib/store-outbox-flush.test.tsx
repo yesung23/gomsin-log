@@ -85,13 +85,16 @@ vi.mock('@/lib/sync', () => ({
 
 /** The single observable. Only a delivery attempt reaches it. */
 const saveRecordToDB = vi.fn(async () => ({ ok: true as const, contentRevision: 1 }));
+const uploadRecordMedia = vi.fn(async (file: File) => ({
+  attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` },
+}));
 
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
   deleteRecordFromDB: vi.fn(async () => ({ ok: true as const })),
   fetchRecordsFromDB: vi.fn(async () => []),
   fetchRecordsResultFromDB: vi.fn(async () => ({ ok: true, records: [] })),
-  uploadRecordMedia: vi.fn(async (file: File) => ({ attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` } })),
+  uploadRecordMedia: (file: File) => uploadRecordMedia(file),
   removeRecordMedia: vi.fn(async () => {}),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
@@ -144,8 +147,13 @@ const { useStore } = await import('@/lib/useStore');
 const STORE_KEY = 'gomsinlog.state.v2';
 
 function Probe() {
-  const { isReady } = useStore();
-  return <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>;
+  const { isReady, flushOutbox } = useStore();
+  return (
+    <>
+      <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
+      <button type="button" onClick={() => { void flushOutbox(); }}>flush</button>
+    </>
+  );
 }
 
 function queuedEntry(overrides: Partial<QueuedRecord> = {}): QueuedRecord {
@@ -240,6 +248,10 @@ describe('offline outbox flush', () => {
     queue = [];
     saveRecordToDB.mockReset();
     saveRecordToDB.mockImplementation(async () => ({ ok: true as const, contentRevision: 1 }));
+    uploadRecordMedia.mockReset();
+    uploadRecordMedia.mockImplementation(async (file: File) => ({
+      attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` },
+    }));
     fetchMyCoupleState.mockReset();
     fetchMyCoupleState.mockResolvedValue({ ok: false, reason: 'server' });
     localStorage.clear();
@@ -273,6 +285,71 @@ describe('offline outbox flush', () => {
 
     await waitFor(() => expect(saveRecordToDB).toHaveBeenCalled());
     await waitFor(() => expect(queue.map((entry) => entry.id)).toEqual([]));
+
+    unmount();
+  });
+
+  it('preserves ordered post mode and publishes only with the complete media patch', async () => {
+    queue = [queuedEntry({
+      allOrNothingMedia: true,
+      files: [new File(['photo'], 'post.png', { type: 'image/png' })],
+    })];
+
+    const unmount = await coldLaunch();
+
+    await waitFor(() => expect(queue).toHaveLength(0));
+    const savedVersions = saveRecordToDB.mock.calls.map((call) => call[0] as DailyRecord);
+    expect(savedVersions).toHaveLength(2);
+    expect(savedVersions[0].isPrivate).toBe(true);
+    expect(savedVersions[0].attachments).toBeUndefined();
+    expect(savedVersions[1].isPrivate).toBe(false);
+    expect(savedVersions[1].attachments?.map((attachment) => attachment.name)).toEqual(['post.png']);
+
+    unmount();
+  });
+
+  it('keeps failed post media queued and resumes the same private row on retry', async () => {
+    const postFile = new File(['photo'], 'post.png', { type: 'image/png' });
+    queue = [queuedEntry({ allOrNothingMedia: true, files: [postFile] })];
+    uploadRecordMedia.mockResolvedValueOnce({ error: 'network unavailable' } as never);
+
+    const unmount = await coldLaunch();
+
+    await waitFor(() => {
+      expect(queue).toHaveLength(1);
+      expect(queue[0].attempts).toBe(1);
+      expect(queue[0].blocked).toBeUndefined();
+    });
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    expect((saveRecordToDB.mock.calls[0][0] as DailyRecord).isPrivate).toBe(true);
+
+    // The queue update happens just before the single-flight guard is released.
+    // Let that first pass finish before simulating the next connection event.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    saveRecordToDB.mockResolvedValueOnce({
+      ok: false as const,
+      reason: 'unreachable' as const,
+    } as never);
+    await act(async () => { screen.getByText('flush').click(); });
+
+    await waitFor(() => {
+      expect(queue).toHaveLength(1);
+      expect(queue[0].attempts).toBe(2);
+      expect(queue[0].blocked).toBeUndefined();
+    });
+    expect((saveRecordToDB.mock.calls[1][0] as DailyRecord).id).toBe('queued-rec-1');
+
+    await act(async () => { screen.getByText('flush').click(); });
+
+    await waitFor(() => expect(queue).toHaveLength(0));
+    const savedVersions = saveRecordToDB.mock.calls.map((call) => call[0] as DailyRecord);
+    expect(savedVersions).toHaveLength(4);
+    expect(savedVersions[2].id).toBe('queued-rec-1');
+    expect(savedVersions[2].isPrivate).toBe(true);
+    expect(savedVersions[2].attachments?.map((attachment) => attachment.name)).toEqual(['post.png']);
+    expect(savedVersions[3].id).toBe('queued-rec-1');
+    expect(savedVersions[3].isPrivate).toBe(false);
+    expect(savedVersions[3].attachments?.map((attachment) => attachment.name)).toEqual(['post.png']);
 
     unmount();
   });

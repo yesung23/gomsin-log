@@ -178,7 +178,7 @@ Deno.test({
     const env = {
       ALLOWED_ORIGINS: ALLOWED,
       SUPABASE_URL: stub.base,
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+      SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_key' }),
     };
     const entrypoint = await startEntrypoint(env);
 
@@ -225,7 +225,7 @@ Deno.test({
     const stub = startSupabaseStub();
     const entrypoint = await startEntrypoint({
       SUPABASE_URL: stub.base,
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+      SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_key' }),
     });
     try {
       for (const method of ['OPTIONS', 'POST', 'GET']) {
@@ -257,7 +257,7 @@ Deno.test({
     const entrypoint = await startEntrypoint({
       ALLOWED_ORIGINS: ALLOWED,
       SUPABASE_URL: stub.base,
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+      SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_key' }),
     });
 
     try {
@@ -281,8 +281,8 @@ Deno.test({
         `the client must call the Auth user endpoint (saw ${JSON.stringify(stub.seen)})`,
       );
       assert(
-        stub.seen.some((entry) => entry.apikey === 'service-role-key'),
-        'the injected service-role key must be sent as apikey',
+        stub.seen.some((entry) => entry.apikey === 'sb_secret_test_key'),
+        'the injected secret key must be sent as apikey',
       );
     } finally {
       await entrypoint.stop();

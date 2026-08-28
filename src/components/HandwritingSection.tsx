@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PenLine } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import {
@@ -6,6 +6,18 @@ import {
   loadHandwritingEnabled,
   saveHandwritingEnabled,
 } from '@/lib/handwritingPreference';
+import {
+  applyPaperTextureAttribute,
+  loadPaperTexture,
+  savePaperTexture,
+  type PaperTexture,
+} from '@/lib/paperTexturePreference';
+import {
+  applyRecordTextSizeAttribute,
+  loadRecordTextSize,
+  saveRecordTextSize,
+  type RecordTextSize,
+} from '@/lib/recordTextSizePreference';
 
 /**
  * 손글씨로 볼지 고르는 곳.
@@ -24,11 +36,22 @@ import {
  *
  * ## 서버로 보내지 않는다
  *
- * 그 사람의 눈과 그 기기의 화면에 관한 값이다. 큰 화면에서는 켜고 작은 폰에서는 끄는 것이
- * 자연스럽고, 계정에 묶으면 그 자연스러움이 사라진다. §19의 허용 목록에도 이런 값이 없다.
+ * 그 사람의 눈과 그 기기의 화면에 관한 값이다. 서버 프로필에는 넣지 않고, 같은 기기에서
+ * 계정이 바뀔 때 서로의 선택이 섞이지 않도록 계정 ID가 붙은 로컬 키로만 보관한다.
+ * §19의 서버 수집 허용 목록에도 이런 값이 없다.
  */
 export function HandwritingSection({ userId }: { userId: string }) {
   const [enabled, setEnabled] = useState(() => loadHandwritingEnabled(userId));
+  const [paper, setPaper] = useState<PaperTexture>(() => loadPaperTexture(userId));
+  const [recordTextSize, setRecordTextSize] = useState<RecordTextSize>(
+    () => loadRecordTextSize(userId),
+  );
+
+  useEffect(() => {
+    setEnabled(loadHandwritingEnabled(userId));
+    setPaper(loadPaperTexture(userId));
+    setRecordTextSize(loadRecordTextSize(userId));
+  }, [userId]);
 
   const toggle = (next: boolean) => {
     setEnabled(next);
@@ -36,10 +59,71 @@ export function HandwritingSection({ userId }: { userId: string }) {
     applyHandwritingAttribute(next);
   };
 
+  const choosePaper = (next: PaperTexture) => {
+    setPaper(next);
+    savePaperTexture(userId, next);
+    applyPaperTextureAttribute(next);
+  };
+
+  const chooseRecordTextSize = (next: RecordTextSize) => {
+    setRecordTextSize(next);
+    saveRecordTextSize(userId, next);
+    applyRecordTextSizeAttribute(next);
+  };
+
   return (
     <section className="space-y-2" data-testid="handwriting-preference">
       <h2 className="text-heading text-foreground">보기</h2>
       <Card className="space-y-3">
+        <div>
+          <p className="text-label font-semibold text-foreground">종이 바탕</p>
+          <div className="mt-2 grid grid-cols-2 gap-2 rounded-control bg-muted p-1">
+            <button
+              type="button"
+              onClick={() => choosePaper('plain')}
+              aria-pressed={paper === 'plain'}
+              className={`press-response min-h-11 rounded-control text-label font-semibold ${paper === 'plain' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
+            >
+              무지 종이
+            </button>
+            <button
+              type="button"
+              onClick={() => choosePaper('ruled')}
+              aria-pressed={paper === 'ruled'}
+              className={`press-response min-h-11 rounded-control text-label font-semibold ${paper === 'ruled' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
+            >
+              줄 종이
+            </button>
+          </div>
+          <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
+            무지 종이는 가로줄을 없애 글과 사진에 더 집중할 수 있어요.
+          </p>
+        </div>
+        <div className="ink-rule" aria-hidden="true" />
+        <div>
+          <p className="text-label font-semibold text-foreground">게시물·스토리 글자 크기</p>
+          <div className="mt-2 grid grid-cols-3 gap-2 rounded-control bg-muted p-1">
+            {([
+              ['small', '작게'],
+              ['medium', '기본'],
+              ['large', '크게'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => chooseRecordTextSize(value)}
+                aria-pressed={recordTextSize === value}
+                className={`press-response min-h-11 rounded-control text-label font-semibold ${recordTextSize === value ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
+            게시물과 스토리의 글만 바뀌어요. 시간과 버튼 크기는 그대로예요.
+          </p>
+        </div>
+        <div className="ink-rule" aria-hidden="true" />
         <label className="flex items-center justify-between gap-3 min-h-11">
           <span className="flex items-center gap-2 text-label font-semibold text-foreground">
             <PenLine size={16} className="text-coral" />

@@ -1,0 +1,7 @@
+// Configuration settings file format documentation can be found at:
+// https://help.apple.com/xcode/#/dev745c5c974
+//
+// Optional include for local developer signing configuration.
+// Developers can copy LocalSigning.xcconfig.example to LocalSigning.xcconfig
+// and fill in their Apple Developer Team ID.
+#include? "LocalSigning.xcconfig"

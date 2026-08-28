@@ -35,6 +35,7 @@ const setHighlightedRecordId = vi.fn();
 let online = true;
 const toastLog: { level: string; message: string }[] = [];
 const toastActions: { label: string; onClick: () => void }[] = [];
+const featureFlagMock = vi.hoisted(() => ({ enabled: false }));
 
 function LocationProbe() {
   const location = useLocation();
@@ -57,6 +58,10 @@ vi.mock('@/lib/useOnlineStatus', async () => {
   const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
   return { ...actual, useOnlineStatus: () => online };
 });
+
+vi.mock('@/app/e2ee/featureFlag', () => ({
+  isDeviceProtectionEnabled: () => featureFlagMock.enabled,
+}));
 
 function makeState(): AppState {
   return {
@@ -119,6 +124,7 @@ beforeEach(() => {
   queueRecordForLater.mockClear();
   toastLog.length = 0;
   toastActions.length = 0;
+  featureFlagMock.enabled = false;
   online = true;
   clearAllComposerDrafts();
   clearAllComposerDrafts();
@@ -211,11 +217,38 @@ describe('online but unreachable: the store queues, the composer says so', () =>
     expect(screen.getByDisplayValue('권한 실패')).toBeInTheDocument();
   });
 
-  it('sends a protection-required write to Settings without losing the draft', async () => {
+  it('offers a retry without a dead Settings route when launch protection is off', async () => {
+    let releaseRetry: (() => void) | undefined;
     addRecordWithMedia.mockResolvedValueOnce({
       ok: false,
       failedFiles: [],
-      error: '이 기기에서 기록 보호 설정이 필요해요. 설정에서 먼저 준비해 주세요.',
+      error: '지금은 이 기록을 안전하게 저장할 수 없어요.',
+      reason: 'protection_required',
+    } as never).mockImplementationOnce(() => new Promise((resolve) => {
+      releaseRetry = () => resolve({ ok: true, failedFiles: [] } as never);
+    }));
+    const user = userEvent.setup();
+    render(<MemoryRouter><LocationProbe /><TodayLogWidget /></MemoryRouter>);
+
+    await typeAndSave(user, '보호 설정이 필요한 기록');
+
+    await waitFor(() => expect(toastActions).toHaveLength(1));
+    expect(toastActions[0].label).toBe('다시 시도');
+    act(() => {
+      toastActions[0].onClick();
+      toastActions[0].onClick();
+    });
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalledTimes(2));
+    await act(async () => { releaseRetry?.(); });
+    expect(screen.getByTestId('location')).not.toHaveTextContent('/settings');
+  });
+
+  it('keeps the Settings recovery path when record protection is enabled', async () => {
+    featureFlagMock.enabled = true;
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: false,
+      failedFiles: [],
+      error: '지금은 이 기록을 안전하게 저장할 수 없어요.',
       reason: 'protection_required',
     } as never);
     const user = userEvent.setup();

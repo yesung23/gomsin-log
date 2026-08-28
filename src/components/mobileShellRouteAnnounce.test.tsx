@@ -125,4 +125,15 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const { container } = renderShell('/home');
     expect(container.querySelector('#main-content')?.textContent).toContain('본문');
   });
+
+  it('keeps the app frame fixed while main owns vertical scrolling', () => {
+    const { container } = renderShell('/home');
+    const main = container.querySelector('#main-content');
+    const frame = main?.parentElement;
+
+    expect(frame?.className).toContain('h-[100dvh]');
+    expect(frame?.className).toContain('overflow-hidden');
+    expect(main?.className).toContain('min-h-0');
+    expect(main?.className).toContain('overflow-y-auto');
+  });
 });

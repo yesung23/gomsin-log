@@ -136,12 +136,20 @@ export interface StoreContextType {
   addRecordWithMedia: (
     record: Omit<DailyRecord, 'id' | 'createdAt'>,
     files: File[],
+    options?: {
+      /** Pins a long-running media preparation to the couple it started in. */
+      expectedCoupleId?: string;
+      /** A post keeps its selected order by committing either every photo or none. */
+      allOrNothingMedia?: boolean;
+    },
   ) => Promise<{
     ok: boolean;
     failedFiles: string[];
     error?: string;
     queued?: boolean;
     reason?: RecordMutationReason;
+    /** Present once the record row exists, including a durable queued intent. */
+    recordId?: string;
   }>;
   /**
    * Store a record for later without attempting the write.
@@ -177,8 +185,19 @@ export interface StoreContextType {
    */
   updateRecordMedia: (
     id: string,
-    changes: { addFiles?: File[]; removePaths?: string[] },
-  ) => Promise<{ ok: boolean; failedFiles: string[]; error?: string }>;
+    changes: {
+      addFiles?: File[];
+      removePaths?: string[];
+      /** Keep the existing row unchanged unless every added file succeeds. */
+      allOrNothing?: boolean;
+    },
+  ) => Promise<{
+    ok: boolean;
+    failedFiles: string[];
+    error?: string;
+    /** Preserves retryable transport causes for offline post replay. */
+    reason?: RecordMutationReason;
+  }>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
   updateEvent: (
     id: string,

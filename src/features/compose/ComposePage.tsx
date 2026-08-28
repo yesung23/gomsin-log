@@ -4,7 +4,8 @@ import { Check, Image as ImageIcon, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { recordProductEvent } from '@/lib/productEvents';
-import { MEDIA_ACCEPT } from '@/lib/records';
+import { classifyMediaFile, MEDIA_ACCEPT } from '@/lib/records';
+import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from '@/lib/composerDraft';
 import { EmotionCharacter } from '@/components/emotion/EmotionCharacter';
 import { useEmotionCandidatesAtBoundary } from '@/lib/useEmotionCandidates';
@@ -81,8 +82,23 @@ export function ComposePage() {
   const moodTouched = useRef(false);
   const [isPrivate, setIsPrivate] = useState(restored?.isPrivate ?? false);
   const [files, setFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<Array<{ file: File; url: string }>>([]);
   const [saving, setSaving] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const saveInFlightRef = useRef(false);
+
+  /*
+    선택한 사진은 서버에 올리기 전까지 이 기기 안의 Blob URL로만 보여 준다.
+
+    URL은 파일 목록이 바뀌거나 화면을 떠날 때 즉시 해제한다. 초안 사진의 바이트나 URL을
+    서버·로그·localStorage에 남기지 않으면서도, 사용자가 무엇을 올리는지 저장 전에 직접
+    확인할 수 있다.
+  */
+  useEffect(() => {
+    const previews = files.map((file) => ({ file, url: URL.createObjectURL(file) }));
+    setPhotoPreviews(previews);
+    return () => previews.forEach(({ url }) => URL.revokeObjectURL(url));
+  }, [files]);
 
   /** §19가 허용하는 단 하나의 시간. 열린 순간은 기기에 남고 **차이만** 나간다. */
   const openedAt = useRef<number>(Date.now());
@@ -154,7 +170,7 @@ export function ComposePage() {
   const buildFlow = (now: Date): EmotionFlowItem[] =>
     buildEmotionFlow({ mood, now, isPrivate: effectivePrivate });
 
-  const save = async () => {
+  const runSave = async () => {
     if (saving || !hasContent) return;
 
     const now = new Date();
@@ -226,9 +242,17 @@ export function ComposePage() {
 
     if (!result.ok) {
       if (result.reason === 'protection_required') {
-        toast.error(result.error || '기록 보호 설정이 필요해요.', {
-          action: { label: '설정 열기', onClick: () => navigate('/settings') },
-        });
+        if (isDeviceProtectionEnabled()) {
+          toast.error(result.error || '지금은 이 기록을 안전하게 저장할 수 없어요.', {
+            action: { label: '설정 열기', onClick: () => navigate('/settings') },
+          });
+        } else {
+          // 출시 플래그가 꺼진 빌드에는 설정 진입점 자체가 없다. 실제 floor와 일시적인
+          // 조회 실패를 이 계층에서는 구분할 수 없으므로 어느 원인도 지어내지 않는다.
+          toast.error(result.error || '지금은 이 기록을 안전하게 저장할 수 없어요.', {
+            action: { label: '다시 시도', onClick: () => { void save(); } },
+          });
+        }
       } else {
         toast.error(result.error || '기록을 저장하지 못했어요.');
       }
@@ -277,6 +301,18 @@ export function ComposePage() {
 
     done('남겼어요.');
   };
+
+  async function save() {
+    // React state disables the button on the next render. The ref closes the
+    // same-frame gap used by a rapid double tap and by repeated toast actions.
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    try {
+      await runSave();
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  }
 
   const stamp = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
   const clock = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
@@ -348,6 +384,35 @@ export function ComposePage() {
           style={{ color: 'var(--ink)', lineHeight: '30px' }}
         />
 
+        {photoPreviews.length > 0 ? (
+          <ul
+            aria-label="선택한 사진"
+            data-testid="compose-photo-previews"
+            className="mt-2 grid grid-cols-2 gap-2"
+          >
+            {photoPreviews.map(({ file, url }, index) => (
+              <li
+                key={`${file.name}-${file.lastModified}-${index}`}
+                className={`relative overflow-hidden rounded-control bg-muted ${photoPreviews.length === 1 ? 'col-span-2' : ''}`}
+              >
+                <img
+                  src={url}
+                  alt={`선택한 사진 ${index + 1}`}
+                  className={`w-full object-cover ${photoPreviews.length === 1 ? 'aspect-[4/3]' : 'aspect-square'}`}
+                />
+                <button
+                  type="button"
+                  aria-label={`선택한 사진 ${index + 1} 빼기`}
+                  onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))}
+                  className="press-response absolute right-1 top-1 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-black/65 text-white"
+                >
+                  <X size={18} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
         <input
           ref={fileInput}
           type="file"
@@ -355,7 +420,16 @@ export function ComposePage() {
           accept={MEDIA_ACCEPT}
           className="hidden"
           onChange={(event) => {
-            setFiles([...(event.target.files ?? [])]);
+            const accepted: File[] = [];
+            Array.from(event.target.files ?? []).forEach((file) => {
+              const classified = classifyMediaFile(file);
+              if ('error' in classified) {
+                toast.error(`${file.name}: ${classified.error}`);
+                return;
+              }
+              accepted.push(file);
+            });
+            if (accepted.length > 0) setFiles((current) => [...current, ...accepted]);
             event.target.value = '';
           }}
         />
@@ -366,7 +440,7 @@ export function ComposePage() {
         >
           <ImageIcon size={17} className="pen-icon" color="var(--ink-soft)" aria-hidden="true" />
           <span className="text-label" style={{ color: 'var(--ink-soft)' }}>
-            {files.length > 0 ? `사진 ${files.length}장` : '사진 더하기'}
+            {files.length > 0 ? `사진 ${files.length}장 · 더하기` : '사진 더하기'}
           </span>
         </button>
 

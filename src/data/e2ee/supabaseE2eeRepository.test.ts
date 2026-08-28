@@ -226,6 +226,105 @@ describe('write-floor adapter', () => {
   });
 });
 
+describe('pairing ceremony adapter', () => {
+  it('uses actor-bound RPCs and bytea encoding instead of direct table writes', async () => {
+    const transcript = new Uint8Array(440).fill(3);
+    const nonce = new Uint8Array(32).fill(4);
+    const hash = new Uint8Array(32).fill(5);
+    const signature = new Uint8Array(64).fill(6);
+    const { repository, rpcs, queries } = repositoryWith([ok(UUID_A), ok('CONFIRMED_ONE'), ok(null)]);
+
+    await expect(repository.startPairing({
+      coupleId: UUID_B,
+      pairingNonce: nonce,
+      transcript,
+      transcriptHash: hash,
+      createdAt: '2026-08-26T00:00:00.000Z',
+      expiresAt: '2026-08-26T00:05:00.000Z',
+    })).resolves.toBe(UUID_A);
+    await repository.confirmPairing({ pairingId: UUID_A, deviceId: UUID_C, signature });
+    await repository.markPairingActive({ pairingId: UUID_A, scopeKeyId: UUID_B });
+
+    expect(rpcs).toEqual([
+      {
+        fn: 'e2ee_start_couple_pairing',
+        args: {
+          p_couple_id: UUID_B,
+          p_pairing_nonce: `\\x${hex(nonce)}`,
+          p_transcript: `\\x${hex(transcript)}`,
+          p_transcript_hash: `\\x${hex(hash)}`,
+          p_created_at: '2026-08-26T00:00:00.000Z',
+          p_expires_at: '2026-08-26T00:05:00.000Z',
+        },
+      },
+      {
+        fn: 'e2ee_confirm_couple_pairing',
+        args: {
+          p_pairing_id: UUID_A,
+          p_device_id: UUID_C,
+          p_signature: `\\x${hex(signature)}`,
+        },
+      },
+      {
+        fn: 'e2ee_mark_couple_pairing_active',
+        args: { p_pairing_id: UUID_A, p_scope_key_id: UUID_B },
+      },
+    ]);
+    expect(queries).toHaveLength(0);
+  });
+
+  it('round-trips the persisted transcript and authoritative timestamps', async () => {
+    const transcript = new Uint8Array(440).fill(7);
+    const { repository, queries } = repositoryWith([ok({
+      id: UUID_A,
+      couple_id: UUID_B,
+      state: 'TRANSCRIPT_PROPOSED',
+      pairing_nonce: encodeBytea(new Uint8Array(32)),
+      transcript: encodeBytea(transcript),
+      transcript_hash: encodeBytea(new Uint8Array(32)),
+      confirmed_low_signature: null,
+      confirmed_low_device_id: null,
+      confirmed_high_signature: null,
+      confirmed_high_device_id: null,
+      created_at: '2026-08-26T00:00:00.000Z',
+      expires_at: '2026-08-26T00:05:00.000Z',
+    })]);
+    const row = await repository.getPairing(UUID_B);
+    expect(row?.transcript).toEqual(transcript);
+    expect(row?.createdAt).toBe('2026-08-26T00:00:00.000Z');
+    expect(queries[0].columns).toContain('transcript');
+    expect(queries[0].columns).toContain('created_at');
+    expect(queries[0].filters).toContainEqual({
+      method: 'in',
+      column: 'state',
+      value: [
+        'CRYPTO_PENDING', 'TRANSCRIPT_PROPOSED', 'CONFIRMED_ONE',
+        'CONFIRMED_BOTH', 'EPOCH_PREPARING', 'CRYPTO_ACTIVE',
+      ],
+    });
+  });
+
+  it('maps a committed expiration result to the existing app error', async () => {
+    const { repository } = repositoryWith([ok('TRANSCRIPT_EXPIRED')]);
+
+    await expect(repository.confirmPairing({
+      pairingId: UUID_A,
+      deviceId: UUID_B,
+      signature: SIG64,
+    })).rejects.toMatchObject({ code: 'E_TRANSCRIPT_EXPIRED' });
+  });
+
+  it('fails closed on an unexpected confirmation response', async () => {
+    const { repository } = repositoryWith([ok(null)]);
+
+    await expect(repository.confirmPairing({
+      pairingId: UUID_A,
+      deviceId: UUID_B,
+      signature: SIG64,
+    })).rejects.toMatchObject({ code: 'E_DB_SHAPE' });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // bigint
 // ---------------------------------------------------------------------------

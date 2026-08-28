@@ -42,7 +42,7 @@ export interface StoryViewerProps {
   cards: StoryCard[];
   initialIndex: number;
   mode: StoryMode;
-  /** 헤더에 적는 이름. `춘향의 오늘` / `나의 오늘` / `8월 14일`. */
+  /** 헤더에 적는 구간. `오늘` / `놓친 하루` / `8월 14일`. */
   title: string;
   onClose: () => void;
   /** 정확한 원본으로. 근사치로 대체하지 않는다. */
@@ -60,6 +60,11 @@ export interface StoryViewerProps {
   bookmarkDisabledReason?: string;
   /** 미디어 복호에 필요한 커플 범위. */
   coupleId?: string;
+}
+
+function formatStoryTime(time: string): string {
+  const match = /^(\d{1,2}):(\d{2})/.exec(time.trim());
+  return match ? `${match[1].padStart(2, '0')}:${match[2]}` : time;
 }
 
 export function StoryViewer({
@@ -136,7 +141,7 @@ export function StoryViewer({
     if (card.kind === 'cover') return `${position}, 목차`;
     if (card.kind === 'missing') return `${position}, 볼 수 없는 기록`;
     if (card.kind === 'closing') return `${position}, 마지막`;
-    return `${position}, ${card.record.time}`;
+    return `${position}, ${formatStoryTime(card.record.time)}`;
   }, [card, index, total]);
 
   const startHold = () => { holdTimer.current = setTimeout(() => setBare(true), 400); };
@@ -179,10 +184,9 @@ export function StoryViewer({
 
       <div className={cn('flex items-center justify-between gap-2 px-4 py-3 transition-opacity', bare && 'opacity-0')}>
         <div className="min-w-0">
-          <p className="text-emphasis text-foreground truncate">{title}</p>
-          {card.kind === 'moment' ? (
-            <p className="text-caption text-muted-foreground">{card.record.time}</p>
-          ) : null}
+          <p className="text-emphasis text-foreground truncate">
+            {card.kind === 'moment' ? formatStoryTime(card.record.time) : title}
+          </p>
         </div>
         <button
           type="button"
@@ -215,42 +219,44 @@ export function StoryViewer({
             onClose={onClose}
           />
         ) : (
-          <MomentCard record={card.record} coupleId={coupleId} />
+          <>
+            <MomentCard record={card.record} coupleId={coupleId} />
+            <div
+              className={cn('mt-3 flex items-center gap-1 border-t border-border pt-2 transition-opacity', bare && 'opacity-0')}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {mode !== 'archive' && mode !== 'highlight' && onToggleBookmark ? (
+                <Bookmark
+                  marked={marked}
+                  onToggle={() => onToggleBookmark(card.record.id, !marked)}
+                  disabled={Boolean(bookmarkDisabledReason)}
+                  disabledReason={bookmarkDisabledReason}
+                />
+              ) : null}
+              <span className="flex-1" />
+              {onAddToHighlight && !card.record.isPrivate && card.record.attachments?.some((attachment) => attachment.type === 'photo') ? (
+                <button
+                  type="button"
+                  onClick={() => onAddToHighlight(card.record.id)}
+                  aria-label="하이라이트에 추가"
+                  className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
+                >
+                  <BookmarkPlus size={16} aria-hidden="true" />
+                  하이라이트
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => onOpenRecord(card.record.id)}
+                className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
+              >
+                원본 보기
+                <ArrowUpRight size={15} aria-hidden="true" />
+              </button>
+            </div>
+          </>
         )}
       </div>
-
-      {card.kind === 'moment' ? (
-        <div className={cn('flex items-center gap-1 border-t border-border px-3 py-2 transition-opacity', bare && 'opacity-0')}>
-          {mode !== 'archive' && mode !== 'highlight' && onToggleBookmark ? (
-            <Bookmark
-              marked={marked}
-              onToggle={() => onToggleBookmark(card.record.id, !marked)}
-              disabled={Boolean(bookmarkDisabledReason)}
-              disabledReason={bookmarkDisabledReason}
-            />
-          ) : null}
-          <span className="flex-1" />
-          {onAddToHighlight && !card.record.isPrivate && card.record.attachments?.some((attachment) => attachment.type === 'photo') ? (
-            <button
-              type="button"
-              onClick={() => onAddToHighlight(card.record.id)}
-              aria-label="하이라이트에 추가"
-              className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
-            >
-              <BookmarkPlus size={16} aria-hidden="true" />
-              하이라이트
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => onOpenRecord(card.record.id)}
-            className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
-          >
-            원본 보기
-            <ArrowUpRight size={15} aria-hidden="true" />
-          </button>
-        </div>
-      ) : null}
 
       {/*
         좌우 이동.
@@ -313,7 +319,7 @@ function CoverCard({
             >
               <span className="shrink-0 text-caption text-muted-foreground tabular-nums">{line.time}</span>
               {/* 사용자가 쓴 글이므로 손글씨다. 시간은 앱이 아는 사실이므로 인쇄체다. */}
-              <span className="hand-text text-body text-foreground">{line.text}</span>
+              <span className="hand-text record-copy text-foreground">{line.text}</span>
             </button>
           </li>
         ))}
@@ -355,7 +361,7 @@ function MomentCard({
     return (
       <PaperCard className="mt-2">
         {/* 자르지 않는다. 요약을 보여주는 화면이 아니다. */}
-        <p className="hand-text text-body whitespace-pre-wrap break-keep text-foreground">
+        <p className="hand-text record-copy whitespace-pre-wrap break-keep text-foreground">
           {body || '순간을 남겼어요'}
         </p>
       </PaperCard>
@@ -364,9 +370,9 @@ function MomentCard({
 
   return (
     <div className="mt-2 space-y-3">
-      <RecordMediaGallery attachments={attachments} recordId={record.id} coupleId={coupleId} />
+      <RecordMediaGallery attachments={attachments} recordId={record.id} coupleId={coupleId} fit="contain" />
       {body ? (
-        <p className="hand-text text-body whitespace-pre-wrap break-keep text-foreground">{body}</p>
+        <p className="hand-text record-copy whitespace-pre-wrap break-keep text-foreground">{body}</p>
       ) : null}
     </div>
   );

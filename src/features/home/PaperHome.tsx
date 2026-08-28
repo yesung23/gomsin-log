@@ -19,7 +19,7 @@ import type { DailyRecord } from '@/types';
  *     헤더 56px        곰신로그 · 이야기할 것 · 통화
  *     스토리 레일 106px 내 스토리(+) · 상대
  *     ─────────────
- *     포스트           작성자 54px → 사진/글 → 액션 44px → 캡션 → 시간
+ *     포스트           사진/글 → 캡션 → 시간·원본·책갈피 44px
  *
  * 이 숫자들이 인스타를 인스타로 보이게 한다. 글자 크기는 임의 픽셀이 아니라 앱의 타입
  * 스케일을 쓴다 -- 둘이 거의 겹치기 때문이다(22 title · 17 heading · 15 body · 13 label ·
@@ -47,11 +47,13 @@ import type { DailyRecord } from '@/types';
 const FEED_DAYS = 7;
 
 function timeAgo(record: DailyRecord, todayStr: string): string {
-  if (record.date === todayStr) return `오늘 ${record.time}`;
+  const match = /^(\d{1,2}):(\d{2})/.exec(record.time.trim());
+  const time = match ? `${match[1].padStart(2, '0')}:${match[2]}` : record.time;
+  if (record.date === todayStr) return `오늘 ${time}`;
   const days = Math.round(
     (Date.parse(`${todayStr}T00:00:00`) - Date.parse(`${record.date}T00:00:00`)) / 86400000,
   );
-  if (days === 1) return `어제 ${record.time}`;
+  if (days === 1) return `어제 ${time}`;
   if (days < 7) return `${days}일 전`;
   const [, month, day] = record.date.split('-');
   return `${Number(month)}월 ${Number(day)}일`;
@@ -132,8 +134,9 @@ export function PaperHome() {
     */
     <div className="min-h-full pb-6" data-testid="home-core">
       <header
-        className="flex h-14 items-center justify-between px-4"
-        style={{ marginTop: 'env(safe-area-inset-top, 0px)', background: 'var(--paper)' }}
+        data-testid="home-sticky-header"
+        className="sticky top-0 z-40 flex h-14 items-center justify-between px-4"
+        style={{ background: 'var(--paper)' }}
       >
         {/*
           로고 자리. 이 앱의 이름은 손글씨다 -- 인스타의 로고가 그 앱의 손글씨인 것과
@@ -370,28 +373,9 @@ function Post({
 
   return (
     <article className="pb-2">
-      {/* 작성자 줄 — 인스타와 같은 54px */}
-      <header className="flex h-[54px] items-center gap-2.5 px-4">
-        <InkCircle size={34}><PenFace size={24} tone={mine ? 'b' : 'a'} /></InkCircle>
-        <span className="flex-1 truncate text-label font-semibold" style={{ color: 'var(--ink)' }}>
-          {author}
-        </span>
-        <button
-          type="button"
-          aria-label={`${author}의 기록 열기`}
-          onClick={onOpen}
-          /*
-            인스타의 `…` 는 좁게 그려지지만 여기서는 44px 를 채운다. 세로만 44 이고
-            가로가 32 이면 규칙을 절반만 지킨 것이다 -- 엄지는 두 방향으로 빗나간다.
-          */
-          className="flex h-11 w-11 items-center justify-center"
-        >
-          <MoreHorizontal size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
-        </button>
-      </header>
-
       {/*
-        사진이 있으면 인스타처럼 전폭, 없으면 **글이 그 자리를 차지한다.**
+        작성자 이름은 홈 상단과 스토리 레일에 이미 있다. 포스트마다 반복하지 않고 사진부터
+        보여 준다. 사진이 없으면 **글이 그 자리를 차지한다.**
 
         빈 사진 틀을 남기면 화면이 로딩 실패처럼 보인다. 글이 주인공인 하루는 구멍이 아니다.
       */}
@@ -420,7 +404,7 @@ function Post({
             }}
           >
             <p
-              className="hand-text whitespace-pre-wrap break-keep text-heading"
+              className="hand-text record-copy whitespace-pre-wrap break-keep"
               style={{ color: 'var(--ink)' }}
             >
               {record.log}
@@ -429,8 +413,15 @@ function Post({
         )}
       </div>
 
+      {hasMedia && record.log ? (
+        <p className="hand-text record-copy px-4 pt-3" style={{ color: 'var(--ink)' }}>
+          {record.log}
+        </p>
+      ) : null}
+
       {/*
-        액션 줄 — 인스타와 같은 44px. **숫자가 없다.**
+        글 아래의 액션 줄. 시간은 초를 버리고 분까지만, 원본과 책갈피는 44px 표적이다.
+        **숫자가 없다.**
 
         좋아요 수·조회 수·본 사람은 §16의 비목표다. 세는 순간 두 사람 사이에 점수가
         생기고, 이 제품은 관계에 점수를 매기지 않는다.
@@ -446,7 +437,18 @@ function Post({
         믿게 만드는 종류의 거짓말이다. 자리는 비워 두고 되는 것만 답한다.
       */}
       <div className="flex h-11 items-center gap-1 px-3">
+        <p className="px-1 text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
+          {timeAgo(record, todayStr)}
+        </p>
         <span className="flex-1" />
+        <button
+          type="button"
+          aria-label={`${author}의 기록 열기`}
+          onClick={onOpen}
+          className="flex h-11 w-11 items-center justify-center"
+        >
+          <MoreHorizontal size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+        </button>
         <button
           type="button"
           aria-label={marked ? '이따 이야기하기 취소' : '이따 이야기하기'}
@@ -462,19 +464,6 @@ function Post({
             aria-hidden="true"
           />
         </button>
-      </div>
-
-      {/* 캡션과 시간. 글이 이미 위에 있으면 여기서 반복하지 않는다. */}
-      <div className="space-y-1 px-4">
-        {hasMedia && record.log ? (
-          <p className="hand-text text-body" style={{ color: 'var(--ink)' }}>
-            <span className="mr-1.5 text-label font-semibold">{author}</span>
-            {record.log}
-          </p>
-        ) : null}
-        <p className="text-caption" style={{ color: 'var(--ink-soft)' }}>
-          {timeAgo(record, todayStr)}
-        </p>
       </div>
     </article>
   );

@@ -11,6 +11,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
+    /// iOS 27 refuses to launch apps built with the current SDK unless they
+    /// adopt the scene life cycle. The named configuration is declared in
+    /// Info.plist and keeps the existing Main storyboard / Capacitor bridge.
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        return UISceneConfiguration(
+            name: "Default Configuration",
+            sessionRole: connectingSceneSession.role
+        )
+    }
+
     /// Keep local diary and session data out of iCloud and encrypted device backups.
     ///
     /// On iOS everything under `Library/` except `Caches/` is backed up by

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { NATIVE_URL_SCHEME, NATIVE_AUTH_CALLBACK_URL } from '@/lib/platform';
 
@@ -71,6 +72,8 @@ const generatedAndroidSettings = read('android/capacitor.settings.gradle');
 const generatedAndroidBuild = read('android/app/capacitor.build.gradle');
 const strings = read('android/app/src/main/res/values/strings.xml');
 const infoPlist = read('ios/App/App/Info.plist');
+const appDelegate = read('ios/App/App/AppDelegate.swift');
+const sceneDelegate = read('ios/App/App/SceneDelegate.swift');
 const iosPodfile = read('ios/App/Podfile');
 const entitlements = read('ios/App/App/App.entitlements');
 const privacyManifest = read('ios/App/App/PrivacyInfo.xcprivacy');
@@ -86,6 +89,7 @@ const devicePluginPackage = JSON.parse(read('packages/capacitor-device-keys/pack
   capacitor?: { ios?: { src?: string }; android?: { src?: string } };
 };
 const devicePodspec = read('packages/capacitor-device-keys/GomsinlogCapacitorDeviceKeys.podspec');
+const summaryPodspec = read('packages/capacitor-on-device-summary/GomsinlogCapacitorOnDeviceSummary.podspec');
 const deviceJavaScriptPlugin = read('packages/capacitor-device-keys/src/index.ts');
 const deviceAndroidPlugin = read(
   'packages/capacitor-device-keys/android/src/main/java/app/gomsinlog/devicekeys/DeviceKeysPlugin.kt',
@@ -131,6 +135,32 @@ describe('the deep-link scheme agrees everywhere it is registered', () => {
       .toEqual(['gomsinlog']);
     // Universal Links are not used, so no associated domain may appear.
     expect(withoutComments(entitlements)).not.toContain('com.apple.developer.associated-domains');
+  });
+});
+
+describe('iOS: the scene life cycle launches the Capacitor shell on current SDKs', () => {
+  it('declares one storyboard-backed scene and wires its delegate into the target', () => {
+    expect(infoPlist).toContain('<key>UIApplicationSceneManifest</key>');
+    expect(infoPlist).toMatch(
+      /<key>UIApplicationSupportsMultipleScenes<\/key>\s*<false\/>/,
+    );
+    expect(infoPlist).toContain('$(PRODUCT_MODULE_NAME).SceneDelegate');
+    expect(infoPlist).toMatch(/<key>UISceneStoryboardFile<\/key>\s*<string>Main<\/string>/);
+    expect(pbxproj).toContain('SceneDelegate.swift in Sources');
+  });
+
+  it('returns the scene configuration iOS 27 requires', () => {
+    expect(appDelegate).toContain('configurationForConnecting connectingSceneSession');
+    expect(appDelegate).toContain('UISceneConfiguration(');
+    expect(appDelegate).toContain('name: "Default Configuration"');
+  });
+
+  it('forwards both cold-start and foreground links to Capacitor', () => {
+    expect(sceneDelegate).toContain('connectionOptions.urlContexts');
+    expect(sceneDelegate).toContain('connectionOptions.userActivities');
+    expect(sceneDelegate).toContain('openURLContexts URLContexts');
+    expect(sceneDelegate).toContain('continue userActivity');
+    expect(sceneDelegate.match(/ApplicationDelegateProxy\.shared\.application/g)).toHaveLength(2);
   });
 });
 
@@ -533,8 +563,6 @@ describe('iOS: the APNs token can actually reach the plugin waiting for it', () 
     device, after credentials, after an entitlement, after TestFlight -- with three
     external gates to blame before this file.
   */
-  const appDelegate = read('ios/App/App/AppDelegate.swift');
-
   it('forwards a successful registration', () => {
     expect(appDelegate).toContain('didRegisterForRemoteNotificationsWithDeviceToken');
     expect(appDelegate).toContain('.capacitorDidRegisterForRemoteNotifications');
@@ -644,6 +672,41 @@ describe('no signing material is tracked on either platform', () => {
     expect(pbxproj).not.toContain('PROVISIONING_PROFILE');
   });
 
+  it('delegates iOS developer signing to ignored LocalSigning.xcconfig with optional include in Config.xcconfig', () => {
+    const configXcconfig = read('ios/App/Config.xcconfig');
+    const localSigningExample = read('ios/App/LocalSigning.xcconfig.example');
+    const rootIgnore = read('.gitignore');
+
+    // Optional include is present in Config.xcconfig
+    expect(configXcconfig).toMatch(/#include\?\s*["']LocalSigning\.xcconfig["']/);
+
+    // Tracked pbxproj connects Config.xcconfig at project level while preserving target Pods xcconfigs
+    expect(pbxproj).toContain('A1F0C0DE0000000000000104 /* Config.xcconfig */');
+    expect(pbxproj).toContain('baseConfigurationReference = FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */;');
+    expect(pbxproj).toContain('baseConfigurationReference = AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */;');
+
+    // Tracked pbxproj, example, and config do not embed an actual 10-character team identifier
+    const tenCharTeamIdRegex = /DEVELOPMENT_TEAM\s*=\s*[A-Z0-9]{10}\b/;
+    expect(pbxproj).not.toContain('DEVELOPMENT_TEAM');
+    expect(pbxproj).not.toMatch(tenCharTeamIdRegex);
+    expect(configXcconfig).not.toContain('DEVELOPMENT_TEAM');
+    expect(configXcconfig).not.toMatch(tenCharTeamIdRegex);
+    expect(localSigningExample).not.toMatch(tenCharTeamIdRegex);
+    expect(localSigningExample).toContain('DEVELOPMENT_TEAM = YOUR_TEAM_ID');
+
+    // LocalSigning.xcconfig is ignored by git
+    expect(rootIgnore).toContain('/ios/App/LocalSigning.xcconfig');
+    const ignoredByGit = execSync('git check-ignore ios/App/LocalSigning.xcconfig', {
+      encoding: 'utf8',
+    }).trim();
+    expect(ignoredByGit).toBe('ios/App/LocalSigning.xcconfig');
+
+    // No provisioning secret is tracked in build/config files
+    expect(pbxproj).not.toContain('PROVISIONING_PROFILE');
+    expect(configXcconfig).not.toContain('PROVISIONING_PROFILE');
+    expect(localSigningExample).not.toContain('PROVISIONING_PROFILE');
+  });
+
   it('.gitignore keeps the whole class out, not just the files that exist today', () => {
     const rootIgnore = read('.gitignore');
     for (const pattern of [
@@ -661,6 +724,7 @@ describe('no signing material is tracked on either platform', () => {
     expect(rootIgnore).toContain('/ios/App/Pods/');
     expect(rootIgnore).toContain('**/xcuserdata/');
     expect(rootIgnore).toContain('/android/build/');
+    expect(rootIgnore).toContain('/ios/App/LocalSigning.xcconfig');
   });
 
   it('the ignore rules name every generated and machine-local native file', () => {
@@ -669,6 +733,7 @@ describe('no signing material is tracked on either platform', () => {
       'android/app/src/main/assets/capacitor.config.json',
       'ios/App/App/capacitor.config.json',
       'ios/App/App/config.xml',
+      'ios/App/LocalSigning.xcconfig',
     ]) {
       // They may exist on disk after a sync; they must be ignored, which the
       // repository-level check in CI asserts. Here we only require that the
@@ -761,5 +826,77 @@ describe('Capacitor DeviceKeys packaging has one sync-owned native path', () => 
     expect(iosPodfile).not.toMatch(/pod\s+['"]GomsinlogDeviceKeys['"]\s*,/);
     expect(devicePodspec).not.toMatch(/s\.name\s*=\s*['"]GomsinlogDeviceKeys['"]/);
     expect(devicePluginPackage.capacitor).toEqual({ ios: { src: 'ios' }, android: { src: 'android' } });
+  });
+});
+
+describe('iOS: minimum deployment target is consistently set to iOS 15.0', () => {
+  it('pins platform :ios, 15.0 in Podfile and normalizes pods in post_install', () => {
+    expect(iosPodfile).toContain("platform :ios, '15.0'");
+    expect(iosPodfile).not.toContain("platform :ios, '14.0'");
+    expect(iosPodfile).toContain("config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'");
+  });
+
+  it('sets IPHONEOS_DEPLOYMENT_TARGET = 15.0 in project.pbxproj for all configurations', () => {
+    const deploymentTargets = [...pbxproj.matchAll(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*([^;]+);/g)].map(
+      (m) => m[1].trim(),
+    );
+    expect(deploymentTargets.length).toBeGreaterThanOrEqual(4);
+    for (const target of deploymentTargets) {
+      expect(target).toBe('15.0');
+    }
+    expect(pbxproj).not.toContain('IPHONEOS_DEPLOYMENT_TARGET = 14.0;');
+  });
+
+  it('sets deployment target to 15.0 in local plugin podspecs', () => {
+    expect(devicePodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
+    expect(summaryPodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
+    expect(devicePodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
+    expect(summaryPodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
+  });
+
+  it('forbids tracked 14.0 iOS deployment targets in source native config', () => {
+    const trackedConfigs = [iosPodfile, pbxproj, devicePodspec, summaryPodspec];
+    for (const config of trackedConfigs) {
+      expect(config).not.toMatch(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*14\.0/);
+      expect(config).not.toMatch(/platform\s+:ios,\s*['"]14\.0['"]/);
+      expect(config).not.toMatch(/deployment_target\s*=\s*['"]14\.0['"]/);
+    }
+  });
+});
+
+describe('iOS: targeted device family is restricted to iPhone only', () => {
+  it('sets TARGETED_DEVICE_FAMILY = 1 for both Debug and Release configurations in project.pbxproj', () => {
+    const targetDebug = pbxproj.slice(
+      pbxproj.indexOf('504EC3171FED79650016851F /* Debug */'),
+      pbxproj.indexOf('504EC3181FED79650016851F /* Release */'),
+    );
+    const targetRelease = pbxproj.slice(
+      pbxproj.indexOf('504EC3181FED79650016851F /* Release */'),
+      pbxproj.indexOf('/* End XCBuildConfiguration section */'),
+    );
+
+    for (const [configName, block] of [
+      ['Debug', targetDebug],
+      ['Release', targetRelease],
+    ] as const) {
+      const match = block.match(/TARGETED_DEVICE_FAMILY\s*=\s*([^;]+);/);
+      expect(match, configName + ' configuration must declare TARGETED_DEVICE_FAMILY').not.toBeNull();
+      const value = match![1].replace(/['"]/g, '').trim();
+      expect(value, configName + ' configuration must declare only iPhone family 1').toBe('1');
+      expect(value, configName + ' configuration must not include iPad family 2').not.toContain('2');
+    }
+  });
+
+  it('does not include iPad family 2 in any TARGETED_DEVICE_FAMILY declaration', () => {
+    const declaredFamilies = [...pbxproj.matchAll(/TARGETED_DEVICE_FAMILY\s*=\s*([^;]+);/g)].map((m) =>
+      m[1].replace(/['"]/g, '').trim(),
+    );
+    expect(declaredFamilies.length).toBe(2);
+    for (const family of declaredFamilies) {
+      expect(family).toBe('1');
+      expect(family.split(',')).not.toContain('2');
+    }
+    expect(pbxproj).not.toContain('TARGETED_DEVICE_FAMILY = "1,2";');
+    expect(pbxproj).not.toMatch(/TARGETED_DEVICE_FAMILY\s*=\s*["']?[^;"']*2[^;"']*["']?;/);
   });
 });

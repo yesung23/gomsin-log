@@ -11,7 +11,9 @@
 - 조사 기준: default branch `master`와 GitHub live state, 2026-08-18. §1의 branch
   consolidation checkpoint는 2026-08-20 전수 감사 기준이다
 - 조사 방식: 저장소와 GitHub PR metadata/body 대조
-- remote Supabase catalog, production migration state, 실제 기기 state: **UNVERIFIED**
+- remote Supabase/Auth/Vercel과 최신 iPhone package 상태: 2026-08-28 §0B에서 live 갱신.
+  signed Archive와 App Store Connect IPA export는 PASS지만 실제 화면·인증 사용자 경로·두 계정·
+  TestFlight 업로드/설치는 여전히 **UNVERIFIED**
 
 분류:
 
@@ -63,10 +65,69 @@
   web/PWA and Supabase-backed shared data path; Google Play packaging is not an active
   release gate. iCloud/CloudKit is not implemented and is not the source of truth.
   It remains a possible later, optional encrypted backup layer only.
-- Remote Supabase still has the 057–059 target objects but lacks the 060 projection;
-  061 therefore is also not applied. The linked migration ledger is empty, so bulk
-  `supabase db push` is prohibited. Exact 060 then 061, PostgREST reload, and the
-  authenticated actor matrix remain a separate production gate.
+- Historical note: this 2026-08-25 checkpoint observed 057–059 but not 060/061.
+  It is superseded by the 2026-08-28 live catalog in §0B, which found 060/061/062
+  objects present while the migration ledger relation remains absent. Bulk
+  `supabase db push` is still prohibited.
+
+## 0B. Active UI/profile-post and live release-gate checkpoint — 2026-08-28
+
+- Branch `codex/profile-post-composer`, source HEAD `044d324`: Story는 작성자 이름을 반복하지
+  않고 `HH:mm` 시각, 17px 본문, 원본 비율 사진과 콘텐츠 아래 액션을 사용한다. Home과
+  My 헤더는 root 스크롤 안에서 고정된다. 설정에는 계정별 기기 로컬 `무지 종이 / 줄 종이`
+  선택이 있고 재실행·계정 전환 시 다시 읽는다.
+- Source commit `d40d7ee`: Home 사진 포스트도 작성자 아바타·이름과 캡션 이름을 반복하지
+  않고 `사진 → 글 → 오늘/어제 HH:mm·원본·책갈피` 순서로 표시한다. DB가 `HH:mm:ss`를
+  반환해도 화면은 분까지만 보이며 원본·책갈피의 44px 동작은 유지된다.
+- Source commit `f12e83e`: 설정의 `보기`에 계정별 기기 로컬 `작게(15px) / 기본(17px) /
+  크게(20px)` 게시물·Story 본문 크기 선택이 생겼다. Home, Story, My 게시물 상세와 legacy
+  feed의 사람 작성 본문만 바뀌고 시간·버튼·법적 문구는 바뀌지 않는다. 앱 안 새 알림과
+  성공/오류 toast는 `safe-area + 64px` 아래에 표시되어 상태바·고정 헤더에 가리지 않는다.
+- Source commit `5b15685`: pre-auth entry에서 Home/media 코드를 분리하고 React 실행 전 크림색
+  boot surface를 넣었으며 사진 디코딩을 비동기로 바꿨다. production entry는 657.02KB /
+  197.58KB gzip에서 437.01KB / 133.18KB gzip으로 줄어 500KB 경고가 사라졌다. fresh 전체
+  Vitest 264 files / 3,761 tests, 전체 lint/typecheck, browser 10건(smoke 1 + media/story 9),
+  release build/sync가 PASS했다. Xcode 27 beta signed Archive `0.1.0 (2026082801)`과 10MB
+  App Store Connect IPA export도 PASS했지만 Apple 서버 업로드는 **NOT APPLIED**다.
+- My의 게시물 격자는 모든 Story 사진을 자동 수집하지 않는다. `+` 게시물 작성기에서 사진이
+  완전히 저장된 마지막 업데이트에 `is_profile_post=true`가 붙은 공유 사진 기록만 보인다.
+  일반 Story 사진과 이전 기록은 `사진` 목록에 보존되고, 타일·상세·원본은 같은 record ID를
+  계속 사용한다. 기존 행은 발행 의도를 추측 backfill하지 않는다.
+- Migration 067은 `BOOLEAN NOT NULL DEFAULT false` 한 열만 추가하고 새 RLS/RPC/index를
+  만들지 않는다. 로컬 PostgreSQL 17 fresh chain은 65 migrations / 420 assertions PASS다.
+  일반 기록은 새 필드를 생략하므로 DB-first 전환 중 기존 CRUD의 blast radius를 줄인다.
+- `LANG=en_US.UTF-8 npm run verify`는 260 files / 3,753 tests, 전체 typecheck/lint와 2,166
+  modules build까지 PASS했다. 320/390px Playwright 5/5와 Xcode 27 beta / iPhoneSimulator
+  27.0 unsigned build도 PASS했다. 이 결과는 실물 iPhone·Production·TestFlight 증거가 아니다.
+- 2026-08-28 사용자 action-time 승인 뒤 exact repository SQL을 `064 → 065 → 067 → 063`
+  순서로 Production Supabase에 각각 적용·검증했다. 최종 catalog는 063 함수 1개와 065 RPC
+  3개가 authenticated-only, SECURITY DEFINER, fixed `search_path`, `auth.uid()` bound임을
+  확인했다. `crypto_pairings`의 authenticated 권한은 정확히 `SELECT`만 남고 anon SELECT는
+  false다. `daily_records.is_profile_post`는 boolean NOT NULL DEFAULT false이고 기존 5행은
+  모두 false, NULL 0행이다. migration ledger relation은 여전히 없으므로 `supabase db push`는
+  계속 금지한다.
+- live rollback-only actor matrix는 063의 gomsin 1행, soldier/former/unrelated 0행과 067의
+  owner update·active partner shared read·private/former/unrelated 차단을 확인했다. 065는 정상
+  start 후 rollback, NULL evidence/signature, former/unrelated, noncanonical/unconfirmed
+  activation 거부를 확인했다. PostgREST anon은 새 RPC/열을 schema-missing 없이 `401/42501`로
+  거부했다. 단, live active device와 active couple scope key가 각각 0이어서 실제 두 기기
+  confirm→activate 정상 경로와 실제 JWT HTTP authenticated actor matrix는 **UNVERIFIED**다.
+- `push_delivery_state`와 `send-push`는 여전히 없고 066은 **NOT APPLIED / 명시적 보류**다.
+- Free plan에는 관리형 physical backup/PITR이 없었다. 저장소 밖 AES-256 암호화 public
+  schema+data archive를 만들고 격리 PostgreSQL 17에 exit 0으로 실제 복원했다: 5 records,
+  39 tables, 69 functions, 53 validated public FKs. Auth row와 Storage blob은 이 archive 범위가
+  아니므로 전체 Supabase 재해복구 증거는 아니다.
+- Supabase Auth는 Email/Google ON, Apple OFF이고 query-aware `sb_flow_id` redirect는 live다.
+  Apple Client IDs/Secret은 비어 있다. Vercel Production은 master `d9a2eb0`, feature Preview는
+  `044d324`에서 Ready이며 Production은 변경하지 않았다. 2026-08-28 fresh release build는
+  live Supabase publishable key를 메모리로만 전달해 2,166 modules를 빌드했고, `dist`, iOS
+  `public`, signed `App.app`의 `index.html` SHA-256이 일치했다. Xcode 27 beta/iPhoneOS 27
+  signed build·덮어 설치·launch와 5초 후 process 생존은 PASS다. 실제 화면·로그인·두 계정·
+  Foundation Models는 여전히 UNVERIFIED다.
+- Production DB delta와 rollback-only actor 검증은 완료됐다. 다음 최소 단계는 독립 보안
+  사후 검토를 닫고 PR #90을 merge한 뒤, Apple Services ID/secret/provider와 실제 iPhone
+  Google/Apple PKCE 왕복을 별도 action-time gate로 진행하는 것이다. `supabase db push`, 066,
+  Apple enable, Vercel Production deploy, TestFlight는 아직 실행하지 않았다.
 
 ## 0. Default-branch reality
 

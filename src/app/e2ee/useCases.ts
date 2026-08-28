@@ -2210,7 +2210,8 @@ export async function completeCouplePairing(
   });
 
   const pairing = await deps.repository.getPairing(input.coupleId);
-  if (pairing) await deps.repository.setPairingState(pairing.id, 'CRYPTO_ACTIVE');
+  if (!pairing) fail('E_PAIRING_NOT_FOUND', 'the confirmed pairing disappeared before activation');
+  await deps.repository.markPairingActive({ pairingId: pairing.id, scopeKeyId: created.id });
   await deps.localState.markCoupleAuthorityCryptoActive(input.coupleId);
 
   return {

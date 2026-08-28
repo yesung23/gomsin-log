@@ -5,7 +5,12 @@ import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { searchRecords, excerptAround, type SearchResult } from '@/lib/recordSearch';
 import { localToday } from '@/lib/cycle';
-import { computeServiceProgress, effectiveDischargeDate, nextUpcomingEvent } from '@/lib/milestones';
+import {
+  computeServiceProgress,
+  effectiveDischargeDate,
+  nextUpcomingEvent,
+  resolveEffectiveMilitary,
+} from '@/lib/milestones';
 import {
   computeServiceExp,
   formatExpNumber,
@@ -75,8 +80,22 @@ const STATUS_LABELS: Record<MilitaryStatus, string> = {
   unknown: '미입력',
 };
 
-function formatPercent(value: number): string {
-  return Number(value.toFixed(1)).toString();
+function formatRemainingDuration(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+
+  if (days > 0) {
+    return hours > 0 ? `${days}일 ${hours}시간 남음` : `${days}일 남음`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}시간 ${minutes}분 남음` : `${hours}시간 남음`;
+  }
+  if (minutes > 0) {
+    return `${minutes}분 남음`;
+  }
+  return `${s}초 남음`;
 }
 
 function RankInsignia({ bars, size = 32 }: { bars: number; size?: number }) {
@@ -123,10 +142,12 @@ function InlineServiceInfo({
   military,
   contact,
   onOpenService,
+  title = '내 복무',
 }: {
   military: MilitaryInfo;
-  contact: ContactPreferences;
-  onOpenService: () => void;
+  contact?: ContactPreferences;
+  onOpenService?: () => void;
+  title?: string;
 }) {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [showAllTiers, setShowAllTiers] = useState(false);
@@ -182,13 +203,13 @@ function InlineServiceInfo({
         const isBent = expTierKey === 'ilkkak' || expTierKey === 'sangkkak';
         setFeedback({
           kind: 'promo',
-          text: `LV ${expState?.tier.level} ${expTierLabel} 달성! 복무 게이지가 이어지고 있어요.`,
+          text: `${expState?.levelBadge} ${expTierLabel} 달성! 복무 게이지가 이어지고 있어요.`,
           isBent,
         });
       }
     }
     prevRef.current = { tierKey: expTierKey, ready: true };
-  }, [expTierKey, expTierLabel, expIsBeforeEnlistment, expState?.tier.level]);
+  }, [expTierKey, expTierLabel, expIsBeforeEnlistment, expState?.levelBadge]);
 
   useEffect(() => {
     if (!feedback) return;
@@ -201,9 +222,9 @@ function InlineServiceInfo({
   const daysUntilEnlistment = expState.daysUntilEnlistment;
   const nextGuide = expState.isBeforeEnlistment
     ? `입대까지 ${daysUntilEnlistment}일`
-    : expState.nextTier === null
+    : expState.isDischarged
     ? '복무를 마쳤어요.'
-    : `다음 LV ${expState.nextTier.level} ${expState.nextTier.label}까지 ${formatPercent(expState.remainingPercentToNextTier ?? 0)}% · ${expState.remainingDaysToNextTier ?? 0}일 남음`;
+    : `다음 Lv.${expState.level + 1}까지 ${formatRemainingDuration(expState.toNextLevelSec)}`;
   const currentTier = expState.tier;
 
   return (
@@ -236,7 +257,7 @@ function InlineServiceInfo({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-label font-bold text-card-foreground">내 복무</span>
+              <span className="text-label font-bold text-card-foreground">{title}</span>
             </div>
             <div className="text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
@@ -280,7 +301,7 @@ function InlineServiceInfo({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={expState.totalPercent}
-          aria-valuetext={`복무율 ${formatExpPercent(expState.totalPercent, 4)}, 현재 복무 레벨 LV ${currentTier.level} ${currentTier.label}, ${nextGuide}`}
+          aria-valuetext={`복무율 ${formatExpPercent(expState.totalPercent, 4)}, 현재 복무 레벨 ${expState.levelBadge} ${currentTier.label}, ${nextGuide}`}
           className="h-2 overflow-hidden rounded-full bg-muted"
         >
           <div
@@ -302,15 +323,15 @@ function InlineServiceInfo({
               <span
                 className={cn(
                   'inline-flex items-center gap-1 rounded bg-coral/20 px-1.5 py-0.5 text-caption font-extrabold text-coral-strong tabular-nums',
-                  currentTier.isMax && 'bg-coral-strong text-coral-strong-foreground',
+                  expState.isDischarged && 'bg-coral-strong text-coral-strong-foreground',
                 )}
                 data-tier-key={currentTier.key}
               >
-                {currentTier.isMax ? <Crown size={12} aria-hidden="true" /> : null}
-                <span>LV {currentTier.level}</span>
+                {expState.isDischarged ? <Crown size={12} aria-hidden="true" /> : null}
+                <span>{expState.levelBadge}</span>
               </span>
               {' '}
-              <span className={cn('text-label font-bold text-card-foreground', currentTier.isMax && 'text-coral-strong')}>
+              <span className={cn('text-label font-bold text-card-foreground', expState.isDischarged && 'text-coral-strong')}>
                 {expState.isPreEnlistment ? '입대 대기' : currentTier.label}
               </span>
             </div>
@@ -341,11 +362,11 @@ function InlineServiceInfo({
         <div className="rounded-lg border border-border/60 bg-card/60 p-2.5 space-y-1.5" data-testid="service-exp-readout">
           <div className="flex items-baseline justify-between gap-2">
             <div className="flex items-baseline gap-1 text-label font-bold text-card-foreground tabular-nums">
-              <span className="font-extrabold text-coral-strong">{formatExpNumber(expState.elapsedSec)}</span>
-              <span className="text-caption font-normal text-muted-foreground">/ {formatExpNumber(expState.totalSec)} EXP</span>
+              <span className="font-extrabold text-coral-strong">{formatExpNumber(expState.intoLevelSec)}</span>
+              <span className="text-caption font-normal text-muted-foreground">/ {formatExpNumber(expState.secPerLevel)} EXP</span>
             </div>
             <span className="text-label font-extrabold text-coral-strong tabular-nums">
-              {formatExpPercent(expState.totalPercent, 4)}
+              {formatExpPercent(expState.levelExpPercent, 4)}
             </span>
           </div>
 
@@ -356,17 +377,18 @@ function InlineServiceInfo({
                 aria-label="현재 복무 레벨 경험치 진행률"
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={expState.tierExpPercent}
+                aria-valuenow={expState.levelExpPercent}
+                aria-valuetext={`${expState.levelBadge} ${currentTier.label} 경험치 ${formatExpPercent(expState.levelExpPercent, 4)}`}
                 className="h-1.5 overflow-hidden rounded-full bg-muted"
               >
                 <div
                   className="h-full rounded-full bg-coral-strong transition-[width] duration-300 ease-out"
-                  style={{ width: `${expState.tierExpPercent}%` }}
+                  style={{ width: `${expState.levelExpPercent}%` }}
                 />
               </div>
               <div className="flex justify-between text-caption text-muted-foreground tabular-nums">
-                <span>LV {currentTier.level} 진행 {formatExpPercent(expState.tierExpPercent, 1)}</span>
-                <span>{expState.nextTier ? `다음 LV ${expState.nextTier.level}까지 ${expState.remainingDaysToNextTier ?? 0}일` : '복무 완료'}</span>
+                <span>{expState.levelBadge} 진행 {formatExpPercent(expState.levelExpPercent, 1)}</span>
+                <span>{`다음 Lv.${expState.level + 1}까지 ${formatRemainingDuration(expState.toNextLevelSec)}`}</span>
               </div>
             </div>
           ) : null}
@@ -446,20 +468,22 @@ function InlineServiceInfo({
         </div>
       </div>
 
-      {contact.enabled ? (
+      {contact?.enabled ? (
         <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
           <Clock size={13} aria-hidden="true" />
           평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
         </p>
       ) : null}
 
-      <button
-        type="button"
-        onClick={onOpenService}
-        className="text-caption font-semibold text-coral-strong"
-      >
-        복무 정보 수정
-      </button>
+      {onOpenService ? (
+        <button
+          type="button"
+          onClick={onOpenService}
+          className="min-h-11 text-caption font-semibold text-coral-strong"
+        >
+          복무 정보 수정
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -551,14 +575,25 @@ function GomsinSearchSurface({
   userId,
   coupleId,
   connected,
+  partnerName,
+  partnerMilitary,
 }: {
   authenticated: boolean;
   userId?: string;
   coupleId?: string;
   connected: boolean;
+  partnerName: string;
+  partnerMilitary?: MilitaryInfo;
 }) {
+  const hasPartnerService = connected && computeServiceProgress(partnerMilitary, localToday()) !== null;
   return (
     <div className="space-y-4" data-testid="gomsin-search-surface">
+      {hasPartnerService ? (
+        <InlineServiceInfo
+          military={partnerMilitary!}
+          title={partnerName ? `${partnerName}의 복무` : '상대 복무'}
+        />
+      ) : null}
       {/* 내 배려/컨디션 신호 */}
       <CycleSupportSection
         key={`mine:${userId || 'signed-out'}`}
@@ -704,6 +739,8 @@ function SearchPageBody() {
               userId={state.authenticatedUser?.id}
               coupleId={state.profile.couple?.coupleId}
               connected={Boolean(state.profile.couple?.connected)}
+              partnerName={state.profile.couple?.partnerName || ''}
+              partnerMilitary={resolveEffectiveMilitary(state.profile)}
             />
           )}
         </div>

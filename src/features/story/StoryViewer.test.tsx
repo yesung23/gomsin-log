@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { StoryViewer } from '@/features/story/StoryViewer';
@@ -7,7 +7,9 @@ import type { StoryCard } from '@/features/story/storyProjection';
 import type { DailyRecord } from '@/types';
 
 vi.mock('@/components/media/RecordMediaGallery', () => ({
-  RecordMediaGallery: ({ recordId }: { recordId: string }) => <div data-testid={`media-${recordId}`} />,
+  RecordMediaGallery: ({ recordId, fit }: { recordId: string; fit?: string }) => (
+    <div data-testid={`media-${recordId}`} data-fit={fit} />
+  ),
 }));
 
 const SOURCE = readFileSync('src/features/story/StoryViewer.tsx', 'utf8')
@@ -171,6 +173,30 @@ describe('책갈피', () => {
     view({ mode: 'archive', onToggleBookmark: undefined });
     expect(screen.queryByRole('button', { name: '이따 이야기하기' })).toBeNull();
   });
+
+  it('사진과 글 아래의 스크롤 본문 안에 놓인다', () => {
+    const { container } = view({
+      onToggleBookmark: vi.fn(),
+      cards: [{
+        kind: 'moment',
+        record: record({ attachments: [{ type: 'photo', name: '사진.jpg' }] }),
+      }],
+    });
+    const bookmark = screen.getByRole('button', { name: '이따 이야기하기' });
+    expect(container.querySelector('.overflow-y-auto')?.contains(bookmark)).toBe(true);
+    expect(screen.getByTestId('media-r1')).toHaveAttribute('data-fit', 'contain');
+  });
+
+  it('책갈피를 길게 눌러도 스토리 UI 숨김 제스처가 시작되지 않는다', () => {
+    vi.useFakeTimers();
+    view({ onToggleBookmark: vi.fn() });
+    const bookmark = screen.getByRole('button', { name: '이따 이야기하기' });
+
+    fireEvent.pointerDown(bookmark);
+    act(() => { vi.advanceTimersByTime(500); });
+
+    expect(bookmark.parentElement).not.toHaveClass('opacity-0');
+  });
 });
 
 describe('없는 것', () => {
@@ -291,12 +317,22 @@ describe('접근성', () => {
     await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     expect(live?.textContent).toContain('3개 중 2번째');
   });
+
+  it('작성자 이름을 반복하지 않고 시간을 분까지만 표시한다', () => {
+    view({
+      title: '오늘',
+      cards: [{ kind: 'moment', record: record({ time: '9:07:33' }) }],
+    });
+    expect(screen.getByText('09:07')).toBeTruthy();
+    expect(screen.queryByText(/춘향/)).toBeNull();
+    expect(screen.queryByText('9:07:33')).toBeNull();
+  });
 });
 
 describe('사용자가 쓴 글에만 손글씨', () => {
   it('본문은 손글씨, 시간은 인쇄체', () => {
-    const { container } = view();
-    expect(screen.getByText('오늘 시험 끝났어').className).toContain('hand-text');
-    expect(container.querySelector('.text-caption')?.className).not.toContain('hand-text');
+    view();
+    expect(screen.getByText('오늘 시험 끝났어')).toHaveClass('hand-text', 'record-copy');
+    expect(screen.getByText('09:00')).not.toHaveClass('hand-text', 'record-copy');
   });
 });

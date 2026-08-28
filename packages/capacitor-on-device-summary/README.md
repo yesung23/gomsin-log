@@ -35,10 +35,7 @@ anywhere in the Swift sources.
 
 ## Deployment target
 
-iOS 14.0, unchanged from the app. FoundationModels is reached through
-`#if canImport(FoundationModels)` plus `@available(iOS 26.0, *)`; raising the
-floor would drop iOS 14–17 devices to buy nothing, since those devices fall back
-to the deterministic rules either way.
+Minimum iOS 15.0 matching the app/Xcode-supported floor, while FoundationModels remains canImport/@available(iOS 26) runtime-gated.
 
 ## Verification status
 

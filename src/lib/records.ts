@@ -335,6 +335,7 @@ async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
           .filter((attachment: Attachment | null): attachment is Attachment => !!attachment)
       : [],
     isPrivate: row.is_private,
+    ...(row.is_profile_post === true ? { isProfilePost: true } : {}),
     ...(row.talk_about === true ? { talkAbout: true } : {}),
     emotionFlow: row.emotion_flow || [],
     emotionUpdatedAt: row.emotion_updated_at || null,
@@ -435,8 +436,11 @@ export async function saveRecordToDB(
    * Metadata the server keeps in the clear either way.
    *
    * `record_date` is accepted leakage (ordering), `talk_about` is bilateral
-   * coordination metadata, and `emotion_updated_at` is a timestamp. Architecture
-   * V2.1 §10 lists all three; nothing here adds to that set.
+   * coordination metadata, `is_profile_post` is the author's explicit profile
+   * publication intent, and `emotion_updated_at` is a timestamp. The marker carries
+   * no text or media and remains subject to the row's existing private/shared RLS.
+   * Omit the new column unless the caller explicitly carries the marker: ordinary
+   * records must remain writable while a DB-first rollout is still in progress.
    */
   const metadata = {
     id: record.id,
@@ -444,6 +448,9 @@ export async function saveRecordToDB(
     couple_id: coupleId,
     record_date: record.date,
     is_private: record.isPrivate,
+    ...(record.isProfilePost !== undefined
+      ? { is_profile_post: record.isProfilePost }
+      : {}),
     talk_about: !record.isPrivate && record.talkAbout === true,
     emotion_updated_at: record.emotionUpdatedAt || null,
     updated_at: new Date().toISOString(),
@@ -732,6 +739,52 @@ export async function uploadRecordMedia(
       path,
     },
   };
+}
+
+/**
+ * Read an already-authorised photo so it can become an independent new post.
+ *
+ * A new record cannot reuse the old object's path: Storage RLS and
+ * `isCanonicalRecordMediaPath` bind every object to the record id in its second
+ * path segment. The caller therefore downloads through the current user's
+ * Storage session and sends the returned File through `uploadRecordMedia`, which
+ * re-sanitises the pixels and writes a new canonical destination path.
+ */
+export async function downloadRecordPhotoForReuse(
+  attachment: Attachment,
+  coupleId: string,
+  sourceRecordId: string,
+): Promise<{ file: File } | { error: string }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { error: '서버 설정을 확인하지 못해 기존 사진을 불러올 수 없어요.' };
+  }
+  if (
+    attachment.type !== 'photo'
+    || !attachment.name?.trim()
+    || !isCanonicalRecordMediaPath(attachment.path, coupleId, sourceRecordId)
+  ) {
+    return { error: '기존 사진의 저장 경로를 확인하지 못했어요.' };
+  }
+
+  const { data, error } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .download(attachment.path, {}, { cache: 'no-store' });
+  if (error || !data) {
+    const detail = error
+      ? classifyServerError(error).message
+      : '서버가 사진 데이터를 보내지 않았어요.';
+    return { error: `기존 사진을 불러오지 못했어요. ${detail}` };
+  }
+
+  const file = new File([data], attachment.name, {
+    type: data.type,
+    lastModified: Date.now(),
+  });
+  const classified = classifyMediaFile(file);
+  if ('error' in classified || classified.type !== 'photo') {
+    return { error: '기존 사진을 이 기기에서 안전하게 처리하지 못했어요.' };
+  }
+  return { file };
 }
 
 /** Remove uploaded objects. Throws on error so callers can decide how to handle failure. */

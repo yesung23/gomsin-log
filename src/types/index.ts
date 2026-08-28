@@ -130,6 +130,8 @@ export interface DailyRecord {
   reaction?: ReactionType;
   attachments?: Attachment[];
   isPrivate: boolean; // false = 우리 둘에게 공유, true = 나에게만
+  /** True only when the author explicitly published this record to the profile grid. */
+  isProfilePost?: boolean;
   /** Explicitly saved by the author as a topic for the next call. */
   talkAbout?: boolean;
   emotionFlow?: EmotionFlowItem[];
@@ -444,6 +446,14 @@ export interface MilitaryInfo {
   memo?: string;
 }
 
+/**
+ * Sanitized partner military service timeline projected through migration 063.
+ *
+ * Structurally excludes owner-only private notes (`MilitaryInfo.memo`).
+ */
+export type PartnerServiceInfo = Omit<MilitaryInfo, 'memo'>;
+export type PartnerMilitaryInfo = PartnerServiceInfo;
+
 export const PROFILE_DATE_TYPES = ['together', 'meeting', 'discharge'] as const;
 export type ProfileDateType = (typeof PROFILE_DATE_TYPES)[number];
 
@@ -454,6 +464,8 @@ export interface CoupleInfo {
   partnerName: string;
   /** The active partner-selected username, when the server exposes it. */
   partnerUsername?: string;
+  /** Sanitized active soldier service timeline from migration 063; structurally excludes memo. */
+  partnerMilitary?: PartnerServiceInfo;
   anniversaryDate?: string; // YYYY-MM-DD (사귄 날짜 - null 가능)
   coupleCode: string;
   connected: boolean;

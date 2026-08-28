@@ -570,7 +570,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     surface = [record({ id: 'y', date: '2026-08-21' }), record({ id: 'a' })];
     records = surface;
     await expectNoCall('/story/partner');
-    expect(screen.getByRole('dialog', { name: '춘향의 놓친 하루' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '놓친 하루' })).toBeTruthy();
   });
 
   it('순간이 하나뿐 -- 표지가 없다', async () => {

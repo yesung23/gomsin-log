@@ -182,7 +182,7 @@ function FeedPost({
 
       {body ? (
         // 사람이 쓴 글이므로 손글씨다.
-        <p className="hand-text text-body whitespace-pre-wrap break-keep text-foreground">{body}</p>
+        <p className="hand-text record-copy whitespace-pre-wrap break-keep text-foreground">{body}</p>
       ) : null}
 
       <div className="flex items-center gap-1">

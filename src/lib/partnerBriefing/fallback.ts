@@ -439,9 +439,6 @@ export function generateDeterministicPartnerBriefing(
       sections.push({
         period,
         items,
-        // Transitional deprecated fields for pipeline/test compatibility until Gate A7.3
-        text: formatFallbackPeriodText(periodEvents),
-        sourceRecordIds: periodEvents.map((e) => sourceMap.get(e.ordinal)!),
       });
     }
 

@@ -61,7 +61,6 @@ import {
   formatAttributedBriefingItemText,
   formatDeterministicBriefingItemText,
   formatFallbackOverviewText,
-  formatFallbackPeriodText,
   formatRangeLabelFromDates,
   generateDeterministicPartnerBriefing,
   validateBriefingMappings,
@@ -591,9 +590,6 @@ export async function runPartnerBriefingPipeline(
       sections.push({
         period,
         items,
-        // Transitional deprecated fields for pipeline/test compatibility until Gate A7.3
-        text: formatFallbackPeriodText(periodEvents),
-        sourceRecordIds: periodEvents.map((e) => sourceMap.get(e.ordinal)!),
       });
     }
 

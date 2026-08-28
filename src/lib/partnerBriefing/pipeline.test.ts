@@ -75,7 +75,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from getCapability and falls back deterministically', async () => {
@@ -97,7 +97,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from selectExtracts and falls back deterministically', async () => {
@@ -119,7 +119,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from cancel and falls back deterministically without unhandled rejection', async () => {
@@ -275,7 +275,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       expect(briefing.days[0].date).toBe('2026-08-26');
       expect(briefing.days[0].sections[0].period).toBe('morning');
       expect(briefing.days[0].sections[0].items).toHaveLength(1);
-      expect(briefing.days[0].sections[0].items![0]).toEqual({
+      expect(briefing.days[0].sections[0].items[0]).toEqual({
         text: '“오늘 아침 점호 완료했습니다.”라고 기록했어요.',
         sourceRecordId: 'rec-0',
       });
@@ -318,17 +318,17 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
       expect(briefing.days[0].sections).toHaveLength(2);
       expect(briefing.days[0].sections[0].period).toBe('morning');
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
       expect(briefing.days[0].sections[1].period).toBe('evening');
-      expect(briefing.days[0].sections[1].items![0].sourceRecordId).toBe('rec-1');
+      expect(briefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-1');
 
       expect(briefing.days[1].sections).toHaveLength(1);
       expect(briefing.days[1].sections[0].period).toBe('afternoon');
-      expect(briefing.days[1].sections[0].items![0].sourceRecordId).toBe('rec-2');
+      expect(briefing.days[1].sections[0].items[0].sourceRecordId).toBe('rec-2');
 
       expect(briefing.days[2].sections).toHaveLength(1);
       expect(briefing.days[2].sections[0].period).toBe('night');
-      expect(briefing.days[2].sections[0].items![0].sourceRecordId).toBe('rec-3');
+      expect(briefing.days[2].sections[0].items[0].sourceRecordId).toBe('rec-3');
     });
   });
 
@@ -439,12 +439,12 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
               section.period,
             );
             expect(section.items).toBeDefined();
-            expect(section.items!.length).toBeGreaterThan(0);
+            expect(section.items.length).toBeGreaterThan(0);
           }
         }
 
         // Level 3: Every item count/ID union equals input and items are properly formatted
-        const allResultItems = briefing.days.flatMap((d) => d.sections.flatMap((s) => s.items!));
+        const allResultItems = briefing.days.flatMap((d) => d.sections.flatMap((s) => s.items));
         expect(allResultItems).toHaveLength(count);
         expect(allResultItems.map((item) => item.sourceRecordId)).toEqual(
           sources.map((s) => s.recordId),
@@ -538,7 +538,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('on_device');
-      expect(briefing.days[0].sections[0].items![0].text).toBe(
+      expect(briefing.days[0].sections[0].items[0].text).toBe(
         '“두 번째 문장입니다.”라고 기록했어요.',
       );
     });
@@ -574,7 +574,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      const itemText = briefing.days[0].sections[0].items![0].text;
+      const itemText = briefing.days[0].sections[0].items[0].text;
       expect(itemText).not.toContain('상대는 이별을 원한다');
       expect(itemText).not.toContain('불안과 갈등');
       expect(itemText).toBe('“오늘 훈련 힘들었다.”라고 기록했어요.');
@@ -624,8 +624,8 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
       expect(briefing.generation).toBe('hybrid');
       expect(briefing.days[0].sections).toHaveLength(2);
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
-      expect(briefing.days[0].sections[1].items![0].sourceRecordId).toBe('rec-1');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-1');
       expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1']);
     });
   });
@@ -656,10 +656,10 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       expect(result.generation).toBe('deterministic');
       expect(result.sourceCount).toBe(2);
       expect(result.days[0].sections[0].items).toHaveLength(2);
-      expect(result.days[0].sections[0].items![0].text).toBe(
+      expect(result.days[0].sections[0].items[0].text).toBe(
         '“세그멘터 없는 환경 첫 번째”라고 기록했어요.',
       );
-      expect(result.days[0].sections[0].items![1].text).toBe(
+      expect(result.days[0].sections[0].items[1].text).toBe(
         '“세그멘터 없는 환경 두 번째”라고 기록했어요.',
       );
     });
@@ -705,7 +705,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
       // 1. Assert exactly one item and exact source record ID
       expect(briefing.days[0].sections[0].items).toHaveLength(1);
-      const item = briefing.days[0].sections[0].items![0];
+      const item = briefing.days[0].sections[0].items[0];
       expect(item.sourceRecordId).toBe('rec-long-single');
       expect(briefing.overview.sourceRecordIds).toEqual(['rec-long-single']);
 
@@ -755,10 +755,10 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       // Text record was verified on device; media record does not downgrade generation
       expect(briefing.generation).toBe('on_device');
       expect(briefing.days[0].sections[0].items).toHaveLength(2);
-      expect(briefing.days[0].sections[0].items![0].text).toBe(
+      expect(briefing.days[0].sections[0].items[0].text).toBe(
         '“텍스트 기록입니다.”라고 기록했어요.',
       );
-      expect(briefing.days[0].sections[0].items![1].text).toBe(
+      expect(briefing.days[0].sections[0].items[1].text).toBe(
         '사진 1장, 동영상 1개를 남겼어요.',
       );
 
@@ -891,7 +891,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         });
 
         expect(briefing.generation).toBe('deterministic');
-        expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
         expect(provider.getCallHistory()).toHaveLength(0);
       });
     }
@@ -917,7 +917,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
     });
 
     it('falls back to deterministic on provider timeout and late response cannot overwrite fallback', async () => {
@@ -938,7 +938,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
 
       // Wait past provider delay to ensure late response does not mutate result
       await new Promise((r) => setTimeout(r, 250));
@@ -970,7 +970,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
       // Assert all 15 items are preserved without Top-N drop or sorting alterations
       expect(briefing.sourceCount).toBe(15);
-      const outputItemIds = briefing.days[0].sections[0].items!.map((it) => it.sourceRecordId);
+      const outputItemIds = briefing.days[0].sections[0].items.map((it) => it.sourceRecordId);
       expect(outputItemIds).toEqual(sources.map((s) => s.recordId));
       expect(briefing.overview.sourceRecordIds).toEqual(sources.map((s) => s.recordId));
     });

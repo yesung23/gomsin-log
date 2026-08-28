@@ -489,13 +489,13 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
       expect(multiDayBriefing.days[0].date).toBe('2026-08-26');
       expect(multiDayBriefing.days[0].sections).toHaveLength(2);
       expect(multiDayBriefing.days[0].sections[0].items).toHaveLength(1);
-      expect(multiDayBriefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-001');
+      expect(multiDayBriefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-001');
       expect(multiDayBriefing.days[0].sections[1].items).toHaveLength(1);
-      expect(multiDayBriefing.days[0].sections[1].items![0].sourceRecordId).toBe('rec-002');
+      expect(multiDayBriefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-002');
       expect(multiDayBriefing.days[1].date).toBe('2026-08-27');
       expect(multiDayBriefing.days[1].sections).toHaveLength(1);
       expect(multiDayBriefing.days[1].sections[0].items).toHaveLength(1);
-      expect(multiDayBriefing.days[1].sections[0].items![0].sourceRecordId).toBe('rec-003');
+      expect(multiDayBriefing.days[1].sections[0].items[0].sourceRecordId).toBe('rec-003');
     });
   });
 

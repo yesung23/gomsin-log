@@ -175,19 +175,7 @@ export interface PartnerBriefingSection {
   /**
    * Verified items in this period section, each bound to one exact source record ID.
    */
-  readonly items?: readonly PartnerBriefingItem[];
-  /**
-   * @deprecated UNSAFE-TRANSITION: Legacy free-form section text.
-   * Retained temporarily for downstream Gate A5-A7 typecheck compatibility.
-   * Do not use in new contracts.
-   */
-  readonly text?: string;
-  /**
-   * @deprecated UNSAFE-TRANSITION: Legacy source record IDs list.
-   * Retained temporarily for downstream Gate A5-A7 typecheck compatibility.
-   * Do not use in new contracts.
-   */
-  readonly sourceRecordIds?: readonly string[];
+  readonly items: readonly PartnerBriefingItem[];
 }
 
 /**

@@ -495,7 +495,7 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       const morningSec = briefing.days[0].sections[0];
       expect(morningSec.period).toBe('morning');
       expect(morningSec.items).toHaveLength(1);
-      expect(morningSec.items![0]).toEqual({
+      expect(morningSec.items[0]).toEqual({
         text: '“기상 완료!”라고 기록했어요.',
         sourceRecordId: 'rec-1',
       });
@@ -503,7 +503,7 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       const eveningSec = briefing.days[0].sections[1];
       expect(eveningSec.period).toBe('evening');
       expect(eveningSec.items).toHaveLength(1);
-      expect(eveningSec.items![0]).toEqual({
+      expect(eveningSec.items[0]).toEqual({
         text: '사진 1장을 남겼어요.',
         sourceRecordId: 'rec-2',
       });
@@ -640,7 +640,7 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
         for (const day of briefing.days) {
           for (const sec of day.sections) {
             expect(sec.items).toBeDefined();
-            for (const item of sec.items!) {
+            for (const item of sec.items) {
               allEmittedItems.push(item);
             }
           }
@@ -679,7 +679,7 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       });
 
       expect(briefing.sourceCount).toBe(1);
-      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-safe');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-safe');
     });
   });
 });

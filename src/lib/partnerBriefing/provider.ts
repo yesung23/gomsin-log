@@ -32,14 +32,8 @@ import type {
   BriefingExtractRequestItem,
   UntrustedBriefingChoice,
   UntrustedBriefingExtractPlan,
-  UntrustedBriefingGeneratedSection,
-  UntrustedBriefingProviderOutput,
 } from './contract';
-import {
-  isValidProviderEnvelope,
-  type BriefingModelChunk,
-  type BriefingProviderEnvelope,
-} from './chunk';
+import { isValidProviderEnvelope, type BriefingProviderEnvelope } from './chunk';
 
 /**
  * Availability state of the on-device briefing model/provider.
@@ -118,42 +112,6 @@ export type BriefingExtractResponse = BriefingExtractResult;
 export type BriefingProviderExtractResult = BriefingExtractResult;
 
 /**
- * @deprecated UNSAFE-TRANSITION: Legacy summarize request sent to a briefing provider.
- * Retained temporarily for downstream Gate A6/A7 typecheck compatibility.
- */
-export interface BriefingProviderRequest {
-  readonly requestId: string;
-  readonly chunk: BriefingModelChunk;
-}
-
-/**
- * @deprecated UNSAFE-TRANSITION: Legacy successful response from a briefing provider.
- * Retained temporarily for downstream Gate A6/A7 typecheck compatibility.
- */
-export interface BriefingProviderSuccess {
-  readonly ok: true;
-  readonly requestId: string;
-  readonly output: UntrustedBriefingProviderOutput;
-}
-
-/**
- * @deprecated UNSAFE-TRANSITION: Legacy failure alias.
- */
-export type BriefingProviderFailure = BriefingExtractFailure;
-
-/**
- * @deprecated UNSAFE-TRANSITION: Legacy discriminated union of provider results.
- */
-export type BriefingProviderResult =
-  | BriefingProviderSuccess
-  | BriefingProviderFailure;
-
-/**
- * @deprecated UNSAFE-TRANSITION: Legacy type alias for provider response.
- */
-export type BriefingProviderResponse = BriefingProviderResult;
-
-/**
  * Options passed when checking provider availability.
  */
 export interface BriefingProviderAvailabilityOptions {
@@ -164,13 +122,6 @@ export interface BriefingProviderAvailabilityOptions {
  * Options passed when executing a candidate extract selection request.
  */
 export interface BriefingProviderSelectExtractsOptions {
-  readonly signal?: AbortSignal;
-}
-
-/**
- * @deprecated UNSAFE-TRANSITION: Options passed when executing a legacy summarize request.
- */
-export interface BriefingProviderSummarizeOptions {
   readonly signal?: AbortSignal;
 }
 
@@ -187,15 +138,6 @@ export interface BriefingProvider {
     optionsOrSignal?: BriefingProviderSelectExtractsOptions | AbortSignal,
   ): Promise<BriefingExtractResult>;
   cancel(requestId: string): Promise<void>;
-
-  /**
-   * @deprecated UNSAFE-TRANSITION: Legacy free-form summarize method.
-   * Retained temporarily for downstream Gate A6/A7 typecheck compatibility.
-   */
-  summarize(
-    request: BriefingProviderRequest,
-    optionsOrSignal?: BriefingProviderSummarizeOptions | AbortSignal,
-  ): Promise<BriefingProviderResult>;
 }
 
 /**
@@ -214,10 +156,8 @@ export const DEFAULT_FAKE_PROVIDER_ENVELOPE: BriefingProviderEnvelope = {
 export type FakeBriefingResponseOverride =
   | {
       readonly type: 'success';
-      readonly output?: UntrustedBriefingExtractPlan | UntrustedBriefingProviderOutput;
+      readonly output?: UntrustedBriefingExtractPlan;
       readonly choices?: readonly UntrustedBriefingChoice[];
-      /** @deprecated UNSAFE-TRANSITION */
-      readonly sections?: readonly UntrustedBriefingGeneratedSection[];
     }
   | {
       readonly type: 'failure';
@@ -226,7 +166,7 @@ export type FakeBriefingResponseOverride =
   | {
       readonly type: 'wrong_correlation';
       readonly wrongRequestId: string;
-      readonly output?: UntrustedBriefingExtractPlan | UntrustedBriefingProviderOutput;
+      readonly output?: UntrustedBriefingExtractPlan;
     }
   | {
       readonly type: 'malformed';
@@ -248,17 +188,13 @@ export interface FakeBriefingProviderConfig {
   readonly capability?: BriefingProviderCapability | BriefingProviderEnvelope;
   readonly delayMs?:
     | number
-    | ((request: BriefingExtractRequest | BriefingProviderRequest) => number);
+    | ((request: BriefingExtractRequest) => number);
   readonly defaultExtractGenerator?: (
     request: BriefingExtractRequest,
   ) => UntrustedBriefingExtractPlan | readonly UntrustedBriefingChoice[];
-  /** @deprecated UNSAFE-TRANSITION */
-  readonly defaultGenerator?: (
-    request: BriefingProviderRequest,
-  ) => UntrustedBriefingProviderOutput | readonly UntrustedBriefingGeneratedSection[];
   readonly scenariosByRequestId?: Record<string, FakeBriefingResponseOverride>;
   readonly scenarioSelector?: (
-    request: BriefingExtractRequest | BriefingProviderRequest,
+    request: BriefingExtractRequest,
     callIndex: number,
   ) => FakeBriefingResponseOverride | undefined;
 }
@@ -266,7 +202,6 @@ export interface FakeBriefingProviderConfig {
 function extractSignal(
   optionsOrSignal?:
     | BriefingProviderSelectExtractsOptions
-    | BriefingProviderSummarizeOptions
     | BriefingProviderAvailabilityOptions
     | AbortSignal,
 ): AbortSignal | undefined {
@@ -322,19 +257,16 @@ export class FakeBriefingProvider implements BriefingProvider {
   private capability: BriefingProviderCapability;
   private delayMs?:
     | number
-    | ((request: BriefingExtractRequest | BriefingProviderRequest) => number);
+    | ((request: BriefingExtractRequest) => number);
   private defaultExtractGenerator?: (
     request: BriefingExtractRequest,
   ) => UntrustedBriefingExtractPlan | readonly UntrustedBriefingChoice[];
-  private defaultGenerator?: (
-    request: BriefingProviderRequest,
-  ) => UntrustedBriefingProviderOutput | readonly UntrustedBriefingGeneratedSection[];
   private scenariosByRequestId: Map<string, FakeBriefingResponseOverride>;
   private scenarioSelector?: (
-    request: BriefingExtractRequest | BriefingProviderRequest,
+    request: BriefingExtractRequest,
     callIndex: number,
   ) => FakeBriefingResponseOverride | undefined;
-  private callHistory: (BriefingExtractRequest | BriefingProviderRequest)[] = [];
+  private callHistory: BriefingExtractRequest[] = [];
   private inFlightControllers: Map<string, AbortController> = new Map();
 
   constructor(config: FakeBriefingProviderConfig = {}) {
@@ -353,7 +285,6 @@ export class FakeBriefingProvider implements BriefingProvider {
     this.capability = { envelope };
     this.delayMs = config.delayMs;
     this.defaultExtractGenerator = config.defaultExtractGenerator;
-    this.defaultGenerator = config.defaultGenerator;
     this.scenariosByRequestId = new Map(
       Object.entries(config.scenariosByRequestId ?? {}),
     );
@@ -377,7 +308,7 @@ export class FakeBriefingProvider implements BriefingProvider {
     return this.capability;
   }
 
-  getCallHistory(): readonly (BriefingExtractRequest | BriefingProviderRequest)[] {
+  getCallHistory(): readonly BriefingExtractRequest[] {
     return [...this.callHistory];
   }
 
@@ -585,173 +516,6 @@ export class FakeBriefingProvider implements BriefingProvider {
       ok: true,
       requestId: request.requestId,
       output: this.generateDefaultExtractOutput(request),
-    };
-  }
-
-  /**
-   * @deprecated UNSAFE-TRANSITION: Legacy summarize implementation.
-   * Retained temporarily for downstream Gate A6/A7 typecheck compatibility.
-   */
-  async summarize(
-    request: BriefingProviderRequest,
-    optionsOrSignal?: BriefingProviderSummarizeOptions | AbortSignal,
-  ): Promise<BriefingProviderResult> {
-    const externalSignal = extractSignal(optionsOrSignal);
-    const callIndex = this.callHistory.length;
-    this.callHistory.push(request);
-
-    if (externalSignal?.aborted) {
-      return {
-        ok: false,
-        requestId: request.requestId,
-        code: 'cancelled',
-      };
-    }
-
-    const internalController = new AbortController();
-    this.inFlightControllers.set(request.requestId, internalController);
-
-    const onExternalAbort = () => {
-      internalController.abort();
-    };
-
-    if (externalSignal) {
-      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
-    }
-
-    try {
-      let scenario: FakeBriefingResponseOverride | undefined =
-        this.scenariosByRequestId.get(request.requestId);
-
-      if (!scenario && this.scenarioSelector) {
-        scenario = this.scenarioSelector(request, callIndex);
-      }
-
-      return await this.executeLegacyScenario(
-        request,
-        scenario,
-        internalController.signal,
-      );
-    } finally {
-      this.inFlightControllers.delete(request.requestId);
-      if (externalSignal) {
-        externalSignal.removeEventListener('abort', onExternalAbort);
-      }
-    }
-  }
-
-  private async executeLegacyScenario(
-    request: BriefingProviderRequest,
-    scenario: FakeBriefingResponseOverride | undefined,
-    signal?: AbortSignal,
-  ): Promise<BriefingProviderResult> {
-    let currentScenario = scenario;
-    let delay =
-      typeof this.delayMs === 'function'
-        ? this.delayMs(request)
-        : (this.delayMs ?? 0);
-
-    if (currentScenario?.type === 'delay') {
-      delay = currentScenario.delayMs;
-      currentScenario = currentScenario.then;
-    }
-
-    if (delay > 0) {
-      try {
-        await delayWithAbort(delay, signal);
-      } catch {
-        return {
-          ok: false,
-          requestId: request.requestId,
-          code: 'cancelled',
-        };
-      }
-    }
-
-    if (signal?.aborted) {
-      return {
-        ok: false,
-        requestId: request.requestId,
-        code: 'cancelled',
-      };
-    }
-
-    if (!currentScenario) {
-      return this.generateDefaultLegacySuccess(request);
-    }
-
-    switch (currentScenario.type) {
-      case 'success': {
-        const output =
-          (currentScenario.output as UntrustedBriefingProviderOutput | undefined) ??
-          (currentScenario.sections
-            ? { sections: currentScenario.sections }
-            : this.generateDefaultLegacyOutput(request));
-        return {
-          ok: true,
-          requestId: request.requestId,
-          output,
-        };
-      }
-      case 'failure': {
-        return {
-          ok: false,
-          requestId: request.requestId,
-          code: currentScenario.code,
-        };
-      }
-      case 'wrong_correlation': {
-        const output =
-          (currentScenario.output as UntrustedBriefingProviderOutput | undefined) ??
-          this.generateDefaultLegacyOutput(request);
-        return {
-          ok: true,
-          requestId: currentScenario.wrongRequestId,
-          output,
-        };
-      }
-      case 'malformed': {
-        return {
-          ok: true,
-          requestId: request.requestId,
-          output: currentScenario.rawOutput as unknown as UntrustedBriefingProviderOutput,
-        };
-      }
-      default: {
-        return this.generateDefaultLegacySuccess(request);
-      }
-    }
-  }
-
-  private generateDefaultLegacyOutput(
-    request: BriefingProviderRequest,
-  ): UntrustedBriefingProviderOutput {
-    if (this.defaultGenerator) {
-      const generated = this.defaultGenerator(request);
-      if (Array.isArray(generated)) {
-        return { sections: generated };
-      }
-      return generated as UntrustedBriefingProviderOutput;
-    }
-
-    const text = request.chunk.events.map((e) => e.text).join(' ');
-    return {
-      sections: [
-        {
-          text: text || '요약된 내용입니다.',
-          sourceOrdinals: [...request.chunk.sourceOrdinals],
-        },
-      ],
-    };
-  }
-
-  private generateDefaultLegacySuccess(
-    request: BriefingProviderRequest,
-  ): BriefingProviderSuccess {
-    return {
-      ok: true,
-      requestId: request.requestId,
-      output: this.generateDefaultLegacyOutput(request),
     };
   }
 }

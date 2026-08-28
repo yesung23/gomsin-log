@@ -14,8 +14,6 @@ import type {
   PartnerBriefingSection,
   UntrustedBriefingChoice,
   UntrustedBriefingExtractPlan,
-  UntrustedBriefingGeneratedSection,
-  UntrustedBriefingProviderOutput,
 } from './contract';
 import { PARTNER_BRIEFING_VERSION } from './contract';
 
@@ -496,21 +494,6 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
       expect(multiDayBriefing.days[1].sections).toHaveLength(1);
       expect(multiDayBriefing.days[1].sections[0].items).toHaveLength(1);
       expect(multiDayBriefing.days[1].sections[0].items[0].sourceRecordId).toBe('rec-003');
-    });
-  });
-
-  describe('Legacy types compatibility for transitional downstream typecheck', () => {
-    it('preserves legacy UntrustedBriefingGeneratedSection and UntrustedBriefingProviderOutput for transition', () => {
-      const legacyOutput: UntrustedBriefingProviderOutput = {
-        sections: [
-          {
-            text: '레거시 섹션 텍스트',
-            sourceOrdinals: [0, 1],
-          },
-        ],
-      };
-      expect(legacyOutput.sections[0].text).toBe('레거시 섹션 텍스트');
-      expect(legacyOutput.sections[0].sourceOrdinals).toEqual([0, 1]);
     });
   });
 });

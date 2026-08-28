@@ -119,27 +119,6 @@ export interface UntrustedBriefingExtractPlan {
 }
 
 /**
- * @deprecated UNSAFE-TRANSITION: Legacy raw generated section output.
- * Retained temporarily for downstream Gate A5-A7 typecheck compatibility.
- * Do not use in new contracts. Obsoleted by UntrustedBriefingExtractPlan.
- * Contains only text and synthetic source ordinals.
- * Must undergo provenance verification before being bound to real record IDs.
- */
-export interface UntrustedBriefingGeneratedSection {
-  readonly text: string;
-  readonly sourceOrdinals: readonly number[];
-}
-
-/**
- * @deprecated UNSAFE-TRANSITION: Legacy raw provider output.
- * Retained temporarily for downstream Gate A5-A7 typecheck compatibility.
- * Do not use in new contracts. Obsoleted by UntrustedBriefingExtractPlan.
- */
-export interface UntrustedBriefingProviderOutput {
-  readonly sections: readonly UntrustedBriefingGeneratedSection[];
-}
-
-/**
  * Verified single source briefing item.
  *
  * Invariants:

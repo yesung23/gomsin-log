@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { X, ChevronLeft, ChevronRight, ArrowUpRight, BookmarkPlus, Check } from 'lucide-react';
 import type { StoryCard } from '@/features/story/storyProjection';
+import type { BriefingLocale, PartnerBriefing } from '@/lib/partnerBriefing/contract';
+import { PartnerBriefingCard } from '@/components/widgets/PartnerBriefingCard';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { PaperCard, Bookmark, FoldDivider } from '@/components/paper';
 import { cn } from '@/lib/utils';
@@ -60,7 +62,15 @@ export interface StoryViewerProps {
   bookmarkDisabledReason?: string;
   /** 미디어 복호에 필요한 커플 범위. */
   coupleId?: string;
+  /** 파트너 브리핑. 첫 번째 압축 화면으로 렌더된다. */
+  briefing?: PartnerBriefing | null;
+  /** 브리핑 로케일. 기본값 ko. */
+  briefingLocale?: BriefingLocale;
 }
+
+type ViewerItem =
+  | { kind: 'briefing'; briefing: PartnerBriefing }
+  | { kind: 'card'; card: StoryCard };
 
 function formatStoryTime(time: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(time.trim());
@@ -82,17 +92,29 @@ export function StoryViewer({
   acknowledgeDisabledReason,
   bookmarkDisabledReason,
   coupleId,
+  briefing,
+  briefingLocale,
 }: StoryViewerProps) {
+  const items: ViewerItem[] = useMemo(() => {
+    const list: ViewerItem[] = [];
+    if (briefing) {
+      list.push({ kind: 'briefing', briefing });
+    }
+    for (const card of cards) {
+      list.push({ kind: 'card', card });
+    }
+    return list;
+  }, [briefing, cards]);
+
+  const total = items.length;
+
   const [index, setIndex] = useState(
-    () => Math.min(Math.max(initialIndex, 0), Math.max(cards.length - 1, 0)),
+    () => Math.min(Math.max(initialIndex, 0), Math.max(total - 1, 0)),
   );
   /** 홀드하면 UI를 감추고 사진만 남긴다. 멈출 타이머가 없으므로 용도가 이것뿐이다. */
   const [bare, setBare] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const card = cards[index];
-  const total = cards.length;
 
   const go = useCallback((target: number) => {
     setIndex(Math.min(Math.max(target, 0), total - 1));
@@ -135,14 +157,17 @@ export function StoryViewer({
   useEffect(() => { containerRef.current?.focus(); }, []);
 
   /** 카드가 바뀌면 무엇이 보이는지 말한다. SC 4.1.3. */
+  const item = items[index];
+
   const announcement = useMemo(() => {
-    if (!card) return '';
+    if (!item) return '';
     const position = `${total}개 중 ${index + 1}번째`;
-    if (card.kind === 'cover') return `${position}, 목차`;
-    if (card.kind === 'missing') return `${position}, 볼 수 없는 기록`;
-    if (card.kind === 'closing') return `${position}, 마지막`;
-    return `${position}, ${formatStoryTime(card.record.time)}`;
-  }, [card, index, total]);
+    if (item.kind === 'briefing') return `${position}, 브리핑`;
+    if (item.card.kind === 'cover') return `${position}, 목차`;
+    if (item.card.kind === 'missing') return `${position}, 볼 수 없는 기록`;
+    if (item.card.kind === 'closing') return `${position}, 마지막`;
+    return `${position}, ${formatStoryTime(item.card.record.time)}`;
+  }, [item, index, total]);
 
   const startHold = () => { holdTimer.current = setTimeout(() => setBare(true), 400); };
   const endHold = () => {
@@ -151,9 +176,10 @@ export function StoryViewer({
     setBare(false);
   };
 
-  if (!card) return null;
+  if (!item) return null;
 
-  const marked = card.kind === 'moment' && markedRecordIds?.has(card.record.id) === true;
+  const card = item.kind === 'card' ? item.card : null;
+  const marked = card?.kind === 'moment' && markedRecordIds?.has(card.record.id) === true;
 
   return (
     <div
@@ -174,7 +200,7 @@ export function StoryViewer({
         보이면 사용자가 서두른다.
       */}
       <div className={cn('flex gap-1 px-4 pt-3 transition-opacity', bare && 'opacity-0')}>
-        {cards.map((_, position) => (
+        {items.map((_, position) => (
           <span
             key={position}
             className={cn('h-0.5 flex-1 rounded-full', position <= index ? 'bg-coral-strong' : 'bg-border')}
@@ -185,7 +211,7 @@ export function StoryViewer({
       <div className={cn('flex items-center justify-between gap-2 px-4 py-3 transition-opacity', bare && 'opacity-0')}>
         <div className="min-w-0">
           <p className="text-emphasis text-foreground truncate">
-            {card.kind === 'moment' ? formatStoryTime(card.record.time) : title}
+            {card?.kind === 'moment' ? formatStoryTime(card.record.time) : title}
           </p>
         </div>
         <button
@@ -205,57 +231,66 @@ export function StoryViewer({
         onPointerCancel={endHold}
         onPointerLeave={endHold}
       >
-        {card.kind === 'cover' ? (
-          <CoverCard card={card} onJump={onJumpToRecord} />
-        ) : card.kind === 'missing' ? (
-          <MissingCard />
-        ) : card.kind === 'closing' ? (
-          <ClosingCard
-            card={card}
-            mode={mode}
-            title={title}
-            onAcknowledge={onAcknowledge}
-            disabledReason={acknowledgeDisabledReason}
-            onClose={onClose}
+        {item.kind === 'briefing' ? (
+          <PartnerBriefingCard
+            briefing={item.briefing}
+            locale={briefingLocale}
+            onOpenRecord={onOpenRecord}
+            className="mt-2"
           />
-        ) : (
-          <>
-            <MomentCard record={card.record} coupleId={coupleId} />
-            <div
-              className={cn('mt-3 flex items-center gap-1 border-t border-border pt-2 transition-opacity', bare && 'opacity-0')}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              {mode !== 'archive' && mode !== 'highlight' && onToggleBookmark ? (
-                <Bookmark
-                  marked={marked}
-                  onToggle={() => onToggleBookmark(card.record.id, !marked)}
-                  disabled={Boolean(bookmarkDisabledReason)}
-                  disabledReason={bookmarkDisabledReason}
-                />
-              ) : null}
-              <span className="flex-1" />
-              {onAddToHighlight && !card.record.isPrivate && card.record.attachments?.some((attachment) => attachment.type === 'photo') ? (
+        ) : card ? (
+          card.kind === 'cover' ? (
+            <CoverCard card={card} onJump={onJumpToRecord} />
+          ) : card.kind === 'missing' ? (
+            <MissingCard />
+          ) : card.kind === 'closing' ? (
+            <ClosingCard
+              card={card}
+              mode={mode}
+              title={title}
+              onAcknowledge={onAcknowledge}
+              disabledReason={acknowledgeDisabledReason}
+              onClose={onClose}
+            />
+          ) : (
+            <>
+              <MomentCard record={card.record} coupleId={coupleId} />
+              <div
+                className={cn('mt-3 flex items-center gap-1 border-t border-border pt-2 transition-opacity', bare && 'opacity-0')}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                {mode !== 'archive' && mode !== 'highlight' && onToggleBookmark ? (
+                  <Bookmark
+                    marked={marked}
+                    onToggle={() => onToggleBookmark(card.record.id, !marked)}
+                    disabled={Boolean(bookmarkDisabledReason)}
+                    disabledReason={bookmarkDisabledReason}
+                  />
+                ) : null}
+                <span className="flex-1" />
+                {onAddToHighlight && !card.record.isPrivate && card.record.attachments?.some((attachment) => attachment.type === 'photo') ? (
+                  <button
+                    type="button"
+                    onClick={() => onAddToHighlight(card.record.id)}
+                    aria-label="하이라이트에 추가"
+                    className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
+                  >
+                    <BookmarkPlus size={16} aria-hidden="true" />
+                    하이라이트
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => onAddToHighlight(card.record.id)}
-                  aria-label="하이라이트에 추가"
+                  onClick={() => onOpenRecord(card.record.id)}
                   className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
                 >
-                  <BookmarkPlus size={16} aria-hidden="true" />
-                  하이라이트
+                  원본 보기
+                  <ArrowUpRight size={15} aria-hidden="true" />
                 </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => onOpenRecord(card.record.id)}
-                className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
-              >
-                원본 보기
-                <ArrowUpRight size={15} aria-hidden="true" />
-              </button>
-            </div>
-          </>
-        )}
+              </div>
+            </>
+          )
+        ) : null}
       </div>
 
       {/*

@@ -21,12 +21,17 @@ const adapter = read('src/lib/partnerBriefing/nativeOnDeviceBriefing.ts');
 const podfile = read('ios/App/Podfile');
 
 describe('iOS Partner Briefing native package', () => {
-  it('is one private iOS-only local Capacitor package', () => {
+  it('shares one private local Capacitor package with Android', () => {
     expect(rootPackage.dependencies['@gomsinlog/capacitor-on-device-briefing'])
       .toBe('file:packages/capacitor-on-device-briefing');
     expect(manifest.private).toBe(true);
-    expect(manifest.capacitor).toEqual({ ios: { src: 'ios' } });
-    expect(existsSync(join(root, `${packageDir}/android`))).toBe(false);
+    expect(manifest.capacitor).toEqual({
+      ios: { src: 'ios' },
+      android: { src: 'android' },
+    });
+    expect(existsSync(join(root, `${packageDir}/android`))).toBe(true);
+    expect(manifest.files).toContain('ios/');
+    expect(manifest.files).toContain('android/');
     expect(manifest.files).toContain('GomsinlogCapacitorOnDeviceBriefing.podspec');
   });
 

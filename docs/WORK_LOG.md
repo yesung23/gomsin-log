@@ -8943,3 +8943,105 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — read-only Supabase/Vercel 확인과 로컬 source/test/docs만 수행
+
+### 2026-08-28 — Production release gate live catalog·backup restore·PR browser repair
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Production Supabase/Auth/Vercel/iPhone release gate
+- Step: exact remote catalog와 복구 가능성 확인, 063–067 적용 순서 확정, PR #90 fresh gate 복구
+- Previous Gate: 스토리/프로필 게시물 로컬 closure와 067 적용 전 HOLD
+- This Gate: action-time Production SQL 승인 직전 CONDITIONAL PASS
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, migration/security/release procedures
+- Current-state checked: repository, `docs/CURRENT_STATE.md`, live branch/HEAD/status/origin master, Supabase/Auth/Vercel/PR/iPhone
+- Latest relevant Work Log checked: 2026-08-28 스토리·프로필 게시물 로컬 closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary release operator, independent Sol Architect
+- Model: primary; `gpt-5.6-sol` High read-only security review
+- Role: live read-only catalog, backup/restore, regression repair, release gate integration
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `044d32442cc7c1952f8916875dc32adec7157620`
+- Old HEAD: `044d32442cc7c1952f8916875dc32adec7157620`
+- New HEAD / Reviewed HEAD: browser fixture `e382d34`; docs-only follow-up in git history
+
+#### CHANGED / REVIEWED
+- file: `e2e/postComposer.spec.ts`
+- function/component/migration: pre-existing photo-post fixture
+- what changed/reviewed: explicit profile-post contract에 맞춰 기존 grid post에 `is_profile_post=true` 한 줄 추가
+- why: 제품이 Story 사진 자동수집을 중단했는데 E2E fixture만 이전 암묵 계약을 유지해 full browser job 2건이 실패함
+- file: Supabase live catalog and encrypted off-repository backup
+- function/component/migration: 060–067 state, pairing impact, public restore
+- what changed/reviewed: 060/061/062 present, 063–067 absent, 066 prerequisite absent; 065 영향 0행; public archive를 격리 PostgreSQL 17에 실제 restore
+- why: 빈 ledger에서 bulk replay 없이 exact 최소 Production delta와 복구 경계를 증명
+- file: `docs/CURRENT_STATE.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `supabase/migrations/README.md`, release report
+- function/component/migration: live release truth
+- what changed/reviewed: Supabase/Auth/Vercel/iPhone/PR 상태, rollback과 가장 작은 다음 단계 기록
+- why: 코드 존재·Preview·실물 process·Production 적용을 분리
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged; vulnerable 062 body/privileges를 롤백 경로로 사용하지 않음
+- DB/migration semantics: local SQL files unchanged
+- product semantics: Story/Profile/복무/온디바이스 AI 계약 unchanged
+- Production: SQL/Auth provider/Vercel Production/Apple/TestFlight/App Store unchanged
+
+#### VERIFICATION
+- command: encrypted public custom archive → isolated PostgreSQL 17 pre-data/data/post-data restore
+- PASS / FAIL / UNVERIFIED: PASS, exit 0; daily_records 5, public tables 39, functions 69, validated FKs 53, profiles 5, crypto_pairings 0
+- what it actually proves: public schema+data archive 구조와 데이터가 복원 가능함; Auth rows/Storage blobs 복구는 증명하지 않음
+- command: live read-only 065 impact SQL
+- PASS / FAIL / UNVERIFIED: PASS, total 0 / malformed live 0 / malformed CRYPTO_ACTIVE 0 at `2026-08-28T00:45:25Z`
+- what it actually proves: exact 065의 현재 data-row quarantine blast radius가 0
+- command: live Supabase catalog/auth/edge checks
+- PASS / FAIL / UNVERIFIED: PASS for observed catalog; 064 P0 privilege live, 063/065/067 absent, 066 prerequisite absent, Google/Email ON, Apple OFF, query-aware redirects present
+- what it actually proves: action-time schema/provider starting state; 실제 authenticated actor matrix와 OAuth 왕복은 아님
+- command: `npx playwright test e2e/postComposer.spec.ts --project=chromium-390`
+- PASS / FAIL / UNVERIFIED: PASS, 2/2 after fixture repair
+- what it actually proves: explicit existing post, private/public publication save, 44px plus, ordered media copy on Chromium 390 fixture backend
+- command: Xcode 27 beta latest signed physical build/install/launch
+- PASS / FAIL / UNVERIFIED: PASS for build/install/process; rendered/authenticated flows UNVERIFIED
+- what it actually proves: current source packages and starts on connected iPhone, not that every user path works
+- command: PR #90 CI at `044d324`
+- PASS / FAIL / UNVERIFIED: PARTIAL FAIL, all jobs PASS except browser matrix 108 PASS/2 fixture FAIL; `e382d34` focused repair PASS, fresh full CI pending push
+- what it actually proves: source regression was fixture-contract drift, but full remote closure requires the follow-up run
+- command: independent Sol High migration/live review
+- PASS / FAIL / UNVERIFIED: initial HOLD; restore and 065-impact prerequisites now closed. SQL source 064/065/067 has no new P0/P1 finding
+- what it actually proves: independent security review of the proposed exact set; Production execution/actor proof remains separate
+
+#### REVIEW IMPACT
+- DELTA: one test fixture and live/docs truth only; application, RLS, migration, and crypto source semantics unchanged. Any Production SQL creates a new exact-state review boundary.
+
+#### BLOCKERS
+- code: fresh full PR #90 CI after `e382d34` is not yet terminal
+- environment: physical rendered UI, Foundation Models Korean/offline/performance, authenticated two-account device flow UNVERIFIED
+- external/manual: Production 064/065/067/063 action-time approval and actor matrix; Apple provider credentials/OAuth; Distribution Archive/TestFlight/App Store metadata
+
+#### STOPPED AT
+- exact completed boundary: encrypted public backup actual restore, live migration impact/catalog, Auth/Vercel/iPhone/package evidence, independent security review and focused browser repair complete; before Production mutation
+
+#### REMAINING
+- push `e382d34` plus docs follow-up and obtain fresh full CI
+- action-time approval, exact 064 → 065 → 067 → 063 per-file apply/check, reload, real actor matrix
+- Apple Services ID/secret/provider, real Google/Apple callback, TestFlight two-account and physical AI gate
+
+#### NEXT ACTION
+- next owner: user-confirmed Codex release operator
+- tool/model: primary operator; independent Sol review if Production result deviates from plan
+- 기준 SHA: docs follow-up commit on `codex/profile-post-composer`
+- exact next task: present current state/blast/rollback and request one action-time confirmation for exact 064 → 065 → 067 → 063; keep 066 deferred
+
+#### DO NOT ADVANCE UNTIL
+- fresh PR #90 CI is terminal PASS
+- exact Production SQL action-time confirmation
+- post-apply catalog/reload/real actor matrix PASS before merge/deploy
+
+#### PRODUCTION
+- NOT APPLIED — read-only live queries only; backup ciphertext is local/off-repository

@@ -196,7 +196,7 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `059_partner_managed_username.sql` | 본인 username 직접 수정 차단, 활성 커플의 상대방 username만 갱신하는 SECURITY DEFINER RPC, username 형식·중복·삭제 상태·커플 row lock·`profile` invalidation 검증 | **신규 / 운영 미적용 — fresh chain 001→059에 포함, phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
 | `060_partner_username_projection.sql` | 활성 커플의 상대방 username만 기존 파트너 프로필 projection에 추가로 반환한다. profiles 직접 SELECT/RLS는 넓히지 않고 authenticated 전용 SECURITY DEFINER RPC로 제한한다 | **운영 적용 (2026-08-25) — 사용자가 SQL Editor로 적용, anon probe로 함수 존재·스키마 캐시 반영·anon 거부 확인. fresh chain 001→060 및 phase0 계약 검증 완료** |
 | `061_reject_null_partner_profile_actor.sql` | PostgREST 호출 시 JWT subject가 없는 NULL actor(`auth.uid() IS NULL`)를 명시적으로 fail-closed(`42501`) 거부하도록 060 함수를 보강한다. 060 반환 형태와 활성 커플 프로젝션은 유지하되, 060 적용 후 순서대로 적용한다 | **운영 적용 보고됨 (2026-08-25) — 함수 존재는 확인. 다만 본문이 060판인지 061판인지는 anon 경로로 구분 불가하며 인증 actor matrix는 UNVERIFIED. fresh chain 001→061 및 phase0 계약 검증 완료** |
-| `062_e2ee_pairing_ceremony_rpc.sql` | 두 계정 기록 보호 페어링 RPC (`e2ee_start_couple_pairing`, `e2ee_confirm_couple_pairing`, `e2ee_mark_couple_pairing_active`), crypto_pairings 직접 write 차단 및 canonical member/slot 분리 | **신규 / 운영 미적용 — fresh chain 001→062 및 phase0 actor/RLS 계약 검증. 운영 Supabase는 변경하지 않음** |
+| `062_e2ee_pairing_ceremony_rpc.sql` | 두 계정 기록 보호 페어링 RPC (`e2ee_start_couple_pairing`, `e2ee_confirm_couple_pairing`, `e2ee_mark_couple_pairing_active`), crypto_pairings 직접 write 차단 및 canonical member/slot 분리 | **운영 객체 존재 확인 (2026-08-28) — RPC 3종은 live catalog에 있으나 migration ledger relation이 없어 exact 적용 이력은 재구성하지 않음. fresh chain/actor 계약 검증 완료** |
 | `063_partner_service_projection.sql` | 곰신 대상 활성 군화 복무 타임라인 프로젝션 RPC (`get_partner_service_info`), 군 복무 메모(memo) 비공개 유지, 활성 2인 커플 gomsin→soldier 호출만 허용 | **신규 / 운영 미적용 (LOCAL FILE ONLY) — fresh chain 001→063 및 phase0 검증 완료. 운영 Supabase는 변경하지 않음** |
 | `064_lock_crypto_pairings_table_privileges.sql` | `crypto_pairings` 테이블의 모든 권한을 `PUBLIC, anon, authenticated`로부터 회수 후 `authenticated`에 `SELECT`만 재부여. 062에서 잔존했던 TRUNCATE/TRIGGER/REFERENCES 권한을 완전 차단하여 RLS 우회 위험(P0) 원천 제거 | **신규 / 운영 미적용 (LOCAL FILE ONLY) — fresh chain 001→064 및 phase0 375 assertions 검증 완료. 운영 Supabase는 변경하지 않음** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
@@ -893,7 +893,8 @@ supabase functions deploy delete-account
   이를 기존 `E_TRANSCRIPT_EXPIRED` 오류로 변환합니다.
 - 064의 SELECT-only table privilege와 authenticated-only RPC 권한을 재확인합니다.
 - **원격 적용 상태: NOT APPLIED (LOCAL FILE ONLY).** 운영 적용 전 064를 우선 적용하고,
-  exact 065 SQL·실제 actor matrix·기존 pairing 행 검사를 별도 수행해야 합니다.
+  exact 065 SQL·실제 actor matrix를 별도 수행해야 합니다. 2026-08-28 live 영향 검사는
+  `crypto_pairings=0`, malformed live=0, malformed `CRYPTO_ACTIVE`=0이었습니다.
   빈 migration ledger 때문에 `supabase db push`는 계속 금지합니다.
 
 ## 066 — 푸시 발송 후보 원자적 claim (2026-08-27)
@@ -903,8 +904,10 @@ supabase functions deploy delete-account
   release를 수행하게 합니다.
 - 로컬 fresh-chain actor 계약은 authenticated/anon 직접 실행 거부, 다른 claim의
   완료·release 거부, lease 중복 선정 차단, 만료 후 재선정과 정상 완료를 검증합니다.
-- **원격 적용 상태: UNVERIFIED / NOT APPLIED by this task.** 빈 migration ledger 때문에
-  `supabase db push`는 계속 금지합니다.
+- **원격 적용 상태: NOT APPLIED.** 2026-08-28 live catalog에는 선행
+  `public.push_delivery_state`가 없고 `send-push` Edge Function도 배포되어 있지 않아 exact
+  066은 현재 첫 `ALTER TABLE`에서 실패합니다. 048–055 dependency chain과 sender를 함께
+  준비할 때까지 명시적으로 보류하며, 빈 ledger에서 `supabase db push`는 계속 금지합니다.
 
 ## 067 — 명시적 프로필 게시물 의도 (2026-08-28)
 
@@ -919,7 +922,8 @@ supabase functions deploy delete-account
 - P5 E2EE actor 하네스도 staging 시 marker `false`, complete-media와 intended visibility를
   함께 확정하는 최종 발행, 일반 수정의 marker 보존과 private/former/unrelated/anon 거부를
   실제 PostgreSQL에서 105 assertions로 PASS했습니다.
-- **원격 적용 상태: NOT APPLIED.** 새 클라이언트 배포 전에 exact 067과 PostgREST reload가
-  필요하며, 운영 적용 직전 backup/catalog·blast radius·rollback을 다시 제시하고 사용자
-  확인을 받아야 합니다. 롤백은 먼저 이전 클라이언트로 되돌린 뒤 unused column을 후속
-  forward migration으로 정리하는 순서입니다.
+- **원격 적용 상태: NOT APPLIED.** 2026-08-28 live catalog에서 열 부재와 기존 5행을
+  확인했습니다. 새 클라이언트 배포 전에 exact 067과 PostgREST reload가 필요하며, 운영
+  적용 직전 backup/catalog·blast radius·rollback을 다시 제시하고 사용자 확인을 받아야
+  합니다. 롤백은 먼저 이전 클라이언트로 되돌리고 열은 남긴 뒤 필요하면 후속 forward
+  migration으로 정리합니다.

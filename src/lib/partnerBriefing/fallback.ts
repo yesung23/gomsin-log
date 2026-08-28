@@ -25,7 +25,9 @@
 
 import {
   PARTNER_BRIEFING_VERSION,
+  DEFAULT_BRIEFING_LOCALE,
   type BriefingExtractCandidate,
+  type BriefingLocale,
   type BriefingMediaKind,
   type BriefingModelSafeEvent,
   type BriefingPeriod,
@@ -59,6 +61,7 @@ export interface ValidatedBriefingMappings {
  */
 export function buildBriefingExtractCandidates(
   sourceText: string,
+  contentLocale?: BriefingLocale,
 ): readonly BriefingExtractCandidate[] {
   if (typeof sourceText !== 'string' || sourceText.trim().length === 0) {
     return [];
@@ -71,7 +74,7 @@ export function buildBriefingExtractCandidates(
 
   try {
     if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
-      const segmenter = new Intl.Segmenter('ko', { granularity: 'sentence' });
+      const segmenter = new Intl.Segmenter(contentLocale, { granularity: 'sentence' });
       const rawSegments = Array.from(segmenter.segment(sourceText));
       const extracted: string[] = [];
 
@@ -107,7 +110,13 @@ export function buildBriefingExtractCandidates(
  * All words other than the exact extract are fixed template text.
  * Renders source statements as attributed quotes, not app/AI judgments.
  */
-export function formatAttributedBriefingItemText(extractText: string): string {
+export function formatAttributedBriefingItemText(
+  extractText: string,
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
+): string {
+  if (locale === 'en') {
+    return `They wrote: “${extractText}”`;
+  }
   return `“${extractText}”라고 기록했어요.`;
 }
 
@@ -118,8 +127,15 @@ export function formatAttributedBriefingItemText(extractText: string): string {
  */
 export function formatMediaItemText(
   mediaKinds: readonly (readonly BriefingMediaKind[] | BriefingMediaKind)[],
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
 ): string {
-  const parts = formatMediaCounts(mediaKinds);
+  const parts = formatMediaCounts(mediaKinds, locale);
+  if (locale === 'en') {
+    if (parts.length === 0) {
+      return 'Shared a record.';
+    }
+    return `Shared ${parts.join(', ')}.`;
+  }
   if (parts.length === 0) {
     return '기록을 남겼어요.';
   }
@@ -137,14 +153,15 @@ export function formatMediaItemText(
  */
 export function formatDeterministicBriefingItemText(
   event: Pick<BriefingModelSafeEvent, 'text' | 'mediaKinds'>,
+  presentationLocale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
 ): string {
   if (typeof event.text === 'string' && event.text.trim().length > 0) {
     const candidates = buildBriefingExtractCandidates(event.text);
     if (candidates.length > 0) {
-      return formatAttributedBriefingItemText(candidates[0].text);
+      return formatAttributedBriefingItemText(candidates[0].text, presentationLocale);
     }
   }
-  return formatMediaItemText(event.mediaKinds);
+  return formatMediaItemText(event.mediaKinds, presentationLocale);
 }
 
 /**
@@ -289,6 +306,36 @@ export function validateBriefingMappings(
   return { sourceMap, dayMap };
 }
 
+const ENGLISH_MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+/**
+ * Formats an ISO date string (YYYY-MM-DD) into standard English date label (e.g. "August 26").
+ */
+export function formatDateEnglish(dateStr: string): string {
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const month = Number(parts[1]);
+    const day = Number(parts[2]);
+    if (month >= 1 && month <= 12 && !Number.isNaN(day)) {
+      return `${ENGLISH_MONTHS[month - 1]} ${day}`;
+    }
+  }
+  return dateStr;
+}
+
 /**
  * Formats an ISO date string (YYYY-MM-DD) into standard Korean date label (e.g. "8월 26일").
  */
@@ -301,20 +348,41 @@ export function formatDateKorean(dateStr: string): string {
 }
 
 /**
- * Builds a range label from a list of sorted distinct date strings.
- * Single day: "8월 26일", Multi-day: "8월 26일 ~ 8월 27일".
+ * Formats an ISO date string (YYYY-MM-DD) for the given locale.
  */
-export function formatRangeLabelFromDates(dates: readonly string[]): string {
-  if (dates.length === 0) return '';
-  if (dates.length === 1) return formatDateKorean(dates[0]);
-  return `${formatDateKorean(dates[0])} ~ ${formatDateKorean(dates[dates.length - 1])}`;
+export function formatDateForLocale(
+  dateStr: string,
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
+): string {
+  if (locale === 'en') {
+    return formatDateEnglish(dateStr);
+  }
+  return formatDateKorean(dateStr);
 }
 
 /**
- * Counts media kinds across events and returns formatted Korean tallies.
+ * Builds a range label from a list of sorted distinct date strings.
+ * Single day: "8월 26일" / "August 26"
+ * Multi-day: "8월 26일 ~ 8월 27일" / "August 26 – August 27"
+ */
+export function formatRangeLabelFromDates(
+  dates: readonly string[],
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
+): string {
+  if (dates.length === 0) return '';
+  const first = formatDateForLocale(dates[0], locale);
+  if (dates.length === 1) return first;
+  const last = formatDateForLocale(dates[dates.length - 1], locale);
+  const separator = locale === 'en' ? ' – ' : ' ~ ';
+  return `${first}${separator}${last}`;
+}
+
+/**
+ * Counts media kinds across events and returns formatted tallies for the given locale.
  */
 export function formatMediaCounts(
   mediaKinds: readonly (readonly BriefingMediaKind[] | BriefingMediaKind)[],
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
 ): string[] {
   let photoCount = 0;
   let videoCount = 0;
@@ -335,6 +403,12 @@ export function formatMediaCounts(
   }
 
   const parts: string[] = [];
+  if (locale === 'en') {
+    if (photoCount > 0) parts.push(photoCount === 1 ? '1 photo' : `${photoCount} photos`);
+    if (videoCount > 0) parts.push(videoCount === 1 ? '1 video' : `${videoCount} videos`);
+    if (voiceCount > 0) parts.push(voiceCount === 1 ? '1 voice note' : `${voiceCount} voice notes`);
+    return parts;
+  }
   if (photoCount > 0) parts.push(`사진 ${photoCount}장`);
   if (videoCount > 0) parts.push(`동영상 ${videoCount}개`);
   if (voiceCount > 0) parts.push(`음성 ${voiceCount}개`);
@@ -347,11 +421,19 @@ export function formatMediaCounts(
  */
 export function formatFallbackPeriodText(
   events: readonly BriefingModelSafeEvent[],
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
 ): string {
   if (events.length === 0) {
     return '';
   }
-  const mediaParts = formatMediaCounts(events.map((e) => e.mediaKinds));
+  const mediaParts = formatMediaCounts(events.map((e) => e.mediaKinds), locale);
+  if (locale === 'en') {
+    const recordLabel = events.length === 1 ? '1 record' : `${events.length} records`;
+    if (mediaParts.length > 0) {
+      return `${recordLabel} (${mediaParts.join(', ')})`;
+    }
+    return recordLabel;
+  }
   if (mediaParts.length > 0) {
     return `기록 ${events.length}개 (${mediaParts.join(', ')})`;
   }
@@ -365,11 +447,20 @@ export function formatFallbackPeriodText(
 export function formatFallbackOverviewText(
   events: readonly BriefingModelSafeEvent[],
   dayCount: number,
+  locale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
 ): string {
   if (events.length === 0) {
     return '';
   }
-  const mediaParts = formatMediaCounts(events.map((e) => e.mediaKinds));
+  const mediaParts = formatMediaCounts(events.map((e) => e.mediaKinds), locale);
+  if (locale === 'en') {
+    const recordLabel = events.length === 1 ? '1 record' : `${events.length} records`;
+    const mediaSuffix = mediaParts.length > 0 ? ` (${mediaParts.join(', ')})` : '';
+    if (dayCount > 1) {
+      return `Over ${dayCount} days: ${recordLabel}${mediaSuffix} in total.`;
+    }
+    return `${recordLabel}${mediaSuffix} in total.`;
+  }
   const dayPrefix = dayCount > 1 ? `${dayCount}일 동안 ` : '';
   const mediaSuffix = mediaParts.length > 0 ? ` (${mediaParts.join(', ')})` : '';
   return `${dayPrefix}총 ${events.length}개의 기록${mediaSuffix}이 있습니다.`;
@@ -379,6 +470,7 @@ export interface FallbackBriefingInput {
   readonly events: readonly BriefingModelSafeEvent[];
   readonly sources: readonly BriefingSourceMapping[];
   readonly days: readonly BriefingDayMapping[];
+  readonly locale?: BriefingLocale;
 }
 
 /**
@@ -387,7 +479,7 @@ export interface FallbackBriefingInput {
 export function generateDeterministicPartnerBriefing(
   input: FallbackBriefingInput,
 ): PartnerBriefing {
-  const { events, sources, days } = input;
+  const { events, sources, days, locale = DEFAULT_BRIEFING_LOCALE } = input;
   const { sourceMap, dayMap } = validateBriefingMappings(events, sources, days);
 
   if (events.length === 0) {
@@ -432,7 +524,7 @@ export function generateDeterministicPartnerBriefing(
 
     for (const [period, periodEvents] of dayGroup.entries()) {
       const items: PartnerBriefingItem[] = periodEvents.map((e) => ({
-        text: formatDeterministicBriefingItemText(e),
+        text: formatDeterministicBriefingItemText(e, locale),
         sourceRecordId: sourceMap.get(e.ordinal)!,
       }));
 
@@ -449,7 +541,7 @@ export function generateDeterministicPartnerBriefing(
   }
 
   const overview: PartnerBriefingOverview = {
-    text: formatFallbackOverviewText(events, resultDays.length),
+    text: formatFallbackOverviewText(events, resultDays.length, locale),
     sourceRecordIds: events.map((e) => sourceMap.get(e.ordinal)!),
   };
 
@@ -457,7 +549,7 @@ export function generateDeterministicPartnerBriefing(
     version: PARTNER_BRIEFING_VERSION,
     sourceCount: events.length,
     generation: 'deterministic',
-    rangeLabel: formatRangeLabelFromDates(allDates),
+    rangeLabel: formatRangeLabelFromDates(allDates, locale),
     overview,
     days: resultDays,
   };

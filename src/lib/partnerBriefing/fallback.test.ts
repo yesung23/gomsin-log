@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type {
+  BriefingLocale,
   BriefingModelSafeEvent,
   BriefingSourceMapping,
   PartnerBriefingItem,
 } from './contract';
+import { DEFAULT_BRIEFING_LOCALE } from './contract';
 import type { BriefingDayMapping } from './normalize';
 import {
   buildBriefingExtractCandidates,
   formatAttributedBriefingItemText,
+  formatDateEnglish,
+  formatDateForLocale,
   formatDateKorean,
   formatDeterministicBriefingItemText,
   formatFallbackOverviewText,
@@ -680,6 +684,397 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
 
       expect(briefing.sourceCount).toBe(1);
       expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-safe');
+    });
+  });
+
+  describe('English & Bilingual Locale Deterministic Fallback (Gate A7.1 Locale L2)', () => {
+    describe('buildBriefingExtractCandidates with locale', () => {
+      it('segments English source text with sequential 0..K-1 candidate ordinals and exact substrings', () => {
+        const source = 'Finished morning workout. Heading to breakfast now! The weather is lovely.';
+        const candidates = buildBriefingExtractCandidates(source, 'en');
+
+        expect(candidates.length).toBeGreaterThanOrEqual(2);
+        for (let i = 0; i < candidates.length; i += 1) {
+          expect(candidates[i].candidateOrdinal).toBe(i);
+          expect(candidates[i].text.length).toBeGreaterThan(0);
+          expect(source.includes(candidates[i].text)).toBe(true);
+        }
+      });
+
+      it('falls back to whole exact text without truncation when Intl.Segmenter is undefined for en locale', () => {
+        const originalSegmenter = Intl.Segmenter;
+        try {
+          // @ts-expect-error test simulation
+          Intl.Segmenter = undefined;
+
+          const longText = 'A'.repeat(500) + ' B'.repeat(500);
+          const candidates = buildBriefingExtractCandidates(longText, 'en');
+
+          expect(candidates).toHaveLength(1);
+          expect(candidates[0]).toEqual({
+            candidateOrdinal: 0,
+            text: longText,
+          });
+          expect(candidates[0].text.length).toBe(longText.length);
+        } finally {
+          Intl.Segmenter = originalSegmenter;
+        }
+      });
+
+      it('falls back to whole exact text without truncation when Intl.Segmenter throws for en locale', () => {
+        const originalSegmenter = Intl.Segmenter;
+        try {
+          // @ts-expect-error test simulation
+          Intl.Segmenter = class {
+            constructor() {
+              throw new Error('Segmenter unsupported for locale');
+            }
+          };
+
+          const text = 'First sentence. Second sentence.';
+          const candidates = buildBriefingExtractCandidates(text, 'en');
+
+          expect(candidates).toHaveLength(1);
+          expect(candidates[0]).toEqual({
+            candidateOrdinal: 0,
+            text: text,
+          });
+        } finally {
+          Intl.Segmenter = originalSegmenter;
+        }
+      });
+    });
+
+    describe('formatAttributedBriefingItemText with locale', () => {
+      it('formats English fixed attributed quote with original extract unchanged and no trailing period', () => {
+        expect(formatAttributedBriefingItemText('Morning run finished', 'en')).toBe(
+          'They wrote: “Morning run finished”',
+        );
+      });
+
+      it('preserves Korean source text ending with punctuation verbatim without double punctuation', () => {
+        const koreanSource = '오늘 하루도 힘내자!';
+        const rendered = formatAttributedBriefingItemText(koreanSource, 'en');
+        expect(rendered).toBe('They wrote: “오늘 하루도 힘내자!”');
+        expect(rendered).toContain(koreanSource);
+      });
+
+      it('preserves English source text ending in period without producing double dots', () => {
+        const englishSource = 'Had a great day.';
+        const rendered = formatAttributedBriefingItemText(englishSource, 'en');
+        expect(rendered).toBe('They wrote: “Had a great day.”');
+      });
+
+      it('preserves English source text verbatim inside Korean quote without translation or paraphrase', () => {
+        const englishSource = 'Good morning, my love!';
+        const rendered = formatAttributedBriefingItemText(englishSource, 'ko');
+        expect(rendered).toBe('“Good morning, my love!”라고 기록했어요.');
+        expect(rendered).toContain(englishSource);
+      });
+    });
+
+    describe('formatMediaCounts & formatMediaItemText in English', () => {
+      it('formats photo, video, voice singular and plural counts accurately in English', () => {
+        expect(formatMediaCounts(['photo'], 'en')).toEqual(['1 photo']);
+        expect(formatMediaCounts(['photo', 'photo'], 'en')).toEqual(['2 photos']);
+        expect(formatMediaCounts(['video'], 'en')).toEqual(['1 video']);
+        expect(formatMediaCounts(['video', 'video'], 'en')).toEqual(['2 videos']);
+        expect(formatMediaCounts(['voice'], 'en')).toEqual(['1 voice note']);
+        expect(formatMediaCounts(['voice', 'voice'], 'en')).toEqual(['2 voice notes']);
+        expect(
+          formatMediaCounts([['photo'], ['photo', 'voice'], ['video']], 'en'),
+        ).toEqual(['2 photos', '1 video', '1 voice note']);
+      });
+
+      it('formats media item text for single and combined media in English', () => {
+        expect(formatMediaItemText(['photo'], 'en')).toBe('Shared 1 photo.');
+        expect(formatMediaItemText(['photo', 'photo'], 'en')).toBe('Shared 2 photos.');
+        expect(formatMediaItemText(['video'], 'en')).toBe('Shared 1 video.');
+        expect(formatMediaItemText(['video', 'video'], 'en')).toBe('Shared 2 videos.');
+        expect(formatMediaItemText(['voice'], 'en')).toBe('Shared 1 voice note.');
+        expect(formatMediaItemText(['voice', 'voice'], 'en')).toBe('Shared 2 voice notes.');
+        expect(formatMediaItemText(['photo', 'video'], 'en')).toBe(
+          'Shared 1 photo, 1 video.',
+        );
+        expect(formatMediaItemText(['photo', 'voice'], 'en')).toBe(
+          'Shared 1 photo, 1 voice note.',
+        );
+        expect(formatMediaItemText(['photo', 'video', 'voice'], 'en')).toBe(
+          'Shared 1 photo, 1 video, 1 voice note.',
+        );
+        expect(
+          formatMediaItemText(['photo', 'photo', 'video', 'voice', 'voice'], 'en'),
+        ).toBe('Shared 2 photos, 1 video, 2 voice notes.');
+      });
+
+      it('formats neutral "Shared a record." for empty media and text in English', () => {
+        expect(formatMediaItemText([], 'en')).toBe('Shared a record.');
+        expect(
+          formatDeterministicBriefingItemText({ text: '', mediaKinds: [] }, 'en'),
+        ).toBe('Shared a record.');
+        expect(
+          formatDeterministicBriefingItemText({ text: '   ', mediaKinds: [] }, 'en'),
+        ).toBe('Shared a record.');
+      });
+
+      it('prefers attributed extract when text is present in English', () => {
+        expect(
+          formatDeterministicBriefingItemText(
+            { text: 'Had lunch with friends.', mediaKinds: ['photo'] },
+            'en',
+          ),
+        ).toBe('They wrote: “Had lunch with friends.”');
+      });
+
+      it('falls back to media item text when text is empty but media is present in English', () => {
+        expect(
+          formatDeterministicBriefingItemText(
+            { text: '', mediaKinds: ['photo', 'voice'] },
+            'en',
+          ),
+        ).toBe('Shared 1 photo, 1 voice note.');
+      });
+    });
+
+    describe('Presentation vs Content Locale Separation Regression', () => {
+      it('does not pass presentation locale or falsely default to Korean for sentence segmentation, allowing runtime negotiation while preserving exact extract', () => {
+        const originalSegmenter = Intl.Segmenter;
+        const segmenterCalls: (string | undefined)[] = [];
+        try {
+          // @ts-expect-error test spy
+          Intl.Segmenter = class extends originalSegmenter {
+            constructor(locale?: string, options?: Intl.SegmenterOptions) {
+              super(locale, options);
+              segmenterCalls.push(locale);
+            }
+          };
+
+          const koreanEvent: BriefingModelSafeEvent = {
+            ordinal: 0,
+            dayOrdinal: 0,
+            period: 'morning',
+            text: '오늘 아침 점호 끝났다. 밥 먹으러 가자!',
+            mediaKinds: [],
+          };
+
+          const formatted = formatDeterministicBriefingItemText(koreanEvent, 'en');
+
+          // Segmenter must receive undefined (allowing runtime negotiation), NOT presentation locale 'en' and NOT hard-coded 'ko'
+          expect(segmenterCalls).toContain(undefined);
+          expect(segmenterCalls).not.toContain('ko');
+          expect(segmenterCalls).not.toContain('en');
+          // Exact extract is preserved inside English attributed template
+          expect(formatted).toBe('They wrote: “오늘 아침 점호 끝났다.”');
+        } finally {
+          Intl.Segmenter = originalSegmenter;
+        }
+      });
+    });
+
+    describe('Date and Range Label Formatting in English', () => {
+      it('formats English dates correctly with full month names', () => {
+        expect(formatDateEnglish('2026-08-26')).toBe('August 26');
+        expect(formatDateEnglish('2026-01-05')).toBe('January 5');
+        expect(formatDateEnglish('2026-12-31')).toBe('December 31');
+        expect(formatDateEnglish('invalid-date')).toBe('invalid-date');
+      });
+
+      it('formats date for locale correctly', () => {
+        expect(formatDateForLocale('2026-08-26', 'ko')).toBe('8월 26일');
+        expect(formatDateForLocale('2026-08-26', 'en')).toBe('August 26');
+      });
+
+      it('formats range labels in English for single and multi-day', () => {
+        expect(formatRangeLabelFromDates([], 'en')).toBe('');
+        expect(formatRangeLabelFromDates(['2026-08-26'], 'en')).toBe('August 26');
+        expect(formatRangeLabelFromDates(['2026-08-26', '2026-08-27'], 'en')).toBe(
+          'August 26 – August 27',
+        );
+        expect(
+          formatRangeLabelFromDates(['2026-08-26', '2026-08-27', '2026-08-28'], 'en'),
+        ).toBe('August 26 – August 28');
+      });
+    });
+
+    describe('Fallback Period and Overview Text in English', () => {
+      it('returns empty string for 0 events in English without debt or absence words', () => {
+        expect(formatFallbackPeriodText([], 'en')).toBe('');
+        expect(formatFallbackOverviewText([], 0, 'en')).toBe('');
+      });
+
+      it('formats period text correctly for singular, plural, and media in English', () => {
+        const singleEvent: BriefingModelSafeEvent[] = [
+          { ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'hi', mediaKinds: [] },
+        ];
+        expect(formatFallbackPeriodText(singleEvent, 'en')).toBe('1 record');
+
+        const pluralEvents: BriefingModelSafeEvent[] = [
+          { ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'a', mediaKinds: ['photo'] },
+          { ordinal: 1, dayOrdinal: 0, period: 'morning', text: 'b', mediaKinds: ['voice'] },
+        ];
+        expect(formatFallbackPeriodText(pluralEvents, 'en')).toBe(
+          '2 records (1 photo, 1 voice note)',
+        );
+      });
+
+      it('formats overview text correctly for 1-day single record and multi-records in English', () => {
+        const singleEvent: BriefingModelSafeEvent[] = [
+          { ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'a', mediaKinds: ['photo'] },
+        ];
+        expect(formatFallbackOverviewText(singleEvent, 1, 'en')).toBe(
+          '1 record (1 photo) in total.',
+        );
+
+        const multiEvents: BriefingModelSafeEvent[] = [
+          { ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'a', mediaKinds: ['photo'] },
+          { ordinal: 1, dayOrdinal: 0, period: 'evening', text: 'b', mediaKinds: ['video'] },
+        ];
+        expect(formatFallbackOverviewText(multiEvents, 1, 'en')).toBe(
+          '2 records (1 photo, 1 video) in total.',
+        );
+      });
+
+      it('formats overview text correctly for 2-day and multi-day in English', () => {
+        const events: BriefingModelSafeEvent[] = [
+          { ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'a', mediaKinds: ['photo'] },
+          { ordinal: 1, dayOrdinal: 0, period: 'evening', text: 'b', mediaKinds: [] },
+          { ordinal: 2, dayOrdinal: 1, period: 'afternoon', text: 'c', mediaKinds: ['voice'] },
+        ];
+        expect(formatFallbackOverviewText(events, 2, 'en')).toBe(
+          'Over 2 days: 3 records (1 photo, 1 voice note) in total.',
+        );
+        expect(formatFallbackOverviewText(events, 5, 'en')).toBe(
+          'Over 5 days: 3 records (1 photo, 1 voice note) in total.',
+        );
+      });
+    });
+
+    describe('generateDeterministicPartnerBriefing with English locale', () => {
+      it('generates multi-day, multi-period English briefing with exact sourceRecordIds and items', () => {
+        const events: BriefingModelSafeEvent[] = [
+          {
+            ordinal: 0,
+            dayOrdinal: 0,
+            period: 'morning',
+            text: 'Morning walk',
+            mediaKinds: ['photo'],
+          },
+          {
+            ordinal: 1,
+            dayOrdinal: 0,
+            period: 'evening',
+            text: '',
+            mediaKinds: ['video'],
+          },
+          {
+            ordinal: 2,
+            dayOrdinal: 1,
+            period: 'afternoon',
+            text: 'Afternoon coffee',
+            mediaKinds: ['voice'],
+          },
+        ];
+        const sources: BriefingSourceMapping[] = [
+          { ordinal: 0, recordId: 'rec-en-1' },
+          { ordinal: 1, recordId: 'rec-en-2' },
+          { ordinal: 2, recordId: 'rec-en-3' },
+        ];
+        const days: BriefingDayMapping[] = [
+          { dayOrdinal: 0, date: '2026-08-26' },
+          { dayOrdinal: 1, date: '2026-08-27' },
+        ];
+
+        const briefing = generateDeterministicPartnerBriefing({
+          events,
+          sources,
+          days,
+          locale: 'en',
+        });
+
+        expect(briefing.version).toBe(1);
+        expect(briefing.sourceCount).toBe(3);
+        expect(briefing.generation).toBe('deterministic');
+        expect(briefing.rangeLabel).toBe('August 26 – August 27');
+        expect(briefing.overview.text).toBe(
+          'Over 2 days: 3 records (1 photo, 1 video, 1 voice note) in total.',
+        );
+        expect(briefing.overview.sourceRecordIds).toEqual([
+          'rec-en-1',
+          'rec-en-2',
+          'rec-en-3',
+        ]);
+
+        expect(briefing.days).toHaveLength(2);
+        expect(briefing.days[0].date).toBe('2026-08-26');
+        expect(briefing.days[0].sections).toHaveLength(2);
+        expect(briefing.days[0].sections[0].items).toEqual([
+          {
+            text: 'They wrote: “Morning walk”',
+            sourceRecordId: 'rec-en-1',
+          },
+        ]);
+        expect(briefing.days[0].sections[1].items).toEqual([
+          {
+            text: 'Shared 1 video.',
+            sourceRecordId: 'rec-en-2',
+          },
+        ]);
+        expect(briefing.days[1].date).toBe('2026-08-27');
+        expect(briefing.days[1].sections[0].items).toEqual([
+          {
+            text: 'They wrote: “Afternoon coffee”',
+            sourceRecordId: 'rec-en-3',
+          },
+        ]);
+      });
+    });
+
+    describe('Absence of Military Terminology in English Templates', () => {
+      it('ensures fixed English templates contain zero military-specific terminology', () => {
+        const militaryForbiddenTerms = [
+          'soldier',
+          'military',
+          'barracks',
+          'enlistment',
+          'discharge',
+          'garrison',
+          'cadet',
+          'salute',
+          'roll call',
+          'taps',
+          'battalion',
+          'brigade',
+          'regiment',
+          'corps',
+          'unit',
+          'post',
+          'duty',
+          'service member',
+        ];
+
+        const sampleOutputs = [
+          formatAttributedBriefingItemText('Test note', 'en'),
+          formatMediaItemText([], 'en'),
+          formatMediaItemText(['photo', 'video', 'voice'], 'en'),
+          formatFallbackPeriodText(
+            [{ ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'hi', mediaKinds: ['photo'] }],
+            'en',
+          ),
+          formatFallbackOverviewText(
+            [{ ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'hi', mediaKinds: ['photo'] }],
+            2,
+            'en',
+          ),
+          formatRangeLabelFromDates(['2026-08-26', '2026-08-27'], 'en'),
+        ];
+
+        for (const output of sampleOutputs) {
+          const lower = output.toLowerCase();
+          for (const term of militaryForbiddenTerms) {
+            expect(lower).not.toContain(term);
+          }
+        }
+      });
     });
   });
 });

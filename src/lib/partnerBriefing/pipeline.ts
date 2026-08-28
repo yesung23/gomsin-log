@@ -29,10 +29,12 @@
  */
 
 import {
+  DEFAULT_BRIEFING_LOCALE,
   PARTNER_BRIEFING_VERSION,
   type BriefingExtractCandidate,
   type BriefingExtractRequestItem,
   type BriefingGeneration,
+  type BriefingLocale,
   type BriefingModelSafeEvent,
   type BriefingPeriod,
   type BriefingSourceMapping,
@@ -73,6 +75,7 @@ export interface PartnerBriefingPipelineInput {
   readonly provider: BriefingProvider;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  readonly locale?: BriefingLocale;
 }
 
 const FIXED_PLACEHOLDER_REQUEST_ID = '00000000-0000-0000-0000-000000000000';
@@ -251,6 +254,7 @@ async function executeProviderSelectExtractsWithTimeout(
   request: BriefingExtractRequest,
   timeoutMs: number,
   externalSignal?: AbortSignal,
+  locale?: BriefingLocale,
 ): Promise<BriefingExtractResult> {
   const { requestId } = request;
   if (externalSignal?.aborted) {
@@ -298,7 +302,10 @@ async function executeProviderSelectExtractsWithTimeout(
   try {
     const callPromise = Promise.resolve()
       .then(() =>
-        provider.selectExtracts(request, { signal: internalController.signal }),
+        provider.selectExtracts(request, {
+          signal: internalController.signal,
+          locale,
+        }),
       )
       .catch((): BriefingExtractResult => {
         return {
@@ -397,7 +404,15 @@ export function batchCandidateSegments(
 export async function runPartnerBriefingPipeline(
   input: PartnerBriefingPipelineInput,
 ): Promise<PartnerBriefing> {
-  const { events, sources, days, provider, timeoutMs, signal } = input;
+  const {
+    events,
+    sources,
+    days,
+    provider,
+    timeoutMs,
+    signal,
+    locale = DEFAULT_BRIEFING_LOCALE,
+  } = input;
 
   // 1. Fail-closed input and mapping validation
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
@@ -407,22 +422,22 @@ export async function runPartnerBriefingPipeline(
   const { sourceMap, dayMap } = validateBriefingMappings(events, sources, days);
 
   if (events.length === 0) {
-    return generateDeterministicPartnerBriefing({ events, sources, days });
+    return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
   if (signal?.aborted) {
-    return generateDeterministicPartnerBriefing({ events, sources, days });
+    return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
   // 2. Check provider availability (bounded by timeout/abort, with sync throw isolation)
   const availability = await executeWithBoundedTimeout(
-    (s) => provider.getAvailability({ signal: s }),
+    (s) => provider.getAvailability({ signal: s, locale }),
     timeoutMs,
     signal,
   );
 
   if (availability !== 'ready' || signal?.aborted) {
-    return generateDeterministicPartnerBriefing({ events, sources, days });
+    return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
   // 3. Query and strictly validate provider capability envelope (bounded by timeout/abort)
@@ -434,13 +449,13 @@ export async function runPartnerBriefingPipeline(
 
   const envelope = extractValidEnvelope(rawCapability);
   if (!envelope || signal?.aborted) {
-    return generateDeterministicPartnerBriefing({ events, sources, days });
+    return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
   // 4. Deterministic chunking (Phase A4)
   const chunkResult = chunkPartnerBriefingEvents(events, envelope);
   if (!chunkResult.ok) {
-    return generateDeterministicPartnerBriefing({ events, sources, days });
+    return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
   const { modelChunks } = chunkResult;
@@ -529,6 +544,7 @@ export async function runPartnerBriefingPipeline(
       request,
       timeoutMs,
       signal,
+      locale,
     );
 
     const verifyResult = verifyBriefingExtractResult({
@@ -588,7 +604,7 @@ export async function runPartnerBriefingPipeline(
             .map((s) => {
               const extract =
                 verifiedSegmentExtracts.get(s.segmentId) ?? s.candidates[0].text;
-              return formatAttributedBriefingItemText(extract);
+              return formatAttributedBriefingItemText(extract, locale);
             })
             .join(' ');
           return {
@@ -599,7 +615,7 @@ export async function runPartnerBriefingPipeline(
 
         // Media-only, empty, or fallback without AI segments
         return {
-          text: formatDeterministicBriefingItemText(evt),
+          text: formatDeterministicBriefingItemText(evt, locale),
           sourceRecordId: sourceMap.get(evt.ordinal)!,
         };
       });
@@ -617,7 +633,7 @@ export async function runPartnerBriefingPipeline(
   }
 
   const overview: PartnerBriefingOverview = {
-    text: formatFallbackOverviewText(events, resultDays.length),
+    text: formatFallbackOverviewText(events, resultDays.length, locale),
     sourceRecordIds: events.map((e) => sourceMap.get(e.ordinal)!),
   };
 
@@ -638,7 +654,7 @@ export async function runPartnerBriefingPipeline(
     version: PARTNER_BRIEFING_VERSION,
     sourceCount: events.length,
     generation,
-    rangeLabel: formatRangeLabelFromDates(allDates),
+    rangeLabel: formatRangeLabelFromDates(allDates, locale),
     overview,
     days: resultDays,
   };

@@ -9,6 +9,7 @@ import type { BriefingDayMapping } from './normalize';
 import {
   FakeBriefingProvider,
   type BriefingExtractRequest,
+  type BriefingProvider,
   type BriefingProviderAvailability,
 } from './provider';
 import {
@@ -1106,6 +1107,322 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
       const currentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
       expect(currentDescriptor).toEqual(originalDescriptor);
+    });
+  });
+
+  describe('Locale Support (Gate L3b)', () => {
+    it('maintains exact Korean strings and generation when locale is unspecified (default)', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { text: '기본 로케일 한국어 테스트' }),
+      ];
+      const sources = [{ ordinal: 0, recordId: 'rec-ko-default' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.rangeLabel).toBe('8월 26일');
+      expect(briefing.overview.text).toBe('총 1개의 기록이 있습니다.');
+      expect(briefing.days[0].sections[0].items[0].text).toBe(
+        '“기본 로케일 한국어 테스트”라고 기록했어요.',
+      );
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-ko-default');
+    });
+
+    it('renders English templates in deterministic fallback path when locale is "en"', async () => {
+      const provider = new FakeBriefingProvider({
+        availability: 'locale_unsupported',
+      });
+
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: '훈련 다녀왔어', mediaKinds: ['photo'] }),
+        createEvent(1, 0, { period: 'evening', text: '', mediaKinds: ['photo', 'video'] }),
+        createEvent(2, 1, { period: 'afternoon', text: '', mediaKinds: [] }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-en-0' },
+        { ordinal: 1, recordId: 'rec-en-1' },
+        { ordinal: 2, recordId: 'rec-en-2' },
+      ];
+      const days = [
+        { dayOrdinal: 0, date: '2026-08-26' },
+        { dayOrdinal: 1, date: '2026-08-27' },
+      ];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+        locale: 'en',
+      });
+
+      expect(briefing.generation).toBe('deterministic');
+      expect(briefing.rangeLabel).toBe('August 26 – August 27');
+      expect(briefing.overview.text).toBe('Over 2 days: 3 records (2 photos, 1 video) in total.');
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-en-0', 'rec-en-1', 'rec-en-2']);
+
+      // Day 0 morning: text with photo in deterministic fallback
+      expect(briefing.days[0].sections[0].items[0].text).toBe('They wrote: “훈련 다녀왔어”');
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-en-0');
+
+      // Day 0 evening: media only
+      expect(briefing.days[0].sections[1].items[0].text).toBe('Shared 1 photo, 1 video.');
+      expect(briefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-en-1');
+
+      // Day 1 afternoon: empty record
+      expect(briefing.days[1].sections[0].items[0].text).toBe('Shared a record.');
+      expect(briefing.days[1].sections[0].items[0].sourceRecordId).toBe('rec-en-2');
+    });
+
+    it('renders English attributed wrapper on on-device success when locale is "en"', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { text: 'First sentence. Second sentence.' }),
+      ];
+      const sources = [{ ordinal: 0, recordId: 'rec-en-on-device' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+        locale: 'en',
+      });
+
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.rangeLabel).toBe('August 26');
+      expect(briefing.overview.text).toBe('1 record in total.');
+      expect(briefing.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “First sentence.”',
+      );
+      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-en-on-device');
+    });
+
+    it('passes identical locale to both getAvailability and selectExtracts options (spy provider proof)', async () => {
+      let capturedAvailabilityOptions: unknown = null;
+      let capturedSelectExtractsOptions: unknown = null;
+
+      const provider: BriefingProvider = {
+        async getAvailability(optionsOrSignal) {
+          capturedAvailabilityOptions = optionsOrSignal;
+          return 'ready';
+        },
+        getCapability() {
+          return {
+            envelope: {
+              maxContextUtf8Bytes: 4096,
+              promptOverheadUtf8Bytes: 256,
+              responseReserveUtf8Bytes: 512,
+              maxInputTextGraphemes: 1000,
+            },
+          };
+        },
+        async selectExtracts(req, optionsOrSignal) {
+          capturedSelectExtractsOptions = optionsOrSignal;
+          return {
+            ok: true,
+            requestId: req.requestId,
+            output: {
+              version: 1,
+              choices: req.items.map((it) => ({
+                itemOrdinal: it.itemOrdinal,
+                candidateOrdinal: 0,
+              })),
+            },
+          };
+        },
+        async cancel() {},
+      };
+
+      const events = [createEvent(0, 0, { text: '옵션 전달 확인' })];
+      const sources = [{ ordinal: 0, recordId: 'rec-spy-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+        locale: 'en',
+      });
+
+      expect(briefing.generation).toBe('on_device');
+
+      // Verify availability received locale: 'en'
+      expect(capturedAvailabilityOptions).toBeDefined();
+      expect(capturedAvailabilityOptions).toMatchObject({
+        locale: 'en',
+      });
+      expect((capturedAvailabilityOptions as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
+
+      // Verify selectExtracts received locale: 'en'
+      expect(capturedSelectExtractsOptions).toBeDefined();
+      expect(capturedSelectExtractsOptions).toMatchObject({
+        locale: 'en',
+      });
+      expect((capturedSelectExtractsOptions as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('ensures serialized BriefingExtractRequest contains no locale or forbidden metadata', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { text: '요청 본문 검증 텍스트' }),
+      ];
+      const sources = [{ ordinal: 0, recordId: 'secret-record-id-123' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+        locale: 'en',
+      });
+
+      const calls = provider.getCallHistory();
+      expect(calls).toHaveLength(1);
+      const req = calls[0];
+
+      // Exact request keys allowlist: { requestId, items }
+      expect(Object.keys(req).sort()).toEqual(['items', 'requestId']);
+
+      // Raw JSON check: zero locale or forbidden metadata
+      const rawJson = JSON.stringify(req);
+      expect(rawJson).not.toContain('"locale"');
+      expect(rawJson).not.toContain('"en"');
+      expect(rawJson).not.toContain('"ko"');
+      expect(rawJson).not.toContain('secret-record-id');
+      expect(rawJson).not.toContain('2026-08-26');
+    });
+
+    it('renders English fallback when provider fails or times out with locale="en"', async () => {
+      // 1. Failure scenario
+      const failingProvider = new FakeBriefingProvider({
+        scenarioSelector: () => ({ type: 'failure', code: 'native_error' }),
+      });
+
+      const events = [createEvent(0, 0, { text: '실패 시 영어 폴백' })];
+      const sources = [{ ordinal: 0, recordId: 'rec-fail-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefingFail = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider: failingProvider,
+        timeoutMs: 1000,
+        locale: 'en',
+      });
+
+      expect(briefingFail.generation).toBe('deterministic');
+      expect(briefingFail.rangeLabel).toBe('August 26');
+      expect(briefingFail.overview.text).toBe('1 record in total.');
+      expect(briefingFail.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “실패 시 영어 폴백”',
+      );
+
+      // 2. Timeout scenario
+      const slowProvider = new FakeBriefingProvider({ delayMs: 200 });
+      const briefingTimeout = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider: slowProvider,
+        timeoutMs: 30,
+        locale: 'en',
+      });
+
+      expect(briefingTimeout.generation).toBe('deterministic');
+      expect(briefingTimeout.rangeLabel).toBe('August 26');
+      expect(briefingTimeout.overview.text).toBe('1 record in total.');
+      expect(briefingTimeout.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “실패 시 영어 폴백”',
+      );
+    });
+
+    it('renders English hybrid when one batch fails and sibling batch succeeds with locale="en"', async () => {
+      const smallEnvelope = {
+        maxContextUtf8Bytes: 300,
+        promptOverheadUtf8Bytes: 30,
+        responseReserveUtf8Bytes: 80,
+        maxInputTextGraphemes: 50,
+      };
+
+      let callIndex = 0;
+      const provider = new FakeBriefingProvider({
+        capability: { envelope: smallEnvelope },
+        scenarioSelector: () => {
+          const isSecondCall = callIndex === 1;
+          callIndex++;
+          if (isSecondCall) {
+            return { type: 'failure', code: 'malformed' };
+          }
+          return undefined; // default success
+        },
+      });
+
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: 'First batch record.' }),
+        createEvent(1, 0, { period: 'evening', text: 'Second batch record.' }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-hyb-0' },
+        { ordinal: 1, recordId: 'rec-hyb-1' },
+      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+        locale: 'en',
+      });
+
+      expect(briefing.generation).toBe('hybrid');
+      expect(briefing.rangeLabel).toBe('August 26');
+      expect(briefing.overview.text).toBe('2 records in total.');
+      expect(briefing.days[0].sections[0].items[0].text).toBe('They wrote: “First batch record.”');
+      expect(briefing.days[0].sections[1].items[0].text).toBe('They wrote: “Second batch record.”');
+    });
+
+    it('PartnerBriefingRunner forwards locale and respects cancellation with locale="en"', async () => {
+      const runner = new PartnerBriefingRunner();
+      const provider = new FakeBriefingProvider();
+
+      const events = [createEvent(0, 0, { text: '러너 로케일 테스트' })];
+      const sources = [{ ordinal: 0, recordId: 'rec-runner-en' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runner.run({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+        locale: 'en',
+      });
+
+      expect(briefing).not.toBeNull();
+      expect(briefing?.generation).toBe('on_device');
+      expect(briefing?.rangeLabel).toBe('August 26');
+      expect(briefing?.days[0].sections[0].items[0].text).toBe(
+        'They wrote: “러너 로케일 테스트”',
+      );
     });
   });
 });

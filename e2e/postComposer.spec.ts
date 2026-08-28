@@ -19,6 +19,7 @@ const PARTNER_PHOTO = record({
   user_id: 'user-creator',
   log_text: '기존 사진 기록',
   record_time: '10:00',
+  is_profile_post: true,
   attachments: [{ type: 'photo', name: 'old.jpg', path: 'couple-1/rec-existing-photo/old.jpg' }],
 });
 

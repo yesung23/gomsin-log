@@ -30,6 +30,7 @@
 
 import type {
   BriefingExtractRequestItem,
+  BriefingLocale,
   UntrustedBriefingChoice,
   UntrustedBriefingExtractPlan,
 } from './contract';
@@ -116,6 +117,7 @@ export type BriefingProviderExtractResult = BriefingExtractResult;
  */
 export interface BriefingProviderAvailabilityOptions {
   readonly signal?: AbortSignal;
+  readonly locale?: BriefingLocale;
 }
 
 /**
@@ -123,6 +125,7 @@ export interface BriefingProviderAvailabilityOptions {
  */
 export interface BriefingProviderSelectExtractsOptions {
   readonly signal?: AbortSignal;
+  readonly locale?: BriefingLocale;
 }
 
 /**

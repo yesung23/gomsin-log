@@ -3,6 +3,7 @@ import type {
   BriefingExtractCandidate,
   BriefingExtractRequestItem,
   BriefingGeneration,
+  BriefingLocale,
   UntrustedBriefingChoice,
   UntrustedBriefingExtractPlan,
 } from './contract';
@@ -16,8 +17,10 @@ import {
   type BriefingExtractSuccess,
   type BriefingProvider,
   type BriefingProviderAvailability,
+  type BriefingProviderAvailabilityOptions,
   type BriefingProviderCapability,
   type BriefingProviderErrorCode,
+  type BriefingProviderSelectExtractsOptions,
 } from './provider';
 
 function makeSampleExtractRequest(
@@ -183,7 +186,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
         | 'mediaKinds'
         | 'attachments'
         | 'emotionFlow'
-        | 'isPrivate';
+        | 'isPrivate'
+        | 'locale';
 
       type HasForbiddenInRequest = [ForbiddenKeys & keyof BriefingExtractRequest] extends [never] ? false : true;
       const hasForbiddenInRequest: HasForbiddenInRequest = false;
@@ -209,6 +213,7 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       expect(serialized).not.toContain('mediaKinds');
       expect(serialized).not.toContain('http');
       expect(serialized).not.toContain('2026-');
+      expect(serialized).not.toContain('locale');
     });
   });
 
@@ -688,6 +693,140 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
 
       provider.clearCallHistory();
       expect(provider.getCallHistory()).toHaveLength(0);
+    });
+  });
+
+  describe('Provider Options Contract (Locale L3a)', () => {
+    it('pins BriefingProviderAvailabilityOptions compile-time keys to exactly signal and locale', () => {
+      type OptionsKeys = keyof BriefingProviderAvailabilityOptions;
+      type ExpectedKeys = 'signal' | 'locale';
+
+      type HasAll = [ExpectedKeys] extends [OptionsKeys] ? true : false;
+      type HasNoExtra = [OptionsKeys] extends [ExpectedKeys] ? true : false;
+      type Exact = HasAll extends true ? (HasNoExtra extends true ? true : false) : false;
+
+      const isExact: Exact = true;
+      expect(isExact).toBe(true);
+    });
+
+    it('pins BriefingProviderSelectExtractsOptions compile-time keys to exactly signal and locale', () => {
+      type OptionsKeys = keyof BriefingProviderSelectExtractsOptions;
+      type ExpectedKeys = 'signal' | 'locale';
+
+      type HasAll = [ExpectedKeys] extends [OptionsKeys] ? true : false;
+      type HasNoExtra = [OptionsKeys] extends [ExpectedKeys] ? true : false;
+      type Exact = HasAll extends true ? (HasNoExtra extends true ? true : false) : false;
+
+      const isExact: Exact = true;
+      expect(isExact).toBe(true);
+    });
+
+    it('proves options locale property reuses BriefingLocale type without ad-hoc extensions', () => {
+      type AvailLocale = NonNullable<BriefingProviderAvailabilityOptions['locale']>;
+      type SelectLocale = NonNullable<BriefingProviderSelectExtractsOptions['locale']>;
+
+      type AvailMatches = [BriefingLocale] extends [AvailLocale]
+        ? [AvailLocale] extends [BriefingLocale]
+          ? true
+          : false
+        : false;
+      type SelectMatches = [BriefingLocale] extends [SelectLocale]
+        ? [SelectLocale] extends [BriefingLocale]
+          ? true
+          : false
+        : false;
+
+      const availMatches: AvailMatches = true;
+      const selectMatches: SelectMatches = true;
+      expect(availMatches).toBe(true);
+      expect(selectMatches).toBe(true);
+    });
+
+    it('preserves getAvailability semantics when passed options with locale or direct AbortSignal', async () => {
+      const provider = new FakeBriefingProvider();
+
+      // Default ready without options
+      expect(await provider.getAvailability()).toBe('ready');
+
+      // With locale 'ko' / 'en'
+      expect(await provider.getAvailability({ locale: 'ko' })).toBe('ready');
+      expect(await provider.getAvailability({ locale: 'en' })).toBe('ready');
+
+      // With aborted signal inside options
+      const controller = new AbortController();
+      controller.abort();
+      expect(await provider.getAvailability({ locale: 'ko', signal: controller.signal })).toBe('unsupported');
+      expect(await provider.getAvailability({ locale: 'en', signal: controller.signal })).toBe('unsupported');
+
+      // Direct AbortSignal overload compatibility
+      const activeController = new AbortController();
+      expect(await provider.getAvailability(activeController.signal)).toBe('ready');
+      expect(await provider.getAvailability(controller.signal)).toBe('unsupported');
+    });
+
+    it('preserves selectExtracts success semantics when passed options with locale (ko / en)', async () => {
+      const provider = new FakeBriefingProvider();
+      const request = makeSampleExtractRequest({ requestId: 'req-locale-test' });
+
+      const resKo = await provider.selectExtracts(request, { locale: 'ko' });
+      expect(resKo.ok).toBe(true);
+      if (resKo.ok) {
+        expect(resKo.requestId).toBe('req-locale-test');
+        expect(resKo.output.choices).toEqual([
+          { itemOrdinal: 0, candidateOrdinal: 0 },
+          { itemOrdinal: 1, candidateOrdinal: 0 },
+        ]);
+      }
+
+      const resEn = await provider.selectExtracts(request, { locale: 'en' });
+      expect(resEn.ok).toBe(true);
+      if (resEn.ok) {
+        expect(resEn.requestId).toBe('req-locale-test');
+        expect(resEn.output.choices).toEqual([
+          { itemOrdinal: 0, candidateOrdinal: 0 },
+          { itemOrdinal: 1, candidateOrdinal: 0 },
+        ]);
+      }
+    });
+
+    it('preserves selectExtracts cancellation semantics when passed options with locale and signal', async () => {
+      const provider = new FakeBriefingProvider({ delayMs: 100 });
+      const controller = new AbortController();
+      const req = makeSampleExtractRequest({ requestId: 'req-abort-with-locale' });
+
+      const promise = provider.selectExtracts(req, {
+        locale: 'ko',
+        signal: controller.signal,
+      });
+
+      setTimeout(() => controller.abort(), 20);
+
+      const result = await promise;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe('cancelled');
+        expect(result.requestId).toBe('req-abort-with-locale');
+      }
+    });
+
+    it('preserves direct AbortSignal overload compatibility for selectExtracts', async () => {
+      const provider = new FakeBriefingProvider();
+      const activeController = new AbortController();
+      const req = makeSampleExtractRequest({ requestId: 'req-direct-signal' });
+
+      const result = await provider.selectExtracts(req, activeController.signal);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.requestId).toBe('req-direct-signal');
+      }
+
+      const abortedController = new AbortController();
+      abortedController.abort();
+      const abortedResult = await provider.selectExtracts(req, abortedController.signal);
+      expect(abortedResult.ok).toBe(false);
+      if (!abortedResult.ok) {
+        expect(abortedResult.code).toBe('cancelled');
+      }
     });
   });
 });

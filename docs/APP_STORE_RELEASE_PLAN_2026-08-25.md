@@ -22,11 +22,10 @@
 | 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **PARTIAL** — Apple Developer 팀 활성/Admin, Apple Development 인증서와 `app.gomsinlog` development profile 사용. UIScene 수정 commit `34b6e4c`의 Xcode 27 signed physical-device build·install·launch·relaunch PASS. Distribution/Archive validation, TestFlight 업로드와 two-account smoke는 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
-- PR #90 source HEAD `044d324`: typecheck/lint/Vitest/build, PostgreSQL, Android,
-  iOS simulator, secret scan, boundary, and Vercel Preview jobs PASS. Real-browser
-  matrix는 108 PASS 뒤 새 profile-post marker를 빠뜨린 E2E fixture 2건으로 FAIL했고,
-  `e382d34` 한 줄 보정 후 focused Chromium은 2/2 PASS했다. fresh full CI는 follow-up
-  push 뒤 다시 받아야 한다. 이는 Production 배포나 실물 사용자 경로 증거가 아니다.
+- PR #90 HEAD `2470f24`: 15개 GitHub/Vercel 검사가 모두 PASS했다. 실제 Chromium
+  creator/partner 행렬은 110/110 PASS했고, typecheck/lint/Vitest/build, PostgreSQL,
+  Android, iOS simulator, secret scan, boundary, Capacitor sync와 Vercel Preview도 PASS다.
+  이는 Production 배포나 실물 사용자 경로 증거가 아니다.
 
 ### 2026-08-26/27 게이트 상태 점검 메모
 

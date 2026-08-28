@@ -9009,9 +9009,9 @@ e2e · Postgres 계약 · Deno).
 - command: Xcode 27 beta latest signed physical build/install/launch
 - PASS / FAIL / UNVERIFIED: PASS for build/install/process; rendered/authenticated flows UNVERIFIED
 - what it actually proves: current source packages and starts on connected iPhone, not that every user path works
-- command: PR #90 CI at `044d324`
-- PASS / FAIL / UNVERIFIED: PARTIAL FAIL, all jobs PASS except browser matrix 108 PASS/2 fixture FAIL; `e382d34` focused repair PASS, fresh full CI pending push
-- what it actually proves: source regression was fixture-contract drift, but full remote closure requires the follow-up run
+- command: PR #90 CI at final audited HEAD `2470f24`
+- PASS / FAIL / UNVERIFIED: PASS, 15/15 GitHub/Vercel checks; full Chromium creator/partner matrix 110/110
+- what it actually proves: fixture repair, typecheck/lint/Vitest/build, PostgreSQL, Android, iOS simulator, secret/boundary/sync checks and Preview are green on the integrated branch; Production/physical flows are separate
 - command: independent Sol High migration/live review
 - PASS / FAIL / UNVERIFIED: initial HOLD; restore and 065-impact prerequisites now closed. SQL source 064/065/067 has no new P0/P1 finding
 - what it actually proves: independent security review of the proposed exact set; Production execution/actor proof remains separate
@@ -9020,7 +9020,7 @@ e2e · Postgres 계약 · Deno).
 - DELTA: one test fixture and live/docs truth only; application, RLS, migration, and crypto source semantics unchanged. Any Production SQL creates a new exact-state review boundary.
 
 #### BLOCKERS
-- code: fresh full PR #90 CI after `e382d34` is not yet terminal
+- code: no open CI failure at `2470f24`
 - environment: physical rendered UI, Foundation Models Korean/offline/performance, authenticated two-account device flow UNVERIFIED
 - external/manual: Production 064/065/067/063 action-time approval and actor matrix; Apple provider credentials/OAuth; Distribution Archive/TestFlight/App Store metadata
 
@@ -9028,7 +9028,6 @@ e2e · Postgres 계약 · Deno).
 - exact completed boundary: encrypted public backup actual restore, live migration impact/catalog, Auth/Vercel/iPhone/package evidence, independent security review and focused browser repair complete; before Production mutation
 
 #### REMAINING
-- push `e382d34` plus docs follow-up and obtain fresh full CI
 - action-time approval, exact 064 → 065 → 067 → 063 per-file apply/check, reload, real actor matrix
 - Apple Services ID/secret/provider, real Google/Apple callback, TestFlight two-account and physical AI gate
 
@@ -9039,7 +9038,6 @@ e2e · Postgres 계약 · Deno).
 - exact next task: present current state/blast/rollback and request one action-time confirmation for exact 064 → 065 → 067 → 063; keep 066 deferred
 
 #### DO NOT ADVANCE UNTIL
-- fresh PR #90 CI is terminal PASS
 - exact Production SQL action-time confirmation
 - post-apply catalog/reload/real actor matrix PASS before merge/deploy
 

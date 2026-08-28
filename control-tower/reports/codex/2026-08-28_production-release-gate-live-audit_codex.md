@@ -107,12 +107,13 @@ pairing impact query were completed. Both conditions are now closed.
 
 ## GitHub and browser regression
 
-PR #90 was updated to `044d324`. All checks passed except the real-browser job,
-which reported 108 passes and two failures in `e2e/postComposer.spec.ts` because
-its pre-existing grid photo lacked the new explicit profile-post marker. The
-one-line fixture correction was committed as `e382d34`; focused Playwright
-`chromium-390` then passed 2/2. A fresh full CI run is required after pushing
-this follow-up.
+PR #90 initially ran at `044d324`. All checks passed except the real-browser
+job, which reported 108 passes and two failures in `e2e/postComposer.spec.ts`
+because its pre-existing grid photo lacked the new explicit profile-post marker.
+The one-line fixture correction was committed as `e382d34`; focused Playwright
+`chromium-390` passed 2/2. After the docs follow-up, exact HEAD `2470f24` passed
+all 15 GitHub/Vercel checks; the full Chromium creator/partner matrix passed
+110/110.
 
 ## Production application plan
 

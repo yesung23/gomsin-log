@@ -114,6 +114,88 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-29 · Partner Briefing B1 완료 및 영어·일반 커플 확장 중단점
+
+#### PLAN POSITION
+- Phase: Partner Briefing Gate B
+- Workstream: on-device Partner Briefing UI integration
+- Step: B1 hook 완료, B2 presentation 시작 전 localization/general-couple 방향 점검
+- Previous Gate: Gate A domain core Terra High independent review PASS at `e82236a`
+- This Gate: B1 local PASS; B2 BLOCKED before file creation by architecture/product-scope change
+
+#### DIRECTION CHECK
+- Product source checked: latest user request, `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, Partner Briefing Gate 0 architecture contract
+- Current-state checked: live branch/HEAD/status, `src/types/index.ts`, onboarding/store/sync role call sites, current Partner Briefing domain/hook
+- Latest relevant Work Log checked: 2026-08-28 Partner Briefing Gate 0 amendments and Pre-A1
+- MASTER PLAN version / 기준일: Partner Briefing Gate 0 + Business Memory Roadmap V1 / 2026-08-29
+- Does this task conflict with canonical direction? YES
+- If YES, what conflict: canonical business sequencing keeps military-service couples as the initial validation segment and places general-couple expansion after that validation; the new user request intentionally asks to consider English and general couples now. English also requires locale to enter deterministic fallback/provider contracts, while general-couple support reaches the persisted `gomsin`/`soldier` role model and role-specific UI/RLS semantics.
+
+#### OWNERSHIP
+- Tool: Codex orchestrator + Gemini 3.7 Flash Max Worker + Terra High prior independent reviewer
+- Model: primary orchestrator; `google-antigravity/gemini-3.7-flash` Max for B1
+- Role: architecture gate, bounded implementation, direct verification
+- PR: none
+- Branch: `codex/partner-briefing`
+- Base SHA: `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- Old HEAD: `e82236a8b61bdffb0f5593050b8fedb1b05b0be3`
+- New HEAD / Reviewed HEAD: `c7fd6e69f3113662be4f5d5b31aeb0a0f45b9bf0`
+
+#### CHANGED / REVIEWED
+- file: `src/lib/partnerBriefing/usePartnerBriefing.ts`, `src/lib/partnerBriefing/usePartnerBriefing.test.tsx`
+- function/component/migration: `usePartnerBriefing`
+- what changed/reviewed: added an in-memory, fail-closed hook that consumes only caller-supplied PartnerDay surface, returns a synchronous deterministic baseline, optionally replaces it with a verified on-device result, and rejects stale/unmounted/late timeout completions. Added 24 focused tests including exact provenance, multi-day, excluded private/wrong-partner/unreadable records, provider failure, timeout/late response, and equivalent-rerender de-duplication.
+- why: complete the first UI integration boundary without changing PartnerDay acknowledgement semantics or adding persistence/server inference.
+- file: product/business/type/onboarding/store/sync call paths
+- function/component/migration: localization and couple-role feasibility review
+- what changed/reviewed: confirmed the app has no app-wide locale contract and that `Role = 'gomsin' | 'soldier'` is deeply coupled to onboarding, store, sync, role-specific surfaces, and some database security/projection semantics. B2 Worker was interrupted before creating files so Korean-only UI did not become a new fixed contract.
+- why: the latest request changes product scope and the common provider/result contract, which is an explicit orchestration stop condition.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no general-couple schema was invented or applied
+- product semantics: canonical initial military-couple positioning was not silently replaced
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: `npx vitest run src/lib/partnerBriefing/usePartnerBriefing.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 1 file / 24 tests
+- what it actually proves: B1 hook baseline/provider/failure/timeout/stale/privacy/provenance behavior in Vitest; not rendered Story UI or native-device behavior
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current TypeScript project typechecks with B1
+- command: targeted ESLint for both B1 files; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: scoped lint and whitespace integrity only
+
+#### REVIEW IMPACT
+- DELTA: Gate A Terra review remains evidence for the exact domain core it reviewed; B1 and all future UI/localization/provider work require fresh Gate B/native reviews.
+
+#### BLOCKERS
+- code: Partner Briefing deterministic templates/provider availability do not yet accept a locale; full app copy is hard-coded rather than catalog-driven.
+- environment: none for the architecture decision.
+- external/manual: general-couple support requires an intentional product-sequencing amendment and likely an additive DB migration/backfill/rollback plan for relationship context; production mutation remains forbidden here.
+
+#### STOPPED AT
+- exact completed boundary: B1 committed at `c7fd6e6`; B2 Worker stopped before creating `PartnerBriefingCard` files.
+
+#### REMAINING
+- not completed: bilingual contract/fallback/provider/UI, app-wide locale preference and copy extraction, general-couple relationship context/onboarding/symmetric surfaces, B2-F, native providers, real-device verification, final review, merge.
+
+#### NEXT ACTION
+- next owner: architecture gate owner
+- tool/model: primary orchestrator; independent security/data review after any approved DB contract
+- 기준 SHA: `c7fd6e69f3113662be4f5d5b31aeb0a0f45b9bf0`
+- exact next task: approve one amended architecture separating (1) locale support, which can start without DB changes, from (2) additive general-couple mode, which needs explicit schema/RLS/backfill/rollback design before implementation.
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: Partner Briefing locale propagation and general-couple data/role compatibility are explicitly decided; no B2 Korean-only UI and no production migration before that gate.
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-27 · Xcode 27 Apple Development 서명·실물 iPhone 설치 gate
 
 #### PLAN POSITION

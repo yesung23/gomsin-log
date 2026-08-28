@@ -1,51 +1,51 @@
 import { describe, expect, it } from 'vitest';
 import type {
+  BriefingExtractCandidate,
+  BriefingExtractRequestItem,
   BriefingGeneration,
-  UntrustedBriefingGeneratedSection,
-  UntrustedBriefingProviderOutput,
+  UntrustedBriefingChoice,
+  UntrustedBriefingExtractPlan,
 } from './contract';
-import type { BriefingModelChunk, BriefingProviderEnvelope } from './chunk';
+import type { BriefingProviderEnvelope } from './chunk';
 import {
   DEFAULT_FAKE_PROVIDER_ENVELOPE,
   FakeBriefingProvider,
+  type BriefingExtractFailure,
+  type BriefingExtractRequest,
+  type BriefingExtractResult,
+  type BriefingExtractSuccess,
   type BriefingProvider,
   type BriefingProviderAvailability,
   type BriefingProviderCapability,
   type BriefingProviderErrorCode,
-  type BriefingProviderFailure,
-  type BriefingProviderRequest,
-  type BriefingProviderResult,
-  type BriefingProviderSuccess,
 } from './provider';
 
-function makeSampleChunk(
-  overrides: Partial<BriefingModelChunk> = {},
-): BriefingModelChunk {
+function makeSampleExtractRequest(
+  overrides: Partial<BriefingExtractRequest> = {},
+): BriefingExtractRequest {
   return {
-    dayOrdinal: 0,
-    period: 'morning',
-    sourceOrdinals: [0, 1],
-    events: [
+    requestId: 'req-001',
+    items: [
       {
-        ordinal: 0,
-        dayOrdinal: 0,
-        period: 'morning',
-        text: '오전 훈련 시작',
-        mediaKinds: ['photo'],
+        itemOrdinal: 0,
+        candidates: [
+          { candidateOrdinal: 0, text: '오전 훈련 시작' },
+          { candidateOrdinal: 1, text: '훈련 시작' },
+        ],
       },
       {
-        ordinal: 1,
-        dayOrdinal: 0,
-        period: 'morning',
-        text: '체력단련 완료',
-        mediaKinds: [],
+        itemOrdinal: 1,
+        candidates: [
+          { candidateOrdinal: 0, text: '체력단련 완료' },
+          { candidateOrdinal: 1, text: '오후 체력단련 완료' },
+        ],
       },
     ],
     ...overrides,
   };
 }
 
-describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
+describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () => {
   describe('Availability & Error Code Unions', () => {
     it('pins BriefingProviderAvailability to the exact 5 states', () => {
       type ExpectedAvailability =
@@ -108,8 +108,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
       expect(codes).toHaveLength(6);
     });
 
-    it('proves BriefingProviderFailure does not carry arbitrary message strings', () => {
-      type FailureKeys = keyof BriefingProviderFailure;
+    it('proves BriefingExtractFailure does not carry arbitrary message strings', () => {
+      type FailureKeys = keyof BriefingExtractFailure;
       type ExpectedKeys = 'ok' | 'requestId' | 'code';
 
       type HasAll = [ExpectedKeys] extends [FailureKeys] ? true : false;
@@ -119,16 +119,16 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
       const isExact: Exact = true;
       expect(isExact).toBe(true);
 
-      type HasMessage = 'message' extends keyof BriefingProviderFailure ? true : false;
+      type HasMessage = 'message' extends keyof BriefingExtractFailure ? true : false;
       const hasMessage: HasMessage = false;
       expect(hasMessage).toBe(false);
     });
   });
 
-  describe('Wire Key Allowlist & Leakage Prevention', () => {
-    it('pins BriefingProviderRequest compile-time keys to exactly requestId and chunk', () => {
-      type RequestKeys = keyof BriefingProviderRequest;
-      type ExpectedKeys = 'requestId' | 'chunk';
+  describe('Closed-Extract Wire Key Allowlist & Leakage Prevention', () => {
+    it('pins BriefingExtractRequest compile-time keys to exactly requestId and items', () => {
+      type RequestKeys = keyof BriefingExtractRequest;
+      type ExpectedKeys = 'requestId' | 'items';
 
       type HasAll = [ExpectedKeys] extends [RequestKeys] ? true : false;
       type HasNoExtra = [RequestKeys] extends [ExpectedKeys] ? true : false;
@@ -138,10 +138,35 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
       expect(isExact).toBe(true);
     });
 
-    it('proves forbidden identity, timestamp, path, URL, and key fields are absent from request', () => {
+    it('pins BriefingExtractRequestItem compile-time keys to exactly itemOrdinal and candidates', () => {
+      type ItemKeys = keyof BriefingExtractRequestItem;
+      type ExpectedKeys = 'itemOrdinal' | 'candidates';
+
+      type HasAll = [ExpectedKeys] extends [ItemKeys] ? true : false;
+      type HasNoExtra = [ItemKeys] extends [ExpectedKeys] ? true : false;
+      type Exact = HasAll extends true ? (HasNoExtra extends true ? true : false) : false;
+
+      const isExact: Exact = true;
+      expect(isExact).toBe(true);
+    });
+
+    it('pins BriefingExtractCandidate compile-time keys to exactly candidateOrdinal and text', () => {
+      type CandidateKeys = keyof BriefingExtractCandidate;
+      type ExpectedKeys = 'candidateOrdinal' | 'text';
+
+      type HasAll = [ExpectedKeys] extends [CandidateKeys] ? true : false;
+      type HasNoExtra = [CandidateKeys] extends [ExpectedKeys] ? true : false;
+      type Exact = HasAll extends true ? (HasNoExtra extends true ? true : false) : false;
+
+      const isExact: Exact = true;
+      expect(isExact).toBe(true);
+    });
+
+    it('proves forbidden identity, timestamp, path, URL, media, and key fields are absent from request', () => {
       type ForbiddenKeys =
         | 'id'
         | 'recordId'
+        | 'sourceRecordId'
         | 'userId'
         | 'coupleId'
         | 'partnerUserId'
@@ -155,27 +180,124 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
         | 'key'
         | 'secret'
         | 'keyMaterial'
+        | 'mediaKinds'
         | 'attachments'
         | 'emotionFlow'
         | 'isPrivate';
 
-      type HasForbidden = [ForbiddenKeys & keyof BriefingProviderRequest] extends [never] ? false : true;
-      const hasForbidden: HasForbidden = false;
-      expect(hasForbidden).toBe(false);
+      type HasForbiddenInRequest = [ForbiddenKeys & keyof BriefingExtractRequest] extends [never] ? false : true;
+      const hasForbiddenInRequest: HasForbiddenInRequest = false;
+      expect(hasForbiddenInRequest).toBe(false);
+
+      type HasForbiddenInItem = [ForbiddenKeys & keyof BriefingExtractRequestItem] extends [never] ? false : true;
+      const hasForbiddenInItem: HasForbiddenInItem = false;
+      expect(hasForbiddenInItem).toBe(false);
+
+      type HasForbiddenInCandidate = [ForbiddenKeys & keyof BriefingExtractCandidate] extends [never] ? false : true;
+      const hasForbiddenInCandidate: HasForbiddenInCandidate = false;
+      expect(hasForbiddenInCandidate).toBe(false);
     });
 
-    it('serializes request with zero forbidden metadata or leaked keys', () => {
-      const sampleRequest: BriefingProviderRequest = {
-        requestId: 'req-001',
-        chunk: makeSampleChunk(),
-      };
-
+    it('serializes extract request with zero forbidden metadata or leaked keys', () => {
+      const sampleRequest = makeSampleExtractRequest();
       const serialized = JSON.stringify(sampleRequest);
+
       expect(serialized).not.toContain('recordId');
+      expect(serialized).not.toContain('sourceRecordId');
       expect(serialized).not.toContain('userId');
       expect(serialized).not.toContain('coupleId');
+      expect(serialized).not.toContain('mediaKinds');
       expect(serialized).not.toContain('http');
       expect(serialized).not.toContain('2026-');
+    });
+  });
+
+  describe('Success Output Wire Keys & Text Exclusion Invariants', () => {
+    it('pins BriefingExtractSuccess compile-time keys to exactly ok, requestId, and output', () => {
+      type SuccessKeys = keyof BriefingExtractSuccess;
+      type ExpectedKeys = 'ok' | 'requestId' | 'output';
+
+      type HasAll = [ExpectedKeys] extends [SuccessKeys] ? true : false;
+      type HasNoExtra = [SuccessKeys] extends [ExpectedKeys] ? true : false;
+      type Exact = HasAll extends true ? (HasNoExtra extends true ? true : false) : false;
+
+      const isExact: Exact = true;
+      expect(isExact).toBe(true);
+    });
+
+    it('pins UntrustedBriefingExtractPlan compile-time keys to exactly version and choices', () => {
+      type PlanKeys = keyof UntrustedBriefingExtractPlan;
+      type ExpectedKeys = 'version' | 'choices';
+
+      type HasAll = [ExpectedKeys] extends [PlanKeys] ? true : false;
+      type HasNoExtra = [PlanKeys] extends [ExpectedKeys] ? true : false;
+      type Exact = HasAll extends true ? (HasNoExtra extends true ? true : false) : false;
+
+      const isExact: Exact = true;
+      expect(isExact).toBe(true);
+    });
+
+    it('pins UntrustedBriefingChoice compile-time keys to exactly itemOrdinal and candidateOrdinal', () => {
+      type ChoiceKeys = keyof UntrustedBriefingChoice;
+      type ExpectedKeys = 'itemOrdinal' | 'candidateOrdinal';
+
+      type HasAll = [ExpectedKeys] extends [ChoiceKeys] ? true : false;
+      type HasNoExtra = [ChoiceKeys] extends [ExpectedKeys] ? true : false;
+      type Exact = HasAll extends true ? (HasNoExtra extends true ? true : false) : false;
+
+      const isExact: Exact = true;
+      expect(isExact).toBe(true);
+    });
+
+    it('proves choices contain numeric ordinals only and NO generated text fields', () => {
+      type ForbiddenChoiceFields =
+        | 'text'
+        | 'string'
+        | 'claim'
+        | 'title'
+        | 'label'
+        | 'summary'
+        | 'overview'
+        | 'section';
+
+      type HasForbiddenChoice = [ForbiddenChoiceFields & keyof UntrustedBriefingChoice] extends [never]
+        ? false
+        : true;
+      const hasForbiddenChoice: HasForbiddenChoice = false;
+      expect(hasForbiddenChoice).toBe(false);
+
+      type HasForbiddenPlan = [ForbiddenChoiceFields & keyof UntrustedBriefingExtractPlan] extends [never]
+        ? false
+        : true;
+      const hasForbiddenPlan: HasForbiddenPlan = false;
+      expect(hasForbiddenPlan).toBe(false);
+    });
+
+    it('verifies fake success output has version 1 and numeric ordinal pairs only with no authored text', async () => {
+      const provider = new FakeBriefingProvider();
+      const request = makeSampleExtractRequest();
+
+      const result = await provider.selectExtracts(request);
+      expect(result.ok).toBe(true);
+
+      if (result.ok) {
+        expect(result.requestId).toBe('req-001');
+        expect(result.output.version).toBe(1);
+        expect(Array.isArray(result.output.choices)).toBe(true);
+        expect(result.output.choices).toHaveLength(2);
+
+        for (const choice of result.output.choices) {
+          expect(typeof choice.itemOrdinal).toBe('number');
+          expect(typeof choice.candidateOrdinal).toBe('number');
+          expect(Number.isSafeInteger(choice.itemOrdinal)).toBe(true);
+          expect(Number.isSafeInteger(choice.candidateOrdinal)).toBe(true);
+          expect('text' in choice).toBe(false);
+        }
+
+        const serializedOutput = JSON.stringify(result.output);
+        expect(serializedOutput).not.toContain('"text"');
+        expect(serializedOutput).not.toContain('요약');
+      }
     });
   });
 
@@ -209,86 +331,131 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
     });
   });
 
-  describe('Deterministic Fake Behavior & Output Generation', () => {
-    it('produces deterministic output with request-local sourceOrdinals', async () => {
+  describe('Deterministic Fake Behavior & Request-Order Choices', () => {
+    it('produces deterministic output selecting candidateOrdinal 0 in request order', async () => {
       const provider = new FakeBriefingProvider();
-      const request: BriefingProviderRequest = {
-        requestId: 'req-leaf-1',
-        chunk: makeSampleChunk({ sourceOrdinals: [0, 1] }),
-      };
+      const request = makeSampleExtractRequest();
 
-      const res1 = await provider.summarize(request);
-      const res2 = await provider.summarize(request);
+      const res1 = await provider.selectExtracts(request);
+      const res2 = await provider.selectExtracts(request);
 
       expect(res1.ok).toBe(true);
       expect(res2.ok).toBe(true);
+
       if (res1.ok && res2.ok) {
-        expect(res1.requestId).toBe('req-leaf-1');
+        expect(res1.requestId).toBe('req-001');
         expect(res1.output).toEqual(res2.output);
-        expect(res1.output.sections[0].sourceOrdinals).toEqual([0, 1]);
-        expect(res1.output.sections[0].text).toContain('오전 훈련 시작');
+        expect(res1.output.choices).toEqual([
+          { itemOrdinal: 0, candidateOrdinal: 0 },
+          { itemOrdinal: 1, candidateOrdinal: 0 },
+        ]);
       }
     });
 
-    it('tracks call history accurately and supports clearing', async () => {
+    it('preserves request order for multi-item requests with arbitrary candidate counts', async () => {
       const provider = new FakeBriefingProvider();
-      const req1: BriefingProviderRequest = {
-        requestId: 'req-1',
-        chunk: makeSampleChunk(),
+      const request: BriefingExtractRequest = {
+        requestId: 'req-multi',
+        items: [
+          {
+            itemOrdinal: 0,
+            candidates: [
+              { candidateOrdinal: 0, text: 'extract 0-0' },
+              { candidateOrdinal: 1, text: 'extract 0-1' },
+              { candidateOrdinal: 2, text: 'extract 0-2' },
+            ],
+          },
+          {
+            itemOrdinal: 1,
+            candidates: [
+              { candidateOrdinal: 0, text: 'extract 1-0' },
+            ],
+          },
+          {
+            itemOrdinal: 2,
+            candidates: [
+              { candidateOrdinal: 0, text: 'extract 2-0' },
+              { candidateOrdinal: 1, text: 'extract 2-1' },
+            ],
+          },
+        ],
       };
-      const req2: BriefingProviderRequest = {
-        requestId: 'req-2',
-        chunk: makeSampleChunk({ dayOrdinal: 1, sourceOrdinals: [2] }),
-      };
 
-      await provider.summarize(req1);
-      await provider.summarize(req2);
-
-      expect(provider.getCallHistory()).toHaveLength(2);
-      expect(provider.getCallHistory()[0].requestId).toBe('req-1');
-      expect(provider.getCallHistory()[1].requestId).toBe('req-2');
-
-      provider.clearCallHistory();
-      expect(provider.getCallHistory()).toHaveLength(0);
+      const res = await provider.selectExtracts(request);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.output.choices).toHaveLength(3);
+        expect(res.output.choices[0]).toEqual({ itemOrdinal: 0, candidateOrdinal: 0 });
+        expect(res.output.choices[1]).toEqual({ itemOrdinal: 1, candidateOrdinal: 0 });
+        expect(res.output.choices[2]).toEqual({ itemOrdinal: 2, candidateOrdinal: 0 });
+      }
     });
 
-    it('supports custom output generator', async () => {
+    it('supports custom choice generator without text fields', async () => {
       const customProvider = new FakeBriefingProvider({
-        defaultGenerator: (req) => [
-          {
-            text: '요약 청크 이벤트',
-            sourceOrdinals: req.chunk.sourceOrdinals,
-          },
+        defaultExtractGenerator: (req) => [
+          { itemOrdinal: 0, candidateOrdinal: 1 },
+          { itemOrdinal: 1, candidateOrdinal: 1 },
         ],
       });
 
-      const res = await customProvider.summarize({
-        requestId: 'custom-gen',
-        chunk: makeSampleChunk(),
-      });
+      const res = await customProvider.selectExtracts(makeSampleExtractRequest());
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.output.sections[0].text).toBe('요약 청크 이벤트');
-        expect(res.output.sections[0].sourceOrdinals).toEqual([0, 1]);
+        expect(res.output.version).toBe(1);
+        expect(res.output.choices).toEqual([
+          { itemOrdinal: 0, candidateOrdinal: 1 },
+          { itemOrdinal: 1, candidateOrdinal: 1 },
+        ]);
+      }
+    });
+  });
+
+  describe('Empty Candidates Handling & No Silent Invention', () => {
+    it('does not silently invent candidate extracts for items with empty candidate lists', async () => {
+      const provider = new FakeBriefingProvider();
+      const request: BriefingExtractRequest = {
+        requestId: 'req-empty-cand',
+        items: [
+          { itemOrdinal: 0, candidates: [] },
+          {
+            itemOrdinal: 1,
+            candidates: [{ candidateOrdinal: 0, text: '단련 완료' }],
+          },
+        ],
+      };
+
+      const res = await provider.selectExtracts(request);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        // Does not invent candidate 0 for item 0
+        expect(res.output.choices).toEqual([
+          { itemOrdinal: 1, candidateOrdinal: 0 },
+        ]);
       }
     });
   });
 
   describe('Per-Request Isolation', () => {
-    it('isolates concurrent requests with distinct requestIds and chunks', async () => {
+    it('isolates concurrent requests with distinct requestIds and item sets', async () => {
       const provider = new FakeBriefingProvider();
-      const reqA: BriefingProviderRequest = {
+      const reqA: BriefingExtractRequest = {
         requestId: 'flight-A',
-        chunk: makeSampleChunk({ sourceOrdinals: [0] }),
+        items: [
+          { itemOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: 'A0' }] },
+        ],
       };
-      const reqB: BriefingProviderRequest = {
+      const reqB: BriefingExtractRequest = {
         requestId: 'flight-B',
-        chunk: makeSampleChunk({ sourceOrdinals: [1, 2] }),
+        items: [
+          { itemOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: 'B0' }] },
+          { itemOrdinal: 1, candidates: [{ candidateOrdinal: 0, text: 'B1' }] },
+        ],
       };
 
       const [resA, resB] = await Promise.all([
-        provider.summarize(reqA),
-        provider.summarize(reqB),
+        provider.selectExtracts(reqA),
+        provider.selectExtracts(reqB),
       ]);
 
       expect(resA.ok).toBe(true);
@@ -296,8 +463,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
       if (resA.ok && resB.ok) {
         expect(resA.requestId).toBe('flight-A');
         expect(resB.requestId).toBe('flight-B');
-        expect(resA.output.sections[0].sourceOrdinals).toEqual([0]);
-        expect(resB.output.sections[0].sourceOrdinals).toEqual([1, 2]);
+        expect(resA.output.choices).toHaveLength(1);
+        expect(resB.output.choices).toHaveLength(2);
       }
     });
   });
@@ -305,12 +472,9 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
   describe('Explicit cancel(requestId) Method Behavior', () => {
     it('cancels an in-flight delayed request A immediately when cancel(A) is called', async () => {
       const provider = new FakeBriefingProvider({ delayMs: 150 });
-      const reqA: BriefingProviderRequest = {
-        requestId: 'req-delayed-A',
-        chunk: makeSampleChunk({ sourceOrdinals: [0] }),
-      };
+      const reqA = makeSampleExtractRequest({ requestId: 'req-delayed-A' });
 
-      const promiseA = provider.summarize(reqA);
+      const promiseA = provider.selectExtracts(reqA);
       setTimeout(() => {
         void provider.cancel('req-delayed-A');
       }, 20);
@@ -325,17 +489,11 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
 
     it('cancels request A while concurrent request B completes successfully', async () => {
       const provider = new FakeBriefingProvider({ delayMs: 100 });
-      const reqA: BriefingProviderRequest = {
-        requestId: 'req-cancel-target',
-        chunk: makeSampleChunk({ sourceOrdinals: [0] }),
-      };
-      const reqB: BriefingProviderRequest = {
-        requestId: 'req-concurrent-b',
-        chunk: makeSampleChunk({ sourceOrdinals: [1] }),
-      };
+      const reqA = makeSampleExtractRequest({ requestId: 'req-cancel-target' });
+      const reqB = makeSampleExtractRequest({ requestId: 'req-concurrent-b' });
 
-      const promiseA = provider.summarize(reqA);
-      const promiseB = provider.summarize(reqB);
+      const promiseA = provider.selectExtracts(reqA);
+      const promiseB = provider.selectExtracts(reqB);
 
       setTimeout(() => {
         void provider.cancel('req-cancel-target');
@@ -352,18 +510,15 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
       expect(resB.ok).toBe(true);
       if (resB.ok) {
         expect(resB.requestId).toBe('req-concurrent-b');
-        expect(resB.output.sections[0].sourceOrdinals).toEqual([1]);
+        expect(resB.output.choices).toHaveLength(2);
       }
     });
 
     it('treats unknown or stale cancel(requestId) as a safe no-op without cancelling other requests', async () => {
       const provider = new FakeBriefingProvider({ delayMs: 50 });
-      const req: BriefingProviderRequest = {
-        requestId: 'req-active',
-        chunk: makeSampleChunk(),
-      };
+      const req = makeSampleExtractRequest({ requestId: 'req-active' });
 
-      const promise = provider.summarize(req);
+      const promise = provider.selectExtracts(req);
       await provider.cancel('non-existent-or-stale-id');
 
       const res = await promise;
@@ -380,11 +535,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
       const controller = new AbortController();
       controller.abort();
 
-      const result = await provider.summarize(
-        {
-          requestId: 'aborted-pre',
-          chunk: makeSampleChunk(),
-        },
+      const result = await provider.selectExtracts(
+        makeSampleExtractRequest({ requestId: 'aborted-pre' }),
         controller.signal,
       );
 
@@ -399,11 +551,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
       const provider = new FakeBriefingProvider({ delayMs: 100 });
       const controller = new AbortController();
 
-      const promise = provider.summarize(
-        {
-          requestId: 'delayed-abort',
-          chunk: makeSampleChunk(),
-        },
+      const promise = provider.selectExtracts(
+        makeSampleExtractRequest({ requestId: 'delayed-abort' }),
         { signal: controller.signal },
       );
 
@@ -418,7 +567,7 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
     });
   });
 
-  describe('Configured Scenarios (Failures, Malformed, Wrong Correlation)', () => {
+  describe('Configured Scenarios (Failures, Malformed, Wrong Correlation, Custom Choices)', () => {
     it('supports configured failure codes per requestId without arbitrary message', async () => {
       const provider = new FakeBriefingProvider({
         scenariosByRequestId: {
@@ -429,7 +578,7 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
         },
       });
 
-      const resBusy = await provider.summarize({ requestId: 'req-busy', chunk: makeSampleChunk() });
+      const resBusy = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-busy' }));
       expect(resBusy.ok).toBe(false);
       if (!resBusy.ok) {
         expect(resBusy.code).toBe('busy');
@@ -437,31 +586,28 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
         expect('message' in resBusy).toBe(false);
       }
 
-      const resQuota = await provider.summarize({ requestId: 'req-quota', chunk: makeSampleChunk() });
+      const resQuota = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-quota' }));
       expect(resQuota.ok).toBe(false);
       if (!resQuota.ok) expect(resQuota.code).toBe('quota');
 
-      const resTimeout = await provider.summarize({ requestId: 'req-timeout', chunk: makeSampleChunk() });
+      const resTimeout = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-timeout' }));
       expect(resTimeout.ok).toBe(false);
       if (!resTimeout.ok) expect(resTimeout.code).toBe('timeout');
 
-      const resNative = await provider.summarize({ requestId: 'req-native', chunk: makeSampleChunk() });
+      const resNative = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-native' }));
       expect(resNative.ok).toBe(false);
       if (!resNative.ok) expect(resNative.code).toBe('native_error');
     });
 
-    it('supports malformed raw output scenario', async () => {
-      const malformedRaw = { unexpected: 123, invalidField: true };
+    it('supports malformed raw output scenario passthrough for verifier', async () => {
+      const malformedRaw = { invalidRoot: true, unexpectedText: 'hello' };
       const provider = new FakeBriefingProvider({
         scenariosByRequestId: {
           'req-malformed': { type: 'malformed', rawOutput: malformedRaw },
         },
       });
 
-      const res = await provider.summarize({
-        requestId: 'req-malformed',
-        chunk: makeSampleChunk(),
-      });
+      const res = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-malformed' }));
       expect(res.ok).toBe(true);
       if (res.ok) {
         expect(res.output).toEqual(malformedRaw);
@@ -478,17 +624,37 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
         },
       });
 
-      const res = await provider.summarize({
-        requestId: 'req-expected',
-        chunk: makeSampleChunk(),
-      });
+      const res = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-expected' }));
       expect(res.ok).toBe(true);
       if (res.ok) {
         expect(res.requestId).toBe('req-stale-other');
       }
     });
 
-    it('supports dynamic scenarioSelector for partial / conditional behaviors', async () => {
+    it('supports custom success choices scenario', async () => {
+      const customChoices: readonly UntrustedBriefingChoice[] = [
+        { itemOrdinal: 0, candidateOrdinal: 1 },
+        { itemOrdinal: 1, candidateOrdinal: 0 },
+      ];
+
+      const provider = new FakeBriefingProvider({
+        scenariosByRequestId: {
+          'req-custom-choices': {
+            type: 'success',
+            choices: customChoices,
+          },
+        },
+      });
+
+      const res = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-custom-choices' }));
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.output.version).toBe(1);
+        expect(res.output.choices).toEqual(customChoices);
+      }
+    });
+
+    it('supports dynamic scenarioSelector for conditional / partial behaviors', async () => {
       const provider = new FakeBriefingProvider({
         scenarioSelector: (req, callIndex) => {
           if (callIndex === 0) {
@@ -498,12 +664,30 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5)', () => {
         },
       });
 
-      const res1 = await provider.summarize({ requestId: 'call-1', chunk: makeSampleChunk() });
-      const res2 = await provider.summarize({ requestId: 'call-2', chunk: makeSampleChunk() });
+      const res1 = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'call-1' }));
+      const res2 = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'call-2' }));
 
       expect(res1.ok).toBe(false);
       if (!res1.ok) expect(res1.code).toBe('busy');
       expect(res2.ok).toBe(true);
+    });
+  });
+
+  describe('Call History Tracking', () => {
+    it('tracks extract call history accurately and supports clearing', async () => {
+      const provider = new FakeBriefingProvider();
+      const req1 = makeSampleExtractRequest({ requestId: 'req-1' });
+      const req2 = makeSampleExtractRequest({ requestId: 'req-2' });
+
+      await provider.selectExtracts(req1);
+      await provider.selectExtracts(req2);
+
+      expect(provider.getCallHistory()).toHaveLength(2);
+      expect(provider.getCallHistory()[0].requestId).toBe('req-1');
+      expect(provider.getCallHistory()[1].requestId).toBe('req-2');
+
+      provider.clearCallHistory();
+      expect(provider.getCallHistory()).toHaveLength(0);
     });
   });
 });

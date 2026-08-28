@@ -118,8 +118,8 @@ Vercel Production, PR merge, TestFlight/App Store는 적용하지 않았다.
   독립 재조회했고 P0 0, P1 0, SQL source P2 0으로 이전 HOLD 종료를 확인했다.
 - reviewer의 유일한 P2는 exact HEAD `b85b757`의 운영 문서가 적용 전 상태였다는 것이다.
   이 closure commit이 migration README, current state, release plan, Work Log, report를
-  Production 현실로 갱신해 해당 문서 P2를 닫는다. 이 docs delta의 diff/CI는 commit 후
-  별도 확인한다.
+  Production 현실로 갱신해 해당 문서 P2를 닫았다. 최초 closure commit `928d778`의
+  GitHub/Vercel checks는 15/15 PASS했다.
 
 ## 명시적으로 적용하지 않은 것
 

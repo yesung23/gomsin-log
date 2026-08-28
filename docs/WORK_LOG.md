@@ -9071,7 +9071,7 @@ e2e · Postgres 계약 · Deno).
 - Branch: `codex/profile-post-composer`
 - Base SHA: `b85b7573a31b7c6c7ad9b9542545676e7c84f571`
 - Old HEAD: `b85b7573a31b7c6c7ad9b9542545676e7c84f571`
-- New HEAD / Reviewed HEAD: docs/report closure commit pending
+- New HEAD / Reviewed HEAD: Production truth closure `928d778872eb0c142de6f301f44638dedc40ec47`
 
 #### CHANGED / REVIEWED
 - file: Production Supabase exact `064_lock_crypto_pairings_table_privileges.sql`
@@ -9123,30 +9123,31 @@ e2e · Postgres 계약 · Deno).
 - command: independent post-apply `main/gpt-5.6-sol` High read-only review
 - PASS / FAIL / UNVERIFIED: Production DB delta PASS / 전체 출시 CONDITIONAL PASS; P0 0, P1 0, SQL-source P2 0
 - what it actually proves: reviewer가 `2026-08-28T01:26:05Z`에 Production을 독립 재조회해 이전 HOLD 종료를 확인. 유일한 P2는 `b85b757` 문서의 적용 전 상태이며 이 docs closure가 해결
+- command: PR #90 checks at Production truth closure `928d778`
+- PASS / FAIL / UNVERIFIED: PASS — 15/15 GitHub/Vercel checks, failure/pending 0
+- what it actually proves: 문서 P2 closure를 포함한 branch에서 typecheck/lint/Vitest/build, PostgreSQL, real-browser, Android, iOS simulator, secret/boundary/sync, Vercel Preview 전체 green
 
 #### REVIEW IMPACT
 - FULL for Production DB/security exact state. 로컬 app/migration source는 unchanged지만 remote C-class schema/authz delta이므로 사후 보안 review를 다시 수행한다.
 
 #### BLOCKERS
-- code: latest PR #90 `b85b757`의 15/15 checks PASS; reviewer 문서 P2를 닫는 현재 docs-only closure commit CI는 아직 없음
+- code: PR #90 Production truth closure `928d778` 15/15 checks PASS; open P0/P1/P2 없음
 - environment: Production active device/scope key 0, phone disconnected
 - external/manual: real JWT HTTP actor matrix, two-device ceremony, Apple provider/Services ID/secret, real Google/Apple iPhone OAuth, Vercel Production, Archive/TestFlight/App Store
 
 #### STOPPED AT
-- exact completed boundary: exact four Production migrations, per-file/final catalog, PostgREST, rollback-only actor evidence, independent post-apply PASS complete; docs commit/push pending
+- exact completed boundary: exact four Production migrations, per-file/final catalog, PostgREST, rollback-only actor evidence, independent post-apply PASS, docs closure commit/push/15 checks complete
 
 #### REMAINING
-- docs/report commit·push와 fresh CI
 - PR merge, Apple/provider/iPhone OAuth, Production web, TestFlight는 별도 gate
 
 #### NEXT ACTION
 - next owner: Codex primary after independent review
 - tool/model: primary integration; `main/gpt-5.6-sol` High review result
 - 기준 SHA: `b85b7573a31b7c6c7ad9b9542545676e7c84f571` plus docs-only closure
-- exact next task: review verdict 반영 → docs commit/push → fresh PR checks 확인 → claim release
+- exact next task: PR merge 전 Vercel Production 자동 배포 영향 확인, 그 뒤 별도 action-time merge 결정
 
 #### DO NOT ADVANCE UNTIL
-- fresh docs commit의 CI가 완료될 것
 - Apple/provider/Production deploy/TestFlight는 각각 별도 action-time 상태 확인
 
 #### PRODUCTION

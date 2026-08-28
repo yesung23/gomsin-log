@@ -297,6 +297,100 @@
 #### PRODUCTION
 - NOT APPLIED
 
+### 2026-08-28 · Partner Briefing A1–A3 domain foundations and A4 worker-provider block
+
+#### PLAN POSITION
+- Phase: Partner Briefing
+- Workstream: portable domain core
+- Step: A1 Contract → A2 Corpus → A3 Normalizer; A4 Chunker dispatch attempted
+- Previous Gate: Gate 0 APPROVED WITH AMENDMENTS
+- This Gate: A1 PASS, A2 PASS, A3 PASS; A4 BLOCKED before implementation
+
+#### DIRECTION CHECK
+- Product source checked: user-approved Partner Briefing Master Prompt FINAL and Orchestration Mode Update; `docs/PARTNER_BRIEFING_ARCHITECTURE.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; selection/ranking 없이 전체 OUTSTANDING 압축 방향 유지
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`
+- Current-state checked: live branch/HEAD/status, accepted A1–A3 files, PartnerDay surface contract, DailyRecord/Attachment types
+- Latest relevant Work Log checked: 2026-08-28 Partner Briefing Gate 0 amendments
+- MASTER PLAN version / 기준일: Partner Briefing Master Prompt FINAL + Gate 0 amendments / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + bounded subagents
+- Model: primary Sol orchestrator; Google Antigravity Gemini 3.7 Flash High Workers
+- Role: Flash implementation, primary diff/test/gate verification
+- PR: 없음
+- Branch: `codex/partner-briefing`
+- Base SHA: `be255759100a761619b4c9e2d842e31155fe9aa9`
+- Old HEAD: `be255759100a761619b4c9e2d842e31155fe9aa9`
+- New HEAD / Reviewed HEAD: `7239085fda2c086c7899af99e7e23127f9ee9f2f`
+
+#### CHANGED / REVIEWED
+- file: `src/lib/partnerBriefing/contract.ts`, `contract.test.ts`
+- function/component/migration: A1 pure domain/model-safe contract
+- what changed/reviewed: generation/period/media unions, JS-only source mapping, exact model-safe allowlist, untrusted ordinal output, verified exact-record result, multi-day shape.
+- why: actual IDs and dates must remain TypeScript-only while the model receives synthetic ordinals.
+- file: `src/lib/partnerBriefing/corpus.ts`, `corpus.test.ts`
+- function/component/migration: A2 supplied-surface fail-closed privacy gate
+- what changed/reviewed: active couple/canonical identity/persisted/exact partner/shared/readable checks; mixed invalid records produce index+reason metadata only.
+- why: PartnerDay alone owns OUTSTANDING while Partner Briefing only decides whether supplied records may progress toward the AI boundary.
+- file: `src/lib/partnerBriefing/normalize.ts`, `normalize.test.ts`
+- function/component/migration: A3 chronology and explicit model-safe projection
+- what changed/reviewed: date/time/id validation, date→time→ID order, dayOrdinal, period, ID-free text/media payload, JS-only source/day maps, separator hardening.
+- why: preserve every accepted source and prevent metadata, URLs, emotion structures, and key material from reaching a model payload.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no migration created or applied
+- product semantics: PartnerDay checkpoint/CONFIRMED/raw timeline unchanged
+- Production: no Supabase, Vercel, Apple, TestFlight, native sync, or deploy action
+
+#### VERIFICATION
+- command: focused Partner Briefing Vitest through A3
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 85 tests
+- what it actually proves: contract keys/unions, fail-closed corpus including multi-day and 120 records, chronology/daypart/privacy-safe normalization and malformed-input behavior.
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current TypeScript project compiles with A1–A3.
+- command: targeted ESLint for `src/lib/partnerBriefing`
+- PASS / FAIL / UNVERIFIED: PASS — 0 errors / 0 warnings
+- what it actually proves: changed TypeScript/tests satisfy current lint rules.
+- command: `git diff --check` plus per-untracked-file `git diff --no-index --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: tracked and new-file whitespace integrity.
+- command: two fresh Gemini 3.7 Flash High A4 Worker dispatches
+- PASS / FAIL / UNVERIFIED: FAIL — both stopped with Antigravity HTTP 400 missing `thought_signature` during tool calls
+- what it actually proves: designated Worker provider/tooling is currently unusable for A4; no A4 code was created.
+
+#### REVIEW IMPACT
+- FULL — new privacy-sensitive AI domain boundary; Terra Domain Review remains mandatory after A7 and has not occurred.
+
+#### BLOCKERS
+- code: none identified in accepted A1–A3
+- environment: Gemini 3.7 Flash High tool calls repeatedly fail upstream with missing `thought_signature`
+- external/manual: none; this is an agent-provider integration failure, not an app runtime or Production failure
+
+#### STOPPED AT
+- exact completed boundary: A3 main-agent PASS; A4 files absent after two fresh designated Worker attempts
+
+#### REMAINING
+- A4 Chunker, A5 Provider Contract + Fake, A6 Verifier, A7 Pipeline/Fallback
+- Terra Domain Review, UI/native/device/final gates
+
+#### NEXT ACTION
+- next owner: Google Antigravity Gemini 3.7 Flash High Worker after provider recovery
+- tool/model: Gemini 3.7 Flash / High
+- 기준 SHA: `7239085fda2c086c7899af99e7e23127f9ee9f2f`
+- exact next task: create only `src/lib/partnerBriefing/chunk.ts` and `chunk.test.ts` under the locked A4 contract
+
+#### DO NOT ADVANCE UNTIL
+- designated Flash Worker can use repository tools without the upstream `thought_signature` error, or the user explicitly changes the Worker-model contract
+- do not substitute a different implementation model, change architecture, or start A5 early
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-26 · 복무 레벨 티어별 EXP 리셋(0→100%) 및 누적 복무율 분리 검증
 
 #### PLAN POSITION

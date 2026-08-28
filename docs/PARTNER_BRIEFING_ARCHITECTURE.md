@@ -70,23 +70,24 @@ coarse periods, normalized text, and media kinds.
 ## Provenance contract
 
 TypeScript assigns synthetic source ordinals. A leaf provider may return grouped
-text with `sourceOrdinals`, but the untrusted response is accepted only when the
-ordinals across the whole response form an exact partition of the requested
-ordinal set:
+text with `sourceOrdinals`. The initial leaf contract uses an exact partition,
+but the domain architecture does not forbid a source from supporting more than
+one future semantic section. Every accepted response must still satisfy:
 
 - integer and structurally well formed;
 - known and within the request range;
 - non-negative;
 - no missing ordinal;
-- no duplicate ordinal;
-- no unknown or hallucinated ordinal.
+- no duplicate ordinal inside one section;
+- no unknown or hallucinated ordinal;
+- the union of verified ordinals exactly equals the requested ordinal set.
 
 After verification, TypeScript alone binds ordinals back to actual record IDs.
 Intermediate nodes obtain provenance from the deterministic union of child
 source sets. The overview source set is the deterministic union of every
 accepted leaf or fallback leaf.
 
-Exact partition proves structural source coverage, not semantic fidelity.
+Exact coverage proves structural source coverage, not semantic fidelity.
 Semantic safety is a separate responsibility: fact-only provider instructions,
 bounded output, forbidden-inference checks, adversarial tests, and deterministic
 fallback on rejection. No verifier may claim that ordinal validity alone proves
@@ -188,3 +189,18 @@ registration, and Story integration prove it dead.
 
 Each implementation phase is narrow, does not pre-build the next phase, and must
 leave PartnerDay, acknowledgement, auth, and E2EE protocols unchanged.
+
+## Orchestration and platform selection
+
+The default implementation loop is Sol High architecture/gating, Gemini 3.7
+Flash High bounded Worker phases, and Terra High independent reviews. Luna High
+may execute the identical Worker specification only when repeated Flash provider
+failures prevent the phase from running. Kiro/Opus is not part of the default
+path. Sol handles architecture-level blockers directly and uses Max only when
+the risk warrants it.
+
+Gate D does not preselect a concrete Android GenAI SDK. At Gate D start, the
+current official on-device Android APIs are reviewed and the implementation that
+best preserves structured output, ordinal provenance, offline execution,
+cancellation, and deterministic fallback is selected behind the common
+`AndroidOnDeviceBriefingProvider` boundary. Server inference remains forbidden.

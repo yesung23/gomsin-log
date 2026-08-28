@@ -77,11 +77,19 @@ export interface PartnerBriefingPipelineInput {
 
 const FIXED_PLACEHOLDER_REQUEST_ID = '00000000-0000-0000-0000-000000000000';
 
-function generateOpaqueRequestId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+function generateOpaqueRequestId(): string | null {
+  try {
+    const cryptoObj = globalThis.crypto;
+    if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+      const generated = cryptoObj.randomUUID();
+      if (typeof generated === 'string' && generated.trim().length > 0) {
+        return generated;
+      }
+    }
+  } catch {
+    return null;
   }
-  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  return null;
 }
 
 /**
@@ -493,6 +501,15 @@ export async function runPartnerBriefingPipeline(
     }
 
     const requestId = generateOpaqueRequestId();
+    if (!requestId) {
+      // Fail-closed: do not transmit execution-time metadata if safe UUID is unavailable
+      for (const seg of batch.segments) {
+        verifiedSegmentExtracts.set(seg.segmentId, seg.candidates[0].text);
+        segmentUsedOnDevice.set(seg.segmentId, false);
+      }
+      continue;
+    }
+
     const request: BriefingExtractRequest = {
       requestId,
       items: batch.items,

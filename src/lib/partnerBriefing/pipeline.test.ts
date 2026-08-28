@@ -976,4 +976,124 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
     });
   });
 
+  describe("Fail-Closed Safe UUID Generation and Provider Request Privacy", () => {
+    it("falls back deterministically without calling provider when crypto.randomUUID is unavailable", async () => {
+      const originalCrypto = globalThis.crypto;
+      try {
+        Object.defineProperty(globalThis, "crypto", {
+          configurable: true,
+          writable: true,
+          value: {
+            ...originalCrypto,
+            randomUUID: undefined,
+          },
+        });
+
+        const provider = new FakeBriefingProvider();
+        const events = [createEvent(0, 0, { text: "난수 UUID 부재 테스트 문장" })];
+        const sources = [{ ordinal: 0, recordId: "rec-uuid-none" }];
+        const days = [{ dayOrdinal: 0, date: "2026-08-26" }];
+
+        const briefing = await runPartnerBriefingPipeline({
+          events,
+          sources,
+          days,
+          provider,
+          timeoutMs: 1000,
+        });
+
+        expect(provider.getCallHistory()).toHaveLength(0);
+        expect(briefing.generation).toBe("deterministic");
+        expect(briefing.sourceCount).toBe(1);
+        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-none");
+        expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-none"]);
+      } finally {
+        Object.defineProperty(globalThis, "crypto", {
+          configurable: true,
+          writable: true,
+          value: originalCrypto,
+        });
+      }
+    });
+
+    it("falls back deterministically without calling provider when crypto.randomUUID throws", async () => {
+      const originalCrypto = globalThis.crypto;
+      try {
+        Object.defineProperty(globalThis, "crypto", {
+          configurable: true,
+          writable: true,
+          value: {
+            ...originalCrypto,
+            randomUUID: () => {
+              throw new Error("crypto entropy depleted");
+            },
+          },
+        });
+
+        const provider = new FakeBriefingProvider();
+        const events = [createEvent(0, 0, { text: "난수 UUID throw 테스트 문장" })];
+        const sources = [{ ordinal: 0, recordId: "rec-uuid-throw" }];
+        const days = [{ dayOrdinal: 0, date: "2026-08-26" }];
+
+        const briefing = await runPartnerBriefingPipeline({
+          events,
+          sources,
+          days,
+          provider,
+          timeoutMs: 1000,
+        });
+
+        expect(provider.getCallHistory()).toHaveLength(0);
+        expect(briefing.generation).toBe("deterministic");
+        expect(briefing.sourceCount).toBe(1);
+        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-throw");
+        expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-throw"]);
+      } finally {
+        Object.defineProperty(globalThis, "crypto", {
+          configurable: true,
+          writable: true,
+          value: originalCrypto,
+        });
+      }
+    });
+
+    it("falls back deterministically without calling provider when crypto.randomUUID returns empty or whitespace string", async () => {
+      const originalCrypto = globalThis.crypto;
+      try {
+        Object.defineProperty(globalThis, "crypto", {
+          configurable: true,
+          writable: true,
+          value: {
+            ...originalCrypto,
+            randomUUID: () => "   ",
+          },
+        });
+
+        const provider = new FakeBriefingProvider();
+        const events = [createEvent(0, 0, { text: "빈 UUID 테스트 문장" })];
+        const sources = [{ ordinal: 0, recordId: "rec-uuid-blank" }];
+        const days = [{ dayOrdinal: 0, date: "2026-08-26" }];
+
+        const briefing = await runPartnerBriefingPipeline({
+          events,
+          sources,
+          days,
+          provider,
+          timeoutMs: 1000,
+        });
+
+        expect(provider.getCallHistory()).toHaveLength(0);
+        expect(briefing.generation).toBe("deterministic");
+        expect(briefing.sourceCount).toBe(1);
+        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-blank");
+        expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-blank"]);
+      } finally {
+        Object.defineProperty(globalThis, "crypto", {
+          configurable: true,
+          writable: true,
+          value: originalCrypto,
+        });
+      }
+    });
+  });
 });

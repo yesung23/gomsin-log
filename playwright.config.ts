@@ -6,6 +6,9 @@ import { defineConfig, devices } from '@playwright/test';
  * unset.
  */
 const localChromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim() || undefined;
+const partnerBriefingSuite = process.env.GOMSINLOG_E2E_PARTNER_BRIEFING === 'true';
+const previewPort = partnerBriefingSuite ? 4174 : 4173;
+const previewUrl = `http://127.0.0.1:${previewPort}`;
 
 /**
  * Real-browser regression suite.
@@ -23,6 +26,8 @@ const localChromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?
  */
 export default defineConfig({
   testDir: './e2e',
+  testMatch: partnerBriefingSuite ? '**/partnerBriefing.spec.ts' : undefined,
+  testIgnore: partnerBriefingSuite ? [] : '**/partnerBriefing.spec.ts',
   outputDir: './e2e/.artifacts/test-results',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
@@ -32,7 +37,7 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: previewUrl,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
@@ -67,13 +72,14 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run build && npx vite preview --port 4173 --host 127.0.0.1 --strictPort',
-    url: 'http://127.0.0.1:4173',
-    reuseExistingServer: !process.env.CI,
+    command: `npm run build && npx vite preview --port ${previewPort} --host 127.0.0.1 --strictPort`,
+    url: previewUrl,
+    reuseExistingServer: !process.env.CI && !partnerBriefingSuite,
     timeout: 180_000,
     env: {
       VITE_SUPABASE_URL: 'https://example.supabase.co',
       VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_public_key_not_a_secret',
+      VITE_PARTNER_BRIEFING_ENABLED: partnerBriefingSuite ? 'true' : 'false',
     },
   },
 });

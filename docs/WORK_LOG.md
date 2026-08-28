@@ -9339,3 +9339,103 @@ e2e · Postgres 계약 · Deno).
 #### PRODUCTION
 - APPLIED — local physical development app overwrite install only
 - NOT APPLIED — Vercel Production, Supabase, Auth provider, TestFlight/App Store
+
+### 2026-08-28 — 게시물·Story 글자 크기, 알림 safe-area, startup 최적화와 TestFlight 사전 검증
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: readability, launch performance, signed distribution preflight
+- Step: 계정별 글자 크기 → 알림 위치 → startup/media 최적화 → Archive/IPA export
+- Previous Gate: Home photo-post layout/browser/physical install
+- This Gate: local RC + signed Archive/export PASS; TestFlight upload NOT APPLIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·과금·AI·저장 전략 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, release-validation procedure
+- Current-state checked: branch/HEAD/status, actual Home/Story/My/feed call paths, bundle output, Xcode settings
+- Latest relevant Work Log checked: 2026-08-28 Home photo-post layout/physical install
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary
+- Model: primary
+- Role: implementer, integration owner, verifier, packaging operator
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a64ecadd4b6833c9c5a8db255c8a3c5a2fd39a57`
+- Old HEAD: `a64ecadd4b6833c9c5a8db255c8a3c5a2fd39a57`
+- New HEAD / Reviewed HEAD: `5b15685` plus docs closure
+
+#### CHANGED / REVIEWED
+- file: `src/lib/recordTextSizePreference.ts`, `HandwritingSection`, App/CSS, Home/Story/My/feed
+- function/component/migration: account-local Small/Default/Large record-copy setting
+- what changed/reviewed: 15/17/20px 본문 선택을 계정별 localStorage에 저장하고 네 surface에 적용
+- why: Story/게시물 가독성을 사용자가 직접 조절하되 UI/시간/법적 문구는 흔들지 않기 위해서다.
+- file: `ThemedToaster`, `NotificationReentryBridge`
+- function/component/migration: top offset
+- what changed/reviewed: safe area + fixed header 64px 아래로 이동, z-index 보강
+- why: iPhone 상태바/다이내믹 아일랜드/고정 헤더 뒤에 알림이 가려지는 문제를 닫기 위해서다.
+- file: `index.html`, `App.tsx`, `RecordMediaGallery.tsx`
+- function/component/migration: boot surface, lazy Home, async image decode
+- what changed/reviewed: React 전 cream progress, Home/media route split, async decoding
+- why: 빈 검정 프레임 위험과 pre-auth parse 비용을 줄이고 사진 디코딩이 main thread를 덜 막게 한다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: record count/order/privacy/exact original unchanged
+- Production: Vercel/Supabase SQL/Auth/TestFlight/App Store mutation 없음
+
+#### VERIFICATION
+- command: focused Vitest groups
+- PASS / FAIL / UNVERIFIED: PASS — readability 59, type/handwriting 34, notifications 12, startup/media/CSP 45
+- what it actually proves: 설정 저장/계정 분리/네 surface 연결, alert offset, pre-React shell, image contract
+- command: full Vitest dot reporter
+- PASS / FAIL / UNVERIFIED: PASS — 264 files / 3,761 tests / 175.69s
+- what it actually proves: 전체 JS/TS 회귀; 과거 deviceKeyPort timeout 미재발
+- command: full ESLint, typecheck, production build, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 정적 계약, 빌드 가능성, diff 무결성
+- command: Playwright smoke + media/story/settings
+- PASS / FAIL / UNVERIFIED: PASS — 10/10
+- what it actually proves: authenticated boot, photo/lightbox, 320/390px, 17→20px, persistence, Home propagation, 44px
+- command: before/after production bundle measurement
+- PASS / FAIL / UNVERIFIED: PASS — entry 657.02→437.01KB, gzip 197.58→133.18KB; large chunk warning 제거
+- what it actually proves: pre-auth startup parse/download 부담 감소; physical iPhone telemetry는 아님
+- command: live publishable key memory injection + `npm run cap:release:ios`
+- PASS / FAIL / UNVERIFIED: first expected FAIL on legacy key, then PASS — 2,168 modules / 5 plugins
+- what it actually proves: release artifact safety guard와 current bundle iOS sync
+- command: Xcode 27 beta signed generic iOS archive + App Store Connect export
+- PASS / FAIL / UNVERIFIED: PASS — `app.gomsinlog` 0.1.0(2026082801), 30MB archive, 10MB IPA
+- what it actually proves: 서명·Archive·IPA 생성 가능. TestFlight upload/processing/install 증거는 아님
+
+#### REVIEW IMPACT
+- DELTA — UI/local preference/performance/package only; auth/DB/RLS/crypto review freshness unchanged
+
+#### BLOCKERS
+- code: 없음
+- environment: phone disconnected; latest physical render and remote TestFlight install UNVERIFIED
+- external/manual: Apple provider/Services ID, TestFlight processing, two-account real OAuth/session, Foundation Models
+
+#### STOPPED AT
+- exact completed boundary: optimized current source → strict Release sync → signed Archive → IPA export 완료; upload 직전 중지
+
+#### REMAINING
+- TestFlight upload and Apple processing
+- remote iPhone install, two-account and full release user-path smoke
+
+#### NEXT ACTION
+- next owner: Codex primary with user action-time instruction
+- tool/model: primary packaging operator; consequential security review only if auth/data scope changes
+- 기준 SHA: docs closure commit on top of `5b15685`
+- exact next task: 사용자가 재개하면 validated Archive/IPA를 TestFlight에 업로드하고 처리 상태 확인
+
+#### DO NOT ADVANCE UNTIL
+- upload 직전 exact HEAD/status와 App Store Connect app record/agreements 상태 재확인
+
+#### PRODUCTION
+- APPLIED — none
+- NOT APPLIED — TestFlight/App Store, Vercel Production, Supabase SQL/Auth/provider

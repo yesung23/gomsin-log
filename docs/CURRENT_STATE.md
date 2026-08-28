@@ -12,7 +12,8 @@
   consolidation checkpoint는 2026-08-20 전수 감사 기준이다
 - 조사 방식: 저장소와 GitHub PR metadata/body 대조
 - remote Supabase/Auth/Vercel과 최신 iPhone package 상태: 2026-08-28 §0B에서 live 갱신.
-  실제 화면·인증 사용자 경로·두 계정·TestFlight는 여전히 **UNVERIFIED**
+  signed Archive와 App Store Connect IPA export는 PASS지만 실제 화면·인증 사용자 경로·두 계정·
+  TestFlight 업로드/설치는 여전히 **UNVERIFIED**
 
 분류:
 
@@ -78,6 +79,16 @@
 - Source commit `d40d7ee`: Home 사진 포스트도 작성자 아바타·이름과 캡션 이름을 반복하지
   않고 `사진 → 글 → 오늘/어제 HH:mm·원본·책갈피` 순서로 표시한다. DB가 `HH:mm:ss`를
   반환해도 화면은 분까지만 보이며 원본·책갈피의 44px 동작은 유지된다.
+- Source commit `f12e83e`: 설정의 `보기`에 계정별 기기 로컬 `작게(15px) / 기본(17px) /
+  크게(20px)` 게시물·Story 본문 크기 선택이 생겼다. Home, Story, My 게시물 상세와 legacy
+  feed의 사람 작성 본문만 바뀌고 시간·버튼·법적 문구는 바뀌지 않는다. 앱 안 새 알림과
+  성공/오류 toast는 `safe-area + 64px` 아래에 표시되어 상태바·고정 헤더에 가리지 않는다.
+- Source commit `5b15685`: pre-auth entry에서 Home/media 코드를 분리하고 React 실행 전 크림색
+  boot surface를 넣었으며 사진 디코딩을 비동기로 바꿨다. production entry는 657.02KB /
+  197.58KB gzip에서 437.01KB / 133.18KB gzip으로 줄어 500KB 경고가 사라졌다. fresh 전체
+  Vitest 264 files / 3,761 tests, 전체 lint/typecheck, browser 10건(smoke 1 + media/story 9),
+  release build/sync가 PASS했다. Xcode 27 beta signed Archive `0.1.0 (2026082801)`과 10MB
+  App Store Connect IPA export도 PASS했지만 Apple 서버 업로드는 **NOT APPLIED**다.
 - My의 게시물 격자는 모든 Story 사진을 자동 수집하지 않는다. `+` 게시물 작성기에서 사진이
   완전히 저장된 마지막 업데이트에 `is_profile_post=true`가 붙은 공유 사진 기록만 보인다.
   일반 Story 사진과 이전 기록은 `사진` 목록에 보존되고, 타일·상세·원본은 같은 record ID를

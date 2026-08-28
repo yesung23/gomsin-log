@@ -3,6 +3,7 @@ import type {
   BriefingExtractCandidate,
   BriefingExtractRequestItem,
   BriefingGeneration,
+  BriefingLocale,
   BriefingMediaKind,
   BriefingModelSafeEvent,
   BriefingPeriod,
@@ -15,7 +16,7 @@ import type {
   UntrustedBriefingChoice,
   UntrustedBriefingExtractPlan,
 } from './contract';
-import { PARTNER_BRIEFING_VERSION } from './contract';
+import { DEFAULT_BRIEFING_LOCALE, PARTNER_BRIEFING_VERSION } from './contract';
 
 describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
   describe('BriefingGeneration union', () => {
@@ -71,6 +72,32 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
     });
   });
 
+  describe('BriefingLocale union and default', () => {
+    it('pins the locale union exactly to ko | en', () => {
+      type ExpectedLocale = 'ko' | 'en';
+      type LocaleCoversExpected = [ExpectedLocale] extends [BriefingLocale] ? true : false;
+      type LocaleHasNoExtra = [BriefingLocale] extends [ExpectedLocale] ? true : false;
+      type LocaleExact = LocaleCoversExpected extends true
+        ? LocaleHasNoExtra extends true
+          ? true
+          : false
+        : false;
+
+      const isLocaleExact: LocaleExact = true;
+      expect(isLocaleExact).toBe(true);
+
+      const ko: BriefingLocale = 'ko';
+      const en: BriefingLocale = 'en';
+      expect([ko, en]).toEqual(['ko', 'en']);
+    });
+
+    it('exports DEFAULT_BRIEFING_LOCALE as ko', () => {
+      expect(DEFAULT_BRIEFING_LOCALE).toBe('ko');
+      const defaultLocale: BriefingLocale = DEFAULT_BRIEFING_LOCALE;
+      expect(defaultLocale).toBe('ko');
+    });
+  });
+
   describe('Provider-safe extract request structures and forbidden fields', () => {
     type ForbiddenKeys =
       | 'id'
@@ -94,7 +121,8 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
       | 'emotionAnalysis'
       | 'isPrivate'
       | 'authorRole'
-      | 'contentUnavailable';
+      | 'contentUnavailable'
+      | 'locale';
 
     describe('BriefingExtractCandidate', () => {
       it('pins candidate keys to exactly candidateOrdinal and text', () => {
@@ -312,7 +340,8 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
         | 'emotionAnalysis'
         | 'isPrivate'
         | 'authorRole'
-        | 'contentUnavailable';
+        | 'contentUnavailable'
+        | 'locale';
 
       type HasForbiddenKey = [ForbiddenKeys & keyof BriefingModelSafeEvent] extends [never] ? false : true;
       const hasForbiddenKey: HasForbiddenKey = false;

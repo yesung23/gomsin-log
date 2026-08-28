@@ -22,6 +22,15 @@
 export const PARTNER_BRIEFING_VERSION = 1 as const;
 
 /**
+ * Supported locale for Partner Briefing presentation and fallback formatting.
+ * - 'ko': Korean (default)
+ * - 'en': English
+ */
+export type BriefingLocale = 'ko' | 'en';
+
+export const DEFAULT_BRIEFING_LOCALE: BriefingLocale = 'ko';
+
+/**
  * Provenance classification of the overall briefing output.
  * - 'on_device': Every displayed item is verified model candidate selection.
  * - 'hybrid': Verified model selections and deterministic fallback items coexist.

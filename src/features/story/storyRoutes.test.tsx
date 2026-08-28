@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -24,7 +24,8 @@ const TODAY = '2026-08-22';
 function record(over: Partial<DailyRecord> = {}): DailyRecord {
   return {
     id: 'r1', userId: 'partner-id', date: TODAY, time: '09:00',
-    authorRole: 'gomsin', log: '오늘 시험 끝났어', isPrivate: false, ...over,
+    authorRole: 'gomsin', log: '오늘 시험 끝났어', isPrivate: false,
+    createdAt: '2026-08-22T00:00:00.000Z', ...over,
   } as DailyRecord;
 }
 
@@ -34,6 +35,8 @@ const acknowledge = vi.fn(() => true);
 let surface: DailyRecord[] = [];
 let records: DailyRecord[] = [];
 let coupleHighlights: CoupleHighlight[] = [];
+let appLocale: 'ko' | 'en' = 'ko';
+let profileId = 'me';
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
@@ -42,10 +45,17 @@ vi.mock('@/lib/useStore', () => ({
       coupleHighlights,
       talkAboutMarks: [],
       profile: {
-        id: 'me', role: 'soldier',
-        couple: { connected: true, coupleId: 'c1', partnerName: '춘향' },
+        id: profileId, role: 'soldier',
+        couple: {
+          connected: true,
+          status: 'active',
+          coupleId: 'c1',
+          partnerUserId: 'partner-id',
+          partnerName: '춘향',
+        },
       },
       authenticatedUser: { id: 'me' },
+      locale: appLocale,
     },
     sharedSyncStatus: 'live',
     setHighlightedRecordId: vi.fn(),
@@ -80,6 +90,13 @@ beforeEach(() => {
   surface = [];
   records = [];
   coupleHighlights = [];
+  appLocale = 'ko';
+  profileId = 'me';
+  vi.unstubAllEnvs();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('/story/partner', () => {
@@ -144,9 +161,108 @@ describe('/story/partner', () => {
     await userEvent.click(screen.getByRole('button', { name: '하이라이트에 추가' }));
     expect(mockNavigate).toHaveBeenCalledWith('/us?highlightRecord=photo-story');
   });
+
+  describe('Partner Briefing feature flag', () => {
+    const eightRecords = () => Array.from({ length: 8 }, (_, index) => record({
+      id: `brief-${index + 1}`,
+      time: `${String(9 + index).padStart(2, '0')}:00`,
+      log: `기록 ${index + 1}`,
+      createdAt: `2026-08-22T${String(index).padStart(2, '0')}:00:00.000Z`,
+    }));
+
+    it('기본 OFF에서는 기존 표지를 유지하고 브리핑을 넣지 않는다', () => {
+      surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00', log: '점심' })];
+      records = surface;
+
+      open('/story/partner');
+
+      expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+      expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /점심/ })).toBeTruthy();
+    });
+
+    it('ON에서는 브리핑 한 장 뒤에 8개 원본을 모두 보존하고 기존 표지는 겹치지 않는다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      surface = eightRecords();
+      records = surface;
+
+      open('/story/partner');
+
+      expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+      expect(screen.getByText('순간 8개')).toBeTruthy();
+      expect(screen.getByText('1 / 10')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /기록 1/ })).toBeNull();
+
+      await userEvent.click(screen.getByTestId('partner-briefing-expand'));
+      expect(screen.getAllByRole('button', { name: '원본 보기' })).toHaveLength(8);
+
+      await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+      expect(screen.getByText('기록 1')).toBeTruthy();
+    });
+
+    it('?at=은 브리핑 prefix 뒤에서도 정확한 원본 또는 정확한 부재 카드를 연다', () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '정확한 둘째' })];
+      records = surface;
+
+      const exact = open('/story/partner?at=b');
+      expect(screen.getByText('정확한 둘째')).toBeTruthy();
+      expect(screen.queryByText('첫 기록')).toBeNull();
+      exact.unmount();
+
+      open('/story/partner?at=gone');
+      expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeTruthy();
+      expect(screen.queryByText('첫 기록')).toBeNull();
+    });
+
+    it('브리핑의 원본 보기는 exact recordId로 이동하고 열람만으로 확인하지 않는다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      surface = [record({ id: 'exact-a', log: '정확한 원본' }), record({ id: 'exact-b', time: '13:00' })];
+      records = surface;
+
+      open('/story/partner');
+      await userEvent.click(screen.getByTestId('partner-briefing-expand'));
+      await userEvent.click(screen.getAllByRole('button', { name: '원본 보기' })[0]);
+
+      expect(mockNavigate).toHaveBeenCalledWith('/record?record=exact-a');
+      expect(acknowledge).not.toHaveBeenCalled();
+    });
+
+    it('기기 언어가 영어면 같은 브리핑을 영어 UI로 표시한다', () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      appLocale = 'en';
+      surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00' })];
+      records = surface;
+
+      open('/story/partner');
+
+      expect(screen.getByText('Since you last checked')).toBeTruthy();
+      expect(screen.getByText('2 moments')).toBeTruthy();
+    });
+
+    it('profile.id가 늦게 동기화돼도 authenticatedUser.id를 canonical viewer로 사용한다', () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      profileId = 'stale-profile-id';
+      surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00' })];
+      records = surface;
+
+      open('/story/partner');
+
+      expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+      expect(screen.getByText('순간 2개')).toBeTruthy();
+    });
+  });
 });
 
 describe('/story/mine', () => {
+  it('Partner Briefing flag가 켜져도 내 스토리에는 브리핑을 넣지 않는다', () => {
+    vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+    records = [record({ id: 'mine', userId: 'me', log: '내 기록' })];
+    open('/story/mine');
+    expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+    expect(screen.getByText('내 기록')).toBeTruthy();
+  });
+
   it('내가 오늘 남긴 것만 담는다', () => {
     records = [
       record({ id: 'mine', userId: 'me', log: '내가 쓴 것' }),

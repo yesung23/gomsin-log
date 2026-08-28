@@ -11,6 +11,7 @@ import { projectStory } from '@/features/story/storyProjection';
 import { StoryViewer, type StoryMode } from '@/features/story/StoryViewer';
 import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
 import { useOnDeviceDailySummary } from '@/lib/dailySummary/useOnDeviceDailySummary';
+import { usePartnerBriefing } from '@/lib/partnerBriefing/usePartnerBriefing';
 
 /**
  * 스토리로 들어가는 세 개의 문.
@@ -41,10 +42,14 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   const isOffline = !useOnlineStatus();
 
   const { profile } = state;
+  const viewerUserId = state.authenticatedUser?.id || profile.id;
   const viewer = useMemo(
-    () => ({ userId: profile.id, role: profile.role }),
-    [profile.id, profile.role],
+    () => ({ userId: viewerUserId, role: profile.role }),
+    [viewerUserId, profile.role],
   );
+  const briefingLocale = state.locale === 'en' ? 'en' : 'ko';
+  const partnerBriefingEnabled = mode === 'today'
+    && import.meta.env.VITE_PARTNER_BRIEFING_ENABLED === 'true';
 
   /*
     `persist`는 상대 스토리에서만 켠다.
@@ -92,13 +97,26 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       todayStr,
       focusRecordId,
       // 보관 스토리에는 목차를 붙이지 않는다. 지나간 하루는 훑는 것이 아니라 넘기는 것이다.
-      withCover: mode !== 'archive' && mode !== 'highlight',
+      withCover: mode !== 'archive' && mode !== 'highlight' && !partnerBriefingEnabled,
       // 전체 요약은 상대의 오늘에만 적용한다. mine/archive/highlight와 놓친 다일 구간은
       // 기존 표지 상한을 유지한다.
-      showAllTodayCoverLines: mode === 'today',
+      showAllTodayCoverLines: mode === 'today' && !partnerBriefingEnabled,
     }),
-    [records, todayStr, focusRecordId, mode],
+    [records, todayStr, focusRecordId, mode, partnerBriefingEnabled],
   );
+
+  const partnerBriefingResult = usePartnerBriefing({
+    enabled: partnerBriefingEnabled,
+    surface,
+    viewerUserId,
+    partnerUserId: profile.couple.partnerUserId,
+    coupleConnected: profile.couple.connected,
+    coupleStatus: profile.couple.status,
+    locale: briefingLocale,
+  });
+  const briefing = partnerBriefingResult.status === 'ready'
+    ? partnerBriefingResult.briefing
+    : null;
 
   /*
     다듬어진 표지 문장, 준비되면.
@@ -108,6 +126,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     기능이 꺼져 있으면 계속 비어 있고, 화면은 규칙 결과 그대로다.
   */
   const refinedCoverText = useOnDeviceDailySummary({
+    enabled: !partnerBriefingEnabled,
     mode,
     records,
     viewerUserId: viewer.userId,
@@ -127,6 +146,10 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     () => applyRefinedCoverText(projection.cards, refinedCoverText),
     [projection.cards, refinedCoverText],
   );
+
+  const initialIndex = briefing
+    ? (focusRecordId ? projection.initialIndex + 1 : 0)
+    : projection.initialIndex;
 
   const title = useMemo(() => {
     if (mode === 'mine') return '오늘';
@@ -221,9 +244,9 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
 
   return (
     <StoryViewer
-      key={focusRecordId ?? 'cover'}
+      key={`${focusRecordId ?? 'cover'}:${briefing ? 'briefing' : 'raw'}`}
       cards={cards}
-      initialIndex={projection.initialIndex}
+      initialIndex={initialIndex}
       mode={mode}
       title={title}
       coupleId={profile.couple.coupleId || undefined}
@@ -238,6 +261,8 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       acknowledgeDisabledReason={
         sharedSyncStatus === 'unavailable' ? '지금은 확인을 저장할 수 없어요' : undefined
       }
+      briefing={briefing}
+      briefingLocale={briefingLocale}
     />
   );
 }

@@ -41,6 +41,8 @@ import { verifyAndBindRefinedLines } from '@/lib/dailySummary/verify';
 const NO_REFINEMENT: ReadonlyMap<string, string> = new Map();
 
 export interface UseOnDeviceDailySummaryInput {
+  /** 새 Partner Briefing이 같은 surface를 소유할 때 legacy 추론을 시작하지 않는다. */
+  enabled?: boolean;
   mode: StoryMode;
   /** 이 스토리가 담은 기록. 이미 권한 판정을 통과한 목록이다. */
   records: readonly DailyRecord[];
@@ -54,7 +56,16 @@ export interface UseOnDeviceDailySummaryInput {
 export function useOnDeviceDailySummary(
   input: UseOnDeviceDailySummaryInput,
 ): ReadonlyMap<string, string> {
-  const { mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus } = input;
+  const {
+    enabled = true,
+    mode,
+    records,
+    viewerUserId,
+    partnerUserId,
+    todayStr,
+    coupleConnected,
+    coupleStatus,
+  } = input;
   const [refined, setRefined] = useState<{
     payloadKey: string;
     values: ReadonlyMap<string, string>;
@@ -67,6 +78,7 @@ export function useOnDeviceDailySummary(
     키에 넣으면 표시 값이 바뀔 때 의미 없이 추론이 다시 돈다.
   */
   const payloadKey = useMemo(() => {
+    if (!enabled) return '[]';
     if (mode !== 'today') return '[]';
     const corpus = selectDailySummaryCorpus({
       records,
@@ -80,7 +92,7 @@ export function useOnDeviceDailySummary(
     return JSON.stringify(
       deterministicSummaryLines(corpus.records).map((line) => [line.recordId, line.text]),
     );
-  }, [mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
+  }, [enabled, mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
 
   useEffect(() => {
     const pairs = JSON.parse(payloadKey) as [string, string][];

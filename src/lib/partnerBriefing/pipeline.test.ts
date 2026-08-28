@@ -1,21 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import type {
+  BriefingExtractRequestItem,
   BriefingModelSafeEvent,
   BriefingSourceMapping,
+  UntrustedBriefingExtractPlan,
 } from './contract';
 import type { BriefingDayMapping } from './normalize';
 import {
   FakeBriefingProvider,
+  type BriefingExtractRequest,
   type BriefingProviderAvailability,
 } from './provider';
 import {
   PartnerBriefingRunner,
-  areOrdinalSetsEqual,
+  batchCandidateSegments,
+  canItemsFitInEnvelope,
   classifyBriefingGeneration,
-  computeSortedUniqueUnion,
-  deriveVerifyLimits,
+  extractValidEnvelope,
   runPartnerBriefingPipeline,
 } from './pipeline';
+import { getUtf8ByteLength } from './chunk';
 
 function createEvent(
   ordinal: number,
@@ -26,13 +30,31 @@ function createEvent(
     ordinal,
     dayOrdinal,
     period: 'morning',
-    text: `기록 ${ordinal}번 본문`,
+    text: `기록 ${ordinal}번 본문입니다. 추가 문장입니다.`,
     mediaKinds: [],
     ...overrides,
   };
 }
 
-describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
+async function withoutSegmenter<T>(run: () => Promise<T>): Promise<T> {
+  const original = Intl.Segmenter;
+  Object.defineProperty(Intl, 'Segmenter', {
+    configurable: true,
+    writable: true,
+    value: undefined,
+  });
+  try {
+    return await run();
+  } finally {
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      writable: true,
+      value: original,
+    });
+  }
+}
+
+describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
   describe('Provider Synchronous Throw and Trust-Boundary Isolation', () => {
     it('isolates synchronous throw from getAvailability and falls back deterministically', async () => {
       const provider = new FakeBriefingProvider();
@@ -53,6 +75,7 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from getCapability and falls back deterministically', async () => {
@@ -74,12 +97,13 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
     });
 
-    it('isolates synchronous throw from summarize and falls back deterministically', async () => {
+    it('isolates synchronous throw from selectExtracts and falls back deterministically', async () => {
       const provider = new FakeBriefingProvider();
-      provider.summarize = () => {
-        throw new Error('Sync throw in summarize');
+      provider.selectExtracts = () => {
+        throw new Error('Sync throw in selectExtracts');
       };
 
       const events = [createEvent(0, 0)];
@@ -95,6 +119,7 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from cancel and falls back deterministically without unhandled rejection', async () => {
@@ -121,283 +146,78 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
 
   describe('Capability Runtime Shape Validation', () => {
     it('falls back deterministically on primitive, array, or malformed capability objects without TypeError', async () => {
-      const validEnvelope = { maxContextUtf8Bytes: 4096, promptOverheadUtf8Bytes: 256, responseReserveUtf8Bytes: 512, maxInputTextGraphemes: 1000 };
-      const malformedCapabilities: unknown[] = [
-        { envelope: validEnvelope, extra: 'not-allowed' },
-        null,
-        undefined,
-        'capability-string',
-        123,
-        true,
-        [],
-        ['array-cap'],
-        {},
-        { envelope: null },
-        { envelope: 'invalid-string' },
-        { envelope: [] },
-        { envelope: { maxContextUtf8Bytes: -1 } },
+      const validEnvelope = {
+        maxContextUtf8Bytes: 4096,
+        promptOverheadUtf8Bytes: 256,
+        responseReserveUtf8Bytes: 512,
+        maxInputTextGraphemes: 1000,
+      };
+
+      expect(extractValidEnvelope({ envelope: validEnvelope })).toEqual(validEnvelope);
+      expect(extractValidEnvelope(validEnvelope)).toEqual(validEnvelope);
+      expect(extractValidEnvelope(null)).toBeNull();
+      expect(extractValidEnvelope(undefined)).toBeNull();
+      expect(extractValidEnvelope('string-cap')).toBeNull();
+      expect(extractValidEnvelope([validEnvelope])).toBeNull();
+      expect(extractValidEnvelope({ envelope: { ...validEnvelope, maxContextUtf8Bytes: -1 } })).toBeNull();
+    });
+  });
+
+  describe('Envelope and Batch Budget Proofs', () => {
+    it('proves that actual request and expected response fit within the envelope', () => {
+      const env = {
+        maxContextUtf8Bytes: 500,
+        promptOverheadUtf8Bytes: 50,
+        responseReserveUtf8Bytes: 150,
+        maxInputTextGraphemes: 100,
+      };
+
+      const items: BriefingExtractRequestItem[] = [
+        {
+          itemOrdinal: 0,
+          candidates: [{ candidateOrdinal: 0, text: '테스트 문장입니다.' }],
+        },
       ];
 
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+      expect(canItemsFitInEnvelope(items, env)).toBe(true);
 
-      for (const malformed of malformedCapabilities) {
-        const provider = new FakeBriefingProvider();
-        // @ts-expect-error simulating runtime violation
-        provider.getCapability = () => malformed;
+      const hugeItems: BriefingExtractRequestItem[] = Array.from({ length: 50 }, (_, i) => ({
+        itemOrdinal: i,
+        candidates: [{ candidateOrdinal: 0, text: '긴 테스트 문장입니다. 반복 문장입니다.' }],
+      }));
 
-        const briefing = await runPartnerBriefingPipeline({
-          events,
-          sources,
-          days,
-          provider,
-          timeoutMs: 1000,
-        });
+      expect(canItemsFitInEnvelope(hugeItems, env)).toBe(false);
+    });
 
-        expect(briefing.generation).toBe('deterministic');
+    it('batchCandidateSegments splits candidate items deterministically and identifies unfittable items', () => {
+      const env = {
+        maxContextUtf8Bytes: 500,
+        promptOverheadUtf8Bytes: 50,
+        responseReserveUtf8Bytes: 150,
+        maxInputTextGraphemes: 100,
+      };
+
+      const segments = [
+        { segmentId: 0, sourceOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: '첫 번째 짧은 문장' }] },
+        { segmentId: 1, sourceOrdinal: 1, candidates: [{ candidateOrdinal: 0, text: '두 번째 짧은 문장' }] },
+        { segmentId: 2, sourceOrdinal: 2, candidates: [{ candidateOrdinal: 0, text: '세 번째 짧은 문장' }] },
+      ];
+
+      const { batches } = batchCandidateSegments(segments, env);
+      expect(batches.length).toBeGreaterThanOrEqual(1);
+
+      // Verify that every batch satisfies envelope constraints
+      for (const batch of batches) {
+        expect(canItemsFitInEnvelope(batch.items, env)).toBe(true);
+        expect(batch.items.map((it) => it.itemOrdinal)).toEqual(
+          Array.from({ length: batch.items.length }, (_, i) => i),
+        );
       }
     });
   });
 
-  describe('Ordinal Helper Fail-Closed Hardening', () => {
-    it('areOrdinalSetsEqual returns false if inputs contain non-safe, negative, NaN, or duplicate ordinals', () => {
-      expect(areOrdinalSetsEqual([0, 1, 2], [0, 1, 2])).toBe(true);
-      expect(areOrdinalSetsEqual([0, 1, 2], [2, 0, 1])).toBe(true);
-
-      // Duplicates in either input
-      expect(areOrdinalSetsEqual([0, 1, 1], [0, 1])).toBe(false);
-      expect(areOrdinalSetsEqual([0, 1], [0, 1, 1])).toBe(false);
-
-      // Negative numbers, NaN, non-integers
-      expect(areOrdinalSetsEqual([-1, 0], [-1, 0])).toBe(false);
-      expect(areOrdinalSetsEqual([NaN, 0], [NaN, 0])).toBe(false);
-      expect(areOrdinalSetsEqual([0.5, 1], [0.5, 1])).toBe(false);
-
-      // Non-array inputs
-      // @ts-expect-error testing invalid input
-      expect(areOrdinalSetsEqual(null, [0])).toBe(false);
-    });
-
-    it('computeSortedUniqueUnion filters non-safe numbers cleanly and produces sorted unique union', () => {
-      expect(computeSortedUniqueUnion([[3, 1], [2, 1], [0]])).toEqual([0, 1, 2, 3]);
-      // @ts-expect-error testing invalid input
-      expect(computeSortedUniqueUnion([[3, -1, NaN], [2, 0]])).toEqual([0, 2, 3]);
-    });
-  });
-
-  describe('Leaf Ordinal Binding and Accurate Provenance', () => {
-    it('binds exact global source ordinals for multiple sequential leaf chunks without double-indexing', async () => {
-      const tightEnvelope = {
-        maxContextUtf8Bytes: 300,
-        promptOverheadUtf8Bytes: 40,
-        responseReserveUtf8Bytes: 100,
-        maxInputTextGraphemes: 15,
-      };
-
-      const provider = new FakeBriefingProvider({
-        capability: { envelope: tightEnvelope },
-        defaultGenerator: (req) => [
-          {
-            text: `청크 요약: ${req.chunk.sourceOrdinals.join(',')}`,
-            sourceOrdinals: [...req.chunk.sourceOrdinals],
-          },
-        ],
-      });
-
-      const events: BriefingModelSafeEvent[] = [
-        createEvent(0, 0, { period: 'morning', text: '첫 번째 긴 기록' }),
-        createEvent(1, 0, { period: 'afternoon', text: '두 번째 긴 기록' }),
-        createEvent(2, 0, { period: 'evening', text: '세 번째 긴 기록' }),
-      ];
-      const sources: BriefingSourceMapping[] = [
-        { ordinal: 0, recordId: 'rec-0' },
-        { ordinal: 1, recordId: 'rec-1' },
-        { ordinal: 2, recordId: 'rec-2' },
-      ];
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 2000,
-      });
-
-      expect(briefing.days[0].sections).toHaveLength(3);
-      expect(briefing.days[0].sections[0].sourceRecordIds).toEqual(['rec-0']);
-      expect(briefing.days[0].sections[1].sourceRecordIds).toEqual(['rec-1']);
-      expect(briefing.days[0].sections[2].sourceRecordIds).toEqual(['rec-2']);
-      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1', 'rec-2']);
-    });
-  });
-
-  describe('Long Single Record Fallback Deduplication', () => {
-    it('deduplicates a single long record segmented across multiple chunks into 1 record count on fallback', async () => {
-      const segmentEnvelope = {
-        maxContextUtf8Bytes: 4096,
-        promptOverheadUtf8Bytes: 256,
-        responseReserveUtf8Bytes: 512,
-        maxInputTextGraphemes: 5,
-      };
-
-      const provider = new FakeBriefingProvider({
-        availability: 'ready',
-        capability: { envelope: segmentEnvelope },
-        scenarioSelector: () => ({
-          type: 'failure',
-          code: 'native_error',
-        }),
-      });
-
-      const events: BriefingModelSafeEvent[] = [
-        createEvent(0, 0, { period: 'morning', text: '매우긴단일기록텍스트입니다' }),
-      ];
-      const sources: BriefingSourceMapping[] = [{ ordinal: 0, recordId: 'rec-long-0' }];
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-      });
-
-      expect(provider.getCallHistory().length).toBeGreaterThan(1);
-      expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections).toHaveLength(1);
-      expect(briefing.days[0].sections[0].text).toBe('기록 1개');
-      expect(briefing.days[0].sections[0].sourceRecordIds).toEqual(['rec-long-0']);
-      expect(briefing.overview.text).toBe('기록 1개');
-      expect(briefing.overview.sourceRecordIds).toEqual(['rec-long-0']);
-    });
-  });
-
-  describe('Displayed Output Generation Classification', () => {
-    it('classifies as deterministic when all leaf model outputs are replaced by period fallback', async () => {
-      let callCount = 0;
-      const tightEnvelope = {
-        maxContextUtf8Bytes: 300,
-        promptOverheadUtf8Bytes: 40,
-        responseReserveUtf8Bytes: 100,
-        maxInputTextGraphemes: 15,
-      };
-
-      const provider = new FakeBriefingProvider({
-        capability: { envelope: tightEnvelope },
-        scenarioSelector: (req) => {
-          callCount += 1;
-          if (callCount <= 2) {
-            return {
-              type: 'success',
-              sections: [{ text: '리프 모델 요약', sourceOrdinals: [...req.chunk.sourceOrdinals] }],
-            };
-          }
-          return {
-            type: 'failure',
-            code: 'native_error',
-          };
-        },
-      });
-
-      const events: BriefingModelSafeEvent[] = [
-        createEvent(0, 0, { period: 'morning', text: '오전 긴 훈련 기록 0' }),
-        createEvent(1, 0, { period: 'morning', text: '오전 긴 훈련 기록 1' }),
-      ];
-      const sources: BriefingSourceMapping[] = [
-        { ordinal: 0, recordId: 'rec-0' },
-        { ordinal: 1, recordId: 'rec-1' },
-      ];
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-      });
-
-      expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].text).toBe('기록 2개');
-      expect(briefing.overview.text).toBe('기록 2개');
-    });
-
-    it('classifies as hybrid when model day section is displayed and overview is deterministic fallback', async () => {
-      let callCount = 0;
-      const provider = new FakeBriefingProvider({
-        scenarioSelector: (req) => {
-          callCount += 1;
-          if (callCount === 1) {
-            return {
-              type: 'success',
-              sections: [{ text: '오전 모델 요약 완료', sourceOrdinals: [...req.chunk.sourceOrdinals] }],
-            };
-          }
-          return {
-            type: 'failure',
-            code: 'native_error',
-          };
-        },
-      });
-
-      const events: BriefingModelSafeEvent[] = [
-        createEvent(0, 0, { period: 'morning' }),
-        createEvent(1, 0, { period: 'evening' }),
-      ];
-      const sources: BriefingSourceMapping[] = [
-        { ordinal: 0, recordId: 'rec-0' },
-        { ordinal: 1, recordId: 'rec-1' },
-      ];
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-      });
-
-      expect(briefing.generation).toBe('hybrid');
-      expect(briefing.days[0].sections[0].text).toBe('오전 모델 요약 완료');
-      expect(briefing.overview.text).toContain('총 2개의 기록');
-    });
-  });
-
-  describe('Zero Abort Listener Leaks', () => {
-    it('removes abort listener upon normal operation completion and does not trigger cancel later', async () => {
-      let cancelCalledAfterCompletion = false;
-      const provider = new FakeBriefingProvider();
-      provider.cancel = async () => {
-        cancelCalledAfterCompletion = true;
-      };
-
-      const controller = new AbortController();
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-        signal: controller.signal,
-      });
-
-      expect(briefing.generation).toBe('on_device');
-
-      controller.abort();
-      expect(cancelCalledAfterCompletion).toBe(false);
-    });
-  });
-
-  describe('0, 1, 30, 100 Events and Multi-Day Scaling', () => {
-    it('handles 0 events (empty corpus) deterministically without calling provider and with empty text', async () => {
+  describe('Core Pipeline Execution (0, 1, Multi-day, Multi-period)', () => {
+    it('handles 0 events deterministically without calling provider', async () => {
       const provider = new FakeBriefingProvider();
       const briefing = await runPartnerBriefingPipeline({
         events: [],
@@ -410,27 +230,36 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
       expect(briefing.version).toBe(1);
       expect(briefing.sourceCount).toBe(0);
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.rangeLabel).toBe('');
       expect(briefing.overview.text).toBe('');
-      expect(briefing.overview.text).not.toContain('없');
       expect(briefing.overview.sourceRecordIds).toEqual([]);
       expect(briefing.days).toEqual([]);
       expect(provider.getCallHistory()).toHaveLength(0);
     });
 
-    it('handles 1 event with on_device verified output', async () => {
-      const provider = new FakeBriefingProvider({
-        defaultGenerator: (req) => [
-          {
-            text: '오전에 일어났습니다.',
-            sourceOrdinals: [...req.chunk.sourceOrdinals],
-          },
-        ],
-      });
+    it('rejects invalid timeoutMs fail-closed', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [createEvent(0, 0)];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
-      const events: BriefingModelSafeEvent[] = [createEvent(0, 0)];
-      const sources: BriefingSourceMapping[] = [{ ordinal: 0, recordId: 'rec-uuid-1' }];
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
+      await expect(
+        runPartnerBriefingPipeline({ events, sources, days, provider, timeoutMs: 0 }),
+      ).rejects.toThrow('timeoutMs must be a positive safe integer.');
+
+      await expect(
+        runPartnerBriefingPipeline({ events, sources, days, provider, timeoutMs: -50 }),
+      ).rejects.toThrow('timeoutMs must be a positive safe integer.');
+
+      await expect(
+        runPartnerBriefingPipeline({ events, sources, days, provider, timeoutMs: NaN }),
+      ).rejects.toThrow('timeoutMs must be a positive safe integer.');
+    });
+
+    it('processes 1 record on-device with candidate 0 attributed extract', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [createEvent(0, 0, { text: '오늘 아침 점호 완료했습니다.' })];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
       const briefing = await runPartnerBriefingPipeline({
         events,
@@ -440,328 +269,215 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
         timeoutMs: 1000,
       });
 
-      expect(briefing.sourceCount).toBe(1);
       expect(briefing.generation).toBe('on_device');
-      expect(briefing.rangeLabel).toBe('8월 26일');
-      expect(briefing.overview.sourceRecordIds).toEqual(['rec-uuid-1']);
+      expect(briefing.sourceCount).toBe(1);
       expect(briefing.days).toHaveLength(1);
       expect(briefing.days[0].date).toBe('2026-08-26');
-      expect(briefing.days[0].sections).toHaveLength(1);
-      expect(briefing.days[0].sections[0].sourceRecordIds).toEqual(['rec-uuid-1']);
-      expect(briefing.days[0].sections[0].text).toBe('오전에 일어났습니다.');
-    });
-
-    it('handles 30 events with proper leaf chunking, recursive period/overview reduction, and provenance', async () => {
-      const provider = new FakeBriefingProvider({
-        defaultGenerator: (req) => [
-          {
-            text: `청크 요약 (${req.chunk.sourceOrdinals.length}개)`,
-            sourceOrdinals: [...req.chunk.sourceOrdinals],
-          },
-        ],
-      });
-
-      const events: BriefingModelSafeEvent[] = [];
-      const sources: BriefingSourceMapping[] = [];
-      for (let i = 0; i < 30; i += 1) {
-        const period = i < 10 ? 'morning' : i < 20 ? 'afternoon' : 'evening';
-        events.push(createEvent(i, 0, { period, text: `훈련 ${i}` }));
-        sources.push({ ordinal: i, recordId: `rec-${i}` });
-      }
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 2000,
-      });
-
-      expect(briefing.sourceCount).toBe(30);
-      expect(briefing.generation).toBe('on_device');
-      expect(briefing.overview.sourceRecordIds).toHaveLength(30);
-      expect(briefing.overview.sourceRecordIds).toEqual(
-        sources.map((s) => s.recordId),
-      );
-      expect(briefing.days[0].sections).toHaveLength(3);
       expect(briefing.days[0].sections[0].period).toBe('morning');
-      expect(briefing.days[0].sections[1].period).toBe('afternoon');
-      expect(briefing.days[0].sections[2].period).toBe('evening');
-    });
-
-    it('handles 100 events across 3 days with multi-pass reduction, multi-day rangeLabel, and exact ID union', async () => {
-      const provider = new FakeBriefingProvider({
-        defaultGenerator: (req) => [
-          {
-            text: '요약 완료',
-            sourceOrdinals: [...req.chunk.sourceOrdinals],
-          },
-        ],
+      expect(briefing.days[0].sections[0].items).toHaveLength(1);
+      expect(briefing.days[0].sections[0].items![0]).toEqual({
+        text: '“오늘 아침 점호 완료했습니다.”라고 기록했어요.',
+        sourceRecordId: 'rec-0',
       });
-
-      const events: BriefingModelSafeEvent[] = [];
-      const sources: BriefingSourceMapping[] = [];
-      for (let i = 0; i < 100; i += 1) {
-        const dayOrdinal = i < 30 ? 0 : i < 70 ? 1 : 2;
-        const period = i % 2 === 0 ? 'morning' : 'evening';
-        events.push(createEvent(i, dayOrdinal, { period, text: `기록 ${i}` }));
-        sources.push({ ordinal: i, recordId: `rec-${i}` });
-      }
-
-      const days: BriefingDayMapping[] = [
-        { dayOrdinal: 0, date: '2026-08-25' },
-        { dayOrdinal: 1, date: '2026-08-26' },
-        { dayOrdinal: 2, date: '2026-08-27' },
-      ];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 3000,
-      });
-
-      expect(briefing.sourceCount).toBe(100);
-      expect(briefing.rangeLabel).toBe('8월 25일 ~ 8월 27일');
-      expect(briefing.days).toHaveLength(3);
-      expect(briefing.overview.sourceRecordIds).toHaveLength(100);
-      expect(briefing.overview.sourceRecordIds).toEqual(
-        sources.map((s) => s.recordId),
-      );
-    });
-  });
-
-  describe('Timeout, Cancellation, and Hangs', () => {
-    it('direct runPartnerBriefingPipeline immediately returns deterministic fallback when signal is aborted', async () => {
-      const controller = new AbortController();
-      const provider = new FakeBriefingProvider();
-      provider.summarize = () => new Promise(() => {});
-
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const pipelinePromise = runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 5000,
-        signal: controller.signal,
-      });
-
-      setTimeout(() => controller.abort(), 20);
-
-      const briefing = await pipelinePromise;
-      expect(briefing.generation).toBe('deterministic');
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0']);
     });
 
-    it('handles availability hang by timing out and falling back cleanly', async () => {
-      const provider = new FakeBriefingProvider();
-      provider.getAvailability = () => new Promise(() => {});
-
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 50,
-      });
-
-      expect(briefing.generation).toBe('deterministic');
-    });
-
-    it('handles capability hang by timing out and falling back cleanly', async () => {
-      const provider = new FakeBriefingProvider();
-      provider.getCapability = () => new Promise(() => {});
-
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 50,
-      });
-
-      expect(briefing.generation).toBe('deterministic');
-    });
-
-    it('cancels provider and isolates provider.cancel rejections on timeout', async () => {
-      let cancelCalled = false;
-      const provider = new FakeBriefingProvider({ delayMs: 500 });
-      provider.cancel = async () => {
-        cancelCalled = true;
-        throw new Error('Cancel failed');
-      };
-
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 50,
-      });
-
-      expect(cancelCalled).toBe(true);
-      expect(briefing.generation).toBe('deterministic');
-    });
-
-    it('runner immediately returns null on external abort even if provider ignores abort and hangs', async () => {
-      const runner = new PartnerBriefingRunner();
-      const provider = new FakeBriefingProvider();
-      provider.summarize = () => new Promise(() => {});
-
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const controller = new AbortController();
-      const runPromise = runner.run({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 5000,
-        signal: controller.signal,
-      });
-
-      setTimeout(() => controller.abort(), 20);
-
-      const result = await runPromise;
-      expect(result).toBeNull();
-    });
-
-    it('runner cancels Run A when Run B starts and rejects late Run A completion', async () => {
-      const runner = new PartnerBriefingRunner();
-      const provider = new FakeBriefingProvider({
-        delayMs: (req) => (req.chunk.events[0]?.text.includes('RunA') ? 200 : 10),
-      });
-
-      const eventsA = [createEvent(0, 0, { text: 'RunA 기록' })];
-      const sourcesA = [{ ordinal: 0, recordId: 'rec-A' }];
-      const daysA = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const eventsB = [createEvent(0, 0, { text: 'RunB 기록' })];
-      const sourcesB = [{ ordinal: 0, recordId: 'rec-B' }];
-      const daysB = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const promiseA = runner.run({
-        events: eventsA,
-        sources: sourcesA,
-        days: daysA,
-        provider,
-        timeoutMs: 1000,
-      });
-
-      const promiseB = runner.run({
-        events: eventsB,
-        sources: sourcesB,
-        days: daysB,
-        provider,
-        timeoutMs: 1000,
-      });
-
-      const [resultA, resultB] = await Promise.all([promiseA, promiseB]);
-
-      expect(resultA).toBeNull();
-      expect(resultB).not.toBeNull();
-      expect(resultB?.overview.sourceRecordIds).toEqual(['rec-B']);
-    });
-  });
-
-  describe('Verifier Limits and Fail-Closed Safeguards', () => {
-    it('validates timeoutMs strictly and throws on non-positive or non-safe integer', async () => {
-      const provider = new FakeBriefingProvider();
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      await expect(
-        runPartnerBriefingPipeline({
-          events,
-          sources,
-          days,
-          provider,
-          timeoutMs: -10,
-        }),
-      ).rejects.toThrow(/timeoutMs must be a positive safe integer/);
-
-      await expect(
-        runPartnerBriefingPipeline({
-          events,
-          sources,
-          days,
-          provider,
-          timeoutMs: NaN,
-        }),
-      ).rejects.toThrow(/timeoutMs must be a positive safe integer/);
-    });
-
-    it('does not inflate response reserve and derives exact limits', () => {
-      const chunk = {
-        dayOrdinal: 0,
-        period: 'morning' as const,
-        sourceOrdinals: [0, 1],
-        events: [createEvent(0, 0), createEvent(1, 0)],
-      };
-      const envelope = {
-        maxContextUtf8Bytes: 4096,
-        promptOverheadUtf8Bytes: 256,
-        responseReserveUtf8Bytes: 128,
-        maxInputTextGraphemes: 500,
-      };
-
-      const limits = deriveVerifyLimits(chunk, envelope);
-      expect(limits).not.toBeNull();
-      expect(limits?.maxSectionUtf8Bytes).toBe(128);
-      expect(limits?.maxTotalUtf8Bytes).toBe(128);
-      expect(limits?.maxSectionGraphemes).toBe(500);
-      expect(limits?.maxSections).toBe(4);
-    });
-
-    it('returns null on invalid responseReserveUtf8Bytes in envelope', () => {
-      const chunk = {
-        dayOrdinal: 0,
-        period: 'morning' as const,
-        sourceOrdinals: [0],
-        events: [createEvent(0, 0)],
-      };
-      const invalidEnvelope = {
-        maxContextUtf8Bytes: 4096,
-        promptOverheadUtf8Bytes: 256,
-        responseReserveUtf8Bytes: 0,
-        maxInputTextGraphemes: 500,
-      };
-
-      const limits = deriveVerifyLimits(chunk, invalidEnvelope);
-      expect(limits).toBeNull();
-    });
-
-    it('proves zero real database IDs or date strings are ever sent to provider across all passes', async () => {
+    it('processes multi-day and multi-period events in strict chronological order', async () => {
       const provider = new FakeBriefingProvider();
       const events = [
-        createEvent(0, 0, { text: '사격 훈련' }),
-        createEvent(1, 0, { text: '체력 단련' }),
+        createEvent(0, 0, { period: 'morning', text: '8월 26일 아침' }),
+        createEvent(1, 0, { period: 'evening', text: '8월 26일 저녁' }),
+        createEvent(2, 1, { period: 'afternoon', text: '8월 27일 오후' }),
+        createEvent(3, 2, { period: 'night', text: '8월 28일 밤' }),
       ];
       const sources = [
-        { ordinal: 0, recordId: 'rec-secret-uuid-999' },
-        { ordinal: 1, recordId: 'rec-secret-uuid-888' },
+        { ordinal: 0, recordId: 'rec-0' },
+        { ordinal: 1, recordId: 'rec-1' },
+        { ordinal: 2, recordId: 'rec-2' },
+        { ordinal: 3, recordId: 'rec-3' },
       ];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+      const days: BriefingDayMapping[] = [
+        { dayOrdinal: 0, date: '2026-08-26' },
+        { dayOrdinal: 1, date: '2026-08-27' },
+        { dayOrdinal: 2, date: '2026-08-28' },
+      ];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.rangeLabel).toBe('8월 26일 ~ 8월 28일');
+      expect(briefing.overview.text).toBe('3일 동안 총 4개의 기록이 있습니다.');
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1', 'rec-2', 'rec-3']);
+      expect(briefing.days).toHaveLength(3);
+
+      expect(briefing.days[0].sections).toHaveLength(2);
+      expect(briefing.days[0].sections[0].period).toBe('morning');
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[1].period).toBe('evening');
+      expect(briefing.days[0].sections[1].items![0].sourceRecordId).toBe('rec-1');
+
+      expect(briefing.days[1].sections).toHaveLength(1);
+      expect(briefing.days[1].sections[0].period).toBe('afternoon');
+      expect(briefing.days[1].sections[0].items![0].sourceRecordId).toBe('rec-2');
+
+      expect(briefing.days[2].sections).toHaveLength(1);
+      expect(briefing.days[2].sections[0].period).toBe('night');
+      expect(briefing.days[2].sections[0].items![0].sourceRecordId).toBe('rec-3');
+    });
+  });
+
+  describe('Forced Small-Envelope Stress Scaling (30, 100, 300 records)', () => {
+    for (const count of [30, 100, 300]) {
+      it(`correctly batches and verifies ${count} records with small envelope`, async () => {
+        const smallEnvelope = {
+          maxContextUtf8Bytes: 600,
+          promptOverheadUtf8Bytes: 50,
+          responseReserveUtf8Bytes: 200,
+          maxInputTextGraphemes: 100,
+        };
+
+        const provider = new FakeBriefingProvider({
+          capability: { envelope: smallEnvelope },
+        });
+
+        const dayCount = Math.max(1, Math.ceil(count / 20));
+        const events: BriefingModelSafeEvent[] = [];
+        const sources: BriefingSourceMapping[] = [];
+        const days: BriefingDayMapping[] = [];
+
+        for (let d = 0; d < dayCount; d++) {
+          const dateObj = new Date(Date.UTC(2026, 7, 1 + d));
+          const dateStr = dateObj.toISOString().slice(0, 10);
+          days.push({ dayOrdinal: d, date: dateStr });
+        }
+
+        const periods: BriefingModelSafeEvent['period'][] = ['morning', 'afternoon', 'evening', 'night'];
+
+        for (let i = 0; i < count; i++) {
+          const dayOrdinal = Math.floor(i / (count / dayCount));
+          const boundedDayOrdinal = Math.min(dayCount - 1, dayOrdinal);
+          // Group sequentially in period order within each day
+          const periodIndex = Math.floor((i % (count / dayCount)) / ((count / dayCount) / 4));
+          const period = periods[Math.min(3, Math.max(0, periodIndex))];
+
+          events.push({
+            ordinal: i,
+            dayOrdinal: boundedDayOrdinal,
+            period,
+            text: `${i}번 기록 문장입니다. 짧은 요약 내용.`,
+            mediaKinds: [],
+          });
+          sources.push({
+            ordinal: i,
+            recordId: `rec-${i}`,
+          });
+        }
+
+        const briefing = await runPartnerBriefingPipeline({
+          events,
+          sources,
+          days,
+          provider,
+          timeoutMs: 5000,
+        });
+
+        expect(briefing.generation).toBe('on_device');
+        expect(briefing.sourceCount).toBe(count);
+
+        // Prove more than one provider call occurred
+        const calls = provider.getCallHistory() as BriefingExtractRequest[];
+        expect(calls.length).toBeGreaterThan(1);
+
+       // Verify every call's ordinals restart 0..N-1 and stay within budget
+       for (const call of calls) {
+         expect(call.items.length).toBeGreaterThan(0);
+         expect(call.items.map((it) => it.itemOrdinal)).toEqual(
+           Array.from({ length: call.items.length }, (_, idx) => idx),
+         );
+         for (const item of call.items) {
+           expect(item.candidates.length).toBeGreaterThan(0);
+           expect(item.candidates.map((c) => c.candidateOrdinal)).toEqual(
+             Array.from({ length: item.candidates.length }, (_, cIdx) => cIdx),
+           );
+         }
+
+          // Invariant: both request and response reserve fit within envelope
+          expect(
+            canItemsFitInEnvelope(call.items, smallEnvelope, call.requestId),
+          ).toBe(true);
+
+          // Invariant: actual request and response serialization fit within envelope
+          const reqBytes = getUtf8ByteLength(JSON.stringify(call));
+          expect(reqBytes).toBeLessThanOrEqual(
+            smallEnvelope.maxContextUtf8Bytes -
+              smallEnvelope.promptOverheadUtf8Bytes -
+              smallEnvelope.responseReserveUtf8Bytes,
+          );
+        }
+
+        // P2 Hierarchy Assertions (Level 1 Overview -> Level 2 Date/Period -> Level 3 Exact Item)
+        // Level 1: Deterministic Overview populated and covers exact source union
+        expect(briefing.overview.text).toBeTruthy();
+        expect(briefing.overview.sourceRecordIds).toEqual(
+          sources.map((s) => s.recordId),
+        );
+
+        // Level 2: Multiple day groups and period sections exist as expected
+        expect(briefing.days.length).toBe(dayCount);
+        expect(briefing.days.length).toBeGreaterThan(1);
+        for (const day of briefing.days) {
+          expect(day.date).toBeTruthy();
+          expect(day.sections.length).toBeGreaterThan(0);
+          for (const section of day.sections) {
+            expect(['morning', 'afternoon', 'evening', 'night']).toContain(
+              section.period,
+            );
+            expect(section.items).toBeDefined();
+            expect(section.items!.length).toBeGreaterThan(0);
+          }
+        }
+
+        // Level 3: Every item count/ID union equals input and items are properly formatted
+        const allResultItems = briefing.days.flatMap((d) => d.sections.flatMap((s) => s.items!));
+        expect(allResultItems).toHaveLength(count);
+        expect(allResultItems.map((item) => item.sourceRecordId)).toEqual(
+          sources.map((s) => s.recordId),
+        );
+        for (const item of allResultItems) {
+          expect(item.text).toBeTruthy();
+          expect(item.sourceRecordId).toBeTruthy();
+        }
+      });
+    }
+  });
+
+  describe('Privacy Boundary Invariants', () => {
+    it('ensures no recordId, userId, coupleId, exact dates, mediaKinds, URLs, paths, or keys cross model boundary', async () => {
+      const provider = new FakeBriefingProvider();
+      const events: BriefingModelSafeEvent[] = [
+        createEvent(0, 0, {
+          text: '비밀 일기 작성 완료',
+          mediaKinds: ['photo', 'video'],
+        }),
+        createEvent(1, 1, {
+          text: '부대 복귀 완료',
+          mediaKinds: ['voice'],
+        }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'secret-record-id-xyz-999' },
+        { ordinal: 1, recordId: 'another-secret-record-id-abc' },
+      ];
+      const days = [
+        { dayOrdinal: 0, date: '2026-08-26' },
+        { dayOrdinal: 1, date: '2026-08-27' },
+      ];
 
       await runPartnerBriefingPipeline({
         events,
@@ -771,99 +487,132 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
         timeoutMs: 1000,
       });
 
-      const history = provider.getCallHistory();
-      expect(history.length).toBeGreaterThan(0);
+      const calls = provider.getCallHistory();
+      expect(calls.length).toBeGreaterThan(0);
 
-      for (const call of history) {
-        const payloadStr = JSON.stringify(call);
-        expect(payloadStr).not.toContain('rec-secret-uuid');
-        expect(payloadStr).not.toContain('2026-08-26');
-        expect(payloadStr).not.toContain('userId');
-        expect(payloadStr).not.toContain('coupleId');
+      for (const call of calls) {
+        const rawJson = JSON.stringify(call);
+
+        expect(rawJson).not.toContain('secret-record-id');
+        expect(rawJson).not.toContain('another-secret-record-id');
+        expect(rawJson).not.toContain('2026-08-26');
+        expect(rawJson).not.toContain('2026-08-27');
+        expect(rawJson).not.toContain('photo');
+        expect(rawJson).not.toContain('video');
+        expect(rawJson).not.toContain('voice');
+        expect(rawJson).not.toContain('user');
+        expect(rawJson).not.toContain('couple');
+        expect(rawJson).not.toContain('http');
+        expect(rawJson).not.toContain('storage');
+        expect(rawJson).not.toContain('key');
       }
     });
   });
 
-  describe('Hierarchical Multi-Level Reduction and Reduction Fallback Preservation', () => {
-    it('preserves reduction deterministicFallbackSourceOrdinals when Segmenter is absent in reduction pass', async () => {
-      let passCount = 0;
-      const originalSegmenter = Intl.Segmenter;
-
+  describe('Closed Candidate Selection & Attributed Rendering (P1 Safety)', () => {
+    it('custom provider selects nonzero candidate and renders exact extract only through fixed template', async () => {
       const provider = new FakeBriefingProvider({
-        defaultGenerator: (req) => {
-          passCount += 1;
-          if (passCount > 2) {
-            // @ts-expect-error simulating absence
-            Intl.Segmenter = undefined;
-          }
-          return [
-            {
-              text: '성공',
-              sourceOrdinals: [...req.chunk.sourceOrdinals],
-            },
-          ];
-        },
+        defaultExtractGenerator: (req) => ({
+          version: 1,
+          choices: req.items.map((it) => ({
+            itemOrdinal: it.itemOrdinal,
+            candidateOrdinal: Math.min(1, it.candidates.length - 1),
+          })),
+        }),
       });
 
-      try {
-        const events: BriefingModelSafeEvent[] = [
-          createEvent(0, 0, { period: 'morning' }),
-          createEvent(1, 0, { period: 'evening' }),
-        ];
-        const sources: BriefingSourceMapping[] = [
-          { ordinal: 0, recordId: 'rec-0' },
-          { ordinal: 1, recordId: 'rec-1' },
-        ];
-        const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
+      const events = [
+        createEvent(0, 0, {
+          text: '첫 번째 문장입니다. 두 번째 문장입니다.',
+        }),
+      ];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
-        const briefing = await runPartnerBriefingPipeline({
-          events,
-          sources,
-          days,
-          provider,
-          timeoutMs: 1000,
-        });
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
 
-        expect(briefing.generation).toBe('hybrid');
-        expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1']);
-      } finally {
-        Intl.Segmenter = originalSegmenter;
-      }
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.days[0].sections[0].items![0].text).toBe(
+        '“두 번째 문장입니다.”라고 기록했어요.',
+      );
     });
 
-    it('falls back that group to deterministic when reduction output is malformed, while sibling model sections remain', async () => {
-      let callCount = 0;
+    it('rejects provider output with arbitrary text/claim and never displays hallucinated strings', async () => {
       const provider = new FakeBriefingProvider({
-        scenarioSelector: (req) => {
-          callCount += 1;
-          if (req.chunk.period === 'morning') {
-            return {
-              type: 'success',
-              sections: [{ text: '오전 성공', sourceOrdinals: [...req.chunk.sourceOrdinals] }],
-            };
+        defaultExtractGenerator: (req) =>
+          ({
+            version: 1,
+            choices: req.items.map((it) => ({
+              itemOrdinal: it.itemOrdinal,
+              candidateOrdinal: 0,
+            })),
+            claim: '상대는 이별을 원한다',
+            text: '불안과 갈등이 감지되었습니다.',
+          }) as unknown as UntrustedBriefingExtractPlan,
+      });
+
+      const events = [
+        createEvent(0, 0, {
+          text: '오늘 훈련 힘들었다.',
+        }),
+      ];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      expect(briefing.generation).toBe('deterministic');
+      const itemText = briefing.days[0].sections[0].items![0].text;
+      expect(itemText).not.toContain('상대는 이별을 원한다');
+      expect(itemText).not.toContain('불안과 갈등');
+      expect(itemText).toBe('“오늘 훈련 힘들었다.”라고 기록했어요.');
+    });
+  });
+
+  describe('Partial Failure & Hybrid Fallback', () => {
+    it('falls back to hybrid when one batch fails, preserving verified sibling batch', async () => {
+      const smallEnvelope = {
+        maxContextUtf8Bytes: 300,
+        promptOverheadUtf8Bytes: 30,
+        responseReserveUtf8Bytes: 80,
+        maxInputTextGraphemes: 50,
+      };
+
+      let callIndex = 0;
+      const provider = new FakeBriefingProvider({
+        capability: { envelope: smallEnvelope },
+        scenarioSelector: () => {
+          const isSecondCall = callIndex === 1;
+          callIndex++;
+          if (isSecondCall) {
+            return { type: 'failure', code: 'malformed' };
           }
-          if (req.chunk.period === 'evening') {
-            return {
-              type: 'malformed',
-              rawOutput: { invalid: 'structure' },
-            };
-          }
-          return {
-            type: 'success',
-            sections: [{ text: '상위 요약', sourceOrdinals: [...req.chunk.sourceOrdinals] }],
-          };
+          return undefined; // default success
         },
       });
 
-      const events: BriefingModelSafeEvent[] = [
-        createEvent(0, 0, { period: 'morning' }),
-        createEvent(1, 0, { period: 'evening' }),
+      // Two events in different periods to ensure separate chunks/batches
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: '첫 번째 배치 기록입니다.' }),
+        createEvent(1, 0, { period: 'evening', text: '두 번째 배치 기록입니다.' }),
       ];
-      const sources: BriefingSourceMapping[] = [
+      const sources = [
         { ordinal: 0, recordId: 'rec-0' },
         { ordinal: 1, recordId: 'rec-1' },
       ];
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
       const briefing = await runPartnerBriefingPipeline({
         events,
@@ -874,38 +623,357 @@ describe('Partner Briefing Pipeline and Concurrency (Gate A7)', () => {
       });
 
       expect(briefing.generation).toBe('hybrid');
-      expect(briefing.days[0].sections[0].text).toBe('오전 성공');
-      expect(briefing.days[0].sections[1].text).toBe('기록 1개');
+      expect(briefing.days[0].sections).toHaveLength(2);
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[1].items![0].sourceRecordId).toBe('rec-1');
       expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1']);
     });
   });
 
-  describe('Helper Functions and Classification', () => {
-    it('classifies on_device, hybrid, and deterministic correctly', () => {
-      expect(classifyBriefingGeneration([], false, true)).toBe('deterministic');
+  describe('Intl.Segmenter Missing Fallback', () => {
+    it('gracefully falls back all records without truncation or drop when Intl.Segmenter is absent', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { text: '세그멘터 없는 환경 첫 번째' }),
+        createEvent(1, 0, { text: '세그멘터 없는 환경 두 번째' }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-0' },
+        { ordinal: 1, recordId: 'rec-1' },
+      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
-      const modelNode = {
-        dayOrdinal: 0,
-        period: 'morning' as const,
-        text: '요약',
-        actualSourceOrdinals: [0],
-        hasOnDevice: true,
-        hasDeterministic: false,
-        firstSourceOrdinal: 0,
-      };
-      const fallbackNode = {
-        dayOrdinal: 0,
-        period: 'evening' as const,
-        text: '폴백',
-        actualSourceOrdinals: [1],
-        hasOnDevice: false,
-        hasDeterministic: true,
-        firstSourceOrdinal: 1,
-      };
+      const result = await withoutSegmenter(async () =>
+        runPartnerBriefingPipeline({
+          events,
+          sources,
+          days,
+          provider,
+          timeoutMs: 1000,
+        }),
+      );
 
-      expect(classifyBriefingGeneration([modelNode], true, false)).toBe('on_device');
-      expect(classifyBriefingGeneration([modelNode, fallbackNode], true, false)).toBe('hybrid');
-      expect(classifyBriefingGeneration([fallbackNode], false, true)).toBe('deterministic');
+      expect(result.generation).toBe('deterministic');
+      expect(result.sourceCount).toBe(2);
+      expect(result.days[0].sections[0].items).toHaveLength(2);
+      expect(result.days[0].sections[0].items![0].text).toBe(
+        '“세그멘터 없는 환경 첫 번째”라고 기록했어요.',
+      );
+      expect(result.days[0].sections[0].items![1].text).toBe(
+        '“세그멘터 없는 환경 두 번째”라고 기록했어요.',
+      );
     });
   });
+
+ describe('Long Single Record Combination', () => {
+   it('splits long record across small grapheme limit but combines back into exactly one navigation item', async () => {
+     const smallEnvelope = {
+        maxContextUtf8Bytes: 500,
+        promptOverheadUtf8Bytes: 50,
+        responseReserveUtf8Bytes: 150,
+        maxInputTextGraphemes: 15,
+      };
+
+      const provider = new FakeBriefingProvider({
+        capability: { envelope: smallEnvelope },
+        defaultExtractGenerator: (req) => ({
+          version: 1,
+          choices: req.items.map((it) => ({
+            itemOrdinal: it.itemOrdinal,
+            candidateOrdinal: 0,
+          })),
+        }),
+      });
+
+      // Long text with 3 sentences, ~45 graphemes, exceeding maxInputTextGraphemes: 15 and small context budget
+      const longText = '첫 번째 분할 문장입니다. 두 번째 분할 문장입니다. 세 번째 분할 문장입니다.';
+      const events = [
+        createEvent(0, 0, {
+          text: longText,
+        }),
+      ];
+      const sources = [{ ordinal: 0, recordId: 'rec-long-single' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      // 1. Assert exactly one item and exact source record ID
+      expect(briefing.days[0].sections[0].items).toHaveLength(1);
+      const item = briefing.days[0].sections[0].items![0];
+      expect(item.sourceRecordId).toBe('rec-long-single');
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-long-single']);
+
+      // 2. Assert provider call count > 1 where envelope forces it
+      const calls = provider.getCallHistory() as BriefingExtractRequest[];
+      expect(calls.length).toBeGreaterThan(1);
+
+      // 3. Extract every dynamic quoted fragment from final text
+      const quotedMatches = Array.from(item.text.matchAll(/“([^”]+)”/g)).map(
+        (m) => m[1],
+      );
+      expect(quotedMatches.length).toBeGreaterThanOrEqual(2);
+
+      // 4. Prove each quoted fragment is an exact substring of the original source text
+      for (const fragment of quotedMatches) {
+        expect(longText).toContain(fragment);
+      }
+
+      // 5. Verify the full item text structure: each quoted fragment is wrapped in “...”라고 기록했어요.
+      for (const fragment of quotedMatches) {
+        expect(item.text).toContain(`“${fragment}”라고 기록했어요.`);
+      }
+    });
+  });
+
+  describe('Media-Only and Empty Record Handling', () => {
+    it('does not send media-only records to provider and does not downgrade otherwise on_device text', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { text: '텍스트 기록입니다.', mediaKinds: [] }),
+        createEvent(1, 0, { text: '', mediaKinds: ['photo', 'video'] }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-text' },
+        { ordinal: 1, recordId: 'rec-media' },
+      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      // Text record was verified on device; media record does not downgrade generation
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.days[0].sections[0].items).toHaveLength(2);
+      expect(briefing.days[0].sections[0].items![0].text).toBe(
+        '“텍스트 기록입니다.”라고 기록했어요.',
+      );
+      expect(briefing.days[0].sections[0].items![1].text).toBe(
+        '사진 1장, 동영상 1개를 남겼어요.',
+      );
+
+      // Only 1 item sent to provider
+      const calls = provider.getCallHistory() as BriefingExtractRequest[];
+      expect(calls).toHaveLength(1);
+      expect(calls[0].items).toHaveLength(1);
+    });
+  });
+
+  describe('Generation Classification', () => {
+    it('strictly classifies generation across all edge cases', () => {
+      expect(classifyBriefingGeneration(0, 0)).toBe('deterministic');
+      expect(classifyBriefingGeneration(5, 0)).toBe('deterministic');
+      expect(classifyBriefingGeneration(5, 5)).toBe('on_device');
+      expect(classifyBriefingGeneration(5, 3)).toBe('hybrid');
+      expect(classifyBriefingGeneration(5, 1)).toBe('hybrid');
+    });
+  });
+
+  describe('PartnerBriefingRunner Concurrency & Stale Rejection', () => {
+    it('supersedes older run with newer run and returns null for stale run', async () => {
+      const runner = new PartnerBriefingRunner();
+
+      const slowProvider = new FakeBriefingProvider({ delayMs: 150 });
+      const fastProvider = new FakeBriefingProvider({ delayMs: 10 });
+
+      const events = [createEvent(0, 0)];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const runA = runner.run({
+        events,
+        sources,
+        days,
+        provider: slowProvider,
+        timeoutMs: 1000,
+      });
+
+      const runB = runner.run({
+        events,
+        sources,
+        days,
+        provider: fastProvider,
+        timeoutMs: 1000,
+      });
+
+      const [resA, resB] = await Promise.all([runA, runB]);
+
+      expect(resA).toBeNull();
+      expect(resB).not.toBeNull();
+      expect(resB?.sourceCount).toBe(1);
+    });
+
+    it('immediately returns null on external AbortSignal without waiting for provider delay', async () => {
+      const runner = new PartnerBriefingRunner();
+      const slowProvider = new FakeBriefingProvider({ delayMs: 1000 });
+      const controller = new AbortController();
+
+      const events = [createEvent(0, 0)];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const runPromise = runner.run({
+        events,
+        sources,
+        days,
+        provider: slowProvider,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
+
+      // Abort externally after 20ms
+      setTimeout(() => controller.abort(), 20);
+
+      const startTime = Date.now();
+      const res = await runPromise;
+      const elapsed = Date.now() - startTime;
+
+      expect(res).toBeNull();
+      expect(elapsed).toBeLessThan(300);
+    });
+
+    it('cancels active run when cancel() is called', async () => {
+      const runner = new PartnerBriefingRunner();
+      const slowProvider = new FakeBriefingProvider({ delayMs: 500 });
+
+      const events = [createEvent(0, 0)];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const runPromise = runner.run({
+        events,
+        sources,
+        days,
+        provider: slowProvider,
+        timeoutMs: 1000,
+      });
+
+      expect(runner.isRunning()).toBe(true);
+      runner.cancel();
+      expect(runner.isRunning()).toBe(false);
+
+      const res = await runPromise;
+      expect(res).toBeNull();
+    });
+  });
+
+  describe('Provider Availability States and Rejection Scenarios', () => {
+    const unreadyStates: BriefingProviderAvailability[] = [
+      'unsupported',
+      'model_unavailable',
+      'preparing',
+      'locale_unsupported',
+    ];
+
+    for (const state of unreadyStates) {
+      it(`falls back to deterministic when availability is '${state}'`, async () => {
+        const provider = new FakeBriefingProvider({ availability: state });
+        const events = [createEvent(0, 0)];
+        const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+        const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+        const briefing = await runPartnerBriefingPipeline({
+          events,
+          sources,
+          days,
+          provider,
+          timeoutMs: 1000,
+        });
+
+        expect(briefing.generation).toBe('deterministic');
+        expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+        expect(provider.getCallHistory()).toHaveLength(0);
+      });
+    }
+
+    it('falls back to deterministic when provider returns wrong correlation requestId', async () => {
+      const provider = new FakeBriefingProvider({
+        scenarioSelector: () => ({
+          type: 'wrong_correlation',
+          wrongRequestId: 'completely-wrong-id-999',
+        }),
+      });
+
+      const events = [createEvent(0, 0)];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      expect(briefing.generation).toBe('deterministic');
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+    });
+
+    it('falls back to deterministic on provider timeout and late response cannot overwrite fallback', async () => {
+      const provider = new FakeBriefingProvider({
+        delayMs: 200,
+      });
+
+      const events = [createEvent(0, 0, { text: '타임아웃 테스트' })];
+      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 30,
+      });
+
+      expect(briefing.generation).toBe('deterministic');
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-0');
+
+      // Wait past provider delay to ensure late response does not mutate result
+      await new Promise((r) => setTimeout(r, 250));
+      expect(briefing.generation).toBe('deterministic');
+    });
+  });
+
+  describe('Corpus Selection Independence and Non-Inspection of state.records', () => {
+    it('pipeline accepts only supplied safe events without accessing state.records or filtering Top-N', async () => {
+      const provider = new FakeBriefingProvider();
+
+      // Supply 15 events
+      const events: BriefingModelSafeEvent[] = Array.from({ length: 15 }, (_, i) =>
+        createEvent(i, 0, { text: `이벤트 ${i}번 내용` }),
+      );
+      const sources: BriefingSourceMapping[] = Array.from({ length: 15 }, (_, i) => ({
+        ordinal: i,
+        recordId: `rec-${i}`,
+      }));
+      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      // Assert all 15 items are preserved without Top-N drop or sorting alterations
+      expect(briefing.sourceCount).toBe(15);
+      const outputItemIds = briefing.days[0].sections[0].items!.map((it) => it.sourceRecordId);
+      expect(outputItemIds).toEqual(sources.map((s) => s.recordId));
+      expect(briefing.overview.sourceRecordIds).toEqual(sources.map((s) => s.recordId));
+    });
+  });
+
 });

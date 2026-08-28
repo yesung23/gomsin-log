@@ -10,6 +10,8 @@ PODS:
     - Capacitor
   - GomsinlogCapacitorDeviceKeys (0.1.0):
     - Capacitor
+  - GomsinlogCapacitorOnDeviceBriefing (0.1.0):
+    - Capacitor
   - GomsinlogCapacitorOnDeviceSummary (0.1.0):
     - Capacitor
 
@@ -20,6 +22,7 @@ DEPENDENCIES:
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorPushNotifications (from `../../node_modules/@capacitor/push-notifications`)"
   - GomsinlogCapacitorDeviceKeys (from `../../packages/capacitor-device-keys`)
+  - GomsinlogCapacitorOnDeviceBriefing (from `../../packages/capacitor-on-device-briefing`)
   - GomsinlogCapacitorOnDeviceSummary (from `../../packages/capacitor-on-device-summary`)
 
 EXTERNAL SOURCES:
@@ -35,6 +38,8 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/push-notifications"
   GomsinlogCapacitorDeviceKeys:
     :path: "../../packages/capacitor-device-keys"
+  GomsinlogCapacitorOnDeviceBriefing:
+    :path: "../../packages/capacitor-on-device-briefing"
   GomsinlogCapacitorOnDeviceSummary:
     :path: "../../packages/capacitor-on-device-summary"
 
@@ -45,8 +50,9 @@ SPEC CHECKSUMS:
   CapacitorCordova: e61ee8c40101b8cd011d0224261606a290c082cf
   CapacitorPushNotifications: 0527809a9619ed775439d5ab2c2d996122b48319
   GomsinlogCapacitorDeviceKeys: 8771b466923fd3832708159b6992be9c78df2597
+  GomsinlogCapacitorOnDeviceBriefing: 343df7f512c67cb7afa24067afa350f43e8861a2
   GomsinlogCapacitorOnDeviceSummary: 3a8e1c13ffd2c598f04f4b78dbc4504d0cf07b5b
 
-PODFILE CHECKSUM: 64b75f905232757392c55f8973ffb1b8e367dfb5
+PODFILE CHECKSUM: 9164ee79e2d50fd1607bc004d65c416c5a37be78
 
 COCOAPODS: 1.17.0

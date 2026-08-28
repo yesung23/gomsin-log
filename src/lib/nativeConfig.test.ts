@@ -90,6 +90,7 @@ const devicePluginPackage = JSON.parse(read('packages/capacitor-device-keys/pack
 };
 const devicePodspec = read('packages/capacitor-device-keys/GomsinlogCapacitorDeviceKeys.podspec');
 const summaryPodspec = read('packages/capacitor-on-device-summary/GomsinlogCapacitorOnDeviceSummary.podspec');
+const briefingPodspec = read('packages/capacitor-on-device-briefing/GomsinlogCapacitorOnDeviceBriefing.podspec');
 const deviceJavaScriptPlugin = read('packages/capacitor-device-keys/src/index.ts');
 const deviceAndroidPlugin = read(
   'packages/capacitor-device-keys/android/src/main/java/app/gomsinlog/devicekeys/DeviceKeysPlugin.kt',
@@ -754,11 +755,12 @@ describe('both platforms are installed and reproducible from the lockfile', () =
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
     // The count is what keeps the loop below from passing vacuously on a regex
-    // that stopped matching. Seven since the iOS-only on-device summary plugin
-    // was added (six after Gate 3 added CapacitorPushNotifications).
-    expect(pods.length).toBe(7);
+    // that stopped matching. Eight since the separate iOS-only Partner Briefing
+    // plugin was added.
+    expect(pods.length).toBe(8);
     const firstPartyPaths = [
       '../../packages/capacitor-device-keys',
+      '../../packages/capacitor-on-device-briefing',
       '../../packages/capacitor-on-device-summary',
     ];
     for (const [, , path] of pods) {
@@ -849,13 +851,15 @@ describe('iOS: minimum deployment target is consistently set to iOS 15.0', () =>
 
   it('sets deployment target to 15.0 in local plugin podspecs', () => {
     expect(devicePodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
+    expect(briefingPodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
     expect(summaryPodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
     expect(devicePodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
+    expect(briefingPodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
     expect(summaryPodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
   });
 
   it('forbids tracked 14.0 iOS deployment targets in source native config', () => {
-    const trackedConfigs = [iosPodfile, pbxproj, devicePodspec, summaryPodspec];
+    const trackedConfigs = [iosPodfile, pbxproj, devicePodspec, briefingPodspec, summaryPodspec];
     for (const config of trackedConfigs) {
       expect(config).not.toMatch(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*14\.0/);
       expect(config).not.toMatch(/platform\s+:ios,\s*['"]14\.0['"]/);

@@ -1,0 +1,11 @@
+{
+  "name": "@gomsinlog/capacitor-on-device-briefing",
+  "version": "0.1.0",
+  "description": "iOS-only closed-extract Partner Briefing selection with Apple Foundation Models.",
+  "private": true,
+  "capacitor": {
+    "ios": { "src": "ios" }
+  },
+  "peerDependencies": { "@capacitor/core": "^7.0.0" },
+  "files": ["ios/", "GomsinlogCapacitorOnDeviceBriefing.podspec"]
+}

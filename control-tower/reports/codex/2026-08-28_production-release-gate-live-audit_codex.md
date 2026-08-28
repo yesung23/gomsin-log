@@ -1,5 +1,10 @@
 # Production release gate live audit — 2026-08-28
 
+> 이 문서는 SQL 적용 전 preflight 기록이다. 같은 날 사용자 action-time 승인 뒤 수행한
+> Production 적용 결과는
+> [`2026-08-28_production-migrations-063-067-apply-closure_codex.md`](2026-08-28_production-migrations-063-067-apply-closure_codex.md)가
+> 대체한다. 아래의 “Production HOLD / 미적용” 문장은 당시 상태를 보존한 역사 기록이다.
+
 ## Verdict
 
 **CONDITIONAL PASS / Production HOLD.** The local release candidate and the

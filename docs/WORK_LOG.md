@@ -9043,3 +9043,112 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED — read-only live queries only; backup ciphertext is local/off-repository
+
+### 2026-08-28 — Production Supabase 064→065→067→063 적용·actor closure
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Production Supabase schema/security release gate
+- Step: 승인된 exact migration 적용, 파일별 catalog, reload, actor boundary, 사후 독립 검토
+- Previous Gate: 암호화 public backup 실제 복원과 action-time Production HOLD
+- This Gate: Production DB delta CONDITIONAL PASS; 실제 두 기기 ceremony·Apple/TestFlight는 후속
+
+#### DIRECTION CHECK
+- Product source checked: `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, migration/security/release procedures
+- Current-state checked: live branch/HEAD/status/origin master, exact migration files/SHA, Production catalog/data counts, PostgREST/Edge Function state
+- Latest relevant Work Log checked: 2026-08-28 Production release gate live catalog·backup restore·PR browser repair
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary Production operator; independent Sol read-only reviewer
+- Model: primary; requested `kiro/gpt-5.6-sol` High failed `INVALID_MODEL_ID`, fallback `main/gpt-5.6-sol` High
+- Role: action-time apply, primary verification, independent security/release review
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `b85b7573a31b7c6c7ad9b9542545676e7c84f571`
+- Old HEAD: `b85b7573a31b7c6c7ad9b9542545676e7c84f571`
+- New HEAD / Reviewed HEAD: docs/report closure commit pending
+
+#### CHANGED / REVIEWED
+- file: Production Supabase exact `064_lock_crypto_pairings_table_privileges.sql`
+- function/component/migration: `crypto_pairings` table privileges
+- what changed/reviewed: authenticated 권한을 SELECT-only로 고정하고 anon/PUBLIC broad privilege를 제거
+- why: RLS를 우회하는 live TRUNCATE P0 권한을 닫기 위해서다.
+- file: Production Supabase exact `065_harden_e2ee_pairing_rpc.sql`
+- function/component/migration: pairing start/confirm/mark-active RPC 3개
+- what changed/reviewed: NULL evidence/signature, expiry, canonical activation 경계와 authenticated-only EXECUTE를 forward hardening
+- why: 062의 fail-open/invalid-state 가능성을 broad table write 없이 닫기 위해서다.
+- file: Production Supabase exact `067_profile_post_intent.sql`
+- function/component/migration: `daily_records.is_profile_post`
+- what changed/reviewed: boolean NOT NULL DEFAULT false 열을 추가하고 기존 5행을 false로 보존
+- why: Story 사진을 자동 profile grid에 넣지 않고 사용자의 명시적 발행 의도만 저장하기 위해서다.
+- file: Production Supabase exact `063_partner_service_projection.sql`
+- function/component/migration: `get_partner_service_info()`
+- what changed/reviewed: active gomsin에게 active soldier의 allow-listed 복무 타임라인 6필드만 projection
+- why: 곰신도 기다림/복무 성장 정보를 보되 memo와 profiles 원본 행은 비공개로 유지하기 위해서다.
+- file: `docs/CURRENT_STATE.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, `supabase/migrations/README.md`, Control Tower reports
+- function/component/migration: Production release truth
+- what changed/reviewed: APPLIED/NOT APPLIED, actor evidence, backup 한계, rollback, 다음 gate 기록
+- why: 저장소 코드·Production schema·실기기·배포 증거를 분리하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: migration 065 exact reviewed forward-hardening 외 protocol/키/recovery 설계 변경 없음
+- DB/migration semantics: repository SQL 파일은 수정하지 않고 exact SHA 파일만 실행
+- product semantics: AI 중요도 선정/서버 AI/관계 점수 없음; profile post와 복무 projection 기존 계약 유지
+- Production: 066, Apple provider, Vercel Production, PR merge, TestFlight/App Store는 변경하지 않음
+
+#### VERIFICATION
+- command: exact SHA 확인 후 linked `psql`, `SET ROLE postgres`, `ON_ERROR_STOP=1`, 064→065→067→063 파일별 실행
+- PASS / FAIL / UNVERIFIED: PASS — 네 트랜잭션 COMMIT, 파일별 post-check PASS
+- what it actually proves: 승인한 exact SQL이 지정 순서로 Production catalog에 적용됨
+- command: final integrated catalog at `2026-08-28T01:20:51Z`
+- PASS / FAIL / UNVERIFIED: PASS — 063 함수 1, 065 함수 3, all fixed search path/security definer/auth-only; 064 authenticated `[SELECT]`, anon false; 067 5 false/0 null; pairing 0; 066 absent; ledger absent
+- what it actually proves: partial/misordered 적용이 남지 않았고 066/db-push가 실행되지 않음
+- command: PostgREST anon probes for 063/065/067
+- PASS / FAIL / UNVERIFIED: PASS — `401/42501`, schema-missing false
+- what it actually proves: schema cache가 새 객체를 알고 anon 호출을 거부함; authenticated 정상 경로는 별도
+- command: Production membership 기반 rollback-only 063/067 actor matrix
+- PASS / FAIL / UNVERIFIED: PASS — gomsin 1, soldier/former/unrelated 0; owner update 1, partner update 0; shared/private/former/unrelated 경계; rollback 후 5행/marker 불변
+- what it actually proves: 실제 Production membership/data 위 권한·projection 경계, 영구 데이터 변경 없음
+- command: Production rollback-only 065 actor probes
+- PASS / FAIL / UNVERIFIED: CONDITIONAL PASS — valid start 후 rollback, NULL 22023, former/unrelated 42501, noncanonical 42501, unconfirmed 22023; 실제 two-device confirm→activate는 active device/scope key 0으로 UNVERIFIED
+- what it actually proves: 현재 가능한 negative/partial normal 경계; 전체 정상 ceremony는 아님
+- command: `npx supabase functions list --project-ref xzlorqsjajokrlkunxhr --output json`
+- PASS / FAIL / UNVERIFIED: PASS — `delete-account` only, ACTIVE v6, JWT required
+- what it actually proves: 066 sender가 배포되지 않았고 066 보류 판단이 유지됨
+- command: independent post-apply `main/gpt-5.6-sol` High read-only review
+- PASS / FAIL / UNVERIFIED: Production DB delta PASS / 전체 출시 CONDITIONAL PASS; P0 0, P1 0, SQL-source P2 0
+- what it actually proves: reviewer가 `2026-08-28T01:26:05Z`에 Production을 독립 재조회해 이전 HOLD 종료를 확인. 유일한 P2는 `b85b757` 문서의 적용 전 상태이며 이 docs closure가 해결
+
+#### REVIEW IMPACT
+- FULL for Production DB/security exact state. 로컬 app/migration source는 unchanged지만 remote C-class schema/authz delta이므로 사후 보안 review를 다시 수행한다.
+
+#### BLOCKERS
+- code: latest PR #90 `b85b757`의 15/15 checks PASS; reviewer 문서 P2를 닫는 현재 docs-only closure commit CI는 아직 없음
+- environment: Production active device/scope key 0, phone disconnected
+- external/manual: real JWT HTTP actor matrix, two-device ceremony, Apple provider/Services ID/secret, real Google/Apple iPhone OAuth, Vercel Production, Archive/TestFlight/App Store
+
+#### STOPPED AT
+- exact completed boundary: exact four Production migrations, per-file/final catalog, PostgREST, rollback-only actor evidence, independent post-apply PASS complete; docs commit/push pending
+
+#### REMAINING
+- docs/report commit·push와 fresh CI
+- PR merge, Apple/provider/iPhone OAuth, Production web, TestFlight는 별도 gate
+
+#### NEXT ACTION
+- next owner: Codex primary after independent review
+- tool/model: primary integration; `main/gpt-5.6-sol` High review result
+- 기준 SHA: `b85b7573a31b7c6c7ad9b9542545676e7c84f571` plus docs-only closure
+- exact next task: review verdict 반영 → docs commit/push → fresh PR checks 확인 → claim release
+
+#### DO NOT ADVANCE UNTIL
+- fresh docs commit의 CI가 완료될 것
+- Apple/provider/Production deploy/TestFlight는 각각 별도 action-time 상태 확인
+
+#### PRODUCTION
+- APPLIED — exact 064/065/067/063 only
+- NOT APPLIED — 066, Auth provider, Vercel Production, PR merge, TestFlight/App Store

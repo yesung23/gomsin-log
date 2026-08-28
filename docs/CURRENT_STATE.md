@@ -85,12 +85,20 @@
 - `LANG=en_US.UTF-8 npm run verify`는 260 files / 3,753 tests, 전체 typecheck/lint와 2,166
   modules build까지 PASS했다. 320/390px Playwright 5/5와 Xcode 27 beta / iPhoneSimulator
   27.0 unsigned build도 PASS했다. 이 결과는 실물 iPhone·Production·TestFlight 증거가 아니다.
-- 2026-08-28 live catalog에서 Supabase는 `ACTIVE_HEALTHY`, migration ledger는 relation 자체가
-  없다. 060/061 marker와 062 pairing RPC 3종은 존재하지만 063·064·065·067은 미적용이다.
-  `authenticated`에 `crypto_pairings`의 `TRUNCATE/TRIGGER/REFERENCES`가 남아 있어 064가
-  Production P0 권한 gate다. pairing 행과 065 malformed/CRYPTO_ACTIVE 영향 행은 모두 0,
-  `daily_records`는 5행이다. `push_delivery_state`와 `send-push`가 없어 066은 적용 불가능하며
-  명시적으로 보류한다.
+- 2026-08-28 사용자 action-time 승인 뒤 exact repository SQL을 `064 → 065 → 067 → 063`
+  순서로 Production Supabase에 각각 적용·검증했다. 최종 catalog는 063 함수 1개와 065 RPC
+  3개가 authenticated-only, SECURITY DEFINER, fixed `search_path`, `auth.uid()` bound임을
+  확인했다. `crypto_pairings`의 authenticated 권한은 정확히 `SELECT`만 남고 anon SELECT는
+  false다. `daily_records.is_profile_post`는 boolean NOT NULL DEFAULT false이고 기존 5행은
+  모두 false, NULL 0행이다. migration ledger relation은 여전히 없으므로 `supabase db push`는
+  계속 금지한다.
+- live rollback-only actor matrix는 063의 gomsin 1행, soldier/former/unrelated 0행과 067의
+  owner update·active partner shared read·private/former/unrelated 차단을 확인했다. 065는 정상
+  start 후 rollback, NULL evidence/signature, former/unrelated, noncanonical/unconfirmed
+  activation 거부를 확인했다. PostgREST anon은 새 RPC/열을 schema-missing 없이 `401/42501`로
+  거부했다. 단, live active device와 active couple scope key가 각각 0이어서 실제 두 기기
+  confirm→activate 정상 경로와 실제 JWT HTTP authenticated actor matrix는 **UNVERIFIED**다.
+- `push_delivery_state`와 `send-push`는 여전히 없고 066은 **NOT APPLIED / 명시적 보류**다.
 - Free plan에는 관리형 physical backup/PITR이 없었다. 저장소 밖 AES-256 암호화 public
   schema+data archive를 만들고 격리 PostgreSQL 17에 exit 0으로 실제 복원했다: 5 records,
   39 tables, 69 functions, 53 validated public FKs. Auth row와 Storage blob은 이 archive 범위가
@@ -99,9 +107,10 @@
   Apple Client IDs/Secret은 비어 있다. Vercel Production은 master `d9a2eb0`, feature Preview는
   `044d324`에서 Ready이며 Production은 변경하지 않았다. 최신 Xcode 27 beta signed iPhone
   build/install/process 생존은 PASS지만 화면·로그인·두 계정·Foundation Models는 UNVERIFIED다.
-- 안전한 다음 순서는 action-time 승인 후 exact 064 → 065 → 067 → 요청 기능용 063을 각각
-  적용·검증 → PostgREST reload → 실제 actor matrix다. `supabase db push`, 066, PR #90 merge,
-  Apple enable, Production deploy는 아직 HOLD다.
+- Production DB delta와 rollback-only actor 검증은 완료됐다. 다음 최소 단계는 독립 보안
+  사후 검토를 닫고 PR #90을 merge한 뒤, Apple Services ID/secret/provider와 실제 iPhone
+  Google/Apple PKCE 왕복을 별도 action-time gate로 진행하는 것이다. `supabase db push`, 066,
+  Apple enable, Vercel Production deploy, TestFlight는 아직 실행하지 않았다.
 
 ## 0. Default-branch reality
 

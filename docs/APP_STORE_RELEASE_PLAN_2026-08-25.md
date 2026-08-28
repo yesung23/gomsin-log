@@ -16,13 +16,13 @@
 |---|---|---|
 | 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 스토리/무지 종이/고정 헤더/명시적 프로필 게시물 후보에서 260 files / 3,753 tests, phase0 65 migrations / 420 assertions, web build 2,166 modules, Xcode 27 beta / `iphonesimulator27.0` unsigned `BUILD SUCCEEDED`; 실제 iPhone의 이 최신 UI와 profile-post 왕복은 UNVERIFIED |
 | 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — 최신 `044d324`를 Xcode 27 beta/iPhoneOS 27로 signed build·설치·launch했고 앱 프로세스 생존은 PASS. 이 설치의 실제 화면, 로그인, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
-| 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **HOLD** — public 암호화 backup을 격리 PostgreSQL 17에 실제 복원 PASS. ledger relation은 없고 060/061/062 객체만 존재하며 063–067은 없다. 064가 닫아야 할 P0 권한이 live이고 065 영향 pairing은 0행, 067 대상은 5행이다. `push_delivery_state`/`send-push`가 없어 066은 보류한다. action-time 승인 후 exact 064 → 065 → 067 → 063을 각각 적용·검증하고 reload/actor matrix를 수행한다 |
+| 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **CONDITIONAL PASS** — 암호화 public backup의 격리 PostgreSQL 17 실제 복원 뒤 사용자 action-time 승인으로 exact 064 → 065 → 067 → 063을 적용했다. 파일별 catalog, PostgREST reload, rollback-only Production actor matrix PASS. 064 P0 권한은 닫혔고 067 기존 5행은 false로 보존됐다. live device/scope key가 0이라 065 실제 두 기기 정상 ceremony와 real JWT HTTP matrix는 UNVERIFIED. 066은 NOT APPLIED 유지 |
 | 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — live Email/Google ON, Apple OFF. custom-scheme/web `sb_flow_id` redirect는 존재하지만 Apple Client IDs/Secret은 비어 있다. 앱은 Supabase browser OAuth 후 custom-scheme PKCE로 복귀한다. Apple 설정과 Google/Apple 실제 iPhone 왕복은 미완료 |
 | 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — live Vercel Production은 master `d9a2eb0` Ready, feature Preview `044d324` Ready. Production 배포와 authenticated smoke는 실행하지 않았다 |
 | 6. 서명·TestFlight | signing, archive validation, TestFlight two-account smoke | **PARTIAL** — Apple Developer 팀 활성/Admin, Apple Development 인증서와 `app.gomsinlog` development profile 사용. UIScene 수정 commit `34b6e4c`의 Xcode 27 signed physical-device build·install·launch·relaunch PASS. Distribution/Archive validation, TestFlight 업로드와 two-account smoke는 미실행 |
 | 7. App Store 제출 | privacy answers, screenshots, review notes, account deletion/support URL | **UNVERIFIED** |
 
-- PR #90 HEAD `2470f24`: 15개 GitHub/Vercel 검사가 모두 PASS했다. 실제 Chromium
+- PR #90 HEAD `b85b757`: 15개 GitHub/Vercel 검사가 모두 PASS했다. 실제 Chromium
   creator/partner 행렬은 110/110 PASS했고, typecheck/lint/Vitest/build, PostgreSQL,
   Android, iOS simulator, secret scan, boundary, Capacitor sync와 Vercel Preview도 PASS다.
   이는 Production 배포나 실물 사용자 경로 증거가 아니다.
@@ -45,7 +45,9 @@
   - 본 패키징 델타는 이미 문서화된 전체 verify PASS 이후에 수행됨. 2차 전체 verify를 주장하지 않으며 타깃 네이티브 델타 검증(targeted native delta validation)으로 명시.
   - 최종 Terra/Sol delta review는 여전히 PENDING 상태. 프로덕션 변경 없음(Production unchanged).
 - **전체 App Store 릴리즈 판정**: 로컬 게이트 PASS에도 불구하고 **HOLD / CONDITIONAL** 유지.
-- **Supabase 스키마 (단계 3)**: migration 063은 LOCAL FILE ONLY이며 원격 프로덕션 Supabase에 **NOT APPLIED**, 원격 Supabase 현재 상태 UNVERIFIED.
+- **Supabase 스키마 (단계 3)**: 이 2026-08-26/27 메모의 LOCAL FILE ONLY 상태는
+  2026-08-28 Production closure로 대체됐다. 063/064/065/067은 **APPLIED**, 066은
+  **NOT APPLIED**다.
 - **인증 / 프로덕션 웹 / 실기기 (단계 2, 4, 5, 6, 7)**: Vercel 배포 exact SHA 및 환경변수 UNVERIFIED, Apple provider 및 redirect allowlist UNVERIFIED, 지원 iPhone 실기기(온디바이스 AI, Secure Enclave) 및 TestFlight 아카이브/서명 UNVERIFIED / BLOCKED. 프로덕션 mutation 일체 없음(no commit, no push, no deploy).
 
 ### 2026-08-27 최종 로컬 closure 및 live preflight
@@ -64,7 +66,25 @@
   실행 직전 사용자 확인이 필요하다.
 - live Auth: Google true, Apple false, Email true, Phone false, signup enabled. Google을 기본 로그인으로 제공하므로 Apple Review Guideline 4.8 대응을 위해 Apple web OAuth가 실제 iPhone에서 작동하기 전 제출하지 않는다.
 - 현재 Apple 구현은 Supabase browser OAuth + custom-scheme PKCE다. `ASAuthorizationAppleIDProvider`를 사용하지 않으므로 binary `com.apple.developer.applesignin` entitlement는 추가하지 않는다. Portal App ID/Services ID/provider 설정과 profile은 별도 운영 gate다.
-- Production SQL/Auth/Vercel/TestFlight/App Store Connect mutation: **NOT APPLIED**.
+- Production SQL: exact 064/065/067/063 **APPLIED (2026-08-28)**. Auth provider,
+  Vercel Production, 066, TestFlight, App Store Connect mutation은 **NOT APPLIED**.
+
+### 2026-08-28 Production Supabase closure
+
+- exact repository 파일 SHA를 고정하고 `supabase db push` 없이 `064 → 065 → 067 → 063`을
+  한 파일씩 적용했다. 각 트랜잭션 직후 catalog를 확인했고 최종 통합 재확인도 PASS했다.
+- 064: `crypto_pairings`의 authenticated 권한은 `SELECT` only, anon SELECT false,
+  pairing 0행이다. 과거 P0 `TRUNCATE/TRIGGER/REFERENCES` 권한은 제거됐다.
+- 065: RPC 3개는 authenticated-only, SECURITY DEFINER, fixed `search_path`, `auth.uid()`
+  bound다. rollback-only negative actor 검증은 PASS했지만 live active device와 couple
+  scope key가 0이어서 실제 두 기기 confirm→activate 정상 경로는 **UNVERIFIED**다.
+- 067: `is_profile_post BOOLEAN NOT NULL DEFAULT false`; 기존 5행은 false, NULL 0행이다.
+  owner/partner/private/former/unrelated 경계와 rollback 후 행·marker 불변을 확인했다.
+- 063: 허용 목록 6개만 반환하고 memo는 제외한다. gomsin 1행,
+  soldier/former/unrelated 0행, anon `401/42501`을 확인했다.
+- migration ledger relation은 여전히 없고 066의 선행 테이블/sender도 없으므로
+  `supabase db push`와 066은 계속 금지/보류한다. public archive는 실제 복원됐지만 Auth
+  rows와 Storage blobs는 포함하지 않으므로 전체 재해복구 PASS로 부르지 않는다.
 
 ### 2026-08-27 실제 기기·원격 운영 gate 갱신
 
@@ -119,18 +139,16 @@
 
 ## 원격 작업의 안전 순서
 
-1. exact release SHA와 rollback 문서를 고정한다.
-2. Supabase backup과 함수/권한/catalog를 다시 읽는다.
-3. 비어 있는 migration ledger를 replay하지 말고 exact `064_lock_crypto_pairings_table_privileges.sql`을 적용·검증한다.
-4. exact `065_harden_e2ee_pairing_rpc.sql`을 적용·검증한다.
-5. exact `067_profile_post_intent.sql`을 적용·검증한 뒤, 요청한 곰신 복무정보용 exact
-   `063_partner_service_projection.sql`을 별도로 적용·검증한다. 066은 적용하지 않는다.
-6. PostgREST schema를 reload한다.
-7. owner, active partner, former partner, unrelated, anon/NULL actor를 실제 세션으로 검증한다.
-8. Apple provider와 redirect URL을 설정하고 Google/Apple PKCE 왕복을 실제 iPhone에서 확인한다.
-9. production deploy 후 `/us`, `/search`, `/settings`, 기록 작성, 사진 상세, 스토리, 계정 삭제를
+1. **완료:** exact release SHA와 rollback 문서를 고정하고 public backup을 실제 복원한다.
+2. **완료:** Supabase 함수/권한/catalog를 다시 읽고 사용자 action-time 승인을 받는다.
+3. **완료:** 빈 ledger를 replay하지 않고 exact 064 → 065 → 067 → 063을 파일별 적용·검증한다.
+4. **완료:** PostgREST reload와 rollback-only owner/partner/former/unrelated/anon 경계를
+   확인한다. 065 실제 두 기기 정상 ceremony는 기기/scope key가 생긴 뒤 별도 검증한다.
+5. **다음:** PR #90을 merge하고 Apple provider/redirect를 설정한 뒤 Google/Apple PKCE
+   왕복을 실제 iPhone에서 확인한다.
+6. production deploy 후 `/us`, `/search`, `/settings`, 기록 작성, 사진 상세, 스토리, 계정 삭제를
    두 계정으로 확인한다.
-10. TestFlight에서 같은 경로와 온디바이스 모델의 기기 gate를 다시 수행한다.
+7. TestFlight에서 같은 경로와 온디바이스 모델의 기기 gate를 다시 수행한다.
 
 ## 지금 수정하지 말아야 할 것
 

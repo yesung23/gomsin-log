@@ -978,8 +978,9 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
   describe("Fail-Closed Safe UUID Generation and Provider Request Privacy", () => {
     it("falls back deterministically without calling provider when crypto.randomUUID is unavailable", async () => {
-      const originalCrypto = globalThis.crypto;
+      const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
       try {
+        const originalCrypto = globalThis.crypto;
         Object.defineProperty(globalThis, "crypto", {
           configurable: true,
           writable: true,
@@ -1008,17 +1009,21 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-none");
         expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-none"]);
       } finally {
-        Object.defineProperty(globalThis, "crypto", {
-          configurable: true,
-          writable: true,
-          value: originalCrypto,
-        });
+        if (originalDescriptor) {
+          Object.defineProperty(globalThis, "crypto", originalDescriptor);
+        } else {
+          Reflect.deleteProperty(globalThis, "crypto");
+        }
       }
+
+      const currentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+      expect(currentDescriptor).toEqual(originalDescriptor);
     });
 
     it("falls back deterministically without calling provider when crypto.randomUUID throws", async () => {
-      const originalCrypto = globalThis.crypto;
+      const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
       try {
+        const originalCrypto = globalThis.crypto;
         Object.defineProperty(globalThis, "crypto", {
           configurable: true,
           writable: true,
@@ -1049,17 +1054,21 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-throw");
         expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-throw"]);
       } finally {
-        Object.defineProperty(globalThis, "crypto", {
-          configurable: true,
-          writable: true,
-          value: originalCrypto,
-        });
+        if (originalDescriptor) {
+          Object.defineProperty(globalThis, "crypto", originalDescriptor);
+        } else {
+          Reflect.deleteProperty(globalThis, "crypto");
+        }
       }
+
+      const currentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+      expect(currentDescriptor).toEqual(originalDescriptor);
     });
 
     it("falls back deterministically without calling provider when crypto.randomUUID returns empty or whitespace string", async () => {
-      const originalCrypto = globalThis.crypto;
+      const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
       try {
+        const originalCrypto = globalThis.crypto;
         Object.defineProperty(globalThis, "crypto", {
           configurable: true,
           writable: true,
@@ -1088,12 +1097,15 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-blank");
         expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-blank"]);
       } finally {
-        Object.defineProperty(globalThis, "crypto", {
-          configurable: true,
-          writable: true,
-          value: originalCrypto,
-        });
+        if (originalDescriptor) {
+          Object.defineProperty(globalThis, "crypto", originalDescriptor);
+        } else {
+          Reflect.deleteProperty(globalThis, "crypto");
+        }
       }
+
+      const currentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+      expect(currentDescriptor).toEqual(originalDescriptor);
     });
   });
 });

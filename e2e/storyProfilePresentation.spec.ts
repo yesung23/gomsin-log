@@ -51,7 +51,9 @@ for (const width of [320, 390]) {
     const dialog = page.getByRole('dialog', { name: '오늘' });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('09:07', { exact: true })).toBeVisible();
-    await expect(dialog.getByText('사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장')).toHaveClass(/text-heading/);
+    const storyCopy = dialog.getByText('사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장');
+    await expect(storyCopy).toHaveClass(/record-copy/);
+    expect(await storyCopy.evaluate((node) => getComputedStyle(node).fontSize)).toBe('17px');
     const original = dialog.getByRole('button', { name: /원본 보기/ });
     const actions = original.locator('xpath=..');
     expect((await actions.boundingBox())!.y).toBeGreaterThan((await dialog.getByText('사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장').boundingBox())!.y);
@@ -59,13 +61,34 @@ for (const width of [320, 390]) {
 
     await page.goto('/settings');
     await page.getByRole('button', { name: '무지 종이' }).click();
+    const sizeButtons = ['작게', '기본', '크게'].map((name) => page.getByRole('button', { name, exact: true }));
+    for (const button of sizeButtons) {
+      const box = await button.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+    await sizeButtons[2].click();
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'plain');
+    await expect(page.locator('html')).toHaveAttribute('data-record-text-size', 'large');
     const background = await page.locator('#main-content').evaluate((node) => getComputedStyle(node).backgroundImage);
     expect(background).toBe('none');
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'plain');
+    await expect(page.locator('html')).toHaveAttribute('data-record-text-size', 'large');
     await expect(page.getByRole('button', { name: '무지 종이' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: '크게', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await page.screenshot({ path: `${OUT}/plain-paper-${width}.png`, fullPage: true });
+    await page.getByText('게시물·스토리 글자 크기', { exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${OUT}/text-size-settings-${width}.png` });
+
+    await page.goto('/story/partner?at=long-0');
+    const largeStoryCopy = page.getByRole('dialog', { name: '오늘' }).getByText('사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장');
+    expect(await largeStoryCopy.evaluate((node) => getComputedStyle(node).fontSize)).toBe('20px');
+    await page.screenshot({ path: `${OUT}/large-story-${width}.png`, fullPage: true });
+
+    await page.goto('/home');
+    const largeHomeCopy = page.getByText('스크롤 검증 기록 1', { exact: true });
+    await expect(largeHomeCopy).toBeVisible();
+    expect(await largeHomeCopy.evaluate((node) => getComputedStyle(node).fontSize)).toBe('20px');
 
     await context.close();
   });

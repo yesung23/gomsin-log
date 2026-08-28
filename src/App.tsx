@@ -7,6 +7,10 @@ import {
   applyPaperTextureAttribute,
   loadPaperTexture,
 } from '@/lib/paperTexturePreference';
+import {
+  applyRecordTextSizeAttribute,
+  loadRecordTextSize,
+} from '@/lib/recordTextSizePreference';
 import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
@@ -314,6 +318,7 @@ export function App() {
   useEffect(() => {
     applyHandwritingAttribute(loadHandwritingEnabled(viewerId));
     applyPaperTextureAttribute(loadPaperTexture(viewerId));
+    applyRecordTextSizeAttribute(loadRecordTextSize(viewerId));
   }, [viewerId]);
 
   if (!isReady) {

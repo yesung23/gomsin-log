@@ -332,7 +332,7 @@ describe('접근성', () => {
 describe('사용자가 쓴 글에만 손글씨', () => {
   it('본문은 손글씨, 시간은 인쇄체', () => {
     view();
-    expect(screen.getByText('오늘 시험 끝났어').className).toContain('hand-text');
-    expect(screen.getByText('09:00').className).not.toContain('hand-text');
+    expect(screen.getByText('오늘 시험 끝났어')).toHaveClass('hand-text', 'record-copy');
+    expect(screen.getByText('09:00')).not.toHaveClass('hand-text', 'record-copy');
   });
 });

@@ -12,6 +12,12 @@ import {
   savePaperTexture,
   type PaperTexture,
 } from '@/lib/paperTexturePreference';
+import {
+  applyRecordTextSizeAttribute,
+  loadRecordTextSize,
+  saveRecordTextSize,
+  type RecordTextSize,
+} from '@/lib/recordTextSizePreference';
 
 /**
  * 손글씨로 볼지 고르는 곳.
@@ -37,10 +43,14 @@ import {
 export function HandwritingSection({ userId }: { userId: string }) {
   const [enabled, setEnabled] = useState(() => loadHandwritingEnabled(userId));
   const [paper, setPaper] = useState<PaperTexture>(() => loadPaperTexture(userId));
+  const [recordTextSize, setRecordTextSize] = useState<RecordTextSize>(
+    () => loadRecordTextSize(userId),
+  );
 
   useEffect(() => {
     setEnabled(loadHandwritingEnabled(userId));
     setPaper(loadPaperTexture(userId));
+    setRecordTextSize(loadRecordTextSize(userId));
   }, [userId]);
 
   const toggle = (next: boolean) => {
@@ -53,6 +63,12 @@ export function HandwritingSection({ userId }: { userId: string }) {
     setPaper(next);
     savePaperTexture(userId, next);
     applyPaperTextureAttribute(next);
+  };
+
+  const chooseRecordTextSize = (next: RecordTextSize) => {
+    setRecordTextSize(next);
+    saveRecordTextSize(userId, next);
+    applyRecordTextSizeAttribute(next);
   };
 
   return (
@@ -81,6 +97,30 @@ export function HandwritingSection({ userId }: { userId: string }) {
           </div>
           <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
             무지 종이는 가로줄을 없애 글과 사진에 더 집중할 수 있어요.
+          </p>
+        </div>
+        <div className="ink-rule" aria-hidden="true" />
+        <div>
+          <p className="text-label font-semibold text-foreground">게시물·스토리 글자 크기</p>
+          <div className="mt-2 grid grid-cols-3 gap-2 rounded-control bg-muted p-1">
+            {([
+              ['small', '작게'],
+              ['medium', '기본'],
+              ['large', '크게'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => chooseRecordTextSize(value)}
+                aria-pressed={recordTextSize === value}
+                className={`press-response min-h-11 rounded-control text-label font-semibold ${recordTextSize === value ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
+            게시물과 스토리의 글만 바뀌어요. 시간과 버튼 크기는 그대로예요.
           </p>
         </div>
         <div className="ink-rule" aria-hidden="true" />

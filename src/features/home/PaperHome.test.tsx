@@ -88,6 +88,8 @@ describe('홈 포스트 읽기 순서', () => {
 
     expect(article).not.toHaveTextContent('예성');
     expect(article).not.toHaveTextContent('01:23:00');
+    expect(body).toHaveClass('record-copy');
+    expect(time).not.toHaveClass('record-copy');
     expect(media.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(body.compareDocumentPosition(bookmark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(body.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

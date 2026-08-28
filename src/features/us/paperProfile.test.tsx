@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, Trip } from '@/types';
 
@@ -245,6 +245,7 @@ describe('PaperProfile (우리 화면)', () => {
     const viewer = screen.getByTestId('photo-post-viewer');
     expect(viewer).toBeInTheDocument();
     expect(viewer.querySelector('[data-testid="record-attachment"] img[alt="제주도.jpg"]')).not.toBeNull();
+    expect(within(viewer).getByText('제주도 바다 도착!')).toHaveClass('record-copy');
 
     fireEvent.click(screen.getByRole('button', { name: '사진 게시물 닫기' }));
     expect(screen.queryByTestId('photo-post-viewer')).not.toBeInTheDocument();

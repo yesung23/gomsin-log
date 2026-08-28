@@ -319,7 +319,7 @@ function CoverCard({
             >
               <span className="shrink-0 text-caption text-muted-foreground tabular-nums">{line.time}</span>
               {/* 사용자가 쓴 글이므로 손글씨다. 시간은 앱이 아는 사실이므로 인쇄체다. */}
-              <span className="hand-text text-body text-foreground">{line.text}</span>
+              <span className="hand-text record-copy text-foreground">{line.text}</span>
             </button>
           </li>
         ))}
@@ -361,7 +361,7 @@ function MomentCard({
     return (
       <PaperCard className="mt-2">
         {/* 자르지 않는다. 요약을 보여주는 화면이 아니다. */}
-        <p className="hand-text text-heading leading-relaxed whitespace-pre-wrap break-keep text-foreground">
+        <p className="hand-text record-copy whitespace-pre-wrap break-keep text-foreground">
           {body || '순간을 남겼어요'}
         </p>
       </PaperCard>
@@ -372,7 +372,7 @@ function MomentCard({
     <div className="mt-2 space-y-3">
       <RecordMediaGallery attachments={attachments} recordId={record.id} coupleId={coupleId} fit="contain" />
       {body ? (
-        <p className="hand-text text-heading leading-relaxed whitespace-pre-wrap break-keep text-foreground">{body}</p>
+        <p className="hand-text record-copy whitespace-pre-wrap break-keep text-foreground">{body}</p>
       ) : null}
     </div>
   );

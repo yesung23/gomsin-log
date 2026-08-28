@@ -404,7 +404,7 @@ function Post({
             }}
           >
             <p
-              className="hand-text whitespace-pre-wrap break-keep text-heading"
+              className="hand-text record-copy whitespace-pre-wrap break-keep"
               style={{ color: 'var(--ink)' }}
             >
               {record.log}
@@ -414,7 +414,7 @@ function Post({
       </div>
 
       {hasMedia && record.log ? (
-        <p className="hand-text px-4 pt-3 text-body" style={{ color: 'var(--ink)' }}>
+        <p className="hand-text record-copy px-4 pt-3" style={{ color: 'var(--ink)' }}>
           {record.log}
         </p>
       ) : null}

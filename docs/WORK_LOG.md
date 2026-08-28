@@ -9153,3 +9153,99 @@ e2e · Postgres 계약 · Deno).
 #### PRODUCTION
 - APPLIED — exact 064/065/067/063 only
 - NOT APPLIED — 066, Auth provider, Vercel Production, PR merge, TestFlight/App Store
+
+### 2026-08-28 — fresh release asset sync·Xcode 27 실물 덮어 설치
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: iOS physical packaging and install
+- Step: stale iOS web bundle 진단 → publishable-key release build → sync → signed reinstall
+- Previous Gate: Production DB closure, 사용자 “앱이 그대로” 보고
+- This Gate: packaging/install PASS; physical render UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 제품/과금/저장 전략 변경 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/APP_STORE_RELEASE_PLAN_2026-08-25.md`, release-validation procedure
+- Current-state checked: branch/HEAD/status, dist/iOS asset hashes, Capacitor config, Xcode toolchains, connected device/install/process
+- Latest relevant Work Log checked: 2026-08-28 Production Supabase closure
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary packaging operator
+- Model: primary
+- Role: diagnose, release build, native sync, physical reinstall verification
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `fee58233df7c66acef2704e4719353be1f7e25d8`
+- Old HEAD: `fee58233df7c66acef2704e4719353be1f7e25d8`
+- New HEAD / Reviewed HEAD: docs-only follow-up commit
+
+#### CHANGED / REVIEWED
+- file: generated/ignored `dist`, `ios/App/App/public`, isolated `/tmp` DerivedData, physical installed app
+- function/component/migration: release asset delivery chain
+- what changed/reviewed: live publishable key를 메모리로만 전달해 fresh build·sync하고 Xcode 27 signed app을 덮어 설치
+- why: 최신 web asset이 iOS bundle과 설치본에 들어가지 않아 앱이 그대로 보이던 상태를 해결
+- file: release docs/report
+- function/component/migration: physical packaging truth
+- what changed/reviewed: stale bundle root cause, warning 판정, build/install 증거와 render 한계 기록
+- why: code existence·bundle sync·physical install·physical render를 분리하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged
+- Production: Supabase/Vercel/Auth/TestFlight/App Store mutation 없음
+
+#### VERIFICATION
+- command: initial `npm run cap:release:ios`
+- PASS / FAIL / UNVERIFIED: expected FAIL — legacy key format으로 release build abort
+- what it actually proves: production artifact가 legacy anon/JWT key로 만들어지지 않음
+- command: live publishable key memory injection + `npm run cap:release:ios`
+- PASS / FAIL / UNVERIFIED: PASS — 2,166 modules, 5 plugins
+- what it actually proves: strict release env를 만족한 current web bundle이 iOS project로 복사됨
+- command: SHA-256 comparison
+- PASS / FAIL / UNVERIFIED: PASS — dist/iOS public/signed App.app index hash exact match
+- what it actually proves: 빌드·native project·설치 대상 artifact가 같은 web entry를 포함
+- command: Xcode 27 beta physical signed build
+- PASS / FAIL / UNVERIFIED: PASS — `BUILD SUCCEEDED`, signature verify PASS
+- what it actually proves: iPhoneOS 27 signed bundle 생성 가능; Archive/TestFlight 증거는 아님
+- command: `devicectl install app`, terminate-existing launch, 5-second process query
+- PASS / FAIL / UNVERIFIED: PASS — new bundle URL installed, PID 4433 running from that URL
+- what it actually proves: fresh signed bundle 설치·프로세스 생존; 화면 내용은 아님
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 106 tests
+- what it actually proves: native config, iOS privacy manifest, app assets, native permissions 계약 유지
+- command: `git diff --check`, final status
+- PASS / FAIL / UNVERIFIED: PASS — tracked native diff 없음, 사용자 변경 보존
+- what it actually proves: generated sync가 추적 source/config를 오염시키지 않음
+
+#### REVIEW IMPACT
+- NONE — packaging/docs only; app/security/DB source semantics unchanged
+
+#### BLOCKERS
+- code: 없음
+- environment: physical screenshot/mirroring unavailable; 설치 전후 data container path가 달라 session 보존 UNVERIFIED
+- external/manual: 사용자가 실제 화면 표지 확인, Apple OAuth, two-account, Foundation Models, Archive/TestFlight
+
+#### STOPPED AT
+- exact completed boundary: strict release build, iOS sync, Xcode 27 signed physical overwrite install, launch/process verification 완료
+
+#### REMAINING
+- physical rendered latest UI와 authenticated path 확인
+- 다음 distributable build에서 build number 증가
+
+#### NEXT ACTION
+- next owner: user + Codex verifier
+- tool/model: user visual check, primary evidence integration
+- 기준 SHA: `fee58233df7c66acef2704e4719353be1f7e25d8`
+- exact next task: 현재 열린 iPhone에서 최신 UI 표지 4개 확인 후 PASS/FAIL 보고
+
+#### DO NOT ADVANCE UNTIL
+- TestFlight 전 physical render/auth smoke와 build number 증가
+
+#### PRODUCTION
+- APPLIED — local physical development app overwrite install only
+- NOT APPLIED — Vercel Production, Auth provider, TestFlight/App Store, additional Supabase mutation

@@ -105,8 +105,11 @@
   아니므로 전체 Supabase 재해복구 증거는 아니다.
 - Supabase Auth는 Email/Google ON, Apple OFF이고 query-aware `sb_flow_id` redirect는 live다.
   Apple Client IDs/Secret은 비어 있다. Vercel Production은 master `d9a2eb0`, feature Preview는
-  `044d324`에서 Ready이며 Production은 변경하지 않았다. 최신 Xcode 27 beta signed iPhone
-  build/install/process 생존은 PASS지만 화면·로그인·두 계정·Foundation Models는 UNVERIFIED다.
+  `044d324`에서 Ready이며 Production은 변경하지 않았다. 2026-08-28 fresh release build는
+  live Supabase publishable key를 메모리로만 전달해 2,166 modules를 빌드했고, `dist`, iOS
+  `public`, signed `App.app`의 `index.html` SHA-256이 일치했다. Xcode 27 beta/iPhoneOS 27
+  signed build·덮어 설치·launch와 5초 후 process 생존은 PASS다. 실제 화면·로그인·두 계정·
+  Foundation Models는 여전히 UNVERIFIED다.
 - Production DB delta와 rollback-only actor 검증은 완료됐다. 다음 최소 단계는 독립 보안
   사후 검토를 닫고 PR #90을 merge한 뒤, Apple Services ID/secret/provider와 실제 iPhone
   Google/Apple PKCE 왕복을 별도 action-time gate로 진행하는 것이다. `supabase db push`, 066,

@@ -15,7 +15,7 @@
 | 단계 | 완료 조건 | 2026-08-28 live 상태 |
 |---|---|---|
 | 1. 로컬 release candidate | typecheck, lint, 전체 Vitest, web build, phase0, iOS simulator build | **PASS** — 스토리/무지 종이/고정 헤더/명시적 프로필 게시물 후보에서 260 files / 3,753 tests, phase0 65 migrations / 420 assertions, web build 2,166 modules, Xcode 27 beta / `iphonesimulator27.0` unsigned `BUILD SUCCEEDED`; 실제 iPhone의 이 최신 UI와 profile-post 왕복은 UNVERIFIED |
-| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — 최신 `044d324`를 Xcode 27 beta/iPhoneOS 27로 signed build·설치·launch했고 앱 프로세스 생존은 PASS. 이 설치의 실제 화면, 로그인, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
+| 2. 온디바이스 실기기 | 지원 iPhone, 한국어, airplane mode, timeout/cancel, latency/heat/battery | **PARTIAL** — `044d324` runtime을 live Supabase publishable key로 fresh release build하고 Xcode 27 beta/iPhoneOS 27로 signed build·덮어 설치·launch했다. `dist`→iOS `public`→signed `App.app` asset hash 일치와 process 생존 PASS. 실제 화면, 로그인, 두 계정, Foundation Models 한국어/offline/성능은 UNVERIFIED; production flag는 기본 OFF 유지 |
 | 3. Supabase schema | 최신 backup/catalog 확인 후 exact delta, reload, actor matrix | **CONDITIONAL PASS** — 암호화 public backup의 격리 PostgreSQL 17 실제 복원 뒤 사용자 action-time 승인으로 exact 064 → 065 → 067 → 063을 적용했다. 파일별 catalog, PostgREST reload, rollback-only Production actor matrix PASS. 064 P0 권한은 닫혔고 067 기존 5행은 false로 보존됐다. live device/scope key가 0이라 065 실제 두 기기 정상 ceremony와 real JWT HTTP matrix는 UNVERIFIED. 066은 NOT APPLIED 유지 |
 | 4. 인증 | Apple provider 활성, query-aware native redirect, Google/Apple 실제 왕복 | **BLOCKED** — live Email/Google ON, Apple OFF. custom-scheme/web `sb_flow_id` redirect는 존재하지만 Apple Client IDs/Secret은 비어 있다. 앱은 Supabase browser OAuth 후 custom-scheme PKCE로 복귀한다. Apple 설정과 Google/Apple 실제 iPhone 왕복은 미완료 |
 | 5. Production web | exact commit 배포, 필수 env, legal/support 연락처, authenticated smoke | **BLOCKED** — live Vercel Production은 master `d9a2eb0` Ready, feature Preview `044d324` Ready. Production 배포와 authenticated smoke는 실행하지 않았다 |
@@ -91,7 +91,13 @@
 - 마이탭 헤더는 좌우 88px 대칭 슬롯으로 고쳐 `+` 왼쪽, 아이디/자물쇠 화면 정중앙, 작성/설정 오른쪽을 유지한다. 390px 실제 렌더에서 중심 오차 1px 이하와 각 44px 터치 타깃을 E2E로 확인했다.
 - 이 보정 뒤 `LANG=en_US.UTF-8 npm run verify`는 exit 0으로 다시 통과했다. 254 files / 3,630 tests, 전체 lint/typecheck, production build가 포함되며 과거 `deviceKeyPort` 병렬 timeout은 재발하지 않았다.
 - iOS 27.0 iPhone 16 Pro는 Xcode 27.0 build `27A5252f`/iOS 27 SDK에서 `connected`로 확인됐다. 활성 Apple Developer 팀과 새 Apple Development 인증서를 연결하고, ignored `ios/App/LocalSigning.xcconfig`를 통해 Team ID를 저장소에 남기지 않은 채 `app.gomsinlog` development profile을 생성했다. signed Debug build가 `BUILD SUCCEEDED`, 실물 기기 설치 목록의 `곰신로그` 0.1.0(1)과 실행 중 `App.app/App` 프로세스 경로 일치까지 PASS했다.
-- 위 증거는 native signing/install/process gate다. 설치된 웹 자산은 아직 publishable-key를 사용하는 fresh release artifact가 아니며, 화면 조작·Foundation Models·Secure Enclave·airplane mode는 **UNVERIFIED**다. Supabase Apple provider, Services ID/key, Distribution/Archive/TestFlight/App Store Connect는 여전히 별도 **BLOCKED/PENDING** gate다.
+- 2026-08-28 fresh release 재설치로 과거 “publishable-key release artifact 아님” 상태는
+  종료됐다. 첫 시도는 `.env`의 legacy key 때문에 의도대로 abort했고, live Supabase
+  publishable key를 메모리로만 전달한 재시도는 2,166 modules build, 5 plugins sync,
+  `dist`/iOS `public`/signed `App.app` index hash 일치, Xcode 27 beta `BUILD SUCCEEDED`,
+  overwrite install·launch·process 생존까지 PASS했다. 화면 조작·Foundation Models·Secure
+  Enclave·airplane mode는 **UNVERIFIED**다. Supabase Apple provider, Services ID/key,
+  Distribution/Archive/TestFlight/App Store Connect는 여전히 별도 **BLOCKED/PENDING** gate다.
 - 설치 후 사용자가 보고한 검정 화면은 Xcode 27 로그의 `UIScene life cycle is required for apps built with this SDK` fatal로 iOS 27 및 26.5 simulator에서 재현했다. 단일-window `SceneDelegate`와 scene manifest를 추가한 commit `34b6e4c`는 simulator에 이어 실물 iPhone 16 Pro / iOS 27에서도 온보딩을 실제 렌더했고, 종료 후 재실행 및 30초 이상 프로세스 생존에도 검정 화면이 재발하지 않았다. cold-start custom-scheme 취소 callback은 오류 토스트를 표시했다. 실제 provider 로그인 완료는 **UNVERIFIED**다.
 - live Vercel에서 feature Preview `b2090d1`은 READY이고 Production은 `d9a2eb0`이다. Production env에는 Supabase URL/key만 있으며 `VITE_LEGAL_OPERATOR_NAME`, `VITE_PRIVACY_CONTACT_EMAIL`은 없다. 실명과 실제 모니터링 이메일을 사용자에게 확인받기 전에는 추측해 넣지 않는다.
 - live `delete-account` Edge Function은 ACTIVE(version 6, JWT required)이고 Production origin preflight 200, 무인증 POST 401을 확인했다. 실제 계정 삭제는 희생 계정을 영구 삭제하므로 별도 action-time 승인 전까지 **UNVERIFIED**다.

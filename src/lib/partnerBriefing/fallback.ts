@@ -1,27 +1,38 @@
 /**
- * Partner Briefing Portable Deterministic Fallback (Gate A7)
+ * Partner Briefing Portable Deterministic Fallback (Gate A7.1)
  *
- * Generates pure, deterministic, fact-only Korean briefing structures
+ * Generates pure, deterministic, exact-source Korean briefing structures and candidate extracts
  * without any external AI models, prompts, sentiment guessing, or psychological inference.
  *
  * Architectural invariants:
- * 1. Zero AI inference: Summaries are strictly factual counts and media tallies (e.g. "기록 3개 (사진 2장, 음성 1개)").
- * 2. Absence phrase prohibition: For 0 events, text is always the empty string ("") with no debt/absence prose.
- * 3. Exact fail-closed mapping validation: Strict validation of events (0..N-1 ordinals), sources (1:1 unique recordIds),
+ * 1. Exact-source candidate extraction: Candidate text is strictly a non-empty exact substring of the
+ *    normalized source text with sequential ordinals (0..K-1). Uses sentence segmentation when available;
+ *    if unavailable or throwing, falls back to the whole exact text without truncation.
+ * 2. Attributed rendering: Dynamic displayed phrase is an exact source extract enclosed in a fixed
+ *    TypeScript template (e.g. “<exact extract>”라고 기록했어요.). Never infers feelings, health, or intent.
+ * 3. Media-only & empty records: Formatted with deterministic fixed factual phrases based only on
+ *    allowlisted media kinds/counts, or neutral "기록을 남겼어요." when text and media are both absent.
+ * 4. Item-level 1:1 representation: Every event is represented by exactly one PartnerBriefingItem
+ *    with one exact sourceRecordId inside its JS date/period section. No Top-N, no record dropping.
+ * 5. Deterministic whole-window overview: Factual count/media summary with exact union sourceRecordIds.
+ * 6. Absence phrase prohibition: For 0 events, text is always the empty string ("") with no debt/absence prose.
+ * 7. Exact fail-closed mapping validation: Strict validation of events (0..N-1 ordinals), sources (1:1 unique recordIds),
  *    and days (0..D-1 strictly ascending unique calendar dates).
- * 4. Exact provenance: All sourceRecordIds are bound strictly via TypeScript JS-only mappings.
- * 5. Surface fidelity: Never reads state.records, recalculates PartnerDay/OUTSTANDING, or accepts DailyRecord.
- * 6. Zero persistence, zero logging, zero network/server calls.
+ * 8. Zero IDs in candidate helpers: AI candidates contain request-local ordinals only; record IDs never cross boundary.
+ * 9. Surface fidelity: Never reads state.records, recalculates PartnerDay/OUTSTANDING, or accepts DailyRecord.
+ * 10. Zero persistence, zero logging, zero network/server calls.
  */
 
 import {
   PARTNER_BRIEFING_VERSION,
+  type BriefingExtractCandidate,
   type BriefingMediaKind,
   type BriefingModelSafeEvent,
   type BriefingPeriod,
   type BriefingSourceMapping,
   type PartnerBriefing,
   type PartnerBriefingDay,
+  type PartnerBriefingItem,
   type PartnerBriefingOverview,
   type PartnerBriefingSection,
 } from './contract';
@@ -32,6 +43,108 @@ import { isValidDateString } from './normalize';
 export interface ValidatedBriefingMappings {
   readonly sourceMap: Map<number, string>;
   readonly dayMap: Map<number, string>;
+}
+
+/**
+ * Builds candidate extracts from normalized source text.
+ *
+ * Invariants:
+ * - Every candidate is a non-empty exact substring of the supplied text.
+ * - Ordinals are sequential 0..K-1.
+ * - Prefers sentence segmentation via Intl.Segmenter('ko', { granularity: 'sentence' }).
+ * - If Intl.Segmenter is unavailable or throws, uses the whole exact text as the sole candidate.
+ * - Never Array.from-truncates or invents text.
+ * - Empty/whitespace-only text returns [].
+ * - Contains zero database IDs, user IDs, dates, or timestamps.
+ */
+export function buildBriefingExtractCandidates(
+  sourceText: string,
+): readonly BriefingExtractCandidate[] {
+  if (typeof sourceText !== 'string' || sourceText.trim().length === 0) {
+    return [];
+  }
+
+  const cleanText = sourceText.trim();
+  if (cleanText.length === 0) {
+    return [];
+  }
+
+  try {
+    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+      const segmenter = new Intl.Segmenter('ko', { granularity: 'sentence' });
+      const rawSegments = Array.from(segmenter.segment(sourceText));
+      const extracted: string[] = [];
+
+      for (const seg of rawSegments) {
+        const trimmed = seg.segment.trim();
+        if (trimmed.length > 0 && sourceText.includes(trimmed)) {
+          extracted.push(trimmed);
+        }
+      }
+
+      if (extracted.length > 0) {
+        return extracted.map((text, candidateOrdinal) => ({
+          candidateOrdinal,
+          text,
+        }));
+      }
+    }
+  } catch {
+    // If Intl.Segmenter fails or throws, fall through to whole exact text candidate
+  }
+
+  return [
+    {
+      candidateOrdinal: 0,
+      text: cleanText,
+    },
+  ];
+}
+
+/**
+ * Formats a TypeScript-owned attributed briefing item text from an exact extract.
+ *
+ * All words other than the exact extract are fixed template text.
+ * Renders source statements as attributed quotes, not app/AI judgments.
+ */
+export function formatAttributedBriefingItemText(extractText: string): string {
+  return `“${extractText}”라고 기록했어요.`;
+}
+
+/**
+ * Formats a deterministic factual item text for media-only or empty records.
+ *
+ * Based only on allowlisted media kinds/counts, or neutral "기록을 남겼어요."
+ */
+export function formatMediaItemText(
+  mediaKinds: readonly (readonly BriefingMediaKind[] | BriefingMediaKind)[],
+): string {
+  const parts = formatMediaCounts(mediaKinds);
+  if (parts.length === 0) {
+    return '기록을 남겼어요.';
+  }
+  const joined = parts.join(', ');
+  const lastPart = parts[parts.length - 1];
+  const particle = lastPart.endsWith('장') ? '을' : '를';
+  return `${joined}${particle} 남겼어요.`;
+}
+
+/**
+ * Formats a deterministic briefing item text for an event.
+ *
+ * If text is present, extracts the first sentence candidate and formats attributed quote.
+ * If text is empty/absent, formats media tally or neutral record notice.
+ */
+export function formatDeterministicBriefingItemText(
+  event: Pick<BriefingModelSafeEvent, 'text' | 'mediaKinds'>,
+): string {
+  if (typeof event.text === 'string' && event.text.trim().length > 0) {
+    const candidates = buildBriefingExtractCandidates(event.text);
+    if (candidates.length > 0) {
+      return formatAttributedBriefingItemText(candidates[0].text);
+    }
+  }
+  return formatMediaItemText(event.mediaKinds);
 }
 
 /**
@@ -318,8 +431,15 @@ export function generateDeterministicPartnerBriefing(
     const sections: PartnerBriefingSection[] = [];
 
     for (const [period, periodEvents] of dayGroup.entries()) {
+      const items: PartnerBriefingItem[] = periodEvents.map((e) => ({
+        text: formatDeterministicBriefingItemText(e),
+        sourceRecordId: sourceMap.get(e.ordinal)!,
+      }));
+
       sections.push({
         period,
+        items,
+        // Transitional deprecated fields for pipeline/test compatibility until Gate A7.3
         text: formatFallbackPeriodText(periodEvents),
         sourceRecordIds: periodEvents.map((e) => sourceMap.get(e.ordinal)!),
       });

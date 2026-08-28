@@ -2,19 +2,169 @@ import { describe, expect, it } from 'vitest';
 import type {
   BriefingModelSafeEvent,
   BriefingSourceMapping,
+  PartnerBriefingItem,
 } from './contract';
 import type { BriefingDayMapping } from './normalize';
 import {
+  buildBriefingExtractCandidates,
+  formatAttributedBriefingItemText,
   formatDateKorean,
+  formatDeterministicBriefingItemText,
   formatFallbackOverviewText,
   formatFallbackPeriodText,
   formatMediaCounts,
+  formatMediaItemText,
   formatRangeLabelFromDates,
   generateDeterministicPartnerBriefing,
   validateBriefingMappings,
 } from './fallback';
 
-describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
+describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1)', () => {
+  describe('buildBriefingExtractCandidates (exact substring candidate extraction)', () => {
+    it('returns sequential 0..K-1 ordinals and exact substrings on normal sentence segmentation path', () => {
+      const source = '오늘 아침 점호 끝났다. 밥 먹으러 가자! 날씨가 좋다.';
+      const candidates = buildBriefingExtractCandidates(source);
+
+      expect(candidates.length).toBeGreaterThanOrEqual(2);
+      for (let i = 0; i < candidates.length; i += 1) {
+        expect(candidates[i].candidateOrdinal).toBe(i);
+        expect(candidates[i].text.length).toBeGreaterThan(0);
+        expect(source.includes(candidates[i].text)).toBe(true);
+      }
+
+      // Check keys: must only contain candidateOrdinal and text (zero IDs)
+      for (const cand of candidates) {
+        expect(Object.keys(cand).sort()).toEqual(['candidateOrdinal', 'text']);
+      }
+    });
+
+    it('returns empty array for empty string, whitespace only, or non-string input', () => {
+      expect(buildBriefingExtractCandidates('')).toEqual([]);
+      expect(buildBriefingExtractCandidates('   ')).toEqual([]);
+      expect(buildBriefingExtractCandidates('\t\n\r  ')).toEqual([]);
+      // @ts-expect-error test non-string input
+      expect(buildBriefingExtractCandidates(null)).toEqual([]);
+      // @ts-expect-error test non-string input
+      expect(buildBriefingExtractCandidates(undefined)).toEqual([]);
+    });
+
+    it('falls back to whole exact text without truncation when Intl.Segmenter is undefined', () => {
+      const originalSegmenter = Intl.Segmenter;
+      try {
+        // @ts-expect-error test simulation
+        Intl.Segmenter = undefined;
+
+        const longText = '가'.repeat(500) + ' 나'.repeat(500);
+        const candidates = buildBriefingExtractCandidates(longText);
+
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0]).toEqual({
+          candidateOrdinal: 0,
+          text: longText,
+        });
+        expect(candidates[0].text.length).toBe(longText.length);
+      } finally {
+        Intl.Segmenter = originalSegmenter;
+      }
+    });
+
+    it('falls back to whole exact text without truncation when Intl.Segmenter throws', () => {
+      const originalSegmenter = Intl.Segmenter;
+      try {
+        // @ts-expect-error test simulation
+        Intl.Segmenter = class {
+          constructor() {
+            throw new Error('Segmenter unsupported runtime error');
+          }
+        };
+
+        const text = '첫 문장입니다. 두 번째 문장입니다.';
+        const candidates = buildBriefingExtractCandidates(text);
+
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0]).toEqual({
+          candidateOrdinal: 0,
+          text: text,
+        });
+        expect(text.includes(candidates[0].text)).toBe(true);
+      } finally {
+        Intl.Segmenter = originalSegmenter;
+      }
+    });
+
+    it('contains zero IDs, dates, URLs, or external metadata in any candidate helper output', () => {
+      const text = '산책하고 들어왔어요.';
+      const candidates = buildBriefingExtractCandidates(text);
+      for (const cand of candidates) {
+        expect(cand).not.toHaveProperty('id');
+        expect(cand).not.toHaveProperty('recordId');
+        expect(cand).not.toHaveProperty('userId');
+        expect(cand).not.toHaveProperty('coupleId');
+        expect(cand).not.toHaveProperty('createdAt');
+      }
+    });
+  });
+
+  describe('formatAttributedBriefingItemText (attributed quote renderer)', () => {
+    it('renders exact extract with fixed quote template', () => {
+      expect(formatAttributedBriefingItemText('오늘 아침 점호 완료')).toBe(
+        '“오늘 아침 점호 완료”라고 기록했어요.',
+      );
+    });
+
+    it('renders sensitive/emotional author statements as attributed quotes, not app/AI inference', () => {
+      const statement = '나는 이별하고 싶어';
+      const rendered = formatAttributedBriefingItemText(statement);
+
+      expect(rendered).toBe('“나는 이별하고 싶어”라고 기록했어요.');
+      expect(rendered.startsWith('“')).toBe(true);
+      expect(rendered.endsWith('”라고 기록했어요.')).toBe(true);
+    });
+  });
+
+  describe('formatMediaItemText & formatDeterministicBriefingItemText', () => {
+    it('formats media-only records accurately for photos, videos, voice, and combinations', () => {
+      expect(formatMediaItemText(['photo'])).toBe('사진 1장을 남겼어요.');
+      expect(formatMediaItemText(['photo', 'photo'])).toBe('사진 2장을 남겼어요.');
+      expect(formatMediaItemText(['video'])).toBe('동영상 1개를 남겼어요.');
+      expect(formatMediaItemText(['video', 'video'])).toBe('동영상 2개를 남겼어요.');
+      expect(formatMediaItemText(['voice'])).toBe('음성 1개를 남겼어요.');
+      expect(formatMediaItemText(['photo', 'video'])).toBe('사진 1장, 동영상 1개를 남겼어요.');
+      expect(formatMediaItemText(['photo', 'voice'])).toBe('사진 1장, 음성 1개를 남겼어요.');
+      expect(formatMediaItemText(['photo', 'video', 'voice'])).toBe(
+        '사진 1장, 동영상 1개, 음성 1개를 남겼어요.',
+      );
+    });
+
+    it('formats neutral "기록을 남겼어요." when neither text nor media is present', () => {
+      expect(formatMediaItemText([])).toBe('기록을 남겼어요.');
+      expect(formatDeterministicBriefingItemText({ text: '', mediaKinds: [] })).toBe(
+        '기록을 남겼어요.',
+      );
+      expect(formatDeterministicBriefingItemText({ text: '   ', mediaKinds: [] })).toBe(
+        '기록을 남겼어요.',
+      );
+    });
+
+    it('prefers attributed text extract when non-empty text exists', () => {
+      expect(
+        formatDeterministicBriefingItemText({
+          text: '점심 맛있게 먹었어.',
+          mediaKinds: ['photo'],
+        }),
+      ).toBe('“점심 맛있게 먹었어.”라고 기록했어요.');
+    });
+
+    it('falls back to media description when text is empty but media exists', () => {
+      expect(
+        formatDeterministicBriefingItemText({
+          text: '',
+          mediaKinds: ['photo'],
+        }),
+      ).toBe('사진 1장을 남겼어요.');
+    });
+  });
+
   describe('validateBriefingMappings (exact fail-closed validation)', () => {
     it('accepts valid matching events, sources, and days', () => {
       const events: BriefingModelSafeEvent[] = [
@@ -59,7 +209,7 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
     it('fails closed on non-contiguous or gap event ordinals', () => {
       const events: BriefingModelSafeEvent[] = [
         { ordinal: 0, dayOrdinal: 0, period: 'morning', text: 'a', mediaKinds: [] },
-        { ordinal: 2, dayOrdinal: 0, period: 'morning', text: 'b', mediaKinds: [] }, // Gap!
+        { ordinal: 2, dayOrdinal: 0, period: 'morning', text: 'b', mediaKinds: [] },
       ];
       const sources: BriefingSourceMapping[] = [
         { ordinal: 0, recordId: 'rec-0' },
@@ -75,7 +225,7 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
     it('fails closed on non-monotonic event dayOrdinals', () => {
       const events: BriefingModelSafeEvent[] = [
         { ordinal: 0, dayOrdinal: 1, period: 'morning', text: 'a', mediaKinds: [] },
-        { ordinal: 1, dayOrdinal: 0, period: 'morning', text: 'b', mediaKinds: [] }, // Decreasing dayOrdinal
+        { ordinal: 1, dayOrdinal: 0, period: 'morning', text: 'b', mediaKinds: [] },
       ];
       const sources: BriefingSourceMapping[] = [
         { ordinal: 0, recordId: 'rec-0' },
@@ -138,7 +288,7 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
       ];
       const sources: BriefingSourceMapping[] = [
         { ordinal: 0, recordId: 'rec-same-id' },
-        { ordinal: 1, recordId: 'rec-same-id' }, // Duplicate recordId
+        { ordinal: 1, recordId: 'rec-same-id' },
       ];
       const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
@@ -182,7 +332,7 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
       ];
       const days: BriefingDayMapping[] = [
         { dayOrdinal: 0, date: '2026-08-26' },
-        { dayOrdinal: 1, date: '2026-08-26' }, // Same date for different dayOrdinals
+        { dayOrdinal: 1, date: '2026-08-26' },
       ];
 
       expect(() => validateBriefingMappings(events, sources, days)).toThrow(
@@ -201,7 +351,7 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
       ];
       const days: BriefingDayMapping[] = [
         { dayOrdinal: 0, date: '2026-08-27' },
-        { dayOrdinal: 1, date: '2026-08-26' }, // Descending date
+        { dayOrdinal: 1, date: '2026-08-26' },
       ];
 
       expect(() => validateBriefingMappings(events, sources, days)).toThrow(
@@ -294,7 +444,7 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
     });
   });
 
-  describe('generateDeterministicPartnerBriefing', () => {
+  describe('generateDeterministicPartnerBriefing (item-level 1:1 representation)', () => {
     it('handles empty events (0 records) cleanly with empty string text', () => {
       const briefing = generateDeterministicPartnerBriefing({
         events: [],
@@ -313,7 +463,55 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
       expect(briefing.days).toEqual([]);
     });
 
-    it('generates multi-day, multi-period deterministic briefing with exact sourceRecordIds', () => {
+    it('generates single day briefing with exact 1:1 items and overview union', () => {
+      const events: BriefingModelSafeEvent[] = [
+        {
+          ordinal: 0,
+          dayOrdinal: 0,
+          period: 'morning',
+          text: '기상 완료!',
+          mediaKinds: [],
+        },
+        {
+          ordinal: 1,
+          dayOrdinal: 0,
+          period: 'evening',
+          text: '',
+          mediaKinds: ['photo'],
+        },
+      ];
+      const sources: BriefingSourceMapping[] = [
+        { ordinal: 0, recordId: 'rec-1' },
+        { ordinal: 1, recordId: 'rec-2' },
+      ];
+      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = generateDeterministicPartnerBriefing({ events, sources, days });
+
+      expect(briefing.sourceCount).toBe(2);
+      expect(briefing.days).toHaveLength(1);
+      expect(briefing.days[0].sections).toHaveLength(2);
+
+      const morningSec = briefing.days[0].sections[0];
+      expect(morningSec.period).toBe('morning');
+      expect(morningSec.items).toHaveLength(1);
+      expect(morningSec.items![0]).toEqual({
+        text: '“기상 완료!”라고 기록했어요.',
+        sourceRecordId: 'rec-1',
+      });
+
+      const eveningSec = briefing.days[0].sections[1];
+      expect(eveningSec.period).toBe('evening');
+      expect(eveningSec.items).toHaveLength(1);
+      expect(eveningSec.items![0]).toEqual({
+        text: '사진 1장을 남겼어요.',
+        sourceRecordId: 'rec-2',
+      });
+
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-1', 'rec-2']);
+    });
+
+    it('generates multi-day, multi-period deterministic briefing with exact sourceRecordIds and items', () => {
       const events: BriefingModelSafeEvent[] = [
         {
           ordinal: 0,
@@ -365,24 +563,123 @@ describe('Partner Briefing Deterministic Fallback (Gate A7)', () => {
       expect(briefing.days).toHaveLength(2);
       expect(briefing.days[0].date).toBe('2026-08-26');
       expect(briefing.days[0].sections).toHaveLength(2);
-      expect(briefing.days[0].sections[0]).toEqual({
-        period: 'morning',
-        text: '기록 1개 (사진 1장)',
-        sourceRecordIds: ['rec-day1-morning'],
-      });
-      expect(briefing.days[0].sections[1]).toEqual({
-        period: 'evening',
-        text: '기록 1개',
-        sourceRecordIds: ['rec-day1-evening'],
-      });
+      expect(briefing.days[0].sections[0].period).toBe('morning');
+      expect(briefing.days[0].sections[0].items).toEqual([
+        {
+          text: '“아침 점호”라고 기록했어요.',
+          sourceRecordId: 'rec-day1-morning',
+        },
+      ]);
+      expect(briefing.days[0].sections[1].period).toBe('evening');
+      expect(briefing.days[0].sections[1].items).toEqual([
+        {
+          text: '“저녁 체력단련”라고 기록했어요.',
+          sourceRecordId: 'rec-day1-evening',
+        },
+      ]);
 
       expect(briefing.days[1].date).toBe('2026-08-27');
       expect(briefing.days[1].sections).toHaveLength(1);
-      expect(briefing.days[1].sections[0]).toEqual({
-        period: 'afternoon',
-        text: '기록 1개 (음성 1개)',
-        sourceRecordIds: ['rec-day2-afternoon'],
+      expect(briefing.days[1].sections[0].period).toBe('afternoon');
+      expect(briefing.days[1].sections[0].items).toEqual([
+        {
+          text: '“오후 정비”라고 기록했어요.',
+          sourceRecordId: 'rec-day2-afternoon',
+        },
+      ]);
+    });
+
+    it('guarantees 1:1 item representation and exact overview union across 30, 100, and 300 events scale', () => {
+      for (const count of [30, 100, 300]) {
+        const periods: ('morning' | 'afternoon' | 'evening' | 'night')[] = [
+          'morning',
+          'afternoon',
+          'evening',
+          'night',
+        ];
+        const dayCount = Math.max(1, Math.ceil(count / 10));
+        const eventsPerDay = Math.ceil(count / dayCount);
+
+        const events: BriefingModelSafeEvent[] = [];
+        const sources: BriefingSourceMapping[] = [];
+        const days: BriefingDayMapping[] = [];
+
+        for (let d = 0; d < dayCount; d += 1) {
+          const dayNum = String(d + 1).padStart(2, '0');
+          days.push({
+            dayOrdinal: d,
+            date: `2026-08-${dayNum}`,
+          });
+        }
+
+        for (let i = 0; i < count; i += 1) {
+          const dayOrdinal = Math.floor(i / eventsPerDay);
+          const withinDayIdx = i % eventsPerDay;
+          const period = periods[Math.min(periods.length - 1, Math.floor((withinDayIdx / eventsPerDay) * periods.length))];
+          const recId = `rec-scale-${count}-${i}`;
+
+          events.push({
+            ordinal: i,
+            dayOrdinal,
+            period,
+            text: i % 3 === 0 ? `기록 번호 ${i}` : '',
+            mediaKinds: i % 2 === 0 ? ['photo'] : [],
+          });
+          sources.push({
+            ordinal: i,
+            recordId: recId,
+          });
+        }
+
+        const briefing = generateDeterministicPartnerBriefing({ events, sources, days });
+
+        expect(briefing.sourceCount).toBe(count);
+        expect(briefing.overview.sourceRecordIds).toHaveLength(count);
+
+        const allEmittedItems: PartnerBriefingItem[] = [];
+        for (const day of briefing.days) {
+          for (const sec of day.sections) {
+            expect(sec.items).toBeDefined();
+            for (const item of sec.items!) {
+              allEmittedItems.push(item);
+            }
+          }
+        }
+
+        // Exactly one item per source event: zero loss, zero duplicates
+        expect(allEmittedItems).toHaveLength(count);
+        const itemRecordIds = allEmittedItems.map((item) => item.sourceRecordId);
+        const expectedRecordIds = sources.map((s) => s.recordId);
+
+        expect(itemRecordIds).toEqual(expectedRecordIds);
+        expect(briefing.overview.sourceRecordIds).toEqual(expectedRecordIds);
+        expect(new Set(itemRecordIds).size).toBe(count);
+      }
+    });
+
+    it('documents pure deterministic mapping without re-filtering or state-machine logic', () => {
+      // Inputs to fallback are already filtered safe corpus (BriefingModelSafeEvent[])
+      // Fallback does not accept raw DailyRecord or evaluate couple status / privacy flags.
+      const safeEvents: BriefingModelSafeEvent[] = [
+        {
+          ordinal: 0,
+          dayOrdinal: 0,
+          period: 'morning',
+          text: '안전한 코퍼스 기록',
+          mediaKinds: [],
+        },
+      ];
+      const sources: BriefingSourceMapping[] = [{ ordinal: 0, recordId: 'rec-safe' }];
+      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = generateDeterministicPartnerBriefing({
+        events: safeEvents,
+        sources,
+        days,
       });
+
+      expect(briefing.sourceCount).toBe(1);
+      expect(briefing.days[0].sections[0].items![0].sourceRecordId).toBe('rec-safe');
     });
   });
 });

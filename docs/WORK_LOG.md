@@ -9249,3 +9249,93 @@ e2e · Postgres 계약 · Deno).
 #### PRODUCTION
 - APPLIED — local physical development app overwrite install only
 - NOT APPLIED — Vercel Production, Auth provider, TestFlight/App Store, additional Supabase mutation
+
+### 2026-08-28 — 홈 사진 포스트 이름·순서·분 단위 시각 정리
+
+#### PLAN POSITION
+- Phase: App Store 출시 준비
+- Workstream: Home/Story presentation
+- Step: 실물 첨부 화면에서 확인된 이전 포스트 레이아웃 수정과 재설치
+- Previous Gate: fresh release asset sync·Xcode 27 실물 덮어 설치
+- This Gate: browser render PASS, physical install PASS, physical Home render 사용자 확인 대기
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 고객·과금·저장·AI 역할 변경 없음
+- Engineering source checked: `AGENTS.md`, Story exact-original contract
+- Current-state checked: branch/HEAD/status, `PaperHome` 실제 라우트와 StoryViewer/legacy feed sibling
+- Latest relevant Work Log checked: 2026-08-28 Story/Profile local closure와 fresh physical reinstall
+- MASTER PLAN version / 기준일: V4 / 2026-08-28
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary implementer/verifier
+- Model: primary
+- Role: root-path UI fix, focused/unit/browser/native packaging verification
+- PR: #90
+- Branch: `codex/profile-post-composer`
+- Base SHA: `958d02ff8ac4eff132931caad534c07ae3e840b0`
+- Old HEAD: `958d02ff8ac4eff132931caad534c07ae3e840b0`
+- New HEAD / Reviewed HEAD: `d40d7ee0a9e47f92fe6610d62ee302014b673451`
+
+#### CHANGED / REVIEWED
+- file: `src/features/home/PaperHome.tsx`, `src/pages/HomePage.tsx`
+- function/component/migration: `Post`, `timeAgo`, Home route contract comment
+- what changed/reviewed: visible author row/caption prefix 제거, 사진→글→하단 시간·원본·책갈피 순서, `HH:mm:ss`→`HH:mm`
+- why: 첨부된 실물 화면에서 이름 반복, 책갈피 선행, 초 단위 노출이 실제 사용자 읽기 흐름을 방해함
+- file: `src/features/home/PaperHome.test.tsx`, `e2e/mediaGallery.spec.ts`
+- function/component/migration: DOM/order/time regression and 390px rendered geometry
+- what changed/reviewed: 이름 부재, exact 순서, 초 제거, 44px target, horizontal overflow와 screenshot을 자동 단언
+- why: 코드 존재가 아니라 공통 Home Post의 실제 렌더 결과를 고정하기 위해서다.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: exact original navigation/bookmark write와 Story selection unchanged
+- Production: Supabase/Vercel/Auth/TestFlight/App Store mutation 없음
+
+#### VERIFICATION
+- command: focused Vitest `PaperHome`, `StoryViewer`, `PaperFeedWidget`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 43 tests
+- what it actually proves: 현재 홈·전체 Story·legacy feed의 표시/이동/책갈피 계약
+- command: target ESLint, `npm run typecheck`, `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 변경 TypeScript/React 정적 계약과 diff 무결성
+- command: Playwright 390px exact Home photo-post regression
+- PASS / FAIL / UNVERIFIED: PASS — 1/1
+- what it actually proves: 사진→이름 없는 글→분 단위 시간·원본·책갈피, 44px targets, overflow 0; screenshot `ui-audit-results/after/home-post-clean-390.png`
+- command: strict release build + Capacitor iOS sync
+- PASS / FAIL / UNVERIFIED: PASS — 2,166 modules, 5 plugins, dist/iOS index SHA `6123fa...` exact match
+- what it actually proves: 새 Home bundle이 native project에 포함됨
+- command: Xcode 27 beta physical signed build/install/launch + `devicectl` screenshot
+- PASS / FAIL / UNVERIFIED: PASS for build/install/launch; Home render UNVERIFIED
+- what it actually proves: 새 bundle이 iPhone에 설치·실행되고 Search 화면이 실제 캡처됨. 설치 직후 기기가 Search 탭에 있어 Home 포스트 자체는 실물 캡처하지 못함
+
+#### REVIEW IMPACT
+- DELTA — presentation/order only; DB/auth/privacy/crypto semantic review freshness unchanged
+
+#### BLOCKERS
+- code: 없음
+- environment: 실물 캡처 당시 앱이 Search 탭에 있어 Home 렌더는 사용자 탭 전환 후 확인 필요
+- external/manual: TestFlight/App Store와 무관한 로컬 development install만 완료
+
+#### STOPPED AT
+- exact completed boundary: code/test/browser screenshot/release sync/Xcode 27 physical reinstall·launch 완료
+
+#### REMAINING
+- 사용자가 iPhone 하단 Home을 눌러 실제 사진 포스트 1개 확인
+- PR #90 CI 재검증과 merge는 별도 gate
+
+#### NEXT ACTION
+- next owner: user + Codex verifier
+- tool/model: physical visual confirmation + primary evidence integration
+- 기준 SHA: `d40d7ee0a9e47f92fe6610d62ee302014b673451` plus docs closure
+- exact next task: iPhone Home에서 해당 사진 포스트를 확인하고 동일 배치인지 보고
+
+#### DO NOT ADVANCE UNTIL
+- TestFlight 전 physical Home/auth smoke와 build number 증가
+
+#### PRODUCTION
+- APPLIED — local physical development app overwrite install only
+- NOT APPLIED — Vercel Production, Supabase, Auth provider, TestFlight/App Store

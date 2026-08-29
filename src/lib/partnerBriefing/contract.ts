@@ -1,5 +1,5 @@
 /**
- * Partner Briefing Domain and Wire Contract (Phase A1 Amendment)
+ * Partner Briefing Domain and Wire Contract (Phase A1 Amendment - v2 Grouping Plan)
  *
  * Defines the minimal pure TypeScript domain contract, model-safe wire payloads,
  * untrusted provider extract plans, and verified domain results for GomsinLog Partner Briefing.
@@ -8,18 +8,27 @@
  * 1. Model-safe request items and candidates never contain recordId, userId, coupleId,
  *    exact date/time, URLs, storage paths, or key material.
  * 2. Candidate text is a TypeScript-owned exact-source extract.
- * 3. The provider only selects request-local ordinals (itemOrdinal and candidateOrdinal)
- *    and produces NO generated or displayable text fields.
+ * 3. The provider produces NO generated or displayable text fields. It only selects
+ *    request-local integer ordinals (itemOrdinal and candidateOrdinal) organized into groups
+ *    (version 2 UntrustedBriefingGroupPlan).
  * 4. Actual record IDs (sourceRecordId) are bound strictly by TypeScript after
  *    provenance verification, and never cross the model boundary.
  * 5. Exact calendar dates exist only in JS/domain final results; native AI
  *    payloads use synthetic request-local ordinals and coarse periods only.
- * 6. Every exact source record is represented independently in the final UI hierarchy
- *    as a PartnerBriefingItem.
- * 7. Zero external runtime dependencies or legacy DailySummary imports.
+ * 6. Every exact source record extract is preserved in order via `parts` within
+ *    each PartnerBriefingItem ({ parts: [{ text, sourceRecordId }] }).
+ * 7. Structured cycle/bleeding/pain/symptom/health fields are strictly excluded upstream
+ *    from AI processing. Partner-shared readable non-private general record.log text
+ *    is allowed exclusively on-device; no server AI, analytics, or persistent AI storage.
+ * 8. Zero external runtime dependencies or legacy DailySummary imports.
  */
 
 export const PARTNER_BRIEFING_VERSION = 1 as const;
+
+/**
+ * Wire format version for untrusted model extract grouping plans.
+ */
+export const PARTNER_BRIEFING_PLAN_VERSION = 2 as const;
 
 /**
  * Supported locale for Partner Briefing presentation and fallback formatting.
@@ -114,31 +123,56 @@ export interface UntrustedBriefingChoice {
 }
 
 /**
- * Untrusted provider output extract plan.
+ * Untrusted provider group containing choices for contiguous items.
  *
  * Invariants:
- * - `version` is exactly 1.
- * - `choices` is an array of untrusted ordinal selections from the model.
- * - The provider only selects ordinals from the TypeScript-supplied candidate list.
+ * - `groupOrdinal` is a request-local integer index (0..G-1).
+ * - `choices` is an array of untrusted ordinal selections for items in this group.
  * - Contains NO generated, free-form, or displayable text fields whatsoever.
  */
-export interface UntrustedBriefingExtractPlan {
-  readonly version: 1;
+export interface UntrustedBriefingGroup {
+  readonly groupOrdinal: number;
   readonly choices: readonly UntrustedBriefingChoice[];
 }
 
 /**
- * Verified single source briefing item.
+ * Untrusted provider output grouping plan (v2).
  *
  * Invariants:
- * - Represents an exact source record independently.
+ * - `version` is strictly 2.
+ * - `groups` is an array of untrusted group ordinal selections from the model.
+ * - The provider only groups and selects ordinals from the TypeScript-supplied candidate list.
+ * - Contains NO generated, free-form, or displayable text fields whatsoever.
+ */
+export interface UntrustedBriefingGroupPlan {
+  readonly version: 2;
+  readonly groups: readonly UntrustedBriefingGroup[];
+}
+
+export type UntrustedBriefingExtractPlan = UntrustedBriefingGroupPlan;
+
+/**
+ * Verified single source record extract part.
+ *
+ * Invariants:
  * - `text`: Attributed/extractive text derived from candidate extract or deterministic fallback.
  * - `sourceRecordId`: Exactly one real record ID, bound strictly in TypeScript after
  *   provenance verification. Never crosses the model boundary.
  */
-export interface PartnerBriefingItem {
+export interface PartnerBriefingItemPart {
   readonly text: string;
   readonly sourceRecordId: string;
+}
+
+/**
+ * Verified briefing item (potentially grouping multiple contiguous source extracts).
+ *
+ * Invariants:
+ * - `parts`: Non-empty array of exact source record extract parts.
+ * - Exact extract-to-original pairing is explicitly maintained per part.
+ */
+export interface PartnerBriefingItem {
+  readonly parts: readonly PartnerBriefingItemPart[];
 }
 
 /**

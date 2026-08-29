@@ -13,6 +13,10 @@ public class GomsinlogOnDeviceBriefingPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     @objc func availability(_ call: CAPPluginCall) {
+        guard requireExactKeys(call, expected: ["locale"]) else {
+            reject(call, error: .badRequest)
+            return
+        }
         let locale = call.getString("locale") ?? ""
         call.resolve([
             "availability": OnDeviceBriefing.availability(locale: locale).rawValue,
@@ -20,17 +24,31 @@ public class GomsinlogOnDeviceBriefingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func capability(_ call: CAPPluginCall) {
+        guard requireExactKeys(call, expected: []) else {
+            reject(call, error: .badRequest)
+            return
+        }
         call.resolve([
             "envelope": [
                 "maxContextUtf8Bytes": OnDeviceBriefing.maxContextUtf8Bytes,
                 "promptOverheadUtf8Bytes": OnDeviceBriefing.promptOverheadUtf8Bytes,
                 "responseReserveUtf8Bytes": OnDeviceBriefing.responseReserveUtf8Bytes,
                 "maxInputTextGraphemes": OnDeviceBriefing.maxInputTextGraphemes,
+                // Structural limits this parser already enforces below. Advertised so the
+                // JS batcher stops building requests this plugin will reject outright:
+                // a record segmenting into 33 candidates was accepted by JS and refused
+                // here, and the couple got deterministic output on a capable device.
+                "maxItems": OnDeviceBriefing.maxItems,
+                "maxCandidatesPerItem": OnDeviceBriefing.maxCandidatesPerItem,
             ],
         ])
     }
 
     @objc func selectExtracts(_ call: CAPPluginCall) {
+        guard requireExactKeys(call, expected: ["requestId", "locale", "items"]) else {
+            reject(call, error: .badRequest)
+            return
+        }
         guard let requestId = call.getString("requestId"),
               !requestId.isEmpty,
               requestId.utf8.count <= 128,
@@ -43,7 +61,7 @@ public class GomsinlogOnDeviceBriefingPlugin: CAPPlugin, CAPBridgedPlugin {
 
         Task {
             do {
-                let choices = try await OnDeviceBriefingEngine.shared.select(
+                let groups = try await OnDeviceBriefingEngine.shared.select(
                     requestId: requestId,
                     locale: locale,
                     items: parsed.items,
@@ -52,11 +70,16 @@ public class GomsinlogOnDeviceBriefingPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve([
                     "requestId": requestId,
                     "output": [
-                        "version": 1,
-                        "choices": choices.map {
+                        "version": 2,
+                        "groups": groups.map { group in
                             [
-                                "itemOrdinal": $0.itemOrdinal,
-                                "candidateOrdinal": $0.candidateOrdinal,
+                                "groupOrdinal": group.groupOrdinal,
+                                "choices": group.choices.map { choice in
+                                    [
+                                        "itemOrdinal": choice.itemOrdinal,
+                                        "candidateOrdinal": choice.candidateOrdinal,
+                                    ]
+                                },
                             ]
                         },
                     ],
@@ -72,6 +95,10 @@ public class GomsinlogOnDeviceBriefingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func cancel(_ call: CAPPluginCall) {
+        guard requireExactKeys(call, expected: ["requestId"]) else {
+            reject(call, error: .badRequest)
+            return
+        }
         guard let requestId = call.getString("requestId"),
               !requestId.isEmpty,
               requestId.utf8.count <= 128 else {
@@ -146,6 +173,11 @@ public class GomsinlogOnDeviceBriefingPlugin: CAPPlugin, CAPBridgedPlugin {
             return nil
         }
         return (parsed, json)
+    }
+
+    private func requireExactKeys(_ call: CAPPluginCall, expected: Set<String>) -> Bool {
+        let actualKeys = Set(call.options.keys.compactMap { $0 as? String })
+        return actualKeys == expected
     }
 
     private func exactInteger(_ value: Any?) -> Int? {

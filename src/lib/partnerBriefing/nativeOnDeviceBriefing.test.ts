@@ -42,11 +42,21 @@ function plugin(overrides: Record<string, unknown> = {}) {
         promptOverheadUtf8Bytes: 256,
         responseReserveUtf8Bytes: 512,
         maxInputTextGraphemes: 1000,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       },
     })),
     selectExtracts: vi.fn(async (options: { requestId: string }) => ({
       requestId: options.requestId,
-      output: { version: 1, choices: [{ itemOrdinal: 0, candidateOrdinal: 1 }] },
+      output: {
+        version: 2,
+        groups: [
+          {
+            groupOrdinal: 0,
+            choices: [{ itemOrdinal: 0, candidateOrdinal: 1 }],
+          },
+        ],
+      },
     })),
     cancel: vi.fn(async () => undefined),
     ...overrides,
@@ -148,8 +158,13 @@ describe('fixed native contract', () => {
 
   it('passes untrusted ordinals through without repairing them', async () => {
     const output = {
-      version: 1 as const,
-      choices: [{ itemOrdinal: 71, candidateOrdinal: -3 }],
+      version: 2 as const,
+      groups: [
+        {
+          groupOrdinal: 0,
+          choices: [{ itemOrdinal: 71, candidateOrdinal: -3 }],
+        },
+      ],
     };
     const port = plugin({
       selectExtracts: vi.fn(async () => ({ requestId: request.requestId, output })),
@@ -219,7 +234,15 @@ describe('cancellation', () => {
     expect(port.cancel).toHaveBeenCalledWith({ requestId: request.requestId });
     resolveNative?.({
       requestId: request.requestId,
-      output: { version: 1, choices: [{ itemOrdinal: 0, candidateOrdinal: 0 }] },
+      output: {
+        version: 2,
+        groups: [
+          {
+            groupOrdinal: 0,
+            choices: [{ itemOrdinal: 0, candidateOrdinal: 0 }],
+          },
+        ],
+      },
     });
     await Promise.resolve();
     expect(port.cancel).toHaveBeenCalledTimes(1);

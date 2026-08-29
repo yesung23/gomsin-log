@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { Attachment, DailyRecord } from '@/types';
 import type { BriefingModelSafeEvent, BriefingPeriod } from './contract';
 import {
+  compareBriefingTime,
   getBriefingPeriod,
   isValidDateString,
   isValidRecordId,
   isValidTimeString,
   normalizeBriefingText,
   normalizePartnerBriefingCorpus,
+  parseBriefingTime,
   projectBriefingMediaKinds,
   type BriefingDayMapping,
   type BriefingNormalizeRejectionReason,
@@ -123,17 +125,166 @@ describe('Partner Briefing Normalizer (Phase A3)', () => {
       expect(isValidTimeString('23:59')).toBe(true);
     });
 
+    // A `time` column read through PostgREST comes back as HH:mm:ss, and with a fraction
+    // when the column has sub-second precision. Rejecting those failed the entire corpus
+    // closed for any couple whose records were written before the client normalized to HH:mm.
+    it('accepts PostgreSQL TIME HH:mm:ss and HH:mm:ss.fraction values', () => {
+      expect(isValidTimeString('09:07:00')).toBe(true);
+      expect(isValidTimeString('09:07:33')).toBe(true);
+      expect(isValidTimeString('00:00:00')).toBe(true);
+      expect(isValidTimeString('23:59:59')).toBe(true);
+      expect(isValidTimeString('12:41:12.213424')).toBe(true);
+      expect(isValidTimeString('12:41:12.5')).toBe(true);
+      expect(isValidTimeString('12:41:12.000000')).toBe(true);
+    });
+
+    // PostgreSQL stores `time` as microseconds since midnight, so one to six digits is
+    // the entire range a `time` column can emit. Seven is not a more precise reading of
+    // the same column; it is a value from somewhere else, and it must not pass silently.
+    it('accepts one to six fractional digits and rejects a seventh', () => {
+      expect(isValidTimeString('12:41:12.1')).toBe(true);
+      expect(isValidTimeString('12:41:12.12')).toBe(true);
+      expect(isValidTimeString('12:41:12.123')).toBe(true);
+      expect(isValidTimeString('12:41:12.1234')).toBe(true);
+      expect(isValidTimeString('12:41:12.12345')).toBe(true);
+      expect(isValidTimeString('12:41:12.123456')).toBe(true);
+
+      expect(isValidTimeString('12:41:12.1234567')).toBe(false);
+      expect(isValidTimeString('12:41:12.0000000')).toBe(false);
+      // Previously accepted by an unbounded `\d+`; a `time` column cannot produce it.
+      expect(isValidTimeString('12:41:12.123456789012')).toBe(false);
+    });
+
     it('rejects invalid or out-of-range times', () => {
       expect(isValidTimeString('24:00')).toBe(false);
       expect(isValidTimeString('12:60')).toBe(false);
       expect(isValidTimeString('9:00')).toBe(false);
-      expect(isValidTimeString('12:00:00')).toBe(false);
       expect(isValidTimeString('12:0')).toBe(false);
       expect(isValidTimeString('12')).toBe(false);
       expect(isValidTimeString('')).toBe(false);
       expect(isValidTimeString('   ')).toBe(false);
       expect(isValidTimeString(null)).toBe(false);
       expect(isValidTimeString(undefined)).toBe(false);
+    });
+
+    it('range-checks every component of the extended forms', () => {
+      expect(isValidTimeString('24:00:00')).toBe(false);
+      expect(isValidTimeString('9:00:00')).toBe(false);
+      expect(isValidTimeString('12:60:00')).toBe(false);
+      expect(isValidTimeString('12:00:60')).toBe(false);
+      expect(isValidTimeString('12:00:99')).toBe(false);
+      expect(isValidTimeString('99:99:99')).toBe(false);
+    });
+
+    it('rejects an empty or non-numeric fraction', () => {
+      expect(isValidTimeString('12:00:00.')).toBe(false);
+      expect(isValidTimeString('12:00:00.abc')).toBe(false);
+      expect(isValidTimeString('12:00.500')).toBe(false);
+      expect(isValidTimeString('12:00:00,500')).toBe(false);
+    });
+
+    // A `time with time zone` value has no single meaning on the client, so it must fail
+    // closed rather than be silently reinterpreted as a local wall-clock time.
+    it('rejects any timezone suffix', () => {
+      expect(isValidTimeString('12:00:00Z')).toBe(false);
+      expect(isValidTimeString('12:00:00+09')).toBe(false);
+      expect(isValidTimeString('12:00:00+09:00')).toBe(false);
+      expect(isValidTimeString('12:00:00-05:00')).toBe(false);
+      expect(isValidTimeString('12:00:00.213424Z')).toBe(false);
+      expect(isValidTimeString('12:00+09:00')).toBe(false);
+      expect(isValidTimeString(' 12:00:00')).toBe(false);
+      expect(isValidTimeString('12:00:00 ')).toBe(false);
+    });
+  });
+
+  describe('Helper: parseBriefingTime canonicalization', () => {
+    it('canonicalizes all three accepted forms to the same HH:mm', () => {
+      expect(parseBriefingTime('09:07')?.canonical).toBe('09:07');
+      expect(parseBriefingTime('09:07:00')?.canonical).toBe('09:07');
+      expect(parseBriefingTime('09:07:33')?.canonical).toBe('09:07');
+      expect(parseBriefingTime('12:41:12.213424')?.canonical).toBe('12:41');
+    });
+
+    it('parses components exactly and strips only trailing fraction zeros', () => {
+      expect(parseBriefingTime('09:07')).toEqual({
+        canonical: '09:07',
+        hour: 9,
+        minute: 7,
+        second: 0,
+        fraction: '',
+      });
+      expect(parseBriefingTime('09:07:33')).toEqual({
+        canonical: '09:07',
+        hour: 9,
+        minute: 7,
+        second: 33,
+        fraction: '',
+      });
+      expect(parseBriefingTime('12:41:12.213424')).toEqual({
+        canonical: '12:41',
+        hour: 12,
+        minute: 41,
+        second: 12,
+        fraction: '213424',
+      });
+      expect(parseBriefingTime('12:41:12.000000')?.fraction).toBe('');
+      expect(parseBriefingTime('12:41:12.500000')?.fraction).toBe('5');
+      expect(parseBriefingTime('12:41:12.010')?.fraction).toBe('01');
+    });
+
+    it('never truncates an over-precise fraction into a valid one', () => {
+      // The danger of a cap is silent truncation: `.1234567` must not become `.123456`.
+      expect(parseBriefingTime('12:41:12.1234567')).toBeNull();
+      expect(parseBriefingTime('12:41:12.123456')?.fraction).toBe('123456');
+    });
+
+    it('returns null for every rejected form', () => {
+      expect(parseBriefingTime('9:00')).toBeNull();
+      expect(parseBriefingTime('24:00:00')).toBeNull();
+      expect(parseBriefingTime('12:60:00')).toBeNull();
+      expect(parseBriefingTime('12:00:60')).toBeNull();
+      expect(parseBriefingTime('12:00:00+09:00')).toBeNull();
+      expect(parseBriefingTime('12:00:00.')).toBeNull();
+      expect(parseBriefingTime('12:00:00.1234567')).toBeNull();
+      expect(parseBriefingTime(null)).toBeNull();
+      expect(parseBriefingTime(undefined)).toBeNull();
+      expect(parseBriefingTime(1430)).toBeNull();
+    });
+  });
+
+  describe('Helper: compareBriefingTime instant ordering', () => {
+    function at(time: string) {
+      const parsed = parseBriefingTime(time);
+      if (parsed === null) throw new Error(`unexpectedly invalid test time: ${time}`);
+      return parsed;
+    }
+
+    it('treats HH:mm and HH:mm:00 as the same instant', () => {
+      expect(compareBriefingTime(at('09:07'), at('09:07:00'))).toBe(0);
+      expect(compareBriefingTime(at('09:07:00'), at('09:07'))).toBe(0);
+      expect(compareBriefingTime(at('09:07'), at('09:07:00.000000'))).toBe(0);
+    });
+
+    it('orders by seconds and by fractional seconds', () => {
+      expect(compareBriefingTime(at('09:07'), at('09:07:01'))).toBe(-1);
+      expect(compareBriefingTime(at('09:07:01'), at('09:07'))).toBe(1);
+      expect(compareBriefingTime(at('09:07:33'), at('09:07:34'))).toBe(-1);
+      expect(compareBriefingTime(at('12:41:12.1'), at('12:41:12.2'))).toBe(-1);
+    });
+
+    it('compares fractions of differing precision without truncating', () => {
+      expect(compareBriefingTime(at('12:41:12.09'), at('12:41:12.1'))).toBe(-1);
+      expect(compareBriefingTime(at('12:41:12.5'), at('12:41:12.50'))).toBe(0);
+      expect(compareBriefingTime(at('12:41:12.213424'), at('12:41:12.213425'))).toBe(-1);
+      // Differing precision, both within the six-digit limit: '2135' padded to '213500'
+      // sorts after '213424', which a raw length-first compare would get wrong.
+      expect(compareBriefingTime(at('12:41:12.2135'), at('12:41:12.213424'))).toBe(1);
+      expect(compareBriefingTime(at('12:41:12.213424'), at('12:41:12.2135'))).toBe(-1);
+    });
+
+    it('orders hours and minutes ahead of seconds', () => {
+      expect(compareBriefingTime(at('09:07:59'), at('09:08'))).toBe(-1);
+      expect(compareBriefingTime(at('09:59:59'), at('10:00'))).toBe(-1);
     });
   });
 
@@ -154,6 +305,12 @@ describe('Partner Briefing Normalizer (Phase A3)', () => {
       { time: '22:00', expected: 'night' },
       { time: '23:30', expected: 'night' },
       { time: '23:59', expected: 'night' },
+      // Seconds and fractional seconds must never move a record across a period boundary.
+      { time: '04:59:59', expected: 'night' },
+      { time: '11:59:59.999999', expected: 'morning' },
+      { time: '17:59:59', expected: 'afternoon' },
+      { time: '21:59:59.5', expected: 'evening' },
+      { time: '23:59:59.999999', expected: 'night' },
     ];
 
     it.each(periodBoundaries)(
@@ -162,6 +319,32 @@ describe('Partner Briefing Normalizer (Phase A3)', () => {
         expect(getBriefingPeriod(time)).toBe(expected);
       },
     );
+
+    // A prefix slice of the first two characters returns the correct hour for every VALID
+    // time, so only invalid input distinguishes "parse, then read the hour" from "slice and
+    // hope". These cases pin that the helper never invents an hour from a string it has not
+    // validated -- 9:00 would slice to 9 and 12:00:00+09:00 to 12.
+    it('does not derive a period from an unvalidated time string', () => {
+      expect(getBriefingPeriod('9:00')).toBe('night');
+      expect(getBriefingPeriod('9:00')).not.toBe('morning');
+      expect(getBriefingPeriod('12:00:00+09:00')).toBe('night');
+      expect(getBriefingPeriod('12:00:00+09:00')).not.toBe('afternoon');
+      expect(getBriefingPeriod('24:00')).toBe('night');
+      expect(getBriefingPeriod('19시 30분')).toBe('night');
+      expect(getBriefingPeriod('19시 30분')).not.toBe('evening');
+      expect(getBriefingPeriod('')).toBe('night');
+    });
+
+    it('buckets a record identically whatever precision its time arrives in', () => {
+      for (const [minute, seconds] of [
+        ['05:00', '05:00:00'],
+        ['12:00', '12:00:00.000000'],
+        ['18:00', '18:00:59'],
+        ['22:00', '22:00:12.213424'],
+      ] as const) {
+        expect(getBriefingPeriod(seconds)).toBe(getBriefingPeriod(minute));
+      }
+    });
   });
 
   describe('Helper: normalizeBriefingText', () => {
@@ -621,6 +804,214 @@ describe('Partner Briefing Normalizer (Phase A3)', () => {
         expect(serialized).not.toContain('민감한');
         expect(serialized).not.toContain('secret.url');
       }
+    });
+  });
+
+  describe('PostgreSQL TIME corpus tolerance', () => {
+    it.each([
+      { time: '09:07', label: 'HH:mm' },
+      { time: '09:07:00', label: 'HH:mm:ss' },
+      { time: '09:07:33', label: 'HH:mm:ss with seconds' },
+      { time: '12:41:12.213424', label: 'HH:mm:ss.fraction' },
+    ])('normalizes a $label record instead of failing the corpus closed', ({ time }) => {
+      const result = normalizePartnerBriefingCorpus([
+        makeValidRecord({ id: 'rec_pg', time, log: '기록' }),
+      ]);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sources).toEqual([{ ordinal: 0, recordId: 'rec_pg' }]);
+        expect(result.events).toHaveLength(1);
+      }
+    });
+
+    it('derives period from the canonical HH:mm regardless of precision', () => {
+      const result = normalizePartnerBriefingCorpus([
+        makeValidRecord({ id: 'a', date: '2026-08-28', time: '09:07' }),
+        makeValidRecord({ id: 'b', date: '2026-08-28', time: '09:07:33' }),
+        makeValidRecord({ id: 'c', date: '2026-08-28', time: '12:41:12.213424' }),
+        makeValidRecord({ id: 'd', date: '2026-08-28', time: '23:59:59.999999' }),
+      ]);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.events.map((e) => e.period)).toEqual([
+          'morning',
+          'morning',
+          'afternoon',
+          'night',
+        ]);
+      }
+    });
+
+    it('keeps every eligible source in a mixed-precision corpus', () => {
+      const mixed = [
+        makeValidRecord({ id: 'r_hhmm', date: '2026-08-28', time: '09:07', log: '분 단위' }),
+        makeValidRecord({ id: 'r_secs', date: '2026-08-28', time: '14:05:21', log: '초 단위' }),
+        makeValidRecord({ id: 'r_frac', date: '2026-08-28', time: '12:41:12.213424', log: '소수 단위' }),
+        makeValidRecord({ id: 'r_zero', date: '2026-08-28', time: '20:00:00', log: '정각' }),
+        makeValidRecord({ id: 'r_mid', date: '2026-08-28', time: '00:00:00.000000', log: '자정' }),
+      ];
+
+      const result = normalizePartnerBriefingCorpus(mixed);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // No eligible source may disappear, and ordering is by exact instant.
+        expect(result.sources.map((s) => s.recordId)).toEqual([
+          'r_mid',
+          'r_hhmm',
+          'r_frac',
+          'r_secs',
+          'r_zero',
+        ]);
+        expect(result.events).toHaveLength(mixed.length);
+        expect(result.events.map((e) => e.ordinal)).toEqual([0, 1, 2, 3, 4]);
+        expect(new Set(result.sources.map((s) => s.recordId)).size).toBe(mixed.length);
+      }
+    });
+
+    it('treats 09:07 and 09:07:00 as one instant, tie-broken by record ID', () => {
+      const result = normalizePartnerBriefingCorpus([
+        makeValidRecord({ id: 'rec_z', date: '2026-08-28', time: '09:07:00', log: 'Z' }),
+        makeValidRecord({ id: 'rec_a', date: '2026-08-28', time: '09:07', log: 'A' }),
+        makeValidRecord({ id: 'rec_m', date: '2026-08-28', time: '09:07:00.000000', log: 'M' }),
+      ]);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sources).toEqual([
+          { ordinal: 0, recordId: 'rec_a' },
+          { ordinal: 1, recordId: 'rec_m' },
+          { ordinal: 2, recordId: 'rec_z' },
+        ]);
+      }
+    });
+
+    it('orders 09:07:01 after every 09:07 same-minute record', () => {
+      const result = normalizePartnerBriefingCorpus([
+        makeValidRecord({ id: 'rec_late', date: '2026-08-28', time: '09:07:01', log: 'late' }),
+        makeValidRecord({ id: 'rec_z', date: '2026-08-28', time: '09:07:00', log: 'Z' }),
+        makeValidRecord({ id: 'rec_a', date: '2026-08-28', time: '09:07', log: 'A' }),
+      ]);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // 'rec_late' sorts last on seconds even though its ID sorts before 'rec_z'.
+        expect(result.sources.map((s) => s.recordId)).toEqual([
+          'rec_a',
+          'rec_z',
+          'rec_late',
+        ]);
+        expect(result.events.map((e) => e.period)).toEqual(['morning', 'morning', 'morning']);
+      }
+    });
+
+    it('orders sub-second records within the same second', () => {
+      const result = normalizePartnerBriefingCorpus([
+        makeValidRecord({ id: 'r3', date: '2026-08-28', time: '12:41:12.9' }),
+        makeValidRecord({ id: 'r1', date: '2026-08-28', time: '12:41:12.09' }),
+        makeValidRecord({ id: 'r2', date: '2026-08-28', time: '12:41:12.213424' }),
+        makeValidRecord({ id: 'r0', date: '2026-08-28', time: '12:41:12' }),
+      ]);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.sources.map((s) => s.recordId)).toEqual(['r0', 'r1', 'r2', 'r3']);
+      }
+    });
+
+    it('sorts a mixed-precision multi-day corpus by day then exact instant', () => {
+      const result = normalizePartnerBriefingCorpus([
+        makeValidRecord({ id: 'd2_b', date: '2026-08-28', time: '06:00:00.5' }),
+        makeValidRecord({ id: 'd0_a', date: '2026-08-26', time: '09:00' }),
+        makeValidRecord({ id: 'd2_a', date: '2026-08-28', time: '06:00' }),
+        makeValidRecord({ id: 'd1_a', date: '2026-08-27', time: '12:00:00' }),
+        makeValidRecord({ id: 'd0_b', date: '2026-08-26', time: '20:00:30' }),
+      ]);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.days).toEqual([
+          { dayOrdinal: 0, date: '2026-08-26' },
+          { dayOrdinal: 1, date: '2026-08-27' },
+          { dayOrdinal: 2, date: '2026-08-28' },
+        ]);
+        expect(result.sources.map((s) => s.recordId)).toEqual([
+          'd0_a',
+          'd0_b',
+          'd1_a',
+          'd2_a',
+          'd2_b',
+        ]);
+        expect(result.events.map((e) => e.dayOrdinal)).toEqual([0, 0, 1, 2, 2]);
+      }
+    });
+
+    it('never leaks seconds or fractional seconds into a model-safe event', () => {
+      const result = normalizePartnerBriefingCorpus([
+        makeValidRecord({ id: 'r_frac', date: '2026-08-28', time: '12:41:12.213424', log: '기록' }),
+        makeValidRecord({ id: 'r_secs', date: '2026-08-28', time: '09:07:33', log: '기록' }),
+      ]);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        for (const event of result.events) {
+          expect(Object.keys(event).sort()).toEqual([
+            'dayOrdinal',
+            'mediaKinds',
+            'ordinal',
+            'period',
+            'text',
+          ]);
+        }
+        const serialized = JSON.stringify(result.events);
+        expect(serialized).not.toContain('213424');
+        expect(serialized).not.toContain('12:41');
+        expect(serialized).not.toContain('09:07');
+        expect(serialized).not.toContain(':33');
+      }
+    });
+
+    it('keeps the fail-closed contract for extended forms that are out of range', () => {
+      for (const [index, time] of [
+        '24:00:00',
+        '12:60:00',
+        '12:00:60',
+        '12:00:00.',
+        '12:00:00.1234567',
+        '12:00:00Z',
+        '12:00:00+09:00',
+        '9:00:00',
+      ].entries()) {
+        const result = normalizePartnerBriefingCorpus([
+          makeValidRecord({ id: 'good', time: '09:07:33' }),
+          makeValidRecord({ id: `bad_${index}`, time }),
+        ]);
+
+        expect(result).toEqual({
+          ok: false,
+          rejection: { index: 1, reason: 'invalid_time' },
+        });
+      }
+    });
+
+    it('does not mutate the input array or any record', () => {
+      const records = [
+        makeValidRecord({ id: 'r_b', date: '2026-08-28', time: '12:41:12.213424' }),
+        makeValidRecord({ id: 'r_a', date: '2026-08-27', time: '09:07:00' }),
+      ];
+      const snapshot = JSON.parse(JSON.stringify(records)) as unknown;
+      const orderBefore = records.map((r) => r.id);
+
+      const result = normalizePartnerBriefingCorpus(records);
+
+      expect(result.ok).toBe(true);
+      // Original DailyRecord values, including the raw DB time strings, are untouched.
+      expect(JSON.parse(JSON.stringify(records))).toEqual(snapshot);
+      expect(records.map((r) => r.id)).toEqual(orderBefore);
+      expect(records[0].time).toBe('12:41:12.213424');
+      expect(records[1].time).toBe('09:07:00');
     });
   });
 });

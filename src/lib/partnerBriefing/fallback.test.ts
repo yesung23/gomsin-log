@@ -20,6 +20,7 @@ import {
   formatMediaItemText,
   formatRangeLabelFromDates,
   generateDeterministicPartnerBriefing,
+  groupEventsIntoChronologicalRuns,
   validateBriefingMappings,
 } from './fallback';
 
@@ -500,16 +501,24 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       expect(morningSec.period).toBe('morning');
       expect(morningSec.items).toHaveLength(1);
       expect(morningSec.items[0]).toEqual({
-        text: '“기상 완료!”라고 기록했어요.',
-        sourceRecordId: 'rec-1',
+        parts: [
+          {
+            text: '“기상 완료!”라고 기록했어요.',
+            sourceRecordId: 'rec-1',
+          },
+        ],
       });
 
       const eveningSec = briefing.days[0].sections[1];
       expect(eveningSec.period).toBe('evening');
       expect(eveningSec.items).toHaveLength(1);
       expect(eveningSec.items[0]).toEqual({
-        text: '사진 1장을 남겼어요.',
-        sourceRecordId: 'rec-2',
+        parts: [
+          {
+            text: '사진 1장을 남겼어요.',
+            sourceRecordId: 'rec-2',
+          },
+        ],
       });
 
       expect(briefing.overview.sourceRecordIds).toEqual(['rec-1', 'rec-2']);
@@ -570,15 +579,23 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       expect(briefing.days[0].sections[0].period).toBe('morning');
       expect(briefing.days[0].sections[0].items).toEqual([
         {
-          text: '“아침 점호”라고 기록했어요.',
-          sourceRecordId: 'rec-day1-morning',
+          parts: [
+            {
+              text: '“아침 점호”라고 기록했어요.',
+              sourceRecordId: 'rec-day1-morning',
+            },
+          ],
         },
       ]);
       expect(briefing.days[0].sections[1].period).toBe('evening');
       expect(briefing.days[0].sections[1].items).toEqual([
         {
-          text: '“저녁 체력단련”라고 기록했어요.',
-          sourceRecordId: 'rec-day1-evening',
+          parts: [
+            {
+              text: '“저녁 체력단련”라고 기록했어요.',
+              sourceRecordId: 'rec-day1-evening',
+            },
+          ],
         },
       ]);
 
@@ -587,8 +604,12 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       expect(briefing.days[1].sections[0].period).toBe('afternoon');
       expect(briefing.days[1].sections[0].items).toEqual([
         {
-          text: '“오후 정비”라고 기록했어요.',
-          sourceRecordId: 'rec-day2-afternoon',
+          parts: [
+            {
+              text: '“오후 정비”라고 기록했어요.',
+              sourceRecordId: 'rec-day2-afternoon',
+            },
+          ],
         },
       ]);
     });
@@ -652,7 +673,7 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
 
         // Exactly one item per source event: zero loss, zero duplicates
         expect(allEmittedItems).toHaveLength(count);
-        const itemRecordIds = allEmittedItems.map((item) => item.sourceRecordId);
+        const itemRecordIds = allEmittedItems.flatMap((item) => item.parts.map((p) => p.sourceRecordId));
         const expectedRecordIds = sources.map((s) => s.recordId);
 
         expect(itemRecordIds).toEqual(expectedRecordIds);
@@ -683,7 +704,7 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       });
 
       expect(briefing.sourceCount).toBe(1);
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-safe');
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-safe');
     });
   });
 
@@ -1006,26 +1027,38 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
 
         expect(briefing.days).toHaveLength(2);
         expect(briefing.days[0].date).toBe('2026-08-26');
-        expect(briefing.days[0].sections).toHaveLength(2);
-        expect(briefing.days[0].sections[0].items).toEqual([
-          {
-            text: 'They wrote: “Morning walk”',
-            sourceRecordId: 'rec-en-1',
-          },
-        ]);
-        expect(briefing.days[0].sections[1].items).toEqual([
-          {
-            text: 'Shared 1 video.',
-            sourceRecordId: 'rec-en-2',
-          },
-        ]);
-        expect(briefing.days[1].date).toBe('2026-08-27');
-        expect(briefing.days[1].sections[0].items).toEqual([
-          {
-            text: 'They wrote: “Afternoon coffee”',
-            sourceRecordId: 'rec-en-3',
-          },
-        ]);
+       expect(briefing.days[0].sections).toHaveLength(2);
+       expect(briefing.days[0].sections[0].items).toEqual([
+         {
+            parts: [
+              {
+                text: 'They wrote: “Morning walk”',
+                sourceRecordId: 'rec-en-1',
+              },
+            ],
+         },
+       ]);
+       expect(briefing.days[0].sections[1].items).toEqual([
+         {
+            parts: [
+              {
+                text: 'Shared 1 video.',
+                sourceRecordId: 'rec-en-2',
+              },
+            ],
+         },
+       ]);
+       expect(briefing.days[1].date).toBe('2026-08-27');
+       expect(briefing.days[1].sections[0].items).toEqual([
+         {
+            parts: [
+              {
+                text: 'They wrote: “Afternoon coffee”',
+                sourceRecordId: 'rec-en-3',
+              },
+            ],
+         },
+       ]);
       });
     });
 
@@ -1077,4 +1110,121 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       });
     });
   });
+  /*
+    A day is a sequence, not a set of period buckets.
+
+    Sections used to be keyed by period in a Map, so all of a day's `night` records
+    collapsed into one section wherever they sat. `night` spans BOTH ends of the clock
+    (00:00-04:59 and 22:00-23:59), so a day of 00:30 / 09:00 / 22:30 produced
+    night(00:30 + 22:30) followed by morning(09:00) -- Map insertion order put the night
+    section first, so a 22:30 record was displayed above the 09:00 one it came eight
+    hours after, fused into the same section as a record from the previous night.
+  */
+  describe('chronological contiguous period runs', () => {
+    function midnightSpanningEvents(): BriefingModelSafeEvent[] {
+      return [
+        { ordinal: 0, dayOrdinal: 0, period: 'night', text: '새벽 근무 교대', mediaKinds: [] },
+        { ordinal: 1, dayOrdinal: 0, period: 'morning', text: '오전 점호 완료', mediaKinds: [] },
+        { ordinal: 2, dayOrdinal: 0, period: 'night', text: '늦은 밤 점검', mediaKinds: [] },
+      ];
+    }
+
+    const sources: BriefingSourceMapping[] = [
+      { ordinal: 0, recordId: 'rec-0030' },
+      { ordinal: 1, recordId: 'rec-0900' },
+      { ordinal: 2, recordId: 'rec-2230' },
+    ];
+    const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+    it('keeps 00:30 night, 09:00 morning and 22:30 night as three separate sections', () => {
+      const briefing = generateDeterministicPartnerBriefing({
+        events: midnightSpanningEvents(),
+        sources,
+        days,
+      });
+
+      const sections = briefing.days[0].sections;
+      expect(sections.map((s) => s.period)).toEqual(['night', 'morning', 'night']);
+      expect(sections.map((s) => s.items.length)).toEqual([1, 1, 1]);
+
+      // Each run holds exactly its own record, in the order the day happened.
+      expect(
+        sections.map((s) => s.items.flatMap((i) => i.parts.map((p) => p.sourceRecordId))),
+      ).toEqual([['rec-0030'], ['rec-0900'], ['rec-2230']]);
+    });
+
+    it('still merges genuinely adjacent same-period records into one run', () => {
+      const events: BriefingModelSafeEvent[] = [
+        { ordinal: 0, dayOrdinal: 0, period: 'night', text: '새벽 1', mediaKinds: [] },
+        { ordinal: 1, dayOrdinal: 0, period: 'night', text: '새벽 2', mediaKinds: [] },
+        { ordinal: 2, dayOrdinal: 0, period: 'morning', text: '오전', mediaKinds: [] },
+      ];
+
+      const briefing = generateDeterministicPartnerBriefing({
+        events,
+        sources,
+        days,
+      });
+
+      const sections = briefing.days[0].sections;
+      expect(sections.map((s) => s.period)).toEqual(['night', 'morning']);
+      expect(sections[0].items).toHaveLength(2);
+    });
+
+    it('preserves total source coverage and order across the runs', () => {
+      const briefing = generateDeterministicPartnerBriefing({
+        events: midnightSpanningEvents(),
+        sources,
+        days,
+      });
+
+      const rendered = briefing.days
+        .flatMap((day) => day.sections)
+        .flatMap((section) => section.items)
+        .flatMap((item) => item.parts.map((part) => part.sourceRecordId));
+
+      expect(rendered).toEqual(['rec-0030', 'rec-0900', 'rec-2230']);
+      expect(briefing.overview.sourceRecordIds).toEqual([
+        'rec-0030',
+        'rec-0900',
+        'rec-2230',
+      ]);
+      expect(briefing.sourceCount).toBe(3);
+    });
+
+    it('cuts runs per day, so the same period on two days never fuses', () => {
+      const events: BriefingModelSafeEvent[] = [
+        { ordinal: 0, dayOrdinal: 0, period: 'night', text: '26일 밤', mediaKinds: [] },
+        { ordinal: 1, dayOrdinal: 1, period: 'night', text: '27일 밤', mediaKinds: [] },
+      ];
+
+      const briefing = generateDeterministicPartnerBriefing({
+        events,
+        sources: [
+          { ordinal: 0, recordId: 'rec-d0' },
+          { ordinal: 1, recordId: 'rec-d1' },
+        ],
+        days: [
+          { dayOrdinal: 0, date: '2026-08-26' },
+          { dayOrdinal: 1, date: '2026-08-27' },
+        ],
+      });
+
+      expect(briefing.days).toHaveLength(2);
+      expect(briefing.days[0].sections.map((s) => s.period)).toEqual(['night']);
+      expect(briefing.days[1].sections.map((s) => s.period)).toEqual(['night']);
+    });
+
+    it('exposes runs whose period value repeats, so period is not a unique key', () => {
+      const runsByDay = groupEventsIntoChronologicalRuns(midnightSpanningEvents());
+      const dayRuns = runsByDay.get(0)!;
+
+      expect(dayRuns).toHaveLength(3);
+      expect(dayRuns.map((r) => r.period)).toEqual(['night', 'morning', 'night']);
+      // Explicitly: the period strings collide. Any consumer keying on them must add
+      // position, which `PartnerBriefingCard` now does.
+      expect(new Set(dayRuns.map((r) => r.period)).size).toBeLessThan(dayRuns.length);
+    });
+  });
+
 });

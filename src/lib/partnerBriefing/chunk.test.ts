@@ -45,6 +45,10 @@ function envelope(
     promptOverheadUtf8Bytes,
     responseReserveUtf8Bytes,
     maxInputTextGraphemes,
+    // Structural limits the natives enforce; generous here so the byte/grapheme
+    // assertions below stay the thing under test.
+    maxItems: 1_000,
+    maxCandidatesPerItem: 1_000,
   };
 }
 
@@ -87,58 +91,116 @@ describe('Partner Briefing chunker (Gate A4)', () => {
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: 0,
           maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         }),
       ).toBe(true);
 
       const invalid: unknown[] = [
         {},
+        // Missing maxInputTextGraphemes, maxItems and maxCandidatesPerItem.
         {
           maxContextUtf8Bytes: 100,
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: 0,
+        },
+        // Missing only the two structural limits.
+        {
+          maxContextUtf8Bytes: 100,
+          promptOverheadUtf8Bytes: 0,
+          responseReserveUtf8Bytes: 0,
+          maxInputTextGraphemes: 1,
         },
         {
           maxContextUtf8Bytes: 0,
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: 0,
           maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
         {
           maxContextUtf8Bytes: 100,
           promptOverheadUtf8Bytes: -1,
           responseReserveUtf8Bytes: 0,
           maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
         {
           maxContextUtf8Bytes: 100,
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: -1,
           maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
         {
           maxContextUtf8Bytes: 100,
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: 0,
           maxInputTextGraphemes: 0,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
         {
           maxContextUtf8Bytes: 100.5,
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: 0,
           maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
         {
           maxContextUtf8Bytes: Number.MAX_SAFE_INTEGER + 1,
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: 0,
           maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
         {
           maxContextUtf8Bytes: 100,
           promptOverheadUtf8Bytes: 0,
           responseReserveUtf8Bytes: 0,
           maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
           maxUtf8Bytes: 99,
+        },
+        // maxItems must be a positive safe integer.
+        {
+          maxContextUtf8Bytes: 100,
+          promptOverheadUtf8Bytes: 0,
+          responseReserveUtf8Bytes: 0,
+          maxInputTextGraphemes: 1,
+          maxItems: 0,
+          maxCandidatesPerItem: 32,
+        },
+        {
+          maxContextUtf8Bytes: 100,
+          promptOverheadUtf8Bytes: 0,
+          responseReserveUtf8Bytes: 0,
+          maxInputTextGraphemes: 1,
+          maxItems: 1.5,
+          maxCandidatesPerItem: 32,
+        },
+        // maxCandidatesPerItem likewise.
+        {
+          maxContextUtf8Bytes: 100,
+          promptOverheadUtf8Bytes: 0,
+          responseReserveUtf8Bytes: 0,
+          maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: 0,
+        },
+        {
+          maxContextUtf8Bytes: 100,
+          promptOverheadUtf8Bytes: 0,
+          responseReserveUtf8Bytes: 0,
+          maxInputTextGraphemes: 1,
+          maxItems: 64,
+          maxCandidatesPerItem: -1,
         },
         null,
         [],
@@ -156,12 +218,16 @@ describe('Partner Briefing chunker (Gate A4)', () => {
           promptOverheadUtf8Bytes: 40,
           responseReserveUtf8Bytes: 60,
           maxInputTextGraphemes: 10,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
         {
           maxContextUtf8Bytes: 100,
           promptOverheadUtf8Bytes: 70,
           responseReserveUtf8Bytes: 40,
           maxInputTextGraphemes: 10,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         },
       ]) {
         expect(chunkPartnerBriefingEvents([], value)).toEqual({
@@ -316,12 +382,16 @@ describe('Partner Briefing chunker (Gate A4)', () => {
         promptOverheadUtf8Bytes: 10,
         responseReserveUtf8Bytes: 0,
         maxInputTextGraphemes: 10,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       });
       const reserved = chunkPartnerBriefingEvents([event], {
         maxContextUtf8Bytes,
         promptOverheadUtf8Bytes: 10,
         responseReserveUtf8Bytes: 1,
         maxInputTextGraphemes: 10,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       });
 
       expect(fits.ok).toBe(true);

@@ -73,9 +73,10 @@ describe('Android Partner Briefing native package contract', () => {
   });
 
   it('uses android.icu.text.BreakIterator for accurate grapheme segmentation and avoids java.text', () => {
-    expect(pluginKt).toContain('import android.icu.text.BreakIterator');
-    expect(pluginKt).not.toContain('import java.text.BreakIterator');
-    expect(pluginKt).toContain('BreakIterator.getCharacterInstance()');
+    expect(engineKt).toContain('import android.icu.text.BreakIterator');
+    expect(engineKt).not.toContain('import java.text.BreakIterator');
+    expect(engineKt).toContain('BreakIterator.getCharacterInstance()');
+    expect(pluginKt).not.toContain('import android.icu.text.BreakIterator');
   });
 
   it('validates candidate text as strict String and bounds rawOutput size before JSON parse', () => {
@@ -127,21 +128,35 @@ describe('Android Partner Briefing native package contract', () => {
     expect(engineKt).not.toMatch(/e\.javaClass/);
   });
 
-  it('enforces exact version=1, choices, and strict JSONTokener end-of-input check', () => {
+  it('enforces exact version=2, groups, and strict JSONTokener end-of-input check', () => {
     expect(engineKt).toContain('val tokener = JSONTokener(rawOutput)');
     expect(engineKt).toContain('tokener.nextClean()');
-    expect(engineKt).toContain('topKeys != setOf("version", "choices")');
-    expect(engineKt).toContain('(versionVal as Number).toInt() != 1');
+    expect(engineKt).toContain('topKeys != setOf("version", "groups")');
+    expect(engineKt).toContain('(versionVal as Number).toInt() != 2');
+    expect(engineKt).toContain('groupKeys != setOf("groupOrdinal", "choices")');
+    expect(engineKt).toContain('choiceKeys != setOf("itemOrdinal", "candidateOrdinal")');
   });
 
-  it('owns engine lifecycle per plugin instance and registers Job before execution', () => {
+  it('owns engine lifecycle per plugin instance and registers the Deferred before bridge launch', () => {
     expect(pluginKt).toContain('private val pluginScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)');
-    expect(pluginKt).toContain('private val engine = OnDeviceBriefingEngine(pluginScope)');
+    expect(pluginKt).toContain('private val engine by lazy { OnDeviceBriefingEngine(pluginScope, context) }');
     expect(pluginKt).toContain('engine.cancelAll()');
     expect(pluginKt).toContain('pluginScope.cancel()');
 
-    expect(engineKt).toContain('start = CoroutineStart.LAZY');
-    expect(engineKt).toContain('inFlight.putIfAbsent(requestId, job)');
+    // Cancellation race safety: one Deferred owns completion and is registered before it starts.
+    expect(engineKt).not.toContain('CompletableDeferred<List<BriefingGroup>>');
+    expect(engineKt).toContain('scope.async(start = CoroutineStart.LAZY)');
+    expect(engineKt).toContain('inFlight.putIfAbsent(requestId, deferred)');
+    expect(engineKt).toContain('deferred.start()');
+    expect(engineKt.indexOf('inFlight.putIfAbsent(requestId, deferred)'))
+      .toBeLessThan(engineKt.indexOf('deferred.start()'));
+    expect(pluginKt).toContain('engine.startSelect(');
+    expect(pluginKt).toContain('val groups = deferred.await()');
+    expect(pluginKt).toMatch(
+      /val deferred = try \{[\s\S]*engine\.startSelect\([\s\S]*pluginScope\.launch \{[\s\S]*val groups = deferred\.await\(\)/,
+    );
+    expect(engineKt.match(/catch \(e: CancellationException\) \{\s*throw e\s*\}/g)?.length)
+      .toBeGreaterThanOrEqual(3);
   });
 
   it('maintains minSdk 23 floor with overrideLibrary and runtime-gates API 26 before parsing', () => {
@@ -182,9 +197,11 @@ describe('Android Partner Briefing native package contract', () => {
     ] as const) {
       expect(engineKt).toContain(`const val ${name} = ${value}`);
     }
+    expect(engineKt).toContain('val groupOrdinal: Int');
     expect(engineKt).toContain('val itemOrdinal: Int');
     expect(engineKt).toContain('val candidateOrdinal: Int');
-    expect(pluginKt).toContain('put("version", 1)');
+    expect(pluginKt).toContain('put("version", 2)');
+    expect(pluginKt).toContain('put("groupOrdinal", group.groupOrdinal)');
     expect(pluginKt).toContain('put("itemOrdinal", choice.itemOrdinal)');
     expect(pluginKt).toContain('put("candidateOrdinal", choice.candidateOrdinal)');
   });
@@ -204,6 +221,7 @@ describe('Android Partner Briefing native package contract', () => {
     }
     expect(pluginKt).toContain('itemOrdinal != i');
     expect(pluginKt).toContain('candidateOrdinal != c');
+    expect(engineKt).toContain('itemOrdinal >= items.size');
     expect(engineKt).toContain('candidateOrdinal >= candidateCount');
   });
 
@@ -249,5 +267,34 @@ describe('Android Partner Briefing native package contract', () => {
     ]) {
       expect(combined, `must not use ${forbidden}`).not.toContain(forbidden);
     }
+  });
+
+  it('isolates API24+ ICU BreakIterator and API26+ ML Kit classes behind class-loader safe boundaries so Plugin can load on API23-25', () => {
+    // OnDeviceBriefingPlugin is instantiated at app launch on all Android versions (minSdk 23).
+    // Direct imports of android.icu or ML Kit classes in Plugin class cause NoClassDefFoundError/VerifyError on API 23-25.
+    expect(pluginKt).not.toContain('import android.icu');
+    expect(pluginKt).not.toContain('import com.google.mlkit');
+    expect(pluginKt).not.toContain('BreakIterator.getCharacterInstance()');
+    expect(pluginKt).toMatch(/Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.O/);
+    expect(pluginKt).toMatch(/Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.O/);
+  });
+
+  it('guards automatic model download to verified unmetered active networks (ConnectivityManager.isActiveNetworkMetered) and fails closed', () => {
+    expect(engineKt).toContain('import android.net.ConnectivityManager');
+    expect(engineKt).toContain('fun isUnmeteredActiveNetwork(): Boolean');
+    expect(engineKt).toContain('cm.isActiveNetworkMetered');
+    expect(engineKt).toContain('!isMetered');
+
+    // Prove DOWNLOADABLE branch gates triggerDownload behind isUnmeteredActiveNetwork()
+    expect(engineKt).toMatch(
+      /FeatureStatus\.DOWNLOADABLE\s*->\s*\{\s*if\s*\(isUnmeteredActiveNetwork\(\)\)\s*\{\s*triggerDownload\(\)\s*\}\s*OnDeviceBriefingAvailability\.PREPARING\s*\}/,
+    );
+
+    // Prove fail-closed handling on metered, missing context, or exceptions
+    expect(engineKt).toMatch(/val ctx = context \?: return false/);
+    expect(engineKt).toMatch(/val cm = ctx\.getSystemService\(Context\.CONNECTIVITY_SERVICE\) as\? ConnectivityManager/);
+    expect(engineKt).toMatch(/cm\.activeNetwork \?: return false/);
+    expect(engineKt).toMatch(/catch \(_: Throwable\) \{\s*false\s*\}/);
+    expect(pluginKt).toContain('OnDeviceBriefingEngine(pluginScope, context)');
   });
 });

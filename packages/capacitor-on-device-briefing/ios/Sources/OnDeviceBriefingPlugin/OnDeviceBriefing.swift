@@ -19,6 +19,11 @@ struct OnDeviceBriefingChoice: Sendable {
     let candidateOrdinal: Int
 }
 
+struct OnDeviceBriefingGroup: Sendable {
+    let groupOrdinal: Int
+    let choices: [OnDeviceBriefingChoice]
+}
+
 enum OnDeviceBriefingAvailability: String {
     case ready
     case unsupported
@@ -38,16 +43,39 @@ enum OnDeviceBriefingError: Error {
 
 enum OnDeviceBriefing {
     static let maxContextUtf8Bytes = 4096
-    static let promptOverheadUtf8Bytes = 256
     static let responseReserveUtf8Bytes = 512
     static let maxInputTextGraphemes = 1000
     static let maxItems = 64
     static let maxCandidatesPerItem = 32
     static let maximumResponseTokens = 512
 
+    /// The model instructions. Sent verbatim, and counted verbatim by
+    /// `promptOverheadUtf8Bytes` below -- there is no second copy of this text.
     static let instructions = """
-    Choose one supplied candidate for every item. Return only itemOrdinal and candidateOrdinal. Keep every item once and in order. Never write text.
+    Group contiguous items into groups of 2–4; use a singleton only when the request contains exactly one item. Choose one supplied candidate for every item. Return only groupOrdinal, itemOrdinal, and candidateOrdinal. Keep every item once and in order across groups. Never write text.
     """
+
+    /// The fixed text that precedes the items JSON in every prompt.
+    /// `prompt(itemsJSON:)` is the only consumer, so the prefix cannot drift from what
+    /// the byte budget below accounts for.
+    static let promptItemsPrefix = "Items JSON:\n"
+
+    /// Budget reserved for everything in the prompt that is NOT the items JSON.
+    ///
+    /// This was the literal 256 while the real static prompt measured 295 bytes
+    /// (283 for the instructions, which contain a 3-byte en dash, plus 12 for the prefix).
+    /// The advertised figure is what the JS batcher subtracts from `maxContextUtf8Bytes`
+    /// to decide how much payload fits, so under-declaring it let the batcher build a
+    /// request 39 bytes larger than the device actually had room for.
+    ///
+    /// Derived from the SAME two strings the prompt is built from, so editing either one
+    /// moves this number with it, and rounded UP to the next 64 bytes so the declared
+    /// budget is always conservative rather than exact-to-the-byte.
+    static let promptOverheadUtf8Bytes: Int = {
+        let staticPromptBytes = instructions.utf8.count + promptItemsPrefix.utf8.count
+        let granularity = 64
+        return ((staticPromptBytes + granularity - 1) / granularity) * granularity
+    }()
 
     static func localeIdentifier(for locale: String) -> String? {
         switch locale {
@@ -83,14 +111,14 @@ enum OnDeviceBriefing {
     }
 
     static func prompt(itemsJSON: String) -> String {
-        "Items JSON:\n\(itemsJSON)"
+        promptItemsPrefix + itemsJSON
     }
 
     static func select(
         locale: String,
         items: [OnDeviceBriefingItem],
         itemsJSON: String
-    ) async throws -> [OnDeviceBriefingChoice] {
+    ) async throws -> [OnDeviceBriefingGroup] {
         guard !items.isEmpty, items.count <= maxItems else {
             throw OnDeviceBriefingError.badRequest
         }
@@ -123,9 +151,19 @@ struct GeneratedBriefingChoice {
 
 @available(iOS 26.0, *)
 @Generable
-struct GeneratedBriefingPlan {
-    @Guide(description: "Exactly one choice for each request item, in request order")
+struct GeneratedBriefingGroup {
+    @Guide(description: "Sequential 0-indexed group ordinal")
+    var groupOrdinal: Int
+
+    @Guide(description: "Contiguous choices for this group, keeping request order")
     var choices: [GeneratedBriefingChoice]
+}
+
+@available(iOS 26.0, *)
+@Generable
+struct GeneratedBriefingPlan {
+    @Guide(description: "Sequential groups covering all request items in order")
+    var groups: [GeneratedBriefingGroup]
 }
 
 extension OnDeviceBriefing {
@@ -134,7 +172,7 @@ extension OnDeviceBriefing {
         locale: String,
         items: [OnDeviceBriefingItem],
         itemsJSON: String
-    ) async throws -> [OnDeviceBriefingChoice] {
+    ) async throws -> [OnDeviceBriefingGroup] {
         let currentAvailability = availability(locale: locale)
         guard currentAvailability == .ready else {
             throw OnDeviceBriefingError.unavailable(currentAvailability)
@@ -156,13 +194,18 @@ extension OnDeviceBriefing {
                 options: options
             )
             try Task.checkCancellation()
-            guard response.content.choices.count <= items.count else {
+            guard response.content.groups.count <= items.count else {
                 throw OnDeviceBriefingError.malformedOutput
             }
-            return response.content.choices.map {
-                OnDeviceBriefingChoice(
-                    itemOrdinal: $0.itemOrdinal,
-                    candidateOrdinal: $0.candidateOrdinal
+            return response.content.groups.map { group in
+                OnDeviceBriefingGroup(
+                    groupOrdinal: group.groupOrdinal,
+                    choices: group.choices.map { choice in
+                        OnDeviceBriefingChoice(
+                            itemOrdinal: choice.itemOrdinal,
+                            candidateOrdinal: choice.candidateOrdinal
+                        )
+                    }
                 )
             }
         } catch is CancellationError {
@@ -198,16 +241,28 @@ extension OnDeviceBriefing {
 
 actor OnDeviceBriefingEngine {
     static let shared = OnDeviceBriefingEngine()
+    private static let maximumPendingCancellations = 32
 
     private var inFlight: (
         requestId: String,
-        task: Task<[OnDeviceBriefingChoice], Error>
+        task: Task<[OnDeviceBriefingGroup], Error>
     )?
+    private var cancelledBeforeStart: [String] = []
 
     func cancel(requestId: String) {
-        guard let current = inFlight, current.requestId == requestId else { return }
-        current.task.cancel()
-        inFlight = nil
+        if let current = inFlight, current.requestId == requestId {
+            current.task.cancel()
+            inFlight = nil
+            return
+        }
+
+        guard !cancelledBeforeStart.contains(requestId) else { return }
+        cancelledBeforeStart.append(requestId)
+        if cancelledBeforeStart.count > Self.maximumPendingCancellations {
+            cancelledBeforeStart.removeFirst(
+                cancelledBeforeStart.count - Self.maximumPendingCancellations
+            )
+        }
     }
 
     func select(
@@ -215,7 +270,12 @@ actor OnDeviceBriefingEngine {
         locale: String,
         items: [OnDeviceBriefingItem],
         itemsJSON: String
-    ) async throws -> [OnDeviceBriefingChoice] {
+    ) async throws -> [OnDeviceBriefingGroup] {
+        if let cancelledIndex = cancelledBeforeStart.firstIndex(of: requestId) {
+            cancelledBeforeStart.remove(at: cancelledIndex)
+            throw CancellationError()
+        }
+
         if let current = inFlight {
             current.task.cancel()
             inFlight = nil
@@ -225,7 +285,7 @@ actor OnDeviceBriefingEngine {
             throw OnDeviceBriefingError.unavailable(currentAvailability)
         }
 
-        let task = Task<[OnDeviceBriefingChoice], Error> {
+        let task = Task<[OnDeviceBriefingGroup], Error> {
             try await OnDeviceBriefing.select(
                 locale: locale,
                 items: items,

@@ -476,6 +476,52 @@ export interface FallbackBriefingInput {
 /**
  * Generates a complete deterministic PartnerBriefing structure without AI models.
  */
+/**
+ * One day's events, cut into CONTIGUOUS runs of the same period.
+ *
+ * Sections used to be keyed by period in a Map, so every event of a given period on a
+ * given day collapsed into one section wherever it sat in the day. `night` spans both
+ * ends of the clock (00:00-04:59 and 22:00-23:59), so a day with 00:30, 09:00 and 22:30
+ * produced a `night` section holding BOTH night records and, because the Map preserved
+ * first-insertion order, it rendered ABOVE `morning` -- the day read as
+ * night(00:30 + 22:30) then morning(09:00), with the late-evening record shown before the
+ * morning one it came eight hours after.
+ *
+ * Cutting on a period CHANGE instead keeps the day in the order it happened and yields
+ * three sections here. Two sections may therefore carry the same `period` value, so no
+ * caller may treat that string as a unique key.
+ *
+ * The event order given is the order used: the pipeline already relies on `events` being
+ * in the chronological order `normalizePartnerBriefingCorpus` produced.
+ */
+export interface BriefingChronologicalRun {
+  readonly period: BriefingPeriod;
+  readonly events: readonly BriefingModelSafeEvent[];
+}
+
+export function groupEventsIntoChronologicalRuns(
+  events: readonly BriefingModelSafeEvent[],
+): Map<number, BriefingChronologicalRun[]> {
+  const runsByDay = new Map<number, BriefingChronologicalRun[]>();
+
+  for (const event of events) {
+    let dayRuns = runsByDay.get(event.dayOrdinal);
+    if (!dayRuns) {
+      dayRuns = [];
+      runsByDay.set(event.dayOrdinal, dayRuns);
+    }
+
+    const lastRun = dayRuns[dayRuns.length - 1];
+    if (lastRun && lastRun.period === event.period) {
+      (lastRun.events as BriefingModelSafeEvent[]).push(event);
+      continue;
+    }
+    dayRuns.push({ period: event.period, events: [event] });
+  }
+
+  return runsByDay;
+}
+
 export function generateDeterministicPartnerBriefing(
   input: FallbackBriefingInput,
 ): PartnerBriefing {
@@ -496,40 +542,28 @@ export function generateDeterministicPartnerBriefing(
     };
   }
 
-  // Group events by dayOrdinal, then by period, preserving event chronology
-  const eventsByDay = new Map<number, Map<BriefingPeriod, BriefingModelSafeEvent[]>>();
-  for (const event of events) {
-    let dayGroup = eventsByDay.get(event.dayOrdinal);
-    if (!dayGroup) {
-      dayGroup = new Map<BriefingPeriod, BriefingModelSafeEvent[]>();
-      eventsByDay.set(event.dayOrdinal, dayGroup);
-    }
-    let periodList = dayGroup.get(event.period);
-    if (!periodList) {
-      periodList = [];
-      dayGroup.set(event.period, periodList);
-    }
-    periodList.push(event);
-  }
-
-  const sortedDayOrdinals = Array.from(eventsByDay.keys()).sort((a, b) => a - b);
+  const runsByDay = groupEventsIntoChronologicalRuns(events);
+  const sortedDayOrdinals = Array.from(runsByDay.keys()).sort((a, b) => a - b);
   const resultDays: PartnerBriefingDay[] = [];
   const allDates: string[] = [];
 
   for (const dayOrdinal of sortedDayOrdinals) {
     const date = dayMap.get(dayOrdinal)!;
     allDates.push(date);
-    const dayGroup = eventsByDay.get(dayOrdinal)!;
     const sections: PartnerBriefingSection[] = [];
 
-    for (const [period, periodEvents] of dayGroup.entries()) {
-      const items: PartnerBriefingItem[] = periodEvents.map((e) => ({
-        text: formatDeterministicBriefingItemText(e, locale),
-        sourceRecordId: sourceMap.get(e.ordinal)!,
+    for (const run of runsByDay.get(dayOrdinal)!) {
+      const items: PartnerBriefingItem[] = run.events.map((e) => ({
+        parts: [
+          {
+            text: formatDeterministicBriefingItemText(e, locale),
+            sourceRecordId: sourceMap.get(e.ordinal)!,
+          },
+        ],
       }));
 
       sections.push({
-        period,
+        period: run.period,
         items,
       });
     }

@@ -1,6 +1,5 @@
 package app.gomsinlog.ondevicebriefing
 
-import android.icu.text.BreakIterator
 import android.os.Build
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
@@ -9,6 +8,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -30,7 +30,7 @@ import org.json.JSONObject
 class OnDeviceBriefingPlugin : Plugin() {
 
     private val pluginScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val engine = OnDeviceBriefingEngine(pluginScope)
+    private val engine by lazy { OnDeviceBriefingEngine(pluginScope, context) }
 
     @PluginMethod
     fun availability(call: PluginCall) {
@@ -69,6 +69,10 @@ class OnDeviceBriefingPlugin : Plugin() {
             put("promptOverheadUtf8Bytes", OnDeviceBriefing.PROMPT_OVERHEAD_UTF8_BYTES)
             put("responseReserveUtf8Bytes", OnDeviceBriefing.RESPONSE_RESERVE_UTF8_BYTES)
             put("maxInputTextGraphemes", OnDeviceBriefing.MAX_INPUT_TEXT_GRAPHEMES)
+            // Structural limits this parser already enforces. Advertised so the JS
+            // batcher stops building requests this plugin will reject outright.
+            put("maxItems", OnDeviceBriefing.MAX_ITEMS)
+            put("maxCandidatesPerItem", OnDeviceBriefing.MAX_CANDIDATES_PER_ITEM)
         }
         val ret = JSObject().apply {
             put("envelope", envelope)
@@ -109,27 +113,45 @@ class OnDeviceBriefingPlugin : Plugin() {
             return
         }
 
+        val deferred = try {
+            engine.startSelect(
+                requestId,
+                locale,
+                parsed.items,
+                parsed.jsonString
+            )
+        } catch (e: OnDeviceBriefingException) {
+            reject(call, e.errorCode)
+            return
+        } catch (_: Throwable) {
+            reject(call, BriefingErrorCode.NATIVE_ERROR)
+            return
+        }
+
         pluginScope.launch {
             try {
-                val choices = engine.select(
-                    requestId,
-                    locale,
-                    parsed.items,
-                    parsed.jsonString
-                )
+                val groups = deferred.await()
 
-                val choicesJsArray = JSArray()
-                for (choice in choices) {
-                    val choiceObj = JSObject().apply {
-                        put("itemOrdinal", choice.itemOrdinal)
-                        put("candidateOrdinal", choice.candidateOrdinal)
+                val groupsJsArray = JSArray()
+                for (group in groups) {
+                    val choicesJsArray = JSArray()
+                    for (choice in group.choices) {
+                        val choiceObj = JSObject().apply {
+                            put("itemOrdinal", choice.itemOrdinal)
+                            put("candidateOrdinal", choice.candidateOrdinal)
+                        }
+                        choicesJsArray.put(choiceObj)
                     }
-                    choicesJsArray.put(choiceObj)
+                    val groupObj = JSObject().apply {
+                        put("groupOrdinal", group.groupOrdinal)
+                        put("choices", choicesJsArray)
+                    }
+                    groupsJsArray.put(groupObj)
                 }
 
                 val outputObj = JSObject().apply {
-                    put("version", 1)
-                    put("choices", choicesJsArray)
+                    put("version", 2)
+                    put("groups", groupsJsArray)
                 }
 
                 val result = JSObject().apply {
@@ -137,6 +159,8 @@ class OnDeviceBriefingPlugin : Plugin() {
                     put("output", outputObj)
                 }
                 call.resolve(result)
+            } catch (_: CancellationException) {
+                reject(call, BriefingErrorCode.CANCELLED)
             } catch (e: OnDeviceBriefingException) {
                 reject(call, e.errorCode)
             } catch (_: Throwable) {
@@ -158,12 +182,16 @@ class OnDeviceBriefingPlugin : Plugin() {
             reject(call, BriefingErrorCode.BAD_REQUEST)
             return
         }
-        engine.cancel(requestId)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            engine.cancel(requestId)
+        }
         call.resolve(JSObject())
     }
 
     override fun handleOnDestroy() {
-        engine.cancelAll()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            engine.cancelAll()
+        }
         pluginScope.cancel()
         super.handleOnDestroy()
     }
@@ -232,7 +260,7 @@ class OnDeviceBriefingPlugin : Plugin() {
                     return null
                 }
 
-                val graphemes = countGraphemes(text)
+                val graphemes = engine.countGraphemes(text)
                 totalGraphemes += graphemes
                 if (totalGraphemes > OnDeviceBriefing.MAX_INPUT_TEXT_GRAPHEMES) {
                     return null
@@ -261,16 +289,6 @@ class OnDeviceBriefingPlugin : Plugin() {
         }
 
         return ParsedItems(items, jsonString)
-    }
-
-    private fun countGraphemes(text: String): Int {
-        val it = BreakIterator.getCharacterInstance()
-        it.setText(text)
-        var count = 0
-        while (it.next() != BreakIterator.DONE) {
-            count++
-        }
-        return count
     }
 
     private fun reject(call: PluginCall, errorCode: BriefingErrorCode) {

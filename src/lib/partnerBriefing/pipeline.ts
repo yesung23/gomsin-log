@@ -1,27 +1,26 @@
 /**
- * Partner Briefing Closed-Extract Pipeline and Concurrency Controller (Gate A7.2)
+ * Partner Briefing Closed-Extract Pipeline and Concurrency Controller (Gate A7.2 - v2 Grouping Plan)
  *
  * Coordinates on-device briefing generation across availability checks, chunking,
  * candidate extraction, deterministic batching with envelope and response reserve proofs,
- * sequential extract selection execution, closed-schema verification, deterministic fallback,
- * and concurrency cancellation.
+ * single total run deadline tracking, sequential extract selection execution,
+ * closed-schema verification, deterministic fallback, and concurrency cancellation.
  *
  * Architectural invariants:
  * 1. Model-safe payloads: AI sees only request-local item ordinals (0..N-1) and candidate extracts (0..K-1).
  *    Zero real record IDs, user IDs, couple IDs, exact dates/times, media kinds, URLs, paths, or keys cross the boundary.
- * 2. Closed Extract Selection: The provider returns ONLY UntrustedBriefingExtractPlan choices.
+ * 2. Closed Extract Grouping (v2): The provider returns ONLY UntrustedBriefingGroupPlan (version: 2).
  *    Zero generated, free-form, or displayable text fields whatsoever.
  * 3. Exact Source Provenance: Every dynamic displayed phrase is an exact TypeScript-owned candidate copied from
  *    the normalized source, enclosed in a fixed TypeScript template.
- * 4. Item-Level 1:1 Representation: Every source event is represented by exactly one PartnerBriefingItem
- *    with its exact sourceRecordId. No Top-N, no record dropping, no selection bias.
- * 5. Deterministic Batching & Budget Proofs: Before every provider call, both request JSON UTF-8 bytes and
- *    expected response JSON UTF-8 bytes are proven to fit within the provider envelope.
- * 6. Robust Partial Failure: A failed, timed-out, or rejected batch falls back only for that batch;
- *    verified sibling choices remain active, resulting in 'hybrid' generation.
- * 7. Long Single Record Combination: Long records split into multiple segments retain their source mapping
- *    and combine back into exactly one final item using fixed TS templates.
- * 8. Deterministic Overview: Whole-window counts and media summary with exact union sourceRecordIds.
+ * 4. Item parts & compression: Groups form a single PartnerBriefingItem with parts: [{ text, sourceRecordId }, ...].
+ *    Preserves exact text-to-record binding and source order without Top-N selection loss.
+ * 5. Single Run Deadline: timeoutMs is a total wall-clock budget across availability, capability, and all batches.
+ *    Recomputes remaining time before each awaited step; once expired, remaining work becomes deterministic.
+ * 6. Day and Period Request Isolation: Each provider request contains items from one dayOrdinal + one period only.
+ * 7. Long Record Singleton: Long records that cannot safely fit whole as one provider item remain deterministic singletons.
+ * 8. Robust Partial Failure: A failed, timed-out, or rejected batch falls back only for that batch;
+ *    verified sibling batches remain active, resulting in 'hybrid' generation.
  * 9. Hardened Runtime Trust Boundaries: Synchronous throws from provider methods are fully isolated.
  * 10. Concurrency & Stale Rejection: PartnerBriefingRunner ensures older runs cannot overwrite newer runs,
  *     and external abort returns null immediately.
@@ -43,10 +42,11 @@ import {
   type PartnerBriefingItem,
   type PartnerBriefingOverview,
   type PartnerBriefingSection,
-  type UntrustedBriefingExtractPlan,
+  type UntrustedBriefingGroupPlan,
 } from './contract';
 import {
   chunkPartnerBriefingEvents,
+  countGraphemes,
   getUtf8ByteLength,
   isValidProviderEnvelope,
   type BriefingProviderEnvelope,
@@ -57,7 +57,7 @@ import type {
   BriefingExtractResult,
   BriefingProvider,
 } from './provider';
-import { verifyBriefingExtractResult } from './verify';
+import { verifyBriefingExtractResult, type VerifiedBriefingGroup } from './verify';
 import {
   buildBriefingExtractCandidates,
   formatAttributedBriefingItemText,
@@ -65,6 +65,7 @@ import {
   formatFallbackOverviewText,
   formatRangeLabelFromDates,
   generateDeterministicPartnerBriefing,
+  groupEventsIntoChronologicalRuns,
   validateBriefingMappings,
 } from './fallback';
 
@@ -77,6 +78,18 @@ export interface PartnerBriefingPipelineInput {
   readonly signal?: AbortSignal;
   readonly locale?: BriefingLocale;
 }
+
+/**
+ * Conservative grapheme safety margin for JS envelope validation.
+ *
+ * Unicode grapheme cluster segmentation can differ slightly across runtimes
+ * (JavaScript Intl.Segmenter, Swift Character.count, and Android ICU BreakIterator),
+ * especially for multi-codepoint sequences such as ZWJ emojis and decomposed (NFD) Hangul.
+ *
+ * Applying this small margin in JS ensures requests near the provider limit are safely
+ * rejected in JS and routed to deterministic fallback rather than hitting a hard native rejection.
+ */
+export const JS_GRAPHEME_SAFETY_MARGIN = 16;
 
 const FIXED_PLACEHOLDER_REQUEST_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -96,16 +109,16 @@ function generateOpaqueRequestId(): string | null {
 }
 
 /**
- * Classifies the overall briefing generation based on verified vs eligible text segments.
+ * Classifies the overall briefing generation based on verified vs eligible text events.
  */
 export function classifyBriefingGeneration(
-  totalAiEligibleSegments: number,
-  verifiedAiSegments: number,
+  totalAiEligibleEvents: number,
+  verifiedAiEvents: number,
 ): BriefingGeneration {
-  if (totalAiEligibleSegments === 0 || verifiedAiSegments === 0) {
+  if (totalAiEligibleEvents === 0 || verifiedAiEvents === 0) {
     return 'deterministic';
   }
-  if (verifiedAiSegments === totalAiEligibleSegments) {
+  if (verifiedAiEvents === totalAiEligibleEvents) {
     return 'on_device';
   }
   return 'hybrid';
@@ -143,8 +156,19 @@ export function extractValidEnvelope(capability: unknown): BriefingProviderEnvel
 }
 
 /**
- * Proves whether a set of request items fits within the provider envelope for BOTH
- * actual request serialization and expected response serialization.
+ * Proves whether a set of request items fits within the provider envelope for the actual
+ * request serialization, the expected response serialization (v2 grouping plan), AND the
+ * provider's aggregate grapheme limit.
+ *
+ * The grapheme half was missing, and `maxInputTextGraphemes` means different things on the
+ * two sides of the bridge if you only read one of them. Both native parsers run a single
+ * running total across EVERY candidate text in the WHOLE request
+ * (`OnDeviceBriefingPlugin.swift`: `totalGraphemes += text.count` then a bounds guard;
+ * `OnDeviceBriefingPlugin.kt`: the same with `engine.countGraphemes`), and reject the
+ * entire request the moment it is exceeded. The batcher only ever proved bytes, so it
+ * happily assembled a batch that was byte-legal and grapheme-illegal; native then hard-
+ * rejected it and the whole batch fell to deterministic output with no signal. This makes
+ * the JS check mean exactly what the native check means.
  */
 export function canItemsFitInEnvelope(
   items: readonly BriefingExtractRequestItem[],
@@ -164,6 +188,53 @@ export function canItemsFitInEnvelope(
     return false;
   }
 
+  /*
+    0. Structural proof, first, and against the limits the DEVICE enforces.
+
+    Step 2 below reads `item.candidates.length`, so a malformed item used to throw a
+    TypeError out of a function whose entire contract is to answer true/false. A throw
+    here is not fail-closed -- it escapes the batcher instead of sending the segment to
+    the deterministic path.
+
+    The count limits are the ones the audit reproduced: a record that segments into 33
+    sentences produced an item JS accepted and both native parsers rejected outright
+    (`maxCandidatesPerItem` is 32), so a supported device silently fell back to
+    deterministic output. Nothing is trimmed to make it fit -- keeping the first 32
+    candidates would put a set that is no longer the exact source in front of the model,
+    and the caller's deterministic path already handles the record correctly.
+  */
+  if (items.length === 0 || items.length > envelope.maxItems) {
+    return false;
+  }
+
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    if (!item || typeof item !== 'object' || !Array.isArray(item.candidates)) {
+      return false;
+    }
+    // Both native parsers require `itemOrdinal == parsed.count`, i.e. dense 0..N-1 in
+    // array order. An out-of-order ordinal is rejected there, so it must be rejected here.
+    if (item.itemOrdinal !== i) {
+      return false;
+    }
+    if (item.candidates.length === 0 || item.candidates.length > envelope.maxCandidatesPerItem) {
+      return false;
+    }
+    for (let c = 0; c < item.candidates.length; c += 1) {
+      const candidate = item.candidates[c];
+      if (!candidate || typeof candidate !== 'object' || typeof candidate.text !== 'string') {
+        return false;
+      }
+      if (candidate.candidateOrdinal !== c) {
+        return false;
+      }
+      // Native also requires a non-blank text.
+      if (candidate.text.trim().length === 0) {
+        return false;
+      }
+    }
+  }
+
   // 1. Actual nested request JSON UTF-8 bytes proof
   const request: BriefingExtractRequest = {
     requestId,
@@ -174,17 +245,50 @@ export function canItemsFitInEnvelope(
     return false;
   }
 
-  // 2. Expected response JSON UTF-8 bytes proof
-  const expectedResponse: UntrustedBriefingExtractPlan = {
-    version: 1,
-    choices: items.map((item, idx) => ({
-      itemOrdinal: idx,
-      candidateOrdinal: Math.max(0, item.candidates.length - 1),
+  // 2. Maximum response JSON UTF-8 bytes proof (v2 group plan).
+  // Singleton groups are deliberately budgeted even though the verifier may
+  // enforce tighter grouping, so future legal shapes cannot exceed the reserve.
+  const expectedResponse: UntrustedBriefingGroupPlan = {
+    version: 2,
+    groups: items.map((item, idx) => ({
+      groupOrdinal: idx,
+      choices: [
+        {
+          itemOrdinal: idx,
+          candidateOrdinal: Math.max(0, item.candidates.length - 1),
+        },
+      ],
     })),
   };
   const responseBytes = getUtf8ByteLength(JSON.stringify(expectedResponse));
   if (responseBytes > envelope.responseReserveUtf8Bytes) {
     return false;
+  }
+
+  // 3. Aggregate grapheme proof across every candidate of every item, in the same
+  //    order and with the same running-total semantics the native parsers use.
+  //    A conservative safety margin is applied in JS so that platform segmentation
+  //    differences (e.g. ZWJ emoji sequences, NFD Hangul) near the boundary are rejected
+  //    here to deterministic fallback rather than hitting native hard limits.
+  const maxAllowedGraphemes = Math.max(
+    0,
+    envelope.maxInputTextGraphemes - JS_GRAPHEME_SAFETY_MARGIN,
+  );
+  let totalGraphemes = 0;
+  for (const item of items) {
+    for (const candidate of item.candidates) {
+      const graphemes = countGraphemes(candidate.text);
+      // `null` means this runtime has no usable Intl.Segmenter, so the count cannot be
+      // proven. Fail closed to the deterministic path rather than guessing a count or
+      // trimming the text -- a truncated candidate would no longer be the exact source.
+      if (graphemes === null) {
+        return false;
+      }
+      totalGraphemes += graphemes;
+      if (totalGraphemes > maxAllowedGraphemes) {
+        return false;
+      }
+    }
   }
 
   return true;
@@ -199,7 +303,7 @@ async function executeWithBoundedTimeout<T>(
   timeoutMs: number,
   externalSignal?: AbortSignal,
 ): Promise<T | null> {
-  if (externalSignal?.aborted) {
+  if (externalSignal?.aborted || timeoutMs <= 0) {
     return null;
   }
 
@@ -259,6 +363,9 @@ async function executeProviderSelectExtractsWithTimeout(
   const { requestId } = request;
   if (externalSignal?.aborted) {
     return { ok: false, requestId, code: 'cancelled' };
+  }
+  if (timeoutMs <= 0) {
+    return { ok: false, requestId, code: 'timeout' };
   }
 
   const internalController = new AbortController();
@@ -330,15 +437,17 @@ async function executeProviderSelectExtractsWithTimeout(
   }
 }
 
-interface PreparedExtractSegment {
+export interface PreparedExtractSegment {
   readonly segmentId: number;
   readonly sourceOrdinal: number;
   readonly candidates: readonly BriefingExtractCandidate[];
 }
 
-interface ExtractBatch {
+export interface ExtractBatch {
   readonly items: readonly BriefingExtractRequestItem[];
   readonly segments: readonly PreparedExtractSegment[];
+  readonly dayOrdinal?: number;
+  readonly period?: BriefingPeriod;
 }
 
 /**
@@ -347,6 +456,7 @@ interface ExtractBatch {
 export function batchCandidateSegments(
   segments: readonly PreparedExtractSegment[],
   envelope: BriefingProviderEnvelope,
+  metadata?: { dayOrdinal: number; period: BriefingPeriod },
 ): {
   readonly batches: readonly ExtractBatch[];
   readonly unfittableSegmentIds: ReadonlySet<number>;
@@ -372,6 +482,8 @@ export function batchCandidateSegments(
         batches.push({
           items: currentBatchItems,
           segments: currentBatchSegments,
+          dayOrdinal: metadata?.dayOrdinal,
+          period: metadata?.period,
         });
         currentBatchItems = [];
         currentBatchSegments = [];
@@ -395,6 +507,8 @@ export function batchCandidateSegments(
     batches.push({
       items: currentBatchItems,
       segments: currentBatchSegments,
+      dayOrdinal: metadata?.dayOrdinal,
+      period: metadata?.period,
     });
   }
 
@@ -429,10 +543,22 @@ export async function runPartnerBriefingPipeline(
     return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
-  // 2. Check provider availability (bounded by timeout/abort, with sync throw isolation)
+  // Track single total run deadline across availability, capability, and all batches
+  const startTime = Date.now();
+  const getRemainingBudgetMs = (): number => {
+    const elapsed = Date.now() - startTime;
+    return timeoutMs - elapsed;
+  };
+
+  const availBudget = getRemainingBudgetMs();
+  if (availBudget <= 0) {
+    return generateDeterministicPartnerBriefing({ events, sources, days, locale });
+  }
+
+  // 2. Check provider availability (bounded by remaining deadline / abort, with sync throw isolation)
   const availability = await executeWithBoundedTimeout(
     (s) => provider.getAvailability({ signal: s, locale }),
-    timeoutMs,
+    availBudget,
     signal,
   );
 
@@ -440,10 +566,15 @@ export async function runPartnerBriefingPipeline(
     return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
-  // 3. Query and strictly validate provider capability envelope (bounded by timeout/abort)
+  const capBudget = getRemainingBudgetMs();
+  if (capBudget <= 0) {
+    return generateDeterministicPartnerBriefing({ events, sources, days, locale });
+  }
+
+  // 3. Query and strictly validate provider capability envelope (bounded by remaining deadline / abort)
   const rawCapability = await executeWithBoundedTimeout(
     () => provider.getCapability(),
-    timeoutMs,
+    capBudget,
     signal,
   );
 
@@ -458,70 +589,122 @@ export async function runPartnerBriefingPipeline(
     return generateDeterministicPartnerBriefing({ events, sources, days, locale });
   }
 
-  const { modelChunks } = chunkResult;
+  const { modelChunks, deterministicFallbackSourceOrdinals } = chunkResult;
+  const forcedFallbackOrdinals = new Set<number>(deterministicFallbackSourceOrdinals);
 
-  // 5. Prepare candidate segments from model chunks
-  const eligibleSegments: PreparedExtractSegment[] = [];
-  const segmentsBySourceOrdinal = new Map<number, PreparedExtractSegment[]>();
-  let nextSegmentId = 0;
-
+  // Identify any event split into multiple segments; force it to stay deterministic singleton
+  const eventAppearanceCount = new Map<number, number>();
   for (const chunk of modelChunks) {
     for (const evt of chunk.events) {
-      if (typeof evt.text === 'string' && evt.text.trim().length > 0) {
-        const candidates = buildBriefingExtractCandidates(evt.text);
-        if (candidates.length > 0) {
-          const seg: PreparedExtractSegment = {
-            segmentId: nextSegmentId++,
-            sourceOrdinal: evt.ordinal,
-            candidates,
-          };
-          eligibleSegments.push(seg);
+      eventAppearanceCount.set(evt.ordinal, (eventAppearanceCount.get(evt.ordinal) ?? 0) + 1);
+    }
+  }
+  for (const [ord, count] of eventAppearanceCount.entries()) {
+    if (count > 1) {
+      forcedFallbackOrdinals.add(ord);
+    }
+  }
 
-          let list = segmentsBySourceOrdinal.get(evt.ordinal);
-          if (!list) {
-            list = [];
-            segmentsBySourceOrdinal.set(evt.ordinal, list);
-          }
-          list.push(seg);
+  // 5. Organize events into contiguous (dayOrdinal, period) runs, preserving chronology.
+  //    Keyed by `${day}_${period}` this merged the two halves of a midnight-spanning
+  //    `night` into one bucket, so a group could join a 00:30 record to a 22:30 one with
+  //    the whole day in between and still look period-isolated.
+  const runsByDay = groupEventsIntoChronologicalRuns(events);
+  const chronologicalRuns: Array<{
+    readonly dayOrdinal: number;
+    readonly period: BriefingPeriod;
+    readonly events: readonly BriefingModelSafeEvent[];
+  }> = [];
+  for (const dayOrdinal of Array.from(runsByDay.keys()).sort((a, b) => a - b)) {
+    for (const run of runsByDay.get(dayOrdinal)!) {
+      chronologicalRuns.push({ dayOrdinal, period: run.period, events: run.events });
+    }
+  }
+
+  // 6. Build batches per contiguous run to enforce day/period request isolation
+  const allBatches: ExtractBatch[] = [];
+  const totalAiEligibleOrdinals = new Set<number>();
+  let nextSegmentId = 0;
+
+  for (const chronoRun of chronologicalRuns) {
+    const { dayOrdinal, period } = chronoRun;
+    const periodEvts = chronoRun.events;
+
+    let contiguousRun: PreparedExtractSegment[] = [];
+
+    const flushContiguousRun = () => {
+      if (contiguousRun.length === 0) {
+        return;
+      }
+
+      const segmentsById = new Map(
+        contiguousRun.map((segment) => [segment.segmentId, segment]),
+      );
+      const { batches, unfittableSegmentIds } = batchCandidateSegments(
+        contiguousRun,
+        envelope,
+        { dayOrdinal, period },
+      );
+
+      for (const unfittableId of unfittableSegmentIds) {
+        const segment = segmentsById.get(unfittableId);
+        if (segment) {
+          totalAiEligibleOrdinals.delete(segment.sourceOrdinal);
+          forcedFallbackOrdinals.add(segment.sourceOrdinal);
         }
       }
-    }
-  }
 
-  // 6. Deterministically batch candidate items
-  const { batches, unfittableSegmentIds } = batchCandidateSegments(
-    eligibleSegments,
-    envelope,
-  );
+      allBatches.push(...batches);
+      contiguousRun = [];
+    };
 
-  const verifiedSegmentExtracts = new Map<number, string>();
-  const segmentUsedOnDevice = new Map<number, boolean>();
-
-  for (const unfittableId of unfittableSegmentIds) {
-    const seg = eligibleSegments.find((s) => s.segmentId === unfittableId);
-    if (seg && seg.candidates.length > 0) {
-      verifiedSegmentExtracts.set(seg.segmentId, seg.candidates[0].text);
-      segmentUsedOnDevice.set(seg.segmentId, false);
-    }
-  }
-
-  // 7. Execute batches sequentially with provider
-  for (const batch of batches) {
-    if (signal?.aborted) {
-      for (const seg of batch.segments) {
-        verifiedSegmentExtracts.set(seg.segmentId, seg.candidates[0].text);
-        segmentUsedOnDevice.set(seg.segmentId, false);
+    for (const evt of periodEvts) {
+      let candidates: readonly BriefingExtractCandidate[] = [];
+      if (
+        !forcedFallbackOrdinals.has(evt.ordinal) &&
+        typeof evt.text === 'string' &&
+        evt.text.trim().length > 0
+      ) {
+        candidates = buildBriefingExtractCandidates(evt.text, locale);
       }
+
+      if (candidates.length === 0) {
+        flushContiguousRun();
+        continue;
+      }
+
+      totalAiEligibleOrdinals.add(evt.ordinal);
+      contiguousRun.push({
+        segmentId: nextSegmentId++,
+        sourceOrdinal: evt.ordinal,
+        candidates,
+      });
+    }
+
+    flushContiguousRun();
+  }
+
+  // 7. Execute batches sequentially with provider under single total run deadline
+  const verifiedGroupsByBatch = new Map<number, readonly VerifiedBriefingGroup[]>();
+  const batchSuccess = new Map<number, boolean>();
+
+  for (let batchIdx = 0; batchIdx < allBatches.length; batchIdx += 1) {
+    const batch = allBatches[batchIdx];
+
+    if (signal?.aborted) {
+      batchSuccess.set(batchIdx, false);
+      continue;
+    }
+
+    const remainingBudget = getRemainingBudgetMs();
+    if (remainingBudget <= 0) {
+      batchSuccess.set(batchIdx, false);
       continue;
     }
 
     const requestId = generateOpaqueRequestId();
     if (!requestId) {
-      // Fail-closed: do not transmit execution-time metadata if safe UUID is unavailable
-      for (const seg of batch.segments) {
-        verifiedSegmentExtracts.set(seg.segmentId, seg.candidates[0].text);
-        segmentUsedOnDevice.set(seg.segmentId, false);
-      }
+      batchSuccess.set(batchIdx, false);
       continue;
     }
 
@@ -531,18 +714,14 @@ export async function runPartnerBriefingPipeline(
     };
 
     if (!canItemsFitInEnvelope(request.items, envelope, requestId)) {
-      // Conservative safety gate on real requestId serialization
-      for (const seg of batch.segments) {
-        verifiedSegmentExtracts.set(seg.segmentId, seg.candidates[0].text);
-        segmentUsedOnDevice.set(seg.segmentId, false);
-      }
+      batchSuccess.set(batchIdx, false);
       continue;
     }
 
     const providerResult = await executeProviderSelectExtractsWithTimeout(
       provider,
       request,
-      timeoutMs,
+      remainingBudget,
       signal,
       locale,
     );
@@ -554,75 +733,109 @@ export async function runPartnerBriefingPipeline(
     });
 
     if (verifyResult.ok) {
-      for (const choice of verifyResult.choices) {
-        const seg = batch.segments[choice.itemOrdinal];
-        const selectedCandidate = seg.candidates[choice.candidateOrdinal];
-        verifiedSegmentExtracts.set(seg.segmentId, selectedCandidate.text);
-        segmentUsedOnDevice.set(seg.segmentId, true);
-      }
+      batchSuccess.set(batchIdx, true);
+      verifiedGroupsByBatch.set(batchIdx, verifyResult.groups);
     } else {
-      // Batch failure: fallback to candidate 0 for only this batch
-      for (const seg of batch.segments) {
-        verifiedSegmentExtracts.set(seg.segmentId, seg.candidates[0].text);
-        segmentUsedOnDevice.set(seg.segmentId, false);
-      }
+      batchSuccess.set(batchIdx, false);
     }
   }
 
   // 8. Build final PartnerBriefing items and hierarchy
-  // Group events by dayOrdinal, then by period
-  const eventsByDay = new Map<number, Map<BriefingPeriod, BriefingModelSafeEvent[]>>();
-  for (const event of events) {
-    let dayGroup = eventsByDay.get(event.dayOrdinal);
-    if (!dayGroup) {
-      dayGroup = new Map<BriefingPeriod, BriefingModelSafeEvent[]>();
-      eventsByDay.set(event.dayOrdinal, dayGroup);
+  const verifiedOnDeviceOrdinals = new Set<number>();
+
+  const builtItemByStartOrdinal = new Map<
+    number,
+    { readonly item: PartnerBriefingItem; readonly sourceOrdinals: readonly number[] }
+  >();
+  for (let batchIdx = 0; batchIdx < allBatches.length; batchIdx += 1) {
+    const batch = allBatches[batchIdx];
+    const isSuccess = batchSuccess.get(batchIdx) === true;
+    const groups = verifiedGroupsByBatch.get(batchIdx);
+
+    if (isSuccess && groups) {
+      for (const group of groups) {
+        const sourceOrdinals = group.choices.map(
+          (choice) => batch.segments[choice.itemOrdinal].sourceOrdinal,
+        );
+        const parts = group.choices.map((choice) => {
+          const seg = batch.segments[choice.itemOrdinal];
+          const cand = seg.candidates[choice.candidateOrdinal];
+          verifiedOnDeviceOrdinals.add(seg.sourceOrdinal);
+          return {
+            text: formatAttributedBriefingItemText(cand.text, locale),
+            sourceRecordId: sourceMap.get(seg.sourceOrdinal)!,
+          };
+        });
+
+        builtItemByStartOrdinal.set(sourceOrdinals[0], {
+          item: { parts },
+          sourceOrdinals,
+        });
+      }
+    } else {
+      // Fallback: each segment becomes its own individual item with candidate 0 extract
+      for (const seg of batch.segments) {
+        builtItemByStartOrdinal.set(seg.sourceOrdinal, {
+          item: {
+            parts: [
+              {
+                text: formatAttributedBriefingItemText(seg.candidates[0].text, locale),
+                sourceRecordId: sourceMap.get(seg.sourceOrdinal)!,
+              },
+            ],
+          },
+          sourceOrdinals: [seg.sourceOrdinal],
+        });
+      }
     }
-    let periodList = dayGroup.get(event.period);
-    if (!periodList) {
-      periodList = [];
-      dayGroup.set(event.period, periodList);
-    }
-    periodList.push(event);
   }
 
   const resultDays: PartnerBriefingDay[] = [];
   const allDates: string[] = [];
-  const sortedDayOrdinals = Array.from(eventsByDay.keys()).sort((a, b) => a - b);
+  const sortedDayOrdinals = Array.from(runsByDay.keys()).sort((a, b) => a - b);
 
   for (const dayOrdinal of sortedDayOrdinals) {
     const date = dayMap.get(dayOrdinal)!;
     allDates.push(date);
-    const dayGroup = eventsByDay.get(dayOrdinal)!;
     const sections: PartnerBriefingSection[] = [];
 
-    for (const [period, periodEvents] of dayGroup.entries()) {
-      const items: PartnerBriefingItem[] = periodEvents.map((evt) => {
-        const segs = segmentsBySourceOrdinal.get(evt.ordinal);
-        if (segs && segs.length > 0) {
-          const itemText = segs
-            .map((s) => {
-              const extract =
-                verifiedSegmentExtracts.get(s.segmentId) ?? s.candidates[0].text;
-              return formatAttributedBriefingItemText(extract, locale);
-            })
-            .join(' ');
-          return {
-            text: itemText,
-            sourceRecordId: sourceMap.get(evt.ordinal)!,
-          };
+    // Same contiguous runs the batches were built from, so a verified group always has
+    // a run to land in and the day still reads in the order it happened.
+    for (const run of runsByDay.get(dayOrdinal)!) {
+      const period = run.period;
+      const periodEvents = run.events;
+      const sectionItems: PartnerBriefingItem[] = [];
+
+      let eventIdx = 0;
+      while (eventIdx < periodEvents.length) {
+        const evt = periodEvents[eventIdx];
+        const built = builtItemByStartOrdinal.get(evt.ordinal);
+        const isExactContiguousMatch =
+          built !== undefined &&
+          built.sourceOrdinals.every(
+            (ordinal, offset) => periodEvents[eventIdx + offset]?.ordinal === ordinal,
+          );
+
+        if (built && isExactContiguousMatch) {
+          sectionItems.push(built.item);
+          eventIdx += built.sourceOrdinals.length;
+          continue;
         }
 
-        // Media-only, empty, or fallback without AI segments
-        return {
-          text: formatDeterministicBriefingItemText(evt, locale),
-          sourceRecordId: sourceMap.get(evt.ordinal)!,
-        };
-      });
+        sectionItems.push({
+          parts: [
+            {
+              text: formatDeterministicBriefingItemText(evt, locale),
+              sourceRecordId: sourceMap.get(evt.ordinal)!,
+            },
+          ],
+        });
+        eventIdx += 1;
+      }
 
       sections.push({
         period,
-        items,
+        items: sectionItems,
       });
     }
 
@@ -637,17 +850,9 @@ export async function runPartnerBriefingPipeline(
     sourceRecordIds: events.map((e) => sourceMap.get(e.ordinal)!),
   };
 
-  const totalAiEligibleSegments = eligibleSegments.length;
-  let verifiedAiSegments = 0;
-  for (const seg of eligibleSegments) {
-    if (segmentUsedOnDevice.get(seg.segmentId) === true) {
-      verifiedAiSegments += 1;
-    }
-  }
-
   const generation = classifyBriefingGeneration(
-    totalAiEligibleSegments,
-    verifiedAiSegments,
+    totalAiEligibleOrdinals.size,
+    verifiedOnDeviceOrdinals.size,
   );
 
   return {

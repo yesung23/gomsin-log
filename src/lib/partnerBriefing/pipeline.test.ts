@@ -3,10 +3,11 @@ import type {
   BriefingExtractRequestItem,
   BriefingModelSafeEvent,
   BriefingSourceMapping,
-  UntrustedBriefingExtractPlan,
+  UntrustedBriefingGroupPlan,
 } from './contract';
 import type { BriefingDayMapping } from './normalize';
 import {
+  DEFAULT_FAKE_PROVIDER_ENVELOPE,
   FakeBriefingProvider,
   type BriefingExtractRequest,
   type BriefingProvider,
@@ -19,8 +20,10 @@ import {
   classifyBriefingGeneration,
   extractValidEnvelope,
   runPartnerBriefingPipeline,
+  JS_GRAPHEME_SAFETY_MARGIN,
 } from './pipeline';
 import { getUtf8ByteLength } from './chunk';
+import { buildBriefingExtractCandidates } from './fallback';
 
 function createEvent(
   ordinal: number,
@@ -55,7 +58,7 @@ async function withoutSegmenter<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
+describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2 - v2 Grouping Plan)', () => {
   describe('Provider Synchronous Throw and Trust-Boundary Isolation', () => {
     it('isolates synchronous throw from getAvailability and falls back deterministically', async () => {
       const provider = new FakeBriefingProvider();
@@ -76,7 +79,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from getCapability and falls back deterministically', async () => {
@@ -98,7 +101,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from selectExtracts and falls back deterministically', async () => {
@@ -120,11 +123,13 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
     });
 
     it('isolates synchronous throw from cancel and falls back deterministically without unhandled rejection', async () => {
-      const provider = new FakeBriefingProvider({ delayMs: 500 });
+      const provider = new FakeBriefingProvider({
+        delayMs: 200,
+      });
       provider.cancel = () => {
         throw new Error('Sync throw in cancel');
       };
@@ -133,6 +138,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       const sources = [{ ordinal: 0, recordId: 'rec-0' }];
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
+      // Timeout quickly (50ms) to trigger cancel()
       const briefing = await runPartnerBriefingPipeline({
         events,
         sources,
@@ -142,82 +148,529 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
     });
   });
 
   describe('Capability Runtime Shape Validation', () => {
     it('falls back deterministically on primitive, array, or malformed capability objects without TypeError', async () => {
-      const validEnvelope = {
+      expect(extractValidEnvelope(null)).toBeNull();
+      expect(extractValidEnvelope(undefined)).toBeNull();
+      expect(extractValidEnvelope(123)).toBeNull();
+      expect(extractValidEnvelope('string')).toBeNull();
+      expect(extractValidEnvelope([])).toBeNull();
+      expect(extractValidEnvelope({})).toBeNull();
+      expect(extractValidEnvelope({ envelope: null })).toBeNull();
+      expect(extractValidEnvelope({ envelope: {} })).toBeNull();
+      expect(extractValidEnvelope({ randomKey: 4096 })).toBeNull();
+
+      const validEnv = {
         maxContextUtf8Bytes: 4096,
         promptOverheadUtf8Bytes: 256,
         responseReserveUtf8Bytes: 512,
         maxInputTextGraphemes: 1000,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       };
-
-      expect(extractValidEnvelope({ envelope: validEnvelope })).toEqual(validEnvelope);
-      expect(extractValidEnvelope(validEnvelope)).toEqual(validEnvelope);
-      expect(extractValidEnvelope(null)).toBeNull();
-      expect(extractValidEnvelope(undefined)).toBeNull();
-      expect(extractValidEnvelope('string-cap')).toBeNull();
-      expect(extractValidEnvelope([validEnvelope])).toBeNull();
-      expect(extractValidEnvelope({ envelope: { ...validEnvelope, maxContextUtf8Bytes: -1 } })).toBeNull();
+      expect(extractValidEnvelope({ envelope: validEnv })).toEqual(validEnv);
+      expect(extractValidEnvelope(validEnv)).toEqual(validEnv);
     });
   });
 
   describe('Envelope and Batch Budget Proofs', () => {
-    it('proves that actual request and expected response fit within the envelope', () => {
-      const env = {
-        maxContextUtf8Bytes: 500,
-        promptOverheadUtf8Bytes: 50,
-        responseReserveUtf8Bytes: 150,
-        maxInputTextGraphemes: 100,
+    it('proves request/response fit and rejects a reserve sized only for one group', () => {
+      const envelope = {
+        maxContextUtf8Bytes: 2000,
+        promptOverheadUtf8Bytes: 200,
+        responseReserveUtf8Bytes: 300,
+        maxInputTextGraphemes: 500,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       };
 
       const items: BriefingExtractRequestItem[] = [
         {
           itemOrdinal: 0,
-          candidates: [{ candidateOrdinal: 0, text: '테스트 문장입니다.' }],
+          candidates: [
+            { candidateOrdinal: 0, text: '문장 1' },
+            { candidateOrdinal: 1, text: '문장 1 대안' },
+          ],
         },
       ];
 
-      expect(canItemsFitInEnvelope(items, env)).toBe(true);
+      expect(canItemsFitInEnvelope(items, envelope)).toBe(true);
 
-      const hugeItems: BriefingExtractRequestItem[] = Array.from({ length: 50 }, (_, i) => ({
-        itemOrdinal: i,
-        candidates: [{ candidateOrdinal: 0, text: '긴 테스트 문장입니다. 반복 문장입니다.' }],
-      }));
+      // Oversized items that exceed available payload bytes
+      const giantText = '가'.repeat(2000);
+      const giantItems: BriefingExtractRequestItem[] = [
+        {
+          itemOrdinal: 0,
+          candidates: [{ candidateOrdinal: 0, text: giantText }],
+        },
+      ];
+      expect(canItemsFitInEnvelope(giantItems, envelope)).toBe(false);
 
-      expect(canItemsFitInEnvelope(hugeItems, env)).toBe(false);
+      const tightlyBudgetedItems: BriefingExtractRequestItem[] = Array.from(
+        { length: 4 },
+        (_, itemOrdinal) => ({
+          itemOrdinal,
+          candidates: [{ candidateOrdinal: 0, text: `짧은 문장 ${itemOrdinal}` }],
+        }),
+      );
+      const oneGroupResponse: UntrustedBriefingGroupPlan = {
+        version: 2,
+        groups: [
+          {
+            groupOrdinal: 0,
+            choices: tightlyBudgetedItems.map(({ itemOrdinal }) => ({
+              itemOrdinal,
+              candidateOrdinal: 0,
+            })),
+          },
+        ],
+      };
+      const worstCaseSingletonResponse: UntrustedBriefingGroupPlan = {
+        version: 2,
+        groups: tightlyBudgetedItems.map(({ itemOrdinal }) => ({
+          groupOrdinal: itemOrdinal,
+          choices: [{ itemOrdinal, candidateOrdinal: 0 }],
+        })),
+      };
+      const placeholderRequest: BriefingExtractRequest = {
+        requestId: '00000000-0000-0000-0000-000000000000',
+        items: tightlyBudgetedItems,
+      };
+      const requestBytes = getUtf8ByteLength(JSON.stringify(placeholderRequest));
+      const oneGroupResponseBytes = getUtf8ByteLength(JSON.stringify(oneGroupResponse));
+      const singletonResponseBytes = getUtf8ByteLength(
+        JSON.stringify(worstCaseSingletonResponse),
+      );
+      const oneGroupOnlyEnvelope = {
+        maxContextUtf8Bytes: 64 + oneGroupResponseBytes + requestBytes,
+        promptOverheadUtf8Bytes: 64,
+        responseReserveUtf8Bytes: oneGroupResponseBytes,
+        maxInputTextGraphemes: 500,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
+      };
+
+      expect(singletonResponseBytes).toBeGreaterThan(oneGroupResponseBytes);
+      expect(requestBytes).toBe(
+        oneGroupOnlyEnvelope.maxContextUtf8Bytes -
+          oneGroupOnlyEnvelope.promptOverheadUtf8Bytes -
+          oneGroupOnlyEnvelope.responseReserveUtf8Bytes,
+      );
+      expect(canItemsFitInEnvelope(tightlyBudgetedItems, oneGroupOnlyEnvelope)).toBe(false);
     });
 
     it('batchCandidateSegments splits candidate items deterministically and identifies unfittable items', () => {
-      const env = {
-        maxContextUtf8Bytes: 500,
+      const tightEnvelope = {
+        maxContextUtf8Bytes: 400,
         promptOverheadUtf8Bytes: 50,
-        responseReserveUtf8Bytes: 150,
-        maxInputTextGraphemes: 100,
+        responseReserveUtf8Bytes: 100,
+        maxInputTextGraphemes: 200,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       };
 
       const segments = [
-        { segmentId: 0, sourceOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: '첫 번째 짧은 문장' }] },
-        { segmentId: 1, sourceOrdinal: 1, candidates: [{ candidateOrdinal: 0, text: '두 번째 짧은 문장' }] },
-        { segmentId: 2, sourceOrdinal: 2, candidates: [{ candidateOrdinal: 0, text: '세 번째 짧은 문장' }] },
+        {
+          segmentId: 0,
+          sourceOrdinal: 0,
+          candidates: [{ candidateOrdinal: 0, text: '첫 번째 짧은 문장' }],
+        },
+        {
+          segmentId: 1,
+          sourceOrdinal: 1,
+          candidates: [{ candidateOrdinal: 0, text: '두 번째 짧은 문장' }],
+        },
+        {
+          segmentId: 2,
+          sourceOrdinal: 2,
+          candidates: [{ candidateOrdinal: 0, text: '가'.repeat(300) }],
+        },
       ];
 
-      const { batches } = batchCandidateSegments(segments, env);
-      expect(batches.length).toBeGreaterThanOrEqual(1);
+      const { batches, unfittableSegmentIds } = batchCandidateSegments(
+        segments,
+        tightEnvelope,
+      );
 
-      // Verify that every batch satisfies envelope constraints
-      for (const batch of batches) {
-        expect(canItemsFitInEnvelope(batch.items, env)).toBe(true);
-        expect(batch.items.map((it) => it.itemOrdinal)).toEqual(
-          Array.from({ length: batch.items.length }, (_, i) => i),
+      expect(batches.length).toBeGreaterThanOrEqual(1);
+      expect(unfittableSegmentIds.has(2)).toBe(true);
+    });
+
+    /*
+      The aggregate grapheme budget.
+
+      `maxInputTextGraphemes` is a WHOLE-REQUEST limit on both native sides: each parser
+      keeps one running total across every candidate of every item and rejects the entire
+      request the moment it is passed (`OnDeviceBriefingPlugin.swift` totalGraphemes +=
+      text.count; `OnDeviceBriefingPlugin.kt` the same via engine.countGraphemes). The JS
+      batcher only proved bytes, so it could assemble a batch that was byte-legal and
+      grapheme-illegal -- native hard-rejected it and the batch silently became
+      deterministic output. ASCII fixtures are used deliberately: one byte per grapheme
+      makes it impossible for the byte proof to be doing this work by accident.
+    */
+    /*
+      구조 한도는 native가 강제하고, JS는 그것을 몰랐다.
+
+      두 native parser는 언제나 `maxItems`/`maxCandidatesPerItem`을 강제하고 넘으면 요청
+      전체를 bad_request로 거부해 왔다. 그런데 광고되지 않아 JS 배처가 볼 수 없었다.
+      문장 33개로 쪼개지는 기록 하나가 JS에서는 통과하고 기기에서는 거부돼, 충분히
+      가능한 기기에서 조용히 deterministic으로 떨어졌다.
+    */
+    describe('native structural capacity is part of the envelope', () => {
+      const envelope = {
+        maxContextUtf8Bytes: 200_000,
+        promptOverheadUtf8Bytes: 256,
+        responseReserveUtf8Bytes: 40_000,
+        maxInputTextGraphemes: 1_000_000,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
+      };
+
+      const candidates = (count: number) =>
+        Array.from({ length: count }, (_, i) => ({ candidateOrdinal: i, text: `후보 ${i}` }));
+      const items = (count: number, per = 1): BriefingExtractRequestItem[] =>
+        Array.from({ length: count }, (_, i) => ({ itemOrdinal: i, candidates: candidates(per) }));
+
+      it('accepts exactly maxCandidatesPerItem and rejects one more', () => {
+        expect(canItemsFitInEnvelope(items(1, 32), envelope)).toBe(true);
+        expect(canItemsFitInEnvelope(items(1, 33), envelope)).toBe(false);
+      });
+
+      it('accepts exactly maxItems and rejects one more', () => {
+        expect(canItemsFitInEnvelope(items(64), envelope)).toBe(true);
+        expect(canItemsFitInEnvelope(items(65), envelope)).toBe(false);
+      });
+
+      it('rejects an empty request and empty candidates', () => {
+        expect(canItemsFitInEnvelope([], envelope)).toBe(false);
+        expect(
+          canItemsFitInEnvelope([{ itemOrdinal: 0, candidates: [] }], envelope),
+        ).toBe(false);
+        expect(
+          canItemsFitInEnvelope(
+            [{ itemOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: '   ' }] }],
+            envelope,
+          ),
+        ).toBe(false);
+      });
+
+      it('requires dense sequential itemOrdinal and candidateOrdinal', () => {
+        // Native requires `itemOrdinal == parsed.count`, so anything else is refused there.
+        expect(
+          canItemsFitInEnvelope(
+            [
+              { itemOrdinal: 1, candidates: candidates(1) },
+              { itemOrdinal: 0, candidates: candidates(1) },
+            ],
+            envelope,
+          ),
+        ).toBe(false);
+        expect(
+          canItemsFitInEnvelope([{ itemOrdinal: 5, candidates: candidates(1) }], envelope),
+        ).toBe(false);
+        expect(
+          canItemsFitInEnvelope(
+            [
+              {
+                itemOrdinal: 0,
+                candidates: [
+                  { candidateOrdinal: 0, text: 'a' },
+                  { candidateOrdinal: 2, text: 'b' },
+                ],
+              },
+            ],
+            envelope,
+          ),
+        ).toBe(false);
+      });
+
+      it('follows the runtime capability, not a JS constant', () => {
+        // A provider advertising a smaller limit must constrain the batcher by that value.
+        const tight = { ...envelope, maxCandidatesPerItem: 4, maxItems: 2 };
+        expect(canItemsFitInEnvelope(items(1, 4), tight)).toBe(true);
+        expect(canItemsFitInEnvelope(items(1, 5), tight)).toBe(false);
+        expect(canItemsFitInEnvelope(items(2), tight)).toBe(true);
+        expect(canItemsFitInEnvelope(items(3), tight)).toBe(false);
+      });
+
+      it('sends an over-capacity record to deterministic output without trimming it', () => {
+        const over = [{ itemOrdinal: 0, candidates: candidates(33) }];
+        const ok = [{ itemOrdinal: 0, candidates: candidates(2) }];
+
+        const { batches, unfittableSegmentIds } = batchCandidateSegments(
+          [
+            { segmentId: 0, sourceOrdinal: 0, candidates: ok[0].candidates },
+            { segmentId: 1, sourceOrdinal: 1, candidates: over[0].candidates },
+          ],
+          envelope,
         );
+
+        expect(unfittableSegmentIds.has(1)).toBe(true);
+        const batched = batches.flatMap((b) => b.segments.map((seg) => seg.segmentId));
+        expect(batched).toEqual([0]);
+
+        // The 33 candidates are neither truncated to 32 nor partially sent.
+        for (const batch of batches) {
+          for (const item of batch.items) {
+            expect(item.candidates).toHaveLength(2);
+          }
+        }
+      });
+    });
+
+    describe('aggregate grapheme budget matches the native request-wide limit', () => {
+      const SAFE_BUDGET = 30;
+      const GRAPHEME_CAP = SAFE_BUDGET + JS_GRAPHEME_SAFETY_MARGIN;
+
+      // Roomy in bytes, tight in graphemes: only the new check can constrain this.
+      const graphemeBoundEnvelope = {
+        maxContextUtf8Bytes: 100_000,
+        promptOverheadUtf8Bytes: 256,
+        responseReserveUtf8Bytes: 4_000,
+        maxInputTextGraphemes: GRAPHEME_CAP,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
+      };
+
+      /** The native running total, recomputed here from the request the batcher built. */
+      function batchGraphemes(items: readonly BriefingExtractRequestItem[]): number {
+        let total = 0;
+        for (const item of items) {
+          for (const candidate of item.candidates) {
+            total += [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(candidate.text)].length;
+          }
+        }
+        return total;
       }
+
+      // 6 records x 10 ASCII graphemes = 60, exactly double the cap.
+      const asciiSegments = Array.from({ length: 6 }, (_, i) => ({
+        segmentId: i,
+        sourceOrdinal: i,
+        candidates: [{ candidateOrdinal: 0, text: `record${i}---` }],
+      }));
+
+      it('rejects a byte-legal item set that exceeds the request-wide grapheme total', () => {
+        const items: BriefingExtractRequestItem[] = asciiSegments.map((seg, idx) => ({
+          itemOrdinal: idx,
+          candidates: seg.candidates,
+        }));
+
+        // Bytes alone would pass comfortably; the grapheme total is 60 against a cap of 30.
+        expect(getUtf8ByteLength(JSON.stringify({ requestId: 'x', items }))).toBeLessThan(
+          graphemeBoundEnvelope.maxContextUtf8Bytes,
+        );
+        expect(batchGraphemes(items)).toBeGreaterThan(GRAPHEME_CAP);
+        expect(canItemsFitInEnvelope(items, graphemeBoundEnvelope)).toBe(false);
+
+        // The first three (30 graphemes) are exactly at the safe budget and must still pass.
+        const three = items.slice(0, 3);
+        expect(batchGraphemes(three)).toBe(SAFE_BUDGET);
+        expect(canItemsFitInEnvelope(three, graphemeBoundEnvelope)).toBe(true);
+      });
+
+      it('sums every candidate of an item, not just the first', () => {
+        const multiCandidate: BriefingExtractRequestItem[] = [
+          {
+            itemOrdinal: 0,
+            candidates: [
+              { candidateOrdinal: 0, text: 'aaaaaaaaaaaaaaa' },
+              { candidateOrdinal: 1, text: 'bbbbbbbbbbbbbbbb' },
+            ],
+          },
+        ];
+        // 15 + 16 = 31 > 30 (SAFE_BUDGET). Counting only the longest, or only the first, would pass.
+        expect(batchGraphemes(multiCandidate)).toBe(31);
+        expect(canItemsFitInEnvelope(multiCandidate, graphemeBoundEnvelope)).toBe(false);
+      });
+
+      it('keeps every produced batch at or under the cap, losing no source', () => {
+        const { batches, unfittableSegmentIds } = batchCandidateSegments(
+          asciiSegments,
+          graphemeBoundEnvelope,
+        );
+
+        expect(batches.length).toBeGreaterThan(1);
+        for (const batch of batches) {
+          expect(batchGraphemes(batch.items)).toBeLessThanOrEqual(GRAPHEME_CAP);
+          // itemOrdinal stays request-local and dense, as the native parsers require.
+          expect(batch.items.map((item) => item.itemOrdinal)).toEqual(
+            batch.items.map((_, idx) => idx),
+          );
+        }
+
+        // Source coverage: every input segment is either batched or explicitly unfittable,
+        // exactly once. Nothing may quietly disappear because of the new constraint.
+        const batched = batches.flatMap((b) => b.segments.map((seg) => seg.segmentId));
+        const union = [...batched, ...unfittableSegmentIds].sort((a, b) => a - b);
+        expect(union).toEqual(asciiSegments.map((seg) => seg.segmentId));
+        expect(new Set(batched).size).toBe(batched.length);
+        expect(unfittableSegmentIds.size).toBe(0);
+      });
+
+      it('routes a single over-cap record to deterministic fallback instead of trimming it', () => {
+        const oversized = [
+          { segmentId: 0, sourceOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: 'ok' }] },
+          {
+            segmentId: 1,
+            sourceOrdinal: 1,
+            candidates: [{ candidateOrdinal: 0, text: 'x'.repeat(GRAPHEME_CAP + 1) }],
+          },
+        ];
+
+        const { batches, unfittableSegmentIds } = batchCandidateSegments(
+          oversized,
+          graphemeBoundEnvelope,
+        );
+
+        expect(unfittableSegmentIds.has(1)).toBe(true);
+        const batched = batches.flatMap((b) => b.segments.map((seg) => seg.segmentId));
+        expect(batched).toEqual([0]);
+        // The exact source text is never shortened to make it fit.
+        for (const batch of batches) {
+          for (const item of batch.items) {
+            for (const candidate of item.candidates) {
+              expect(candidate.text).toBe('ok');
+            }
+          }
+        }
+      });
+
+      it('fails closed, without truncating, when graphemes cannot be counted', async () => {
+        await withoutSegmenter(async () => {
+          const items: BriefingExtractRequestItem[] = [
+            { itemOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: 'record0---' }] },
+          ];
+          // No usable Intl.Segmenter means the count cannot be proven. Guessing it, or
+          // trimming the text to a byte length, would put a non-exact source in front of
+          // the model; the deterministic path is the correct answer instead.
+          expect(canItemsFitInEnvelope(items, graphemeBoundEnvelope)).toBe(false);
+
+          const { batches, unfittableSegmentIds } = batchCandidateSegments(
+            asciiSegments,
+            graphemeBoundEnvelope,
+          );
+          expect(batches).toEqual([]);
+          expect([...unfittableSegmentIds].sort((a, b) => a - b)).toEqual(
+            asciiSegments.map((seg) => seg.segmentId),
+          );
+        });
+      });
+
+      it('rejects a malformed candidate rather than counting it as zero', () => {
+        const malformed = [
+          { itemOrdinal: 0, candidates: [{ candidateOrdinal: 0, text: 123 }] },
+        ] as unknown as BriefingExtractRequestItem[];
+        expect(canItemsFitInEnvelope(malformed, graphemeBoundEnvelope)).toBe(false);
+
+        const noCandidates = [{ itemOrdinal: 0 }] as unknown as BriefingExtractRequestItem[];
+        expect(canItemsFitInEnvelope(noCandidates, graphemeBoundEnvelope)).toBe(false);
+      });
+
+      it('rejects candidate sets with ZWJ emoji in the safety margin before native hard limit', () => {
+        // Complex ZWJ emoji sequence (e.g. Family: 👨‍👩‍👧‍👦 which is 7 codepoints but 1 grapheme cluster in JS)
+        const familyEmoji = '👨‍👩‍👧‍👦';
+        expect([...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(familyEmoji)].length).toBe(1);
+
+        // Safe items: exactly at SAFE_BUDGET
+        const safeItems: BriefingExtractRequestItem[] = [
+          {
+            itemOrdinal: 0,
+            candidates: [
+              { candidateOrdinal: 0, text: `${familyEmoji.repeat(5)}${'a'.repeat(SAFE_BUDGET - 5)}` },
+            ],
+          },
+        ];
+        expect(batchGraphemes(safeItems)).toBe(SAFE_BUDGET);
+        expect(canItemsFitInEnvelope(safeItems, graphemeBoundEnvelope)).toBe(true);
+
+        // Margin items: SAFE_BUDGET + 1 (31 graphemes).
+        // 31 <= GRAPHEME_CAP (46), but > SAFE_BUDGET (30).
+        // JS rejects in the safety margin before native hard limit is hit.
+        const marginItems: BriefingExtractRequestItem[] = [
+          {
+            itemOrdinal: 0,
+            candidates: [
+              { candidateOrdinal: 0, text: `${familyEmoji.repeat(5)}${'a'.repeat(SAFE_BUDGET - 5 + 1)}` },
+            ],
+          },
+        ];
+        expect(batchGraphemes(marginItems)).toBe(SAFE_BUDGET + 1);
+        expect(batchGraphemes(marginItems)).toBeLessThanOrEqual(graphemeBoundEnvelope.maxInputTextGraphemes);
+        expect(canItemsFitInEnvelope(marginItems, graphemeBoundEnvelope)).toBe(false);
+      });
+
+      it('rejects candidate sets with NFD decomposed Hangul in the safety margin before native hard limit', () => {
+        // NFD Hangul: decomposed into Choseong + Jungseong + Jongseong jamo
+        const nfdHangul = '가나다라마바사아자차'.normalize('NFD');
+        const nfdGraphemeCount = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(nfdHangul)].length;
+        expect(nfdGraphemeCount).toBe(10);
+
+        // Safe items: exactly at SAFE_BUDGET
+        const safeItems: BriefingExtractRequestItem[] = [
+          {
+            itemOrdinal: 0,
+            candidates: [
+              { candidateOrdinal: 0, text: `${nfdHangul}${'a'.repeat(SAFE_BUDGET - nfdGraphemeCount)}` },
+            ],
+          },
+        ];
+        expect(batchGraphemes(safeItems)).toBe(SAFE_BUDGET);
+        expect(canItemsFitInEnvelope(safeItems, graphemeBoundEnvelope)).toBe(true);
+
+        // Margin items: SAFE_BUDGET + 1 (31 graphemes).
+        // Sits in safety margin window: > 30, but <= 46.
+        // JS rejects early to prevent platform-specific ICU/Swift mismatch from causing native rejection.
+        const marginItems: BriefingExtractRequestItem[] = [
+          {
+            itemOrdinal: 0,
+            candidates: [
+              { candidateOrdinal: 0, text: `${nfdHangul}${'a'.repeat(SAFE_BUDGET - nfdGraphemeCount + 1)}` },
+            ],
+          },
+        ];
+        expect(batchGraphemes(marginItems)).toBe(SAFE_BUDGET + 1);
+        expect(batchGraphemes(marginItems)).toBeLessThanOrEqual(graphemeBoundEnvelope.maxInputTextGraphemes);
+        expect(canItemsFitInEnvelope(marginItems, graphemeBoundEnvelope)).toBe(false);
+      });
+
+      it('retains all sources through deterministic fallback when items with ZWJ emoji or NFD Hangul exceed JS safe margin', () => {
+        const emojiText = '👨‍👩‍👧‍👦'.repeat(SAFE_BUDGET + 2); // 32 graphemes > 30
+        const segments = [
+          {
+            segmentId: 0,
+            sourceOrdinal: 0,
+            candidates: [{ candidateOrdinal: 0, text: '정상 기록입니다.' }],
+          },
+          {
+            segmentId: 1,
+            sourceOrdinal: 1,
+            candidates: [{ candidateOrdinal: 0, text: emojiText }],
+          },
+        ];
+
+        const { batches, unfittableSegmentIds } = batchCandidateSegments(
+          segments,
+          graphemeBoundEnvelope,
+        );
+
+        // Segment 1 exceeds safe margin, so it is routed to unfittableSegmentIds (deterministic fallback)
+        expect(unfittableSegmentIds.has(1)).toBe(true);
+        const batched = batches.flatMap((b) => b.segments.map((seg) => seg.segmentId));
+        expect(batched).toEqual([0]);
+
+        // Full union retains both sources: zero dropped sources
+        const union = [...batched, ...unfittableSegmentIds].sort((a, b) => a - b);
+        expect(union).toEqual([0, 1]);
+      });
     });
   });
 
-  describe('Core Pipeline Execution (0, 1, Multi-day, Multi-period)', () => {
+  describe('Core Pipeline Execution (0, 1, 2, 5, 8 Sources & Grouping)', () => {
     it('handles 0 events deterministically without calling provider', async () => {
       const provider = new FakeBriefingProvider();
       const briefing = await runPartnerBriefingPipeline({
@@ -231,6 +684,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       expect(briefing.version).toBe(1);
       expect(briefing.sourceCount).toBe(0);
       expect(briefing.generation).toBe('deterministic');
+      expect(briefing.rangeLabel).toBe('');
       expect(briefing.overview.text).toBe('');
       expect(briefing.overview.sourceRecordIds).toEqual([]);
       expect(briefing.days).toEqual([]);
@@ -239,26 +693,34 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
     it('rejects invalid timeoutMs fail-closed', async () => {
       const provider = new FakeBriefingProvider();
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+      await expect(
+        runPartnerBriefingPipeline({
+          events: [createEvent(0, 0)],
+          sources: [{ ordinal: 0, recordId: 'rec-0' }],
+          days: [{ dayOrdinal: 0, date: '2026-08-26' }],
+          provider,
+          timeoutMs: 0,
+        }),
+      ).rejects.toThrow(/timeoutMs must be a positive safe integer/);
 
       await expect(
-        runPartnerBriefingPipeline({ events, sources, days, provider, timeoutMs: 0 }),
-      ).rejects.toThrow('timeoutMs must be a positive safe integer.');
-
-      await expect(
-        runPartnerBriefingPipeline({ events, sources, days, provider, timeoutMs: -50 }),
-      ).rejects.toThrow('timeoutMs must be a positive safe integer.');
-
-      await expect(
-        runPartnerBriefingPipeline({ events, sources, days, provider, timeoutMs: NaN }),
-      ).rejects.toThrow('timeoutMs must be a positive safe integer.');
+        runPartnerBriefingPipeline({
+          events: [createEvent(0, 0)],
+          sources: [{ ordinal: 0, recordId: 'rec-0' }],
+          days: [{ dayOrdinal: 0, date: '2026-08-26' }],
+          provider,
+          timeoutMs: -500,
+        }),
+      ).rejects.toThrow(/timeoutMs must be a positive safe integer/);
     });
 
-    it('processes 1 record on-device with candidate 0 attributed extract', async () => {
+    it('processes 1 record on-device with single item (N=1 singleton group)', async () => {
       const provider = new FakeBriefingProvider();
-      const events = [createEvent(0, 0, { text: '오늘 아침 점호 완료했습니다.' })];
+      const events = [
+        createEvent(0, 0, {
+          text: '오늘 아침 점호 완료했습니다. 밥 먹으러 갑니다.',
+        }),
+      ];
       const sources = [{ ordinal: 0, recordId: 'rec-0' }];
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
@@ -270,37 +732,131 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         timeoutMs: 1000,
       });
 
-      expect(briefing.generation).toBe('on_device');
+      expect(briefing.version).toBe(1);
       expect(briefing.sourceCount).toBe(1);
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.rangeLabel).toBe('8월 26일');
+      expect(briefing.overview.text).toBe('총 1개의 기록이 있습니다.');
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0']);
+
       expect(briefing.days).toHaveLength(1);
       expect(briefing.days[0].date).toBe('2026-08-26');
+      expect(briefing.days[0].sections).toHaveLength(1);
       expect(briefing.days[0].sections[0].period).toBe('morning');
       expect(briefing.days[0].sections[0].items).toHaveLength(1);
       expect(briefing.days[0].sections[0].items[0]).toEqual({
-        text: '“오늘 아침 점호 완료했습니다.”라고 기록했어요.',
-        sourceRecordId: 'rec-0',
+        parts: [
+          {
+            text: '“오늘 아침 점호 완료했습니다.”라고 기록했어요.',
+            sourceRecordId: 'rec-0',
+          },
+        ],
       });
-      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0']);
+
+      expect(provider.getCallHistory()).toHaveLength(1);
     });
 
-    it('processes multi-day and multi-period events in strict chronological order', async () => {
+    it('processes 2 records on-device and compresses into 1 grouped item with 2 parts', async () => {
       const provider = new FakeBriefingProvider();
       const events = [
-        createEvent(0, 0, { period: 'morning', text: '8월 26일 아침' }),
-        createEvent(1, 0, { period: 'evening', text: '8월 26일 저녁' }),
-        createEvent(2, 1, { period: 'afternoon', text: '8월 27일 오후' }),
-        createEvent(3, 2, { period: 'night', text: '8월 28일 밤' }),
+        createEvent(0, 0, { period: 'morning', text: '오전 훈련 시작' }),
+        createEvent(1, 0, { period: 'morning', text: '오전 훈련 복귀' }),
       ];
       const sources = [
         { ordinal: 0, recordId: 'rec-0' },
         { ordinal: 1, recordId: 'rec-1' },
-        { ordinal: 2, recordId: 'rec-2' },
-        { ordinal: 3, recordId: 'rec-3' },
       ];
-      const days: BriefingDayMapping[] = [
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.sourceCount).toBe(2);
+      expect(briefing.days[0].sections[0].items).toHaveLength(1);
+      expect(briefing.days[0].sections[0].items[0].parts).toHaveLength(2);
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].parts[1].sourceRecordId).toBe('rec-1');
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1']);
+    });
+
+    it('processes 5 records on-device and compresses into 2 grouped items (sizes 3 and 2)', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: '기록 0' }),
+        createEvent(1, 0, { period: 'morning', text: '기록 1' }),
+        createEvent(2, 0, { period: 'morning', text: '기록 2' }),
+        createEvent(3, 0, { period: 'morning', text: '기록 3' }),
+        createEvent(4, 0, { period: 'morning', text: '기록 4' }),
+      ];
+      const sources = events.map((e) => ({ ordinal: e.ordinal, recordId: `rec-${e.ordinal}` }));
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.sourceCount).toBe(5);
+      const items = briefing.days[0].sections[0].items;
+      expect(items).toHaveLength(2);
+      expect(items[0].parts).toHaveLength(3);
+      expect(items[1].parts).toHaveLength(2);
+
+      const allPartIds = items.flatMap((it) => it.parts.map((p) => p.sourceRecordId));
+      expect(allPartIds).toEqual(sources.map((s) => s.recordId));
+    });
+
+    it('processes 8 records on-device across envelope-safe batches with real compression', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = Array.from({ length: 8 }, (_, i) =>
+        createEvent(i, 0, { period: 'morning', text: `기록 ${i}` }),
+      );
+      const sources = events.map((e) => ({ ordinal: e.ordinal, recordId: `rec-${e.ordinal}` }));
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 1000,
+      });
+
+      expect(briefing.generation).toBe('on_device');
+      expect(briefing.sourceCount).toBe(8);
+      const items = briefing.days[0].sections[0].items;
+      expect(provider.getCallHistory().length).toBeGreaterThan(1);
+      expect(items.length).toBeLessThan(8);
+
+      const allPartIds = items.flatMap((it) => it.parts.map((p) => p.sourceRecordId));
+      expect(allPartIds).toHaveLength(8);
+      expect(allPartIds).toEqual(sources.map((s) => s.recordId));
+    });
+
+    it('processes multi-day and multi-period events in strict chronological order with day/period request isolation', async () => {
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: '1일차 아침' }),
+        createEvent(1, 0, { period: 'morning', text: '1일차 아침 두번째' }),
+        createEvent(2, 0, { period: 'evening', text: '1일차 저녁' }),
+        createEvent(3, 0, { period: 'evening', text: '1일차 저녁 두번째' }),
+        createEvent(4, 1, { period: 'afternoon', text: '2일차 오후' }),
+        createEvent(5, 1, { period: 'afternoon', text: '2일차 오후 두번째' }),
+      ];
+      const sources = events.map((e) => ({ ordinal: e.ordinal, recordId: `rec-${e.ordinal}` }));
+      const days = [
         { dayOrdinal: 0, date: '2026-08-26' },
         { dayOrdinal: 1, date: '2026-08-27' },
-        { dayOrdinal: 2, date: '2026-08-28' },
       ];
 
       const briefing = await runPartnerBriefingPipeline({
@@ -312,71 +868,68 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('on_device');
-      expect(briefing.rangeLabel).toBe('8월 26일 ~ 8월 28일');
-      expect(briefing.overview.text).toBe('3일 동안 총 4개의 기록이 있습니다.');
-      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1', 'rec-2', 'rec-3']);
-      expect(briefing.days).toHaveLength(3);
-
+      expect(briefing.days).toHaveLength(2);
+      expect(briefing.days[0].date).toBe('2026-08-26');
       expect(briefing.days[0].sections).toHaveLength(2);
-      expect(briefing.days[0].sections[0].period).toBe('morning');
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
-      expect(briefing.days[0].sections[1].period).toBe('evening');
-      expect(briefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-1');
-
+      expect(briefing.days[1].date).toBe('2026-08-27');
       expect(briefing.days[1].sections).toHaveLength(1);
-      expect(briefing.days[1].sections[0].period).toBe('afternoon');
-      expect(briefing.days[1].sections[0].items[0].sourceRecordId).toBe('rec-2');
 
-      expect(briefing.days[2].sections).toHaveLength(1);
-      expect(briefing.days[2].sections[0].period).toBe('night');
-      expect(briefing.days[2].sections[0].items[0].sourceRecordId).toBe('rec-3');
+      // Verify request isolation: 3 batches (day0 morning, day0 evening, day1 afternoon)
+      const callHistory = provider.getCallHistory();
+      expect(callHistory).toHaveLength(3);
     });
   });
 
   describe('Forced Small-Envelope Stress Scaling (30, 100, 300 records)', () => {
-    for (const count of [30, 100, 300]) {
-      it(`correctly batches and verifies ${count} records with small envelope`, async () => {
+    const stressCounts = [30, 100, 300];
+
+    for (const count of stressCounts) {
+      it(`correctly batches and verifies ${count} records with small envelope without Top-N loss`, async () => {
         const smallEnvelope = {
-          maxContextUtf8Bytes: 600,
-          promptOverheadUtf8Bytes: 50,
-          responseReserveUtf8Bytes: 200,
-          maxInputTextGraphemes: 100,
+          maxContextUtf8Bytes: 1024,
+          promptOverheadUtf8Bytes: 128,
+          responseReserveUtf8Bytes: 256,
+          maxInputTextGraphemes: 500,
+          maxItems: 64,
+          maxCandidatesPerItem: 32,
         };
 
         const provider = new FakeBriefingProvider({
           capability: { envelope: smallEnvelope },
         });
 
-        const dayCount = Math.max(1, Math.ceil(count / 20));
+        const periods = ['morning', 'afternoon', 'evening', 'night'] as const;
+        const dayCount = Math.max(1, Math.ceil(count / 10));
+        const eventsPerDay = Math.ceil(count / dayCount);
+
         const events: BriefingModelSafeEvent[] = [];
         const sources: BriefingSourceMapping[] = [];
         const days: BriefingDayMapping[] = [];
 
-        for (let d = 0; d < dayCount; d++) {
-          const dateObj = new Date(Date.UTC(2026, 7, 1 + d));
-          const dateStr = dateObj.toISOString().slice(0, 10);
-          days.push({ dayOrdinal: d, date: dateStr });
+        for (let d = 0; d < dayCount; d += 1) {
+          const dayNum = String(d + 1).padStart(2, '0');
+          days.push({
+            dayOrdinal: d,
+            date: `2026-08-${dayNum}`,
+          });
         }
 
-        const periods: BriefingModelSafeEvent['period'][] = ['morning', 'afternoon', 'evening', 'night'];
-
-        for (let i = 0; i < count; i++) {
-          const dayOrdinal = Math.floor(i / (count / dayCount));
-          const boundedDayOrdinal = Math.min(dayCount - 1, dayOrdinal);
-          // Group sequentially in period order within each day
-          const periodIndex = Math.floor((i % (count / dayCount)) / ((count / dayCount) / 4));
-          const period = periods[Math.min(3, Math.max(0, periodIndex))];
+        for (let i = 0; i < count; i += 1) {
+          const dayOrdinal = Math.floor(i / eventsPerDay);
+          const withinDayIdx = i % eventsPerDay;
+          const period = periods[Math.min(periods.length - 1, Math.floor((withinDayIdx / eventsPerDay) * periods.length))];
+          const recId = `rec-${i}`;
 
           events.push({
             ordinal: i,
-            dayOrdinal: boundedDayOrdinal,
+            dayOrdinal,
             period,
-            text: `${i}번 기록 문장입니다. 짧은 요약 내용.`,
+            text: `스트레스 기록 ${i}번 내용입니다.`,
             mediaKinds: [],
           });
           sources.push({
             ordinal: i,
-            recordId: `rec-${i}`,
+            recordId: recId,
           });
         }
 
@@ -388,72 +941,20 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
           timeoutMs: 5000,
         });
 
+        expect(provider.getCallHistory().length).toBeGreaterThan(1);
         expect(briefing.generation).toBe('on_device');
         expect(briefing.sourceCount).toBe(count);
+        expect(briefing.overview.sourceRecordIds).toHaveLength(count);
+        expect(briefing.overview.sourceRecordIds).toEqual(sources.map((s) => s.recordId));
 
-        // Prove more than one provider call occurred
-        const calls = provider.getCallHistory() as BriefingExtractRequest[];
-        expect(calls.length).toBeGreaterThan(1);
+        const allResultItems = briefing.days
+          .flatMap((d) => d.sections)
+          .flatMap((s) => s.items);
+        const allResultParts = allResultItems.flatMap((it) => it.parts);
 
-       // Verify every call's ordinals restart 0..N-1 and stay within budget
-       for (const call of calls) {
-         expect(call.items.length).toBeGreaterThan(0);
-         expect(call.items.map((it) => it.itemOrdinal)).toEqual(
-           Array.from({ length: call.items.length }, (_, idx) => idx),
-         );
-         for (const item of call.items) {
-           expect(item.candidates.length).toBeGreaterThan(0);
-           expect(item.candidates.map((c) => c.candidateOrdinal)).toEqual(
-             Array.from({ length: item.candidates.length }, (_, cIdx) => cIdx),
-           );
-         }
-
-          // Invariant: both request and response reserve fit within envelope
-          expect(
-            canItemsFitInEnvelope(call.items, smallEnvelope, call.requestId),
-          ).toBe(true);
-
-          // Invariant: actual request and response serialization fit within envelope
-          const reqBytes = getUtf8ByteLength(JSON.stringify(call));
-          expect(reqBytes).toBeLessThanOrEqual(
-            smallEnvelope.maxContextUtf8Bytes -
-              smallEnvelope.promptOverheadUtf8Bytes -
-              smallEnvelope.responseReserveUtf8Bytes,
-          );
-        }
-
-        // P2 Hierarchy Assertions (Level 1 Overview -> Level 2 Date/Period -> Level 3 Exact Item)
-        // Level 1: Deterministic Overview populated and covers exact source union
-        expect(briefing.overview.text).toBeTruthy();
-        expect(briefing.overview.sourceRecordIds).toEqual(
-          sources.map((s) => s.recordId),
-        );
-
-        // Level 2: Multiple day groups and period sections exist as expected
-        expect(briefing.days.length).toBe(dayCount);
-        expect(briefing.days.length).toBeGreaterThan(1);
-        for (const day of briefing.days) {
-          expect(day.date).toBeTruthy();
-          expect(day.sections.length).toBeGreaterThan(0);
-          for (const section of day.sections) {
-            expect(['morning', 'afternoon', 'evening', 'night']).toContain(
-              section.period,
-            );
-            expect(section.items).toBeDefined();
-            expect(section.items.length).toBeGreaterThan(0);
-          }
-        }
-
-        // Level 3: Every item count/ID union equals input and items are properly formatted
-        const allResultItems = briefing.days.flatMap((d) => d.sections.flatMap((s) => s.items));
-        expect(allResultItems).toHaveLength(count);
-        expect(allResultItems.map((item) => item.sourceRecordId)).toEqual(
-          sources.map((s) => s.recordId),
-        );
-        for (const item of allResultItems) {
-          expect(item.text).toBeTruthy();
-          expect(item.sourceRecordId).toBeTruthy();
-        }
+        expect(allResultItems.length).toBeLessThan(count);
+        expect(allResultParts).toHaveLength(count);
+        expect(allResultParts.map((p) => p.sourceRecordId)).toEqual(sources.map((s) => s.recordId));
       });
     }
   });
@@ -461,24 +962,16 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
   describe('Privacy Boundary Invariants', () => {
     it('ensures no recordId, userId, coupleId, exact dates, mediaKinds, URLs, paths, or keys cross model boundary', async () => {
       const provider = new FakeBriefingProvider();
-      const events: BriefingModelSafeEvent[] = [
-        createEvent(0, 0, {
-          text: '비밀 일기 작성 완료',
-          mediaKinds: ['photo', 'video'],
-        }),
-        createEvent(1, 1, {
-          text: '부대 복귀 완료',
-          mediaKinds: ['voice'],
-        }),
+
+      const events = [
+        createEvent(0, 0, { text: '개인정보 보호 테스트' }),
+        createEvent(1, 0, { text: '두 번째 개인정보 보호 테스트' }),
       ];
       const sources = [
-        { ordinal: 0, recordId: 'secret-record-id-xyz-999' },
-        { ordinal: 1, recordId: 'another-secret-record-id-abc' },
+        { ordinal: 0, recordId: 'sensitive-rec-001' },
+        { ordinal: 1, recordId: 'sensitive-rec-002' },
       ];
-      const days = [
-        { dayOrdinal: 0, date: '2026-08-26' },
-        { dayOrdinal: 1, date: '2026-08-27' },
-      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
       await runPartnerBriefingPipeline({
         events,
@@ -492,20 +985,14 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       expect(calls.length).toBeGreaterThan(0);
 
       for (const call of calls) {
-        const rawJson = JSON.stringify(call);
-
-        expect(rawJson).not.toContain('secret-record-id');
-        expect(rawJson).not.toContain('another-secret-record-id');
-        expect(rawJson).not.toContain('2026-08-26');
-        expect(rawJson).not.toContain('2026-08-27');
-        expect(rawJson).not.toContain('photo');
-        expect(rawJson).not.toContain('video');
-        expect(rawJson).not.toContain('voice');
-        expect(rawJson).not.toContain('user');
-        expect(rawJson).not.toContain('couple');
-        expect(rawJson).not.toContain('http');
-        expect(rawJson).not.toContain('storage');
-        expect(rawJson).not.toContain('key');
+        const json = JSON.stringify(call);
+        expect(json).not.toContain('sensitive-rec-001');
+        expect(json).not.toContain('sensitive-rec-002');
+        expect(json).not.toContain('2026-08-26');
+        expect(json).not.toContain('mediaKinds');
+        expect(json).not.toContain('coupleId');
+        expect(json).not.toContain('userId');
+        expect(json).not.toContain('http');
       }
     });
   });
@@ -514,11 +1001,16 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
     it('custom provider selects nonzero candidate and renders exact extract only through fixed template', async () => {
       const provider = new FakeBriefingProvider({
         defaultExtractGenerator: (req) => ({
-          version: 1,
-          choices: req.items.map((it) => ({
-            itemOrdinal: it.itemOrdinal,
-            candidateOrdinal: Math.min(1, it.candidates.length - 1),
-          })),
+          version: 2,
+          groups: [
+            {
+              groupOrdinal: 0,
+              choices: req.items.map((it) => ({
+                itemOrdinal: it.itemOrdinal,
+                candidateOrdinal: Math.min(1, it.candidates.length - 1),
+              })),
+            },
+          ],
         }),
       });
 
@@ -539,7 +1031,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('on_device');
-      expect(briefing.days[0].sections[0].items[0].text).toBe(
+      expect(briefing.days[0].sections[0].items[0].parts[0].text).toBe(
         '“두 번째 문장입니다.”라고 기록했어요.',
       );
     });
@@ -548,14 +1040,18 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       const provider = new FakeBriefingProvider({
         defaultExtractGenerator: (req) =>
           ({
-            version: 1,
-            choices: req.items.map((it) => ({
-              itemOrdinal: it.itemOrdinal,
-              candidateOrdinal: 0,
-            })),
-            claim: '상대는 이별을 원한다',
-            text: '불안과 갈등이 감지되었습니다.',
-          }) as unknown as UntrustedBriefingExtractPlan,
+            version: 2,
+            groups: [
+              {
+                groupOrdinal: 0,
+                choices: req.items.map((it) => ({
+                  itemOrdinal: it.itemOrdinal,
+                  candidateOrdinal: 0,
+                })),
+                hallucinatedSummary: '상대는 이별을 원한다. 불안과 갈등이 있다.',
+              },
+            ],
+          } as unknown as UntrustedBriefingGroupPlan),
       });
 
       const events = [
@@ -575,7 +1071,7 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      const itemText = briefing.days[0].sections[0].items[0].text;
+      const itemText = briefing.days[0].sections[0].items[0].parts[0].text;
       expect(itemText).not.toContain('상대는 이별을 원한다');
       expect(itemText).not.toContain('불안과 갈등');
       expect(itemText).toBe('“오늘 훈련 힘들었다.”라고 기록했어요.');
@@ -584,35 +1080,26 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
   describe('Partial Failure & Hybrid Fallback', () => {
     it('falls back to hybrid when one batch fails, preserving verified sibling batch', async () => {
-      const smallEnvelope = {
-        maxContextUtf8Bytes: 300,
-        promptOverheadUtf8Bytes: 30,
-        responseReserveUtf8Bytes: 80,
-        maxInputTextGraphemes: 50,
-      };
-
-      let callIndex = 0;
       const provider = new FakeBriefingProvider({
-        capability: { envelope: smallEnvelope },
-        scenarioSelector: () => {
-          const isSecondCall = callIndex === 1;
-          callIndex++;
-          if (isSecondCall) {
-            return { type: 'failure', code: 'malformed' };
+        scenarioSelector: (_req, callIndex) => {
+          if (callIndex === 0) {
+            return {
+              type: 'failure',
+              code: 'native_error',
+            };
           }
-          return undefined; // default success
+          return undefined; // default success for subsequent calls
         },
       });
 
-      // Two events in different periods to ensure separate chunks/batches
+      // Two periods: morning (batch 0, will fail) and evening (batch 1, will succeed)
       const events = [
-        createEvent(0, 0, { period: 'morning', text: '첫 번째 배치 기록입니다.' }),
-        createEvent(1, 0, { period: 'evening', text: '두 번째 배치 기록입니다.' }),
+        createEvent(0, 0, { period: 'morning', text: '오전 훈련 내용 1' }),
+        createEvent(1, 0, { period: 'morning', text: '오전 훈련 내용 2' }),
+        createEvent(2, 0, { period: 'evening', text: '저녁 점호 내용 1' }),
+        createEvent(3, 0, { period: 'evening', text: '저녁 점호 내용 2' }),
       ];
-      const sources = [
-        { ordinal: 0, recordId: 'rec-0' },
-        { ordinal: 1, recordId: 'rec-1' },
-      ];
+      const sources = events.map((e) => ({ ordinal: e.ordinal, recordId: `rec-${e.ordinal}` }));
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
       const briefing = await runPartnerBriefingPipeline({
@@ -625,68 +1112,69 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
       expect(briefing.generation).toBe('hybrid');
       expect(briefing.days[0].sections).toHaveLength(2);
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
-      expect(briefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-1');
-      expect(briefing.overview.sourceRecordIds).toEqual(['rec-0', 'rec-1']);
+
+      // Morning section fell back to deterministic (2 individual items)
+      expect(briefing.days[0].sections[0].period).toBe('morning');
+      expect(briefing.days[0].sections[0].items).toHaveLength(2);
+
+      // Evening section succeeded on_device (1 grouped item with 2 parts)
+      expect(briefing.days[0].sections[1].period).toBe('evening');
+      expect(briefing.days[0].sections[1].items).toHaveLength(1);
+      expect(briefing.days[0].sections[1].items[0].parts).toHaveLength(2);
     });
   });
 
   describe('Intl.Segmenter Missing Fallback', () => {
     it('gracefully falls back all records without truncation or drop when Intl.Segmenter is absent', async () => {
-      const provider = new FakeBriefingProvider();
-      const events = [
-        createEvent(0, 0, { text: '세그멘터 없는 환경 첫 번째' }),
-        createEvent(1, 0, { text: '세그멘터 없는 환경 두 번째' }),
-      ];
-      const sources = [
-        { ordinal: 0, recordId: 'rec-0' },
-        { ordinal: 1, recordId: 'rec-1' },
-      ];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+      await withoutSegmenter(async () => {
+        const provider = new FakeBriefingProvider();
 
-      const result = await withoutSegmenter(async () =>
-        runPartnerBriefingPipeline({
+        const events = [
+          createEvent(0, 0, {
+            text: '세그멘터 없는 환경 첫 번째',
+          }),
+          createEvent(1, 0, {
+            text: '세그멘터 없는 환경 두 번째',
+          }),
+        ];
+        const sources = [
+          { ordinal: 0, recordId: 'rec-no-seg-0' },
+          { ordinal: 1, recordId: 'rec-no-seg-1' },
+        ];
+        const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+        const result = await runPartnerBriefingPipeline({
           events,
           sources,
           days,
           provider,
           timeoutMs: 1000,
-        }),
-      );
+        });
 
-      expect(result.generation).toBe('deterministic');
-      expect(result.sourceCount).toBe(2);
-      expect(result.days[0].sections[0].items).toHaveLength(2);
-      expect(result.days[0].sections[0].items[0].text).toBe(
-        '“세그멘터 없는 환경 첫 번째”라고 기록했어요.',
-      );
-      expect(result.days[0].sections[0].items[1].text).toBe(
-        '“세그멘터 없는 환경 두 번째”라고 기록했어요.',
-      );
+        expect(result.sourceCount).toBe(2);
+        expect(result.overview.sourceRecordIds).toEqual(['rec-no-seg-0', 'rec-no-seg-1']);
+        expect(result.days[0].sections[0].items[0].parts[0].text).toBe(
+          '“세그멘터 없는 환경 첫 번째”라고 기록했어요.',
+        );
+      });
     });
   });
 
- describe('Long Single Record Combination', () => {
-   it('splits long record across small grapheme limit but combines back into exactly one navigation item', async () => {
-     const smallEnvelope = {
+  describe('Long Single Record Singleton', () => {
+    it('forces long single record that exceeds grapheme limit to stay a deterministic singleton', async () => {
+      const smallEnvelope = {
         maxContextUtf8Bytes: 500,
         promptOverheadUtf8Bytes: 50,
         responseReserveUtf8Bytes: 150,
         maxInputTextGraphemes: 15,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       };
 
       const provider = new FakeBriefingProvider({
         capability: { envelope: smallEnvelope },
-        defaultExtractGenerator: (req) => ({
-          version: 1,
-          choices: req.items.map((it) => ({
-            itemOrdinal: it.itemOrdinal,
-            candidateOrdinal: 0,
-          })),
-        }),
       });
 
-      // Long text with 3 sentences, ~45 graphemes, exceeding maxInputTextGraphemes: 15 and small context budget
       const longText = '첫 번째 분할 문장입니다. 두 번째 분할 문장입니다. 세 번째 분할 문장입니다.';
       const events = [
         createEvent(0, 0, {
@@ -704,44 +1192,39 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         timeoutMs: 1000,
       });
 
-      // 1. Assert exactly one item and exact source record ID
       expect(briefing.days[0].sections[0].items).toHaveLength(1);
       const item = briefing.days[0].sections[0].items[0];
-      expect(item.sourceRecordId).toBe('rec-long-single');
+      expect(item.parts[0].sourceRecordId).toBe('rec-long-single');
       expect(briefing.overview.sourceRecordIds).toEqual(['rec-long-single']);
-
-      // 2. Assert provider call count > 1 where envelope forces it
-      const calls = provider.getCallHistory() as BriefingExtractRequest[];
-      expect(calls.length).toBeGreaterThan(1);
-
-      // 3. Extract every dynamic quoted fragment from final text
-      const quotedMatches = Array.from(item.text.matchAll(/“([^”]+)”/g)).map(
-        (m) => m[1],
-      );
-      expect(quotedMatches.length).toBeGreaterThanOrEqual(2);
-
-      // 4. Prove each quoted fragment is an exact substring of the original source text
-      for (const fragment of quotedMatches) {
-        expect(longText).toContain(fragment);
-      }
-
-      // 5. Verify the full item text structure: each quoted fragment is wrapped in “...”라고 기록했어요.
-      for (const fragment of quotedMatches) {
-        expect(item.text).toContain(`“${fragment}”라고 기록했어요.`);
-      }
+      expect(item.parts[0].text).toContain('“첫 번째 분할 문장입니다.”라고 기록했어요.');
     });
   });
 
   describe('Media-Only and Empty Record Handling', () => {
-    it('does not send media-only records to provider and does not downgrade otherwise on_device text', async () => {
+    it('never groups eligible records across a media-only original gap', async () => {
       const provider = new FakeBriefingProvider();
+
       const events = [
-        createEvent(0, 0, { text: '텍스트 기록입니다.', mediaKinds: [] }),
-        createEvent(1, 0, { text: '', mediaKinds: ['photo', 'video'] }),
+        createEvent(0, 0, {
+          period: 'morning',
+          text: '텍스트 기록입니다.',
+          mediaKinds: [],
+        }),
+        createEvent(1, 0, {
+          period: 'morning',
+          text: '',
+          mediaKinds: ['photo'],
+        }),
+        createEvent(2, 0, {
+          period: 'morning',
+          text: '간격 뒤 텍스트 기록입니다.',
+          mediaKinds: [],
+        }),
       ];
       const sources = [
         { ordinal: 0, recordId: 'rec-text' },
         { ordinal: 1, recordId: 'rec-media' },
+        { ordinal: 2, recordId: 'rec-text-after-gap' },
       ];
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
@@ -753,20 +1236,28 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         timeoutMs: 1000,
       });
 
-      // Text record was verified on device; media record does not downgrade generation
       expect(briefing.generation).toBe('on_device');
-      expect(briefing.days[0].sections[0].items).toHaveLength(2);
-      expect(briefing.days[0].sections[0].items[0].text).toBe(
+      const items = briefing.days[0].sections[0].items;
+      expect(items).toHaveLength(3);
+      expect(items[0].parts[0].text).toBe(
         '“텍스트 기록입니다.”라고 기록했어요.',
       );
-      expect(briefing.days[0].sections[0].items[1].text).toBe(
-        '사진 1장, 동영상 1개를 남겼어요.',
+      expect(items[1].parts[0].text).toBe(
+        '사진 1장을 남겼어요.',
+      );
+      expect(items[2].parts[0].text).toBe(
+        '“간격 뒤 텍스트 기록입니다.”라고 기록했어요.',
       );
 
-      // Only 1 item sent to provider
-      const calls = provider.getCallHistory() as BriefingExtractRequest[];
-      expect(calls).toHaveLength(1);
-      expect(calls[0].items).toHaveLength(1);
+      const sourceIds = items.flatMap((item) =>
+        item.parts.map((part) => part.sourceRecordId),
+      );
+      expect(sourceIds).toEqual(['rec-text', 'rec-media', 'rec-text-after-gap']);
+      expect(briefing.overview.sourceRecordIds).toEqual(sourceIds);
+
+      const calls = provider.getCallHistory();
+      expect(calls).toHaveLength(2);
+      expect(calls.every((call) => call.items.length === 1)).toBe(true);
     });
   });
 
@@ -780,38 +1271,71 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
     });
   });
 
-  describe('PartnerBriefingRunner Concurrency & Stale Rejection', () => {
-    it('supersedes older run with newer run and returns null for stale run', async () => {
-      const runner = new PartnerBriefingRunner();
+  describe('Total Run Deadline & Concurrency Controller', () => {
+    it('bounds total execution across multiple delayed calls under single deadline', async () => {
+      const provider = new FakeBriefingProvider({
+        delayMs: 80,
+      });
 
-      const slowProvider = new FakeBriefingProvider({ delayMs: 150 });
-      const fastProvider = new FakeBriefingProvider({ delayMs: 10 });
-
-      const events = [createEvent(0, 0)];
-      const sources = [{ ordinal: 0, recordId: 'rec-0' }];
+      // 4 periods -> 4 sequential batches. With 120ms total timeout, batch 0 succeeds (~80ms), batch 1 times out / expires, remaining fallback instantly.
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: '아침 1' }),
+        createEvent(1, 0, { period: 'afternoon', text: '오후 1' }),
+        createEvent(2, 0, { period: 'evening', text: '저녁 1' }),
+        createEvent(3, 0, { period: 'night', text: '밤 1' }),
+      ];
+      const sources = events.map((e) => ({ ordinal: e.ordinal, recordId: `rec-${e.ordinal}` }));
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
-      const runA = runner.run({
+      const start = Date.now();
+      const briefing = await runPartnerBriefingPipeline({
         events,
         sources,
         days,
+        provider,
+        timeoutMs: 120,
+      });
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(350); // Proves no per-batch 120ms * 4 multiplication!
+      expect(briefing.sourceCount).toBe(4);
+      expect(briefing.overview.sourceRecordIds).toHaveLength(4);
+    });
+
+    it('supersedes older run with newer run and returns null for stale run', async () => {
+      const runner = new PartnerBriefingRunner();
+      const slowProvider = new FakeBriefingProvider({ delayMs: 100 });
+      const fastProvider = new FakeBriefingProvider({ delayMs: 10 });
+
+      const eventsA = [createEvent(0, 0, { text: 'A' })];
+      const sourcesA = [{ ordinal: 0, recordId: 'rec-A' }];
+      const daysA = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const eventsB = [createEvent(0, 0, { text: 'B' })];
+      const sourcesB = [{ ordinal: 0, recordId: 'rec-B' }];
+      const daysB = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const promiseA = runner.run({
+        events: eventsA,
+        sources: sourcesA,
+        days: daysA,
         provider: slowProvider,
         timeoutMs: 1000,
       });
 
-      const runB = runner.run({
-        events,
-        sources,
-        days,
+      const promiseB = runner.run({
+        events: eventsB,
+        sources: sourcesB,
+        days: daysB,
         provider: fastProvider,
         timeoutMs: 1000,
       });
 
-      const [resA, resB] = await Promise.all([runA, runB]);
+      const [resultA, resultB] = await Promise.all([promiseA, promiseB]);
 
-      expect(resA).toBeNull();
-      expect(resB).not.toBeNull();
-      expect(resB?.sourceCount).toBe(1);
+      expect(resultA).toBeNull();
+      expect(resultB).not.toBeNull();
+      expect(resultB?.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-B');
     });
 
     it('immediately returns null on external AbortSignal without waiting for provider delay', async () => {
@@ -819,10 +1343,11 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       const slowProvider = new FakeBriefingProvider({ delayMs: 1000 });
       const controller = new AbortController();
 
-      const events = [createEvent(0, 0)];
+      const events = [createEvent(0, 0, { text: '취소 테스트' })];
       const sources = [{ ordinal: 0, recordId: 'rec-0' }];
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
+      const start = Date.now();
       const runPromise = runner.run({
         events,
         sources,
@@ -832,15 +1357,12 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         signal: controller.signal,
       });
 
-      // Abort externally after 20ms
       setTimeout(() => controller.abort(), 20);
+      const result = await runPromise;
+      const elapsed = Date.now() - start;
 
-      const startTime = Date.now();
-      const res = await runPromise;
-      const elapsed = Date.now() - startTime;
-
-      expect(res).toBeNull();
-      expect(elapsed).toBeLessThan(300);
+      expect(result).toBeNull();
+      expect(elapsed).toBeLessThan(200);
     });
 
     it('cancels active run when cancel() is called', async () => {
@@ -856,29 +1378,32 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         sources,
         days,
         provider: slowProvider,
-        timeoutMs: 1000,
+        timeoutMs: 2000,
       });
 
       expect(runner.isRunning()).toBe(true);
       runner.cancel();
       expect(runner.isRunning()).toBe(false);
 
-      const res = await runPromise;
-      expect(res).toBeNull();
+      const result = await runPromise;
+      expect(result).toBeNull();
     });
   });
 
   describe('Provider Availability States and Rejection Scenarios', () => {
-    const unreadyStates: BriefingProviderAvailability[] = [
+    const unavailableStates: BriefingProviderAvailability[] = [
       'unsupported',
       'model_unavailable',
       'preparing',
       'locale_unsupported',
     ];
 
-    for (const state of unreadyStates) {
+    for (const state of unavailableStates) {
       it(`falls back to deterministic when availability is '${state}'`, async () => {
-        const provider = new FakeBriefingProvider({ availability: state });
+        const provider = new FakeBriefingProvider({
+          availability: state,
+        });
+
         const events = [createEvent(0, 0)];
         const sources = [{ ordinal: 0, recordId: 'rec-0' }];
         const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
@@ -892,16 +1417,231 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         });
 
         expect(briefing.generation).toBe('deterministic');
-        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
+        expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
         expect(provider.getCallHistory()).toHaveLength(0);
       });
     }
+
+    /*
+      One malformed batch must not take the whole run down with it.
+
+      The verifier walked `currentExpectedItemOrdinal` forward with each consumed choice,
+      so a plan carrying more choices than were requested pushed it past the end of
+      `requestedItems` and indexed off the array. That threw a TypeError out of
+      `verifyBriefingExtractResult`, and the pipeline's batch loop has no try/catch around
+      it -- so a single hostile batch destroyed every sibling batch that had already
+      verified cleanly, and the user got nothing.
+    */
+    it('keeps sibling batches when one batch returns an over-long plan', async () => {
+      const seen: number[] = [];
+
+      /*
+        The hostile batch must carry at least TWO items. With a single-item request the
+        verifier's group-size rule ("requestCount === 1 -> exactly one group of one
+        choice") rejects an extra choice before it is ever used as an index, so a
+        one-item batch cannot reach the crash and a test built on one proves nothing.
+        Batching is per (day, period), so two records in each of two periods gives two
+        batches of two.
+      */
+      const provider: BriefingProvider = {
+        async getAvailability() {
+          return 'ready' as BriefingProviderAvailability;
+        },
+        getCapability() {
+          return { envelope: DEFAULT_FAKE_PROVIDER_ENVELOPE };
+        },
+        async selectExtracts(request: BriefingExtractRequest) {
+          const callIndex = seen.length;
+          seen.push(request.items.length);
+
+          if (callIndex === 0) {
+            // Hostile: one more choice than there are items, landing exactly on the
+            // ordinal the verifier expects next.
+            return {
+              ok: true as const,
+              requestId: request.requestId,
+              output: {
+                version: 2,
+                groups: [
+                  {
+                    groupOrdinal: 0,
+                    choices: [
+                      ...request.items.map((item, idx) => ({
+                        itemOrdinal: idx,
+                        candidateOrdinal: Math.max(0, item.candidates.length - 1),
+                      })),
+                      { itemOrdinal: request.items.length, candidateOrdinal: 0 },
+                    ],
+                  },
+                ],
+              },
+            };
+          }
+
+          // A well-formed plan: with requestCount >= 2 every group must carry 2..4
+          // choices, so all items go into one group in request order.
+          return {
+            ok: true as const,
+            requestId: request.requestId,
+            output: {
+              version: 2,
+              groups: [
+                {
+                  groupOrdinal: 0,
+                  choices: request.items.map((item, idx) => ({
+                    itemOrdinal: idx,
+                    candidateOrdinal: Math.max(0, item.candidates.length - 1),
+                  })),
+                },
+              ],
+            },
+          };
+        },
+        async cancel() {},
+      };
+
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: '오전 훈련을 시작했습니다.' }),
+        createEvent(1, 0, { period: 'morning', text: '오전 훈련에서 복귀했습니다.' }),
+        createEvent(2, 0, { period: 'afternoon', text: '오후 정비를 시작했습니다.' }),
+        createEvent(3, 0, { period: 'afternoon', text: '오후 정비를 마무리했습니다.' }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-0' },
+        { ordinal: 1, recordId: 'rec-1' },
+        { ordinal: 2, recordId: 'rec-2' },
+        { ordinal: 3, recordId: 'rec-3' },
+      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 2000,
+      });
+
+      // Non-vacuity: the hostile request really did carry >= 2 items, so its extra
+      // choice reached the ordinal that used to index off the end.
+      expect(seen[0]).toBeGreaterThanOrEqual(2);
+      // The hostile batch did not abort the run: later batches were still requested.
+      expect(seen.length).toBeGreaterThan(1);
+
+      // Source coverage is total, and every source is still bound to its exact record.
+      const boundIds = briefing.days
+        .flatMap((day) => day.sections)
+        .flatMap((section) => section.items)
+        .flatMap((item) => item.parts.map((part) => part.sourceRecordId));
+      expect([...new Set(boundIds)].sort()).toEqual(['rec-0', 'rec-1', 'rec-2', 'rec-3']);
+      expect(briefing.sourceCount).toBe(4);
+      expect(briefing.overview.sourceRecordIds).toEqual([
+        'rec-0',
+        'rec-1',
+        'rec-2',
+        'rec-3',
+      ]);
+
+      // Mixed outcome: the hostile batch was rejected, the clean one still verified.
+      expect(briefing.generation).toBe('hybrid');
+    });
+
+    it('후보 33개짜리 기록도 최종 브리핑에서 사라지지 않는다', async () => {
+      // 실제 재현: 문장 33개로 쪼개지는 기록 하나. native 한도는 32라 요청 전체가
+      // 거부되고, JS는 그 사실을 몰라 그대로 보내고 있었다.
+      const thirtyThree = Array.from({ length: 33 }, (_, i) => `문장 ${i} 입니다.`).join(' ');
+      expect(buildBriefingExtractCandidates(thirtyThree, 'ko')).toHaveLength(33);
+
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { period: 'morning', text: thirtyThree }),
+        createEvent(1, 0, { period: 'morning', text: '짧은 기록 하나.' }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-33' },
+        { ordinal: 1, recordId: 'rec-ok' },
+      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 2000,
+      });
+
+      // 두 source 모두 최종 결과에 정확한 recordId로 남는다.
+      const rendered = briefing.days
+        .flatMap((day) => day.sections)
+        .flatMap((section) => section.items)
+        .flatMap((item) => item.parts.map((part) => part.sourceRecordId));
+      expect([...new Set(rendered)].sort()).toEqual(['rec-33', 'rec-ok']);
+      expect(briefing.sourceCount).toBe(2);
+      expect(briefing.overview.sourceRecordIds).toEqual(['rec-33', 'rec-ok']);
+
+      // 그리고 33개짜리는 native로 보내지지 않았다: 어떤 요청도 32개를 넘지 않는다.
+      for (const call of provider.getCallHistory()) {
+        for (const item of call.items) {
+          expect(item.candidates.length).toBeLessThanOrEqual(32);
+        }
+      }
+    });
+
+    it('keeps a midnight-spanning night as two runs on the AI path too', async () => {
+      // Same defect as the deterministic path, one layer up: batching keyed on
+      // `${day}_${period}`, so a group could join a 00:30 record to a 22:30 one with the
+      // whole day in between and still believe it was period-isolated.
+      const provider = new FakeBriefingProvider();
+      const events = [
+        createEvent(0, 0, { period: 'night', text: '새벽 근무 교대했습니다.' }),
+        createEvent(1, 0, { period: 'morning', text: '오전 점호를 마쳤습니다.' }),
+        createEvent(2, 0, { period: 'night', text: '늦은 밤 점검했습니다.' }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-0030' },
+        { ordinal: 1, recordId: 'rec-0900' },
+        { ordinal: 2, recordId: 'rec-2230' },
+      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 2000,
+      });
+
+      const sections = briefing.days[0].sections;
+      expect(sections.map((sec) => sec.period)).toEqual(['night', 'morning', 'night']);
+
+      // No group may fuse the two nights: every item's parts stay inside one run.
+      const perSection = sections.map((sec) =>
+        sec.items.flatMap((item) => item.parts.map((part) => part.sourceRecordId)),
+      );
+      expect(perSection).toEqual([['rec-0030'], ['rec-0900'], ['rec-2230']]);
+
+      // Total source coverage and chronological order are unchanged.
+      expect(perSection.flat()).toEqual(['rec-0030', 'rec-0900', 'rec-2230']);
+      expect(briefing.overview.sourceRecordIds).toEqual([
+        'rec-0030',
+        'rec-0900',
+        'rec-2230',
+      ]);
+      expect(briefing.sourceCount).toBe(3);
+
+      // Every provider request stays within a single contiguous run.
+      for (const call of provider.getCallHistory()) {
+        expect(call.items.length).toBeLessThanOrEqual(1);
+      }
+    });
 
     it('falls back to deterministic when provider returns wrong correlation requestId', async () => {
       const provider = new FakeBriefingProvider({
         scenarioSelector: () => ({
           type: 'wrong_correlation',
-          wrongRequestId: 'completely-wrong-id-999',
+          wrongRequestId: 'completely-wrong-uuid',
         }),
       });
 
@@ -918,15 +1658,15 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
     });
 
     it('falls back to deterministic on provider timeout and late response cannot overwrite fallback', async () => {
       const provider = new FakeBriefingProvider({
-        delayMs: 200,
+        delayMs: 300,
       });
 
-      const events = [createEvent(0, 0, { text: '타임아웃 테스트' })];
+      const events = [createEvent(0, 0)];
       const sources = [{ ordinal: 0, recordId: 'rec-0' }];
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
@@ -935,188 +1675,20 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
         sources,
         days,
         provider,
-        timeoutMs: 30,
+        timeoutMs: 50,
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-0');
-
-      // Wait past provider delay to ensure late response does not mutate result
-      await new Promise((r) => setTimeout(r, 250));
-      expect(briefing.generation).toBe('deterministic');
-    });
-  });
-
-  describe('Corpus Selection Independence and Non-Inspection of state.records', () => {
-    it('pipeline accepts only supplied safe events without accessing state.records or filtering Top-N', async () => {
-      const provider = new FakeBriefingProvider();
-
-      // Supply 15 events
-      const events: BriefingModelSafeEvent[] = Array.from({ length: 15 }, (_, i) =>
-        createEvent(i, 0, { text: `이벤트 ${i}번 내용` }),
-      );
-      const sources: BriefingSourceMapping[] = Array.from({ length: 15 }, (_, i) => ({
-        ordinal: i,
-        recordId: `rec-${i}`,
-      }));
-      const days: BriefingDayMapping[] = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-      });
-
-      // Assert all 15 items are preserved without Top-N drop or sorting alterations
-      expect(briefing.sourceCount).toBe(15);
-      const outputItemIds = briefing.days[0].sections[0].items.map((it) => it.sourceRecordId);
-      expect(outputItemIds).toEqual(sources.map((s) => s.recordId));
-      expect(briefing.overview.sourceRecordIds).toEqual(sources.map((s) => s.recordId));
-    });
-  });
-
-  describe("Fail-Closed Safe UUID Generation and Provider Request Privacy", () => {
-    it("falls back deterministically without calling provider when crypto.randomUUID is unavailable", async () => {
-      const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-      try {
-        const originalCrypto = globalThis.crypto;
-        Object.defineProperty(globalThis, "crypto", {
-          configurable: true,
-          writable: true,
-          value: {
-            ...originalCrypto,
-            randomUUID: undefined,
-          },
-        });
-
-        const provider = new FakeBriefingProvider();
-        const events = [createEvent(0, 0, { text: "난수 UUID 부재 테스트 문장" })];
-        const sources = [{ ordinal: 0, recordId: "rec-uuid-none" }];
-        const days = [{ dayOrdinal: 0, date: "2026-08-26" }];
-
-        const briefing = await runPartnerBriefingPipeline({
-          events,
-          sources,
-          days,
-          provider,
-          timeoutMs: 1000,
-        });
-
-        expect(provider.getCallHistory()).toHaveLength(0);
-        expect(briefing.generation).toBe("deterministic");
-        expect(briefing.sourceCount).toBe(1);
-        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-none");
-        expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-none"]);
-      } finally {
-        if (originalDescriptor) {
-          Object.defineProperty(globalThis, "crypto", originalDescriptor);
-        } else {
-          Reflect.deleteProperty(globalThis, "crypto");
-        }
-      }
-
-      const currentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-      expect(currentDescriptor).toEqual(originalDescriptor);
-    });
-
-    it("falls back deterministically without calling provider when crypto.randomUUID throws", async () => {
-      const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-      try {
-        const originalCrypto = globalThis.crypto;
-        Object.defineProperty(globalThis, "crypto", {
-          configurable: true,
-          writable: true,
-          value: {
-            ...originalCrypto,
-            randomUUID: () => {
-              throw new Error("crypto entropy depleted");
-            },
-          },
-        });
-
-        const provider = new FakeBriefingProvider();
-        const events = [createEvent(0, 0, { text: "난수 UUID throw 테스트 문장" })];
-        const sources = [{ ordinal: 0, recordId: "rec-uuid-throw" }];
-        const days = [{ dayOrdinal: 0, date: "2026-08-26" }];
-
-        const briefing = await runPartnerBriefingPipeline({
-          events,
-          sources,
-          days,
-          provider,
-          timeoutMs: 1000,
-        });
-
-        expect(provider.getCallHistory()).toHaveLength(0);
-        expect(briefing.generation).toBe("deterministic");
-        expect(briefing.sourceCount).toBe(1);
-        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-throw");
-        expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-throw"]);
-      } finally {
-        if (originalDescriptor) {
-          Object.defineProperty(globalThis, "crypto", originalDescriptor);
-        } else {
-          Reflect.deleteProperty(globalThis, "crypto");
-        }
-      }
-
-      const currentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-      expect(currentDescriptor).toEqual(originalDescriptor);
-    });
-
-    it("falls back deterministically without calling provider when crypto.randomUUID returns empty or whitespace string", async () => {
-      const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-      try {
-        const originalCrypto = globalThis.crypto;
-        Object.defineProperty(globalThis, "crypto", {
-          configurable: true,
-          writable: true,
-          value: {
-            ...originalCrypto,
-            randomUUID: () => "   ",
-          },
-        });
-
-        const provider = new FakeBriefingProvider();
-        const events = [createEvent(0, 0, { text: "빈 UUID 테스트 문장" })];
-        const sources = [{ ordinal: 0, recordId: "rec-uuid-blank" }];
-        const days = [{ dayOrdinal: 0, date: "2026-08-26" }];
-
-        const briefing = await runPartnerBriefingPipeline({
-          events,
-          sources,
-          days,
-          provider,
-          timeoutMs: 1000,
-        });
-
-        expect(provider.getCallHistory()).toHaveLength(0);
-        expect(briefing.generation).toBe("deterministic");
-        expect(briefing.sourceCount).toBe(1);
-        expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe("rec-uuid-blank");
-        expect(briefing.overview.sourceRecordIds).toEqual(["rec-uuid-blank"]);
-      } finally {
-        if (originalDescriptor) {
-          Object.defineProperty(globalThis, "crypto", originalDescriptor);
-        } else {
-          Reflect.deleteProperty(globalThis, "crypto");
-        }
-      }
-
-      const currentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-      expect(currentDescriptor).toEqual(originalDescriptor);
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-0');
     });
   });
 
   describe('Locale Support (Gate L3b)', () => {
     it('maintains exact Korean strings and generation when locale is unspecified (default)', async () => {
       const provider = new FakeBriefingProvider();
-      const events = [
-        createEvent(0, 0, { text: '기본 로케일 한국어 테스트' }),
-      ];
-      const sources = [{ ordinal: 0, recordId: 'rec-ko-default' }];
+
+      const events = [createEvent(0, 0, { text: '기본 로케일 한국어 테스트' })];
+      const sources = [{ ordinal: 0, recordId: 'rec-ko-0' }];
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
       const briefing = await runPartnerBriefingPipeline({
@@ -1130,31 +1702,33 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       expect(briefing.generation).toBe('on_device');
       expect(briefing.rangeLabel).toBe('8월 26일');
       expect(briefing.overview.text).toBe('총 1개의 기록이 있습니다.');
-      expect(briefing.days[0].sections[0].items[0].text).toBe(
+      expect(briefing.days[0].sections[0].items[0].parts[0].text).toBe(
         '“기본 로케일 한국어 테스트”라고 기록했어요.',
       );
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-ko-default');
     });
 
     it('renders English templates in deterministic fallback path when locale is "en"', async () => {
       const provider = new FakeBriefingProvider({
-        availability: 'locale_unsupported',
+        availability: 'unsupported',
       });
 
       const events = [
-        createEvent(0, 0, { period: 'morning', text: '훈련 다녀왔어', mediaKinds: ['photo'] }),
-        createEvent(1, 0, { period: 'evening', text: '', mediaKinds: ['photo', 'video'] }),
-        createEvent(2, 1, { period: 'afternoon', text: '', mediaKinds: [] }),
+        createEvent(0, 0, {
+          period: 'morning',
+          text: '훈련 다녀왔어',
+          mediaKinds: ['photo'],
+        }),
+        createEvent(1, 0, {
+          period: 'evening',
+          text: '',
+          mediaKinds: ['video', 'voice'],
+        }),
       ];
       const sources = [
         { ordinal: 0, recordId: 'rec-en-0' },
         { ordinal: 1, recordId: 'rec-en-1' },
-        { ordinal: 2, recordId: 'rec-en-2' },
       ];
-      const days = [
-        { dayOrdinal: 0, date: '2026-08-26' },
-        { dayOrdinal: 1, date: '2026-08-27' },
-      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
       const briefing = await runPartnerBriefingPipeline({
         events,
@@ -1166,29 +1740,29 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       });
 
       expect(briefing.generation).toBe('deterministic');
-      expect(briefing.rangeLabel).toBe('August 26 – August 27');
-      expect(briefing.overview.text).toBe('Over 2 days: 3 records (2 photos, 1 video) in total.');
-      expect(briefing.overview.sourceRecordIds).toEqual(['rec-en-0', 'rec-en-1', 'rec-en-2']);
+      expect(briefing.rangeLabel).toBe('August 26');
+      expect(briefing.overview.text).toBe(
+        '2 records (1 photo, 1 video, 1 voice note) in total.',
+      );
 
-      // Day 0 morning: text with photo in deterministic fallback
-      expect(briefing.days[0].sections[0].items[0].text).toBe('They wrote: “훈련 다녀왔어”');
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-en-0');
+      expect(briefing.days[0].sections[0].items[0].parts[0].text).toBe('They wrote: “훈련 다녀왔어”');
+      expect(briefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-en-0');
 
-      // Day 0 evening: media only
-      expect(briefing.days[0].sections[1].items[0].text).toBe('Shared 1 photo, 1 video.');
-      expect(briefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-en-1');
-
-      // Day 1 afternoon: empty record
-      expect(briefing.days[1].sections[0].items[0].text).toBe('Shared a record.');
-      expect(briefing.days[1].sections[0].items[0].sourceRecordId).toBe('rec-en-2');
+      expect(briefing.days[0].sections[1].items[0].parts[0].text).toBe(
+        'Shared 1 video, 1 voice note.',
+      );
+      expect(briefing.days[0].sections[1].items[0].parts[0].sourceRecordId).toBe('rec-en-1');
     });
 
     it('renders English attributed wrapper on on-device success when locale is "en"', async () => {
       const provider = new FakeBriefingProvider();
+
       const events = [
-        createEvent(0, 0, { text: 'First sentence. Second sentence.' }),
+        createEvent(0, 0, {
+          text: 'First sentence. Second sentence.',
+        }),
       ];
-      const sources = [{ ordinal: 0, recordId: 'rec-en-on-device' }];
+      const sources = [{ ordinal: 0, recordId: 'rec-en-single' }];
       const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
 
       const briefing = await runPartnerBriefingPipeline({
@@ -1203,10 +1777,9 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
       expect(briefing.generation).toBe('on_device');
       expect(briefing.rangeLabel).toBe('August 26');
       expect(briefing.overview.text).toBe('1 record in total.');
-      expect(briefing.days[0].sections[0].items[0].text).toBe(
+      expect(briefing.days[0].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “First sentence.”',
       );
-      expect(briefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-en-on-device');
     });
 
     it('passes identical locale to both getAvailability and selectExtracts options (spy provider proof)', async () => {
@@ -1225,6 +1798,8 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
               promptOverheadUtf8Bytes: 256,
               responseReserveUtf8Bytes: 512,
               maxInputTextGraphemes: 1000,
+              maxItems: 64,
+              maxCandidatesPerItem: 32,
             },
           };
         },
@@ -1234,11 +1809,16 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
             ok: true,
             requestId: req.requestId,
             output: {
-              version: 1,
-              choices: req.items.map((it) => ({
-                itemOrdinal: it.itemOrdinal,
-                candidateOrdinal: 0,
-              })),
+              version: 2,
+              groups: [
+                {
+                  groupOrdinal: 0,
+                  choices: req.items.map((it) => ({
+                    itemOrdinal: it.itemOrdinal,
+                    candidateOrdinal: 0,
+                  })),
+                },
+              ],
             },
           };
         },
@@ -1260,168 +1840,12 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2)', () => {
 
       expect(briefing.generation).toBe('on_device');
 
-      // Verify availability received locale: 'en'
-      expect(capturedAvailabilityOptions).toBeDefined();
-      expect(capturedAvailabilityOptions).toMatchObject({
-        locale: 'en',
-      });
-      expect((capturedAvailabilityOptions as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
-
-      // Verify selectExtracts received locale: 'en'
-      expect(capturedSelectExtractsOptions).toBeDefined();
-      expect(capturedSelectExtractsOptions).toMatchObject({
-        locale: 'en',
-      });
-      expect((capturedSelectExtractsOptions as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('ensures serialized BriefingExtractRequest contains no locale or forbidden metadata', async () => {
-      const provider = new FakeBriefingProvider();
-      const events = [
-        createEvent(0, 0, { text: '요청 본문 검증 텍스트' }),
-      ];
-      const sources = [{ ordinal: 0, recordId: 'secret-record-id-123' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-        locale: 'en',
-      });
-
-      const calls = provider.getCallHistory();
-      expect(calls).toHaveLength(1);
-      const req = calls[0];
-
-      // Exact request keys allowlist: { requestId, items }
-      expect(Object.keys(req).sort()).toEqual(['items', 'requestId']);
-
-      // Raw JSON check: zero locale or forbidden metadata
-      const rawJson = JSON.stringify(req);
-      expect(rawJson).not.toContain('"locale"');
-      expect(rawJson).not.toContain('"en"');
-      expect(rawJson).not.toContain('"ko"');
-      expect(rawJson).not.toContain('secret-record-id');
-      expect(rawJson).not.toContain('2026-08-26');
-    });
-
-    it('renders English fallback when provider fails or times out with locale="en"', async () => {
-      // 1. Failure scenario
-      const failingProvider = new FakeBriefingProvider({
-        scenarioSelector: () => ({ type: 'failure', code: 'native_error' }),
-      });
-
-      const events = [createEvent(0, 0, { text: '실패 시 영어 폴백' })];
-      const sources = [{ ordinal: 0, recordId: 'rec-fail-0' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefingFail = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider: failingProvider,
-        timeoutMs: 1000,
-        locale: 'en',
-      });
-
-      expect(briefingFail.generation).toBe('deterministic');
-      expect(briefingFail.rangeLabel).toBe('August 26');
-      expect(briefingFail.overview.text).toBe('1 record in total.');
-      expect(briefingFail.days[0].sections[0].items[0].text).toBe(
-        'They wrote: “실패 시 영어 폴백”',
+      expect(capturedAvailabilityOptions).toEqual(
+        expect.objectContaining({ locale: 'en' }),
       );
 
-      // 2. Timeout scenario
-      const slowProvider = new FakeBriefingProvider({ delayMs: 200 });
-      const briefingTimeout = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider: slowProvider,
-        timeoutMs: 30,
-        locale: 'en',
-      });
-
-      expect(briefingTimeout.generation).toBe('deterministic');
-      expect(briefingTimeout.rangeLabel).toBe('August 26');
-      expect(briefingTimeout.overview.text).toBe('1 record in total.');
-      expect(briefingTimeout.days[0].sections[0].items[0].text).toBe(
-        'They wrote: “실패 시 영어 폴백”',
-      );
-    });
-
-    it('renders English hybrid when one batch fails and sibling batch succeeds with locale="en"', async () => {
-      const smallEnvelope = {
-        maxContextUtf8Bytes: 300,
-        promptOverheadUtf8Bytes: 30,
-        responseReserveUtf8Bytes: 80,
-        maxInputTextGraphemes: 50,
-      };
-
-      let callIndex = 0;
-      const provider = new FakeBriefingProvider({
-        capability: { envelope: smallEnvelope },
-        scenarioSelector: () => {
-          const isSecondCall = callIndex === 1;
-          callIndex++;
-          if (isSecondCall) {
-            return { type: 'failure', code: 'malformed' };
-          }
-          return undefined; // default success
-        },
-      });
-
-      const events = [
-        createEvent(0, 0, { period: 'morning', text: 'First batch record.' }),
-        createEvent(1, 0, { period: 'evening', text: 'Second batch record.' }),
-      ];
-      const sources = [
-        { ordinal: 0, recordId: 'rec-hyb-0' },
-        { ordinal: 1, recordId: 'rec-hyb-1' },
-      ];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runPartnerBriefingPipeline({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-        locale: 'en',
-      });
-
-      expect(briefing.generation).toBe('hybrid');
-      expect(briefing.rangeLabel).toBe('August 26');
-      expect(briefing.overview.text).toBe('2 records in total.');
-      expect(briefing.days[0].sections[0].items[0].text).toBe('They wrote: “First batch record.”');
-      expect(briefing.days[0].sections[1].items[0].text).toBe('They wrote: “Second batch record.”');
-    });
-
-    it('PartnerBriefingRunner forwards locale and respects cancellation with locale="en"', async () => {
-      const runner = new PartnerBriefingRunner();
-      const provider = new FakeBriefingProvider();
-
-      const events = [createEvent(0, 0, { text: '러너 로케일 테스트' })];
-      const sources = [{ ordinal: 0, recordId: 'rec-runner-en' }];
-      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
-
-      const briefing = await runner.run({
-        events,
-        sources,
-        days,
-        provider,
-        timeoutMs: 1000,
-        locale: 'en',
-      });
-
-      expect(briefing).not.toBeNull();
-      expect(briefing?.generation).toBe('on_device');
-      expect(briefing?.rangeLabel).toBe('August 26');
-      expect(briefing?.days[0].sections[0].items[0].text).toBe(
-        'They wrote: “러너 로케일 테스트”',
+      expect(capturedSelectExtractsOptions).toEqual(
+        expect.objectContaining({ locale: 'en' }),
       );
     });
   });

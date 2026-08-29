@@ -227,15 +227,16 @@ describe('usePartnerBriefing (Phase B1)', () => {
 
       // Model call verification
       const history = provider.getCallHistory();
-      expect(history).toHaveLength(1);
-      expect(history[0].items).toHaveLength(2);
+      expect(history).toHaveLength(2);
+      expect(history[0].items).toHaveLength(1);
       expect(history[0].items[0].candidates[0].text).toContain('아침 먹었어');
-      expect(history[0].items[1].candidates[0].text).toContain('점심');
+      expect(history[1].items).toHaveLength(1);
+      expect(history[1].items[0].candidates[0].text).toContain('점심');
 
-      const serializedRequest = JSON.stringify(history[0]);
-      expect(serializedRequest).not.toContain('비밀');
-      expect(serializedRequest).not.toContain('내 기록');
-      expect(serializedRequest).not.toContain('복호화 실패');
+      const serializedRequests = JSON.stringify(history);
+      expect(serializedRequests).not.toContain('비밀');
+      expect(serializedRequests).not.toContain('내 기록');
+      expect(serializedRequests).not.toContain('복호화 실패');
     });
   });
 
@@ -310,7 +311,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
       // Immediate synchronous baseline
       expect(result.current.status).toBe('ready');
       expect(result.current.briefing?.generation).toBe('deterministic');
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         '“오늘 하루도 수고했어.”라고 기록했어요.',
       );
 
@@ -319,7 +320,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
         expect(result.current.briefing?.generation).toBe('on_device');
       });
 
-      expect(result.current.briefing?.days[0].sections[0].items[0].sourceRecordId).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe(
         'rec_1',
       );
     });
@@ -385,7 +386,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
           'rec_fail_1',
         ]);
         expect(
-          result.current.briefing?.days[0].sections[0].items[0].sourceRecordId,
+          result.current.briefing?.days[0].sections[0].items[0].parts[0].sourceRecordId,
         ).toBe('rec_fail_1');
       });
     });
@@ -423,7 +424,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
         'rec_timeout_1',
       ]);
       expect(
-        result.current.briefing?.days[0].sections[0].items[0].sourceRecordId,
+        result.current.briefing?.days[0].sections[0].items[0].parts[0].sourceRecordId,
       ).toBe('rec_timeout_1');
 
       // 3. Wait past the provider late completion (120ms total)
@@ -436,7 +437,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
         'rec_timeout_1',
       ]);
       expect(
-        result.current.briefing?.days[0].sections[0].items[0].text,
+        result.current.briefing?.days[0].sections[0].items[0].parts[0].text,
       ).toBe('“훈련 끝나고 쉬는 중이야.”라고 기록했어요.');
     });
   });
@@ -629,10 +630,10 @@ describe('usePartnerBriefing (Phase B1)', () => {
         'rec_kor_2',
       ]);
       expect(result.current.briefing?.days[0].date).toBe('2026-08-27');
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         '“첫째 날 아침입니다.”라고 기록했어요.',
       );
-      expect(result.current.briefing?.days[0].sections[0].items[0].sourceRecordId).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe(
         'rec_kor_1',
       );
     });
@@ -675,17 +676,17 @@ describe('usePartnerBriefing (Phase B1)', () => {
         'rec_en_2',
       ]);
       expect(result.current.briefing?.days[0].date).toBe('2026-08-27');
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “Completed morning roll call smoothly.”',
       );
-      expect(result.current.briefing?.days[0].sections[0].items[0].sourceRecordId).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe(
         'rec_en_1',
       );
       expect(result.current.briefing?.days[1].date).toBe('2026-08-28');
-      expect(result.current.briefing?.days[1].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[1].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “Had dinner and relaxing now.”',
       );
-      expect(result.current.briefing?.days[1].sections[0].items[0].sourceRecordId).toBe(
+      expect(result.current.briefing?.days[1].sections[0].items[0].parts[0].sourceRecordId).toBe(
         'rec_en_2',
       );
     });
@@ -715,7 +716,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
       expect(result.current.status).toBe('ready');
       expect(result.current.briefing?.generation).toBe('deterministic');
       expect(result.current.briefing?.rangeLabel).toBe('August 28');
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “Great training day today.”',
       );
 
@@ -724,10 +725,10 @@ describe('usePartnerBriefing (Phase B1)', () => {
         expect(result.current.briefing?.generation).toBe('on_device');
       });
 
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “Great training day today.”',
       );
-      expect(result.current.briefing?.days[0].sections[0].items[0].sourceRecordId).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe(
         'rec_en_prov',
       );
     });
@@ -758,7 +759,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
       expect(result.current.status).toBe('ready');
       expect(result.current.briefing?.generation).toBe('deterministic');
       expect(result.current.briefing?.rangeLabel).toBe('8월 28일');
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         '“오늘 하루도 수고했어.”라고 기록했어요.',
       );
 
@@ -783,7 +784,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
       expect(result.current.briefing?.generation).toBe('deterministic');
       expect(result.current.briefing?.rangeLabel).toBe('August 28');
       expect(result.current.briefing?.overview.text).toBe('1 record in total.');
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “오늘 하루도 수고했어.”',
       );
 
@@ -798,7 +799,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
       });
 
       // Ensure English attributed format remains active
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “오늘 하루도 수고했어.”',
       );
 
@@ -807,7 +808,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
 
       // Confirm late Korean result NEVER overwrote the English state
       expect(result.current.briefing?.rangeLabel).toBe('August 28');
-      expect(result.current.briefing?.days[0].sections[0].items[0].text).toBe(
+      expect(result.current.briefing?.days[0].sections[0].items[0].parts[0].text).toBe(
         'They wrote: “오늘 하루도 수고했어.”',
       );
     });

@@ -12,11 +12,27 @@ import type {
   BriefingPeriod,
 } from './contract';
 
+/**
+ * Everything a provider actually enforces on a request, in one place.
+ *
+ * `maxItems` and `maxCandidatesPerItem` are the STRUCTURAL limits. Both native parsers
+ * have always enforced them (`OnDeviceBriefing.maxItems` / `maxCandidatesPerItem` on iOS,
+ * `MAX_ITEMS` / `MAX_CANDIDATES_PER_ITEM` on Android) and reject the whole request with
+ * `bad_request` when either is exceeded -- but they were never advertised, so the JS
+ * batcher could not see them. A single record that segments into 33 sentences produced a
+ * request JS considered valid and the device refused outright, and the couple silently
+ * got deterministic output on hardware that could have done better.
+ *
+ * They are part of the envelope rather than JS constants so that iOS and Android may
+ * differ, and so a change on one side cannot drift from the batcher.
+ */
 export interface BriefingProviderEnvelope {
   readonly maxContextUtf8Bytes: number;
   readonly promptOverheadUtf8Bytes: number;
   readonly responseReserveUtf8Bytes: number;
   readonly maxInputTextGraphemes: number;
+  readonly maxItems: number;
+  readonly maxCandidatesPerItem: number;
 }
 
 export interface BriefingModelChunk {
@@ -67,6 +83,8 @@ const ENVELOPE_KEYS = new Set([
   'promptOverheadUtf8Bytes',
   'responseReserveUtf8Bytes',
   'maxInputTextGraphemes',
+  'maxItems',
+  'maxCandidatesPerItem',
 ]);
 
 export function isValidProviderEnvelope(
@@ -89,6 +107,8 @@ export function isValidProviderEnvelope(
   const promptOverhead = envelope.promptOverheadUtf8Bytes;
   const responseReserve = envelope.responseReserveUtf8Bytes;
   const maxGraphemes = envelope.maxInputTextGraphemes;
+  const maxItems = envelope.maxItems;
+  const maxCandidatesPerItem = envelope.maxCandidatesPerItem;
 
   if (
     !Number.isSafeInteger(maxContext) ||
@@ -98,7 +118,11 @@ export function isValidProviderEnvelope(
     !Number.isSafeInteger(responseReserve) ||
     (responseReserve as number) < 0 ||
     !Number.isSafeInteger(maxGraphemes) ||
-    (maxGraphemes as number) <= 0
+    (maxGraphemes as number) <= 0 ||
+    !Number.isSafeInteger(maxItems) ||
+    (maxItems as number) <= 0 ||
+    !Number.isSafeInteger(maxCandidatesPerItem) ||
+    (maxCandidatesPerItem as number) <= 0
   ) {
     return false;
   }

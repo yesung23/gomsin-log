@@ -5,6 +5,8 @@ import type {
   BriefingGeneration,
   BriefingLocale,
   UntrustedBriefingChoice,
+  UntrustedBriefingGroup,
+  UntrustedBriefingGroupPlan,
   UntrustedBriefingExtractPlan,
 } from './contract';
 import type { BriefingProviderEnvelope } from './chunk';
@@ -230,9 +232,9 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       expect(isExact).toBe(true);
     });
 
-    it('pins UntrustedBriefingExtractPlan compile-time keys to exactly version and choices', () => {
-      type PlanKeys = keyof UntrustedBriefingExtractPlan;
-      type ExpectedKeys = 'version' | 'choices';
+    it('pins UntrustedBriefingGroupPlan compile-time keys to exactly version and groups', () => {
+      type PlanKeys = keyof UntrustedBriefingGroupPlan;
+      type ExpectedKeys = 'version' | 'groups';
 
       type HasAll = [ExpectedKeys] extends [PlanKeys] ? true : false;
       type HasNoExtra = [PlanKeys] extends [ExpectedKeys] ? true : false;
@@ -278,7 +280,7 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       expect(hasForbiddenPlan).toBe(false);
     });
 
-    it('verifies fake success output has version 1 and numeric ordinal pairs only with no authored text', async () => {
+    it('verifies fake success output has version 2 and numeric ordinal groups with no authored text', async () => {
       const provider = new FakeBriefingProvider();
       const request = makeSampleExtractRequest();
 
@@ -287,16 +289,20 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
 
       if (result.ok) {
         expect(result.requestId).toBe('req-001');
-        expect(result.output.version).toBe(1);
-        expect(Array.isArray(result.output.choices)).toBe(true);
-        expect(result.output.choices).toHaveLength(2);
+        expect(result.output.version).toBe(2);
+        expect(Array.isArray(result.output.groups)).toBe(true);
+        expect(result.output.groups).toHaveLength(1);
+        expect(result.output.groups[0].choices).toHaveLength(2);
 
-        for (const choice of result.output.choices) {
-          expect(typeof choice.itemOrdinal).toBe('number');
-          expect(typeof choice.candidateOrdinal).toBe('number');
-          expect(Number.isSafeInteger(choice.itemOrdinal)).toBe(true);
-          expect(Number.isSafeInteger(choice.candidateOrdinal)).toBe(true);
-          expect('text' in choice).toBe(false);
+        for (const group of result.output.groups) {
+          expect(typeof group.groupOrdinal).toBe('number');
+          for (const choice of group.choices) {
+            expect(typeof choice.itemOrdinal).toBe('number');
+            expect(typeof choice.candidateOrdinal).toBe('number');
+            expect(Number.isSafeInteger(choice.itemOrdinal)).toBe(true);
+            expect(Number.isSafeInteger(choice.candidateOrdinal)).toBe(true);
+            expect('text' in choice).toBe(false);
+          }
         }
 
         const serializedOutput = JSON.stringify(result.output);
@@ -320,6 +326,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
         promptOverheadUtf8Bytes: 512,
         responseReserveUtf8Bytes: 1024,
         maxInputTextGraphemes: 2000,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       };
 
       const provider = new FakeBriefingProvider({ capability: customEnvelope });
@@ -330,6 +338,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
         promptOverheadUtf8Bytes: 128,
         responseReserveUtf8Bytes: 256,
         maxInputTextGraphemes: 500,
+        maxItems: 64,
+        maxCandidatesPerItem: 32,
       };
       provider.setCapability(updatedEnvelope);
       expect((await provider.getCapability()).envelope).toEqual(updatedEnvelope);
@@ -350,9 +360,14 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       if (res1.ok && res2.ok) {
         expect(res1.requestId).toBe('req-001');
         expect(res1.output).toEqual(res2.output);
-        expect(res1.output.choices).toEqual([
-          { itemOrdinal: 0, candidateOrdinal: 0 },
-          { itemOrdinal: 1, candidateOrdinal: 0 },
+        expect(res1.output.groups).toEqual([
+          {
+            groupOrdinal: 0,
+            choices: [
+              { itemOrdinal: 0, candidateOrdinal: 0 },
+              { itemOrdinal: 1, candidateOrdinal: 0 },
+            ],
+          },
         ]);
       }
     });
@@ -389,28 +404,110 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       const res = await provider.selectExtracts(request);
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.output.choices).toHaveLength(3);
-        expect(res.output.choices[0]).toEqual({ itemOrdinal: 0, candidateOrdinal: 0 });
-        expect(res.output.choices[1]).toEqual({ itemOrdinal: 1, candidateOrdinal: 0 });
-        expect(res.output.choices[2]).toEqual({ itemOrdinal: 2, candidateOrdinal: 0 });
+        expect(res.output.groups).toHaveLength(1);
+        expect(res.output.groups[0].choices).toHaveLength(3);
+        expect(res.output.groups[0].choices[0]).toEqual({ itemOrdinal: 0, candidateOrdinal: 0 });
+        expect(res.output.groups[0].choices[1]).toEqual({ itemOrdinal: 1, candidateOrdinal: 0 });
+        expect(res.output.groups[0].choices[2]).toEqual({ itemOrdinal: 2, candidateOrdinal: 0 });
+      }
+    });
+
+    it('groups 5 items into contiguous groups of 3 and 2 to avoid trailing singleton', async () => {
+      const provider = new FakeBriefingProvider();
+      const request: BriefingExtractRequest = {
+        requestId: 'req-5-items',
+        items: Array.from({ length: 5 }, (_, i) => ({
+          itemOrdinal: i,
+          candidates: [{ candidateOrdinal: 0, text: `item ${i}` }],
+        })),
+      };
+
+      const res = await provider.selectExtracts(request);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.output.version).toBe(2);
+        expect(res.output.groups).toHaveLength(2);
+        expect(res.output.groups[0].groupOrdinal).toBe(0);
+        expect(res.output.groups[0].choices).toHaveLength(3);
+        expect(res.output.groups[0].choices.map((c) => c.itemOrdinal)).toEqual([0, 1, 2]);
+        expect(res.output.groups[1].groupOrdinal).toBe(1);
+        expect(res.output.groups[1].choices).toHaveLength(2);
+        expect(res.output.groups[1].choices.map((c) => c.itemOrdinal)).toEqual([3, 4]);
+      }
+    });
+
+    it('groups 8 items into contiguous groups of 4 and 4', async () => {
+      const provider = new FakeBriefingProvider();
+      const request: BriefingExtractRequest = {
+        requestId: 'req-8-items',
+        items: Array.from({ length: 8 }, (_, i) => ({
+          itemOrdinal: i,
+          candidates: [{ candidateOrdinal: 0, text: `item ${i}` }],
+        })),
+      };
+
+      const res = await provider.selectExtracts(request);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.output.version).toBe(2);
+        expect(res.output.groups).toHaveLength(2);
+        expect(res.output.groups[0].choices).toHaveLength(4);
+        expect(res.output.groups[0].choices.map((c) => c.itemOrdinal)).toEqual([0, 1, 2, 3]);
+        expect(res.output.groups[1].choices).toHaveLength(4);
+        expect(res.output.groups[1].choices.map((c) => c.itemOrdinal)).toEqual([4, 5, 6, 7]);
+      }
+    });
+
+    it('groups 1 item into a single singleton group', async () => {
+      const provider = new FakeBriefingProvider();
+      const request: BriefingExtractRequest = {
+        requestId: 'req-1-item',
+        items: [
+          {
+            itemOrdinal: 0,
+            candidates: [{ candidateOrdinal: 0, text: 'only item' }],
+          },
+        ],
+      };
+
+      const res = await provider.selectExtracts(request);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.output.version).toBe(2);
+        expect(res.output.groups).toHaveLength(1);
+        expect(res.output.groups[0].choices).toHaveLength(1);
+        expect(res.output.groups[0].choices[0].itemOrdinal).toBe(0);
       }
     });
 
     it('supports custom choice generator without text fields', async () => {
       const customProvider = new FakeBriefingProvider({
-        defaultExtractGenerator: (req) => [
-          { itemOrdinal: 0, candidateOrdinal: 1 },
-          { itemOrdinal: 1, candidateOrdinal: 1 },
-        ],
+        defaultExtractGenerator: (req) => ({
+          version: 2,
+          groups: [
+            {
+              groupOrdinal: 0,
+              choices: [
+                { itemOrdinal: 0, candidateOrdinal: 1 },
+                { itemOrdinal: 1, candidateOrdinal: 1 },
+              ],
+            },
+          ],
+        }),
       });
 
       const res = await customProvider.selectExtracts(makeSampleExtractRequest());
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.output.version).toBe(1);
-        expect(res.output.choices).toEqual([
-          { itemOrdinal: 0, candidateOrdinal: 1 },
-          { itemOrdinal: 1, candidateOrdinal: 1 },
+        expect(res.output.version).toBe(2);
+        expect(res.output.groups).toEqual([
+          {
+            groupOrdinal: 0,
+            choices: [
+              { itemOrdinal: 0, candidateOrdinal: 1 },
+              { itemOrdinal: 1, candidateOrdinal: 1 },
+            ],
+          },
         ]);
       }
     });
@@ -434,8 +531,13 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       expect(res.ok).toBe(true);
       if (res.ok) {
         // Does not invent candidate 0 for item 0
-        expect(res.output.choices).toEqual([
-          { itemOrdinal: 1, candidateOrdinal: 0 },
+        expect(res.output.groups).toEqual([
+          {
+            groupOrdinal: 0,
+            choices: [
+              { itemOrdinal: 1, candidateOrdinal: 0 },
+            ],
+          },
         ]);
       }
     });
@@ -468,8 +570,10 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       if (resA.ok && resB.ok) {
         expect(resA.requestId).toBe('flight-A');
         expect(resB.requestId).toBe('flight-B');
-        expect(resA.output.choices).toHaveLength(1);
-        expect(resB.output.choices).toHaveLength(2);
+        expect(resA.output.groups).toHaveLength(1);
+        expect(resA.output.groups[0].choices).toHaveLength(1);
+        expect(resB.output.groups).toHaveLength(1);
+        expect(resB.output.groups[0].choices).toHaveLength(2);
       }
     });
   });
@@ -515,7 +619,8 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       expect(resB.ok).toBe(true);
       if (resB.ok) {
         expect(resB.requestId).toBe('req-concurrent-b');
-        expect(resB.output.choices).toHaveLength(2);
+        expect(resB.output.groups).toHaveLength(1);
+        expect(resB.output.groups[0].choices).toHaveLength(2);
       }
     });
 
@@ -654,8 +759,13 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       const res = await provider.selectExtracts(makeSampleExtractRequest({ requestId: 'req-custom-choices' }));
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.output.version).toBe(1);
-        expect(res.output.choices).toEqual(customChoices);
+        expect(res.output.version).toBe(2);
+        expect(res.output.groups).toEqual([
+          {
+            groupOrdinal: 0,
+            choices: customChoices,
+          },
+        ]);
       }
     });
 
@@ -772,9 +882,14 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       expect(resKo.ok).toBe(true);
       if (resKo.ok) {
         expect(resKo.requestId).toBe('req-locale-test');
-        expect(resKo.output.choices).toEqual([
-          { itemOrdinal: 0, candidateOrdinal: 0 },
-          { itemOrdinal: 1, candidateOrdinal: 0 },
+        expect(resKo.output.groups).toEqual([
+          {
+            groupOrdinal: 0,
+            choices: [
+              { itemOrdinal: 0, candidateOrdinal: 0 },
+              { itemOrdinal: 1, candidateOrdinal: 0 },
+            ],
+          },
         ]);
       }
 
@@ -782,9 +897,14 @@ describe('Partner Briefing Provider Contract & Fake (Phase A5 Amendment)', () =>
       expect(resEn.ok).toBe(true);
       if (resEn.ok) {
         expect(resEn.requestId).toBe('req-locale-test');
-        expect(resEn.output.choices).toEqual([
-          { itemOrdinal: 0, candidateOrdinal: 0 },
-          { itemOrdinal: 1, candidateOrdinal: 0 },
+        expect(resEn.output.groups).toEqual([
+          {
+            groupOrdinal: 0,
+            choices: [
+              { itemOrdinal: 0, candidateOrdinal: 0 },
+              { itemOrdinal: 1, candidateOrdinal: 0 },
+            ],
+          },
         ]);
       }
     });

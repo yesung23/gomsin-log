@@ -11,12 +11,15 @@ import type {
   PartnerBriefing,
   PartnerBriefingDay,
   PartnerBriefingItem,
+  PartnerBriefingItemPart,
   PartnerBriefingOverview,
   PartnerBriefingSection,
   UntrustedBriefingChoice,
+  UntrustedBriefingGroup,
+  UntrustedBriefingGroupPlan,
   UntrustedBriefingExtractPlan,
 } from './contract';
-import { DEFAULT_BRIEFING_LOCALE, PARTNER_BRIEFING_VERSION } from './contract';
+import { DEFAULT_BRIEFING_LOCALE, PARTNER_BRIEFING_PLAN_VERSION, PARTNER_BRIEFING_VERSION } from './contract';
 
 describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
   describe('BriefingGeneration union', () => {
@@ -210,13 +213,49 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
   });
 
   describe('Untrusted provider extract plan and choice', () => {
-    describe('UntrustedBriefingChoice', () => {
-      it('pins choice keys to exactly itemOrdinal and candidateOrdinal', () => {
-        type ChoiceKeys = keyof UntrustedBriefingChoice;
-        type ExpectedKeys = 'itemOrdinal' | 'candidateOrdinal';
+   describe('UntrustedBriefingChoice', () => {
+     it('pins choice keys to exactly itemOrdinal and candidateOrdinal', () => {
+       type ChoiceKeys = keyof UntrustedBriefingChoice;
+       type ExpectedKeys = 'itemOrdinal' | 'candidateOrdinal';
 
-        type HasAllExpected = [ExpectedKeys] extends [ChoiceKeys] ? true : false;
-        type HasNoExtra = [ChoiceKeys] extends [ExpectedKeys] ? true : false;
+       type HasAllExpected = [ExpectedKeys] extends [ChoiceKeys] ? true : false;
+       type HasNoExtra = [ChoiceKeys] extends [ExpectedKeys] ? true : false;
+       type KeysExact = HasAllExpected extends true
+         ? HasNoExtra extends true
+           ? true
+           : false
+         : false;
+
+       const isKeysExact: KeysExact = true;
+       expect(isKeysExact).toBe(true);
+     });
+
+     it('proves choice contains NO generated, free-form, or displayable text fields', () => {
+       type DisplayTextKeys = 'text' | 'claim' | 'title' | 'label' | 'summary' | 'description' | 'content';
+       type HasDisplayTextKey = [DisplayTextKeys & keyof UntrustedBriefingChoice] extends [never] ? false : true;
+       const hasDisplayTextKey: HasDisplayTextKey = false;
+       expect(hasDisplayTextKey).toBe(false);
+     });
+
+     it('runtime choice fixture contains only numeric ordinals and exact allowlisted keys', () => {
+       const choice: UntrustedBriefingChoice = {
+         itemOrdinal: 0,
+         candidateOrdinal: 1,
+       };
+
+       expect(Object.keys(choice).sort()).toEqual(['candidateOrdinal', 'itemOrdinal']);
+       expect(typeof choice.itemOrdinal).toBe('number');
+       expect(typeof choice.candidateOrdinal).toBe('number');
+     });
+   });
+
+    describe('UntrustedBriefingGroup', () => {
+      it('pins group keys to exactly groupOrdinal and choices', () => {
+        type GroupKeys = keyof UntrustedBriefingGroup;
+        type ExpectedKeys = 'groupOrdinal' | 'choices';
+
+        type HasAllExpected = [ExpectedKeys] extends [GroupKeys] ? true : false;
+        type HasNoExtra = [GroupKeys] extends [ExpectedKeys] ? true : false;
         type KeysExact = HasAllExpected extends true
           ? HasNoExtra extends true
             ? true
@@ -227,29 +266,28 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
         expect(isKeysExact).toBe(true);
       });
 
-      it('proves choice contains NO generated, free-form, or displayable text fields', () => {
+      it('proves group contains NO generated, free-form, or displayable text fields', () => {
         type DisplayTextKeys = 'text' | 'claim' | 'title' | 'label' | 'summary' | 'description' | 'content';
-        type HasDisplayTextKey = [DisplayTextKeys & keyof UntrustedBriefingChoice] extends [never] ? false : true;
+        type HasDisplayTextKey = [DisplayTextKeys & keyof UntrustedBriefingGroup] extends [never] ? false : true;
         const hasDisplayTextKey: HasDisplayTextKey = false;
         expect(hasDisplayTextKey).toBe(false);
       });
 
-      it('runtime choice fixture contains only numeric ordinals and exact allowlisted keys', () => {
-        const choice: UntrustedBriefingChoice = {
-          itemOrdinal: 0,
-          candidateOrdinal: 1,
+      it('runtime group fixture contains only numeric ordinals, choices, and exact allowlisted keys', () => {
+        const group: UntrustedBriefingGroup = {
+          groupOrdinal: 0,
+          choices: [{ itemOrdinal: 0, candidateOrdinal: 1 }],
         };
 
-        expect(Object.keys(choice).sort()).toEqual(['candidateOrdinal', 'itemOrdinal']);
-        expect(typeof choice.itemOrdinal).toBe('number');
-        expect(typeof choice.candidateOrdinal).toBe('number');
+        expect(Object.keys(group).sort()).toEqual(['choices', 'groupOrdinal']);
+        expect(typeof group.groupOrdinal).toBe('number');
       });
     });
 
-    describe('UntrustedBriefingExtractPlan', () => {
-      it('pins extract plan keys to exactly version and choices', () => {
-        type PlanKeys = keyof UntrustedBriefingExtractPlan;
-        type ExpectedKeys = 'version' | 'choices';
+    describe('UntrustedBriefingGroupPlan (v2)', () => {
+      it('pins group plan keys to exactly version and groups', () => {
+        type PlanKeys = keyof UntrustedBriefingGroupPlan;
+        type ExpectedKeys = 'version' | 'groups';
 
         type HasAllExpected = [ExpectedKeys] extends [PlanKeys] ? true : false;
         type HasNoExtra = [PlanKeys] extends [ExpectedKeys] ? true : false;
@@ -263,35 +301,42 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
         expect(isKeysExact).toBe(true);
       });
 
-      it('proves version is strictly 1', () => {
-        type PlanVersion = UntrustedBriefingExtractPlan['version'];
-        type IsVersionOne = [PlanVersion] extends [1] ? ([1] extends [PlanVersion] ? true : false) : false;
-        const isVersionOne: IsVersionOne = true;
-        expect(isVersionOne).toBe(true);
+      it('proves version is strictly 2 and PARTNER_BRIEFING_PLAN_VERSION is 2', () => {
+        type PlanVersion = UntrustedBriefingGroupPlan['version'];
+        type IsVersionTwo = [PlanVersion] extends [2] ? ([2] extends [PlanVersion] ? true : false) : false;
+        const isVersionTwo: IsVersionTwo = true;
+        expect(isVersionTwo).toBe(true);
+        expect(PARTNER_BRIEFING_PLAN_VERSION).toBe(2);
       });
 
       it('proves extract plan contains NO generated, free-form, or displayable text/claim fields', () => {
-        type DisplayTextKeys = 'text' | 'claim' | 'title' | 'label' | 'summary' | 'description' | 'sections' | 'items';
-        type HasDisplayTextKey = [DisplayTextKeys & keyof UntrustedBriefingExtractPlan] extends [never] ? false : true;
+        type DisplayTextKeys = 'text' | 'claim' | 'title' | 'label' | 'summary' | 'description' | 'sections' | 'items' | 'choices';
+        type HasDisplayTextKey = [DisplayTextKeys & keyof UntrustedBriefingGroupPlan] extends [never] ? false : true;
         const hasDisplayTextKey: HasDisplayTextKey = false;
         expect(hasDisplayTextKey).toBe(false);
       });
 
       it('runtime extract plan fixture matches allowlisted key set and has no string claim fields', () => {
-        const plan: UntrustedBriefingExtractPlan = {
-          version: 1,
-          choices: [
-            { itemOrdinal: 0, candidateOrdinal: 1 },
-            { itemOrdinal: 1, candidateOrdinal: 0 },
+        const plan: UntrustedBriefingGroupPlan = {
+          version: 2,
+          groups: [
+            {
+              groupOrdinal: 0,
+              choices: [
+                { itemOrdinal: 0, candidateOrdinal: 1 },
+                { itemOrdinal: 1, candidateOrdinal: 0 },
+              ],
+            },
           ],
         };
 
-        expect(Object.keys(plan).sort()).toEqual(['choices', 'version']);
-        expect(plan.version).toBe(1);
-        expect(plan.choices).toHaveLength(2);
+        expect(Object.keys(plan).sort()).toEqual(['groups', 'version']);
+        expect(plan.version).toBe(2);
+        expect(plan.groups).toHaveLength(1);
+        expect(plan.groups[0].choices).toHaveLength(2);
 
         // Prove all choices have only numeric values
-        for (const c of plan.choices) {
+        for (const c of plan.groups[0].choices) {
           expect(typeof c.itemOrdinal).toBe('number');
           expect(typeof c.candidateOrdinal).toBe('number');
           expect(Object.keys(c).sort()).toEqual(['candidateOrdinal', 'itemOrdinal']);
@@ -387,12 +432,12 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
   });
 
   describe('Untrusted provider plan vs Verified domain types', () => {
-    it('untrusted extract plan carries only version and choices with ordinals', () => {
+    it('untrusted extract plan carries only version and groups with ordinals', () => {
       type UntrustedHasSourceRecordId = 'sourceRecordId' extends keyof UntrustedBriefingChoice ? true : false;
       const untrustedHasSourceRecordId: UntrustedHasSourceRecordId = false;
       expect(untrustedHasSourceRecordId).toBe(false);
 
-      type UntrustedHasSourceRecordIds = 'sourceRecordIds' extends keyof UntrustedBriefingExtractPlan ? true : false;
+      type UntrustedHasSourceRecordIds = 'sourceRecordIds' extends keyof UntrustedBriefingGroupPlan ? true : false;
       const untrustedHasSourceRecordIds: UntrustedHasSourceRecordIds = false;
       expect(untrustedHasSourceRecordIds).toBe(false);
 
@@ -400,23 +445,56 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
       const untrustedHasText: UntrustedHasText = false;
       expect(untrustedHasText).toBe(false);
 
-      const rawPlan: UntrustedBriefingExtractPlan = {
-        version: 1,
-        choices: [
-          { itemOrdinal: 0, candidateOrdinal: 0 },
-          { itemOrdinal: 1, candidateOrdinal: 1 },
+      const rawPlan: UntrustedBriefingGroupPlan = {
+        version: 2,
+        groups: [
+          {
+            groupOrdinal: 0,
+            choices: [
+              { itemOrdinal: 0, candidateOrdinal: 0 },
+              { itemOrdinal: 1, candidateOrdinal: 1 },
+            ],
+          },
         ],
       };
-      expect(rawPlan.version).toBe(1);
-      expect(rawPlan.choices[0]).toEqual({ itemOrdinal: 0, candidateOrdinal: 0 });
-      expect('sourceRecordId' in rawPlan.choices[0]).toBe(false);
-      expect('text' in rawPlan.choices[0]).toBe(false);
+      expect(rawPlan.version).toBe(2);
+      expect(rawPlan.groups[0].choices[0]).toEqual({ itemOrdinal: 0, candidateOrdinal: 0 });
+      expect('sourceRecordId' in rawPlan.groups[0].choices[0]).toBe(false);
+      expect('text' in rawPlan.groups[0].choices[0]).toBe(false);
+    });
+
+    describe('PartnerBriefingItemPart', () => {
+      it('pins item part keys to exactly text and sourceRecordId', () => {
+        type PartKeys = keyof PartnerBriefingItemPart;
+        type ExpectedKeys = 'text' | 'sourceRecordId';
+
+        type HasAllExpected = [ExpectedKeys] extends [PartKeys] ? true : false;
+        type HasNoExtra = [PartKeys] extends [ExpectedKeys] ? true : false;
+        type KeysExact = HasAllExpected extends true
+          ? HasNoExtra extends true
+            ? true
+            : false
+          : false;
+
+        const isKeysExact: KeysExact = true;
+        expect(isKeysExact).toBe(true);
+      });
+
+      it('verified domain item part carries attributed text and one exact bound sourceRecordId', () => {
+        const part: PartnerBriefingItemPart = {
+          text: '사격 훈련을 진행했습니다.',
+          sourceRecordId: 'rec-uuid-001',
+        };
+
+        expect(part.text).toBe('사격 훈련을 진행했습니다.');
+        expect(part.sourceRecordId).toBe('rec-uuid-001');
+      });
     });
 
     describe('PartnerBriefingItem', () => {
-      it('pins item keys to exactly text and one exact sourceRecordId', () => {
+      it('pins item keys to exactly parts array', () => {
         type ItemKeys = keyof PartnerBriefingItem;
-        type ExpectedKeys = 'text' | 'sourceRecordId';
+        type ExpectedKeys = 'parts';
 
         type HasAllExpected = [ExpectedKeys] extends [ItemKeys] ? true : false;
         type HasNoExtra = [ItemKeys] extends [ExpectedKeys] ? true : false;
@@ -430,14 +508,17 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
         expect(isKeysExact).toBe(true);
       });
 
-      it('verified domain item carries attributed text and one exact bound sourceRecordId', () => {
+      it('verified domain item carries parts with exact extract-to-original pairing', () => {
         const item: PartnerBriefingItem = {
-          text: '사격 훈련을 진행했습니다.',
-          sourceRecordId: 'rec-uuid-001',
+          parts: [
+            { text: '사격 훈련 진행', sourceRecordId: 'rec-uuid-001' },
+            { text: '생활관 복귀', sourceRecordId: 'rec-uuid-002' },
+          ],
         };
 
-        expect(item.text).toBe('사격 훈련을 진행했습니다.');
-        expect(item.sourceRecordId).toBe('rec-uuid-001');
+        expect(item.parts).toHaveLength(2);
+        expect(item.parts[0].sourceRecordId).toBe('rec-uuid-001');
+        expect(item.parts[1].sourceRecordId).toBe('rec-uuid-002');
       });
     });
 
@@ -475,8 +556,12 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
                 period: 'morning',
                 items: [
                   {
-                    text: '오전 훈련을 진행했습니다.',
-                    sourceRecordId: 'rec-001',
+                    parts: [
+                      {
+                        text: '오전 훈련을 진행했습니다.',
+                        sourceRecordId: 'rec-001',
+                      },
+                    ],
                   },
                 ],
               },
@@ -484,8 +569,12 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
                 period: 'evening',
                 items: [
                   {
-                    text: '체력단련을 마쳤습니다.',
-                    sourceRecordId: 'rec-002',
+                    parts: [
+                      {
+                        text: '체력단련을 마쳤습니다.',
+                        sourceRecordId: 'rec-002',
+                      },
+                    ],
                   },
                 ],
               },
@@ -498,8 +587,12 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
                 period: 'afternoon',
                 items: [
                   {
-                    text: '휴식을 취했습니다.',
-                    sourceRecordId: 'rec-003',
+                    parts: [
+                      {
+                        text: '휴식을 취했습니다.',
+                        sourceRecordId: 'rec-003',
+                      },
+                    ],
                   },
                 ],
               },
@@ -516,13 +609,13 @@ describe('Partner Briefing Contract (Phase A1 Amendment)', () => {
       expect(multiDayBriefing.days[0].date).toBe('2026-08-26');
       expect(multiDayBriefing.days[0].sections).toHaveLength(2);
       expect(multiDayBriefing.days[0].sections[0].items).toHaveLength(1);
-      expect(multiDayBriefing.days[0].sections[0].items[0].sourceRecordId).toBe('rec-001');
+      expect(multiDayBriefing.days[0].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-001');
       expect(multiDayBriefing.days[0].sections[1].items).toHaveLength(1);
-      expect(multiDayBriefing.days[0].sections[1].items[0].sourceRecordId).toBe('rec-002');
+      expect(multiDayBriefing.days[0].sections[1].items[0].parts[0].sourceRecordId).toBe('rec-002');
       expect(multiDayBriefing.days[1].date).toBe('2026-08-27');
       expect(multiDayBriefing.days[1].sections).toHaveLength(1);
       expect(multiDayBriefing.days[1].sections[0].items).toHaveLength(1);
-      expect(multiDayBriefing.days[1].sections[0].items[0].sourceRecordId).toBe('rec-003');
+      expect(multiDayBriefing.days[1].sections[0].items[0].parts[0].sourceRecordId).toBe('rec-003');
     });
   });
 });

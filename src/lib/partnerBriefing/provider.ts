@@ -1,5 +1,5 @@
 /**
- * Partner Briefing Closed-Extract Provider Contract and Configurable Fake (Phase A5 Amendment)
+ * Partner Briefing Closed-Extract Provider Contract and Configurable Fake (Phase A5 Amendment - v2 Grouping Plan)
  *
  * Defines the common on-device provider contract for candidate extract selection
  * and a deterministic fake provider for testing and cross-platform pipeline execution.
@@ -9,8 +9,8 @@
  *    Each item contains only request-local itemOrdinal and candidate extracts.
  *    Zero record/user/couple IDs, exact dates/times, URLs, storage paths, or key material.
  * 2. Closed extract selection: The provider returns ONLY UntrustedBriefingExtractPlan
- *    (version: 1, choices: { itemOrdinal, candidateOrdinal }[]). Zero generated, free-form,
- *    or displayable text fields whatsoever.
+ *    (version: 2, groups: { groupOrdinal, choices: { itemOrdinal, candidateOrdinal }[] }[]).
+ *    Zero generated, free-form, or displayable text fields whatsoever.
  * 3. Method semantics: The primary method is `selectExtracts`, reflecting closed candidate
  *    selection rather than free-form summarization.
  * 4. Runtime availability states ('ready' | 'unsupported' | 'model_unavailable' |
@@ -20,8 +20,10 @@
  *    'native_error') capture execution failure modes without throwing.
  *    Failures contain only { ok: false, requestId?, code } with no arbitrary message strings.
  * 6. Explicit cancellation support via both cancel(requestId) and AbortSignal.
- * 7. Default fake behavior: Deterministically selects candidateOrdinal 0 for every requested
- *    item in request order. Never silently invents candidates for empty items.
+ * 7. Default fake behavior: Deterministically partitions requested items into contiguous groups
+ *    sized 2..4 (or 1 singleton if exactly 1 item requested) covering all requested items
+ *    in request order. Avoids trailing singletons for N >= 2 (e.g. 5 => 2 + 3).
+ *    Selects candidateOrdinal 0 for every item choice. Never invents candidates for empty items.
  * 8. Configurable testing scenarios: Success, failure codes, wrong correlation, malformed
  *    raw output passthrough, delay, and call history.
  * 9. Zero verification (Gate A6), zero fallback/pipeline (Gate A7), zero native plugins,
@@ -32,6 +34,8 @@ import type {
   BriefingExtractRequestItem,
   BriefingLocale,
   UntrustedBriefingChoice,
+  UntrustedBriefingGroup,
+  UntrustedBriefingGroupPlan,
   UntrustedBriefingExtractPlan,
 } from './contract';
 import { isValidProviderEnvelope, type BriefingProviderEnvelope } from './chunk';
@@ -79,7 +83,7 @@ export type BriefingProviderExtractRequest = BriefingExtractRequest;
 
 /**
  * Successful response from a briefing provider with correlated requestId.
- * Output extract plan contains only version and request-local ordinal choices.
+ * Output extract plan contains only version 2 and request-local ordinal groups and choices.
  * Contains zero generated or displayable text fields.
  */
 export interface BriefingExtractSuccess {
@@ -151,6 +155,10 @@ export const DEFAULT_FAKE_PROVIDER_ENVELOPE: BriefingProviderEnvelope = {
   promptOverheadUtf8Bytes: 256,
   responseReserveUtf8Bytes: 512,
   maxInputTextGraphemes: 1000,
+  // Same structural limits both native parsers enforce, so the fake provider exercises
+  // the same batcher behaviour a device does.
+  maxItems: 64,
+  maxCandidatesPerItem: 32,
 };
 
 /**
@@ -160,6 +168,7 @@ export type FakeBriefingResponseOverride =
   | {
       readonly type: 'success';
       readonly output?: UntrustedBriefingExtractPlan;
+      readonly groups?: readonly UntrustedBriefingGroup[];
       readonly choices?: readonly UntrustedBriefingChoice[];
     }
   | {
@@ -194,7 +203,7 @@ export interface FakeBriefingProviderConfig {
     | ((request: BriefingExtractRequest) => number);
   readonly defaultExtractGenerator?: (
     request: BriefingExtractRequest,
-  ) => UntrustedBriefingExtractPlan | readonly UntrustedBriefingChoice[];
+  ) => UntrustedBriefingExtractPlan | readonly UntrustedBriefingGroup[];
   readonly scenariosByRequestId?: Record<string, FakeBriefingResponseOverride>;
   readonly scenarioSelector?: (
     request: BriefingExtractRequest,
@@ -263,7 +272,7 @@ export class FakeBriefingProvider implements BriefingProvider {
     | ((request: BriefingExtractRequest) => number);
   private defaultExtractGenerator?: (
     request: BriefingExtractRequest,
-  ) => UntrustedBriefingExtractPlan | readonly UntrustedBriefingChoice[];
+  ) => UntrustedBriefingExtractPlan | readonly UntrustedBriefingGroup[];
   private scenariosByRequestId: Map<string, FakeBriefingResponseOverride>;
   private scenarioSelector?: (
     request: BriefingExtractRequest,
@@ -442,13 +451,21 @@ export class FakeBriefingProvider implements BriefingProvider {
       return this.generateDefaultExtractSuccess(request);
     }
 
-    switch (currentScenario.type) {
-      case 'success': {
-        const output =
-          (currentScenario.output as UntrustedBriefingExtractPlan | undefined) ??
-          (currentScenario.choices
-            ? { version: 1 as const, choices: currentScenario.choices }
-            : this.generateDefaultExtractOutput(request));
+   switch (currentScenario.type) {
+     case 'success': {
+        let output: UntrustedBriefingExtractPlan;
+        if (currentScenario.output) {
+          output = currentScenario.output;
+        } else if (currentScenario.groups) {
+          output = { version: 2 as const, groups: currentScenario.groups };
+        } else if (currentScenario.choices) {
+          output = {
+            version: 2 as const,
+            groups: [{ groupOrdinal: 0, choices: currentScenario.choices }],
+          };
+        } else {
+          output = this.generateDefaultExtractOutput(request);
+        }
         return {
           ok: true,
           requestId: request.requestId,
@@ -491,24 +508,76 @@ export class FakeBriefingProvider implements BriefingProvider {
     if (this.defaultExtractGenerator) {
       const generated = this.defaultExtractGenerator(request);
       if (Array.isArray(generated)) {
-        return { version: 1, choices: generated };
+        return { version: 2, groups: generated };
       }
-      return generated as UntrustedBriefingExtractPlan;
+      return generated as UntrustedBriefingGroupPlan;
     }
 
-    const choices: UntrustedBriefingChoice[] = [];
-    for (const item of request.items) {
-      if (item.candidates && item.candidates.length > 0) {
+    const validItems = request.items.filter(
+      (item) => item.candidates && item.candidates.length > 0,
+    );
+
+    if (validItems.length === 0) {
+      return {
+        version: 2,
+        groups: [],
+      };
+    }
+
+    if (validItems.length === 1) {
+      return {
+        version: 2,
+        groups: [
+          {
+            groupOrdinal: 0,
+            choices: [
+              {
+                itemOrdinal: validItems[0].itemOrdinal,
+                candidateOrdinal: validItems[0].candidates[0].candidateOrdinal,
+              },
+            ],
+          },
+        ],
+      };
+    }
+
+    // Partition valid items into contiguous groups sized 2..4, avoiding trailing singletons
+    const groupSizes: number[] = [];
+    let remaining = validItems.length;
+    while (remaining > 0) {
+      if (remaining === 5) {
+        groupSizes.push(3, 2);
+        remaining = 0;
+      } else if (remaining >= 4) {
+        groupSizes.push(4);
+        remaining -= 4;
+      } else {
+        groupSizes.push(remaining);
+        remaining = 0;
+      }
+    }
+
+    const groups: UntrustedBriefingGroup[] = [];
+    let itemIdx = 0;
+    for (let g = 0; g < groupSizes.length; g++) {
+      const size = groupSizes[g];
+      const choices: UntrustedBriefingChoice[] = [];
+      for (let i = 0; i < size; i++) {
+        const item = validItems[itemIdx++];
         choices.push({
           itemOrdinal: item.itemOrdinal,
           candidateOrdinal: item.candidates[0].candidateOrdinal,
         });
       }
+      groups.push({
+        groupOrdinal: g,
+        choices,
+      });
     }
 
     return {
-      version: 1,
-      choices,
+      version: 2,
+      groups,
     };
   }
 

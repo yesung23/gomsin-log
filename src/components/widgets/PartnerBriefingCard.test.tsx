@@ -21,14 +21,14 @@ function createMockBriefing(overrides: Partial<PartnerBriefing> = {}): PartnerBr
           {
             period: 'morning',
             items: [
-              { text: '“아침 먹었어”라고 기록했어요.', sourceRecordId: 'rec-1' },
-              { text: '사진 1장을 남겼어요.', sourceRecordId: 'rec-2' },
+              { parts: [{ text: '“아침 먹었어”라고 기록했어요.', sourceRecordId: 'rec-1' }] },
+              { parts: [{ text: '사진 1장을 남겼어요.', sourceRecordId: 'rec-2' }] },
             ],
           },
           {
             period: 'evening',
             items: [
-              { text: '“오늘 하루 수고했어”라고 기록했어요.', sourceRecordId: 'rec-3' },
+              { parts: [{ text: '“오늘 하루 수고했어”라고 기록했어요.', sourceRecordId: 'rec-3' }] },
             ],
           },
         ],
@@ -84,7 +84,7 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
           sections: [
             {
               period: 'morning',
-              items: [{ text: 'They wrote: “Had breakfast”', sourceRecordId: 'rec-1' }],
+              items: [{ parts: [{ text: 'They wrote: “Had breakfast”', sourceRecordId: 'rec-1' }] }],
             },
           ],
         },
@@ -113,7 +113,7 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
           sections: [
             {
               period: 'morning',
-              items: [{ text: 'They wrote: “Good morning”', sourceRecordId: 'rec-1' }],
+              items: [{ parts: [{ text: 'They wrote: “Good morning”', sourceRecordId: 'rec-1' }] }],
             },
           ],
         },
@@ -122,7 +122,7 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
           sections: [
             {
               period: 'night',
-              items: [{ text: 'Shared 1 photo.', sourceRecordId: 'rec-2' }],
+              items: [{ parts: [{ text: 'Shared 1 photo.', sourceRecordId: 'rec-2' }] }],
             },
           ],
         },
@@ -218,20 +218,20 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
   it('exact 8 items all appear after expand (no 5 cap), in day/period/item order', async () => {
     const user = userEvent.setup();
     const itemsDay1Morning = [
-      { text: 'Item 1 - Day 1 Morning 1', sourceRecordId: 'rec-1' },
-      { text: 'Item 2 - Day 1 Morning 2', sourceRecordId: 'rec-2' },
+      { parts: [{ text: 'Item 1 - Day 1 Morning 1', sourceRecordId: 'rec-1' }] },
+      { parts: [{ text: 'Item 2 - Day 1 Morning 2', sourceRecordId: 'rec-2' }] },
     ];
     const itemsDay1Afternoon = [
-      { text: 'Item 3 - Day 1 Afternoon 1', sourceRecordId: 'rec-3' },
-      { text: 'Item 4 - Day 1 Afternoon 2', sourceRecordId: 'rec-4' },
+      { parts: [{ text: 'Item 3 - Day 1 Afternoon 1', sourceRecordId: 'rec-3' }] },
+      { parts: [{ text: 'Item 4 - Day 1 Afternoon 2', sourceRecordId: 'rec-4' }] },
     ];
     const itemsDay2Evening = [
-      { text: 'Item 5 - Day 2 Evening 1', sourceRecordId: 'rec-5' },
-      { text: 'Item 6 - Day 2 Evening 2', sourceRecordId: 'rec-6' },
+      { parts: [{ text: 'Item 5 - Day 2 Evening 1', sourceRecordId: 'rec-5' }] },
+      { parts: [{ text: 'Item 6 - Day 2 Evening 2', sourceRecordId: 'rec-6' }] },
     ];
     const itemsDay2Night = [
-      { text: 'Item 7 - Day 2 Night 1', sourceRecordId: 'rec-7' },
-      { text: 'Item 8 - Day 2 Night 2', sourceRecordId: 'rec-8' },
+      { parts: [{ text: 'Item 7 - Day 2 Night 1', sourceRecordId: 'rec-7' }] },
+      { parts: [{ text: 'Item 8 - Day 2 Night 2', sourceRecordId: 'rec-8' }] },
     ];
 
     const eightItemBriefing: PartnerBriefing = {
@@ -388,10 +388,10 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
         {
           date: '2026-08-26',
           sections: [
-            { period: 'morning', items: [{ text: '기록 1', sourceRecordId: 'r1' }] },
-            { period: 'afternoon', items: [{ text: '기록 2', sourceRecordId: 'r2' }] },
-            { period: 'evening', items: [{ text: '기록 3', sourceRecordId: 'r3' }] },
-            { period: 'night', items: [{ text: '기록 4', sourceRecordId: 'r4' }] },
+            { period: 'morning', items: [{ parts: [{ text: '기록 1', sourceRecordId: 'r1' }] }] },
+            { period: 'afternoon', items: [{ parts: [{ text: '기록 2', sourceRecordId: 'r2' }] }] },
+            { period: 'evening', items: [{ parts: [{ text: '기록 3', sourceRecordId: 'r3' }] }] },
+            { period: 'night', items: [{ parts: [{ text: '기록 4', sourceRecordId: 'r4' }] }] },
           ],
         },
       ],
@@ -433,14 +433,14 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
         {
           date: '2026-08-25',
           sections: [
-            { period: 'afternoon', items: [{ text: rawText1, sourceRecordId: 'rec-a' }] },
+            { period: 'afternoon', items: [{ parts: [{ text: rawText1, sourceRecordId: 'rec-a' }] }] },
           ],
         },
         {
           date: '2026-08-26',
           sections: [
-            { period: 'morning', items: [{ text: rawText2, sourceRecordId: 'rec-b' }] },
-            { period: 'night', items: [{ text: rawText3, sourceRecordId: 'rec-c' }] },
+            { period: 'morning', items: [{ parts: [{ text: rawText2, sourceRecordId: 'rec-b' }] }] },
+            { period: 'night', items: [{ parts: [{ text: rawText3, sourceRecordId: 'rec-c' }] }] },
           ],
         },
       ],
@@ -471,7 +471,7 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
           sections: [
             {
               period: 'morning',
-              items: [{ text: '테스트 기록', sourceRecordId: secretId }],
+              items: [{ parts: [{ text: '테스트 기록', sourceRecordId: secretId }] }],
             },
           ],
         },
@@ -506,4 +506,300 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
     expect(screen.getByText('순간 0개')).toBeTruthy();
     expect(screen.queryByTestId('partner-briefing-expand')).toBeNull();
   });
+
+  it('one compressed item containing at least 2 parts renders all parts grouped in one summary paragraph and each button opens its exact corresponding source', async () => {
+    const user = userEvent.setup();
+    const briefing: PartnerBriefing = {
+      version: 1,
+      sourceCount: 2,
+      generation: 'on_device',
+      rangeLabel: '8월 26일',
+      overview: {
+        text: '총 2개의 기록이 있습니다.',
+        sourceRecordIds: ['rec-part-1', 'rec-part-2'],
+      },
+      days: [
+        {
+          date: '2026-08-26',
+          sections: [
+            {
+              period: 'morning',
+              items: [
+                {
+                  parts: [
+                    { text: '“아침 점호 완료했어”라고 기록했어요.', sourceRecordId: 'rec-part-1' },
+                    { text: '“식사 맛있게 했어”라고 기록했어요.', sourceRecordId: 'rec-part-2' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    render(<PartnerBriefingCard briefing={briefing} onOpenRecord={onOpenRecord} />);
+    await user.click(screen.getByTestId('partner-briefing-expand'));
+
+    // Exactly one summary paragraph for this multi-part item
+    const summaries = screen.getAllByTestId('partner-briefing-summary');
+    expect(summaries).toHaveLength(1);
+
+    // Both parts are rendered
+    expect(screen.getByText('“아침 점호 완료했어”라고 기록했어요.')).toBeTruthy();
+    expect(screen.getByText('“식사 맛있게 했어”라고 기록했어요.')).toBeTruthy();
+
+    const buttons = screen.getAllByRole('button', { name: '원본 보기' });
+    expect(buttons).toHaveLength(2);
+
+    // Check aria-describedby for both buttons
+    const descId1 = buttons[0].getAttribute('aria-describedby');
+    const descId2 = buttons[1].getAttribute('aria-describedby');
+    expect(descId1).toBeTruthy();
+    expect(descId2).toBeTruthy();
+    expect(descId1).not.toBe(descId2);
+    expect(document.getElementById(descId1!)?.textContent).toBe('“아침 점호 완료했어”라고 기록했어요.');
+    expect(document.getElementById(descId2!)?.textContent).toBe('“식사 맛있게 했어”라고 기록했어요.');
+
+    // Click 1st part button -> opens rec-part-1
+    await user.click(buttons[0]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('rec-part-1');
+
+    // Click 2nd part button -> opens rec-part-2
+    await user.click(buttons[1]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(2);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('rec-part-2');
+  });
+
+  it('progressively renders 300 source parts while keeping the initial DOM bounded and every exact original reachable', async () => {
+    const user = userEvent.setup();
+    const count = 300;
+    const parts = Array.from({ length: count }, (_, i) => ({
+      text: `기록 ${i + 1}번째 내용`,
+      sourceRecordId: `rec-${i + 1}`,
+    }));
+
+    // Group into 75 items with 4 parts each
+    const items = [];
+    for (let i = 0; i < count; i += 4) {
+      items.push({ parts: parts.slice(i, i + 4) });
+    }
+
+    const largeBriefing: PartnerBriefing = {
+      version: 1,
+      sourceCount: count,
+      generation: 'on_device',
+      rangeLabel: '8월 26일',
+      overview: {
+        text: `총 ${count}개의 기록이 있습니다.`,
+        sourceRecordIds: parts.map((p) => p.sourceRecordId),
+      },
+      days: [
+        {
+          date: '2026-08-26',
+          sections: [
+            {
+              period: 'afternoon',
+              items,
+            },
+          ],
+        },
+      ],
+    };
+
+    render(<PartnerBriefingCard briefing={largeBriefing} onOpenRecord={onOpenRecord} />);
+    const expandButton = screen.getByTestId('partner-briefing-expand');
+    expect(expandButton.className).toContain('min-h-11');
+    await user.click(expandButton);
+
+    // Initial 20 compressed groups × 4 parts = 80 exact-original buttons and 20 summary paragraphs
+    expect(screen.getAllByTestId('partner-briefing-summary')).toHaveLength(20);
+    let viewButtons = screen.getAllByRole('button', { name: '원본 보기' });
+    expect(viewButtons).toHaveLength(80);
+
+    const firstShowMore = screen.getByRole('button', { name: '55개 더 보기' });
+    expect(firstShowMore.className).toContain('min-h-11');
+
+    await user.click(viewButtons[0]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('rec-1');
+
+    // Each press reveals 20 more groups and does not navigate by itself.
+    await user.click(firstShowMore);
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId('partner-briefing-summary')).toHaveLength(40);
+    expect(screen.getAllByRole('button', { name: '원본 보기' })).toHaveLength(160);
+    expect(screen.getByRole('button', { name: '35개 더 보기' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '35개 더 보기' }));
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId('partner-briefing-summary')).toHaveLength(60);
+    expect(screen.getAllByRole('button', { name: '원본 보기' })).toHaveLength(240);
+    expect(screen.getByRole('button', { name: '15개 더 보기' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '15개 더 보기' }));
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId('partner-briefing-summary')).toHaveLength(75);
+
+    viewButtons = screen.getAllByRole('button', { name: '원본 보기' });
+    expect(viewButtons).toHaveLength(300);
+    expect(screen.queryByTestId('partner-briefing-show-more')).toBeNull();
+
+    await user.click(viewButtons[299]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(2);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('rec-300');
+
+    // Collapse/re-expand resets the details DOM to the first 20 groups.
+    await user.click(expandButton);
+    expect(onOpenRecord).toHaveBeenCalledTimes(2);
+    await user.click(expandButton);
+    expect(onOpenRecord).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByRole('button', { name: '원본 보기' })).toHaveLength(80);
+    expect(screen.getAllByTestId('partner-briefing-summary')).toHaveLength(20);
+    expect(screen.getByRole('button', { name: '55개 더 보기' })).toBeTruthy();
+  });
+
+  it('shows the remaining group count in the English show-more label matching the expansion unit', async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 21 }, (_, groupIdx) => ({
+      parts: Array.from({ length: 2 }, (_, partIdx) => ({
+        text: `Group ${groupIdx + 1}, part ${partIdx + 1}`,
+        sourceRecordId: `rec-${groupIdx + 1}-${partIdx + 1}`,
+      })),
+    }));
+
+    const briefing = createMockBriefing({
+      sourceCount: 42,
+      overview: {
+        text: '42 records in total.',
+        sourceRecordIds: items.flatMap((item) => item.parts.map((part) => part.sourceRecordId)),
+      },
+      days: [
+        {
+          date: '2026-08-26',
+          sections: [{ period: 'morning', items }],
+        },
+      ],
+    });
+
+    render(
+      <PartnerBriefingCard briefing={briefing} locale="en" onOpenRecord={onOpenRecord} />
+    );
+    await user.click(screen.getByTestId('partner-briefing-expand'));
+
+    const showMore = screen.getByRole('button', { name: 'Show 1 more' });
+    expect(showMore.className).toContain('min-h-11');
+    expect(screen.getAllByRole('button', { name: 'View original' })).toHaveLength(40);
+
+    await user.click(showMore);
+    expect(onOpenRecord).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('button', { name: 'View original' })).toHaveLength(42);
+    expect(screen.queryByTestId('partner-briefing-show-more')).toBeNull();
+  });
+
+  it('reproduces Terra P2 item 3: show-more label uses group unit matching expansion step rather than overstating with part count', async () => {
+    const user = userEvent.setup();
+    // 25 groups with 3 parts each = 75 source parts total
+    const items = Array.from({ length: 25 }, (_, groupIdx) => ({
+      parts: Array.from({ length: 3 }, (_, partIdx) => ({
+        text: `Group ${groupIdx + 1}, part ${partIdx + 1}`,
+        sourceRecordId: `rec-${groupIdx + 1}-${partIdx + 1}`,
+      })),
+    }));
+
+    const briefing = createMockBriefing({
+      sourceCount: 75,
+      overview: {
+        text: '75 records in total.',
+        sourceRecordIds: items.flatMap((item) => item.parts.map((part) => part.sourceRecordId)),
+      },
+      days: [
+        {
+          date: '2026-08-26',
+          sections: [{ period: 'morning', items }],
+        },
+      ],
+    });
+
+    render(<PartnerBriefingCard briefing={briefing} locale="ko" onOpenRecord={onOpenRecord} />);
+    await user.click(screen.getByTestId('partner-briefing-expand'));
+
+    expect(screen.queryByRole('button', { name: '15개 더 보기' })).toBeNull();
+    const showMore = screen.getByRole('button', { name: '5개 더 보기' });
+    expect(showMore).toBeTruthy();
+    expect(showMore.className).toContain('min-h-11');
+
+    // Expanding reveals all remaining groups and allows opening exact original
+    await user.click(showMore);
+    expect(screen.getAllByTestId('partner-briefing-summary')).toHaveLength(25);
+    const allButtons = screen.getAllByRole('button', { name: '원본 보기' });
+    expect(allButtons).toHaveLength(75);
+    expect(screen.queryByTestId('partner-briefing-show-more')).toBeNull();
+  });
+  /*
+    A day can carry two sections with the SAME period.
+
+    `night` spans both ends of the clock, so 00:30 and 22:30 are separate contiguous runs
+    with `morning` between them. The section list used to be keyed by `section.period`,
+    which gives React two children keyed "night" in one list -- duplicate keys, a console
+    error, and DOM reuse across two sections that hold different records.
+  */
+  it('renders repeated periods in a day without duplicate React keys', async () => {
+    const errors: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+
+    try {
+      const briefing = createMockBriefing({
+        sourceCount: 3,
+        overview: {
+          text: '총 3개의 기록이 있습니다.',
+          sourceRecordIds: ['rec-0030', 'rec-0900', 'rec-2230'],
+        },
+        days: [
+          {
+            date: '2026-08-26',
+            sections: [
+              {
+                period: 'night',
+                items: [{ parts: [{ text: '새벽 근무 교대', sourceRecordId: 'rec-0030' }] }],
+              },
+              {
+                period: 'morning',
+                items: [{ parts: [{ text: '오전 점호 완료', sourceRecordId: 'rec-0900' }] }],
+              },
+              {
+                period: 'night',
+                items: [{ parts: [{ text: '늦은 밤 점검', sourceRecordId: 'rec-2230' }] }],
+              },
+            ],
+          },
+        ],
+      });
+
+      render(<PartnerBriefingCard briefing={briefing} onOpenRecord={onOpenRecord} />);
+      await userEvent.click(screen.getByTestId('partner-briefing-expand'));
+
+      const keyWarnings = errors.filter((args) =>
+        args.some((arg) => typeof arg === 'string' && arg.includes('same key')),
+      );
+      expect(keyWarnings).toEqual([]);
+
+      // All three records are shown, each still opening its own exact original.
+      expect(screen.getByText('새벽 근무 교대')).toBeTruthy();
+      expect(screen.getByText('오전 점호 완료')).toBeTruthy();
+      expect(screen.getByText('늦은 밤 점검')).toBeTruthy();
+
+      const openButtons = screen.getAllByRole('button', { name: '원본 보기' });
+      expect(openButtons).toHaveLength(3);
+      await userEvent.click(openButtons[2]);
+      expect(onOpenRecord).toHaveBeenCalledWith('rec-2230');
+    } finally {
+      console.error = originalError;
+    }
+  });
+
 });

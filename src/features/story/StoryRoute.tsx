@@ -36,6 +36,15 @@ import { nativeOnDeviceBriefingProvider } from '@/lib/partnerBriefing/nativeOnDe
  * 판정을 두 곳에서 하면 두 곳이 어긋나는 날이 온다.
  */
 export function StoryRoute({ mode }: { mode: StoryMode }) {
+  const { state } = useStore();
+  const viewerUserId = state.authenticatedUser?.id || state.profile.id || '';
+  const coupleId = state.profile.couple.coupleId || '';
+  const viewerIdentity = `${viewerUserId}:${coupleId}`;
+
+  return <StoryRouteContent key={viewerIdentity} mode={mode} />;
+}
+
+function StoryRouteContent({ mode }: { mode: StoryMode }) {
   const navigate = useNavigate();
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -92,20 +101,6 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   }, [dateParam, highlightId, mode, state.coupleHighlights, surface, todayStr, visible, viewer]);
 
-  const projection = useMemo(
-    () => projectStory({
-      records,
-      todayStr,
-      focusRecordId,
-      // 보관 스토리에는 목차를 붙이지 않는다. 지나간 하루는 훑는 것이 아니라 넘기는 것이다.
-      withCover: mode !== 'archive' && mode !== 'highlight' && !partnerBriefingEnabled,
-      // 전체 요약은 상대의 오늘에만 적용한다. mine/archive/highlight와 놓친 다일 구간은
-      // 기존 표지 상한을 유지한다.
-      showAllTodayCoverLines: mode === 'today' && !partnerBriefingEnabled,
-    }),
-    [records, todayStr, focusRecordId, mode, partnerBriefingEnabled],
-  );
-
   const partnerBriefingResult = usePartnerBriefing({
     enabled: partnerBriefingEnabled,
     surface,
@@ -119,6 +114,30 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   const briefing = partnerBriefingResult.status === 'ready'
     ? partnerBriefingResult.briefing
     : null;
+
+  const projection = useMemo(
+    () => projectStory({
+      records,
+      todayStr,
+      focusRecordId,
+      /*
+        표지는 브리핑이 **실제로 있을 때만** 물러난다.
+
+        전에는 기능 플래그가 켜졌다는 사실만으로 표지를 없앴다. 그런데 브리핑이 없는
+        경우는 실패가 아니라 정상 경로에도 있다 -- `partnerUserId`가 아직 안 붙었을 때,
+        기록 시각이 정규화를 통과하지 못했을 때(`unavailable`), 볼 기록이 없을 때
+        (`empty`). 그때 화면에는 브리핑도 없고 목차도 없이 원본 카드만 남았다. 플래그를
+        켜는 것이 첫 화면을 없애는 일이 되어서는 안 된다.
+
+        보관 스토리에는 목차를 붙이지 않는다. 지나간 하루는 훑는 것이 아니라 넘기는 것이다.
+      */
+      withCover: mode !== 'archive' && mode !== 'highlight' && !briefing,
+      // 전체 요약은 상대의 오늘에만 적용한다. mine/archive/highlight와 놓친 다일 구간은
+      // 기존 표지 상한을 유지한다.
+      showAllTodayCoverLines: mode === 'today' && !briefing,
+    }),
+    [records, todayStr, focusRecordId, mode, briefing],
+  );
 
   /*
     다듬어진 표지 문장, 준비되면.
@@ -245,8 +264,18 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   }
 
   return (
+    /*
+      브리핑 유무는 key에 넣지 않는다.
+
+      넣으면 브리핑이 늦게 도착하는 순간 StoryViewer가 통째로 다시 마운트되고, 사용자가
+      읽던 자리가 첫 장으로 돌아간다. 그럴 필요가 없다: 표지가 있을 때의 목록은
+      [표지, ...기록]이고 브리핑이 있을 때는 [브리핑, ...기록]이라 **길이와 기록 위치가
+      같다.** 앞 장 한 장이 표지에서 브리핑으로 바뀔 뿐이므로 현재 index는 그대로 같은
+      기록을 가리킨다. `focusRecordId`가 바뀔 때는 여는 자리 자체가 달라지므로 지금처럼
+      다시 마운트하는 것이 맞다.
+    */
     <StoryViewer
-      key={`${focusRecordId ?? 'cover'}:${briefing ? 'briefing' : 'raw'}`}
+      key={focusRecordId ?? 'cover'}
       cards={cards}
       initialIndex={initialIndex}
       mode={mode}

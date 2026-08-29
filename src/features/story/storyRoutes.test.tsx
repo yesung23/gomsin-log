@@ -38,6 +38,7 @@ let records: DailyRecord[] = [];
 let coupleHighlights: CoupleHighlight[] = [];
 let appLocale: 'ko' | 'en' = 'ko';
 let profileId = 'me';
+let partnerUserId: string | undefined = 'partner-id';
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
@@ -51,7 +52,7 @@ vi.mock('@/lib/useStore', () => ({
           connected: true,
           status: 'active',
           coupleId: 'c1',
-          partnerUserId: 'partner-id',
+          partnerUserId,
           partnerName: '춘향',
         },
       },
@@ -73,8 +74,8 @@ vi.mock('@/components/media/RecordMediaGallery', () => ({
   RecordMediaGallery: ({ recordId }: { recordId: string }) => <div data-testid={`media-${recordId}`} />,
 }));
 
-function open(path: string) {
-  return render(
+function tree(path: string) {
+  return (
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/story/partner" element={<StoryRoute mode="today" />} />
@@ -82,8 +83,18 @@ function open(path: string) {
         <Route path="/story/day/:date" element={<StoryRoute mode="archive" />} />
         <Route path="/story/highlight/:highlightId" element={<StoryRoute mode="highlight" />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function open(path: string) {
+  const view = render(tree(path));
+  return {
+    ...view,
+    /** Re-render the SAME tree, so module-level store changes reach the component
+     *  without unmounting it -- which is exactly what a late partner binding does. */
+    refresh: () => view.rerender(tree(path)),
+  };
 }
 
 beforeEach(() => {
@@ -93,6 +104,7 @@ beforeEach(() => {
   coupleHighlights = [];
   appLocale = 'ko';
   profileId = 'me';
+  partnerUserId = 'partner-id';
   vi.unstubAllEnvs();
 });
 
@@ -181,6 +193,8 @@ describe('/story/partner', () => {
             promptOverheadUtf8Bytes: 256,
             responseReserveUtf8Bytes: 512,
             maxInputTextGraphemes: 1000,
+            maxItems: 64,
+            maxCandidatesPerItem: 32,
           },
         })),
         selectExtracts: vi.fn(async (options: {
@@ -292,6 +306,346 @@ describe('/story/partner', () => {
 
       expect(screen.getByText('Since you last checked')).toBeTruthy();
       expect(screen.getByText('2 moments')).toBeTruthy();
+    });
+
+    /*
+      플래그가 아니라 브리핑이 표지를 대체한다.
+
+      전에는 `VITE_PARTNER_BRIEFING_ENABLED`가 켜졌다는 사실만으로 표지를 없앴다. 그런데
+      브리핑이 없는 상태는 예외가 아니라 정상 경로에 있다 -- `partnerUserId`가 아직
+      안 붙었을 때, 기록 시각이 정규화를 통과하지 못했을 때, 볼 기록이 없을 때. 그때
+      화면에는 브리핑도 표지도 없이 원본 카드만 남았다. 기능 플래그를 켜는 일이 첫 화면을
+      없애는 일이 되어서는 안 된다.
+    */
+    describe('브리핑이 없으면 기존 목차가 그대로 남는다', () => {
+      it('partnerUserId가 아직 안 붙었으면 표지를 유지한다', () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        partnerUserId = undefined;
+        surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+        records = surface;
+
+        open('/story/partner');
+
+        // 브리핑은 없다.
+        expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+        // 그러나 첫 장은 비어 있지 않다: 표지가 돌아와 있고 원본은 모두 그 뒤에 있다.
+        // 카드는 [표지, 원본 2, 닫는 장] = 4.
+        expect(screen.getByText('1 / 4')).toBeTruthy();
+        // 표지의 증거는 그 줄들이다: 표지만이 기록마다 점프 버튼을 낸다.
+        expect(screen.getByRole('button', { name: /첫 기록/ })).toBeTruthy();
+        expect(screen.getByRole('button', { name: /둘째 기록/ })).toBeTruthy();
+      });
+
+      it('시각이 정규화를 통과하지 못해도 표지를 유지한다', () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        // '9:00'은 유효한 24시간 표기가 아니다 -> normalize가 corpus 전체를 fail-closed.
+        surface = [record({ id: 'a', time: '9:00', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+        records = surface;
+
+        open('/story/partner');
+
+        expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+        expect(screen.getByText('1 / 4')).toBeTruthy();
+        expect(screen.getByRole('button', { name: /첫 기록/ })).toBeTruthy();
+      });
+
+      it('브리핑이 준비되면 표지는 물러난다', () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+        records = surface;
+
+        open('/story/partner');
+
+        // 표지와 브리핑이 겹쳐서 두 장이 되지 않는다: 앞 장은 언제나 정확히 한 장이고,
+        // 카드 수는 표지일 때와 같은 4다 -- 그래서 늦게 도착해도 위치가 밀리지 않는다.
+        expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+        // 표지는 물러났다: 첫 장에 표지의 점프 줄이 없다.
+        expect(screen.queryByRole('button', { name: /첫 기록/ })).toBeNull();
+        expect(screen.getByText('1 / 4')).toBeTruthy();
+      });
+    });
+
+    it('브리핑이 늦게 도착해도 읽던 자리를 잃지 않는다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      // 처음에는 partner가 아직 안 붙어 브리핑이 없다 -> 표지 + 원본 2장.
+      partnerUserId = undefined;
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+      records = surface;
+
+      const view = open('/story/partner');
+      expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+
+      // 사용자가 두 번째 원본까지 읽어 내려간다.
+      await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+      await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+      expect(screen.getByText('3 / 4')).toBeTruthy();
+      expect(screen.getByText('둘째 기록')).toBeTruthy();
+
+      // 그 사이에 partner가 붙어 브리핑이 생긴다.
+      partnerUserId = 'partner-id';
+      view.refresh();
+
+      // 브리핑은 들어왔지만 사용자는 있던 자리에 그대로 있다. key에 브리핑 유무를 넣으면
+      // 여기서 StoryViewer가 다시 마운트되어 첫 장으로 돌아간다.
+      expect(screen.getByText('3 / 4')).toBeTruthy();
+      expect(screen.getByText('둘째 기록')).toBeTruthy();
+      expect(screen.queryByText('1 / 4')).toBeNull();
+
+      // 그리고 앞 장은 표지가 아니라 브리핑으로 바뀌어 있다.
+      await userEvent.click(screen.getByRole('button', { name: '이전 순간' }));
+      await userEvent.click(screen.getByRole('button', { name: '이전 순간' }));
+      expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+    });
+
+    it('브리핑이 사라져도 목차로 되돌아가고 자리를 잃지 않는다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+      records = surface;
+
+      const view = open('/story/partner');
+      expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+
+      await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+      await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+      expect(screen.getByText('3 / 4')).toBeTruthy();
+
+      // 연결이 풀려 브리핑 자격이 사라진다.
+      partnerUserId = undefined;
+      view.refresh();
+
+      expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+      expect(screen.getByText('3 / 4')).toBeTruthy();
+      expect(screen.getByText('둘째 기록')).toBeTruthy();
+    });
+
+    it('?at= 초기 위치는 브리핑 도착 전후가 같다', () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      partnerUserId = undefined;
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+      records = surface;
+
+      const view = open('/story/partner?at=b');
+      // 표지 fallback에서도 정확한 원본이 열린다.
+      expect(screen.getByText('둘째 기록')).toBeTruthy();
+      expect(screen.getByText('3 / 4')).toBeTruthy();
+
+      partnerUserId = 'partner-id';
+      view.refresh();
+
+      // 브리핑이 앞 장을 차지해도 ?at= 이 가리키는 자리는 그대로다.
+      expect(screen.getByText('둘째 기록')).toBeTruthy();
+      expect(screen.getByText('3 / 4')).toBeTruthy();
+    });
+
+    it('닫는 카드 위치도 브리핑 도착 전후가 같다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      partnerUserId = undefined;
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+      records = surface;
+
+      const view = open('/story/partner');
+      for (let i = 0; i < 3; i += 1) {
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+      }
+      expect(screen.getByText('4 / 4')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '다 읽었어요' })).toBeTruthy();
+
+      partnerUserId = 'partner-id';
+      view.refresh();
+
+      expect(screen.getByText('4 / 4')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '다 읽었어요' })).toBeTruthy();
+    });
+
+    it('표지 fallback에서도 정확한 원본으로 점프한다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      partnerUserId = undefined;
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+      records = surface;
+
+      open('/story/partner');
+      // 표지 줄을 누르면 그 카드로 이동한다. 대체하지 않고 정확한 원본이어야 한다.
+      await userEvent.click(screen.getByRole('button', { name: /둘째 기록/ }));
+
+      expect(screen.getByText('둘째 기록')).toBeTruthy();
+      expect(acknowledge).not.toHaveBeenCalled();
+    });
+
+    it('브리핑 생성·교체·확장·원본 이동 어느 것도 CONFIRMED를 쓰지 않는다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      partnerUserId = undefined;
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+      records = surface;
+
+      const view = open('/story/partner');
+      // 표지 fallback
+      expect(acknowledge).not.toHaveBeenCalled();
+
+      // 브리핑이 도착해 앞 장을 교체
+      partnerUserId = 'partner-id';
+      view.refresh();
+      expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+      expect(acknowledge).not.toHaveBeenCalled();
+
+      // 확장
+      await userEvent.click(screen.getByTestId('partner-briefing-expand'));
+      expect(acknowledge).not.toHaveBeenCalled();
+
+      // 원본 이동
+      await userEvent.click(screen.getAllByRole('button', { name: '원본 보기' })[0]);
+      expect(mockNavigate).toHaveBeenCalledWith('/record?record=a');
+      expect(acknowledge).not.toHaveBeenCalled();
+    });
+
+    it('명시적인 다 읽었어요에서만 acknowledge가 불린다', async () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      surface = [record({ id: 'a', log: '첫 기록' }), record({ id: 'b', time: '13:00', log: '둘째 기록' })];
+      records = surface;
+
+      open('/story/partner');
+      for (let i = 0; i < 3; i += 1) {
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+      }
+      expect(acknowledge).not.toHaveBeenCalled();
+
+      await userEvent.click(screen.getByRole('button', { name: '다 읽었어요' }));
+      expect(acknowledge).toHaveBeenCalledTimes(1);
+    });
+
+    /*
+      읽을 수 있는 원본이 정확히 1개일 때.
+
+      표지는 `readable.length > 1`일 때만 생긴다. 그래서 원본이 하나면 브리핑 유무에 따라
+      목록 길이가 실제로 달라진다:
+
+        브리핑 없음: [원본, 닫는 장]
+        브리핑 있음: [브리핑, 원본, 닫는 장]
+
+      StoryViewer가 숫자 index만 들고 있으면 앞에 한 장이 끼어드는 순간 index 0이 원본에서
+      브리핑으로, index 1이 닫는 장에서 원본으로 밀린다. 사용자는 아무것도 누르지 않았는데
+      다른 카드를 보게 된다. 반대로 브리핑이 사라지면 뒤로 밀린다.
+    */
+    describe('원본이 하나뿐일 때도 보던 카드를 유지한다', () => {
+      const single = () => [record({ id: 'only', log: '유일한 기록' })];
+
+      it('원본을 보는 중 브리핑이 도착해도 같은 원본을 유지한다', () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        partnerUserId = undefined;
+        surface = single();
+        records = surface;
+
+        const view = open('/story/partner');
+        // 표지가 없으므로 첫 장이 곧 원본이다.
+        expect(screen.getByText('유일한 기록')).toBeTruthy();
+        expect(screen.getByText('1 / 2')).toBeTruthy();
+
+        partnerUserId = 'partner-id';
+        view.refresh();
+
+        // 앞에 브리핑이 끼어들었지만 보고 있던 것은 그대로 원본이어야 한다.
+        expect(screen.getByText('유일한 기록')).toBeTruthy();
+        expect(screen.getByText('2 / 3')).toBeTruthy();
+        expect(acknowledge).not.toHaveBeenCalled();
+      });
+
+      it('닫는 장을 보는 중 브리핑이 도착해도 닫는 장을 유지한다', async () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        partnerUserId = undefined;
+        surface = single();
+        records = surface;
+
+        const view = open('/story/partner');
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+        expect(screen.getByText('2 / 2')).toBeTruthy();
+        expect(screen.getByRole('button', { name: '다 읽었어요' })).toBeTruthy();
+
+        partnerUserId = 'partner-id';
+        view.refresh();
+
+        expect(screen.getByRole('button', { name: '다 읽었어요' })).toBeTruthy();
+        expect(screen.getByText('3 / 3')).toBeTruthy();
+        expect(screen.queryByText('유일한 기록')).toBeNull();
+        expect(acknowledge).not.toHaveBeenCalled();
+      });
+
+      it('원본을 보는 중 브리핑이 사라져도 같은 원본을 유지한다', async () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        surface = single();
+        records = surface;
+
+        const view = open('/story/partner');
+        expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+        expect(screen.getByText('유일한 기록')).toBeTruthy();
+        expect(screen.getByText('2 / 3')).toBeTruthy();
+
+        partnerUserId = undefined;
+        view.refresh();
+
+        expect(screen.getByText('유일한 기록')).toBeTruthy();
+        expect(screen.getByText('1 / 2')).toBeTruthy();
+        expect(acknowledge).not.toHaveBeenCalled();
+      });
+
+      it('닫는 장을 보는 중 브리핑이 사라져도 닫는 장을 유지한다', async () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        surface = single();
+        records = surface;
+
+        const view = open('/story/partner');
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+        expect(screen.getByText('3 / 3')).toBeTruthy();
+        expect(screen.getByRole('button', { name: '다 읽었어요' })).toBeTruthy();
+
+        partnerUserId = undefined;
+        view.refresh();
+
+        expect(screen.getByRole('button', { name: '다 읽었어요' })).toBeTruthy();
+        expect(screen.getByText('2 / 2')).toBeTruthy();
+        expect(acknowledge).not.toHaveBeenCalled();
+      });
+
+      it('?at= 로 연 정확한 원본은 브리핑 도착·소멸 후에도 그 원본이다', () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        partnerUserId = undefined;
+        surface = single();
+        records = surface;
+
+        const view = open('/story/partner?at=only');
+        expect(screen.getByText('유일한 기록')).toBeTruthy();
+
+        partnerUserId = 'partner-id';
+        view.refresh();
+        expect(screen.getByText('유일한 기록')).toBeTruthy();
+
+        partnerUserId = undefined;
+        view.refresh();
+        expect(screen.getByText('유일한 기록')).toBeTruthy();
+        expect(acknowledge).not.toHaveBeenCalled();
+      });
+
+      it('전환 뒤에도 빈 화면이 되지 않고 명시적 확인만 acknowledge를 부른다', async () => {
+        vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+        surface = single();
+        records = surface;
+
+        const view = open('/story/partner');
+        // 마지막 카드에서 브리핑이 사라지면 목록이 3 -> 2로 줄어든다.
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+        await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+
+        partnerUserId = undefined;
+        view.refresh();
+
+        // 뷰어는 여전히 무언가를 보여준다. 범위를 벗어나 사라지지 않는다.
+        expect(screen.getByTestId('story-viewer')).toBeTruthy();
+        expect(screen.getByText('2 / 2')).toBeTruthy();
+        expect(acknowledge).not.toHaveBeenCalled();
+
+        await userEvent.click(screen.getByRole('button', { name: '다 읽었어요' }));
+        expect(acknowledge).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('profile.id가 늦게 동기화돼도 authenticatedUser.id를 canonical viewer로 사용한다', () => {

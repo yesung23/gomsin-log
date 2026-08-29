@@ -72,6 +72,26 @@ type ViewerItem =
   | { kind: 'briefing'; briefing: PartnerBriefing }
   | { kind: 'card'; card: StoryCard };
 
+/**
+ * 카드의 안정적인 identity.
+ *
+ * 목록 앞에 브리핑이 끼어들거나 빠지면 카드의 숫자 위치가 통째로 밀린다. 원본이 하나뿐인
+ * 하루에서는 표지가 생기지 않으므로(표지는 원본 2개 이상일 때만 붙는다) 길이 자체가
+ * 2와 3 사이를 오가고, 숫자 index만 들고 있으면 사용자가 아무것도 누르지 않았는데
+ * index 0의 원본이 브리핑으로, index 1의 닫는 장이 원본으로 바뀐다.
+ *
+ * 그래서 뷰어가 기억하는 것은 "몇 번째"가 아니라 "무엇"이다. 원본은 정확한 record id로
+ * 식별하므로 `?at=`이 연 카드도 전환 뒤에 같은 원본으로 남는다.
+ */
+function itemKey(item: ViewerItem): string {
+  if (item.kind === 'briefing') return 'briefing';
+  const card = item.card;
+  if (card.kind === 'cover') return 'cover';
+  if (card.kind === 'moment') return `moment:${card.record.id}`;
+  if (card.kind === 'missing') return `missing:${card.recordId}`;
+  return 'closing';
+}
+
 function formatStoryTime(time: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(time.trim());
   return match ? `${match[1].padStart(2, '0')}:${match[2]}` : time;
@@ -107,18 +127,53 @@ export function StoryViewer({
   }, [briefing, cards]);
 
   const total = items.length;
+  const itemKeys = useMemo(() => items.map(itemKey), [items]);
 
-  const [index, setIndex] = useState(
-    () => Math.min(Math.max(initialIndex, 0), Math.max(total - 1, 0)),
+  const clampIndex = useCallback(
+    (value: number) => Math.min(Math.max(value, 0), Math.max(total - 1, 0)),
+    [total],
   );
+
+  /*
+    보고 있는 카드를 identity로 기억한다.
+
+    `initialIndex`는 여는 자리를 정할 때만 쓰이고, 그 뒤로는 이 key가 위치를 소유한다.
+    목록이 바뀌면 같은 key를 새 배열에서 찾아 그 자리를 계속 보여준다.
+  */
+  const [activeKey, setActiveKey] = useState(
+    () => itemKeys[Math.min(Math.max(initialIndex, 0), Math.max(items.length - 1, 0))] ?? '',
+  );
+
+  /** 보던 카드가 정말로 사라졌을 때만 쓰는 마지막 유효 위치. */
+  const lastIndexRef = useRef(
+    Math.min(Math.max(initialIndex, 0), Math.max(items.length - 1, 0)),
+  );
+
+  const foundIndex = itemKeys.indexOf(activeKey);
+  const index = foundIndex >= 0 ? foundIndex : clampIndex(lastIndexRef.current);
+
+  /*
+    보던 카드가 사라졌으면 -- 기록이 지워졌거나 공개 범위가 바뀌었거나 -- 마지막 유효
+    위치로 안전하게 내려앉고, 그 자리의 카드를 새로운 기준으로 삼는다. 범위를 벗어나
+    빈 화면이 되는 경로가 없도록 clamp가 항상 유효한 위치를 돌려준다.
+  */
+  useEffect(() => {
+    lastIndexRef.current = index;
+    const resolved = itemKeys[index];
+    if (resolved !== undefined && resolved !== activeKey) {
+      setActiveKey(resolved);
+    }
+  }, [index, itemKeys, activeKey]);
+
   /** 홀드하면 UI를 감추고 사진만 남긴다. 멈출 타이머가 없으므로 용도가 이것뿐이다. */
   const [bare, setBare] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const go = useCallback((target: number) => {
-    setIndex(Math.min(Math.max(target, 0), total - 1));
-  }, [total]);
+    const next = itemKeys[Math.min(Math.max(target, 0), Math.max(total - 1, 0))];
+    if (next !== undefined) setActiveKey(next);
+  }, [itemKeys, total]);
 
   /*
     마지막에서는 넘어가지 않는다.

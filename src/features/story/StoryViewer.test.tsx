@@ -47,13 +47,13 @@ function mockBriefing(overrides: Partial<PartnerBriefing> = {}): PartnerBriefing
           {
             period: 'morning',
             items: [
-              { text: '오늘 시험 끝났어', sourceRecordId: 'a' },
+              { parts: [{ text: '오늘 시험 끝났어', sourceRecordId: 'a' }] },
             ],
           },
           {
             period: 'afternoon',
             items: [
-              { text: '점심 먹었어', sourceRecordId: 'b' },
+              { parts: [{ text: '점심 먹었어', sourceRecordId: 'b' }] },
             ],
           },
         ],

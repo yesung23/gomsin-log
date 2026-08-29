@@ -91,6 +91,11 @@ const devicePluginPackage = JSON.parse(read('packages/capacitor-device-keys/pack
 const devicePodspec = read('packages/capacitor-device-keys/GomsinlogCapacitorDeviceKeys.podspec');
 const summaryPodspec = read('packages/capacitor-on-device-summary/GomsinlogCapacitorOnDeviceSummary.podspec');
 const briefingPodspec = read('packages/capacitor-on-device-briefing/GomsinlogCapacitorOnDeviceBriefing.podspec');
+const briefingAndroidGradle = read('packages/capacitor-on-device-briefing/android/build.gradle');
+const briefingAndroidManifest = read('packages/capacitor-on-device-briefing/android/src/main/AndroidManifest.xml');
+const briefingAndroidPlugin = read(
+  'packages/capacitor-on-device-briefing/android/src/main/java/app/gomsinlog/ondevicebriefing/OnDeviceBriefingPlugin.kt',
+);
 const deviceJavaScriptPlugin = read('packages/capacitor-device-keys/src/index.ts');
 const deviceAndroidPlugin = read(
   'packages/capacitor-device-keys/android/src/main/java/app/gomsinlog/devicekeys/DeviceKeysPlugin.kt',
@@ -461,15 +466,12 @@ describe("Android: the app's OWN manifest declares exactly these permissions", (
  *
  * Android's manifest merger folds every library's manifest into the app's before
  * packaging, so the permission set a user is shown at install time, and the one Play
- * Console lists, is the MERGED set. On this branch the ML Kit GenAI dependency adds a
- * permission and a `<queries>` entry that no amount of reading
- * `android/app/src/main/AndroidManifest.xml` can reveal.
+ * Console lists, is the MERGED set. Library permissions cannot be proven by reading
+ * `android/app/src/main/AndroidManifest.xml` alone.
  *
  * Known library-merged additions, with where each comes from. Recorded so that a NEW
  * one shows up as a diff rather than as an unnoticed install-time prompt:
  *
- *   com.google.android.apps.aicore.service.BIND_SERVICE
- *       com.google.mlkit:genai-prompt (this branch's on-device briefing provider)
  *   com.google.android.c2dm.permission.RECEIVE
  *   app.gomsinlog.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
  *   android.permission.WAKE_LOCK
@@ -507,7 +509,6 @@ describe('Android: the merged manifest carries more than the app declares', () =
   const EXPECTED_LIBRARY_MERGED_PERMISSIONS = [
     'android.permission.WAKE_LOCK',
     'app.gomsinlog.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
-    'com.google.android.apps.aicore.service.BIND_SERVICE',
     'com.google.android.c2dm.permission.RECEIVE',
   ];
 
@@ -557,15 +558,39 @@ describe('Android: the merged manifest carries more than the app declares', () =
     );
   });
 
-  it.skipIf(NO_ARTIFACT)('shows the ML Kit init provider that runs at process start', () => {
-    // Android instantiates every declared ContentProvider before Application.onCreate,
-    // on every API level. This is the path by which ML Kit common classes load even on
-    // pre-26 devices, where the plugin's own API 26 gate blocks all inference.
-    // docs/PARTNER_BRIEFING_ARCHITECTURE.md records the same fact and why the provider
-    // is deliberately not suppressed.
+  it.skipIf(NO_ARTIFACT)('keeps ML Kit and its process-start provider out of the artifact', () => {
     const mergedXml = read(mergedManifestPath());
-    expect(mergedXml).toContain('com.google.mlkit.common.internal.MlKitInitProvider');
-    expect(mergedXml).not.toContain('com.google.mlkit.common.internal.MlKitInitProvider" tools:node="remove"');
+    expect(mergedXml).not.toContain('com.google.mlkit');
+    expect(mergedXml).not.toContain('com.google.android.apps.aicore.service.BIND_SERVICE');
+  });
+});
+
+describe('Android: on-device briefing is an unsupported bridge without ML Kit packaging', () => {
+  it('does not bypass a dependency minSdk or package ML Kit', () => {
+    expect(briefingAndroidGradle).not.toContain('com.google.mlkit');
+    expect(briefingAndroidGradle).not.toContain('genai-prompt');
+    expect(withoutComments(briefingAndroidManifest)).not.toContain('overrideLibrary');
+    expect(withoutComments(briefingAndroidManifest)).not.toContain('<uses-sdk');
+    expect(
+      existsSync(join(
+        repoRoot,
+        'packages/capacitor-on-device-briefing/android/src/main/java/app/gomsinlog/ondevicebriefing/OnDeviceBriefingEngine.kt',
+      )),
+    ).toBe(false);
+  });
+
+  it('keeps the bridge methods and reports unsupported before inference', () => {
+    for (const method of ['availability', 'capability', 'selectExtracts', 'cancel']) {
+      expect(briefingAndroidPlugin).toContain(`fun ${method}(call: PluginCall)`);
+    }
+    expect(briefingAndroidPlugin).toContain('put("availability", "unsupported")');
+    const selectExtracts = briefingAndroidPlugin.slice(
+      briefingAndroidPlugin.indexOf('fun selectExtracts(call: PluginCall)'),
+      briefingAndroidPlugin.indexOf('fun cancel(call: PluginCall)'),
+    );
+    expect(selectExtracts).toContain('reject(call, BriefingErrorCode.UNAVAILABLE)');
+    expect(selectExtracts).not.toContain('call.resolve');
+    expect(briefingAndroidPlugin).not.toContain('com.google.mlkit');
   });
 });
 

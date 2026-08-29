@@ -184,50 +184,33 @@ The pipeline enforces a whole-run deadline across all batches.
 
 The pipeline processes every bounded candidate batch independently:
 - iOS: Foundation Models on-device provider (`OnDeviceBriefing.swift`).
-- Android: Official ML Kit GenAI Prompt beta2 provider (`OnDeviceBriefingEngine.kt`).
-  Android app `minSdk 23`, but the provider is API 26+ gated. On pre-26 devices the
-  runtime `Build.VERSION.SDK_INT` gate blocks every plugin inference path, so no model
-  session is ever started and the briefing is produced deterministically.
+- Android: no model provider in the base APK. The bridge reports `unsupported`, so the
+  deterministic exact-source path remains active on every Android API level.
 - iOS keeps a bounded in-memory pre-start cancellation set inside the provider actor,
   so a cancel that arrives before request registration cannot start a model session.
-  Android registers the request `Deferred` before launching the bridge coroutine.
 
-### Pre-26 Android: what the API 26 gate does and does not cover
+### Android packaging boundary
 
-The plugin's own gate is a *runtime* gate, not a class-loading one, and the two are
-easy to conflate. Recorded precisely, because the earlier wording ("without crashing or
-loading ML Kit classes") was wrong on the second half and has been removed:
+Google's current ML Kit GenAI Prompt API requires API 26+ and its AAR declares that
+floor. The app remains `minSdk 23`, Google Play is outside the iOS-first release scope,
+and Android users retain the web/PWA and Supabase-backed shared-data path. Therefore:
 
-- The shipped APK manifest contains
-  `<provider android:name="com.google.mlkit.common.internal.MlKitInitProvider" …>`,
-  merged in from the ML Kit AAR. Android instantiates every declared `ContentProvider`
-  during application startup, before `Application.onCreate`, on **every** API level.
-  **ML Kit common classes are therefore loaded at process start on API 23–25 too**, by a
-  path that lies entirely outside this plugin. The provider is deliberately **not**
-  removed from the manifest — see below.
-- What the API 26 gate does cover is inference: every `engine` access site in
-  `OnDeviceBriefingPlugin.kt` is behind `Build.VERSION.SDK_INT`, so on pre-26 devices no
-  ML Kit GenAI call is reached and the deterministic path is what runs.
+- the Android module has no `genai-prompt` dependency or inference engine;
+- its manifest has no `tools:overrideLibrary` minSdk bypass;
+- the merged app manifest has no ML Kit process-start provider or AICore permission;
+- the Capacitor bridge methods remain registered and return `unsupported` /
+  `E_UNAVAILABLE`, preserving the JavaScript provider contract and deterministic
+  fallback.
 
-Verification status of that claim, as of 2026-08-29:
+Verification status as of 2026-08-30:
 
 | Claim | State | Evidence |
 |---|---|---|
-| APK installs on API 23 and API 24 | **PASS** | emulator install |
-| App starts and the process survives on API 23 and 24 | **PASS** | emulator launch, process alive after start |
-| No startup crash observed on API 23 or 24 | **PASS** | observed; absence of a crash on two images, not a proof for all pre-26 devices |
-| `MlKitInitProvider` loads at process start | **CONFIRMED** | shipped-APK merged manifest |
-| Pre-26 inference is blocked by the runtime gate | **CONFIRMED** | `Build.VERSION.SDK_INT` guards on all six `engine` access sites |
-| JS reaches the deterministic fallback on pre-26 | **UNVERIFIED** | requires driving the WebView UI on those images; not executed |
-| API 25 | **UNVERIFIED** | no API 25 system image was booted |
-| Physical Samsung / any physical Android device | **UNVERIFIED** | no Android device was connected |
-
-The manifest provider stays. Suppressing it with `tools:node="remove"` would delete ML
-Kit's own initialization on API 26+ as well, where the feature depends on it, and the
-startup path it drives has been observed not to crash on the two pre-26 images tested.
-
-- Unverified runtime environments: API 25, the JS-side pre-26 deterministic fallback,
-  and all physical Android devices remain UNVERIFIED until executed.
+| Android module and debug APK compile | **PASS** | Gradle compile + assemble |
+| Runtime dependency graph excludes ML Kit GenAI | **PASS** | Gradle `debugRuntimeClasspath` |
+| Merged manifest excludes ML Kit/AICore entries | **PASS** | built merged manifest |
+| JS deterministic fallback contract | **PASS** | provider/fallback Vitest + bridge static guard |
+| API 23/24/25 physical-device cold start | **UNVERIFIED** | no physical devices were run for this delta |
 
 A failed, timed-out, cancelled, or malformed batch uses deterministic exact-source
 items for that batch; verified sibling choices remain usable. Provider-selected text is
@@ -317,36 +300,14 @@ may execute the identical Worker specification only when repeated Flash provider
 failures prevent the phase from running. Kiro/Opus is not part of the default
 path.
 
-### Gate D — Android SDK selection: COMPLETE
+### Gate D — Android SDK selection: DEFERRED
 
-This section used to say the SDK had not been picked yet, which contradicted the Native
-Platform section above: the Android provider is implemented and shipping against a
-specific SDK. The selection has been made, and this is what was chosen and why.
-
-**Selected: ML Kit GenAI Prompt API, `com.google.mlkit:genai-prompt:1.0.0-beta2`**,
-behind the common `AndroidOnDeviceBriefingProvider` boundary
-(`OnDeviceBriefingEngine.kt`). The artifact resolves from Google Maven and is the
-official Google on-device GenAI surface; it was reviewed against the alternatives
-current at implementation time and selected on these grounds:
-
-| Requirement | Why ML Kit GenAI Prompt satisfies it |
-|---|---|
-| Structured output | Returns text that the JS verifier parses into a strictly ordinal-only v2 group plan; the model emits no displayable text at all |
-| Ordinal provenance | Request and response carry only `groupOrdinal` / `itemOrdinal` / `candidateOrdinal`; real record ids never cross the bridge |
-| Offline execution | Inference runs on the device through AICore; no request leaves the handset |
-| Cancellation | The plugin registers the request `Deferred` before launching the bridge coroutine, so a cancel that arrives first cannot start a session |
-| Deterministic fallback | Every failure path — `model_unavailable`, `preparing`, `busy`, `quota`, cancel, timeout, malformed output — returns a bounded error the pipeline answers with exact-source deterministic items |
-| Runtime capability detection | `availability()` is queried per request rather than assumed, and the advertised envelope (context bytes, prompt overhead, response reserve, grapheme limit, `maxItems`, `maxCandidatesPerItem`) is read from the device at runtime |
-
-The API 26 floor and what it does and does not cover is recorded in the Native
-Platform section above: the runtime `Build.VERSION.SDK_INT` gate blocks every
-inference path on API 23–25, which fall back to deterministic output, while ML Kit
-common classes still load at process start through the merged manifest's
-`MlKitInitProvider`.
+No Android GenAI SDK ships in the base APK. ML Kit GenAI Prompt remains a possible
+future Google Play implementation candidate, but adopting it requires a separate
+packaging decision that does not bypass its API 26 floor. Until Google Play enters
+scope, Android uses deterministic exact-source briefing output.
 
 **Server inference remains forbidden**, and no AI result is persisted.
 
-**Still UNVERIFIED:** no physical Android device has run this provider. API 23 and 24
-emulator install/launch/process-survival passed; API 25 and physical hardware have not
-been exercised, and the JS-side pre-26 deterministic fallback has not been observed
-through a real WebView. Selecting the SDK does not close that gate.
+**Still UNVERIFIED:** physical API 23/24/25 cold start and the Android WebView fallback
+were not exercised for this packaging delta.

@@ -12262,3 +12262,106 @@ PRODUCTION
 - NOT APPLIED / UNVERIFIED: remote state was neither queried nor changed
 
 ---
+
+- NOT APPLIED — no Supabase, Vercel, Apple, TestFlight or App Store mutation
+### 2026-08-30 · Kiro Sol · P1-3 Android ML Kit base-APK removal
+
+#### PLAN POSITION
+- Phase: iOS-first App Store integration
+- Workstream: Android packaging safety
+- Step: P1-3 closure
+- Previous Gate: Sol independent audit found ML Kit API 26 AAR forced into a minSdk 23 base APK through `tools:overrideLibrary`
+- This Gate: base APK excludes ML Kit; Android deterministic fallback contract remains
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no customer, AI role, pricing, storage, or product-scope change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `docs/skills/feature-build.md`
+- Current-state checked: exact branch/HEAD/status, Android Gradle/manifest/plugin, built dependency graph and merged manifest
+- Latest relevant Work Log checked: 2026-08-29 Partner Briefing integration and whole-app native audit entries
+- MASTER PLAN version / 기준일: V4 + Partner Briefing / 2026-08-30
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. iOS is the first store release; Android retains web/PWA and Supabase shared data, while Google Play is deferred.
+
+#### OWNERSHIP
+- Tool: Kiro
+- Model: kiro/gpt-5.6-sol
+- Role: implementation owner and local verifier
+- PR: none
+- Branch: `codex/app-store-integration-2026-08-29`
+- Base SHA: `d52007b46da98855626020e7d2e8d0c91fb1db60`
+- Old HEAD: `d52007b46da98855626020e7d2e8d0c91fb1db60`
+- New HEAD / Reviewed HEAD: local commit recorded after this entry
+
+#### CHANGED / REVIEWED
+- file: `packages/capacitor-on-device-briefing/android/**`
+- function/component/migration: Android Capacitor briefing plugin and package manifest/dependencies
+- what changed/reviewed: removed ML Kit GenAI Prompt, the minSdk override, inference engine, coroutines/JUnit-only dependencies and obsolete engine tests; retained the four-method bridge as an explicit `unsupported` / `E_UNAVAILABLE` provider
+- why: Google's current Prompt API requires API 26+, while the app remains minSdk 23 and Google Play is outside this release; removing the provider eliminates process-start class/provider risk on API 23–25
+- file: `src/lib/nativeConfig.test.ts`
+- function/component/migration: native package and merged-manifest guards
+- what changed/reviewed: asserts ML Kit, AICore permission, minSdk override and engine do not return; asserts the bridge remains fail-closed
+- why: make the packaging decision a runnable release guard
+- file: `docs/PARTNER_BRIEFING_ARCHITECTURE.md`
+- function/component/migration: Android provider current-state description
+- what changed/reviewed: changed Gate D from shipping/complete to deferred and documented deterministic Android behavior
+- why: repository documentation must match shipped code
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: iOS provider, Partner Briefing TypeScript pipeline, JS provider contract, exact-source fallback and shared Supabase data unchanged
+- Production: no remote mutation, push, merge, deploy, App Store or Google Play action
+
+#### VERIFICATION
+- command: official Google ML Kit Prompt API Android guide checked 2026-08-30
+- PASS / FAIL / UNVERIFIED: PASS — current guide requires `minSdk = 26` and names `com.google.mlkit:genai-prompt:1.0.0-beta2`
+- what it actually proves: the removed AAR is not compatible with the app's minSdk 23 without an override; it does not test a device
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 112 tests
+- what it actually proves: tracked native config plus rebuilt merged-manifest exclusion guards
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/nativeConfig.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 1 file / 72 tests
+- what it actually proves: focused Android packaging and bridge static contract
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/features/story/storyRoutes.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 1 file / 38 tests
+- what it actually proves: the unchanged Story user path still renders its deterministic route when native refinement is unavailable; it is not physical Android evidence
+- command: `npm run typecheck`; `npx eslint src/lib/nativeConfig.test.ts`; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TS build contract, changed TS lint, patch whitespace
+- command: SDK-scoped `./gradlew :gomsinlog-capacitor-on-device-briefing:compileDebugKotlin :app:processDebugManifest :app:assembleDebug --stacktrace`
+- PASS / FAIL / UNVERIFIED: PASS — BUILD SUCCESSFUL, 152 tasks, debug APK 16,533,481 bytes
+- what it actually proves: Android module compiles, manifest merges, and debug APK packages without ML Kit
+- command: SDK-scoped `./gradlew :app:testDebugUnitTest :gomsinlog-capacitor-on-device-briefing:dependencies --configuration debugRuntimeClasspath --stacktrace`
+- PASS / FAIL / UNVERIFIED: PASS — BUILD SUCCESSFUL, 113 tasks; plugin graph contains only Kotlin stdlib and Capacitor Android directly
+- what it actually proves: Android JVM config tests pass and plugin dependency graph has no ML Kit GenAI artifact
+- command: built merged-manifest `rg` for `com.google.mlkit|aicore.service.BIND_SERVICE|overrideLibrary|genai-prompt`
+- PASS / FAIL / UNVERIFIED: PASS — zero matches
+- what it actually proves: rebuilt debug manifest and plugin sources contain none of the removed packaging paths
+
+#### REVIEW IMPACT
+- DELTA — Android packaging/provider only. iOS, TypeScript Partner Briefing semantics, DB/RLS/auth/crypto review freshness unchanged.
+
+#### BLOCKERS
+- code: none
+- environment: API 23/24/25 physical-device cold start not run
+- external/manual: Android WebView deterministic fallback not observed on a physical Android device
+
+#### STOPPED AT
+- exact completed boundary: local Android package removal, rebuilt APK/manifest, static/type/lint/unit verification and single local commit
+
+#### REMAINING
+- API 23/24/25 physical-device cold-start and Android WebView fallback smoke remain UNVERIFIED
+- any future Google Play GenAI provider requires a new API-floor/package-isolation decision
+
+#### NEXT ACTION
+- next owner: release integrator
+- tool/model: Kiro/Sol delta review if this commit is rebased or conflicts
+- 기준 SHA: commit produced by this entry
+- exact next task: integrate without reintroducing ML Kit into the minSdk 23 base APK
+
+#### DO NOT ADVANCE UNTIL
+- any future Android model provider respects its declared minSdk without `overrideLibrary` and has physical-device startup evidence
+
+#### PRODUCTION
+- NOT APPLIED

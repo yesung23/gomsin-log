@@ -114,6 +114,923 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-08-29 · Partner Briefing Gate F 로컬 통합·출시 검증 완료
+
+#### PLAN POSITION
+- Phase: Partner Briefing Gate F
+- Workstream: 전체 OUTSTANDING 기록의 온디바이스 compression layer
+- Step: 최종 코드 통합, 독립 리뷰, 로컬 release validation, 커밋 분리
+- Previous Gate: Android provider P2 closure 및 Story 단일-record 위치 보존
+- This Gate: LOCAL CONDITIONAL PASS — merge 직전 정지
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/PARTNER_BRIEFING_ARCHITECTURE.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — 새 과금·저장전략 변경 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, 실제 PartnerDay/Story/native call path
+- Current-state checked: `docs/CURRENT_STATE.md`와 live branch/HEAD/status
+- Latest relevant Work Log checked: 2026-08-29 Partner Briefing P1/P2 및 StoryViewer closure 항목
+- MASTER PLAN version / 기준일: Partner Briefing Architecture v2 / 2026-08-29
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: 해당 없음
+
+#### OWNERSHIP
+- Tool: Codex Control Tower + 좁은 Flash High workers + Kiro High independent reviewers
+- Model: primary high reasoning; Max/Ultra는 architecture·security blocker가 없어 사용하지 않음
+- Role: 통합자·검증자·독립 리뷰 조정
+- PR: 없음
+- Branch: `codex/partner-briefing`
+- Base SHA: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- Old HEAD: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- New/Reviewed HEAD: `4f5d74d` (검증된 code HEAD; 이 원장·보고서는 evidence-only 후속 커밋)
+
+#### CHANGED / REVIEWED
+- file: `src/lib/partnerBriefing/**`, `packages/capacitor-on-device-briefing/**`
+- function/component/migration: corpus·normalizer·chunker·v2 ordinal grouping·pipeline·fallback·iOS Foundation Models·Android ML Kit GenAI
+- what changed/reviewed: 전체 eligible source coverage, exact provenance, hybrid fallback, deadline/cancel/stale response, native strict payload, Android validated-unmetered network gate와 10개 Kotlin tests
+- why: Top-N 없이 마지막 확인 이후 전체 기록을 안전하게 압축하고 기기 내 AI 실패 시 원본 기반 fallback을 유지하기 위해
+- file: `src/features/story/**`, `src/components/widgets/PartnerBriefingCard.tsx`
+- function/component/migration: `/story/partner` integration, progressive disclosure, exact-original navigation, stable card identity
+- what changed/reviewed: Briefing ON 시 legacy cover를 대체하되 moment/closing/explicit acknowledgement를 유지; 원본 1개에서도 briefing 출현·소멸 시 현재 카드가 밀리지 않음
+- why: compression layer가 원본과 CONFIRMED 상태머신을 대체하거나 변경하지 않도록 하기 위해
+- file: `src/pages/LegalPage.tsx`, `src/pages/OnboardingPage.tsx`, 대응 tests
+- function/component/migration: 앱 내부 약관 sheet
+- what changed/reviewed: Capacitor 앱에서 외부 `https://localhost`로 이탈하지 않고 약관을 읽으며 동의 checkbox 상태를 보존; 열람과 동의를 구조적으로 분리
+- why: 실제 iOS/Android 가입 경로를 막던 법적 문서 접근 실패를 닫기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: E2EE key·device-key authority와 암호 프로토콜 미변경
+- DB/migration semantics: Supabase schema/RLS/migration 미변경
+- product semantics: Briefing 열기·스크롤·생성으로 CONFIRMED를 쓰지 않음; server AI와 AI 결과 영속 저장 없음
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: `LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck, lint, Vitest 281 files / 4,329 tests, production build 2,180 modules
+- what it actually proves: 현재 전체 TypeScript/React 코드와 웹 빌드의 로컬 회귀; Production·실기기 증거는 아님
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 109 tests
+- what it actually proves: native config/bridge 정적 계약
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17 / 65 migrations / 420 assertions
+- what it actually proves: throwaway local DB 계약; remote Supabase 적용 증거는 아님
+- command: `npx cap sync ios` + unsigned iOS Simulator `xcodebuild`
+- PASS / FAIL / UNVERIFIED: PASS — 6 plugins, tracked diff/status checksum 불변, Xcode 26.6에서 `BUILD SUCCEEDED`
+- what it actually proves: simulator compile; iOS 27·Foundation Models 실기기 실행은 아님
+- command: Android Gradle compile/unit/assemble with `--rerun-tasks`
+- PASS / FAIL / UNVERIFIED: PASS — 157/157 tasks executed, Kotlin tests 10 PASS
+- what it actually proves: Android 산출물과 engine unit path; 실물 Samsung/AICore 실행은 아님
+- command: Partner Briefing Playwright suite at 390x844
+- PASS / FAIL / UNVERIFIED: PASS — 2/2, 한국어·영어, 8개 원본 확장·44px·exact navigation
+- what it actually proves: 브라우저 deterministic rendering; native model quality가 아님
+- command: legal focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 2 files / 29 tests
+- what it actually proves: 앱 내부 약관, 동의 상태, keyboard/focus contract
+- command: Kiro independent full/delta review
+- PASS / FAIL / UNVERIFIED: PASS — P0/P1/P2 0
+- what it actually proves: 실제 diff/call path/test 독립 코드 검토; physical-device 증거는 아님
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: patch whitespace integrity
+
+#### REVIEW IMPACT
+- FULL: Partner Briefing code는 Android P2와 Story P1 closure 후 fresh independent review PASS.
+- evidence-only 원장·보고서 후속 변경은 runtime/security semantics를 바꾸지 않아 기존 code review를 stale하게 만들지 않음.
+
+#### BLOCKERS
+- code: 없음
+- environment: Xcode 27 beta 경로 미탐지; physical iPhone Foundation Models와 physical Samsung/AICore 미검증
+- external/manual: App Store signing/Archive/TestFlight, 실제 Apple OAuth, remote Supabase/Vercel exact production 상태 미검증
+
+#### STOPPED AT
+- exact completed boundary: 로컬 코드·simulator·Android assembly·브라우저 검증과 독립 리뷰 완료, 기능별 로컬 커밋 분리 완료; merge 직전 정지
+
+#### REMAINING
+- origin/master 기준 clean integration과 재검증
+- physical iPhone/Android 실제 계정·오프라인·cancel·model unavailable 사용자 경로
+- App Store signing/Archive/TestFlight와 remote 환경 점검
+
+#### NEXT ACTION
+- next owner: 통합 owner + physical-device release validator
+- tool/model: Kiro High 구현 검증, 중요한 보안·출시 최종 판정만 Max/Ultra
+- 기준 SHA: `4f5d74d` code HEAD
+- exact next task: 세 로컬 feature branch를 clean origin/master integration branch에 병합하기 전 diff 계획을 제시하고 승인받은 뒤 통합·전체 재검증
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: merge 승인, integration diff 검토, physical-device 미검증을 App Store READY로 오표기하지 않을 것
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-29 · 원본 1개짜리 하루의 읽던 위치 보존 — StoryViewer 카드 identity
+
+#### PLAN POSITION
+- Phase: Partner Briefing post-audit remediation
+- Workstream: Terra delta review에 남은 P1 1건만
+- Previous Gate: Terra delta review → 단일 원본 위치 이동 P1
+- This Gate: Terra delta 재검토 대기
+
+#### DIRECTION CHECK
+- Product source checked: NOT RE-READ — 결함 수정
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `StoryViewer.tsx`·`StoryRoute.tsx`·`storyProjection.ts` 실제 경로
+- Current-state checked: branch·HEAD·origin/master·status 44건 preflight 일치 확인
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Opus 5 (1M), effort high / Role: 좁은 범위 구현자
+- Branch: `codex/partner-briefing` / Base `b7d59ac`
+- Old HEAD / New HEAD: `15a7a79` → `15a7a79` (**커밋하지 않음**)
+
+#### CHANGED / REVIEWED
+
+**P1 — 원본이 정확히 1개일 때 보던 카드가 밀린다**
+- 재현: 기존 route 테스트 harness로 6건의 실패 테스트를 먼저 작성해 **실제로 실패시켰다**.
+- 근본 원인: 표지는 `readable.length > 1`일 때만 붙는다. 그래서 원본이 하나면 브리핑 유무로
+  목록 길이 자체가 달라진다 — 없을 때 `[원본, 닫는 장]`, 있을 때 `[브리핑, 원본, 닫는 장]`.
+  `StoryViewer`가 숫자 index만 들고 있어, 앞에 한 장이 끼어드는 순간 index 0의 원본이
+  브리핑으로, index 1의 닫는 장이 원본으로 밀렸다. 브리핑이 사라질 때는 반대로 밀린다.
+- 수정(`StoryViewer.tsx` **한 파일**): 뷰어가 기억하는 것을 "몇 번째"에서 "무엇"으로 바꿨다.
+  `itemKey`가 카드마다 안정적인 identity를 준다 — briefing / cover / `moment:<recordId>` /
+  `missing:<recordId>` / closing. 상태는 `activeKey`이고 index는 매 렌더에서 파생된다.
+  `initialIndex`는 여는 자리를 정할 때만 쓰인다.
+- 보던 카드가 **정말로** 사라진 경우에만 마지막 유효 위치로 clamp해 내려앉고, 그 자리의
+  카드를 새 기준으로 삼는다. clamp가 항상 유효 범위를 돌려주므로 축소 후 빈 화면이 되는
+  경로가 없다.
+- 단일 원본에 억지로 표지를 만들어 증상을 가리지 않았다. 근본 원인은 identity 보존이다.
+- remount key는 이전 phase에서 이미 briefing을 빼 두었고 이번에 건드리지 않았다.
+
+#### EXPLICITLY NOT CHANGED
+- PartnerDay 상태머신·CONFIRMED 의미, E2EE/auth/crypto, DB/migration, native provider,
+  briefing pipeline: 변경 없음
+- `StoryRoute.tsx`·`storyProjection.ts`·`usePartnerBriefing.ts`: 읽기만 하고 수정하지 않음
+- 새 dependency·새 공통 추상화 없음. production 변경은 `StoryViewer.tsx` 한 파일
+
+#### VERIFICATION
+- 재현: 새 테스트 6건이 수정 전 **6 failed** → 수정 후 전부 PASS
+- Story focused — **PASS (6 files / 134)**
+- Story + Partner Briefing + Card focused — **PASS (19 files / 610)**
+- `npm run test` — **PASS (281 files / 4324)** (직전 4318)
+- `npm run typecheck` — **PASS**
+- 변경 파일 대상 ESLint(`StoryViewer.tsx`, `storyRoutes.test.tsx`) — **PASS**, 전체
+  `npm run lint` — **PASS**
+- `npm run build` — **PASS** (eager `index-*.js` 437,893 B, 변동 없음)
+- `git diff --check` — **PASS (clean)** · `git diff`·`git status` 직접 검토함
+- **mutation 검증**: identity 조회를 버리고 숫자 위치만 쓰도록 되돌리면 **13 fail**.
+  restore 후 전부 PASS.
+- 실행하지 않은 것: native 빌드(이번 변경은 TSX 한 파일이라 native 입력이 아니다),
+  `verify:native`, 실기기.
+
+#### REVIEW IMPACT
+- DELTA. Terra의 delta 재검토 필요. 구현자가 스스로 승인하지 않는다.
+
+#### BLOCKERS
+- code: 없음 / environment: 실기기 미보유 / external: Terra High delta review
+
+#### STOPPED AT
+- exact completed boundary: P1 수정·검증·문서화. commit 직전 중지.
+
+#### REMAINING
+- not completed: commit/push/PR 없음
+- not completed: 실기기에서 단일 원본 하루의 전환 확인
+
+#### NEXT ACTION
+- next owner: Terra High / 기준 SHA: `15a7a79` + working tree
+- exact next task: delta review
+
+#### DO NOT ADVANCE UNTIL
+- Terra High delta review 통과 전 commit·PR·merge 금지
+
+#### PRODUCTION
+- NOT APPLIED.
+
+### 2026-08-29 · Partner Briefing 최종 blocker 종결 — Story fallback·공통 native capacity 계약·Gate D 문서 정합성
+
+#### PLAN POSITION
+- Phase: Partner Briefing post-audit remediation (최종)
+- Workstream: Terra 전체 diff 재검토에서 남은 P1 1건 + P2 2건
+- Previous Gate: Terra 전체 diff 재검토 → BLOCKED
+- This Gate: Terra 전체 working-tree 재검토 대기
+
+#### DIRECTION CHECK
+- Product source checked: NOT RE-READ — 결함 수정이며 제품 방향을 만들지 않는다
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `StoryRoute.tsx`·`StoryViewer.tsx`·`storyProjection.ts`·
+  `usePartnerBriefing.ts` 실제 호출 경로, 두 native parser의 구조 한도 강제 지점
+- Current-state checked: live branch/HEAD/origin·status 41건 확인 후 착수
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Opus 5 (1M), effort high / Role: write-capable Worker
+- Branch: `codex/partner-briefing` / Base `b7d59ac`
+- Old HEAD / New HEAD: `15a7a79` → `15a7a79` (**커밋하지 않음**)
+
+#### CHANGED / REVIEWED
+
+**P1 — Story fallback과 읽기 위치 보존** (`StoryRoute.tsx`, `storyRoutes.test.tsx`)
+- 재현: flag ON + `partnerUserId` 미확정 → 브리핑도 목차도 없이 원본 카드만 남는다.
+- 근본 원인: `withCover`/`showAllTodayCoverLines`가 **`partnerBriefingEnabled`** 를 봤다.
+  브리핑 부재는 예외가 아니라 정상 경로에 있다(identity 미확정, 시각 정규화 실패
+  `unavailable`, `empty`).
+- 수정: 두 조건을 **`!briefing`** 으로 바꿔 실제 브리핑이 있을 때만 목차가 물러난다.
+  카드 목록은 표지일 때 `[표지, ...moment, closing]`, 브리핑일 때
+  `[브리핑, ...moment, closing]` 으로 **길이와 moment/closing index가 동일**하다.
+- remount key에서 `briefing ? 'briefing' : 'raw'` 를 제거했다. 늦게 도착해도 StoryViewer가
+  다시 마운트되지 않아 읽던 자리가 유지된다. `focusRecordId` 변경 시에는 그대로 remount.
+- dailySummary refinement는 이미 `enabled: !partnerBriefingEnabled` 라 두 AI 경로가 동시에
+  돌지 않는다(변경 없음).
+- 새 상태관리 abstraction이나 store 변경 없음.
+
+**P2 — 공통 native capacity 계약** (`chunk.ts`, `pipeline.ts`, `provider.ts`, 두 native bridge, 대응 test)
+- 재현: 문장 33개로 쪼개지는 기록 1건 → `buildBriefingExtractCandidates` 33개 →
+  `canItemsFitInEnvelope` **true** → native 한도 32 → 요청 전체 `bad_request` → 지원 기기에서
+  불필요한 deterministic fallback.
+- `BriefingProviderEnvelope`에 `maxItems`·`maxCandidatesPerItem`을 추가했다. strict allowlist와
+  safe-integer 범위 검증 유지. 두 native와 fake provider가 같은 필드를 광고한다(64 / 32).
+- `canItemsFitInEnvelope`가 native 호출 전에 검증한다: items 비어있지 않음, `<= maxItems`,
+  각 item candidates 비어있지 않음·`<= maxCandidatesPerItem`, itemOrdinal/candidateOrdinal
+  dense 순차, 공백 candidate 거부 — 기존 byte·response reserve·aggregate grapheme 유지.
+- **자르지 않는다.** 32개만 보내면 그것은 더 이상 정확한 원본 집합이 아니다. 해당 source는
+  deterministic 경로로 가고 최종 union에 그대로 남는다.
+- JS는 runtime capability를 따르므로 iOS/Android가 다른 값을 줘도 그대로 동작한다.
+- capability payload에는 용량 숫자만 있고 id/date/time/URL이 없음을 테스트로 고정했다.
+
+**P2 — Gate D 문서 정합성** (`docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `onDeviceBriefingBridge.test.ts`)
+- "Gate D does not preselect a concrete Android GenAI SDK" 문장을 제거하고 Gate D를 **COMPLETE**
+  로 기록했다. 선택: `com.google.mlkit:genai-prompt:1.0.0-beta2`.
+- 선택 근거를 표로 남겼다: structured output, ordinal provenance, offline 실행, cancellation,
+  deterministic fallback, runtime capability detection. server inference 금지, AI 결과 미영속.
+- API 26 gate와 API 23–25 deterministic fallback, `MlKitInitProvider` process-start 로딩은
+  위 Native Platform 절이 소유한다(링크만).
+- **실물 Android 미검증**을 명시적으로 남겼다. SDK 선택이 device gate를 닫지 않는다.
+- 새 test 파일 없이 기존 bridge test에 문서 일관성 검사 3건을 추가했다. gradle이 실제로 푸는
+  artifact 좌표·버전과 문서가 일치하는지까지 본다.
+
+#### EXPLICITLY NOT CHANGED
+- PartnerDay 상태머신·CONFIRMED 의미, E2EE/auth/crypto, DB/migration/schema: 변경 없음
+- UI 재설계·legacy dailySummary 삭제·새 dependency·server AI·AI 영속 저장: 없음
+- Production: 변경 없음
+
+#### VERIFICATION
+- Partner Briefing + Story + Card focused — **PASS (19 files / 604)**
+- `npm run test` — **PASS (281 files / 4318)** (직전 4294)
+- `npm run typecheck` · `npm run lint` — **PASS**
+- `npm run build` — **PASS** (eager `index-*.js` 437,893 B, 변동 없음)
+- `npm run verify:native` — **PASS (109)** · `nativeConfig` 재생성 APK 대상 **PASS (69)**
+- `git diff --check` — **PASS (clean)**
+- Android: 모듈명 확인 후 `:gomsinlog-capacitor-on-device-briefing:compileDebugKotlin`
+  `:app:assembleDebug` `:app:testDebugUnitTest` **`--rerun-tasks`** —
+  **BUILD SUCCESSFUL, 157/157 executed** (up-to-date 아님), JVM 8 tests 0 failures,
+  APK 16,612,952 bytes 재생성. Kotlin capability 변경이 실제로 컴파일됐다.
+- iOS: Xcode 26.6 (17F113) 확인 후 `cap sync ios` + 무서명 시뮬레이터 빌드 —
+  **`** BUILD SUCCEEDED **`**. 시뮬레이터 빌드는 Foundation Models 실동작 검증이 아니다.
+- **mutation 검증**: cover를 flag 기준으로 되돌림 → 4 fail · key에 briefing 복귀 → 2 fail ·
+  `maxCandidatesPerItem` 검사 제거 → 4 fail · `maxItems` 검사 제거 → 2 fail ·
+  itemOrdinal 순차성 제거 → 1 fail. restore 후 전부 PASS.
+
+#### REVIEW IMPACT
+- DELTA. 누적 diff 전체를 Terra가 다시 봐야 한다. 구현자가 스스로 승인하지 않는다.
+
+#### BLOCKERS
+- code: 없음 / environment: 실물 iPhone·Android 미보유
+- external/manual: Terra High 전체 재검토
+
+#### STOPPED AT
+- exact completed boundary: P1 1건 + P2 2건 구현·검증·문서화. commit 직전 중지.
+
+#### REMAINING
+- not completed: commit/push/PR 없음
+- not completed: 실물 기기에서 브리핑 fallback·capacity 한도 실측
+
+#### NEXT ACTION
+- next owner: Terra High / 기준 SHA: `15a7a79` + working tree
+- exact next task: 전체 working-tree diff 독립 재검토
+
+#### DO NOT ADVANCE UNTIL
+- Terra High 재검토 통과 전 commit·PR·merge 금지
+
+#### PRODUCTION
+- NOT APPLIED.
+
+### 2026-08-29 · Terra P2 종결 — aggregate grapheme budget·malformed itemOrdinal·chronological runs·iOS prompt overhead
+
+#### PLAN POSITION
+- Phase: Partner Briefing post-audit remediation
+- Workstream: Terra 전체 diff 검토에서 나온 P2 4건만 최소 범위 수정
+- Previous Gate: Terra 전체 diff 검토 (P1 remediation 이후)
+- This Gate: 동일 working-tree diff 재검토 대기
+
+#### DIRECTION CHECK
+- Product source checked: NOT RE-READ — 결함 수정, 제품 방향 변경 없음
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: 두 native parser(`OnDeviceBriefingPlugin.swift`/`.kt`)의
+  grapheme 누적 의미론을 직접 읽고 JS와 일치시켰다
+- Current-state checked: live HEAD `15a7a79`, dirty 41건
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Opus 5 (1M), effort high / Role: write-capable Worker
+- Branch: `codex/partner-briefing`, worktree `곰신로그-partner-briefing`
+- Old HEAD / New HEAD: `15a7a79` → `15a7a79` (**커밋하지 않음**)
+
+#### CHANGED / REVIEWED
+
+**P2-1 — aggregate grapheme budget** (`pipeline.ts`, `pipeline.test.ts`)
+- `canItemsFitInEnvelope`가 byte만 증명하고 `maxInputTextGraphemes`를 전혀 보지 않았다.
+  두 native parser는 **요청 전체**의 모든 candidate text grapheme을 하나의 running total로
+  더해 초과 즉시 요청 전체를 거부한다(iOS `totalGraphemes += text.count`, Android
+  `engine.countGraphemes`). 그래서 batcher는 byte-legal·grapheme-illegal 배치를 만들었고
+  native가 통째로 거부해 조용히 deterministic으로 떨어졌다.
+- JS에 동일 의미의 누적 검사를 추가했다. `Intl.Segmenter`가 없어 grapheme을 셀 수 없으면
+  **문자열을 자르지 않고** `false`를 반환해 기존 deterministic 경로로 fail closed한다.
+- 부수 발견: malformed item(`candidates` 없음)이 response-budget 단계의
+  `item.candidates.length`에서 **TypeError를 던지고 있었다.** 구조 검증을 함수 맨 앞으로
+  올려 true/false 계약을 지키게 했다.
+
+**P2-2 — malformed itemOrdinal** (`verify.ts`, `verify.test.ts`, `pipeline.test.ts`)
+- 범위 검사가 `itemOrd !== currentExpectedItemOrdinal` 분기 **안에** 있어서, 기대값과
+  같아진 out-of-range ordinal은 검사를 건너뛰고 `requestedItems[itemOrd].candidates`에서
+  TypeError를 던졌다. 요청 2건에 choice 3건을 주면 재현된다.
+- 범위 검사를 인덱싱 **전으로** 올려 `unknown_item` bounded rejection으로 처리한다.
+  in-range 재정렬은 그대로 `reordered_choices`.
+- pipeline의 batch 루프에는 try/catch가 없어 이 throw가 **run 전체**를 죽였다. 정상 검증된
+  sibling batch가 계속 쓰이는지 pipeline 레벨 테스트로 고정했다.
+
+**P2-3 — chronological contiguous runs** (`fallback.ts`, `pipeline.ts`, `PartnerBriefingCard.tsx`, 대응 test)
+- 하루의 section을 period로 keying한 Map이 같은 period를 전부 한 entry로 합쳤다. `night`는
+  자정 양쪽(00:00–04:59, 22:00–23:59)이라 00:30·09:00·22:30인 하루가
+  night(00:30+22:30) → morning(09:00) 순으로 렌더됐다. 22:30 기록이 8시간 전 09:00 기록
+  **위에**, 전날 밤 기록과 **같은 section에** 붙었다.
+- `groupEventsIntoChronologicalRuns`를 추가해 period가 **바뀔 때만** run을 끊는다. 세 곳에
+  적용: deterministic fallback section, pipeline display section, pipeline batching.
+  batching까지 고친 이유는 `${day}_${period}` key가 자정 양쪽을 한 배치로 합쳐 group이
+  00:30과 22:30을 이어붙일 수 있었기 때문이다.
+- `BriefingPeriod` union과 시간 경계는 건드리지 않았다.
+- 이제 하루에 같은 period section이 둘 이상 생길 수 있어 `PartnerBriefingCard`의
+  `key={section.period}`가 **중복 React key**가 된다. `sectionIdx`를 붙였다. exact-original
+  `textId`는 이미 `sectionIdx`를 포함하고 있어 수정 불필요했다.
+
+**P2-4 — iOS prompt overhead** (`OnDeviceBriefing.swift`, `onDeviceBriefingBridge.test.ts`)
+- 광고값은 리터럴 256인데 실제 static prompt는 **295 bytes**(instructions 283 — en dash가
+  3바이트 — + "Items JSON:\n" 12). JS batcher가 이 값을 빼서 payload 여유를 계산하므로
+  39바이트만큼 과대 적재했다.
+- `promptItemsPrefix` 상수를 도입해 prompt 생성과 예산 계산이 **같은 두 문자열**을 쓰게 하고,
+  `promptOverheadUtf8Bytes`를 그 둘의 UTF-8 크기에서 계산해 64바이트 단위로 **올림**한다(320).
+- Android contract와 TypeScript provider contract는 건드리지 않았다.
+
+#### EXPLICITLY NOT CHANGED
+- DB/schema/migration: 변경 없음 (`supabase/` 변경 0건)
+- E2EE·PartnerDay·CONFIRMED 의미론: 변경 없음
+- Production: 변경 없음. commit/push/merge/deploy 없음
+- 무관한 리팩터링·UI 재설계 없음
+
+#### VERIFICATION
+- Partner Briefing focused (`src/lib/partnerBriefing/` + card + story) — **PASS (19 files / 580)**
+- `npm run test` — **PASS (281 files / 4294)** (직전 4274)
+- `npm run typecheck` · `npm run lint` — **PASS**
+- `npm run build` — **PASS** (eager `index-*.js` 437,893 B, 변동 없음)
+- `npm run verify:native` — **PASS (109)**
+- `git diff --check` — **PASS (clean)**
+- iOS: `npx cap sync ios` + 무서명 시뮬레이터 빌드 — **`** BUILD SUCCEEDED **`**
+- iOS 산술 실증: 동일 상수/식을 `swift`로 직접 실행 — instructions 283 · prefix 12 ·
+  static 295 · advertised **320** · covers=true. 컴파일만이 아니라 값 자체를 확인했다.
+- Android: `compileDebugKotlin` + `assembleDebug` + `testDebugUnitTest` — **BUILD SUCCESSFUL,
+  8 tests 0 failures**, 단 **157 tasks 전부 up-to-date**. 이번 phase가 Android 입력을
+  바꾸지 않았으므로 정상이며, 새로 컴파일된 증거는 아니다.
+- **mutation 검증**: aggregate 검사 제거 → 4 fail · per-item으로 리셋 → 2 fail ·
+  uncountable을 0으로 취급 → 1 fail · verify 범위검사 원위치 복귀 → verify 2 fail +
+  pipeline 1 fail(TypeError 탈출) · run 절단을 period Map merge로 복귀 → 4 fail ·
+  React key를 `section.period`로 복귀 → 1 fail · prompt overhead를 리터럴 256으로 복귀 →
+  1 fail · prompt builder가 리터럴 중복 → 1 fail. restore 후 전부 PASS.
+
+#### REVIEW IMPACT
+- DELTA. 누적 diff이므로 Terra는 **동일 working-tree diff 전체**를 다시 봐야 한다.
+  구현자가 스스로 최종 승인하지 않는다.
+
+#### BLOCKERS
+- code: 없음
+- environment: 실물 iPhone/Android 런타임 미확인
+- external/manual: Terra High 재검토
+
+#### STOPPED AT
+- exact completed boundary: P2 4건 구현 + 전체 검증 + 문서화. commit 직전 중지.
+
+#### REMAINING
+- not completed: commit/push/PR 없음
+- not completed: 실기기에서 grapheme 한도·prompt overhead 실측 확인
+- not completed: 자정 걸침 하루를 실제 앱 화면에서 눈으로 확인
+
+#### NEXT ACTION
+- next owner: Terra High / 기준 SHA: `15a7a79` + working tree
+- exact next task: 동일 code diff 재검토
+
+#### DO NOT ADVANCE UNTIL
+- Terra High 재검토 통과 전 commit·PR·merge 금지
+
+#### PRODUCTION
+- NOT APPLIED.
+
+### 2026-08-29 · Terra High BLOCKED 해소 — focus containment·label semantics·manifest skip API·TIME fraction 6자리
+
+#### PLAN POSITION
+- Phase: Partner Briefing post-audit remediation
+- Workstream: Terra High 독립 리뷰 BLOCKED 지적 4건(P1 2 · P2 2)만 수정
+- Step: 직전 세션(CONFIRMED Phase 1–4) 결과물에 대한 remediation
+- Previous Gate: Terra High 독립 리뷰 → **BLOCKED**
+- This Gate: remediation 완료 후 동일 diff 재검토 대기
+
+#### DIRECTION CHECK
+- Product source checked: NOT RE-READ — 결함 수정이며 제품 방향을 만들지 않는다
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `src/components/cycle/CycleSheet.tsx` (기존 focus-cycle 구현 재사용)
+- Current-state checked: live HEAD `15a7a79`, dirty 41건 확인
+- Latest relevant Work Log checked: 직전 CONFIRMED Phase 1–4 항목
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code / Model: Opus 5 (1M), effort high / Role: write-capable Worker
+- Branch: `codex/partner-briefing`, worktree `곰신로그-partner-briefing`
+- Old HEAD / New HEAD: `15a7a79` → `15a7a79` (**커밋하지 않음**)
+
+#### CHANGED / REVIEWED
+
+**P1 — Legal modal focus containment** (`src/pages/LegalPage.tsx`, `onboardingLegalDocs.test.tsx`)
+- `LegalDocumentSheet`에 focus trap 추가. **새 dependency 없음** — `CycleSheet.tsx`의 기존
+  구현(같은 key 처리, 같은 focusable selector)을 그대로 재사용했다.
+- CycleSheet 대비 한 가지 추가: focus가 panel 밖에 있을 때 되끌어온다. 긴 산문 문서라
+  문단을 탭하면 `body`로 blur되고, 그 다음 Tab이 배경의 체크박스·로그인 버튼으로 나가기
+  때문에 실제로 도달 가능한 경로다.
+- Escape close, open 시 close focus, close 후 정확한 trigger로 focus 복귀는 모두 유지.
+  focus 복귀는 기존대로 `OnboardingPage`의 trigger ref가 소유한다(이미 검증된 경로).
+- 공용 hook으로 추출하지 않았다: `CycleSheet.tsx` 재배선은 이번 phase 파일 목록 밖의
+  refactor다.
+
+**P2 — label 내부 interactive element 제거** (`src/pages/OnboardingPage.tsx`, 대응 test)
+- 동의 체크박스의 `<label>` 래퍼를 `<div>`로 바꾸고, 법률 문서 button 2개를 label의
+  **형제**로 분리했다. label은 버튼 사이의 텍스트 3조각(`htmlFor`)으로 남아 문장을 탭하면
+  여전히 체크박스가 토글된다.
+- 체크박스 accessible name은 `aria-label`로 문장 전체를 유지했다. label 조각만으로는
+  "[필수] 및 을 확인하고 동의합니다."로 읽힌다.
+- 이제 구조적으로 보장되므로 방어용 `preventDefault`/`stopPropagation`을 제거했다.
+  기존 주석("버튼은 interactive content라 label로 전달되지 않는다")은 spec 한 조항에
+  의존하는 설명이었고, 그 의존 자체를 없앤 것이 이번 수정이다.
+
+**P1 — merged manifest skip API** (`src/lib/nativeConfig.test.ts`)
+- runtime `ctx.skip()` → 선언 시점 `it.skipIf(NO_ARTIFACT)`. merged manifest 경로를
+  collection 시점에 1회 계산한다.
+- **정직하게 기록: Terra가 지적한 "verbose reporter에서 PASS처럼 집계된다"는 이 저장소의
+  Vitest 3.2.6에서 재현되지 않았다.** 최소 probe로 `ctx.skip()`과 `it.skipIf(true)`를 나란히
+  실행한 결과 둘 다 `↓`로 표시되고 `2 skipped`로 집계됐다. 그럼에도 지시대로 변경했고,
+  실제 이득은 따로 있다: `skipIf`는 test body에 진입조차 하지 않으므로 reporter/버전에
+  무관하게 안전하고, 본문 일부가 실행된 뒤 skip되는 상태가 생길 수 없다.
+
+**P2 — PostgreSQL fraction 최대 6자리** (`src/lib/partnerBriefing/normalize.ts`, 대응 test)
+- regex fraction을 `\d+` → `\d{1,6}`. PostgreSQL `time`은 microsecond 저장이라 7자리 이상은
+  이 parser가 읽으려는 컬럼이 만들 수 없는 값이다.
+- 허용 `.1`~`.123456`, 거부 `.`(빈 소수), `.1234567`, 기존 12자리 fixture, timezone suffix.
+  **절삭이 아니라 거부**임을 별도 테스트로 고정했다(`.1234567` → null).
+- hour/minute/second 범위 검증, same-instant tie + recordId 안정화, 초·소수초 정렬,
+  model payload, DB/DailyRecord 무변경, fail-closed 모두 유지.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics / DB·migration semantics / Production: 변경 없음
+- consent·sign-in 동작, 법률 문구, permission, entitlement key: 변경 없음
+- 새 기능·리팩터링·dependency 추가 없음
+- `CycleSheet.tsx`: 재사용만 하고 수정하지 않음
+
+#### VERIFICATION
+- `normalize.test.ts` — **PASS (81)** · `src/lib/partnerBriefing/` — **PASS (12 files / 426)**
+- `onboardingLegalDocs.test.tsx` — **PASS (20)** · `nativeConfig.test.ts` — **PASS (69)**
+- `npm run test` — **PASS (281 files / 4274)** (직전 4263)
+- `npm run typecheck` · `npm run lint` — **PASS**
+- `npm run build` — **PASS** (eager `index-*.js` 437,893 B, 변동 없음)
+- `npm run verify:native` — **PASS (109)** · `npm run test:e2e:partner-briefing` — **PASS 2/2**
+- `git diff --check` — **PASS (clean)**
+- `./gradlew :app:testDebugUnitTest --rerun-tasks` — **PASS (8 tests, 0 failures),
+  112/112 tasks executed** — 캐시가 아닌 실제 재컴파일·재실행
+- **manifest skip 검증 A/B**: artifact 있을 때 exact 7 permissions + `MlKitInitProvider`
+  검증 PASS. artifact를 임시 경로로 옮기면 verbose reporter가 두 테스트를 `↓ SKIPPED`로
+  집계(`67 passed | 2 skipped`). `android/app/build`는 trap/finally로 복구했고
+  **1273개 파일 전부 원위치 확인**, APK·merged manifest 모두 보존.
+- **mutation 검증**: focus trap 전체 무력화 → 4 fail · 밖→안 되끌기 제거 → 1 fail ·
+  shift 분기 제거 → 3 fail · button을 label 안으로 되돌림 → 2 fail ·
+  fraction `\d+`로 복귀 → 4 fail · 절삭형 cap(`\d{1,6}\d*`) → 4 fail.
+  restore 후 전부 PASS.
+- what it actually proves: JS/TS 계약과 Android JVM 단위 테스트. **실기기 런타임은 증명하지 않는다.**
+
+#### REVIEW IMPACT
+- DELTA. 직전 세션 diff 위에 4건을 덧댄 것이므로 Terra는 **동일 working-tree diff 전체**를
+  다시 봐야 한다. 구현자가 스스로 최종 승인하지 않는다.
+
+#### BLOCKERS
+- code: 없음
+- environment: API 25 image·실물 Android 없음
+- external/manual: Terra High 재검토
+
+#### STOPPED AT
+- exact completed boundary: 지시된 P1 2건·P2 2건 구현 + 전체 검증 + 문서화. commit 직전 중지.
+
+#### REMAINING
+- not completed: commit/push/PR 없음. 다른 RAISED·REJECTED finding 미수정(의도적)
+- not completed: 법률 시트 focus 동작의 실기기(iPhone VoiceOver) 확인 — jsdom 레벨만 검증됨
+
+#### NEXT ACTION
+- next owner: Terra High
+- 기준 SHA: `15a7a79` + working tree
+- exact next task: 동일 code diff 재검토
+
+#### DO NOT ADVANCE UNTIL
+- Terra High 재검토 통과 전 commit·PR·merge 금지
+
+#### PRODUCTION
+- NOT APPLIED.
+
+### 2026-08-29 · CONFIRMED Phase 1–4 구현 — PostgreSQL TIME 정규화·온보딩 법률 문서 in-app 시트·Android/Keychain 문서 정확성
+
+#### PLAN POSITION
+- Phase: Partner Briefing post-audit remediation (whole-app optimization)
+- Workstream: XHigh adversarial triage에서 CONFIRMED된 finding만 구현
+- Step: Phase 1 (TIME) → Phase 2 (legal) → Phase 3 (Android doc) → Phase 4 (작은 정확성 수정)
+- Previous Gate: GATE 0 read-only audit (`control-tower/reports/claude/2026-08-29_whole-app-release-optimization-gate0_opus.md`)
+- This Gate: CONFIRMED fix 구현 + 독립 검토 대기
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md` NOT RE-READ — 이번 작업은 기존 화면의 결함 수정이며 새 제품 방향을 만들지 않는다
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE (고객·BM·가격·시장 영향 없음)
+- Engineering source checked: `docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `AGENTS.md`
+- Current-state checked: live `git status` / `git rev-parse HEAD` / worktree 확인
+- Latest relevant Work Log checked: 2026-08-29 Partner Briefing Architecture Blocker 항목
+- MASTER PLAN version / 기준일: 2026-08-29 GATE 0 보고서
+- Does this task conflict with canonical direction? NO
+
+#### OWNERSHIP
+- Tool: Claude Code
+- Model: Opus 5 (1M context), effort high
+- Role: write-capable Worker (구현). 보안 최종 승인은 내리지 않는다
+- PR: 없음 (commit/push 금지)
+- Branch: `codex/partner-briefing` (worktree `/Users/han-yejun/Desktop/곰신로그-partner-briefing`)
+- Base SHA: `b7d59ac` (origin/master)
+- Old HEAD: `15a7a79`
+- New/Reviewed HEAD: `15a7a79` — **커밋하지 않았다. 변경은 전부 working tree에 있다**
+
+#### CHANGED / REVIEWED
+
+**P0 — PostgreSQL TIME canonicalization**
+- file: `src/lib/partnerBriefing/normalize.ts`, `normalize.test.ts`
+- function: `parseBriefingTime` (신규), `isValidTimeString`, `compareBriefingTime` (신규), `getBriefingPeriod`, `normalizePartnerBriefingCorpus`
+- what changed: `HH:mm`만 통과시키던 시각 검증기가 `HH:mm:ss`, `HH:mm:ss.fraction`도 받는다.
+  시·분·초 범위는 엄격히 유지하고 `9:00`, `24:00:00`, `12:60:00`, `12:00:60`, timezone suffix,
+  빈 fraction은 계속 거부한다. period 계산은 canonical `HH:mm`만 읽고, 정렬은 초와 fractional
+  precision을 보존하되 `09:07`과 `09:07:00`은 같은 시각으로 보고 recordId로 안정화한다.
+- why: `time` 컬럼을 PostgREST로 읽으면 `HH:mm:ss`가 그대로 온다. 그 값 하나로 corpus 전체가
+  fail-closed 되어, 클라이언트가 `HH:mm`으로 정규화하기 전에 쓰인 기록을 가진 커플은 브리핑이
+  통째로 죽었다. DailyRecord와 DB 값은 건드리지 않으며, 실제 시각은 모델 payload에 들어가지 않는다.
+
+**P1 — 온보딩 법률 문서 in-app 전체화면 시트**
+- file: `src/pages/OnboardingPage.tsx`, `src/pages/LegalPage.tsx`, `src/lib/legalDocs.ts` (신규),
+  `src/pages/onboardingLegalDocs.test.tsx` (신규), `src/pages/LegalPage.test.tsx`
+- what changed: `target="_blank"` 링크 2개를 제거하고 앱 내부 dialog로 여는 버튼으로 바꿨다.
+  `LegalDocumentBody`를 추출해 공개 `/legal/:doc` route와 시트가 **같은 원문 하나**를 렌더한다.
+  법률 문구는 복제하지 않았다. 닫기 버튼 44px, safe-area, 시트 내부 스크롤, `aria-modal`,
+  Escape, 트리거로 focus 복귀를 갖췄다.
+- why: 앱은 `capacitor://localhost`(iOS)·`https://localhost`(Android)에서 서빙된다.
+  `target="_blank"`는 그 origin을 시스템 브라우저에 넘겨 Safari가 `https://localhost` 연결
+  실패를 보여줬다 — 동의해야 하는 문서 자체에 도달할 수 없었고, 사용자는 온보딩 밖으로 나갔다.
+  route 이동이 아니라 오버레이라서 `ageConfirmed`/`legalAccepted`가 유지된다.
+  **문서를 여는 것은 동의가 아니다**: 시트에는 동의 컨트롤이 없고 체크박스를 건드리지 않는다.
+  로그인/OAuth 코드는 수정하지 않았다.
+
+**P2 — Android architecture 문서 정확성**
+- file: `docs/PARTNER_BRIEFING_ARCHITECTURE.md`
+- what changed: "without crashing or loading ML Kit classes" 문장을 제거했다. pre-26에서
+  차단되는 것은 **inference(runtime gate)**이고 **class loading은 아니다** — 병합된 manifest의
+  `MlKitInitProvider`가 모든 API level의 process start에 로딩된다. 검증 상태 표를 추가해
+  API 23/24 설치·시작·프로세스 생존 PASS, MlKitInitProvider 로딩 CONFIRMED, pre-26 inference
+  차단 CONFIRMED, JS deterministic fallback 도달 UNVERIFIED, API 25·실물 Samsung UNVERIFIED로
+  구분했다. manifest provider는 제거하지 않았고, 제거하지 않는 이유를 적었다.
+- why: 이전 문장의 후반부가 shipped manifest와 모순됐다.
+
+**P3 — DeviceKeys plugin singleton**
+- file: `src/crypto/keystore/index.ts`, `src/crypto/keystore/deviceKeysPluginSingleton.test.ts` (신규)
+- what changed: `registerPlugin('GomsinlogDeviceKeys')` 두 번 호출을 memoized accessor 하나로
+  통합해 `DeviceKeyPort`와 `LocalKeyPort`가 같은 native bridge 인스턴스를 쓴다.
+- why: 실물 iPhone 콘솔의 `Cannot register plugins twice.` 경고. crypto/key semantics,
+  native-unavailable fail-closed 계약, test seam, 포트별 memo는 그대로다.
+
+**P2 — Android permission 검증 정직성**
+- file: `src/lib/nativeConfig.test.ts`, `android/app/src/test/java/app/gomsinlog/NativeConfigTest.java`
+- what changed: source manifest 검사를 "앱 **자신이** 선언한 permission"으로 rescope하고
+  (`declaresOnlyThePermissionsTheCodeProves` → `declaresOnlyItsOwnPermissionsInTheSourceManifest`),
+  생성된 merged manifest를 읽는 블록을 추가했다. build artifact가 없으면 **PASS가 아니라
+  SKIP**으로 보고한다. 현재 library-merged 4건(WAKE_LOCK, c2dm RECEIVE,
+  DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION, aicore BIND_SERVICE)의 출처를 문서화했다.
+  permission 자체는 바꾸지 않았다.
+- why: 두 "독립 witness"가 같은 blind spot의 두 구현이었다. source manifest는 merger의
+  입력이지 shipping artifact가 아니고, APK는 7개를 싣는데 검사는 3개를 exact set으로 단언했다.
+
+**P2 — App.entitlements / Keychain 계약**
+- file: `ios/App/App/App.entitlements`, `docs/kiro/NATIVE_RELEASE_GUIDE.md`
+- what changed: "The app never touches the Keychain."를 실제 계약으로 교체했다 — Keychain 사용은
+  first-party device-keys plugin(`DeviceKeys.swift` Secure Enclave/software fallback,
+  `LocalKeys.swift` generic password)에 한정되고, 어느 call site도 `kSecAttrAccessGroup`을
+  설정하지 않아 앱 기본 access group을 쓴다. shared group을 선언하면 같은 entitlement를 가진
+  다른 번들이 device key를 읽게 되므로 추가하지 않는다. entitlement key는 추가·삭제하지 않았다.
+- why: 기존 문장이 `iosPrivacyManifest.test.ts`와 정면으로 모순됐고, E2EE device key가
+  어디 사는지를 가렸다. `NATIVE_RELEASE_GUIDE.md`의 Keychain 절이 같은 오류를 담고 있었고
+  entitlements 주석이 그 절을 가리키고 있어서 함께 고쳤다 (지시 범위 밖의 추가 수정 1건).
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음. key 생성·서명·derive·assurance 경로 무수정, plugin proxy만 공유
+- DB/migration semantics: 변경 없음. migration 추가·수정 없음, DailyRecord·DB 값 무수정
+- product semantics: 시각 디자인·법률 문구·permission·entitlement key·로그인/OAuth 무수정
+- Production: 무변경. commit/push/merge/deploy/Supabase mutation 없음
+- RAISED / REJECTED finding: 손대지 않음 (store.tsx foreground hydration, SharedProfile,
+  StoryRoute cover, e2ee runtime N+1, StoryViewer notch, night period wrap 등)
+
+#### VERIFICATION
+- command: `npx vitest run src/lib/partnerBriefing/normalize.test.ts` — **PASS (79 tests)**
+- command: `npx vitest run src/lib/partnerBriefing/` — **PASS (12 files / 424 tests)**
+- command: `npx vitest run src/crypto/keystore/ src/lib/nativeDeviceKeysBridge.test.ts` — **PASS (44 tests)**
+- command: `npx vitest run src/lib/nativeConfig.test.ts src/lib/iosPrivacyManifest.test.ts` — **PASS (80 tests)**
+- command: `npx vitest run src/pages/onboardingLegalDocs.test.tsx src/pages/LegalPage.test.tsx` — **PASS (20 tests)**
+- command: `npm run test` — **PASS (281 files / 4263 tests)**, baseline 279/4205
+- command: `npm run typecheck` — **PASS**
+- command: `npm run lint` — **PASS** (`--max-warnings 0`)
+- command: `npm run build` — **PASS**, eager `index-*.js` 437,893 B (baseline 437,978 B). 법률 원문은
+  `LegalPage-*.js` lazy chunk에 그대로 남아 startup에 실리지 않는다
+- command: `npm run verify:native` — **PASS (4 files / 109 tests)**, baseline 106
+- command: `npm run test:e2e:partner-briefing` — **PASS (2/2)**
+- command: `git diff --check` — **PASS (clean)**
+- command: `./gradlew :gomsinlog-capacitor-on-device-briefing:compileDebugKotlin :app:assembleDebug`
+  — **BUILD SUCCESSFUL**, 단 152 tasks 전부 up-to-date. **이번 변경이 Android 컴파일 입력을 바꾸지
+  않았다는 뜻이며, 새로 컴파일된 증거가 아니다**
+- command: `./gradlew :app:testDebugUnitTest` — **PASS (8 tests, 0 failures), 실제 재컴파일·재실행됨**
+  (`compileDebugUnitTestJavaWithJavac` 실행 확인). 이름을 바꾼 JVM permission test가 여기서 돈다
+- command: `npx cap sync ios` — PASS (6 plugins)
+- command: `xcodebuild -workspace App.xcworkspace -scheme App -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build`
+  — **`** BUILD SUCCEEDED **`**
+- what it actually proves: TypeScript/JS 레벨 계약과 두 native 프로젝트의 컴파일. **실물 기기에서의
+  런타임 동작은 증명하지 않는다.**
+
+- **mutation 검증 (테스트가 vacuous하지 않음을 확인):** 새 assertion을 일부러 깨서 실패하는지 봤다.
+  regex를 `HH:mm` 전용으로 되돌리면 23 fail, period를 raw time prefix slice로 되돌리면 1 fail,
+  `target="_blank"` anchor로 되돌리면 10 fail, 시트가 체크박스를 건드리면 1 fail, focus 복귀를
+  없애면 1 fail, `registerPlugin` 2회로 되돌리면 4 fail, native-without-plugin에서 web으로
+  downgrade하면 1 fail, merged permission 목록에서 1개를 빼면 1 fail, 시트가 첫 section만
+  렌더하면 4 fail. merged manifest를 감추면 **2 skipped**로 정직하게 보고된다.
+  - **정직하게 남기는 사실 2건**: (1) fraction 비교의 zero-padding은 trailing zero를 이미
+    stripping하므로 *증명 가능하게 동등한* mutant다 — 방어적으로 남겼을 뿐 테스트가 덮지 않는다.
+    (2) 유효한 시각에 한해 `time.slice(0,2)`와 canonical hour는 같은 값을 준다. 그래서 period
+    테스트는 **검증되지 않은 문자열**로만 두 구현을 구분한다.
+
+#### REVIEW IMPACT
+- DELTA: 기존 Partner Briefing review는 stale하지 않다 (dirty 변경 보존, HEAD 불변).
+  단 `normalize.ts`의 시각 계약과 `keystore/index.ts`의 plugin 획득 경로는 새로 검토가 필요하다.
+- security semantic delta: 의도상 NONE. **구현자가 스스로 보안 승인을 내리지 않는다.**
+
+#### BLOCKERS
+- code: 없음
+- environment: API 25 system image·실물 Android 기기 없음. Android emulator는 디스크로 여전히 제약
+- external/manual: Terra High의 현재 code diff 독립 검토 필요
+
+#### STOPPED AT
+- exact completed boundary: Phase 1–4 구현 + 전체 검증 통과 + 문서화 완료. **commit 직전 중지.**
+
+#### REMAINING
+- not completed: commit/push/PR 없음. RAISED·REJECTED finding 미수정 (의도적)
+- not completed: pre-26 JS deterministic fallback 실기기·에뮬레이터 확인, API 25, 실물 Samsung
+- not completed: in-app iPhone UX로 법률 시트를 실제로 열어본 확인 (jsdom 레벨만 검증됨)
+
+#### NEXT ACTION
+- next owner: Terra High (독립 검토), 이후 Control Tower
+- tool/model: Terra High
+- 기준 SHA: `15a7a79` + working tree
+- exact next task: 현재 code diff 독립 검토. 특히 (1) `normalize.ts` 시각 파싱·정렬 계약,
+  (2) 온보딩 시트가 로그인 gate를 우회할 수 없는지, (3) DeviceKeys plugin 공유가 account
+  isolation에 영향이 없는지
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: 독립 보안 검토 통과 전에는 commit·PR·merge 금지
+
+#### PRODUCTION
+- NOT APPLIED. Supabase·Vercel·Apple·TestFlight 무변경.
+
+### 2026-08-29 · Partner Briefing Architecture Blocker 해소 및 v2 Grouping Plan 계약 갱신
+
+#### PLAN POSITION
+- Phase: Partner Briefing post-audit remediation & architecture resolution
+- Workstream: privacy, v2 ordinal grouping compression, state isolation, native reliability
+- Step: Architecture block superseded with v2 grouping and on-device privacy contract; local validation and independent review complete
+- Previous Gate: Architecture block on model input contract
+- This Gate: local code CONDITIONAL PASS and Terra independent review PASS; physical-device and Android SDK gates remain UNVERIFIED
+
+#### DIRECTION CHECK
+- Product source checked: latest user-approved Partner Briefing requirements, `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: live worktree `/Users/han-yejun/Desktop/곰신로그-partner-briefing`, branch `codex/partner-briefing`, HEAD `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- Latest relevant Work Log checked: 2026-08-29 Partner Briefing P1/P2 재현 및 AI 입력 계약 architecture block
+- MASTER PLAN version / 기준일: Partner Briefing v2 Grouping Plan amendment / 2026-08-29
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: none. The prior architecture block is superseded: explicitly partner-shared general `DailyRecord.log` is processed strictly on-device on the partner device with zero DB migration/projection, while v2 ordinal grouping achieves multi-source compression with zero model-authored display text.
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator, bounded implementation workers, independent reviewer
+- Model: Gemini 3.7 Flash High (implementation), Terra High (independent review)
+- Role: P1/P2 remediation, verification, and independent regression review
+- PR: none
+- Branch: `codex/partner-briefing`
+- Base SHA: `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- Old HEAD: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- New HEAD / Reviewed HEAD: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2` plus uncommitted scoped diff
+
+#### CHANGED / REVIEWED
+- file: `docs/PARTNER_BRIEFING_ARCHITECTURE.md`
+- function/component/migration: architecture contract
+- what changed/reviewed: updated to v2 Grouping Plan (`UntrustedBriefingGroupPlan`, version 2). Documented zero-DB-migration privacy authority (partner-shared general log processed only on partner device via on-device AI), upstream exclusion of structured cycle/symptom/health fields, zero metadata leakage (no IDs/timestamps/paths/keys in AI payload), 2–4 item contiguous grouping compression with exact `parts` (`{ text, sourceRecordId }`), deterministic singleton fallback for long unfittable records, whole-run deadline, and 30/100/300 stress limits with 20-group progressive rendering.
+- why: align architecture contract with user-approved on-device privacy model and v2 code implementation.
+- file: `control-tower/reports/codex/2026-08-29_partner-briefing-p1-p2-remediation-architecture-block_codex.md`
+- function/component/migration: orchestrator audit report
+- what changed/reviewed: updated the superseding verdict to LOCAL CODE CONDITIONAL PASS — TERRA PASS; DEVICE/ANDROID ENVIRONMENT UNVERIFIED; MERGE HELD. Documented resolved privacy/compression boundaries, Story/native race fixes, exact validation evidence, and remaining device/release gates.
+- why: supersede stale blocker conclusion while maintaining strict truth about pending validation.
+- file: `docs/WORK_LOG.md`
+- function/component/migration: mandatory work ledger
+- what changed/reviewed: added superseding session entry detailing architecture resolution, v2 grouping mechanics, and exact current test verification.
+- why: satisfy repository governance and provide clear handoff ledger.
+- file: `src/features/story/StoryRoute.tsx`, `src/features/story/storyIdentityTransition.test.tsx`
+- function/component/migration: PartnerDay relationship identity isolation
+- what changed/reviewed: remounts the active Story flow when canonical viewer or couple identity changes; regression tests cover unlink and relink transitions.
+- why: prevent stale OUTSTANDING/briefing state from crossing relationship lifecycles without modifying PartnerDay checkpoint semantics.
+- file: `src/lib/partnerBriefing/**`, `src/components/widgets/PartnerBriefingCard.tsx`
+- function/component/migration: v2 grouping verifier, hierarchical pipeline, fallback, and progressive disclosure
+- what changed/reviewed: all eligible sources traverse bounded batches; verified 2–4 item contiguous groups compress multiple records while TypeScript retains exact per-part source IDs; failed batches remain deterministic; 20 groups render at a time without source loss.
+- why: provide actual multi-record compression rather than Top-N selection or decorative paraphrasing.
+- file: `packages/capacitor-on-device-briefing/ios/**`, `packages/capacitor-on-device-briefing/android/**`
+- function/component/migration: native strict payload validation and cancellation ownership
+- what changed/reviewed: iOS now retains bounded pre-registration cancellations inside the actor; Android registers its request `Deferred` before bridge launch and preserves API 23–25 startup safety through the API 26 runtime gate.
+- why: close late/pre-start cancellation races and keep deterministic fallback safe on unsupported devices.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: no database projection column or migration created; zero remote Supabase mutation
+- product semantics: no server AI, analytics content, persistent AI storage, or external content service; briefing viewing never writes CONFIRMED
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: `npx vitest run src/lib/partnerBriefing/onDeviceBriefingBridge.test.ts src/lib/partnerBriefing/nativeOnDeviceBriefing.test.ts src/lib/partnerBriefing/usePartnerBriefing.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 56 tests
+- what it actually proves: final iOS pre-start cancellation regression, native adapter, timeout/cancellation, and hook stale-result behavior pass.
+- command: `npm run test`
+- PASS / FAIL / UNVERIFIED: PASS — 279 files / 4,205 tests
+- what it actually proves: the complete Vitest suite passes after the remediation.
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: whole project TypeScript compilation succeeds with zero errors.
+- command: `npm run lint`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: repository ESLint checks pass.
+- command: `set -a; source '/Users/han-yejun/Desktop/곰신로그/.env'; set +a; npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — Vite built 2,179 modules
+- what it actually proves: the web production bundle compiles with the locally available build environment.
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 106 tests
+- what it actually proves: native bridge source-contract and adapter suites pass.
+- command: `npm run test:e2e:partner-briefing`
+- PASS / FAIL / UNVERIFIED: PASS — 2/2 browser scenarios
+- what it actually proves: Korean and English 390x844 flows render, expand, preserve 44px controls, and navigate to the exact first record under deterministic browser fallback.
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 65 migrations, 420 assertions
+- what it actually proves: all repository migrations and Phase 0 database assertions pass in a throwaway local database; it does not prove remote Supabase state.
+- command: `npx cap sync ios`
+- PASS / FAIL / UNVERIFIED: PASS — 6 plugins synchronized
+- what it actually proves: the current web/native package graph synchronizes into the local iOS project.
+- command: `xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build`
+- PASS / FAIL / UNVERIFIED: PASS — `BUILD SUCCEEDED`
+- what it actually proves: the updated Swift provider and app compile for an unsigned iOS Simulator build; it does not prove Foundation Models runtime behavior on a physical iPhone.
+- command: `./gradlew :gomsinlog-capacitor-on-device-briefing:compileDebugKotlin :app:assembleDebug --stacktrace`
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — Android SDK location not found before Kotlin compilation
+- what it actually proves: this host is missing a configured Android SDK; it is not evidence of an Android source compilation failure or success.
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: patch whitespace and formatting integrity.
+- command: Terra High independent diff/code/test/call-path review, including post-fix iOS cancellation delta
+- PASS / FAIL / UNVERIFIED: PASS — P0 none, P1 none, P2 none
+- what it actually proves: the reviewer independently accepted the scoped code contracts after the initial iOS pre-registration cancellation P1 was fixed; physical-device behavior remains outside this proof.
+
+#### REVIEW IMPACT
+- FULL: Supersedes the previous architecture block and the review that found the iOS pre-registration cancellation race. Fresh Terra delta review is PASS on the current code diff; the only later edits refresh evidence-only documentation and do not change runtime or security semantics.
+
+#### BLOCKERS
+- code: none found by the completed local suite and Terra review
+- environment: Android SDK is not configured on this host; Android compile, API 23-25 emulator, and physical iOS/Android devices remain UNVERIFIED
+- external/manual: physical Foundation Models/Gemini runtime, offline behavior, model availability/download, Samsung capability, signing/TestFlight, and Production rollout remain UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: scoped P1/P2 implementation, full local web/iOS/DB validation, browser rendering, and Terra independent review complete; stopped before merge and device/Production gates.
+
+#### REMAINING
+- not completed: Android compile/API 23-25 verification because the SDK is absent; physical iPhone/Samsung runtime testing; signing/TestFlight; remote Supabase/Vercel/Apple configuration verification; commit/merge/deploy.
+
+#### NEXT ACTION
+- next owner: release/device verifier
+- tool/model: capable local runner plus physical iPhone/Samsung
+- 기준 SHA: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- exact next task: configure an Android SDK, compile the plugin/app, run API 23–25 startup/fallback checks, then verify on supported physical iPhone and Samsung devices before the merge decision.
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: do not claim App Store/Android readiness until physical on-device runtime and Android compile/API-floor evidence exist; merge still requires an explicit final decision.
+
+#### PRODUCTION
+- NOT APPLIED
+
+### 2026-08-29 · Partner Briefing P1/P2 재현 및 AI 입력 계약 architecture block
+
+#### PLAN POSITION
+- Phase: Partner Briefing post-audit remediation
+- Workstream: privacy, state isolation, native reliability, performance
+- Step: P1 5건과 관련 P2를 live code에서 재현한 뒤 최소 수정
+- Previous Gate: native/UI 구현에 대한 read-only audit BLOCKED
+- This Gate: Story identity isolation 및 Android cancellation/API floor narrow fixes locally PASS; semantic compression/privacy contract BLOCKED
+
+#### DIRECTION CHECK
+- Product source checked: latest user-approved Partner Briefing requirements, `docs/WHAT_IS_GOMSINLOG.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: live Partner Briefing worktree, branch, HEAD, status, actual Story/PartnerDay/corpus/normalizer/pipeline/native call paths
+- Latest relevant Work Log checked: 2026-08-29 Partner Briefing B1 and localization expansion block
+- MASTER PLAN version / 기준일: Partner Briefing Gate 0 plus Closed Extract Plan amendment / 2026-08-29
+- Does this task conflict with canonical direction? YES
+- If YES, what conflict: the new requirement forbids sensitive health/cycle free text from crossing the AI/native boundary, but the approved closed-extract plan intentionally sends exact TypeScript-owned source candidates derived from `record.log`. The same current plan also preserves one rendered item per record and therefore does not provide semantic multi-record compression.
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator, bounded Gemini 3.7 Flash High workers, read-only architecture consultant
+- Model: current primary; `google-antigravity/gemini-3.7-flash` High for Story and Android narrow slices
+- Role: reproduction, bounded implementation, direct diff/test review, architecture stop gate
+- PR: none
+- Branch: `codex/partner-briefing`
+- Base SHA: `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- Old HEAD: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- New HEAD / Reviewed HEAD: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2` plus uncommitted scoped diff
+
+#### CHANGED / REVIEWED
+- file: `src/features/story/StoryRoute.tsx`, `src/features/story/storyIdentityTransition.test.tsx`
+- function/component/migration: `StoryRoute` identity boundary
+- what changed/reviewed: key the stateful route content by canonical viewer ID plus active couple ID; added unlink/relink and account-switch receipt-isolation regressions.
+- why: prevent mounted Story hooks from carrying relationship A PartnerDay state into relationship B without changing PartnerDay checkpoint semantics.
+- file: Android `OnDeviceBriefingEngine.kt`, `OnDeviceBriefingPlugin.kt`, `onDeviceBriefingAndroidBridge.test.ts`
+- function/component/migration: in-flight request ownership and API 23-25 plugin load boundary
+- what changed/reviewed: one lazily-started `Deferred` now owns inference completion and is registered before start; plugin initialization is lazy; ICU/ML Kit references moved out of the plugin class; cancel/destroy engine access is API-26 gated.
+- why: remove the audited split Job/CompletableDeferred cancellation race and reduce pre-26 class-loading exposure.
+- file: `normalize.ts`, `pipeline.ts`, provider/native contracts and tests
+- function/component/migration: AI payload and output hierarchy audit
+- what changed/reviewed: confirmed normalized `record.log` becomes candidate text sent to native, while final output still renders one item per source record and the overview is deterministic counts.
+- why: independently reproduce the remaining privacy/compression findings before modifying architecture.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no AI-safe projection field or consent contract invented
+- product semantics: no keyword denylist, classifier, server AI, or persistent AI result introduced
+- Production: NOT APPLIED
+
+#### VERIFICATION
+- command: `npx vitest run src/features/story/storyIdentityTransition.test.tsx src/features/story/StoryRoute.test.tsx src/lib/partnerBriefing/onDeviceBriefingAndroidBridge.test.ts src/lib/partnerBriefing/onDeviceBriefingBridge.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 3 matched files / 25 tests
+- what it actually proves: Story identity-transition behavior and source-level Android/iOS bridge contracts in Vitest; it does not prove Android 23-25 process launch or physical-device behavior.
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current TypeScript project compiles with the uncommitted narrow diff.
+- command: targeted ESLint for changed TS/TSX files; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: scoped lint and patch whitespace integrity only.
+- command: full Vitest/lint/build/native tests/iOS and Android compile
+- PASS / FAIL / UNVERIFIED: UNVERIFIED — not run after the architecture stop condition was met
+- what it actually proves: no claim is made for full release readiness.
+
+#### REVIEW IMPACT
+- FULL: Story and Android fixes need fresh independent review after the architecture choice; prior Partner Briefing reviews do not cover this uncommitted diff or the new privacy requirement.
+
+#### BLOCKERS
+- code: current model payload is exact source-derived text, so shared free text can contain health/cycle content; current provider selects a candidate per record instead of semantically compressing multiple records.
+- environment: Android API 23-25 install/start and iOS/Android physical-device execution remain UNVERIFIED.
+- external/manual: safely combining semantic compression with a hard sensitive-text boundary needs an authenticated, author-owned AI-safe projection contract. Persisting that contract likely requires a DB migration and actor/RLS/rollback review.
+
+#### STOPPED AT
+- exact completed boundary: Story isolation and Android race/API-floor narrow changes are locally focused-tested but uncommitted; compression/privacy architecture was not changed.
+
+#### REMAINING
+- not completed: semantic multi-record compression, sensitive-free-text AI boundary, whole-run deadline, 300-record render/performance proof, persisted-record authority hardening, locale parity audit, iOS strict top-level allowlist, native builds/devices, full suite, Terra final review.
+
+#### NEXT ACTION
+- next owner: architecture/data contract owner followed by security reviewer
+- tool/model: architecture-level reasoning, then narrow Worker and independent Terra review
+- 기준 SHA: `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- exact next task: choose between release-safe deterministic-only briefing now, or an additive author-owned non-sensitive projection plus ordinal-only grouping contract for actual on-device compression.
+
+#### DO NOT ADVANCE UNTIL
+- next-step conditions: the AI-safe text authority is explicitly defined; if persisted, migration/RLS/backfill/rollback and actor tests are approved. Regex/classifier-only filtering is not sufficient evidence.
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-29 · Partner Briefing B1 완료 및 영어·일반 커플 확장 중단점
 
 #### PLAN POSITION
@@ -9699,3 +10616,97 @@ e2e · Postgres 계약 · Deno).
 
 #### PRODUCTION
 - NOT APPLIED
+
+## 2026-08-29 · opus · Whole-App Release Optimization GATE 0 — Android/iPhone 환경을 실제로 닫고, 내 결론 두 개를 정정하다 (`codex/partner-briefing`)
+
+전체 보고서: [`control-tower/reports/claude/2026-08-29_whole-app-release-optimization-gate0_opus.md`](../control-tower/reports/claude/2026-08-29_whole-app-release-optimization-gate0_opus.md)
+
+#### SCOPE
+- GATE 0 read-only 전수 감사 + 이전 리포트가 UNVERIFIED로 남긴 native 환경 게이트 닫기
+- **저장소 소스 파일은 하나도 수정하지 않았다.** 이 항목과 위 보고서만 새로 쓴다.
+- START HEAD == END HEAD == `15a7a7933d37e95907fd8f5d609fbb9e4f1e1cd2`
+- `origin/master` = `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- 메인 체크아웃 `codex/profile-post-composer` @ `a536f9b` 는 건드리지 않았다.
+
+#### 실제로 실행한 검증
+- Android SDK를 **처음부터 구성**(cmdline-tools 21.0 / platform-tools 37.0.1 / platforms;android-35 /
+  build-tools 35.0.0 / emulator 37.1.11 / API24·API26 arm64 이미지). `android-sdk-license`는
+  사용자 명시 동의를 받고 수락했고 임의로 우회하지 않았다.
+- `./gradlew :gomsinlog-capacitor-on-device-briefing:compileDebugKotlin :app:assembleDebug --stacktrace`
+  → **BUILD SUCCESSFUL**, 실제 `app-debug.apk` 16,747,717 bytes, `com.google.mlkit:genai-prompt:1.0.0-beta2`
+  Google Maven에서 실제 해석됨.
+- merged manifest·APK 모두 `minSdkVersion 23` 유지 확인(ML Kit AAR는 26을 선언).
+- **실물 iPhone 16 Pro (iOS 27, `00008140-000171663AE3001C`)**: 서명 빌드 `** BUILD SUCCEEDED **`
+  → install → **launch 성공** → runtime console 확보.
+- live baseline 재측정: typecheck PASS · lint PASS · `npm run test` **279 files / 4,205 tests PASS** ·
+  `verify:native` 4/106 PASS · `test:phase0` PASS · `test:e2e:partner-briefing` **2/2 PASS** ·
+  build PASS · `cap sync ios` PASS(6 plugins).
+- eager bundle baseline: raw **1,075,317 B** / gzip 283,482 B (index.js 437,978 + css 326,607 주도).
+
+#### 실물 기기가 알려준 것 (정적 분석으로는 나올 수 없던 것)
+- `capacitor://localhost` 로컬 번들 로드 확인 — 외부 웹사이트로 새지 않는다.
+- WebView 정상 로드, device-keys 플러그인 동작(`lckHas → {"present":true}`).
+- push: 권한은 이미 `granted`인데 `aps-environment` 부재로 `register` 실패.
+- `clear_my_unseen`이 live schema cache에 없음(2026-08-29 관측).
+
+#### 내가 직접 검증한 finding (아직 고치지 않음)
+- **P2** Android 권한 게이트가 산출물이 아닌 파일을 증명한다. `nativeConfig.test.ts:68,316`과
+  `NativeConfigTest.java:50`이 **같은 source manifest**를 읽어 3개를 EXACT로 단언하는데, 실제 APK는
+  7개(신규 `aicore.service.BIND_SERVICE` 포함) + `<queries>`를 싣는다. "두 독립 증인"은 구현만 독립이고
+  사각지대는 동일하다.
+- **P2** `App.entitlements`가 저장소 자기 테스트와 모순. "The app never touches the Keychain"이라고
+  적었지만 `iosPrivacyManifest.test.ts:155`는 device-keys 플러그인이 Keychain을 쓴다고 단언한다.
+  결론(선언하지 않음)은 옳고 이유가 틀렸다.
+- **P2** 알림 권한을 받아 놓고 전달할 수 없다(클라이언트·서버 양쪽 모두 의도된 보류). 제품 판단 사항.
+- **P3** `registerPlugin('GomsinlogDeviceKeys')` 중복 호출 `src/crypto/keystore/index.ts:51,69`.
+- **P3** migration ledger에 2026-08-29 live 관측치가 없다.
+
+#### 내 결론 정정 (중요)
+- **"P0 — 원격 Supabase가 20개 뒤처짐"은 틀렸다 → P3으로 강등.** `supabase/migrations/README.md`가
+  이미 정확히 기록하고 있다(048 "어디에도 미적용", 066 "NOT APPLIED … 명시적으로 보류",
+  067 "APPLIED"). 미적용 34건·적용 4건이 명시돼 있고, 앱에는 `PGRST202/PGRST205` 관용 계층이
+  일부러 들어 있다. 내 "remote ≤ 047" 추론도 067이 적용돼 있어 틀렸다.
+- **"API 23–25에서 ML Kit 클래스가 로딩되지 않는다"는 과했다.** dex로 증명한 것(플러그인 클래스에
+  ML Kit 참조 0, 필드는 `Lkotlin/Lazy;`, engine 접근 6곳 전부 `SDK_INT` 가드)은 그대로 유효하다.
+  그러나 shipped manifest에 `com.google.mlkit.common.internal.MlKitInitProvider`(`initOrder=99`)가
+  병합돼 있고, Android는 모든 API 레벨에서 프로세스 시작 시 ContentProvider를 생성한다. 따라서
+  `docs/PARTNER_BRIEFING_ARCHITECTURE.md:189`의 "without crashing or **loading ML Kit classes**"는
+  산출물과 어긋난다. **crash 여부는 여전히 UNVERIFIED.**
+
+#### 감사 fleet 결과 — RAISED, NOT CONFIRMED
+12개 차원 중 **11개 반환**(supabase-rls 미반환), **35개 finding**. adversarial verification은
+verdict 1개만 남기고 종료 → **전부 미검증 lead**다. Privacy/E2EE는 0건(clean). 목록·file:line은
+보고서 §5, 원본은 `scratchpad/audit-findings.json`(run `wf_04720e6f-d7b`).
+
+#### 검증 결과 건강하다고 확인된 것 (재조사 불필요)
+`NSPrivacyAccessedAPITypes` 빈 배열은 측정 기반이라 옳고, `NSPhotoLibraryUsageDescription` 부재는
+web `<input type="file">` → out-of-process PHPicker라 옳고, `applesignin` 부재는 Supabase web OAuth라
+옳다. GATE 4 "Compression not Selection"은 30/100/300에서 모든 source id의 순서까지 동일 비교하고
+`items < count`도 함께 단언하므로 비어 있지 않은 진짜 증명이다.
+
+#### BLOCKERS
+- environment: **API 23–25 emulator BLOCKED** — userdata 7,372.80 MB 요구, 호스트 여유 ~3.6 GB
+  (디스크 99%). `-partition-size`·`config.ini` override 모두 무시됨.
+- environment: 실물 Samsung 미연결 → NOT PERFORMED.
+- environment: iPhone이 측정 도중 `unavailable`로 빠져 cold-start 계측 BLOCKED.
+- code: 없음 (수정한 코드가 없다)
+
+#### STOPPED AT
+- GATE 0 감사와 native 환경 게이트까지. GATE 1 이후 수정은 시작하지 않았다.
+
+#### REMAINING
+- §5의 35개 lead 독립 triage (특히 `normalize.ts:118` P0, `OnboardingPage.tsx:1044`, `store.tsx:1216`)
+- §4.2 ML Kit provider의 API 23–25 실제 동작 확인 후 아키텍처 문서 정정 또는 provider 제거
+- GATE 1: `keystore/index.ts` 중복 registerPlugin
+- GATE 7: 권한 테스트 범위 정정, entitlements 주석 정정
+
+#### NEXT ACTION
+- next owner: 미정 (triage 먼저)
+- 기준 SHA: `15a7a793` (변경 없음)
+
+#### DO NOT ADVANCE UNTIL
+- §5 lead가 검증되기 전에는 그것을 근거로 코드를 고치지 않는다
+- §4.2가 확정되기 전에는 API 23–25 fallback을 "검증됨"으로 표기하지 않는다
+
+#### PRODUCTION
+- NOT APPLIED — Supabase·Apple·Vercel·TestFlight 어느 것도 변경하지 않았다

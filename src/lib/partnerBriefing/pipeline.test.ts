@@ -3,6 +3,7 @@ import type {
   BriefingExtractRequestItem,
   BriefingModelSafeEvent,
   BriefingSourceMapping,
+  PartnerBriefing,
   UntrustedBriefingGroupPlan,
 } from './contract';
 import type { BriefingDayMapping } from './normalize';
@@ -24,6 +25,7 @@ import {
 } from './pipeline';
 import { getUtf8ByteLength } from './chunk';
 import { buildBriefingExtractCandidates } from './fallback';
+import { findBriefingModelInputRisk } from './modelInputGate';
 
 function createEvent(
   ordinal: number,
@@ -1847,6 +1849,224 @@ describe('Partner Briefing Closed-Extract Pipeline (Gate A7.2 - v2 Grouping Plan
       expect(capturedSelectExtractsOptions).toEqual(
         expect.objectContaining({ locale: 'en' }),
       );
+    });
+  });
+  describe('Model-Input Value Gate (P1-1 negative proofs)', () => {
+    /*
+      These sentinels are shaped like the values this app actually produces, because a
+      partner can type any of them into a shared record body and `normalizeBriefingText`
+      copies that body through verbatim. Before the gate existed this pipeline put the
+      record/user/couple UUIDs, the object path and the signed-URL token into the provider
+      request; the pasted URL string alone did NOT appear, because sentence segmentation
+      split it across candidates, which is why every assertion below checks the sensitive
+      COMPONENTS rather than the whole string.
+    */
+    const RECORD_UUID = 'deadbeef-1111-2222-3333-444455556666';
+    const USER_UUID = 'facefeed-9999-8888-7777-666655554444';
+    const COUPLE_UUID = 'c0ffee11-2233-4455-6677-8899aabbccdd';
+    const STORAGE_PATH = `${COUPLE_UUID}/${RECORD_UUID}/9f8e7d6c.jpg`;
+    const SIGNED_URL_TOKEN =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.sentinelpayload.sentinelsig';
+    const SIGNED_URL = `https://abcdefghijklmnopqrst.supabase.co/storage/v1/object/sign/couple-media/${STORAGE_PATH}?token=${SIGNED_URL_TOKEN}`;
+    const SAFE_TEXT = '오늘 훈련 힘들었어. 그래도 네 생각하니까 버텼다.';
+
+    /** Every substring that must not appear anywhere in what the provider received. */
+    const FORBIDDEN_FRAGMENTS: readonly string[] = [
+      RECORD_UUID,
+      USER_UUID,
+      COUPLE_UUID,
+      STORAGE_PATH,
+      SIGNED_URL,
+      SIGNED_URL_TOKEN,
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
+      'sentinelsig',
+      'supabase.co',
+      'storage/v1/object',
+      'couple-media/',
+      'token=',
+      'https://',
+      'GLE1',
+      'wrappedDek',
+      '-----BEGIN',
+    ];
+
+    const RISKY_CASES: readonly { label: string; text: string }[] = [
+      { label: 'signed url', text: `사진 링크는 ${SIGNED_URL} 이야.` },
+      { label: 'canonical storage path', text: `파일은 ${STORAGE_PATH} 에 올려뒀어.` },
+      { label: 'record uuid', text: `기록 아이디 ${RECORD_UUID} 확인해줘.` },
+      { label: 'user uuid', text: `내 계정은 ${USER_UUID} 야.` },
+      { label: 'couple uuid', text: `커플 아이디 ${COUPLE_UUID} 적어둠.` },
+      {
+        label: 'key/envelope marker',
+        text: '봉투 헤더에 GLE1 매직이 있고 wrappedDek 값이랑 -----BEGIN PRIVATE KEY----- 도 적어뒀어.',
+      },
+    ];
+
+    function assertProviderNeverSawSentinels(provider: FakeBriefingProvider): void {
+      const seen = JSON.stringify(provider.getCallHistory());
+      for (const fragment of FORBIDDEN_FRAGMENTS) {
+        expect(seen).not.toContain(fragment);
+      }
+    }
+
+    /** Every source record id reachable from the finished briefing, in render order. */
+    function collectBriefingRecordIds(briefing: PartnerBriefing): string[] {
+      const ids: string[] = [];
+      for (const day of briefing.days) {
+        for (const section of day.sections) {
+          for (const item of section.items) {
+            for (const part of item.parts) {
+              ids.push(part.sourceRecordId);
+            }
+          }
+        }
+      }
+      return ids;
+    }
+
+    for (const risky of RISKY_CASES) {
+      it(`withholds a source containing a ${risky.label} from the provider while keeping every other source on-device`, async () => {
+        const provider = new FakeBriefingProvider();
+
+        const events = [
+          createEvent(0, 0, { text: risky.text }),
+          createEvent(1, 0, { text: SAFE_TEXT }),
+          createEvent(2, 0, { text: '내일은 면회 갈 수 있을 것 같아. 기다려줘.' }),
+        ];
+        const sources = [
+          { ordinal: 0, recordId: 'rec-risky' },
+          { ordinal: 1, recordId: 'rec-safe-1' },
+          { ordinal: 2, recordId: 'rec-safe-2' },
+        ];
+        const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+        const briefing = await runPartnerBriefingPipeline({
+          events,
+          sources,
+          days,
+          provider,
+          timeoutMs: 2000,
+        });
+
+        // 1. No sentinel value reached the model boundary.
+        assertProviderNeverSawSentinels(provider);
+
+        // 2. The safe siblings still went to the model: the gate isolates one source, it
+        //    does not disable the on-device path for the whole briefing.
+        const seen = JSON.stringify(provider.getCallHistory());
+        expect(provider.getCallHistory().length).toBeGreaterThan(0);
+        expect(seen).toContain('오늘 훈련 힘들었어.');
+        expect(seen).toContain('내일은 면회 갈 수 있을 것 같아.');
+
+        // 3. Full source coverage: every eligible source appears exactly once, in order.
+        expect(collectBriefingRecordIds(briefing)).toEqual([
+          'rec-risky',
+          'rec-safe-1',
+          'rec-safe-2',
+        ]);
+        expect(briefing.sourceCount).toBe(3);
+        expect(briefing.overview.sourceRecordIds).toEqual([
+          'rec-risky',
+          'rec-safe-1',
+          'rec-safe-2',
+        ]);
+
+        // 4. The withheld source still renders from its exact original through the fixed
+        //    deterministic template, so exact-original navigation is unaffected.
+        const riskyItem = briefing.days[0].sections[0].items[0];
+        expect(riskyItem.parts).toHaveLength(1);
+        expect(riskyItem.parts[0].sourceRecordId).toBe('rec-risky');
+        expect(riskyItem.parts[0].text).toContain('라고 기록했어요.');
+
+        // 5. Withholding is not an AI failure: the sources that were eligible and did go to
+        //    the model were all verified, so this is not downgraded to 'hybrid'.
+        expect(briefing.generation).toBe('on_device');
+      });
+    }
+
+    it('keeps every source exactly once when every source is withheld', async () => {
+      const provider = new FakeBriefingProvider();
+
+      const events = [
+        createEvent(0, 0, { text: `링크 ${SIGNED_URL}` }),
+        createEvent(1, 0, { text: `아이디 ${RECORD_UUID}` }),
+        createEvent(2, 1, { text: `계정 ${USER_UUID}` }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-a' },
+        { ordinal: 1, recordId: 'rec-b' },
+        { ordinal: 2, recordId: 'rec-c' },
+      ];
+      const days = [
+        { dayOrdinal: 0, date: '2026-08-26' },
+        { dayOrdinal: 1, date: '2026-08-27' },
+      ];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 2000,
+      });
+
+      assertProviderNeverSawSentinels(provider);
+      // Nothing was eligible, so no extract request was ever made.
+      expect(provider.getCallHistory()).toHaveLength(0);
+      expect(briefing.generation).toBe('deterministic');
+      expect(collectBriefingRecordIds(briefing)).toEqual(['rec-a', 'rec-b', 'rec-c']);
+      expect(briefing.days).toHaveLength(2);
+    });
+
+    it('still sends ordinary Korean records to the model when nothing is risky', async () => {
+      const provider = new FakeBriefingProvider();
+
+      const events = [
+        createEvent(0, 0, { text: SAFE_TEXT }),
+        createEvent(1, 0, { text: '점심에 국밥 먹었어. 다음에 같이 가자.' }),
+      ];
+      const sources = [
+        { ordinal: 0, recordId: 'rec-safe-1' },
+        { ordinal: 1, recordId: 'rec-safe-2' },
+      ];
+      const days = [{ dayOrdinal: 0, date: '2026-08-26' }];
+
+      const briefing = await runPartnerBriefingPipeline({
+        events,
+        sources,
+        days,
+        provider,
+        timeoutMs: 2000,
+      });
+
+      const seen = JSON.stringify(provider.getCallHistory());
+      expect(seen).toContain('오늘 훈련 힘들었어.');
+      expect(seen).toContain('점심에 국밥 먹었어.');
+      expect(briefing.generation).toBe('on_device');
+      expect(collectBriefingRecordIds(briefing)).toEqual(['rec-safe-1', 'rec-safe-2']);
+    });
+
+    it('cannot be bypassed by sentence segmentation, because every candidate is a substring of the gated source', () => {
+      /*
+        Why the source gate is sufficient for the normal path, and why the pre-dispatch
+        request assertion needs its own test file to be reached at all.
+
+        `buildBriefingExtractCandidates` keeps a segment only when
+        `sourceText.includes(trimmed)`, so a candidate is always a substring of the text the
+        source gate already cleared. Every detector in the gate is monotone over substrings
+        for the shapes that matter -- a UUID, a `scheme://`, a `token=` or a `-----BEGIN`
+        cannot appear in a fragment of a string that did not contain it -- so no segmentation
+        of a cleared source can produce a risky candidate.
+
+        This is asserted rather than described so that a future change to candidate building
+        that breaks the substring invariant fails here.
+      */
+      const risky = `사진 링크는 ${SIGNED_URL} 이야. 오늘 기분은 좋았어.`;
+      for (const candidate of buildBriefingExtractCandidates(risky, 'ko')) {
+        expect(risky).toContain(candidate.text);
+      }
+      // And the source as a whole never reaches candidate building in the first place.
+      expect(findBriefingModelInputRisk(risky)).not.toBeNull();
     });
   });
 });

@@ -59,6 +59,10 @@ import type {
 } from './provider';
 import { verifyBriefingExtractResult, type VerifiedBriefingGroup } from './verify';
 import {
+  findBriefingModelInputRisk,
+  findBriefingRequestItemsRisk,
+} from './modelInputGate';
+import {
   buildBriefingExtractCandidates,
   formatAttributedBriefingItemText,
   formatDeterministicBriefingItemText,
@@ -663,12 +667,23 @@ export async function runPartnerBriefingPipeline(
       if (
         !forcedFallbackOrdinals.has(evt.ordinal) &&
         typeof evt.text === 'string' &&
-        evt.text.trim().length > 0
+        evt.text.trim().length > 0 &&
+        // P1-1 value gate. The normalizer removes record METADATA but copies the partner's
+        // log body verbatim, so a UUID, Storage path, signed URL or key marker typed INTO a
+        // shared record would otherwise cross the native boundary as candidate text. A risky
+        // source is withheld from the model entirely rather than redacted: it keeps its
+        // ordinal and is rendered from its exact source by the deterministic path below, so
+        // coverage and provenance are unchanged.
+        findBriefingModelInputRisk(evt.text) === null
       ) {
         candidates = buildBriefingExtractCandidates(evt.text, locale);
       }
 
       if (candidates.length === 0) {
+        // A withheld source lands here alongside media-only and empty ones: it is never added
+        // to `totalAiEligibleOrdinals`, so it neither reaches a batch nor counts against the
+        // verified ratio, and step 8 renders it from its exact source like any other event
+        // with no built item.
         flushContiguousRun();
         continue;
       }
@@ -714,6 +729,20 @@ export async function runPartnerBriefingPipeline(
     };
 
     if (!canItemsFitInEnvelope(request.items, envelope, requestId)) {
+      batchSuccess.set(batchIdx, false);
+      continue;
+    }
+
+    /*
+      Last line of TypeScript before the native call.
+
+      Every candidate here is a substring of a source the value gate already cleared, so this
+      is expected to pass; it is asserted rather than assumed because the batch is assembled
+      across several steps and a future change to candidate building must not be able to
+      reintroduce P1-1 silently. Failing the batch sends exactly these segments to the
+      deterministic exact-source path, which is the same handling as any other batch failure.
+    */
+    if (findBriefingRequestItemsRisk(request.items) !== null) {
       batchSuccess.set(batchIdx, false);
       continue;
     }

@@ -400,11 +400,21 @@ export function TripDetailPage() {
         title: place.title,
         address: place.address,
         businessHours: place.businessHours,
-        category: inferPlaceCategory(place.rawText),
+        // The place panel's own category words, not the whole capture. A
+        // neighbouring map label ('게스트하우스' beside a noodle shop) used to vote.
+        // The whole-capture read stays as the fallback so this is never undefined:
+        // `category` is NOT NULL with a CHECK constraint, and a dropped value would
+        // turn a recognised place into a failed write.
+        category: place.category || inferPlaceCategory(place.rawText),
         source: 'screenshot',
       };
       if (!place.title) {
-        openDraftEditor(draft, '장소 이름을 충분히 읽지 못했어요. 이름만 확인해 주세요.');
+        openDraftEditor(
+          draft,
+          place.address || place.businessHours
+            ? '주소와 영업시간은 읽었지만 장소 이름을 읽지 못했어요. 이름만 채워 주세요.'
+            : '장소 이름을 충분히 읽지 못했어요. 이름만 확인해 주세요.',
+        );
         return;
       }
       openDraftEditor(draft);
@@ -440,6 +450,7 @@ export function TripDetailPage() {
         title: place.title || current.title,
         address: place.address || current.address,
         businessHours: place.businessHours || current.businessHours,
+        category: place.categoryHint ? place.category : current.category,
         source: 'screenshot',
       }));
       if (!place.title && !place.address && !place.businessHours) {
@@ -1062,7 +1073,8 @@ export function TripDetailPage() {
                 )}
                 <label className="block text-caption font-medium text-muted-foreground">장소 또는 제목 *<input value={itemDraft.title} onChange={(event) => setItemDraft((current) => ({ ...current, title: event.target.value }))} placeholder="직접 입력해 주세요" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
                 <label className="block text-caption font-medium text-muted-foreground">방문 시간 (선택)<input type="time" value={itemDraft.startTime} onChange={(event) => setItemDraft((current) => ({ ...current, startTime: event.target.value }))} className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
-                <fieldset><legend className="text-caption font-medium text-muted-foreground mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`press-response min-h-9 rounded-control border text-label font-medium ${itemDraft.category === option.value ? 'bg-info text-coral-strong-foreground border-info' : 'border-border text-foreground'}`}>{option.label}</button>)}</div></fieldset>
+                {/* 44px: these chips are how a wrong auto-filled category gets corrected. */}
+                <fieldset><legend className="text-caption font-medium text-muted-foreground mb-1">분류</legend><div className="grid grid-cols-4 gap-1">{CATEGORY_OPTIONS.map((option) => <button key={option.value} type="button" aria-pressed={itemDraft.category === option.value} onClick={() => setItemDraft((current) => ({ ...current, category: option.value }))} className={`press-response min-h-11 rounded-control border text-label font-medium ${itemDraft.category === option.value ? 'bg-info text-coral-strong-foreground border-info' : 'border-border text-foreground'}`}>{option.label}</button>)}</div></fieldset>
                 <label className="block text-caption font-medium text-muted-foreground">링크 (선택)<input type="url" value={itemDraft.url} onChange={(event) => setItemDraft((current) => ({ ...current, url: event.target.value }))} placeholder="https://" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
                 <label className="block text-caption font-medium text-muted-foreground">주소 (선택)<input value={itemDraft.address} onChange={(event) => setItemDraft((current) => ({ ...current, address: event.target.value, source: current.source === 'screenshot' ? 'screenshot' : 'manual' }))} placeholder="예: 서울 마포구 연남로 1" maxLength={300} className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground min-h-11" /></label>
                 <label className="block text-caption font-medium text-muted-foreground">영업시간 (선택)<textarea value={itemDraft.businessHours} onChange={(event) => setItemDraft((current) => ({ ...current, businessHours: event.target.value }))} rows={2} maxLength={500} placeholder="예: 매일 11:00~21:00" className="mt-1 w-full bg-background border border-border rounded-control px-3 py-2 text-body text-foreground resize-none" /></label>

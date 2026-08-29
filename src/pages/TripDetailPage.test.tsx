@@ -263,4 +263,157 @@ describe('TripDetailPage route request isolation', () => {
     expect(screen.getByDisplayValue('매일 11:30 - 21:00')).toBeInTheDocument();
     expect(saveTripItemMock).not.toHaveBeenCalled();
   });
+
+  /**
+   * The panel's own category words classify the place; the whole capture must not.
+   * A real 신라제면 capture recognises a neighbouring `게스트하우스` map label, and
+   * classifying on `rawText` filed that noodle shop under 숙소.
+   */
+  it('files a screenshot place under the category its Naver panel printed', async () => {
+    parentRequests.length = 0;
+    itemRequests.length = 0;
+    checklistRequests.length = 0;
+    deleteRequests.length = 0;
+    saveTripItemMock.mockReset();
+    recognizePlaceScreenshotMock.mockResolvedValue({
+      title: '신라제면 안국점',
+      address: '서울 종로구',
+      businessHours: '영업 종료 · 10:30에 영업 시작',
+      categoryHint: '국수',
+      category: 'food',
+      rawText: '게스트하우스 신라제면 안국점 국수 리뷰 7085',
+    });
+    saveTripItemMock.mockResolvedValue({
+      id: 'item-noodle',
+      tripId: 'trip-a',
+      itemDate: '2026-08-01',
+      title: '신라제면 안국점',
+      address: '서울 종로구',
+      category: 'food',
+      source: 'screenshot',
+      sortOrder: 0,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/trips/trip-a']}>
+        <Harness />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(parentRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => parentRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({
+      ok: true,
+      trip: trip('trip-a', 'A trip', '2026-08-01'),
+    }));
+    await waitFor(() => expect(itemRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => {
+      itemRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, items: [] });
+      checklistRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, checklists: [] });
+    });
+
+    expect(await screen.findByRole('button', { name: '사진으로 바로 추가' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('지도 캡처 선택'), {
+      target: { files: [new File(['map'], 'map.png', { type: 'image/png' })] },
+    });
+
+    await screen.findByRole('button', { name: '신라제면 안국점 일정 수정' });
+    expect(saveTripItemMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: '신라제면 안국점',
+      category: 'food',
+    }));
+  });
+
+  /**
+   * Partial recognition must say which field it could not read and keep the rest,
+   * so the fix is one field instead of a fresh start.
+   */
+  it('keeps the fields it did read when the place name is unreadable', async () => {
+    parentRequests.length = 0;
+    itemRequests.length = 0;
+    checklistRequests.length = 0;
+    deleteRequests.length = 0;
+    saveTripItemMock.mockReset();
+    recognizePlaceScreenshotMock.mockResolvedValue({
+      title: '',
+      address: '서울 영등포구',
+      businessHours: '영업 중 · 다음 날 02:30에 라스트오더',
+      categoryHint: '치킨,닭강정',
+      category: 'food',
+      rawText: '치킨,닭강정 리뷰 244 서울 영등포구',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/trips/trip-a']}>
+        <Harness />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(parentRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => parentRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({
+      ok: true,
+      trip: trip('trip-a', 'A trip', '2026-08-01'),
+    }));
+    await waitFor(() => expect(itemRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => {
+      itemRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, items: [] });
+      checklistRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, checklists: [] });
+    });
+
+    fireEvent.change(screen.getByLabelText('지도 캡처 선택'), {
+      target: { files: [new File(['map'], 'map.png', { type: 'image/png' })] },
+    });
+
+    // Nothing is written until a human confirms the name.
+    await waitFor(() => expect(screen.getByRole('heading', { name: /일정 추가/ })).toBeInTheDocument());
+    expect(saveTripItemMock).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('서울 영등포구')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('영업 중 · 다음 날 02:30에 라스트오더')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Asserted on the RENDERED output, not on the source text. A source string only
+ * proves the code exists; these prove the user reaches it.
+ */
+describe('the capture path does not present OCR as certain', () => {
+  async function renderReadyTrip() {
+    parentRequests.length = 0;
+    itemRequests.length = 0;
+    checklistRequests.length = 0;
+    deleteRequests.length = 0;
+    render(
+      <MemoryRouter initialEntries={['/trips/trip-a']}>
+        <Harness />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(parentRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => parentRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({
+      ok: true,
+      trip: trip('trip-a', 'A trip', '2026-08-01'),
+    }));
+    await waitFor(() => expect(itemRequests.some((entry) => entry.id === 'trip-a')).toBe(true));
+    await act(async () => {
+      itemRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, items: [] });
+      checklistRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, checklists: [] });
+    });
+  }
+
+  it('warns on screen that the read may be wrong, and still promises on-device', async () => {
+    // The old copy said only '캡처 한 장이면 일정이 만들어져요'. Measured on real
+    // captures the name is right often enough to be useful and wrong often enough
+    // that silence would be a lie.
+    await renderReadyTrip();
+    const description = await screen.findByText(/글자를 잘못 읽을 수 있으니/);
+    expect(description).toBeInTheDocument();
+    expect(description.textContent).toContain('이 기기에서만');
+  });
+
+  it('renders the category chips at a 44px tap target', async () => {
+    // These chips are the repair control for an auto-filled category, so they sit
+    // on the correction path now, not only on the manual-entry path.
+    await renderReadyTrip();
+    await act(async () => screen.getByText('직접 입력하기').click());
+    const chip = await screen.findByRole('button', { name: '음식' });
+    expect(chip.className).toContain('min-h-11');
+    expect(chip.className).not.toContain('min-h-9');
+    expect(chip).toHaveAttribute('aria-pressed');
+  });
 });

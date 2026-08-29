@@ -3,6 +3,22 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ON_DEVICE_BRIEFING_PLUGIN_NAME } from './nativeOnDeviceBriefing';
 
+/*
+  Android는 이 릴리스에서 **모델 provider를 싣지 않는다.**
+
+  ML Kit GenAI Prompt는 공식적으로 API 26을 요구하는데 이 앱은 minSdk 23이다. 예전 구현은
+  `tools:overrideLibrary` 로 그 요구를 우회해서, API 23–25 기기에서는 런타임 guard보다
+  먼저 클래스가 로드될 수 있었다 — 즉 요약이 조용히 fallback 되는 게 아니라 앱이 시작조차
+  못 할 수 있었다. Google Play가 범위에 들어오기 전까지 base APK에서 ML Kit를 빼고,
+  Android는 deterministic exact-source 경로만 쓴다.
+
+  그래서 이 파일이 지키는 것은 "Kotlin이 좋은 요약을 만드는가"가 아니라 다음 두 가지다.
+
+  1. ML Kit·AICore·overrideLibrary가 **다시 들어오지 않는다.**
+  2. JS 계약은 그대로다 — 같은 plugin 이름, 같은 4개 메서드, 같은 envelope 키,
+     그리고 언제나 fail-closed.
+*/
+
 const root = resolve(process.cwd());
 const packageDir = 'packages/capacitor-on-device-briefing';
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
@@ -18,8 +34,9 @@ const rootPackage = JSON.parse(read('package.json')) as {
 const buildGradle = read(`${packageDir}/android/build.gradle`);
 const androidManifest = read(`${packageDir}/android/src/main/AndroidManifest.xml`);
 const pluginKt = read(`${packageDir}/android/src/main/java/app/gomsinlog/ondevicebriefing/OnDeviceBriefingPlugin.kt`);
-const engineKt = read(`${packageDir}/android/src/main/java/app/gomsinlog/ondevicebriefing/OnDeviceBriefingEngine.kt`);
 const adapter = read('src/lib/partnerBriefing/nativeOnDeviceBriefing.ts');
+
+const androidSourceDir = `${packageDir}/android/src/main/java/app/gomsinlog/ondevicebriefing`;
 
 describe('Android Partner Briefing native package contract', () => {
   it('is wired as a dual-platform local Capacitor package in manifest and files', () => {
@@ -36,149 +53,46 @@ describe('Android Partner Briefing native package contract', () => {
     expect(manifest.files).toContain('GomsinlogCapacitorOnDeviceBriefing.podspec');
   });
 
-  it('uses the official ML Kit Prompt API dependency and official package imports', () => {
-    expect(buildGradle).toContain("implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'");
+  /*
+    되돌림 방지가 이 파일의 핵심이다.
+
+    ML Kit 좌표 하나만 검사하면 `genai-summarization` 같은 형제 artifact로 조용히
+    돌아올 수 있으므로 계열 전체를 막는다.
+  */
+  it('ships no Android GenAI model dependency in the base module', () => {
+    expect(buildGradle).not.toMatch(/com\.google\.mlkit/);
+    expect(buildGradle).not.toMatch(/genai/i);
+    expect(buildGradle).not.toMatch(/aicore/i);
     expect(buildGradle).toContain("implementation project(':capacitor-android')");
-    expect(buildGradle).not.toMatch(/ksp/i);
-    expect(buildGradle).not.toMatch(/structured-output/i);
-    expect(buildGradle).not.toMatch(/androidx\.genai/i);
-
-    // Official common package classes
-    expect(engineKt).toContain('import com.google.mlkit.genai.common.FeatureStatus');
-    expect(engineKt).toContain('import com.google.mlkit.genai.common.GenAiException');
-    expect(engineKt).not.toContain('import com.google.mlkit.genai.prompt.DownloadStatus');
-    expect(engineKt).not.toContain('import com.google.mlkit.genai.prompt.FeatureStatus');
-    expect(engineKt).not.toContain('import com.google.mlkit.genai.prompt.GenAiException');
   });
 
-  it('uses actual beta2 GenerativeModel methods and builds an explicit GenerateContentRequest via TextPart constructor', () => {
-    expect(engineKt).toContain('model.checkStatus()');
-    expect(engineKt).toContain('.download().collect { }');
-    expect(engineKt).toContain('model.generateContent(request)');
-    expect(engineKt).toContain('response.candidates.firstOrNull()?.text');
-    expect(engineKt).not.toContain('checkFeatureStatus');
-    expect(engineKt).not.toContain('downloadFeature');
-    expect(engineKt).not.toMatch(/response\.text\b/);
-
-    // Explicit Builder(TextPart)
-    expect(engineKt).toContain('GenerateContentRequest.Builder(TextPart(promptText))');
-    expect(engineKt).not.toMatch(/GenerateContentRequest\.Builder\(\)/);
-    expect(engineKt).not.toContain('addPart');
-
-    expect(engineKt).toContain('temperature = 0f');
-    expect(engineKt).toContain('seed = 0');
-    expect(engineKt).toContain('topK = 1');
-    expect(engineKt).toContain('candidateCount = 1');
-    expect(engineKt).toContain('maxOutputTokens = OnDeviceBriefing.MAXIMUM_RESPONSE_TOKENS');
+  it('never re-enables the manifest minSdk override that let ML Kit load below API 26', () => {
+    expect(androidManifest).not.toContain('overrideLibrary');
+    expect(androidManifest).not.toMatch(/com\.google\.mlkit/);
+    expect(androidManifest).not.toMatch(/AICore|aicore/);
   });
 
-  it('uses android.icu.text.BreakIterator for accurate grapheme segmentation and avoids java.text', () => {
-    expect(engineKt).toContain('import android.icu.text.BreakIterator');
-    expect(engineKt).not.toContain('import java.text.BreakIterator');
-    expect(engineKt).toContain('BreakIterator.getCharacterInstance()');
-    expect(pluginKt).not.toContain('import android.icu.text.BreakIterator');
-  });
-
-  it('validates candidate text as strict String and bounds rawOutput size before JSON parse', () => {
-    expect(pluginKt).toContain('candidateObj.opt("text")');
-    expect(pluginKt).toContain('rawText !is String');
-    expect(pluginKt).not.toContain('optString("text")');
-
-    expect(engineKt).toContain('rawOutput.toByteArray(Charsets.UTF_8).size > OnDeviceBriefing.RESPONSE_RESERVE_UTF8_BYTES');
-    expect(engineKt).toContain('ACTUAL_PROMPT_OVERHEAD_UTF8_BYTES <= PROMPT_OVERHEAD_UTF8_BYTES');
-  });
-
-  it('switches GenAiException strictly on actual errorCode constants and rejects nonexistent constants', () => {
-    expect(engineKt).toContain('when (e.errorCode)');
-    // Real constants
-    for (const realConst of [
-      'GenAiException.ErrorCode.BUSY',
-      'GenAiException.ErrorCode.PER_APP_BATTERY_USE_QUOTA_EXCEEDED',
-      'GenAiException.ErrorCode.CANCELLED',
-      'GenAiException.ErrorCode.REQUEST_PROCESSING_ERROR',
-      'GenAiException.ErrorCode.RESPONSE_PROCESSING_ERROR',
-      'GenAiException.ErrorCode.REQUEST_TOO_LARGE',
-      'GenAiException.ErrorCode.REQUEST_TOO_SMALL',
-      'GenAiException.ErrorCode.RESPONSE_GENERATION_ERROR',
-      'GenAiException.ErrorCode.INVALID_INPUT_IMAGE',
-      'GenAiException.ErrorCode.CACHE_PROCESSING_ERROR',
-      'GenAiException.ErrorCode.NOT_AVAILABLE',
-      'GenAiException.ErrorCode.NEEDS_SYSTEM_UPDATE',
-      'GenAiException.ErrorCode.AICORE_INCOMPATIBLE',
-      'GenAiException.ErrorCode.NOT_ENOUGH_DISK_SPACE',
-      'GenAiException.ErrorCode.BACKGROUND_USE_BLOCKED',
-    ]) {
-      expect(engineKt).toContain(realConst);
-    }
-
-    // Nonexistent constants must NOT exist in engine
-    for (const nonExistent of [
-      'RESPONSE_TOO_LARGE',
-      'PROCESSING_ERROR',
-      'OUTPUT_PARSE_ERROR',
-      'PROMPT_BLOCKED',
-      'SAFETY_BLOCKED',
-      'DOWNLOAD_FAILED',
-    ]) {
-      expect(engineKt).not.toContain(`GenAiException.ErrorCode.${nonExistent}`);
-    }
-
-    // Never inspect e.message or raw exception strings
-    expect(engineKt).not.toMatch(/e\.message/);
-    expect(engineKt).not.toMatch(/e\.javaClass/);
-  });
-
-  it('enforces exact version=2, groups, and strict JSONTokener end-of-input check', () => {
-    expect(engineKt).toContain('val tokener = JSONTokener(rawOutput)');
-    expect(engineKt).toContain('tokener.nextClean()');
-    expect(engineKt).toContain('topKeys != setOf("version", "groups")');
-    expect(engineKt).toContain('(versionVal as Number).toInt() != 2');
-    expect(engineKt).toContain('groupKeys != setOf("groupOrdinal", "choices")');
-    expect(engineKt).toContain('choiceKeys != setOf("itemOrdinal", "candidateOrdinal")');
-  });
-
-  it('owns engine lifecycle per plugin instance and registers the Deferred before bridge launch', () => {
-    expect(pluginKt).toContain('private val pluginScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)');
-    expect(pluginKt).toContain('private val engine by lazy { OnDeviceBriefingEngine(pluginScope, context) }');
-    expect(pluginKt).toContain('engine.cancelAll()');
-    expect(pluginKt).toContain('pluginScope.cancel()');
-
-    // Cancellation race safety: one Deferred owns completion and is registered before it starts.
-    expect(engineKt).not.toContain('CompletableDeferred<List<BriefingGroup>>');
-    expect(engineKt).toContain('scope.async(start = CoroutineStart.LAZY)');
-    expect(engineKt).toContain('inFlight.putIfAbsent(requestId, deferred)');
-    expect(engineKt).toContain('deferred.start()');
-    expect(engineKt.indexOf('inFlight.putIfAbsent(requestId, deferred)'))
-      .toBeLessThan(engineKt.indexOf('deferred.start()'));
-    expect(pluginKt).toContain('engine.startSelect(');
-    expect(pluginKt).toContain('val groups = deferred.await()');
-    expect(pluginKt).toMatch(
-      /val deferred = try \{[\s\S]*engine\.startSelect\([\s\S]*pluginScope\.launch \{[\s\S]*val groups = deferred\.await\(\)/,
-    );
-    expect(engineKt.match(/catch \(e: CancellationException\) \{\s*throw e\s*\}/g)?.length)
-      .toBeGreaterThanOrEqual(3);
-  });
-
-  it('maintains minSdk 23 floor with overrideLibrary and runtime-gates API 26 before parsing', () => {
+  it('keeps the minSdk 23 install floor the override was bypassing', () => {
     expect(buildGradle).toMatch(/minSdk\s+23/);
     expect(buildGradle).toMatch(/compileSdk\s+35/);
     expect(buildGradle).toMatch(/targetSdk\s+35/);
-    expect(androidManifest).toContain(
-      '<uses-sdk tools:overrideLibrary="com.google.mlkit.genai.prompt,com.google.mlkit.genai.common" />',
-    );
-
-    expect(pluginKt).toContain('OnDeviceBriefingAvailability.UNSUPPORTED.value');
-    expect(pluginKt).toMatch(/selectExtracts\([\s\S]*?Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.O[\s\S]*?reject\(call, BriefingErrorCode\.UNAVAILABLE\)[\s\S]*?parseItems/);
   });
 
-  it('enforces exact top-level call keys on all plugin methods', () => {
-    expect(pluginKt).toContain('keys != setOf("locale")');
-    expect(pluginKt).toContain('keys.isNotEmpty()');
-    expect(pluginKt).toContain('keys != setOf("requestId", "locale", "items")');
-    expect(pluginKt).toContain('keys != setOf("requestId")');
+  /*
+    Plugin 클래스는 minSdk 23 기기에서 앱 시작 시 인스턴스화된다. API 24+/26+ 클래스를
+    직접 import 하면 그 자체로 VerifyError/NoClassDefFoundError가 될 수 있다.
+  */
+  it('imports nothing that cannot load on API 23', () => {
+    expect(pluginKt).not.toContain('import android.icu');
+    expect(pluginKt).not.toContain('import com.google.mlkit');
+    expect(pluginKt).not.toContain('BreakIterator');
   });
 
-  it('matches the exact Capacitor plugin name and bridge methods across Kotlin, Swift, and TS', () => {
+  it('carries no Kotlin model engine any more', () => {
+    expect(existsSync(join(root, `${androidSourceDir}/OnDeviceBriefingEngine.kt`))).toBe(false);
+  });
+
+  it('matches the exact Capacitor plugin name and bridge methods across Kotlin and TS', () => {
     expect(ON_DEVICE_BRIEFING_PLUGIN_NAME).toBe('GomsinlogOnDeviceBriefing');
     expect(adapter).toContain("'GomsinlogOnDeviceBriefing'");
     expect(pluginKt).toContain('@CapacitorPlugin(name = "GomsinlogOnDeviceBriefing")');
@@ -188,26 +102,44 @@ describe('Android Partner Briefing native package contract', () => {
     expect(annotated).toEqual(['availability', 'cancel', 'capability', 'selectExtracts']);
   });
 
-  it('declares the portable envelope and ordinal-only response contract', () => {
-    for (const [name, value] of [
-      ['MAX_CONTEXT_UTF8_BYTES', 4096],
-      ['PROMPT_OVERHEAD_UTF8_BYTES', 512],
-      ['RESPONSE_RESERVE_UTF8_BYTES', 1024],
-      ['MAX_INPUT_TEXT_GRAPHEMES', 1000],
-    ] as const) {
-      expect(engineKt).toContain(`const val ${name} = ${value}`);
-    }
-    expect(engineKt).toContain('val groupOrdinal: Int');
-    expect(engineKt).toContain('val itemOrdinal: Int');
-    expect(engineKt).toContain('val candidateOrdinal: Int');
-    expect(pluginKt).toContain('put("version", 2)');
-    expect(pluginKt).toContain('put("groupOrdinal", group.groupOrdinal)');
-    expect(pluginKt).toContain('put("itemOrdinal", choice.itemOrdinal)');
-    expect(pluginKt).toContain('put("candidateOrdinal", choice.candidateOrdinal)');
+  /*
+    가장 중요한 동작 계약: 사용 불가를 **거짓 성공이 아니라** unsupported 로 답한다.
+    JS는 이 신호를 보고 deterministic exact-source 경로를 쓴다.
+  */
+  it('answers unsupported and refuses to generate instead of returning empty output', () => {
+    expect(pluginKt).toContain('put("availability", "unsupported")');
+    expect(pluginKt).toMatch(/fun selectExtracts\(call: PluginCall\) \{\s*reject\(call, BriefingErrorCode\.UNAVAILABLE\)/);
+    expect(pluginKt).toContain('E_UNAVAILABLE');
+    expect(pluginKt).toContain('E_BAD_REQUEST');
   });
 
-  it('validates request shapes strictly and prevents prompt injection of private metadata', () => {
-    const combined = `${pluginKt}\n${engineKt}`;
+  it('still advertises the structural envelope JS reads on both platforms', () => {
+    for (const key of [
+      'maxContextUtf8Bytes',
+      'promptOverheadUtf8Bytes',
+      'responseReserveUtf8Bytes',
+      'maxInputTextGraphemes',
+      'maxItems',
+      'maxCandidatesPerItem',
+    ]) {
+      expect(pluginKt, `envelope drops ${key}`).toContain(`put("${key}"`);
+    }
+    expect(pluginKt).toContain('put("maxItems", 64)');
+    expect(pluginKt).toContain('put("maxCandidatesPerItem", 32)');
+  });
+
+  it('enforces exact top-level call keys on every plugin method', () => {
+    expect(pluginKt).toContain('setOf("locale")');
+    expect(pluginKt).toContain('setOf("requestId")');
+    expect(pluginKt).toContain('call.data.keys().hasNext()');
+  });
+
+  it('bounds the cancel request id and resolves an unknown cancel without side effects', () => {
+    expect(pluginKt).toContain('requestId.toByteArray(Charsets.UTF_8).size > 128');
+    expect(pluginKt).toContain('call.resolve(JSObject())');
+  });
+
+  it('references no record, user, couple or credential identifier', () => {
     for (const forbidden of [
       'recordId',
       'userId',
@@ -217,16 +149,11 @@ describe('Android Partner Briefing native package contract', () => {
       'sessionToken',
       'cookie',
     ]) {
-      expect(combined, `must not reference ${forbidden}`).not.toContain(forbidden);
+      expect(pluginKt, `must not reference ${forbidden}`).not.toContain(forbidden);
     }
-    expect(pluginKt).toContain('itemOrdinal != i');
-    expect(pluginKt).toContain('candidateOrdinal != c');
-    expect(engineKt).toContain('itemOrdinal >= items.size');
-    expect(engineKt).toContain('candidateOrdinal >= candidateCount');
   });
 
-  it('strictly isolates errors to fixed bridge error codes and never logs raw exception text', () => {
-    const combined = `${pluginKt}\n${engineKt}`;
+  it('never logs and never opens a network or persistence path', () => {
     for (const forbidden of [
       'Log.d(',
       'Log.i(',
@@ -236,65 +163,15 @@ describe('Android Partner Briefing native package contract', () => {
       'System.out',
       'System.err',
       'printStackTrace(',
-    ]) {
-      expect(combined, `must not use ${forbidden}`).not.toContain(forbidden);
-    }
-    for (const code of [
-      'E_UNAVAILABLE',
-      'E_BAD_REQUEST',
-      'E_MALFORMED',
-      'E_BUSY',
-      'E_QUOTA',
-      'E_CANCELLED',
-      'E_NATIVE',
-    ]) {
-      expect(combined).toContain(code);
-    }
-  });
-
-  it('has no external network client or local disk persistence APIs', () => {
-    const combined = `${pluginKt}\n${engineKt}`;
-    for (const forbidden of [
       'HttpURLConnection',
       'OkHttpClient',
       'HttpClient',
-      'URLSession',
       'SharedPreferences',
       'getSharedPreferences',
       'openFileOutput',
       'SQLiteDatabase',
-      'Room',
     ]) {
-      expect(combined, `must not use ${forbidden}`).not.toContain(forbidden);
+      expect(pluginKt, `must not use ${forbidden}`).not.toContain(forbidden);
     }
-  });
-
-  it('isolates API24+ ICU BreakIterator and API26+ ML Kit classes behind class-loader safe boundaries so Plugin can load on API23-25', () => {
-    // OnDeviceBriefingPlugin is instantiated at app launch on all Android versions (minSdk 23).
-    // Direct imports of android.icu or ML Kit classes in Plugin class cause NoClassDefFoundError/VerifyError on API 23-25.
-    expect(pluginKt).not.toContain('import android.icu');
-    expect(pluginKt).not.toContain('import com.google.mlkit');
-    expect(pluginKt).not.toContain('BreakIterator.getCharacterInstance()');
-    expect(pluginKt).toMatch(/Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.O/);
-    expect(pluginKt).toMatch(/Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.O/);
-  });
-
-  it('guards automatic model download to verified unmetered active networks (ConnectivityManager.isActiveNetworkMetered) and fails closed', () => {
-    expect(engineKt).toContain('import android.net.ConnectivityManager');
-    expect(engineKt).toContain('fun isUnmeteredActiveNetwork(): Boolean');
-    expect(engineKt).toContain('cm.isActiveNetworkMetered');
-    expect(engineKt).toContain('!isMetered');
-
-    // Prove DOWNLOADABLE branch gates triggerDownload behind isUnmeteredActiveNetwork()
-    expect(engineKt).toMatch(
-      /FeatureStatus\.DOWNLOADABLE\s*->\s*\{\s*if\s*\(isUnmeteredActiveNetwork\(\)\)\s*\{\s*triggerDownload\(\)\s*\}\s*OnDeviceBriefingAvailability\.PREPARING\s*\}/,
-    );
-
-    // Prove fail-closed handling on metered, missing context, or exceptions
-    expect(engineKt).toMatch(/val ctx = context \?: return false/);
-    expect(engineKt).toMatch(/val cm = ctx\.getSystemService\(Context\.CONNECTIVITY_SERVICE\) as\? ConnectivityManager/);
-    expect(engineKt).toMatch(/cm\.activeNetwork \?: return false/);
-    expect(engineKt).toMatch(/catch \(_: Throwable\) \{\s*false\s*\}/);
-    expect(pluginKt).toContain('OnDeviceBriefingEngine(pluginScope, context)');
   });
 });

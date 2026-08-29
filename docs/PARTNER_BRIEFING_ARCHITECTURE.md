@@ -307,7 +307,15 @@ future Google Play implementation candidate, but adopting it requires a separate
 packaging decision that does not bypass its API 26 floor. Until Google Play enters
 scope, Android uses deterministic exact-source briefing output.
 
+Runtime capability detection stays in the JS provider contract: the Android bridge
+answers `availability` with `unsupported` and rejects `selectExtracts` with
+`E_UNAVAILABLE`, which is the same signal every unavailable provider gives. The
+Deterministic fallback path therefore renders every eligible source from its exact
+original, and no source is dropped. Cancellation keeps the same bridge contract, so
+a cancel that arrives for an unknown request resolves without side effects.
+
 **Server inference remains forbidden**, and no AI result is persisted.
 
 **Still UNVERIFIED:** physical API 23/24/25 cold start and the Android WebView fallback
-were not exercised for this packaging delta.
+were not exercised for this packaging delta. There is no physical Android device
+evidence for this release.

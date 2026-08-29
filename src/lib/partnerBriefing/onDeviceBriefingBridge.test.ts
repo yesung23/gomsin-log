@@ -218,9 +218,6 @@ describe('iOS Partner Briefing native package', () => {
     일부이므로, 어느 한쪽이 값을 바꾸면 여기서 드러나야 한다.
   */
   describe('structural capacity parity across both native providers', () => {
-    const androidEngine = read(
-      `${packageDir}/android/src/main/java/app/gomsinlog/ondevicebriefing/OnDeviceBriefingEngine.kt`,
-    );
     const androidBridge = read(
       `${packageDir}/android/src/main/java/app/gomsinlog/ondevicebriefing/OnDeviceBriefingPlugin.kt`,
     );
@@ -232,13 +229,15 @@ describe('iOS Partner Briefing native package', () => {
       expect(bridge).toContain('"maxCandidatesPerItem": OnDeviceBriefing.maxCandidatesPerItem');
     });
 
-    it('Android declares and advertises the same values', () => {
-      expect(androidEngine).toContain('const val MAX_ITEMS = 64');
-      expect(androidEngine).toContain('const val MAX_CANDIDATES_PER_ITEM = 32');
-      expect(androidBridge).toContain('put("maxItems", OnDeviceBriefing.MAX_ITEMS)');
-      expect(androidBridge).toContain(
-        'put("maxCandidatesPerItem", OnDeviceBriefing.MAX_CANDIDATES_PER_ITEM)',
-      );
+    /*
+      Android는 이제 모델 provider를 싣지 않는다(ML Kit는 base APK에서 제거됨).
+      그래도 JS는 두 플랫폼에서 같은 envelope 모양을 받아야 하므로, Android는
+      같은 키와 같은 구조 한도를 리터럴로 광고한다.
+    */
+    it('Android advertises the same structural limits without a model provider', () => {
+      expect(androidBridge).toContain('put("maxItems", 64)');
+      expect(androidBridge).toContain('put("maxCandidatesPerItem", 32)');
+      expect(androidBridge).not.toContain('com.google.mlkit');
     });
 
     /** The envelope literal only, so unrelated `OnDeviceBriefing.` uses cannot leak in. */
@@ -252,14 +251,14 @@ describe('iOS Partner Briefing native package', () => {
 
     const iosEnvelope = () => envelopeBlock(bridge, '"envelope": [', '],');
     const androidEnvelope = () =>
-      envelopeBlock(androidBridge, 'val envelope = JSObject()', 'val ret =');
+      envelopeBlock(androidBridge, 'val envelope = JSObject()', 'call.resolve(');
 
     it('both advertise the identical envelope key set', () => {
       const iosKeys = [...iosEnvelope().matchAll(/"(\w+)": OnDeviceBriefing\.\w+/g)].map(
         (m) => m[1],
       );
       const androidKeys = [
-        ...androidEnvelope().matchAll(/put\("(\w+)", OnDeviceBriefing\.\w+\)/g),
+        ...androidEnvelope().matchAll(/put\("(\w+)", \d+\)/g),
       ].map((m) => m[1]);
 
       const expected = [
@@ -281,8 +280,10 @@ describe('iOS Partner Briefing native package', () => {
       // The advertised limits are the same constants the parsers guard with.
       expect(bridge).toContain('rawItems.count <= OnDeviceBriefing.maxItems');
       expect(bridge).toContain('rawCandidates.count <= OnDeviceBriefing.maxCandidatesPerItem');
-      expect(androidBridge).toContain('OnDeviceBriefing.MAX_ITEMS');
-      expect(androidBridge).toContain('OnDeviceBriefing.MAX_CANDIDATES_PER_ITEM');
+      // Android가 요약을 만들지 않으므로 강제할 parser도 없다. 대신 provider가
+      // 언제나 unsupported/E_UNAVAILABLE로 닫히는지 확인한다.
+      expect(androidBridge).toContain('put("availability", "unsupported")');
+      expect(androidBridge).toContain('BriefingErrorCode.UNAVAILABLE');
 
       // Capability payloads carry capacity numbers only -- no ids, dates or times.
       for (const [name, block] of [
@@ -305,20 +306,11 @@ describe('iOS Partner Briefing native package', () => {
     모순이 다시 생기면 잡는다.
   */
   describe('architecture doc agrees with the shipped Android provider', () => {
-    it('records Gate D as decided, not pending', () => {
-      expect(architectureDoc).toContain('Gate D — Android SDK selection: COMPLETE');
-      // The stale claim, in the forms it could come back as.
-      expect(architectureDoc).not.toMatch(/Gate D does not preselect/);
-      expect(architectureDoc).not.toMatch(/does not preselect a concrete Android GenAI/);
-    });
-
-    it('names the SDK the build actually resolves', () => {
+    it('does not claim a shipped Android model provider', () => {
       const gradle = read(`${packageDir}/android/build.gradle`);
-      const coordinate = gradle.match(/com\.google\.mlkit:genai-prompt:([\w.-]+)/);
-      expect(coordinate).not.toBeNull();
-      // The doc must name the same artifact and version the module depends on.
-      expect(architectureDoc).toContain('com.google.mlkit:genai-prompt');
-      expect(architectureDoc).toContain(coordinate![1]);
+      // 코드가 ML Kit를 싣지 않는다면 문서도 실었다고 말하면 안 된다.
+      expect(gradle).not.toMatch(/com\.google\.mlkit:genai-prompt/);
+      expect(architectureDoc).toMatch(/Gate D[^\n]*DEFERRED/);
     });
 
     it('keeps the selection rationale and the honest verification status', () => {
@@ -327,7 +319,6 @@ describe('iOS Partner Briefing native package', () => {
         'Deterministic fallback',
         'Cancellation',
         'Server inference remains forbidden',
-        'MlKitInitProvider',
       ]) {
         expect(architectureDoc, `doc drops "${claim}"`).toContain(claim);
       }

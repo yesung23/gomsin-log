@@ -13,6 +13,7 @@ dependencies {
     implementation project(':capacitor-browser')
     implementation project(':capacitor-push-notifications')
     implementation project(':gomsinlog-capacitor-device-keys')
+    implementation project(':gomsinlog-capacitor-on-device-briefing')
 
 }
 

@@ -221,21 +221,37 @@ GATE** — no emulator is available here (`/dev/kvm` is absent).
 
 ### Keychain accessibility
 
-**Decision: the app does not use the Keychain, and that is an explicit choice
-rather than an omission.**
+**Decision: Keychain use is confined to the first-party device-keys plugin, in
+the app's own default access group, and no `keychain-access-groups` entitlement
+is declared.**
+
+This section previously said the app does not use the Keychain at all. That was
+wrong, and wrong in the place it mattered most: it hid where the E2EE device keys
+live.
 
 The Supabase session lives in WKWebView `localStorage`, which is inside the app
 container and therefore covered by `NSFileProtectionComplete` and by the backup
-exclusion above. Nothing in the compile surface — `AppDelegate.swift` plus the
-four pods in `ios/App/Podfile` — calls `SecItemAdd`, `SecItemCopyMatching` or any
-other Keychain API. `src/lib/iosPrivacyManifest.test.ts` measures that against
-the real pod sources, so the claim cannot quietly stop being true.
+exclusion above. What does use the Keychain is
+`packages/capacitor-device-keys/ios/Sources/DeviceKeysPlugin/`:
 
-`keychain-access-groups` is therefore deliberately absent: a shared access group
-would create a way for another bundle to read whatever ended up there.
+| File | Item | Purpose |
+|---|---|---|
+| `DeviceKeys.swift` | Secure Enclave P-256 key via `SecAccessControlCreateWithFlags`, falling back to a software `kSecClassKey` item | the device identity key used for E2EE bootstrap and recovery |
+| `LocalKeys.swift` | `kSecClassGenericPassword` item | the local content key |
 
-If a future version does adopt the Keychain (for example a native Sign in with
-Apple credential), the accessibility class to use is
+`src/lib/iosPrivacyManifest.test.ts` measures that those two files are the ONLY
+Keychain callers across the Swift sources and the pods in `ios/App/Podfile`, so
+the boundary cannot quietly widen.
+
+`keychain-access-groups` is deliberately absent. Neither call site sets
+`kSecAttrAccessGroup`, so both items live in the app's default access group and
+are readable by this bundle alone. Declaring the entitlement would move them into
+a shared group that any other bundle carrying the same entitlement could read —
+for the device key, that is handing another process the material that
+authenticates this device. Keep the entitlement out, and keep the plugin free of
+`kSecAttrAccessGroup`.
+
+For any NEW Keychain item, the accessibility class to use is
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` — device-only so it cannot travel
 in an iCloud Keychain backup, and unlocked-only to match the container's
 Complete protection. Add it explicitly at the call site; never rely on the

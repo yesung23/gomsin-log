@@ -375,9 +375,9 @@ export function TripDetailPage() {
   };
 
   /**
-   * The primary trip-planning path: choose one capture and OCR it locally. The
-   * screenshot itself never leaves the device, and recognized text remains a
-   * draft until the user reviews it and explicitly presses Save.
+   * Choose one capture and OCR it locally. OCR is fallible, so every result is
+   * opened in the normal editor. The screenshot never leaves the device and
+   * nothing is written until the user confirms with the explicit Save button.
    */
   const handleQuickPlaceScreenshot = async (file?: File) => {
     const validationError = validateScreenshot(file);
@@ -859,8 +859,8 @@ export function TripDetailPage() {
               {currentDayItems.length === 0 ? (
                 <EmptyState
                   icon={<MapPin size={18} className="text-muted-foreground" />}
-                  title="캡처 한 장이면 일정이 만들어져요"
-                  description="지도 화면의 글자를 기기에서 읽어 초안으로 채워요. 확인하기 전에는 저장하지 않습니다."
+                  title="캡처에서 일정을 불러와요"
+                  description="사진은 이 기기에서만 읽어요. 글자를 잘못 읽을 수 있으니 저장 전에 확인해 주세요."
                   action={(
                     <div className="flex flex-col items-center gap-2">
                       <Button
@@ -870,7 +870,7 @@ export function TripDetailPage() {
                         disabled={isReadingScreenshot || isSavingItem || isOffline}
                       >
                         <ImagePlus size={14} />
-                        {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진에서 초안 만들기'}
+                        {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진에서 불러오기'}
                       </Button>
                       <button type="button" onClick={openNewItem} disabled={isOffline} className="press-response min-h-11 px-3 text-caption font-medium text-muted-foreground disabled:opacity-40">
                         직접 입력하기

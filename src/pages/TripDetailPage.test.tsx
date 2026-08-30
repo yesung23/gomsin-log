@@ -225,7 +225,7 @@ describe('TripDetailPage route request isolation', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/trips/trip-b');
   });
 
-  it('keeps recognized screenshot text in a review draft until the user explicitly saves', async () => {
+  it('prefills a place from one screenshot and writes only after explicit confirmation', async () => {
     parentRequests.length = 0;
     itemRequests.length = 0;
     checklistRequests.length = 0;
@@ -234,6 +234,8 @@ describe('TripDetailPage route request isolation', () => {
       title: '연남토마',
       address: '서울 마포구 연남로 42',
       businessHours: '매일 11:30 - 21:00',
+      categoryHint: '카페',
+      category: 'food',
       rawText: '연남토마 카페 서울 마포구 연남로 42',
     });
     render(
@@ -252,7 +254,7 @@ describe('TripDetailPage route request isolation', () => {
       checklistRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, checklists: [] });
     });
 
-    expect(await screen.findByRole('button', { name: '사진에서 초안 만들기' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '사진에서 불러오기' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('지도 캡처 선택'), {
       target: { files: [new File(['map'], 'map.png', { type: 'image/png' })] },
     });
@@ -262,6 +264,14 @@ describe('TripDetailPage route request isolation', () => {
     expect(screen.getByDisplayValue('서울 마포구 연남로 42')).toBeInTheDocument();
     expect(screen.getByDisplayValue('매일 11:30 - 21:00')).toBeInTheDocument();
     expect(saveTripItemMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await waitFor(() => expect(saveTripItemMock).toHaveBeenCalledTimes(1));
+    expect(saveTripItemMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: '연남토마',
+      category: 'food',
+      source: 'screenshot',
+    }));
   });
 
   /**
@@ -269,7 +279,7 @@ describe('TripDetailPage route request isolation', () => {
    * A real 신라제면 capture recognises a neighbouring `게스트하우스` map label, and
    * classifying on `rawText` filed that noodle shop under 숙소.
    */
-  it('files a screenshot place under the category its Naver panel printed', async () => {
+  it('prefills the category its Naver panel printed without an automatic write', async () => {
     parentRequests.length = 0;
     itemRequests.length = 0;
     checklistRequests.length = 0;
@@ -310,12 +320,18 @@ describe('TripDetailPage route request isolation', () => {
       checklistRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, checklists: [] });
     });
 
-    expect(await screen.findByRole('button', { name: '사진으로 바로 추가' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '사진에서 불러오기' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('지도 캡처 선택'), {
       target: { files: [new File(['map'], 'map.png', { type: 'image/png' })] },
     });
 
-    await screen.findByRole('button', { name: '신라제면 안국점 일정 수정' });
+    expect(await screen.findByRole('heading', { name: /일정 추가/ })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('신라제면 안국점')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '음식' })).toHaveAttribute('aria-pressed', 'true');
+    expect(saveTripItemMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    await waitFor(() => expect(saveTripItemMock).toHaveBeenCalledTimes(1));
     expect(saveTripItemMock).toHaveBeenCalledWith(expect.objectContaining({
       title: '신라제면 안국점',
       category: 'food',
@@ -403,6 +419,7 @@ describe('the capture path does not present OCR as certain', () => {
     await renderReadyTrip();
     const description = await screen.findByText(/글자를 잘못 읽을 수 있으니/);
     expect(description).toBeInTheDocument();
+    expect(description.textContent).toContain('저장 전에 확인');
     expect(description.textContent).toContain('이 기기에서만');
   });
 

@@ -375,10 +375,9 @@ export function TripDetailPage() {
   };
 
   /**
-   * The primary trip-planning path: choose one capture, OCR locally, save the
-   * extracted place immediately. The screenshot itself never leaves the device.
-   * If recognition or the write is incomplete, preserve everything we did read
-   * and fall back to the normal editor instead of making the user start over.
+   * Choose one capture and OCR it locally. OCR is fallible, so every result is
+   * opened in the normal editor and nothing is written until the user confirms
+   * the fields with the explicit Save button.
    */
   const handleQuickPlaceScreenshot = async (file?: File) => {
     const validationError = validateScreenshot(file);
@@ -419,24 +418,11 @@ export function TripDetailPage() {
         return;
       }
 
-      setIsSavingItem(true);
-      const saved = await saveTripItemToDB({
-        tripId: trip.id,
-        itemDate: activeDate,
-        title: place.title,
-        category: draft.category,
-        address: place.address || undefined,
-        businessHours: place.businessHours || undefined,
-        source: 'screenshot',
-        sortOrder: currentDayItems.length,
-      });
-      if (!isCurrentTripScope(operationScope)) return;
-      if (!saved) {
-        openFallbackEditor(draft, '자동 저장하지 못했어요. 내용을 확인하고 저장을 눌러 주세요.');
-        return;
-      }
-      setItems((current) => [...current, saved]);
-      toast.success(`${saved.title}을(를) 추가했어요. 틀리면 카드를 눌러 고쳐 주세요.`);
+      setEditingItemId(null);
+      setItemDraft(draft);
+      setItemError(null);
+      setShowItemModal(true);
+      toast.success('캡처에서 읽은 내용을 확인한 뒤 저장해 주세요.');
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('Failed to quick-add place screenshot:', error);
@@ -877,8 +863,8 @@ export function TripDetailPage() {
               {currentDayItems.length === 0 ? (
                 <EmptyState
                   icon={<MapPin size={18} className="text-muted-foreground" />}
-                  title="캡처 한 장이면 일정이 만들어져요"
-                  description="지도 화면을 선택하면 장소를 읽어 바로 추가해요. 글자를 잘못 읽을 수 있으니 추가된 뒤 확인해 주세요. 사진은 이 기기에서만 처리합니다."
+                  title="캡처 한 장에서 일정을 불러와요"
+                  description="지도 화면을 선택하면 장소를 읽어 확인 화면에 채워요. 글자를 잘못 읽을 수 있으니 저장 전에 확인해 주세요. 사진은 이 기기에서만 처리합니다."
                   action={(
                     <div className="flex flex-col items-center gap-2">
                       <Button
@@ -888,7 +874,7 @@ export function TripDetailPage() {
                         disabled={isReadingScreenshot || isSavingItem || isOffline}
                       >
                         <ImagePlus size={14} />
-                        {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진으로 바로 추가'}
+                        {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진에서 불러오기'}
                       </Button>
                       <button type="button" onClick={openNewItem} disabled={isOffline} className="press-response min-h-11 px-3 text-caption font-medium text-muted-foreground disabled:opacity-40">
                         직접 입력하기

@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent, Role } from '@/types';
+import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent, Role, AppLocale } from '@/types';
 import type { CoupleHighlightDraft, HighlightMutationResult } from '@/lib/highlights';
 import type { AccountDeletionOutcome, DeletionStatus } from '@/lib/accountDeletion';
 import type { ServerErrorKind } from '@/lib/serverErrors';
@@ -255,6 +255,7 @@ export interface StoreContextType {
   setWidgetLayout: (layout: string[], role?: Role) => void;
   setHasSeenInstallPrompt: (seen: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
+  setLocale: (locale: AppLocale) => void;
 }
 
 export const StoreContext = createContext<StoreContextType | null>(null);

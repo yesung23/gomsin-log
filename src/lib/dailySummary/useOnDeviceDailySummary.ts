@@ -36,6 +36,8 @@ const RETRYABLE_FAILURES = new Set<OnDeviceSummaryFailure>([
 ]);
 
 export interface UseOnDeviceDailySummaryInput {
+  /** 새 Partner Briefing이 같은 surface를 소유할 때 legacy 추론을 시작하지 않는다. */
+  enabled?: boolean;
   mode: StoryMode;
   /** 이 스토리가 담은 기록. 이미 권한 판정을 통과한 목록이다. */
   records: readonly DailyRecord[];
@@ -59,6 +61,7 @@ export function useOnDeviceDailySummary(
   input: UseOnDeviceDailySummaryInput,
 ): UseOnDeviceDailySummaryResult {
   const {
+    enabled = true,
     mode,
     records,
     viewerUserId,
@@ -82,7 +85,7 @@ export function useOnDeviceDailySummary(
   }>({ payloadKey: '[]', requestVersion: 0, values: NO_REFINEMENT, status: 'idle' });
 
   const corpus = useMemo(() => {
-    if (mode !== 'today') {
+    if (!enabled || mode !== 'today') {
       return { ok: false, rejection: 'not_partner_today' } as const;
     }
     return selectDailySummaryCorpus({
@@ -93,7 +96,7 @@ export function useOnDeviceDailySummary(
       coupleConnected,
       coupleStatus,
     });
-  }, [mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
+  }, [enabled, mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
 
   const summaryLines = useMemo(
     () => corpus.ok ? deterministicSummaryLines(corpus.records) : [],

@@ -1,7 +1,9 @@
+import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { AppBar } from '@/components/ui/AppBar';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
+import { LEGAL_DOC_TITLES, toLegalDocKey, type LegalDocKey } from '@/lib/legalDocs';
 
 const LAST_UPDATED = '2026-09-04';
 const EFFECTIVE_DATE = '2026-09-11';
@@ -211,12 +213,180 @@ const PRIVACY: Section[] = [
   },
 ];
 
+/**
+ * The body of a legal document: revision dates, every section, and the contact block.
+ *
+ * The public `/legal/:doc` route and the in-app onboarding sheet both render THIS, so
+ * the consented text and the published text cannot drift apart. The legal prose itself
+ * lives in `TERMS` / `PRIVACY` above and is never copied anywhere else.
+ */
+export function LegalDocumentBody({ doc }: { doc: LegalDocKey }) {
+  const isPrivacy = doc === 'privacy';
+  const sections = isPrivacy ? PRIVACY : TERMS;
+
+  return (
+    <>
+      <div className="rounded-control border border-border bg-muted/40 px-3 py-2 text-caption text-muted-foreground leading-relaxed">
+        최종 개정일: {LAST_UPDATED} · 시행일: {EFFECTIVE_DATE}
+      </div>
+
+      <div className="space-y-6">
+        {sections.map((section) => (
+          <section key={section.heading} className="space-y-2">
+            <h2 className="text-heading text-foreground break-keep">{section.heading}</h2>
+            <ul className="space-y-2 list-disc pl-5 marker:text-coral">
+              {section.body.map((line) => (
+                <li key={line} className="text-body text-muted-foreground leading-relaxed break-keep">{line}</li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+
+      <div className="rounded-surface bg-muted/60 border border-border p-4 text-caption text-muted-foreground leading-relaxed space-y-2">
+        <p className="font-semibold text-foreground">{isPrivacy ? '개인정보 문의' : '서비스 문의'}</p>
+        {PRIVACY_CONTACT ? (
+          <a href={`mailto:${PRIVACY_CONTACT}`} className="inline-flex min-h-11 items-center gap-1 text-info font-medium break-all">
+            {PRIVACY_CONTACT}<ExternalLink size={12} />
+          </a>
+        ) : (
+          <p>앱 스토어 등록 페이지에 공개된 개발자 연락처를 이용해 주세요.</p>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * A full-screen, in-app reader for one legal document.
+ *
+ * Onboarding used `<a href="/legal/terms" target="_blank">` for these. In the Capacitor
+ * WebView the app is served from `capacitor://localhost` (iOS) and `https://localhost`
+ * (Android), so `target="_blank"` handed that origin to the system browser, where Safari
+ * showed a `https://localhost` connection failure and the two documents a user must read
+ * before consenting were simply unreachable. It also left the app, which on iOS can end the
+ * onboarding view entirely.
+ *
+ * This mounts over onboarding instead, so no navigation occurs and the wizard -- including
+ * the two consent checkboxes -- keeps its state. Reading is NOT consenting: this sheet has
+ * no agree control and never touches the checkboxes.
+ */
+export function LegalDocumentSheet({
+  doc,
+  onClose,
+}: {
+  doc: LegalDocKey;
+  onClose: () => void;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const titleId = 'legal-document-sheet-title';
+  const title = LEGAL_DOC_TITLES[doc];
+
+  // Focus the way out first: on a screen reader the sheet otherwise opens with the
+  // focus still on the onboarding link behind it.
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, [doc]);
+
+  /*
+    Escape, and a focus trap.
+
+    The trap is the same one `src/components/cycle/CycleSheet.tsx` uses -- same key
+    handling, same focusable selector -- rather than a new dependency or a second
+    invention. It is written here instead of extracted into a shared hook because
+    rewiring CycleSheet is a refactor of a screen this change has no reason to touch.
+
+    Without it, `aria-modal="true"` is a claim the markup does not keep: Tab walks
+    straight out of the dialog and into the consent checkboxes and sign-in buttons
+    behind it, which is the one place a stray keystroke must never land.
+
+    One addition over CycleSheet: when focus is NOT inside the panel it is pulled back
+    in rather than left alone. That case is reachable here by ordinary use -- these
+    documents are long prose, and a tap on a paragraph blurs to `body`, after which the
+    next Tab would go to the first tabbable element on the page, which is behind the
+    dialog.
+  */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (!active || !panel.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
+      // With the close button as the only focusable element, first === last, so both
+      // directions land back on it and focus simply stays put.
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex justify-center bg-muted">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        data-testid="legal-document-sheet"
+        data-legal-doc={doc}
+        data-astryx-theme="gomsin"
+        className="relative flex h-full w-full max-w-[430px] flex-col bg-background pt-[env(safe-area-inset-top,0px)]"
+      >
+        <header className="flex min-h-11 shrink-0 items-center gap-1 border-b border-border px-2 py-2">
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            aria-label={`${title} 닫기`}
+            className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"
+          >
+            <X size={20} aria-hidden="true" />
+          </button>
+          <h1 id={titleId} className="min-w-0 flex-1 truncate text-title text-foreground">{title}</h1>
+        </header>
+
+        {/*
+          The scroller is the inner element, not the page: these documents are long, and
+          a body-level scroll would leave the close control off-screen at the bottom of
+          a twelve-clause document.
+        */}
+        <div className="flex-1 space-y-5 overflow-y-auto px-5 pt-4 pb-[max(env(safe-area-inset-bottom,0px),1.5rem)]">
+          <LegalDocumentBody doc={doc} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function LegalPage() {
   const navigate = useNavigate();
   const { doc } = useParams<{ doc: string }>();
-  const isPrivacy = doc === 'privacy';
-  const sections = isPrivacy ? PRIVACY : TERMS;
-  const title = isPrivacy ? '개인정보 처리방침' : '서비스 이용약관';
+  const docKey = toLegalDocKey(doc);
 
   return (
     <MobileShell hideNav>
@@ -229,38 +399,12 @@ export function LegalPage() {
         <AppBar
           sticky={false}
           className="px-0 pt-0"
-          title={title}
+          title={LEGAL_DOC_TITLES[docKey]}
           onBack={() => navigate(-1)}
           backLabel="뒤로가기"
         />
 
-        <div className="rounded-control border border-border bg-muted/40 px-3 py-2 text-caption text-muted-foreground leading-relaxed">
-          최종 개정일: {LAST_UPDATED} · 시행일: {EFFECTIVE_DATE}
-        </div>
-
-        <div className="space-y-6">
-          {sections.map((section) => (
-            <section key={section.heading} className="space-y-2">
-              <h2 className="text-heading text-foreground break-keep">{section.heading}</h2>
-              <ul className="space-y-2 list-disc pl-5 marker:text-coral">
-                {section.body.map((line) => (
-                  <li key={line} className="text-body text-muted-foreground leading-relaxed break-keep">{line}</li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-
-        <div className="rounded-surface bg-muted/60 border border-border p-4 text-caption text-muted-foreground leading-relaxed space-y-2">
-          <p className="font-semibold text-foreground">{isPrivacy ? '개인정보 문의' : '서비스 문의'}</p>
-          {PRIVACY_CONTACT ? (
-            <a href={`mailto:${PRIVACY_CONTACT}`} className="inline-flex min-h-11 items-center gap-1 text-info font-medium break-all">
-              {PRIVACY_CONTACT}<ExternalLink size={12} />
-            </a>
-          ) : (
-            <p>앱 스토어 등록 페이지에 공개된 개발자 연락처를 이용해 주세요.</p>
-          )}
-        </div>
+        <LegalDocumentBody doc={docKey} />
       </div>
     </MobileShell>
   );

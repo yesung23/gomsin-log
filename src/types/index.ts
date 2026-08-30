@@ -1,6 +1,7 @@
 import type { ServerErrorKind } from '@/lib/serverErrors';
+import type { AppLocale } from '@/lib/appLocale';
 
-export type { ServerErrorKind };
+export type { ServerErrorKind, AppLocale };
 
 export type Role = 'gomsin' | 'soldier';
 export type RelationshipContext = 'military' | 'general';
@@ -532,6 +533,7 @@ export interface AppState {
   soldierWidgetLayout: string[];
   hasSeenInstallPrompt: boolean;
   theme: 'light' | 'dark';
+  locale?: AppLocale;
 }
 
 export interface AuthUser {

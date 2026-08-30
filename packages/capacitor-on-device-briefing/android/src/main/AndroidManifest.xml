@@ -1,0 +1,11 @@
+<manifest xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      The Google ML Kit Prompt API library specifies minSdk 26 in its AAR metadata.
+      To allow the host application to retain minSdk 23 for older devices while
+      strictly runtime-gating all ML Kit Prompt API calls to Android 8.0 (API 26+),
+      overrideLibrary allows manifest merging without lowering the app's global install compatibility.
+    -->
+    <uses-sdk tools:overrideLibrary="com.google.mlkit.genai.prompt,com.google.mlkit.genai.common" />
+
+</manifest>

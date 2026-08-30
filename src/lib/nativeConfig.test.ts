@@ -90,6 +90,7 @@ const devicePluginPackage = JSON.parse(read('packages/capacitor-device-keys/pack
 };
 const devicePodspec = read('packages/capacitor-device-keys/GomsinlogCapacitorDeviceKeys.podspec');
 const summaryPodspec = read('packages/capacitor-on-device-summary/GomsinlogCapacitorOnDeviceSummary.podspec');
+const briefingPodspec = read('packages/capacitor-on-device-briefing/GomsinlogCapacitorOnDeviceBriefing.podspec');
 const deviceJavaScriptPlugin = read('packages/capacitor-device-keys/src/index.ts');
 const deviceAndroidPlugin = read(
   'packages/capacitor-device-keys/android/src/main/java/app/gomsinlog/devicekeys/DeviceKeysPlugin.kt',
@@ -312,12 +313,26 @@ describe('the Android manifests are well-formed XML', () => {
   });
 });
 
-describe('Android: the permission set is exactly what the code proves', () => {
+/**
+ * What this suite reads is `android/app/src/main/AndroidManifest.xml`, which is an
+ * INPUT to the Android manifest merger, not the manifest that ships.
+ *
+ * That distinction was previously blurred: this block was titled "the permission set
+ * is exactly what the code proves" and asserted an exact set of three, while the built
+ * APK carried seven. The four extras come from library manifests and are merged in at
+ * build time, so neither this test nor its JVM twin could ever have seen them -- they
+ * are two independent implementations of the SAME blind spot. Play Console shows the
+ * merged set, which is what a reviewer and a user actually meet.
+ *
+ * So the source-manifest assertion below is scoped to what it can prove: the app's own
+ * declarations. The merged artifact is checked separately, further down.
+ */
+describe("Android: the app's OWN manifest declares exactly these permissions", () => {
   const declared = [...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(
     (m) => m[1],
   );
 
-  it('declares INTERNET and ACCESS_NETWORK_STATE, and nothing else', () => {
+  it('declares INTERNET, ACCESS_NETWORK_STATE and POST_NOTIFICATIONS of its own, and nothing else', () => {
     // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS left with the voice recorder
     // (§12.4 upload gate, 2026-08-21): no code calls getUserMedia({ audio }),
     // and a microphone permission with no feature behind it is a review flag.
@@ -332,10 +347,11 @@ describe('Android: the permission set is exactly what the code proves', () => {
 
   it('agrees with the JVM copy of the same list', () => {
     /*
-      The permission set is checked twice, on purpose: here, and again in
+      The app's OWN permission set is checked twice, on purpose: here, and again in
       `NativeConfigTest.java`. Two independent witnesses reading the same
-      manifest is worth more than one, because a single check can be relaxed in
-      the same commit that relaxes the thing it guards.
+      SOURCE manifest is worth more than one, because a single check can be relaxed in
+      the same commit that relaxes the thing it guards. Neither witness sees a
+      library-merged permission; that is the merged-artifact block's job.
 
       The cost is drift, and it has happened twice. Both times the JVM copy was
       the one left behind, because the Android CI job is the ONLY thing that
@@ -437,6 +453,119 @@ describe('Android: the permission set is exactly what the code proves', () => {
     for (const component of components) {
       expect(component[0], component[0].slice(0, 80)).toContain('android:exported=');
     }
+  });
+});
+
+/**
+ * The merged manifest is the artifact. The source manifest is not.
+ *
+ * Android's manifest merger folds every library's manifest into the app's before
+ * packaging, so the permission set a user is shown at install time, and the one Play
+ * Console lists, is the MERGED set. On this branch the ML Kit GenAI dependency adds a
+ * permission and a `<queries>` entry that no amount of reading
+ * `android/app/src/main/AndroidManifest.xml` can reveal.
+ *
+ * Known library-merged additions, with where each comes from. Recorded so that a NEW
+ * one shows up as a diff rather than as an unnoticed install-time prompt:
+ *
+ *   com.google.android.apps.aicore.service.BIND_SERVICE
+ *       com.google.mlkit:genai-prompt (this branch's on-device briefing provider)
+ *   com.google.android.c2dm.permission.RECEIVE
+ *   app.gomsinlog.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ *   android.permission.WAKE_LOCK
+ *       Firebase Cloud Messaging / androidx work + Play services messaging
+ *
+ * Nothing here CHANGES a permission; the point is only that the check now reads the
+ * file that decides what ships.
+ *
+ * The merged manifest is build output and is gitignored, so it is frequently absent --
+ * on CI, and on any checkout that has not run a Gradle build. An absent artifact is
+ * reported as SKIPPED rather than passed: a green tick for a file that was never read
+ * is exactly the false assurance this block exists to remove.
+ *
+ * The skip is decided at COLLECTION time with `it.skipIf`, not inside the test body with
+ * `ctx.skip()`. A runtime `ctx.skip()` still enters the test, and reporters tally the
+ * result alongside passes -- which reintroduced, in the reporting layer, the same false
+ * assurance the block was written to remove. `it.skipIf` never registers the test as
+ * runnable, so every reporter counts it as skipped.
+ */
+describe('Android: the merged manifest carries more than the app declares', () => {
+  /** Candidate locations, oldest AGP layout last. The first that exists is used. */
+  const MERGED_MANIFEST_CANDIDATES = [
+    'android/app/build/intermediates/merged_manifests/debug/processDebugManifest/AndroidManifest.xml',
+    'android/app/build/intermediates/packaged_manifests/debug/processDebugManifestForPackage/AndroidManifest.xml',
+    'android/app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml',
+    'android/app/build/intermediates/packaged_manifests/release/processReleaseManifestForPackage/AndroidManifest.xml',
+  ] as const;
+
+  const OWN_PERMISSIONS = [
+    'android.permission.ACCESS_NETWORK_STATE',
+    'android.permission.INTERNET',
+    'android.permission.POST_NOTIFICATIONS',
+  ];
+
+  const EXPECTED_LIBRARY_MERGED_PERMISSIONS = [
+    'android.permission.WAKE_LOCK',
+    'app.gomsinlog.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+    'com.google.android.apps.aicore.service.BIND_SERVICE',
+    'com.google.android.c2dm.permission.RECEIVE',
+  ];
+
+  /**
+   * Resolved once, at collection time, so `it.skipIf` below can decide before the test
+   * is ever registered as runnable.
+   */
+  const MERGED_MANIFEST_PATH: string | null =
+    MERGED_MANIFEST_CANDIDATES.find((candidate) =>
+      existsSync(join(repoRoot, candidate)),
+    ) ?? null;
+
+  const NO_ARTIFACT = MERGED_MANIFEST_PATH === null;
+
+  /** Narrows for the test bodies; `it.skipIf` guarantees it never throws. */
+  function mergedManifestPath(): string {
+    if (MERGED_MANIFEST_PATH === null) {
+      throw new Error(
+        'unreachable: it.skipIf(NO_ARTIFACT) keeps this body from running. ' +
+          'Run `cd android && ./gradlew :app:processDebugManifest` to produce the artifact.',
+      );
+    }
+    return MERGED_MANIFEST_PATH;
+  }
+
+  it('proves the source manifest cannot see a library-merged permission', () => {
+    // Non-vacuity for the whole block, and it needs no build artifact: whatever the
+    // merged set turns out to be, these four are NOT in the file the two source-manifest
+    // witnesses read, so neither witness could ever have reported them.
+    for (const permission of EXPECTED_LIBRARY_MERGED_PERMISSIONS) {
+      expect(manifest).not.toContain(permission);
+    }
+    expect(EXPECTED_LIBRARY_MERGED_PERMISSIONS.length).toBeGreaterThan(0);
+  });
+
+  it.skipIf(NO_ARTIFACT)('lists every permission in the built artifact', () => {
+    const merged = [
+      ...read(mergedManifestPath()).matchAll(/<uses-permission android:name="([^"]+)"/g),
+    ]
+      .map((m) => m[1])
+      .sort();
+
+    // Non-vacuous: a truncated or empty artifact fails instead of asserting nothing.
+    expect(merged.length).toBeGreaterThanOrEqual(OWN_PERMISSIONS.length);
+    expect(merged).toEqual(
+      [...OWN_PERMISSIONS, ...EXPECTED_LIBRARY_MERGED_PERMISSIONS].sort(),
+    );
+  });
+
+  it.skipIf(NO_ARTIFACT)('shows the ML Kit init provider that runs at process start', () => {
+    // Android instantiates every declared ContentProvider before Application.onCreate,
+    // on every API level. This is the path by which ML Kit common classes load even on
+    // pre-26 devices, where the plugin's own API 26 gate blocks all inference.
+    // docs/PARTNER_BRIEFING_ARCHITECTURE.md records the same fact and why the provider
+    // is deliberately not suppressed.
+    const mergedXml = read(mergedManifestPath());
+    expect(mergedXml).toContain('com.google.mlkit.common.internal.MlKitInitProvider');
+    expect(mergedXml).not.toContain('com.google.mlkit.common.internal.MlKitInitProvider" tools:node="remove"');
   });
 });
 
@@ -754,11 +883,12 @@ describe('both platforms are installed and reproducible from the lockfile', () =
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
     // The count is what keeps the loop below from passing vacuously on a regex
-    // that stopped matching. Eight since the iOS-only StoreKit plugin was
-    // added after the on-device summary and push plugins.
-    expect(pods.length).toBe(8);
+    // that stopped matching. Nine with the iOS-only StoreKit plugin and the
+    // first-party on-device summary and Partner Briefing plugins.
+    expect(pods.length).toBe(9);
     const firstPartyPaths = [
       '../../packages/capacitor-device-keys',
+      '../../packages/capacitor-on-device-briefing',
       '../../packages/capacitor-on-device-summary',
       '../../packages/capacitor-storekit',
     ];
@@ -850,13 +980,15 @@ describe('iOS: minimum deployment target is consistently set to iOS 15.0', () =>
 
   it('sets deployment target to 15.0 in local plugin podspecs', () => {
     expect(devicePodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
+    expect(briefingPodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
     expect(summaryPodspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
     expect(devicePodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
+    expect(briefingPodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
     expect(summaryPodspec).not.toMatch(/s\.ios\.deployment_target\s*=\s*['"]14\.0['"]/);
   });
 
   it('forbids tracked 14.0 iOS deployment targets in source native config', () => {
-    const trackedConfigs = [iosPodfile, pbxproj, devicePodspec, summaryPodspec];
+    const trackedConfigs = [iosPodfile, pbxproj, devicePodspec, briefingPodspec, summaryPodspec];
     for (const config of trackedConfigs) {
       expect(config).not.toMatch(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*14\.0/);
       expect(config).not.toMatch(/platform\s+:ios,\s*['"]14\.0['"]/);

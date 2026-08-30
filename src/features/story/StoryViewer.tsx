@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { X, ChevronLeft, ChevronRight, ArrowUpRight, BookmarkPlus, Check, Sparkles, LoaderCircle } from 'lucide-react';
 import type { StoryCard } from '@/features/story/storyProjection';
+import type { BriefingLocale, PartnerBriefing } from '@/lib/partnerBriefing/contract';
+import { PartnerBriefingCard } from '@/components/widgets/PartnerBriefingCard';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { PaperCard, Bookmark, FoldDivider } from '@/components/paper';
 import { cn } from '@/lib/utils';
@@ -71,18 +73,41 @@ export interface StoryViewerProps {
   bookmarkDisabledReason?: string;
   /** 미디어 복호에 필요한 커플 범위. */
   coupleId?: string;
+  /** 파트너 브리핑. 첫 번째 압축 화면으로 렌더된다. */
+  briefing?: PartnerBriefing | null;
+  /** 브리핑 로케일. 기본값 ko. */
+  briefingLocale?: BriefingLocale;
+}
+
+type ViewerItem =
+  | { kind: 'briefing'; briefing: PartnerBriefing }
+  | { kind: 'card'; card: StoryCard };
+
+/**
+ * 카드의 안정적인 identity.
+ *
+ * 목록 앞에 브리핑이 끼어들거나 빠지면 카드의 숫자 위치가 통째로 밀린다. 원본이 하나뿐인
+ * 하루에서는 표지가 생기지 않으므로(표지는 원본 2개 이상일 때만 붙는다) 길이 자체가
+ * 2와 3 사이를 오가고, 숫자 index만 들고 있으면 사용자가 아무것도 누르지 않았는데
+ * index 0의 원본이 브리핑으로, index 1의 닫는 장이 원본으로 바뀐다.
+ *
+ * 그래서 뷰어가 기억하는 것은 "몇 번째"가 아니라 "무엇"이다. 원본은 정확한 record id로
+ * 식별하므로 `?at=`이 연 카드도 전환 뒤에 같은 원본으로 남는다.
+ */
+function itemKey(item: ViewerItem): string {
+  // 브리핑과 기존 목차는 같은 "앞장"이다. 브리핑이 늦게 준비되거나 사라져도
+  // 사용자가 읽던 원본의 위치를 흔들지 않고 앞장만 자연스럽게 교체한다.
+  if (item.kind === 'briefing') return 'front';
+  const card = item.card;
+  if (card.kind === 'cover') return 'front';
+  if (card.kind === 'moment') return `record:${card.record.id}`;
+  if (card.kind === 'missing') return `record:${card.recordId}`;
+  return 'closing';
 }
 
 function formatStoryTime(time: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(time.trim());
   return match ? `${match[1].padStart(2, '0')}:${match[2]}` : time;
-}
-
-/** Stable identity for realtime-safe navigation. Moment and missing share an exact source id. */
-function storyCardIdentity(card: StoryCard): string {
-  if (card.kind === 'cover') return 'cover';
-  if (card.kind === 'closing') return 'closing';
-  return `record:${card.kind === 'moment' ? card.record.id : card.recordId}`;
 }
 
 export function StoryViewer({
@@ -104,30 +129,49 @@ export function StoryViewer({
   acknowledgeDisabledReason,
   bookmarkDisabledReason,
   coupleId,
+  briefing,
+  briefingLocale,
 }: StoryViewerProps) {
-  const [activeCardIdentity, setActiveCardIdentity] = useState<string | null>(() => {
-    const index = Math.min(Math.max(initialIndex, 0), Math.max(cards.length - 1, 0));
-    return cards[index] ? storyCardIdentity(cards[index]) : null;
-  });
+  const items: ViewerItem[] = useMemo(() => {
+    const list: ViewerItem[] = [];
+    if (briefing) {
+      list.push({ kind: 'briefing', briefing });
+    }
+    for (const card of cards) {
+      list.push({ kind: 'card', card });
+    }
+    return list;
+  }, [briefing, cards]);
+
+  const total = items.length;
+  const itemKeys = useMemo(() => items.map(itemKey), [items]);
+
+  /*
+    보고 있는 카드를 identity로 기억한다.
+
+    `initialIndex`는 여는 자리를 정할 때만 쓰이고, 그 뒤로는 이 key가 위치를 소유한다.
+    목록이 바뀌면 같은 key를 새 배열에서 찾아 그 자리를 계속 보여준다.
+  */
+  const [activeKey, setActiveKey] = useState(
+    () => itemKeys[Math.min(Math.max(initialIndex, 0), Math.max(items.length - 1, 0))] ?? '',
+  );
+  const foundIndex = itemKeys.indexOf(activeKey);
+  const index = foundIndex;
+  const currentUnavailable = activeKey !== '' && foundIndex < 0;
+  const item = index >= 0 ? items[index] : undefined;
+  const card = item?.kind === 'card' ? item.card : undefined;
+  const sourceUnavailable = currentUnavailable || card?.kind === 'missing';
+
   /** 홀드하면 UI를 감추고 사진만 남긴다. 멈출 타이머가 없으므로 용도가 이것뿐이다. */
   const [bare, setBare] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const unavailableHeadingRef = useRef<HTMLHeadingElement>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const total = cards.length;
-  const index = activeCardIdentity === null
-    ? -1
-    : cards.findIndex((candidate) => storyCardIdentity(candidate) === activeCardIdentity);
-  const card = index >= 0 ? cards[index] : undefined;
-  const currentUnavailable = activeCardIdentity !== null && index < 0;
-  const sourceUnavailable = currentUnavailable || card?.kind === 'missing';
-
   const go = useCallback((target: number) => {
-    if (cards.length === 0) return;
-    const nextCard = cards[Math.min(Math.max(target, 0), cards.length - 1)];
-    setActiveCardIdentity(storyCardIdentity(nextCard));
-  }, [cards]);
+    const next = itemKeys[Math.min(Math.max(target, 0), Math.max(total - 1, 0))];
+    if (next !== undefined) setActiveKey(next);
+  }, [itemKeys, total]);
 
   /*
     마지막에서는 넘어가지 않는다.
@@ -177,13 +221,14 @@ export function StoryViewer({
   /** 카드가 바뀌면 무엇이 보이는지 말한다. SC 4.1.3. */
   const announcement = useMemo(() => {
     if (currentUnavailable) return '현재 보던 기록을 더 이상 볼 수 없어요';
-    if (!card) return '';
+    if (!item) return '';
     const position = `${total}개 중 ${index + 1}번째`;
-    if (card.kind === 'cover') return `${position}, 목차`;
-    if (card.kind === 'missing') return `${position}, 볼 수 없는 기록`;
-    if (card.kind === 'closing') return `${position}, 마지막`;
-    return `${position}, ${formatStoryTime(card.record.time)}`;
-  }, [card, currentUnavailable, index, total]);
+    if (item.kind === 'briefing') return `${position}, 브리핑`;
+    if (item.card.kind === 'cover') return `${position}, 목차`;
+    if (item.card.kind === 'missing') return `${position}, 볼 수 없는 기록`;
+    if (item.card.kind === 'closing') return `${position}, 마지막`;
+    return `${position}, ${formatStoryTime(item.card.record.time)}`;
+  }, [currentUnavailable, item, index, total]);
 
   const startHold = () => { holdTimer.current = setTimeout(() => setBare(true), 400); };
   const endHold = () => {
@@ -192,7 +237,7 @@ export function StoryViewer({
     setBare(false);
   };
 
-  if (!card && !currentUnavailable) return null;
+  if (!item && !currentUnavailable) return null;
 
   const talkAboutState = card?.kind === 'moment'
     ? talkAboutStateByRecordId?.get(card.record.id) ?? 'none'
@@ -219,9 +264,9 @@ export function StoryViewer({
         보이면 사용자가 서두른다.
       */}
       <div className={cn('flex gap-1 px-4 pt-3 transition-opacity', bare && 'opacity-0')}>
-        {cards.map((progressCard, position) => (
+        {items.map((progressItem, position) => (
           <span
-            key={storyCardIdentity(progressCard)}
+            key={itemKey(progressItem)}
             className={cn('h-0.5 flex-1 rounded-full', position <= index ? 'bg-coral-strong' : 'bg-border')}
           />
         ))}
@@ -252,9 +297,16 @@ export function StoryViewer({
       >
         {currentUnavailable ? (
           <StoryCurrentUnavailable
-            canRestart={cards.length > 0}
+            canRestart={items.length > 0}
             onRestart={() => go(0)}
             headingRef={unavailableHeadingRef}
+          />
+        ) : item?.kind === 'briefing' ? (
+          <PartnerBriefingCard
+            briefing={item.briefing}
+            locale={briefingLocale}
+            onOpenRecord={onOpenRecord}
+            className="mt-2"
           />
         ) : card?.kind === 'cover' ? (
           <CoverCard
@@ -308,14 +360,14 @@ export function StoryViewer({
                   하이라이트
                 </button>
               ) : null}
-              <button
-                type="button"
-                onClick={() => onOpenRecord(card.record.id)}
-                className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
-              >
-                원본 보기
-                <ArrowUpRight size={15} aria-hidden="true" />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenRecord(card.record.id)}
+                  className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
+                >
+                  원본 보기
+                  <ArrowUpRight size={15} aria-hidden="true" />
+                </button>
             </div>
           </>
         ) : null}

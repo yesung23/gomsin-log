@@ -322,7 +322,7 @@ describe('Deletion-Recovery Suite', () => {
     // did pass that assertion untouched. Asserting the constant first makes the
     // declaration itself the thing under test.
     expect([...DEVICE_PREF_CARRY_OVER_KEYS].sort())
-      .toEqual(['hasSeenInstallPrompt', 'soldierWidgetLayout', 'theme', 'widgetLayout']);
+      .toEqual(['hasSeenInstallPrompt', 'locale', 'soldierWidgetLayout', 'theme', 'widgetLayout']);
     // ...and the blob may not contain anything the declaration does not allow.
     expect(Object.keys(persisted).sort())
       .toEqual([...DEVICE_PREF_CARRY_OVER_KEYS].sort());

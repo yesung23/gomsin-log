@@ -15,6 +15,7 @@ def capacitor_pods
   pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
   pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
   pod 'GomsinlogCapacitorDeviceKeys', :path => '../../packages/capacitor-device-keys'
+  pod 'GomsinlogCapacitorOnDeviceBriefing', :path => '../../packages/capacitor-on-device-briefing'
   pod 'GomsinlogCapacitorOnDeviceSummary', :path => '../../packages/capacitor-on-device-summary'
   pod 'GomsinlogCapacitorStorekit', :path => '../../packages/capacitor-storekit'
 end

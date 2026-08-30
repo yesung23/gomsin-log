@@ -49,6 +49,13 @@ import {
   saveCoupleHighlightToDB,
   type CoupleHighlightDraft,
 } from '@/lib/highlights';
+import {
+  type AppLocale,
+  DEFAULT_APP_LOCALE,
+  isAppLocale,
+  normalizeAppLocale,
+  preferredAppLocale,
+} from '@/lib/appLocale';
 import { setPartnerUsernameInDB } from '@/lib/partnerUsername';
 import {
   fetchTalkAboutMarksResultFromDB,
@@ -256,6 +263,18 @@ function preferredTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
+
+/**
+ * The locale to use on a device that has never chosen one.
+ * Falls back to 'ko' if navigator or languages are unsupported.
+ */
+function resolveBrowserLocale(): AppLocale {
+  if (typeof navigator === 'undefined') return DEFAULT_APP_LOCALE;
+  const languages = Array.isArray(navigator.languages) && navigator.languages.length > 0
+    ? navigator.languages
+    : (typeof navigator.language === 'string' && navigator.language ? [navigator.language] : []);
+  return preferredAppLocale(languages);
+}
 import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
@@ -343,6 +362,7 @@ const DEFAULT_STATE: AppState = {
   soldierWidgetLayout: DEFAULT_LAYOUT_BY_ROLE.soldier,
   hasSeenInstallPrompt: false,
   theme: 'light',
+  locale: DEFAULT_APP_LOCALE,
 };
 
 /**
@@ -358,6 +378,7 @@ const DEFAULT_STATE: AppState = {
  */
 export const DEVICE_PREF_CARRY_OVER_KEYS = [
   'hasSeenInstallPrompt',
+  'locale',
   // Kept per role: the two people use one app on two devices with opposite
   // home screens, and a single shared list meant whoever edited last
   // overwrote the other's arrangement on role change.
@@ -383,7 +404,11 @@ function carryOverDevicePrefs(prev: AppState): Pick<AppState, DevicePrefKey> {
   const carried = Object.fromEntries(
     DEVICE_PREF_CARRY_OVER_KEYS.map((key) => [key, prev[key]]),
   ) as Pick<AppState, DevicePrefKey>;
-  return { ...carried, theme: prev.theme || 'light' };
+  return {
+    ...carried,
+    theme: prev.theme || 'light',
+    locale: isAppLocale(prev.locale) ? prev.locale : DEFAULT_APP_LOCALE,
+  };
 }
 
 const devicePreferencesRepository = new DevicePreferencesRepository();
@@ -1026,6 +1051,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const theme = stored.theme === 'light' || stored.theme === 'dark'
           ? stored.theme
           : preferredTheme();
+        const locale: AppLocale = isAppLocale(stored.locale)
+          ? stored.locale
+          : resolveBrowserLocale();
         const devicePrefs = {
           widgetLayout: Array.isArray(stored.widgetLayout)
             && stored.widgetLayout.every((item) => typeof item === 'string')
@@ -1039,6 +1067,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ? stored.hasSeenInstallPrompt
             : DEFAULT_STATE.hasSeenInstallPrompt,
           theme,
+          locale,
         };
         // Older releases could persist complete sample-account content here.
         // Retain only harmless device preferences and drop all profile,
@@ -1047,7 +1076,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         stateRef.current = nextState;
         setState(nextState);
       } else {
-        const nextState = { ...stateRef.current, theme: preferredTheme() };
+        const nextState = {
+          ...stateRef.current,
+          theme: preferredTheme(),
+          locale: resolveBrowserLocale(),
+        };
         stateRef.current = nextState;
         setState(nextState);
       }
@@ -1601,6 +1634,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       meta.content = theme === 'dark' ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
     }
   }, [state.theme]);
+
+  useEffect(() => {
+    const locale = isAppLocale(state.locale) ? state.locale : DEFAULT_APP_LOCALE;
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.lang = locale;
+    }
+  }, [state.locale]);
 
   /**
    * Realtime sync for the shared couple space.
@@ -4288,6 +4328,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, theme }));
   };
 
+  const setLocale = (locale: AppLocale) => {
+    const nextLocale = normalizeAppLocale(locale);
+    updateStateImmediately((prev) => ({ ...prev, locale: nextLocale }));
+  };
+
   /**
    * Manual recovery for the shared workspace.
    *
@@ -4352,6 +4397,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setWidgetLayout,
         setHasSeenInstallPrompt,
         setTheme,
+        setLocale,
       }}
     >
       {children}

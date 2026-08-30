@@ -709,6 +709,21 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     return plugin;
   }
 
+  it('Partner Briefing이 같은 surface를 소유하면 legacy 플러그인을 전혀 호출하지 않는다', async () => {
+    vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = twoToday();
+    records = surface;
+
+    open('/story/partner');
+
+    expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+    await Promise.resolve();
+    await waitFor(() => expect(plugin.availability).not.toHaveBeenCalled());
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+  });
+
   it('나의 오늘', async () => {
     records = [
       record({ id: 'mine-1', userId: ME, log: '내가 쓴 것' }),

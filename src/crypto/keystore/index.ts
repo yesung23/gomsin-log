@@ -25,6 +25,7 @@ export { createWebLocalKeyPort, isWebLocalKeyPortAvailable } from './webLocalKey
 
 let cached: DeviceKeyPort | null = null;
 let cachedLocal: LocalKeyPort | null = null;
+let cachedNativePlugin: NativeDeviceKeysPlugin | null = null;
 
 function nativePlatform(): boolean {
   try {
@@ -39,6 +40,28 @@ function nativeAvailable(): boolean {
 }
 
 /**
+ * The one `registerPlugin('GomsinlogDeviceKeys')` call in the app.
+ *
+ * `getDeviceKeyPort` and `getLocalKeyPort` each held their own memo and each called
+ * `registerPlugin`, so a session that used both registered the same plugin twice.
+ * Capacitor answered the second one on a physical iPhone with
+ * `Capacitor plugin "GomsinlogDeviceKeys" already registered. Cannot register plugins
+ * twice.` The two ports address the same native bridge -- device keys and the local
+ * content key are methods on one plugin -- so they share one proxy.
+ *
+ * Memoising the proxy changes no key semantics: `registerPlugin` returns a lazy proxy
+ * that resolves the native implementation per call, so a shared proxy and two proxies
+ * dispatch identically. Each port's own memo (`cached` / `cachedLocal`) is unchanged,
+ * as are the test seams below.
+ */
+function nativeDeviceKeysPlugin(): NativeDeviceKeysPlugin {
+  if (!cachedNativePlugin) {
+    cachedNativePlugin = registerPlugin<NativeDeviceKeysPlugin>('GomsinlogDeviceKeys');
+  }
+  return cachedNativePlugin;
+}
+
+/**
  * Returns null where no device key store exists at all.
  *
  * Null rather than a silently-forgetting stub: a caller that cannot persist a
@@ -48,8 +71,7 @@ function nativeAvailable(): boolean {
 export function getDeviceKeyPort(): DeviceKeyPort | null {
   if (cached) return cached;
   if (nativeAvailable()) {
-    const plugin = registerPlugin<NativeDeviceKeysPlugin>('GomsinlogDeviceKeys');
-    cached = createNativeDeviceKeyPort(plugin);
+    cached = createNativeDeviceKeyPort(nativeDeviceKeysPlugin());
     return cached;
   }
   // A native build without its first-party plugin is not a web device. Do not
@@ -66,8 +88,7 @@ export function getDeviceKeyPort(): DeviceKeyPort | null {
 export function getLocalKeyPort(): LocalKeyPort | null {
   if (cachedLocal) return cachedLocal;
   if (nativeAvailable()) {
-    const plugin = registerPlugin<NativeDeviceKeysPlugin>('GomsinlogDeviceKeys');
-    cachedLocal = createNativeLocalKeyPort(plugin);
+    cachedLocal = createNativeLocalKeyPort(nativeDeviceKeysPlugin());
     return cachedLocal;
   }
   if (nativePlatform()) return null;

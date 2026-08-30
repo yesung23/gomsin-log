@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { StoryViewer } from '@/features/story/StoryViewer';
 import type { StoryCard } from '@/features/story/storyProjection';
+import type { PartnerBriefing } from '@/lib/partnerBriefing/contract';
 import type { DailyRecord } from '@/types';
 
 vi.mock('@/components/media/RecordMediaGallery', () => ({
@@ -28,6 +29,39 @@ const CARDS: StoryCard[] = [
   { kind: 'moment', record: record({ id: 'b', time: '13:00', log: '점심 먹었어' }) },
   { kind: 'closing', momentCount: 2, unreadableCount: 0 },
 ];
+
+function mockBriefing(overrides: Partial<PartnerBriefing> = {}): PartnerBriefing {
+  return {
+    version: 1,
+    sourceCount: 2,
+    generation: 'deterministic',
+    rangeLabel: '8월 22일',
+    overview: {
+      text: '총 2개의 기록이 있습니다.',
+      sourceRecordIds: ['a', 'b'],
+    },
+    days: [
+      {
+        date: '2026-08-22',
+        sections: [
+          {
+            period: 'morning',
+            items: [
+              { parts: [{ text: '오늘 시험 끝났어', sourceRecordId: 'a' }] },
+            ],
+          },
+          {
+            period: 'afternoon',
+            items: [
+              { parts: [{ text: '점심 먹었어', sourceRecordId: 'b' }] },
+            ],
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
 
 function view(props: Partial<Parameters<typeof StoryViewer>[0]> = {}) {
   return render(
@@ -510,5 +544,173 @@ describe('사용자가 쓴 글에만 손글씨', () => {
     view();
     expect(screen.getByText('오늘 시험 끝났어')).toHaveClass('hand-text', 'record-copy');
     expect(screen.getByText('09:00')).not.toHaveClass('hand-text', 'record-copy');
+  });
+});
+
+describe('파트너 브리핑 화면 지원 (Phase B3 Gate)', () => {
+  it('briefing이 있으면 0번에서 브리핑으로 시작하고 Next 전까지 원본 카드가 노출되지 않는다', () => {
+    const briefing = mockBriefing();
+    const { container } = view({ briefing, cards: CARDS, initialIndex: 0 });
+
+    // 1 / 4 표시
+    expect(screen.getByText('1 / 4')).toBeTruthy();
+    expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+    expect(screen.getByText('총 2개의 기록이 있습니다.')).toBeTruthy();
+
+    // 원본 카드의 순간 전용 컨트롤 및 시간 헤더 미노출
+    expect(screen.queryByRole('button', { name: '이따 이야기하기' })).toBeNull();
+    expect(screen.queryByText('09:00')).toBeNull();
+
+    // 스크린리더 공지
+    const live = container.querySelector('[aria-live="polite"]');
+    expect(live?.textContent).toContain('4개 중 1번째, 브리핑');
+  });
+
+  it('Next 이동 시 정확한 첫 번째 원본 순간에 도달하고 이후 closing 카드가 유지된다', async () => {
+    const onAcknowledge = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 0, onAcknowledge });
+
+    // 브리핑 -> 첫 순간 (a)
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('2 / 4')).toBeTruthy();
+    expect(screen.getByText('09:00')).toBeTruthy();
+    expect(screen.getByText('오늘 시험 끝났어')).toBeTruthy();
+
+    // 첫 순간 -> 둘째 순간 (b)
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('3 / 4')).toBeTruthy();
+    expect(screen.getByText('13:00')).toBeTruthy();
+    expect(screen.getByText('점심 먹었어')).toBeTruthy();
+
+    // 둘째 순간 -> 닫는 카드 (closing)
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('4 / 4')).toBeTruthy();
+    expect(screen.getByText('여기까지가 춘향의 오늘이에요')).toBeTruthy();
+    expect(screen.getByTestId('story-acknowledge')).toBeTruthy();
+  });
+
+  it('PartnerBriefingCard의 원본 보기 클릭 시 exact sourceRecordId로 onOpenRecord가 호출된다', async () => {
+    const onOpenRecord = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 0, onOpenRecord });
+
+    // 자세히 보기 펼치기
+    await userEvent.click(screen.getByTestId('partner-briefing-expand'));
+    const viewButtons = screen.getAllByRole('button', { name: '원본 보기' });
+    expect(viewButtons).toHaveLength(2);
+
+    // 첫 번째 항목 클릭 -> 'a'
+    await userEvent.click(viewButtons[0]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('a');
+
+    // 두 번째 항목 클릭 -> 'b'
+    await userEvent.click(viewButtons[1]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(2);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('b');
+  });
+
+  it('브리핑 펼치기/접기/이동/닫기는 onAcknowledge를 호출하지 않는다', async () => {
+    const onAcknowledge = vi.fn();
+    const onClose = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 0, onAcknowledge, onClose });
+
+    const expandBtn = screen.getByTestId('partner-briefing-expand');
+    await userEvent.click(expandBtn);
+    expect(onAcknowledge).not.toHaveBeenCalled();
+
+    await userEvent.click(expandBtn);
+    expect(onAcknowledge).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(onAcknowledge).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: '스토리 닫기' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onAcknowledge).not.toHaveBeenCalled();
+  });
+
+  it('onAcknowledge는 오직 closing 카드의 명시적 확인 버튼에서만 호출된다', async () => {
+    const onAcknowledge = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 3, onAcknowledge });
+
+    expect(screen.getByText('4 / 4')).toBeTruthy();
+    await userEvent.click(screen.getByTestId('story-acknowledge'));
+    expect(onAcknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('combined 시퀀스에서 진행 표시 및 화살표 비활성 상태가 정확하다', () => {
+    const briefing = mockBriefing();
+
+    // 0번 (브리핑): 이전 비활성, 다음 활성
+    const { unmount } = view({ briefing, cards: CARDS, initialIndex: 0 });
+    expect(screen.getByText('1 / 4')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '이전 순간' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음 순간' })).not.toBeDisabled();
+    unmount();
+
+    // 마지막 3번 (closing): 이전 활성, 다음 비활성
+    view({ briefing, cards: CARDS, initialIndex: 3 });
+    expect(screen.getByText('4 / 4')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '이전 순간' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음 순간' })).toBeDisabled();
+  });
+
+  it('initialIndex가 combined 시퀀스의 raw moment를 가리키면 정확한 카드를 열고 엉뚱한 기록으로 밀리지 않는다', async () => {
+    const briefing = mockBriefing();
+
+    // initialIndex = 1 -> 첫 번째 카드 (a)
+    const { unmount } = view({ briefing, cards: CARDS, initialIndex: 1 });
+    expect(screen.getByText('2 / 4')).toBeTruthy();
+    expect(screen.getByText('09:00')).toBeTruthy();
+    expect(screen.getByText('오늘 시험 끝났어')).toBeTruthy();
+    expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+    unmount();
+
+    // initialIndex = 2 -> 두 번째 카드 (b)
+    view({ briefing, cards: CARDS, initialIndex: 2 });
+    expect(screen.getByText('3 / 4')).toBeTruthy();
+    expect(screen.getByText('13:00')).toBeTruthy();
+    expect(screen.getByText('점심 먹었어')).toBeTruthy();
+
+    // 이전 순간 클릭 시 브리핑으로 역방향 이동 가능
+    await userEvent.click(screen.getByRole('button', { name: '이전 순간' }));
+    expect(screen.getByText('2 / 4')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '이전 순간' }));
+    expect(screen.getByText('1 / 4')).toBeTruthy();
+    expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+  });
+
+  it('briefing만 있고 cards=[]인 경우에도 안전하게 렌더된다', () => {
+    const briefing = mockBriefing();
+    const { container } = view({ briefing, cards: [], initialIndex: 0 });
+
+    expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '이전 순간' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음 순간' })).toBeDisabled();
+
+    const live = container.querySelector('[aria-live="polite"]');
+    expect(live?.textContent).toContain('1개 중 1번째, 브리핑');
+  });
+
+  it('briefing도 없고 cards도 없으면 null을 반환한다', () => {
+    const { container } = view({ briefing: null, cards: [], initialIndex: 0 });
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('briefingLocale props가 PartnerBriefingCard에 전달된다', async () => {
+    const briefing = mockBriefing({
+      rangeLabel: 'August 22',
+      overview: { text: '2 records in total.', sourceRecordIds: ['a', 'b'] },
+    });
+    view({ briefing, cards: CARDS, briefingLocale: 'en', initialIndex: 0 });
+
+    expect(screen.getByText('Since you last checked')).toBeTruthy();
+    expect(screen.getByText('2 moments')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /See details/i })).toBeTruthy();
   });
 });

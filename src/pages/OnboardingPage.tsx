@@ -18,6 +18,8 @@ import {
   supabase,
 } from '@/lib/supabase';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { LEGAL_DOC_TITLES, type LegalDocKey } from '@/lib/legalDocs';
+import { LegalDocumentSheet } from '@/pages/LegalPage';
 import { classifyServerError } from '@/lib/serverErrors';
 import { appleLoginEnabled } from '@/lib/appleLoginFeature';
 import { isGeneralCoupleOnboardingEnabled } from '@/lib/generalCoupleGate';
@@ -166,6 +168,25 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   // Form State
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [legalAccepted, setLegalAccepted] = useState(false);
+
+  /**
+   * Which legal document is open over the sign-in screen, if any.
+   *
+   * Deliberately NOT a route: navigating to `/legal/:doc` and back would unmount this
+   * wizard and reset both consent checkboxes, so a user who did the responsible thing
+   * and read the terms would come back to an empty form.
+   */
+  const [openLegalDoc, setOpenLegalDoc] = useState<LegalDocKey | null>(null);
+  const legalTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeLegalDoc = useCallback(() => {
+    setOpenLegalDoc(null);
+    // Put focus back on the link that opened the document rather than at the top of
+    // the page, so a keyboard or screen-reader user resumes where they left off.
+    const trigger = legalTriggerRef.current;
+    legalTriggerRef.current = null;
+    trigger?.focus();
+  }, []);
   const [isStartingSocialLogin, setIsStartingSocialLogin] = useState(false);
   const socialLoginInFlightRef = useRef(false);
   const [role, setRole] = useState<Role>('gomsin');
@@ -1077,16 +1098,63 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                     <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-1 accent-coral" />
                     <span><strong>[필수]</strong> 만 14세 이상입니다.</span>
                   </label>
-                  <label className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
-                    <input type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} className="mt-1 accent-coral" />
+                  {/*
+                    The document buttons are SIBLINGS of the label, never inside it.
+
+                    They are buttons rather than `target="_blank"` links because the app
+                    is served from `capacitor://localhost` on iOS and `https://localhost`
+                    on Android: opening either document in the system browser handed
+                    Safari an origin it cannot reach, so the user met a connection failure
+                    instead of the terms they are being asked to agree to, and had left
+                    onboarding to get there. These open in-app over the wizard.
+
+                    A button inside a `<label>` is only safe by the spec's rule that a
+                    label does nothing for events targeted at interactive descendants --
+                    one behaviour, in one clause, standing between "read the terms" and
+                    "silently agree to the terms". It does not need to be relied on. The
+                    label is now three text-only `htmlFor` segments around the buttons:
+                    tapping the sentence still ticks the box, tapping a document name
+                    cannot, and no rule has to hold for that to be true.
+
+                    The checkbox carries `aria-label` because its name has to be the whole
+                    sentence; three separate label fragments would otherwise announce as
+                    "[필수] 및 을 확인하고 동의합니다."
+                  */}
+                  <div className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
+                    <input
+                      id="legal-consent-checkbox"
+                      type="checkbox"
+                      checked={legalAccepted}
+                      onChange={(event) => setLegalAccepted(event.target.checked)}
+                      aria-label={`[필수] ${LEGAL_DOC_TITLES.terms} 및 ${LEGAL_DOC_TITLES.privacy}을 확인하고 동의합니다.`}
+                      className="mt-1 accent-coral"
+                    />
                     <span>
-                      <strong>[필수]</strong>{' '}
-                      <a href="/legal/terms" target="_blank" rel="noreferrer" className="underline underline-offset-2">서비스 이용약관</a>
-                      {' 및 '}
-                      <a href="/legal/privacy" target="_blank" rel="noreferrer" className="underline underline-offset-2">개인정보 처리방침</a>
-                      을 확인하고 동의합니다.
+                      <label htmlFor="legal-consent-checkbox"><strong>[필수]</strong>{' '}</label>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          legalTriggerRef.current = event.currentTarget;
+                          setOpenLegalDoc('terms');
+                        }}
+                        className="underline underline-offset-2"
+                      >
+                        {LEGAL_DOC_TITLES.terms}
+                      </button>
+                      <label htmlFor="legal-consent-checkbox">{' 및 '}</label>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          legalTriggerRef.current = event.currentTarget;
+                          setOpenLegalDoc('privacy');
+                        }}
+                        className="underline underline-offset-2"
+                      >
+                        {LEGAL_DOC_TITLES.privacy}
+                      </button>
+                      <label htmlFor="legal-consent-checkbox">을 확인하고 동의합니다.</label>
                     </span>
-                  </label>
+                  </div>
                 </div>
 
                 {/*
@@ -1814,6 +1882,14 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
         </main>
       </div>
+
+      {/*
+        Rendered outside the wizard frame so it covers the whole viewport, and mounted
+        only while open so the long document is not in the tree during sign-in.
+      */}
+      {openLegalDoc !== null && (
+        <LegalDocumentSheet doc={openLegalDoc} onClose={closeLegalDoc} />
+      )}
     </div>
   );
 }

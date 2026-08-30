@@ -265,6 +265,7 @@ function Probe({
     markTalkAbout,
     unmarkTalkAbout,
     resolveTalkAbout,
+    setLocale,
   } = useStore();
   useEffect(() => {
     onCommit?.(state);
@@ -277,6 +278,7 @@ function Probe({
       <span data-testid="talkSyncStatus">{talkAboutSyncStatus}</span>
       <span data-testid="coupleLifecycle">{coupleLifecycle}</span>
       <span data-testid="setup">{String(state.setupComplete)}</span>
+      <span data-testid="locale">{state.locale ?? 'none'}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
       <span data-testid="username">{state.profile.username ?? 'none'}</span>
@@ -345,6 +347,8 @@ function Probe({
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
       <button onClick={() => void updateProfile({ myName: 'updated-name' })}>update-profile</button>
+      <button onClick={() => setLocale('en')}>set-locale-en</button>
+      <button onClick={() => setLocale('ko')}>set-locale-ko</button>
       <button onClick={() => void updateProfile({
         username: ' Foo_Bar ',
         profileCaption: '오늘도 함께',
@@ -3198,5 +3202,56 @@ describe('profile persistence acknowledgement', () => {
     });
     await waitFor(() => expect(screen.getByTestId('gender')).toHaveTextContent('none'));
     expect(mockSupabase.lastProfileUpdatePayload).toMatchObject({ gender_identity: null });
+  });
+
+  it('hydrates with stored valid locale and sets html lang', async () => {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ locale: 'en' }));
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('INITIAL_SESSION', null));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('locale')).toHaveTextContent('en');
+    expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('uses browser English preference on first run when no stored locale exists', async () => {
+    const origLanguages = navigator.languages;
+    Object.defineProperty(navigator, 'languages', { value: ['en-US', 'en'], configurable: true });
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('INITIAL_SESSION', null));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('locale')).toHaveTextContent('en');
+    expect(document.documentElement.lang).toBe('en');
+    Object.defineProperty(navigator, 'languages', { value: origLanguages, configurable: true });
+  });
+
+  it('rejects invalid stored locale and falls back to default', async () => {
+    const origLanguages = navigator.languages;
+    Object.defineProperty(navigator, 'languages', { value: ['fr-FR'], configurable: true });
+    localStorage.setItem(STORE_KEY, JSON.stringify({ locale: 'unsupported-xyz' }));
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('INITIAL_SESSION', null));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('locale')).toHaveTextContent('ko');
+    expect(document.documentElement.lang).toBe('ko');
+    Object.defineProperty(navigator, 'languages', { value: origLanguages, configurable: true });
+  });
+
+  it('setLocale updates state, html lang, and persists via device preferences save flow', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => {
+      screen.getByText('set-locale-en').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('locale')).toHaveTextContent('en'));
+    expect(document.documentElement.lang).toBe('en');
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+      expect(stored.locale).toBe('en');
+    });
   });
 });

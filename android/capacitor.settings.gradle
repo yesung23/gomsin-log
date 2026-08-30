@@ -13,3 +13,6 @@ project(':capacitor-push-notifications').projectDir = new File('../node_modules/
 
 include ':gomsinlog-capacitor-device-keys'
 project(':gomsinlog-capacitor-device-keys').projectDir = new File('../packages/capacitor-device-keys/android')
+
+include ':gomsinlog-capacitor-on-device-briefing'
+project(':gomsinlog-capacitor-on-device-briefing').projectDir = new File('../packages/capacitor-on-device-briefing/android')

@@ -10710,3 +10710,107 @@ web `<input type="file">` → out-of-process PHPicker라 옳고, `applesignin` �
 
 #### PRODUCTION
 - NOT APPLIED — Supabase·Apple·Vercel·TestFlight 어느 것도 변경하지 않았다
+
+## 2026-08-30 · Codex · Partner Briefing과 네이버지도 OCR 로컬 master 통합
+
+### PLAN POSITION
+- Phase: iPhone/App Store 출시 전 로컬 통합
+- Workstream: Partner Briefing + 여행 장소 OCR
+- Step: 검토된 Partner Briefing 병합, 네이버지도 OCR 보정, 사용자 확인 전 저장 차단
+- Previous Gate: Partner Briefing final integration 및 OCR fixture 검증
+- This Gate: 로컬 master 커밋과 전체 로컬 검증 완료
+
+### DIRECTION CHECK
+- Product source checked: docs/V4_AS_BUILT.md, docs/V4_BACKLOG.md, docs/PARTNER_BRIEFING_ARCHITECTURE.md
+- Business source checked / NOT APPLICABLE: docs/BUSINESS_MEMORY_ROADMAP_V1.md의 AI 보조·원본 보존 원칙
+- Engineering source checked: docs/ENGINEERING_ROADMAP.md, feature-build, security-review, release-validation 절차
+- Current-state checked: live branch, HEAD, status, origin/master, original dirty checkout, active claims
+- Latest relevant Work Log checked: 2026-08-28 Gate 0 및 2026-08-29 final integration/whole-app audit
+- MASTER PLAN version / 기준일: Partner Briefing FINAL + 사용자 승인 OCR 흐름 / 2026-08-30
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex primary
+- Model: gpt-5.6-sol
+- Role: local master integrator and verifier
+- PR: 없음
+- Branch: master
+- Base SHA: b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3
+- Old HEAD: b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3
+- New HEAD / Reviewed HEAD: runtime 89094a5174aa2e979b33e7d5b9647982dc4e7835; docs-only closure commit follows
+
+### CHANGED / REVIEWED
+- file: Partner Briefing merge 전체 (49b2f00, source f4af41c)
+- function/component/migration: src/lib/partnerBriefing, Story integration, iOS/Android on-device providers
+- what changed/reviewed: 모든 eligible OUTSTANDING 기록의 multi-day 계층 압축, ordinal-only model boundary, exact-original, timeout/cancellation/stale 방어, deterministic fallback
+- why: Top-N 선택 없이 마지막 확인 이후 전체 흐름을 이해하게 하기 위해서다.
+- file: src/lib/placeOcr.ts 및 세 Naver fixture
+- function/component/migration: 네이버지도 장소 패널 파서
+- what changed/reviewed: 지도 잡음보다 장소 상세 패널을 우선해 상호·업종·영업정보·지역을 추출
+- why: 지도 캡처만으로 여행 후보 입력을 쉽게 만들기 위해서다.
+- file: src/pages/TripDetailPage.tsx
+- function/component/migration: OCR 확인 후 저장
+- what changed/reviewed: OCR 성공 직후 자동 DB 저장을 제거하고 사용자가 편집·확인 후 저장하도록 변경
+- why: 오인식 정보가 확인 없이 영구 저장되는 것을 막기 위해서다.
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: actual IDs와 E2EE key material은 model payload에 포함하지 않음; protocol 변경 없음
+- DB/migration semantics: 새 migration 없음
+- product semantics: PartnerDay CONFIRMED 및 explicit acknowledgement 유지
+- Production: push, deploy, Supabase, Apple, TestFlight/App Store 변경 없음
+- excluded: Sentry, Couple Garden, 캐릭터, 결제/IAP 미병합
+
+### VERIFICATION
+- command: npm run verify
+- PASS / FAIL / UNVERIFIED: PASS, exit 0
+- what it actually proves: runtime HEAD의 typecheck, lint, 전체 Vitest, production build
+- command: npm run test -- --reporter=dot
+- PASS / FAIL / UNVERIFIED: PASS — 281 files, 4,337 passed, 2 skipped
+- what it actually proves: 전체 JS/TS 회귀; 실물 기기는 증명하지 않음
+- command: OCR + TripDetail focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 2 files, 17 tests
+- what it actually proves: 세 캡처 fixture와 확인 전 DB write 0건
+- command: npm run test:phase0
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 65 migrations, 420 assertions
+- what it actually proves: throwaway DB의 Storage/RLS/RPC 계약; remote 적용은 증명하지 않음
+- command: npm run verify:native
+- PASS / FAIL / UNVERIFIED: PASS — 4 files, 107 passed, 2 skipped
+- what it actually proves: tracked native 설정·권한·privacy manifest·asset 정적 계약
+- command: npm run test:e2e:partner-briefing
+- PASS / FAIL / UNVERIFIED: PASS — Chromium 390px, 2/2
+- what it actually proves: 8개 전체 압축/exact-original 및 영어 locale 경로
+- command: git diff --check origin/master..master
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 통합 diff 공백 무결성
+
+### REVIEW IMPACT
+- DELTA — Partner Briefing exact branch tree와 비중첩 trip 경로를 통합. Sentry는 별도 독립 검토 BLOCKED로 미병합.
+
+### BLOCKERS
+- code: Sentry 후보는 P1 2건과 P2 2건으로 BLOCKED; telemetry OFF 유지
+- environment: exact final master의 실물 iPhone/Foundation Models와 실물 Android UNVERIFIED
+- external/manual: origin/master push, Vercel, Supabase Apple provider, TestFlight/App Store NOT APPLIED
+- preservation: Couple Garden 미커밋 작업은 별도 임시 worktree에 있어 먼저 보존용 branch commit 필요
+
+### STOPPED AT
+- exact completed boundary: 로컬 master에 Partner Briefing merge + OCR 두 커밋, 전체 local gate PASS
+
+### REMAINING
+- Sentry P1 수정 후 fresh independent review
+- Garden 유실 방지용 별도 branch 보존; 관계 경계 해소 전 출시 병합 금지
+- 원격 push 후 exact SHA 확인, Apple provider/TestFlight/실물 2계정 검증
+
+### NEXT ACTION
+- next owner: Codex/Kiro orchestrator
+- tool/model: bounded worker; 보안은 Kiro Sol Max 독립 검토
+- 기준 SHA: docs closure commit이 추가된 local master
+- exact next task: 사용자 요청 시 local master push 후 exact remote SHA 확인
+
+### DO NOT ADVANCE UNTIL
+- 원격 변경 직전 live state, blast radius, rollback 재확인
+- Sentry는 P1 수정과 fresh PASS 전 활성화 금지
+- TestFlight/실물 검증 전 App Store 출시 PASS 주장 금지
+
+### PRODUCTION
+- NOT APPLIED — local Git commits only

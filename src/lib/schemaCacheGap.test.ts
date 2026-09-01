@@ -126,14 +126,15 @@ describe('the three call sites that used to swallow PGRST202', () => {
     )).toBe(true);
   });
 
-  it('PRESERVATION: an ordinary failure keeps its existing generic log', async () => {
+  it('PRESERVATION: an ordinary failure keeps a generic privacy-safe log', async () => {
     const rpc = vi.fn().mockResolvedValue({ error: { code: '42501', message: 'permission denied' } });
     const { disconnectCoupleFromDB } = await loadSupabase(rpc);
 
     expect(await disconnectCoupleFromDB()).toBe(false);
     // A permission failure is NOT a deploy gap and must not be reported as one.
     expect(errors.some((line) => line.includes('PGRST202'))).toBe(false);
-    expect(errors.some((line) => line.includes('Error in disconnect_couple RPC'))).toBe(true);
+    expect(errors.some((line) => line.includes('[gomsinlog] disconnect_couple RPC failed.'))).toBe(true);
+    expect(errors.some((line) => line.includes('permission denied'))).toBe(false);
   });
 
   it('PRESERVATION: a successful call logs nothing and reports success', async () => {

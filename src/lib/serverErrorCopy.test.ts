@@ -263,11 +263,12 @@ describe('no live client code blames the connection without classifying', () => 
 });
 
 describe('the four repaired mutation paths classify their cause', () => {
-  it('consumeCoupleInvitation classifies the thrown error', () => {
+  it('consumeCoupleInvitation classifies the thrown error without logging the raw cause', () => {
     const source = read('src/lib/supabase.ts');
-    const block = source.slice(source.indexOf("[gomsinlog] redeem_invitation threw:"));
+    const block = source.slice(source.indexOf("[gomsinlog] redeem_invitation threw."));
     expect(block).toContain('classifyServerError(err).message');
     expect(block.slice(0, 400)).not.toContain(NETWORK_PHRASE);
+    expect(block.slice(0, 200)).not.toContain("console.error('[gomsinlog] redeem_invitation threw.', err)");
   });
 
   it('the onboarding profile upsert failure classifies its error', () => {

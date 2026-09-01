@@ -98,7 +98,7 @@ function failureMessage(
  */
 export function CycleTrackerSection({ userId }: { userId?: string }) {
   const today = localToday();
-  const initialDate = new Date();
+  const [initialYear, initialMonthNumber] = today.split('-').map(Number);
 
   /*
    * Identity generation guard.
@@ -149,8 +149,8 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [periodLength, setPeriodLength] = useState(5);
   const [preferences, setPreferences] = useState<CycleSharingPreferences>(EMPTY_PREFERENCES);
 
-  const [viewYear, setViewYear] = useState(initialDate.getFullYear());
-  const [viewMonth, setViewMonth] = useState(initialDate.getMonth());
+  const [viewYear, setViewYear] = useState(initialYear);
+  const [viewMonth, setViewMonth] = useState(initialMonthNumber - 1);
   const [selectedDate, setSelectedDate] = useState(today);
   const [sheet, setSheet] = useState<OpenSheet>({ kind: 'none' });
 

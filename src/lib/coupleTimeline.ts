@@ -73,7 +73,7 @@ export async function fetchPartnerMembership(
       .maybeSingle();
 
     if (error) {
-      console.warn('[gomsinlog] Could not read the partner join time:', error.message);
+      console.warn('[gomsinlog] Could not read the partner join time.');
       return undefined;
     }
     if (typeof data?.user_id !== 'string' || !data.user_id) return undefined;
@@ -81,8 +81,8 @@ export async function fetchPartnerMembership(
       userId: data.user_id,
       ...(typeof data.joined_at === 'string' ? { joinedAt: data.joined_at } : {}),
     };
-  } catch (thrown) {
-    console.warn('[gomsinlog] The partner join-time lookup threw:', thrown);
+  } catch {
+    console.warn('[gomsinlog] The partner join-time lookup threw.');
     return undefined;
   }
 }

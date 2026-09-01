@@ -497,7 +497,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           }
         } catch (error) {
           if (!isCurrentIdentity(identity)) return;
-          console.error('[Onboarding] Invitation creation failed:', error);
+          console.error('[Onboarding] Invitation creation failed.');
           toast.error('초대 코드를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.');
           return;
         } finally {
@@ -527,7 +527,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
             setCreatedCoupleId(res.coupleId);
           } catch (error) {
             if (!isCurrentIdentity(identity)) return;
-            console.error('[Onboarding] Invitation verification failed:', error);
+            console.error('[Onboarding] Invitation verification failed.');
             toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
             return;
           } finally {
@@ -579,7 +579,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           return;
         } catch (error) {
           if (!isCurrentIdentity(identity)) return;
-          console.error('[Onboarding] Authority verification failed:', error);
+          console.error('[Onboarding] Authority verification failed.');
           toast.error('커플 공간 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
           return;
         } finally {
@@ -797,7 +797,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
         if (!isCurrentIdentity(identity)) return;
 
         if (profileError) {
-          console.error('[Onboarding] Profile save failed:', profileError);
+          console.error('[Onboarding] Profile save failed.');
           // Classified from the real error: an RLS or session failure must not be
           // reported as a connectivity problem.
           toast.error(`프로필을 저장하지 못했어요. ${classifyServerError(profileError).message}`);
@@ -815,7 +815,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           if (!isCurrentIdentity(identity)) return;
           if (contactError) {
             // Non-blocking: contact hours are editable later from settings.
-            console.error('[Onboarding] Contact preferences save failed:', contactError);
+            console.error('[Onboarding] Contact preferences save failed.');
           }
         }
 
@@ -865,7 +865,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
       }
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[Onboarding] Final setup failed:', error);
+      console.error('[Onboarding] Final setup failed.');
       toast.error(`설정을 완료하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentIdentity(identity)) setIsFinishing(false);

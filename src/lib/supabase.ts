@@ -70,7 +70,7 @@ export async function fetchAuthProviderAvailability(): Promise<AuthProviderAvail
     }
     return parseAuthProviderAvailability(await response.json());
   } catch (error) {
-    console.error('[gomsinlog] Auth provider settings request failed:', error);
+    console.error('[gomsinlog] Auth provider settings request failed.');
     return null;
   }
 }
@@ -146,7 +146,7 @@ export async function saveCoupleAnniversary(
     .select('id')
     .maybeSingle();
   if (error) {
-    console.error('[gomsinlog] Failed to save anniversary date:', error);
+    console.error('[gomsinlog] Failed to save anniversary date.');
     return false;
   }
   if (data?.id !== coupleId) {
@@ -424,7 +424,7 @@ export async function consumeCoupleInvitation(
           reason: 'server',
         };
       }
-      console.error('[gomsinlog] redeem_invitation failed:', error);
+      console.error('[gomsinlog] redeem_invitation failed.');
       // Classified exactly like the `catch` branch below. Left unclassified, the
       // same 401 or 42501 read as a transient hiccup or as a permission problem
       // depending only on how supabase-js chose to surface it.
@@ -450,14 +450,14 @@ export async function consumeCoupleInvitation(
       return { error: verdict.message, reason: verdict.reason };
     }
     if (!result.couple_id || result.error_code !== null) {
-      console.error('[gomsinlog] Invalid successful redeem_invitation result:', result);
+      console.error('[gomsinlog] Invalid successful redeem_invitation result.');
       return { error: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
     }
 
     clearInviteAttempts();
     return { coupleId: result.couple_id };
   } catch (err: any) {
-    console.error('[gomsinlog] redeem_invitation threw:', err);
+    console.error('[gomsinlog] redeem_invitation threw.');
     // The raw cause is in hand, so classify it. Blaming the internet
     // unconditionally told users with an expired session or an RLS rejection to
     // fix a connection that was already working.
@@ -509,13 +509,13 @@ export async function regenerateCoupleInvitation(): Promise<{ code?: string; err
       // A collided draw is retryable; anything else is not.
       if (isInvitationCodeCollision(error) && attempt < INVITATION_CODE_ATTEMPTS) continue;
       if (!isInvitationCodeCollision(error)) {
-        console.error('[gomsinlog] regenerate_invitation failed:', error);
+        console.error('[gomsinlog] regenerate_invitation failed.');
       }
       return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
     }
     return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
   } catch (err: any) {
-    console.error('[gomsinlog] regenerate_invitation threw:', err);
+    console.error('[gomsinlog] regenerate_invitation threw.');
     return { error: '초대 코드 재발급 중 오류가 발생했습니다.' };
   }
 }
@@ -559,17 +559,17 @@ export async function fetchMyCoupleState(): Promise<
         console.error(schemaCacheMissLog('get_my_couple_state', '016'));
         return { ok: false, reason: classifyServerError(error).kind, schemaGap: true };
       }
-      console.error('[gomsinlog] get_my_couple_state failed:', error);
+      console.error('[gomsinlog] get_my_couple_state failed.');
       return { ok: false, reason: classifyServerError(error).kind };
     }
     const parsed = parseRemoteCoupleState(data);
     if (!parsed) {
-      console.error('[gomsinlog] Unexpected get_my_couple_state payload:', data);
+      console.error('[gomsinlog] Unexpected get_my_couple_state payload.');
       return { ok: false, reason: 'server' };
     }
     return { ok: true, state: parsed.coupleId ? parsed : null };
   } catch (err) {
-    console.error('[gomsinlog] get_my_couple_state threw:', err);
+    console.error('[gomsinlog] get_my_couple_state threw.');
     return { ok: false, reason: classifyServerError(err).kind };
   }
 }
@@ -588,12 +588,12 @@ export async function disconnectCoupleFromDB(): Promise<boolean> {
         console.error(schemaCacheMissLog('disconnect_couple', '015'));
         return false;
       }
-      console.error('Error in disconnect_couple RPC:', error);
+      console.error('[gomsinlog] disconnect_couple RPC failed.');
       return false;
     }
     return true;
   } catch (err) {
-    console.error('Failed to call disconnect_couple RPC:', err);
+    console.error('[gomsinlog] Failed to call disconnect_couple RPC.');
     return false;
   }
 }
@@ -614,7 +614,7 @@ export async function deleteAccountFromDB(): Promise<AccountDeletionOutcome> {
       method: 'POST',
     });
     if (error) {
-      console.error('[gomsinlog] Failed to delete account:', error);
+      console.error('[gomsinlog] Account deletion request failed.');
       // `FunctionsHttpError.context` is a `Response`. Its body may be consumed
       // only once, so it is read exactly once here and the parsed value is
       // passed on. A relay/fetch error with no `context`, or a parse failure,
@@ -625,11 +625,11 @@ export async function deleteAccountFromDB(): Promise<AccountDeletionOutcome> {
           const body: unknown = await (context as Response).json();
           const outcome = classifyDeletionErrorBody(body);
           if (outcome.status === 'partially_deleted') {
-            console.error('[gomsinlog] Account data was removed but the login was not:', body);
+            console.error('[gomsinlog] Account deletion ended in a partial state.');
           }
           return outcome;
-        } catch (parseError) {
-          console.error('[gomsinlog] Account deletion error body was unreadable', parseError);
+        } catch {
+          console.error('[gomsinlog] Account deletion error body was unreadable.');
           return { status: 'failed', dataRemoved: false, warnings: [] };
         }
       }
@@ -640,11 +640,11 @@ export async function deleteAccountFromDB(): Promise<AccountDeletionOutcome> {
     // never be reported to the user as a completed deletion.
     const outcome = classifyDeletionSuccess(data);
     if (outcome.status !== 'deleted') {
-      console.error('[gomsinlog] Account deletion did not confirm success:', data);
+      console.error('[gomsinlog] Account deletion did not confirm success.');
     }
     return outcome;
-  } catch (error) {
-    console.error('[gomsinlog] Failed to invoke account deletion:', error);
+  } catch {
+    console.error('[gomsinlog] Failed to invoke account deletion.');
     return { status: 'failed', dataRemoved: false, warnings: [] };
   }
 }
@@ -698,7 +698,7 @@ export class SupabaseAuthRepository implements IAuthRepository {
         provider,
       };
     } catch (e) {
-      console.error('[SupabaseAuthRepository] getCurrentUser error:', e);
+      console.error('[gomsinlog] Failed to read the current auth user.');
       return null;
     }
   }

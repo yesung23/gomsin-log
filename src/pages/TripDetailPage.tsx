@@ -206,7 +206,7 @@ export function TripDetailPage() {
       setParentState('ready');
     } catch (error) {
       if (!isCurrentTripScope(requestScope) || parentLoadGenerationRef.current !== loadGeneration) return;
-      console.error('Failed to load trip:', error);
+      console.error('[gomsinlog] Failed to load trip.');
       setParentState('error');
     }
   }, [activeCouple, captureTripScope, coupleId, id, isCurrentTripScope, userId]);
@@ -232,7 +232,7 @@ export function TripDetailPage() {
       setChildState('ready');
     } catch (error) {
       if (!isCurrentTripScope(requestScope) || childLoadGenerationRef.current !== loadGeneration) return;
-      console.error('Failed to load trip details:', error);
+      console.error('[gomsinlog] Failed to load trip details.');
       setChildState('error');
     }
   }, [activeCouple, captureTripScope, id, isCurrentTripScope]);
@@ -321,7 +321,7 @@ export function TripDetailPage() {
       toast.success('여행 정보가 수정되었습니다.');
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to update trip:', error);
+      console.error('[gomsinlog] Failed to update trip.');
       setTripError(`여행 정보를 수정하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsSavingTrip(false);
@@ -341,7 +341,7 @@ export function TripDetailPage() {
       navigate('/trips');
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to delete trip:', error);
+      console.error('[gomsinlog] Failed to delete trip.');
       toast.error(`여행을 삭제하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsDeletingTrip(false);
@@ -429,7 +429,7 @@ export function TripDetailPage() {
       toast.success(`${saved.title}을(를) 추가했어요. 틀리면 카드를 눌러 고쳐 주세요.`);
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to quick-add place screenshot:', error);
+      console.error('[gomsinlog] Failed to quick-add place screenshot.');
       openFallbackEditor(
         { ...EMPTY_ITEM, source: 'screenshot' },
         '사진을 읽지 못했어요. 장소 이름만 입력하면 바로 추가할 수 있어요.',
@@ -466,7 +466,7 @@ export function TripDetailPage() {
         toast.success('캡처에서 읽은 내용을 확인해 주세요. 틀린 부분은 바로 고칠 수 있어요.');
       }
     } catch (error) {
-      console.error('Failed to read place screenshot:', error);
+      console.error('[gomsinlog] Failed to read place screenshot.');
       setItemError('캡처를 읽지 못했어요. 직접 입력하거나 더 선명한 이미지로 다시 시도해 주세요.');
     } finally {
       setIsReadingScreenshot(false);
@@ -503,7 +503,7 @@ export function TripDetailPage() {
       toast.success(existing ? '일정이 수정되었습니다.' : '일정이 추가되었습니다.');
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to save trip item:', error);
+      console.error('[gomsinlog] Failed to save trip item.');
       setItemError(`일정을 저장하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsSavingItem(false);
@@ -523,7 +523,7 @@ export function TripDetailPage() {
       toast.success('일정이 삭제되었습니다.');
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to delete trip item:', error);
+      console.error('[gomsinlog] Failed to delete trip item.');
       toast.error(`일정을 삭제하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setItemPending(itemId, false);
@@ -618,7 +618,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       rollback();
-      console.error('Failed to reorder trip items:', error);
+      console.error('[gomsinlog] Failed to reorder trip items.');
       await loadChildren();
       if (!isCurrentTripScope(operationScope)) return;
       toast.error('연결 오류로 순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
@@ -667,7 +667,7 @@ export function TripDetailPage() {
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       rollback();
-      console.error('Failed to reorder trip items:', error);
+      console.error('[gomsinlog] Failed to reorder trip items.');
       await loadChildren();
       if (!isCurrentTripScope(operationScope)) return;
       toast.error('연결 오류로 순서를 저장하지 못해 서버의 최신 순서를 다시 불러왔어요.');
@@ -690,7 +690,7 @@ export function TripDetailPage() {
       setNewChecklistName('');
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to add trip checklist item:', error);
+      console.error('[gomsinlog] Failed to add trip checklist item.');
       setChildActionError(`준비물을 추가하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setIsAddingChecklist(false);
@@ -711,7 +711,7 @@ export function TripDetailPage() {
       if (!saved) { await loadChildren(); if (!isCurrentTripScope(operationScope)) return; setChildActionError('체크 상태를 저장하지 못해 서버의 최신 상태를 다시 확인했어요.'); toast.error('체크 상태를 저장하지 못해 서버의 최신 상태를 다시 확인했어요.'); }
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to toggle trip checklist item:', error);
+      console.error('[gomsinlog] Failed to toggle trip checklist item.');
       await loadChildren();
       if (!isCurrentTripScope(operationScope)) return;
       const message = '연결 오류로 체크 상태를 저장하지 못해 서버의 최신 상태를 다시 확인했어요.';
@@ -735,7 +735,7 @@ export function TripDetailPage() {
       setChecklists((current) => current.filter((entry) => entry.id !== checklistId));
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
-      console.error('Failed to delete trip checklist item:', error);
+      console.error('[gomsinlog] Failed to delete trip checklist item.');
       setChildActionError(`준비물을 삭제하지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentTripScope(operationScope)) setChecklistPending(checklistId, false);

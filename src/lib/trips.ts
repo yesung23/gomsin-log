@@ -167,7 +167,7 @@ export async function fetchTripsResultFromDB(coupleId?: string): Promise<TripsFe
     const { data: activeCoupleId, error: membershipError } = await supabase
       .rpc('get_my_active_couple_id');
     if (membershipError) {
-      console.error('Error verifying trip workspace:', membershipError);
+      console.error('[gomsinlog] Failed to verify trip workspace.');
       return failure(membershipError);
     }
     if (activeCoupleId !== coupleId) return failure({ code: '42501' });
@@ -177,7 +177,7 @@ export async function fetchTripsResultFromDB(coupleId?: string): Promise<TripsFe
   if (coupleId) query = query.eq('couple_id', coupleId);
   const { data, error } = await query;
   if (error) {
-    console.error('Error fetching trips:', error);
+    console.error('[gomsinlog] Failed to fetch trips.');
     return failure(error);
   }
   return { ok: true, trips: (data || []).map(mapTrip) };
@@ -193,7 +193,7 @@ export async function fetchTripResultFromDB(tripId: string): Promise<TripFetchRe
   if (!supabase || !tripId) return failure();
   const { data, error } = await supabase.from('trips').select('*').eq('id', tripId).maybeSingle();
   if (error) {
-    console.error('Error fetching trip:', error);
+    console.error('[gomsinlog] Failed to fetch trip.');
     return failure(error);
   }
   return { ok: true, trip: data ? mapTrip(data) : null };
@@ -216,7 +216,7 @@ export async function saveTripToDB(
     status: 'planned',
   }]).select().single();
   if (error || !data) {
-    console.error('Error saving trip:', error);
+    console.error('[gomsinlog] Failed to save trip.');
     return null;
   }
   return mapTrip(data);
@@ -248,7 +248,7 @@ export async function updateTripInDB(
   const { data, error } = await supabase.from('trips').update(payload)
     .eq('id', tripId).eq('couple_id', coupleId).select().maybeSingle();
   if (error || !data) {
-    console.error('Error updating trip:', error);
+    console.error('[gomsinlog] Failed to update trip.');
     return null;
   }
   return mapTrip(data);
@@ -270,7 +270,7 @@ export async function deleteTripFromDB(tripId: string, coupleId: string): Promis
   const { data, error } = await supabase.from('trips').delete().eq('id', tripId)
     .eq('couple_id', coupleId).select('id').maybeSingle();
   if (error) {
-    console.error('Error deleting trip:', error);
+    console.error('[gomsinlog] Failed to delete trip.');
     return false;
   }
   return !!data;
@@ -281,7 +281,7 @@ export async function fetchTripItemsResultFromDB(tripId: string): Promise<TripIt
   const { data, error } = await supabase.from('trip_items').select('*').eq('trip_id', tripId)
     .order('item_date', { ascending: true }).order('sort_order', { ascending: true });
   if (error) {
-    console.error('Error fetching trip items:', error);
+    console.error('[gomsinlog] Failed to fetch trip items.');
     return failure(error);
   }
   return { ok: true, items: (data || []).map(mapTripItem) };
@@ -313,7 +313,7 @@ export async function saveTripItemToDB(item: Omit<TripItem, 'id'>): Promise<Trip
     sort_order: item.sortOrder,
   }]).select().single();
   if (error || !data) {
-    console.error('Error saving trip item:', error);
+    console.error('[gomsinlog] Failed to save trip item.');
     return null;
   }
   return mapTripItem(data);
@@ -350,7 +350,7 @@ export async function updateTripItemInDB(item: TripItem): Promise<TripItem | nul
     updated_at: new Date().toISOString(),
   }).eq('id', item.id).eq('trip_id', item.tripId).select().maybeSingle();
   if (error || !data) {
-    console.error('Error updating trip item:', error);
+    console.error('[gomsinlog] Failed to update trip item.');
     return null;
   }
   return mapTripItem(data);
@@ -375,7 +375,7 @@ export async function reorderTripItemsInDB(items: Array<Pick<TripItem, 'id' | 's
       console.error(schemaCacheMissLog('reorder_trip_items', '015'));
       return false;
     }
-    console.error('Error reordering trip items:', error);
+    console.error('[gomsinlog] Failed to reorder trip items.');
     return false;
   }
   return true;
@@ -398,7 +398,7 @@ export async function deleteTripItemFromDB(itemId: string, tripId: string): Prom
   const { data, error } = await supabase.from('trip_items').delete().eq('id', itemId)
     .eq('trip_id', tripId).select('id').maybeSingle();
   if (error) {
-    console.error('Error deleting trip item:', error);
+    console.error('[gomsinlog] Failed to delete trip item.');
     return false;
   }
   return !!data;
@@ -409,7 +409,7 @@ export async function fetchTripChecklistsResultFromDB(tripId: string): Promise<T
   const { data, error } = await supabase.from('trip_checklists').select('*').eq('trip_id', tripId)
     .order('created_at', { ascending: true });
   if (error) {
-    console.error('Error fetching trip checklists:', error);
+    console.error('[gomsinlog] Failed to fetch trip checklists.');
     return failure(error);
   }
   return { ok: true, checklists: (data || []).map(mapTripChecklist) };
@@ -430,7 +430,7 @@ export async function saveTripChecklistToDB(tripId: string, itemName: string): P
     completed: false,
   }]).select().single();
   if (error || !data) {
-    console.error('Error saving trip checklist:', error);
+    console.error('[gomsinlog] Failed to save trip checklist.');
     return null;
   }
   return mapTripChecklist(data);
@@ -450,7 +450,7 @@ export async function toggleTripChecklistInDB(
     updated_at: new Date().toISOString(),
   }).eq('id', checklistId).eq('trip_id', tripId).select('id').maybeSingle();
   if (error) {
-    console.error('Error toggling trip checklist:', error);
+    console.error('[gomsinlog] Failed to toggle trip checklist.');
     return false;
   }
   return !!data;
@@ -467,7 +467,7 @@ export async function deleteTripChecklistFromDB(
   const { data, error } = await supabase.from('trip_checklists').delete().eq('id', checklistId)
     .eq('trip_id', tripId).select('id').maybeSingle();
   if (error) {
-    console.error('Error deleting trip checklist:', error);
+    console.error('[gomsinlog] Failed to delete trip checklist.');
     return false;
   }
   return !!data;

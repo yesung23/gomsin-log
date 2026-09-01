@@ -145,18 +145,15 @@ async function fetchProfileRow(userId: string) {
 /**
  * Preserve the failing read without exposing database details to the UI.
  *
- * The stage is safe to display as a support code; raw messages remain in the
- * developer console and may contain schema names, so they never enter state.
+ * The stage is safe to keep as diagnostic metadata. Raw server messages and
+ * response objects are deliberately not written to the developer console.
  */
 function syncFailure(stage: AuthSyncStage, error: unknown): FullStateResult {
   const reason = classifyServerError(error).kind;
   const record = error && typeof error === 'object'
     ? error as { code?: unknown; message?: unknown }
     : null;
-  console.error(`[gomsinlog] Account sync failed at ${stage}:`, {
-    code: typeof record?.code === 'string' ? record.code : undefined,
-    message: typeof record?.message === 'string' ? record.message : undefined,
-  });
+  console.error(`[gomsinlog] Account sync failed at ${stage}.`);
   const code = typeof record?.code === 'string' && /^[A-Z0-9_]{1,24}$/i.test(record.code)
     ? record.code.toUpperCase()
     : undefined;
@@ -231,7 +228,7 @@ async function fetchResumableMembership(
   } catch (err) {
     // A thrown lookup (malformed response, transport failure) is also not proof
     // that the account is new.
-    console.error('[gomsinlog] Resumable membership lookup failed:', err);
+    console.error('[gomsinlog] Resumable membership lookup failed.');
     return syncFailure('membership', err) as ResumableMembershipResult;
   }
 }
@@ -443,7 +440,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       },
     };
   } catch (err) {
-    console.error('fetchFullStateFromDB error:', err);
+    console.error('[gomsinlog] Full state fetch failed.');
     return syncFailure('unexpected', err);
   }
 }

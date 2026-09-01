@@ -121,7 +121,7 @@ export async function setUpPushNotifications(): Promise<PushSetupResult> {
     const result = await registerPushToken(platformName(), token);
     return result.ok ? { registered: true } : { registered: false, reason: 'failed' };
   } catch (error) {
-    console.warn('[gomsinlog] Push setup failed', error);
+    console.warn('[gomsinlog] Push setup failed.');
     return { registered: false, reason: 'failed' };
   }
 }
@@ -159,7 +159,7 @@ export async function listenForPushTaps(
     // outlives whatever installed it, and a second install routes one tap twice.
     return () => { void handle.remove().catch(() => {}); };
   } catch (error) {
-    console.warn('[gomsinlog] Push tap listener failed', error);
+    console.warn('[gomsinlog] Push tap listener failed.');
     return undefined;
   }
 }

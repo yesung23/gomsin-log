@@ -397,7 +397,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       toast.success('오늘부터 생리로 기록했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to start cycle period:', error);
+      console.error('[gomsinlog] Failed to start cycle period.');
       toast.error(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setPeriodPending(false);
@@ -426,7 +426,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       toast.success('오늘 종료로 기록했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to end cycle period:', error);
+      console.error('[gomsinlog] Failed to end cycle period.');
       toast.error(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setPeriodPending(false);
@@ -453,7 +453,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       toast.success('생리 기간을 수정했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to update cycle period:', error);
+      console.error('[gomsinlog] Failed to update cycle period.');
       setPeriodError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setPeriodPending(false);
@@ -479,7 +479,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       toast.info('생리 기록을 삭제했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to delete cycle period:', error);
+      console.error('[gomsinlog] Failed to delete cycle period.');
       setPeriodError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setPeriodDeletePending(false);
@@ -520,7 +520,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
         mergeDailyLog(result.log);
       } catch (error) {
         if (!isCurrentIdentity(identity)) return;
-        console.error('[gomsinlog] Failed to save cycle daily log:', error);
+        console.error('[gomsinlog] Failed to save cycle daily log.');
         toast.error(classifyServerError(error).message);
       } finally {
         if (isCurrentIdentity(identity)) setQuickSymptomPending(null);
@@ -551,7 +551,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       toast.success('오늘의 컨디션을 기록했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to save cycle daily log:', error);
+      console.error('[gomsinlog] Failed to save cycle daily log.');
       setDailyLogError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setDailyLogPending(false);
@@ -575,7 +575,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       toast.info('이 날의 컨디션 기록을 삭제했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to delete cycle daily log:', error);
+      console.error('[gomsinlog] Failed to delete cycle daily log.');
       setDailyLogError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setDailyLogDeletePending(false);
@@ -608,7 +608,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       toast.success('주기 설정을 저장했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to save cycle settings:', error);
+      console.error('[gomsinlog] Failed to save cycle settings.');
       setSettingsError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setSettingsPending(false);
@@ -632,7 +632,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setPreferences(result.preferences);
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to save cycle sharing preferences:', error);
+      console.error('[gomsinlog] Failed to save cycle sharing preferences.');
       setSharingError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setSharingPendingKey(null);

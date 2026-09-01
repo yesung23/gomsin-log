@@ -88,7 +88,7 @@ export async function fetchTalkAboutMarksResultFromDB(
       );
       return { ok: true, marks: [], deployed: false };
     }
-    console.error('Failed to fetch talk-about marks:', error);
+    console.error('[gomsinlog] Failed to fetch talk-about marks.');
     return { ok: false, error };
   }
   return { ok: true, marks: (data || []).map(mapRow), deployed: true };
@@ -133,7 +133,7 @@ export async function markTalkAboutInDB(
     .eq('actor_user_id', actorUserId)
     .eq('is_completed', true);
   if (clearCompletedError) {
-    console.error('Failed to clear completed talk-about mark:', clearCompletedError);
+    console.error('[gomsinlog] Failed to clear completed talk-about mark.');
     return { ok: false, error: '표시하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
 
@@ -147,7 +147,7 @@ export async function markTalkAboutInDB(
     );
 
   if (error) {
-    console.error('Failed to mark talk-about:', error);
+    console.error('[gomsinlog] Failed to mark talk-about.');
     return { ok: false, error: '표시하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
   return { ok: true };
@@ -172,7 +172,7 @@ export async function unmarkTalkAboutInDB(
     .eq('actor_user_id', actorUserId);
 
   if (error) {
-    console.error('Failed to unmark talk-about:', error);
+    console.error('[gomsinlog] Failed to unmark talk-about.');
     return { ok: false, error: '해제하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
   return { ok: true };
@@ -205,7 +205,7 @@ export async function resolveTalkAboutInDB(
     .eq('is_completed', false);
 
   if (error) {
-    console.error('Failed to resolve talk-about:', error);
+    console.error('[gomsinlog] Failed to resolve talk-about.');
     return { ok: false, error: '처리하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
   return { ok: true };

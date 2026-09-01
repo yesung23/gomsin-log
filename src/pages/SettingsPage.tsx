@@ -509,7 +509,7 @@ export function SettingsPage() {
       URL.revokeObjectURL(url);
       toast.success('내 데이터 목록을 JSON 파일로 내보냈어요.');
     } catch (error) {
-      console.error('[gomsinlog] Export failed:', error);
+      console.error('[gomsinlog] Export failed.');
       toast.error('내보내기에 실패했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
       setIsExporting(false);
@@ -611,7 +611,7 @@ export function SettingsPage() {
       toast.success('우리 공간을 만들었어요. 초대 코드를 상대방에게 전달해 주세요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[Settings] Couple space creation failed:', error);
+      console.error('[Settings] Couple space creation failed.');
       toast.error(`커플 공간을 만들지 못했어요. ${classifyServerError(error).message}`);
     } finally {
       if (isCurrentIdentity(identity)) setIsCreatingSpace(false);
@@ -661,19 +661,19 @@ export function SettingsPage() {
         ]);
         if (!isCurrentIdentity(identity)) return;
         if (membershipResult.error) {
-          console.error('[Settings] Membership lookup failed:', membershipResult.error);
+          console.error('[Settings] Membership lookup failed.');
         } else if (membershipResult.data?.role) {
           nextRole = membershipResult.data.role;
         }
         if (partnerResult.error) {
-          console.error('[Settings] Partner profile lookup failed:', partnerResult.error);
+          console.error('[Settings] Partner profile lookup failed.');
         } else if (partnerResult.data?.[0]?.display_name) {
           partnerName = partnerResult.data[0].display_name;
         }
       } catch (error) {
         if (!isCurrentIdentity(identity)) return;
         // Redemption already succeeded; keep explicit safe fallbacks if enrichment failed.
-        console.error('[Settings] Couple membership enrichment failed:', error);
+        console.error('[Settings] Couple membership enrichment failed.');
       }
 
       if (!isCurrentIdentity(identity)) return;
@@ -697,7 +697,7 @@ export function SettingsPage() {
       toast.success('우리 공간에 연결되었습니다.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[Settings] Couple join failed:', error);
+      console.error('[Settings] Couple join failed.');
       toast.error('커플 공간에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
       if (isCurrentIdentity(identity)) setIsJoiningCouple(false);
@@ -1216,7 +1216,7 @@ export function SettingsPage() {
                         toast.error('연결을 해제하지 못했어요. 잠시 후 다시 시도해 주세요.');
                       }
                     } catch (error) {
-                      console.error('[Settings] Couple disconnect failed:', error);
+                      console.error('[Settings] Couple disconnect failed.');
                       toast.error(`연결을 해제하지 못했어요. ${classifyServerError(error).message}`);
                     } finally {
                       setIsDisconnecting(false);
@@ -1269,7 +1269,7 @@ export function SettingsPage() {
                         );
                       }
                     } catch (error) {
-                      console.error('[Settings] Record deletion failed:', error);
+                      console.error('[Settings] Record deletion failed.');
                       toast.error('일부 기록을 삭제하지 못했어요. 다시 시도해 주세요.');
                     } finally {
                       setIsDeletingRecords(false);
@@ -1363,7 +1363,7 @@ export function SettingsPage() {
                         toast.success('계정과 데이터가 삭제되었습니다.');
                       }
                     } catch (error) {
-                      console.error('[Settings] Account deletion failed:', error);
+                      console.error('[Settings] Account deletion failed.');
                       toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
                     } finally {
                       setIsDeletingAccount(false);

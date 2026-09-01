@@ -14,7 +14,7 @@ export async function fetchEventsResultFromDB(coupleId?: string): Promise<EventF
     const { data: activeCoupleId, error: membershipError } = await supabase
       .rpc('get_my_active_couple_id');
     if (membershipError) {
-      console.error('Failed to verify event workspace:', membershipError);
+      console.error('[gomsinlog] Failed to verify event workspace.');
       return { ok: false, reason: 'error' };
     }
     if (activeCoupleId !== coupleId) return { ok: false, reason: 'forbidden' };
@@ -32,7 +32,7 @@ export async function fetchEventsResultFromDB(coupleId?: string): Promise<EventF
   const { data, error } = await query;
 
   if (error) {
-    console.error('Failed to fetch events:', error);
+    console.error('[gomsinlog] Failed to fetch events.');
     return { ok: false, reason: error.code === '42501' ? 'forbidden' : 'error' };
   }
 
@@ -82,7 +82,7 @@ export async function saveEventToDB(event: Omit<CoupleEvent, 'id' | 'createdAt'>
     .single();
 
   if (error || !data) {
-    console.error('Failed to save event:', error);
+    console.error('[gomsinlog] Failed to save event.');
     return null;
   }
 
@@ -119,7 +119,7 @@ export async function updateEventInDB(event: CoupleEvent): Promise<CoupleEvent |
     .maybeSingle();
 
   if (error || !data) {
-    console.error('Failed to update event:', error);
+    console.error('[gomsinlog] Failed to update event.');
     return null;
   }
   return {
@@ -158,7 +158,7 @@ export async function deleteEventFromDB(eventId: string, ownerId: string): Promi
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to delete event:', error);
+    console.error('[gomsinlog] Failed to delete event.');
     return false;
   }
   return !!data;

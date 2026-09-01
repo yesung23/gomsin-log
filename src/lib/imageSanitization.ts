@@ -178,7 +178,7 @@ export async function sanitizePhotoForUpload(
       ext: SANITIZED_PHOTO_EXTENSION,
     };
   } catch (error) {
-    console.error('[gomsinlog] Photo sanitization failed:', error);
+    console.error('[gomsinlog] Photo sanitization failed.');
     return {
       error: '이 사진 형식은 이 기기에서 안전하게 처리하지 못했어요. JPG, PNG 또는 WebP 사진으로 다시 선택해 주세요.',
     };

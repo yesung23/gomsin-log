@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { classifyServerError } from '@/lib/serverErrors';
 
 /**
  * The client half of push token lifecycle.
@@ -62,8 +63,7 @@ export async function registerPushToken(
   });
 
   if (error) {
-    // The token itself is deliberately absent from this log line.
-    console.error('[gomsinlog] Push token registration failed:', error.message);
+    console.error('[gomsinlog] Push token registration failed:', classifyServerError(error).kind);
     return { ok: false, error: '알림을 설정하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
   return { ok: true };
@@ -87,8 +87,8 @@ export async function revokeOwnPushTokens(): Promise<PushTokenResult> {
 
   const { error } = await supabase.rpc('revoke_my_push_tokens');
   if (error) {
-    console.warn('[gomsinlog] Push token revocation failed:', error.message);
-    return { ok: false, error: error.message };
+    console.warn('[gomsinlog] Push token revocation failed:', classifyServerError(error).kind);
+    return { ok: false, error: '알림 해제를 완료하지 못했어요.' };
   }
   return { ok: true };
 }
@@ -105,5 +105,5 @@ export async function revokeOwnPushTokens(): Promise<PushTokenResult> {
 export async function clearOwnUnseen(): Promise<void> {
   if (!isSupabaseConfigured || !supabase) return;
   const { error } = await supabase.rpc('clear_my_unseen');
-  if (error) console.warn('[gomsinlog] Clearing the delivery flag failed:', error.message);
+  if (error) console.warn('[gomsinlog] Clearing the delivery flag failed:', classifyServerError(error).kind);
 }

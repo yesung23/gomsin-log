@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { reportBoundaryError } from '@/lib/sentry';
 
 interface Props {
   children: ReactNode;
@@ -19,7 +20,8 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true };
   }
 
-  componentDidCatch(_error: Error, _info: ErrorInfo) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    reportBoundaryError(error, info);
     console.error('[gomsinlog] A render error reached the recovery boundary.');
   }
 

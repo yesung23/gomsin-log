@@ -51,6 +51,8 @@ export interface PostComposerSheetProps {
   busy?: boolean;
   /** 사진 업로드 실패 뒤 이미 생성된 같은 기록에 다시 붙이는 단계. */
   retryingMedia?: boolean;
+  /** 사진은 첨부됐으나 공개/발행 갱신이 실패하여 공개 설정만 다시 시도하는 단계. */
+  retryingPublication?: boolean;
   /** Reloaded retries restore the visibility the owner chose before staging. */
   initialPrivate?: boolean;
   /**
@@ -80,6 +82,7 @@ export function PostComposerSheet({
   connected,
   busy = false,
   retryingMedia = false,
+  retryingPublication = false,
   initialPrivate = !connected,
   items,
   setItems,
@@ -88,7 +91,7 @@ export function PostComposerSheet({
   onClose,
   onSubmit,
 }: PostComposerSheetProps) {
-  const [step, setStep] = useState<Step>('source');
+  const [step, setStep] = useState<Step>(retryingPublication ? 'caption' : 'source');
   const [isPrivate, setIsPrivate] = useState(initialPrivate);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -166,7 +169,7 @@ export function PostComposerSheet({
   }, [setItems]);
 
   const submit = () => {
-    if (items.length === 0) {
+    if (!retryingPublication && items.length === 0) {
       toast.info('사진을 한 장 이상 담아 주세요.');
       return;
     }
@@ -200,7 +203,7 @@ export function PostComposerSheet({
         onPointerDown={(event) => event.stopPropagation()}
       >
         <header className="flex min-h-11 items-center gap-2">
-          {step === 'source' ? (
+          {step === 'source' || retryingPublication ? (
             <button ref={closeRef} type="button" onClick={onClose} disabled={busy} aria-label="게시물 만들기 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground">
               <X size={19} aria-hidden="true" />
             </button>
@@ -217,8 +220,8 @@ export function PostComposerSheet({
               다음
             </button>
           ) : step === 'caption' ? (
-            <button type="button" onClick={submit} disabled={busy || items.length === 0} data-testid="post-share" className="press-response min-h-11 rounded-control px-3 text-label font-semibold text-coral-strong disabled:opacity-40">
-              {busy ? '올리는 중…' : retryingMedia ? '사진 다시 올리기' : '공유'}
+            <button type="button" onClick={submit} disabled={busy || (!retryingPublication && items.length === 0)} data-testid="post-share" className="press-response min-h-11 rounded-control px-3 text-label font-semibold text-coral-strong disabled:opacity-40">
+              {busy ? '올리는 중…' : retryingPublication ? '게시물 다시 올리기' : retryingMedia ? '사진 다시 올리기' : '공유'}
             </button>
           ) : items.length > 0 ? (
             <button type="button" onClick={() => setStep(items.length === 1 ? 'caption' : 'arrange')} className="press-response min-h-11 rounded-control px-3 text-label font-semibold text-coral-strong">
@@ -262,6 +265,7 @@ export function PostComposerSheet({
             isPrivate={isPrivate}
             setIsPrivate={setIsPrivate}
             retryingMedia={retryingMedia}
+            retryingPublication={retryingPublication}
           />
         )}
 
@@ -451,6 +455,7 @@ function CaptionStep({
   isPrivate,
   setIsPrivate,
   retryingMedia,
+  retryingPublication,
 }: {
   items: PostDraftItem[];
   coupleId?: string;
@@ -460,15 +465,22 @@ function CaptionStep({
   isPrivate: boolean;
   setIsPrivate: (value: boolean) => void;
   retryingMedia: boolean;
+  retryingPublication?: boolean;
 }) {
   return (
     <div className="pt-3">
-      <ul className="flex gap-1 overflow-x-auto pb-1" aria-label="담은 사진">
-        {items.map((item) => (
-          <li key={item.id} className="shrink-0"><DraftThumb item={item} coupleId={coupleId} /></li>
-        ))}
-      </ul>
-      {retryingMedia ? (
+      {items.length > 0 ? (
+        <ul className="flex gap-1 overflow-x-auto pb-1" aria-label="담은 사진">
+          {items.map((item) => (
+            <li key={item.id} className="shrink-0"><DraftThumb item={item} coupleId={coupleId} /></li>
+          ))}
+        </ul>
+      ) : null}
+      {retryingPublication ? (
+        <p className="mt-3 rounded-control border border-border px-3 py-3 text-caption leading-relaxed text-muted-foreground">
+          사진은 이미 저장했어요. 공개 설정을 다시 시도해 주세요.
+        </p>
+      ) : retryingMedia ? (
         <p className="mt-3 rounded-control border border-border px-3 py-3 text-caption leading-relaxed text-muted-foreground">
           글은 이미 저장했어요. 사진은 아직 한 장도 붙이지 않았으니 그대로 다시 올릴게요.
         </p>
@@ -486,12 +498,12 @@ function CaptionStep({
           />
         </label>
       )}
-      {!retryingMedia && connected ? (
+      {(!retryingMedia && !retryingPublication) && connected ? (
         <button type="button" role="switch" aria-checked={isPrivate} onClick={() => setIsPrivate(!isPrivate)} className="press-response-row mt-2 flex min-h-11 w-full items-center justify-between rounded-control px-3" style={{ border: 'var(--stroke-thin) solid var(--ink-faint)' }}>
           <span className="text-label" style={{ color: 'var(--ink)' }}>나만 보기</span>
           <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>{isPrivate ? '켜짐' : '꺼짐'}</span>
         </button>
-      ) : !retryingMedia ? (
+      ) : (!retryingMedia && !retryingPublication) ? (
         <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
           아직 둘이 연결되지 않아 이 게시물은 나만 볼 수 있게 저장돼요.
         </p>

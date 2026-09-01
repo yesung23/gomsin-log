@@ -63,8 +63,10 @@ describe('AuthCallbackPage PKCE handling', () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it('pins automatic URL detection off so the callback owns the only exchange', () => {
+  it('pins automatic URL detection off while keeping the exchanged session persistent', () => {
     const source = readFileSync('src/lib/supabase.ts', 'utf8');
+    expect(source).toMatch(/autoRefreshToken:\s*true/);
+    expect(source).toMatch(/persistSession:\s*true/);
     expect(source).toMatch(/detectSessionInUrl:\s*false/);
     expect(source).not.toMatch(/detectSessionInUrl:\s*true/);
     expect(source).toMatch(/appendPkceFlowIdToRedirects:\s*true/);

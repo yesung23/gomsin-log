@@ -8,7 +8,10 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemedToaster } from '@/components/ThemedToaster';
 import { createDeferredFailureSink, registerAuthDeepLinkHandler } from '@/lib/deepLinks';
 import { isNativePlatform } from '@/lib/platform';
+import { initializeSentry } from '@/lib/sentry';
 import '@/styles/index.css';
+
+void initializeSentry(isNativePlatform());
 
 // Handles `gomsinlog://auth/callback` in the Capacitor shell. No-op on the web.
 const authFailures = createDeferredFailureSink();

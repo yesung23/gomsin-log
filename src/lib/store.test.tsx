@@ -510,7 +510,7 @@ describe('StoreProvider auth lifecycle', () => {
     expect(Array.from(outboxEntries.values())[0].blocked?.reason).toBe('couple_changed');
   });
 
-  it('becomes ready after a session is restored', async () => {
+  it('enters the app when Supabase restores the persisted initial session', async () => {
     fetchFullStateFromDB.mockResolvedValue(
       serverState({ profile: { myName: '춘향', role: 'gomsin', couple: { partnerName: '', coupleCode: '', connected: false, status: 'pending' }, military: {} as never, contact: {} as never } as never }),
     );
@@ -523,11 +523,12 @@ describe('StoreProvider auth lifecycle', () => {
 
     await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
     await act(async () => {
-      emitAuth('SIGNED_IN', 'user-a');
+      emitAuth('INITIAL_SESSION', 'user-a');
     });
 
     await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
     expect(screen.getByTestId('user')).toHaveTextContent('user-a');
+    expect(screen.getByTestId('setup')).toHaveTextContent('true');
   });
 
   it('still becomes ready when the server sync never resolves (no infinite spinner)', async () => {

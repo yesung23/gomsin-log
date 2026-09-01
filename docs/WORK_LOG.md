@@ -114,6 +114,101 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-09-01 · Profile Post Composer next gate · Terra HOLD 보강
+
+#### PLAN POSITION
+- Phase: Profile Post Composer next gate
+- Workstream: 기능·데이터 무결성·복구
+- Step: publication response-loss reconciliation 및 ambiguous close fail-safe
+- Previous Gate: staged same-record publication-only retry patch; Terra HOLD 2건
+- This Gate: existing store boundary 보강과 publication retry 삭제 방지
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 제품 범위·수익·저장전략 변경 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `.superpowers/sdd/profile-post-composer-next-gate-plan/task-1-brief.md`
+- Current-state checked: `scripts/agent/session-start.sh`, live branch/HEAD/status, staged diff
+- Latest relevant Work Log checked: 2026-08-31 profile-post-composer handoff entry
+- MASTER PLAN version / 기준일: Profile Post Composer next gate / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex local Worker
+- Model: GPT-5 current Worker
+- Role: bounded implementation owner
+- PR: 없음 / remote mutation 금지
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- Old HEAD: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- New/Reviewed HEAD: uncommitted working tree; no commit created
+
+#### CHANGED / REVIEWED
+- file: `src/lib/store.tsx`
+- function/component/migration: `updateRecord`, `RECORD_UPDATE_READ_BACK_REASONS`, `sameRequestedRecordUpdates`
+- what changed/reviewed: ambiguous offline/unreachable/server/unknown/not_found update failures read back through existing `fetchRecordsResultFromDB`; exact id, current owner/couple scope, requested update semantics, and authoritative content revision are required before success/state update
+- why: encrypted CAS retry must use the newer server revision after a lost response
+- file: `src/lib/store-update-record-media.test.tsx`
+- function/component/migration: generic update response-loss regression coverage
+- what changed/reviewed: added success/newer-revision and read-back mismatch/unavailable tests
+- why: pin the store reconciliation contract
+- file: `src/features/us/SharedProfile.tsx`
+- function/component/migration: `closePostComposer`
+- what changed/reviewed: publication retry close only closes the composer and preserves retry metadata; it does not call `deleteRecord`
+- why: ambiguous publication may already be remotely public, so delete could remove published row/media
+- file: `src/features/us/postComposerSheet.test.tsx`
+- function/component/migration: publication retry close regression
+- what changed/reviewed: asserts no delete and preserved publication retry metadata; staged existing tests remain preserved
+- why: pin UI fail-safe behavior
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: no protocol/key/encryption changes
+- DB/migration semantics: no table/RPC/storage/RLS/migration/API changes
+- product semantics: existing publication/media retry flow retained; no new modal or feature
+- Production: Supabase/Vercel/Auth/TestFlight/device state not changed
+- unrelated dirty files: AccountDeletionV2/Sentry/pitch/Now/graph and other pre-existing changes not modified
+
+#### VERIFICATION
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/store-update-record-media.test.tsx src/features/us/postComposerSheet.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS after RED
+- what it actually proves: focused response-loss, mismatch/failure, publication close, reload/legacy/media/no-reupload/rapid-tap tests; 2 files / 40 tests
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/store.test.tsx src/lib/store-delete-record.test.tsx src/lib/store-update-record-media.test.tsx src/features/us/postComposerSheet.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: related store/delete/media/post composer behavior; 4 files / 86 tests
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript project build/type validation exited 0
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: no whitespace errors in the working-tree diff
+
+#### REVIEW IMPACT
+- DELTA: Terra HOLD findings addressed in code and tests; earlier review is stale for this changed HEAD and upper orchestrator must re-review the diff
+
+#### BLOCKERS
+- code: none found in the bounded path
+- environment: live Supabase actor matrix, physical iOS/WKWebView, and production state were not queried
+- external/manual: independent Terra/orchestrator final review remains
+
+#### STOPPED AT
+- exact completed boundary: local tests/typecheck/diff hygiene and task report update; no commit or remote action
+
+#### REMAINING
+- malformed `src/lib/accountDeletionV2.test.ts` patch artifact remains pre-existing debt and was not edited
+- production/remote/device verification remains UNVERIFIED
+
+#### NEXT ACTION
+- next owner: upper orchestrator / independent reviewer
+- tool/model: inspect exact working-tree diff and rerun required gates
+- 기준 SHA: base `a536f9bbd2a66b72f15daa99af093474a296c9c4` plus this uncommitted delta
+- exact next task: verify Terra HOLD closure and decide whether the patch is safe to advance
+
+#### DO NOT ADVANCE UNTIL
+- exact diff review confirms no staged patch loss, all related tests remain green, and publication retry close cannot delete an ambiguously published row
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-08-27 · Xcode 27 Apple Development 서명·실물 iPhone 설치 gate
 
 #### PLAN POSITION
@@ -9439,3 +9534,782 @@ e2e · Postgres 계약 · Deno).
 #### PRODUCTION
 - APPLIED — none
 - NOT APPLIED — TestFlight/App Store, Vercel Production, Supabase SQL/Auth/provider
+
+### 2026-08-31 — 현재 profile-post-composer 저장소 HANDOFF 및 dirty 상태 대조
+
+#### PLAN POSITION
+- Phase: session handoff / release readiness
+- Workstream: repository state capture and cross-workstream isolation
+- Step: live state + dirty diff handoff
+- Previous Gate: `a536f9b` readability/startup/distribution preflight; current dirty candidates
+- This Gate: live state 재확인, HANDOFF 작성, context checkpoint 준비
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` 확인; 고객·과금·저장·AI 역할 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/AI_SESSION_PROTOCOL.md`
+- Current-state checked: live branch/HEAD/status/diff/untracked 및 실제 call path
+- Latest relevant Work Log checked: 최신 tail의 2026-08-28 release/readability/preflight entries
+- MASTER PLAN version / 기준일: V4 / 2026-08-31
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary + Terra Max worker
+- Model: `gpt-5.6-terra` max for HANDOFF/report authoring; Codex final verifier
+- Role: Terra docs-only author; Codex integration, live-state verifier, and ledger owner
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- Old HEAD: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- New HEAD / Reviewed HEAD: unchanged; docs remain uncommitted
+
+#### CHANGED / REVIEWED
+- file: `docs/HANDOFF_PROFILE_POST_COMPOSER_2026-08-31.md`
+- function/component/migration: current-state HANDOFF
+- what changed/reviewed: live Git identity, dirty file scopes, completed/incomplete work, blockers, tests, next-session sequence, and rollback boundaries recorded
+- why: a new session must not inherit stale claims from conversation or older reports
+- file: `control-tower/reports/terra/2026-08-31_2229_profile-post-composer-handoff_terra.md`
+- function/component/migration: non-canonical Obsidian handoff report
+- what changed/reviewed: evidence and explicit NOT APPLIED/UNVERIFIED boundaries recorded
+- why: preserve an Obsidian-readable session index without making the vault canonical
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no migration applied
+- product semantics: unchanged; no runtime implementation or visual redesign
+- Production: no Supabase/Auth/Storage/Vercel/Apple/TestFlight/App Store mutation
+- source code: no intentional code or package edits in this handoff task
+
+#### VERIFICATION
+- command: `bash scripts/agent/session-start.sh`
+- PASS / FAIL / UNVERIFIED: PASS — current branch/HEAD, gate, dirty state, and claims surfaced
+- what it actually proves: live session context only; it does not prove remote or Production parity
+- command: `git branch --show-current && git rev-parse HEAD && git status --short && git diff --stat && git ls-files --others --exclude-standard`
+- PASS / FAIL / UNVERIFIED: PASS — exact repository identity and dirty/untracked inventory captured in HANDOFF
+- what it actually proves: local checkout state at handoff time
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/accountDeletionV2.test.ts`
+- PASS / FAIL / UNVERIFIED: FAIL — esbuild `Unexpected "**"` at `src/lib/accountDeletionV2.test.ts:255:0`; 0 tests
+- what it actually proves: the untracked test contains a patch artifact and is not runnable
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/sentry.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 1 file / 4 tests
+- what it actually proves: limited pure Sentry helper assertions only; not production privacy safety
+- command: `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript project graph compiles; it does not prove runtime wiring or parse the malformed test
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: tracked diff whitespace integrity; untracked files are excluded
+
+#### REVIEW IMPACT
+- NONE for product/security semantics — this was docs-only capture; earlier reviews remain scoped to their exact HEADs and do not validate current dirty candidates
+
+#### BLOCKERS
+- code: AccountDeletionV2 is client-only/unwired and its focused test is parse-broken; Sentry candidate lacks exact enable gate and retains raw boundary logging
+- environment: remote Supabase catalog, Production deployment, physical device, and TestFlight state are UNVERIFIED
+- external/manual: V2 server/migration/security design, Sentry privacy/CSP/dashboard/canary, and release upload require separate owner and approval
+
+#### STOPPED AT
+- exact completed boundary: live repository audit, HANDOFF, Terra Obsidian report, focused evidence capture, and context-save preparation; no implementation
+
+#### REMAINING
+- repair and design-review AccountDeletionV2 before any server/migration wiring
+- independently review/fix Sentry gate, dependency, lazy-loading, and logging boundary
+- recheck profile-post remote 067/actor matrix and release/TestFlight gates only in a separately authorized task
+
+#### NEXT ACTION
+- next owner: primary Codex with a security reviewer/architect for V2 or Sentry as applicable
+- tool/model: first run `session-start.sh`; use Luna/Terra for bounded implementation only after scope is approved; Sol for security semantics
+- 기준 SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4` plus this uncommitted docs delta
+- exact next task: recheck exact live state, then choose one isolated gate; do not mix V2, Sentry, pitch captures, or release upload
+
+#### DO NOT ADVANCE UNTIL
+- current dirty files are intentionally classified and the selected gate has an owner, negative tests, rollback plan, and fresh review target
+
+#### PRODUCTION
+- NOT APPLIED — no remote or production mutation in this task
+- UNVERIFIED — remote Supabase catalog and deployed runtime
+
+### 2026-09-01 · Profile Post Composer next gate · local recovery implementation and Terra delta review
+
+#### PLAN POSITION
+- Phase: Profile Post Composer next gate
+- Workstream: functionality, data integrity, recovery
+- Step: same-record publication retry and response-loss reconciliation
+- Previous Gate: `a536f9bbd2a66b72f15daa99af093474a296c9c4`; normal path present, publication-failure recovery gap
+- This Gate: local implementation complete; scoped verification complete; Terra `PASS WITH FINDINGS`
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no customer, pricing, storage, AI, or market change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/AI_SESSION_PROTOCOL.md`, `docs/skills/control-tower.md`, `docs/skills/feature-build.md`
+- Current-state checked: `bash scripts/agent/session-start.sh`, live branch/HEAD/status/diff, HANDOFF, call path
+- Latest relevant Work Log checked: 2026-08-31 profile-post handoff and 2026-09-01 continuation entries
+- MASTER PLAN version / 기준일: Profile Post Composer next gate / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex orchestrator with bounded implementation workers and Terra reviewer
+- Model: GPT-5.6 Luna implementation/safety worker; GPT-5.6 Terra independent reviewer; Gemini 3.7 Flash attempts ended with rate-limit errors
+- Role: orchestrator, implementation integration, independent verification, gate decision
+- PR: 없음 / commit·push 금지
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- Old HEAD: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- New/Reviewed HEAD: unchanged; implementation remains uncommitted
+
+#### CHANGED / REVIEWED
+- file: `src/features/us/SharedProfile.tsx`
+- function/component/migration: `PostRetryPhase`, `runPublishPost`, retry hydration, `closePostComposer`
+- what changed/reviewed: publication-only retry phase; same-record publication retry; ambiguous publication close preserves retry metadata/private row instead of deleting
+- why: a media-complete row must remain recoverable when final publication response or publication update is ambiguous
+- file: `src/features/us/PostComposerSheet.tsx`
+- function/component/migration: publication retry presentation and submit path
+- what changed/reviewed: caption-only retry state, no-media submit, publication-specific copy; existing media path preserved
+- why: retry must not reselect or reupload already stored media
+- file: `src/lib/store.tsx`
+- function/component/migration: `updateRecord`, `sameRequestedRecordUpdates`
+- what changed/reviewed: ambiguous update read-back through the existing couple-scoped fetch; exact id/owner/requested-field checks; authoritative attachments and content revision adopted
+- why: prevent stale encrypted CAS retries and preserve newer remote state
+- file: `src/features/us/postComposerSheet.test.tsx`
+- function/component/migration: publication retry regression tests
+- what changed/reviewed: publication transition/reload/legacy/close/no-media-reupload coverage
+- why: pin the user-visible recovery and fail-safe close contract
+- file: `src/lib/store-update-record-media.test.tsx`
+- function/component/migration: update response-loss regression tests
+- what changed/reviewed: read-back success/mismatch/unavailable, newer remote attachments, and subsequent expected revision coverage
+- why: pin state integrity after an ambiguous update
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged; no protocol, key, algorithm, or encryption-boundary change
+- DB/migration semantics: unchanged; no table, RPC, migration, RLS, privilege, or Storage-policy change
+- product semantics: no unrelated feature, visual redesign, or new product surface
+- Production: no Supabase, Vercel, Auth, Apple, TestFlight, App Store, or device mutation
+- unrelated dirty work: AccountDeletionV2, Sentry, pitch fixtures, package/session files, and existing dirty files preserved
+
+#### VERIFICATION
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/store-update-record-media.test.tsx src/features/us/postComposerSheet.test.tsx`
+- PASS: 2 files / 41 tests
+- what it actually proves: focused publication retry, response-loss reconciliation, attachment preservation, mismatch/failure, reload, legacy, close, and no-media-reupload behavior in the mocked local runtime
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/store.test.tsx src/lib/store-delete-record.test.tsx src/lib/records.test.ts src/features/us/paperProfile.test.tsx src/features/us/postComposition.test.ts src/features/us/postTiles.test.ts`
+- PASS: 6 files / 139 tests
+- what it actually proves: related store, deletion, record persistence, profile, composition, and tile regressions
+- command: `npm run typecheck`
+- PASS: `tsc -b --force` exited 0
+- what it actually proves: TypeScript project graph validation
+- command: `npx eslint src/lib/store.tsx src/lib/store-update-record-media.test.tsx src/features/us/SharedProfile.tsx src/features/us/PostComposerSheet.tsx src/features/us/postComposerSheet.test.tsx --max-warnings 0`
+- PASS
+- what it actually proves: scoped lint for changed implementation/test files; full-project lint remains affected by the malformed AccountDeletionV2 artifact
+- command: `git diff --cached --check`, `git diff --check`, `git diff HEAD --check`
+- PASS
+- what it actually proves: staged and working-tree whitespace hygiene; it does not validate untracked source semantics
+- command: Terra final delta review
+- PASS WITH FINDINGS: P1 authoritative-attachment overwrite fixed; P2 realtime/read-back race remains
+- what it actually proves: independent review of the current five-file feature/store delta; not remote, production, or device proof
+
+#### REVIEW IMPACT
+- DELTA: current Terra review supersedes the earlier HOLD reviews for this uncommitted delta
+- whether an earlier review is stale: any future HEAD change makes this review stale; remote/actor/device gates are not covered by this review
+
+#### BLOCKERS
+- code: P2 — a newer realtime/local record may be overwritten by the reconciled snapshot because state commit has no revision comparison; this blocks final merge/release confidence, not read-only remote/actor verification
+- environment: remote migration 067/catalog, live two-account/two-device actor behavior, physical iOS/WKWebView, and TestFlight remain UNVERIFIED
+- external/manual: no remote mutation was authorized or performed
+- separate debt: `src/lib/accountDeletionV2.test.ts:255` is the pre-existing patch artifact; focused test remains parse FAIL / 0 tests and was intentionally not changed
+
+#### STOPPED AT
+- exact completed boundary: local implementation, independent scoped verification, Terra `PASS WITH FINDINGS`, and no-remote-change gate decision
+
+#### REMAINING
+- perform read-only remote migration 067/catalog and two-account/two-device actor verification when credentials and authorization are available
+- fix or explicitly accept the P2 realtime/read-back race before merge/release
+- keep AccountDeletionV2 and Sentry as separate gates
+
+#### NEXT ACTION
+- next owner: Control Tower with Terra/Reviewer
+- tool/model: read-only remote/catalog and actor verification; no deployment or mutation
+- 기준 SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4` plus the five-file uncommitted implementation delta
+- exact next task: verify migration 067/catalog and owner/partner/former-partner/anon actor matrix, then decide the P2 gate
+
+#### DO NOT ADVANCE UNTIL
+- current scoped diff remains exact and independently reviewed
+- remote/catalog and actor results are recorded as APPLIED or UNVERIFIED without inference
+- P2 is fixed or explicitly accepted by the reviewer before merge/release
+
+#### PRODUCTION
+- NOT APPLIED: no remote or production mutation
+- UNVERIFIED: Supabase catalog/deployed migration, Production/Vercel, physical device, TestFlight
+
+### 2026-09-01 · Profile Post Composer · P2 security completion and scoped gardening
+
+#### PLAN POSITION
+- Phase: Profile Post Composer completion gate
+- Workstream: recovery, data integrity, security verification
+- Step: realtime/read-back and delayed-success race hardening + local actor/security revalidation
+- Previous Gate: local publication retry PASS with Terra P2 `REMAINS`
+- This Gate: P2 `RESOLVED`; local code/security gate PASS; remote credential hygiene remains manual blocker
+
+#### DIRECTION CHECK
+- Product source checked: existing Profile Post Composer V4 direction; no product semantics change
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE
+- Engineering source checked: `AGENTS.md`, `CLAUDE.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: `bash scripts/agent/session-start.sh`, live Git/status/diff, migration 067 ledger/report, current source/test path
+- Latest relevant Work Log checked: 2026-09-01 Profile Post Composer continuation entry
+- MASTER PLAN version / 기준일: Profile Post Composer next gate / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: ChatGPT + DevSpace, independent Codex/Terra reviewer
+- Model: GPT-5.6 Sol primary; GPT-5.6 Terra independent review
+- Role: implementation integration, security verification, scoped gardening, gate decision
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- Old HEAD: same
+- New/Reviewed HEAD: unchanged; delta remains uncommitted
+
+#### CHANGED / REVIEWED
+- file: `src/lib/store.tsx`
+- function/component/migration: `updateRecord`, response-loss reconciliation, state-commit snapshot authority
+- what changed/reviewed: reconciliation now requires an authoritative positive integer revision; stale lower/equal read-back and delayed normal success cannot overwrite a newer local/realtime record snapshot; revision and attachments are preserved together
+- why: close Terra P2 data-integrity race family without changing DB/RLS/crypto semantics
+- file: `src/lib/store-update-record-media.test.tsx`
+- function/component/migration: update response-loss/success race tests
+- what changed/reviewed: delayed normal success, lower/equal revision read-back, missing revision, authoritative attachment and next-CAS cases
+- why: reproduce and pin each race before accepting the fix
+- inherited Profile Post files revalidated: `SharedProfile.tsx`, `PostComposerSheet.tsx`, `postComposerSheet.test.tsx`
+- documentation: `docs/CURRENT_STATE.md` plus `control-tower/reports/codex/2026-09-01_0249_profile-post-p2-security-gardening_chatgpt.md`
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; migration 067 not edited or reapplied
+- product semantics: unchanged; no redesign/new feature
+- Production: no Supabase/Auth/Storage/Vercel/TestFlight write
+- unrelated dirty files: AccountDeletionV2, Sentry, pitch fixtures, package/session work, cycle tests untouched
+
+#### VERIFICATION
+- command: targeted Profile Post/store suite after final patch
+- PASS: 8 files / 184 tests; focused pair 45/45 within this set
+- what it actually proves: publication retry, store update/reconciliation, delayed success, stale/equal/missing revision, attachments/CAS and related store/profile regressions in local mocked runtime
+- command: `npm run typecheck`; scoped ESLint; `npm run build`; `git diff --check`; `git diff --cached --check`
+- PASS: all
+- command: `npm run test:p0`
+- PASS: 76 assertions
+- command: `npm run test:phase0`
+- PASS: 420 assertions including migration 067 owner/partner/former/unrelated/anon boundaries on throwaway PostgreSQL
+- command: `npm run test:p5`
+- PASS: 105 assertions including encrypted Profile Post publication boundaries
+- command: `npm run test:write-floor`
+- PASS: 39 assertions
+- command: `npm run verify:native`
+- PASS: 4 files / 106 tests
+- command: independent Terra review session `agt_72cc2a64`
+- PASS: final verdict `RESOLVED`; focused 45/45 independently rerun; no new P0/P1/P2 in the scoped five-file delta
+- command: current anon PostgREST read-only probe requesting `daily_records.is_profile_post`
+- PASS / LIMITED: `401/42501`, no schema-missing signal; proves current anon denial, not authenticated actor/default/NOT NULL metadata
+- command: full `npm run test`
+- FAIL OUTSIDE SCOPE: 3770/3772 tests pass; two time-dependent `cycleV3DataPath.test.tsx` calendar cases fail on 2026-09-01 and were not changed
+- command: full `npm run lint`
+- FAIL OUTSIDE SCOPE: pre-existing untracked `src/lib/accountDeletionV2.test.ts:255` patch artifact parse error only; scoped lint PASS
+
+#### REVIEW IMPACT
+- DELTA: earlier Terra `PASS WITH FINDINGS` and two intermediate `REMAINS` verdicts are superseded for the current uncommitted five-file delta by final `RESOLVED`
+- whether an earlier review is stale: yes, earlier P2 verdicts are stale; final review applies only to the current exact uncommitted scoped delta
+
+#### BLOCKERS
+- code: no P0/P1/P2 found in the scoped Profile Post delta after final Terra review
+- environment: current authenticated remote owner/partner/former actor matrix, exact remote column metadata, physical iPhone/two-device/TestFlight remain UNVERIFIED
+- security/manual: `supabase db dump --linked --schema public --dry-run` printed the linked DB credential to interactive session output. Value is not recorded in repository docs. Rotate that database credential before declaring production security hygiene closed.
+- unrelated debt: full test date-dependent cycle failures and AccountDeletionV2 parse artifact remain separate workstreams
+
+#### STOPPED AT
+- exact completed boundary: P2 code family resolved, local Profile Post/security verification complete, independent Terra `RESOLVED`, documentation/gardening recorded; no commit/push/deploy
+
+#### REMAINING
+- rotate exposed Supabase database credential (manual/authorized remote security action)
+- if release is desired, freshly verify authenticated remote actor/catalog and physical-device/TestFlight gates
+- keep unrelated dirty/debt work isolated
+
+#### NEXT ACTION
+- next owner: Control Tower / authorized operator
+- tool/model: Supabase credential management first; then read-only remote actor verification and release review
+- 기준 SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4` plus current uncommitted scoped Profile Post delta
+- exact next task: rotate the exposed linked DB credential, re-establish safe CLI access, then decide commit/release gate without mixing unrelated dirty work
+
+#### DO NOT ADVANCE UNTIL
+- exposed DB credential is rotated
+- intended Profile Post files are separated from unrelated dirty files before commit
+- release-only remote/device claims remain UNVERIFIED until freshly demonstrated
+
+#### PRODUCTION
+- NOT APPLIED: no Production/Supabase write in this session
+- HISTORICAL: migration 067 applied/actor-tested 2026-08-28
+- FRESH LIMITED: anon 401/42501 with no schema-missing signal on 2026-09-01
+- UNVERIFIED: current authenticated actor matrix, exact remote metadata, physical device, TestFlight
+
+### 2026-09-01 · Digital Memory Book Gate H 대량 기록 선택
+
+#### PLAN POSITION
+- Phase: Digital Memory Book PDF
+- Workstream: standalone Book Studio UX
+- Step: 수백~수천 개 기록의 검색·필터·일괄 선택·선택 보관함
+- Previous Gate: Gate A PASS; 실제 로그인·Supabase·project-scoped BFF/RPC/RLS는 후속 게이트
+- This Gate: 합성 1,000개 corpus 선택 UX 구현 및 로컬/브라우저 검증; 독립 Flash Max 검토는 라우터 제한으로 BLOCKED
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/DESIGN_V2.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 가격·저장·AI 전략 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/AI_SESSION_PROTOCOL.md`, `docs/skills/feature-build.md`, `docs/skills/release-validation.md`
+- Current-state checked: `bash scripts/agent/session-start.sh`, standalone Git state, existing Book Studio code/tests
+- Latest relevant Work Log checked: latest memory-book / Book Studio entries
+- MASTER PLAN version / 기준일: Digital Memory Book PDF Gate H / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex orchestrator; Flash Max independent review requested
+- Model: claude-opus-5 orchestrator; `google-antigravity/gemini-3.7-flash` Max requested for review
+- Role: narrow frontend implementation, parent verification, gate decision
+- PR: none
+- Branch: `main` in standalone `/Users/han-yejun/Desktop/gomsinlog-book-studio`
+- Base SHA: `ba9ef76b0a6a22b9fb22646cdf4ee88589731961`
+- Old HEAD: `ba9ef76b0a6a22b9fb22646cdf4ee88589731961`
+- New HEAD / Reviewed HEAD: `3847aca278fcf98254311696821606a6f7b433b2`
+
+#### CHANGED / REVIEWED
+- files: standalone `src/features/memoryBookStudio/MemoryBookStudio.tsx`, `.css`, `MemoryBookStudio.test.tsx`, `bookModel.ts`, new `librarySelection.ts`/test, `scripts/memoryBookPdf/verify-large-library.mjs`
+- what changed/reviewed: explicit synthetic 1,000-record mode, search/month/type filters, current-result selection/release, 36-item window, persistent selection tray, exact-id/order preservation, and accessible labels/counts
+- why: users need to find exact memories without mounting or manually scanning an unbounded list
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase, RLS, Storage, auth, BFF, or RPC work
+- product semantics: no AI selection; synthetic data only; existing direct source selection/order contract preserved
+- PDF/native export: no new library or Capacitor wiring
+- Production: no GitHub push, Cloudflare deploy, Supabase, Vercel, or user-data mutation
+- unrelated dirty files: source worktree files were not reset, stashed, cleaned, or mixed into the standalone commit
+
+#### VERIFICATION
+- command: `npm test -- --reporter=dot`
+- PASS: 5 files / 51 tests
+- command: `npm run typecheck`; `npm run lint`; `npm run build:book`
+- PASS: each exited 0; `dist-book` emitted
+- command: `node scripts/memoryBookPdf/verify-large-library.mjs`
+- PASS: `MEMORY_BOOK_LARGE_LIBRARY_VERIFIED`
+- command: local gstack browser QA at 375x812, 834x1112, 1194x834
+- PASS / LIMITED: exact search selection, filter counts, bounded 36-item rendering, selection persistence, no console errors, width checks; synthetic/local only
+- command: independent Flash Max dispatch
+- BLOCKED: eight Flash Max attempts, including the retry after all prior agents were closed, ended with router `429 Too Many Requests`; the requested Luna Max review timed out and Sol Max was unavailable with `401 Unauthorized / No eligible Codex account`; no independent verdict exists
+- what it actually proves: local implementation is verified, but not independently approved or production/auth/device-verified
+
+#### REVIEW IMPACT
+- FULL: new high-volume selection surface; future reviewer must target exact HEAD `3847aca`
+- whether an earlier review is stale: pre-`3847aca` Book Studio reviews do not cover this change
+
+#### BLOCKERS
+- code: no P0/P1/P2 found by parent inspection; this is not an independent reviewer verdict
+- environment: requested Flash Max reviewer unavailable after four 429 failures
+- performance: selecting/rendering a 1,000-record book was not attempted; PDF Gate B must measure time/memory and coverage
+- product boundary: real login, exact-couple authorization, project-scoped BFF/RPC/RLS, and live content remain out of scope
+
+#### STOPPED AT
+- exact completed boundary: local implementation commit, tests/builds, 375/834/1194 browser checks; stopped before push/deploy because Max gate is unavailable
+
+#### REMAINING
+- rerun Flash Max read-only review against exact `3847aca278fcf98254311696821606a6f7b433b2`
+- after a real Max verdict, decide push/deploy of the static synthetic demo
+- Gate B PDF renderer, performance, fidelity, font, and later authenticated project boundary
+
+#### NEXT ACTION
+- next owner: Codex orchestrator + independent Flash Max reviewer
+- tool/model: `google-antigravity/gemini-3.7-flash` / Max
+- 기준 SHA: `3847aca278fcf98254311696821606a6f7b433b2`
+- exact next task: rerun unchanged exact-HEAD review; only then consider release checks
+
+#### DO NOT ADVANCE UNTIL
+- independent Flash Max returns a real verdict for exact HEAD
+- no release-blocking finding remains
+- any push/deploy is separately recorded as APPLIED and verified
+- real-user/auth/Supabase work has its own security gate
+
+#### PRODUCTION
+- NOT APPLIED: no GitHub, Cloudflare, Supabase, Vercel, auth, or production mutation
+- UNVERIFIED: live user path, project BFF/RPC/RLS, PDF performance, physical iPad/iPhone, public deployment of `3847aca`
+
+### 2026-09-01 · Digital Memory Book Gate H continuation — conditional release and public demo
+
+#### PLAN POSITION
+- Phase: Digital Memory Book PDF
+- Workstream: standalone Book Studio UX
+- Step: parent verification, conditional GitHub push, Cloudflare Pages deployment, public smoke test
+- Previous Gate: Gate H local implementation and verification complete; independent Max review unavailable
+- This Gate: release actions completed conditionally; no real-user or server data path opened
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/DESIGN_V2.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; synthetic demo only, no pricing/storage/AI strategy change
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/AI_SESSION_PROTOCOL.md`, `docs/skills/release-validation.md`
+- Current-state checked: source `session-start`, standalone Git status, exact commit and public bundle checks
+- Latest relevant Work Log checked: immediately preceding Gate H entry
+- MASTER PLAN version / 기준일: Digital Memory Book PDF Gate H / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex orchestrator; parent review and release verification
+- Model: claude-opus-5 orchestrator; requested independent Flash/Luna/Sol Max routes were unavailable
+- Role: final diff inspection, local verification, authorized conditional push/deploy, public smoke test
+- PR: none
+- Branch: `main` in `/Users/han-yejun/Desktop/gomsinlog-book-studio`
+- Base SHA: `ba9ef76b0a6a22b9fb22646cdf4ee88589731961`
+- Old HEAD: `ba9ef76b0a6a22b9fb22646cdf4ee88589731961`
+- New HEAD / Reviewed HEAD: `3847aca278fcf98254311696821606a6f7b433b2`
+
+#### CHANGED / REVIEWED
+- file: standalone seven-file Gate H commit `3847aca`
+- function/component/migration: large-library selection UI and pure selection helpers
+- what changed/reviewed: no additional code changes; parent inspected the exact diff and release scope
+- why: continue the already-authorized synthetic demo to a public reviewable state without opening auth/DB scope
+- file: Cloudflare Pages artifact `dist-book`
+- function/component/migration: static deployment only
+- what changed/reviewed: deployed build and checked both preview and stable URLs
+- why: make the synthetic selection flow reachable for visual/product review
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase, RLS, Storage, auth, BFF, or RPC work
+- product semantics: no AI selection; synthetic data only; no real user content
+- Production: GitHub and Cloudflare static demo actions applied; no Supabase/auth/database/payment mutation
+- unrelated dirty source worktree: preserved; no reset, stash, checkout, clean, or merge
+
+#### VERIFICATION
+- command: `git show --check --oneline HEAD`; diff scope scan; `npm run verify:release`
+- PASS: exact commit had no whitespace errors; 7 intended files only; typecheck, lint, 5 files/51 tests, build, rights/layout/provenance/Cloudflare verifiers passed
+- what it actually proves: local release artifact and static scope are internally consistent
+- command: `git push origin main`
+- APPLIED / PASS: private GitHub `main` advanced to `3847aca278fcf98254311696821606a6f7b433b2`
+- what it actually proves: the committed synthetic demo is present on the repository remote
+- command: `npx wrangler pages deploy dist-book --project-name gomsinlog-book --branch main`
+- APPLIED / PASS: preview `https://39730a8c.gomsinlog-book.pages.dev`; stable `https://gomsinlog-book.pages.dev`
+- what it actually proves: the static demo is deployed; it does not connect login, Supabase, or live data
+- command: deployed Cloudflare verifier against preview and stable URLs
+- PASS: both returned 33 files, five rights notices, no secret markers
+- command: public gstack browser QA at 834px
+- PASS / LIMITED: 1,000-record mode, exact search to one result, selection, clear search to 36-item window, and clean console recheck all worked; screenshot visually inspected
+- what it actually proves: public synthetic UX is reachable; it does not prove authenticated or device behavior
+- command: independent Max review routes
+- BLOCKED: Flash Max router 429 after eight attempts; Luna Max timeout; Sol Max 401 no eligible account; no independent approval exists
+
+#### REVIEW IMPACT
+- FULL: release applies to exact `3847aca`; any later code change requires a fresh review
+- whether an earlier review is stale: no code changed after the commit; independent Max verdict is still absent
+
+#### BLOCKERS
+- code: no P0/P1/P2 found by parent inspection; not an independent reviewer verdict
+- environment: independent Max route unavailable
+- performance: 1,000-record PDF generation time/memory not tested; Gate B remains open
+- external/manual: real login, current-couple authorization, BFF/RPC/RLS, iPad/iPhone, and live user data remain unverified/unimplemented
+
+#### STOPPED AT
+- exact completed boundary: Gate H synthetic selection demo pushed and deployed; public smoke test passed conditionally
+
+#### REMAINING
+- independent Max read-only review against exact `3847aca` when a route is available
+- Gate B renderer/PDF fidelity/performance work
+- authenticated project-scoped data boundary under a separate security gate
+
+#### NEXT ACTION
+- next owner: independent reviewer, then Book Studio owner
+- tool/model: available Max reviewer for read-only exact-HEAD review; no substitution counted as approval
+- 기준 SHA: `3847aca278fcf98254311696821606a6f7b433b2`
+- exact next task: review the deployed commit; only then decide whether to open real-user/auth or PDF renderer scope
+
+#### DO NOT ADVANCE UNTIL
+- independent Max review is recorded before calling the demo independently approved
+- Gate B has explicit PDF bytes, font, page coverage, memory/time, and cancellation acceptance tests
+- real-user/auth/Supabase work has its own identity/exact-couple security gate
+
+#### PRODUCTION
+- APPLIED: private GitHub `main` push and Cloudflare Pages static demo deploy
+- NOT APPLIED: Supabase/Auth/RLS/BFF, live user data, Vercel, payment, or production database changes
+- UNVERIFIED: independent Max approval, authenticated flow, PDF performance, physical iPad/iPhone
+
+### 2026-09-01 · Service-readiness closure — privacy logging and stale media safety
+
+#### PLAN POSITION
+- Phase: release hardening / Profile Post stability
+- Workstream: application reliability, privacy logging, native preflight
+- Step: independent review → reproduction → minimum remediation → full verification
+- Previous Gate: Terra `PASS WITH FINDINGS`; raw Edge logging and stale media cleanup were release-blocking findings
+- This Gate: all scoped P0/P1/P2 findings resolved; physical-device and remote-production gates remain separate
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`; connection-first record → exact original → conversation flow preserved
+- Business source checked / NOT APPLICABLE: no customer, pricing, storage, AI, or monetization change
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/AI_SESSION_PROTOCOL.md`, `docs/skills/release-validation.md`, `supabase/migrations/README.md`
+- Current-state checked: `bash scripts/agent/session-start.sh`, live branch/HEAD/status, Xcode/device state, live `origin/master` ref
+- Latest relevant Work Log checked: 2026-09-01 Profile Post Composer and security-gardening entries
+- MASTER PLAN version / 기준일: service-readiness gates in `GATES.md` / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex orchestrator with Terra independent reviewer
+- Model: parent Codex; Terra reviewer at exact current tree
+- Role: bounded stability remediation, verification, and gate classification
+- PR: none
+- Branch: `codex/profile-post-composer`
+- Base SHA: `a536f9bbd2a66b72f15daa99af093474a296c9c4`; live `origin/master` `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- Old HEAD: `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- New HEAD / Reviewed HEAD: same HEAD with uncommitted scoped changes; Terra exact-tree verdict `PASS`
+
+#### CHANGED / REVIEWED
+- file: `src/lib/store.tsx`
+- function/component/migration: `updateRecordMedia`
+- what changed/reviewed: state snapshot guard is applied before destructive Storage cleanup; stale responses cannot remove paths still referenced by the newer record
+- why: prevent a delayed media response from deleting or replaying newer record state
+- file: `src/lib/store-update-record-media.test.tsx`
+- function/component/migration: delayed media response regression
+- what changed/reviewed: added the path-preservation assertion for a newer snapshot
+- why: reproduce and lock the data-loss race
+- file: `supabase/functions/delete-account/handler.ts`
+- function/component/migration: error logging boundary
+- what changed/reviewed: raw external errors are reduced to bounded categories
+- why: keep service diagnostics without leaking messages or storage details
+- files: `supabase/functions/_shared/safeEventLog.ts`, `src/lib/safeEventLog.test.ts`, `src/lib/loggingPrivacy.test.ts`, and four Edge entrypoints
+- function/component/migration: platform logging adapter and AST guard
+- what changed/reviewed: only bounded code/kind/reason/stage/status/count/boolean fields cross the platform log boundary; every console argument is scanned
+- why: the first `JSON.stringify` argument must not bypass the privacy guard
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no migration, RPC, RLS, or Storage policy was applied
+- product semantics: unchanged; AccountDeletion V2 remains unshipped and unreferenced
+- visual redesign: not performed
+- Production: no Supabase, Vercel, GitHub push/merge, payment, or TestFlight action
+- unrelated dirty files: preserved; no reset/stash/rebase/clean/broad restore
+
+#### VERIFICATION
+- command: focused pre-fix privacy/media test
+- FAIL: reproduced four Edge logger spreads and stale media path deletion; this was the intended red test before remediation
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/loggingPrivacy.test.ts src/lib/safeEventLog.test.ts src/lib/e2eeEdgeFunctions.test.ts`
+- PASS: 3 files / 83 tests
+- command: `npm run verify`
+- PASS: typecheck, lint, 268 files / 3,807 tests, and production-mode-disabled build; initial entry gzip 134.17 kB
+- command: `npm run test:p0`; `npm run test:phase0`; `npm run test:p5`; `npm run test:write-floor`; `npm run test:rollback`; `npm run verify:native`
+- PASS: 76; 420; 105; 39; rollback; 106 assertions/tests respectively
+- command: `npm run check:edge`; `npm run test:edge`
+- PASS: Deno type check; 18 Edge tests
+- command: `npm run test:e2e`
+- PASS: 124/124 Playwright tests
+- command: `npm audit`; `npm audit --omit=dev`
+- PASS: 0 vulnerabilities in both scopes
+- command: `npm run cap:sync:ios` with Xcode-27-Beta environment; unsigned `xcodebuild` Simulator build with the same `DEVELOPER_DIR`
+- PASS: Capacitor sync; `** BUILD SUCCEEDED **` under Xcode 27.0 / iOS Simulator 27.0
+- command: `npm run build:release`
+- HOLD: fail-closed because the required `sb_publishable_` key was not present in the session environment; no key was printed or changed
+- command: Terra exact-tree independent rereview
+- PASS: no new P0/P1/P2; AccountDeletion V2 unshipped; stale media and Edge logging findings resolved
+
+#### REVIEW IMPACT
+- FULL: this review covers the current uncommitted scoped delta at exact HEAD `a536f9b`; any later code change needs a fresh review
+- whether an earlier review is stale: yes; the preceding `PASS WITH FINDINGS` is superseded by the final `PASS`
+
+#### BLOCKERS
+- code: no known scoped P0/P1/P2 after Terra review
+- environment: Release artifact needs a valid publishable key; current physical iPhone is unavailable because it is disconnected
+- external/manual: remote Supabase catalog/actor matrix, credential rotation, Production logs, current CI for uncommitted changes, TestFlight, and signed device install are UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: local security/stability remediation, full local/browser/Edge/native verification, Xcode-27-Beta Simulator build, and independent Terra PASS
+
+#### REMAINING
+- reconnect the physical iPhone and verify availability before any install
+- if a release artifact is needed, supply the publishable key through the approved secret channel and rerun the release build without logging it
+- isolate only the intended files into a reviewable commit/PR; do not mix the existing dirty worktree
+- rotate the previously exposed linked Supabase credential before production security closure
+
+#### NEXT ACTION
+- next owner: user for phone reconnection; Codex for Xcode-27-Beta signed device build/install
+- tool/model: `DEVELOPER_DIR=/Users/han-yejun/Downloads/Xcode-27-Beta.app/Contents/Developer` + Xcode device destination; Terra for any post-install critical review
+- 기준 SHA: current reviewed tree `a536f9bbd2a66b72f15daa99af093474a296c9c4` plus the exact intended uncommitted files
+- exact next task: when the iPhone is connected, confirm it is available, build the app for that device with Xcode-27-Beta, install, launch, and record physical evidence; do not infer from Simulator
+
+#### DO NOT ADVANCE UNTIL
+- physical device reports available and the user has not asked to keep it disconnected
+- signed device build and launch complete under Xcode-27-Beta
+- Release key and remote credential hygiene are handled before TestFlight/Production
+- intended changes are separated from unrelated dirty work before commit/PR
+
+#### PRODUCTION
+- NOT APPLIED: no Supabase, Vercel, GitHub push/merge, payment, or TestFlight action
+- UNVERIFIED: remote catalog/actor matrix, production log retention/access, current CI for this uncommitted delta, and physical iPhone
+
+---
+
+## 2026-09-01 — Book Studio Supabase read-only boundary
+
+PLAN POSITION
+- Phase: Book Studio Supabase 연결 — 읽기 전용 경계
+- Workstream: 별도 Book Studio 사이트와 Supabase 권한 경계
+- Step: PKCE 로그인, 현재 active couple allowlist RPC, 메모리 내 signed URL 연결
+- Previous Gate: Gate A identity/exact-couple PASS
+- This Gate: 로컬 구현·정적 계약 검증 PASS / 원격 적용 전 CONDITIONAL
+
+DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, `docs/DESIGN_V2.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/DATA_LEGAL_E2EE_ARCHITECTURE_DECISION_2026-08-11.md`, `docs/skills/feature-build.md`, `docs/skills/security-review.md`, `supabase/migrations/README.md`
+- Current-state checked: session-start output, two feature worktree status/HEAD, canonical migration/schema
+- Latest relevant Work Log checked: 2026-09-01 Memory Book/service-readiness entries
+- MASTER PLAN version / 기준일: Book Studio Supabase read-only integration / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex orchestrator
+- Model: primary Codex; requested `kiro/gpt-5.6-sol` Max returned `401 Unauthorized`, so no Sol approval exists
+- Role: bounded frontend integration, migration contract, verification, and release-boundary classification
+- PR: none
+- Branch: frontend `codex/book-studio-supabase`; migration `codex/book-studio-supabase-migration`
+- Base SHA: frontend `3847aca278fcf98254311696821606a6f7b433b2`; migration `a536f9bbd2a66b72f15daa99af093474a296c9c4`
+- Old HEAD: same as each base SHA
+- New HEAD / Reviewed HEAD: frontend `463e13b569515c2edd2aefe0bbc82108ef648330`; migration `fcd64b8a57bb723a368cd5cfd2aa8f8e50f99188`
+
+CHANGED / REVIEWED
+- file: Book Studio auth/library/editor files and `supabase/migrations/068_book_library_read_rpc.sql`
+- function/component/migration: independent PKCE auth, `get_book_library()` read boundary, live editor wiring
+- what changed/reviewed: exact feature flag; publishable-key-only independent login; validated flow id; authenticated current-couple allowlist; public/plaintext rows only; canonical photo paths and short-lived same-origin signed URLs in memory; stale auth state clearing; no writes
+- why: connect customer-selected memory materials without passing app tokens, exposing private/encrypted records, or persisting drafts
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: encrypted rows excluded; no crypto changes
+- DB/migration semantics: new 068 file only; existing RLS/Storage policies unchanged
+- product semantics: no AI selection, no server AI, no draft/PDF persistence, no PDF library
+- Production: no remote Supabase, OAuth, Cloudflare, GitHub push/merge, or deploy action
+
+VERIFICATION
+- command: `npm run verify:release` in frontend worktree
+- PASS: typecheck, lint, 9 files/69 tests, build and static Book Studio checks
+- command: explicit live and false Book Studio builds; `npm audit --omit=dev`; migration contract test
+- PASS: live/false builds and 0 vulnerabilities; migration 1 file/4 tests
+- command: `supabase db lint --local --schema public --fail-on error`
+- BLOCKED / UNVERIFIED: no local Postgres at `127.0.0.1:54322`; no Docker/start action
+- command: unlazy gate reverify
+- PASS: G1/G2/G3/G5; UNMET: G4 manual source scan, G6 Sol review, G7 remote verification
+
+REVIEW IMPACT
+- FULL: new auth/data boundary; independent security review required before remote enablement
+- whether an earlier review is stale: earlier Gate A review does not cover this integration; Sol review unavailable
+
+BLOCKERS
+- code: no known local bounded-scope test failure
+- environment: local SQL runtime unavailable; staging actor credentials/callback unavailable
+- external/manual: Sol 401; remote schema/RLS/Storage/OAuth/Cloudflare state unverified
+
+STOPPED AT
+- exact completed boundary: local commits only; stopped before remote mutation and live flag enablement
+
+REMAINING
+- independent Sol/security review; staging-only migration and actor/RLS/Storage tests; OAuth allow-list and browser/device verification
+
+NEXT ACTION
+- next owner: independent security reviewer, then staging operator
+- tool/model: `kiro/gpt-5.6-sol` Max when available
+- 기준 SHA: frontend `463e13b569515c2edd2aefe0bbc82108ef648330`; migration `fcd64b8a57bb723a368cd5cfd2aa8f8e50f99188`
+- exact next task: exact-commit read-only review, then staging runtime validation; no production apply
+
+DO NOT ADVANCE UNTIL
+- independent review, runtime SQL lint, actor matrix, signed URL scope, and stale unlink/relink checks pass
+
+PRODUCTION
+- NOT APPLIED: Supabase, Storage, OAuth, Cloudflare, GitHub push/merge, deploy, and database changes
+- UNVERIFIED: remote/staging runtime state, actor matrix, physical device, and independent Sol review
+
+---
+
+## 2026-09-01 — Vercel urgent master promotion
+
+PLAN POSITION
+- Phase: release validation / urgent Vercel promotion
+- Workstream: release engineering
+- Step: clean candidate from live `origin/master`, validate, push `master`, verify Vercel and CI
+- Previous Gate: local stability/privacy candidate validation and prior independent Terra review on the preceding exact tree
+- This Gate: final clean candidate validation, fast-forward push, Vercel Production completion, and GitHub validation
+
+DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no product, customer, monetization, or storage-scope change
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/README.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, `GATES.md`, live GitHub refs and checks
+- Latest relevant Work Log checked: service-readiness closure entry
+- MASTER PLAN version / 기준일: current repository direction / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex
+- Model: GPT-5 orchestrator; requested Luna Max implementation, main/5.6 Terra review, and Daybreak Blue Sol review when required
+- Role: release orchestrator
+- PR: #90 already merged; direct non-force fast-forward from live `origin/master`
+- Branch: detached clean release candidate worktree
+- Base SHA: `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- Old HEAD: `b7d59ace34fd6cd8ec63078e8c19b3a7b5406aa3`
+- New HEAD / Reviewed HEAD: `57c10086218b810a2e20f6eb7d8c48daef6fd25f`
+
+CHANGED / REVIEWED
+- file: record media reconciliation, application/Edge logging call sites, privacy regression tests, `CycleTrackerSection.tsx`, `package.json`
+- function/component/migration: stale media protection, bounded privacy-safe logging, calendar date abstraction alignment, Edge static gate
+- what changed/reviewed: final release candidate contains 34 changed paths, isolated from unrelated dirty workspace files
+- why: protect record/media consistency and prevent raw error/detail leakage while keeping release gates aligned
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: no protocol, key, nonce, or E2EE change
+- DB/migration semantics: no migration or remote Supabase change
+- product semantics: no new product flow or visual redesign
+- Production: only the authorized GitHub `master` push and resulting Vercel deployment
+
+VERIFICATION
+- command: candidate `npm run verify`
+- PASS: typecheck, lint, 266 files / 3772 tests, production build
+- command: focused regression tests, `npm run check:edge`, `npm run test:edge`, `npm run test:e2e`
+- PASS: 4 files / 84 tests; Edge static check PASS; 18/18 Edge tests; 111/111 E2E
+- command: GitHub workflows for `57c1008`
+- PASS: master validation and Native release validation; 13/13 check runs successful
+- command: GitHub Vercel status and live HTTP probe
+- PASS: Vercel Deployment has completed; `https://gomsin-log.vercel.app/us` HTTP 200
+- command: physical iPhone install
+- NOT EXECUTED: device disconnected; Xcode-27-Beta device installation remains a separate gate
+
+REVIEW IMPACT
+- DELTA: narrow release-gate/test-alignment changes followed the preceding Terra review
+- whether an earlier review is stale: fresh Terra dispatch could not start because the active subagent thread limit was reached; primary final diff review plus independent GitHub checks completed
+
+BLOCKERS
+- code: none in final candidate/CI
+- environment: Vercel CLI unavailable; verified through GitHub deployment status and live HTTP
+- external/manual: Supabase remote state and physical iPhone unverified
+
+STOPPED AT
+- exact completed boundary: `57c1008` pushed to `master`; Vercel Production completed; all GitHub checks passed
+
+REMAINING
+- physical iPhone QA/install after reconnect
+- separate Supabase Edge deployment/verification if explicitly requested
+
+NEXT ACTION
+- next owner: Codex orchestrator
+- tool/model: Xcode-27-Beta; route any new implementation to Luna Max and security/design review to the requested model only when scope requires
+- 기준 SHA: `57c10086218b810a2e20f6eb7d8c48daef6fd25f`
+- exact next task: reconnect iPhone and run device QA/install
+
+DO NOT ADVANCE UNTIL
+- device target is connected and identified
+- no release-blocking device QA failures
+- any Supabase remote mutation has explicit gate and rollback evidence
+
+PRODUCTION
+- APPLIED: GitHub `master` push and Vercel Production deployment
+- NOT APPLIED: Supabase migrations/Edge Functions and physical iPhone installation

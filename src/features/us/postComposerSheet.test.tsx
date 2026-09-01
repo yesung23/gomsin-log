@@ -414,7 +414,7 @@ describe('게시물 만들기 3단계', () => {
     await waitFor(() => expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toBeNull());
   });
 
-  it('재시도 사진은 저장됐지만 공개 범위 복원이 실패하면 비공개 원본으로 안내한다', async () => {
+  it('사진 첨부 후 공개 범위 갱신이 실패하면 publication 단계로 보존되어 사진 재업로드 없이 공개만 재시도한다', async () => {
     storeState.records = [record({
       id: 'r1', attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
     } as Partial<DailyRecord> & { id: string })];
@@ -443,8 +443,132 @@ describe('게시물 만들기 3단계', () => {
       isPrivate: false,
       isProfilePost: true,
     });
+
+    // publication 실패 후 retry state가 publication 단계로 보존되어 있어야 함
+    const stored = JSON.parse(localStorage.getItem('gomsinlog.post-retry.v1:user-me') || 'null');
+    expect(stored).toEqual({
+      recordId: 'post-retry-1',
+      coupleId: 'couple-1',
+      desiredPrivate: false,
+      phase: 'publication',
+    });
+
+    // updateRecordMedia가 다시 불리지 않고 updateRecord만 재호출되어 완료됨
+    updateRecord.mockResolvedValueOnce({ ok: true });
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(updateRecord).toHaveBeenCalledTimes(2));
+    expect(updateRecordMedia).toHaveBeenCalledTimes(1);
     expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
+    expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toBeNull();
+  });
+
+  it('새로고침 뒤 publication retry 상태를 복구해 사진 재선택 없이 공개만 재시도한다', async () => {
+    localStorage.setItem('gomsinlog.post-retry.v1:user-me', JSON.stringify({
+      recordId: 'post-pub-1',
+      coupleId: 'couple-1',
+      desiredPrivate: false,
+      phase: 'publication',
+    }));
+    storeState.records = [
+      record({
+        id: 'post-pub-1',
+        log: '이미 사진이 올라간 글',
+        isPrivate: true,
+        attachments: [{ type: 'photo', name: 'uploaded.jpg', path: 'couple-1/post-pub-1/uploaded.jpg' }],
+      } as Partial<DailyRecord> & { id: string }),
+    ];
+
+    open();
+    const resume = await screen.findByRole('button', { name: '게시물 다시 올리기' });
+    await userEvent.click(resume);
+
+    // 사진 선택 없이 글 쓰기(caption) 단계로 바로 열림
+    expect(screen.getByTestId('post-composer').textContent).toContain('글 쓰기');
+    expect(screen.getByText(/사진은 이미 저장했어요/)).toBeTruthy();
+    expect(screen.getByTestId('post-share').textContent).toContain('게시물 다시 올리기');
+
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(updateRecord).toHaveBeenCalledWith('post-pub-1', {
+      isPrivate: false,
+      isProfilePost: true,
+    }));
+    expect(updateRecordMedia).not.toHaveBeenCalled();
+    expect(addRecordWithMedia).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
+    expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toBeNull();
+  });
+
+  it('phase 없는 구버전 저장 항목은 하위 호환성을 위해 media 단계로 취급한다', async () => {
+    localStorage.setItem('gomsinlog.post-retry.v1:user-me', JSON.stringify({
+      recordId: 'post-legacy-1',
+      coupleId: 'couple-1',
+      desiredPrivate: false,
+    }));
+    storeState.records = [
+      record({
+        id: 'r1',
+        attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+      } as Partial<DailyRecord> & { id: string }),
+      record({
+        id: 'post-legacy-1',
+        log: '구버전 재시도 글',
+        isPrivate: true,
+      } as Partial<DailyRecord> & { id: string }),
+    ];
+
+    open();
+    const resume = await screen.findByRole('button', { name: '게시물 사진 이어서 올리기' });
+    await userEvent.click(resume);
+    await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+    expect(screen.getByTestId('post-share').textContent).toContain('사진 다시 올리기');
+    await userEvent.click(screen.getByTestId('post-share'));
+
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalledWith('post-legacy-1', {
+      addFiles: expect.any(Array),
+      allOrNothing: true,
+    }));
+    expect(updateRecord).toHaveBeenCalledWith('post-legacy-1', {
+      isPrivate: false,
+      isProfilePost: true,
+    });
+    await waitFor(() => expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toBeNull());
+  });
+
+  it('publication retry 중 닫기를 누르면 원격 상태를 증명할 수 없어 삭제하지 않고 retry metadata를 보존한다', async () => {
+    localStorage.setItem('gomsinlog.post-retry.v1:user-me', JSON.stringify({
+      recordId: 'post-pub-1',
+      coupleId: 'couple-1',
+      desiredPrivate: false,
+      phase: 'publication',
+    }));
+    storeState.records = [
+      record({
+        id: 'post-pub-1',
+        log: '이미 사진이 올라간 글',
+        isPrivate: true,
+        attachments: [{ type: 'photo', name: 'uploaded.jpg', path: 'couple-1/post-pub-1/uploaded.jpg' }],
+      } as Partial<DailyRecord> & { id: string }),
+    ];
+
+    open();
+    const resume = await screen.findByRole('button', { name: '게시물 다시 올리기' });
+    await userEvent.click(resume);
+    expect(screen.getByTestId('post-composer')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기 닫기' }));
+
+    await waitFor(() => expect(deleteRecord).not.toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
+    expect(localStorage.getItem('gomsinlog.post-retry.v1:user-me')).toEqual(JSON.stringify({
+      recordId: 'post-pub-1',
+      coupleId: 'couple-1',
+      desiredPrivate: false,
+      phase: 'publication',
+    }));
   });
 });
 

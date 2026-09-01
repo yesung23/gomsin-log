@@ -27,12 +27,15 @@ import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
 
+export type PostRetryPhase = 'media' | 'publication';
+
 const POST_RETRY_KEY_PREFIX = 'gomsinlog.post-retry.v1';
 
 interface StoredPostRetry {
   recordId: string;
   coupleId: string;
   desiredPrivate: boolean;
+  phase?: PostRetryPhase;
 }
 
 function postRetryKey(userId: string): string {
@@ -47,7 +50,13 @@ function readStoredPostRetry(userId: string): StoredPostRetry | null {
     if (typeof candidate.recordId !== 'string'
       || typeof candidate.coupleId !== 'string'
       || typeof candidate.desiredPrivate !== 'boolean') return null;
-    return candidate as StoredPostRetry;
+    const phase: PostRetryPhase = candidate.phase === 'publication' ? 'publication' : 'media';
+    return {
+      recordId: candidate.recordId,
+      coupleId: candidate.coupleId,
+      desiredPrivate: candidate.desiredPrivate,
+      phase,
+    };
   } catch {
     return null;
   }
@@ -107,6 +116,7 @@ export function SharedProfile() {
   const [postCaption, setPostCaption] = useState('');
   const [postRetryRecordId, setPostRetryRecordId] = useState<string | null>(null);
   const [postRetryDesiredPrivate, setPostRetryDesiredPrivate] = useState<boolean | null>(null);
+  const [postRetryPhase, setPostRetryPhase] = useState<PostRetryPhase>('media');
   const postItemsRef = useRef(postItems);
 
   useEffect(() => {
@@ -141,6 +151,7 @@ export function SharedProfile() {
     }
     setPostRetryRecordId(retryRecord.id);
     setPostRetryDesiredPrivate(stored.desiredPrivate);
+    setPostRetryPhase(stored.phase ?? 'media');
     setPostCaption(retryRecord.log);
   }, [isReady, postRetryRecordId, profile.couple.coupleId, state.authenticatedUser?.id, state.records]);
 
@@ -159,6 +170,7 @@ export function SharedProfile() {
     setPostCaption('');
     setPostRetryRecordId(null);
     setPostRetryDesiredPrivate(null);
+    setPostRetryPhase('media');
     clearStoredPostRetry(state.authenticatedUser?.id);
   };
   const closeHighlightEditor = () => {
@@ -194,6 +206,21 @@ export function SharedProfile() {
     const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     setIsPublishingPost(true);
     try {
+      if (postRetryRecordId && postRetryPhase === 'publication') {
+        const publication = await updateRecord(postRetryRecordId, {
+          isPrivate: input.isPrivate,
+          isProfilePost: true,
+        });
+        if (!publication.ok) {
+          toast.error(publication.error || '공개 설정을 완료하지 못했어요. 다시 시도해 주세요.');
+          return;
+        }
+        setComposingPost(false);
+        discardPostDraft();
+        toast.success('게시물을 올렸어요.');
+        return;
+      }
+
       const files: File[] = [];
       for (const item of input.items) {
         if (item.kind === 'file') {
@@ -243,16 +270,22 @@ export function SharedProfile() {
           isProfilePost: true,
         });
         if (!publication.ok) {
-          const recordId = postRetryRecordId;
-          setComposingPost(false);
-          discardPostDraft();
-          toast.error('사진은 저장했지만 공개 범위를 확인하지 못했어요. 원본 기록에서 확인해 주세요.', {
-            duration: 8_000,
-            action: {
-              label: '원본 열기',
-              onClick: () => navigate(`/record?record=${encodeURIComponent(recordId)}`),
-            },
-          });
+          setPostRetryPhase('publication');
+          setPostRetryDesiredPrivate(input.isPrivate);
+          for (const item of postItems) {
+            if (item.kind === 'file') URL.revokeObjectURL(item.previewUrl);
+          }
+          setPostItems([]);
+          const userId = state.authenticatedUser?.id;
+          if (userId) {
+            storePostRetry(userId, {
+              recordId: postRetryRecordId,
+              coupleId: expectedCoupleId,
+              desiredPrivate: input.isPrivate,
+              phase: 'publication',
+            });
+          }
+          toast.error('사진은 저장했지만 공개 설정을 완료하지 못했어요. 다시 시도해 주세요.');
           return;
         }
         setComposingPost(false);
@@ -305,12 +338,14 @@ export function SharedProfile() {
         }
         setPostRetryRecordId(result.recordId);
         setPostRetryDesiredPrivate(input.isPrivate);
+        setPostRetryPhase('media');
         const userId = state.authenticatedUser?.id;
         if (userId) {
           storePostRetry(userId, {
             recordId: result.recordId,
             coupleId: expectedCoupleId,
             desiredPrivate: input.isPrivate,
+            phase: 'media',
           });
         }
         toast.warning('사진은 아직 붙이지 못했고 글은 나만 보기로 보관했어요. 사진을 다시 골라도 같은 기록에 이어서 올려요.');
@@ -342,6 +377,13 @@ export function SharedProfile() {
 
   const closePostComposer = async () => {
     if (isPublishingPost) return;
+    if (postRetryRecordId && postRetryPhase === 'publication') {
+      // The publication request may already have committed remotely. Without an
+      // authoritative success result, closing must never turn that ambiguity into
+      // a destructive delete of the row and its attached media.
+      setComposingPost(false);
+      return;
+    }
     if (postRetryRecordId) {
       const removed = await deleteRecord(postRetryRecordId);
       if (!removed.ok) {
@@ -502,7 +544,17 @@ export function SharedProfile() {
           헤더가 그 자리다. 좌우 88px 슬롯으로 대칭을 맞춰 아이디가 뷰포트 정중앙에 온다.
         */}
         <div className="flex items-center justify-start">
-          <button type="button" aria-label={postRetryRecordId ? '게시물 사진 이어서 올리기' : '게시물 만들기'} data-testid="open-post-composer" onClick={() => setComposingPost(true)} className="flex h-11 w-11 shrink-0 items-center justify-center">
+          <button
+            type="button"
+            aria-label={
+              postRetryRecordId
+                ? (postRetryPhase === 'publication' ? '게시물 다시 올리기' : '게시물 사진 이어서 올리기')
+                : '게시물 만들기'
+            }
+            data-testid="open-post-composer"
+            onClick={() => setComposingPost(true)}
+            className="flex h-11 w-11 shrink-0 items-center justify-center"
+          >
             <Plus size={22} color="var(--ink)" aria-hidden="true" />
           </button>
         </div>
@@ -623,7 +675,8 @@ export function SharedProfile() {
           coupleId={profile.couple.coupleId}
           connected={profile.couple.connected}
           busy={isPublishingPost}
-          retryingMedia={postRetryRecordId !== null}
+          retryingMedia={postRetryRecordId !== null && postRetryPhase !== 'publication'}
+          retryingPublication={postRetryRecordId !== null && postRetryPhase === 'publication'}
           initialPrivate={postRetryDesiredPrivate ?? !profile.couple.connected}
           items={postItems}
           setItems={setPostItems}

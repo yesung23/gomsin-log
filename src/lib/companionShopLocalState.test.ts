@@ -44,6 +44,14 @@ describe('companion shop account-local collection', () => {
     }));
 
     expect(loadCompanionShopState('u1').ownedAccessories).toEqual(['scarf']);
+
+    localStorage.setItem('gomsin.diary.garden.u1', JSON.stringify({
+      version: 1,
+      peach: 'none',
+      sage: 'none',
+    }));
+
+    expect(loadCompanionShopState('u1').ownedAccessories).toEqual(['scarf']);
   });
 
   it('collects a paper for only the active account', () => {
@@ -81,5 +89,17 @@ describe('companion shop account-local collection', () => {
     const result = drawDailyAccessory('u1', '2026-09-01', () => 0);
     expect(result).toMatchObject({ status: 'complete', accessory: null });
     expect(result.state.lastFreeDrawDate).toBeNull();
+  });
+
+  it('rejects an invalid local calendar date without granting an accessory', () => {
+    const first = drawDailyAccessory('u1', '2026-02-30', () => 0);
+    const second = drawDailyAccessory('u1', 'not-a-date', () => 0.99);
+
+    expect(first).toMatchObject({ status: 'invalid_date', accessory: null });
+    expect(second).toMatchObject({ status: 'invalid_date', accessory: null });
+    expect(loadCompanionShopState('u1')).toMatchObject({
+      ownedAccessories: [],
+      lastFreeDrawDate: null,
+    });
   });
 });

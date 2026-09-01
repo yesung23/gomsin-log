@@ -15,7 +15,7 @@ export interface CompanionShopState {
 }
 
 export type DailyAccessoryDrawResult = {
-  status: 'drawn' | 'used_today' | 'complete';
+  status: 'drawn' | 'used_today' | 'complete' | 'invalid_date';
   accessory: CollectibleGardenAccessory | null;
   state: CompanionShopState;
 };
@@ -30,6 +30,14 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function key(userId: string): string {
   return `${KEY_PREFIX}${userId}`;
+}
+
+function isValidLocalDate(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1];
 }
 
 function uniqueInOrder<T extends string>(values: readonly T[], order: readonly T[]): T[] {
@@ -71,35 +79,49 @@ function normalizeState(userId: string, value: unknown): CompanionShopState {
     version: 1,
     ownedAccessories,
     ownedPapers: normalizePapers(stored.ownedPapers),
-    lastFreeDrawDate: typeof stored.lastFreeDrawDate === 'string' && DATE_PATTERN.test(stored.lastFreeDrawDate)
+    lastFreeDrawDate: typeof stored.lastFreeDrawDate === 'string' && isValidLocalDate(stored.lastFreeDrawDate)
       ? stored.lastFreeDrawDate
       : null,
   };
+}
+
+function persistState(userId: string, state: CompanionShopState): void {
+  try {
+    localStorage.setItem(key(userId), JSON.stringify(state));
+  } catch {
+    // Optional local collection state must never block the rest of the app.
+  }
 }
 
 export function loadCompanionShopState(userId: string): CompanionShopState {
   if (!userId || typeof localStorage === 'undefined') return normalizeState('', null);
   try {
     const raw = localStorage.getItem(key(userId));
-    if (!raw) return normalizeState(userId, null);
+    if (!raw) {
+      const state = normalizeState(userId, null);
+      if (state.ownedAccessories.length > 0) persistState(userId, state);
+      return state;
+    }
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || (parsed as Record<string, unknown>).version !== 1) {
-      return normalizeState(userId, null);
+      const state = normalizeState(userId, null);
+      if (state.ownedAccessories.length > 0) persistState(userId, state);
+      return state;
     }
-    return normalizeState(userId, parsed);
+    const state = normalizeState(userId, parsed);
+    if (JSON.stringify(parsed) !== JSON.stringify(state)) persistState(userId, state);
+    return state;
   } catch {
-    return normalizeState(userId, null);
+    const state = normalizeState(userId, null);
+    if (state.ownedAccessories.length > 0) persistState(userId, state);
+    return state;
   }
 }
 
 export function saveCompanionShopState(userId: string, state: CompanionShopState): CompanionShopState {
   const normalized = normalizeState(userId, state);
   if (!userId || typeof localStorage === 'undefined') return normalized;
-  try {
-    localStorage.setItem(key(userId), JSON.stringify(normalized));
-  } catch {
-    // Optional local collection state must never block the rest of the app.
-  }
+  persistState(userId, normalized);
   return normalized;
 }
 
@@ -117,6 +139,9 @@ export function drawDailyAccessory(
   random: () => number = Math.random,
 ): DailyAccessoryDrawResult {
   const current = loadCompanionShopState(userId);
+  if (!isValidLocalDate(localDate)) {
+    return { status: 'invalid_date', accessory: null, state: current };
+  }
   const remaining = ACCESSORY_ORDER.filter((accessory) => !current.ownedAccessories.includes(accessory));
   if (remaining.length === 0) {
     return { status: 'complete', accessory: null, state: current };
@@ -130,8 +155,7 @@ export function drawDailyAccessory(
   const state = saveCompanionShopState(userId, {
     ...current,
     ownedAccessories: [...current.ownedAccessories, accessory],
-    lastFreeDrawDate: DATE_PATTERN.test(localDate) ? localDate : current.lastFreeDrawDate,
+    lastFreeDrawDate: localDate,
   });
   return { status: 'drawn', accessory, state };
 }
-

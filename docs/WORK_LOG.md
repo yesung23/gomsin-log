@@ -10313,3 +10313,97 @@ DO NOT ADVANCE UNTIL
 PRODUCTION
 - APPLIED: GitHub `master` push and Vercel Production deployment
 - NOT APPLIED: Supabase migrations/Edge Functions and physical iPhone installation
+
+---
+
+## 2026-09-01 — 미커밋 작업 master 반영 및 Vercel 검증
+
+PLAN POSITION
+- Phase: release validation / uncommitted workspace promotion
+- Workstream: release engineering
+- Step: 의미 있는 미커밋 변경을 보존·커밋하고 live `origin/master` 기준으로 통합한 뒤 검증·push·Vercel 확인
+- Previous Gate: `57c10086218b810a2e20f6eb7d8c48daef6fd25f` master/Vercel 반영
+- This Gate: `ee1cb127d0265126554e49b8f3742cf988fb184d` master 반영, GitHub 두 검증 흐름 성공, Vercel 완료
+
+DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: 제품·고객·가격·저장 범위 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/README.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, `GATES.md`, GitHub refs/checks, Vercel commit status
+- Latest relevant Work Log checked: 2026-09-01 Vercel urgent master promotion 및 service-readiness closure
+- MASTER PLAN version / 기준일: current repository direction / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex
+- Model: GPT-5 orchestrator; Luna Max implementation route, Terra/Daybreak route only when review scope requires
+- Role: release orchestrator
+- PR: none; user-authorized direct non-force fast-forward push
+- Branch: detached master-based release candidate worktree
+- Base SHA: `57c10086218b810a2e20f6eb7d8c48daef6fd25f`
+- Old HEAD: `57c10086218b810a2e20f6eb7d8c48daef6fd25f`
+- New HEAD / Reviewed HEAD: `ee1cb127d0265126554e49b8f3742cf988fb184d`
+
+CHANGED / REVIEWED
+- file: profile-post retry sources/tests, Sentry opt-in sources/tests, dormant Account Deletion V2 sources/tests, CI workflow pins, docs/reports, E2E pitch specs and fixtures
+- function/component/migration: publication recovery, privacy-bounded observability, dormant deletion capability contract, release gates, evidence and browser coverage
+- what changed/reviewed: 43 meaningful primary-worktree paths were committed as `3a4c664`; master integration produced the 40-path code/evidence delta `ee1cb127`; only package/ErrorBoundary conflicts were resolved
+- why: user requested the existing uncommitted work be put into master and future completed work be promoted promptly after verification
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: no protocol/key/nonce/E2EE authority change
+- DB/migration semantics: no migration or remote Supabase change
+- product semantics: no visual redesign; profile publication retry only
+- Production: GitHub master and Vercel only
+- local metadata: `.DS_Store`, Obsidian graph, and generated claim metadata excluded and preserved locally
+
+VERIFICATION
+- command: primary and master-based `npm run verify`
+- PASS: typecheck, lint, 268 Vitest files / 3807 tests, production build
+- command: master-based `npm run check:edge && npm run test:edge`
+- PASS: Edge static check and 18/18 tests
+- command: master-based `npm run test:e2e`
+- PASS: 124/124; an earlier primary run had one Playwright trace artifact ENOENT, then targeted and full reruns passed
+- command: `npm audit`, `npm audit --omit=dev`, and candidate `npm ci`
+- PASS: 0 vulnerabilities
+- command: candidate diff/secret checks
+- PASS: diff clean, no conflict markers, secret-pattern scan PASS
+- command: GitHub Actions for `ee1cb127d0265126554e49b8f3742cf988fb184d`
+- PASS: master validation and Native release validation both completed successfully
+- command: GitHub Vercel status and live HTTP probe
+- PASS: Vercel deployment completed; `https://gomsin-log.vercel.app/us` HTTP 200
+- command: Xcode-27-Beta physical iPhone install
+- NOT EXECUTED: device disconnected
+
+REVIEW IMPACT
+- FULL: exact master-based candidate reviewed and all local/remote release gates rerun
+- whether an earlier review is stale: fresh Terra dispatch unavailable because active subagent thread limit was reached; no prior Terra verdict was reused as exact-SHA proof
+- Sol/Daybreak: NOT DISPATCHED — no new authz/RLS/migration/crypto/key-authority semantics
+
+BLOCKERS
+- code: none in completed checks
+- environment: Vercel CLI unavailable; GitHub status plus live HTTP used
+- external/manual: Supabase remote state and physical iPhone unverified
+
+STOPPED AT
+- exact completed boundary: `ee1cb127d0265126554e49b8f3742cf988fb184d` pushed to master; GitHub validation and Vercel completed
+
+REMAINING
+- physical-device QA/install with Xcode-27-Beta after reconnect
+- separate Supabase remote deployment/verification if requested
+
+NEXT ACTION
+- next owner: Codex orchestrator
+- tool/model: Xcode-27-Beta; new code routes to Luna Max; independent review only when scope requires
+- 기준 SHA: `ee1cb127d0265126554e49b8f3742cf988fb184d`
+- exact next task: reconnect iPhone and complete device QA/install
+
+DO NOT ADVANCE UNTIL
+- device connected and identified
+- no release-blocking device QA failure
+- any Supabase remote mutation has explicit gate and rollback evidence
+
+PRODUCTION
+- APPLIED: GitHub master push and Vercel Production deployment
+- NOT APPLIED: Supabase migrations/Edge Functions and physical iPhone installation

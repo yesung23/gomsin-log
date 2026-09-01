@@ -7,12 +7,12 @@ import type {
 /**
  * iOS 온디바이스 요약 플러그인으로 가는 유일한 통로.
  *
- * ## 기본값은 꺼짐
+ * ## 기본값은 켜짐
  *
- * `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED`가 문자열 `'true'`일 때만 호출한다. 미설정·`'false'`·
- * `'1'`·대문자 `'TRUE'` 전부 꺼짐이다. `import.meta.env`의 모든 값은 브라우저 번들에
- * 인라인되는 공개 값이고, 이것은 자격증명이 아니라 불리언 하나다
- * (`src/app/e2ee/featureFlag.ts`와 같은 형태).
+ * 지원되는 iOS 네이티브 기기에서는 기본적으로 사용할 수 있다. 운영 중 긴급히 끌 필요가
+ * 있을 때만 `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED=false|0|off`를 명시한다. 이 값은
+ * 브라우저 번들에 인라인되는 공개 kill switch일 뿐 자격증명이 아니다. 실제 생성은 스토리의
+ * 사용자 버튼을 눌렀을 때만 시작하고, 웹·Android·미지원 모델은 기존 규칙 요약으로 남는다.
  *
  * ## Android 구현이 없다
  *
@@ -56,7 +56,9 @@ export type OnDeviceRefineOutcome =
   | { ok: false; reason: OnDeviceSummaryFailure };
 
 export function isOnDeviceDailySummaryEnabled(): boolean {
-  return import.meta.env.VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED === 'true';
+  const value = import.meta.env.VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED;
+  if (value === undefined) return true;
+  return !['false', '0', 'off'].includes(value.trim().toLowerCase());
 }
 
 let registered: OnDeviceSummaryPlugin | null = null;

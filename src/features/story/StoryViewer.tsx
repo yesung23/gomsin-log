@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { X, ChevronLeft, ChevronRight, ArrowUpRight, BookmarkPlus, Check } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ArrowUpRight, BookmarkPlus, Check, Sparkles, LoaderCircle } from 'lucide-react';
 import type { StoryCard } from '@/features/story/storyProjection';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { PaperCard, Bookmark, FoldDivider } from '@/components/paper';
@@ -51,6 +51,9 @@ export interface StoryViewerProps {
   onAddToHighlight?: (recordId: string) => void;
   /** 속표지의 줄을 눌렀을 때. 그 줄이 가리키는 카드로 이동한다. */
   onJumpToRecord?: (recordId: string) => void;
+  /** 지원되는 iOS에서 사용자가 요청할 때만 온디바이스 문장 다듬기를 시작한다. */
+  onRefineCover?: () => void;
+  coverRefinementStatus?: 'idle' | 'running' | 'applied' | 'fallback';
   /** 책갈피 토글. `archive`에서는 넘기지 않는다. */
   onToggleBookmark?: (recordId: string, next: boolean) => void;
   markedRecordIds?: ReadonlySet<string>;
@@ -76,6 +79,8 @@ export function StoryViewer({
   onOpenRecord,
   onAddToHighlight,
   onJumpToRecord,
+  onRefineCover,
+  coverRefinementStatus = 'idle',
   onToggleBookmark,
   markedRecordIds,
   onAcknowledge,
@@ -206,7 +211,12 @@ export function StoryViewer({
         onPointerLeave={endHold}
       >
         {card.kind === 'cover' ? (
-          <CoverCard card={card} onJump={onJumpToRecord} />
+          <CoverCard
+            card={card}
+            onJump={onJumpToRecord}
+            onRefine={onRefineCover}
+            refinementStatus={coverRefinementStatus}
+          />
         ) : card.kind === 'missing' ? (
           <MissingCard />
         ) : card.kind === 'closing' ? (
@@ -295,9 +305,13 @@ export function StoryViewer({
 function CoverCard({
   card,
   onJump,
+  onRefine,
+  refinementStatus = 'idle',
 }: {
   card: Extract<StoryCard, { kind: 'cover' }>;
   onJump?: (recordId: string) => void;
+  onRefine?: () => void;
+  refinementStatus?: 'idle' | 'running' | 'applied' | 'fallback';
 }) {
   const [expanded, setExpanded] = useState(false);
   const total = card.lines.length;
@@ -305,9 +319,33 @@ function CoverCard({
   const visibleLines = hasMore && !expanded ? card.lines.slice(0, 5) : card.lines;
   const remainingCount = total - 5;
 
+  const refineLabel = refinementStatus === 'running'
+    ? 'AI 요약 중'
+    : refinementStatus === 'applied'
+      ? 'AI로 다듬었어요'
+      : refinementStatus === 'fallback'
+        ? 'AI 다시 시도'
+        : 'AI로 다듬기';
+
   return (
     <PaperCard className="mt-2">
-      <p className="text-caption text-muted-foreground">{card.rangeLabel}</p>
+      <div className="flex min-h-11 items-center justify-between gap-3">
+        <p className="text-caption text-muted-foreground">{card.rangeLabel}</p>
+        {onRefine ? (
+          <button
+            type="button"
+            onClick={onRefine}
+            disabled={refinementStatus === 'running' || refinementStatus === 'applied'}
+            aria-busy={refinementStatus === 'running'}
+            className="press-response inline-flex min-h-11 items-center gap-1.5 rounded-control px-3 text-caption font-semibold text-foreground disabled:opacity-60"
+          >
+            {refinementStatus === 'running'
+              ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
+              : <Sparkles size={15} aria-hidden="true" />}
+            {refineLabel}
+          </button>
+        ) : null}
+      </div>
       <FoldDivider className="my-4" />
       <ul className="space-y-3">
         {visibleLines.map((line) => (

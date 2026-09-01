@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { StoryRoute } from '@/features/story/StoryRoute';
@@ -115,6 +115,11 @@ function open(path: string) {
   );
 }
 
+async function requestAiSummary() {
+  fireEvent.click(screen.getByRole('button', { name: 'AI로 다듬기' }));
+  await Promise.resolve();
+}
+
 function stubPlugin(over: Partial<OnDeviceSummaryPlugin> = {}): OnDeviceSummaryPlugin {
   return {
     availability: vi.fn(async () => ({ available: true, reason: 'ready' })),
@@ -150,8 +155,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('기본값(기능 OFF)에서는 규칙 결과 그대로다', () => {
-  it('플러그인을 부르지 않고 규칙 문장을 그린다', async () => {
+describe('기본 ON이어도 스토리를 여는 것만으로 모델을 실행하지 않는다', () => {
+  it('규칙 문장을 즉시 그리고 AI 버튼을 누르기 전에는 플러그인을 부르지 않는다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
     surface = twoToday();
@@ -160,8 +165,21 @@ describe('기본값(기능 OFF)에서는 규칙 결과 그대로다', () => {
     open('/story/partner');
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'AI로 다듬기' })).toBeTruthy();
     await waitFor(() => expect(plugin.availability).not.toHaveBeenCalled());
     expect(plugin.refineLines).not.toHaveBeenCalled();
+  });
+
+  it('AI 버튼을 누르면 즉시 온디바이스 요약을 시작한다', async () => {
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = twoToday();
+    records = surface;
+
+    open('/story/partner');
+    await requestAiSummary();
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /다듬은 0번/ })).toBeTruthy());
   });
 });
 
@@ -179,6 +197,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     open('/story/partner');
     // 동기적으로 이미 옳은 화면.
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+    await requestAiSummary();
 
     await waitFor(() => expect(screen.getByRole('button', { name: /다듬은 0번/ })).toBeTruthy());
     expect(screen.getByRole('button', { name: /다듬은 1번/ })).toBeTruthy();
@@ -193,6 +212,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
     const sent = JSON.stringify(vi.mocked(plugin.refineLines).mock.calls[0][0].items);
     expect(sent).not.toContain('"a"');
@@ -211,6 +231,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(screen.getByRole('button', { name: /다듬은 1번/ })).toBeTruthy());
 
     // 다듬어진 문장을 눌러도 `recordId`로 정확한 원본 카드가 열린다.
@@ -235,6 +256,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
     __setOnDeviceSummaryPluginForTests(stubPlugin());
     open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(screen.getByRole('button', { name: /다듬은 1번/ })).toBeTruthy());
     await userEvent.click(screen.getByRole('button', { name: /다듬은 1번/ }));
     await waitFor(() => expect(screen.getByTestId('story-location').textContent).toBe(rulesTarget));
@@ -249,8 +271,9 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     open('/story/partner?at=b');
     expect(screen.getByText('점심 먹었어')).toBeTruthy();
-    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
-    // 원문은 모델 출력으로 바뀌지 않는다.
+    await Promise.resolve();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+    // 딥링크는 표지 버튼을 거치지 않으므로 모델을 실행하지 않고 원문을 그대로 연다.
     expect(screen.getByText('점심 먹었어')).toBeTruthy();
     expect(screen.queryByText('다듬은 1번')).toBeNull();
   });
@@ -263,7 +286,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     open('/story/partner?at=gone');
     expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeTruthy();
-    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
     expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeTruthy();
   });
 
@@ -295,6 +319,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     expect(screen.queryByText('지어낸 줄')).toBeNull();
@@ -310,6 +335,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
   });
@@ -330,6 +356,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     const view = open('/story/partner');
+    await requestAiSummary();
     // 8개는 2개 배치 (5 + 3)
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
 
@@ -374,6 +401,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
 
     // 배치 2 실패로 인해 첫 번째 배치의 내용도 섞이지 않고 전체가 규칙 원문으로 유지됨
@@ -406,6 +434,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     const view = open('/story/partner');
+    await requestAiSummary();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
@@ -436,6 +465,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     const view = open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
     const firstOptions = vi.mocked(plugin.refineLines).mock.calls[0][0];
     view.unmount();
@@ -476,6 +506,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     );
     records = surface;
     const view = open('/story/partner');
+    await requestAiSummary();
     await waitFor(() => expect(screen.getAllByRole('button', { name: /기존/ })).toHaveLength(5));
 
     surface = [
@@ -524,7 +555,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
       records = surface;
 
       open('/story/partner');
-      await Promise.resolve();
+      await requestAiSummary();
       // 배치 검증이 사전에 실패하여 플러그인을 단 한 번도 호출하지 않음
       expect(plugin.refineLines).not.toHaveBeenCalled();
       expect(screen.getByRole('button', { name: /짧은 원문 0/ })).toBeTruthy();
@@ -606,6 +637,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     __setOnDeviceSummaryPluginForTests(null);
     open('/story/partner');
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'AI로 다듬기' })).toBeNull();
     await waitFor(() => expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy());
   });
 });

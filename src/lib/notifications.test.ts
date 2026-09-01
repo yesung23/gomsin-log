@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearNotificationDedupeForTests,
   DEFAULT_NOTIFICATION_PREFERENCES,
@@ -12,6 +12,10 @@ import {
   subscribeNotifications,
   unseenPartnerTalkAboutMarks,
 } from './notifications';
+
+beforeEach(() => {
+  vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'true');
+});
 
 afterEach(() => {
   clearNotificationDedupeForTests();
@@ -77,6 +81,25 @@ describe('privacy-safe notifications', () => {
     vi.stubGlobal('Notification', undefined);
     expect(notificationPermission()).toBe('unsupported');
     await expect(requestNotificationPermission()).resolves.toBe('unsupported');
+  });
+
+  it('the product switch blocks permission requests and system notifications even when the browser supports them', async () => {
+    const requestPermission = vi.fn(async () => 'granted' as const);
+    const NotificationMock = vi.fn(function NotificationMock(this: { close: () => void }) {
+      this.close = vi.fn();
+    }) as unknown as typeof Notification;
+    Object.defineProperty(NotificationMock, 'permission', { value: 'granted', configurable: true });
+    Object.defineProperty(NotificationMock, 'requestPermission', { value: requestPermission, configurable: true });
+    vi.stubGlobal('Notification', NotificationMock);
+    vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'false');
+
+    expect(notificationPermission()).toBe('unsupported');
+    await expect(requestNotificationPermission()).resolves.toBe('unsupported');
+    expect(requestPermission).not.toHaveBeenCalled();
+
+    saveNotificationPreferences('a', { ...DEFAULT_NOTIFICATION_PREFERENCES, systemEnabled: true, inAppEnabled: false });
+    await emitNotification({ userId: 'a', eventType: 'new_shared_record', eventId: EVENT_1, recordId: RECORD });
+    expect(NotificationMock).not.toHaveBeenCalled();
   });
 
   it('drops an event that is stale by the time delivery begins', async () => {

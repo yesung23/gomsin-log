@@ -169,7 +169,7 @@
 
 3. 일일 요약 온디바이스 동작 및 프라이버시 (Daily Summary & Privacy)
 - 스토리 표지 요약은 사실 기반 결정론적 규칙 요약이 기본으로 즉시 표시됩니다.
-- Foundation Models 정제는 VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED=true 시, iOS 26+ Apple Intelligence 지원 실기기 및 한국어(ko_KR) 로케일에서만 조건부 동작합니다. (현재 기본값 OFF, 실물 iPhone 런타임 UNVERIFIED)
+- Foundation Models 정제는 지원되는 iOS 26+ Apple Intelligence 실기기 및 한국어(ko_KR) 로케일에서 기본 사용 가능하며, 스토리 첫 장의 `AI로 다듬기`를 사용자가 누를 때만 실행됩니다. 웹·Android·미지원·timeout·검증 실패는 기존 규칙 요약으로 fallback합니다. `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED=false|0|off`는 긴급 kill switch입니다. Xcode 26.6 Simulator build는 PASS, 실물 iPhone의 한국어 품질·지연·발열·배터리는 UNVERIFIED입니다.
 - [폴백]: 4초 초과, 오류, 취소, 기기/OS 미지원 시 중단 없이 기존 결정론적 규칙 요약이 유지됩니다.
 - [프라이버시]: 외부 AI 서버 전송이 없습니다. 모델 payload에는 recordId, userId, 날짜, 시각, 첨부 URL/파일명, 비공개 여부, 건강/주기 raw data가 일절 제외되며 정규화된 텍스트 줄과 서수 인덱스만 전달됩니다. (단 전체 앱 DB나 미디어 스토리지가 E2EE 상태인 것은 아닙니다.)
 

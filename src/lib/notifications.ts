@@ -1,3 +1,5 @@
+import { pushNotificationsEnabled } from '@/lib/pushFeature';
+
 /**
  * Privacy-safe notification and re-entry contract.
  *
@@ -90,12 +92,14 @@ export function saveNotificationPreferences(
 export type NotificationPermission = 'granted' | 'denied' | 'default' | 'unsupported';
 
 export function notificationPermission(): NotificationPermission {
+  if (!pushNotificationsEnabled()) return 'unsupported';
   if (typeof Notification === 'undefined') return 'unsupported';
   return Notification.permission;
 }
 
 /** Must be called from a user gesture when the browser supports notifications. */
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  if (!pushNotificationsEnabled()) return 'unsupported';
   if (typeof Notification === 'undefined') return 'unsupported';
   return Notification.requestPermission();
 }
@@ -128,6 +132,7 @@ export function subscribeNotifications(
 }
 
 function systemNotification(notification: ReentryNotification): void {
+  if (!pushNotificationsEnabled()) return;
   if (notificationPermission() !== 'granted') return;
   try {
     const shown = new Notification(notification.title, {

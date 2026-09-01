@@ -126,13 +126,16 @@
 
 ### A7. iPhone 온디바이스 하루 요약 보조
 
-- 상태: **IMPLEMENTED BEHIND DEFAULT-OFF FLAG / PHYSICAL DEVICE UNVERIFIED**
+- 상태: **IMPLEMENTED / DEFAULT-ON ON SUPPORTED iOS / MANUAL STORY TRIGGER / PHYSICAL DEVICE UNVERIFIED**
 - 상대의 오늘 적격 기록 전체를 시간순으로 유지하고 처음 5개만 보여 준다. 나머지는
-  `N개 더 보기`로 펼치며, Apple Foundation Models는 5개 고정 배치에서 문장만 다듬는다.
-  AI가 중요한 기록을 고르거나 감정·관계·건강을 추론하지 않는다.
-- 미지원 iPhone, 웹, Android, timeout, 취소, 잘못된 출력은 규칙 기반 문장을 그대로 쓴다.
-- 남은 gate: Apple Intelligence 지원 실기기의 한국어 품질, airplane mode 네트워크 0,
-  cold/warm latency, 발열·배터리, 화면 이탈 취소를 검증한 뒤 production flag를 판단한다.
+  `N개 더 보기`로 펼친다. 스토리를 여는 것만으로 모델을 자동 실행하지 않고, 표지의
+  `AI로 다듬기`를 누르면 Apple Foundation Models가 5개 고정 배치에서 문장 표현만 즉시
+  다듬는다. AI가 중요한 기록을 고르거나 감정·관계·건강을 추론하지 않는다.
+- 기본 ON은 **지원되는 iOS native에서 기능을 사용할 수 있다는 뜻**이다. 웹·Android·미지원
+  iPhone에는 AI 버튼/모델 경로가 없고, `false|0|off`는 긴급 kill switch다.
+- timeout, 취소, 검증 실패, malformed output이면 이미 화면에 있던 규칙 요약을 그대로 유지한다.
+- Xcode 26.6 iOS Simulator build는 PASS. 남은 gate는 Apple Intelligence 지원 **실물 iPhone**의
+  한국어 품질, airplane mode 네트워크 0, cold/warm latency, 발열·배터리, 화면 이탈 취소다.
 - Google Play 출시는 현재 출시 범위가 아니다. Android는 기존 웹/PWA를 유지한다.
 
 ---
@@ -173,8 +176,8 @@
 |---|---|---|
 | 공감·토닥이기 | 보는 사람 반응 테이블·RLS | migration gate |
 | 일기장 스티커 동기화 | CSK 도메인 테이블·RLS | migration gate |
-| `한 권으로 만들기` 결제 | `P-MP` 게이트 셋 | product/engineering gate |
-| 유료 스티커 | §9.5 — Memory Product 검증 뒤 | BUSINESS 문서 |
+| Book Studio / `한 권으로 만들기` | post-PMF까지 FROZEN. 현재 Diary/종이 보관함에서 숨김 | product/engineering gate |
+| 유료 스티커·테마 | 현재 제품 표면에서 숨김; Memory Product 검증 뒤 재평가 | BUSINESS 문서 |
 | 주기 트래커 역할 해제 | HRK 도메인, §21 재검토 | security review |
 | 외박·외출 일정 종류 | CHECK 제약 변경 | migration gate |
 | 여행 사진 EXIF 자동 입력 | §19가 허용하는 데이터 범위 | product 판단 |

@@ -425,6 +425,11 @@ export async function installMockBackend(
       test to assert on delivery bookkeeping instead of on what the person sees.
     */
     if (path === '/rest/v1/rpc/clear_my_unseen') return json(route, null);
+    // Push is disabled by default in the active product. A connected account may
+    // still carry a token registered by an older build, so the client revokes it
+    // once while the authenticated session is valid. The browser fixture accepts
+    // and discards that hygiene RPC just like the unseen-flag cleanup above.
+    if (path === '/rest/v1/rpc/revoke_my_push_tokens') return json(route, null);
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
     if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);

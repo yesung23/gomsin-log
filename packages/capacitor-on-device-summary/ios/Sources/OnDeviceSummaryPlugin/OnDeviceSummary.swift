@@ -212,8 +212,17 @@ extension OnDeviceSummary {
         try Task.checkCancellation()
 
         let produced = response.content.items
-        guard produced.count <= OnDeviceSummary.maxLines else {
+        guard produced.count == items.count else {
             throw OnDeviceSummaryError.malformedOutput
+        }
+        for (position, line) in produced.enumerated() {
+            guard line.index == items[position].index else {
+                throw OnDeviceSummaryError.malformedOutput
+            }
+            let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, line.text.utf16.count <= OnDeviceSummary.maxLineCharacters else {
+                throw OnDeviceSummaryError.malformedOutput
+            }
         }
         return produced.map { OnDeviceSummaryLine(index: $0.index, text: $0.text) }
     }

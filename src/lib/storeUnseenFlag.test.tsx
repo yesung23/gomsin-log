@@ -81,10 +81,11 @@ vi.mock('@/lib/supabase', () => ({
 
 /** The observable: the one client path that lowers the flag and moves the boundary. */
 const clearOwnUnseen = vi.fn(async () => {});
+const revokeOwnPushTokens = vi.fn(async () => ({ ok: true }));
 vi.mock('@/lib/pushTokens', () => ({
   clearOwnUnseen: () => clearOwnUnseen(),
   registerPushToken: vi.fn(async () => ({ ok: true })),
-  revokeOwnPushTokens: vi.fn(async () => ({ ok: true })),
+  revokeOwnPushTokens: () => revokeOwnPushTokens(),
 }));
 
 const fetchFullStateFromDB = vi.fn();
@@ -227,7 +228,9 @@ describe('lowering the partner\'s invitation', () => {
   beforeEach(() => {
     authCallbacks.length = 0;
     createdChannels.length = 0;
+    vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'false');
     clearOwnUnseen.mockClear();
+    revokeOwnPushTokens.mockClear();
     fetchMyCoupleState.mockReset();
     fetchMyCoupleState.mockResolvedValue({
       ok: true,
@@ -249,10 +252,11 @@ describe('lowering the partner\'s invitation', () => {
     localStorage.clear();
   });
 
-  it('clears on foreground while the couple workspace is live', async () => {
+  it('clears on foreground while the couple workspace is live and revokes any token left by an older push-enabled build', async () => {
     const unmount = await connect();
 
     await waitFor(() => expect(clearOwnUnseen).toHaveBeenCalled());
+    await waitFor(() => expect(revokeOwnPushTokens).toHaveBeenCalled());
     expect(screen.getByTestId('syncStatus').textContent).toBe('live');
 
     unmount();

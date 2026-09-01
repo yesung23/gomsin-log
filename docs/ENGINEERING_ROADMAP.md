@@ -197,6 +197,13 @@ gate다. M-stage가 P-stage를 대체하거나, 사업계획서의 개발 예정
 > 한국어 품질·오프라인·지연·발열·배터리 gate가 끝날 때까지 규칙 경로가 확정 제품 동작이다.
 > 첫 스토어 출시는 iOS만 준비하고 Android는 웹/PWA를 유지한다. Google Play는 후속 판단이며,
 > 플랫폼 중립 공유 경로나 Android/비iOS 사용자 지원을 폐기하는 결정이 아니다.
+>
+> **2026-09-01 product-owner override.** 위 default-off 운영 결정은 최신 승인으로 superseded다.
+> 지원되는 iOS native에서는 온디바이스 요약 보조를 **기본 ON**으로 두되, 스토리 진입만으로
+> 자동 실행하지 않고 사용자가 `AI로 다듬기`를 눌렀을 때만 생성한다. 미지원/timeout/invalid
+> output은 기존 규칙 요약을 그대로 유지하고 `false|0|off`를 긴급 kill switch로 남긴다.
+> Xcode Simulator compile은 필수 gate지만, 실물 지원 iPhone의 한국어 품질·오프라인·지연·
+> 발열·배터리 검증은 여전히 M6의 미완료 실증 항목이다.
 
 M3와 M7은 사업 검증 단계이지만 각각 engineering 산출물을 요구한다. 그 산출물의 소유자는
 아래 `LV`와 `P-MP` 단계다. 두 단계 모두 P10 Beta/Production gate를 대체하지 않는다.

@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { classifyServerError } from '@/lib/serverErrors';
+import { pushNotificationsEnabled } from '@/lib/pushFeature';
 
 /**
  * The client half of push token lifecycle.
@@ -50,6 +51,9 @@ export async function registerPushToken(
   platform: PushPlatform,
   token: string,
 ): Promise<PushTokenResult> {
+  if (!pushNotificationsEnabled()) {
+    return { ok: false, error: '알림 기능이 꺼져 있어요.' };
+  }
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 알림을 설정할 수 없어요.' };
   }

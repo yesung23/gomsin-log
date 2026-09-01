@@ -48,6 +48,7 @@ function emitToken(value: string) {
 }
 
 beforeEach(() => {
+  vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'true');
   native = true;
   listeners.clear();
   removed.length = 0;
@@ -56,6 +57,20 @@ beforeEach(() => {
   requestPermissions.mockReset().mockResolvedValue({ receive: 'granted' });
   register.mockClear();
   addListener.mockClear();
+});
+
+describe('product kill switch', () => {
+  it('stays fail-closed and never touches native push when disabled', async () => {
+    vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'false');
+    expect(pushSupported()).toBe(false);
+    await expect(setUpPushNotifications()).resolves.toEqual({ registered: false, reason: 'unsupported' });
+    await expect(listenForPushTaps(vi.fn())).resolves.toBeUndefined();
+    expect(checkPermissions).not.toHaveBeenCalled();
+    expect(requestPermissions).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+    expect(addListener).not.toHaveBeenCalled();
+    expect(registerPushToken).not.toHaveBeenCalled();
+  });
 });
 
 describe('web is left entirely alone', () => {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
@@ -11,6 +11,7 @@ import { projectStory } from '@/features/story/storyProjection';
 import { StoryViewer, type StoryMode } from '@/features/story/StoryViewer';
 import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
 import { useOnDeviceDailySummary } from '@/lib/dailySummary/useOnDeviceDailySummary';
+import { onDeviceSummaryGate } from '@/lib/dailySummary/nativeOnDeviceSummary';
 
 /**
  * 스토리로 들어가는 세 개의 문.
@@ -41,6 +42,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   const isOffline = !useOnlineStatus();
 
   const { profile } = state;
+  const [aiRequestVersion, setAiRequestVersion] = useState(0);
   const viewer = useMemo(
     () => ({ userId: profile.id, role: profile.role }),
     [profile.id, profile.role],
@@ -107,7 +109,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     덮어쓰기 지도만 돌려주고, 처음 렌더에서는 비어 있다. 상대의 오늘 표지가 아니거나
     기능이 꺼져 있으면 계속 비어 있고, 화면은 규칙 결과 그대로다.
   */
-  const refinedCoverText = useOnDeviceDailySummary({
+  const { refined: refinedCoverText, status: aiSummaryStatus } = useOnDeviceDailySummary({
     mode,
     records,
     viewerUserId: viewer.userId,
@@ -115,7 +117,15 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     todayStr,
     coupleConnected: profile.couple.connected,
     coupleStatus: profile.couple.status,
+    requestVersion: aiRequestVersion,
   });
+
+  const aiSummaryAvailable = mode === 'today'
+    && projection.cards[0]?.kind === 'cover'
+    && onDeviceSummaryGate() === 'ready';
+  const requestAiSummary = useCallback(() => {
+    setAiRequestVersion((version) => version + 1);
+  }, []);
 
   /*
     텍스트만 갈아 끼운다.
@@ -232,6 +242,8 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       onOpenRecord={openRecord}
       onAddToHighlight={mode === 'highlight' ? undefined : addToHighlight}
       onJumpToRecord={jumpToRecord}
+      onRefineCover={aiSummaryAvailable ? requestAiSummary : undefined}
+      coverRefinementStatus={aiSummaryStatus}
       onToggleBookmark={mode === 'archive' || mode === 'highlight' ? undefined : toggleBookmark}
       onAcknowledge={mode === 'today' ? confirm : undefined}
       bookmarkDisabledReason={isOffline ? '연결되면 표시할 수 있어요' : undefined}

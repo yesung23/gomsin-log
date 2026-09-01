@@ -15,7 +15,7 @@ import {
  * 규칙 결과로 되돌아가는 모든 경로.
  *
  * 이 기능의 안전성은 "모델이 잘 동작한다"가 아니라 **"모델이 동작하지 않아도 화면이 옳다"**에
- * 있다. 그래서 세는 것은 실패 경로다: 기본값 꺼짐, 웹, Android, 미지원, timeout, 취소.
+ * 있다. 그래서 세는 것은 실패 경로다: 명시적 kill switch, 웹, Android, 미지원, timeout, 취소.
  */
 
 const ITEMS = buildOnDeviceItems([
@@ -62,22 +62,25 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('기본값은 꺼짐', () => {
-  it('환경 변수가 없으면 꺼져 있다', () => {
-    expect(isOnDeviceDailySummaryEnabled()).toBe(false);
-    expect(onDeviceSummaryGate()).toBe('disabled');
+describe('기본값은 켜짐', () => {
+  it('환경 변수가 없으면 기능은 켜져 있고 플랫폼 게이트만 적용한다', () => {
+    expect(isOnDeviceDailySummaryEnabled()).toBe(true);
+    expect(onDeviceSummaryGate()).toBe('not_ios');
   });
 
-  it("문자열 'true' 만 켠다", () => {
-    for (const value of ['false', 'TRUE', '1', 'yes', '']) {
+  it("명시적 'false'만 끄고 그 외 값은 기본 ON으로 취급한다", () => {
+    for (const value of ['false', 'FALSE', '0', 'off']) {
       vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', value);
       expect(isOnDeviceDailySummaryEnabled()).toBe(false);
     }
-    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
-    expect(isOnDeviceDailySummaryEnabled()).toBe(true);
+    for (const value of ['true', 'TRUE', '1', 'yes', '']) {
+      vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', value);
+      expect(isOnDeviceDailySummaryEnabled()).toBe(true);
+    }
   });
 
-  it('꺼져 있으면 플러그인을 부르지 않는다', async () => {
+  it('명시적으로 꺼져 있으면 플러그인을 부르지 않는다', async () => {
+    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'false');
     const plugin = stubPlugin();
     // flag 게이트가 주입보다 먼저다.
     __setOnDeviceSummaryPluginForTests(plugin);

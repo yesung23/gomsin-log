@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookHeart, Images, NotebookPen, CalendarDays, ShoppingBag } from 'lucide-react';
+import { BookHeart, Images, NotebookPen, CalendarDays, FileText } from 'lucide-react';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { useStore } from '@/lib/useStore';
@@ -59,6 +59,7 @@ function DiaryPageBody() {
       <MonthSpread
         month={open}
         userId={state.authenticatedUser?.id || profile.id || ''}
+        coupleId={profile.couple.coupleId}
         onClose={() => setOpenKey(null)}
       />
     );
@@ -70,38 +71,37 @@ function DiaryPageBody() {
         title="일기장"
         actions={(
           <AppBarAction
-            aria-label="상점"
+            aria-label="종이 보관함"
             onClick={() => navigate('/shop')}
           >
-            <ShoppingBag size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+            <FileText size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
           </AppBarAction>
         )}
       />
 
       <div className="px-4 py-4 space-y-4">
-        {/* 상점 바로가기 배너 */}
         <div className="rounded-surface border border-border bg-card p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShoppingBag size={18} className="pen-icon text-coral" aria-hidden="true" />
-              <h2 className="text-label font-bold text-card-foreground">다꾸 & 기억 상점</h2>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileText size={18} className="pen-icon shrink-0 text-coral" aria-hidden="true" />
+              <h2 className="text-label font-bold text-card-foreground">내 종이로 엮기</h2>
             </div>
             <button
               type="button"
               onClick={() => navigate('/shop')}
-              aria-label="상점 둘러보기"
-              className="press-response px-3 py-1.5 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
+              aria-label="종이 고르기"
+              className="press-response min-h-11 shrink-0 px-3 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
             >
-              상점 둘러보기
+              종이 고르기
             </button>
           </div>
           <p className="text-caption text-muted-foreground leading-relaxed">
-            스티커 팩, 다꾸 테마, 한 권으로 만드는 기억책 상품을 미리 둘러보세요.
+            남겨 둔 기록이 날짜별 페이지가 돼요. 종이와 순서만 골라도 한 장의 일기처럼 읽을 수 있어요.
           </p>
         </div>
 
         <p className="text-body text-muted-foreground">
-          한 달씩 엮어 뒀어요. 꾸미고 싶으면 꾸미고, 그대로 둬도 괜찮아요.
+          한 달을 열고 날짜를 골라 보세요. 원본은 건드리지 않고, 이 페이지에서 무엇을 보여줄지만 정할 수 있어요.
         </p>
 
         {months.length === 0 ? (

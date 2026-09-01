@@ -58,6 +58,8 @@ import {
 } from '@/lib/talkAbout';
 import { revokeOwnPushTokens, clearOwnUnseen } from '@/lib/pushTokens';
 import { setUpPushNotifications } from '@/lib/pushNotifications';
+import { pushNotificationsEnabled } from '@/lib/pushFeature';
+import { purgeDiaryLocalStateForUser } from '@/lib/diaryLocalState';
 import { recordProductEvent } from '@/lib/productEvents';
 import { bindPartnerMembership, fetchPartnerMembership } from '@/lib/coupleTimeline';
 import { visibleRecordsForViewer } from '@/lib/privacy';
@@ -874,6 +876,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     retrySharedAccessRef.current = null;
     // Deliberately NOT bumping `sessionGenerationRef`: the session is kept.
     localStorage.removeItem(STORE_KEY_V1);
+    purgeDiaryLocalStateForUser(expected.userId);
     const nextState: AppState = {
       ...DEFAULT_STATE,
       ...carryOverDevicePrefs(current),
@@ -1113,7 +1116,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (coupleLifecycle !== 'connected') return;
     let cancelled = false;
-    void setUpPushNotifications();
+    if (pushNotificationsEnabled()) {
+      void setUpPushNotifications();
+    } else {
+      // Push is product-disabled, but prior builds may already have registered a
+      // device token. Revoke it while the authenticated session is still valid.
+      // `clearOwnUnseen` above deliberately remains active so a live sender cannot
+      // notify tomorrow about content the user already saw today.
+      void revokeOwnPushTokens();
+    }
 
     /*
       §7.6 needs to know which records predate the partner, and the only fact
@@ -3815,13 +3826,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
      * a person's face would survive both sign-out and account deletion.
      */
     clearAllAvatars();
+    const current = stateRef.current;
+    const accountUserId = current.authenticatedUser?.id || current.profile.id || '';
+    purgeDiaryLocalStateForUser(accountUserId);
     // The outbox is NOT cleared here. This runs on sign-out as well as on account
     // deletion, and the same person signing back in must still find the record they
     // wrote on a train with no signal. Every read is filtered by `userId`, so
     // another account on this device can neither see nor replay it. Account
     // DELETION purges it explicitly -- see `deleteAccount`.
     setOutboxCounts({ waiting: 0, blocked: 0 });
-    const current = stateRef.current;
     const nextState: AppState = {
       ...DEFAULT_STATE,
       ...carryOverDevicePrefs(current),

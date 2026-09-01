@@ -1,4 +1,5 @@
 import { isNativePlatform } from '@/lib/platform';
+import { pushNotificationsEnabled } from '@/lib/pushFeature';
 import { registerPushToken, type PushPlatform } from '@/lib/pushTokens';
 
 /**
@@ -25,9 +26,9 @@ import { registerPushToken, type PushPlatform } from '@/lib/pushTokens';
  * they add up to.
  */
 
-/** Whether push can work at all on this platform. */
+/** Whether push can work at all on this platform and in this product build. */
 export function pushSupported(): boolean {
-  return isNativePlatform();
+  return pushNotificationsEnabled() && isNativePlatform();
 }
 
 function platformName(): PushPlatform {

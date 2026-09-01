@@ -100,9 +100,9 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   */
   await page.getByRole('tab', { name: '일기장' }).click();
   await page.waitForURL(/\/diary$/, { timeout: 20_000 });
-  await page.getByRole('button', { name: '상점 둘러보기' }).click();
+  await page.getByRole('button', { name: '종이 고르기' }).click();
   await page.waitForURL(/\/shop$/, { timeout: 20_000 });
-  expect(await page.locator('article, [role="tab"]').count()).toBeGreaterThan(0);
+  await expect(page.getByRole('radiogroup', { name: '기본 종이' })).toBeVisible();
   await page.getByRole('button', { name: '일기장으로 돌아가기' }).click();
   await page.waitForURL(/\/diary$/, { timeout: 20_000 });
 
@@ -119,6 +119,48 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
   expect(errors, 'errors while walking the tab bar').toEqual([]);
+  await context.close();
+});
+
+for (const width of [320, 390, 430]) {
+  test(`diary page assembly persists paper/layout at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 } });
+    await installMockBackend(context, CREATOR);
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+
+    await bootedInto(page, '/diary');
+    await page.getByRole('button', { name: /지면 열기$/ }).first().click();
+    await page.getByRole('button', { name: '페이지 편집' }).click();
+    await page.getByRole('radio', { name: '모눈 종이' }).click();
+    await page.getByRole('radio', { name: '사진 먼저' }).click();
+    await expect(page.getByTestId('diary-paper')).toHaveAttribute('data-paper', 'grid');
+    await expect(page.getByTestId('diary-paper')).toHaveAttribute('data-layout', 'photo-first');
+
+    await page.reload();
+    await page.getByRole('button', { name: /지면 열기$/ }).first().click();
+    await expect(page.getByTestId('diary-paper')).toHaveAttribute('data-paper', 'grid');
+    await expect(page.getByTestId('diary-paper')).toHaveAttribute('data-layout', 'photo-first');
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(overflow).toBe(false);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+}
+
+test('paper chosen in the library becomes the default for an uncustomized diary page', async ({ browser }) => {
+  const context = await browser.newContext();
+  await installMockBackend(context, CREATOR);
+  const page = await context.newPage();
+
+  await bootedInto(page, '/shop');
+  await page.getByRole('radio', { name: '크림 편지지' }).click();
+  await page.getByRole('button', { name: '일기장으로 돌아가기' }).click();
+  await page.getByRole('button', { name: /지면 열기$/ }).first().click();
+  await expect(page.getByTestId('diary-paper')).toHaveAttribute('data-paper', 'cream');
+
   await context.close();
 });
 

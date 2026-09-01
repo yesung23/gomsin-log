@@ -177,6 +177,13 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
     expect(swiftEngine).toMatch(/maximumResponseTokens: OnDeviceSummary\.maximumResponseTokens/);
   });
 
+  it('native에서도 count · index order · empty text · 40자 상한을 즉시 거부한다', () => {
+    expect(swiftEngine).toContain('guard produced.count == items.count');
+    expect(swiftEngine).toContain('guard line.index == items[position].index');
+    expect(swiftEngine).toContain('trimmingCharacters(in: .whitespacesAndNewlines)');
+    expect(swiftEngine).toContain('line.text.utf16.count <= OnDeviceSummary.maxLineCharacters');
+  });
+
   it('취소를 requestId 단위로 다루고 single-flight를 유지한다', () => {
     expect(swiftEngine).toContain('actor OnDeviceSummaryEngine');
     expect(swiftEngine).toMatch(/func cancel\(requestId: String\)/);

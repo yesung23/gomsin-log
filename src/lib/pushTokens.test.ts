@@ -20,11 +20,19 @@ vi.mock('@/lib/supabase', () => ({
 const { registerPushToken, revokeOwnPushTokens, clearOwnUnseen } = await import('@/lib/pushTokens');
 
 beforeEach(() => {
+  vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'true');
   rpc.mockReset();
   rpc.mockResolvedValue({ error: null });
 });
 
 describe('registering this device', () => {
+  it('does not claim a token while the product push switch is off', async () => {
+    vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'false');
+    const result = await registerPushToken('ios', 'token-abc');
+    expect(result.ok).toBe(false);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it('claims the token through the RPC, never by writing the table', async () => {
     // A direct INSERT cannot express the handover, and the table is SELECT-only
     // for clients precisely so this is the only path.

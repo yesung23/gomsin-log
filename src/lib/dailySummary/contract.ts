@@ -61,7 +61,7 @@ export interface DailySummaryBatch {
 
 /** 온디바이스 경로가 쓰이지 못한 이유. 콘텐츠 없는 안정 코드만. */
 export type OnDeviceSummaryFailure =
-  /** `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED`가 `'true'`가 아니다(기본값). */
+  /** 운영 kill switch가 `false`/`0`/`off`로 명시되어 있다. */
   | 'disabled'
   /** 웹 또는 Android. 이 기능에는 Android 구현이 없다. */
   | 'not_ios'

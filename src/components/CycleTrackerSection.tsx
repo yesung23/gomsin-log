@@ -288,7 +288,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setPreferences(nextPreferences);
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to load private cycle data:', error);
+      console.error('[gomsinlog] Failed to load private cycle data.');
       setLoadState('error');
     }
   }, [captureIdentity, consentGranted, isCurrentIdentity, userId]);

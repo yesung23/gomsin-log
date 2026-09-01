@@ -19,7 +19,7 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
     console.error('[gomsinlog] A render error reached the recovery boundary.');
   }
 

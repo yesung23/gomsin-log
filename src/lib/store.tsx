@@ -135,6 +135,50 @@ function hasSamePersistedMedia(actual: DailyRecord, expected: DailyRecord): bool
     === JSON.stringify((expected.attachments || []).map(persistedMediaKey));
 }
 
+const RECORD_UPDATE_READ_BACK_REASONS: ReadonlySet<RecordMutationReason> = new Set([
+  'offline',
+  'unreachable',
+  'server',
+  'unknown',
+  'not_found',
+]);
+
+function sameRequestedRecordUpdates(
+  actual: DailyRecord,
+  updates: Partial<DailyRecord>,
+): boolean {
+  return Object.entries(updates).every(([key, expected]) => {
+    if (key === 'contentRevision') return true;
+    const actualValue = actual[key as keyof DailyRecord];
+    if (key === 'attachments') {
+      return hasSamePersistedMedia(actual, { ...actual, attachments: expected as Attachment[] });
+    }
+    if (key === 'isProfilePost' || key === 'talkAbout') {
+      return (actualValue === true) === (expected === true);
+    }
+    if (key === 'reaction' || key === 'emotionUpdatedAt') {
+      return (actualValue ?? null) === (expected ?? null);
+    }
+    return JSON.stringify(actualValue) === JSON.stringify(expected);
+  });
+}
+
+function shouldKeepCurrentRecordSnapshot(
+  current: DailyRecord,
+  candidate: DailyRecord,
+  requestStart: DailyRecord,
+  wasReconciled: boolean,
+): boolean {
+  const currentRevision = current.contentRevision ?? 1;
+  const candidateRevision = candidate.contentRevision ?? 1;
+  if (currentRevision !== candidateRevision) return currentRevision > candidateRevision;
+
+  // Equal revision can still race: Realtime may have installed the server row
+  // before this request finishes. Preserve that newer state object (and its
+  // attachments) rather than replaying the request-start snapshot over it.
+  return wasReconciled || current !== requestStart;
+}
+
 /**
  * The couple space this account belongs to, whether or not a partner has joined.
  *
@@ -213,7 +257,7 @@ class DevicePreferencesRepository {
     } catch (e) {
       // Corrupt state must not be retried on every launch.
       localStorage.removeItem(STORE_KEY);
-      console.error('[gomsinlog] Failed to load state from localStorage', e);
+      console.error('[gomsinlog] Failed to load state from localStorage.');
       return null;
     }
   }
@@ -228,7 +272,7 @@ class DevicePreferencesRepository {
       void hasAuthenticatedSession;
       localStorage.setItem(STORE_KEY, JSON.stringify(carryOverDevicePrefs(state)));
     } catch (e) {
-      console.error('[gomsinlog] Failed to save state to localStorage', e);
+      console.error('[gomsinlog] Failed to save state to localStorage.');
     }
   }
 }
@@ -566,9 +610,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           setAuthSyncReason(null);
           return true;
         }
-        console.warn('[gomsinlog] Session refresh failed; signing out', error);
-      } catch (error) {
-        console.warn('[gomsinlog] Session refresh threw; signing out', error);
+        console.warn('[gomsinlog] Session refresh failed; signing out.');
+      } catch {
+        console.warn('[gomsinlog] Session refresh threw; signing out.');
       }
       // The session cannot be rescued. Say so in Korean and never let a raw
       // permission/DB string reach the UI for this cause.
@@ -576,7 +620,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       try {
         await authRepository.signOut();
       } catch (error) {
-        console.error('[gomsinlog] Sign-out after session expiry failed', error);
+        console.error('[gomsinlog] Sign-out after session expiry failed.');
       }
       return false;
     })();
@@ -708,7 +752,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     try {
       result = await fetchMyCoupleState();
     } catch (error) {
-      console.error('[gomsinlog] Couple lifecycle probe threw:', error);
+      console.error('[gomsinlog] Couple lifecycle probe threw.');
       result = { ok: false, reason: 'unknown' };
     }
     if (!isCurrentIdentity(identity)) return 'unknown';
@@ -1643,7 +1687,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const { data, error } = await client.rpc('get_my_active_couple_id');
       if (!isLatestCurrentWorkspace()) return false;
       if (error) {
-        console.error('[gomsinlog] Failed to verify active membership:', error);
+        console.error('[gomsinlog] Failed to verify active membership.');
         // An expired session is not evidence that membership was revoked, so it
         // must not look like one. Recover the session centrally and let the retry
         // path re-ask; the workspace is quarantined meanwhile, not purged.
@@ -1701,7 +1745,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return true;
     } catch (error) {
       if (!isLatestCurrentWorkspace()) return false;
-      console.error('[gomsinlog] Failed to reconcile shared access:', error);
+      console.error('[gomsinlog] Failed to reconcile shared access.');
       quarantineSharedAccess(workspace);
       return false;
     }
@@ -1873,7 +1917,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         );
       } catch (error) {
         if (!isCurrentRefresh()) return;
-        console.error(`[gomsinlog] Realtime refresh of ${slice} failed:`, error);
+        console.error(`[gomsinlog] Realtime refresh of ${slice} failed.`);
         quarantineSharedAccess(workspace);
       }
     };
@@ -2128,7 +2172,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (error) {
-        console.error('[gomsinlog] Partner lookup failed:', error);
+        console.error('[gomsinlog] Partner lookup failed.');
         if (error.code === 'PGRST301') void handleAuthExpired();
       }
       if (attempts >= PARTNER_POLL_MAX_ATTEMPTS) return; // Give up quietly.
@@ -2227,7 +2271,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         .select('id')
         .maybeSingle();
         if (error) {
-          console.error('[gomsinlog] Failed to update profile:', error);
+          console.error('[gomsinlog] Failed to update profile.');
           return false;
         }
         // PostgREST can answer an RLS-filtered UPDATE with no error and zero rows.
@@ -2247,7 +2291,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           weekend_end: newProfile.contact.weekendEnd,
         });
         if (error) {
-          console.error('[gomsinlog] Failed to update contact preferences:', error);
+          console.error('[gomsinlog] Failed to update contact preferences.');
           return false;
         }
       }
@@ -2264,7 +2308,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       commitLocally();
       return true;
     } catch (error) {
-      console.error('[gomsinlog] Failed to update profile settings:', error);
+      console.error('[gomsinlog] Failed to update profile settings.');
       return false;
     }
   };
@@ -2564,7 +2608,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           allOrNothingMedia: options?.allOrNothingMedia === true || undefined,
         });
       } catch (error) {
-        console.error('[gomsinlog] Failed to queue record for later delivery:', error);
+        console.error('[gomsinlog] Failed to queue record for later delivery.');
         return { ok: false, failedFiles: files.map((file) => file.name), error: message, reason };
       }
       setOutboxCounts(await countOutbox(persistence, workspace.userId));
@@ -2589,7 +2633,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       authoritativeRevision = saved.contentRevision;
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      console.error('[gomsinlog] Failed to save record:', error);
+      console.error('[gomsinlog] Failed to save record.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
       return queueOrFail(reason);
@@ -2639,7 +2683,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
       if ('error' in result) {
         failedFiles.push(file.name);
-        console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
+        console.error('[gomsinlog] Attachment upload failed.');
         continue;
       }
       attachments.push(result.attachment);
@@ -2724,7 +2768,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (error) {
         if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        console.error('[gomsinlog] Failed to attach media to record:', error);
+        console.error('[gomsinlog] Failed to attach media to record.');
         const reason = classifyServerError(error).kind;
         if (!await reconcileAttachmentPatch(reason)) {
           if (!isCurrentLinkedCouple(workspace)) return staleResult;
@@ -2793,7 +2837,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         files,
       });
     } catch (error) {
-      console.error('[gomsinlog] Failed to queue record for later delivery:', error);
+      console.error('[gomsinlog] Failed to queue record for later delivery.');
       return { queued: false, error: recordFailureMessage('unknown') };
     }
     setOutboxCounts(await countOutbox(persistence, workspace.userId));
@@ -2856,7 +2900,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         try {
           queuedRecord = await readQueuedRecord(entry);
         } catch (error) {
-          console.error('[gomsinlog] Queued record could not be opened:', error);
+          console.error('[gomsinlog] Queued record could not be opened.');
           const disposition = await applyDeliveryOutcome(persistence, entry, {
             ok: false,
             reason: 'unreadable_queue_entry',
@@ -2967,7 +3011,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       setOutboxCounts(await countOutbox(persistence, identity.userId));
     } catch (error) {
-      console.error('[gomsinlog] Outbox flush failed:', error);
+      console.error('[gomsinlog] Outbox flush failed.');
     } finally {
       flushInFlightRef.current = false;
     }
@@ -3112,6 +3156,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return recordFailure('deletion_pending');
     }
     let authoritativeRevision = existing.contentRevision ?? 1;
+    let reconciledRecord: DailyRecord | null = null;
+    const reconcileRecordUpdate = async (reason: RecordMutationReason): Promise<DailyRecord | null> => {
+      if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) return null;
+      try {
+        const remote = await fetchRecordsResultFromDB(workspace.coupleId);
+        if (!isCurrentLinkedCouple(workspace) || !remote.ok) return null;
+        const persisted = remote.records.find((candidate) => (
+          candidate.id === id
+          && candidate.userId === workspace.userId
+          && Number.isInteger(candidate.contentRevision)
+          && (candidate.contentRevision ?? 0) > 0
+          && sameRequestedRecordUpdates(candidate, updates)
+        ));
+        return persisted ?? null;
+      } catch {
+        return null;
+      }
+    };
     try {
       const saved = await saveRecordToDB(
         updated,
@@ -3122,26 +3184,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       if (!saved.ok) {
         if (saved.reason === 'auth_expired') void handleAuthExpired();
-        return recordFailure(recordSaveFailureReason(saved));
+        const reason = recordSaveFailureReason(saved);
+        reconciledRecord = await reconcileRecordUpdate(reason);
+        if (!reconciledRecord) return recordFailure(reason);
+        authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+      } else {
+        authoritativeRevision = saved.contentRevision;
       }
-      authoritativeRevision = saved.contentRevision;
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
-      console.error('[gomsinlog] Failed to update record:', error);
+      console.error('[gomsinlog] Failed to update record.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
-      return recordFailure(reason);
+      reconciledRecord = await reconcileRecordUpdate(reason);
+      if (!reconciledRecord) return recordFailure(reason);
+      authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
     }
 
     let recordToCommit: DailyRecord = {
-      ...updated,
+      ...(reconciledRecord ?? updated),
       contentRevision: authoritativeRevision,
     };
-    if (updated.attachments?.length) {
+    const attachmentsToResolve = reconciledRecord
+      ? reconciledRecord.attachments
+      : updated.attachments;
+    if (attachmentsToResolve?.length) {
       recordToCommit = {
         ...recordToCommit,
         attachments: await resolveAttachmentUrls(
-          updated.attachments,
+          attachmentsToResolve,
           workspace.coupleId,
           updated.id,
         ),
@@ -3154,7 +3225,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? {
             ...current,
             records: current.records.map((record) =>
-              record.id === id ? recordToCommit : record,
+              record.id === id
+                ? shouldKeepCurrentRecordSnapshot(record, recordToCommit, existing, reconciledRecord !== null)
+                  ? record
+                  : recordToCommit
+                : record,
             ),
           }
         : current,
@@ -3189,7 +3264,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       } catch (error) {
         if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
-        console.error('[gomsinlog] Storage cleanup failed, aborting delete:', error);
+        console.error('[gomsinlog] Storage cleanup failed, aborting delete.');
         return recordFailure(classifyServerError(error).kind);
       }
     }
@@ -3207,7 +3282,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
-      console.error('Failed to delete record:', error);
+      console.error('[gomsinlog] Failed to delete record.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
       return recordFailure(reason);
@@ -3227,8 +3302,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * Ordering is forced by storage RLS and by the no-orphans rule, and is the same
    * shape `addRecordWithMedia` uses:
    *
-   *   gate -> verify ownership -> upload new objects -> patch the row -> ONLY THEN
-   *   delete the removed objects.
+   *   gate -> verify ownership -> upload new objects -> patch the row -> commit the
+   *   guarded local snapshot -> delete only objects no longer referenced by it.
    *
    * If the patch fails, the freshly uploaded objects are deleted again and the row
    * is left exactly as it was: no orphaned storage, no phantom success. Deleting
@@ -3285,7 +3360,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       (path) => !isCanonicalRecordMediaPath(path, workspace.coupleId, id),
     );
     if (invalidPath) {
-      console.error('[gomsinlog] Refusing to remove a non-canonical media path:', invalidPath);
+      console.error('[gomsinlog] Refusing to remove a non-canonical media path.');
       return {
         ok: false,
         failedFiles: allFileNames,
@@ -3324,7 +3399,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
       if ('error' in result) {
         failedFiles.push(file.name);
-        console.error(`[gomsinlog] Attachment failed (${file.name}): ${result.error}`);
+        console.error('[gomsinlog] Attachment upload failed.');
         continue;
       }
       added.push(result.attachment);
@@ -3335,7 +3410,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       try {
         await removeRecordMedia(uploadedPaths);
       } catch (error) {
-        console.error('[gomsinlog] Failed to roll back uploaded media:', error);
+        console.error('[gomsinlog] Failed to roll back uploaded media.');
       }
     };
 
@@ -3387,7 +3462,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         authoritativeRevision = patched.contentRevision;
       }
     } catch (error) {
-      console.error('[gomsinlog] Failed to patch record media:', error);
+      console.error('[gomsinlog] Failed to patch record media.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
       reconciledRecord = await reconcileMediaUpdate(reason);
@@ -3406,16 +3481,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
     }
 
-    // The row no longer references these objects, so removing them now cannot
-    // orphan a live attachment. A failure here leaves unreferenced bytes behind,
-    // which is logged but must NOT fail the operation the user asked for.
-    if (removePaths.length > 0) {
-      try {
-        await removeRecordMedia(removePaths);
-      } catch (error) {
-        console.error('[gomsinlog] Failed to clean up removed media objects:', error);
-      }
-    }
     if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
     let committed: DailyRecord = {
@@ -3430,14 +3495,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
     }
 
-    updateStateImmediately((current) =>
+    // Commit the snapshot guard before any destructive Storage cleanup. A delayed
+    // media response may finish after a newer revision has reattached one of the
+    // requested paths; in that case the guard keeps the newer state and cleanup
+    // must be skipped rather than deleting an object that state still references.
+    const nextState = updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? {
             ...current,
-            records: current.records.map((record) => record.id === id ? committed : record),
+            records: current.records.map((record) =>
+              record.id === id
+                ? shouldKeepCurrentRecordSnapshot(record, committed, existing, reconciledRecord !== null)
+                  ? record
+                  : committed
+                : record,
+            ),
           }
         : current,
     );
+
+    const currentRecord = nextState.records.find((record) => record.id === id);
+    const committedLocally = currentRecord === committed;
+    const referencedPaths = new Set(
+      (currentRecord?.attachments || [])
+        .map((attachment) => attachment.path)
+        .filter((path): path is string => typeof path === 'string'),
+    );
+    const cleanupPaths = committedLocally
+      ? removePaths.filter((path) => !referencedPaths.has(path))
+      : [];
+
+    // A cleanup failure leaves unreferenced bytes behind, which is logged but
+    // must NOT fail the operation the user asked for. If the guard retained a
+    // newer snapshot, leaving all paths alone is the safe outcome.
+    if (cleanupPaths.length > 0) {
+      try {
+        await removeRecordMedia(cleanupPaths);
+      } catch (error) {
+        console.error('[gomsinlog] Failed to clean up removed media objects.');
+      }
+    }
     return isCurrentLinkedCouple(workspace)
       ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
       : staleResult;
@@ -3469,7 +3566,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         : prev);
       return true;
     } catch (error) {
-      if (isCurrentLinkedCouple(workspace)) console.error('Failed to save event:', error);
+      if (isCurrentLinkedCouple(workspace)) console.error('[gomsinlog] Failed to save event.');
       return false;
     }
   };
@@ -3517,7 +3614,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return true;
     } catch (error) {
       if (!isCurrentScope()) return false;
-      console.error('Failed to update event:', error);
+      console.error('[gomsinlog] Failed to update event.');
       updateStateImmediately((prev) => isCurrentScope()
         ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
         : prev);
@@ -3549,7 +3646,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const deleted = await deleteEventFromDB(id, identity.userId);
       if (!isCurrentScope() || !deleted) return false;
     } catch (error) {
-      if (isCurrentScope()) console.error('Failed to delete event:', error);
+      if (isCurrentScope()) console.error('[gomsinlog] Failed to delete event.');
       return false;
     }
 
@@ -3601,7 +3698,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if (!isCurrentIdentity(identity)) return { ok: false, reason: 'forbidden' };
       if (shared) quarantineSharedAccess(shared);
-      console.error('Failed to reload events:', error);
+      console.error('[gomsinlog] Failed to reload events.');
       return { ok: false, reason: 'error' };
     }
   };
@@ -3631,7 +3728,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return purgeSharedAccess(pending);
     } catch (error) {
       clearPendingDisconnect();
-      console.error('Failed to cancel the pending couple link:', error);
+      console.error('[gomsinlog] Failed to cancel the pending couple link.');
       return false;
     }
   };
@@ -3670,7 +3767,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         clearPendingDisconnect();
         return false;
       }
-      console.error('Failed to disconnect:', error);
+      console.error('[gomsinlog] Failed to disconnect.');
       clearPendingDisconnect();
       await reconcileSharedAccess(workspace);
       return false;
@@ -3754,8 +3851,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     purgeLocalAccountData();
     try {
       await authRepository.signOut();
-    } catch (error) {
-      console.error('[gomsinlog] Sign-out request failed; local session was cleared anyway', error);
+    } catch {
+      console.error('[gomsinlog] Sign-out request failed; local session was cleared anyway.');
     }
   };
 
@@ -3801,15 +3898,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       try {
         await purgeOutboxAccount(outboxRef.current, identity.userId);
       } catch (error) {
-        console.error('[gomsinlog] Failed to purge the outbox after deletion:', error);
+        console.error('[gomsinlog] Failed to purge the outbox after deletion.');
       }
     }
     setAccountDeletionRecovery(null);
     applyDeletionStatus({ kind: 'clear' });
     try {
       await authRepository.signOut();
-    } catch (error) {
-      console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared', error);
+    } catch {
+      console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared.');
     }
     clearRecoveryMarker(identity.userId);
     return outcome;

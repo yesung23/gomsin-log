@@ -3,6 +3,7 @@ import { MAX_CHAIN_DEPTH, handleApproveDevice, type CertificateRow } from './han
 import { decodePgBytea, encodePgBytea } from '../_shared/e2eeVerify.ts';
 import { parseAdminSecretKey, createAdminClientFetch } from '../_shared/adminSecret.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
+import { logSafeEvent } from '../_shared/safeEventLog.ts';
 
 const DB_READ_FAILURE = 'E_DB_READ_FAILED';
 
@@ -176,8 +177,9 @@ Deno.serve(async (request) => {
       }
       return { ok: true };
     },
-    // IDs and error codes only. Never key material, never user content.
-    logEvent: (event, detail) => console.log(JSON.stringify({ event, ...detail })),
+    // The handler may carry opaque IDs for test correlation, but the platform
+    // boundary forwards only bounded non-identifying diagnostics.
+    logEvent: logSafeEvent,
     });
   } catch (error) {
     if (error instanceof Error && error.message === DB_READ_FAILURE) {

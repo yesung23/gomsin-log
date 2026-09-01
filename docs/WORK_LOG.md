@@ -10681,3 +10681,109 @@ DO NOT ADVANCE UNTIL
 PRODUCTION
 - NOT APPLIED: Supabase, Vercel, GitHub merge, TestFlight, App Store
 - UNVERIFIED: physical iPhone runtime and post-commit CI for this exact tree
+
+---
+
+## 2026-09-01 — Companion Garden Git 운반 및 CI closure
+
+PLAN POSITION
+- Phase: V4 diary experience release closure
+- Workstream: Companion Garden integration and release evidence
+- Step: exact diff transport, Draft PR, CI closure, iOS gate recording
+- Previous Gate: validated detached worktree at `b7df5f69691b1cc60bda75b95664271c48acc7cc`
+- This Gate: intended tree committed as `b7cf067dab8c13f8096654fd4cf93d2aafd22c07`, pushed, Draft PR #91 opened, all reported PR checks green
+
+DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` — no business/product scope change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: prior Companion Garden implementation entry immediately above
+- MASTER PLAN version / 기준일: repository V4 direction, 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex / DevSpace isolated worktree
+- Model: GPT-5 Luna Max orchestrator; read-only subagent attempts were unavailable with provider HTTP 429
+- Role: exact diff audit, Git transport, PR/CI closure, iOS gate verification
+- PR: #91 — `feat: add interactive companion garden`
+- Branch: `feat/companion-garden-interactions`
+- Base SHA: `b7df5f69691b1cc60bda75b95664271c48acc7cc`
+- Old HEAD: `b7df5f69691b1cc60bda75b95664271c48acc7cc`
+- New HEAD / Reviewed HEAD: `b7cf067dab8c13f8096654fd4cf93d2aafd22c07`
+
+CHANGED / REVIEWED
+- file: exact Companion Garden implementation, tests, wiring, CSS, docs, and prior ChatGPT report listed in the feature commit
+- function/component/migration: Git transport and release evidence only after implementation verification
+- what changed/reviewed: created the feature branch from the rechecked base, staged exactly 23 intended files, excluded the pre-existing `control-tower/Now.md` claim row, committed, pushed, and opened Draft PR #91 against `master`
+- why: freeze the already-validated Companion Garden tree without recreating or broadening the feature
+- file: `control-tower/Now.md`
+- function/component/migration: active claim metadata
+- what changed/reviewed: not changed and not included; it remains a pre-existing working-tree modification
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase table, migration, RPC, RLS, Storage policy, or E2EE change
+- product semantics: no gameification, shared accessory sync, server state, paid entitlement, or adjacent feature added
+- Production: no merge, Supabase mutation, Vercel production mutation, TestFlight upload, or App Store submission
+
+VERIFICATION
+- command: `git fetch origin`; `git rev-parse HEAD`; `git rev-parse origin/master`; `git status --short --branch`; `git worktree list --porcelain`
+- PASS: base HEAD and `origin/master` matched at `b7df5f69691b1cc60bda75b95664271c48acc7cc` before branching; the only excluded dirty file was `control-tower/Now.md`
+- command: exact staged-name comparison and `git diff --cached --check`
+- PASS: staged scope exactly matched the 23 intended files; `Now.md` excluded; staged diff check clean
+- command: `git commit -m "feat: add interactive companion garden"`
+- PASS: commit `b7cf067dab8c13f8096654fd4cf93d2aafd22c07`, 23 files changed, 1,851 insertions, 1 deletion
+- command: `git diff HEAD^..HEAD --check`
+- PASS: committed tree has no whitespace errors
+- command: `git push -u origin feat/companion-garden-interactions`
+- PASS: remote feature branch created and tracking configured; no force push
+- command: `npx vitest run --config vitest.config.ts --configLoader runner` with the eight focused Garden/diary suites
+- PASS: 8 files / 76 tests
+- command: `npm run verify` with public placeholder Vite environment
+- PASS: typecheck, lint, 277 Vitest files / 3,877 tests, production build; initial app 133.46 kB gzip and Garden lazy chunk 5.29 kB gzip
+- command: `npx playwright test e2e/companionGarden.spec.ts --project=chromium-390`
+- PASS: 5/5
+- command: `npm run verify:native`
+- PASS: 106/106
+- command: `npm run check:edge && npm run test:edge`
+- PASS: Edge checks and 18/18 tests
+- command: `npm run cap:sync:ios`
+- PASS: Capacitor iOS sync completed; generated-file cleanliness preserved
+- command: Xcode 27 workspace Debug build for iOS 27.0 iPhone 17 Pro Simulator with signing disabled
+- PASS: `** BUILD SUCCEEDED **`; direct `.xcodeproj` attempt was not used as evidence because it omitted the required Pods workspace
+- command: `gh pr checks 91 --repo yesung23/gomsin-log --watch`
+- PASS: all 15 reported checks green, including master validation, Native release validation, Vercel, and Vercel Preview Comments
+
+REVIEW IMPACT
+- DELTA: docs-only evidence commit after the feature commit; no application, security, authorization, DB, crypto, or native semantics changed
+- whether an earlier review is stale: no feature review invalidation; CI was rerun on the final documentation HEAD
+
+BLOCKERS
+- code: none found in local or PR validation
+- environment: physical iPhone `00008140-000171663AE3001C` was `unavailable` / offline
+- external/manual: physical-device interaction QA remains blocked; simulator evidence is not physical-device evidence
+
+STOPPED AT
+- exact completed boundary: feature branch pushed, Draft PR #91 open and mergeable, final PR checks green, iOS Simulator build green, physical-device status explicitly recorded
+
+REMAINING
+- physical iPhone QA when the device is online
+- normal repository approval/review before merging the Draft PR
+
+NEXT ACTION
+- next owner: repository maintainer / user
+- tool/model: GitHub PR review and merge process
+- 기준 SHA: `b7cf067dab8c13f8096654fd4cf93d2aafd22c07`
+- exact next task: review and merge PR #91 only after the repository’s approval policy is satisfied; do not force-merge
+
+DO NOT ADVANCE UNTIL
+- physical-device QA is either completed or consciously accepted as a separate offline gate
+- repository approval policy for Draft PR #91 is satisfied
+
+PRODUCTION
+- Supabase: NOT APPLIED
+- Vercel: NOT APPLIED by this task; PR preview status only
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED

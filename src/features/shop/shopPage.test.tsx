@@ -53,9 +53,10 @@ describe('free local companion shop', () => {
     expect(screen.getByRole('heading', { name: '상점', level: 1 })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '액세서리 뽑기', level: 2 })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '종이 바탕', level: 2 })).toBeInTheDocument();
+    expect(screen.getByText('지금 상점은 모두 무료이며 결제 기능이 없어요.')).toBeInTheDocument();
     expect(PAPER_TEXTURE_OPTIONS.map(({ id }) => screen.getByTestId(`paper-texture-preview-${id}`)
       .getAttribute('data-paper'))).toEqual(['plain', 'ruled', 'grid', 'dot', 'cream']);
-    expect(screen.queryByText(/스티커|기억책|Book Studio|결제|구매|구독|코인|포인트|원/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/스티커|기억책|Book Studio|구매|구독|코인|포인트|원/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /결제|구매|구독|통화/ })).not.toBeInTheDocument();
   });
 
@@ -180,6 +181,20 @@ describe('free local companion shop', () => {
       expect(screen.queryByText('모자')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: '따뜻한 무지 사용 중' })).toBeInTheDocument();
     });
+  });
+
+  it('reconciles a retained unowned paper after malformed collection data', async () => {
+    localStorage.setItem('gomsin.diary.shop.user-me', '{malformed-json');
+    localStorage.setItem('gomsin.display.paper.user-me', 'grid');
+
+    renderShop();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '줄 노트 사용 중' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: '모눈 종이 사용 중' })).not.toBeInTheDocument();
+    expect(localStorage.getItem('gomsin.display.paper.user-me')).toBe('ruled');
+    expect(document.documentElement).toHaveAttribute('data-paper', 'ruled');
   });
 
   it('returns to the diary and opens the garden from the Shop app bar', async () => {

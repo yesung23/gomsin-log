@@ -4,6 +4,7 @@ import {
   PAPER_TEXTURE_DEFAULT,
   applyPaperTextureAttribute,
   loadPaperTexture,
+  reconcileOwnedPaperTexture,
   savePaperTexture,
 } from '@/lib/paperTexturePreference';
 
@@ -29,6 +30,13 @@ describe('종이 바탕 설정', () => {
       savePaperTexture('user-1', texture);
       expect(loadPaperTexture('user-1')).toBe(texture);
     }
+  });
+
+  it('보유하지 않은 선택은 보유 중인 기본 종이로 되돌리고 저장한다', () => {
+    savePaperTexture('user-1', 'grid');
+
+    expect(reconcileOwnedPaperTexture('user-1', ['plain', 'ruled'])).toBe('ruled');
+    expect(loadPaperTexture('user-1')).toBe('ruled');
   });
 
   it('모든 종이를 안정적인 html 속성으로 즉시 적용한다', () => {

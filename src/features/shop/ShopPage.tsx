@@ -15,8 +15,8 @@ import {
 } from '@/lib/companionShopLocalState';
 import {
   applyPaperTextureAttribute,
-  loadPaperTexture,
   PAPER_TEXTURE_OPTIONS,
+  reconcileOwnedPaperTexture,
   savePaperTexture,
   type PaperTexture,
 } from '@/lib/paperTexturePreference';
@@ -35,13 +35,17 @@ export function ShopPageBody() {
   const { state } = useStore();
   const userId = state.authenticatedUser?.id || state.profile.id || '';
   const [shopState, setShopState] = useState<CompanionShopState>(() => loadCompanionShopState(userId));
-  const [selectedPaper, setSelectedPaper] = useState<PaperTexture>(() => loadPaperTexture(userId));
+  const [selectedPaper, setSelectedPaper] = useState<PaperTexture>(() => {
+    const initialShopState = loadCompanionShopState(userId);
+    return reconcileOwnedPaperTexture(userId, initialShopState.ownedPapers);
+  });
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const [today, setToday] = useState(() => localToday());
 
   useEffect(() => {
-    setShopState(loadCompanionShopState(userId));
-    const nextPaper = loadPaperTexture(userId);
+    const nextShopState = loadCompanionShopState(userId);
+    setShopState(nextShopState);
+    const nextPaper = reconcileOwnedPaperTexture(userId, nextShopState.ownedPapers);
     setSelectedPaper(nextPaper);
     applyPaperTextureAttribute(nextPaper);
     setAnnouncement(null);
@@ -136,6 +140,9 @@ export function ShopPageBody() {
       />
 
       <div className="space-y-4 px-4 py-4">
+        <p className="text-caption leading-relaxed text-muted-foreground">
+          지금 상점은 모두 무료이며 결제 기능이 없어요.
+        </p>
         <section className="space-y-3" aria-labelledby="accessory-draw-title">
           <div className="flex items-center justify-between gap-3">
             <h2 id="accessory-draw-title" className="text-heading text-foreground">액세서리 뽑기</h2>

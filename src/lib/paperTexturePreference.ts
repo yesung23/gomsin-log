@@ -46,6 +46,21 @@ export function savePaperTexture(userId: string, texture: PaperTexture): void {
   }
 }
 
+/** Keep the per-device selection inside the account's currently owned collection. */
+export function reconcileOwnedPaperTexture(
+  userId: string,
+  ownedPapers: readonly PaperTexture[],
+): PaperTexture {
+  const selected = loadPaperTexture(userId);
+  if (ownedPapers.includes(selected)) return selected;
+
+  const fallback = ownedPapers.includes(PAPER_TEXTURE_DEFAULT)
+    ? PAPER_TEXTURE_DEFAULT
+    : PAPER_TEXTURES.find((texture) => ownedPapers.includes(texture)) ?? PAPER_TEXTURE_DEFAULT;
+  savePaperTexture(userId, fallback);
+  return fallback;
+}
+
 export function applyPaperTextureAttribute(texture: PaperTexture): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;

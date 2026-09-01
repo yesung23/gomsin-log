@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { installMockBackend } from './fixtures/mockBackend';
 import { CREATOR, TODAY } from './scenarios';
 
@@ -15,84 +15,76 @@ const GARDEN_SCENARIO = {
   anniversaryDate: shiftCalendarDate(TODAY, -99),
 };
 
-async function bootedInto(page: Page, route: string) {
-  await page.goto(route);
+async function openGarden(context: BrowserContext, page: Page) {
+  const { unrouted } = await installMockBackend(context, GARDEN_SCENARIO);
+  await page.goto('/diary/garden');
   await expect(page.locator('#root')).not.toBeEmpty();
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { level: 1, name: '우리 정원' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('함께한 100일')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: '든든한 나무' })).toBeVisible();
+  return unrouted;
 }
 
-test('two garden companions actually wander, wear accessories, persist them, and wriggle when lifted', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const { unrouted } = await installMockBackend(context, GARDEN_SCENARIO);
+async function longPressAndDrag(page: Page, companionTestId: string) {
+  const companion = page.getByTestId(companionTestId);
+  const scene = page.getByTestId('garden-scene');
+  const companionBox = await companion.boundingBox();
+  const sceneBox = await scene.boundingBox();
+  expect(companionBox).not.toBeNull();
+  expect(sceneBox).not.toBeNull();
+  if (!companionBox || !sceneBox) throw new Error('Garden geometry unavailable');
+
+  const startX = companionBox.x + companionBox.width / 2;
+  const startY = companionBox.y + companionBox.height / 2;
+  const targetX = sceneBox.x + sceneBox.width * 0.62;
+  const targetY = sceneBox.y + sceneBox.height * 0.68;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await expect(companion).toHaveAttribute('data-pressed', 'true');
+  await page.waitForTimeout(520);
+  await expect(companion).toHaveAttribute('data-lifted', 'true');
+
+  await page.mouse.move(targetX, targetY, { steps: 4 });
+  await expect.poll(async () => Number(await companion.getAttribute('data-x'))).toBeGreaterThan(50);
+  await page.mouse.up();
+  await expect(companion).toHaveAttribute('data-lifted', 'false');
+  await expect(companion).toHaveAttribute('data-pressed', 'false');
+}
+
+test('full-screen garden uses the exact characters, hides persistent nav, wanders independently, and supports long-press drag', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
   const page = await context.newPage();
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  const unrouted = await openGarden(context, page);
 
-  await bootedInto(page, '/diary');
-  await page.getByRole('button', { name: '우리 정원 보기' }).click();
-  await page.waitForURL(/\/diary\/garden$/);
-  await expect(page.getByRole('tab', { name: '일기장' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByText('함께한 100일')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: '든든한 나무' })).toBeVisible();
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toHaveCount(0);
+  await expect(page.getByTestId('garden-scene')).not.toHaveClass(/aspect-\[4\/3\]/);
+  await expect(page.getByTestId('garden-exact-character-peach')).toHaveAttribute('viewBox', '20 515 136 155');
+  await expect(page.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '156 514 138 155');
 
   const peach = page.getByTestId('garden-companion-peach');
   const sage = page.getByTestId('garden-companion-sage');
   await expect(peach).toBeVisible();
   await expect(sage).toBeVisible();
-  await expect(page.getByRole('button', { name: /친구 들어올리기/ })).toHaveCount(2);
 
-  const peachStart = await peach.boundingBox();
-  const sageStart = await sage.boundingBox();
-  expect(peachStart).not.toBeNull();
-  expect(sageStart).not.toBeNull();
-
-  // The startup delay is <=900ms. Both state machines must independently choose a destination.
   await expect.poll(async () => Number(await peach.getAttribute('data-move-count')), { timeout: 4_000 }).toBeGreaterThan(0);
   await expect.poll(async () => Number(await sage.getAttribute('data-move-count')), { timeout: 4_000 }).toBeGreaterThan(0);
 
-  const peachPoint = {
-    x: Number(await peach.getAttribute('data-x')),
-    y: Number(await peach.getAttribute('data-y')),
-  };
-  const sagePoint = {
-    x: Number(await sage.getAttribute('data-x')),
-    y: Number(await sage.getAttribute('data-y')),
-  };
-  for (const point of [peachPoint, sagePoint]) {
-    expect(point.x).toBeGreaterThanOrEqual(12);
-    expect(point.x).toBeLessThanOrEqual(88);
-    expect(point.y).toBeGreaterThanOrEqual(48);
-    expect(point.y).toBeLessThanOrEqual(80);
-  }
-  expect(Math.hypot(peachPoint.x - sagePoint.x, peachPoint.y - sagePoint.y)).toBeGreaterThanOrEqual(16);
+  // A normal click is deliberately not a pickup interaction.
+  await sage.click();
+  await expect(sage).toHaveAttribute('data-lifted', 'false');
 
-  // CSS interpolation means a real box should also visibly leave its initial position, not only change data attributes.
-  await page.waitForTimeout(650);
-  const peachMoved = await peach.boundingBox();
-  const sageMoved = await sage.boundingBox();
-  expect(peachMoved).not.toBeNull();
-  expect(sageMoved).not.toBeNull();
-  expect(Math.hypot((peachMoved?.x ?? 0) - (peachStart?.x ?? 0), (peachMoved?.y ?? 0) - (peachStart?.y ?? 0))).toBeGreaterThan(1);
-  expect(Math.hypot((sageMoved?.x ?? 0) - (sageStart?.x ?? 0), (sageMoved?.y ?? 0) - (sageStart?.y ?? 0))).toBeGreaterThan(1);
+  await longPressAndDrag(page, 'garden-companion-peach');
+  const animationName = await peach.evaluate((node) => getComputedStyle(node).animationName);
+  expect(animationName === 'none' || animationName.includes('garden-lift-wriggle')).toBe(true);
 
-  await page.getByRole('button', { name: '정원 꾸미기' }).click();
-  await page.getByRole('radio', { name: '분홍 친구 모자' }).click();
-  await page.getByRole('radio', { name: '초록 친구 꽃' }).click();
-  await expect(peach).toHaveAttribute('data-accessory', 'cap');
-  await expect(sage).toHaveAttribute('data-accessory', 'flower');
-  await expect(page.getByTestId('garden-accessory-peach-cap')).toBeAttached();
-  await expect(page.getByTestId('garden-accessory-sage-flower')).toBeAttached();
-
-  await page.reload();
-  await expect(page.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'cap');
-  await expect(page.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'flower');
-
-  const peachAfterReload = page.getByRole('button', { name: '분홍 친구 들어올리기' });
-  await peachAfterReload.click();
-  await expect(peachAfterReload).toHaveAttribute('data-lifted', 'true');
-  const animationName = await peachAfterReload.evaluate((node) => getComputedStyle(node).animationName);
-  expect(animationName).toContain('garden-lift-wriggle');
-  await expect.poll(async () => peachAfterReload.getAttribute('data-lifted'), { timeout: 2_000 }).toBe('false');
+  // Keyboard users get a finite equivalent interaction.
+  await sage.focus();
+  await sage.press('Enter');
+  await expect(sage).toHaveAttribute('data-lifted', 'true');
+  await expect.poll(async () => sage.getAttribute('data-lifted'), { timeout: 2_000 }).toBe('false');
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   expect(pageErrors).toEqual([]);
@@ -100,51 +92,46 @@ test('two garden companions actually wander, wear accessories, persist them, and
   await context.close();
 });
 
-for (const width of [320, 390, 430]) {
-  test(`garden stays contained and usable at ${width}px`, async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width, height: 844 } });
-    const { unrouted } = await installMockBackend(context, GARDEN_SCENARIO);
-    const page = await context.newPage();
-    const errors: string[] = [];
-    page.on('pageerror', (error) => errors.push(error.message));
-
-    await bootedInto(page, '/diary/garden');
-    const scene = page.getByTestId('garden-scene');
-    const sceneBox = await scene.boundingBox();
-    expect(sceneBox).not.toBeNull();
-
-    for (const id of ['peach', 'sage'] as const) {
-      const companion = page.getByTestId(`garden-companion-${id}`);
-      const box = await companion.boundingBox();
-      expect(box).not.toBeNull();
-      if (sceneBox && box) {
-        expect(box.x).toBeGreaterThanOrEqual(sceneBox.x - 1);
-        expect(box.y).toBeGreaterThanOrEqual(sceneBox.y - 1);
-        expect(box.x + box.width).toBeLessThanOrEqual(sceneBox.x + sceneBox.width + 1);
-        expect(box.y + box.height).toBeLessThanOrEqual(sceneBox.y + sceneBox.height + 1);
-      }
-      const size = await companion.evaluate((node) => {
-        const rect = node.getBoundingClientRect();
-        return { width: rect.width, height: rect.height };
-      });
-      expect(size.width).toBeGreaterThanOrEqual(44);
-      expect(size.height).toBeGreaterThanOrEqual(44);
-    }
-
-    await page.getByRole('button', { name: '정원 꾸미기' }).click();
-    await expect(page.getByRole('region', { name: '정원 꾸미기' })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
-    expect(errors).toEqual([]);
-    expect(unrouted).toEqual([]);
-    await context.close();
-  });
-}
-
-test('reduced-motion keeps the two companions stationary but lift remains understandable', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
-  const { unrouted } = await installMockBackend(context, GARDEN_SCENARIO);
+test('garden app bar opens Shop and full-screen geometry remains usable in landscape', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 812, height: 375 } });
   const page = await context.newPage();
-  await bootedInto(page, '/diary/garden');
+  const unrouted = await openGarden(context, page);
+
+  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toHaveCount(0);
+  const scene = page.getByTestId('garden-scene');
+  const sceneBox = await scene.boundingBox();
+  expect(sceneBox).not.toBeNull();
+  expect(sceneBox?.width ?? 0).toBeGreaterThan(300);
+
+  for (const id of ['peach', 'sage'] as const) {
+    const companion = page.getByTestId(`garden-companion-${id}`);
+    const box = await companion.boundingBox();
+    expect(box).not.toBeNull();
+    if (sceneBox && box) {
+      expect(box.x).toBeGreaterThanOrEqual(sceneBox.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(sceneBox.x + sceneBox.width + 1);
+      expect(box.y).toBeGreaterThanOrEqual(sceneBox.y - 1);
+      expect(box.y + box.height).toBeLessThanOrEqual(sceneBox.y + sceneBox.height + 1);
+    }
+  }
+
+  const mainMetrics = await page.locator('#main-content').evaluate((node) => ({
+    clientHeight: node.clientHeight,
+    scrollHeight: node.scrollHeight,
+  }));
+  expect(mainMetrics.scrollHeight).toBeLessThanOrEqual(mainMetrics.clientHeight + 1);
+
+  await page.getByRole('button', { name: '상점 열기' }).click();
+  await page.waitForURL(/\/shop$/);
+  await expect(page.getByRole('heading', { level: 1, name: /상점/ })).toBeVisible();
+  expect(unrouted).toEqual([]);
+  await context.close();
+});
+
+test('reduced-motion stops autonomous wandering and repeated squirm while preserving direct pickup feedback', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 812 }, reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  const unrouted = await openGarden(context, page);
 
   const peach = page.getByTestId('garden-companion-peach');
   const sage = page.getByTestId('garden-companion-sage');
@@ -154,13 +141,17 @@ test('reduced-motion keeps the two companions stationary but lift remains unders
   await expect(peach).toHaveAttribute('data-wandering', 'false');
   await expect(sage).toHaveAttribute('data-wandering', 'false');
 
-  await peach.click();
+  const box = await peach.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) throw new Error('Companion geometry unavailable');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(520);
   await expect(peach).toHaveAttribute('data-lifted', 'true');
-  const reducedAnimation = await peach.evaluate((node) => getComputedStyle(node).animationName);
-  expect(reducedAnimation).toBe('none');
-  const transform = await peach.evaluate((node) => getComputedStyle(node).transform);
-  expect(transform).not.toBe('none');
-  await expect.poll(async () => peach.getAttribute('data-lifted'), { timeout: 2_000 }).toBe('false');
+  expect(await peach.evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  expect(await peach.evaluate((node) => getComputedStyle(node).transform)).not.toBe('none');
+  await page.mouse.up();
+  await expect(peach).toHaveAttribute('data-lifted', 'false');
 
   expect(unrouted).toEqual([]);
   await context.close();

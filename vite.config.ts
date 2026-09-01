@@ -108,7 +108,8 @@ function injectServiceWorkerManifest(): Plugin {
       // response whose request destination is 'font', so the handful of subsets a
       // session actually rendered are available offline from then on, and the
       // `unicode-range` metadata means a browser never asks for the rest.
-      const isPrecachedAsset = (file: string) => !/\.woff2?$/.test(file);
+      const isPrecachedAsset = (file: string) =>
+        !/\.woff2?$/.test(file) && !/paper-pair-v1/i.test(file);
       const assetUrls = listFiles(assetsDirectory)
         .filter(isPrecachedAsset)
         .sort()

@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -12,8 +11,8 @@ import { useEscapeKey } from '@/lib/hooks';
 import { useSheetDrag } from '@/lib/useSheetDrag';
 import {
   applyPaperTextureAttribute,
-  loadPaperTexture,
   PAPER_TEXTURE_OPTIONS,
+  reconcileOwnedPaperTexture,
   savePaperTexture,
   type PaperTexture,
 } from '@/lib/paperTexturePreference';
@@ -39,7 +38,10 @@ export function ProfilePaperMenu({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const paperOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const [selected, setSelected] = useState<PaperTexture>(() => loadPaperTexture(userId));
+  const [selected, setSelected] = useState<PaperTexture>(() => {
+    const initialShopState = loadCompanionShopState(userId);
+    return reconcileOwnedPaperTexture(userId, initialShopState.ownedPapers);
+  });
   const { sheetRef, handleProps } = useSheetDrag({ onDismiss: onClose, enabled: isOpen });
 
   const attachPanel = useCallback((node: HTMLDivElement | null) => {
@@ -47,10 +49,7 @@ export function ProfilePaperMenu({
     sheetRef.current = node;
   }, [sheetRef]);
 
-  const ownedPapers = useMemo(
-    () => new Set(loadCompanionShopState(userId).ownedPapers),
-    [isOpen, userId],
-  );
+  const ownedPapers = new Set(loadCompanionShopState(userId).ownedPapers);
   const availablePapers = PAPER_TEXTURE_OPTIONS.filter((paper) => ownedPapers.has(paper.id));
 
   useEscapeKey(onClose, isOpen);
@@ -58,7 +57,10 @@ export function ProfilePaperMenu({
   useEffect(() => {
     if (!isOpen) return;
 
-    setSelected(loadPaperTexture(userId));
+    const shopState = loadCompanionShopState(userId);
+    const nextPaper = reconcileOwnedPaperTexture(userId, shopState.ownedPapers);
+    setSelected(nextPaper);
+    applyPaperTextureAttribute(nextPaper);
     restoreFocusRef.current = triggerRef.current || document.activeElement as HTMLElement | null;
     panelRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
 

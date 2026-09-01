@@ -148,7 +148,8 @@ describe('the service worker precache stays an app shell', () => {
   it('excludes fonts from the all-or-nothing install list', () => {
     // 92 subset files / ~2.9 MB behind `cache.addAll()` would make a first visit
     // a multi-megabyte download and fail installation on a flaky connection.
-    expect(viteConfig).toContain('const isPrecachedAsset = (file: string) => !/\\.woff2?$/.test(file)');
+    expect(viteConfig).toContain('paper-pair-v1');
+    expect(viteConfig).toMatch(/isPrecachedAsset[\s\S]*woff2?[\s\S]*paper-pair-v1/);
     expect(viteConfig).toContain('.filter(isPrecachedAsset)');
   });
 

@@ -69,13 +69,14 @@ function CompanionGardenPageBody() {
       ownedAccessories={ownedAccessories}
       onAccessoryChange={changeAccessory}
       onBack={() => navigate('/diary')}
+      onOpenShop={() => navigate('/shop')}
     />
   );
 }
 
 export function CompanionGardenPage() {
   return (
-    <MobileShell>
+    <MobileShell hideNav>
       <CompanionGardenPageBody />
     </MobileShell>
   );

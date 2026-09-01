@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookHeart, Images, NotebookPen, CalendarDays, FileText } from 'lucide-react';
+import { BookHeart, Images, NotebookPen, CalendarDays, FileText, Sprout } from 'lucide-react';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { useStore } from '@/lib/useStore';
@@ -97,6 +97,26 @@ function DiaryPageBody() {
           </div>
           <p className="text-caption text-muted-foreground leading-relaxed">
             남겨 둔 기록이 날짜별 페이지가 돼요. 종이와 순서만 골라도 한 장의 일기처럼 읽을 수 있어요.
+          </p>
+        </div>
+
+        <div className="rounded-surface border border-border bg-card p-4 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Sprout size={18} className="pen-icon shrink-0 text-coral" aria-hidden="true" />
+              <h2 className="text-label font-bold text-card-foreground">우리 정원</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/diary/garden')}
+              aria-label="우리 정원 보기"
+              className="press-response min-h-11 shrink-0 px-3 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
+            >
+              정원 보기
+            </button>
+          </div>
+          <p className="text-caption text-muted-foreground leading-relaxed">
+            함께한 시간에 따라 자라는 두 친구를 만나고, 이 기기에서 가볍게 꾸밀 수 있어요.
           </p>
         </div>
 

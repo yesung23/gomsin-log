@@ -988,3 +988,51 @@ input[type='range']::-webkit-slider-thumb {
   background-color: var(--muted);
   transition-duration: 0.06s;
 }
+
+/* Companion garden: the scene position glides; the little body bobs separately. */
+@keyframes garden-walk-bob {
+  0% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-3px) rotate(1deg); }
+  100% { transform: translateY(0) rotate(-1deg); }
+}
+
+.garden-companion-walking {
+  animation: garden-walk-bob 0.38s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+
+/*
+ * A picked-up companion rises first, then squirms left/right before settling.
+ * Position movement lives on the outer wrapper, so this transform never fights the wander transition.
+ */
+@keyframes garden-lift-wriggle {
+  0% { transform: translateY(0) rotate(0deg); }
+  14% { transform: translateY(-22px) rotate(-8deg); }
+  28% { transform: translateY(-25px) rotate(9deg); }
+  42% { transform: translateY(-23px) rotate(-7deg); }
+  56% { transform: translateY(-24px) rotate(8deg); }
+  72% { transform: translateY(-18px) rotate(-4deg); }
+  86% { transform: translateY(-8px) rotate(2deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+.garden-companion-lifted {
+  animation: garden-lift-wriggle 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: 50% 85%;
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .garden-companion-position {
+    transition: none !important;
+  }
+
+  .garden-companion-walking {
+    animation: none !important;
+  }
+
+  .garden-companion-lifted {
+    animation: none !important;
+    transform: translateY(-6px);
+  }
+}

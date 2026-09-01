@@ -22,6 +22,7 @@ const ROUTES: { prefix: string; name: string; exact?: boolean }[] = [
   { prefix: '/compose', name: '오늘 남기기' },
   { prefix: '/search', name: '찾기' },
   { prefix: '/me', name: '나' },
+  { prefix: '/diary/garden', name: '우리 정원' },
   { prefix: '/diary', name: '일기장' },
   { prefix: '/shop', name: '상점' },
   { prefix: '/saved', name: '이야기할 것' },

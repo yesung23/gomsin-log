@@ -2,6 +2,7 @@ const ACCOUNT_SCOPED_PREFIXES = [
   'gomsin.diary.page.',
   'gomsin.diary.paper.',
   'gomsin.diary.stickers.',
+  'gomsin.diary.garden.',
 ] as const;
 
 /**

@@ -152,6 +152,18 @@ describe('day-page diary', () => {
   });
 });
 
+describe('companion garden entry', () => {
+  it('offers the garden as an optional diary reward and opens the garden route', async () => {
+    const user = userEvent.setup();
+    renderDiary();
+
+    const entry = screen.getByRole('button', { name: '우리 정원 보기' });
+    expect(entry).toBeInTheDocument();
+    await user.click(entry);
+    expect(navigate).toHaveBeenCalledWith('/diary/garden');
+  });
+});
+
 describe('paper library entry', () => {
   it('uses paper wording rather than an unvalidated store/catalog promise', async () => {
     const user = userEvent.setup();

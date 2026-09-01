@@ -1,6 +1,21 @@
 export type PaperTexture = 'ruled' | 'plain' | 'grid' | 'dot' | 'cream';
 
-const PAPER_TEXTURES: readonly PaperTexture[] = ['ruled', 'plain', 'grid', 'dot', 'cream'];
+export interface PaperTextureOption {
+  id: PaperTexture;
+  label: string;
+  description: string;
+}
+
+/** Shared display copy for every app-wide paper texture. */
+export const PAPER_TEXTURE_OPTIONS: readonly PaperTextureOption[] = [
+  { id: 'plain', label: '따뜻한 무지', description: '기록과 사진에 집중하는 기본 종이' },
+  { id: 'ruled', label: '줄 노트', description: '손글씨 일기처럼 차분한 가로줄' },
+  { id: 'grid', label: '모눈 종이', description: '사진과 글을 정돈해 보이는 작은 격자' },
+  { id: 'dot', label: '도트 종이', description: '꾸미기 여백을 남기는 옅은 점선' },
+  { id: 'cream', label: '크림 편지지', description: '조금 더 따뜻한 편지 느낌의 종이' },
+] as const;
+
+const PAPER_TEXTURES: readonly PaperTexture[] = PAPER_TEXTURE_OPTIONS.map(({ id }) => id);
 
 const KEY_PREFIX = 'gomsin.display.paper.';
 

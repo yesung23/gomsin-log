@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Plus, SquarePen, X } from 'lucide-react';
+import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, MoreHorizontal, Plane, Plus, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
@@ -13,6 +13,7 @@ import type { PostDraftItem } from '@/features/us/postComposition';
 import { ProfileIdentity } from '@/components/ProfileIdentity';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
+import { ProfilePaperMenu } from '@/components/ProfilePaperMenu';
 import { InkCircle, PenFace } from '@/components/paper';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
@@ -102,6 +103,8 @@ export function SharedProfile() {
   const [highlightCoverId, setHighlightCoverId] = useState<string | undefined>();
   const [isSavingHighlight, setIsSavingHighlight] = useState(false);
   const [composingPost, setComposingPost] = useState(false);
+  const [isPaperMenuOpen, setIsPaperMenuOpen] = useState(false);
+  const paperMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const [isPublishingPost, setIsPublishingPost] = useState(false);
   const publishPostInFlightRef = useRef(false);
   /*
@@ -572,8 +575,18 @@ export function SharedProfile() {
           <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
             <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
           </button>
-          <button type="button" aria-label="설정" onClick={() => navigate('/settings')} className="flex h-11 w-11 items-center justify-center">
-            <Menu size={22} color="var(--ink)" aria-hidden="true" />
+          <button
+            ref={paperMenuTriggerRef}
+            type="button"
+            aria-label="마이 메뉴 열기"
+            aria-haspopup="dialog"
+            aria-expanded={isPaperMenuOpen}
+            aria-controls="profile-paper-menu-dialog"
+            data-testid="open-profile-paper-menu"
+            onClick={() => setIsPaperMenuOpen(true)}
+            className="flex h-11 w-11 items-center justify-center"
+          >
+            <MoreHorizontal size={22} color="var(--ink)" aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -686,6 +699,14 @@ export function SharedProfile() {
           onSubmit={(input) => { void publishPost(input); }}
         />
       ) : null}
+
+      <ProfilePaperMenu
+        isOpen={isPaperMenuOpen}
+        userId={state.authenticatedUser?.id || profile.id || ''}
+        triggerRef={paperMenuTriggerRef}
+        onClose={() => setIsPaperMenuOpen(false)}
+        onOpenSettings={() => navigate('/settings')}
+      />
     </div>
   );
 }

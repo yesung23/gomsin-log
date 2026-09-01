@@ -144,6 +144,23 @@
     background-image: none;
   }
 
+  [data-paper='grid'] .notebook {
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px),
+      linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  [data-paper='dot'] .notebook {
+    background-image: radial-gradient(circle, var(--rule) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+
+  [data-paper='cream'] .notebook {
+    background-color: color-mix(in srgb, var(--paper) 86%, #e6c98f 14%);
+    background-image: none;
+  }
+
   /* 손으로 그린 상자. 네 모서리가 서로 다르다. */
   .ink-box {
     border: var(--stroke) solid var(--ink);

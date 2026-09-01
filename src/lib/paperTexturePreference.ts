@@ -1,4 +1,6 @@
-export type PaperTexture = 'ruled' | 'plain';
+export type PaperTexture = 'ruled' | 'plain' | 'grid' | 'dot' | 'cream';
+
+const PAPER_TEXTURES: readonly PaperTexture[] = ['ruled', 'plain', 'grid', 'dot', 'cream'];
 
 const KEY_PREFIX = 'gomsin.display.paper.';
 
@@ -11,7 +13,10 @@ function key(userId: string): string {
 export function loadPaperTexture(userId: string): PaperTexture {
   if (!userId || typeof localStorage === 'undefined') return PAPER_TEXTURE_DEFAULT;
   try {
-    return localStorage.getItem(key(userId)) === 'plain' ? 'plain' : PAPER_TEXTURE_DEFAULT;
+    const value = localStorage.getItem(key(userId));
+    return typeof value === 'string' && PAPER_TEXTURES.includes(value as PaperTexture)
+      ? value as PaperTexture
+      : PAPER_TEXTURE_DEFAULT;
   } catch {
     return PAPER_TEXTURE_DEFAULT;
   }
@@ -29,6 +34,5 @@ export function savePaperTexture(userId: string, texture: PaperTexture): void {
 export function applyPaperTextureAttribute(texture: PaperTexture): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  if (texture === 'plain') root.setAttribute('data-paper', 'plain');
-  else root.removeAttribute('data-paper');
+  root.setAttribute('data-paper', texture);
 }

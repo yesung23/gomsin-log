@@ -10407,3 +10407,88 @@ DO NOT ADVANCE UNTIL
 PRODUCTION
 - APPLIED: GitHub master push and Vercel Production deployment
 - NOT APPLIED: Supabase migrations/Edge Functions and physical iPhone installation
+
+---
+
+## 2026-09-01 — Book Studio 보류 및 저장소 분리
+
+PLAN POSITION
+- Phase: Digital Memory Book / standalone Book Studio Supabase read-only stabilization
+- Workstream: 곰신로그 앱과 분리된 Book Studio 사이트
+- Step: 최신 로컬 보완·독립 보안 검토 후 사용자 요청으로 보류
+- Previous Gate: Gate A identity/exact-couple PASS
+- This Gate: synthetic fixture 범위 `PASS WITH FINDINGS`; 실자료 연동·migration은 BLOCK
+
+DIRECTION CHECK
+- Product source checked: 기존 Book Studio Gate A 및 Supabase read-boundary 보고서와 현재 저장소 상태
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — 제품·고객·가격·저장 정책 변경 없음
+- Engineering source checked: `AGENTS.md`, `bash scripts/agent/session-start.sh`, 관련 `docs/WORK_LOG.md`
+- Current-state checked: 본 앱, 독립 Book Studio 프론트, 별도 migration worktree의 branch/HEAD/status/remote
+- Latest relevant Work Log checked: 2026-09-01 Book Studio Supabase read-only boundary 및 최신 앱 release 기록
+- MASTER PLAN version / 기준일: standalone Book Studio Supabase read-only integration / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex orchestrator
+- Model: primary Codex; `gpt-daybreak-blue-latest` High 독립 read-only 보안 검토
+- Role: 로컬 상태 정리, 보류 경계 확정, 문서화
+- PR: none
+- Branch: 본 앱 `codex/profile-post-composer`; Book Studio `codex/book-studio-supabase`; migration `codex/book-studio-supabase-migration`
+- Base SHA: 본 앱 `3a4c664d7bfe71a9cca9dc293c818f7ce37bb3e9`; Book Studio `826f3af6607a8f90c8accf2126db6fb547d818db`; migration `22187dbf84e253113a9bed304d69a1bb521e216d`
+- Old HEAD: Book Studio `555463f`; migration `0e086f5`
+- New HEAD / Reviewed HEAD: 본 앱 `3a4c664`; Book Studio `826f3af`; migration `22187db`
+
+CHANGED / REVIEWED
+- file: `control-tower/reports/codex/2026-09-01_1315_book-studio-paused-and-separated_codex.md`
+- function/component/migration: Book Studio 별도 저장소·브랜치와 최신 검토 결과 기록
+- what changed/reviewed: 본 앱 레포에는 Book Studio 파일을 복사하지 않고, 별도 프론트 및 migration 상태·보류 조건을 기록
+- why: 곰신로그 GitHub에 Book Studio 파일이 함께 올라가는 위험을 막고 앱 작업으로 전환하기 위해
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: 변경하지 않음
+- DB/migration semantics: migration은 별도 worktree에만 보존; push/apply하지 않음
+- product semantics: 앱 코드, PartnerDay, 인증, E2EE, RLS 변경 없음
+- Production: GitHub push/merge, Supabase, Cloudflare, OAuth, deploy 없음
+
+VERIFICATION
+- command: `bash scripts/agent/session-start.sh` 및 세 저장소의 `git status --short --branch`, `git rev-parse HEAD`, `git remote -v`
+- PASS: 본 앱 `codex/profile-post-composer` / `3a4c664`; Book Studio `826f3af` / 별도 `gomsinlog-book-studio` remote; migration `22187db` / 별도 worktree; 본 앱에는 기존 `.DS_Store`와 Obsidian graph 변경만 dirty
+- command: Book Studio `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`
+- PASS: 9 files / 76 tests; typecheck/lint/build PASS
+- command: migration focused Vitest, typecheck, lint
+- PASS: 5 tests 및 정적 검증 PASS
+- command: Daybreak Blue exact-commit review
+- PASS WITH FINDINGS: synthetic fixture/flag OFF에 한해 조건부; 실자료 활성화·migration은 BLOCK
+- command: `supabase db lint --local --schema public --fail-on error`
+- BLOCKED / UNVERIFIED: local Postgres `127.0.0.1:54322` 연결 거부
+
+REVIEW IMPACT
+- FULL: 최신 auth/data-boundary와 pagination 변경을 독립 검토함
+- whether an earlier review is stale: 이전 `555463f` 기준 검토는 stale; 현재 결과는 `826f3af` 기준
+
+BLOCKERS
+- code: encrypted Storage policy 조건, legacy 무제한 RPC upgrade, attachment/body 총량 제한, 계정 전환 `directGestureRef` 정리가 남음
+- environment: remote schema/RLS/Storage/OAuth/Cloudflare와 실제 actor 검증 UNVERIFIED
+- external/manual: 사용자 요청으로 Book Studio 보류, 앱 작업으로 우선순위 전환
+
+STOPPED AT
+- exact completed boundary: 최신 Book Studio 로컬 commit과 Daybreak 결과를 보존하고 reviewer를 종료; 외부 상태는 변경하지 않음
+
+REMAINING
+- Book Studio 재개 시 finding 보완 → staging actor/RLS/Storage 검증 → fresh Daybreak review
+- 본 앱 작업은 현재 branch `codex/profile-post-composer`에서 별도 claim으로 시작
+
+NEXT ACTION
+- next owner: 곰신로그 앱 작업 owner
+- tool/model: 앱 범위에 맞는 별도 구현·검증; Book Studio 재개 때 Daybreak Blue
+- 기준 SHA: `3a4c664d7bfe71a9cca9dc293c818f7ce37bb3e9`
+- exact next task: Book Studio 파일을 본 앱 레포에 넣지 않은 상태로 앱 작업을 계속
+
+DO NOT ADVANCE UNTIL
+- Book Studio 재개 시 P1/P2 보완, staging runtime/actor 검증, fresh review 완료
+- 앱 작업 시 기존 dirty 파일 보존 및 Book Studio 저장소 분리 유지
+
+PRODUCTION
+- NOT APPLIED: Supabase, Storage, OAuth, Cloudflare, GitHub push/merge, deploy
+- UNVERIFIED: remote schema, RLS/Storage runtime, Cloudflare settings, browser login, physical device

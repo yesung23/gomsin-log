@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+} from 'react';
 import { Check, X } from 'lucide-react';
 import { useEscapeKey } from '@/lib/hooks';
 import { useSheetDrag } from '@/lib/useSheetDrag';
@@ -30,6 +38,7 @@ export function ProfilePaperMenu({
 }: ProfilePaperMenuProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const paperOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [selected, setSelected] = useState<PaperTexture>(() => loadPaperTexture(userId));
   const { sheetRef, handleProps } = useSheetDrag({ onDismiss: onClose, enabled: isOpen });
 
@@ -87,6 +96,24 @@ export function ProfilePaperMenu({
     applyPaperTextureAttribute(texture);
   };
 
+  const movePaperSelection = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      nextIndex = (index + 1) % availablePapers.length;
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      nextIndex = (index - 1 + availablePapers.length) % availablePapers.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = availablePapers.length - 1;
+    }
+    if (nextIndex === null || !availablePapers[nextIndex]) return;
+
+    event.preventDefault();
+    choosePaper(availablePapers[nextIndex].id);
+    paperOptionRefs.current[nextIndex]?.focus();
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -124,18 +151,21 @@ export function ProfilePaperMenu({
         <section className="mt-3" aria-labelledby="profile-paper-menu-paper-title">
           <h3 id="profile-paper-menu-paper-title" className="text-label font-semibold text-foreground">앱 종이</h3>
           <p className="mt-1 text-caption leading-relaxed text-muted-foreground">내가 가진 종이를 골라 앱 전체 바탕에 적용해요.</p>
-          <div role="radiogroup" aria-label="앱 종이" className="mt-3 space-y-2">
-            {availablePapers.map((paper) => {
+          <div role="radiogroup" aria-label="앱 종이" aria-orientation="vertical" className="mt-3 space-y-2">
+            {availablePapers.map((paper, index) => {
               const active = selected === paper.id;
               return (
                 <button
+                  ref={(node) => { paperOptionRefs.current[index] = node; }}
                   key={paper.id}
                   type="button"
                   role="radio"
                   aria-checked={active}
                   aria-label={paper.label}
+                  tabIndex={active ? 0 : -1}
                   data-testid={`profile-paper-option-${paper.id}`}
                   onClick={() => choosePaper(paper.id)}
+                  onKeyDown={(event) => movePaperSelection(event, index)}
                   className="press-response-row flex min-h-16 w-full items-center gap-3 rounded-control border border-border px-3 py-2 text-left"
                   style={{ borderColor: active ? 'var(--ink)' : 'var(--ink-faint)' }}
                 >

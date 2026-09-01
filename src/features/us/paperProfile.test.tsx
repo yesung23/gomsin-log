@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, Trip } from '@/types';
 import { saveCompanionShopState } from '@/lib/companionShopLocalState';
+import { savePaperTexture } from '@/lib/paperTexturePreference';
 
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -198,6 +199,33 @@ describe('PaperProfile (우리 화면)', () => {
     expect(localStorage.getItem('gomsin.display.paper.user-me')).toBe('grid');
   });
 
+  it('화살표 키로 다음 종이를 선택하고 포커스를 함께 옮긴다', () => {
+    saveCompanionShopState('user-me', {
+      version: 1,
+      ownedAccessories: [],
+      ownedPapers: ['plain', 'ruled', 'grid'],
+      lastFreeDrawDate: null,
+    });
+
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '마이 메뉴 열기' }));
+
+    const ruled = screen.getByRole('radio', { name: '줄 노트' });
+    const grid = screen.getByRole('radio', { name: '모눈 종이' });
+    ruled.focus();
+    fireEvent.keyDown(ruled, { key: 'ArrowDown' });
+
+    expect(grid).toHaveFocus();
+    expect(grid).toHaveAttribute('aria-checked', 'true');
+    expect(grid).toHaveAttribute('tabindex', '0');
+    expect(ruled).toHaveAttribute('tabindex', '-1');
+    expect(document.documentElement).toHaveAttribute('data-paper', 'grid');
+  });
+
   it('마이 메뉴에서 설정 및 계정 관리로 설정 화면에 접근한다', () => {
     render(
       <MemoryRouter>
@@ -227,6 +255,59 @@ describe('PaperProfile (우리 화면)', () => {
 
     expect(screen.queryByRole('dialog', { name: '마이 메뉴' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it('Tab과 Shift+Tab 포커스를 열린 시트 안에서 순환시킨다', () => {
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '마이 메뉴 열기' }));
+
+    const first = screen.getByRole('button', { name: '마이 메뉴 닫기' });
+    const last = screen.getByRole('button', { name: '설정 및 계정 관리' });
+    last.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(first).toHaveFocus();
+
+    first.focus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+  });
+
+  it('계정이 바뀌면 이전 계정의 종이 소유권과 선택을 남기지 않는다', async () => {
+    saveCompanionShopState('user-me', {
+      version: 1,
+      ownedAccessories: [],
+      ownedPapers: ['plain', 'ruled', 'grid'],
+      lastFreeDrawDate: null,
+    });
+    savePaperTexture('user-me', 'grid');
+    savePaperTexture('user-other', 'plain');
+
+    const view = render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '마이 메뉴 열기' }));
+    expect(screen.getByRole('radio', { name: '모눈 종이' })).toHaveAttribute('aria-checked', 'true');
+
+    const next = baseState();
+    storeState = {
+      ...next,
+      authenticatedUser: { id: 'user-other' },
+      profile: { ...next.profile, id: 'user-other' },
+    };
+    view.rerender(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('radio', { name: '모눈 종이' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('radio', { name: '따뜻한 무지' })).toHaveAttribute('aria-checked', 'true'));
   });
 
   it('기념일이 있으면 profileCaption이 없어도 기본 문구를 유지한다', () => {

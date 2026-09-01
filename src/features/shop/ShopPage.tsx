@@ -25,6 +25,11 @@ const COLLECTIBLE_ACCESSORY_OPTIONS = GARDEN_ACCESSORY_OPTIONS.filter(
   (option): option is { id: CollectibleGardenAccessory; label: string } => option.id !== 'none',
 );
 
+function millisecondsUntilNextLocalDay(now = new Date()): number {
+  const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return Math.max(50, nextDay.getTime() - now.getTime() + 50);
+}
+
 export function ShopPageBody() {
   const navigate = useNavigate();
   const { state } = useStore();
@@ -32,6 +37,7 @@ export function ShopPageBody() {
   const [shopState, setShopState] = useState<CompanionShopState>(() => loadCompanionShopState(userId));
   const [selectedPaper, setSelectedPaper] = useState<PaperTexture>(() => loadPaperTexture(userId));
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  const [today, setToday] = useState(() => localToday());
 
   useEffect(() => {
     setShopState(loadCompanionShopState(userId));
@@ -39,9 +45,32 @@ export function ShopPageBody() {
     setSelectedPaper(nextPaper);
     applyPaperTextureAttribute(nextPaper);
     setAnnouncement(null);
+    setToday(localToday());
   }, [userId]);
 
-  const today = localToday();
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refreshDate = () => setToday(localToday());
+    const scheduleNextDay = () => {
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        refreshDate();
+        scheduleNextDay();
+      }, millisecondsUntilNextLocalDay());
+    };
+
+    scheduleNextDay();
+    window.addEventListener('focus', refreshDate);
+    document.addEventListener('visibilitychange', refreshDate);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('focus', refreshDate);
+      document.removeEventListener('visibilitychange', refreshDate);
+    };
+  }, []);
+
   const ownedAccessories = COLLECTIBLE_ACCESSORY_OPTIONS.filter(({ id }) => (
     shopState.ownedAccessories.includes(id)
   ));
@@ -57,7 +86,9 @@ export function ShopPageBody() {
         : '오늘의 액세서리 무료 뽑기';
 
   const drawAccessory = () => {
-    const result = drawDailyAccessory(userId, localToday());
+    const drawDate = localToday();
+    const result = drawDailyAccessory(userId, drawDate);
+    setToday(drawDate);
     setShopState(result.state);
 
     if (result.status === 'drawn' && result.accessory) {
@@ -161,7 +192,6 @@ export function ShopPageBody() {
                   key={paper.id}
                   type="button"
                   aria-label={label}
-                  aria-pressed={active}
                   disabled={active}
                   onClick={() => choosePaper(paper)}
                   className="press-response min-h-[112px] overflow-hidden rounded-surface border text-left disabled:cursor-default"

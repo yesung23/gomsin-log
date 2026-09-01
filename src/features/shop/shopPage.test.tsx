@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { GARDEN_ACCESSORY_OPTIONS } from '@/lib/companionGardenLocalState';
@@ -44,6 +44,10 @@ describe('free local companion shop', () => {
     document.documentElement.removeAttribute('data-paper');
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('shows the compact title, two sections, truthful previews, and no payment or Book Studio UI', () => {
     renderShop();
     expect(screen.getByRole('heading', { name: '상점', level: 1 })).toBeInTheDocument();
@@ -62,7 +66,7 @@ describe('free local companion shop', () => {
     expect(screen.getByRole('button', { name: '모눈 종이 무료로 받기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '도트 종이 무료로 받기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '크림 편지지 무료로 받기' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '줄 노트 사용 중' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '줄 노트 사용 중' })).not.toHaveAttribute('aria-pressed');
     expect(screen.getByRole('button', { name: '따뜻한 무지 적용하기' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '모눈 종이 무료로 받기' }));
@@ -78,7 +82,7 @@ describe('free local companion shop', () => {
 
     expect(localStorage.getItem('gomsin.display.paper.user-me')).toBe('grid');
     expect(document.documentElement).toHaveAttribute('data-paper', 'grid');
-    expect(screen.getByRole('button', { name: '모눈 종이 사용 중' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '모눈 종이 사용 중' })).not.toHaveAttribute('aria-pressed');
   });
 
   it('draws one unowned accessory per local calendar day and announces the label', async () => {
@@ -124,6 +128,24 @@ describe('free local companion shop', () => {
     await user.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
     expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
     expect(screen.getByRole('status')).toHaveTextContent('오늘 날짜를 확인할 수 없어 뽑지 못했어요');
+  });
+
+  it('unlocks the next free draw when an open Shop crosses local midnight', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 1, 23, 59, 59, 900));
+    localStorage.setItem('gomsin.diary.shop.user-me', JSON.stringify({
+      version: 1,
+      ownedAccessories: ['cap'],
+      ownedPapers: ['plain', 'ruled'],
+      lastFreeDrawDate: '2026-09-01',
+    }));
+    renderShop();
+    expect(screen.getByRole('button', { name: '오늘 뽑기 완료' })).toBeDisabled();
+
+    mockedToday.value = '2026-09-02';
+    act(() => vi.advanceTimersByTime(200));
+
+    expect(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' })).toBeEnabled();
   });
 
   it('refreshes collection and selected paper when the authenticated account changes', async () => {

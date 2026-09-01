@@ -125,6 +125,12 @@ describe('companion garden route authority', () => {
     localStorage.setItem('gomsin.diary.garden.me', JSON.stringify({
       version: 1, peach: 'cap', sage: 'none',
     }));
+    localStorage.setItem('gomsin.diary.shop.me', JSON.stringify({
+      version: 1,
+      ownedAccessories: ['flower'],
+      ownedPapers: ['plain', 'ruled'],
+      lastFreeDrawDate: null,
+    }));
     const user = userEvent.setup();
     const view = renderGarden();
 
@@ -140,6 +146,18 @@ describe('companion garden route authority', () => {
     renderGarden();
     expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'cap');
     expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'flower');
+  });
+
+  it('does not expose accessories that this account has not drawn', async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    renderGarden();
+
+    await user.click(screen.getByRole('button', { name: '정원 꾸미기' }));
+
+    expect(screen.getAllByRole('radio', { name: /친구 없음/ })).toHaveLength(2);
+    expect(screen.queryByRole('radio', { name: /친구 꽃/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /친구 모자/ })).not.toBeInTheDocument();
   });
 
   it('back is explicit and returns to diary', async () => {

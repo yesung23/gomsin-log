@@ -9,6 +9,7 @@ import {
   type GardenAccessoryState,
   type GardenCompanionId,
 } from '@/lib/companionGardenLocalState';
+import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
 import type { CompanionGardenStageLevel, CompanionGardenState } from './companionGarden';
 import {
   gardenFirstMoveDelay,
@@ -22,6 +23,7 @@ export interface CompanionGardenViewProps {
   state: CompanionGardenState;
   unavailableReason?: 'missing_date' | 'shared_unavailable' | 'inactive_couple';
   accessories?: GardenAccessoryState;
+  ownedAccessories?: readonly CollectibleGardenAccessory[];
   onAccessoryChange?: (companion: GardenCompanionId, accessory: GardenAccessory) => void;
   onBack?: () => void;
 }
@@ -221,18 +223,22 @@ function AccessoryGroup({
   companion,
   label,
   value,
+  ownedAccessories,
   onChange,
 }: {
   companion: GardenCompanionId;
   label: string;
   value: GardenAccessory;
+  ownedAccessories: readonly CollectibleGardenAccessory[];
   onChange?: (companion: GardenCompanionId, accessory: GardenAccessory) => void;
 }) {
   return (
     <div role="radiogroup" aria-label={`${label} 친구 액세서리`} className="space-y-2">
       <p className="text-caption font-semibold text-foreground">{label} 친구</p>
       <div className="flex flex-wrap gap-2">
-        {GARDEN_ACCESSORY_OPTIONS.map((option) => (
+        {GARDEN_ACCESSORY_OPTIONS
+          .filter(({ id }) => id === 'none' || ownedAccessories.includes(id))
+          .map((option) => (
           <button
             key={option.id}
             type="button"
@@ -249,7 +255,7 @@ function AccessoryGroup({
           >
             {option.label}
           </button>
-        ))}
+          ))}
       </div>
     </div>
   );
@@ -259,6 +265,7 @@ export function CompanionGardenView({
   state,
   unavailableReason = 'missing_date',
   accessories = DEFAULT_GARDEN_ACCESSORIES,
+  ownedAccessories = [],
   onAccessoryChange,
   onBack,
 }: CompanionGardenViewProps) {
@@ -413,8 +420,8 @@ export function CompanionGardenView({
                 className="space-y-4 rounded-surface border border-border bg-card p-4"
               >
                 <p className="text-caption text-muted-foreground">무료 장식이에요. 선택은 이 계정의 이 기기에만 저장돼요.</p>
-                <AccessoryGroup companion="peach" label="분홍" value={accessories.peach} onChange={onAccessoryChange} />
-                <AccessoryGroup companion="sage" label="초록" value={accessories.sage} onChange={onAccessoryChange} />
+                <AccessoryGroup companion="peach" label="분홍" value={accessories.peach} ownedAccessories={ownedAccessories} onChange={onAccessoryChange} />
+                <AccessoryGroup companion="sage" label="초록" value={accessories.sage} ownedAccessories={ownedAccessories} onChange={onAccessoryChange} />
               </div>
             ) : null}
 

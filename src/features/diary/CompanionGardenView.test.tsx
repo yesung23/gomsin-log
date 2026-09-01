@@ -12,6 +12,7 @@ import type {
 
 const AVAILABLE = deriveCompanionGardenState(100);
 const DEFAULT_ACCESSORIES: GardenAccessoryState = { version: 1, peach: 'none', sage: 'none' };
+const OWNED_ACCESSORIES = ['cap', 'bow', 'scarf', 'flower'] as const;
 
 function mockReducedMotion(matches: boolean) {
   Object.defineProperty(window, 'matchMedia', {
@@ -39,6 +40,7 @@ function ControlledGarden({ initial = DEFAULT_ACCESSORIES }: { initial?: GardenA
     <CompanionGardenView
       state={AVAILABLE}
       accessories={accessories}
+      ownedAccessories={OWNED_ACCESSORIES}
       onAccessoryChange={change}
     />
   );

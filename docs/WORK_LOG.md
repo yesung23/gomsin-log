@@ -114,6 +114,94 @@
 - APPLIED / NOT APPLIED / UNVERIFIED:
 ```
 
+### 2026-09-01 · Product realignment · Diary / Push OFF / Story on-device AI
+
+#### PLAN POSITION
+- Phase: V4 product realignment / pre-LV hardening
+- Workstream: Diary + local privacy + notification kill switch + on-device Story AI
+- Step: user-approved product realignment implementation and validation
+- Previous Gate: `origin/master` `d69b677` service-readiness master promotion
+- This Gate: validated candidate `d677e7011c68e33ac3c8aaa21014b5ef95814101`
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, latest explicit user approvals
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; Book Studio/Memory Product remains FROZEN
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`
+- Current-state checked: `docs/CURRENT_STATE.md` plus live repository/worktree state
+- Latest relevant Work Log checked: YES
+- MASTER PLAN version / 기준일: 2026-09-01 user override
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: ChatGPT + DevSpace isolated worktree
+- Model: GPT-5.6 Sol
+- Role: primary implementation / verification / integration owner
+- PR: none; validated work is intended for direct master promotion per current owner policy
+- Branch: detached DevSpace worktree based on `origin/master`
+- Base SHA: `d69b677634a5526c81dd263a67990361b0df97db`
+- Old HEAD: `d69b677634a5526c81dd263a67990361b0df97db`
+- New HEAD / Reviewed HEAD: implementation candidate `d677e7011c68e33ac3c8aaa21014b5ef95814101`
+
+#### CHANGED / REVIEWED
+- `src/features/diary/*`: month discovery now opens date-scoped diary pages; user can include/exclude/reorder existing records and choose one of three constrained layouts. `daily_records` remains the content source of truth; diary persistence stores ids/layout/paper metadata only.
+- `src/features/diary/papers.ts`, `src/features/shop/ShopPage.tsx`: active shop surface reduced to five paper backgrounds; unvalidated sticker packs/themes/books/payment surfaces are hidden. Existing 12 free stickers and placements remain available through a separate legacy month-decoration mode instead of duplicating an entire month's records under a single-day page.
+- `src/lib/diaryLocalState.ts`, `src/lib/store.tsx`: account-scoped diary page/paper/sticker local namespaces are purged on sign-out, successful deletion, and deletion-recovery content purge so record ids/date metadata do not survive account removal on a handed-over device.
+- `src/lib/pushFeature.ts`, push/notification/store paths: Push is default OFF. Permission prompts, browser OS notifications, token registration and native tap listeners are gated. When disabled, a connected authenticated account best-effort revokes tokens left by older builds while `clear_my_unseen` remains active so already-viewed content does not remain eligible for later scheduler delivery.
+- `packages/capacitor-on-device-summary/.../OnDeviceSummary.swift`: native output validates exact item count/order/index, non-empty trimmed text and UTF-16 40-character ceiling before returning to JS; JS verification remains a second boundary.
+- `src/features/story/*`, `src/lib/dailySummary/*`: supported iOS native now treats on-device refinement as default ON with `false|0|off` emergency kill switch. Story still renders deterministic summary immediately and does not invoke the model on open. The cover `AI로 다듬기` button starts Foundation Models immediately on user action; running/failure keep deterministic lines visible and all-batch success replaces text only while preserving exact record targets.
+- docs: V4/current-state/engineering/App Store draft updated to describe paper-only shop, Book Studio freeze, Push OFF, default-on/manual-trigger Story AI and remaining physical-device evidence boundary.
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: NOT CHANGED
+- DB/migration semantics: NOT CHANGED; no migration or Edge Function source delta
+- product semantics: changed only by explicit owner decisions above; core record → partner today → exact original → conversation contract retained
+- Production: NOT APPLIED
+- Supabase remote state: NOT APPLIED
+- Vercel: NOT DEPLOYED / not a gate for this task; retained for later pre-upload web verification
+- TestFlight/App Store upload: NOT APPLIED
+
+#### VERIFICATION
+- `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder LANG=en_US.UTF-8 npm run verify`: **PASS** — typecheck, lint, 270 Vitest files / 3,809 tests, production Vite build; main entry 133.36 kB gzip.
+- `npm run verify:native`: **PASS 106/106**.
+- `npm run check:edge && npm run test:edge`: **PASS 18/18**; this is regression evidence only, Edge code was not changed.
+- pre-AI real-browser whole suite on the same realignment delta: **PASS 128/128**. After manual-trigger/default-on AI delta, affected browser set (`dailySummaryOverflow`, `storyProfilePresentation`, `pitchShots`, `realUsability`, `smoke`) **PASS 30/30**.
+- Story/on-device focused contract: **PASS 43/43**, including no automatic generation on Story open, immediate generation after button action, web button absence, payload minimization, batching/fallback/exact-original invariants.
+- `npx cap sync ios`: **PASS**, five Capacitor plugins including local on-device-summary plugin detected.
+- Xcode 26.6 `xcodebuild ... -sdk iphonesimulator ... CODE_SIGNING_ALLOWED=NO build`: **PASS** after restoring ignored CocoaPods/Capacitor generated build inputs.
+- `git diff --check`: **PASS**.
+- What it actually proves: repository/browser/simulator compile correctness for this candidate. It does not prove Foundation Models quality or thermal/battery behaviour on a physical supported iPhone.
+
+#### REVIEW IMPACT
+- FULL for the product realignment delta.
+- Earlier independent Claude review found one Push P1 and six P2 issues; all were fixed before `d677e70`. Claude was unavailable for a second pass, so the primary owner performed exact-diff self-review plus full/targeted verification. No claim of a second independent Claude PASS is made.
+
+#### BLOCKERS
+- code: none found in executed gates
+- environment: none for repository/simulator validation
+- external/manual: Apple Intelligence capable physical iPhone is still required for Korean output quality, airplane-mode network observation, cold/warm latency, heat and battery validation. Current simulator cannot prove these.
+
+#### STOPPED AT
+- exact completed boundary: validated implementation candidate `d677e70`; no remote mutation/deploy performed yet at the time of this ledger entry.
+
+#### REMAINING
+- promote validated commits onto the latest `origin/master` if it has not diverged; run/observe master CI.
+- physical-device Foundation Models QA before App Store upload decision.
+- Vercel may be used later as the owner's pre-upload web check, not as an automatic gate for every master change.
+
+#### NEXT ACTION
+- next owner: ChatGPT primary
+- tool/model: DevSpace / GPT-5.6 Sol
+- 기준 SHA: `d677e7011c68e33ac3c8aaa21014b5ef95814101`
+- exact next task: write Control Tower handoff, fetch remote master, integrate without force, verify CI.
+
+#### DO NOT ADVANCE UNTIL
+- remote master ancestry is checked and no newer conflicting master delta is overwritten.
+- no force push; if master moved, integrate/revalidate instead.
+
+#### PRODUCTION
+- NOT APPLIED
+
 ### 2026-09-01 · Profile Post Composer next gate · Terra HOLD 보강
 
 #### PLAN POSITION

@@ -72,6 +72,24 @@ type RecordMediaScope = { id: string; couple_id: string };
 type Bucket = any;
 type StorageEntry = { name: string; id: string | null };
 
+type DeleteErrorKind = 'authorization' | 'configuration' | 'server' | 'transient' | 'service' | 'unknown';
+
+/**
+ * Convert an external error into a bounded diagnostic category.
+ *
+ * Never return a message, code, path, or object from this boundary: Supabase
+ * errors can contain request details and Storage paths, while the category is
+ * enough to distinguish an auth, retryable, or service-side failure in logs.
+ */
+function safeDeleteErrorKind(error: unknown): DeleteErrorKind {
+  if (!error || typeof error !== 'object') return 'unknown';
+  const status = (error as { status?: unknown }).status;
+  if (status === 401 || status === 403) return 'authorization';
+  if (status === 408 || status === 429) return 'transient';
+  if (typeof status === 'number' && status >= 500 && status <= 599) return 'server';
+  return 'service';
+}
+
 export type HandlerDeps = {
   env: (key: string) => string | undefined;
   createAdmin: (url: string, adminSecretKey: string) => Admin;
@@ -238,7 +256,8 @@ export async function handleDeleteAccountRequest(
     // of this step, so the worst outcome is a flag set on an account whose data
     // is fully intact -- resolved by the next retry, which re-writes the same
     // `true` value idempotently.
-    console.error('[delete-account] Could not record pending deletion; nothing was deleted', flagError);
+    const kind = safeDeleteErrorKind(flagError);
+    console.error('[delete-account] Could not record pending deletion; nothing was deleted', { kind });
     return jsonResponse(
       {
         error: 'Account deletion could not be started. Please try again.',
@@ -281,11 +300,13 @@ export async function handleDeleteAccountRequest(
         p_user_id: userId,
       });
       if (cancelError) {
-        console.error('[delete-account] Failed to clear deletion marker', cancelError);
+        const kind = safeDeleteErrorKind(cancelError);
+        console.error('[delete-account] Failed to clear deletion marker', { kind });
       } else {
         deletionMarkerStarted = false;
       }
-      console.error('[delete-account] Media cleanup failed; database untouched', mediaError);
+      const kind = safeDeleteErrorKind(mediaError);
+      console.error('[delete-account] Media cleanup failed; database untouched', { kind });
       return jsonResponse(
         {
           error: 'Account deletion failed because stored media could not be fully removed. Please try again.',
@@ -356,9 +377,10 @@ export async function handleDeleteAccountRequest(
         break;
       }
       deleteUserError = error;
+      const kind = safeDeleteErrorKind(error);
       console.error(
         `[delete-account] Auth deletion attempt ${attempt}/${AUTH_DELETE_ATTEMPTS} failed`,
-        error,
+        { kind },
       );
       if (attempt < AUTH_DELETE_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
@@ -371,7 +393,6 @@ export async function handleDeleteAccountRequest(
     // would open a window in which the flag is false while the user still lives.
     console.log('[delete-account] Completed', {
       records: records.length,
-      preparation,
       soloCouplesDeleted,
     });
 
@@ -392,15 +413,17 @@ export async function handleDeleteAccountRequest(
         p_user_id: userId,
       });
       if (cancelError) {
+        const kind = safeDeleteErrorKind(cancelError);
         console.error(
           '[delete-account] Failed to clear deletion marker; uploads stay blocked until an operator clears it',
-          cancelError,
+          { kind },
         );
       }
     }
+    const kind = safeDeleteErrorKind(error);
     console.error('[delete-account] Deletion failed', {
       databasePreparationCompleted,
-      error,
+      kind,
     });
     return jsonResponse(
       {

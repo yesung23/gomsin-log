@@ -3,6 +3,7 @@ import { handleIssueRecoveryChallenge, type IssuedChallengeRow } from './handler
 import { encodePgBytea } from '../_shared/e2eeVerify.ts';
 import { parseAdminSecretKey, createAdminClientFetch } from '../_shared/adminSecret.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
+import { logSafeEvent } from '../_shared/safeEventLog.ts';
 
 const DB_READ_FAILURE = 'E_DB_READ_FAILED';
 const failClosedRead = (): never => { throw new Error(DB_READ_FAILURE); };
@@ -103,9 +104,10 @@ Deno.serve(async (request) => {
       if (!row) return { ok: false, code: 'E_ISSUE_FAILED' };
       return { ok: true, row: row as IssuedChallengeRow };
     },
-    // IDs and error codes only. NEVER the challenge bytes: a logged challenge
-    // is a live credential sitting in a log aggregator.
-    logEvent: (event, detail) => console.log(JSON.stringify({ event, ...detail })),
+    // The handler may carry opaque IDs for test correlation, but the platform
+    // boundary forwards only bounded non-identifying diagnostics. In
+    // particular, a challenge nonce must never reach a log aggregator.
+    logEvent: logSafeEvent,
     });
   } catch (error) {
     if (error instanceof Error && error.message === DB_READ_FAILURE) {

@@ -144,7 +144,7 @@ function Probe({
   recordId = 'rec-1',
   allOrNothing = false,
 }: { addFiles?: File[]; removePaths?: string[]; recordId?: string; allOrNothing?: boolean }) {
-  const { state, isReady, updateRecordMedia } = useStore();
+  const { state, isReady, updateRecord, updateRecordMedia } = useStore();
   const record = state.records.find((r) => r.id === 'rec-1');
   return (
     <div>
@@ -152,6 +152,37 @@ function Probe({
       <span data-testid="attachments">
         {(record?.attachments || []).map((a) => a.path ?? a.name).join(',')}
       </span>
+      <span data-testid="update-result" />
+      <span data-testid="record-state">
+        {record ? JSON.stringify({
+          isPrivate: record.isPrivate,
+          isProfilePost: record.isProfilePost,
+          talkAbout: record.talkAbout,
+          contentRevision: record.contentRevision,
+          log: record.log,
+        }) : ''}
+      </span>
+      <button
+        onClick={() => {
+          void updateRecord('rec-1', { isPrivate: false, isProfilePost: true }).then((result) => {
+            screen.getByTestId('update-result').textContent = result.ok ? 'ok' : result.reason;
+          });
+        }}
+      >
+        publish
+      </button>
+      <button
+        onClick={() => {
+          void updateRecord('rec-1', {
+            isPrivate: false,
+            isProfilePost: true,
+            talkAbout: true,
+            log: 'newer local state',
+          });
+        }}
+      >
+        publish-newer
+      </button>
       <button
         onClick={() => {
           void updateRecordMedia(recordId, { addFiles, removePaths, allOrNothing }).then((result) => {
@@ -323,6 +354,241 @@ describe('updateRecordMedia', () => {
     await waitFor(() =>
       expect(screen.getByTestId('attachments')).toHaveTextContent('couple-1/rec-1/new.png'),
     );
+  });
+
+  it('accepts a committed publication update when only its response was lost and adopts the newer revision', async () => {
+    saveRecordToDB.mockResolvedValue({ ok: false, reason: 'offline' });
+    fetchRecordsResultFromDB.mockResolvedValue({
+      ok: true,
+      records: [{
+        ...baseRecord,
+        isPrivate: false,
+        isProfilePost: true,
+        contentRevision: 7,
+      }],
+    });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('ok'));
+    expect(fetchRecordsResultFromDB).toHaveBeenCalledWith('couple-1');
+    expect(screen.getByTestId('record-state')).toHaveTextContent('"isProfilePost":true');
+    expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":7');
+  });
+
+  it('does not let a delayed normal success overwrite a newer local revision', async () => {
+    let resolveFirstSave!: (result: { ok: true; contentRevision: number }) => void;
+    const firstSave = new Promise<{ ok: true; contentRevision: number }>((resolve) => {
+      resolveFirstSave = resolve;
+    });
+    saveRecordToDB
+      .mockImplementationOnce(() => firstSave)
+      .mockResolvedValueOnce({ ok: true, contentRevision: 8 });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(saveRecordToDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => { screen.getByText('publish-newer').click(); });
+    await waitFor(() => {
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":8');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
+    });
+
+    await act(async () => {
+      resolveFirstSave({ ok: true, contentRevision: 7 });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":8');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
+      expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
+    });
+  });
+
+  it('does not let a delayed media success overwrite a newer local revision', async () => {
+    let resolveMediaSave!: (result: { ok: true; contentRevision: number }) => void;
+    const mediaSave = new Promise<{ ok: true; contentRevision: number }>((resolve) => {
+      resolveMediaSave = resolve;
+    });
+    saveRecordToDB
+      .mockImplementationOnce(() => mediaSave)
+      .mockResolvedValueOnce({ ok: true, contentRevision: 8 });
+    await setup({ addFiles: [pngFile('new.png')], removePaths: [EXISTING_PATH] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(saveRecordToDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => { screen.getByText('publish-newer').click(); });
+    await waitFor(() => {
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":8');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
+    });
+
+    await act(async () => {
+      resolveMediaSave({ ok: true, contentRevision: 7 });
+    });
+
+    await waitFor(() => expect(lastResult?.ok).toBe(true));
+    expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":8');
+    expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+    expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
+    expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
+    expect(screen.getByTestId('attachments')).not.toHaveTextContent('new.png');
+    expect(removeRecordMedia).not.toHaveBeenCalledWith([EXISTING_PATH]);
+  });
+
+  it('does not let an older response-loss read-back overwrite a newer local revision', async () => {
+    let resolveReadBack!: (result: { ok: true; records: DailyRecord[] }) => void;
+    const readBack = new Promise<{ ok: true; records: DailyRecord[] }>((resolve) => {
+      resolveReadBack = resolve;
+    });
+    saveRecordToDB
+      .mockResolvedValueOnce({ ok: false, reason: 'offline' })
+      .mockResolvedValueOnce({ ok: true, contentRevision: 8 });
+    fetchRecordsResultFromDB.mockImplementationOnce(() => readBack);
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledWith('couple-1'));
+
+    await act(async () => { screen.getByText('publish-newer').click(); });
+    await waitFor(() => {
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":8');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+    });
+
+    await act(async () => {
+      resolveReadBack({
+        ok: true,
+        records: [{
+          ...baseRecord,
+          isPrivate: false,
+          isProfilePost: true,
+          contentRevision: 7,
+        }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":8');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
+    });
+  });
+
+  it('does not let an equal-revision delayed read-back overwrite a newer local snapshot', async () => {
+    let resolveReadBack!: (result: { ok: true; records: DailyRecord[] }) => void;
+    const readBack = new Promise<{ ok: true; records: DailyRecord[] }>((resolve) => {
+      resolveReadBack = resolve;
+    });
+    saveRecordToDB
+      .mockResolvedValueOnce({ ok: false, reason: 'offline' })
+      .mockResolvedValueOnce({ ok: true, contentRevision: 7 });
+    fetchRecordsResultFromDB.mockImplementationOnce(() => readBack);
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledWith('couple-1'));
+
+    await act(async () => { screen.getByText('publish-newer').click(); });
+    await waitFor(() => {
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":7');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
+    });
+
+    await act(async () => {
+      resolveReadBack({
+        ok: true,
+        records: [{
+          ...baseRecord,
+          isPrivate: false,
+          isProfilePost: true,
+          contentRevision: 7,
+        }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"contentRevision":7');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"talkAbout":true');
+      expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
+      expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
+    });
+  });
+
+  it('refuses to reconcile a response-loss snapshot without an authoritative revision', async () => {
+    saveRecordToDB.mockResolvedValue({ ok: false, reason: 'offline' });
+    fetchRecordsResultFromDB.mockResolvedValue({
+      ok: true,
+      records: [{
+        ...baseRecord,
+        isPrivate: false,
+        isProfilePost: true,
+        contentRevision: undefined,
+      }],
+    });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('offline'));
+    expect(screen.getByTestId('record-state')).not.toHaveTextContent('"isProfilePost":true');
+    expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
+  });
+
+  it('keeps authoritative newer attachments after response-loss reconciliation for the next CAS update', async () => {
+    saveRecordToDB
+      .mockResolvedValueOnce({ ok: false, reason: 'offline' })
+      .mockResolvedValueOnce({ ok: true, contentRevision: 8 });
+    fetchRecordsResultFromDB.mockResolvedValue({
+      ok: true,
+      records: [{
+        ...baseRecord,
+        isPrivate: false,
+        isProfilePost: true,
+        contentRevision: 7,
+        attachments: [{
+          type: 'photo',
+          name: 'newer.png',
+          path: 'couple-1/rec-1/newer.png',
+        }],
+      }],
+    });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('ok'));
+    expect(screen.getByTestId('attachments')).toHaveTextContent('couple-1/rec-1/newer.png');
+    expect(screen.getByTestId('attachments')).not.toHaveTextContent(EXISTING_PATH);
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(saveRecordToDB).toHaveBeenCalledTimes(2));
+    expect(saveRecordToDB.mock.calls[1]?.[3]).toEqual({ kind: 'update', expectedRevision: 7 });
+  });
+
+  it('keeps an ambiguous publication update failed when read-back is mismatched or unavailable', async () => {
+    saveRecordToDB.mockResolvedValue({ ok: false, reason: 'offline' });
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      records: [{ ...baseRecord, isPrivate: true, contentRevision: 7 }],
+    });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('offline'));
+    expect(screen.getByTestId('record-state')).not.toHaveTextContent('"isProfilePost":true');
+
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      records: [],
+      error: new Error('read-back unavailable'),
+    });
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('offline'));
   });
 
   it('keeps uncertain uploads when response loss cannot be reconciled', async () => {

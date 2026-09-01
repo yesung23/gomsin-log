@@ -13,6 +13,7 @@ import {
   type PushCandidate,
   type SendResult,
 } from './handler.ts';
+import { logSafeEvent } from '../_shared/safeEventLog.ts';
 
 /**
  * Thin Deno entrypoint. Every decision lives in `handler.ts` so it is covered by
@@ -234,8 +235,8 @@ Deno.serve(async (request: Request) => {
         await admin.from('device_push_tokens').delete().eq('token', dead);
       },
 
-      // Ids and outcomes only. Never a token, never user content.
-      logEvent: (event, detail) => console.log(JSON.stringify({ event, ...detail })),
+      // The platform boundary forwards only bounded non-identifying outcomes.
+      logEvent: logSafeEvent,
     });
   } catch (error) {
     const code = error instanceof Error && error.message.startsWith('E_')

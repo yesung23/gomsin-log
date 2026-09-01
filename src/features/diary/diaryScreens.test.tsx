@@ -153,29 +153,31 @@ describe('day-page diary', () => {
 });
 
 describe('companion garden entry', () => {
-  it('offers the garden as an optional diary reward and opens the garden route', async () => {
+  it('keeps shop then garden as the only named header actions and removes body cards', async () => {
     const user = userEvent.setup();
     renderDiary();
 
-    const entry = screen.getByRole('button', { name: '우리 정원 보기' });
-    expect(entry).toBeInTheDocument();
-    await user.click(entry);
+    const header = screen.getByRole('banner');
+    const actions = within(header).getAllByRole('button');
+    expect(actions).toHaveLength(2);
+    expect(actions.map((button) => button.getAttribute('aria-label'))).toEqual([
+      '상점 열기',
+      '우리 정원 열기',
+    ]);
+    expect(screen.queryByText('내 종이로 엮기')).not.toBeInTheDocument();
+    expect(screen.queryByText('종이 고르기')).not.toBeInTheDocument();
+    expect(screen.queryByText('우리 정원', { selector: 'h2' })).not.toBeInTheDocument();
+    expect(screen.queryByText('정원 보기')).not.toBeInTheDocument();
+
+    await user.click(actions[0]);
+    expect(navigate).toHaveBeenCalledWith('/shop');
+    navigate.mockClear();
+    await user.click(actions[1]);
     expect(navigate).toHaveBeenCalledWith('/diary/garden');
   });
 });
 
-describe('paper library entry', () => {
-  it('uses paper wording rather than an unvalidated store/catalog promise', async () => {
-    const user = userEvent.setup();
-    renderDiary();
-    expect(screen.queryByText(/다꾸 & 기억 상점|기억책/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '종이 보관함' }));
-    expect(navigate).toHaveBeenCalledWith('/shop');
-    navigate.mockClear();
-    await user.click(screen.getByRole('button', { name: '종이 고르기' }));
-    expect(navigate).toHaveBeenCalledWith('/shop');
-  });
-
+describe('legacy month decoration', () => {
   it('keeps the free sticker set available only in the explicit legacy decorating mode', async () => {
     const user = userEvent.setup();
     renderDiary();

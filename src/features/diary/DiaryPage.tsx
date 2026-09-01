@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookHeart, Images, NotebookPen, CalendarDays, FileText, Sprout } from 'lucide-react';
+import { BookHeart, Images, NotebookPen, CalendarDays, ShoppingBag, Sprout } from 'lucide-react';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { useStore } from '@/lib/useStore';
@@ -70,56 +70,24 @@ function DiaryPageBody() {
       <AppBar
         title="일기장"
         actions={(
-          <AppBarAction
-            aria-label="종이 보관함"
-            onClick={() => navigate('/shop')}
-          >
-            <FileText size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
-          </AppBarAction>
+          <>
+            <AppBarAction
+              aria-label="상점 열기"
+              onClick={() => navigate('/shop')}
+            >
+              <ShoppingBag size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+            </AppBarAction>
+            <AppBarAction
+              aria-label="우리 정원 열기"
+              onClick={() => navigate('/diary/garden')}
+            >
+              <Sprout size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+            </AppBarAction>
+          </>
         )}
       />
 
       <div className="px-4 py-4 space-y-4">
-        <div className="rounded-surface border border-border bg-card p-4 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <FileText size={18} className="pen-icon shrink-0 text-coral" aria-hidden="true" />
-              <h2 className="text-label font-bold text-card-foreground">내 종이로 엮기</h2>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate('/shop')}
-              aria-label="종이 고르기"
-              className="press-response min-h-11 shrink-0 px-3 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
-            >
-              종이 고르기
-            </button>
-          </div>
-          <p className="text-caption text-muted-foreground leading-relaxed">
-            남겨 둔 기록이 날짜별 페이지가 돼요. 종이와 순서만 골라도 한 장의 일기처럼 읽을 수 있어요.
-          </p>
-        </div>
-
-        <div className="rounded-surface border border-border bg-card p-4 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <Sprout size={18} className="pen-icon shrink-0 text-coral" aria-hidden="true" />
-              <h2 className="text-label font-bold text-card-foreground">우리 정원</h2>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate('/diary/garden')}
-              aria-label="우리 정원 보기"
-              className="press-response min-h-11 shrink-0 px-3 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
-            >
-              정원 보기
-            </button>
-          </div>
-          <p className="text-caption text-muted-foreground leading-relaxed">
-            함께한 시간에 따라 자라는 두 친구를 만나고, 이 기기에서 가볍게 꾸밀 수 있어요.
-          </p>
-        </div>
-
         <p className="text-body text-muted-foreground">
           한 달을 열고 날짜를 골라 보세요. 원본은 건드리지 않고, 이 페이지에서 무엇을 보여줄지만 정할 수 있어요.
         </p>

@@ -21,11 +21,11 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pr
         clearTimeout(timer);
         resolve(value);
       })
-      .catch((error) => {
+      .catch(() => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        console.error('[gomsinlog] operation failed, continuing with fallback', error);
+        console.error('[gomsinlog] operation failed, continuing with fallback.');
         resolve(fallback);
       });
   });

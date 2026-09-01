@@ -167,7 +167,7 @@ export function CycleSupportSection({
         !isCurrentIdentity(identity)
         || verificationGenerationRef.current !== verificationGeneration
       ) return;
-      console.error('Failed to load sanitized support signals:', error);
+      console.error('[gomsinlog] Failed to load sanitized support signals.');
       setSignals([]);
       setLoadState('error');
     }
@@ -326,7 +326,7 @@ export function CycleSupportSection({
       toast.success('오늘의 응원 신호를 공유했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('Failed to create sanitized support signal:', error);
+      console.error('[gomsinlog] Failed to create sanitized support signal.');
       setMutationError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setMutationPending(null);
@@ -353,7 +353,7 @@ export function CycleSupportSection({
       toast.info('응원 신호 공유를 취소했어요.');
     } catch (error) {
       if (!isCurrentIdentity(identity)) return;
-      console.error('Failed to revoke sanitized support signal:', error);
+      console.error('[gomsinlog] Failed to revoke sanitized support signal.');
       setMutationError(classifyServerError(error).message);
     } finally {
       if (isCurrentIdentity(identity)) setMutationPending(null);

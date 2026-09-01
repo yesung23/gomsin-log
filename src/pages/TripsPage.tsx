@@ -114,7 +114,7 @@ export function TripsPage() {
         !isCurrentTripScope(requestScope) ||
         globalTripsSnapshotRef.current !== globalSnapshot
       ) return;
-      console.error('Failed to load trips:', error);
+      console.error('[gomsinlog] Failed to load trips.');
       setLoadState('error');
     }
   }, [activeCouple, captureTripScope, coupleId, isCurrentTripScope, userId]);

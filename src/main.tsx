@@ -54,10 +54,10 @@ if (import.meta.env.PROD && !isNativePlatform() && 'serviceWorker' in navigator)
       window.location.reload();
     });
 
-    navigator.serviceWorker.register('/sw.js').then((registration) => {
-      console.info('[PWA] Service Worker registered with scope:', registration.scope);
-    }).catch((error) => {
-      console.warn('[PWA] Service Worker registration skipped/failed:', error);
+    navigator.serviceWorker.register('/sw.js').then(() => {
+      console.info('[PWA] Service Worker registered.');
+    }).catch(() => {
+      console.warn('[PWA] Service Worker registration skipped/failed.');
     });
   });
 }

@@ -93,7 +93,7 @@ export async function syncCycleConsentWithDB(
       .maybeSingle();
 
     if (error) {
-      console.error('[gomsinlog] Failed to read sensitive consent:', error);
+      console.error('[gomsinlog] Failed to read sensitive consent.');
       return consentWriteFailure(error);
     }
 
@@ -108,7 +108,7 @@ export async function syncCycleConsentWithDB(
 
     return { ok: true, granted };
   } catch (err) {
-    console.error('[gomsinlog] Failed to read sensitive consent:', err);
+    console.error('[gomsinlog] Failed to read sensitive consent.');
     return consentWriteFailure(err);
   }
 }
@@ -147,7 +147,7 @@ export async function grantCycleConsentInDB(
       }, { onConflict: 'user_id, consent_type' });
 
     if (error) {
-      console.error('[gomsinlog] Failed to record sensitive consent:', error);
+      console.error('[gomsinlog] Failed to record sensitive consent.');
       return consentWriteFailure(error);
     }
 
@@ -157,7 +157,7 @@ export async function grantCycleConsentInDB(
     }
     return { ok: true, granted: true };
   } catch (err) {
-    console.error('[gomsinlog] Failed to record sensitive consent:', err);
+    console.error('[gomsinlog] Failed to record sensitive consent.');
     return consentWriteFailure(err);
   }
 }
@@ -189,7 +189,7 @@ export async function revokeCycleConsentInDB(
       .eq('consent_type', 'cycle');
 
     if (error) {
-      console.error('[gomsinlog] Failed to revoke sensitive consent:', error);
+      console.error('[gomsinlog] Failed to revoke sensitive consent.');
       return consentWriteFailure(error);
     }
 
@@ -198,7 +198,7 @@ export async function revokeCycleConsentInDB(
     revokeCycleSensitiveConsent(userId);
     return { ok: true, granted: false };
   } catch (err) {
-    console.error('[gomsinlog] Failed to revoke sensitive consent:', err);
+    console.error('[gomsinlog] Failed to revoke sensitive consent.');
     return consentWriteFailure(err);
   }
 }

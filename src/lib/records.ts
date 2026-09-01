@@ -223,7 +223,7 @@ async function signValidatedAttachments(attachments: Attachment[]): Promise<Atta
     .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
 
   if (error) {
-    console.error('[gomsinlog] Failed to sign media URLs:', error);
+    console.error('[gomsinlog] Failed to sign media URLs.');
     const reason = classifyServerError(error).kind;
     return attachments.map((attachment) => ({ ...attachment, url: undefined, urlUnavailable: reason }));
   }
@@ -259,7 +259,7 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
     .order('record_time', { ascending: false });
 
   if (error) {
-    console.error('Failed to fetch records:', error);
+    console.error('[gomsinlog] Failed to fetch records.');
     return { ok: false, records: [], error };
   }
 
@@ -531,7 +531,7 @@ export async function saveRecordToDB(
   if (!environment) {
     const { error } = await request;
     if (error) {
-      console.error('Failed to save record:', error);
+      console.error('[gomsinlog] Failed to save record.');
       return { ok: false, reason: classifyServerError(error).kind };
     }
     return { ok: true, contentRevision: record.contentRevision ?? 1 };
@@ -542,7 +542,7 @@ export async function saveRecordToDB(
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to save record:', error);
+    console.error('[gomsinlog] Failed to save record.');
     return { ok: false, reason: classifyServerError(error).kind };
   }
   if (!data || !Number.isSafeInteger(Number(data.content_revision))) {
@@ -574,7 +574,7 @@ export async function deleteRecordFromDB(
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to delete record:', error);
+    console.error('[gomsinlog] Failed to delete record.');
     return { ok: false, reason: classifyServerError(error).kind };
   }
   // No matching row came back. The filters pin id + owner + couple, so this is
@@ -725,7 +725,7 @@ export async function uploadRecordMedia(
   });
 
   if (error) {
-    console.error('[gomsinlog] Media upload failed:', error);
+    console.error('[gomsinlog] Media upload failed.');
     // Classified from the real Storage error. This used to hard-code
     // "연결 상태를 확인하고" while holding the actual cause, so an RLS rejection,
     // a 413 and an expired JWT all told the user to check a working connection.

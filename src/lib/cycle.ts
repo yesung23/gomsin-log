@@ -546,7 +546,7 @@ export async function fetchCycleSettingsResultFromDB(): Promise<CycleSettingsFet
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to fetch cycle settings:', error);
+    console.error('[gomsinlog] Failed to fetch cycle settings.');
     return fetchFailure(error);
   }
   return {
@@ -587,7 +587,7 @@ export async function saveCycleSettingsToDB(
     .single();
 
   if (error || !data) {
-    console.error('Failed to save cycle settings:', error);
+    console.error('[gomsinlog] Failed to save cycle settings.');
     return writeFailure(error);
   }
   return {
@@ -612,7 +612,7 @@ export async function fetchCycleEntriesResultFromDB(): Promise<CycleEntriesFetch
     .order('start_date', { ascending: false });
 
   if (error) {
-    console.error('Failed to fetch cycle entries:', error);
+    console.error('[gomsinlog] Failed to fetch cycle entries.');
     return fetchFailure(error);
   }
   return { ok: true, entries: (data || []).map(mapCycleEntryRow) };
@@ -651,7 +651,7 @@ export async function saveCycleEntryToDB(
     .single();
 
   if (error || !data) {
-    console.error('Failed to save cycle entry:', error);
+    console.error('[gomsinlog] Failed to save cycle entry.');
     return writeFailure(error);
   }
   return { ok: true, entry: mapCycleEntryRow(data) };
@@ -685,7 +685,7 @@ export async function updateCycleEntryInDB(
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to update cycle entry:', error);
+    console.error('[gomsinlog] Failed to update cycle entry.');
     return writeFailure(error);
   }
   // The filters pin id + owner, so an empty answer is an ownership/visibility
@@ -710,7 +710,7 @@ export async function deleteCycleEntryFromDB(id: string): Promise<CycleDeleteRes
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to delete cycle entry:', error);
+    console.error('[gomsinlog] Failed to delete cycle entry.');
     return writeFailure(error);
   }
   // Nothing was deleted: the row is gone or was never this user's.
@@ -733,7 +733,7 @@ export async function fetchCycleSupportSignalsResultFromDB(
     .order('created_at', { ascending: false });
 
   if (error) {
-    console.error('Failed to fetch cycle support signals:', error);
+    console.error('[gomsinlog] Failed to fetch cycle support signals.');
     return fetchFailure(error);
   }
   return {
@@ -771,7 +771,7 @@ export async function createCycleSupportSignalInDB(
     .single();
 
   if (error || !data) {
-    console.error('Failed to create cycle support signal:', error);
+    console.error('[gomsinlog] Failed to create cycle support signal.');
     return writeFailure(error);
   }
   return { ok: true, signal: mapCycleSupportSignalRow(data) };
@@ -794,7 +794,7 @@ export async function revokeCycleSupportSignalFromDB(id: string): Promise<CycleD
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to revoke cycle support signal:', error);
+    console.error('[gomsinlog] Failed to revoke cycle support signal.');
     return writeFailure(error);
   }
   // Nothing was revoked: the signal is gone or was never this user's to share.
@@ -818,7 +818,7 @@ export async function fetchCyclePeriodsResultFromDB(): Promise<CyclePeriodsFetch
     .order('start_date', { ascending: false });
 
   if (error) {
-    console.error('Failed to fetch cycle periods:', error);
+    console.error('[gomsinlog] Failed to fetch cycle periods.');
     return fetchFailure(error);
   }
   return { ok: true, periods: (data || []).map(mapCyclePeriodRow) };
@@ -852,7 +852,7 @@ export async function saveCyclePeriodToDB(
     .single();
 
   if (error || !data) {
-    console.error('Failed to save cycle period:', error);
+    console.error('[gomsinlog] Failed to save cycle period.');
     return writeFailure(error);
   }
   return { ok: true, period: mapCyclePeriodRow(data) };
@@ -884,7 +884,7 @@ export async function updateCyclePeriodInDB(
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to update cycle period:', error);
+    console.error('[gomsinlog] Failed to update cycle period.');
     return writeFailure(error);
   }
   if (!data) return { ok: false, reason: 'not_found' };
@@ -907,7 +907,7 @@ export async function deleteCyclePeriodFromDB(id: string): Promise<CycleDeleteRe
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to delete cycle period:', error);
+    console.error('[gomsinlog] Failed to delete cycle period.');
     return writeFailure(error);
   }
   if (!data) return { ok: false, reason: 'not_found' };
@@ -930,7 +930,7 @@ export async function fetchCycleDailyLogsResultFromDB(): Promise<CycleDailyLogsF
     .order('log_date', { ascending: false });
 
   if (error) {
-    console.error('Failed to fetch cycle daily logs:', error);
+    console.error('[gomsinlog] Failed to fetch cycle daily logs.');
     return fetchFailure(error);
   }
   return { ok: true, logs: (data || []).map(mapCycleDailyLogRow) };
@@ -973,7 +973,7 @@ export async function saveCycleDailyLogToDB(
     .single();
 
   if (error || !data) {
-    console.error('Failed to save cycle daily log:', error);
+    console.error('[gomsinlog] Failed to save cycle daily log.');
     return writeFailure(error);
   }
   return { ok: true, log: mapCycleDailyLogRow(data) };
@@ -995,7 +995,7 @@ export async function deleteCycleDailyLogFromDB(id: string): Promise<CycleDelete
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to delete cycle daily log:', error);
+    console.error('[gomsinlog] Failed to delete cycle daily log.');
     return writeFailure(error);
   }
   if (!data) return { ok: false, reason: 'not_found' };
@@ -1069,7 +1069,7 @@ export async function saveCycleSharingPreferencesToDB(
     .single();
 
   if (error || !data) {
-    console.error('Failed to save sharing preferences:', error);
+    console.error('[gomsinlog] Failed to save sharing preferences.');
     return writeFailure(error);
   }
   return {
@@ -1109,7 +1109,7 @@ export async function fetchPartnerCycleProjectionFromDB(): Promise<CyclePartnerP
   const { data, error } = await supabase.rpc('get_partner_cycle_projection');
 
   if (error) {
-    console.error('Failed to fetch partner cycle projection:', error);
+    console.error('[gomsinlog] Failed to fetch partner cycle projection.');
     // `PGRST202` is the missing-function answer, the RPC analogue of a missing
     // table. Reporting it as a bad connection would invite a pointless retry.
     if (error.code === 'PGRST202') return { ok: false, reason: 'not_deployed' };

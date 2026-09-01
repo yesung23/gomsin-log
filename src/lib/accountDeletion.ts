@@ -91,10 +91,10 @@ export type MarkerState = 'absent' | 'active';
 export function markRecoveryPending(userId: string): void {
   try {
     window.localStorage.setItem(recoveryKeyFor(userId), 'true');
-  } catch (error) {
+  } catch {
     // Losing the marker is a FAILURE, not a "fail-safe". It is mitigated only
     // by the server-authoritative `app_metadata.account_deletion_pending` flag.
-    console.error('[gomsinlog] deletion_status=pending marker could not be stored', error);
+    console.error('[gomsinlog] deletion_status=pending marker could not be stored.');
   }
 }
 
@@ -114,10 +114,10 @@ export function readRecoveryMarker(
 ): MarkerState {
   try {
     return storage.getItem(recoveryKeyFor(userId)) === null ? 'absent' : 'active';
-  } catch (error) {
+  } catch {
     // Storage unreadable. We cannot prove the marker is absent, so we do not
     // claim it is. Fail closed.
-    console.error('[gomsinlog] deletion_status marker unreadable; failing closed', error);
+    console.error('[gomsinlog] deletion_status marker unreadable; failing closed.');
     return 'active';
   }
 }
@@ -133,7 +133,7 @@ export function clearRecoveryMarker(userId: string): void {
   try {
     window.localStorage.removeItem(recoveryKeyFor(userId));
   } catch (error) {
-    console.error('[gomsinlog] recovery marker could not be cleared', error);
+    console.error('[gomsinlog] recovery marker could not be cleared.');
   }
 }
 
@@ -277,7 +277,7 @@ export async function serverCallBlockedByPendingDeletion(): Promise<boolean> {
     // A broken gate must not silently open the door, but it also must not brick
     // every write. Log loudly and let the caller proceed: the route gate and the
     // store's own pre-flight remain in force.
-    console.error('[gomsinlog] deletion pre-flight gate failed', error);
+    console.error('[gomsinlog] deletion pre-flight gate failed.');
     return false;
   }
 }

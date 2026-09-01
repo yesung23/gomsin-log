@@ -73,7 +73,7 @@ export function writeAvatar(userId: string | undefined, slot: AvatarSlot, dataUr
     localStorage.setItem(storageKey(userId, slot), dataUrl);
     return true;
   } catch (error) {
-    console.error('[gomsinlog] Avatar save failed:', error);
+    console.error('[gomsinlog] Avatar save failed.');
     return false;
   }
 }

@@ -18,6 +18,7 @@ import {
 } from '@/lib/supabase';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { classifyServerError } from '@/lib/serverErrors';
+import { appleLoginEnabled } from '@/lib/appleLoginFeature';
 
 import { toast } from 'sonner';
 import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
@@ -122,6 +123,10 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   });
   const [authProvidersResolved, setAuthProvidersResolved] = useState(false);
   const [authAvailabilityReloadIndex, setAuthAvailabilityReloadIndex] = useState(0);
+  const appleLoginAvailable = authProvidersResolved
+    && appleLoginEnabled()
+    && isIOS
+    && authProviders.apple;
 
   useEffect(() => {
     if (step !== 0) {
@@ -1066,7 +1071,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 )}
 
                 {/* Primary Auth CTAs */}
-                {authProvidersResolved && isIOS && authProviders.apple && (
+                {appleLoginAvailable && (
                   <button
                     onClick={handleAppleLogin}
                     disabled={isStartingSocialLogin}
@@ -1093,7 +1098,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 {/* `email` is deliberately absent: a provider the screen does not
                     offer must not count as a way in, or a project configured for
                     email alone would show no button and no explanation either. */}
-                {authProvidersResolved && !authProviders.google && !(isIOS && authProviders.apple) && (
+                {authProvidersResolved && !authProviders.google && !appleLoginAvailable && (
                   <div className="space-y-3 text-center">
                     <p role="alert" className="text-caption text-destructive text-center font-semibold">
                       현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.

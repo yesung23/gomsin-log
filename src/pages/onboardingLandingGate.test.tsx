@@ -165,6 +165,7 @@ describe('Apple sign-in on iOS obeys the legal consent gate', () => {
   const originalUserAgent = navigator.userAgent;
 
   beforeEach(() => {
+    vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'true');
     signInWithApple.mockClear();
     Object.defineProperty(navigator, 'userAgent', {
       value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
@@ -173,6 +174,7 @@ describe('Apple sign-in on iOS obeys the legal consent gate', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     Object.defineProperty(navigator, 'userAgent', {
       value: originalUserAgent,
       configurable: true,

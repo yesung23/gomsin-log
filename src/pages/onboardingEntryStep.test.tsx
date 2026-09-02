@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import type { AuthUser } from '@/types';
 
@@ -75,6 +75,7 @@ const ROLE_STEP = '곰신로그를 어떻게 사용할까요?';
 
 describe('onboarding entry step', () => {
   beforeEach(() => {
+    vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'true');
     setOnboardingStep.mockClear();
     state.authenticatedUser = null;
     state.onboardingStep = 0;
@@ -87,6 +88,10 @@ describe('onboarding entry step', () => {
       configurable: true,
       value: 'Mozilla/5.0',
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('shows the sign-in screen to a visitor who is not signed in', async () => {
@@ -121,6 +126,45 @@ describe('onboarding entry step', () => {
     render(<OnboardingPage />);
 
     expect(await screen.findByText('Apple로 계속하기')).toBeInTheDocument();
+  });
+
+  it('keeps Apple login hidden when the server enables it but the reviewed build gate is off', async () => {
+    vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'false');
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    });
+    fetchAuthProviderAvailability.mockResolvedValue({
+      google: true,
+      apple: true,
+      email: true,
+    });
+
+    render(<OnboardingPage />);
+
+    expect(await screen.findByText(SIGN_IN_CTA)).toBeInTheDocument();
+    expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
+  });
+
+  it('shows a recoverable unavailable state when Apple is the only remote provider but its build gate is off', async () => {
+    vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'false');
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    });
+    fetchAuthProviderAvailability.mockResolvedValue({
+      google: false,
+      apple: true,
+      email: true,
+    });
+
+    render(<OnboardingPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
+    );
+    expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
   });
 
   it('does NOT ask an already-signed-in account to sign in again', async () => {

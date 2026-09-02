@@ -17,6 +17,7 @@ import {
 import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
 import type { AuthUser, IAuthRepository, Role } from '@/types';
 import { createPkceTimeoutFetch } from '@/lib/oauthPkce';
+import { appleLoginEnabled } from '@/lib/appleLoginFeature';
 
 /**
  * Supabase environment variables configuration.
@@ -749,6 +750,9 @@ export class SupabaseAuthRepository implements IAuthRepository {
   }
 
   async signInWithApple(): Promise<{ error?: string }> {
+    if (!appleLoginEnabled()) {
+      return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+    }
     return this.startOAuth('apple');
   }
 

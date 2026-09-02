@@ -34,6 +34,17 @@ export function validateTaskTitle(title: string): string | null {
 
 export async function fetchTasks(coupleId: string): Promise<TasksResult> {
   if (!supabase || !coupleId) return failed();
+  // A SELECT hidden by RLS can legitimately return `[]` when the caller no
+  // longer belongs to this couple. Verify the workspace first so an empty list
+  // cannot be mistaken for write authority by the schedule UI.
+  const { data: activeCoupleId, error: membershipError } = await supabase
+    .rpc('get_my_active_couple_id');
+  if (membershipError) {
+    console.error('[gomsinlog] Failed to verify task workspace.');
+    return failed(membershipError);
+  }
+  if (activeCoupleId !== coupleId) return failed({ code: '42501' });
+
   const { data, error } = await supabase.from('couple_tasks').select('*')
     .eq('couple_id', coupleId)
     .order('due_date', { ascending: true })

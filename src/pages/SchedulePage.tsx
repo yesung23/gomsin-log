@@ -52,6 +52,7 @@ const EVENT_BADGES: Record<EventType, { label: string; tone: 'neutral' | 'accent
 };
 
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden';
+type TaskLoadState = 'idle' | 'loading' | 'ready' | 'error' | 'forbidden';
 
 export function SchedulePage() {
   const { state, addEvent, updateEvent, deleteEvent, reloadEvents, sharedSyncStatus } = useStore();
@@ -160,11 +161,13 @@ export function SchedulePage() {
   const isOffline = !useOnlineStatus();
   const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<CoupleTask[]>([]);
+  const [taskLoadState, setTaskLoadState] = useState<TaskLoadState>(activeCouple ? 'loading' : 'idle');
   const [taskTitle, setTaskTitle] = useState('');
   const [taskTime, setTaskTime] = useState('');
   const [taskForMe, setTaskForMe] = useState(false);
   const [isSavingTask, setIsSavingTask] = useState(false);
   const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(new Set());
+  const taskRequestSequenceRef = useRef(0);
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
 
@@ -191,6 +194,22 @@ export function SchedulePage() {
     setDeletingEventId(null);
   }, [scheduleAccessKey, today]);
 
+  /*
+   * Tasks are component-local rather than part of the shared store. Clear them
+   * before paint whenever the account or couple boundary changes, otherwise one
+   * frame can show the previous couple's private planning data.
+   */
+  useLayoutEffect(() => {
+    taskRequestSequenceRef.current += 1;
+    setTasks([]);
+    setPendingTaskIds(new Set());
+    setTaskTitle('');
+    setTaskTime('');
+    setTaskForMe(false);
+    setIsSavingTask(false);
+    setTaskLoadState(activeCouple ? 'loading' : 'idle');
+  }, [activeCouple, scheduleAccessKey]);
+
   useEffect(() => {
     if (!authenticatedUser?.id) return;
     let cancelled = false;
@@ -203,27 +222,43 @@ export function SchedulePage() {
     return () => { cancelled = true; };
   }, [authenticatedUser?.id, scheduleAccessKey]);
 
-  const refreshTasks = useCallback(async () => {
+  const refreshTasks = useCallback(async ({ announce = false }: { announce?: boolean } = {}) => {
     const coupleId = profile.couple.coupleId;
     if (!authenticatedUser?.id || !coupleId || !activeCouple) {
+      taskRequestSequenceRef.current += 1;
       setTasks([]);
+      setTaskLoadState('idle');
       return;
     }
     const access = captureAccess();
+    const requestSequence = ++taskRequestSequenceRef.current;
+    if (announce) setTaskLoadState('loading');
     const result = await fetchTasks(coupleId);
-    if (!isCurrentAccess(access)) return;
-    if (result.ok) setTasks(result.tasks);
+    if (!isCurrentAccess(access) || requestSequence !== taskRequestSequenceRef.current) return;
+    if (result.ok) {
+      setTasks(result.tasks);
+      setTaskLoadState('ready');
+      return;
+    }
+    if (result.reason === 'forbidden') setTasks([]);
+    setTaskLoadState(result.reason);
   }, [activeCouple, authenticatedUser?.id, captureAccess, isCurrentAccess, profile.couple.coupleId]);
 
   useEffect(() => {
-    void refreshTasks();
+    void refreshTasks({ announce: true });
     const client = supabase;
     const coupleId = profile.couple.coupleId;
     if (!client || !activeCouple || !coupleId) return;
+    let subscribed = true;
     const channel = client.channel(`couple-tasks:${coupleId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'couple_tasks', filter: `couple_id=eq.${coupleId}` }, () => void refreshTasks())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'couple_tasks', filter: `couple_id=eq.${coupleId}` }, () => {
+        if (subscribed) void refreshTasks();
+      })
       .subscribe();
-    return () => { void client.removeChannel(channel); };
+    return () => {
+      subscribed = false;
+      void client.removeChannel(channel);
+    };
   }, [activeCouple, profile.couple.coupleId, refreshTasks]);
 
   const previousSyncStatusRef = useRef(sharedSyncStatus);
@@ -541,7 +576,14 @@ export function SchedulePage() {
   };
 
   const handleCreateTask = async () => {
-    if (isSavingTask || isOffline || !authenticatedUser?.id || !profile.couple.coupleId || !activeCouple) return;
+    if (
+      isSavingTask
+      || isOffline
+      || taskLoadState !== 'ready'
+      || !authenticatedUser?.id
+      || !profile.couple.coupleId
+      || !activeCouple
+    ) return;
     const error = validateTaskTitle(taskTitle);
     if (error) {
       toast.error(error);
@@ -574,32 +616,52 @@ export function SchedulePage() {
   };
 
   const handleToggleTask = async (task: CoupleTask) => {
-    if (pendingTaskIds.has(task.id) || isOffline) return;
+    if (pendingTaskIds.has(task.id) || isOffline || taskLoadState !== 'ready' || !activeCouple) return;
+    const access = captureAccess();
     setPendingTaskIds((current) => new Set(current).add(task.id));
-    const saved = await updateTask(task, { completed: !task.completed });
-    setPendingTaskIds((current) => {
-      const next = new Set(current);
-      next.delete(task.id);
-      return next;
-    });
-    if (!saved) {
-      toast.error('할 일 상태를 저장하지 못했어요.');
-      return;
+    try {
+      const saved = await updateTask(task, { completed: !task.completed });
+      if (!isCurrentAccess(access)) return;
+      if (!saved) {
+        toast.error('할 일 상태를 저장하지 못했어요.');
+        return;
+      }
+      setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
+    } finally {
+      if (isCurrentAccess(access)) {
+        setPendingTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(task.id);
+          return next;
+        });
+      }
     }
-    setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
   };
 
   const handleDeleteTask = async (task: CoupleTask) => {
-    if (pendingTaskIds.has(task.id) || task.createdBy !== authenticatedUser?.id || isOffline) return;
+    if (
+      pendingTaskIds.has(task.id)
+      || task.createdBy !== authenticatedUser?.id
+      || isOffline
+      || taskLoadState !== 'ready'
+      || !activeCouple
+    ) return;
+    const access = captureAccess();
     setPendingTaskIds((current) => new Set(current).add(task.id));
-    const deleted = await deleteTask(task);
-    setPendingTaskIds((current) => {
-      const next = new Set(current);
-      next.delete(task.id);
-      return next;
-    });
-    if (deleted) setTasks((current) => current.filter((entry) => entry.id !== task.id));
-    else toast.error('할 일을 삭제하지 못했어요.');
+    try {
+      const deleted = await deleteTask(task);
+      if (!isCurrentAccess(access)) return;
+      if (deleted) setTasks((current) => current.filter((entry) => entry.id !== task.id));
+      else toast.error('할 일을 삭제하지 못했어요.');
+    } finally {
+      if (isCurrentAccess(access)) {
+        setPendingTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(task.id);
+          return next;
+        });
+      }
+    }
   };
 
   const selectedEvents = eventsOnDate(events, selectedDate).sort((a, b) =>
@@ -888,8 +950,44 @@ export function SchedulePage() {
                 }
               />
 
+              {activeCouple && taskLoadState === 'loading' ? (
+                <div
+                  role="status"
+                  className="mb-3 flex min-h-11 items-center gap-2 rounded-control border border-border px-3 py-2 text-label text-muted-foreground"
+                >
+                  <RefreshCw size={16} className="shrink-0 animate-spin" aria-hidden="true" />
+                  할 일을 불러오는 중이에요
+                </div>
+              ) : null}
+
+              {activeCouple && (taskLoadState === 'error' || taskLoadState === 'forbidden') ? (
+                <EmptyState
+                  className="mb-3 rounded-control border border-border px-4"
+                  icon={taskLoadState === 'forbidden'
+                    ? <ShieldAlert size={18} className="text-warning" />
+                    : <RefreshCw size={18} className="text-muted-foreground" />}
+                  title={taskLoadState === 'forbidden'
+                    ? '할 일을 볼 권한이 없어요'
+                    : '할 일을 불러오지 못했어요'}
+                  description={taskLoadState === 'forbidden'
+                    ? '연결 상태나 계정 권한을 확인한 뒤 다시 시도해 주세요.'
+                    : tasks.length > 0
+                      ? '이미 확인한 할 일은 그대로 두었어요. 연결을 확인한 뒤 다시 시도해 주세요.'
+                      : '일정은 불러왔지만 할 일 목록은 확인하지 못했어요.'}
+                  action={(
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => void refreshTasks({ announce: true })}
+                    >
+                      할 일 다시 시도
+                    </Button>
+                  )}
+                />
+              ) : null}
+
               {/* Quick task creation */}
-              {activeCouple && (
+              {activeCouple && taskLoadState === 'ready' && (
                 /*
                   두 줄로 나눴다 (2026-08-23).
 
@@ -943,7 +1041,7 @@ export function SchedulePage() {
                   </div>
                 </div>
               )}
-              {activeCouple && (
+              {activeCouple && taskLoadState === 'ready' && (
                 /*
                  * The native checkbox paints at 13x13 and cannot be resized reliably
                  * across browsers, so the tap target is the LABEL: `min-h-11` makes the
@@ -979,7 +1077,7 @@ export function SchedulePage() {
                           <button
                             type="button"
                             onClick={() => void handleToggleTask(task)}
-                            disabled={pending || isOffline}
+                            disabled={pending || isOffline || taskLoadState !== 'ready' || !activeCouple}
                             aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`}
                             className="press-response disabled:opacity-40 min-w-11 min-h-11 flex items-center justify-center -m-2" style={{ color: 'var(--ink)' }}
                           >
@@ -991,7 +1089,7 @@ export function SchedulePage() {
                             <button
                               type="button"
                               onClick={() => void handleDeleteTask(task)}
-                              disabled={pending || isOffline}
+                              disabled={pending || isOffline || taskLoadState !== 'ready' || !activeCouple}
                               aria-label={`${task.title} 할 일 삭제`}
                               className="press-response min-w-11 min-h-11 flex items-center justify-center -m-2 text-muted-foreground hover:text-destructive disabled:opacity-40"
                             >
@@ -1066,10 +1164,14 @@ export function SchedulePage() {
                 </RowGroup>
               )}
 
-              {selectedEvents.length === 0 && selectedTasks.length === 0 && (
+              {selectedEvents.length === 0
+                && selectedTasks.length === 0
+                && (!activeCouple || taskLoadState === 'ready') && (
                 <EmptyState
                   icon={<ListTodo size={18} className="text-muted-foreground" />}
-                  title="선택한 날짜에 일정과 할 일이 없어요."
+                  title={activeCouple
+                    ? '선택한 날짜에 일정과 할 일이 없어요.'
+                    : '선택한 날짜에 일정이 없어요.'}
                 />
               )}
             </section>

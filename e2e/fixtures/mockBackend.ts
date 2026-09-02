@@ -431,7 +431,11 @@ export async function installMockBackend(
     // and discards that hygiene RPC just like the unseen-flag cleanup above.
     if (path === '/rest/v1/rpc/revoke_my_push_tokens') return json(route, null);
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
-    if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
+    if (path === '/rest/v1/couple_tasks') {
+      const failure = failureFor(scenario, 'couple_tasks');
+      if (failure) return json(route, failure, failure.status);
+      return rows(route, scenario.coupleTasks ?? []);
+    }
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);
     // Migration 058 is additive to the full-state hydration path. Keep the
     // browser fixture additive too: an empty highlight workspace is a valid

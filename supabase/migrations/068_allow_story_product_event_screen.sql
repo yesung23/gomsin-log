@@ -29,6 +29,17 @@ ALTER TABLE public.product_events
 ALTER TABLE public.product_events
   VALIDATE CONSTRAINT product_events_screen_check_v2;
 
+-- Cached or rolled-back clients predating this migration used to attach the
+-- exact source-record UUID to the Story conversion. Story measurement needs
+-- only the aggregate transition, so make data minimisation a server invariant
+-- rather than trusting every client version to omit the identifier.
+ALTER TABLE public.product_events
+  ADD CONSTRAINT product_events_story_subject_check
+  CHECK (screen IS DISTINCT FROM 'story' OR subject_id IS NULL) NOT VALID;
+
+ALTER TABLE public.product_events
+  VALIDATE CONSTRAINT product_events_story_subject_check;
+
 ALTER TABLE public.product_events
   DROP CONSTRAINT product_events_screen_check;
 

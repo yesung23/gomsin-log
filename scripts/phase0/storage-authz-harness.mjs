@@ -4088,9 +4088,15 @@ check(
 check(
   mustSql(`SELECT count(*) FROM pg_constraint
            WHERE conrelid = 'public.product_events'::regclass
-             AND contype = 'c'
-             AND pg_get_constraintdef(oid) LIKE '%screen%'`, '068 screen constraint count') === '1',
+             AND conname = 'product_events_screen_check'`, '068 screen constraint count') === '1',
   '068 leaves one final screen constraint rather than parallel legacy rules',
+);
+check(
+  mustSql(`SELECT convalidated::text
+           FROM pg_constraint
+           WHERE conrelid = 'public.product_events'::regclass
+             AND conname = 'product_events_story_subject_check'`, '068 Story subject validation') === 'true',
+  '068 validates the Story no-subject privacy constraint',
 );
 
 for (const screen of ['home', 'record', 'schedule', 'us', 'my', 'call', 'story', 'onboarding', 'settings']) {
@@ -4115,6 +4121,11 @@ check(
   asUser(A, `INSERT INTO public.product_events (kind, screen, occurred_on)
              VALUES ('briefing_to_original', 'story', DATE '2026-05-03')`).ok,
   '068 Story can record the aggregate transition without a source identifier',
+);
+check(
+  !asUser(A, `INSERT INTO public.product_events (kind, screen, subject_id, occurred_on)
+              VALUES ('briefing_to_original', 'story', '${SHARED}', DATE '2026-05-03')`).ok,
+  '068 even an older owner client cannot attach an exact record id to a Story event',
 );
 check(
   asUser(A, `SELECT count(*) FROM public.product_events

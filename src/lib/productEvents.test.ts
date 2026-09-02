@@ -254,5 +254,6 @@ it('emits every kind the union declares', () => {
 
     expect(databaseScreens).toEqual(clientScreens);
     expect(databaseScreens).toContain('story');
+    expect(migration).toContain('CHECK (screen IS DISTINCT FROM \'story\' OR subject_id IS NULL)');
   });
 });

@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, FileText, Sprout } from 'lucide-react';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
-import { localToday } from '@/lib/cycle';
 import { GARDEN_ACCESSORY_OPTIONS } from '@/lib/companionGardenLocalState';
 import {
+  collectCompanionAccessory,
   collectCompanionPaper,
-  drawDailyAccessory,
   loadCompanionShopState,
   type CollectibleGardenAccessory,
   type CompanionShopState,
@@ -24,36 +23,25 @@ import {
 const COLLECTIBLE_ACCESSORY_OPTIONS = GARDEN_ACCESSORY_OPTIONS.filter(
   (option): option is { id: CollectibleGardenAccessory; label: string } => option.id !== 'none',
 );
-const DRAW_DURATION_MS = 1000;
-const REDUCED_MOTION_DRAW_DURATION_MS = 80;
 
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches === true;
-}
-
-function millisecondsUntilNextLocalDay(now = new Date()): number {
-  const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return Math.max(50, nextDay.getTime() - now.getTime() + 50);
+function withObjectParticle(label: string): string {
+  const lastCodePoint = label.codePointAt(label.length - 1) ?? 0;
+  const hasBatchim = lastCodePoint >= 0xac00
+    && lastCodePoint <= 0xd7a3
+    && (lastCodePoint - 0xac00) % 28 !== 0;
+  return `${label}${hasBatchim ? '을' : '를'}`;
 }
 
 export function ShopPageBody() {
   const navigate = useNavigate();
   const { state } = useStore();
-  const userId = state.authenticatedUser?.id || state.profile.id || '';
+  const userId = state.authenticatedUser?.id || '';
   const [shopState, setShopState] = useState<CompanionShopState>(() => loadCompanionShopState(userId));
   const [selectedPaper, setSelectedPaper] = useState<PaperTexture>(() => {
     const initialShopState = loadCompanionShopState(userId);
     return reconcileOwnedPaperTexture(userId, initialShopState.ownedPapers);
   });
   const [announcement, setAnnouncement] = useState<string | null>(null);
-  const [today, setToday] = useState(() => localToday());
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [pendingAccessory, setPendingAccessory] = useState<CollectibleGardenAccessory | null>(null);
-  const [isReducedMotion, setIsReducedMotion] = useState(false);
-  const drawTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const drawInFlightRef = useRef(false);
 
   useEffect(() => {
     const nextShopState = loadCompanionShopState(userId);
@@ -62,105 +50,21 @@ export function ShopPageBody() {
     setSelectedPaper(nextPaper);
     applyPaperTextureAttribute(nextPaper);
     setAnnouncement(null);
-    setToday(localToday());
-    setIsDrawing(false);
-    setPendingAccessory(null);
-    setIsReducedMotion(false);
   }, [userId]);
 
-  useEffect(() => {
-    setIsDrawing(false);
-    setPendingAccessory(null);
-    setIsReducedMotion(false);
-    return () => {
-      if (drawTimerRef.current !== null) clearTimeout(drawTimerRef.current);
-      drawTimerRef.current = null;
-      drawInFlightRef.current = false;
-    };
-  }, [userId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const refreshDate = () => setToday(localToday());
-    const scheduleNextDay = () => {
-      timer = setTimeout(() => {
-        if (cancelled) return;
-        refreshDate();
-        scheduleNextDay();
-      }, millisecondsUntilNextLocalDay());
-    };
-
-    scheduleNextDay();
-    window.addEventListener('focus', refreshDate);
-    document.addEventListener('visibilitychange', refreshDate);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      window.removeEventListener('focus', refreshDate);
-      document.removeEventListener('visibilitychange', refreshDate);
-    };
-  }, []);
-
-  const ownedAccessories = COLLECTIBLE_ACCESSORY_OPTIONS.filter(({ id }) => (
-    shopState.ownedAccessories.includes(id)
-  ));
-  const drawComplete = ownedAccessories.length === COLLECTIBLE_ACCESSORY_OPTIONS.length;
-  const drawUsedToday = shopState.lastFreeDrawDate === today;
-  const drawDisabled = !userId || drawComplete || drawUsedToday || isDrawing;
-  const drawLabel = !userId
-    ? '로그인 후 이용할 수 있어요'
-    : isDrawing
-      ? '뽑는 중…'
-      : drawComplete
-      ? '모든 액세서리를 모았어요'
-      : drawUsedToday
-        ? '오늘 뽑기 완료'
-        : '오늘의 액세서리 무료 뽑기';
-
-  const drawAccessory = () => {
-    if (drawInFlightRef.current || drawDisabled) return;
-    drawInFlightRef.current = true;
+  const collectAccessory = (option: typeof COLLECTIBLE_ACCESSORY_OPTIONS[number]) => {
+    if (!userId || shopState.ownedAccessories.includes(option.id)) return;
     setAnnouncement(null);
-    const drawDate = localToday();
-    const result = drawDailyAccessory(userId, drawDate);
-    setToday(drawDate);
-    setShopState(result.state);
-
-    if (result.status === 'drawn' && result.accessory) {
-      const option = GARDEN_ACCESSORY_OPTIONS.find(({ id }) => id === result.accessory);
-      const reducedMotion = prefersReducedMotion();
-      setIsReducedMotion(reducedMotion);
-      setPendingAccessory(result.accessory);
-      setIsDrawing(true);
-      drawTimerRef.current = setTimeout(() => {
-        drawTimerRef.current = null;
-        drawInFlightRef.current = false;
-        setIsDrawing(false);
-        setPendingAccessory(null);
-        setAnnouncement(option ? `액세서리 뽑기 결과: ${option.label}` : '뽑은 액세서리를 확인할 수 없어요.');
-      }, reducedMotion ? REDUCED_MOTION_DRAW_DURATION_MS : DRAW_DURATION_MS);
-      return;
-    }
-    drawInFlightRef.current = false;
-    setIsDrawing(false);
-    setPendingAccessory(null);
-    if (result.status === 'invalid_date') {
-      setAnnouncement('오늘 날짜를 확인할 수 없어 뽑지 못했어요.');
-      return;
-    }
-    if (result.status === 'complete') {
-      setAnnouncement('모든 액세서리를 모았어요.');
-      return;
-    }
-    setAnnouncement('오늘은 이미 액세서리를 뽑았어요.');
+    setShopState(collectCompanionAccessory(userId, option.id));
+    setAnnouncement(`${withObjectParticle(option.label)} 무료로 받았어요.`);
   };
 
   const choosePaper = (paper: typeof PAPER_TEXTURE_OPTIONS[number]) => {
+    if (!userId) return;
     const owned = shopState.ownedPapers.includes(paper.id);
     if (!owned) {
       setShopState(collectCompanionPaper(userId, paper.id));
-      setAnnouncement(`${paper.label}을 무료로 받았어요.`);
+      setAnnouncement(`${withObjectParticle(paper.label)} 무료로 받았어요.`);
       return;
     }
     if (selectedPaper === paper.id) return;
@@ -168,7 +72,7 @@ export function ShopPageBody() {
     savePaperTexture(userId, paper.id);
     applyPaperTextureAttribute(paper.id);
     setSelectedPaper(paper.id);
-    setAnnouncement(`${paper.label}을 적용했어요.`);
+    setAnnouncement(`${withObjectParticle(paper.label)} 적용했어요.`);
   };
 
   return (
@@ -188,70 +92,41 @@ export function ShopPageBody() {
         <p className="text-caption leading-relaxed text-muted-foreground">
           지금 상점은 모두 무료이며 결제 기능이 없어요.
         </p>
-        <section className="space-y-3" aria-labelledby="accessory-draw-title">
+        <section className="space-y-3" aria-labelledby="accessory-collection-title">
           <div className="flex items-center justify-between gap-3">
-            <h2 id="accessory-draw-title" className="text-heading text-foreground">액세서리 뽑기</h2>
+            <h2 id="accessory-collection-title" className="text-heading text-foreground">액세서리 컬렉션</h2>
             <span className="text-caption text-muted-foreground">무료</span>
           </div>
           <p className="text-label leading-relaxed text-muted-foreground">
-            하루에 한 번, 아직 없는 액세서리 중 하나를 무료로 뽑아요.
+            원하는 액세서리를 언제든 골라 무료로 받아요.
           </p>
-          <button
-            type="button"
-            onClick={drawAccessory}
-            disabled={drawDisabled}
-            aria-label={drawLabel}
-            className="press-response min-h-11 w-full rounded-control border border-border px-3 text-label font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {drawLabel}
-          </button>
-          {isDrawing ? (
-            <div
-              data-testid="accessory-draw-roulette"
-              className="rounded-surface border border-border px-3 py-4 text-center"
-              aria-label="액세서리 룰렛"
-              role="img"
-            >
-              <div
-                className={`relative mx-auto h-36 w-36 ${isReducedMotion ? '' : 'animate-spin'}`}
-                style={{ animationDuration: `${DRAW_DURATION_MS}ms` }}
-              >
-                {COLLECTIBLE_ACCESSORY_OPTIONS.map((option, index) => {
-                  const angle = (360 / COLLECTIBLE_ACCESSORY_OPTIONS.length) * index;
-                  return (
-                    <span
-                      key={option.id}
-                      data-testid={`accessory-draw-option-${option.id}`}
-                      data-selected={pendingAccessory === option.id ? 'true' : undefined}
-                      className="absolute left-1/2 top-1/2 w-20 -translate-x-1/2 -translate-y-1/2 rounded-control border border-border bg-background px-2 py-1 text-caption text-foreground"
-                      style={{
-                        transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-52px) rotate(${-angle}deg)`,
-                      }}
-                    >
-                      {option.label}
-                    </span>
-                  );
-                })}
-              </div>
-              <p className="mt-2 text-caption text-muted-foreground" aria-live="off">뽑는 중…</p>
-            </div>
+          {!userId ? (
+            <p id="shop-login-help" className="text-caption leading-relaxed text-muted-foreground">
+              로그인하면 무료 수집과 종이 적용을 이용할 수 있어요.
+            </p>
           ) : null}
-          {announcement ? <p role="status" aria-live="polite" className="text-label text-coral">{announcement}</p> : null}
+          <div className="grid grid-cols-2 gap-3" aria-label="액세서리 선택">
+            {COLLECTIBLE_ACCESSORY_OPTIONS.map((option) => {
+              const owned = shopState.ownedAccessories.includes(option.id);
+              const actionLabel = owned ? '보유 중' : '무료로 받기';
 
-          <div aria-label="보유 액세서리" className="space-y-2">
-            <h3 className="text-label font-semibold text-foreground">내 액세서리</h3>
-            {ownedAccessories.length > 0 ? (
-              <ul className="flex flex-wrap gap-2">
-                {ownedAccessories.map((option) => (
-                  <li key={option.id} className="rounded-control border border-border px-3 py-2 text-label text-foreground">
-                    {option.label}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-caption text-muted-foreground">아직 모은 액세서리가 없어요.</p>
-            )}
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => collectAccessory(option)}
+                  disabled={!userId || owned}
+                  aria-label={`${option.label} ${actionLabel}`}
+                  aria-describedby={!userId ? 'shop-login-help' : undefined}
+                  className="press-response min-h-11 rounded-control border border-border px-3 py-2 text-left text-label font-semibold text-foreground disabled:cursor-default disabled:opacity-60"
+                >
+                  <span className="block">{option.label}</span>
+                  <span className="mt-1 block text-caption font-normal text-muted-foreground">{actionLabel}</span>
+                </button>
+              );
+            })}
           </div>
+          {announcement ? <p role="status" aria-live="polite" className="text-label text-coral">{announcement}</p> : null}
         </section>
 
         <section className="space-y-3" aria-labelledby="paper-texture-title">
@@ -275,7 +150,8 @@ export function ShopPageBody() {
                   key={paper.id}
                   type="button"
                   aria-label={label}
-                  disabled={active}
+                  disabled={!userId || active}
+                  aria-describedby={!userId ? 'shop-login-help' : undefined}
                   onClick={() => choosePaper(paper)}
                   className="press-response min-h-[112px] overflow-hidden rounded-surface border text-left disabled:cursor-default"
                   style={{ borderColor: active ? 'var(--ink)' : 'var(--ink-faint)' }}

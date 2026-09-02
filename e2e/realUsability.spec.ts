@@ -192,24 +192,50 @@ for (const width of [320, 375]) {
   });
 }
 
-test('paper collected and applied in the Shop persists as the account background', async ({ browser }) => {
-  const context = await browser.newContext();
-  await installMockBackend(context, CREATOR);
-  const page = await context.newPage();
+for (const width of [320, 393]) {
+  test(`direct Shop collection stays usable and persists at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 852 } });
+    const { unrouted } = await installMockBackend(context, CREATOR);
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
 
-  await bootedInto(page, '/shop');
-  await page.getByRole('button', { name: '크림 편지지 무료로 받기' }).click();
-  await expect(page.getByRole('button', { name: '크림 편지지 적용하기' })).toBeVisible();
-  await page.getByRole('button', { name: '크림 편지지 적용하기' }).click();
-  await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
-  await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
+    await bootedInto(page, '/shop');
+    await expect(page.getByRole('heading', { level: 2, name: '액세서리 컬렉션' })).toBeVisible();
+    await expect(page.getByText(/뽑기|룰렛|오늘 뽑기/)).toHaveCount(0);
 
-  await page.reload();
-  await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
-  await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
+    const accessoryButtons = page.locator('section[aria-labelledby="accessory-collection-title"] button');
+    expect(await accessoryButtons.count()).toBe(4);
+    for (const box of await accessoryButtons.evaluateAll((buttons) => (
+      buttons.map((button) => {
+        const rect = button.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      })
+    ))) {
+      expect(box.height, 'every accessory choice keeps a 44px touch target').toBeGreaterThanOrEqual(44);
+    }
 
-  await context.close();
-});
+    await page.getByRole('button', { name: '꽃 무료로 받기' }).click();
+    await expect(page.getByText('꽃을 무료로 받았어요.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '꽃 보유 중' })).toBeDisabled();
+
+    await page.getByRole('button', { name: '크림 편지지 무료로 받기' }).click();
+    await expect(page.getByRole('button', { name: '크림 편지지 적용하기' })).toBeVisible();
+    await page.getByRole('button', { name: '크림 편지지 적용하기' }).click();
+    await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
+    await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: '꽃 보유 중' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
+    await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+    expect(errors).toEqual([]);
+    expect(unrouted).toEqual([]);
+    await context.close();
+  });
+}
 
 test('the primary action on each core screen is present and enabled for a real couple', async ({ browser }) => {
   const context = await browser.newContext();

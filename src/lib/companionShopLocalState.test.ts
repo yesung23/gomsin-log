@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  collectCompanionAccessory,
   collectCompanionPaper,
-  drawDailyAccessory,
   loadCompanionShopState,
   saveCompanionShopState,
 } from './companionShopLocalState';
@@ -27,7 +27,7 @@ describe('companion shop account-local collection', () => {
       version: 1,
       ownedAccessories: ['crown', 'cap'],
       ownedPapers: ['plain', 'gold'],
-      lastFreeDrawDate: 123,
+      lastFreeDrawDate: '2026-02-30',
     }));
     expect(loadCompanionShopState('u1')).toMatchObject({
       ownedAccessories: ['cap'],
@@ -61,45 +61,52 @@ describe('companion shop account-local collection', () => {
     expect(loadCompanionShopState('u2').ownedPapers).toEqual(['plain', 'ruled']);
   });
 
-  it('draws an unowned accessory once per local calendar day without duplicates', () => {
+  it('does not collect a paper without an account identifier', () => {
+    const result = collectCompanionPaper('', 'grid');
+
+    expect(result.ownedPapers).toEqual(['plain', 'ruled']);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('collects the exact selected accessory and preserves the legacy draw date', () => {
     saveCompanionShopState('u1', {
       version: 1,
       ownedAccessories: ['cap'],
       ownedPapers: ['plain', 'ruled'],
-      lastFreeDrawDate: null,
+      lastFreeDrawDate: '2026-09-01',
     });
 
-    const first = drawDailyAccessory('u1', '2026-09-01', () => 0);
-    expect(first).toMatchObject({ status: 'drawn', accessory: 'bow' });
-    expect(first.state.ownedAccessories).toEqual(['cap', 'bow']);
+    const result = collectCompanionAccessory('u1', 'flower');
 
-    const second = drawDailyAccessory('u1', '2026-09-01', () => 0.99);
-    expect(second).toMatchObject({ status: 'used_today', accessory: null });
-    expect(second.state.ownedAccessories).toEqual(['cap', 'bow']);
+    expect(result.ownedAccessories).toEqual(['cap', 'flower']);
+    expect(result.lastFreeDrawDate).toBe('2026-09-01');
   });
 
-  it('does not consume the day when every accessory is already owned', () => {
+  it('is idempotent when the selected accessory is already owned', () => {
     saveCompanionShopState('u1', {
       version: 1,
-      ownedAccessories: ['cap', 'bow', 'scarf', 'flower'],
+      ownedAccessories: ['cap', 'bow'],
       ownedPapers: ['plain', 'ruled'],
-      lastFreeDrawDate: null,
+      lastFreeDrawDate: '2026-01-01',
     });
 
-    const result = drawDailyAccessory('u1', '2026-09-01', () => 0);
-    expect(result).toMatchObject({ status: 'complete', accessory: null });
-    expect(result.state.lastFreeDrawDate).toBeNull();
+    const result = collectCompanionAccessory('u1', 'cap');
+
+    expect(result.ownedAccessories).toEqual(['cap', 'bow']);
+    expect(loadCompanionShopState('u1').ownedAccessories).toEqual(['cap', 'bow']);
   });
 
-  it('rejects an invalid local calendar date without granting an accessory', () => {
-    const first = drawDailyAccessory('u1', '2026-02-30', () => 0);
-    const second = drawDailyAccessory('u1', 'not-a-date', () => 0.99);
+  it('keeps accessory collections separate for each account', () => {
+    collectCompanionAccessory('u1', 'scarf');
 
-    expect(first).toMatchObject({ status: 'invalid_date', accessory: null });
-    expect(second).toMatchObject({ status: 'invalid_date', accessory: null });
-    expect(loadCompanionShopState('u1')).toMatchObject({
-      ownedAccessories: [],
-      lastFreeDrawDate: null,
-    });
+    expect(loadCompanionShopState('u1').ownedAccessories).toEqual(['scarf']);
+    expect(loadCompanionShopState('u2').ownedAccessories).toEqual([]);
+  });
+
+  it('does not collect without an account identifier', () => {
+    const result = collectCompanionAccessory('', 'cap');
+
+    expect(result.ownedAccessories).toEqual([]);
+    expect(localStorage.length).toBe(0);
   });
 });

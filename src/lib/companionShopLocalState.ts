@@ -14,12 +14,6 @@ export interface CompanionShopState {
   lastFreeDrawDate: string | null;
 }
 
-export type DailyAccessoryDrawResult = {
-  status: 'drawn' | 'used_today' | 'complete' | 'invalid_date';
-  accessory: CollectibleGardenAccessory | null;
-  state: CompanionShopState;
-};
-
 const KEY_PREFIX = 'gomsin.diary.shop.';
 const DEFAULT_PAPERS: readonly PaperTexture[] = ['plain', 'ruled'];
 const PAPER_ORDER: readonly PaperTexture[] = ['plain', 'ruled', 'grid', 'dot', 'cream'];
@@ -127,35 +121,23 @@ export function saveCompanionShopState(userId: string, state: CompanionShopState
 
 export function collectCompanionPaper(userId: string, paper: PaperTexture): CompanionShopState {
   const current = loadCompanionShopState(userId);
+  if (!userId) return current;
   return saveCompanionShopState(userId, {
     ...current,
     ownedPapers: [...current.ownedPapers, paper],
   });
 }
 
-export function drawDailyAccessory(
+export function collectCompanionAccessory(
   userId: string,
-  localDate: string,
-  random: () => number = Math.random,
-): DailyAccessoryDrawResult {
+  accessory: CollectibleGardenAccessory,
+): CompanionShopState {
   const current = loadCompanionShopState(userId);
-  if (!isValidLocalDate(localDate)) {
-    return { status: 'invalid_date', accessory: null, state: current };
+  if (!userId || !ACCESSORY_ORDER.includes(accessory) || current.ownedAccessories.includes(accessory)) {
+    return current;
   }
-  const remaining = ACCESSORY_ORDER.filter((accessory) => !current.ownedAccessories.includes(accessory));
-  if (remaining.length === 0) {
-    return { status: 'complete', accessory: null, state: current };
-  }
-  if (current.lastFreeDrawDate === localDate) {
-    return { status: 'used_today', accessory: null, state: current };
-  }
-  const sample = random();
-  const bounded = Number.isFinite(sample) ? Math.min(Math.max(sample, 0), 0.999999) : 0;
-  const accessory = remaining[Math.floor(bounded * remaining.length)];
-  const state = saveCompanionShopState(userId, {
+  return saveCompanionShopState(userId, {
     ...current,
     ownedAccessories: [...current.ownedAccessories, accessory],
-    lastFreeDrawDate: localDate,
   });
-  return { status: 'drawn', accessory, state };
 }

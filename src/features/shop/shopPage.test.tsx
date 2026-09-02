@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { GARDEN_ACCESSORY_OPTIONS } from '@/lib/companionGardenLocalState';
@@ -8,14 +8,9 @@ import { loadCompanionShopState } from '@/lib/companionShopLocalState';
 import { PAPER_TEXTURE_OPTIONS } from '@/lib/paperTexturePreference';
 
 const navigate = vi.hoisted(() => vi.fn());
-const mockedToday = vi.hoisted(() => ({ value: '2026-09-01' }));
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return { ...actual, useNavigate: () => navigate };
-});
-vi.mock('@/lib/cycle', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/cycle')>();
-  return { ...actual, localToday: () => mockedToday.value };
 });
 vi.mock('@/components/MobileShell', () => ({
   MobileShell: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -40,23 +35,18 @@ describe('free local companion shop', () => {
       authenticatedUser: { id: 'user-me' },
       profile: { id: 'profile-me' },
     };
-    mockedToday.value = '2026-09-01';
     document.documentElement.removeAttribute('data-paper');
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it('shows the compact title, two sections, truthful previews, and no payment or Book Studio UI', () => {
     renderShop();
     expect(screen.getByRole('heading', { name: '상점', level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '액세서리 뽑기', level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '액세서리 컬렉션', level: 2 })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '종이 바탕', level: 2 })).toBeInTheDocument();
     expect(screen.getByText('지금 상점은 모두 무료이며 결제 기능이 없어요.')).toBeInTheDocument();
     expect(PAPER_TEXTURE_OPTIONS.map(({ id }) => screen.getByTestId(`paper-texture-preview-${id}`)
       .getAttribute('data-paper'))).toEqual(['plain', 'ruled', 'grid', 'dot', 'cream']);
-    expect(screen.queryByText(/스티커|기억책|Book Studio|구매|구독|코인|포인트|원/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/스티커|기억책|Book Studio|구매|구독|코인|포인트|\d[\d, ]*원/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /결제|구매|구독|통화/ })).not.toBeInTheDocument();
   });
 
@@ -69,6 +59,11 @@ describe('free local companion shop', () => {
     expect(screen.getByRole('button', { name: '크림 편지지 무료로 받기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '줄 노트 사용 중' })).not.toHaveAttribute('aria-pressed');
     expect(screen.getByRole('button', { name: '따뜻한 무지 적용하기' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '따뜻한 무지 적용하기' }));
+    expect(screen.getByRole('status')).toHaveTextContent('따뜻한 무지를 적용했어요.');
+    await user.click(screen.getByRole('button', { name: '줄 노트 적용하기' }));
+    expect(screen.getByRole('status')).toHaveTextContent('줄 노트를 적용했어요.');
 
     await user.click(screen.getByRole('button', { name: '모눈 종이 무료로 받기' }));
     expect(loadCompanionShopState('user-me').ownedPapers).toEqual(['plain', 'ruled', 'grid']);
@@ -86,114 +81,32 @@ describe('free local companion shop', () => {
     expect(screen.getByRole('button', { name: '모눈 종이 사용 중' })).not.toHaveAttribute('aria-pressed');
   });
 
-  it('draws one unowned accessory per local calendar day and announces the label', async () => {
-    vi.useFakeTimers();
-    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
-    renderShop();
-    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
-
-    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
-    expect(screen.getByTestId('accessory-draw-roulette')).toBeInTheDocument();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1000));
-
-    const drawnLabel = GARDEN_ACCESSORY_OPTIONS.find(({ id }) => id === 'cap')?.label;
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
-    expect(screen.getByRole('status')).toHaveTextContent(drawnLabel as string);
-    expect(screen.getByText(drawnLabel as string)).toBeInTheDocument();
-    expect(random).toHaveBeenCalledTimes(1);
-
-    expect(screen.getByRole('button', { name: '오늘 뽑기 완료' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '오늘 뽑기 완료' }));
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
-  });
-
-  it('decides and stores the result once at click time while the roulette is running', async () => {
-    vi.useFakeTimers();
-    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
-    renderShop();
-    const setItem = vi.spyOn(localStorage, 'setItem');
-    const drawButton = screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' });
-
-    fireEvent.click(drawButton);
-    fireEvent.click(drawButton);
-
-    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
-    expect(screen.getByTestId('accessory-draw-roulette')).toBeInTheDocument();
-    expect(random).toHaveBeenCalledTimes(1);
-    expect(setItem).toHaveBeenCalledTimes(1);
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
-
-    act(() => vi.advanceTimersByTime(999));
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByRole('status')).toHaveTextContent('모자');
-  });
-
-  it('short-circuits the roulette when reduced motion is requested without changing the draw result', async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+  it('shows every finite starter accessory as a direct choice without draw UI or date language', () => {
     renderShop();
 
-    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
-    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
-    act(() => vi.advanceTimersByTime(79));
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByRole('status')).toHaveTextContent('모자');
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
+    expect(GARDEN_ACCESSORY_OPTIONS.filter(({ id }) => id !== 'none').map(({ label }) => (
+      screen.getByRole('button', { name: `${label} 무료로 받기` }).textContent
+    ))).toHaveLength(4);
+    expect(screen.queryByText(/뽑기|뽑는 중|오늘|룰렛/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('accessory-draw-roulette')).not.toBeInTheDocument();
   });
 
-  it('cancels a pending visual result when the signed-in account changes', async () => {
-    vi.useFakeTimers();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-    const view = renderShop();
-
-    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
-    currentState = {
-      authenticatedUser: { id: 'user-other' },
-      profile: { id: 'profile-other' },
-    };
-    view.rerender(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
-
-    act(() => vi.advanceTimersByTime(1000));
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
-    expect(loadCompanionShopState('user-other').ownedAccessories).toEqual([]);
-  });
-
-  it('labels a complete collection and does not consume a draw', async () => {
+  it('collects the exact accessory selected and announces it immediately', async () => {
     const user = userEvent.setup();
-    localStorage.setItem('gomsin.diary.shop.user-me', JSON.stringify({
-      version: 1,
-      ownedAccessories: ['cap', 'bow', 'scarf', 'flower'],
-      ownedPapers: ['plain', 'ruled'],
-      lastFreeDrawDate: null,
-    }));
     renderShop();
 
-    expect(screen.getByRole('button', { name: '모든 액세서리를 모았어요' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '모든 액세서리를 모았어요' }));
-    expect(loadCompanionShopState('user-me').lastFreeDrawDate).toBeNull();
-    expect(screen.getByText('모자')).toBeInTheDocument();
-    expect(screen.getByText('리본')).toBeInTheDocument();
-    expect(screen.getByText('목도리')).toBeInTheDocument();
-    expect(screen.getByText('꽃')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '꽃 무료로 받기' }));
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['flower']);
+    expect(screen.getByRole('button', { name: '꽃 보유 중' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('꽃을 무료로 받았어요.');
+
+    await user.click(screen.getByRole('button', { name: '모자 무료로 받기' }));
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap', 'flower']);
+    expect(screen.getByRole('status')).toHaveTextContent('모자를 무료로 받았어요.');
   });
 
-  it('handles an invalid draw result honestly without granting an accessory', async () => {
+  it('keeps an owned accessory disabled while a legacy draw date does not block new collection', async () => {
     const user = userEvent.setup();
-    mockedToday.value = '2026-02-30';
-    renderShop();
-    await user.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
-    expect(screen.getByRole('status')).toHaveTextContent('오늘 날짜를 확인할 수 없어 뽑지 못했어요');
-  });
-
-  it('unlocks the next free draw when an open Shop crosses local midnight', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 8, 1, 23, 59, 59, 900));
     localStorage.setItem('gomsin.diary.shop.user-me', JSON.stringify({
       version: 1,
       ownedAccessories: ['cap'],
@@ -201,27 +114,39 @@ describe('free local companion shop', () => {
       lastFreeDrawDate: '2026-09-01',
     }));
     renderShop();
-    expect(screen.getByRole('button', { name: '오늘 뽑기 완료' })).toBeDisabled();
 
-    mockedToday.value = '2026-09-02';
-    act(() => vi.advanceTimersByTime(200));
-
-    expect(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '모자 보유 중' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '리본 무료로 받기' }));
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap', 'bow']);
+    expect(screen.getByRole('button', { name: '리본 보유 중' })).toBeDisabled();
   });
 
-  it('finishes the first draw after midnight even before the scheduled date refresh runs', () => {
-    vi.useFakeTimers();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+  it('disables every signed-out accessory and paper action with no mutation or success announcement', () => {
+    currentState = {
+      authenticatedUser: { id: '' },
+      profile: { id: 'profile-me' },
+    };
     renderShop();
 
-    mockedToday.value = '2026-09-02';
-    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
-    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
+    const loginReason = screen.getByText('로그인하면 무료 수집과 종이 적용을 이용할 수 있어요.');
+    const accessoryButtons = ['모자', '리본', '목도리', '꽃'].map((label) => (
+      screen.getByRole('button', { name: `${label} 무료로 받기` })
+    ));
+    const paperButtons = [
+      '따뜻한 무지 적용하기',
+      '줄 노트 사용 중',
+      '모눈 종이 무료로 받기',
+      '도트 종이 무료로 받기',
+      '크림 편지지 무료로 받기',
+    ].map((label) => screen.getByRole('button', { name: label }));
 
-    act(() => vi.advanceTimersByTime(1000));
-
-    expect(screen.getByRole('status')).toHaveTextContent('모자');
-    expect(screen.getByRole('button', { name: '오늘 뽑기 완료' })).toBeDisabled();
+    [...accessoryButtons, ...paperButtons].forEach((button) => {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('aria-describedby', loginReason.id);
+    });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(localStorage.length).toBe(0);
+    expect(loadCompanionShopState('profile-me').ownedAccessories).toEqual([]);
   });
 
   it('refreshes collection and selected paper when the authenticated account changes', async () => {
@@ -232,28 +157,28 @@ describe('free local companion shop', () => {
       lastFreeDrawDate: null,
     }));
     localStorage.setItem('gomsin.display.paper.user-me', 'grid');
-    localStorage.setItem('gomsin.diary.shop.profile-me', JSON.stringify({
+    localStorage.setItem('gomsin.diary.shop.user-other', JSON.stringify({
       version: 1,
       ownedAccessories: ['flower'],
       ownedPapers: ['plain', 'ruled'],
       lastFreeDrawDate: null,
     }));
-    localStorage.setItem('gomsin.display.paper.profile-me', 'plain');
+    localStorage.setItem('gomsin.display.paper.user-other', 'plain');
 
     const view = renderShop();
-    expect(screen.getByText('모자')).toBeInTheDocument();
-    expect(screen.queryByText('꽃')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '모자 보유 중' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '꽃 무료로 받기' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '모눈 종이 사용 중' })).toBeInTheDocument();
 
     currentState = {
-      authenticatedUser: { id: '' },
-      profile: { id: 'profile-me' },
+      authenticatedUser: { id: 'user-other' },
+      profile: { id: 'profile-other' },
     };
     view.rerender(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
 
     await waitFor(() => {
-      expect(screen.getByText('꽃')).toBeInTheDocument();
-      expect(screen.queryByText('모자')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '꽃 보유 중' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '모자 무료로 받기' })).toBeEnabled();
       expect(screen.getByRole('button', { name: '따뜻한 무지 사용 중' })).toBeInTheDocument();
     });
   });

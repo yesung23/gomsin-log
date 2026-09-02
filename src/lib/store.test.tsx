@@ -662,6 +662,54 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-new');
   });
 
+  it('does not restore talk-about metadata after the workspace is quarantined mid-refresh', async () => {
+    let finishRefresh!: (value: { ok: true; marks: Array<{
+      id: string; recordId: string; coupleId: string; actorUserId: string;
+      createdAt: string; isCompleted: boolean;
+    }> }) => void;
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+
+    screen.getByText('mark-talk').click();
+    await waitFor(() => expect(fetchTalkAboutMarksResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => subscribeCallback?.('CHANNEL_ERROR'));
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
+
+    await act(async () => finishRefresh({
+      ok: true,
+      marks: [{
+        id: 'mark-stale', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+      }],
+    }));
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true, syncPending: true }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
+  });
+
   it('fails closed immediately while a different account is hydrating', async () => {
     let resolveUserB!: (value: Partial<AppState> | null) => void;
     fetchFullStateFromDB.mockImplementation((userId: string) => {

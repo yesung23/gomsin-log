@@ -30,6 +30,7 @@ vi.mock('sonner', () => ({
 }));
 
 let online = true;
+let sharedSyncStatus: 'live' | 'delayed' | 'unavailable' = 'live';
 vi.mock('@/lib/useOnlineStatus', async () => {
   const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
   return { ...actual, useOnlineStatus: () => online };
@@ -40,6 +41,7 @@ vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: currentState,
     isReady: true,
+    sharedSyncStatus,
     resolveTalkAbout,
     setHighlightedRecordId,
   }),
@@ -146,6 +148,7 @@ beforeEach(() => {
   setHighlightedRecordId.mockClear();
   navigate.mockClear();
   online = true;
+  sharedSyncStatus = 'live';
 });
 
 describe('what 통화 모드 must never do', () => {
@@ -414,7 +417,7 @@ describe('the states either side of a topic', () => {
     expect(screen.getByTestId('call-mode-topic')).toBeInTheDocument();
   });
 
-  it('keeps a missing original generic while omitting private and unreadable originals', () => {
+  it('hides missing, private, and unreadable originals without disclosing mark existence', () => {
     renderPage([
       record({ id: 'rec-private', isPrivate: true, log: '비공개 원문' }),
       record({
@@ -429,9 +432,18 @@ describe('the states either side of a topic', () => {
       mark({ id: 'locked-mark', recordId: 'rec-locked' }),
     ]);
 
-    expect(screen.getByTestId('call-mode-topic')).toBeInTheDocument();
-    expect(screen.getByText('원본을 더 이상 열 수 없는 이야기거리예요.')).toBeInTheDocument();
+    expect(screen.getByTestId('call-mode-done')).toBeInTheDocument();
+    expect(screen.queryByTestId('call-mode-topic')).not.toBeInTheDocument();
     expect(screen.queryByText(/비공개 원문|2026-09-01|몽룡|원본 보기|rec-gone/)).not.toBeInTheDocument();
+  });
+
+  it('does not call a quarantined shared workspace done', () => {
+    sharedSyncStatus = 'unavailable';
+    renderPage([], []);
+
+    expect(screen.getByTestId('call-mode-unavailable')).toBeInTheDocument();
+    expect(screen.queryByTestId('call-mode-done')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('call-mode-complete')).not.toBeInTheDocument();
   });
 
   it('reaches the exact original through the durable route', async () => {

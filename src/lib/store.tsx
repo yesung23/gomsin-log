@@ -3958,12 +3958,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * cheaper to reason about and the only way the two clients converge.
    */
   const refreshTalkAboutMarks = async (expected?: ActiveWorkspace): Promise<boolean> => {
-    const coupleId = stateRef.current.profile.couple.coupleId;
-    const userId = stateRef.current.authenticatedUser?.id || stateRef.current.profile.id;
-    const workspace: ActiveWorkspace | null = coupleId && userId
-      ? { coupleId, userId, generation: sessionGenerationRef.current }
-      : null;
-    if (!workspace || (expected && !workspaceRefMatches(workspace, expected))) return false;
+    const workspace = expected ?? captureActiveWorkspace();
+    if (!workspace || !isCurrentWorkspace(workspace)) return false;
+    const authorizationRevision = membershipReconciliationRef.current;
+    const canCommit = () => isCurrentWorkspace(workspace)
+      && membershipReconciliationRef.current === authorizationRevision;
     let result;
     try {
       result = await fetchTalkAboutMarksResultFromDB(workspace.coupleId);
@@ -3971,13 +3970,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       console.error('[gomsinlog] Failed to reconcile talk-about marks.');
       return false;
     }
-    if (!workspaceRefMatches({
-      coupleId: stateRef.current.profile.couple.coupleId || '',
-      userId: stateRef.current.authenticatedUser?.id || stateRef.current.profile.id || '',
-      generation: sessionGenerationRef.current,
-    }, workspace)) return false;
-    if (!result.ok) return false;
-    updateStateImmediately((prev) => ({ ...prev, talkAboutMarks: result.marks }));
+    if (!canCommit() || !result.ok) return false;
+    updateStateImmediately((prev) => canCommit()
+      ? { ...prev, talkAboutMarks: result.marks }
+      : prev);
+    if (!canCommit()) return false;
     return true;
   };
 
@@ -3989,6 +3986,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: '커플 연결이 확인되지 않아 표시할 수 없어요.' };
     }
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
+    if (!isCurrentWorkspace(workspace)) {
+      return { ok: false, error: '공유 정보를 확인한 뒤 다시 시도해 주세요.' };
+    }
     const result = await markTalkAboutInDB(recordId, coupleId, userId);
     if (result.ok) {
       // Conversation intent. Paired with `talk_about_resolved`, the two say
@@ -4008,6 +4008,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const coupleId = current.profile.couple.coupleId;
     if (!userId || !coupleId) return { ok: false, error: '해제할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
+    if (!isCurrentWorkspace(workspace)) {
+      return { ok: false, error: '공유 정보를 확인한 뒤 다시 시도해 주세요.' };
+    }
     const result = await unmarkTalkAboutInDB(recordId, userId);
     if (result.ok) {
       const reconciled = await refreshTalkAboutMarks(workspace);
@@ -4023,10 +4026,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const userId = current.authenticatedUser?.id || current.profile.id;
     if (!coupleId || !userId) return { ok: false, error: '커플 연결이 확인되지 않아 처리할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
+    if (!isCurrentWorkspace(workspace)) {
+      return { ok: false, error: '공유 정보를 확인한 뒤 다시 시도해 주세요.' };
+    }
     const result = await resolveTalkAboutInDB(recordId, coupleId);
     if (result.ok) {
       const reconciled = await refreshTalkAboutMarks(workspace);
-      return reconciled ? result : { ...result, syncPending: true };
+      if (!reconciled) {
+        return result.changed === false
+          ? { ok: false, error: '이야기거리 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' }
+          : { ...result, syncPending: true };
+      }
+      if (
+        result.changed === false
+        && stateRef.current.talkAboutMarks.some(
+          (mark) => mark.recordId === recordId && !mark.isCompleted,
+        )
+      ) {
+        return { ok: false, error: '이야기거리를 정리하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+      }
+      return result;
     }
     return result;
   };

@@ -82,6 +82,8 @@ export interface TalkAboutMutationResult {
   ok: boolean;
   error?: string;
   syncPending?: boolean;
+  /** False when another client already settled the exact topic. */
+  changed?: boolean;
 }
 
 export interface StoreContextType {

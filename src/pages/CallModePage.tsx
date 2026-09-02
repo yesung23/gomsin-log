@@ -53,7 +53,7 @@ function sameIds(left: string[], right: string[]): boolean {
  * on its own, so leaving after three topics keeps three.
  */
 export function CallModePage() {
-  const { state, resolveTalkAbout, setHighlightedRecordId } = useStore();
+  const { state, sharedSyncStatus, resolveTalkAbout, setHighlightedRecordId } = useStore();
   const navigate = useNavigate();
   const isOffline = !useOnlineStatus();
   const { profile } = state;
@@ -139,7 +139,6 @@ export function CallModePage() {
     pendingRef.current = true;
     setPending(true);
     const recordId = current.recordId;
-    const unavailable = current.unavailable;
     try {
       const result = await resolveTalkAbout(recordId);
       if (!result.ok) {
@@ -161,8 +160,8 @@ export function CallModePage() {
       */
       if (result.syncPending) {
         toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
-      } else if (unavailable) {
-        toast.success('열 수 없는 이야기거리를 목록에서 정리했어요.');
+      } else if (result.changed === false) {
+        toast.info('이미 목록에서 정리된 이야기거리예요.');
       } else {
         void recordProductEvent({
           kind: 'talk_about_resolved',
@@ -208,7 +207,24 @@ export function CallModePage() {
         </button>
       </header>
 
-      {done ? (
+      {sharedSyncStatus === 'unavailable' ? (
+        <section
+          data-testid="call-mode-unavailable"
+          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        >
+          <p className="text-heading text-foreground break-keep">이야기거리를 확인하고 있어요</p>
+          <p className="text-body text-muted-foreground break-keep">
+            공유 정보를 아직 확인하지 못했어요. 확인되면 현재 목록을 다시 보여드려요.
+          </p>
+          <button
+            type="button"
+            onClick={leave}
+            className="press-response mt-2 min-h-12 px-6 rounded-control bg-muted text-label font-bold text-foreground"
+          >
+            홈으로
+          </button>
+        </section>
+      ) : done ? (
         <section
           data-testid="call-mode-done"
           className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
@@ -284,35 +300,29 @@ export function CallModePage() {
             </p>
 
             <p className="text-heading text-foreground break-keep leading-relaxed">
-              {current.unavailable
-                ? '원본을 더 이상 열 수 없는 이야기거리예요.'
-                : current.record.log
-                  || (current.record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간')}
+              {current.record.log
+                || (current.record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간')}
             </p>
 
-            {!current.unavailable ? (
-              <p className="text-caption text-muted-foreground break-keep">
-                {`${current.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${current.record.date}`}
-              </p>
-            ) : null}
+            <p className="text-caption text-muted-foreground break-keep">
+              {`${current.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${current.record.date}`}
+            </p>
 
             {/*
               Reading the exact original is still one tap away, but it leaves this
               screen, so it is drawn as the quiet option. During a call the text
               above is usually enough to remember what this was.
             */}
-            {!current.unavailable ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setHighlightedRecordId(current.recordId);
-                  navigate(`/record?record=${encodeURIComponent(current.recordId)}`);
-                }}
-                className="press-response-row self-start min-h-11 -mx-1 px-1 rounded-control text-caption text-coral"
-              >
-                원본 보기
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setHighlightedRecordId(current.recordId);
+                navigate(`/record?record=${encodeURIComponent(current.recordId)}`);
+              }}
+              className="press-response-row self-start min-h-11 -mx-1 px-1 rounded-control text-caption text-coral"
+            >
+              원본 보기
+            </button>
           </section>
 
           <footer className="px-6 pb-8 pt-2 flex flex-col gap-2">
@@ -325,11 +335,7 @@ export function CallModePage() {
               className="press-response min-h-14 w-full rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <Check size={18} aria-hidden="true" />
-              {pending
-                ? '정리하는 중...'
-                : current.unavailable
-                  ? '목록에서 정리하기'
-                  : '이야기했어요'}
+              {pending ? '정리하는 중...' : '이야기했어요'}
             </button>
 
             <button

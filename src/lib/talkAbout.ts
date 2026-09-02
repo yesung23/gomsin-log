@@ -100,6 +100,8 @@ export async function fetchTalkAboutMarksResultFromDB(
 export interface TalkAboutWriteResult {
   ok: boolean;
   error?: string;
+  /** Whether this request actually transitioned at least one pending row. */
+  changed?: boolean;
 }
 
 /**
@@ -200,16 +202,17 @@ export async function resolveTalkAboutInDB(
     return { ok: false, error: '계정 삭제가 진행 중이라 처리할 수 없어요.' };
   }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('talk_about_marks')
     .update({ is_completed: true })
     .eq('record_id', recordId)
     .eq('couple_id', coupleId)
-    .eq('is_completed', false);
+    .eq('is_completed', false)
+    .select('id');
 
   if (error) {
     console.error('[gomsinlog] Failed to resolve talk-about.');
     return { ok: false, error: '처리하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
-  return { ok: true };
+  return { ok: true, changed: Array.isArray(data) && data.length > 0 };
 }

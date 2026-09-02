@@ -102,18 +102,14 @@ describe('buildTalkAboutTopics: the list is a join, not a copy', () => {
 describe('buildTalkAboutTopics: nothing the viewer may not see', () => {
   /**
    * The important one. A stale mark pointing at a record this client cannot
-   * resolve must produce a generic unavailable entry only. It must not use a
-   * different record or expose source-derived content.
+   * resolve is ambiguous: the record might be deleted, outside this slice, or
+   * newly hidden by RLS. Rendering even a generic row would disclose that some
+   * hidden exact source exists, so only an explicit server tombstone could make
+   * such a cleanup row safe.
    */
-  it('keeps an absent exact source as a generic unavailable topic with no record metadata', () => {
+  it('drops an absent exact source instead of disclosing hidden-record existence', () => {
     const topics = buildTalkAboutTopics([mark({ recordId: 'rec-gone' })], [], viewer, NOW);
-    expect(topics).toHaveLength(1);
-    expect(topics[0]).toMatchObject({
-      recordId: 'rec-gone',
-      unavailable: true,
-      record: undefined,
-      actorState: 'partner_only',
-    });
+    expect(topics).toEqual([]);
   });
 
   it("drops a partner's private record", () => {

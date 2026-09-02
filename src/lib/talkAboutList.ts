@@ -31,18 +31,10 @@ interface TalkAboutTopicBase {
   latestAt: string;
 }
 
-export type TalkAboutTopic = TalkAboutTopicBase & (
-  | {
-    /** Exact readable original. */
-    record: DailyRecord;
-    unavailable: false;
-  }
-  | {
-    /** A deleted original keeps only its opaque id so the couple can clear the stranded mark. */
-    record?: undefined;
-    unavailable: true;
-  }
-);
+export type TalkAboutTopic = TalkAboutTopicBase & {
+  /** Exact readable original. An unresolved id never becomes a visible topic. */
+  record: DailyRecord;
+};
 
 export type TalkAboutActorState = 'none' | 'mine' | 'partner_only' | 'both';
 
@@ -115,14 +107,14 @@ export function buildTalkAboutTopics(
       latestAt: sorted[0].createdAt,
     };
 
-    if (!record) {
-      topics.push({ ...base, record: undefined, unavailable: true });
-      continue;
-    }
+    // Missing is not deletion provenance. The record may simply be outside the
+    // current authorized slice, newly private, or withheld by RLS. Rendering a
+    // generic row would still disclose that a hidden exact source exists.
+    if (!record) continue;
     if (record.isPrivate || record.contentUnavailable || !isVisibleToViewer(record, viewer)) {
       continue;
     }
-    topics.push({ ...base, record, unavailable: false });
+    topics.push({ ...base, record });
   }
 
   return topics.sort((a, b) => compareTimestampDesc(a.latestAt, b.latestAt)

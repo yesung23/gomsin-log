@@ -126,15 +126,15 @@ describe('오늘 이야기할 것', () => {
   });
 
   /**
-   * The leak case. A mark whose record this client cannot resolve must produce
-   * generic unavailable row only. It must never show source-derived content.
+   * The leak case. Without explicit deletion provenance an unresolved id could
+   * be an RLS-hidden source, so even a generic row would reveal its existence.
    */
-  it('renders a safe unavailable state for a mark whose record is unreachable', () => {
+  it('hides a mark whose source is unreachable', () => {
     renderWidget([], [mark({ recordId: 'rec-not-here' })]);
-    expect(screen.getByText('원본을 더 이상 열 수 없는 이야기거리예요.')).toBeInTheDocument();
+    expect(screen.getByText(/아직 표시한 기록이 없어요/)).toBeInTheDocument();
     expect(screen.queryByText('rec-not-here')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /원본 보기/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '목록에서 정리하기' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '목록에서 정리하기' })).not.toBeInTheDocument();
   });
 
   it("never renders a mark pointing at the partner's private record", () => {
@@ -145,14 +145,6 @@ describe('오늘 이야기할 것', () => {
     expect(screen.queryByText('비공개 내용')).not.toBeInTheDocument();
     expect(screen.queryByText(/원본을 더 이상 열 수 없는/)).not.toBeInTheDocument();
     expect(screen.getByText(/아직 표시한 기록이 없어요/)).toBeInTheDocument();
-  });
-
-  it('clears an unavailable exact id without calling it a conversation', async () => {
-    renderWidget([], [mark({ recordId: 'rec-not-here' })]);
-
-    await userEvent.click(screen.getByRole('button', { name: '목록에서 정리하기' }));
-
-    await waitFor(() => expect(resolveTalkAbout).toHaveBeenCalledWith('rec-not-here'));
   });
 
   it('tapping a topic routes with the durable ?record= id from P2', async () => {
@@ -180,6 +172,7 @@ describe('오늘 이야기할 것', () => {
       [mark({ id: 'm1', actorUserId: ME }), mark({ id: 'm2', actorUserId: PARTNER })],
     );
     expect(screen.getAllByText('훈련 끝나고 노을을 봤어')).toHaveLength(1);
+    expect(screen.getByText(/함께 표시/)).toBeInTheDocument();
   });
 
   it('is not a task manager: no due date, assignee, priority or completion count', () => {
@@ -327,7 +320,7 @@ describe('the overflow control holds up at the sizes a real couple reaches', () 
     await waitFor(() => expect(resolveTalkAbout).toHaveBeenCalledWith('rec-000'));
   });
 
-  it('an unreachable source in the expanded region stays generic, never substituted', async () => {
+  it('an unreachable source in the expanded region is omitted, never substituted', async () => {
     const user = userEvent.setup();
     const { records, marks } = manyTopicsAt(7);
     // Drop the oldest record so its mark can no longer resolve to a source.
@@ -335,7 +328,7 @@ describe('the overflow control holds up at the sizes a real couple reaches', () 
     renderWidget(withoutOldest, marks);
     await user.click(screen.getByTestId('talk-about-expand'));
 
-    expect(screen.getByText('원본을 더 이상 열 수 없는 이야기거리예요.')).toBeInTheDocument();
+    expect(screen.queryByText('원본을 더 이상 열 수 없는 이야기거리예요.')).not.toBeInTheDocument();
     // No other topic's text was borrowed to fill the gap.
     expect(screen.queryByText('이야기거리 0')).not.toBeInTheDocument();
     expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(6);
@@ -363,10 +356,10 @@ describe('통화 모드 진입점', () => {
     expect(screen.queryByTestId('talk-about-call-mode')).toBeNull();
   });
 
-  it('is offered even when the only topic is an unreachable original', () => {
-    // The coordination state survives the record (§8), so the pair may still want
-    // to talk it through. Hiding the entry would strand it.
+  it('is hidden when the only mark has no authorized source', () => {
+    // Without an explicit server tombstone, an unresolved id could be a record
+    // hidden by RLS. Exposing a route for it would disclose its existence.
     renderWidget([], [mark({ recordId: 'rec-gone' })]);
-    expect(screen.getByTestId('talk-about-call-mode')).toBeInTheDocument();
+    expect(screen.queryByTestId('talk-about-call-mode')).not.toBeInTheDocument();
   });
 });

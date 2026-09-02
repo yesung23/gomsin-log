@@ -10,6 +10,7 @@ const unmarkTalkAbout = vi.fn(async () => ({ ok: true }));
 const resolveTalkAbout = vi.fn(async () => ({ ok: true }));
 let currentState: AppState;
 let online = true;
+let sharedSyncStatus: 'live' | 'delayed' | 'unavailable' = 'live';
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -17,7 +18,13 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('@/lib/useStore', () => ({
-  useStore: () => ({ state: currentState, markTalkAbout, unmarkTalkAbout, resolveTalkAbout }),
+  useStore: () => ({
+    state: currentState,
+    sharedSyncStatus,
+    markTalkAbout,
+    unmarkTalkAbout,
+    resolveTalkAbout,
+  }),
 }));
 
 vi.mock('@/lib/useOnlineStatus', async () => {
@@ -98,6 +105,7 @@ function view(records = [record()], marks = [mark()]) {
 beforeEach(() => {
   vi.clearAllMocks();
   online = true;
+  sharedSyncStatus = 'live';
   markTalkAbout.mockResolvedValue({ ok: true });
   unmarkTalkAbout.mockResolvedValue({ ok: true });
   resolveTalkAbout.mockResolvedValue({ ok: true });
@@ -144,7 +152,7 @@ describe('SavedTopicsPage actor-aware topics', () => {
     expect(markTalkAbout).not.toHaveBeenCalled();
   });
 
-  it('keeps a missing source generic while omitting private and unreadable source records', () => {
+  it('hides missing, private, and unreadable source marks without disclosing their existence', () => {
     view([
       record({ id: 'private', isPrivate: true }),
       record({ id: 'locked', contentUnavailable: 'key_unavailable', log: '' }),
@@ -154,11 +162,20 @@ describe('SavedTopicsPage actor-aware topics', () => {
       mark({ id: 'locked-mark', recordId: 'locked' }),
     ]);
 
-    expect(screen.getAllByRole('listitem')).toHaveLength(1);
-    expect(screen.getByText('원본을 더 이상 열 수 없는 이야기거리예요.')).toBeInTheDocument();
-    expect(screen.getByTestId('talk-about-call-mode')).toBeInTheDocument();
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+    expect(screen.getByText('책갈피가 비었어요')).toBeInTheDocument();
+    expect(screen.queryByTestId('talk-about-call-mode')).not.toBeInTheDocument();
     expect(screen.queryByText(/상대 비공개|이 기기에서 아직 열 수 없어요|2026-09-02|몽룡 ·/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /원본 보기/ })).not.toBeInTheDocument();
+  });
+
+  it('does not call a quarantined shared workspace empty', () => {
+    sharedSyncStatus = 'unavailable';
+    view([], []);
+
+    expect(screen.getByText(/공유 정보를 아직 확인하지 못했어요/)).toBeInTheDocument();
+    expect(screen.queryByText('책갈피가 비었어요')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('talk-about-call-mode')).not.toBeInTheDocument();
   });
 
   it('opens only the exact source id represented by the topic', async () => {

@@ -34,7 +34,7 @@ import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
 export function SavedTopicsPage() {
   const navigate = useNavigate();
-  const { state, markTalkAbout, unmarkTalkAbout, resolveTalkAbout } = useStore();
+  const { state, sharedSyncStatus, markTalkAbout, unmarkTalkAbout } = useStore();
   const { profile, talkAboutMarks } = state;
   const isOnline = useOnlineStatus();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -96,35 +96,6 @@ export function SavedTopicsPage() {
     }
   };
 
-  const clearUnavailable = async (recordId: string) => {
-    if (pendingRecordIdRef.current) return;
-    if (!isOnline) {
-      toast.error(OFFLINE_READONLY_MESSAGE);
-      return;
-    }
-    pendingRecordIdRef.current = recordId;
-    setPendingRecordId(recordId);
-    try {
-      const result = await resolveTalkAbout(recordId);
-      if (!result.ok) {
-        toast.error(result.error || '목록에서 정리하지 못했어요.');
-        return;
-      }
-      if (result.syncPending) {
-        toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
-        setStatusMessage(TALK_ABOUT_SYNC_PENDING_MESSAGE);
-        return;
-      }
-      setStatusMessage('열 수 없는 이야기거리를 목록에서 정리했어요.');
-      headingRef.current?.focus();
-    } catch {
-      toast.error('목록에서 정리하지 못했어요. 잠시 후 다시 시도해 주세요.');
-    } finally {
-      pendingRecordIdRef.current = null;
-      setPendingRecordId(null);
-    }
-  };
-
   return (
     <div className="notebook flex min-h-screen min-h-[100dvh] flex-col">
       <header
@@ -153,19 +124,17 @@ export function SavedTopicsPage() {
         <p role="status" aria-live="polite" className="sr-only">
           {statusMessage}
         </p>
-        {topics.length === 0 ? (
+        {sharedSyncStatus === 'unavailable' ? (
+          <p className="pt-12 text-center text-label" style={{ color: 'var(--ink-soft)' }}>
+            공유 정보를 아직 확인하지 못했어요. 확인되면 책갈피를 다시 보여드려요.
+          </p>
+        ) : topics.length === 0 ? (
           <p className="pt-12 text-center text-label" style={{ color: 'var(--ink-soft)' }}>
             책갈피가 비었어요
           </p>
         ) : (
           <ul aria-busy={pendingRecordId !== null || undefined}>
-            {topics.map((topic) => topic.unavailable ? (
-              <UnavailableTopic
-                key={topic.recordId}
-                disabled={!isOnline || pendingRecordId !== null}
-                onClear={() => void clearUnavailable(topic.recordId)}
-              />
-            ) : (
+            {topics.map((topic) => (
               <Topic
                 key={topic.recordId}
                 record={topic.record}
@@ -187,7 +156,7 @@ export function SavedTopicsPage() {
         )}
 
         {/* 남은 것이 없으면 통화 모드로 보내지 않는다 -- 빈 화면으로 들어가게 된다(§8). */}
-        {topics.length > 0 ? (
+        {sharedSyncStatus !== 'unavailable' && topics.length > 0 ? (
           <button
             type="button"
             /*
@@ -218,32 +187,6 @@ export function SavedTopicsPage() {
         ) : null}
       </div>
     </div>
-  );
-}
-
-function UnavailableTopic({
-  disabled,
-  onClear,
-}: {
-  disabled: boolean;
-  onClear: () => void;
-}) {
-  return (
-    <li className="py-4">
-      <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
-        원본을 더 이상 열 수 없는 이야기거리예요.
-      </p>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={onClear}
-        className="mt-2 min-h-11 rounded-control px-1 text-caption disabled:opacity-50"
-        style={{ color: 'var(--ink-soft)' }}
-      >
-        목록에서 정리하기
-      </button>
-      <div className="ink-rule mt-3" aria-hidden="true" />
-    </li>
   );
 }
 

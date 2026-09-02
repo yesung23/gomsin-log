@@ -12,7 +12,7 @@ import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { usePartnerCareNote } from '@/lib/usePartnerCareNote';
 import { selectOnThisDay, onThisDayLabel } from '@/lib/onThisDay';
-import { CYCLE_SUPPORT_LABEL } from '@/lib/cycleSupportLabels';
+import { selectHomeFocus } from '@/features/home/homeFocus';
 import type { DailyRecord } from '@/types';
 
 /**
@@ -137,6 +137,18 @@ export function PaperHome() {
   });
   const hasUnseen = partnerDay.surface.length > 0;
   const hasMarks = (talkAboutMarks?.length ?? 0) > 0;
+  const hasOwnRecordToday = records.some((record) => (
+    record.date === todayStr
+    && isRecordContentAvailable(record)
+    && isOwnRecord(record, { userId: profile.id, role: profile.role })
+  ));
+  const focus = selectHomeFocus({
+    partnerName,
+    careKind: careNote?.kind ?? null,
+    hasPartnerDay: hasUnseen,
+    hasTalkAboutMarks: hasMarks,
+    hasOwnRecordToday,
+  });
 
   return (
     /*
@@ -231,75 +243,57 @@ export function PaperHome() {
           </button>
         </div>
 
-        {/*
-          상대의 쪽지 — 인스타의 노트(Notes) 자리.
-
-          계획서(#30)가 이 자리를 못 박은 이유는 배려 신호가 **매일 보여야** 쓸모가 있기
-          때문이다. `우리 → 오늘 내 상태` 로 두 번 들어가야 나오면 궁금해서 찾아본
-          사람에게만 보이고, 궁금하지 않았던 날에는 없는 것과 같다 -- 그런데 그날이야말로
-          상대가 힘들다고 말한 날일 수 있다.
-
-          링 **위**에 뜬다. 인스타의 노트가 아바타 위 말풍선인 것과 같은 자리이고, 링
-          자체는 스토리를 열어야 하므로 쪽지가 그 위를 덮으면 안 된다.
-
-          없으면 자리 자체가 없다. "오늘은 신호가 없어요" 라고 말하면 상대가 보내지
-          않았다는 사실이 새어 나간다(§16).
-        */}
         <div className="relative">
-          {careNote ? (
-            <button
-              type="button"
-              onClick={() => navigate('/me')}
-              aria-label={`${partnerName}의 쪽지: ${CYCLE_SUPPORT_LABEL[careNote.kind]}`}
-              /*
-                링을 **덮지 않고 걸린다.** 링 자체는 스토리를 여는 곳이므로 쪽지가 그
-                위에 앉으면 상대의 하루로 가는 길을 쪽지가 막는다. 그래서 레일의 위
-                여백(`pt-1`)으로 올라가 앉고, 누르는 곳은 `::before` 로 넓힌다 --
-                보이는 것은 작아도 닿는 곳은 44px 이어야 한다.
-              */
-              className="absolute -top-2 left-1/2 z-10 w-[104px] -translate-x-1/2 px-2 py-1 before:absolute before:-inset-2 before:content-['']"
-              style={{
-                background: 'var(--paper)',
-                border: 'var(--stroke-thin) solid var(--ink-faint)',
-                borderRadius: '80px 8px 90px 8px / 8px 90px 8px 80px',
-              }}
-            >
-              {/*
-                `text-caption` 이다. 처음에 11px 을 골랐다가 타입 스케일 가드가 잡았고,
-                가드가 옳다 -- 12px 이 이 앱이 읽을 수 있다고 정한 바닥이다. 쪽지가
-                작아 보여야 한다는 이유로 그 바닥을 뚫으면, 정작 몸이 힘들다고 말한
-                문장이 가장 안 읽히는 글자가 된다.
-              */}
-              <span className="block truncate text-caption leading-none" style={{ color: 'var(--ink)' }}>
-                {CYCLE_SUPPORT_LABEL[careNote.kind]}
-              </span>
-            </button>
-          ) : null}
-
-        <button
-          type="button"
-          onClick={() => navigate('/story/partner')}
-          aria-label={`${partnerName}의 스토리`}
-          className="flex w-[72px] flex-col items-center gap-1.5"
-        >
-          {/*
-            링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
-
-            열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
-            말한다 -- 상대는 내가 봤는지 알 수 없다.
-          */}
-          <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><PenFace size={44} /></InkCircle>
-          <span
-            className="max-w-[72px] truncate text-caption leading-none"
-            style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}
+          <button
+            type="button"
+            onClick={() => navigate('/story/partner')}
+            aria-label={`${partnerName}의 스토리`}
+            className="flex w-[72px] flex-col items-center gap-1.5"
           >
-            {partnerName}
-          </span>
-        </button>
+            {/*
+              링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
+
+              열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
+              말한다 -- 상대는 내가 봤는지 알 수 없다.
+            */}
+            <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><PenFace size={44} /></InkCircle>
+            <span
+              className="max-w-[72px] truncate text-caption leading-none"
+              style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}
+            >
+              {partnerName}
+            </span>
+          </button>
         </div>
       </section>
 
       <div className="ink-rule mx-4" aria-hidden="true" />
+
+      {focus ? (
+        <section aria-label="지금 가장 필요한 것" className="px-4">
+          <button
+            type="button"
+            onClick={() => navigate(focus.to)}
+            className="press-response flex min-h-[76px] w-full items-center gap-3 py-3 text-left"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-caption" style={{ color: 'var(--ink-soft)' }}>
+                {focus.eyebrow}
+              </span>
+              <span
+                className="mt-0.5 block break-keep text-body font-semibold leading-snug"
+                style={{ color: 'var(--ink)' }}
+              >
+                {focus.title}
+              </span>
+            </span>
+            <span className="shrink-0 text-label font-semibold" style={{ color: 'var(--ink-accent)' }}>
+              {focus.actionLabel}
+            </span>
+          </button>
+          <div className="ink-rule" aria-hidden="true" />
+        </section>
+      ) : null}
 
       {/*
         쌓인 것이 스스로 돌아오는 유일한 자리.

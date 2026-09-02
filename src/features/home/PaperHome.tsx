@@ -324,7 +324,7 @@ export function PaperHome() {
         <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
           지난 이레는 조용했어요.
           <br />
-          오늘 있었던 일을 하나 남기면 여기 쌓여요.
+          상대가 공유한 하루가 생기면 이곳에 놓여요.
         </p>
       ) : (
         feed.map((record, index) => (
@@ -380,7 +380,7 @@ function Post({
   const hasMedia = (record.attachments?.length ?? 0) > 0;
 
   return (
-    <article className="pb-2">
+    <article className={index === 0 ? 'pb-2 pt-3' : 'pb-2'}>
       {/*
         작성자 이름은 홈 상단과 스토리 레일에 이미 있다. 포스트마다 반복하지 않고 사진부터
         보여 준다. 사진이 없으면 **글이 그 자리를 차지한다.**

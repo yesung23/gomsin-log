@@ -161,9 +161,8 @@ describe('the measured flow is wired, not merely available', () => {
 
   const CALLERS: Array<[string, string]> = [
     ['src/components/widgets/TodayLogWidget.tsx', 'record_composed'],
-    ['src/components/widgets/CallBriefingWidget.tsx', 'briefing_opened'],
-    ['src/components/widgets/CallBriefingWidget.tsx', 'briefing_to_original'],
-    ['src/components/widgets/PartnerDayTimelineWidget.tsx', 'briefing_to_original'],
+    ['src/features/story/StoryRoute.tsx', 'briefing_opened'],
+    ['src/features/story/StoryRoute.tsx', 'briefing_to_original'],
     ['src/pages/CallModePage.tsx', 'call_mode_opened'],
     ['src/pages/CallModePage.tsx', 'talk_about_resolved'],
     ['src/components/widgets/TalkAboutListWidget.tsx', 'talk_about_resolved'],
@@ -234,5 +233,26 @@ it('emits every kind the union declares', () => {
     expect(text).toContain('durationMs: Date.now() - composerOpenedAt.current');
     // The opening instant stays on the device; only the difference leaves it.
     expect(text).not.toMatch(/occurredAt|startedAt:\s*Date\.now/);
+  });
+
+  it('keeps the client and final database screen vocabularies identical', () => {
+    const screenUnion = SOURCE.slice(
+      SOURCE.indexOf('export type ProductEventScreen'),
+      SOURCE.indexOf('export interface ProductEvent'),
+    );
+    const clientScreens = [...screenUnion.matchAll(/'(\w+)'/g)].map((match) => match[1]);
+
+    const migration = readFileSync(
+      resolve(process.cwd(), 'supabase/migrations/068_allow_story_product_event_screen.sql'),
+      'utf8',
+    );
+    const constraint = migration.slice(
+      migration.indexOf('ADD CONSTRAINT product_events_screen_check_v2'),
+      migration.indexOf('NOT VALID'),
+    );
+    const databaseScreens = [...constraint.matchAll(/'(\w+)'/g)].map((match) => match[1]);
+
+    expect(databaseScreens).toEqual(clientScreens);
+    expect(databaseScreens).toContain('story');
   });
 });

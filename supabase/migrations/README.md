@@ -942,3 +942,17 @@ supabase functions deploy delete-account
   읽기 경계와 rollback 후 5행·marker 불변을 확인했습니다. anon PostgREST는
   `401/42501`로 거부됐습니다. 롤백은 먼저 이전 클라이언트로 되돌리고 열은 남긴 뒤
   필요하면 후속 forward migration으로 정리합니다.
+
+## 068 — V4 Story 계측 화면 계약 정합화 (2026-09-03)
+
+- `068_allow_story_product_event_screen.sql`은 활성 V4 상대 브리핑 화면인
+  `/story/partner`가 보내는 `screen='story'`를 `product_events.screen`의 닫힌 허용
+  목록에 추가합니다. 이벤트 종류·payload·날짜 정밀도·RLS·GRANT는 바꾸지 않습니다.
+- 새 CHECK를 `NOT VALID`로 추가한 뒤 기존 행 전체를 검증하고, 검증 성공 뒤에만 이전
+  CHECK를 교체합니다. 예상하지 못한 기존 값이 있으면 transaction 전체가 실패합니다.
+- 클라이언트와 SQL 화면 목록의 exact parity를 단위 테스트로, 기존 8개 화면·Story·NULL
+  허용과 임의 route 문자열 거부, owner/partner/unrelated/anon 및 UPDATE/DELETE 경계를
+  phase0 실제 actor harness로 검증합니다.
+- **원격 적용 상태: NOT APPLIED.** Production Supabase에는 이 작업에서 접근하거나
+  적용하지 않았습니다. 로컬 fresh-chain과 독립 보안 검토를 통과한 뒤에도 원격 적용은
+  별도 action-time 승인과 사전 상태 확인이 필요합니다.

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
@@ -42,6 +42,8 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   const { state, sharedSyncStatus, setHighlightedRecordId, markTalkAbout, unmarkTalkAbout } = useStore();
   const isOffline = !useOnlineStatus();
   const bookmarkMutationRef = useRef<string | null>(null);
+  const briefingOpenedRef = useRef(false);
+  const briefingToOriginalRef = useRef(false);
   const [bookmarkMutationRecordId, setBookmarkMutationRecordId] = useState<string | null>(null);
 
   const { profile } = state;
@@ -146,6 +148,17 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     [projection.cards, refinedCoverText],
   );
 
+  useEffect(() => {
+    if (
+      mode !== 'today'
+      || briefingOpenedRef.current
+      || !cards.some((card) => card.kind === 'moment')
+    ) return;
+
+    briefingOpenedRef.current = true;
+    void recordProductEvent({ kind: 'briefing_opened', screen: 'story' });
+  }, [cards, mode]);
+
   const title = useMemo(() => {
     if (mode === 'mine') return '오늘';
     if (mode === 'highlight') {
@@ -172,13 +185,17 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
 
   const openRecord = useCallback((recordId: string) => {
     /*
-      요약에서 원본으로. §19가 허용하는 것은 이벤트 종류와 불투명 id뿐이며, 기록 본문은
-      읽지 않고 실어 보낼 필드도 없다.
+      요약에서 원본으로. 전환 여부만 필요하므로 정확한 원본 id는 로컬 탐색에만 쓰고
+      계측 서버에는 보내지 않는다. 한 번의 브리핑에서 여러 원본을 열어도 conversion
+      ratio의 분자가 분모를 넘지 않도록 첫 전환만 기록한다.
     */
-    void recordProductEvent({ kind: 'briefing_to_original', screen: 'story', subjectId: recordId });
+    if (mode === 'today' && !briefingToOriginalRef.current) {
+      briefingToOriginalRef.current = true;
+      void recordProductEvent({ kind: 'briefing_to_original', screen: 'story' });
+    }
     setHighlightedRecordId(recordId);
     navigate(`/record?record=${encodeURIComponent(recordId)}`);
-  }, [navigate, setHighlightedRecordId]);
+  }, [mode, navigate, setHighlightedRecordId]);
 
   const addToHighlight = useCallback((recordId: string) => {
     navigate(`/us?highlightRecord=${encodeURIComponent(recordId)}`);

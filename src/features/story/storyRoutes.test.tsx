@@ -7,10 +7,13 @@ import type { CoupleHighlight, DailyRecord, TalkAboutMark } from '@/types';
 import { toast } from 'sonner';
 
 const mockNavigate = vi.hoisted(() => vi.fn());
+const recordProductEvent = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return { ...actual, useNavigate: () => mockNavigate };
 });
+
+vi.mock('@/lib/productEvents', () => ({ recordProductEvent }));
 
 /*
   라우트가 무엇을 여는가.
@@ -99,6 +102,30 @@ beforeEach(() => {
 });
 
 describe('/story/partner', () => {
+  it('읽을 수 있는 상대 스토리를 실제로 열 때만 briefing_opened를 한 번 기록한다', async () => {
+    surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00' })];
+    records = surface;
+    open('/story/partner');
+
+    await waitFor(() => expect(recordProductEvent).toHaveBeenCalledWith({
+      kind: 'briefing_opened',
+      screen: 'story',
+    }));
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(recordProductEvent.mock.calls.filter(([event]) => (
+      event.kind === 'briefing_opened'
+    ))).toHaveLength(1);
+  });
+
+  it('읽을 수 있는 순간이 없으면 briefing_opened를 기록하지 않는다', async () => {
+    surface = [record({ id: 'locked', contentUnavailable: 'key_unavailable' })];
+    records = surface;
+    open('/story/partner');
+
+    await Promise.resolve();
+    expect(recordProductEvent).not.toHaveBeenCalled();
+  });
+
   it('상대의 놓친 구간을 연다', () => {
     surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00', log: '점심' })];
     records = surface;
@@ -257,6 +284,25 @@ describe('/story/partner', () => {
     await userEvent.click(screen.getByRole('button', { name: '하이라이트에 추가' }));
     expect(mockNavigate).toHaveBeenCalledWith('/us?highlightRecord=photo-story');
   });
+
+  it('상대의 오늘에서 정확한 원본을 열 때만 briefing_to_original을 기록한다', async () => {
+    surface = [record({ id: 'exact-source' })];
+    records = surface;
+    open('/story/partner');
+
+    await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));
+
+    expect(recordProductEvent).toHaveBeenCalledWith({
+      kind: 'briefing_to_original',
+      screen: 'story',
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('/record?record=exact-source');
+
+    await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));
+    expect(recordProductEvent.mock.calls.filter(([event]) => (
+      event.kind === 'briefing_to_original'
+    ))).toHaveLength(1);
+  });
 });
 
 describe('/story/mine', () => {
@@ -287,6 +333,14 @@ describe('/story/mine', () => {
     expect(screen.getByText('나만 보는 기록')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /이따 이야기하기/ })).not.toBeInTheDocument();
   });
+
+  it('내 스토리 열기와 원본 이동을 상대 briefing 지표로 기록하지 않는다', async () => {
+    records = [record({ id: 'mine', userId: 'me' })];
+    open('/story/mine');
+
+    await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));
+    expect(recordProductEvent).not.toHaveBeenCalled();
+  });
 });
 
 describe('/story/day/:date', () => {
@@ -313,6 +367,14 @@ describe('/story/day/:date', () => {
     expect(screen.queryByRole('button', { name: '이따 이야기하기' })).toBeNull();
     expect(screen.queryByTestId('story-acknowledge')).toBeNull();
   });
+
+  it('보관 스토리의 원본 이동을 상대 briefing 지표로 기록하지 않는다', async () => {
+    records = [record({ id: 'then', date: '2026-08-14' })];
+    open('/story/day/2026-08-14');
+
+    await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));
+    expect(recordProductEvent).not.toHaveBeenCalled();
+  });
 });
 
 describe('/story/highlight/:highlightId', () => {
@@ -331,5 +393,17 @@ describe('/story/highlight/:highlightId', () => {
     expect(screen.getByText('두 번째로 고른 사진')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     expect(screen.getByText('첫 번째로 고른 사진')).toBeTruthy();
+  });
+
+  it('하이라이트의 원본 이동을 상대 briefing 지표로 기록하지 않는다', async () => {
+    records = [record({ id: 'picked', log: '직접 고른 사진' })];
+    coupleHighlights = [{
+      id: 'summer', coupleId: 'c1', title: '여름', recordIds: ['picked'],
+      coverRecordId: 'picked', sortOrder: 0, createdAt: '2026-08-01', updatedAt: '2026-08-01',
+    }];
+    open('/story/highlight/summer');
+
+    await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));
+    expect(recordProductEvent).not.toHaveBeenCalled();
   });
 });

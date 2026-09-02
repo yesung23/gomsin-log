@@ -124,6 +124,7 @@ const ORDER = [
   '065_harden_e2ee_pairing_rpc.sql',
   '066_atomic_push_delivery_claims.sql',
   '067_profile_post_intent.sql',
+  '068_allow_story_product_event_screen.sql',
 ];
 
 /**
@@ -4064,6 +4065,91 @@ check(
   ownerClearsProfilePost.ok
     && mustSql(`SELECT is_profile_post FROM public.daily_records WHERE id = '67000000-0000-4000-8000-000000000002'`, '067 inspect after owner update') === 'f',
   '067 author can change their own profile-post marker',
+);
+
+// ---------------------------------------------------------------------------
+// 068 — V4 Story is an allowed measurement surface, without opening the set
+// ---------------------------------------------------------------------------
+
+const finalScreenConstraint = mustSql(`
+  SELECT pg_get_constraintdef(oid)
+  FROM pg_constraint
+  WHERE conrelid = 'public.product_events'::regclass
+    AND conname = 'product_events_screen_check'`, '068 screen constraint');
+check(finalScreenConstraint.includes("'story'::text"),
+  '068 the closed screen vocabulary includes the active V4 Story surface');
+check(
+  mustSql(`SELECT convalidated::text
+           FROM pg_constraint
+           WHERE conrelid = 'public.product_events'::regclass
+             AND conname = 'product_events_screen_check'`, '068 validation') === 'true',
+  '068 the replacement screen constraint is validated',
+);
+check(
+  mustSql(`SELECT count(*) FROM pg_constraint
+           WHERE conrelid = 'public.product_events'::regclass
+             AND contype = 'c'
+             AND pg_get_constraintdef(oid) LIKE '%screen%'`, '068 screen constraint count') === '1',
+  '068 leaves one final screen constraint rather than parallel legacy rules',
+);
+
+for (const screen of ['home', 'record', 'schedule', 'us', 'my', 'call', 'story', 'onboarding', 'settings']) {
+  check(
+    asUser(A, `INSERT INTO public.product_events (kind, screen, occurred_on)
+               VALUES ('briefing_opened', '${screen}', CURRENT_DATE)`).ok,
+    `068 authenticated owner may write the allowlisted ${screen} screen`,
+  );
+}
+check(
+  asUser(A, `INSERT INTO public.product_events (kind, screen, occurred_on)
+             VALUES ('briefing_opened', NULL, CURRENT_DATE)`).ok,
+  '068 a screen remains optional',
+);
+check(
+  !asUser(A, `INSERT INTO public.product_events (kind, screen, occurred_on)
+              VALUES ('briefing_opened', 'story/private-route', CURRENT_DATE)`).ok,
+  '068 a route-like value outside the closed set is rejected',
+);
+
+check(
+  asUser(A, `INSERT INTO public.product_events (kind, screen, occurred_on)
+             VALUES ('briefing_to_original', 'story', DATE '2026-05-03')`).ok,
+  '068 Story can record the aggregate transition without a source identifier',
+);
+check(
+  asUser(A, `SELECT count(*) FROM public.product_events
+             WHERE kind = 'briefing_to_original' AND screen = 'story'
+               AND occurred_on = DATE '2026-05-03'`).stdout.trim() === '1',
+  '068 the event owner can read their Story event',
+);
+for (const [actor, label] of [[B, 'partner'], [C, 'unrelated user']]) {
+  const read = asUser(actor, `SELECT count(*) FROM public.product_events
+                              WHERE user_id = '${A}' AND kind = 'briefing_to_original'
+                                AND screen = 'story' AND occurred_on = DATE '2026-05-03'`);
+  check(!read.ok || read.stdout.trim() === '0', `068 the ${label} cannot read the Story event`);
+}
+const anonStoryRead = asAnon(`SELECT count(*) FROM public.product_events
+                              WHERE user_id = '${A}' AND kind = 'briefing_to_original'
+                                AND screen = 'story' AND occurred_on = DATE '2026-05-03'`);
+check(!anonStoryRead.ok || anonStoryRead.stdout.trim() === '0',
+  '068 anon cannot read the Story event');
+asUser(A, `UPDATE public.product_events SET screen = 'home'
+           WHERE kind = 'briefing_to_original' AND screen = 'story'
+             AND occurred_on = DATE '2026-05-03'`);
+check(
+  mustSql(`SELECT screen FROM public.product_events
+           WHERE user_id = '${A}' AND kind = 'briefing_to_original'
+             AND occurred_on = DATE '2026-05-03'`, '068 unchanged Story event') === 'story',
+  '068 the owner cannot rewrite a Story event',
+);
+asUser(A, `DELETE FROM public.product_events
+           WHERE kind = 'briefing_to_original' AND screen = 'story'
+             AND occurred_on = DATE '2026-05-03'`);
+check(
+  mustSql(`SELECT count(*) FROM public.product_events
+           WHERE user_id = '${A}' AND kind = 'briefing_to_original'
+             AND screen = 'story' AND occurred_on = DATE '2026-05-03'`, '068 retained Story event') === '1',
+  '068 the owner cannot delete a Story event',
 );
 
 // ---------------------------------------------------------------------------

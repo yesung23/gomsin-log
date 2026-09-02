@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { Button } from '@/components/ui/Button';
 import { useStore } from '@/lib/useStore';
-import { useEscapeKey } from '@/lib/hooks';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
 import {
   computeServiceProgress,
@@ -92,10 +92,22 @@ export function ServicePage() {
   const [editDischargeSource, setEditDischargeSource] = useState<DischargeDateSource>(
     editableSource(profile.military?.dischargeDateSource),
   );
+  const editorPanelRef = useRef<HTMLDivElement>(null);
+  const editorTriggerRef = useRef<HTMLElement | null>(null);
+  const editorInitialFocusRef = useRef<HTMLSelectElement>(null);
 
-  useEscapeKey(() => {
+  const closeEditor = useCallback(() => {
     if (!isSaving) setIsEditing(false);
-  }, isEditing);
+  }, [isSaving]);
+
+  useDialogFocus({
+    active: isEditing,
+    panelRef: editorPanelRef,
+    restoreFocusRef: editorTriggerRef,
+    initialFocusRef: editorInitialFocusRef,
+    onClose: closeEditor,
+    closeDisabled: isSaving,
+  });
 
   // Real progress, or null when the dates needed to compute it are missing.
   const progress = computeServiceProgress(military, todayStr);
@@ -103,6 +115,9 @@ export function ServicePage() {
 
   const openEditor = () => {
     if (!isSoldier) return;
+    editorTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     setEditBranch(profile.military?.branch || 'army');
     setEditStatus(editableStatus(profile.military?.militaryStatus));
     setEditEnlistDate(profile.military?.enlistmentDate || '');
@@ -181,11 +196,11 @@ export function ServicePage() {
 
         {/* D-Day / progress. Shown only when real dates exist. */}
         {progress ? (
-          <div className="bg-gradient-to-br from-navy to-navy/80 rounded-surface p-5 text-white relative overflow-hidden">
-            <Shield className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10 rotate-12" />
+          <section className="ink-fill relative overflow-hidden p-5" aria-labelledby="service-progress-title">
+            <Shield className="absolute -right-4 -bottom-4 h-32 w-32 rotate-12 opacity-10" aria-hidden="true" />
             <div className="relative z-10">
               <div className="flex justify-between items-start mb-2">
-                <span className="bg-white/20 px-3 py-1 rounded-full text-caption font-bold backdrop-blur-sm">
+                <span className="rounded-control border border-current/40 px-3 py-1 text-caption font-bold">
                   {BRANCH_LABELS[military?.branch || 'army']} ·{' '}
                   {STATUS_LABELS[military?.militaryStatus || 'serving']}
                 </span>
@@ -193,22 +208,22 @@ export function ServicePage() {
                     `unknown` used to fall through to 자동 계산, which asserted
                     the date had been derived when nobody had said so. */}
                 {military?.dischargeDateSource !== 'unknown' && (
-                  <span className="bg-white/10 px-2.5 py-1 rounded-full text-caption font-semibold">
+                  <span className="rounded-control border border-current/30 px-2.5 py-1 text-caption font-semibold opacity-80">
                     {military?.dischargeDateSource === 'manual' ? '직접 입력' : '자동 계산'}
                   </span>
                 )}
               </div>
 
-              <div className="text-display mb-4 tracking-tight tabular-nums">
+              <h2 id="service-progress-title" className="text-display mb-4 tracking-tight tabular-nums">
                 {progress.isDischarged
                   ? '전역 🎉'
                   : progress.isBeforeEnlistment
                     ? `입대 D-${progress.daysUntilEnlistment ?? 0}`
                     : `D-${progress.remainingDays}`}
-              </div>
+              </h2>
 
               <div className="space-y-2">
-                <div className="flex justify-between text-label font-medium text-white/80">
+                <div className="flex justify-between text-label font-medium opacity-80">
                   <span>복무율 {progress.percent}%</span>
                   <span>
                     {progress.isBeforeEnlistment
@@ -216,19 +231,28 @@ export function ServicePage() {
                       : `${progress.remainingDays}일 남음`}
                   </span>
                 </div>
-                <div className="h-2.5 bg-black/25 rounded-full overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-label={`${soldierName} 복무 진행률`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={progress.percent}
+                  aria-valuetext={`복무율 ${progress.percent}%`}
+                  className="h-2.5 overflow-hidden rounded-full"
+                  style={{ background: 'var(--paper)' }}
+                >
                   <div
-                    className="h-full bg-coral rounded-full transition-all duration-1000"
-                    style={{ width: `${progress.percent}%` }}
+                    className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700"
+                    style={{ width: `${progress.percent}%`, background: 'var(--ink-accent)' }}
                   />
                 </div>
-                <div className="flex justify-between text-caption text-white/60 pt-1">
+                <div className="flex justify-between text-caption pt-1 opacity-65">
                   <span>입대 {formatLocalDate(military!.enlistmentDate!)}</span>
                   <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         ) : (
           <div className="rounded-surface border border-dashed border-border bg-muted/40 p-5 text-center space-y-3">
             <Shield className="w-8 h-8 text-muted-foreground/60 mx-auto" />
@@ -317,7 +341,7 @@ export function ServicePage() {
       {/* Edit Modal */}
       {isSoldier && isEditing && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="service-edit-modal-title" className="bg-card border border-border w-full max-w-md rounded-surface p-6 shadow-xl space-y-4 max-h-[90dvh] overflow-y-auto">
+          <div ref={editorPanelRef} role="dialog" aria-modal="true" aria-labelledby="service-edit-modal-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-surface border border-border bg-card p-6 shadow-xl space-y-4">
             <h3 id="service-edit-modal-title" className="text-heading text-foreground">복무 정보 수정</h3>
 
             <div className="space-y-4">
@@ -326,6 +350,7 @@ export function ServicePage() {
                   복무 상태
                 </label>
                 <select
+                  ref={editorInitialFocusRef}
                   id="svc-status"
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as MilitaryStatus)}
@@ -398,7 +423,7 @@ export function ServicePage() {
 
             <div className="flex gap-2 pt-2">
               <button
-                onClick={() => setIsEditing(false)}
+                onClick={closeEditor}
                 disabled={isSaving}
                 className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label min-h-[44px]"
               >

@@ -1850,7 +1850,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const isCurrentRefresh = () => isCurrentActiveCouple()
         && !isWorkspaceQuarantined()
         && membershipReconciliationRef.current === authorizationRevision;
-      const talkAboutRequestSequence = slice === 'talk-about'
+      // A profile invalidation uses the full-state reader, which also owns the
+      // authoritative talk-about slice. Sequence both paths together so an
+      // older full-state response cannot overwrite a newer dedicated refresh.
+      const talkAboutRequestSequence = slice === 'talk-about' || slice === 'profile'
         ? ++talkAboutRefreshSequenceRef.current
         : null;
       const isLatestTalkAboutRefresh = () => isCurrentRefresh()
@@ -1859,10 +1862,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       try {
         if (slice === 'profile') {
           const result = await fetchFullStateResultFromDB(authUserId);
-          if (!isCurrentRefresh() || !result.ok || !result.state?.profile) return;
+          if (!isLatestTalkAboutRefresh()) return;
+          if (!result.ok) {
+            if (result.stage === 'talk-about') setTalkAboutSyncStatus('unavailable');
+            return;
+          }
+          if (!result.state?.profile || !Array.isArray(result.state.talkAboutMarks)) {
+            // A nominally successful full read without this slice is not an
+            // authoritative empty list. Keep the old list and block writes.
+            setTalkAboutSyncStatus('unavailable');
+            return;
+          }
+          const profile = result.state.profile;
+          const talkAboutMarks = result.state.talkAboutMarks;
+          setTalkAboutSyncStatus('ready');
           updateStateImmediately((current) =>
-            isCurrentRefresh()
-              ? { ...current, profile: result.state!.profile! }
+            isLatestTalkAboutRefresh()
+              ? { ...current, profile, talkAboutMarks }
               : current,
           );
           return;
@@ -1967,7 +1983,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : current,
         );
       } catch (error) {
-        if (slice === 'talk-about') {
+        if (slice === 'talk-about' || slice === 'profile') {
           if (!isLatestTalkAboutRefresh()) return;
         } else if (!isCurrentRefresh()) return;
         console.error(`[gomsinlog] Realtime refresh of ${slice} failed.`);
@@ -4046,6 +4062,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
     }
     const result = await markTalkAboutInDB(recordId, coupleId, userId);
+    if (!isCurrentWorkspace(workspace)) {
+      return { ok: false, error: '계정이나 커플 연결이 바뀌어 결과를 반영하지 않았어요.' };
+    }
     if (result.ok) {
       // Conversation intent. Paired with `talk_about_resolved`, the two say
       // whether marking something leads to talking about it -- which is the
@@ -4068,6 +4087,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
     }
     const result = await unmarkTalkAboutInDB(recordId, userId);
+    if (!isCurrentWorkspace(workspace)) {
+      return { ok: false, error: '계정이나 커플 연결이 바뀌어 결과를 반영하지 않았어요.' };
+    }
     if (result.ok) {
       const reconciled = await refreshTalkAboutMarks(workspace);
       return reconciled ? result : { ...result, syncPending: true };
@@ -4086,6 +4108,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
     }
     const result = await resolveTalkAboutInDB(recordId, coupleId);
+    if (!isCurrentWorkspace(workspace)) {
+      return { ok: false, error: '계정이나 커플 연결이 바뀌어 결과를 반영하지 않았어요.' };
+    }
     if (result.ok) {
       const reconciled = await refreshTalkAboutMarks(workspace);
       if (!reconciled) {

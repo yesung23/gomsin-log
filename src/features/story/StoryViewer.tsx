@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { X, ChevronLeft, ChevronRight, ArrowUpRight, BookmarkPlus, Check, Sparkles, LoaderCircle } from 'lucide-react';
 import type { StoryCard } from '@/features/story/storyProjection';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
@@ -112,6 +112,7 @@ export function StoryViewer({
   /** 홀드하면 UI를 감추고 사진만 남긴다. 멈출 타이머가 없으므로 용도가 이것뿐이다. */
   const [bare, setBare] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const unavailableHeadingRef = useRef<HTMLHeadingElement>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const total = cards.length;
@@ -120,6 +121,7 @@ export function StoryViewer({
     : cards.findIndex((candidate) => storyCardIdentity(candidate) === activeCardIdentity);
   const card = index >= 0 ? cards[index] : undefined;
   const currentUnavailable = activeCardIdentity !== null && index < 0;
+  const sourceUnavailable = currentUnavailable || card?.kind === 'missing';
 
   const go = useCallback((target: number) => {
     if (cards.length === 0) return;
@@ -166,6 +168,11 @@ export function StoryViewer({
     자기가 무엇을 열었는지 듣지 못한다. WCAG 2.1 SC 2.4.3.
   */
   useEffect(() => { containerRef.current?.focus(); }, []);
+
+  /** If realtime removes the focused source, move focus to the truthful replacement. */
+  useEffect(() => {
+    if (sourceUnavailable) unavailableHeadingRef.current?.focus();
+  }, [sourceUnavailable]);
 
   /** 카드가 바뀌면 무엇이 보이는지 말한다. SC 4.1.3. */
   const announcement = useMemo(() => {
@@ -247,6 +254,7 @@ export function StoryViewer({
           <StoryCurrentUnavailable
             canRestart={cards.length > 0}
             onRestart={() => go(0)}
+            headingRef={unavailableHeadingRef}
           />
         ) : card?.kind === 'cover' ? (
           <CoverCard
@@ -257,7 +265,7 @@ export function StoryViewer({
             refinementReason={coverRefinementReason}
           />
         ) : card?.kind === 'missing' ? (
-          <MissingCard />
+          <MissingCard headingRef={unavailableHeadingRef} />
         ) : card?.kind === 'closing' ? (
           <ClosingCard
             card={card}
@@ -491,7 +499,7 @@ function MomentCard({
   );
 }
 
-function MissingCard() {
+function MissingCard({ headingRef }: { headingRef: RefObject<HTMLHeadingElement | null> }) {
   return (
     <PaperCard className="mt-2 text-center">
       {/*
@@ -501,7 +509,13 @@ function MissingCard() {
         왜 볼 수 없는지는 말하지 않는다 -- 삭제인지 비공개 전환인지를 구분해 알리면
         그 자체가 상대에 대한 정보가 된다.
       */}
-      <p className="text-body text-muted-foreground">이 기록은 더 이상 볼 수 없어요</p>
+      <h2
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-body text-muted-foreground outline-none"
+      >
+        이 기록은 더 이상 볼 수 없어요
+      </h2>
     </PaperCard>
   );
 }
@@ -509,14 +523,22 @@ function MissingCard() {
 function StoryCurrentUnavailable({
   canRestart,
   onRestart,
+  headingRef,
 }: {
   canRestart: boolean;
   onRestart: () => void;
+  headingRef: RefObject<HTMLHeadingElement | null>;
 }) {
   return (
     <div data-testid="story-current-unavailable">
       <PaperCard className="mt-2 text-center">
-        <p className="text-body text-muted-foreground">이 기록은 더 이상 볼 수 없어요</p>
+        <h2
+          ref={headingRef}
+          tabIndex={-1}
+          className="text-body text-muted-foreground outline-none"
+        >
+          이 기록은 더 이상 볼 수 없어요
+        </h2>
         {canRestart ? (
           <button
             type="button"

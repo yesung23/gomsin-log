@@ -13,14 +13,24 @@ interface CallSession {
   remaining: string[];
   /** Exact ids skipped in this pass. They remain unresolved. */
   skipped: string[];
-  /** Resolved locally this visit, even while realtime reconciliation catches up. */
-  settled: string[];
+  /** Resolved mark generation, retained while realtime reconciliation catches up. */
+  settled: Array<{ recordId: string; activeMarkIds: string[] }>;
   /** Sources that disappeared while current and were explicitly skipped, never resolved. */
   unavailable: string[];
 }
 
 function sameIds(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function sameSettled(
+  left: Array<{ recordId: string; activeMarkIds: string[] }>,
+  right: Array<{ recordId: string; activeMarkIds: string[] }>,
+): boolean {
+  return left.length === right.length && left.every((entry, index) => (
+    entry.recordId === right[index]?.recordId
+    && sameIds(entry.activeMarkIds, right[index].activeMarkIds)
+  ));
 }
 
 /**
@@ -96,16 +106,26 @@ export function CallModePage() {
     if (coordinationUnavailable) return;
     const activeIds = topics.map((topic) => topic.recordId);
     const active = new Set(activeIds);
+    const activeById = new Map(topics.map((topic) => [topic.recordId, topic]));
     setSession((previous) => {
-      const settled = new Set(previous.settled);
+      // A server snapshot containing only rows that were active at completion
+      // is reconciliation lag. Any new row id means someone explicitly marked
+      // this exact source again, so it must become a topic again.
+      const settled = previous.settled.filter((entry) => {
+        const activeTopic = activeById.get(entry.recordId);
+        return !activeTopic || activeTopic.activeMarkIds.every(
+          (markId) => entry.activeMarkIds.includes(markId),
+        );
+      });
+      const settledIds = new Set(settled.map((entry) => entry.recordId));
       const [pinnedCurrent, ...queued] = previous.remaining;
       const remaining = [
-        ...(pinnedCurrent && !settled.has(pinnedCurrent) ? [pinnedCurrent] : []),
-        ...queued.filter((id) => active.has(id) && !settled.has(id)),
+        ...(pinnedCurrent && !settledIds.has(pinnedCurrent) ? [pinnedCurrent] : []),
+        ...queued.filter((id) => active.has(id) && !settledIds.has(id)),
       ];
-      const skipped = previous.skipped.filter((id) => active.has(id) && !settled.has(id));
-      const unavailable = previous.unavailable.filter((id) => !settled.has(id));
-      const known = new Set([...remaining, ...skipped, ...unavailable, ...previous.settled]);
+      const skipped = previous.skipped.filter((id) => active.has(id) && !settledIds.has(id));
+      const unavailable = previous.unavailable.filter((id) => !settledIds.has(id));
+      const known = new Set([...remaining, ...skipped, ...unavailable, ...settledIds]);
 
       // New realtime topics wait behind the current session instead of jumping
       // in front of the sentence already on screen.
@@ -120,10 +140,11 @@ export function CallModePage() {
         sameIds(remaining, previous.remaining)
         && sameIds(skipped, previous.skipped)
         && sameIds(unavailable, previous.unavailable)
+        && sameSettled(settled, previous.settled)
       ) {
         return previous;
       }
-      return { ...previous, remaining, skipped, unavailable };
+      return { ...previous, remaining, skipped, settled, unavailable };
     });
   }, [coordinationUnavailable, topics]);
 
@@ -198,6 +219,7 @@ export function CallModePage() {
     pendingRef.current = true;
     setPending(true);
     const recordId = current.recordId;
+    const activeMarkIds = [...current.activeMarkIds];
     try {
       const result = await resolveTalkAbout(recordId);
       if (!result.ok) {
@@ -209,9 +231,10 @@ export function CallModePage() {
       setSession((previous) => ({
         remaining: previous.remaining.filter((id) => id !== recordId),
         skipped: previous.skipped.filter((id) => id !== recordId),
-        settled: previous.settled.includes(recordId)
-          ? previous.settled
-          : [...previous.settled, recordId],
+        settled: [
+          ...previous.settled.filter((entry) => entry.recordId !== recordId),
+          { recordId, activeMarkIds },
+        ],
         unavailable: previous.unavailable.filter((id) => id !== recordId),
       }));
       /*

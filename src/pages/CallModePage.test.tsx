@@ -320,6 +320,49 @@ describe('one topic at a time', () => {
 
     expect(screen.getByText('둘째')).toBeInTheDocument();
   });
+
+  it('shows the same exact source again when it receives a new mark generation', async () => {
+    const onlyRecord = record({ id: 'only', log: '다시 꺼낸 이야기' });
+    const firstMark = mark({
+      id: 'mark-old',
+      recordId: 'only',
+      createdAt: '2026-08-21T10:00:00.000Z',
+    });
+    const { rerender } = renderPage([onlyRecord], [firstMark]);
+
+    await userEvent.click(screen.getByTestId('call-mode-complete'));
+    await waitFor(() => expect(screen.getByTestId('call-mode-done')).toBeInTheDocument());
+
+    currentState = makeState([onlyRecord], [mark({
+      id: 'mark-new',
+      recordId: 'only',
+      createdAt: '2026-08-21T11:00:00.000Z',
+    })]);
+    rerender(<CallModePage />);
+
+    await waitFor(() => expect(screen.getByText('다시 꺼낸 이야기')).toBeInTheDocument());
+    expect(screen.queryByTestId('call-mode-done')).not.toBeInTheDocument();
+    expect(screen.getByTestId('call-mode-complete')).toBeInTheDocument();
+  });
+
+  it('suppresses the same settled mark generation when an old snapshot arrives again', async () => {
+    const onlyRecord = record({ id: 'only', log: '이미 정리한 이야기' });
+    const oldMark = mark({
+      id: 'mark-old',
+      recordId: 'only',
+      createdAt: '2026-08-21T10:00:00.000Z',
+    });
+    const { rerender } = renderPage([onlyRecord], [oldMark]);
+
+    await userEvent.click(screen.getByTestId('call-mode-complete'));
+    await waitFor(() => expect(screen.getByTestId('call-mode-done')).toBeInTheDocument());
+
+    currentState = makeState([onlyRecord], [{ ...oldMark }]);
+    rerender(<CallModePage />);
+
+    expect(screen.getByTestId('call-mode-done')).toBeInTheDocument();
+    expect(screen.queryByTestId('call-mode-topic')).not.toBeInTheDocument();
+  });
 });
 
 describe('each completion stands on its own', () => {

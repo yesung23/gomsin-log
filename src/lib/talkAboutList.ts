@@ -21,6 +21,8 @@ import { isVisibleToViewer, type Viewer } from '@/lib/privacy';
 interface TalkAboutTopicBase {
   /** Exact original id. Never substitute a different record for this id. */
   recordId: string;
+  /** Active server row ids, used only to distinguish a later re-mark of this source. */
+  activeMarkIds: string[];
   /** Distinct users who marked this record, newest mark first. */
   markedBy: string[];
   /** Whether the viewer is one of them -- drives 표시 해제 vs 나도 표시. */
@@ -101,6 +103,7 @@ export function buildTalkAboutTopics(
     const actorState = actorStateFromMarks(sorted, viewer.userId);
     const base: TalkAboutTopicBase = {
       recordId,
+      activeMarkIds: sorted.map((mark) => mark.id),
       markedBy: [...new Set(sorted.map((mark) => mark.actorUserId))],
       markedByViewer: actorState === 'mine' || actorState === 'both',
       actorState,

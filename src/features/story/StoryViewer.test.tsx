@@ -144,9 +144,10 @@ describe('이동', () => {
     expect(onOpenRecord).toHaveBeenCalledWith('b');
   });
 
-  it('읽던 원본이 사라지면 옆 카드를 대신 열지 않는다', () => {
+  it('읽던 원본이 사라지면 옆 카드를 대신 열지 않고 안내로 포커스를 옮긴다', async () => {
     const { rerender } = view({ initialIndex: 1 });
     expect(screen.getByText('점심 먹었어')).toBeInTheDocument();
+    screen.getByRole('button', { name: '원본 보기' }).focus();
 
     rerender(
       <StoryViewer
@@ -163,6 +164,30 @@ describe('이동', () => {
     expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
     expect(screen.queryByText('오늘 시험 끝났어')).not.toBeInTheDocument();
     expect(screen.queryByTestId('story-acknowledge')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '원본 보기' })).not.toBeInTheDocument();
+    const unavailableHeading = screen.getByRole('heading', { name: '이 기록은 더 이상 볼 수 없어요' });
+    await act(async () => undefined);
+    expect(unavailableHeading).toHaveFocus();
+  });
+
+  it('읽던 원본이 같은 ID의 부재 카드로 바뀌어도 안내로 포커스를 옮긴다', async () => {
+    const { rerender } = view({ initialIndex: 1 });
+    screen.getByRole('button', { name: '원본 보기' }).focus();
+
+    rerender(
+      <StoryViewer
+        cards={[CARDS[0], { kind: 'missing', recordId: 'b' }, CARDS[2]]}
+        initialIndex={1}
+        mode="today"
+        title="춘향의 오늘"
+        onClose={vi.fn()}
+        onOpenRecord={vi.fn()}
+      />,
+    );
+
+    const unavailableHeading = screen.getByRole('heading', { name: '이 기록은 더 이상 볼 수 없어요' });
+    await act(async () => undefined);
+    expect(unavailableHeading).toHaveFocus();
     expect(screen.queryByRole('button', { name: '원본 보기' })).not.toBeInTheDocument();
   });
 });

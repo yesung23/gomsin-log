@@ -17,11 +17,14 @@ const OUT = process.env.SHOT_DIR || './e2e/.artifacts/audit';
 
 const TABS = [
   { path: '/home', name: 'home' },
-  { path: '/record', name: 'record' },
+  { path: '/search', name: 'search' },
+  { path: '/diary', name: 'diary' },
   { path: '/schedule', name: 'schedule' },
   { path: '/us', name: 'us' },
-  { path: '/my', name: 'my' },
 ];
+
+const IPHONE_16_PRO_VIEWPORT = { width: 402, height: 874 } as const;
+const SMALL_IPHONE_VIEWPORT = { width: 375, height: 667 } as const;
 
 /**
  * A context with the backend mocked and a theme chosen, and only THEN a page.
@@ -37,7 +40,7 @@ async function boot(
   scenario: Scenario,
   theme: 'light' | 'dark' = 'light',
 ): Promise<Page> {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: IPHONE_16_PRO_VIEWPORT });
   await installMockBackend(context, scenario);
   await context.addInitScript((value) => {
     const key = 'gomsinlog.state.v2';
@@ -145,10 +148,29 @@ test('degraded — no couple space, and a failing table', async ({ browser }) =>
     ...CREATOR,
     failures: { daily_records: { status: 500, code: 'PGRST500', message: 'boom' } },
   });
-  await page2.goto('/record');
+  await page2.goto('/diary');
   await page2.waitForTimeout(2000);
-  await shot(page2, 'error-record');
+  await shot(page2, 'error-diary');
   await page2.context().close();
+});
+
+/** Small iPhone: every primary tab must remain usable without horizontal overflow. */
+test('primary tabs — small iPhone viewport', async ({ browser }) => {
+  const page = await boot(browser, CREATOR);
+  await page.setViewportSize(SMALL_IPHONE_VIEWPORT);
+
+  for (const tab of TABS) {
+    await page.goto(tab.path);
+    await ready(page);
+    const overflow = await page.evaluate(() => {
+      const doc = document.documentElement;
+      return Math.max(0, doc.scrollWidth - doc.clientWidth);
+    });
+    expect(overflow, `${tab.path} should not overflow horizontally`).toBeLessThanOrEqual(1);
+    await shot(page, `${tab.name}-gomsin-light-small`);
+  }
+
+  await page.context().close();
 });
 
 /** The sub-screens that are not tabs. */

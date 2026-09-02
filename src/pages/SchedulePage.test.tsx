@@ -138,6 +138,29 @@ describe('SchedulePage loading lifecycle', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 20));
     expect(reloadCalls).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps keyboard focus inside the event dialog and restores its opener', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+    const trigger = await screen.findByRole('button', { name: '이 날짜에 추가' });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(await screen.findByLabelText(/일정 제목/)).toHaveFocus();
+    const first = screen.getByRole('button', { name: '닫기' });
+    const last = screen.getByRole('button', { name: '등록하기' });
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(first).toHaveFocus();
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '새 일정 추가' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
 });
 
 describe('SchedulePage offline read-only mode', () => {

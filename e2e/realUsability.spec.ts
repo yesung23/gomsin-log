@@ -152,6 +152,46 @@ for (const width of [320, 390, 430]) {
   });
 }
 
+for (const width of [320, 375]) {
+  test(`schedule calendar fits and keeps date targets at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 } });
+    await installMockBackend(context, CREATOR);
+    const page = await context.newPage();
+
+    await bootedInto(page, '/schedule');
+    await expect(page.getByRole('button', { name: '일정 추가' })).toBeVisible({ timeout: 20_000 });
+    const layout = await page.locator('[data-cal-date]').evaluateAll((days) => {
+      const rects = days.map((day) => day.getBoundingClientRect());
+      const rows = new Map<number, Array<{ left: number; right: number }>>();
+      for (const rect of rects) {
+        const row = Math.round(rect.top);
+        rows.set(row, [...(rows.get(row) ?? []), { left: rect.left, right: rect.right }]);
+      }
+      const week = [...rows.values()]
+        .sort((a, b) => b.length - a.length)[0]
+        ?.sort((a, b) => a.left - b.left) ?? [];
+      return {
+        widths: rects.map((rect) => rect.width),
+        left: Math.min(...rects.map((rect) => rect.left)),
+        right: Math.max(...rects.map((rect) => rect.right)),
+        week,
+        pageWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      };
+    });
+
+    expect(layout.scrollWidth - layout.pageWidth, 'schedule should not overflow horizontally').toBeLessThanOrEqual(1);
+    expect(Math.min(...layout.widths), 'every calendar date keeps a 44px target').toBeGreaterThanOrEqual(44);
+    expect(
+      layout.week.every((day, index) => index === 0 || day.left >= layout.week[index - 1].right - 0.5),
+      'calendar date targets must not overlap each other',
+    ).toBe(true);
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.pageWidth);
+    await context.close();
+  });
+}
+
 test('paper collected and applied in the Shop persists as the account background', async ({ browser }) => {
   const context = await browser.newContext();
   await installMockBackend(context, CREATOR);

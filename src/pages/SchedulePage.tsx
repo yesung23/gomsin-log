@@ -34,12 +34,12 @@ import {
   upcomingEvents,
   validateEventDraft,
 } from '@/lib/calendar';
-import { useEscapeKey } from '@/lib/hooks';
 import { nextAnniversaryMilestone } from '@/lib/milestones';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
 import { useStore } from '@/lib/useStore';
 import { createTask, deleteTask, fetchTasks, updateTask, validateTaskTitle } from '@/lib/tasks';
 import { supabase } from '@/lib/supabase';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 import type { CoupleEvent, CoupleTask, EventType } from '@/types';
 
 const EVENT_BADGES: Record<EventType, { label: string; tone: 'neutral' | 'accent' | 'info' | 'success' | 'warning' }> = {
@@ -94,6 +94,9 @@ export function SchedulePage() {
   const [currMonth, setCurrMonth] = useState(localToday().getMonth());
   const [currYear, setCurrYear] = useState(localToday().getFullYear());
   const [showEventModal, setShowEventModal] = useState(false);
+  const eventModalPanelRef = useRef<HTMLDivElement>(null);
+  const eventTitleRef = useRef<HTMLInputElement>(null);
+  const eventModalTriggerRef = useRef<HTMLElement | null>(null);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [eventType, setEventType] = useState<EventType>('visit');
@@ -165,10 +168,14 @@ export function SchedulePage() {
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
 
-  useEscapeKey(
-    () => setShowEventModal(false),
-    showEventModal && !isSaving && deletingEventId === null,
-  );
+  useDialogFocus({
+    active: showEventModal,
+    panelRef: eventModalPanelRef,
+    initialFocusRef: eventTitleRef,
+    restoreFocusRef: eventModalTriggerRef,
+    onClose: () => setShowEventModal(false),
+    closeDisabled: isSaving || deletingEventId !== null,
+  });
 
   useLayoutEffect(() => {
     setShowEventModal(false);
@@ -335,6 +342,7 @@ export function SchedulePage() {
   const openCreateFromPick = () => {
     const runs = groupIntoRuns(pickedDays);
     if (runs.length === 0) return;
+    eventModalTriggerRef.current = document.querySelector<HTMLElement>(`[data-cal-date="${runs[0].start}"]`);
     setEditingEventId(null);
     setTitle('');
     setEventType('visit');
@@ -350,6 +358,9 @@ export function SchedulePage() {
 
   const openCreateModal = () => {
     if (!hasCoupleSpace) return;
+    eventModalTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : document.querySelector<HTMLElement>(`[data-cal-date="${selectedDate}"]`);
     setEditingEventId(null);
     setPendingRuns(null);
     setTitle('');
@@ -364,6 +375,9 @@ export function SchedulePage() {
 
   const openEditModal = (event: CoupleEvent) => {
     if (event.createdBy !== authenticatedUser?.id) return;
+    eventModalTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : document.querySelector<HTMLElement>(`[data-cal-date="${event.startDate}"]`);
     setPendingRuns(null);
     setEditingEventId(event.id);
     setTitle(event.title);
@@ -735,11 +749,11 @@ export function SchedulePage() {
                   ) : null}
                 </div>
               </div>
-              <div className="grid grid-cols-7 gap-0.5 pb-1 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
+              <div className="-mx-3 grid grid-cols-7 gap-0 pb-1 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
                 <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
               </div>
               <div
-                className="grid grid-cols-7 gap-0.5 text-center"
+                className="-mx-3 grid grid-cols-7 gap-0 text-center"
                 onPointerDown={onGridDown}
                 onPointerMove={onGridMove}
                 onPointerUp={onGridUp}
@@ -853,7 +867,7 @@ export function SchedulePage() {
                 </div>
               ) : (
                 <p className="mt-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
-                  일정 추가를 누르고 날짜를 끌면 여러 날이 한 번에 잡혀요. 떨어진 날은 하나씩 눌러 더할 수 있어요
+                  일정 추가를 누른 뒤 날짜를 누르거나 끌어 골라요. 떨어진 날도 하나씩 더할 수 있어요
                 </p>
               )}
             </section>
@@ -1129,7 +1143,7 @@ export function SchedulePage() {
         {/* Event create/edit modal — z-[60] above the tab bar */}
         {showEventModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="bg-card rounded-surface p-4 max-w-sm w-full space-y-4 border border-border">
+            <div ref={eventModalPanelRef} role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-sm space-y-4 overflow-y-auto rounded-surface border border-border bg-card p-4">
               <div className="flex items-center justify-between">
                 <h3 id="event-modal-title" className="text-heading text-foreground">{editingEventId ? '일정 수정' : '새 일정 추가'}</h3>
                 <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} aria-label="닫기" className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-40"><X size={18} /></button>
@@ -1137,7 +1151,7 @@ export function SchedulePage() {
               <div className="space-y-3">
                 <div>
                   <label htmlFor="event-title" className="block text-caption text-muted-foreground font-medium mb-1">일정 제목 *</label>
-                  <input id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 첫 휴가 / 주말 데이트" className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11" />
+                  <input ref={eventTitleRef} id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 첫 휴가 / 주말 데이트" className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11" />
                 </div>
                 <div>
                   <label htmlFor="event-type" className="block text-caption text-muted-foreground font-medium mb-1">일정 유형</label>
@@ -1145,7 +1159,7 @@ export function SchedulePage() {
                     {(Object.entries(EVENT_BADGES) as [EventType, { label: string }][]).map(([value, badge]) => <option key={value} value={value}>{badge.label}</option>)}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
                   <div>
                     <label htmlFor="event-start" className="block text-caption text-muted-foreground font-medium mb-1">시작일 *</label>
                     <input id="event-start" type="date" value={eventStartDate} onChange={(event) => setEventStartDate(event.target.value)} className="w-full px-2 py-2 rounded-control border border-border bg-background text-foreground text-body min-h-11" />

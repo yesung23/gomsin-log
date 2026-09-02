@@ -9,14 +9,12 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 
 /**
- * 하단 탭바 — 인스타그램의 5칸 그대로.
+ * 하단 탭바 — 다섯 목적지를 처음부터 읽을 수 있는 고정 내비게이션.
  *
- *     인스타      홈    검색    만들기(+)   릴스     프로필
- *     곰신로그    홈    찾기    남기기      일정     우리
+ *     곰신로그    홈    찾기    일기장      일정     우리
  *
- * 자리와 개수가 같아야 손이 기억한다. 인스타를 쓰는 사람은 왼쪽 끝이 홈이고 가운데가
- * 만들기이며 오른쪽 끝이 자기 프로필이라는 것을 몸으로 안다. **그 기억을 그대로 쓰는
- * 것이 이 앱이 인스타 문법을 빌리는 이유다.**
+ * 아이콘의 위치는 반복 사용을 돕지만, BookHeart와 커플 얼굴만 보고 `일기장`과 `우리`를
+ * 처음부터 맞히게 해서는 안 된다. 그래서 아이콘 아래에 짧은 이름을 항상 남긴다.
  *
  * 릴스 자리에 일정이 오는 것은 성격이 맞아서다. 다른 넷은 전부 과거와 현재인데 -- 기록·
  * 탐색·작성·축적 -- 일정만 미래다. 인스타에서도 그 칸은 "다른 종류의 것"을 보는 자리다.
@@ -245,7 +243,7 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
         {!hideNav && <OfflineBanner />}
 
         {/*
-          다섯 칸: 홈 | 찾기 | 남기기 | 일정 | 우리.
+          다섯 칸: 홈 | 찾기 | 일기장 | 일정 | 우리.
 
           공책을 덮는다 -- 반투명이 아니다. 괘선 위에 떠 있으면 글과 겹쳐 읽히고, 그러면
           탭바가 아니라 얼룩이 된다. 이 바만 종이를 가린다.
@@ -291,7 +289,7 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
                         포인터가 내려가는 순간 걸리므로 바가 먼저 답하고 경로는 올 때
                         온다.
                       */
-                      'press-response flex items-center justify-center w-full min-h-11 py-3',
+                      'press-response flex min-h-[52px] w-full flex-col items-center justify-center gap-0.5 py-1.5',
                     )}
                   >
                     {Icon ? (
@@ -312,6 +310,15 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
                         <PenFace size={18} />
                       </InkCircle>
                     )}
+                    <span
+                      className={cn(
+                        'text-caption leading-none',
+                        active ? 'font-semibold' : 'font-medium',
+                      )}
+                      style={{ color: active ? 'var(--ink)' : 'var(--ink-soft)' }}
+                    >
+                      {t.label}
+                    </span>
                   </Link>
                 </li>
               );

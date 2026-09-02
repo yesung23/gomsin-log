@@ -1,19 +1,18 @@
 # 곰신로그 CURRENT STATE — 저장소 현실
 
 > **이 문서는 현시점의 저장소 현실을 기술한다.** `PRODUCT_V3.md`는 2026-08-24
-> 제품 오너 결정으로 legacy가 되었고, 활성 제품 방향은 최신 사용자 승인 요청과
+> 제품 오너 결정으로 legacy가 되었고, 활성 제품 방향은 최신 사용자 승인과
+> [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md), 현재 V4 화면 사실은
 > [`V4_AS_BUILT.md`](V4_AS_BUILT.md)에서 확인한다. 구현 순서는
 > [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)가 소유한다.
 >
 > 이 문서는 default branch reality와 active development checkpoint를 분리한다.
 > active draft PR의 코드가 default branch에 구현된 것으로 보이지 않게 한다.
 
-- 조사 기준: default branch `master`와 GitHub live state, 2026-08-18. §1의 branch
-  consolidation checkpoint는 2026-08-20 전수 감사 기준이다
-- 조사 방식: 저장소와 GitHub PR metadata/body 대조
-- remote Supabase/Auth/Vercel과 최신 iPhone package 상태: 2026-08-28 §0B에서 live 갱신.
-  signed Archive와 App Store Connect IPA export는 PASS지만 실제 화면·인증 사용자 경로·두 계정·
-  TestFlight 업로드/설치는 여전히 **UNVERIFIED**
+- 현재 검증 기준은 §0의 격리 worktree와 실행 결과다. GitHub, remote Supabase/Auth/Vercel,
+  TestFlight/App Store 상태는 이번 workstream에서 다시 확인하지 않았으므로 **UNVERIFIED**다.
+- §0 아래의 2026-08 역사 기록은 당시 증거와 의사결정 추적용이며 현재 branch·HEAD·배포 상태로
+  사용하지 않는다.
 
 분류:
 
@@ -26,7 +25,48 @@
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
 
-## 0A. Active working checkpoint — 2026-08-25
+## 0. Current V5 control-tower checkpoint — 2026-09-03
+
+- Active isolated branch: `codex/sol-gomsinlog-rc-v4`; 현재 코드 checkpoint는
+  `3426e15133eb2ea761e42eb14870b2e69b217bf4`다. 이 문서 작업은 해당 SHA 뒤의 미커밋
+  변경이므로 작업·검토 시 exact HEAD와 diff를 다시 확인한다. Production·remote Supabase·
+  TestFlight·App Store에는 이 workstream에서 아무 변경도 적용하지 않았다.
+- 제품 오너가 [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md)의 방향을
+  승인했다. 정원 액세서리·상호작용 건물·종이 IAP와 선택형 Plus, 앱 RC 다음 Book Studio는
+  승인된 미래 구현이지만 현재 V4 화면·StoreKit·remote entitlement에 구현·활성화됐다는
+  뜻은 아니다.
+- 로컬 commit `0f26bb3`부터 여행 OCR은 읽은 내용을 DB에 자동 저장하지 않고 review draft로
+  열며, 사용자가 `저장`을 눌러야 write한다. 온디바이스 요약은 정확한 feature flag `true`인
+  검증 빌드에서만 열린다.
+- 2026-09-03 Control Tower가 code checkpoint `3426e15`에서
+  `npx vitest run --config vitest.config.ts --configLoader runner`를 실행해 293 files / 4,046
+  tests PASS, `npm run typecheck` PASS,
+  `npx eslint src/features/shop/ShopPage.tsx src/features/shop/shopPage.test.tsx src/lib/companionShopLocalState.ts src/lib/companionShopLocalState.test.ts`
+  PASS와 `git diff --check` PASS를 확인했다. 상점은
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npx playwright test e2e/realUsability.spec.ts --grep "direct Shop collection stays usable"`
+  로 320px·393px의
+  repository Playwright mock-backend 경로에서 직접 무료 액세서리 선택, 종이 수령·적용,
+  reload 보존, 44px 조작 영역, 가로 overflow 없음이 2/2 PASS했다. 이는 로컬·mock 증거이며
+  Production 동작 증거가 아니다. 이 실행 증거는 세션 종료 `WORK_LOG`와 Control Tower
+  report에도 같은 exact command와 함께 기록한다.
+- commit `3426e15`부터 V4의 일일 무작위 액세서리 뽑기와 timer/FOMO가 제거됐다. 기존 소유권은
+  보존되고 starter set은 날짜 제한 없이 직접 선택한다. 유료 catalog·entitlement·결제는
+  구현되거나 활성화된 상태가 아니다.
+- Apple provider의 실제 Production 설정, StoreKit 상품, App Store 계약/심사, Supabase 현재
+  migration catalog, 실물 지원 iPhone 동작은 **UNVERIFIED**다. 현재 코드는 GoTrue provider
+  응답이 Apple ON이면 iOS CTA를 표시하므로 독립적인 V5 build gate는 **NOT BUILT**다.
+  managed Supabase에서 검증된
+  동일 이메일 OAuth identity의 자동 연결을 안전하게 끄는 공식 설정도 확인되지 않았다.
+  따라서 Apple 경로는 default-OFF 준비만 허용하며 provider·CTA·V5-B 완료·App Store 제출은
+  staging 2계정 silent-merge negative test와 삭제 token revoke 검증 전까지 **HOLD**다.
+- 현재 worktree의 주기 V4는 실제 시작일만 사용하는 소유자 전용 참고 범위로 바뀌었고,
+  배란·가임·확률형 confidence와 자동 partner projection UI를 제거했다. migration 071은 legacy
+  공유 설정을 all-false로 잠그되 네 원본 건강 테이블의 exact snapshot을 보존한다. 로컬
+  Phase 0 actor harness는 old-client INSERT/UPDATE와 실제 UPSERT, owner/partner/unrelated/
+  former-partner/anon 경계를 PASS했다. **071 Production 적용은 NOT APPLIED / UNVERIFIED**다.
+- 아래 날짜별 checkpoint는 역사적 증거다. 서로 충돌할 때 이 절과 실제 코드가 우선한다.
+
+## H1. Historical working checkpoint — 2026-08-25
 
 - The product owner explicitly moved `docs/PRODUCT_V3.md` to **legacy**. Do not use
   that document to reactivate superseded navigation or product decisions.
@@ -70,7 +110,7 @@
   objects present while the migration ledger relation remains absent. Bulk
   `supabase db push` is still prohibited.
 
-## 0B. Active UI/profile-post and live release-gate checkpoint — 2026-08-28
+## H2. Historical UI/profile-post and release-gate checkpoint — 2026-08-28
 
 - **2026-09-01 product realignment candidate (base `origin/master` `d69b677`, isolated worktree):** Diary는 월 카드에서 날짜별 페이지로 들어가 기록 포함/제외·순서·종이 5종·3개 제한 레이아웃을 계정별 기기 로컬 메타데이터로 저장하고, 원본 `daily_records`는 복제하지 않는다. 기존 무료 스티커 12종/배치는 `기존 월 꾸미기`로 보존하며 로그아웃·계정 삭제 시 `gomsin.diary.*` 로컬 namespace를 정리한다. `/shop`은 `종이 보관함`으로 축소되어 유료 스티커·테마·Memory Product·결제 UI를 숨겼고 Book Studio는 FROZEN이다. Push는 기본 OFF이며 새 권한/등록/browser notification을 막는 동시에 과거 빌드가 남긴 token을 authenticated 상태에서 best-effort revoke하고 `clear_my_unseen`은 계속 유지한다. iOS Foundation Models 보조는 지원 native에서 default-ON으로 전환했지만 Story를 열 때 자동 실행하지 않고 `AI로 다듬기`를 눌렀을 때만 시작한다; 웹/Android/미지원/timeout/invalid output은 deterministic summary를 유지하고 `false|0|off`가 kill switch다. 현재 candidate 검증은 `npm run verify` 270 files / 3,809 tests, native 106/106, Edge 18/18, 영향 브라우저 30/30, `git diff --check`, Capacitor sync, Xcode 26.6 unsigned iOS Simulator build PASS다. 이 작업은 Supabase/Production/Vercel/TestFlight를 변경하지 않았고, 지원 **실물 iPhone**의 Foundation Models 한국어 품질·airplane mode·cold/warm latency·발열·배터리는 **UNVERIFIED**다.
 - **2026-09-02 Diary · Garden · Shop V2 reviewed candidate (branch `codex/diary-garden-shop-v2`, reviewed dirty tree above `7e515fe`, live `origin/master` `bd4a9f3`):** Tasks 1–3의 계정별 로컬 종이/보유품 기반 무료 상점 위에서 Task 4 정원을 완성했다. `/diary/garden`은 하단 5탭을 숨긴 전용 전체 콘텐츠 화면이며 헤더에서 `/shop`으로 이동한다. 캐릭터는 임시 SVG 재그림이 아니라 2026-08-30 C2PA 원본의 보존 파생물 `src/assets/characters/paper-pair-v1.webp`(1254×1254, SHA-256 `cac84b0179f4f0d05a655b4c41c03b644a7fdd67d3701c51a9de30c5f04ff856`)에서 앞모습 두 영역을 정확히 크롭한다. 두 친구는 전체 98×112 footprint가 경계 안에 있고 서로 겹치지 않게 독립 보행하며, 빠른 탭은 들지 않고 500ms 연속 길게 누르면 pointer-captured drag가 시작된다. release/cancel/lost-capture는 즉시 종료하고 Enter/Space와 assistive semantic click은 900ms 유한 등가 상호작용이다. reduced-motion에서는 자동 보행과 반복 버둥을 끄고 직접 조작 피드백만 남긴다. 짧은 430×180 landscape의 drag-to-other 부동소수점 경계도 0.1px 여유와 결정적 회귀 테스트로 닫았다. 꾸미기는 `none`과 이 계정이 무료 상점에서 실제 보유한 액세서리만 노출하고, 보유하지 않은 종이 preference는 app/shop/profile 진입에서 보유 기본값으로 복구한다. Settings의 중복 종이 선택기는 제거했으며 `/shop`은 전부 무료이고 결제 기능이 없다고 명시한다. 1.49MB 정원 시트는 route-lazy 별도 asset이며 initial HTML 및 service-worker precache에서 제외된다. 현재 exact-tree 검증은 focused **14 files / 148 tests PASS**, 나머지 전체 회귀 **277 files / 3,874 tests PASS**, rollback **17/17 PASS**, 변경 없는 날짜 의존 Search suite **26/27 PASS · 1 existing FAIL**, typecheck·ESLint·Garden Playwright **3/3**·native **106/106**·placeholder production build·`git diff --check` PASS다. 즉 총 **3,917 PASS / 1 existing unrelated FAIL**이다. Sol 최종 delta는 270개 추가 geometry 조합 실패 0, Terra 최종 delta는 flaky 반복 20/20과 focused 44/44 PASS로 새 Critical/Important 0건을 확인했다. Supabase/Production/Vercel/TestFlight/App Store/실기기 mutation은 **NOT APPLIED**이며 remote CI, 실기기 접근성/터치, 외부 C2PA 사용권 판단은 **UNVERIFIED**다.
@@ -134,7 +174,7 @@
   Google/Apple PKCE 왕복을 별도 action-time gate로 진행하는 것이다. `supabase db push`, 066,
   Apple enable, Vercel Production deploy, TestFlight는 아직 실행하지 않았다.
 
-## 0. Default-branch reality
+## H3. Historical default-branch reality
 
 ### Latest live checkpoint — 2026-08-23
 
@@ -171,7 +211,7 @@ landing 완료 상태다. Production/Supabase/native physical-device evidence는
 gate이며 여전히 자동으로 충족되지 않는다. Chat foundation/UI는 여전히
 FROZEN / DEFERRED active draft asset이다.
 
-## 1. Active development checkpoint — 2026-08-18
+## H4. Historical development checkpoint — 2026-08-18
 
 아래 PR/HEAD는 live GitHub에서 확인한 volatile checkpoint다. 다음 세션은 작업 전에
 PR state, draft, mergeability, base/head, CI를 다시 확인한다.
@@ -375,7 +415,7 @@ Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저�
 > 먼저 오고 구현(#79)이 나중에 오므로, 두 계보가 합쳐지는 지점에서 이 문장이 낡는다.
 > 저자 감사에서 발견해 정정했다.
 
-## 2. Active migration ledger facts
+## H5. Historical migration-ledger snapshot
 
 | migration | scope | production state for this docs task |
 |---|---|---|
@@ -400,7 +440,7 @@ Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저�
 
 No remote Supabase mutation was performed by this documentation task.
 
-## 3. Default-branch product/security reality
+## H6. Historical default-branch product/security reality
 
 master에는 approved P5.5 security stack과 reviewed browser harness가 landing되었다.
 그러나 이것은 Production/Supabase 적용이나 실기기 검증 완료를 의미하지 않는다.
@@ -466,7 +506,8 @@ Beta gate B1 전에는 Storage policy catalog와 실제 signed-URL 동작을 모
 ## 7. 이 문서의 유지
 
 - 항목이 해소되면 삭제한다. 완료 이력을 여기에 쌓지 않는다.
-- 제품 의도는 최신 사용자 승인 V4 방향과 `V4_AS_BUILT.md`/`V4_BACKLOG.md`에 쓴다.
+- 제품 의도는 최신 사용자 승인과 `PRODUCT_V5_MASTER_DECISION.md`에, 현재 화면 사실과
+  미완료 항목은 `V4_AS_BUILT.md`/`V4_BACKLOG.md`에 쓴다.
   `PRODUCT_V3.md`는 legacy 역사 기록이다. 구현 순서는 `ENGINEERING_ROADMAP.md`에 쓴다.
 - remote 상태 주장은 날짜·증거 출처와 함께 적고, 확인할 수 없으면 `UNVERIFIED`다.
 - active PR/HEAD/CI는 checkpoint일 뿐이며 다음 세션에서 live 재검증한다.

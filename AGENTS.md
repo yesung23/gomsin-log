@@ -353,7 +353,7 @@ during convergence.
 
 | Question | Canonical source |
 |---|---|
-| What should the active product do? | latest user-approved V4 direction + `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md` |
+| What should the active product do? | `docs/PRODUCT_V5_MASTER_DECISION.md`; current V4 facts remain in `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md` |
 | What did the superseded product direction say? | `docs/PRODUCT_V3.md` (legacy history only) |
 | What is the approved business strategy? | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |
 | What is currently implemented / blocked? | the repository, then `docs/CURRENT_STATE.md` |
@@ -454,16 +454,16 @@ and historical implementation notes,
 decisions, `docs/SECURITY_TEST_PLAN.md` and `docs/rls-test-matrix.md` for
 security/RLS coverage, and `docs/operations/rollback-runbook.md` for rollback.
 
-### Abandoned-strategy guard
+### Superseded-strategy guard
 
-The following are superseded strategy, not active defaults. If a request reintroduces one,
+The following remain superseded strategy, not active defaults. If a request reintroduces one,
 mark `DIRECTION CONFLICT`, stop before changing the canonical plan, and ask whether the user
 is intentionally changing strategy:
 
 - Free 5GB / Plus 100GB / Archive 300GB or any storage-capacity subscription
 - paid high-quality photo or paid long video
 - E2EE or privacy as a premium gate
-- subscription-first initial business model
+- subscription-first initial business model or a subscription that gates the free core
 - company-server-only media architecture
 - AI selecting important memories automatically
 - relationship score, affection score, breakup prediction, or hidden relationship analysis
@@ -471,6 +471,12 @@ is intentionally changing strategy:
 - military population treated as the entire customer market
 - CloudKit described as already implemented
 - audio/video described as currently complete
+
+The 2026-09-03 product-owner override in `docs/PRODUCT_V5_MASTER_DECISION.md` explicitly allows
+activation-ready, default-off Apple IAP for original/licensed garden accessories, buildings, and
+paper packs, plus an optional ongoing-value Plus subscription. This does **not** reactivate
+storage-capacity pricing, paid privacy/E2EE, paid normal photo quality, paid core connection, or
+client-authoritative entitlements. Book Studio begins only after the GomsinLog RC safety gate.
 
 Historical `WORK_LOG` entries and superseded source packets remain for traceability, but they
 must not be used as current business direction without an explicit user decision.

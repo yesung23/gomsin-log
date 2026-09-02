@@ -89,4 +89,16 @@
 - 초대 코드는 6자리 숫자(100,000가지 조합)이므로, 연속 시도를 방어하기 위해 Supabase Edge Function 또는 RPC 내에 **IP/User 당 분당 5회 실패 시 15분 차단 Rate Limiting**을 적용해야 합니다. (파일럿 전 필수 구현 항목).
 
 ### 3) OAuth Identity Linking (계정 병합)
-- 이메일 Magic Link, Google OAuth, Apple OAuth가 동일한 이메일 주소를 사용하는 경우, Supabase Auth 설정에서 `Automatically link identities`를 활성화하여 동일한 `auth.uid()`로 병합 처리합니다.
+- 이메일이 같다는 이유만으로 Magic Link, Google OAuth, Apple OAuth identity를 조용히
+  병합하지 않습니다. 계정 연결은 로그인된 사용자가 `로그인 방법 연결`을 명시적으로 시작하고
+  재인증한 경우에만 허용하는 것이 V5 계약입니다.
+- 이 목표 경계는 Apple만이 아니라 Google·email을 포함한 모든 로그인 방법 조합에 적용합니다.
+  다만 기존 Google/email 사용자 경로를 복구 계획 없이 즉시 끄지는 않습니다. 현재 원격 자동
+  연결 동작과 기존 identity 충돌은 `UNVERIFIED`이며 별도 auth migration gate에서 측정합니다.
+- managed Supabase에서 동일 verified-email OAuth identity의 자동 연결을 안전하게 끄는 공식
+  지원이 확인되고 staging 두 계정 negative test가 통과하기 전에는 Apple provider와 CTA를
+  활성화하지 않습니다. 클라이언트 사전 확인이나 Auth hook은 이미 일어난 서버 병합을 되돌리는
+  보안 경계로 취급하지 않습니다.
+- 필수 negative test: 동일 이메일의 서로 다른 기존 계정, Apple private relay email, 이미 다른
+  계정에 연결된 Apple identity, 연결 취소, 재인증 실패, unlink 후 재로그인, 계정 삭제 중 Apple
+  token revoke 실패·재시도. 하나라도 미검증이면 Apple Production 활성화는 `HOLD`입니다.

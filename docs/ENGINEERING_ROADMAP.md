@@ -1,11 +1,34 @@
 # 곰신로그 엔지니어링 로드맵
 
 > 구현 **순서**만 담는다. `PRODUCT_V3.md`는 legacy 역사 기록이며, 활성 제품 의도는
-> 최신 사용자 승인 V4 방향과 [`V4_AS_BUILT.md`](V4_AS_BUILT.md)에서 확인한다.
+> [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md), 현재 V4 화면 사실은
+> [`V4_AS_BUILT.md`](V4_AS_BUILT.md)에서 확인한다.
 > 현재 저장소 상태는 [`CURRENT_STATE.md`](CURRENT_STATE.md).
 
-- 기준일: 2026-08-15
+- 기준일: 2026-09-03
 - 이 문서는 어떤 것도 구현하지 않는다.
+
+## 0. 현재 V5 실행선
+
+2026-09-03 제품 오너 승인 이후의 실제 순서는 아래와 같다. 뒤의 P0–P10은 보안 의존성과
+역사적 gate를 보존하는 참고 지도다. 두 순서가 충돌하면 이 절이 우선하며, 완료 여부는 코드와
+`CURRENT_STATE.md`가 증명한다.
+
+| 순서 | Gate | 완료 조건 |
+|---|---|---|
+| **V5-A** | 생성형 write·건강정보 안전 경계 | OCR review-before-save, 온디바이스 요약 exact-true/default-off, 주기 owner-only V4와 자동 projection all-false, 로컬 회귀·actor test |
+| **V5-B** | Apple 로그인 | default-OFF native/web 경로와 이름 1회·logout/delete/revoke를 준비한다. managed Supabase에서 silent same-email merge를 막는 공식 지원과 staging 2계정 실측 전에는 provider·CTA·App Store 제출을 활성화하지 않는다 |
+| **V5-C** | 결제 기반 | 신규 판매 CTA와 항상 살아 있는 restore/refund listener 분리, StoreKit bridge, 서버 검증·멱등 transaction·entitlement·notification 원장, Sandbox/App Review 구성 |
+| **V5-D** | 정원 제품 | 기존 일일 뽑기/FOMO 제거, 권리 원장과 manifest, 접근 가능한 배치, 충돌·pair interaction 상태머신, 무료 첫 건물, 구매 에셋 entitlement·unlink fallback |
+| **V5-E** | 사진 lifecycle | 기기 생성 screen master/thumbnail, EXIF 제거, 멱등 업로드·orphan cleanup, Book Studio effective-PPI·print-master lifecycle |
+| **V5-F** | 제품 표면 완성 | iOS Vision 다중사진 OCR review, onboarding/IA/copy, 모든 주요 empty/loading/error/offline 상태 |
+| **V5-G** | RC 검증 | 실제 iPhone viewport·light/dark·Dynamic Type·VoiceOver·reduced motion, 성능·배터리, 전체 테스트·build, 독립 보안/코드 검토, High 이상 0 |
+| **V5-H** | `GOMSINLOG RELEASE CANDIDATE` | branch/HEAD/diff/test/risk/rollback 증거와 외부 미적용 상태를 명시한 READY TO MERGE 전 판정 |
+| **V5-I** | Book Studio | 앱 RC 뒤 별도 저장소에서 exact-source 선택·인쇄품질·IP provenance·디지털 MVP를 완성; POD·실결제는 별도 외부 승인 |
+
+CloudKit은 이 실행선의 필수 저장소가 아니다. 플랫폼 중립 암호문 공유 경로가 제품의 source
+of truth이며, 개인 iCloud/Google Drive는 없어도 기능하는 선택형 보존·복구 후보일 뿐이다.
+Production Supabase, App Store 상품/심사, TestFlight, master merge, POD 계약은 각 STOP gate다.
 
 ---
 
@@ -50,7 +73,7 @@ Phase 1B는 로컬에서 Phase 1A 마이그레이션 체인(031→032→034→03
 | **P5.4** | **Chat Product Integration — FROZEN / DEFERRED** | active draft의 `/chat` 통합 자산을 삭제하지 않고 동결한다. 재개에는 별도 제품·보안 승인 필요 |
 | **P5.5** | **Security Stack Integration** | P6A 이전 마지막 통합 gate다 |
 | **ARCH-P6** | **암호화 미디어 architecture decision** | 결정은 완료되었지만 P6 코드는 아직 구현하지 않는다 |
-| **P6A–P6D** | **CloudKit 미디어 구현·통합·실기기 hardening** | P5.5와 P6 entry conditions 이후에만 시작한다 |
+| **P6A–P6D** | **플랫폼 중립 암호화 미디어 구현·통합·실기기 hardening** | P5.5와 P6 entry conditions 이후에만 시작한다. 개인 cloud는 optional backup이다 |
 
 ### P5.1 — `daily_records` E2EE vertical slice
 
@@ -109,15 +132,13 @@ P4 Conversation Bridge + P5.1 daily_records + P5.2 Device Bootstrap
 P5.5가 P6A를 시작하기 전 마지막 gate이며, 이 정정은 native validation이나 P6의
 보안 의존성을 약화시키지 않는다.
 
-### ARCH-P6 — architecture decision
+### ARCH-P6 — architecture decision (원결정의 저장·공유 부분은 superseded)
 
 ARCH-P6 결정은 완료되었으며 상태는 **READY FOR IMPLEMENTATION**이다. 이것은 P6
 코드가 구현되었다는 뜻이 아니다. 결정의 핵심은 다음과 같다.
 
-- iOS-first
-- uploader-owned CloudKit private DB/custom zone
-- CKAsset ciphertext
-- CKShare read-only partner
+- iOS-first packaging
+- 원결정의 uploader-owned CloudKit/CKShare 경로는 아래 2026-08-21 개정으로 대체됨
 - Supabase는 coordination metadata only
 - PMK private photo / CSK shared photo
 - HRK forbidden
@@ -126,9 +147,9 @@ ARCH-P6 결정은 완료되었으며 상태는 **READY FOR IMPLEMENTATION**이�
 - normalize/EXIF strip before encryption
 - no silent Supabase Storage fallback
 - account unlink/account switch fail closed
-- Android boundary intentionally deferred
+- 플랫폼 중립 공유 경로와 optional personal-cloud backup의 분리
 
-구현 순서는 `P6A Native CloudKit Media Foundation` → `P6B Media E2EE + GME1 +
+구현 순서는 `P6A Platform-neutral Media Foundation` → `P6B Media E2EE + GME1 +
 normalization + 새 forward migration(045 이상; frozen 042를 재사용하지 않음)` →
 `P6C Photo Product Integration` → `P6D Two Apple IDs / real devices / quota / unlink /
 account-switch / security hardening`이다.
@@ -166,7 +187,8 @@ iPhone+Galaxy 커플에서 **가입 첫날부터** 동작하지 않는다
 - `DeviceKeys`/LCK real iPhone validation
 - active migration 039/040/043/044 coexistence verified; frozen 041/042는 포함하지 않음
 - P6 재개 시 042 내용을 045 이상의 새 migration으로 재발급하는 계획 검토
-- CloudKit development entitlement/container prerequisites
+- 선택형 personal-cloud PoC를 실제 범위에 넣는 경우에만 해당 provider entitlement/container
+  prerequisites; 기본 공유·RC의 선행조건은 아님
 - Production mutation 없음
 
 ARCH-P6 완료는 P6A 시작 허가와 같지 않다.
@@ -198,12 +220,10 @@ gate다. M-stage가 P-stage를 대체하거나, 사업계획서의 개발 예정
 > 첫 스토어 출시는 iOS만 준비하고 Android는 웹/PWA를 유지한다. Google Play는 후속 판단이며,
 > 플랫폼 중립 공유 경로나 Android/비iOS 사용자 지원을 폐기하는 결정이 아니다.
 >
-> **2026-09-01 product-owner override.** 위 default-off 운영 결정은 최신 승인으로 superseded다.
-> 지원되는 iOS native에서는 온디바이스 요약 보조를 **기본 ON**으로 두되, 스토리 진입만으로
-> 자동 실행하지 않고 사용자가 `AI로 다듬기`를 눌렀을 때만 생성한다. 미지원/timeout/invalid
-> output은 기존 규칙 요약을 그대로 유지하고 `false|0|off`를 긴급 kill switch로 남긴다.
-> Xcode Simulator compile은 필수 gate지만, 실물 지원 iPhone의 한국어 품질·오프라인·지연·
-> 발열·배터리 검증은 여전히 M6의 미완료 실증 항목이다.
+> **2026-09-03 safety correction.** 제품 오너의 완성도·보안 우선 위임에 따라 실물 지원
+> iPhone의 한국어 의미 보존·민감정보 경계·airplane mode·지연·발열·배터리가 검증되기 전에는
+> `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED === 'true'`인 검증 빌드에서만 연다. 값이 없거나
+> 다른 값이면 규칙 요약을 유지한다. 사용자 버튼 trigger와 invalid-output fallback은 그대로다.
 
 M3와 M7은 사업 검증 단계이지만 각각 engineering 산출물을 요구한다. 그 산출물의 소유자는
 아래 `LV`와 `P-MP` 단계다. 두 단계 모두 P10 Beta/Production gate를 대체하지 않는다.
@@ -231,12 +251,11 @@ LV 진입 조건은 다음이며, 검증 대상 흐름에 한정한다.
 - 외부 사용자 범위가 통제된 소규모이며 참가자에게 검증 단계임을 고지한다
 - 데이터 손실·오류에 대한 rollback·지원 경로가 정해져 있다
 - 검증 중 수집·보관하는 데이터 범위와 종료 후 처리가 정해져 있다
-- **(2026-08-21 추가)** [`PRODUCT_V3.md`](PRODUCT_V3.md) §19 허용 목록 안의 최소 계측이
-  구현되어, 검증 대상 흐름의 이벤트가 실제로 수집됨을 확인했다. **계측 없는 검증은
-  시작하지 않는다**
-- **(2026-08-21 추가)** 검증 빌드의 보안 표현이 [`PRODUCT_V3.md`](PRODUCT_V3.md) §14.5의
-  LV 단계 문장과 일치한다 — device protection flag OFF 상태 고지, 영상·음성 캡처 비활성,
-  사진 평문 저장 고지
+- [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md) §13의 목적 분리와
+  명시적 opt-in 경계를 지키는 최소 검증 계측을 준비한다. 동의하지 않은 참가자에게 불이익을
+  주거나 콘텐츠·기록 ID를 수집하지 않는다
+- 검증 빌드의 보안 표현은 실제 활성 feature flag, 현재 E2EE 적용 범위와 미적용 미디어를
+  그대로 설명한다. 계획된 보호를 구현된 것처럼 쓰지 않는다
 
 LV가 명시적으로 뜻하지 않는 것:
 
@@ -247,7 +266,7 @@ LV가 명시적으로 뜻하지 않는 것:
 LV 시점에 아직 해소되지 않은 §6 정밀 위치·§7 평문 영상 같은 gate가 있으면, 해당 기능을
 검증 범위에서 제외하거나 비활성화한 상태로만 LV를 진행한다.
 
-### P-MP — Memory Product MVP (M7 전제)
+### P-MP — Memory Product MVP (M7 전제, 앱 RC 다음 단계)
 
 M7은 판매 가능한 기억상품을 요구한다. 그 제품을 만드는 engineering 소유자는 P-MP다.
 범위는 M7 검증에 필요한 최소한으로 제한한다.
@@ -264,12 +283,13 @@ M7은 판매 가능한 기억상품을 요구한다. 그 제품을 만드는 eng
 - 검증하는 범위의 POD 주문 handoff (디지털 실제결제 확인 이후)
 - M7이 요구하는 전환·원가 계측
 
-포함하지 않는다:
+초기 MVP에 포함하지 않는다:
 
-- 전체 Book Studio
+- 고급 다품종 Book Studio (단, 앱 RC 이후 `우리의 한 달`을 만드는 독립 Book Studio
+  저장소 작업은 P-MP의 구현 수단으로 승인됨)
 - AI가 중요한 기억을 선정하는 기능
 - 고급 Archive(P9)
-- Plus
+- Plus 전체 판매 활성화 (구현은 default-off 병렬 준비 가능)
 - 동시 다수 기억상품
 - 음성·영상 기억상품
 
@@ -277,11 +297,13 @@ M7은 판매 가능한 기억상품을 요구한다. 그 제품을 만드는 eng
 
 ```text
 M5 기록축적·기본 Archive 기반
-→ M6 온디바이스 AI 실증(선택적)
 → P-MP Memory Product MVP 구현
 → M7 디지털 기억상품 검증(지불의향·제작완료·실제결제)
 → M7 POD 실물 제작 검증
 ```
+
+M6 온디바이스 AI 실증은 이 흐름과 독립적으로 병행할 수 있으며 P-MP나 M7의 선행조건이
+아니다.
 
 P-MP 안에서도 디지털 경로를 먼저 완성한다. 디지털 기억상품의 실제결제가 확인되기 전에는
 POD 벤더 연동·최소 제작수량·선투자를 진행하지 않는다. 사업 근거는
@@ -293,8 +315,9 @@ POD 벤더 연동·최소 제작수량·선투자를 진행하지 않는다. 사
 > 구현하고, AI 편집보조는 그 위의 선택적 보조다. M6에서 온디바이스 AI가 지원되지 않거나
 > 효과가 없다고 판정되어도 M7은 규칙 기반 구성만으로 실행할 수 있어야 한다.
 
-결제·주문 구현 전에 구매자·미리보기 공유 범위·연결 해제 후 주문/접근 처리를 먼저
-확정한다. 이는 P-MP의 선행 product/engineering gate이며 지금 추측하지 않는다.
+구매자·미리보기 공유 범위·상대 원본 동의·연결 해제 후 주문/접근 계약은
+`PRODUCT_V5_MASTER_DECISION.md` §4.4를 따른다. 구현 전에 DB/RLS 상태머신과 삭제·환불
+negative test로 증명한다.
 
 ### 후속 engineering stages 보존
 
@@ -329,11 +352,12 @@ E2EE보다 제품 작업을 먼저 하더라도 다음을 어기지 않는다.
    이미 암호화 대상인 필드 안에 들어가야 한다.
 2. 요약·파생값을 서버에 저장하지 않는다.
 3. 알림 payload에 콘텐츠를 넣지 않는다.
-4. 새 기능 명세는 [`PRODUCT_V3.md`](PRODUCT_V3.md) §14.2의 네 항목을 포함한다.
+4. 새 기능 명세는 `PRODUCT_V5_MASTER_DECISION.md`의 무료 core·exact-source·AI·개인정보
+   경계를 포함한다.
 
 ---
 
-## 3.5 ARCH-P6 — iCloud Media Architecture
+## 3.5 ARCH-P6 — Media Architecture Validation
 
 > **2026-08-21 개정 적용.** 이 절의 검증 목록 중 미디어 저장 위치·`CKShare` 파트너 공유
 > 항목은 §2의 「ARCH-P6 개정 — 공유와 보존의 분리」를 따른다. 개인 클라우드 항목은
@@ -343,8 +367,8 @@ P5 이후, 실제 P6 구현 전에 다음을 read-only architecture decision으�
 이 단계에서는 새 암호 프로토콜을 발명하지 않으며, 필요한 경우 Architect decision을
 먼저 남긴다.
 
-- CloudKit 데이터 소유권과 `CKAsset` 미디어 저장
-- 파트너 공유 모델(`CKShare` 또는 승인된 equivalent)
+- 플랫폼 중립 blob의 데이터 소유권과 암호문 미디어 저장
+- 활성 커플 파트너 공유 모델과 optional personal-cloud backup
 - E2EE blob lifecycle과 CSK/PMK 미디어 라우팅
 - 서버·CloudKit·공유 메타데이터 leakage
 - EXIF/GPS 제거와 thumbnail/preview 경계
@@ -379,7 +403,7 @@ ARCH-P6
 | B5 | **평문 영상 게이트** — §7 |
 | B6 | 실제 두 계정으로 기록 → 상대방의 오늘 → 원본 → 삭제 → 내보내기 → 연결 해제 E2E 검증 | |
 | B7 | 비공개 기록이 상대의 어떤 화면·요약·알림·메트릭에도 나타나지 않음을 **negative test로** 증명 | |
-| B8 | 미확인 기계 추론 감정이 파트너 표면에 도달하지 않음을 테스트로 증명 | `PRODUCT_V3.md` §13 |
+| B8 | 미확인 기계 추론 감정이 파트너 표면에 도달하지 않음을 테스트로 증명 | `PRODUCT_V5_MASTER_DECISION.md` §8·§13 |
 | B9 | P0-c의 PMK/CSK/HRK 회귀 테스트 통과 | |
 
 ---
@@ -431,7 +455,7 @@ Full User-Content E2EE 베타 이전에, 일반 사용자에게 **새 평문 영
 ## 8. 이 문서의 유지
 
 - 순서를 바꾸면 **이유를 남긴다.**
-- 제품 의도를 이 문서에 쓰지 않는다 → 최신 사용자 승인 V4 방향 문서.
+- 제품 의도를 이 문서에 쓰지 않는다 → 최신 사용자 승인과 `PRODUCT_V5_MASTER_DECISION.md`.
   `PRODUCT_V3.md`는 legacy 역사 기록이다.
 - 현재 상태 사실을 이 문서에 쌓지 않는다 → `CURRENT_STATE.md`.
 - 게이트를 통과하면 해당 행을 지우지 말고 통과 근거를 적는다.

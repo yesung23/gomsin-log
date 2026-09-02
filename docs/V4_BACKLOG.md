@@ -1,8 +1,10 @@
 # V4 백로그 — 요청받은 것과, 계획했는데 안 지은 것
 
-> 2026-08-23 작성. **지어진 것의 지도는 [`V4_AS_BUILT.md`](V4_AS_BUILT.md)**,
-> 계획의 원본은 [`EXPERIENCE_V4_MASTER_PLAN.md`](EXPERIENCE_V4_MASTER_PLAN.md)다.
-> 이 문서는 **그 둘의 차이**만 담는다 — 무엇이 남았고, 무엇에 막혀 있고, 왜 그 순서인지.
+> 2026-08-23 작성, 2026-09-03 역할 정정. 미래 제품 의도는
+> [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md), **현재 구현 지도는
+> [`V4_AS_BUILT.md`](V4_AS_BUILT.md)**가 소유한다. `EXPERIENCE_V4_MASTER_PLAN.md`는 V4가
+> 만들어진 배경을 보존하는 역사 자료다. 이 문서는 현재 구현과 승인된 다음 상태 사이의
+> **미구현 차이와 gate**만 기록한다.
 >
 > 각 항목의 상태는 코드에서 직접 확인했다. `NOT BUILT`는 "찾아봤는데 없다"이지
 > "아마 없을 것"이 아니다.
@@ -39,8 +41,9 @@
 
 - 남는 질문: 컴포저는 어디로 가는가. 홈 레일의 `+`와 `우리`·`찾기`의 펜이 이미 §7.1을
   지고 있으므로 탭에서 빠져도 계약은 깨지지 않는다
-- 영향: `PRODUCT_V3` §5 탭 표 개정 필요
-- 상태: **NOT BUILT**
+- 결정: `PRODUCT_V5_MASTER_DECISION.md` §3이 현재 다섯 탭과 맥락형 `/compose` 진입을 확정한다
+- 상태: **DONE / CODE CONFIRMED.** 하단 세 번째 탭은 `/diary`이고 홈·찾기·우리의 작성
+  행동은 `/compose`로 유지된다
 
 ### A2. `우리` 탭의 격자 = 캘린더가 아니라 **게시물**
 
@@ -126,13 +129,13 @@
 
 ### A7. iPhone 온디바이스 하루 요약 보조
 
-- 상태: **IMPLEMENTED / DEFAULT-ON ON SUPPORTED iOS / MANUAL STORY TRIGGER / PHYSICAL DEVICE UNVERIFIED**
+- 상태: **IMPLEMENTED / EXACT-TRUE FEATURE GATE / MANUAL STORY TRIGGER / PHYSICAL DEVICE UNVERIFIED**
 - 상대의 오늘 적격 기록 전체를 시간순으로 유지하고 처음 5개만 보여 준다. 나머지는
   `N개 더 보기`로 펼친다. 스토리를 여는 것만으로 모델을 자동 실행하지 않고, 표지의
   `AI로 다듬기`를 누르면 Apple Foundation Models가 5개 고정 배치에서 문장 표현만 즉시
   다듬는다. AI가 중요한 기록을 고르거나 감정·관계·건강을 추론하지 않는다.
-- 기본 ON은 **지원되는 iOS native에서 기능을 사용할 수 있다는 뜻**이다. 웹·Android·미지원
-  iPhone에는 AI 버튼/모델 경로가 없고, `false|0|off`는 긴급 kill switch다.
+- 실물 지원 iPhone gate 전에는 `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED === 'true'`인 검증
+  빌드에서만 버튼을 연다. 값이 없거나 다른 값, 웹·Android·미지원 iPhone은 규칙 요약만 쓴다.
 - timeout, 취소, 검증 실패, malformed output이면 이미 화면에 있던 규칙 요약을 그대로 유지한다.
 - Xcode 26.6 iOS Simulator build는 PASS. 남은 gate는 Apple Intelligence 지원 **실물 iPhone**의
   한국어 품질, airplane mode 네트워크 0, cold/warm latency, 발열·배터리, 화면 이탈 취소다.
@@ -156,19 +159,8 @@
 | 27 | 이 달 다시 보기 | `우리/격자` 하단 | **DONE** (`더 보기`) |
 | 29 | **1년 전 오늘** | `홈/지면` 위 조용한 한 줄 | **DONE** (2026-08-23) |
 | 30 | **배려 신호를 홈 레일에** | `홈/레일/쪽지` | **DONE** (2026-08-23) |
-| 32 | 파트너 주기 projection | 상대 `홈/레일/쪽지` 근처 | **NOT BUILT** |
+| 32 | 파트너 주기 projection | 상대 `홈/레일/쪽지` 근처 | **REMOVED / PRIVACY HOLD.** 현재 동의·고지로는 건강 파생정보 자동 제공을 열지 않는다. 사용자가 직접 고른 만료형 배려 신호만 유지 |
 | 41 | 위젯 커스터마이즈 강등 | `설정/홈 구성` | **절반.** 홈에서 뺐으나 설정에 자리를 안 만들었다 |
-
-### B1. 특히 눈에 띄는 둘
-
-**배려 신호(#30)가 홈에 없다.** 계획서가 "인스타의 노트(Notes)" 자리라고 못 박았고,
-그게 이 기능이 매일 보이는 유일한 길이었다. 지금은 `우리 → 오늘 내 상태`를 두 번
-들어가야 나온다 — **묻혀 있던 곳에서 조금 덜 묻힌 곳으로 옮겼을 뿐**이다.
-
-**1년 전 오늘(#29)이 없다.** 축적이 이 제품의 north star인데, 쌓인 것이 스스로 돌아오는
-유일한 장치가 이것이었다.
-
----
 
 ## C. 게이트에 막힌 것 (코드로 못 여는 것)
 
@@ -176,8 +168,8 @@
 |---|---|---|
 | 공감·토닥이기 | 보는 사람 반응 테이블·RLS | migration gate |
 | 일기장 스티커 동기화 | CSK 도메인 테이블·RLS | migration gate |
-| Book Studio / `한 권으로 만들기` | post-PMF까지 FROZEN. 현재 Diary/종이 보관함에서 숨김 | product/engineering gate |
-| 유료 스티커·테마 | 현재 제품 표면에서 숨김; Memory Product 검증 뒤 재평가 | BUSINESS 문서 |
+| Book Studio / `한 권으로 만들기` | **V5에서 승인됨.** 앱 RC·exact-source·print-quality gate 뒤 구현하며 현재 V4 UI에는 숨김 | `PRODUCT_V5_MASTER_DECISION.md` |
+| 유료 액세서리·건물·종이 | **V5에서 승인됨.** StoreKit·서버 entitlement·환불·IP provenance 완성 전 default OFF | `PRODUCT_V5_MASTER_DECISION.md` |
 | 주기 트래커 역할 해제 | HRK 도메인, §21 재검토 | security review |
 | 외박·외출 일정 종류 | CHECK 제약 변경 | migration gate |
 | 여행 사진 EXIF 자동 입력 | §19가 허용하는 데이터 범위 | product 판단 |
@@ -186,15 +178,12 @@
 
 ## D. 순서 제안
 
-> 2026-08-23: **하나 · 둘 · 넷 · 다섯(순서 변경) · A2 · A3를 지었다.** 아래는 남은 것이다.
+> 2026-09-03 코드 재확인: A1·A2·A3·A4·A5와 A6의 순서 변경은 구현됐다. 아래는 남은
+> 자동 입력 범위다.
 
-**셋: A1 탭 재편** — `+`를 일기장으로, 컴포저를 어디로, `찾기`를 무엇으로. 이건
-`PRODUCT_V3` §5 개정이 먼저다. **탭 자리를 네 번째로 바꾸는 것이므로**
-[`V4_AS_BUILT.md`](V4_AS_BUILT.md) §6.1을 먼저 읽고 같은 이유로 되돌리지 않을지
-확인한다.
-
-**다섯: A6 여행 자동 입력** — EXIF인지 OCR인지 순서만인지 정해지기 전에는 짓지 않는다.
-§19가 허용하는 데이터 범위가 걸려 있다.
+**다섯: A6 여행 자동 입력** — V5 결정으로 EXIF 자동 추론은 제외하고, 사용자가 고른 사진의
+로컬 OCR → 순서 보존 → review draft → 명시적 저장으로 확정했다. 현재 V4의 한 장 Tesseract
+경로는 존재하지만 다중사진 iOS Vision 경로는 아직 NOT BUILT다.
 
 ---
 

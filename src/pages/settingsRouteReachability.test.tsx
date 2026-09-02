@@ -186,6 +186,44 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
 
     expect(setPartnerUsername).toHaveBeenCalledWith('partner_name');
   });
+
+  it('프로필 편집으로 포커스를 옮기고 가둔 뒤 연 버튼으로 돌려보낸다', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const opener = screen.getByRole('button', { name: '내 프로필 수정' });
+
+    await user.click(opener);
+
+    const dialog = screen.getByRole('dialog', { name: '내 프로필 수정' });
+    expect(within(dialog).getByRole('textbox', { name: /내 닉네임/ })).toHaveFocus();
+
+    const close = within(dialog).getByRole('button', { name: '프로필 수정 닫기' });
+    close.focus();
+    await user.tab({ shift: true });
+    expect(within(dialog).getByRole('button', { name: '저장하기' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '내 프로필 수정' })).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
+  it('설치 안내의 유일한 행동에 포커스를 두고 닫은 뒤 시작점으로 돌아간다', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const opener = screen.getByRole('button', { name: /^PWA 홈 화면 설치 방법/ });
+
+    await user.click(opener);
+
+    const dialog = screen.getByRole('dialog', { name: 'PWA 앱 설치 안내' });
+    const confirm = within(dialog).getByRole('button', { name: '확인' });
+    expect(confirm).toHaveFocus();
+    await user.tab();
+    expect(confirm).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'PWA 앱 설치 안내' })).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
 });
 
 describe('H-4: the entry point survives the conditions that caused the stranding', () => {

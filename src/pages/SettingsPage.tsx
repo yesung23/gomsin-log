@@ -22,7 +22,7 @@ import {
   regenerateCoupleInvitation,
   supabase,
 } from '@/lib/supabase';
-import { useEscapeKey } from '@/lib/hooks';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 import { buildPersonalExport } from '@/lib/dataExport';
 import { DeviceProtectionSection } from '@/components/DeviceProtectionSection';
 import { activeCoupleScopeId, loadSettingsBootstrapFacts } from '@/app/e2ee/settingsFacts';
@@ -154,6 +154,17 @@ export function SettingsPage() {
   const [pairingCeremony, setPairingCeremony] = useState<CoupleProtectionCeremony | null>(null);
   const [showPairingDialog, setShowPairingDialog] = useState(false);
   const dialogIdentityRef = useRef(settingsIdentityKey);
+  const dialogPanelRef = useRef<HTMLDivElement>(null);
+  const dialogTriggerRef = useRef<HTMLElement | null>(null);
+  const dialogInitialFocusRef = useRef<HTMLElement | null>(null);
+  const setDialogInitialFocus = useCallback((element: HTMLElement | null) => {
+    dialogInitialFocusRef.current = element;
+  }, []);
+  const rememberDialogTrigger = useCallback(() => {
+    dialogTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  }, []);
 
   useLayoutEffect(() => {
     if (dialogIdentityRef.current === settingsIdentityKey) return;
@@ -247,6 +258,7 @@ export function SettingsPage() {
       toast.error('이 빌드에서는 기록 보호 설정이 아직 열려 있지 않아요.');
       return;
     }
+    rememberDialogTrigger();
     const identity = captureIdentity();
     setIsProtectionBusy(true);
     try {
@@ -299,6 +311,7 @@ export function SettingsPage() {
 
   const startProtectionRecovery = () => {
     if (!deviceProtectionEnabled) return;
+    rememberDialogTrigger();
     setSetupResult(null);
     setRecoveryCodeInput('');
     setRecoveryArtifactInput('');
@@ -324,6 +337,7 @@ export function SettingsPage() {
   const openCoupleProtection = async () => {
     if (!deviceProtectionEnabled) return;
     if (!protectionCoupleId || isProtectionBusy) return;
+    rememberDialogTrigger();
     const identity = captureIdentity();
     setIsProtectionBusy(true);
     try {
@@ -451,7 +465,23 @@ export function SettingsPage() {
     }
   }, [navigate, searchParams]);
 
-  useEscapeKey(() => {
+  const activeDialog = showPairingDialog
+    ? 'pairing'
+    : showProtectionDialog
+      ? 'protection'
+      : showDeleteAccountModal
+        ? 'delete-account'
+        : showDeleteRecordsModal
+          ? 'delete-records'
+          : showDisconnectModal
+            ? 'disconnect'
+            : showPWAModal
+              ? 'pwa'
+              : showProfileModal
+                ? 'profile'
+                : null;
+
+  const closeActiveDialog = useCallback(() => {
     if (showPairingDialog) {
       if (!isProtectionBusy) setShowPairingDialog(false);
     } else if (showProtectionDialog) {
@@ -469,8 +499,34 @@ export function SettingsPage() {
     } else if (showProfileModal) {
       if (!isSavingProfile) closeProfileModal();
     }
-  }, showPairingDialog || showProtectionDialog || showDeleteAccountModal
-    || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
+  }, [
+    closeProfileModal,
+    isDeletingAccount,
+    isDeletingRecords,
+    isDisconnecting,
+    isProtectionBusy,
+    isSavingProfile,
+    showDeleteAccountModal,
+    showDeleteRecordsModal,
+    showDisconnectModal,
+    showPWAModal,
+    showPairingDialog,
+    showProfileModal,
+    showProtectionDialog,
+  ]);
+
+  useDialogFocus({
+    active: activeDialog !== null,
+    panelRef: dialogPanelRef,
+    restoreFocusRef: dialogTriggerRef,
+    initialFocusRef: dialogInitialFocusRef,
+    onClose: closeActiveDialog,
+    closeDisabled: (showPairingDialog || showProtectionDialog) && isProtectionBusy
+      || showDeleteAccountModal && isDeletingAccount
+      || showDeleteRecordsModal && isDeletingRecords
+      || showDisconnectModal && isDisconnecting
+      || showProfileModal && isSavingProfile,
+  });
 
   useLayoutEffect(() => {
     instanceActiveRef.current = true;
@@ -893,6 +949,7 @@ export function SettingsPage() {
           <RowGroup boxed>
             <PressableRow
               onClick={() => {
+                rememberDialogTrigger();
                 setEditName(profile.myName);
                 setEditAnniversary(profile.couple.anniversaryDate || '');
                 setEditProfileCaption(profile.profileCaption || '');
@@ -917,7 +974,10 @@ export function SettingsPage() {
             )}
 
             <PressableRow
-              onClick={() => setShowPWAModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowPWAModal(true);
+              }}
               leading={<Smartphone size={18} className="text-coral" />}
               trailing={<span className="text-caption text-muted-foreground">Safari/Chrome</span>}
             >
@@ -1013,7 +1073,10 @@ export function SettingsPage() {
             </PressableRow>
 
             <PressableRow
-              onClick={() => setShowDeleteRecordsModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowDeleteRecordsModal(true);
+              }}
               leading={<Trash2 size={18} className="text-foreground" />}
               trailing={<span className="text-caption text-muted-foreground">{ownRecords.length}개 보유</span>}
             >
@@ -1027,7 +1090,10 @@ export function SettingsPage() {
           <SectionHeader title="연결 해제" />
           <RowGroup boxed>
             <PressableRow
-              onClick={() => setShowDisconnectModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowDisconnectModal(true);
+              }}
               leading={<Unlink size={18} className="text-destructive" />}
               trailing={<ChevronRight size={16} className="text-destructive/60" />}
             >
@@ -1073,7 +1139,10 @@ export function SettingsPage() {
             </PressableRow>
 
             <PressableRow
-              onClick={() => setShowDeleteAccountModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowDeleteAccountModal(true);
+              }}
               leading={<Trash2 size={18} className="text-destructive" />}
               trailing={<ChevronRight size={16} className="text-destructive/60" />}
             >
@@ -1090,14 +1159,14 @@ export function SettingsPage() {
         {/* Profile Edit Modal */}
         {showProfileModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center justify-between">
                 <h3 id="profile-modal-title" className="text-heading text-foreground">내 프로필 수정</h3>
                 <button
                   type="button"
                   onClick={closeProfileModal}
                   disabled={isSavingProfile}
-                  className="press-response inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                  className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground hover:text-foreground"
                   aria-label="프로필 수정 닫기"
                 >
                   <X size={18} aria-hidden="true" />
@@ -1109,6 +1178,7 @@ export function SettingsPage() {
                   내 닉네임 (2~12자)
                 </label>
                 <input
+                  ref={setDialogInitialFocus}
                   id="edit-nickname"
                   value={editName}
                   onChange={(event) => setEditName(event.target.value.slice(0, 12))}
@@ -1187,13 +1257,14 @@ export function SettingsPage() {
         {/* Disconnect Modal */}
         {showDisconnectModal && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 animate-in fade-in">
-            <div role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="bg-card rounded-surface p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
               <h3 id="disconnect-modal-title" className="text-heading text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
               <p className="text-caption text-muted-foreground leading-relaxed">
                 연결을 해제하면 상대방은 내 공유 기록을 더 이상 볼 수 없게 됩니다.
               </p>
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
+                  ref={setDialogInitialFocus}
                   onClick={() => setShowDisconnectModal(false)}
                   disabled={isDisconnecting}
                   className="press-response py-2.5 rounded-control border border-border text-label font-semibold min-h-[44px] disabled:opacity-50"
@@ -1235,13 +1306,14 @@ export function SettingsPage() {
         {/* Delete Records Modal */}
         {showDeleteRecordsModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <h3 id="delete-records-modal-title" className="text-heading text-foreground">내 기록 전체 삭제</h3>
               <p className="text-caption text-muted-foreground leading-relaxed">
                 내가 작성한 총 {ownRecords.length}개의 일상 기록이 삭제됩니다. 정말 삭제하시겠습니까?
               </p>
               <div className="flex gap-2 pt-2">
                 <button
+                  ref={setDialogInitialFocus}
                   onClick={() => setShowDeleteRecordsModal(false)}
                   disabled={isDeletingRecords}
                   className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px] disabled:opacity-50"
@@ -1288,7 +1360,7 @@ export function SettingsPage() {
         {/* Delete Account Modal */}
         {showDeleteAccountModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-destructive text-heading">
                 <AlertTriangle size={20} />
                 <span id="delete-account-modal-title">계정 삭제 (회원 탈퇴)</span>
@@ -1303,6 +1375,7 @@ export function SettingsPage() {
                   계속하려면 아래에 <b>탈퇴</b>를 입력하세요.
                 </label>
                 <input
+                  ref={setDialogInitialFocus}
                   id="delete-account-confirmation"
                   value={deleteAccountConfirmation}
                   onChange={(event) => setDeleteAccountConfirmation(event.target.value)}
@@ -1382,7 +1455,7 @@ export function SettingsPage() {
         {/* PWA Modal */}
         {showPWAModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground text-heading">
                 <Smartphone size={20} className="text-coral" />
                 <span id="pwa-modal-title">PWA 앱 설치 안내</span>
@@ -1401,7 +1474,7 @@ export function SettingsPage() {
 
         {deviceProtectionEnabled && showPairingDialog && pairingCeremony && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="pairing-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="pairing-dialog-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground text-heading">
                 <Shield size={20} className="text-coral" aria-hidden="true" />
                 <span id="pairing-dialog-title">둘의 보호 코드 확인</span>
@@ -1423,6 +1496,7 @@ export function SettingsPage() {
               </div>
               <div className="flex gap-2 pt-1">
                 <button
+                  ref={setDialogInitialFocus}
                   type="button"
                   onClick={() => setShowPairingDialog(false)}
                   disabled={isProtectionBusy}
@@ -1446,7 +1520,7 @@ export function SettingsPage() {
 
         {deviceProtectionEnabled && showProtectionDialog && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border max-h-[90vh] overflow-y-auto">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               {protectionDialogMode === 'setup' && setupResult ? (
                 <>
                   <div className="flex items-center gap-2 text-foreground text-heading">
@@ -1483,6 +1557,7 @@ export function SettingsPage() {
                       저장한 복구 코드를 다시 입력해 주세요
                     </label>
                     <input
+                      ref={setDialogInitialFocus}
                       id="protection-confirm-code"
                       value={recoveryCodeInput}
                       onChange={(event) => setRecoveryCodeInput(event.target.value)}
@@ -1517,7 +1592,7 @@ export function SettingsPage() {
                   </p>
                   <div className="space-y-2">
                     <label htmlFor="protection-recovery-code" className="text-label font-semibold text-foreground">복구 코드</label>
-                    <input id="protection-recovery-code" value={recoveryCodeInput} onChange={(event) => setRecoveryCodeInput(event.target.value)} autoComplete="off" className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40" />
+                    <input ref={setDialogInitialFocus} id="protection-recovery-code" value={recoveryCodeInput} onChange={(event) => setRecoveryCodeInput(event.target.value)} autoComplete="off" className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40" />
                   </div>
                   <div className="space-y-2">
                     <label htmlFor="protection-recovery-artifact" className="text-label font-semibold text-foreground">복구 정보</label>

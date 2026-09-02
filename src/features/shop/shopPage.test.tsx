@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -26,6 +26,8 @@ const { ShopPage } = await import('./ShopPage');
 function renderShop() {
   return render(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('free local companion shop', () => {
   beforeEach(() => {
@@ -61,6 +63,8 @@ describe('free local companion shop', () => {
     expect(screen.getByRole('button', { name: '따뜻한 무지 적용하기' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '따뜻한 무지 적용하기' }));
+    expect(screen.getByRole('region', { name: '종이 바탕' }))
+      .toContainElement(screen.getByRole('status'));
     expect(screen.getByRole('status')).toHaveTextContent('따뜻한 무지를 적용했어요.');
     await user.click(screen.getByRole('button', { name: '줄 노트 적용하기' }));
     expect(screen.getByRole('status')).toHaveTextContent('줄 노트를 적용했어요.');
@@ -103,6 +107,37 @@ describe('free local companion shop', () => {
     await user.click(screen.getByRole('button', { name: '모자 무료로 받기' }));
     expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap', 'flower']);
     expect(screen.getByRole('status')).toHaveTextContent('모자를 무료로 받았어요.');
+  });
+
+  it('keeps the item unowned and announces an error when collection persistence fails', async () => {
+    const user = userEvent.setup();
+    renderShop();
+    vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+
+    await user.click(screen.getByRole('button', { name: '꽃 무료로 받기' }));
+
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
+    expect(screen.getByRole('button', { name: '꽃 무료로 받기' })).toBeEnabled();
+    expect(screen.queryByText('꽃을 무료로 받았어요.')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('액세서리를 저장하지 못했어요.');
+  });
+
+  it('keeps a paper unowned and announces the storage error inside the paper section', async () => {
+    const user = userEvent.setup();
+    renderShop();
+    vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+
+    await user.click(screen.getByRole('button', { name: '모눈 종이 무료로 받기' }));
+
+    expect(loadCompanionShopState('user-me').ownedPapers).toEqual(['plain', 'ruled']);
+    expect(screen.getByRole('button', { name: '모눈 종이 무료로 받기' })).toBeEnabled();
+    const paperSection = screen.getByRole('region', { name: '종이 바탕' });
+    expect(paperSection).toContainElement(screen.getByRole('alert'));
+    expect(screen.getByRole('alert')).toHaveTextContent('종이를 저장하지 못했어요.');
   });
 
   it('keeps an owned accessory disabled while a legacy draw date does not block new collection', async () => {

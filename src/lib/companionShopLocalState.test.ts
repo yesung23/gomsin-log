@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   collectCompanionAccessory,
   collectCompanionPaper,
@@ -7,6 +7,7 @@ import {
 } from './companionShopLocalState';
 
 beforeEach(() => localStorage.clear());
+afterEach(() => vi.restoreAllMocks());
 
 describe('companion shop account-local collection', () => {
   it('starts each account with only the existing plain and ruled papers', () => {
@@ -108,5 +109,16 @@ describe('companion shop account-local collection', () => {
 
     expect(result.ownedAccessories).toEqual([]);
     expect(localStorage.length).toBe(0);
+  });
+
+  it('returns the prior collection when browser storage rejects an accessory write', () => {
+    vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+
+    const result = collectCompanionAccessory('u1', 'flower');
+
+    expect(result.ownedAccessories).toEqual([]);
+    expect(loadCompanionShopState('u1').ownedAccessories).toEqual([]);
   });
 });

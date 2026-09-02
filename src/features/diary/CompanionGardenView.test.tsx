@@ -8,7 +8,7 @@ import {
   companionsOverlap,
   getPhysicalGardenBounds,
 } from './companionGardenMotion';
-import type { GardenAccessoryState } from '@/lib/companionGardenLocalState';
+import type { GardenAccessory, GardenAccessoryState } from '@/lib/companionGardenLocalState';
 
 const AVAILABLE = deriveCompanionGardenState(100);
 const DEFAULT_ACCESSORIES: GardenAccessoryState = { version: 1, peach: 'none', sage: 'none' };
@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 describe('interactive companion garden characters', () => {
-  it('keeps the garden surface quiet with only the together-day copy and back control', () => {
+  it('keeps the garden surface quiet while exposing one discoverable play entry point', () => {
     const onBack = vi.fn();
     render(<CompanionGardenView
       state={AVAILABLE}
@@ -77,7 +77,7 @@ describe('interactive companion garden characters', () => {
     expect(screen.getByText('함께한 100일')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '우리 정원' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '든든한 나무' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '정원 꾸미기' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '꾸미기와 함께 놀기' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '상점 열기' })).not.toBeInTheDocument();
     expect(screen.queryByText('길게 누르면 친구를 들어 올려 움직일 수 있어요.')).not.toBeInTheDocument();
     expect(screen.queryByText('정원은 점수나 미션 없이 함께한 시간만 따라 자라요.')).not.toBeInTheDocument();
@@ -87,7 +87,7 @@ describe('interactive companion garden characters', () => {
 
   it('renders exactly two independently addressable companions', () => {
     render(<ControlledGarden />);
-    const companions = screen.getAllByRole('button', { name: /친구 길게 눌러 잡기/ });
+    const companions = screen.getAllByRole('button', { name: /친구와 함께 놀기/ });
     expect(companions).toHaveLength(2);
     expect(companions.map((node) => node.getAttribute('data-companion'))).toEqual(['peach', 'sage']);
     expect(companions.every((node) => node.getAttribute('data-lifted') === 'false')).toBe(true);
@@ -104,31 +104,24 @@ describe('interactive companion garden characters', () => {
     expect(second.querySelector('image')?.getAttribute('href')).toContain('paper-pair-v1.webp');
   });
 
-  it('uses original sheet pose crops for walking and pickup frames without synthetic accessory SVGs', () => {
-    const accessories: GardenAccessoryState = { version: 1, peach: 'bow', sage: 'flower' };
+  it.each(['cap', 'bow', 'scarf', 'flower'] as const)(
+    'keeps the exact paper-pair character and visibly overlays the %s accessory',
+    (accessory: GardenAccessory) => {
+    const accessories: GardenAccessoryState = { version: 1, peach: accessory, sage: 'none' };
     render(<ControlledGarden initial={accessories} />);
 
     expect(screen.getByTestId('garden-exact-character-peach')).toHaveAttribute('viewBox', '20 515 136 155');
-    expect(screen.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '930 688 150 170');
-
-    for (const id of ['peach', 'sage'] as const) {
-      const companion = screen.getByTestId(`garden-companion-${id}`);
-      const idle = screen.getByTestId(`garden-exact-character-${id}`);
-      const walk = screen.getByTestId(`garden-character-${id}-walk`);
-      const lift = screen.getByTestId(`garden-character-${id}-lift`);
-      expect(idle.querySelector('image')).toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
-      expect(walk.querySelector('image')).toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
-      expect(lift.querySelector('image')).toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
-      expect(walk).not.toHaveAttribute('viewBox', idle.getAttribute('viewBox'));
-      expect(lift).not.toHaveAttribute('viewBox', idle.getAttribute('viewBox'));
-      expect(companion.querySelector('[data-testid^="garden-accessory-"]')).not.toBeInTheDocument();
-    }
+    expect(screen.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '156 514 138 155');
+    expect(screen.getByTestId('garden-exact-character-peach').querySelector('image'))
+      .toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
+    expect(screen.getByTestId(`garden-accessory-peach-${accessory}`)).toBeVisible();
+    expect(screen.queryByTestId(`garden-accessory-sage-${accessory}`)).not.toBeInTheDocument();
   });
 
   it('requires a continuous 500ms press, then stays picked up until release', () => {
     vi.useFakeTimers();
     render(<ControlledGarden />);
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByRole('button', { name: '첫째 친구와 함께 놀기. 길게 눌러 직접 이동' });
 
     fireEvent.pointerDown(peach, { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
     expect(peach).toHaveAttribute('data-pressed', 'true');
@@ -144,27 +137,56 @@ describe('interactive companion garden characters', () => {
     expect(peach).toHaveAttribute('data-lifted', 'false');
   });
 
-  it('does not pick up on a quick tap or after pre-activation movement', () => {
+  it('opens the same accessible action sheet after a quick pointer tap', () => {
     vi.useFakeTimers();
     render(<ControlledGarden />);
-    const sage = screen.getByRole('button', { name: '둘째 친구 길게 눌러 잡기' });
+    const sage = screen.getByTestId('garden-companion-sage');
 
     fireEvent.pointerDown(sage, { pointerId: 2, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
     act(() => vi.advanceTimersByTime(200));
     fireEvent.pointerUp(sage, { pointerId: 2, pointerType: 'mouse', clientX: 100, clientY: 100 });
-    act(() => vi.advanceTimersByTime(500));
+    fireEvent.click(sage, { detail: 1 });
+
     expect(sage).toHaveAttribute('data-lifted', 'false');
+    expect(screen.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeInTheDocument();
+  });
+
+  it('cancels a pre-activation pickup after movement without opening the action sheet', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const sage = screen.getByTestId('garden-companion-sage');
 
     fireEvent.pointerDown(sage, { pointerId: 3, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
     fireEvent.pointerMove(sage, { pointerId: 3, pointerType: 'mouse', clientX: 110, clientY: 100 });
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.pointerUp(sage, { pointerId: 3, pointerType: 'mouse', clientX: 110, clientY: 100 });
+    fireEvent.click(sage, { detail: 1 });
     act(() => vi.advanceTimersByTime(500));
+
     expect(sage).toHaveAttribute('data-lifted', 'false');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('lets the next deliberate tap work when a moved gesture produced no click', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.pointerDown(sage, { pointerId: 31, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(sage, { pointerId: 31, pointerType: 'touch', clientX: 112, clientY: 100 });
+    fireEvent.pointerUp(sage, { pointerId: 31, pointerType: 'touch', clientX: 112, clientY: 100 });
+
+    fireEvent.pointerDown(sage, { pointerId: 32, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(sage, { pointerId: 32, pointerType: 'touch', clientX: 100, clientY: 100 });
+    fireEvent.click(sage, { detail: 1 });
+
+    expect(screen.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeInTheDocument();
   });
 
   it('cancels a pre-activation pickup on pointercancel and clears its timer', () => {
     vi.useFakeTimers();
     render(<ControlledGarden />);
-    const sage = screen.getByRole('button', { name: '둘째 친구 길게 눌러 잡기' });
+    const sage = screen.getByRole('button', { name: '둘째 친구와 함께 놀기. 길게 눌러 직접 이동' });
 
     fireEvent.pointerDown(sage, { pointerId: 5, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
     expect(sage).toHaveAttribute('data-pressed', 'true');
@@ -179,7 +201,7 @@ describe('interactive companion garden characters', () => {
   it('cancels an activated pickup on pointercancel and clears its lifted state', () => {
     vi.useFakeTimers();
     render(<ControlledGarden />);
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByRole('button', { name: '첫째 친구와 함께 놀기. 길게 눌러 직접 이동' });
 
     fireEvent.pointerDown(peach, { pointerId: 6, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
     act(() => vi.advanceTimersByTime(500));
@@ -202,7 +224,7 @@ describe('interactive companion garden characters', () => {
       x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 600, width: 300, height: 600,
       toJSON: () => ({}),
     });
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByRole('button', { name: '첫째 친구와 함께 놀기. 길게 눌러 직접 이동' });
     const before = [peach.getAttribute('data-x'), peach.getAttribute('data-y')];
 
     fireEvent.pointerDown(peach, { pointerId: 4, pointerType: 'mouse', button: 0, clientX: 90, clientY: 450 });
@@ -228,8 +250,8 @@ describe('interactive companion garden characters', () => {
       x: 0, y: 0, left: 0, top: 0, right: 320, bottom: 600, width: 320, height: 600,
       toJSON: () => ({}),
     });
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
-    const sage = screen.getByRole('button', { name: '둘째 친구 길게 눌러 잡기' });
+    const peach = screen.getByRole('button', { name: '첫째 친구와 함께 놀기. 길게 눌러 직접 이동' });
+    const sage = screen.getByRole('button', { name: '둘째 친구와 함께 놀기. 길게 눌러 직접 이동' });
 
     fireEvent.pointerDown(peach, { pointerId: 7, pointerType: 'touch', button: 0, clientX: 160, clientY: 100 });
     act(() => vi.advanceTimersByTime(500));
@@ -327,62 +349,131 @@ describe('interactive companion garden characters', () => {
     fireEvent.pointerUp(peach, { pointerId: 9, pointerType: 'touch', clientX: 90, clientY: 240 });
   });
 
-  it('keyboard activation provides a finite equivalent pickup interaction', () => {
-    vi.useFakeTimers();
+  it.each(['Enter', ' '])('keyboard %s activation opens the same action sheet', (key) => {
     render(<ControlledGarden />);
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByTestId('garden-companion-peach');
     peach.focus();
-    fireEvent.keyDown(peach, { key: 'Enter' });
-    expect(peach).toHaveAttribute('data-lifted', 'true');
-    act(() => vi.advanceTimersByTime(900));
+    fireEvent.keyDown(peach, { key });
+
     expect(peach).toHaveAttribute('data-lifted', 'false');
+    expect(screen.getByRole('dialog', { name: '첫째 친구와 함께 놀기' })).toBeInTheDocument();
   });
 
-  it('does not extend the finite pickup when the held key repeats', () => {
-    vi.useFakeTimers();
+  it('ignores held-key repeats instead of reopening the action sheet', () => {
     render(<ControlledGarden />);
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByTestId('garden-companion-peach');
     peach.focus();
 
     fireEvent.keyDown(peach, { key: 'Enter', repeat: false });
-    act(() => vi.advanceTimersByTime(800));
+    const dialog = screen.getByRole('dialog', { name: '첫째 친구와 함께 놀기' });
     fireEvent.keyDown(peach, { key: 'Enter', repeat: true });
-    act(() => vi.advanceTimersByTime(100));
 
-    expect(peach).toHaveAttribute('data-lifted', 'false');
+    expect(screen.getAllByRole('dialog')).toEqual([dialog]);
   });
 
-  it('supports a semantic detail-zero click while keeping a physical quick click inert', () => {
-    vi.useFakeTimers();
+  it('supports an assistive semantic detail-zero click through the same action sheet', () => {
     render(<ControlledGarden />);
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByTestId('garden-companion-peach');
 
-    fireEvent.click(peach, { detail: 1 });
-    expect(peach).toHaveAttribute('data-lifted', 'false');
     fireEvent.click(peach, { detail: 0 });
-    expect(peach).toHaveAttribute('data-lifted', 'true');
-    act(() => vi.advanceTimersByTime(900));
+
     expect(peach).toHaveAttribute('data-lifted', 'false');
+    expect(screen.getByRole('dialog', { name: '첫째 친구와 함께 놀기' })).toBeInTheDocument();
   });
 
-  it('does not let an older keyboard timer clear a newer pointer pickup', () => {
+  it('does not open the action sheet after a completed long-press pickup', () => {
     vi.useFakeTimers();
     render(<ControlledGarden />);
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByTestId('garden-companion-peach');
 
-    fireEvent.keyDown(peach, { key: 'Enter' });
     fireEvent.pointerDown(peach, { pointerId: 10, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
     act(() => vi.advanceTimersByTime(500));
     expect(peach).toHaveAttribute('data-lifted', 'true');
-    act(() => vi.advanceTimersByTime(400));
-    expect(peach).toHaveAttribute('data-lifted', 'true');
     fireEvent.pointerUp(peach, { pointerId: 10, pointerType: 'touch', clientX: 100, clientY: 100 });
+    fireEvent.click(peach, { detail: 1 });
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('moves in all four directions, stays bounded and non-overlapping, and announces the result', () => {
+    mockReducedMotion(true);
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.click(peach, { detail: 0 });
+    const actions = [
+      { label: '위쪽', axis: 'y', compare: (next: number, prior: number) => next < prior },
+      { label: '아래쪽', axis: 'y', compare: (next: number, prior: number) => next > prior },
+      { label: '왼쪽', axis: 'x', compare: (next: number, prior: number) => next < prior },
+      { label: '오른쪽', axis: 'x', compare: (next: number, prior: number) => next > prior },
+    ] as const;
+    for (const action of actions) {
+      const prior = Number(peach.getAttribute(`data-${action.axis}`));
+      fireEvent.click(screen.getByRole('button', { name: `첫째 친구 ${action.label}으로 이동` }));
+      const next = Number(peach.getAttribute(`data-${action.axis}`));
+      expect(action.compare(next, prior)).toBe(true);
+      expect(screen.getByRole('status')).toHaveTextContent(`첫째 친구를 ${action.label}으로 옮겼어요.`);
+    }
+
+    for (let index = 0; index < 20; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }));
+    }
+    const peachPoint = {
+      x: Number(peach.getAttribute('data-x')),
+      y: Number(peach.getAttribute('data-y')),
+    };
+    const sagePoint = {
+      x: Number(sage.getAttribute('data-x')),
+      y: Number(sage.getAttribute('data-y')),
+    };
+    expect(peachPoint.x).toBeGreaterThanOrEqual(GARDEN_BOUNDS.minX);
+    expect(peachPoint.x).toBeLessThanOrEqual(GARDEN_BOUNDS.maxX);
+    expect(companionsOverlap(peachPoint, sagePoint, { width: 320, height: 600 }, GARDEN_COMPANION_SIZE.gap)).toBe(false);
+  });
+
+  it('names the modal, closes it with Escape, and restores focus to its trigger', () => {
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    peach.focus();
+
+    fireEvent.click(peach, { detail: 0 });
+    const dialog = screen.getByRole('dialog', { name: '첫째 친구와 함께 놀기' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(peach).toHaveFocus();
+  });
+
+  it('pauses both autonomous companions while the action sheet is open and resumes after it closes', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.click(peach, { detail: 0 });
+    act(() => vi.advanceTimersByTime(20_000));
+
+    expect(peach).toHaveAttribute('data-move-count', '0');
+    expect(sage).toHaveAttribute('data-move-count', '0');
+    expect(peach).toHaveAttribute('data-wandering', 'false');
+    expect(sage).toHaveAttribute('data-wandering', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구와 함께 놀기 닫기' }));
+    act(() => vi.advanceTimersByTime(901));
+
+    expect(Number(peach.getAttribute('data-move-count'))).toBeGreaterThan(0);
+    expect(Number(sage.getAttribute('data-move-count'))).toBeGreaterThan(0);
   });
 
   it('clears pickup state when availability is withdrawn and restored', () => {
     vi.useFakeTimers();
     const view = render(<ControlledGarden />);
-    const peach = screen.getByRole('button', { name: '첫째 친구 길게 눌러 잡기' });
+    const peach = screen.getByRole('button', { name: '첫째 친구와 함께 놀기. 길게 눌러 직접 이동' });
 
     fireEvent.pointerDown(peach, { pointerId: 11, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
     view.rerender(

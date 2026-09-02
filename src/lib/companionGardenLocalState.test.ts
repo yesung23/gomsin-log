@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_GARDEN_ACCESSORIES,
   loadGardenAccessories,
@@ -9,6 +9,8 @@ import { purgeDiaryLocalStateForUser } from '@/lib/diaryLocalState';
 beforeEach(() => {
   localStorage.clear();
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('companion garden local accessories', () => {
   it('starts with no accessories and persists independent choices for the two companions', () => {
@@ -51,6 +53,17 @@ describe('companion garden local accessories', () => {
   it('does not persist anything without an account identity', () => {
     expect(saveGardenAccessory('', 'peach', 'cap')).toEqual(DEFAULT_GARDEN_ACCESSORIES);
     expect(localStorage.length).toBe(0);
+  });
+
+  it('returns the prior state when browser storage rejects the write', () => {
+    vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+
+    const result = saveGardenAccessory('alice', 'peach', 'cap');
+
+    expect(result).toEqual(DEFAULT_GARDEN_ACCESSORIES);
+    expect(loadGardenAccessories('alice')).toEqual(DEFAULT_GARDEN_ACCESSORIES);
   });
 
   it('is purged with the rest of that account diary metadata on sign-out/delete', () => {

@@ -73,11 +73,27 @@ test('full-screen garden uses the exact characters, hides persistent nav, wander
   await expect.poll(async () => Number(await peach.getAttribute('data-move-count')), { timeout: 4_000 }).toBeGreaterThan(0);
   await expect.poll(async () => Number(await sage.getAttribute('data-move-count')), { timeout: 4_000 }).toBeGreaterThan(0);
 
-  // A normal click is deliberately not a pickup interaction.
+  // A normal click exposes the same non-drag interaction available to assistive technology.
   await sage.click();
   await expect(sage).toHaveAttribute('data-lifted', 'false');
+  await expect(page.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeVisible();
+  await page.getByRole('button', { name: '둘째 친구와 함께 놀기 닫기' }).click();
+
+  const sageBox = await sage.boundingBox();
+  expect(sageBox).not.toBeNull();
+  if (sageBox) {
+    const startX = sageBox.x + sageBox.width / 2;
+    const startY = sageBox.y + sageBox.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 12, startY);
+    await page.waitForTimeout(50);
+    await page.mouse.up();
+  }
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   await longPressAndDrag(page, 'garden-companion-peach');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   const visualBox = await peach.locator('.garden-exact-character').boundingBox();
   const hitBox = await peach.boundingBox();
@@ -86,11 +102,17 @@ test('full-screen garden uses the exact characters, hides persistent nav, wander
   expect(hitBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(hitBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
-  // Keyboard users get a finite equivalent interaction.
+  // Keyboard users reach the same action sheet and can move the character without dragging.
   await sage.focus();
   await sage.press('Enter');
-  await expect(sage).toHaveAttribute('data-lifted', 'true');
-  await expect.poll(async () => sage.getAttribute('data-lifted'), { timeout: 2_000 }).toBe('false');
+  await expect(sage).toHaveAttribute('data-lifted', 'false');
+  await expect(page.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeVisible();
+  const beforeKeyboardMove = Number(await sage.getAttribute('data-x'));
+  await page.getByRole('button', { name: '둘째 친구 왼쪽으로 이동' }).click();
+  await expect.poll(async () => Number(await sage.getAttribute('data-x'))).toBeLessThan(beforeKeyboardMove);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(sage).toBeFocused();
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   expect(pageErrors).toEqual([]);
@@ -128,6 +150,50 @@ test('quiet garden remains usable in landscape', async ({ browser }) => {
   expect(mainMetrics.scrollHeight).toBeLessThanOrEqual(mainMetrics.clientHeight + 1);
 
   await expect(page.getByRole('button', { name: '상점 열기' })).toHaveCount(0);
+  expect(unrouted).toEqual([]);
+  await context.close();
+});
+
+test('small-phone action sheet equips only owned accessories and reaches the Shop without overflow', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 320, height: 568 } });
+  await context.addInitScript(() => {
+    window.localStorage.setItem('gomsin.diary.shop.user-creator', JSON.stringify({
+      version: 1,
+      ownedAccessories: ['flower'],
+      ownedPapers: ['plain', 'ruled'],
+      lastFreeDrawDate: null,
+    }));
+  });
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const unrouted = await openGarden(context, page);
+
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
+  const dialog = page.getByRole('dialog', { name: '첫째 친구와 함께 놀기' });
+  await expect(dialog).toBeVisible();
+  const dialogBox = await dialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(320);
+  expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(568);
+  expect(await dialog.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingBottom)))
+    .toBeGreaterThanOrEqual(16);
+
+  const flowerRadio = page.getByRole('radio', { name: '첫째 친구 꽃' });
+  const flowerTarget = flowerRadio.locator('..');
+  const flowerTargetBox = await flowerTarget.boundingBox();
+  expect(flowerTargetBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(flowerTargetBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await flowerTarget.click();
+  await expect(flowerRadio).toBeChecked();
+  await expect(page.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'flower');
+  await expect(page.getByTestId('garden-accessory-peach-flower')).toBeVisible();
+
+  await page.getByRole('button', { name: '장식 더 받으러 가기' }).click();
+  await expect(page.getByRole('heading', { name: '상점' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+  expect(pageErrors).toEqual([]);
   expect(unrouted).toEqual([]);
   await context.close();
 });

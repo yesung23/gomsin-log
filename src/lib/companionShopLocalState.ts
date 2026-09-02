@@ -79,11 +79,14 @@ function normalizeState(userId: string, value: unknown): CompanionShopState {
   };
 }
 
-function persistState(userId: string, state: CompanionShopState): void {
+function persistState(userId: string, state: CompanionShopState): boolean {
   try {
-    localStorage.setItem(key(userId), JSON.stringify(state));
+    const serialized = JSON.stringify(state);
+    localStorage.setItem(key(userId), serialized);
+    return localStorage.getItem(key(userId)) === serialized;
   } catch {
     // Optional local collection state must never block the rest of the app.
+    return false;
   }
 }
 
@@ -115,8 +118,8 @@ export function loadCompanionShopState(userId: string): CompanionShopState {
 export function saveCompanionShopState(userId: string, state: CompanionShopState): CompanionShopState {
   const normalized = normalizeState(userId, state);
   if (!userId || typeof localStorage === 'undefined') return normalized;
-  persistState(userId, normalized);
-  return normalized;
+  const previous = loadCompanionShopState(userId);
+  return persistState(userId, normalized) ? normalized : previous;
 }
 
 export function collectCompanionPaper(userId: string, paper: PaperTexture): CompanionShopState {

@@ -67,9 +67,12 @@ export function saveGardenAccessory(
     [companion]: validAccessory(accessory),
   };
   try {
-    localStorage.setItem(key(userId), JSON.stringify(next));
+    const serialized = JSON.stringify(next);
+    localStorage.setItem(key(userId), serialized);
+    if (localStorage.getItem(key(userId)) !== serialized) return current;
   } catch {
     // Decoration persistence is deliberately best-effort. It never blocks the garden itself.
+    return current;
   }
   return next;
 }

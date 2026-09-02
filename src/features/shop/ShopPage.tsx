@@ -20,6 +20,12 @@ import {
   type PaperTexture,
 } from '@/lib/paperTexturePreference';
 
+type ShopAnnouncement = {
+  kind: 'status' | 'alert';
+  section: 'accessory' | 'paper';
+  message: string;
+};
+
 const COLLECTIBLE_ACCESSORY_OPTIONS = GARDEN_ACCESSORY_OPTIONS.filter(
   (option): option is { id: CollectibleGardenAccessory; label: string } => option.id !== 'none',
 );
@@ -41,7 +47,7 @@ export function ShopPageBody() {
     const initialShopState = loadCompanionShopState(userId);
     return reconcileOwnedPaperTexture(userId, initialShopState.ownedPapers);
   });
-  const [announcement, setAnnouncement] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<ShopAnnouncement | null>(null);
 
   useEffect(() => {
     const nextShopState = loadCompanionShopState(userId);
@@ -55,16 +61,42 @@ export function ShopPageBody() {
   const collectAccessory = (option: typeof COLLECTIBLE_ACCESSORY_OPTIONS[number]) => {
     if (!userId || shopState.ownedAccessories.includes(option.id)) return;
     setAnnouncement(null);
-    setShopState(collectCompanionAccessory(userId, option.id));
-    setAnnouncement(`${withObjectParticle(option.label)} 무료로 받았어요.`);
+    const next = collectCompanionAccessory(userId, option.id);
+    if (!next.ownedAccessories.includes(option.id)) {
+      setAnnouncement({
+        kind: 'alert',
+        section: 'accessory',
+        message: '액세서리를 저장하지 못했어요. 기기 저장 공간을 확인한 뒤 다시 시도해 주세요.',
+      });
+      return;
+    }
+    setShopState(next);
+    setAnnouncement({
+      kind: 'status',
+      section: 'accessory',
+      message: `${withObjectParticle(option.label)} 무료로 받았어요.`,
+    });
   };
 
   const choosePaper = (paper: typeof PAPER_TEXTURE_OPTIONS[number]) => {
     if (!userId) return;
     const owned = shopState.ownedPapers.includes(paper.id);
     if (!owned) {
-      setShopState(collectCompanionPaper(userId, paper.id));
-      setAnnouncement(`${withObjectParticle(paper.label)} 무료로 받았어요.`);
+      const next = collectCompanionPaper(userId, paper.id);
+      if (!next.ownedPapers.includes(paper.id)) {
+        setAnnouncement({
+          kind: 'alert',
+          section: 'paper',
+          message: '종이를 저장하지 못했어요. 기기 저장 공간을 확인한 뒤 다시 시도해 주세요.',
+        });
+        return;
+      }
+      setShopState(next);
+      setAnnouncement({
+        kind: 'status',
+        section: 'paper',
+        message: `${withObjectParticle(paper.label)} 무료로 받았어요.`,
+      });
       return;
     }
     if (selectedPaper === paper.id) return;
@@ -72,7 +104,11 @@ export function ShopPageBody() {
     savePaperTexture(userId, paper.id);
     applyPaperTextureAttribute(paper.id);
     setSelectedPaper(paper.id);
-    setAnnouncement(`${withObjectParticle(paper.label)} 적용했어요.`);
+    setAnnouncement({
+      kind: 'status',
+      section: 'paper',
+      message: `${withObjectParticle(paper.label)} 적용했어요.`,
+    });
   };
 
   return (
@@ -126,7 +162,16 @@ export function ShopPageBody() {
               );
             })}
           </div>
-          {announcement ? <p role="status" aria-live="polite" className="text-label text-coral">{announcement}</p> : null}
+          {announcement?.section === 'accessory' ? (
+            <p
+              role={announcement.kind}
+              aria-live={announcement.kind === 'alert' ? 'assertive' : 'polite'}
+              aria-atomic="true"
+              className="text-label text-coral"
+            >
+              {announcement.message}
+            </p>
+          ) : null}
         </section>
 
         <section className="space-y-3" aria-labelledby="paper-texture-title">
@@ -174,6 +219,16 @@ export function ShopPageBody() {
               );
             })}
           </div>
+          {announcement?.section === 'paper' ? (
+            <p
+              role={announcement.kind}
+              aria-live={announcement.kind === 'alert' ? 'assertive' : 'polite'}
+              aria-atomic="true"
+              className="text-label text-coral"
+            >
+              {announcement.message}
+            </p>
+          ) : null}
         </section>
       </div>
     </div>

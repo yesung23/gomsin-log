@@ -8,7 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Sprout } from 'lucide-react';
+import { Palette, Sprout } from 'lucide-react';
 import { AppBar } from '@/components/ui/AppBar';
 import { cn } from '@/lib/utils';
 import paperPairAsset from '@/assets/characters/paper-pair-v1.webp';
@@ -18,7 +18,12 @@ import {
   type GardenAccessoryState,
   type GardenCompanionId,
 } from '@/lib/companionGardenLocalState';
+import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
 import type { CompanionGardenState } from './companionGarden';
+import {
+  CompanionGardenActionSheet,
+  type GardenMoveDirection,
+} from './CompanionGardenActionSheet';
 import {
   GARDEN_BOUNDS,
   constrainCompanionPoint,
@@ -34,7 +39,10 @@ export interface CompanionGardenViewProps {
   state: CompanionGardenState;
   unavailableReason?: 'missing_date' | 'shared_unavailable' | 'inactive_couple';
   accessories?: GardenAccessoryState;
+  ownedAccessories?: readonly CollectibleGardenAccessory[];
+  onAccessoryChange?: (companion: GardenCompanionId, accessory: GardenAccessory) => boolean;
   onBack?: () => void;
+  onOpenShop?: () => void;
 }
 
 type CompanionMotion = GardenPoint & {
@@ -52,7 +60,11 @@ const INITIAL_MOTION: MotionMap = {
 
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_TOLERANCE = 8;
-const KEYBOARD_PICKUP_MS = 900;
+const BUTTON_MOVE_STEP = 8;
+// A compatibility click can arrive after pointer capture has already been released.
+// Keep the guard alive long enough for delayed touch/mouse synthesis; a fresh
+// pointerdown explicitly clears it so the user's next deliberate tap is never lost.
+const SUPPRESSED_CLICK_FALLBACK_MS = 1_000;
 
 const CHARACTER_POSE_CROPS: Record<GardenCompanionId, Record<'idle' | 'walk' | 'lift', string>> = {
   peach: {
@@ -67,12 +79,6 @@ const CHARACTER_POSE_CROPS: Record<GardenCompanionId, Record<'idle' | 'walk' | '
   },
 };
 
-/** Original-sheet poses with a visible object/accessory; cap has no matching source pose. */
-const ACCESSORY_POSE_CROPS: Partial<Record<GardenAccessory, string>> = {
-  scarf: '460 688 140 170',
-  flower: '930 688 150 170',
-};
-
 type PressSession = {
   pointerId: number;
   startX: number;
@@ -80,11 +86,6 @@ type PressSession = {
   activated: boolean;
   token: number;
   timer?: ReturnType<typeof setTimeout>;
-};
-
-type FinitePickupSession = {
-  token: number;
-  timer: ReturnType<typeof setTimeout>;
 };
 
 function usePrefersReducedMotion(): boolean {
@@ -122,6 +123,61 @@ function renderedGardenPoint(
   };
 }
 
+function GardenAccessoryGlyph({
+  companion,
+  accessory,
+}: {
+  companion: GardenCompanionId;
+  accessory: GardenAccessory;
+}) {
+  if (accessory === 'none') return null;
+  const testId = `garden-accessory-${companion}-${accessory}`;
+  if (accessory === 'cap') {
+    return (
+      <g data-testid={testId}>
+        <path d="M21 23 Q36 9 51 23 L49 29 L23 29Z" fill="var(--ink-accent)" stroke="var(--ink)" strokeWidth="1.5" />
+        <path d="M35 28 Q50 28 57 32" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" />
+      </g>
+    );
+  }
+  if (accessory === 'bow') {
+    return (
+      <g data-testid={testId}>
+        <path d="M18 29 Q9 21 10 34 Q12 42 22 34Z" fill="var(--coral)" stroke="var(--ink)" strokeWidth="1.5" />
+        <path d="M22 30 Q31 21 30 35 Q27 42 20 35Z" fill="var(--coral-fill)" stroke="var(--ink)" strokeWidth="1.5" />
+        <circle cx="21" cy="32" r="3.5" fill="var(--card)" stroke="var(--ink)" strokeWidth="1" />
+      </g>
+    );
+  }
+  if (accessory === 'scarf') {
+    return (
+      <g data-testid={testId}>
+        <path d="M19 56 Q36 63 53 56 L52 63 Q36 69 20 63Z" fill="var(--coral)" stroke="var(--ink)" strokeWidth="1.5" />
+        <path d="M48 62 L54 76 L47 73 L44 64Z" fill="var(--coral)" stroke="var(--ink)" strokeWidth="1.5" />
+      </g>
+    );
+  }
+  return (
+    <g data-testid={testId}>
+      {[0, 1, 2, 3, 4].map((petal) => {
+        const angle = (Math.PI * 2 * petal) / 5;
+        return (
+          <circle
+            key={petal}
+            cx={51 + Math.cos(angle) * 5}
+            cy={25 + Math.sin(angle) * 5}
+            r="3.3"
+            fill="var(--coral-fill)"
+            stroke="var(--ink)"
+            strokeWidth="0.8"
+          />
+        );
+      })}
+      <circle cx="51" cy="25" r="3" fill="var(--coral)" stroke="var(--ink)" strokeWidth="0.8" />
+    </g>
+  );
+}
+
 function CompanionGlyph({
   companion,
   accessory,
@@ -133,14 +189,11 @@ function CompanionGlyph({
   moving: boolean;
   lifted: boolean;
 }) {
-  const accessoryIdleCrop = accessory === 'none'
-    ? null
-    : ACCESSORY_POSE_CROPS[accessory] ?? null;
   const renderFrame = (phase: 'idle' | 'walk' | 'lift', className: string, testId: string) => (
     <svg
       data-testid={phase === 'idle' ? `garden-exact-character-${companion}` : testId}
       data-garden-pose={phase}
-      viewBox={phase === 'idle' && accessoryIdleCrop ? accessoryIdleCrop : CHARACTER_POSE_CROPS[companion][phase]}
+      viewBox={CHARACTER_POSE_CROPS[companion][phase]}
       className={cn('garden-character-frame', className)}
       aria-hidden="true"
     >
@@ -152,6 +205,9 @@ function CompanionGlyph({
       {renderFrame('idle', 'garden-exact-character', `garden-character-${companion}-idle`)}
       {renderFrame('walk', 'garden-character-frame--walk', `garden-character-${companion}-walk`)}
       {renderFrame('lift', 'garden-character-frame--lift', `garden-character-${companion}-lift`)}
+      <svg viewBox="0 0 72 82" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+        <GardenAccessoryGlyph companion={companion} accessory={accessory} />
+      </svg>
     </span>
   );
 }
@@ -211,7 +267,7 @@ function GardenCompanion({
         onKeyDown={(event) => onKeyDown(id, event)}
         onClick={(event) => onClick(id, event)}
         onContextMenu={(event) => event.preventDefault()}
-        aria-label={`${label} 친구 길게 눌러 잡기`}
+        aria-label={`${label} 친구와 함께 놀기. 길게 눌러 직접 이동`}
         data-testid={`garden-companion-${id}`}
         data-companion={id}
         data-accessory={accessory}
@@ -237,7 +293,10 @@ export function CompanionGardenView({
   state,
   unavailableReason = 'missing_date',
   accessories = DEFAULT_GARDEN_ACCESSORIES,
+  ownedAccessories = [],
+  onAccessoryChange,
   onBack,
+  onOpenShop,
 }: CompanionGardenViewProps) {
   const reducedMotion = usePrefersReducedMotion();
   const [motion, setMotion] = useState<MotionMap>(INITIAL_MOTION);
@@ -249,8 +308,11 @@ export function CompanionGardenView({
   const [lifted, setLifted] = useState<Record<GardenCompanionId, boolean>>({ peach: false, sage: false });
   const liftedRef = useRef<Record<GardenCompanionId, boolean>>({ peach: false, sage: false });
   const pressSessions = useRef<Partial<Record<GardenCompanionId, PressSession>>>({});
-  const keyboardTimers = useRef<Partial<Record<GardenCompanionId, FinitePickupSession>>>({});
   const interactionTokens = useRef<Record<GardenCompanionId, number>>({ peach: 0, sage: 0 });
+  const suppressedClicks = useRef<Record<GardenCompanionId, boolean>>({ peach: false, sage: false });
+  const suppressedClickTimers = useRef<Partial<Record<GardenCompanionId, ReturnType<typeof setTimeout>>>>({});
+  const actionSheetTriggerRef = useRef<HTMLElement | null>(null);
+  const [actionSheetCompanion, setActionSheetCompanion] = useState<GardenCompanionId | null>(null);
   useEffect(() => {
     motionRef.current = motion;
   }, [motion]);
@@ -277,7 +339,7 @@ export function CompanionGardenView({
   }, [state.isAvailable]);
 
   useEffect(() => {
-    if (!state.isAvailable || reducedMotion) {
+    if (!state.isAvailable || reducedMotion || actionSheetCompanion) {
       setMotion((current) => ({
         peach: { ...current.peach, moving: false, transitionMs: 0 },
         sage: { ...current.sage, moving: false, transitionMs: 0 },
@@ -339,14 +401,14 @@ export function CompanionGardenView({
       cancelled = true;
       for (const timer of timers) clearTimeout(timer);
     };
-  }, [reducedMotion, state.isAvailable]);
+  }, [actionSheetCompanion, reducedMotion, state.isAvailable]);
 
   useEffect(() => () => {
     for (const session of Object.values(pressSessions.current)) {
       if (session?.timer) clearTimeout(session.timer);
     }
-    for (const session of Object.values(keyboardTimers.current)) {
-      if (session) clearTimeout(session.timer);
+    for (const timer of Object.values(suppressedClickTimers.current)) {
+      if (timer) clearTimeout(timer);
     }
   }, []);
 
@@ -386,9 +448,6 @@ export function CompanionGardenView({
     const session = pressSessions.current[id];
     if (session?.timer) clearTimeout(session.timer);
     delete pressSessions.current[id];
-    const finiteSession = keyboardTimers.current[id];
-    if (finiteSession) clearTimeout(finiteSession.timer);
-    delete keyboardTimers.current[id];
     interactionTokens.current[id] += 1;
     setCompanionPressed(id, false);
     setCompanionLifted(id, false);
@@ -397,23 +456,33 @@ export function CompanionGardenView({
     }
   }, [setCompanionLifted, setCompanionPressed]);
 
-  const startFinitePickup = useCallback((id: GardenCompanionId) => {
+  const clearSuppressedClick = useCallback((id: GardenCompanionId) => {
+    suppressedClicks.current[id] = false;
+    const previousTimer = suppressedClickTimers.current[id];
+    if (previousTimer) clearTimeout(previousTimer);
+    delete suppressedClickTimers.current[id];
+  }, []);
+
+  const suppressNextClick = useCallback((id: GardenCompanionId) => {
+    clearSuppressedClick(id);
+    suppressedClicks.current[id] = true;
+    suppressedClickTimers.current[id] = setTimeout(() => {
+      suppressedClicks.current[id] = false;
+      delete suppressedClickTimers.current[id];
+    }, SUPPRESSED_CLICK_FALLBACK_MS);
+  }, [clearSuppressedClick]);
+
+  const openActionSheet = useCallback((id: GardenCompanionId, trigger: HTMLElement) => {
     cancelInteraction(id);
-    stopCompanionMotion(id);
-    setCompanionPressed(id, true);
-    setCompanionLifted(id, true);
-    const token = interactionTokens.current[id];
-    const timer = setTimeout(() => {
-      if (interactionTokens.current[id] !== token || keyboardTimers.current[id]?.token !== token) return;
-      delete keyboardTimers.current[id];
-      setCompanionPressed(id, false);
-      setCompanionLifted(id, false);
-    }, KEYBOARD_PICKUP_MS);
-    keyboardTimers.current[id] = { token, timer };
-  }, [cancelInteraction, setCompanionLifted, setCompanionPressed, stopCompanionMotion]);
+    stopCompanionMotion('peach');
+    stopCompanionMotion('sage');
+    actionSheetTriggerRef.current = trigger;
+    setActionSheetCompanion(id);
+  }, [cancelInteraction, stopCompanionMotion]);
 
   const beginPointerPickup = useCallback((id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    clearSuppressedClick(id);
     cancelInteraction(id);
     stopCompanionMotion(id);
     setCompanionPressed(id, true);
@@ -431,14 +500,17 @@ export function CompanionGardenView({
     }, LONG_PRESS_MS);
     pressSessions.current[id] = session;
     event.currentTarget.setPointerCapture?.(event.pointerId);
-  }, [cancelInteraction, setCompanionLifted, setCompanionPressed, stopCompanionMotion]);
+  }, [cancelInteraction, clearSuppressedClick, setCompanionLifted, setCompanionPressed, stopCompanionMotion]);
 
   const movePointerPickup = useCallback((id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => {
     const session = pressSessions.current[id];
     if (!session || session.pointerId !== event.pointerId) return;
     if (!session.activated) {
       const distance = Math.hypot(event.clientX - session.startX, event.clientY - session.startY);
-      if (distance > LONG_PRESS_MOVE_TOLERANCE) cancelInteraction(id, event);
+      if (distance > LONG_PRESS_MOVE_TOLERANCE) {
+        suppressNextClick(id);
+        cancelInteraction(id, event);
+      }
       return;
     }
 
@@ -458,28 +530,68 @@ export function CompanionGardenView({
     const dragged = { ...motionRef.current[id], ...constrained, moving: false, transitionMs: 0 };
     motionRef.current = { ...motionRef.current, [id]: dragged };
     setMotion((current) => ({ ...current, [id]: dragged }));
-  }, [cancelInteraction]);
+  }, [cancelInteraction, suppressNextClick]);
 
   const endPointerPickup = useCallback((id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (pressSessions.current[id]?.activated) suppressNextClick(id);
     cancelInteraction(id, event);
-  }, [cancelInteraction]);
+  }, [cancelInteraction, suppressNextClick]);
 
-  const keyboardPickup = useCallback((id: GardenCompanionId, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+  const keyboardAction = useCallback((id: GardenCompanionId, event: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     if (event.repeat) return;
-    startFinitePickup(id);
-  }, [startFinitePickup]);
+    openActionSheet(id, event.currentTarget);
+  }, [openActionSheet]);
 
-  const semanticPickup = useCallback((id: GardenCompanionId, event: ReactMouseEvent<HTMLButtonElement>) => {
-    if (event.detail !== 0) return;
-    startFinitePickup(id);
-  }, [startFinitePickup]);
+  const clickAction = useCallback((id: GardenCompanionId, event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (suppressedClicks.current[id] && event.detail > 0) {
+      clearSuppressedClick(id);
+      return;
+    }
+    clearSuppressedClick(id);
+    openActionSheet(id, event.currentTarget);
+  }, [clearSuppressedClick, openActionSheet]);
+
+  const moveCompanion = useCallback((id: GardenCompanionId, direction: GardenMoveDirection): boolean => {
+    stopCompanionMotion(id);
+    const sceneBounds = sceneRef.current?.getBoundingClientRect();
+    const sceneSize = sceneBounds && sceneBounds.width > 0 && sceneBounds.height > 0
+      ? { width: sceneBounds.width, height: sceneBounds.height }
+      : { width: 320, height: 600 };
+    const bounds = getPhysicalGardenBounds(sceneSize.width, sceneSize.height);
+    const current = motionRef.current[id];
+    const otherId: GardenCompanionId = id === 'peach' ? 'sage' : 'peach';
+    const delta = {
+      up: { x: 0, y: -BUTTON_MOVE_STEP },
+      down: { x: 0, y: BUTTON_MOVE_STEP },
+      left: { x: -BUTTON_MOVE_STEP, y: 0 },
+      right: { x: BUTTON_MOVE_STEP, y: 0 },
+    }[direction];
+    const nextPoint = constrainCompanionPoint(
+      { x: current.x + delta.x, y: current.y + delta.y },
+      motionRef.current[otherId],
+      sceneSize,
+      bounds,
+    );
+    const moved = Math.abs(nextPoint.x - current.x) > 0.01 || Math.abs(nextPoint.y - current.y) > 0.01;
+    if (!moved) return false;
+    const next = {
+      ...current,
+      ...nextPoint,
+      moving: false,
+      transitionMs: reducedMotion ? 0 : 180,
+    };
+    motionRef.current = { ...motionRef.current, [id]: next };
+    setMotion((value) => ({ ...value, [id]: next }));
+    return true;
+  }, [reducedMotion, stopCompanionMotion]);
 
   useEffect(() => {
     if (state.isAvailable) return;
     cancelInteraction('peach');
     cancelInteraction('sage');
+    setActionSheetCompanion(null);
   }, [cancelInteraction, state.isAvailable]);
 
   const unavailableCopy = unavailableReason === 'shared_unavailable'
@@ -494,6 +606,17 @@ export function CompanionGardenView({
         title={<span className="sr-only">정원</span>}
         onBack={onBack}
         backLabel="이전 화면으로"
+        actions={state.isAvailable ? (
+          <button
+            type="button"
+            onClick={(event) => openActionSheet('peach', event.currentTarget)}
+            aria-label="꾸미기와 함께 놀기"
+            className="press-response inline-flex min-h-11 items-center gap-1.5 rounded-control px-2 text-caption font-semibold text-foreground"
+          >
+            <Palette size={17} aria-hidden="true" />
+            함께 놀기
+          </button>
+        ) : undefined}
       />
 
       {state.isAvailable ? (
@@ -519,8 +642,8 @@ export function CompanionGardenView({
               onPointerUp={endPointerPickup}
               onPointerCancel={endPointerPickup}
               onLostPointerCapture={endPointerPickup}
-              onKeyDown={keyboardPickup}
-              onClick={semanticPickup}
+              onKeyDown={keyboardAction}
+              onClick={clickAction}
               positionRef={(node) => {
                 if (node) companionPositionRefs.current.peach = node;
                 else delete companionPositionRefs.current.peach;
@@ -538,8 +661,8 @@ export function CompanionGardenView({
               onPointerUp={endPointerPickup}
               onPointerCancel={endPointerPickup}
               onLostPointerCapture={endPointerPickup}
-              onKeyDown={keyboardPickup}
-              onClick={semanticPickup}
+              onKeyDown={keyboardAction}
+              onClick={clickAction}
               positionRef={(node) => {
                 if (node) companionPositionRefs.current.sage = node;
                 else delete companionPositionRefs.current.sage;
@@ -562,6 +685,20 @@ export function CompanionGardenView({
           </div>
         </section>
       )}
+
+      {state.isAvailable && actionSheetCompanion ? (
+        <CompanionGardenActionSheet
+          companion={actionSheetCompanion}
+          triggerRef={actionSheetTriggerRef}
+          accessories={accessories}
+          ownedAccessories={ownedAccessories}
+          onSelectCompanion={setActionSheetCompanion}
+          onAccessoryChange={onAccessoryChange}
+          onMove={(direction) => moveCompanion(actionSheetCompanion, direction)}
+          onClose={() => setActionSheetCompanion(null)}
+          onOpenShop={onOpenShop}
+        />
+      ) : null}
     </div>
   );
 }

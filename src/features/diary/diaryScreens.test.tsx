@@ -71,6 +71,25 @@ beforeEach(() => {
 });
 
 describe('day-page diary', () => {
+  it('shows one recent readable moment before opening a month', () => {
+    renderDiary();
+
+    const august = screen.getByRole('button', { name: '2026년 8월 지면 열기' });
+    expect(within(august).getByText('8월 14일')).toBeInTheDocument();
+    expect(within(august).getByText('8월 둘째 기록')).toBeInTheDocument();
+  });
+
+  it('explains when the latest month cannot be opened on this device', () => {
+    currentState = stateWith([
+      record({ date: '2026-08-02', log: '', contentUnavailable: 'key_unavailable' }),
+    ]);
+
+    renderDiary();
+
+    const august = screen.getByRole('button', { name: '2026년 8월 지면 열기' });
+    expect(within(august).getByText('이 기기에서 아직 열 수 없는 기록이에요')).toBeInTheDocument();
+  });
+
   it('keeps month cards but opens a single date page instead of duplicating the whole month', async () => {
     const user = userEvent.setup();
     renderDiary();

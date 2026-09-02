@@ -18,7 +18,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { installMockBackend } from './fixtures/mockBackend';
-import { CREATOR, NO_SPACE, PARTNER, SHARED_LOG } from './scenarios';
+import { CREATOR, NO_SPACE, PARTNER, PARTNER_LOG, SHARED_LOG } from './scenarios';
 
 /** Wait for the shell, which is the only reliable "the app booted" signal. */
 async function bootedInto(page: Page, route: string) {
@@ -131,7 +131,9 @@ for (const width of [320, 390, 430]) {
     page.on('pageerror', (error) => errors.push(error.message));
 
     await bootedInto(page, '/diary');
-    await page.getByRole('button', { name: /지면 열기$/ }).first().click();
+    const month = page.getByRole('button', { name: /지면 열기$/ }).first();
+    await expect(month).toContainText(PARTNER_LOG);
+    await month.click();
     await page.getByRole('button', { name: '페이지 편집' }).click();
     await page.getByRole('radio', { name: '모눈 종이' }).click();
     await page.getByRole('radio', { name: '사진 먼저' }).click();

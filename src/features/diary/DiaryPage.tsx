@@ -131,6 +131,16 @@ function EmptyYet() {
  * "쌓인 시간"이므로 얼마나 쌓였는지가 곧 설명이다. 앱이 만든 홍보 문구보다 정확하다.
  */
 function MonthCard({ month, onOpen }: { month: DiaryMonth; onOpen: () => void }) {
+  const latest = month.records[month.records.length - 1];
+  const [, latestMonth, latestDay] = latest?.date.split('-') ?? [];
+  const latestDateLabel = latestMonth && latestDay
+    ? `${Number(latestMonth)}월 ${Number(latestDay)}일`
+    : '';
+  const firstLine = latest?.contentUnavailable
+    ? '이 기기에서 아직 열 수 없는 기록이에요'
+    : latest?.log.split('\n').map((line) => line.trim()).find(Boolean)
+      ?? ((latest?.attachments?.length ?? 0) > 0 ? '사진으로 남긴 기록' : '짧게 남긴 기록');
+
   return (
     <button
       type="button"
@@ -154,6 +164,17 @@ function MonthCard({ month, onOpen }: { month: DiaryMonth; onOpen: () => void })
           {month.dayCount}일
         </span>
       </div>
+
+      {latest ? (
+        <div className="mt-3 border-t border-border pt-3">
+          {latestDateLabel ? (
+            <p className="text-caption text-muted-foreground">{latestDateLabel}</p>
+          ) : null}
+          <p className="hand-text mt-1 line-clamp-2 break-keep text-body text-card-foreground">
+            {firstLine}
+          </p>
+        </div>
+      ) : null}
     </button>
   );
 }

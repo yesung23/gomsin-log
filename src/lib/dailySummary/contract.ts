@@ -69,6 +69,10 @@ export type OnDeviceSummaryFailure =
   | 'plugin_missing'
   /** OS·모델·로케일 중 하나가 지원되지 않는다. */
   | 'unsupported'
+  | 'os_too_old'
+  | 'framework_missing'
+  | 'model_unavailable'
+  | 'locale_unsupported'
   | 'timeout'
   | 'cancelled'
   /** 응답이 왔지만 요청과 짝이 맞지 않는다. */
@@ -86,6 +90,17 @@ export type DailySummaryCorpusRejection =
   | 'multi_day'
   /** 순간이 하나 이하. 목차가 목차 노릇을 못 하므로 표지 자체가 없다. */
   | 'too_few_moments';
+
+export type DailySummaryRefinementReason =
+  | DailySummaryCorpusRejection
+  | OnDeviceSummaryFailure;
+
+export type DailySummaryRefinementStatus =
+  | 'idle'
+  | 'running'
+  | 'applied'
+  | 'fallback'
+  | 'unavailable';
 
 /**
  * 구분자로 취급할 문자.

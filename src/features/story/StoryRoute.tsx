@@ -11,7 +11,6 @@ import { projectStory } from '@/features/story/storyProjection';
 import { StoryViewer, type StoryMode } from '@/features/story/StoryViewer';
 import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
 import { useOnDeviceDailySummary } from '@/lib/dailySummary/useOnDeviceDailySummary';
-import { onDeviceSummaryGate } from '@/lib/dailySummary/nativeOnDeviceSummary';
 
 /**
  * 스토리로 들어가는 세 개의 문.
@@ -109,7 +108,12 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     덮어쓰기 지도만 돌려주고, 처음 렌더에서는 비어 있다. 상대의 오늘 표지가 아니거나
     기능이 꺼져 있으면 계속 비어 있고, 화면은 규칙 결과 그대로다.
   */
-  const { refined: refinedCoverText, status: aiSummaryStatus } = useOnDeviceDailySummary({
+  const {
+    refined: refinedCoverText,
+    status: aiSummaryStatus,
+    reason: aiSummaryReason,
+    canRequest: canRequestAiSummary,
+  } = useOnDeviceDailySummary({
     mode,
     records,
     viewerUserId: viewer.userId,
@@ -120,9 +124,9 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     requestVersion: aiRequestVersion,
   });
 
-  const aiSummaryAvailable = mode === 'today'
+  const aiSummaryActionVisible = mode === 'today'
     && projection.cards[0]?.kind === 'cover'
-    && onDeviceSummaryGate() === 'ready';
+    && (canRequestAiSummary || aiSummaryStatus === 'running' || aiSummaryStatus === 'applied');
   const requestAiSummary = useCallback(() => {
     setAiRequestVersion((version) => version + 1);
   }, []);
@@ -242,8 +246,9 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       onOpenRecord={openRecord}
       onAddToHighlight={mode === 'highlight' ? undefined : addToHighlight}
       onJumpToRecord={jumpToRecord}
-      onRefineCover={aiSummaryAvailable ? requestAiSummary : undefined}
+      onRefineCover={aiSummaryActionVisible ? requestAiSummary : undefined}
       coverRefinementStatus={aiSummaryStatus}
+      coverRefinementReason={mode === 'today' ? aiSummaryReason : undefined}
       onToggleBookmark={mode === 'archive' || mode === 'highlight' ? undefined : toggleBookmark}
       onAcknowledge={mode === 'today' ? confirm : undefined}
       bookmarkDisabledReason={isOffline ? '연결되면 표시할 수 있어요' : undefined}

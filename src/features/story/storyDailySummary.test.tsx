@@ -60,6 +60,8 @@ const acknowledge = vi.fn(() => true);
 let surface: DailyRecord[] = [];
 let records: DailyRecord[] = [];
 let coupleStatus: 'pending' | 'active' | 'disconnected' = 'active';
+let coupleConnected = true;
+let partnerUserId: string | undefined = PARTNER;
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
@@ -71,10 +73,10 @@ vi.mock('@/lib/useStore', () => ({
         id: ME,
         role: 'soldier',
         couple: {
-          connected: true,
+          connected: coupleConnected,
           status: coupleStatus,
           coupleId: 'c1',
-          partnerUserId: PARTNER,
+          partnerUserId,
           partnerName: '춘향',
         },
       },
@@ -142,6 +144,8 @@ beforeEach(() => {
   surface = [];
   records = [];
   coupleStatus = 'active';
+  coupleConnected = true;
+  partnerUserId = PARTNER;
   platform.native = true;
   platform.name = 'ios';
   platform.pluginAvailable = true;
@@ -201,6 +205,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /다듬은 0번/ })).toBeTruthy());
     expect(screen.getByRole('button', { name: /다듬은 1번/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'AI로 다듬었어요' })).toBeDisabled();
     // 줄이 늘거나 줄지 않는다.
     expect(screen.queryByRole('button', { name: /다듬은 2번/ })).toBeNull();
   });
@@ -324,6 +329,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     expect(screen.queryByText('지어낸 줄')).toBeNull();
     expect(screen.queryByText('다듬은 0번')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('AI 결과를 안전하게 확인하지 못했어요'));
+    expect(screen.queryByRole('button', { name: 'AI 다시 시도' })).toBeNull();
   });
 
   it('네이티브가 실패해도 화면은 규칙 결과다', async () => {
@@ -338,6 +345,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('기기 AI가 응답하지 않았어요'));
+    expect(screen.getByRole('button', { name: 'AI 다시 시도' })).toBeTruthy();
   });
 
   it('5/6/8개 기록 처리: 5개는 1회 호출, 6개는 2회(5+1), 8개는 2회(5+3) 순차 배치 처리', async () => {
@@ -447,6 +456,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(plugin.cancel).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /첫 0번/ })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('AI 다듬기가 제시간에 끝나지 않았어요');
+    expect(screen.getByRole('button', { name: 'AI 다시 시도' })).toBeTruthy();
     view.unmount();
   });
 
@@ -565,6 +576,62 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
   });
 });
 
+describe('실패 이유와 재시도 정책', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
+  });
+
+  it('기기 모델이 아직 준비되지 않았으면 규칙 문장을 보존하고 재시도할 수 있다', async () => {
+    const plugin = stubPlugin({
+      availability: vi.fn(async () => ({ available: false, reason: 'model_unavailable' })),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = twoToday();
+    records = surface;
+
+    open('/story/partner');
+    await requestAiSummary();
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('기기 AI가 아직 준비되지 않았어요'));
+    expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'AI 다시 시도' }));
+    await waitFor(() => expect(plugin.availability).toHaveBeenCalledTimes(2));
+  });
+
+  it.each([
+    ['locale_unsupported', '한국어 AI 다듬기를 지원하지 않아요'],
+    ['os_too_old', '이 iOS 버전에서는 AI 다듬기를 지원하지 않아요'],
+    ['framework_missing', '이 앱 빌드에서는 AI 다듬기를 지원하지 않아요'],
+    ['record-specific-detail', '이 기기에서는 AI 다듬기를 사용할 수 없어요'],
+  ])('영구 미지원 사유는 상태만 표시하고 재시도 버튼을 두지 않는다: %s', async (reason, message) => {
+    const plugin = stubPlugin({
+      availability: vi.fn(async () => ({ available: false, reason })),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = twoToday();
+    records = surface;
+
+    open('/story/partner');
+    await requestAiSummary();
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(message));
+    expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'AI 다시 시도' })).toBeNull();
+  });
+
+  it('기능이 명시적으로 꺼져 있으면 실행 버튼 없이 이유를 표시한다', () => {
+    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'false');
+    __setOnDeviceSummaryPluginForTests(stubPlugin());
+    surface = twoToday();
+    records = surface;
+
+    open('/story/partner');
+
+    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('AI 다듬기가 꺼져 있어요');
+  });
+});
+
 describe('기능 ON이어도 호출하지 않는 자리', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
@@ -602,6 +669,8 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     records = surface;
     await expectNoCall('/story/partner');
     expect(screen.getByRole('dialog', { name: '놓친 하루' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('오늘 기록만 AI로 다듬을 수 있어요');
   });
 
   it('순간이 하나뿐 -- 표지가 없다', async () => {
@@ -612,9 +681,32 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
 
   it('커플이 active가 아니다', async () => {
     coupleStatus = 'disconnected';
+    coupleConnected = false;
     surface = twoToday();
     records = surface;
     await expectNoCall('/story/partner');
+    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('연결된 상대의 오늘만 AI로 다듬을 수 있어요');
+  });
+
+  it('현재 상대 신원이 아직 확인되지 않았다', async () => {
+    partnerUserId = undefined;
+    surface = twoToday();
+    records = surface;
+    await expectNoCall('/story/partner');
+    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('상대 정보를 확인한 뒤 AI로 다듬을 수 있어요');
+  });
+
+  it('표지는 있지만 적격한 상대 기록이 하나뿐이다', async () => {
+    surface = [
+      record({ id: 'partner' }),
+      record({ id: 'unrelated', userId: 'unrelated-user', time: '13:00' }),
+    ];
+    records = surface;
+    await expectNoCall('/story/partner');
+    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('공유 기록이 두 개 이상일 때 AI로 다듬을 수 있어요');
   });
 
   it('비공개·읽을 수 없는 기록만 남으면', async () => {
@@ -638,6 +730,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     open('/story/partner');
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'AI로 다듬기' })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('이 기기에서는 AI 다듬기를 사용할 수 없어요');
     await waitFor(() => expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy());
   });
 });

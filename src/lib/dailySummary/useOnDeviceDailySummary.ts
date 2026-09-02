@@ -3,13 +3,16 @@ import type { CoupleStatus, DailyRecord } from '@/types';
 import type { StoryMode } from '@/features/story/StoryViewer';
 import {
   buildAllOnDeviceBatches,
+  type OnDeviceSummaryFailure,
+  type DailySummaryRefinementReason,
+  type DailySummaryRefinementStatus,
   type DailySummaryLine,
 } from '@/lib/dailySummary/contract';
 import { selectDailySummaryCorpus } from '@/lib/dailySummary/corpus';
 import { deterministicSummaryLines } from '@/lib/dailySummary/rules';
 import {
   cancelOnDeviceSummary,
-  isOnDeviceDailySummaryEnabled,
+  onDeviceSummaryGate,
   ON_DEVICE_SUMMARY_TIMEOUT_MS,
   refineOnDeviceSummary,
 } from '@/lib/dailySummary/nativeOnDeviceSummary';
@@ -24,8 +27,12 @@ import { verifyAndBindRefinedLines } from '@/lib/dailySummary/verify';
  */
 
 const NO_REFINEMENT: ReadonlyMap<string, string> = new Map();
-
-export type OnDeviceSummaryStatus = 'idle' | 'running' | 'applied' | 'fallback';
+const RETRYABLE_FAILURES = new Set<OnDeviceSummaryFailure>([
+  'model_unavailable',
+  'timeout',
+  'cancelled',
+  'native_error',
+]);
 
 export interface UseOnDeviceDailySummaryInput {
   mode: StoryMode;
@@ -42,7 +49,9 @@ export interface UseOnDeviceDailySummaryInput {
 
 export interface UseOnDeviceDailySummaryResult {
   refined: ReadonlyMap<string, string>;
-  status: OnDeviceSummaryStatus;
+  status: DailySummaryRefinementStatus;
+  reason?: DailySummaryRefinementReason;
+  canRequest: boolean;
 }
 
 export function useOnDeviceDailySummary(
@@ -62,8 +71,23 @@ export function useOnDeviceDailySummary(
     payloadKey: string;
     requestVersion: number;
     values: ReadonlyMap<string, string>;
-    status: OnDeviceSummaryStatus;
+    status: DailySummaryRefinementStatus;
+    reason?: OnDeviceSummaryFailure;
   }>({ payloadKey: '[]', requestVersion: 0, values: NO_REFINEMENT, status: 'idle' });
+
+  const corpus = useMemo(() => {
+    if (mode !== 'today') {
+      return { ok: false, rejection: 'not_partner_today' } as const;
+    }
+    return selectDailySummaryCorpus({
+      records,
+      viewerUserId,
+      partnerUserId,
+      todayStr,
+      coupleConnected,
+      coupleStatus,
+    });
+  }, [mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
 
   /*
     내용에서 유도한 키.
@@ -72,29 +96,22 @@ export function useOnDeviceDailySummary(
     스토어의 무관한 갱신으로 records 배열 신원만 바뀌어도 같은 요약을 다시 만들지 않는다.
   */
   const payloadKey = useMemo(() => {
-    if (mode !== 'today') return '[]';
-    const corpus = selectDailySummaryCorpus({
-      records,
-      viewerUserId,
-      partnerUserId,
-      todayStr,
-      coupleConnected,
-      coupleStatus,
-    });
     if (!corpus.ok) return '[]';
     return JSON.stringify(
       deterministicSummaryLines(corpus.records).map((line) => [line.recordId, line.text]),
     );
-  }, [mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
+  }, [corpus]);
+
+  const nativeGate = onDeviceSummaryGate();
 
   useEffect(() => {
     const pairs = JSON.parse(payloadKey) as [string, string][];
     if (pairs.length === 0 || requestVersion <= 0) {
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle' });
+      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle', reason: undefined });
       return;
     }
-    if (!isOnDeviceDailySummaryEnabled()) {
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback' });
+    if (nativeGate !== 'ready') {
+      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle', reason: undefined });
       return;
     }
 
@@ -108,16 +125,16 @@ export function useOnDeviceDailySummary(
 
     const batches = buildAllOnDeviceBatches(lines);
     if (!batches) {
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback' });
+      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback', reason: 'rejected' });
       return;
     }
 
     let active = true;
-    setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'running' });
+    setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'running', reason: undefined });
 
-    const fallback = () => {
+    const fallback = (reason: OnDeviceSummaryFailure) => {
       if (!active) return;
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback' });
+      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback', reason });
     };
 
     void (async () => {
@@ -127,18 +144,18 @@ export function useOnDeviceDailySummary(
         if (!active) return;
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0) {
-          fallback();
+          fallback('timeout');
           return;
         }
         const outcome = await refineOnDeviceSummary(batch.items, { timeoutMs: remainingMs });
         if (!active) return;
         if (!outcome.ok) {
-          fallback();
+          fallback(outcome.reason);
           return;
         }
         const bound = verifyAndBindRefinedLines(outcome.items, batch.lines, batch.items);
         if (!bound.ok) {
-          fallback();
+          fallback('rejected');
           return;
         }
         for (const [recordId, refinedText] of bound.refined.entries()) {
@@ -147,9 +164,9 @@ export function useOnDeviceDailySummary(
       }
       if (!active) return;
       if (merged.size === lines.length) {
-        setResult({ payloadKey, requestVersion, values: merged, status: 'applied' });
+        setResult({ payloadKey, requestVersion, values: merged, status: 'applied', reason: undefined });
       } else {
-        fallback();
+        fallback('rejected');
       }
     })();
 
@@ -157,11 +174,39 @@ export function useOnDeviceDailySummary(
       active = false;
       cancelOnDeviceSummary();
     };
-  }, [payloadKey, requestVersion]);
+  }, [nativeGate, payloadKey, requestVersion]);
 
   // payload나 요청 번호가 바뀐 렌더에서는 이전 모델 결과를 즉시 숨긴다.
-  if (result.payloadKey !== payloadKey || result.requestVersion !== requestVersion) {
-    return { refined: NO_REFINEMENT, status: requestVersion > 0 ? 'running' : 'idle' };
+  if (!corpus.ok) {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'unavailable',
+      reason: corpus.rejection,
+      canRequest: false,
+    };
   }
-  return { refined: result.values, status: result.status };
+  if (nativeGate !== 'ready') {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'unavailable',
+      reason: nativeGate,
+      canRequest: false,
+    };
+  }
+  if (result.payloadKey !== payloadKey || result.requestVersion !== requestVersion) {
+    return {
+      refined: NO_REFINEMENT,
+      status: requestVersion > 0 ? 'running' : 'idle',
+      canRequest: requestVersion <= 0,
+    };
+  }
+  return {
+    refined: result.values,
+    status: result.status,
+    reason: result.reason,
+    canRequest: result.status === 'idle'
+      || (result.status === 'fallback'
+        && result.reason !== undefined
+        && RETRYABLE_FAILURES.has(result.reason)),
+  };
 }

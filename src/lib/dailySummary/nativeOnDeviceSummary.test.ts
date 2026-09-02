@@ -128,13 +128,32 @@ describe('플러그인이 있어도 답을 믿기 전에 게이트가 있다', (
       availability: vi.fn(async () => ({ available: false, reason: 'model_unavailable' })),
     });
     __setOnDeviceSummaryPluginForTests(plugin);
-    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'unsupported' });
+    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'model_unavailable' });
     expect(plugin.refineLines).not.toHaveBeenCalled();
   });
 
   it('로케일이 미지원이어도 같다', async () => {
     const plugin = stubPlugin({
       availability: vi.fn(async () => ({ available: false, reason: 'locale_unsupported' })),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'locale_unsupported' });
+  });
+
+  it.each(['os_too_old', 'framework_missing'] as const)(
+    'OS·framework 미지원 코드를 콘텐츠 없이 보존한다: %s',
+    async (reason) => {
+      const plugin = stubPlugin({
+        availability: vi.fn(async () => ({ available: false, reason })),
+      });
+      __setOnDeviceSummaryPluginForTests(plugin);
+      expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason });
+    },
+  );
+
+  it('알 수 없는 availability 문자열은 화면에 전달하지 않고 generic unsupported로 닫는다', async () => {
+    const plugin = stubPlugin({
+      availability: vi.fn(async () => ({ available: false, reason: 'record-specific-detail' })),
     });
     __setOnDeviceSummaryPluginForTests(plugin);
     expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'unsupported' });

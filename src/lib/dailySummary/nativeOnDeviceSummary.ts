@@ -41,7 +41,7 @@ export const ON_DEVICE_SUMMARY_LOCALE = 'ko_KR';
 export const ON_DEVICE_SUMMARY_TIMEOUT_MS = 4000;
 
 export interface OnDeviceSummaryPlugin {
-  availability(options: { locale: string }): Promise<{ available: boolean; reason: string }>;
+  availability(options: { locale: string }): Promise<{ available: boolean; reason: unknown }>;
   refineLines(options: {
     requestId: string;
     locale: string;
@@ -54,6 +54,19 @@ export type OnDeviceRefineOutcome =
   /** `items`는 아직 검증되지 않았다. `verify.ts`를 통과해야 화면에 닿는다. */
   | { ok: true; items: unknown }
   | { ok: false; reason: OnDeviceSummaryFailure };
+
+const AVAILABILITY_FAILURES = new Set<OnDeviceSummaryFailure>([
+  'os_too_old',
+  'framework_missing',
+  'model_unavailable',
+  'locale_unsupported',
+]);
+
+function availabilityFailure(reason: unknown): OnDeviceSummaryFailure {
+  return typeof reason === 'string' && AVAILABILITY_FAILURES.has(reason as OnDeviceSummaryFailure)
+    ? reason as OnDeviceSummaryFailure
+    : 'unsupported';
+}
 
 export function isOnDeviceDailySummaryEnabled(): boolean {
   const value = import.meta.env.VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED;
@@ -161,7 +174,9 @@ export async function refineOnDeviceSummary(
       requestCancel(port, requestId);
       return { ok: false, reason: 'timeout' };
     }
-    if (!support?.available) return { ok: false, reason: 'unsupported' };
+    if (support?.available !== true) {
+      return { ok: false, reason: availabilityFailure(support?.reason) };
+    }
     if (currentRequestId !== requestId) return { ok: false, reason: 'cancelled' };
 
     const raced = await Promise.race([

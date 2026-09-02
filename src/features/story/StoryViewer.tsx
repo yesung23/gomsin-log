@@ -4,6 +4,10 @@ import type { StoryCard } from '@/features/story/storyProjection';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { PaperCard, Bookmark, FoldDivider } from '@/components/paper';
 import { cn } from '@/lib/utils';
+import type {
+  DailySummaryRefinementReason,
+  DailySummaryRefinementStatus,
+} from '@/lib/dailySummary/contract';
 
 /**
  * 스토리 뷰어 — 상대의 하루를 하나씩 넘겨 본다.
@@ -53,7 +57,9 @@ export interface StoryViewerProps {
   onJumpToRecord?: (recordId: string) => void;
   /** 지원되는 iOS에서 사용자가 요청할 때만 온디바이스 문장 다듬기를 시작한다. */
   onRefineCover?: () => void;
-  coverRefinementStatus?: 'idle' | 'running' | 'applied' | 'fallback';
+  coverRefinementStatus?: DailySummaryRefinementStatus;
+  /** 콘텐츠가 아닌 고정 이유 코드. 사용자 기록을 포함하지 않는다. */
+  coverRefinementReason?: DailySummaryRefinementReason;
   /** 책갈피 토글. `archive`에서는 넘기지 않는다. */
   onToggleBookmark?: (recordId: string, next: boolean) => void;
   markedRecordIds?: ReadonlySet<string>;
@@ -81,6 +87,7 @@ export function StoryViewer({
   onJumpToRecord,
   onRefineCover,
   coverRefinementStatus = 'idle',
+  coverRefinementReason,
   onToggleBookmark,
   markedRecordIds,
   onAcknowledge,
@@ -216,6 +223,7 @@ export function StoryViewer({
             onJump={onJumpToRecord}
             onRefine={onRefineCover}
             refinementStatus={coverRefinementStatus}
+            refinementReason={coverRefinementReason}
           />
         ) : card.kind === 'missing' ? (
           <MissingCard />
@@ -302,16 +310,38 @@ export function StoryViewer({
   );
 }
 
+const REFINEMENT_REASON_LABEL: Record<DailySummaryRefinementReason, string> = {
+  not_partner_today: '상대의 오늘에서만 AI로 다듬을 수 있어요',
+  couple_not_active: '연결된 상대의 오늘만 AI로 다듬을 수 있어요',
+  identity_unresolved: '상대 정보를 확인한 뒤 AI로 다듬을 수 있어요',
+  multi_day: '오늘 기록만 AI로 다듬을 수 있어요',
+  too_few_moments: '공유 기록이 두 개 이상일 때 AI로 다듬을 수 있어요',
+  disabled: 'AI 다듬기가 꺼져 있어요',
+  not_ios: '이 기기에서는 AI 다듬기를 사용할 수 없어요',
+  plugin_missing: '이 기기에서는 AI 다듬기를 준비할 수 없어요',
+  unsupported: '이 기기에서는 AI 다듬기를 사용할 수 없어요',
+  os_too_old: '이 iOS 버전에서는 AI 다듬기를 지원하지 않아요',
+  framework_missing: '이 앱 빌드에서는 AI 다듬기를 지원하지 않아요',
+  model_unavailable: '기기 AI가 아직 준비되지 않았어요',
+  locale_unsupported: '한국어 AI 다듬기를 지원하지 않아요',
+  timeout: 'AI 다듬기가 제시간에 끝나지 않았어요',
+  cancelled: 'AI 다듬기가 취소됐어요',
+  rejected: 'AI 결과를 안전하게 확인하지 못했어요',
+  native_error: '기기 AI가 응답하지 않았어요',
+};
+
 function CoverCard({
   card,
   onJump,
   onRefine,
   refinementStatus = 'idle',
+  refinementReason,
 }: {
   card: Extract<StoryCard, { kind: 'cover' }>;
   onJump?: (recordId: string) => void;
   onRefine?: () => void;
-  refinementStatus?: 'idle' | 'running' | 'applied' | 'fallback';
+  refinementStatus?: DailySummaryRefinementStatus;
+  refinementReason?: DailySummaryRefinementReason;
 }) {
   const [expanded, setExpanded] = useState(false);
   const total = card.lines.length;
@@ -326,25 +356,33 @@ function CoverCard({
       : refinementStatus === 'fallback'
         ? 'AI 다시 시도'
         : 'AI로 다듬기';
+  const reasonLabel = refinementReason ? REFINEMENT_REASON_LABEL[refinementReason] : undefined;
 
   return (
     <PaperCard className="mt-2">
       <div className="flex min-h-11 items-center justify-between gap-3">
         <p className="text-caption text-muted-foreground">{card.rangeLabel}</p>
-        {onRefine ? (
-          <button
-            type="button"
-            onClick={onRefine}
-            disabled={refinementStatus === 'running' || refinementStatus === 'applied'}
-            aria-busy={refinementStatus === 'running'}
-            className="press-response inline-flex min-h-11 items-center gap-1.5 rounded-control px-3 text-caption font-semibold text-foreground disabled:opacity-60"
-          >
-            {refinementStatus === 'running'
-              ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
-              : <Sparkles size={15} aria-hidden="true" />}
-            {refineLabel}
-          </button>
-        ) : null}
+        <div className="flex max-w-52 flex-col items-end">
+          {onRefine ? (
+            <button
+              type="button"
+              onClick={onRefine}
+              disabled={refinementStatus === 'running' || refinementStatus === 'applied'}
+              aria-busy={refinementStatus === 'running'}
+              className="press-response inline-flex min-h-11 items-center gap-1.5 rounded-control px-3 text-caption font-semibold text-foreground disabled:opacity-60"
+            >
+              {refinementStatus === 'running'
+                ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
+                : <Sparkles size={15} aria-hidden="true" />}
+              {refineLabel}
+            </button>
+          ) : null}
+          {reasonLabel ? (
+            <p role="status" className="text-right text-caption text-muted-foreground">
+              {reasonLabel}
+            </p>
+          ) : null}
+        </div>
       </div>
       <FoldDivider className="my-4" />
       <ul className="space-y-3">

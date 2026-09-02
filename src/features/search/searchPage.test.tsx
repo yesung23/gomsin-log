@@ -199,25 +199,34 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
   });
 
   it('다음 휴가/면회 일정이 있으면 D-Day 와 일정이 표시된다', () => {
-    const events: CoupleEvent[] = [
-      {
-        id: 'ev-1',
-        coupleId: 'couple-1',
-        title: '정기 휴가',
-        startDate: '2026-09-01',
-        endDate: '2026-09-05',
-        eventType: 'vacation',
-        createdBy: 'user-me',
-        createdAt: '2026-08-20T00:00:00.000Z',
-        updatedAt: '2026-08-20T00:00:00.000Z',
-      },
-    ];
-    currentState = stateWith({ role: 'soldier', events });
-    renderSearch();
+    vi.useFakeTimers();
+    let view: ReturnType<typeof renderSearch> | undefined;
 
-    expect(screen.getByTestId('soldier-next-leave')).toBeInTheDocument();
-    expect(screen.getByText('다음 휴가')).toBeInTheDocument();
-    expect(screen.getByText('정기 휴가')).toBeInTheDocument();
+    try {
+      vi.setSystemTime(Date.parse('2026-08-27T03:00:00.000Z'));
+      const events: CoupleEvent[] = [
+        {
+          id: 'ev-1',
+          coupleId: 'couple-1',
+          title: '정기 휴가',
+          startDate: '2026-09-01',
+          endDate: '2026-09-05',
+          eventType: 'vacation',
+          createdBy: 'user-me',
+          createdAt: '2026-08-20T00:00:00.000Z',
+          updatedAt: '2026-08-20T00:00:00.000Z',
+        },
+      ];
+      currentState = stateWith({ role: 'soldier', events });
+      view = renderSearch();
+
+      expect(screen.getByTestId('soldier-next-leave')).toBeInTheDocument();
+      expect(screen.getByText('다음 휴가')).toBeInTheDocument();
+      expect(screen.getByText('정기 휴가')).toBeInTheDocument();
+    } finally {
+      view?.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it('복무 정보가 없거나 unknown 이면 지어내지 않고 /service 연결 입력 상태를 보여준다', () => {

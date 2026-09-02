@@ -38,7 +38,7 @@
  * Usage: node scripts/phase0/storage-authz-harness.mjs [--keep]
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -126,6 +126,7 @@ const ORDER = [
   '067_profile_post_intent.sql',
   '068_allow_story_product_event_screen.sql',
   '069_require_current_cycle_consent.sql',
+  '070_cycle_consent_atomic_write_gate.sql',
 ];
 
 /**
@@ -287,6 +288,83 @@ function asAuthenticatedWithoutSubject(text) {
 /** Run SQL as the anon role, with no JWT subject at all. */
 function asAnon(text) {
   return psql(['-At', '-c', 'SET ROLE anon', '-c', text]);
+}
+
+/**
+ * A controllable psql process for transaction-order proofs.
+ *
+ * Keeping stdin open keeps the transaction open without relying on pg_sleep.
+ * The harness releases it only after pg_stat_activity proves that the competing
+ * backend is waiting on a PostgreSQL lock.
+ */
+function openPsqlSession(applicationName) {
+  const child = spawn(
+    'psql',
+    ['-h', socketDir, '-U', 'postgres', '-d', DB, '-v', 'ON_ERROR_STOP=1', '-X', '-q', '-At'],
+    {
+      env: { ...PG_ENV, PGAPPNAME: applicationName },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const done = new Promise((resolveDone) => {
+    child.on('close', (status, signal) => resolveDone({
+      ok: status === 0,
+      status,
+      signal,
+      stdout,
+      stderr,
+    }));
+  });
+  return {
+    child,
+    done,
+    stdout: () => stdout,
+    stderr: () => stderr,
+  };
+}
+
+async function waitUntil(predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+  }
+  return predicate();
+}
+
+async function waitForSessionMarker(session, marker) {
+  return waitUntil(() => session.stdout().includes(marker));
+}
+
+async function waitForDatabaseLock(applicationName) {
+  return waitUntil(() => mustSql(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_stat_activity
+      WHERE application_name = '${applicationName}'
+        AND wait_event_type = 'Lock'
+        AND pg_catalog.cardinality(pg_catalog.pg_blocking_pids(pid)) > 0
+    )
+  `, `070 observe ${applicationName} lock`) === 't');
+}
+
+async function finishPsqlSession(session, finalInput = '') {
+  if (!session.child.stdin.destroyed) session.child.stdin.end(finalInput);
+  let timeoutId;
+  const timeout = new Promise((resolveTimeout) => {
+    timeoutId = setTimeout(() => resolveTimeout(null), 5000);
+  });
+  const result = await Promise.race([session.done, timeout]);
+  if (timeoutId) clearTimeout(timeoutId);
+  if (result) return result;
+  session.child.kill('SIGKILL');
+  return session.done;
 }
 
 /**
@@ -4182,7 +4260,10 @@ function cycleProjectionFlags(actor) {
 
 function checkCycleProjection(actor, expected, label) {
   const result = cycleProjectionFlags(actor);
-  check(result.ok && result.stdout.trim() === expected, label);
+  const actual = result.ok
+    ? result.stdout.trim()
+    : `SQL ERROR: ${result.stderr.trim()}`;
+  check(result.ok && actual === expected, `${label} (got: ${actual || '<empty>'})`);
 }
 
 mustSql(`
@@ -4300,31 +4381,31 @@ check(
                   array_to_string(proconfig, ',')
            FROM pg_proc
            WHERE oid = 'public.get_partner_cycle_projection()'::regprocedure`, '069 function flags')
-    === 'true|s|search_path=public, pg_temp',
-  '069 projection remains SECURITY DEFINER, STABLE, with a pinned search_path',
+    === 'true|v|search_path=public, pg_temp',
+  '070 projection is SECURITY DEFINER, VOLATILE for row locking, with a pinned search_path',
 );
 
 // Natural tests can stay green when another predicate denies the same fixture.
-// Mutate each consent predicate in isolation and prove the forbidden projection
-// becomes visible, then restore the exact 069 definition.
+// Mutate each consent predicate in the final winning definition and prove the
+// forbidden projection becomes visible, then restore that exact definition.
 const cycleConsentMigration = readFileSync(
-  join(MIGRATIONS, '069_require_current_cycle_consent.sql'),
+  join(MIGRATIONS, '070_cycle_consent_atomic_write_gate.sql'),
   'utf8',
 );
 
 function proveCycleConsentMutation({ label, find, replace, prepare }) {
   const occurrences = cycleConsentMigration.split(find).length - 1;
-  if (!check(occurrences === 1, `069 mutation "${label}" matches exactly one predicate`)) return;
+  if (!check(occurrences === 1, `070 projection mutation "${label}" matches exactly one predicate`)) return;
   prepare();
   const applied = psqlScript(cycleConsentMigration.replace(find, replace));
   if (!applied.ok) {
-    failures.push(`069 mutation "${label}" failed to apply:\n    ${applied.stderr.trim()}`);
+    failures.push(`070 projection mutation "${label}" failed to apply:\n    ${applied.stderr.trim()}`);
     return;
   }
-  checkCycleProjection(B, 'true|true|true|true', `069 mutation "${label}" exposes the forbidden projection`);
+  checkCycleProjection(B, 'true|true|true|true', `070 projection mutation "${label}" exposes the forbidden projection`);
   const restored = psqlScript(cycleConsentMigration);
   if (!restored.ok) {
-    throw new Error(`069 restore after mutation "${label}" failed:\n${restored.stderr.trim()}`);
+    throw new Error(`070 restore after mutation "${label}" failed:\n${restored.stderr.trim()}`);
   }
 }
 
@@ -4336,8 +4417,8 @@ mustSql(`UPDATE public.cycle_sharing_preferences
 
 proveCycleConsentMutation({
   label: 'current consent version',
-  find: '      AND version = v_required_consent_version',
-  replace: '      AND true',
+  find: '      consent.version = v_required_consent_version',
+  replace: '      true',
   prepare: () => mustSql(`UPDATE public.user_sensitive_consents
                           SET version = 'obsolete-version', revoked_at = NULL
                           WHERE user_id = '${A}' AND consent_type = 'cycle'`, '069 mutation stale consent'),
@@ -4345,7 +4426,7 @@ proveCycleConsentMutation({
 
 proveCycleConsentMutation({
   label: 'non-revoked consent',
-  find: '      AND revoked_at IS NULL',
+  find: '      AND consent.revoked_at IS NULL',
   replace: '      AND true',
   prepare: () => mustSql(`UPDATE public.user_sensitive_consents
                           SET version = '2026-08-09', revoked_at = now()
@@ -4355,6 +4436,1061 @@ proveCycleConsentMutation({
 mustSql(`UPDATE public.user_sensitive_consents
          SET version = '2026-08-09', revoked_at = NULL
          WHERE user_id = '${A}' AND consent_type = 'cycle'`, '069 final valid consent');
+
+// ---------------------------------------------------------------------------
+// 070 — current consent is an atomic write boundary, not merely a UI check
+// ---------------------------------------------------------------------------
+
+// Every toggle combination is an independent public API state. In particular,
+// current-only must not dereference an unassigned prediction RECORD.
+for (const [current, prediction, fertility, expected] of [
+  [false, false, false, 'false|false|false|false'],
+  [true, false, false, 'true|true|false|false'],
+  [false, true, false, 'false|false|true|false'],
+  [false, false, true, 'false|false|false|true'],
+  [true, true, false, 'true|true|true|false'],
+  [true, false, true, 'true|true|false|true'],
+  [false, true, true, 'false|false|true|true'],
+  [true, true, true, 'true|true|true|true'],
+]) {
+  mustSql(`UPDATE public.cycle_sharing_preferences
+           SET share_current_period = ${current},
+               share_prediction_window = ${prediction},
+               share_fertility_window = ${fertility}
+           WHERE user_id = '${A}'`, '070 projection toggle fixture');
+  checkCycleProjection(
+    B,
+    expected,
+    `070 projection handles toggle combination ${Number(current)}${Number(prediction)}${Number(fertility)}`,
+  );
+}
+
+const cycleConsentHelperExists = mustSql(
+  `SELECT (pg_catalog.to_regprocedure('public.has_current_cycle_write_consent()') IS NOT NULL)::text`,
+  '070 helper existence',
+) === 'true';
+check(cycleConsentHelperExists, '070 installs the atomic current-consent helper');
+if (cycleConsentHelperExists) {
+  check(
+    mustSql(`SELECT prosecdef::text || '|' || provolatile::text || '|' ||
+                    pg_catalog.array_to_string(proconfig, ',')
+             FROM pg_catalog.pg_proc
+             WHERE oid = 'public.has_current_cycle_write_consent()'::pg_catalog.regprocedure`,
+    '070 helper function flags') === 'true|v|search_path=pg_catalog, pg_temp',
+    '070 helper is SECURITY DEFINER, VOLATILE, with only pg_catalog and pg_temp on search_path',
+  );
+  check(
+    mustSql(`SELECT pg_catalog.concat_ws('|',
+                      pg_catalog.has_function_privilege(
+                        'authenticated', 'public.has_current_cycle_write_consent()', 'EXECUTE'
+                      )::text,
+                      pg_catalog.has_function_privilege(
+                        'anon', 'public.has_current_cycle_write_consent()', 'EXECUTE'
+                      )::text,
+                      COALESCE((
+                        SELECT pg_catalog.bool_or(
+                          acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+                        )
+                        FROM pg_catalog.pg_proc AS proc
+                        CROSS JOIN LATERAL pg_catalog.aclexplode(
+                          COALESCE(proc.proacl, pg_catalog.acldefault('f', proc.proowner))
+                        ) AS acl
+                        WHERE proc.oid =
+                          'public.has_current_cycle_write_consent()'::pg_catalog.regprocedure
+                      ), false)::text
+                    )`, '070 helper effective privileges') === 'true|false|false',
+    '070 helper EXECUTE belongs to authenticated, not anon or PUBLIC',
+  );
+  const currentHelper = asUser(A, 'SELECT public.has_current_cycle_write_consent()');
+  const missingHelper = asUser(B, 'SELECT public.has_current_cycle_write_consent()');
+  const nullActorHelper = asAuthenticatedWithoutSubject(
+    'SELECT public.has_current_cycle_write_consent()',
+  );
+  check(
+    currentHelper.ok && currentHelper.stdout.trim() === 't'
+      && missingHelper.ok && missingHelper.stdout.trim() === 'f'
+      && nullActorHelper.ok && nullActorHelper.stdout.trim() === 'f',
+    '070 helper grants only the current-consent owner and fails closed without consent or subject',
+  );
+  check(
+    !asAnon('SELECT public.has_current_cycle_write_consent()').ok,
+    '070 anon cannot execute the current-consent helper',
+  );
+}
+
+check(
+  mustSql(`SELECT pg_catalog.concat_ws('|',
+              pg_catalog.has_table_privilege(
+                'authenticated', 'public.user_sensitive_consents', 'SELECT'
+              )::text,
+              pg_catalog.has_table_privilege(
+                'authenticated', 'public.user_sensitive_consents', 'UPDATE'
+              )::text,
+              pg_catalog.has_table_privilege(
+                'authenticated', 'public.user_sensitive_consents', 'INSERT'
+              )::text,
+              pg_catalog.has_table_privilege(
+                'authenticated', 'public.user_sensitive_consents', 'DELETE'
+              )::text
+            )`, '070 consent table privileges') === 'true|true|false|false',
+  '070 clients may read and send a legacy revoke, but cannot directly insert or delete consent authority',
+);
+
+for (const [signature, label] of [
+  ['public.grant_cycle_sensitive_consent(uuid,bigint,text)', 'grant'],
+  ['public.revoke_cycle_sensitive_consent(uuid)', 'revoke'],
+]) {
+  check(
+    mustSql(`SELECT prosecdef::text || '|' || provolatile::text || '|' ||
+                    pg_catalog.array_to_string(proconfig, ',')
+             FROM pg_catalog.pg_proc
+             WHERE oid = '${signature}'::pg_catalog.regprocedure`,
+    `070 ${label} RPC flags`) === 'true|v|search_path=pg_catalog, pg_temp',
+    `070 ${label} RPC is SECURITY DEFINER, VOLATILE, with a pinned narrow search_path`,
+  );
+  check(
+    mustSql(`SELECT pg_catalog.concat_ws('|',
+                pg_catalog.has_function_privilege(
+                  'authenticated', '${signature}', 'EXECUTE'
+                )::text,
+                pg_catalog.has_function_privilege(
+                  'anon', '${signature}', 'EXECUTE'
+                )::text
+              )`, `070 ${label} RPC privileges`) === 'true|false',
+    `070 ${label} RPC is executable only by authenticated clients`,
+  );
+}
+
+mustSql(`DELETE FROM public.user_sensitive_consents
+         WHERE user_id = '${B}' AND consent_type = 'cycle'`, '070 clear B consent authority');
+const directFirstGrant = asUser(B, `INSERT INTO public.user_sensitive_consents (
+  user_id, consent_type, version, granted_at, revoked_at
+) VALUES ('${B}', 'cycle', '2026-08-09', now(), NULL)`);
+check(!directFirstGrant.ok, '070 a client cannot create consent authority by direct INSERT');
+
+const firstRevoke = asUser(B, `SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+  FROM public.revoke_cycle_sensitive_consent('${B}')`);
+check(
+  firstRevoke.ok && firstRevoke.stdout.trim() === 'true|false|1',
+  '070 revoke creates revision-1 tombstone even when no consent row existed',
+);
+const staleMissingGrant = asUser(B, `SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+  FROM public.grant_cycle_sensitive_consent('${B}', 0, '2026-08-09')`);
+check(
+  staleMissingGrant.ok && staleMissingGrant.stdout.trim() === 'false|false|1',
+  '070 a grant that observed a missing row cannot overwrite a newer revoke tombstone',
+);
+const freshGrant = asUser(B, `SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+  FROM public.grant_cycle_sensitive_consent('${B}', 1, '2026-08-09')`);
+check(
+  freshGrant.ok && freshGrant.stdout.trim() === 'true|true|2',
+  '070 a fresh explicit grant advances exactly the observed revision',
+);
+
+const legacyDirectRevoke = asUser(B, `UPDATE public.user_sensitive_consents
+  SET revoked_at = now()
+  WHERE user_id = '${B}' AND consent_type = 'cycle'`);
+check(
+  legacyDirectRevoke.ok
+    && mustSql(`SELECT pg_catalog.concat_ws('|', (revoked_at IS NOT NULL)::text, revision::text)
+                FROM public.user_sensitive_consents
+                WHERE user_id = '${B}' AND consent_type = 'cycle'`,
+      '070 legacy direct revoke state') === 'true|3',
+  '070 an installed legacy client can still revoke and the trigger advances revision',
+);
+const directRegrant = asUser(B, `UPDATE public.user_sensitive_consents
+  SET revoked_at = NULL
+  WHERE user_id = '${B}' AND consent_type = 'cycle'`);
+check(!directRegrant.ok, '070 no client can directly clear a revoked tombstone');
+const moveTombstone = asUser(B, `UPDATE public.user_sensitive_consents
+  SET consent_type = 'moved-away'
+  WHERE user_id = '${B}' AND consent_type = 'cycle'`);
+check(!moveTombstone.ok, '070 no client can move a consent tombstone to another identity');
+const directDelete = asUser(B, `DELETE FROM public.user_sensitive_consents
+  WHERE user_id = '${B}' AND consent_type = 'cycle'`);
+check(
+  !directDelete.ok
+    && mustSql(`SELECT count(*) FROM public.user_sensitive_consents
+                WHERE user_id = '${B}' AND consent_type = 'cycle'`,
+      '070 tombstone after denied delete') === '1',
+  '070 no client can delete the monotonic consent tombstone',
+);
+
+const delayedGrant = asUser(B, `SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+  FROM public.grant_cycle_sensitive_consent('${B}', 2, '2026-08-09')`);
+check(
+  delayedGrant.ok && delayedGrant.stdout.trim() === 'false|false|3',
+  '070 a delayed grant cannot arrive after a newer revoke and reopen consent',
+);
+check(
+  !asUser(B, `SELECT * FROM public.grant_cycle_sensitive_consent('${A}', 3, '2026-08-09')`).ok,
+  '070 a session cannot mutate consent for a different expected identity',
+);
+check(
+  !asAuthenticatedWithoutSubject(
+    `SELECT * FROM public.revoke_cycle_sensitive_consent('${B}')`,
+  ).ok,
+  '070 an authenticated role without a JWT subject cannot revoke another account',
+);
+check(
+  !asAnon(`SELECT * FROM public.revoke_cycle_sensitive_consent('${B}')`).ok,
+  '070 anon cannot execute the consent revoke RPC',
+);
+
+mustSql(`INSERT INTO public.account_deletion_requests (user_id, expected_record_ids)
+         VALUES ('${B}', '{}'::uuid[])`, '070 pending deletion for consent grant');
+check(
+  !asUser(B, `SELECT * FROM public.grant_cycle_sensitive_consent('${B}', 3, '2026-08-09')`).ok,
+  '070 a pending account deletion blocks a new consent grant',
+);
+const revokeWhileDeleting = asUser(B, `SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+  FROM public.revoke_cycle_sensitive_consent('${B}')`);
+check(
+  revokeWhileDeleting.ok && revokeWhileDeleting.stdout.trim() === 'true|false|4',
+  '070 a pending account deletion never blocks the privacy-preserving revoke',
+);
+mustSql(`DELETE FROM public.account_deletion_requests WHERE user_id = '${B}';
+         DELETE FROM public.user_sensitive_consents
+         WHERE user_id = '${B}' AND consent_type = 'cycle'`,
+  '070 clean B consent authority');
+
+check(
+  mustSql(`SELECT count(*)
+           FROM pg_catalog.pg_policy AS policy
+           JOIN pg_catalog.pg_class AS relation ON relation.oid = policy.polrelid
+           JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'public'
+             AND relation.relname IN (
+               'cycle_periods', 'cycle_daily_logs', 'cycle_settings',
+               'cycle_entries', 'cycle_sharing_preferences'
+             )
+             AND policy.polpermissive = false
+             AND policy.polcmd IN ('a', 'w')`) === '10',
+  '070 installs INSERT and UPDATE restrictive consent policies on exactly five writable cycle tables',
+);
+check(
+  mustSql(`SELECT count(*)
+           FROM pg_catalog.pg_policy AS policy
+           JOIN pg_catalog.pg_class AS relation ON relation.oid = policy.polrelid
+           JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'public'
+             AND relation.relname IN (
+               'user_sensitive_consents', 'legacy_cycle_entries_backup',
+               'cycle_support_signals', 'account_deletion_requests'
+             )
+             AND policy.polpermissive = false`) === '0',
+  '070 does not put its restrictive consent gate on consent, backup, support, or account-deletion data',
+);
+
+// A current consent must permit both sides of every raw-table write contract.
+for (const [label, insertStatement, updateStatement, storedValue] of [
+  [
+    'period',
+    `INSERT INTO public.cycle_periods (user_id, start_date)
+     VALUES ('${A}', DATE '2041-01-01')`,
+    `UPDATE public.cycle_periods SET end_date = DATE '2041-01-04'
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-01'`,
+    `SELECT end_date FROM public.cycle_periods
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-01'`,
+  ],
+  [
+    'daily log',
+    `INSERT INTO public.cycle_daily_logs (user_id, log_date, symptoms, note)
+     VALUES ('${A}', DATE '2041-01-01', ARRAY['headache'], 'before')`,
+    `UPDATE public.cycle_daily_logs SET note = 'after'
+     WHERE user_id = '${A}' AND log_date = DATE '2041-01-01'`,
+    `SELECT note FROM public.cycle_daily_logs
+     WHERE user_id = '${A}' AND log_date = DATE '2041-01-01'`,
+  ],
+  [
+    'legacy entry',
+    `INSERT INTO public.cycle_entries (user_id, start_date, notes)
+     VALUES ('${A}', DATE '2041-01-02', 'before')`,
+    `UPDATE public.cycle_entries SET notes = 'after'
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-02'`,
+    `SELECT notes FROM public.cycle_entries
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-02'`,
+  ],
+]) {
+  check(asUser(A, insertStatement).ok, `070 current consent permits ${label} insert`);
+  check(asUser(A, updateStatement).ok, `070 current consent permits ${label} update`);
+  const expected = label === 'period' ? '2041-01-04' : 'after';
+  check(
+    mustSql(storedValue, `070 ${label} current-consent value`) === expected,
+    `070 current-consent ${label} update persists`,
+  );
+}
+check(
+  asUser(A, `DELETE FROM public.cycle_settings WHERE user_id = '${A}'`).ok,
+  '070 current-consent owner can clear the settings fixture before the INSERT check',
+);
+const currentSettingsInsert = asUser(A, `INSERT INTO public.cycle_settings (
+  user_id, average_cycle_length, average_period_length
+) VALUES ('${A}', 28, 5)`);
+check(currentSettingsInsert.ok, '070 current consent permits cycle settings insert');
+const currentSettingsUpdate = asUser(
+  A,
+  `UPDATE public.cycle_settings SET average_cycle_length = 29 WHERE user_id = '${A}'`,
+);
+check(currentSettingsUpdate.ok, '070 current consent permits cycle settings update');
+check(
+  mustSql(`SELECT average_cycle_length FROM public.cycle_settings WHERE user_id = '${A}'`,
+    '070 current settings value') === '29',
+  '070 current-consent settings update persists',
+);
+
+mustSql(`UPDATE public.user_sensitive_consents
+         SET revoked_at = now(), updated_at = now()
+         WHERE user_id = '${A}' AND consent_type = 'cycle'`, '070 revoke owner consent');
+
+for (const [label, statement, survives] of [
+  [
+    'period insert',
+    `INSERT INTO public.cycle_periods (user_id, start_date) VALUES ('${A}', DATE '2040-01-01')`,
+    `SELECT count(*) FROM public.cycle_periods WHERE user_id = '${A}' AND start_date = DATE '2040-01-01'`,
+  ],
+  [
+    'daily-log insert',
+    `INSERT INTO public.cycle_daily_logs (user_id, log_date, symptoms) VALUES ('${A}', DATE '2040-01-01', ARRAY['headache'])`,
+    `SELECT count(*) FROM public.cycle_daily_logs WHERE user_id = '${A}' AND log_date = DATE '2040-01-01'`,
+  ],
+  [
+    'legacy entry insert',
+    `INSERT INTO public.cycle_entries (user_id, start_date) VALUES ('${A}', DATE '2040-01-02')`,
+    `SELECT count(*) FROM public.cycle_entries WHERE user_id = '${A}' AND start_date = DATE '2040-01-02'`,
+  ],
+]) {
+  const attempt = asUser(A, statement);
+  check(!attempt.ok, `070 revoked owner cannot perform ${label}`);
+  check(mustSql(survives, `070 ${label} recount`) === '0', `070 refused ${label} creates no row`);
+}
+
+const settingsBeforeRevokedUpdate = mustSql(
+  `SELECT average_cycle_length FROM public.cycle_settings WHERE user_id = '${A}'`,
+  '070 settings before revoked update',
+);
+const revokedSettingsUpdate = asUser(
+  A,
+  `UPDATE public.cycle_settings SET average_cycle_length = 31 WHERE user_id = '${A}'`,
+);
+check(!revokedSettingsUpdate.ok, '070 revoked owner cannot update cycle settings');
+check(
+  mustSql(`SELECT average_cycle_length FROM public.cycle_settings WHERE user_id = '${A}'`, '070 settings recount')
+    === settingsBeforeRevokedUpdate,
+  '070 refused settings update leaves the stored value unchanged',
+);
+
+for (const [label, updateStatement, storedValue, expected] of [
+  [
+    'period',
+    `UPDATE public.cycle_periods SET end_date = DATE '2041-01-05'
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-01'`,
+    `SELECT end_date FROM public.cycle_periods
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-01'`,
+    '2041-01-04',
+  ],
+  [
+    'daily log',
+    `UPDATE public.cycle_daily_logs SET note = 'revoked overwrite'
+     WHERE user_id = '${A}' AND log_date = DATE '2041-01-01'`,
+    `SELECT note FROM public.cycle_daily_logs
+     WHERE user_id = '${A}' AND log_date = DATE '2041-01-01'`,
+    'after',
+  ],
+  [
+    'legacy entry',
+    `UPDATE public.cycle_entries SET notes = 'revoked overwrite'
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-02'`,
+    `SELECT notes FROM public.cycle_entries
+     WHERE user_id = '${A}' AND start_date = DATE '2041-01-02'`,
+    'after',
+  ],
+]) {
+  check(!asUser(A, updateStatement).ok, `070 revoked owner cannot update ${label}`);
+  check(
+    mustSql(storedValue, `070 revoked ${label} value`) === expected,
+    `070 refused ${label} update preserves the stored data`,
+  );
+}
+
+// Revocation must not trap a user into retaining data. Read and delete remain
+// available even though inserts and updates are closed.
+mustSql(`INSERT INTO public.cycle_periods (user_id, start_date)
+         VALUES ('${A}', DATE '2040-02-01')`, '070 deletable period fixture');
+const revokedOwnerRead = asUser(
+  A,
+  `SELECT count(*) FROM public.cycle_periods WHERE user_id = '${A}' AND start_date = DATE '2040-02-01'`,
+);
+check(
+  revokedOwnerRead.ok && revokedOwnerRead.stdout.trim() === '1',
+  '070 revoked owner can still read raw cycle data for export or deletion',
+);
+const revokedOwnerDelete = asUser(
+  A,
+  `DELETE FROM public.cycle_periods WHERE user_id = '${A}' AND start_date = DATE '2040-02-01'`,
+);
+check(revokedOwnerDelete.ok, '070 revoked owner can still delete raw cycle data');
+check(
+  mustSql(`SELECT count(*) FROM public.cycle_periods WHERE user_id = '${A}' AND start_date = DATE '2040-02-01'`, '070 delete recount') === '0',
+  '070 revoked-owner delete removes the intended row',
+);
+
+for (const [label, table, predicate] of [
+  ['daily log', 'cycle_daily_logs', `user_id = '${A}' AND log_date = DATE '2041-01-01'`],
+  ['legacy entry', 'cycle_entries', `user_id = '${A}' AND start_date = DATE '2041-01-02'`],
+  ['settings', 'cycle_settings', `user_id = '${A}'`],
+]) {
+  const read = asUser(A, `SELECT count(*) FROM public.${table} WHERE ${predicate}`);
+  check(
+    read.ok && read.stdout.trim() === '1',
+    `070 revoked owner can still read ${label} for export or deletion`,
+  );
+  const deletion = asUser(A, `DELETE FROM public.${table} WHERE ${predicate}`);
+  check(deletion.ok, `070 revoked owner can still delete ${label}`);
+  check(
+    mustSql(`SELECT count(*) FROM public.${table} WHERE ${predicate}`, `070 ${label} delete recount`) === '0',
+    `070 revoked-owner delete removes the intended ${label}`,
+  );
+}
+const revokedSettingsInsert = asUser(A, `INSERT INTO public.cycle_settings (
+  user_id, average_cycle_length, average_period_length
+) VALUES ('${A}', 29, 5)`);
+check(!revokedSettingsInsert.ok, '070 revoked owner cannot insert cycle settings');
+check(
+  mustSql(`SELECT count(*) FROM public.cycle_settings WHERE user_id = '${A}'`) === '0',
+  '070 denied settings insert creates no row',
+);
+mustSql(`INSERT INTO public.cycle_settings (
+           user_id, average_cycle_length, average_period_length
+         ) VALUES ('${A}', 29, 5)
+         ON CONFLICT (user_id) DO UPDATE
+         SET average_cycle_length = EXCLUDED.average_cycle_length,
+             average_period_length = EXCLUDED.average_period_length`,
+  '070 restore settings after revoked delete');
+
+// Turning everything off is always safe and must remain possible after revoke;
+// turning any projection back on requires current consent.
+const allOffAfterRevoke = asUser(A, `UPDATE public.cycle_sharing_preferences
+  SET share_current_period = false,
+      share_prediction_window = false,
+      share_fertility_window = false
+  WHERE user_id = '${A}'`);
+check(allOffAfterRevoke.ok, '070 revoked owner can turn every partner projection off');
+const reenableAfterRevoke = asUser(A, `UPDATE public.cycle_sharing_preferences
+  SET share_current_period = true
+  WHERE user_id = '${A}'`);
+check(!reenableAfterRevoke.ok, '070 revoked owner cannot re-enable a partner projection');
+check(
+  mustSql(`SELECT pg_catalog.concat_ws('|', share_current_period::text,
+                    share_prediction_window::text, share_fertility_window::text)
+           FROM public.cycle_sharing_preferences WHERE user_id = '${A}'`) === 'false|false|false',
+  '070 denied re-enable leaves every sharing toggle off',
+);
+const revokedSharingRead = asUser(
+  A,
+  `SELECT count(*) FROM public.cycle_sharing_preferences WHERE user_id = '${A}'`,
+);
+check(
+  revokedSharingRead.ok && revokedSharingRead.stdout.trim() === '1',
+  '070 revoked owner can still read sharing preferences',
+);
+check(
+  asUser(A, `DELETE FROM public.cycle_sharing_preferences WHERE user_id = '${A}'`).ok,
+  '070 revoked owner can still delete sharing preferences',
+);
+const allOffInsertAfterRevoke = asUser(A, `INSERT INTO public.cycle_sharing_preferences (
+  user_id, share_current_period, share_prediction_window, share_fertility_window
+) VALUES ('${A}', false, false, false)`);
+check(allOffInsertAfterRevoke.ok, '070 revoked owner can insert an all-off sharing row');
+check(
+  asUser(A, `DELETE FROM public.cycle_sharing_preferences WHERE user_id = '${A}'`).ok,
+  '070 revoked owner can remove the all-off sharing row before an insert-boundary check',
+);
+const trueInsertAfterRevoke = asUser(A, `INSERT INTO public.cycle_sharing_preferences (
+  user_id, share_current_period, share_prediction_window, share_fertility_window
+) VALUES ('${A}', true, false, false)`);
+check(!trueInsertAfterRevoke.ok, '070 an any-true sharing insert is denied without current owner consent');
+check(
+  mustSql(`SELECT count(*) FROM public.cycle_sharing_preferences WHERE user_id = '${A}'`) === '0',
+  '070 denied any-true sharing insert creates no row',
+);
+check(
+  asUser(A, `INSERT INTO public.cycle_sharing_preferences (
+    user_id, share_current_period, share_prediction_window, share_fertility_window
+  ) VALUES ('${A}', false, false, false)`).ok,
+  '070 revoked owner can restore an all-off sharing row after a denied enable',
+);
+
+mustSql(`UPDATE public.user_sensitive_consents
+         SET version = '2026-08-09', revoked_at = NULL, updated_at = now()
+         WHERE user_id = '${A}' AND consent_type = 'cycle'`, '070 restore current consent');
+const currentConsentWrite = asUser(
+  A,
+  `INSERT INTO public.cycle_daily_logs (user_id, log_date, symptoms)
+   VALUES ('${A}', DATE '2040-03-01', ARRAY['headache'])`,
+);
+check(currentConsentWrite.ok, '070 current consent permits an owner raw-cycle write');
+const currentConsentSharing = asUser(A, `UPDATE public.cycle_sharing_preferences
+  SET share_current_period = true
+  WHERE user_id = '${A}'`);
+check(currentConsentSharing.ok, '070 current consent permits enabling a partner projection');
+mustSql(`DELETE FROM public.cycle_daily_logs
+         WHERE user_id = '${A}' AND log_date = DATE '2040-03-01'`, '070 cleanup current-consent write');
+
+// Missing, stale, and revoked consent are three independent fail-closed states.
+for (const [index, state] of ['missing', 'stale', 'revoked'].entries()) {
+  if (state === 'missing') {
+    mustSql(`DELETE FROM public.user_sensitive_consents
+             WHERE user_id = '${A}' AND consent_type = 'cycle'`, '070 missing-consent fixture');
+  } else {
+    mustSql(`INSERT INTO public.user_sensitive_consents (
+               user_id, consent_type, version, granted_at, revoked_at
+             ) VALUES (
+               '${A}', 'cycle',
+               '${state === 'stale' ? 'obsolete-version' : '2026-08-09'}',
+               now(), ${state === 'revoked' ? 'now()' : 'NULL'}
+             )
+             ON CONFLICT (user_id, consent_type) DO UPDATE
+             SET version = EXCLUDED.version,
+                 revoked_at = EXCLUDED.revoked_at,
+                 updated_at = now()`, `070 ${state}-consent fixture`);
+  }
+
+  const updateDate = `2042-01-0${index + 1}`;
+  const insertDate = `2042-02-0${index + 1}`;
+  mustSql(`DELETE FROM public.cycle_periods
+           WHERE user_id = '${A}' AND start_date IN (DATE '${updateDate}', DATE '${insertDate}');
+           INSERT INTO public.cycle_periods (user_id, start_date)
+           VALUES ('${A}', DATE '${updateDate}')`, `070 ${state} authority fixture`);
+
+  const insert = asUser(
+    A,
+    `INSERT INTO public.cycle_periods (user_id, start_date)
+     VALUES ('${A}', DATE '${insertDate}')`,
+  );
+  const update = asUser(
+    A,
+    `UPDATE public.cycle_periods SET end_date = DATE '${updateDate}' + 3
+     WHERE user_id = '${A}' AND start_date = DATE '${updateDate}'`,
+  );
+  check(!insert.ok, `070 ${state}-consent owner cannot insert raw cycle data`);
+  check(!update.ok, `070 ${state}-consent owner cannot update raw cycle data`);
+  check(
+    mustSql(`SELECT count(*) FROM public.cycle_periods
+             WHERE user_id = '${A}' AND start_date = DATE '${insertDate}'`,
+    `070 ${state} denied insert recount`) === '0',
+    `070 denied ${state}-consent insert creates no row`,
+  );
+  check(
+    mustSql(`SELECT (end_date IS NULL)::text FROM public.cycle_periods
+             WHERE user_id = '${A}' AND start_date = DATE '${updateDate}'`,
+    `070 ${state} denied update recount`) === 'true',
+    `070 denied ${state}-consent update preserves the existing row`,
+  );
+  if (cycleConsentHelperExists) {
+    const authority = asUser(A, 'SELECT public.has_current_cycle_write_consent()');
+    check(
+      authority.ok && authority.stdout.trim() === 'f',
+      `070 helper returns false for ${state} consent`,
+    );
+  }
+}
+
+// Revocation does not disable the consent row itself or the separately
+// authorized, sanitized support-signal surface.
+const directOwnerRegrant = asUser(A, `UPDATE public.user_sensitive_consents
+  SET version = '2026-08-09', revoked_at = NULL, updated_at = now()
+  WHERE user_id = '${A}' AND consent_type = 'cycle'`);
+check(!directOwnerRegrant.ok, '070 a client cannot re-grant directly through user_sensitive_consents');
+const ownerRevisionBeforeRegrant = mustSql(`SELECT revision
+  FROM public.user_sensitive_consents
+  WHERE user_id = '${A}' AND consent_type = 'cycle'`, '070 revision before RPC regrant');
+const ownerRegrant = asUser(A, `SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+  FROM public.grant_cycle_sensitive_consent(
+    '${A}', ${ownerRevisionBeforeRegrant}, '2026-08-09'
+  )`);
+check(
+  ownerRegrant.ok && ownerRegrant.stdout.trim().startsWith('true|true|'),
+  '070 the owner can re-grant only through the revision-checked RPC',
+);
+mustSql(`UPDATE public.user_sensitive_consents
+         SET revoked_at = now(), updated_at = now()
+         WHERE user_id = '${A}' AND consent_type = 'cycle';
+         DELETE FROM public.cycle_support_signals WHERE owner_id = '${A}'`,
+  '070 revoked support-signal fixture');
+const revokedSupportSignal = asUser(A, `INSERT INTO public.cycle_support_signals (
+  couple_id, owner_id, kind, expires_at
+) VALUES ('${COUPLE1}', '${A}', 'resting', now() + interval '1 hour')`);
+check(
+  revokedSupportSignal.ok
+    && mustSql(`SELECT count(*) FROM public.cycle_support_signals WHERE owner_id = '${A}'`) === '1',
+  '070 raw-cycle revocation does not gate an independently authorized sanitized support signal',
+);
+mustSql(`DELETE FROM public.cycle_support_signals WHERE owner_id = '${A}';
+         UPDATE public.user_sensitive_consents
+         SET version = '2026-08-09', revoked_at = NULL, updated_at = now()
+         WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+  '070 restore current consent after excluded-surface proof');
+
+// Other actors stay denied by the existing owner policy even while A has
+// current consent. RLS-filtered UPDATE can report success, so survival is the
+// assertion rather than the command status.
+mustSql(`DELETE FROM public.cycle_periods
+         WHERE user_id = '${A}' AND start_date BETWEEN DATE '2043-01-01' AND DATE '2043-01-03';
+         INSERT INTO public.cycle_periods (user_id, start_date)
+         VALUES ('${A}', DATE '2043-01-01')`, '070 cross-actor fixture');
+for (const [actor, label, insertDate] of [
+  [B, 'active partner', '2043-01-02'],
+  [C, 'unrelated user', '2043-01-03'],
+]) {
+  asUser(actor, `UPDATE public.cycle_periods SET end_date = DATE '2043-01-05'
+                 WHERE user_id = '${A}' AND start_date = DATE '2043-01-01'`);
+  const insert = asUser(actor, `INSERT INTO public.cycle_periods (user_id, start_date)
+                                VALUES ('${A}', DATE '${insertDate}')`);
+  check(!insert.ok, `070 ${label} cannot insert raw data for the owner`);
+  check(
+    mustSql(`SELECT (end_date IS NULL)::text FROM public.cycle_periods
+             WHERE user_id = '${A}' AND start_date = DATE '2043-01-01'`) === 'true',
+    `070 ${label} cannot update the owner's raw data`,
+  );
+  check(
+    mustSql(`SELECT count(*) FROM public.cycle_periods
+             WHERE user_id = '${A}' AND start_date = DATE '${insertDate}'`) === '0',
+    `070 ${label} denial preserves the raw-table row set`,
+  );
+}
+const anonCycleUpdate = asAnon(`UPDATE public.cycle_periods
+  SET end_date = DATE '2043-01-05'
+  WHERE user_id = '${A}' AND start_date = DATE '2043-01-01'`);
+check(!anonCycleUpdate.ok, '070 anon has no raw-cycle table write privilege');
+check(
+  mustSql(`SELECT (end_date IS NULL)::text FROM public.cycle_periods
+           WHERE user_id = '${A}' AND start_date = DATE '2043-01-01'`) === 'true',
+  '070 anon denial preserves the owner raw row',
+);
+check(
+  asUser(A, `UPDATE public.cycle_periods SET end_date = DATE '2043-01-05'
+             WHERE user_id = '${A}' AND start_date = DATE '2043-01-01'`).ok,
+  '070 the current-consent owner still updates the same actor-matrix row',
+);
+
+function authenticatedCycleSession(userId) {
+  return `
+    \\set ON_ERROR_STOP on
+    SET ROLE authenticated;
+    SELECT pg_catalog.set_config('request.jwt.claim.sub', '${userId}', false);
+  `;
+}
+
+async function proveCycleConsentLockOrdering() {
+  // Race A: the write's FOR SHARE lock is first. Revocation must visibly wait,
+  // then become the final authority after the write commits.
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL, updated_at = now()
+           WHERE user_id = '${A}' AND consent_type = 'cycle';
+           DELETE FROM public.cycle_periods
+           WHERE user_id = '${A}' AND start_date = DATE '2044-01-01'`,
+  '070 race A fixture');
+  const writeHolder = openPsqlSession('cycle070_write_holder');
+  writeHolder.child.stdin.write(`${authenticatedCycleSession(A)}
+    BEGIN;
+    INSERT INTO public.cycle_periods (user_id, start_date)
+    VALUES ('${A}', DATE '2044-01-01');
+    SELECT 'cycle070-write-lock-held';
+  `);
+  const writeReady = await waitForSessionMarker(writeHolder, 'cycle070-write-lock-held');
+  check(writeReady, '070 race A write reaches the open transaction boundary');
+
+  const revokeWaiter = openPsqlSession('cycle070_revoke_waiter');
+  revokeWaiter.child.stdin.end(`${authenticatedCycleSession(A)}
+    UPDATE public.user_sensitive_consents
+    SET revoked_at = now(), updated_at = now()
+    WHERE user_id = '${A}' AND consent_type = 'cycle';
+  `);
+  const revokeWaitedOnLock = writeReady
+    ? await waitForDatabaseLock('cycle070_revoke_waiter')
+    : false;
+  check(
+    revokeWaitedOnLock,
+    '070 race A observes revoke waiting on the write-held consent-row lock',
+  );
+  const writeResult = await finishPsqlSession(writeHolder, 'COMMIT;\n');
+  const revokeResult = await finishPsqlSession(revokeWaiter);
+  check(writeResult.ok, '070 race A write commits after owning the consent lock first');
+  check(revokeResult.ok, '070 race A queued revocation commits after the write');
+  check(
+    mustSql(`SELECT pg_catalog.concat_ws('|',
+                    (SELECT count(*) FROM public.cycle_periods
+                     WHERE user_id = '${A}' AND start_date = DATE '2044-01-01')::text,
+                    (SELECT (revoked_at IS NOT NULL)::text
+                     FROM public.user_sensitive_consents
+                     WHERE user_id = '${A}' AND consent_type = 'cycle'))`) === '1|true',
+    '070 race A preserves the committed write and leaves revocation as final authority',
+  );
+
+  // Race B: revocation owns the row first. The write must visibly wait; after
+  // the revoke commits, PostgreSQL rechecks the locked row and RLS denies it.
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL, updated_at = now()
+           WHERE user_id = '${A}' AND consent_type = 'cycle';
+           DELETE FROM public.cycle_periods
+           WHERE user_id = '${A}' AND start_date = DATE '2044-01-02'`,
+  '070 race B fixture');
+  const revokeHolder = openPsqlSession('cycle070_revoke_holder');
+  revokeHolder.child.stdin.write(`${authenticatedCycleSession(A)}
+    BEGIN;
+    UPDATE public.user_sensitive_consents
+    SET revoked_at = now(), updated_at = now()
+    WHERE user_id = '${A}' AND consent_type = 'cycle';
+    SELECT 'cycle070-revoke-lock-held';
+  `);
+  const revokeReady = await waitForSessionMarker(revokeHolder, 'cycle070-revoke-lock-held');
+  check(revokeReady, '070 race B revoke reaches the open transaction boundary');
+
+  const writeWaiter = openPsqlSession('cycle070_write_waiter');
+  writeWaiter.child.stdin.end(`${authenticatedCycleSession(A)}
+    INSERT INTO public.cycle_periods (user_id, start_date)
+    VALUES ('${A}', DATE '2044-01-02');
+  `);
+  const writeWaitedOnLock = revokeReady
+    ? await waitForDatabaseLock('cycle070_write_waiter')
+    : false;
+  check(
+    writeWaitedOnLock,
+    '070 race B observes the write waiting on the revoke-held consent-row lock',
+  );
+  const revokeHolderResult = await finishPsqlSession(revokeHolder, 'COMMIT;\n');
+  const writeWaiterResult = await finishPsqlSession(writeWaiter);
+  check(revokeHolderResult.ok, '070 race B revocation commits after owning the row lock first');
+  check(!writeWaiterResult.ok, '070 race B queued write is denied after revocation commits');
+  check(
+    mustSql(`SELECT pg_catalog.concat_ws('|',
+                    (SELECT count(*) FROM public.cycle_periods
+                     WHERE user_id = '${A}' AND start_date = DATE '2044-01-02')::text,
+                    (SELECT (revoked_at IS NOT NULL)::text
+                     FROM public.user_sensitive_consents
+                     WHERE user_id = '${A}' AND consent_type = 'cycle'))`) === '0|true',
+    '070 race B persists no raw row and keeps consent revoked',
+  );
+
+  mustSql(`DELETE FROM public.cycle_periods
+           WHERE user_id = '${A}' AND start_date IN (DATE '2044-01-01', DATE '2044-01-02');
+           UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL, updated_at = now()
+           WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+  '070 race cleanup');
+}
+
+await proveCycleConsentLockOrdering();
+
+async function proveCycleConsentRevisionOrdering() {
+  // Grant owns the row first: revoke waits, then becomes the final authority.
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = now()
+           WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+  '070 grant-first fixture');
+  const grantFirstRevision = Number(mustSql(`SELECT revision
+    FROM public.user_sensitive_consents
+    WHERE user_id = '${A}' AND consent_type = 'cycle'`, '070 grant-first revision'));
+  const grantHolder = openPsqlSession('cycle070_grant_holder');
+  grantHolder.child.stdin.write(`${authenticatedCycleSession(A)}
+    BEGIN;
+    SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+    FROM public.grant_cycle_sensitive_consent(
+      '${A}', ${grantFirstRevision}, '2026-08-09'
+    );
+    SELECT 'cycle070-grant-lock-held';
+  `);
+  const grantReady = await waitForSessionMarker(grantHolder, 'cycle070-grant-lock-held');
+  check(grantReady, '070 grant-first race reaches the open transaction boundary');
+
+  const revokeAfterGrant = openPsqlSession('cycle070_revoke_after_grant');
+  revokeAfterGrant.child.stdin.end(`${authenticatedCycleSession(A)}
+    SELECT * FROM public.revoke_cycle_sensitive_consent('${A}');
+  `);
+  const revokeWaited = grantReady
+    ? await waitForDatabaseLock('cycle070_revoke_after_grant')
+    : false;
+  check(revokeWaited, '070 grant-first race observes revoke waiting on the grant lock');
+  const grantHolderResult = await finishPsqlSession(grantHolder, 'COMMIT;\n');
+  const revokeAfterGrantResult = await finishPsqlSession(revokeAfterGrant);
+  check(grantHolderResult.ok, '070 grant-first race commits the matching revision grant');
+  check(revokeAfterGrantResult.ok, '070 grant-first race then commits the privacy-wins revoke');
+  check(
+    mustSql(`SELECT pg_catalog.concat_ws('|',
+                    (revoked_at IS NOT NULL)::text,
+                    revision::text)
+             FROM public.user_sensitive_consents
+             WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+    '070 grant-first final state') === `true|${grantFirstRevision + 2}`,
+    '070 grant-first race leaves revoke final and advances once per authority change',
+  );
+
+  // Revoke owns the row first: a grant carrying the older observed revision
+  // waits, then returns applied=false without clearing the tombstone.
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL
+           WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+  '070 revoke-first revision fixture');
+  const revokeFirstRevision = Number(mustSql(`SELECT revision
+    FROM public.user_sensitive_consents
+    WHERE user_id = '${A}' AND consent_type = 'cycle'`, '070 revoke-first revision'));
+  const revokeRpcHolder = openPsqlSession('cycle070_revoke_rpc_holder');
+  revokeRpcHolder.child.stdin.write(`${authenticatedCycleSession(A)}
+    BEGIN;
+    SELECT * FROM public.revoke_cycle_sensitive_consent('${A}');
+    SELECT 'cycle070-revoke-rpc-lock-held';
+  `);
+  const revokeRpcReady = await waitForSessionMarker(
+    revokeRpcHolder,
+    'cycle070-revoke-rpc-lock-held',
+  );
+  check(revokeRpcReady, '070 revoke-first RPC race reaches the open transaction boundary');
+
+  const staleGrantWaiter = openPsqlSession('cycle070_stale_grant_waiter');
+  staleGrantWaiter.child.stdin.end(`${authenticatedCycleSession(A)}
+    SELECT pg_catalog.concat_ws('|', applied::text, granted::text, revision::text)
+    FROM public.grant_cycle_sensitive_consent(
+      '${A}', ${revokeFirstRevision}, '2026-08-09'
+    );
+  `);
+  const staleGrantWaited = revokeRpcReady
+    ? await waitForDatabaseLock('cycle070_stale_grant_waiter')
+    : false;
+  check(staleGrantWaited, '070 revoke-first RPC race observes the stale grant waiting');
+  const revokeRpcResult = await finishPsqlSession(revokeRpcHolder, 'COMMIT;\n');
+  const staleGrantResult = await finishPsqlSession(staleGrantWaiter);
+  check(revokeRpcResult.ok, '070 revoke-first RPC race commits revocation');
+  check(
+    staleGrantResult.ok
+      && staleGrantResult.stdout.includes(`false|false|${revokeFirstRevision + 1}`),
+    '070 revoke-first RPC race returns the delayed grant as not applied',
+  );
+  check(
+    mustSql(`SELECT pg_catalog.concat_ws('|',
+                    (revoked_at IS NOT NULL)::text,
+                    revision::text)
+             FROM public.user_sensitive_consents
+             WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+    '070 revoke-first final state') === `true|${revokeFirstRevision + 1}`,
+    '070 revoke-first RPC race preserves the newer tombstone and revision',
+  );
+
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL
+           WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+  '070 revision-race cleanup');
+}
+
+await proveCycleConsentRevisionOrdering();
+
+function projectionFlagsSql() {
+  return `SELECT pg_catalog.concat_ws('|',
+            has_current_period_status::text,
+            current_period_active::text,
+            has_prediction_window::text,
+            has_fertility_window::text
+          )
+          FROM public.get_partner_cycle_projection()`;
+}
+
+async function proveCycleProjectionLockOrdering() {
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL
+           WHERE user_id = '${A}' AND consent_type = 'cycle';
+           UPDATE public.cycle_sharing_preferences
+           SET share_current_period = true,
+               share_prediction_window = true,
+               share_fertility_window = true
+           WHERE user_id = '${A}'`, '070 projection-first fixture');
+
+  const projectionHolder = openPsqlSession('cycle070_projection_holder');
+  projectionHolder.child.stdin.write(`${authenticatedCycleSession(B)}
+    BEGIN;
+    ${projectionFlagsSql()};
+    SELECT 'cycle070-projection-lock-held';
+  `);
+  const projectionReady = await waitForSessionMarker(
+    projectionHolder,
+    'cycle070-projection-lock-held',
+  );
+  check(projectionReady, '070 projection-first race reaches the open transaction boundary');
+
+  const projectionRevokeWaiter = openPsqlSession('cycle070_projection_revoke_waiter');
+  projectionRevokeWaiter.child.stdin.end(`${authenticatedCycleSession(A)}
+    SELECT * FROM public.revoke_cycle_sensitive_consent('${A}');
+  `);
+  const projectionRevokeWaited = projectionReady
+    ? await waitForDatabaseLock('cycle070_projection_revoke_waiter')
+    : false;
+  check(
+    projectionRevokeWaited,
+    '070 projection-first race observes revoke waiting for the consent snapshot',
+  );
+  const projectionHolderResult = await finishPsqlSession(projectionHolder, 'COMMIT;\n');
+  const projectionRevokeResult = await finishPsqlSession(projectionRevokeWaiter);
+  check(
+    projectionHolderResult.ok
+      && projectionHolderResult.stdout.includes('true|true|true|true'),
+    '070 projection-first race returns the pre-revoke snapshot before releasing its lock',
+  );
+  check(
+    projectionRevokeResult.ok,
+    '070 projection-first race commits revocation only after that snapshot transaction ends',
+  );
+
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL
+           WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+  '070 projection revoke-first fixture');
+  const projectionRevokeHolder = openPsqlSession('cycle070_projection_revoke_holder');
+  projectionRevokeHolder.child.stdin.write(`${authenticatedCycleSession(A)}
+    BEGIN;
+    SELECT * FROM public.revoke_cycle_sensitive_consent('${A}');
+    SELECT 'cycle070-projection-revoke-lock-held';
+  `);
+  const projectionRevokeReady = await waitForSessionMarker(
+    projectionRevokeHolder,
+    'cycle070-projection-revoke-lock-held',
+  );
+  check(
+    projectionRevokeReady,
+    '070 projection revoke-first race reaches the open transaction boundary',
+  );
+
+  const projectionWaiter = openPsqlSession('cycle070_projection_waiter');
+  projectionWaiter.child.stdin.end(`${authenticatedCycleSession(B)}
+    ${projectionFlagsSql()};
+  `);
+  const projectionWaited = projectionRevokeReady
+    ? await waitForDatabaseLock('cycle070_projection_waiter')
+    : false;
+  check(projectionWaited, '070 projection revoke-first race observes projection waiting');
+  const projectionRevokeHolderResult = await finishPsqlSession(
+    projectionRevokeHolder,
+    'COMMIT;\n',
+  );
+  const projectionWaiterResult = await finishPsqlSession(projectionWaiter);
+  check(projectionRevokeHolderResult.ok, '070 projection revoke-first race commits revocation');
+  check(
+    projectionWaiterResult.ok
+      && projectionWaiterResult.stdout.includes('false|false|false|false'),
+    '070 a projection queued behind revoke returns no health-derived value',
+  );
+
+  mustSql(`UPDATE public.user_sensitive_consents
+           SET version = '2026-08-09', revoked_at = NULL
+           WHERE user_id = '${A}' AND consent_type = 'cycle'`,
+  '070 projection-race cleanup');
+}
+
+await proveCycleProjectionLockOrdering();
+
+async function proveCycleGrantDeletionOrdering() {
+  mustSql(`DELETE FROM public.account_deletion_requests WHERE user_id = '${B}';
+           DELETE FROM public.user_sensitive_consents
+           WHERE user_id = '${B}' AND consent_type = 'cycle'`,
+  '070 grant-deletion race fixture');
+
+  // Grant first: account-deletion startup waits, then its durable marker is the
+  // later authority. The deletion worker can safely remove the earlier grant.
+  const grantBeforeDeletion = openPsqlSession('cycle070_grant_before_deletion');
+  grantBeforeDeletion.child.stdin.write(`${authenticatedCycleSession(B)}
+    BEGIN;
+    SELECT * FROM public.grant_cycle_sensitive_consent(
+      '${B}', 0, '2026-08-09'
+    );
+    SELECT 'cycle070-grant-before-deletion-lock-held';
+  `);
+  const grantBeforeDeletionReady = await waitForSessionMarker(
+    grantBeforeDeletion,
+    'cycle070-grant-before-deletion-lock-held',
+  );
+  check(
+    grantBeforeDeletionReady,
+    '070 grant-before-deletion race reaches the open transaction boundary',
+  );
+
+  const deletionAfterGrant = openPsqlSession('cycle070_deletion_after_grant');
+  deletionAfterGrant.child.stdin.end(`
+    INSERT INTO public.account_deletion_requests (user_id, expected_record_ids)
+    VALUES ('${B}', '{}'::uuid[]);
+  `);
+  const deletionWaited = grantBeforeDeletionReady
+    ? await waitForDatabaseLock('cycle070_deletion_after_grant')
+    : false;
+  check(
+    deletionWaited,
+    '070 grant-before-deletion race observes deletion startup waiting on the grant barrier',
+  );
+  const grantBeforeDeletionResult = await finishPsqlSession(
+    grantBeforeDeletion,
+    'COMMIT;\n',
+  );
+  const deletionAfterGrantResult = await finishPsqlSession(deletionAfterGrant);
+  check(grantBeforeDeletionResult.ok, '070 grant-before-deletion race commits the earlier grant');
+  check(deletionAfterGrantResult.ok, '070 grant-before-deletion race then commits deletion startup');
+  check(
+    mustSql(`SELECT count(*) FROM public.account_deletion_requests
+             WHERE user_id = '${B}'`, '070 grant-before-deletion marker') === '1',
+    '070 grant-before-deletion race leaves account deletion as the later durable state',
+  );
+
+  mustSql(`DELETE FROM public.account_deletion_requests WHERE user_id = '${B}';
+           DELETE FROM public.user_sensitive_consents
+           WHERE user_id = '${B}' AND consent_type = 'cycle'`,
+  '070 deletion-first race fixture');
+
+  // Deletion first: its ROW EXCLUSIVE table lock makes grant wait. Once the
+  // marker commits, the grant rechecks and is denied rather than landing late.
+  const deletionBeforeGrant = openPsqlSession('cycle070_deletion_before_grant');
+  deletionBeforeGrant.child.stdin.write(`
+    BEGIN;
+    INSERT INTO public.account_deletion_requests (user_id, expected_record_ids)
+    VALUES ('${B}', '{}'::uuid[]);
+    SELECT 'cycle070-deletion-before-grant-lock-held';
+  `);
+  const deletionBeforeGrantReady = await waitForSessionMarker(
+    deletionBeforeGrant,
+    'cycle070-deletion-before-grant-lock-held',
+  );
+  check(
+    deletionBeforeGrantReady,
+    '070 deletion-before-grant race reaches the open transaction boundary',
+  );
+
+  const grantAfterDeletion = openPsqlSession('cycle070_grant_after_deletion');
+  grantAfterDeletion.child.stdin.end(`${authenticatedCycleSession(B)}
+    SELECT * FROM public.grant_cycle_sensitive_consent(
+      '${B}', 0, '2026-08-09'
+    );
+  `);
+  const grantAfterDeletionWaited = deletionBeforeGrantReady
+    ? await waitForDatabaseLock('cycle070_grant_after_deletion')
+    : false;
+  check(
+    grantAfterDeletionWaited,
+    '070 deletion-before-grant race observes the grant waiting on deletion startup',
+  );
+  const deletionBeforeGrantResult = await finishPsqlSession(
+    deletionBeforeGrant,
+    'COMMIT;\n',
+  );
+  const grantAfterDeletionResult = await finishPsqlSession(grantAfterDeletion);
+  check(deletionBeforeGrantResult.ok, '070 deletion-before-grant race commits the deletion marker');
+  check(!grantAfterDeletionResult.ok, '070 deletion-before-grant race denies the queued grant');
+  check(
+    mustSql(`SELECT count(*) FROM public.user_sensitive_consents
+             WHERE user_id = '${B}' AND consent_type = 'cycle'`,
+    '070 denied late grant state') === '0',
+    '070 deletion-before-grant race leaves no late consent row',
+  );
+
+  mustSql(`DELETE FROM public.account_deletion_requests WHERE user_id = '${B}'`,
+    '070 grant-deletion race cleanup');
+}
+
+await proveCycleGrantDeletionOrdering();
 
 // ---------------------------------------------------------------------------
 // Report

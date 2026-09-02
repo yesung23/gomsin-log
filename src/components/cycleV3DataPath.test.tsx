@@ -7,7 +7,10 @@ import type {
   CyclePeriodsFetchResult,
   CycleSettingsFetchResult,
 } from '@/lib/cycle';
-import { grantCycleSensitiveConsent } from '@/lib/sensitiveConsent';
+import {
+  clearPendingCycleConsentRevocation,
+  grantCycleSensitiveConsent,
+} from '@/lib/sensitiveConsent';
 import type { CycleDailyLog, CyclePeriod } from '@/types';
 
 /**
@@ -88,7 +91,7 @@ vi.mock('@/lib/sensitiveConsent', async (importOriginal) => {
   return {
     ...actual,
     // Server consent is asserted separately; here it is already granted.
-    syncCycleConsentWithDB: async () => ({ ok: true as const, granted: true }),
+    syncCycleConsentWithDB: async () => ({ ok: true as const, granted: true, revision: 1 }),
     revokeCycleConsentInDB: (...args: unknown[]) => revokeConsent(...args),
   };
 });
@@ -105,6 +108,10 @@ const COMPLETED_PERIOD: CyclePeriod = {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // A failed server revoke intentionally survives component remounts for the
+  // lifetime of the app process. Tests share one process, so reset that real
+  // runtime guard explicitly between otherwise independent scenarios.
+  clearPendingCycleConsentRevocation('user-a');
   grantCycleSensitiveConsent('user-a');
   periodLoads.length = 0;
   dailyLogLoads.length = 0;
@@ -122,7 +129,12 @@ beforeEach(() => {
   fetchSharingPreferences.mockReset();
   saveSharingPreferences.mockReset();
   revokeConsent.mockReset();
-  revokeConsent.mockResolvedValue({ ok: true, granted: false });
+  revokeConsent.mockResolvedValue({
+    ok: true,
+    applied: true,
+    granted: false,
+    revision: 1,
+  });
   fetchSharingPreferences.mockResolvedValue({
     userId: 'user-a',
     shareCurrentPeriod: false,
@@ -186,6 +198,7 @@ describe('P0: daily symptoms never create or extend a menstrual period', () => {
       '2026-08-14',
       ['headache'],
       expect.anything(),
+      'user-a',
     );
 
     // The period tables are untouched by a condition log.
@@ -224,7 +237,11 @@ describe('period start and end write cycle_periods only', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /오늘 생리 시작했어요/ }));
 
-    await waitFor(() => expect(savePeriod).toHaveBeenCalledWith('2026-08-14'));
+    await waitFor(() => expect(savePeriod).toHaveBeenCalledWith(
+      '2026-08-14',
+      undefined,
+      'user-a',
+    ));
     expect(saveDailyLog).not.toHaveBeenCalled();
     expect(legacySaveEntry).not.toHaveBeenCalled();
   });
@@ -251,6 +268,7 @@ describe('period start and end write cycle_periods only', () => {
       'period-open',
       '2026-08-12',
       '2026-08-14',
+      'user-a',
     ));
     expect(saveDailyLog).not.toHaveBeenCalled();
     expect(legacyUpdateEntry).not.toHaveBeenCalled();
@@ -303,6 +321,7 @@ describe('detailed daily log persistence', () => {
         mood: 'tired',
         note: '오늘은 좀 힘들었어요',
       }),
+      'user-a',
     ));
 
     // Period tables untouched by the detailed condition editor.
@@ -488,6 +507,7 @@ describe('sharing preferences are server state, not local state', () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(saveSharingPreferences).toHaveBeenCalledWith(
       expect.objectContaining({ shareCurrentPeriod: true }),
+      'user-a',
     ));
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
   });
@@ -541,7 +561,7 @@ describe('revoking consent also stops partner sharing', () => {
     return screen.findByRole('button', { name: '철회' });
   }
 
-  it('turns every sharing toggle off before revoking', async () => {
+  it('revokes authority before clearing every stale sharing toggle', async () => {
     fetchSharingPreferences.mockResolvedValue({
       userId: 'user-a',
       shareCurrentPeriod: true,
@@ -565,16 +585,18 @@ describe('revoking consent also stops partner sharing', () => {
       shareCurrentPeriod: false,
       sharePredictionWindow: false,
       shareFertilityWindow: false,
-    }));
+    }, 'user-a'));
     await waitFor(() => expect(revokeConsent).toHaveBeenCalled());
 
-    // Order is load-bearing: sharing must stop first, so a failure anywhere
-    // leaves the stricter state.
-    expect(saveSharingPreferences.mock.invocationCallOrder[0])
-      .toBeLessThan(revokeConsent.mock.invocationCallOrder[0]);
+    // Order is load-bearing: current consent gates the server projection, so
+    // revoking it is the fastest fail-closed boundary. Preference cleanup is
+    // hygiene that prevents stale toggles resurfacing after a later re-grant.
+    expect(revokeConsent.mock.invocationCallOrder[0])
+      .toBeLessThan(saveSharingPreferences.mock.invocationCallOrder[0]);
   });
 
-  it('does not revoke when sharing could not be turned off', async () => {
+  it('stays revoked even when stale-sharing cleanup fails', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     fetchSharingPreferences.mockResolvedValue({
       userId: 'user-a',
       shareCurrentPeriod: true,
@@ -586,12 +608,49 @@ describe('revoking consent also stops partner sharing', () => {
 
     fireEvent.click(await openPrivacy());
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('권한이 없어요');
-    expect(alert).not.toHaveTextContent('인터넷 연결');
-    // Consent must survive: telling the user sharing ended while it continued
-    // would be worse than refusing the revoke.
-    expect(revokeConsent).not.toHaveBeenCalled();
+    await waitFor(() => expect(revokeConsent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(saveSharingPreferences).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(screen.queryByTestId('cycle-hero')).not.toBeInTheDocument();
+    errorLog.mockRestore();
+  });
+
+  it('does not keep sensitive UI in a pending state while post-revoke cleanup is slow', async () => {
+    const slowCleanup = deferred<{
+      ok: true;
+      preferences: {
+        userId: string;
+        shareCurrentPeriod: false;
+        sharePredictionWindow: false;
+        shareFertilityWindow: false;
+      };
+    }>();
+    fetchSharingPreferences.mockResolvedValue({
+      userId: 'user-a',
+      shareCurrentPeriod: true,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
+    });
+    saveSharingPreferences.mockReturnValueOnce(slowCleanup.promise);
+    await renderLoaded({ periods: [COMPLETED_PERIOD] });
+
+    fireEvent.click(await openPrivacy());
+    await waitFor(() => expect(revokeConsent).toHaveBeenCalledTimes(1));
+
+    // Revocation is already authoritative. Optional stale-toggle cleanup may
+    // continue without holding the user in a spinner or keeping health UI open.
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(screen.queryByTestId('cycle-hero')).not.toBeInTheDocument();
+
+    await act(async () => slowCleanup.resolve({
+      ok: true,
+      preferences: {
+        userId: 'user-a',
+        shareCurrentPeriod: false,
+        sharePredictionWindow: false,
+        shareFertilityWindow: false,
+      },
+    }));
   });
 
   it('skips the extra write when nothing was shared', async () => {
@@ -602,14 +661,16 @@ describe('revoking consent also stops partner sharing', () => {
     expect(saveSharingPreferences).not.toHaveBeenCalled();
   });
 
-  it('keeps consent when the revoke itself is refused', async () => {
+  it('keeps the surface locked when the server revoke itself is refused', async () => {
     revokeConsent.mockResolvedValue({ ok: false, reason: 'forbidden' });
     await renderLoaded({ periods: [COMPLETED_PERIOD] });
     fireEvent.click(await openPrivacy());
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('권한이 없어요');
-    // Still unlocked: a refused revoke must not be presented as done.
+    expect(screen.getByRole('button', { name: '철회 다시 시도' })).toBeInTheDocument();
+    expect(screen.queryByTestId('cycle-hero')).not.toBeInTheDocument();
+    // Re-grant is unavailable until the explicit revoke has been resolved.
     expect(screen.queryByText('동의하고 시작하기')).not.toBeInTheDocument();
   });
 });
@@ -665,6 +726,7 @@ describe('a period already ended today offers no further action', () => {
       'period-today',
       '2026-08-12',
       '2026-08-14',
+      'user-a',
     ));
 
     // The button is gone, so it cannot be tapped into a second identical write.

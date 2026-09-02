@@ -235,6 +235,18 @@ async function currentUserId(): Promise<string | null> {
   return session?.user.id || null;
 }
 
+/**
+ * Keep a raw-health request attached to the account that initiated it.
+ *
+ * A UI authority token supplies `expectedUserId` before the first await. If the
+ * auth session changes while a request is in flight, read filters and mutation
+ * payloads remain on the initiating account. A later token can therefore never
+ * turn an old request into a valid read or write for the newly signed-in user.
+ */
+async function cycleRequestUserId(expectedUserId?: string): Promise<string | null> {
+  return expectedUserId || currentUserId();
+}
+
 export function toLocalDateString(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -534,9 +546,11 @@ export function activeCycleSupportSignal(
     && signal.expiresAt > nowIso) || null;
 }
 
-export async function fetchCycleSettingsResultFromDB(): Promise<CycleSettingsFetchResult> {
+export async function fetchCycleSettingsResultFromDB(
+  expectedUserId?: string,
+): Promise<CycleSettingsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return { ok: false, reason: 'unauthenticated' };
 
   const { data, error } = await supabase
@@ -559,20 +573,21 @@ export async function fetchCycleSettingsResultFromDB(): Promise<CycleSettingsFet
   };
 }
 
-export async function fetchCycleSettingsFromDB(): Promise<CycleSettings | null> {
-  const result = await fetchCycleSettingsResultFromDB();
+export async function fetchCycleSettingsFromDB(expectedUserId?: string): Promise<CycleSettings | null> {
+  const result = await fetchCycleSettingsResultFromDB(expectedUserId);
   return result.ok ? result.settings : null;
 }
 
 export async function saveCycleSettingsToDB(
   averageCycleLength: number,
   averagePeriodLength: number,
+  expectedUserId?: string,
 ): Promise<CycleSettingsWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (validateCycleSettings(averageCycleLength, averagePeriodLength)) return invalidDraftFailure();
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
@@ -806,9 +821,11 @@ export async function revokeCycleSupportSignalFromDB(id: string): Promise<CycleD
 // V3 CYCLE PERIODS & DAILY LOGS API
 // =============================================================
 
-export async function fetchCyclePeriodsResultFromDB(): Promise<CyclePeriodsFetchResult> {
+export async function fetchCyclePeriodsResultFromDB(
+  expectedUserId?: string,
+): Promise<CyclePeriodsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return { ok: false, reason: 'unauthenticated' };
 
   const { data, error } = await supabase
@@ -824,20 +841,21 @@ export async function fetchCyclePeriodsResultFromDB(): Promise<CyclePeriodsFetch
   return { ok: true, periods: (data || []).map(mapCyclePeriodRow) };
 }
 
-export async function fetchCyclePeriodsFromDB(): Promise<CyclePeriod[]> {
-  const result = await fetchCyclePeriodsResultFromDB();
+export async function fetchCyclePeriodsFromDB(expectedUserId?: string): Promise<CyclePeriod[]> {
+  const result = await fetchCyclePeriodsResultFromDB(expectedUserId);
   return result.ok ? result.periods : [];
 }
 
 export async function saveCyclePeriodToDB(
   startDate: string,
   endDate?: string,
+  expectedUserId?: string,
 ): Promise<CyclePeriodWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(startDate)) return invalidDraftFailure();
   if (endDate && (!isCalendarDate(endDate) || endDate < startDate)) return invalidDraftFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
@@ -862,13 +880,14 @@ export async function updateCyclePeriodInDB(
   id: string,
   startDate: string,
   endDate?: string,
+  expectedUserId?: string,
 ): Promise<CyclePeriodWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(startDate)) return invalidDraftFailure();
   if (endDate && (!isCalendarDate(endDate) || endDate < startDate)) return invalidDraftFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
@@ -891,11 +910,14 @@ export async function updateCyclePeriodInDB(
   return { ok: true, period: mapCyclePeriodRow(data) };
 }
 
-export async function deleteCyclePeriodFromDB(id: string): Promise<CycleDeleteResult> {
+export async function deleteCyclePeriodFromDB(
+  id: string,
+  expectedUserId?: string,
+): Promise<CycleDeleteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
@@ -918,9 +940,11 @@ export async function deleteCyclePeriodFromDB(id: string): Promise<CycleDeleteRe
 // CYCLE DAILY LOGS API
 // -------------------------------------------------------------
 
-export async function fetchCycleDailyLogsResultFromDB(): Promise<CycleDailyLogsFetchResult> {
+export async function fetchCycleDailyLogsResultFromDB(
+  expectedUserId?: string,
+): Promise<CycleDailyLogsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return { ok: false, reason: 'unauthenticated' };
 
   const { data, error } = await supabase
@@ -936,8 +960,8 @@ export async function fetchCycleDailyLogsResultFromDB(): Promise<CycleDailyLogsF
   return { ok: true, logs: (data || []).map(mapCycleDailyLogRow) };
 }
 
-export async function fetchCycleDailyLogsFromDB(): Promise<CycleDailyLog[]> {
-  const result = await fetchCycleDailyLogsResultFromDB();
+export async function fetchCycleDailyLogsFromDB(expectedUserId?: string): Promise<CycleDailyLog[]> {
+  const result = await fetchCycleDailyLogsResultFromDB(expectedUserId);
   return result.ok ? result.logs : [];
 }
 
@@ -950,11 +974,12 @@ export async function saveCycleDailyLogToDB(
     mood?: CycleMood;
     note?: string;
   },
+  expectedUserId?: string,
 ): Promise<CycleDailyLogWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(logDate)) return invalidDraftFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
@@ -979,11 +1004,14 @@ export async function saveCycleDailyLogToDB(
   return { ok: true, log: mapCycleDailyLogRow(data) };
 }
 
-export async function deleteCycleDailyLogFromDB(id: string): Promise<CycleDeleteResult> {
+export async function deleteCycleDailyLogFromDB(
+  id: string,
+  expectedUserId?: string,
+): Promise<CycleDeleteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
   const { data, error } = await supabase
@@ -1006,7 +1034,9 @@ export async function deleteCycleDailyLogFromDB(id: string): Promise<CycleDelete
 // SHARING PREFERENCES & CONSENT DB API
 // -------------------------------------------------------------
 
-export async function fetchCycleSharingPreferencesFromDB(): Promise<CycleSharingPreferences> {
+export async function fetchCycleSharingPreferencesFromDB(
+  expectedUserId?: string,
+): Promise<CycleSharingPreferences> {
   const defaultPrefs: CycleSharingPreferences = {
     userId: '',
     shareCurrentPeriod: false,
@@ -1014,7 +1044,7 @@ export async function fetchCycleSharingPreferencesFromDB(): Promise<CycleSharing
     shareFertilityWindow: false,
   };
   if (!isSupabaseConfigured || !supabase) return defaultPrefs;
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return defaultPrefs;
 
   const { data, error } = await supabase
@@ -1046,14 +1076,15 @@ export type CycleSharingPreferencesWriteResult =
 
 export async function saveCycleSharingPreferencesToDB(
   prefs: Partial<CycleSharingPreferences>,
+  expectedUserId?: string,
 ): Promise<CycleSharingPreferencesWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   // Pre-flight: a pending deletion aborts this write before it is issued.
   if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
-  const current = await fetchCycleSharingPreferencesFromDB();
+  const current = await fetchCycleSharingPreferencesFromDB(userId);
   const next = {
     user_id: userId,
     share_current_period: prefs.shareCurrentPeriod ?? current.shareCurrentPeriod,

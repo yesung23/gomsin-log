@@ -19,12 +19,12 @@ const read = (file: string) =>
   readFileSync(resolve(process.cwd(), 'supabase/migrations', file), 'utf8');
 
 /**
- * 069 redefines `get_partner_cycle_projection` in full, so it — not 026 — is the
+ * 070 redefines `get_partner_cycle_projection` in full, so it — not 069 — is the
  * definition that actually runs. Assertions about the partner-facing function
  * must read the winning file, or they pass while describing dead SQL.
  */
-const migration = read('069_require_current_cycle_consent.sql');
-/** 025 still owns the internal prediction helper; 069 does not touch it. */
+const migration = read('070_cycle_consent_atomic_write_gate.sql');
+/** 025 still owns the internal prediction helper; 070 does not touch it. */
 const helperMigration = read('025_partner_cycle_projection.sql');
 const consentClient = readFileSync(
   resolve(process.cwd(), 'src/lib/sensitiveConsent.ts'),
@@ -68,7 +68,7 @@ describe('the projection cannot carry raw health data', () => {
   it('gates each field on its own toggle', () => {
     for (const guard of [
       'CASE WHEN v_share_current THEN v_active ELSE false END',
-      'CASE WHEN v_share_prediction THEN v_window.window_start ELSE NULL END',
+      'CASE WHEN v_share_prediction THEN v_window_start ELSE NULL END',
       'CASE WHEN v_share_fertility THEN v_ovulation - 5 ELSE NULL END',
     ]) {
       expect(migration).toContain(guard);
@@ -79,6 +79,14 @@ describe('the projection cannot carry raw health data', () => {
     expect(migration).toContain('v_share_current := COALESCE(v_share_current, false)');
     expect(migration).toContain('v_share_prediction := COALESCE(v_share_prediction, false)');
     expect(migration).toContain('v_share_fertility := COALESCE(v_share_fertility, false)');
+  });
+
+  it('does not dereference an unassigned prediction record in current-only mode', () => {
+    expect(migration).not.toMatch(/\bv_window\s+RECORD\b/);
+    expect(migration).not.toMatch(/\bv_window\./);
+    expect(migration).toContain('v_expected_start DATE;');
+    expect(migration).toContain('v_window_start DATE;');
+    expect(migration).toContain('v_window_end DATE;');
   });
 });
 
@@ -114,22 +122,22 @@ describe('the projection is reachable only by a connected partner', () => {
     }
   });
 
-  it.each([
-    ['025 (prediction helper)', () => helperMigration, 2],
-    ['026 (partner projection)', () => migration, 1],
-  ])('pins search_path on every SECURITY DEFINER function in %s', (_label, sqlOf, count) => {
+  it('pins the prediction helper and partner projection to public plus pg_temp', () => {
     // Only definitions, not the prose above them: `^` anchors to the line the
     // clause actually occupies inside a CREATE FUNCTION body.
-    const sql = sqlOf();
-    expect(sql.match(/^SECURITY DEFINER$/gm) ?? []).toHaveLength(count);
-    expect(sql.match(/^SET search_path = public, pg_temp$/gm) ?? []).toHaveLength(count);
+    expect(helperMigration.match(/^SECURITY DEFINER$/gm) ?? []).toHaveLength(2);
+    expect(helperMigration.match(/^SET search_path = public, pg_temp$/gm) ?? []).toHaveLength(2);
+    expect(migration.match(/^SET search_path = public, pg_temp$/gm) ?? []).toHaveLength(1);
   });
 
-  it.each([
-    ['025 (prediction helper)', () => helperMigration, 2],
-    ['026 (partner projection)', () => migration, 1],
-  ])('declares every function in %s STABLE, so none can write', (_label, sqlOf, count) => {
-    expect(sqlOf().match(/^STABLE$/gm) ?? []).toHaveLength(count);
+  it('uses a locking VOLATILE partner projection while keeping the pure helper STABLE', () => {
+    expect(helperMigration.match(/^STABLE$/gm) ?? []).toHaveLength(2);
+    const projection = migration.slice(
+      migration.indexOf('CREATE OR REPLACE FUNCTION public.get_partner_cycle_projection'),
+      migration.indexOf('COMMENT ON FUNCTION public.get_partner_cycle_projection'),
+    );
+    expect(projection).toMatch(/^VOLATILE$/m);
+    expect(projection).toContain('FOR SHARE');
   });
 });
 
@@ -140,12 +148,12 @@ describe('only explicit, current consent permits partner sharing', () => {
    * `has_prediction_window = true` and a date after `revoked_at` was set.
    * Revoking means stop using this data this way, and partner sharing is one of
    * those ways.
-   */
+  */
   it('requires an existing current-version, non-revoked partner consent row', () => {
-    expect(migration).toContain("AND consent_type = 'cycle'");
-    expect(migration).toContain('SELECT EXISTS (');
-    expect(migration).toContain('AND version = v_required_consent_version');
-    expect(migration).toContain('AND revoked_at IS NULL');
+    expect(migration).toContain("AND consent.consent_type = 'cycle'");
+    expect(migration).toMatch(/FROM public\.user_sensitive_consents AS consent[\s\S]+FOR SHARE;/);
+    expect(migration).toContain('consent.version = v_required_consent_version');
+    expect(migration).toContain('AND consent.revoked_at IS NULL');
     // The consent gate must come BEFORE the preferences read, so an invalid
     // owner's toggles are never even consulted.
     expect(migration.indexOf('INTO v_consent_valid'))

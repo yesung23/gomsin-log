@@ -21,7 +21,7 @@ export function AppLoadingState({
         className="notebook min-h-[100dvh] w-full max-w-[430px] px-6 pt-[max(env(safe-area-inset-top,0px),5rem)]"
       >
         <div className="mx-auto w-full max-w-sm">
-          <p className="hand-text text-title leading-none" style={{ color: 'var(--ink)' }}>
+          <p className="text-title leading-none" style={{ color: 'var(--ink)' }}>
             곰신로그
           </p>
           <div className="ink-rule my-4" aria-hidden="true" />

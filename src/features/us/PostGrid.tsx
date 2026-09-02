@@ -90,7 +90,7 @@ export function PostGrid({
 
   if (tiles.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-3 px-8 pt-10 text-center">
+      <div className="flex flex-col items-center gap-3 px-8 pt-8 text-center">
         <p className="text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
           {emptyMessage}
         </p>

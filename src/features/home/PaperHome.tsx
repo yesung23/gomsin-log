@@ -281,7 +281,7 @@ export function PaperHome() {
                 {focus.eyebrow}
               </span>
               <span
-                className="mt-0.5 block break-keep text-body font-semibold leading-snug"
+                className="mt-0.5 block break-keep text-body font-semibold"
                 style={{ color: 'var(--ink)' }}
               >
                 {focus.title}

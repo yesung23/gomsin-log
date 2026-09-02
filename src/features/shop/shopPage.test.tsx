@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { GARDEN_ACCESSORY_OPTIONS } from '@/lib/companionGardenLocalState';
@@ -87,10 +87,15 @@ describe('free local companion shop', () => {
   });
 
   it('draws one unowned accessory per local calendar day and announces the label', async () => {
-    const user = userEvent.setup();
+    vi.useFakeTimers();
     const random = vi.spyOn(Math, 'random').mockReturnValue(0);
     renderShop();
-    await user.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
+    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
+
+    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
+    expect(screen.getByTestId('accessory-draw-roulette')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1000));
 
     const drawnLabel = GARDEN_ACCESSORY_OPTIONS.find(({ id }) => id === 'cap')?.label;
     expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
@@ -99,8 +104,63 @@ describe('free local companion shop', () => {
     expect(random).toHaveBeenCalledTimes(1);
 
     expect(screen.getByRole('button', { name: '오늘 뽑기 완료' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '오늘 뽑기 완료' }));
+    fireEvent.click(screen.getByRole('button', { name: '오늘 뽑기 완료' }));
     expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
+  });
+
+  it('decides and stores the result once at click time while the roulette is running', async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    renderShop();
+    const setItem = vi.spyOn(localStorage, 'setItem');
+    const drawButton = screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' });
+
+    fireEvent.click(drawButton);
+    fireEvent.click(drawButton);
+
+    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
+    expect(screen.getByTestId('accessory-draw-roulette')).toBeInTheDocument();
+    expect(random).toHaveBeenCalledTimes(1);
+    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
+
+    act(() => vi.advanceTimersByTime(999));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole('status')).toHaveTextContent('모자');
+  });
+
+  it('short-circuits the roulette when reduced motion is requested without changing the draw result', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    renderShop();
+
+    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
+    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
+    act(() => vi.advanceTimersByTime(79));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole('status')).toHaveTextContent('모자');
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
+  });
+
+  it('cancels a pending visual result when the signed-in account changes', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const view = renderShop();
+
+    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
+    currentState = {
+      authenticatedUser: { id: 'user-other' },
+      profile: { id: 'profile-other' },
+    };
+    view.rerender(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
+
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['cap']);
+    expect(loadCompanionShopState('user-other').ownedAccessories).toEqual([]);
   });
 
   it('labels a complete collection and does not consume a draw', async () => {
@@ -147,6 +207,21 @@ describe('free local companion shop', () => {
     act(() => vi.advanceTimersByTime(200));
 
     expect(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' })).toBeEnabled();
+  });
+
+  it('finishes the first draw after midnight even before the scheduled date refresh runs', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    renderShop();
+
+    mockedToday.value = '2026-09-02';
+    fireEvent.click(screen.getByRole('button', { name: '오늘의 액세서리 무료 뽑기' }));
+    expect(screen.getByRole('button', { name: '뽑는 중…' })).toBeDisabled();
+
+    act(() => vi.advanceTimersByTime(1000));
+
+    expect(screen.getByRole('status')).toHaveTextContent('모자');
+    expect(screen.getByRole('button', { name: '오늘 뽑기 완료' })).toBeDisabled();
   });
 
   it('refreshes collection and selected paper when the authenticated account changes', async () => {

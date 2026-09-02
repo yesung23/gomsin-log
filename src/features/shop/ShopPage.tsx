@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, FileText, Sprout } from 'lucide-react';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
@@ -24,6 +24,14 @@ import {
 const COLLECTIBLE_ACCESSORY_OPTIONS = GARDEN_ACCESSORY_OPTIONS.filter(
   (option): option is { id: CollectibleGardenAccessory; label: string } => option.id !== 'none',
 );
+const DRAW_DURATION_MS = 1000;
+const REDUCED_MOTION_DRAW_DURATION_MS = 80;
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches === true;
+}
 
 function millisecondsUntilNextLocalDay(now = new Date()): number {
   const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
@@ -41,6 +49,11 @@ export function ShopPageBody() {
   });
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const [today, setToday] = useState(() => localToday());
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [pendingAccessory, setPendingAccessory] = useState<CollectibleGardenAccessory | null>(null);
+  const [isReducedMotion, setIsReducedMotion] = useState(false);
+  const drawTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const drawInFlightRef = useRef(false);
 
   useEffect(() => {
     const nextShopState = loadCompanionShopState(userId);
@@ -50,6 +63,20 @@ export function ShopPageBody() {
     applyPaperTextureAttribute(nextPaper);
     setAnnouncement(null);
     setToday(localToday());
+    setIsDrawing(false);
+    setPendingAccessory(null);
+    setIsReducedMotion(false);
+  }, [userId]);
+
+  useEffect(() => {
+    setIsDrawing(false);
+    setPendingAccessory(null);
+    setIsReducedMotion(false);
+    return () => {
+      if (drawTimerRef.current !== null) clearTimeout(drawTimerRef.current);
+      drawTimerRef.current = null;
+      drawInFlightRef.current = false;
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -80,16 +107,21 @@ export function ShopPageBody() {
   ));
   const drawComplete = ownedAccessories.length === COLLECTIBLE_ACCESSORY_OPTIONS.length;
   const drawUsedToday = shopState.lastFreeDrawDate === today;
-  const drawDisabled = !userId || drawComplete || drawUsedToday;
+  const drawDisabled = !userId || drawComplete || drawUsedToday || isDrawing;
   const drawLabel = !userId
     ? '로그인 후 이용할 수 있어요'
-    : drawComplete
+    : isDrawing
+      ? '뽑는 중…'
+      : drawComplete
       ? '모든 액세서리를 모았어요'
       : drawUsedToday
         ? '오늘 뽑기 완료'
         : '오늘의 액세서리 무료 뽑기';
 
   const drawAccessory = () => {
+    if (drawInFlightRef.current || drawDisabled) return;
+    drawInFlightRef.current = true;
+    setAnnouncement(null);
     const drawDate = localToday();
     const result = drawDailyAccessory(userId, drawDate);
     setToday(drawDate);
@@ -97,9 +129,22 @@ export function ShopPageBody() {
 
     if (result.status === 'drawn' && result.accessory) {
       const option = GARDEN_ACCESSORY_OPTIONS.find(({ id }) => id === result.accessory);
-      setAnnouncement(option ? `액세서리 뽑기 결과: ${option.label}` : '뽑은 액세서리를 확인할 수 없어요.');
+      const reducedMotion = prefersReducedMotion();
+      setIsReducedMotion(reducedMotion);
+      setPendingAccessory(result.accessory);
+      setIsDrawing(true);
+      drawTimerRef.current = setTimeout(() => {
+        drawTimerRef.current = null;
+        drawInFlightRef.current = false;
+        setIsDrawing(false);
+        setPendingAccessory(null);
+        setAnnouncement(option ? `액세서리 뽑기 결과: ${option.label}` : '뽑은 액세서리를 확인할 수 없어요.');
+      }, reducedMotion ? REDUCED_MOTION_DRAW_DURATION_MS : DRAW_DURATION_MS);
       return;
     }
+    drawInFlightRef.current = false;
+    setIsDrawing(false);
+    setPendingAccessory(null);
     if (result.status === 'invalid_date') {
       setAnnouncement('오늘 날짜를 확인할 수 없어 뽑지 못했어요.');
       return;
@@ -160,6 +205,37 @@ export function ShopPageBody() {
           >
             {drawLabel}
           </button>
+          {isDrawing ? (
+            <div
+              data-testid="accessory-draw-roulette"
+              className="rounded-surface border border-border px-3 py-4 text-center"
+              aria-label="액세서리 룰렛"
+              role="img"
+            >
+              <div
+                className={`relative mx-auto h-36 w-36 ${isReducedMotion ? '' : 'animate-spin'}`}
+                style={{ animationDuration: `${DRAW_DURATION_MS}ms` }}
+              >
+                {COLLECTIBLE_ACCESSORY_OPTIONS.map((option, index) => {
+                  const angle = (360 / COLLECTIBLE_ACCESSORY_OPTIONS.length) * index;
+                  return (
+                    <span
+                      key={option.id}
+                      data-testid={`accessory-draw-option-${option.id}`}
+                      data-selected={pendingAccessory === option.id ? 'true' : undefined}
+                      className="absolute left-1/2 top-1/2 w-20 -translate-x-1/2 -translate-y-1/2 rounded-control border border-border bg-background px-2 py-1 text-caption text-foreground"
+                      style={{
+                        transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-52px) rotate(${-angle}deg)`,
+                      }}
+                    >
+                      {option.label}
+                    </span>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-caption text-muted-foreground" aria-live="off">뽑는 중…</p>
+            </div>
+          ) : null}
           {announcement ? <p role="status" aria-live="polite" className="text-label text-coral">{announcement}</p> : null}
 
           <div aria-label="보유 액세서리" className="space-y-2">

@@ -39,8 +39,8 @@ const ALLOWED_FILES: Record<string, string> = {
     'Defines the single offline message and documents the rule; the classifier is the intended source of this phrase.',
   'src/components/OfflineBanner.tsx':
     'Renders only while the device is genuinely offline, so the diagnosis is true by construction.',
-  'src/App.tsx':
-    'AuthSyncUnavailable picks this copy strictly inside the reason === \'offline\' branch.',
+  'src/lib/authSyncFailureCopy.ts':
+    'AuthSyncUnavailable delegates to this total mapping, whose offline key owns its only network diagnosis.',
 };
 
 function listSourceFiles(dir: string, acc: string[] = []): string[] {
@@ -83,14 +83,13 @@ describe('no live client code invents an internet diagnosis', () => {
     }
   });
 
-  it("App.tsx uses the phrase only under reason === 'offline'", () => {
-    const app = read('src/App.tsx');
-    const line = app
+  it("authSyncFailureCopy uses the phrase only under the offline cause", () => {
+    const copy = read('src/lib/authSyncFailureCopy.ts');
+    const line = copy
       .split('\n')
       .find((candidate) => candidate.includes(NETWORK_PHRASE) && !candidate.includes('*'));
     expect(line).toBeTruthy();
-    // The ternary arm immediately above the copy is the offline test.
-    expect(app).toMatch(/reason === 'offline'\s*\n\s*\?\s*'인터넷 연결/);
+    expect(copy).toMatch(/offline:\s*'인터넷 연결/);
   });
 });
 
@@ -134,8 +133,8 @@ const ALLOWED_CONNECTION_FILES: Record<string, string> = {
   'src/lib/serverErrors.ts':
     'The classifier itself. `offline` owns the only genuine connection message, and '
     + '`forbidden` says 커플 공간 연결 상태, which is the COUPLE link rather than the network.',
-  'src/App.tsx':
-    "AuthSyncUnavailable picks this copy strictly inside the reason === 'offline' branch.",
+  'src/lib/authSyncFailureCopy.ts':
+    'Its total cause map owns the offline-only connection copy and is directly covered by unit tests.',
   'src/components/CycleTrackerSection.tsx':
     'Residual-error branch only: `LoadState` is the CycleFetchFailureReason itself, so '
     + '`unauthenticated` and `forbidden` are separate states with their own copy and can '

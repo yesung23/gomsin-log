@@ -975,3 +975,26 @@ supabase functions deploy delete-account
   projection을 전부 비공유 상태로 잠근 뒤 원인을 수정합니다.
 - **원격 적용 상태: NOT APPLIED.** 이 작업은 로컬 fresh chain만 사용했으며 Production
   Supabase에는 접근하거나 적용하지 않았습니다.
+
+## 070 — 주기 민감정보 동의 철회·쓰기 원자화 (2026-09-03)
+
+- `070_cycle_consent_atomic_write_gate.sql`은 동의 확인과 원본 주기 데이터 쓰기 사이의
+  경쟁 조건을 닫습니다. 쓰기와 파트너 projection은 동의 행을 잠근 뒤 현재 버전·미철회
+  상태를 확인하고, 동의 부여와 철회는 revision 기반 RPC로만 수행합니다.
+- 기존 데이터 삭제·내보내기 권리는 보존합니다. 철회된 소유자는 자신의 원본을 읽고
+  삭제할 수 있지만 새 원본 쓰기나 공유 재활성화는 할 수 없고, 모든 공유 토글을 끄는
+  작업은 계속 허용됩니다. 파트너에게는 현재 동의와 명시적 공유 설정을 모두 만족한
+  최소 projection만 반환됩니다.
+- 계정 삭제 시작과 재동의, 쓰기와 철회, projection과 철회의 양쪽 실행 순서를 실제
+  PostgreSQL lock wait로 검증했습니다. NULL actor·anon·비관련 사용자·이전 파트너 거부,
+  stale revision, 삭제 진행 중 재동의 차단, 철회 후 원본 read/delete 보존과 write/share
+  거부도 actor harness로 확인했습니다.
+- 로컬 검증: `scripts/agent/validate.sh migration`에서 diff-check, TypeScript, lint, 전체
+  Vitest, P0, phase0(001→070 fresh chain, 614 assertions), P5, write-floor, native contract,
+  rollback이 PASS했습니다. 기본 build 단계는 공개 Supabase 환경변수 부재로 FAIL했고,
+  동일 exact HEAD에 안전한 로컬 공개값을 주입한 production build는 별도로 PASS했습니다.
+- rollback은 취약한 동의 경계로 되돌리지 않습니다. 문제가 있으면 새 forward migration으로
+  주기 쓰기와 projection을 잠근 뒤 원인을 수정합니다.
+- **원격 적용 상태: NOT APPLIED / UNVERIFIED.** Production Supabase에는 접근하거나
+  적용하지 않았습니다. 선행 migration과 원격 카탈로그를 확인한 별도 배포 게이트 전에는
+  070을 적용하지 않습니다.

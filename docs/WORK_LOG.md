@@ -3212,6 +3212,82 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+## 2026-09-03 — Cycle consent atomic revocation and write gate
+
+PLAN POSITION
+- Phase: Release Candidate reliability / sensitive health-data boundary
+- Workstream: cycle consent, raw-data authorization, partner projection
+- Previous Gate: migration 069 required current consent for partner projection but did not make consent checks atomic with raw writes
+- This Gate: local migration 070, client authority state machine, identity pinning, PostgreSQL concurrency proof, and independent security review
+
+DIRECTION CHECK
+- Product source checked: latest user-approved V4 direction, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE; this slice does not change monetization, customer, storage, or AI role
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/security-review.md`, `docs/skills/migration-gate.md`, `docs/skills/release-validation.md`
+- Current-state checked: live branch/HEAD/status, repository call paths, `docs/CURRENT_STATE.md`, and local migration chain
+- Latest relevant Work Log checked: migration 069 and Diary/Garden/Shop V2 entries
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Primary: Codex Control Tower / Sol Ultra, implementation integration and exact-diff verification
+- Independent reviewer: Sol Ultra read-only security review
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base: `origin/codex/diary-garden-shop-v2`
+- Old HEAD: `453bda99633d2ee3d384cf038ff65103bb08c7e9`
+- Code/migration commit: `dc3d221c956e6d5bb211d300d57d17adccba55e9`
+
+CHANGED / REVIEWED
+- `src/lib/sensitiveConsent.ts`: server-authoritative grant/revoke RPCs, monotonic revision, pending-revoke lock, and process-lifetime fallback when durable marker storage fails
+- `src/components/CycleTrackerSection.tsx`: generation-scoped consent state machine, immediate privacy lock on revoke, retry-only error state, stale-response rejection, and sharing cleanup
+- `src/lib/cycle.ts`: initiating user identity is pinned through raw read/write/delete/settings/sharing requests so an account switch cannot retarget an operation
+- `supabase/migrations/070_cycle_consent_atomic_write_gate.sql`: revision-CAS grant, privacy-wins revoke, account-deletion barrier, row-locking write helper, restrictive raw-table write policies, and consent-locked partner projection
+- related unit/contract tests and `scripts/phase0/storage-authz-harness.mjs`: negative actor matrix and real PostgreSQL lock-order proofs
+- `supabase/migrations/README.md`: local-only migration status and forward-repair boundary
+
+PRESERVED CONTRACTS
+- a revoked owner may still read/export and delete their own raw health data
+- a revoked owner cannot write new raw health data or re-enable partner sharing
+- all sharing toggles may always be turned off
+- partner projection remains sanitized and requires current consent plus explicit sharing
+- already accessed partner data is not falsely claimed to be remotely revocable
+
+VERIFICATION
+- `npm test`: PASS, 292 files / 4,099 tests
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `git diff --check`: PASS
+- `scripts/agent/validate.sh migration`: P0, phase0, P5, write-floor, native contract, rollback, lint, typecheck, full Vitest, and diff-check PASS
+- phase0: PASS on fresh PostgreSQL 17 through migration 070, 614 assertions including verified lock waits and both transaction orders
+- default `npm run build` inside the validation script: FAIL because `VITE_SUPABASE_URL` and publishable key were intentionally absent
+- `VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_local_build_verification npm run build`: PASS on exact code HEAD
+- independent Sol Ultra review: PASS; confirmed Critical 0, High 0 and closed raw read/delete, raw write deny, sharing re-enable deny, race, and remount invariants
+
+NOT EXECUTED / UNVERIFIED
+- remote Supabase catalog and migration ordering: UNVERIFIED
+- Production migration 070: NOT APPLIED
+- authenticated Production actor matrix: UNVERIFIED
+- physical iPhone process-kill recovery, Secure Enclave, cold start, and accessibility: UNVERIFIED
+- server revoke plus simultaneous durable-storage failure across an OS process termination remains a documented residual; the same-process remount privacy lock is verified
+
+ROLLBACK / RECOVERY
+- do not restore the weaker 069 write boundary or rewrite an applied migration
+- if a deployment issue is found, issue a forward migration that fail-closes cycle writes and partner projection, then repair
+- client rollback must retain the ability to revoke; migration-first deployment intentionally makes unsupported re-grants fail closed
+
+STOPPED AT
+- exact completed boundary: cycle consent atomicity is locally implemented, committed, migration-gated, and independently approved
+- explicitly not changed: Production, Supabase remote, master, App Store, user data
+- next owner: Codex Control Tower
+- next action: establish the user-approved V5 business/server/media/IAP contract, then implement only default-off activation-ready surfaces
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote state UNVERIFIED
+- Vercel/TestFlight/App Store: NOT APPLIED
+
+---
+
 ### 2026-08-20 · LV · 감정 캐릭터·기록 속 마음·주기 시각화, 그리고 통증 공유(미착지)
 
 #### PLAN POSITION

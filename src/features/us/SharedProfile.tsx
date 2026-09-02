@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, MoreHorizontal, Plane, Plus, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -25,28 +25,13 @@ import { formatLocalDate } from '@/lib/utils';
 import { TRIP_PHASE_ORDER, TRIP_PHASE_PILL, groupTripsByPhase, type TripPhase } from '@/lib/tripPhase';
 import type { Attachment, CoupleHighlight, DailyRecord, Trip } from '@/types';
 import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
 
 export type PostRetryPhase = 'media' | 'publication';
 
 const POST_RETRY_KEY_PREFIX = 'gomsinlog.post-retry.v1';
-const DIALOG_FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-function keepDialogFocus(event: KeyboardEvent, panel: HTMLElement | null): void {
-  if (event.key !== 'Tab' || !panel) return;
-  const focusable = panel.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE);
-  if (focusable.length === 0) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
 
 interface StoredPostRetry {
   recordId: string;
@@ -672,7 +657,7 @@ export function SharedProfile() {
           onClose={closeHighlightEditor}
           onSave={() => void saveHighlight()}
           onDelete={editingHighlightId ? () => void removeHighlight() : undefined}
-          restoreFocusTo={highlightTriggerRef.current}
+          restoreFocusRef={highlightTriggerRef}
         />
       ) : null}
 
@@ -708,7 +693,7 @@ export function SharedProfile() {
       )}
 
       {selectedPost ? (
-        <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} restoreFocusTo={selectedPostTriggerRef.current} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
+        <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} restoreFocusRef={selectedPostTriggerRef} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
       ) : null}
 
       {composingPost ? (
@@ -846,7 +831,7 @@ function HighlightEditor({
   onClose,
   onSave,
   onDelete,
-  restoreFocusTo,
+  restoreFocusRef,
 }: {
   title: string;
   setTitle: (value: string) => void;
@@ -861,28 +846,18 @@ function HighlightEditor({
   onClose: () => void;
   onSave: () => void;
   onDelete?: () => void;
-  restoreFocusTo: HTMLElement | null;
+  restoreFocusRef: RefObject<HTMLElement | null>;
 }) {
   const panelRef = useRef<HTMLElement>(null);
-  const onCloseRef = useRef(onClose);
-  const busyRef = useRef(busy);
-  onCloseRef.current = onClose;
-  busyRef.current = busy;
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (!busyRef.current) onCloseRef.current();
-        return;
-      }
-      keepDialogFocus(event, panelRef.current);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      restoreFocusTo?.focus();
-    };
-  }, [restoreFocusTo]);
+  const titleRef = useRef<HTMLInputElement>(null);
+  useDialogFocus({
+    active: true,
+    panelRef,
+    initialFocusRef: titleRef,
+    restoreFocusRef,
+    onClose,
+    closeDisabled: busy,
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-foreground/35 p-3" role="dialog" aria-modal="true" aria-labelledby="highlight-editor-title" data-testid="highlight-editor">
@@ -893,7 +868,7 @@ function HighlightEditor({
         </div>
         <label className="mt-4 block text-label font-semibold text-foreground">
           이름
-          <input value={title} onChange={(event) => setTitle(event.target.value.slice(0, 20))} maxLength={20} autoFocus className="mt-1 h-11 w-full rounded-control border border-border bg-background px-3 text-body font-normal outline-none focus:ring-2 focus:ring-coral/40" placeholder="예: 우리의 봄" />
+          <input ref={titleRef} value={title} onChange={(event) => setTitle(event.target.value.slice(0, 20))} maxLength={20} className="mt-1 h-11 w-full rounded-control border border-border bg-background px-3 text-body font-normal outline-none focus:ring-2 focus:ring-coral/40" placeholder="예: 우리의 봄" />
         </label>
         <p className="mt-3 text-caption leading-relaxed text-muted-foreground">
           게시물 격자에서 고르거나, 스토리를 보다가 ‘하이라이트에 추가’를 눌러 가져올 수 있어요.
@@ -951,27 +926,17 @@ function TripRow({ trip, phase, onOpen }: { trip: Trip; phase: TripPhase; onOpen
   return <button type="button" data-testid={`profile-trip-${trip.id}`} aria-label={`${trip.title} 열기`} onClick={() => onOpen(trip.id)} className="press-response flex min-h-16 w-full items-center gap-3 rounded-control px-3 text-left" style={{ background: 'var(--paper)', border: 'var(--stroke-thin) solid var(--ink-faint)' }}><CalendarDays size={18} className="shrink-0" color="var(--ink-soft)" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-label font-semibold" style={{ color: 'var(--ink)' }}>{trip.title}</span><span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>{TRIP_PHASE_PILL[phase]}</span></span><span className="mt-0.5 block truncate text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>{dateLabel}</span></span></button>;
 }
 
-function PhotoPostViewer({ record, coupleId, restoreFocusTo, onClose, onOpenRecord }: { record: DailyRecord; coupleId?: string; restoreFocusTo: HTMLElement | null; onClose: () => void; onOpenRecord: (id: string) => void }) {
+function PhotoPostViewer({ record, coupleId, restoreFocusRef, onClose, onOpenRecord }: { record: DailyRecord; coupleId?: string; restoreFocusRef: RefObject<HTMLElement | null>; onClose: () => void; onOpenRecord: (id: string) => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const photos = getPhotoAttachments(record);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onCloseRef.current();
-        return;
-      }
-      keepDialogFocus(event, panelRef.current);
-    };
-    document.addEventListener('keydown', onKey);
-    closeRef.current?.focus();
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      restoreFocusTo?.focus();
-    };
-  }, [restoreFocusTo]);
+  useDialogFocus({
+    active: true,
+    panelRef,
+    initialFocusRef: closeRef,
+    restoreFocusRef,
+    onClose,
+  });
   if (photos.length === 0) return null;
   return <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="photo-post-viewer-title" data-testid="photo-post-viewer" className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface" onPointerDown={(event) => event.stopPropagation()}><header className="flex min-h-11 items-center gap-3"><h2 id="photo-post-viewer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">{formatLocalDate(record.date)}{record.time ? ` ${record.time}` : ''}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="사진 게시물 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button></header><div className="pt-3"><RecordMediaGallery attachments={photos} coupleId={coupleId} recordId={record.id} /></div>{record.contentUnavailable ? <p className="pt-3 text-caption leading-relaxed text-muted-foreground">이 기록의 글은 이 기기에서 아직 열 수 없어요.</p> : record.log.trim() ? <p className="hand-text record-copy whitespace-pre-wrap break-keep pt-3 text-card-foreground">{record.log}</p> : null}<div className="flex justify-end pt-3"><button type="button" onClick={() => onOpenRecord(record.id)} className="press-response-row ink-chip min-h-11 px-3 text-caption font-semibold" style={{ color: 'var(--ink)' }}>원본 보기</button></div></div></div>;
 }

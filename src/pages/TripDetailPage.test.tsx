@@ -225,7 +225,7 @@ describe('TripDetailPage route request isolation', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/trips/trip-b');
   });
 
-  it('adds a place from one screenshot and opens the saved row for correction', async () => {
+  it('keeps recognized screenshot text in a review draft until the user explicitly saves', async () => {
     parentRequests.length = 0;
     itemRequests.length = 0;
     checklistRequests.length = 0;
@@ -236,18 +236,6 @@ describe('TripDetailPage route request isolation', () => {
       businessHours: '매일 11:30 - 21:00',
       rawText: '연남토마 카페 서울 마포구 연남로 42',
     });
-    saveTripItemMock.mockResolvedValue({
-      id: 'item-photo',
-      tripId: 'trip-a',
-      itemDate: '2026-08-01',
-      title: '연남토마',
-      address: '서울 마포구 연남로 42',
-      businessHours: '매일 11:30 - 21:00',
-      category: 'food',
-      source: 'screenshot',
-      sortOrder: 0,
-    });
-
     render(
       <MemoryRouter initialEntries={['/trips/trip-a']}>
         <Harness />
@@ -264,19 +252,15 @@ describe('TripDetailPage route request isolation', () => {
       checklistRequests.find((entry) => entry.id === 'trip-a')!.request.resolve({ ok: true, checklists: [] });
     });
 
-    expect(await screen.findByRole('button', { name: '사진으로 바로 추가' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '사진에서 초안 만들기' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('지도 캡처 선택'), {
       target: { files: [new File(['map'], 'map.png', { type: 'image/png' })] },
     });
 
-    const savedRow = await screen.findByRole('button', { name: '연남토마 일정 수정' });
-    expect(saveTripItemMock).toHaveBeenCalledWith(expect.objectContaining({
-      title: '연남토마',
-      category: 'food',
-      source: 'screenshot',
-    }));
-    fireEvent.click(savedRow);
-    expect(screen.getByRole('heading', { name: '일정 수정' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '1일차 일정 추가' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('연남토마')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('서울 마포구 연남로 42')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('매일 11:30 - 21:00')).toBeInTheDocument();
+    expect(saveTripItemMock).not.toHaveBeenCalled();
   });
 });

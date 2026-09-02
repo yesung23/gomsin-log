@@ -62,21 +62,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('기본값은 켜짐', () => {
-  it('환경 변수가 없으면 기능은 켜져 있고 플랫폼 게이트만 적용한다', () => {
-    expect(isOnDeviceDailySummaryEnabled()).toBe(true);
-    expect(onDeviceSummaryGate()).toBe('not_ios');
+describe('명시적으로 검증된 빌드에서만 켜짐', () => {
+  it('환경 변수가 없으면 기능은 꺼져 있고 규칙 요약만 유지한다', () => {
+    expect(isOnDeviceDailySummaryEnabled()).toBe(false);
+    expect(onDeviceSummaryGate()).toBe('disabled');
   });
 
-  it("명시적 'false'만 끄고 그 외 값은 기본 ON으로 취급한다", () => {
-    for (const value of ['false', 'FALSE', '0', 'off']) {
+  it("정확한 'true'만 켜고 그 외 값은 모두 닫힌다", () => {
+    for (const value of ['false', 'FALSE', '0', 'off', 'TRUE', '1', 'yes', '']) {
       vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', value);
       expect(isOnDeviceDailySummaryEnabled()).toBe(false);
     }
-    for (const value of ['true', 'TRUE', '1', 'yes', '']) {
-      vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', value);
-      expect(isOnDeviceDailySummaryEnabled()).toBe(true);
-    }
+    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
+    expect(isOnDeviceDailySummaryEnabled()).toBe(true);
   });
 
   it('명시적으로 꺼져 있으면 플러그인을 부르지 않는다', async () => {

@@ -159,7 +159,11 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('기본 ON이어도 스토리를 여는 것만으로 모델을 실행하지 않는다', () => {
+describe('기능을 명시적으로 켜도 스토리를 여는 것만으로 모델을 실행하지 않는다', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
+  });
+
   it('규칙 문장을 즉시 그리고 AI 버튼을 누르기 전에는 플러그인을 부르지 않는다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);

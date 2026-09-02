@@ -367,7 +367,7 @@ export function TripDetailPage() {
     return null;
   };
 
-  const openFallbackEditor = (draft: ItemDraft, message: string) => {
+  const openDraftEditor = (draft: ItemDraft, message: string | null = null) => {
     setEditingItemId(null);
     setItemDraft(draft);
     setItemError(message);
@@ -375,10 +375,9 @@ export function TripDetailPage() {
   };
 
   /**
-   * The primary trip-planning path: choose one capture, OCR locally, save the
-   * extracted place immediately. The screenshot itself never leaves the device.
-   * If recognition or the write is incomplete, preserve everything we did read
-   * and fall back to the normal editor instead of making the user start over.
+   * The primary trip-planning path: choose one capture and OCR it locally. The
+   * screenshot itself never leaves the device, and recognized text remains a
+   * draft until the user reviews it and explicitly presses Save.
    */
   const handleQuickPlaceScreenshot = async (file?: File) => {
     const validationError = validateScreenshot(file);
@@ -405,34 +404,17 @@ export function TripDetailPage() {
         source: 'screenshot',
       };
       if (!place.title) {
-        openFallbackEditor(draft, '장소 이름을 충분히 읽지 못했어요. 이름만 확인해 주세요.');
+        openDraftEditor(draft, '장소 이름을 충분히 읽지 못했어요. 이름만 확인해 주세요.');
         return;
       }
-
-      setIsSavingItem(true);
-      const saved = await saveTripItemToDB({
-        tripId: trip.id,
-        itemDate: activeDate,
-        title: place.title,
-        category: draft.category,
-        address: place.address || undefined,
-        businessHours: place.businessHours || undefined,
-        source: 'screenshot',
-        sortOrder: currentDayItems.length,
-      });
-      if (!isCurrentTripScope(operationScope)) return;
-      if (!saved) {
-        openFallbackEditor(draft, '자동 저장하지 못했어요. 내용을 확인하고 저장을 눌러 주세요.');
-        return;
-      }
-      setItems((current) => [...current, saved]);
-      toast.success(`${saved.title}을(를) 추가했어요. 틀리면 카드를 눌러 고쳐 주세요.`);
+      openDraftEditor(draft);
+      toast.success('캡처에서 읽은 내용을 확인한 뒤 저장해 주세요.');
     } catch (error) {
       if (!isCurrentTripScope(operationScope)) return;
       console.error('[gomsinlog] Failed to quick-add place screenshot.');
-      openFallbackEditor(
+      openDraftEditor(
         { ...EMPTY_ITEM, source: 'screenshot' },
-        '사진을 읽지 못했어요. 장소 이름만 입력하면 바로 추가할 수 있어요.',
+        '사진을 읽지 못했어요. 장소 이름을 입력하고 저장해 주세요.',
       );
     } finally {
       if (isCurrentTripScope(operationScope)) {
@@ -867,7 +849,7 @@ export function TripDetailPage() {
                 <EmptyState
                   icon={<MapPin size={18} className="text-muted-foreground" />}
                   title="캡처 한 장이면 일정이 만들어져요"
-                  description="지도 화면을 선택하면 장소를 읽어 바로 추가해요. 사진은 이 기기에서만 처리합니다."
+                  description="지도 화면의 글자를 기기에서 읽어 초안으로 채워요. 확인하기 전에는 저장하지 않습니다."
                   action={(
                     <div className="flex flex-col items-center gap-2">
                       <Button
@@ -877,7 +859,7 @@ export function TripDetailPage() {
                         disabled={isReadingScreenshot || isSavingItem || isOffline}
                       >
                         <ImagePlus size={14} />
-                        {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진으로 바로 추가'}
+                        {isReadingScreenshot ? `사진 읽는 중 ${Math.round(ocrProgress * 100)}%` : '사진에서 초안 만들기'}
                       </Button>
                       <button type="button" onClick={openNewItem} disabled={isOffline} className="press-response min-h-11 px-3 text-caption font-medium text-muted-foreground disabled:opacity-40">
                         직접 입력하기

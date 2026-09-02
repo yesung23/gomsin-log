@@ -30,6 +30,8 @@ describe('companion garden wandering geometry', () => {
   });
 
   it('derives physical-safe bounds and detects rendered sprite overlap', () => {
+    expect(GARDEN_COMPANION_SIZE.width).toBe(49);
+    expect(GARDEN_COMPANION_SIZE.height).toBe(56);
     const bounds = getPhysicalGardenBounds(320, 141);
     expect(bounds.minX).toBeGreaterThanOrEqual(16);
     expect(bounds.maxX).toBeLessThanOrEqual(84);

@@ -76,9 +76,9 @@ afterEach(() => {
 describe('companion garden route authority', () => {
   it('verified active couple + valid anniversary renders the real growth state', () => {
     renderGarden();
-    expect(screen.getByRole('heading', { level: 1, name: '우리 정원' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: '정원' })).toBeInTheDocument();
     expect(screen.getByText('함께한 100일')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: '든든한 나무' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: '든든한 나무' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /친구 길게 눌러 잡기/ })).toHaveLength(2);
     expect(screen.getByTestId('garden-scene').className).not.toContain('aspect-[4/3]');
   });
@@ -121,8 +121,7 @@ describe('companion garden route authority', () => {
     expect(screen.queryByText(/함께한 \d+일/)).not.toBeInTheDocument();
   });
 
-  it('loads and saves accessories through the real account-scoped page boundary', async () => {
-    vi.useRealTimers();
+  it('loads saved accessories through the real account-scoped page boundary', () => {
     localStorage.setItem('gomsin.diary.garden.me', JSON.stringify({
       version: 1, peach: 'cap', sage: 'none',
     }));
@@ -132,33 +131,23 @@ describe('companion garden route authority', () => {
       ownedPapers: ['plain', 'ruled'],
       lastFreeDrawDate: null,
     }));
-    const user = userEvent.setup();
     const view = renderGarden();
 
     expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'cap');
-    await user.click(screen.getByRole('button', { name: '정원 꾸미기' }));
-    await user.click(screen.getByRole('radio', { name: '둘째 친구 꽃' }));
-    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'flower');
-    expect(JSON.parse(localStorage.getItem('gomsin.diary.garden.me') || '{}')).toMatchObject({
-      version: 1, peach: 'cap', sage: 'flower',
-    });
+    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'none');
+    expect(screen.queryByRole('button', { name: '정원 꾸미기' })).not.toBeInTheDocument();
 
     view.unmount();
     renderGarden();
     expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'cap');
-    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'flower');
+    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'none');
   });
 
-  it('does not expose accessories that this account has not drawn', async () => {
-    vi.useRealTimers();
-    const user = userEvent.setup();
+  it('does not expose an accessory picker on the quiet garden surface', () => {
     renderGarden();
 
-    await user.click(screen.getByRole('button', { name: '정원 꾸미기' }));
-
-    expect(screen.getAllByRole('radio', { name: /친구 없음/ })).toHaveLength(2);
-    expect(screen.queryByRole('radio', { name: /친구 꽃/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /친구 모자/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '정원 꾸미기' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
   });
 
   it('back is explicit and returns to diary', async () => {
@@ -169,12 +158,9 @@ describe('companion garden route authority', () => {
     expect(navigate).toHaveBeenCalledWith('/diary');
   });
 
-  it('opens the Shop from the full-screen garden app bar', async () => {
-    vi.useRealTimers();
-    const user = userEvent.setup();
+  it('keeps Shop out of the quiet garden app bar', () => {
     renderGarden();
-    await user.click(screen.getByRole('button', { name: '상점 열기' }));
-    expect(navigate).toHaveBeenCalledWith('/shop');
+    expect(screen.queryByRole('button', { name: '상점 열기' })).not.toBeInTheDocument();
   });
 
   it('uses the full app content without a bottom tab bar or second main landmark', () => {

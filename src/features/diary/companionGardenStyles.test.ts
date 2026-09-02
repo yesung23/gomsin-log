@@ -5,13 +5,16 @@ import { resolve } from 'node:path';
 describe('companion garden motion CSS', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/styles/index.css'), 'utf8');
 
-  it('has walking, immediate press feedback, and a continuous held wriggle', () => {
-    expect(css).toContain('@keyframes garden-walk-bob');
+  it('has original pose-frame walking, immediate press feedback, and held limb-pose flailing', () => {
+    expect(css).toContain('@keyframes garden-walk-frame');
     expect(css).toContain('.garden-companion-walking');
-    expect(css).toContain('@keyframes garden-lift-wriggle');
+    expect(css).toContain('.garden-character-frame--walk');
+    expect(css).toContain('@keyframes garden-lift-frame');
+    expect(css).toContain('.garden-character-frame--lift');
     expect(css).toContain('.garden-companion-lifted');
     expect(css).toContain('.garden-companion-pressed');
-    expect(css).toMatch(/garden-lift-wriggle[^;]*infinite/);
+    expect(css).not.toContain('@keyframes garden-walk-bob');
+    expect(css).not.toContain('@keyframes garden-lift-wriggle');
   });
 
   it('turns autonomous visual motion off for reduced-motion users', () => {

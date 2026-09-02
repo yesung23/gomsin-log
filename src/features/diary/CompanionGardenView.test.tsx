@@ -1,7 +1,5 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useState } from 'react';
 import { CompanionGardenView } from './CompanionGardenView';
 import { deriveCompanionGardenState } from './companionGarden';
 import {
@@ -10,15 +8,10 @@ import {
   companionsOverlap,
   getPhysicalGardenBounds,
 } from './companionGardenMotion';
-import type {
-  GardenAccessory,
-  GardenAccessoryState,
-  GardenCompanionId,
-} from '@/lib/companionGardenLocalState';
+import type { GardenAccessoryState } from '@/lib/companionGardenLocalState';
 
 const AVAILABLE = deriveCompanionGardenState(100);
 const DEFAULT_ACCESSORIES: GardenAccessoryState = { version: 1, peach: 'none', sage: 'none' };
-const OWNED_ACCESSORIES = ['cap', 'bow', 'scarf', 'flower'] as const;
 
 class TestPointerEvent extends MouseEvent {
   pointerId: number;
@@ -49,16 +42,10 @@ function mockReducedMotion(matches: boolean) {
 }
 
 function ControlledGarden({ initial = DEFAULT_ACCESSORIES }: { initial?: GardenAccessoryState }) {
-  const [accessories, setAccessories] = useState(initial);
-  const change = (companion: GardenCompanionId, accessory: GardenAccessory) => {
-    setAccessories((current) => ({ ...current, [companion]: accessory }));
-  };
   return (
     <CompanionGardenView
       state={AVAILABLE}
-      accessories={accessories}
-      ownedAccessories={OWNED_ACCESSORIES}
-      onAccessoryChange={change}
+      accessories={initial}
     />
   );
 }
@@ -78,6 +65,26 @@ afterEach(() => {
 });
 
 describe('interactive companion garden characters', () => {
+  it('keeps the garden surface quiet with only the together-day copy and back control', () => {
+    const onBack = vi.fn();
+    render(<CompanionGardenView
+      state={AVAILABLE}
+      accessories={DEFAULT_ACCESSORIES}
+      onBack={onBack}
+    />);
+
+    expect(screen.getByRole('button', { name: '이전 화면으로' })).toBeInTheDocument();
+    expect(screen.getByText('함께한 100일')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '우리 정원' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '든든한 나무' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '정원 꾸미기' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '상점 열기' })).not.toBeInTheDocument();
+    expect(screen.queryByText('길게 누르면 친구를 들어 올려 움직일 수 있어요.')).not.toBeInTheDocument();
+    expect(screen.queryByText('정원은 점수나 미션 없이 함께한 시간만 따라 자라요.')).not.toBeInTheDocument();
+    expect(screen.getByTestId('garden-scene')).toHaveClass('bg-card');
+    expect(screen.getByTestId('garden-scene')).not.toHaveAttribute('style');
+  });
+
   it('renders exactly two independently addressable companions', () => {
     render(<ControlledGarden />);
     const companions = screen.getAllByRole('button', { name: /친구 길게 눌러 잡기/ });
@@ -97,26 +104,25 @@ describe('interactive companion garden characters', () => {
     expect(second.querySelector('image')?.getAttribute('href')).toContain('paper-pair-v1.webp');
   });
 
-  it('opens optional decoration controls and applies an accessory to each companion independently', async () => {
-    const user = userEvent.setup();
-    render(<ControlledGarden />);
+  it('uses original sheet pose crops for walking and pickup frames without synthetic accessory SVGs', () => {
+    const accessories: GardenAccessoryState = { version: 1, peach: 'bow', sage: 'flower' };
+    render(<ControlledGarden initial={accessories} />);
 
-    expect(screen.queryByRole('region', { name: '정원 꾸미기' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '정원 꾸미기' }));
+    expect(screen.getByTestId('garden-exact-character-peach')).toHaveAttribute('viewBox', '20 515 136 155');
+    expect(screen.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '930 688 150 170');
 
-    const panel = screen.getByRole('region', { name: '정원 꾸미기' });
-    const peachGroup = within(panel).getByRole('radiogroup', { name: '첫째 친구 액세서리' });
-    const sageGroup = within(panel).getByRole('radiogroup', { name: '둘째 친구 액세서리' });
-    expect(within(peachGroup).getAllByRole('radio')).toHaveLength(5);
-    expect(within(sageGroup).getAllByRole('radio')).toHaveLength(5);
-
-    await user.click(within(peachGroup).getByRole('radio', { name: '첫째 친구 모자' }));
-    await user.click(within(sageGroup).getByRole('radio', { name: '둘째 친구 꽃' }));
-
-    expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'cap');
-    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'flower');
-    expect(screen.getByTestId('garden-accessory-peach-cap')).toBeInTheDocument();
-    expect(screen.getByTestId('garden-accessory-sage-flower')).toBeInTheDocument();
+    for (const id of ['peach', 'sage'] as const) {
+      const companion = screen.getByTestId(`garden-companion-${id}`);
+      const idle = screen.getByTestId(`garden-exact-character-${id}`);
+      const walk = screen.getByTestId(`garden-character-${id}-walk`);
+      const lift = screen.getByTestId(`garden-character-${id}-lift`);
+      expect(idle.querySelector('image')).toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
+      expect(walk.querySelector('image')).toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
+      expect(lift.querySelector('image')).toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
+      expect(walk).not.toHaveAttribute('viewBox', idle.getAttribute('viewBox'));
+      expect(lift).not.toHaveAttribute('viewBox', idle.getAttribute('viewBox'));
+      expect(companion.querySelector('[data-testid^="garden-accessory-"]')).not.toBeInTheDocument();
+    }
   });
 
   it('requires a continuous 500ms press, then stays picked up until release', () => {
@@ -383,7 +389,6 @@ describe('interactive companion garden characters', () => {
       <CompanionGardenView
         state={{ ...AVAILABLE, isAvailable: false }}
         accessories={DEFAULT_ACCESSORIES}
-        ownedAccessories={OWNED_ACCESSORIES}
       />,
     );
     act(() => vi.advanceTimersByTime(600));

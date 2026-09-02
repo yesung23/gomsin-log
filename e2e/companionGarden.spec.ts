@@ -19,9 +19,7 @@ async function openGarden(context: BrowserContext, page: Page) {
   const { unrouted } = await installMockBackend(context, GARDEN_SCENARIO);
   await page.goto('/diary/garden');
   await expect(page.locator('#root')).not.toBeEmpty();
-  await expect(page.getByRole('heading', { level: 1, name: '우리 정원' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('함께한 100일')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: '든든한 나무' })).toBeVisible();
+  await expect(page.getByText('함께한 100일')).toBeVisible({ timeout: 20_000 });
   return unrouted;
 }
 
@@ -44,6 +42,9 @@ async function longPressAndDrag(page: Page, companionTestId: string) {
   await expect(companion).toHaveAttribute('data-pressed', 'true');
   await page.waitForTimeout(520);
   await expect(companion).toHaveAttribute('data-lifted', 'true');
+  const liftedFrame = companion.locator('.garden-character-frame--lift');
+  expect(await liftedFrame.evaluate((node) => getComputedStyle(node).animationName)).toContain('garden-lift-frame');
+  expect(await companion.evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
 
   await page.mouse.move(targetX, targetY, { steps: 4 });
   await expect.poll(async () => Number(await companion.getAttribute('data-x'))).toBeGreaterThan(50);
@@ -77,8 +78,13 @@ test('full-screen garden uses the exact characters, hides persistent nav, wander
   await expect(sage).toHaveAttribute('data-lifted', 'false');
 
   await longPressAndDrag(page, 'garden-companion-peach');
-  const animationName = await peach.evaluate((node) => getComputedStyle(node).animationName);
-  expect(animationName === 'none' || animationName.includes('garden-lift-wriggle')).toBe(true);
+
+  const visualBox = await peach.locator('.garden-exact-character').boundingBox();
+  const hitBox = await peach.boundingBox();
+  expect(visualBox?.width ?? 0).toBeLessThanOrEqual(55);
+  expect(visualBox?.height ?? 0).toBeLessThanOrEqual(62);
+  expect(hitBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(hitBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
   // Keyboard users get a finite equivalent interaction.
   await sage.focus();
@@ -92,7 +98,7 @@ test('full-screen garden uses the exact characters, hides persistent nav, wander
   await context.close();
 });
 
-test('garden app bar opens Shop and full-screen geometry remains usable in landscape', async ({ browser }) => {
+test('quiet garden remains usable in landscape', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 812, height: 375 } });
   const page = await context.newPage();
   const unrouted = await openGarden(context, page);
@@ -121,9 +127,7 @@ test('garden app bar opens Shop and full-screen geometry remains usable in lands
   }));
   expect(mainMetrics.scrollHeight).toBeLessThanOrEqual(mainMetrics.clientHeight + 1);
 
-  await page.getByRole('button', { name: '상점 열기' }).click();
-  await page.waitForURL(/\/shop$/);
-  await expect(page.getByRole('heading', { level: 1, name: /상점/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: '상점 열기' })).toHaveCount(0);
   expect(unrouted).toEqual([]);
   await context.close();
 });
@@ -148,8 +152,9 @@ test('reduced-motion stops autonomous wandering and repeated squirm while preser
   await page.mouse.down();
   await page.waitForTimeout(520);
   await expect(peach).toHaveAttribute('data-lifted', 'true');
-  expect(await peach.evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
-  expect(await peach.evaluate((node) => getComputedStyle(node).transform)).not.toBe('none');
+  expect(await peach.locator('.garden-character-frame--walk').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  expect(await peach.locator('.garden-character-frame--lift').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  expect(await peach.evaluate((node) => getComputedStyle(node).filter)).not.toBe('none');
   await page.mouse.up();
   await expect(peach).toHaveAttribute('data-lifted', 'false');
 

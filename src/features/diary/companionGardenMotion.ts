@@ -15,10 +15,10 @@ export interface GardenBounds {
   maxY: number;
 }
 
-/** The rendered button footprint, kept beside the geometry that constrains it. */
+/** The reduced visible sprite footprint, kept beside the geometry that constrains it. */
 export const GARDEN_COMPANION_SIZE = {
-  width: 98,
-  height: 112,
+  width: 49,
+  height: 56,
   gap: 4,
 } as const;
 
@@ -36,7 +36,7 @@ const GARDEN_SEPARATION_EPSILON_PX = 0.1;
 
 /** Prevent the visual fiction of "walking" by one or two pixels. */
 export const GARDEN_MIN_MOVE_DISTANCE = 12;
-/** Keep the two 98px companions from occupying the same visual spot on phone widths. */
+/** Keep the two companions from occupying the same visual spot on phone widths. */
 export const GARDEN_MIN_COMPANION_DISTANCE = 16;
 
 const FALLBACK_ANCHORS: readonly GardenPoint[] = [

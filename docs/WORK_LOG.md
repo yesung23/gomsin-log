@@ -11118,3 +11118,103 @@ PRODUCTION
 - physical device: NOT APPLIED / UNVERIFIED
 
 ---
+
+## 2026-09-02 — Diary · Garden · Shop V2 Draft PR CI remediation
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Draft PR browser-contract alignment and deterministic full-suite closure
+- Previous Gate: Draft PR #92 opened; reviewed application commit locally green; remote checks pending
+- This Gate: branch-caused browser expectations corrected; unrelated date-expired Search fixture isolated; exact final CI rerun pending
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`, current implemented paper ownership path
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; free local collection direction unchanged
+- Engineering source checked: `AGENTS.md`, `docs/skills/feature-build.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: PR #92 checks/logs, exact branch diff, local full suite, live `origin/master`
+- Latest relevant Work Log checked: 2026-09-02 independent review and local integration gate immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex desktop multi-agent orchestration
+- Model: GPT-5 primary orchestrator; Luna browser-test worker; Terra independent reviewer; prior Sol security/state review remains PASS
+- Role: CI diagnosis, bounded test maintenance, independent verification, integration owner
+- PR: Draft PR #92
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `d5fdc0ed2d3b144ce0878f6f632dd0d2b7cbffe2`
+- New HEAD / Reviewed HEAD: browser contract `75c08708c5ea4f0bd788affa5b5dbdb2480cf967`; date fixture `4b8a8f94d8e8997275d2ca2c824103728e847745`; following report commit is docs-only
+
+CHANGED / REVIEWED
+- file: `e2e/realUsability.spec.ts`, `e2e/storyProfilePresentation.spec.ts`
+- function/component/migration: Diary-to-Shop route, free paper acquisition/application, Settings presentation regression
+- what changed/reviewed: replaced deleted labels/controls with the current `상점 열기`, `무료로 받기 → 적용하기 → 사용 중`, reload persistence, and Settings text-size-only contract
+- why: the first remote browser run correctly found stale tests after the approved paper-setting ownership move
+- file: `src/features/search/searchPage.test.tsx`
+- function/component/migration: upcoming leave fixture clock
+- what changed/reviewed: pins only the affected test to 2026-08-27 and restores real timers in a render-safe finally boundary
+- why: fixed vacation date 2026-09-01 expired on the 2026-09-02 UTC runner; product code is unchanged
+- file: `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_1011_diary-garden-shop-v2-ci-remediation_codex.md`
+- function/component/migration: factual CI remediation record
+- what changed/reviewed: records remote failures, bounded fixes, review results, local proof, and remaining exact-HEAD CI gate
+- why: keep the mandatory ledger and Control Tower aligned with repository reality
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged by CI remediation; no new feature, payment, or ownership rule
+- Production: no master merge/deploy, Supabase mutation, TestFlight/App Store action, or physical-device install
+
+VERIFICATION
+- command: `npx playwright test e2e/realUsability.spec.ts e2e/storyProfilePresentation.spec.ts`
+- PASS: 16/16; proves the corrected browser flows locally
+- command: GitHub `Real-browser creator/partner matrix` on `75c0870`
+- PASS: 5m44s; proves the production-bundle browser matrix, including the four former failures, is green on that commit
+- command: `npm run test -- src/features/search/searchPage.test.tsx`
+- PASS: 27/27 after deterministic clock isolation
+- command: `npm run test`
+- PASS: 279 files / 3,918 tests after deterministic clock isolation
+- command: `npm run typecheck`; `npm run lint`; `git diff --check`
+- PASS: TypeScript, ESLint, and whitespace integrity are clean
+- command: Terra review of browser delta and final clock-isolation delta
+- PASS: no Critical/Important; initial timer-leak HOLD was fixed and re-reviewed PASS
+
+REVIEW IMPACT
+- DELTA: tests/docs only; application/security semantics remain covered by the earlier Sol/Terra PASS on `8d463c1`
+- whether an earlier review is stale: NO for application semantics; browser/date-test deltas have their own Terra PASS
+
+BLOCKERS
+- code: none known locally
+- environment: exact final documentation-inclusive HEAD CI is pending; physical touch/accessibility remains UNVERIFIED
+- external/manual: external character-rights judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: browser contract and deterministic Search fixture are committed/pushed and locally green; final factual docs are prepared for push
+
+REMAINING
+- wait for all required checks on the exact final Draft PR HEAD
+- do not merge/deploy; physical-device and external-rights gates remain separate
+
+NEXT ACTION
+- next owner: Codex primary orchestrator, then repository maintainer/user
+- tool/model: GitHub exact-HEAD CI; no new implementation model unless CI finds a branch-caused failure
+- 기준 SHA: documentation-inclusive HEAD following `4b8a8f94d8e8997275d2ca2c824103728e847745`
+- exact next task: push report commit, confirm every required check, release the claim, and hand off the Draft PR without promotion
+
+DO NOT ADVANCE UNTIL
+- exact final Draft PR HEAD required checks are green
+- repository approval is explicit
+- production/manual gates are separately satisfied or consciously deferred
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel: PR PREVIEW ONLY / production NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: NOT APPLIED / UNVERIFIED
+
+---

@@ -112,3 +112,68 @@ Acceptance criteria:
 3. Update canonical/current-state documentation to reflect only implemented behavior and explicitly state no payment, server inventory, Supabase, or production mutation.
 4. Write the mandatory Work Log and Control Tower report with exact commands/results, remaining IP/provenance risk, rollback, and production status.
 5. Commit documentation separately. Do not edit `control-tower/Now.md` manually.
+
+## 2026-09-02 User-Approved Refinement
+
+This section supersedes only the presentation and feed details that conflict with the user's
+2026-09-02 device feedback. The privacy, exact-original, no-payment, local-collection, lazy-loading,
+and reduced-motion contracts above remain in force.
+
+### Direction Check
+
+- Product source checked: latest explicit user request, `docs/V4_AS_BUILT.md`, this plan, and the current repository paths.
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no customer, monetization, storage, or AI-role change.
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, and `docs/kiro/AI_HANDOFF.md`.
+- Current-state checked: `docs/CURRENT_STATE.md`, `scripts/agent/session-start.sh`, and branch HEAD `3373ee2`.
+- Latest relevant Work Log checked: the 2026-09-02 physical-iPhone install record.
+- Does this task conflict with canonical direction? NO. The user's newer instruction intentionally replaces the garden's tree/copy-heavy presentation and the split home/story feed presentation. Core privacy and exact-original behavior remain unchanged.
+
+### Refinement A: Quiet white garden with original-character motion
+
+2026-09-02 Control Tower accessibility amendment: a real dark-mode capture showed that an isolated
+pure-white stage becomes a high-luminance band against the surrounding dark paper. The user's newer
+instruction to make every surface more natural and accessible therefore supersedes only the
+"white in dark mode" detail below. Light mode remains white; dark mode uses the corresponding semantic
+elevated surface. This also removes a direct hex value without changing interaction or data semantics.
+
+1. Keep only the back control and the together-day copy as garden text. Remove the tree, ground strip,
+   stage title/copy, decoration controls, helper copy, footer, and shop action from the garden surface.
+2. Use a white garden canvas in light mode and the corresponding semantic elevated surface in dark mode,
+   while keeping controls and focus indicators readable. Preserve safe areas and a minimum 44×44 CSS px
+   control target.
+3. Reduce each visible character to about half the former size and update physical bounds/collision
+   geometry to match; do not merely scale the bitmap while retaining stale geometry.
+4. Use pose frames cropped from the approved `paper-pair-v1.webp` sheet for walking and held/flailing
+   motion. Do not redraw the characters. Animate frame opacity/transform only, and stop automatic or
+   repeated motion under `prefers-reduced-motion`.
+5. Keep long-press, pointer-follow, release, cancel, and keyboard pickup alternatives. Held animation
+   must come from visibly different limb poses rather than shaking the entire control.
+6. Replace synthetic cap/bow/scarf/flower drawings with crops of objects already present in the approved
+   character sheet wherever a usable original object exists. Preserve local ownership safely through a
+   versioned mapping; never delete an already owned selection silently.
+
+### Refinement B: Visible spinning draw and continuous paper texture
+
+1. Keep the existing local, free, once-per-day, duplicate-free draw semantics.
+2. Add a visible roulette/spinner phase before revealing the already selected result. Disable repeat
+   activation while spinning and announce the result once through the existing live region.
+3. Under reduced motion, shorten or remove repeated rotation while preserving clear progress and the
+   same draw result.
+4. Apply the active paper texture layers to sticky top surfaces, including the Home logo/bookmark/call
+   row and shared AppBar surfaces, so a solid `var(--paper)` fill does not mask the selected texture.
+
+### Refinement C: Partner-only Home feed and truthful on-device AI status
+
+1. Home's seven-day feed shows records written by the currently active partner and never the viewer's
+   own records. Partner records remain privacy-filtered, readable on this device, and linked to the exact
+   original record. A record may also remain in the unread Story surface; the user's explicit Home request
+   supersedes the previous no-duplication presentation rule.
+2. Do not change Supabase, RLS, couple membership, record visibility, or remote state unless repository
+   evidence proves the display-layer fix is insufficient.
+3. Keep deterministic summary lines as the immediate fallback. On-device AI remains a user-requested
+   editing pass, never a hidden selector or importance judge.
+4. Distinguish corpus-not-eligible, plugin/device/model/locale unavailable, timeout, and rejected-output
+   outcomes without logging diary content. The UI must show a short actionable reason instead of a
+   generic silent fallback, while preserving the fail-closed privacy boundary.
+5. Verify native compilation with Xcode 27 Beta and, when the physical iPhone is connected and its model
+   is ready, verify the actual device path. Otherwise report runtime model execution as UNVERIFIED.

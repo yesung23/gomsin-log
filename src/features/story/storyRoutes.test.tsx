@@ -3,7 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { StoryRoute } from '@/features/story/StoryRoute';
-import type { CoupleHighlight, DailyRecord } from '@/types';
+import type { CoupleHighlight, DailyRecord, TalkAboutMark } from '@/types';
+import { toast } from 'sonner';
 
 const mockNavigate = vi.hoisted(() => vi.fn());
 vi.mock('react-router-dom', async () => {
@@ -34,13 +35,24 @@ const acknowledge = vi.fn(() => true);
 let surface: DailyRecord[] = [];
 let records: DailyRecord[] = [];
 let coupleHighlights: CoupleHighlight[] = [];
+let talkAboutMarks: TalkAboutMark[] = [];
+let online = true;
+
+vi.mock('@/lib/useOnlineStatus', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
+  return { ...actual, useOnlineStatus: () => online };
+});
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), warning: vi.fn() },
+}));
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: {
       records,
       coupleHighlights,
-      talkAboutMarks: [],
+      talkAboutMarks,
       profile: {
         id: 'me', role: 'soldier',
         couple: { connected: true, coupleId: 'c1', partnerName: '춘향' },
@@ -80,6 +92,10 @@ beforeEach(() => {
   surface = [];
   records = [];
   coupleHighlights = [];
+  talkAboutMarks = [];
+  online = true;
+  markTalkAbout.mockResolvedValue({ ok: true });
+  unmarkTalkAbout.mockResolvedValue({ ok: true });
 });
 
 describe('/story/partner', () => {
@@ -134,6 +150,103 @@ describe('/story/partner', () => {
     await waitFor(() => expect(markTalkAbout).toHaveBeenCalledWith('a'));
   });
 
+  it('상대만 표시한 책갈피는 내 표시를 추가하고 상대 표시를 지우려 하지 않는다', async () => {
+    surface = [record({ id: 'a' })];
+    records = surface;
+    talkAboutMarks = [{
+      id: 'partner-mark', recordId: 'a', coupleId: 'c1', actorUserId: 'partner-id',
+      createdAt: '2026-08-22T10:00:00.000Z', isCompleted: false,
+    }];
+    open('/story/partner');
+
+    const action = screen.getByRole('button', {
+      name: '춘향님이 표시했어요. 나도 이따 이야기하기',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(action);
+    await waitFor(() => expect(markTalkAbout).toHaveBeenCalledWith('a'));
+    expect(unmarkTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('둘 다 표시한 책갈피는 내 표시만 해제한다', async () => {
+    surface = [record({ id: 'a' })];
+    records = surface;
+    talkAboutMarks = [
+      {
+        id: 'partner-mark', recordId: 'a', coupleId: 'c1', actorUserId: 'partner-id',
+        createdAt: '2026-08-22T10:00:00.000Z', isCompleted: false,
+      },
+      {
+        id: 'my-mark', recordId: 'a', coupleId: 'c1', actorUserId: 'me',
+        createdAt: '2026-08-22T10:01:00.000Z', isCompleted: false,
+      },
+    ];
+    open('/story/partner');
+
+    const action = screen.getByRole('button', {
+      name: '춘향님도 표시했어요. 이따 이야기하기 표시 해제',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(action);
+    await waitFor(() => expect(unmarkTalkAbout).toHaveBeenCalledWith('a'));
+    expect(markTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('책갈피 저장을 single-flight하고 처리 중에는 다시 누를 수 없다', async () => {
+    let finish!: (value: { ok: boolean }) => void;
+    markTalkAbout.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    surface = [record({ id: 'a' })];
+    records = surface;
+    open('/story/partner');
+
+    const action = screen.getByRole('button', { name: '이따 이야기하기' });
+    await userEvent.click(action);
+    action.click();
+
+    expect(markTalkAbout).toHaveBeenCalledTimes(1);
+    expect(action).toBeDisabled();
+    finish({ ok: true });
+    await vi.waitFor(() => expect(action).not.toBeDisabled());
+  });
+
+  it('오프라인에서는 책갈피를 바꾸지 않고 이유를 읽어 준다', () => {
+    online = false;
+    surface = [record({ id: 'a' })];
+    records = surface;
+    open('/story/partner');
+
+    expect(screen.getByRole('button', { name: /연결되면 표시할 수 있어요/ })).toBeDisabled();
+    expect(markTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('예상 밖 저장 거절도 처리하고 책갈피를 다시 사용할 수 있게 한다', async () => {
+    markTalkAbout.mockRejectedValueOnce(new Error('network exploded'));
+    surface = [record({ id: 'a' })];
+    records = surface;
+    open('/story/partner');
+
+    await userEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
+
+    await vi.waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('책갈피를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.');
+    });
+    expect(screen.getByRole('button', { name: '이따 이야기하기' })).not.toBeDisabled();
+  });
+
+  it('저장 후 재조회만 늦으면 재시도를 유도하지 않고 지연을 알린다', async () => {
+    markTalkAbout.mockResolvedValueOnce({ ok: true, syncPending: true });
+    surface = [record({ id: 'a' })];
+    records = surface;
+    open('/story/partner');
+
+    await userEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(
+      expect.stringContaining('저장은 됐지만 화면 반영이 늦어지고 있어요'),
+    ));
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it('사진 스토리에서 정확한 원본을 하이라이트 편집기로 가져온다', async () => {
     surface = [record({
       id: 'photo-story',
@@ -165,6 +278,14 @@ describe('/story/mine', () => {
     open('/story/mine');
     await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     expect(screen.queryByTestId('story-acknowledge')).toBeNull();
+  });
+
+  it('내 비공개 기록에는 커플 이야기 책갈피를 노출하지 않는다', () => {
+    records = [record({ id: 'private-mine', userId: 'me', isPrivate: true, log: '나만 보는 기록' })];
+    open('/story/mine');
+
+    expect(screen.getByText('나만 보는 기록')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /이따 이야기하기/ })).not.toBeInTheDocument();
   });
 });
 

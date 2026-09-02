@@ -16,30 +16,44 @@ import { cn } from '@/lib/utils';
  */
 export function Bookmark({
   marked,
+  partnerMarked = false,
+  partnerName = '상대',
   onToggle,
   disabled = false,
   disabledReason,
   className,
 }: {
+  /** The viewer's own mark. This alone controls aria-pressed and removal. */
   marked: boolean;
+  /** A separate partner mark that the viewer is not authorized to remove. */
+  partnerMarked?: boolean;
+  partnerName?: string;
   onToggle: () => void;
   disabled?: boolean;
   disabledReason?: string;
   className?: string;
 }) {
-  const label = marked ? '이따 이야기하기 표시 해제' : '이따 이야기하기';
+  const namedPartner = partnerName.endsWith('님') ? partnerName : `${partnerName}님`;
+  const label = partnerMarked
+    ? marked
+      ? `${namedPartner}도 표시했어요. 이따 이야기하기 표시 해제`
+      : `${namedPartner}이 표시했어요. 나도 이따 이야기하기`
+    : marked
+      ? '이따 이야기하기 표시 해제'
+      : '이따 이야기하기';
   return (
     <button
       type="button"
       onClick={onToggle}
       disabled={disabled}
       aria-pressed={marked}
+      data-partner-marked={partnerMarked || undefined}
       aria-label={disabled && disabledReason ? `${label} — ${disabledReason}` : label}
       title={disabled ? disabledReason : undefined}
       className={cn(
         'press-response inline-flex min-h-11 min-w-11 items-center justify-center',
         'rounded-control transition-colors duration-[120ms]',
-        marked ? 'text-coral-strong' : 'text-muted-foreground hover:text-foreground',
+        marked || partnerMarked ? 'text-coral-strong' : 'text-muted-foreground hover:text-foreground',
         disabled && 'opacity-50',
         className,
       )}

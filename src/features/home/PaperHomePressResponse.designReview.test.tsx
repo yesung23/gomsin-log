@@ -72,7 +72,6 @@ describe('PaperHome immediate press feedback', () => {
     const currentNeed = screen.getByRole('region', { name: '지금 가장 필요한 것' });
     const actions = [
       screen.getByRole('button', { name: '이야기할 것' }),
-      screen.getByRole('button', { name: '통화 모드' }),
       screen.getByRole('button', { name: '내 스토리' }),
       screen.getByRole('button', { name: '기록 남기기' }),
       screen.getByRole('button', { name: '예성의 스토리' }),

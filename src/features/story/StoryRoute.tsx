@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
@@ -11,6 +11,8 @@ import { projectStory } from '@/features/story/storyProjection';
 import { StoryViewer, type StoryMode } from '@/features/story/StoryViewer';
 import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
 import { useOnDeviceDailySummary } from '@/lib/dailySummary/useOnDeviceDailySummary';
+import { getTalkAboutActorState, type TalkAboutActorState } from '@/lib/talkAboutList';
+import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
 /**
  * 스토리로 들어가는 세 개의 문.
@@ -39,6 +41,8 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { state, sharedSyncStatus, setHighlightedRecordId, markTalkAbout, unmarkTalkAbout } = useStore();
   const isOffline = !useOnlineStatus();
+  const bookmarkMutationRef = useRef<string | null>(null);
+  const [bookmarkMutationRecordId, setBookmarkMutationRecordId] = useState<string | null>(null);
 
   const { profile } = state;
   const [aiRequestVersion, setAiRequestVersion] = useState(0);
@@ -155,12 +159,14 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     return multiDay ? '놓친 하루' : '오늘';
   }, [highlightId, mode, dateParam, records, state.coupleHighlights, todayStr]);
 
-  const markedRecordIds = useMemo(
-    () => new Set(
-      (state.talkAboutMarks ?? []).filter((mark) => !mark.isCompleted).map((mark) => mark.recordId),
-    ),
-    [state.talkAboutMarks],
-  );
+  const talkAboutStateByRecordId = useMemo(() => {
+    const marks = state.talkAboutMarks ?? [];
+    const states = new Map<string, TalkAboutActorState>();
+    for (const recordId of new Set(marks.map((mark) => mark.recordId))) {
+      states.set(recordId, getTalkAboutActorState(marks, recordId, profile.id));
+    }
+    return states;
+  }, [state.talkAboutMarks, profile.id]);
 
   const close = useCallback(() => navigate(-1), [navigate]);
 
@@ -171,7 +177,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
     */
     void recordProductEvent({ kind: 'briefing_to_original', screen: 'story', subjectId: recordId });
     setHighlightedRecordId(recordId);
-    navigate(`/record?record=${recordId}`);
+    navigate(`/record?record=${encodeURIComponent(recordId)}`);
   }, [navigate, setHighlightedRecordId]);
 
   const addToHighlight = useCallback((recordId: string) => {
@@ -187,9 +193,20 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
 
   const toggleBookmark = useCallback((recordId: string, nextMarked: boolean) => {
     if (isOffline) { toast.error(OFFLINE_READONLY_MESSAGE); return; }
+    if (bookmarkMutationRef.current) return;
+    bookmarkMutationRef.current = recordId;
+    setBookmarkMutationRecordId(recordId);
     void (async () => {
-      const result = nextMarked ? await markTalkAbout(recordId) : await unmarkTalkAbout(recordId);
-      if (!result.ok) toast.error(result.error || '처리하지 못했어요.');
+      try {
+        const result = nextMarked ? await markTalkAbout(recordId) : await unmarkTalkAbout(recordId);
+        if (!result.ok) toast.error(result.error || '책갈피를 바꾸지 못했어요.');
+        else if (result.syncPending) toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+      } catch {
+        toast.error('책갈피를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.');
+      } finally {
+        bookmarkMutationRef.current = null;
+        setBookmarkMutationRecordId(null);
+      }
     })();
   }, [isOffline, markTalkAbout, unmarkTalkAbout]);
 
@@ -241,7 +258,8 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       mode={mode}
       title={title}
       coupleId={profile.couple.coupleId || undefined}
-      markedRecordIds={markedRecordIds}
+      talkAboutStateByRecordId={talkAboutStateByRecordId}
+      bookmarkPartnerName={profile.couple.partnerName || '상대'}
       onClose={close}
       onOpenRecord={openRecord}
       onAddToHighlight={mode === 'highlight' ? undefined : addToHighlight}
@@ -251,7 +269,11 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       coverRefinementReason={mode === 'today' ? aiSummaryReason : undefined}
       onToggleBookmark={mode === 'archive' || mode === 'highlight' ? undefined : toggleBookmark}
       onAcknowledge={mode === 'today' ? confirm : undefined}
-      bookmarkDisabledReason={isOffline ? '연결되면 표시할 수 있어요' : undefined}
+      bookmarkDisabledReason={isOffline
+        ? '연결되면 표시할 수 있어요'
+        : bookmarkMutationRecordId !== null
+          ? '책갈피를 바꾸는 중이에요'
+          : undefined}
       acknowledgeDisabledReason={
         sharedSyncStatus === 'unavailable' ? '지금은 확인을 저장할 수 없어요' : undefined
       }

@@ -1,19 +1,27 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, MoreHorizontal, Phone, Plus } from 'lucide-react';
+import { Bookmark as BookmarkIcon, MoreHorizontal, Phone, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { usePartnerDay } from '@/lib/usePartnerDay';
 import { localToday } from '@/lib/cycle';
 import { isRecordContentAvailable } from '@/lib/recordAvailability';
 import { parseLocalDate, toLocalDateString } from '@/lib/utils';
-import { InkCircle, PenFace } from '@/components/paper';
+import { Bookmark, InkCircle, PenFace } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { usePartnerCareNote } from '@/lib/usePartnerCareNote';
 import { selectOnThisDay, onThisDayLabel } from '@/lib/onThisDay';
 import { selectHomeFocus } from '@/features/home/homeFocus';
 import type { DailyRecord } from '@/types';
+import {
+  buildTalkAboutTopics,
+  getTalkAboutActorState,
+  type TalkAboutActorState,
+} from '@/lib/talkAboutList';
+import { OFFLINE_READONLY_MESSAGE, useOnlineStatus } from '@/lib/useOnlineStatus';
+import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
 /**
  * 홈 — 노트에 그린 인스타그램.
@@ -65,6 +73,9 @@ export function PaperHome() {
   const navigate = useNavigate();
   const { state, coupleLifecycle, markTalkAbout, unmarkTalkAbout } = useStore();
   const { profile, talkAboutMarks } = state;
+  const isOnline = useOnlineStatus();
+  const pendingTalkAboutRef = useRef<string | null>(null);
+  const [pendingTalkAboutRecordId, setPendingTalkAboutRecordId] = useState<string | null>(null);
   const todayStr = localToday();
 
   const partnerDay = usePartnerDay();
@@ -120,10 +131,46 @@ export function PaperHome() {
     [memoryRecords, todayStr],
   );
 
-  const markedIds = useMemo(
-    () => new Set((talkAboutMarks ?? []).map((mark) => mark.recordId)),
-    [talkAboutMarks],
+  const talkTopics = useMemo(
+    () => buildTalkAboutTopics(talkAboutMarks ?? [], records, {
+      userId: profile.id,
+      role: profile.role,
+    }),
+    [talkAboutMarks, records, profile.id, profile.role],
   );
+  const talkAboutStateByRecordId = useMemo(() => {
+    const marks = talkAboutMarks ?? [];
+    const states = new Map<string, TalkAboutActorState>();
+    for (const topic of talkTopics) {
+      states.set(topic.recordId, getTalkAboutActorState(marks, topic.recordId, profile.id));
+    }
+    return states;
+  }, [talkAboutMarks, talkTopics, profile.id]);
+
+  const toggleTalkAbout = useCallback((recordId: string, actorState: TalkAboutActorState) => {
+    if (pendingTalkAboutRef.current) return;
+    if (!isOnline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+
+    pendingTalkAboutRef.current = recordId;
+    setPendingTalkAboutRecordId(recordId);
+    void (async () => {
+      try {
+        const result = actorState === 'mine' || actorState === 'both'
+          ? await unmarkTalkAbout(recordId)
+          : await markTalkAbout(recordId);
+        if (!result.ok) toast.error(result.error || '책갈피를 바꾸지 못했어요.');
+        else if (result.syncPending) toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+      } catch {
+        toast.error('책갈피를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.');
+      } finally {
+        pendingTalkAboutRef.current = null;
+        setPendingTalkAboutRecordId(null);
+      }
+    })();
+  }, [isOnline, markTalkAbout, unmarkTalkAbout]);
 
   const partnerName = profile.couple.partnerName || '상대';
   /*
@@ -136,7 +183,7 @@ export function PaperHome() {
     userId: profile.id,
   });
   const hasUnseen = partnerDay.surface.length > 0;
-  const hasMarks = (talkAboutMarks?.length ?? 0) > 0;
+  const hasMarks = talkTopics.length > 0;
   const hasOwnRecordToday = records.some((record) => (
     record.date === todayStr
     && isRecordContentAvailable(record)
@@ -179,7 +226,7 @@ export function PaperHome() {
             onClick={() => navigate('/saved')}
             className="press-response relative flex h-11 w-11 items-center justify-center"
           >
-            <Bookmark size={22} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
+            <BookmarkIcon size={22} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
             {/* 인스타의 빨간 점과 같은 자리. 개수를 적지 않는다 -- 개수는 부채다. */}
             {hasMarks ? (
               <span
@@ -189,14 +236,16 @@ export function PaperHome() {
               />
             ) : null}
           </button>
-          <button
-            type="button"
-            aria-label="통화 모드"
-            onClick={() => navigate('/call')}
-            className="press-response flex h-11 w-11 items-center justify-center"
-          >
-            <Phone size={21} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
-          </button>
+          {hasMarks ? (
+            <button
+              type="button"
+              aria-label="통화 모드"
+              onClick={() => navigate('/call')}
+              className="press-response flex h-11 w-11 items-center justify-center"
+            >
+              <Phone size={21} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -337,11 +386,18 @@ export function PaperHome() {
             partnerName={partnerName}
             todayStr={todayStr}
             onOpen={() => navigate(`/record?record=${encodeURIComponent(record.id)}`)}
-            marked={markedIds.has(record.id)}
-            onToggleTalkAbout={() => {
-              if (markedIds.has(record.id)) void unmarkTalkAbout(record.id);
-              else void markTalkAbout(record.id);
-            }}
+            talkAboutState={talkAboutStateByRecordId.get(record.id) ?? 'none'}
+            talkAboutBusy={pendingTalkAboutRecordId !== null}
+            talkAboutDisabled={!isOnline || pendingTalkAboutRecordId !== null}
+            talkAboutDisabledReason={!isOnline
+              ? OFFLINE_READONLY_MESSAGE
+              : pendingTalkAboutRecordId !== null
+                ? '다른 책갈피를 바꾸는 중이에요.'
+                : undefined}
+            onToggleTalkAbout={() => toggleTalkAbout(
+              record.id,
+              talkAboutStateByRecordId.get(record.id) ?? 'none',
+            )}
           />
         ))
       )}
@@ -363,7 +419,10 @@ function Post({
   partnerName,
   todayStr,
   onOpen,
-  marked,
+  talkAboutState,
+  talkAboutBusy,
+  talkAboutDisabled,
+  talkAboutDisabledReason,
   onToggleTalkAbout,
 }: {
   record: DailyRecord;
@@ -373,14 +432,22 @@ function Post({
   partnerName: string;
   todayStr: string;
   onOpen: () => void;
-  marked: boolean;
+  talkAboutState: TalkAboutActorState;
+  talkAboutBusy: boolean;
+  talkAboutDisabled: boolean;
+  talkAboutDisabledReason?: string;
   onToggleTalkAbout: () => void;
 }) {
   const author = mine ? myName : partnerName;
   const hasMedia = (record.attachments?.length ?? 0) > 0;
+  const marked = talkAboutState === 'mine' || talkAboutState === 'both';
+  const partnerMarked = talkAboutState === 'partner_only' || talkAboutState === 'both';
 
   return (
-    <article className={index === 0 ? 'pb-2 pt-3' : 'pb-2'}>
+    <article
+      aria-busy={talkAboutBusy || undefined}
+      className={index === 0 ? 'pb-2 pt-3' : 'pb-2'}
+    >
       {/*
         작성자 이름은 홈 상단과 스토리 레일에 이미 있다. 포스트마다 반복하지 않고 사진부터
         보여 준다. 사진이 없으면 **글이 그 자리를 차지한다.**
@@ -457,21 +524,14 @@ function Post({
         >
           <MoreHorizontal size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
         </button>
-        <button
-          type="button"
-          aria-label={marked ? '이따 이야기하기 취소' : '이따 이야기하기'}
-          aria-pressed={marked}
-          onClick={onToggleTalkAbout}
-          className="press-response flex h-11 w-11 items-center justify-center"
-        >
-          <Bookmark
-            size={21}
-            className="pen-icon"
-            color="var(--ink)"
-            fill={marked ? 'var(--ink)' : 'none'}
-            aria-hidden="true"
-          />
-        </button>
+        <Bookmark
+          marked={marked}
+          partnerMarked={partnerMarked}
+          partnerName={partnerName}
+          onToggle={onToggleTalkAbout}
+          disabled={talkAboutDisabled}
+          disabledReason={talkAboutDisabledReason}
+        />
       </div>
     </article>
   );

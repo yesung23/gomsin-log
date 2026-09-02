@@ -71,6 +71,19 @@ export type RecordMutationResult =
   | { ok: true }
   | { ok: false; reason: RecordMutationReason; error: string };
 
+/**
+ * A conversation-mark write and its immediate authoritative reconciliation.
+ *
+ * `syncPending` means the server accepted the mutation but the follow-up read
+ * could not yet prove the screen is current. It must never be presented as a
+ * plain failure (which invites a duplicate retry) or a fully reflected success.
+ */
+export interface TalkAboutMutationResult {
+  ok: boolean;
+  error?: string;
+  syncPending?: boolean;
+}
+
 export interface StoreContextType {
   state: AppState;
   isReady: boolean;
@@ -216,9 +229,9 @@ export interface StoreContextType {
    * act on the caller's own flag; `resolveTalkAbout` clears the topic for
    * both partners once the conversation has actually happened.
    */
-  markTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
-  unmarkTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
-  resolveTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
+  markTalkAbout: (recordId: string) => Promise<TalkAboutMutationResult>;
+  unmarkTalkAbout: (recordId: string) => Promise<TalkAboutMutationResult>;
+  resolveTalkAbout: (recordId: string) => Promise<TalkAboutMutationResult>;
   setAuthenticatedUser: (user: AuthUser | null) => void;
   /**
    * `role` selects which of the two per-role layouts is written. It defaults to

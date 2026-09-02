@@ -8,6 +8,7 @@ import type {
   DailySummaryRefinementReason,
   DailySummaryRefinementStatus,
 } from '@/lib/dailySummary/contract';
+import type { TalkAboutActorState } from '@/lib/talkAboutList';
 
 /**
  * 스토리 뷰어 — 상대의 하루를 하나씩 넘겨 본다.
@@ -62,7 +63,8 @@ export interface StoryViewerProps {
   coverRefinementReason?: DailySummaryRefinementReason;
   /** 책갈피 토글. `archive`에서는 넘기지 않는다. */
   onToggleBookmark?: (recordId: string, next: boolean) => void;
-  markedRecordIds?: ReadonlySet<string>;
+  talkAboutStateByRecordId?: ReadonlyMap<string, TalkAboutActorState>;
+  bookmarkPartnerName?: string;
   /** 닫는 카드의 `다 읽었어요`. `today`에서만 온다. */
   onAcknowledge?: () => void;
   acknowledgeDisabledReason?: string;
@@ -89,7 +91,8 @@ export function StoryViewer({
   coverRefinementStatus = 'idle',
   coverRefinementReason,
   onToggleBookmark,
-  markedRecordIds,
+  talkAboutStateByRecordId,
+  bookmarkPartnerName,
   onAcknowledge,
   acknowledgeDisabledReason,
   bookmarkDisabledReason,
@@ -165,7 +168,11 @@ export function StoryViewer({
 
   if (!card) return null;
 
-  const marked = card.kind === 'moment' && markedRecordIds?.has(card.record.id) === true;
+  const talkAboutState = card.kind === 'moment'
+    ? talkAboutStateByRecordId?.get(card.record.id) ?? 'none'
+    : 'none';
+  const marked = talkAboutState === 'mine' || talkAboutState === 'both';
+  const partnerMarked = talkAboutState === 'partner_only' || talkAboutState === 'both';
 
   return (
     <div
@@ -243,9 +250,15 @@ export function StoryViewer({
               className={cn('mt-3 flex items-center gap-1 border-t border-border pt-2 transition-opacity', bare && 'opacity-0')}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              {mode !== 'archive' && mode !== 'highlight' && onToggleBookmark ? (
+              {mode !== 'archive'
+                && mode !== 'highlight'
+                && !card.record.isPrivate
+                && !card.record.contentUnavailable
+                && onToggleBookmark ? (
                 <Bookmark
                   marked={marked}
+                  partnerMarked={partnerMarked}
+                  partnerName={bookmarkPartnerName}
                   onToggle={() => onToggleBookmark(card.record.id, !marked)}
                   disabled={Boolean(bookmarkDisabledReason)}
                   disabledReason={bookmarkDisabledReason}

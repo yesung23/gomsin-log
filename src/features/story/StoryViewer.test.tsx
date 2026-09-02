@@ -160,9 +160,41 @@ describe('확인은 읽기의 끝에서만 일어난다', () => {
 describe('책갈피', () => {
   it('오늘 스토리에서는 붙일 수 있다', async () => {
     const onToggleBookmark = vi.fn();
-    view({ onToggleBookmark, markedRecordIds: new Set<string>() });
+    view({ onToggleBookmark, talkAboutStateByRecordId: new Map([['a', 'none']]) });
     await userEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
     expect(onToggleBookmark).toHaveBeenCalledWith('a', true);
+  });
+
+  it('상대만 표시했으면 내 표시는 눌리지 않고 나도 표시하는 동작을 준다', async () => {
+    const onToggleBookmark = vi.fn();
+    view({
+      onToggleBookmark,
+      bookmarkPartnerName: '몽룡',
+      talkAboutStateByRecordId: new Map([['a', 'partner_only']]),
+    });
+
+    const action = screen.getByRole('button', {
+      name: '몽룡님이 표시했어요. 나도 이따 이야기하기',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(action);
+    expect(onToggleBookmark).toHaveBeenCalledWith('a', true);
+  });
+
+  it('둘 다 표시했으면 상대도 표시했음을 말하고 내 표시만 빼는 동작을 준다', async () => {
+    const onToggleBookmark = vi.fn();
+    view({
+      onToggleBookmark,
+      bookmarkPartnerName: '몽룡',
+      talkAboutStateByRecordId: new Map([['a', 'both']]),
+    });
+
+    const action = screen.getByRole('button', {
+      name: '몽룡님도 표시했어요. 이따 이야기하기 표시 해제',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(action);
+    expect(onToggleBookmark).toHaveBeenCalledWith('a', false);
   });
 
   it('보관 모드에서는 사라진다', () => {

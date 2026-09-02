@@ -4,7 +4,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { PaperHome } from '@/features/home/PaperHome';
 import { localToday } from '@/lib/cycle';
 import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
-import type { DailyRecord } from '@/types';
+import type { DailyRecord, TalkAboutMark } from '@/types';
+import { toast } from 'sonner';
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -13,17 +14,28 @@ vi.mock('react-router-dom', async () => {
 });
 
 let records: DailyRecord[] = [];
+let talkAboutMarks: TalkAboutMark[] = [];
 let partnerSurface: DailyRecord[] = [];
 let partnerUserId: string | undefined = 'partner';
 let coupleLifecycle: CoupleLifecycle = 'connected';
 const markTalkAbout = vi.fn();
 const unmarkTalkAbout = vi.fn();
+let online = true;
+
+vi.mock('@/lib/useOnlineStatus', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
+  return { ...actual, useOnlineStatus: () => online };
+});
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), warning: vi.fn() },
+}));
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: {
       records,
-      talkAboutMarks: [],
+      talkAboutMarks,
       profile: {
         id: 'me',
         role: 'soldier',
@@ -76,6 +88,10 @@ beforeEach(() => {
   partnerSurface = [];
   partnerUserId = 'partner';
   coupleLifecycle = 'connected';
+  talkAboutMarks = [];
+  online = true;
+  markTalkAbout.mockResolvedValue({ ok: true });
+  unmarkTalkAbout.mockResolvedValue({ ok: true });
   records = [{
     id: 'record-1',
     userId: 'partner',
@@ -284,5 +300,100 @@ describe('홈 포스트 읽기 순서', () => {
     const header = screen.getByTestId('home-sticky-header');
     expect(header).toHaveClass('paper-texture-layer');
     expect(header).not.toHaveStyle({ background: 'var(--paper)' });
+  });
+});
+
+describe('홈의 actor-aware 이야기 표시', () => {
+  const partnerMark = (overrides: Partial<TalkAboutMark> = {}): TalkAboutMark => ({
+    id: 'partner-mark',
+    recordId: 'record-1',
+    coupleId: 'couple-1',
+    actorUserId: 'partner',
+    createdAt: '2026-09-02T20:00:00.000Z',
+    isCompleted: false,
+    ...overrides,
+  });
+
+  it('hides the call-mode entry when there is no eligible topic', () => {
+    view();
+
+    expect(screen.queryByRole('button', { name: '통화 모드' })).not.toBeInTheDocument();
+  });
+
+  it('invites me to add my mark when only the partner marked the record', () => {
+    talkAboutMarks = [partnerMark()];
+    view();
+
+    const action = screen.getByRole('button', {
+      name: '예성님이 표시했어요. 나도 이따 이야기하기',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(action);
+    expect(markTalkAbout).toHaveBeenCalledWith('record-1');
+    expect(unmarkTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('attributes a partner mark while removing only my side when both marked it', () => {
+    talkAboutMarks = [
+      partnerMark(),
+      partnerMark({ id: 'my-mark', actorUserId: 'me' }),
+    ];
+    view();
+
+    const action = screen.getByRole('button', {
+      name: '예성님도 표시했어요. 이따 이야기하기 표시 해제',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(action);
+    expect(unmarkTalkAbout).toHaveBeenCalledWith('record-1');
+    expect(markTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('single-flights the bookmark mutation and disables the control until refresh settles', async () => {
+    let finish!: (value: { ok: boolean }) => void;
+    markTalkAbout.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    view();
+
+    const action = screen.getByRole('button', { name: '이따 이야기하기' });
+    fireEvent.click(action);
+    fireEvent.click(action);
+
+    expect(markTalkAbout).toHaveBeenCalledTimes(1);
+    expect(action).toBeDisabled();
+    finish({ ok: true });
+    await vi.waitFor(() => expect(action).not.toBeDisabled());
+  });
+
+  it('keeps bookmarks read-only while offline', () => {
+    online = false;
+    view();
+
+    expect(screen.getByRole('button', { name: /오프라인이라 지금은 읽기만 가능해요/ }))
+      .toBeDisabled();
+    expect(markTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('reports an unexpected mutation rejection and restores the control', async () => {
+    markTalkAbout.mockRejectedValueOnce(new Error('network exploded'));
+    view();
+
+    fireEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
+
+    await vi.waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('책갈피를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.');
+    });
+    expect(screen.getByRole('button', { name: '이따 이야기하기' })).not.toBeDisabled();
+  });
+
+  it('tells the truth when the mark was saved but its refresh is delayed', async () => {
+    markTalkAbout.mockResolvedValueOnce({ ok: true, syncPending: true });
+    view();
+
+    fireEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
+
+    await vi.waitFor(() => expect(toast.warning).toHaveBeenCalledWith(
+      expect.stringContaining('저장은 됐지만 화면 반영이 늦어지고 있어요'),
+    ));
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

@@ -131,8 +131,10 @@ describe('오늘 이야기할 것', () => {
    */
   it('renders a safe unavailable state for a mark whose record is unreachable', () => {
     renderWidget([], [mark({ recordId: 'rec-not-here' })]);
-    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
+    expect(screen.getByText('원본을 더 이상 열 수 없는 이야기거리예요.')).toBeInTheDocument();
     expect(screen.queryByText('rec-not-here')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /원본 보기/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '목록에서 정리하기' })).toBeInTheDocument();
   });
 
   it("never renders a mark pointing at the partner's private record", () => {
@@ -141,7 +143,16 @@ describe('오늘 이야기할 것', () => {
       [mark({ actorUserId: PARTNER })],
     );
     expect(screen.queryByText('비공개 내용')).not.toBeInTheDocument();
-    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
+    expect(screen.queryByText(/원본을 더 이상 열 수 없는/)).not.toBeInTheDocument();
+    expect(screen.getByText(/아직 표시한 기록이 없어요/)).toBeInTheDocument();
+  });
+
+  it('clears an unavailable exact id without calling it a conversation', async () => {
+    renderWidget([], [mark({ recordId: 'rec-not-here' })]);
+
+    await userEvent.click(screen.getByRole('button', { name: '목록에서 정리하기' }));
+
+    await waitFor(() => expect(resolveTalkAbout).toHaveBeenCalledWith('rec-not-here'));
   });
 
   it('tapping a topic routes with the durable ?record= id from P2', async () => {
@@ -324,7 +335,7 @@ describe('the overflow control holds up at the sizes a real couple reaches', () 
     renderWidget(withoutOldest, marks);
     await user.click(screen.getByTestId('talk-about-expand'));
 
-    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
+    expect(screen.getByText('원본을 더 이상 열 수 없는 이야기거리예요.')).toBeInTheDocument();
     // No other topic's text was borrowed to fill the gap.
     expect(screen.queryByText('이야기거리 0')).not.toBeInTheDocument();
     expect(screen.getAllByText(/이야기거리 \d/)).toHaveLength(6);

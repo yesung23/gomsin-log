@@ -3,6 +3,9 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { isMissingTable } from '@/lib/serverErrors';
 import type { TalkAboutMark } from '@/types';
 
+export const TALK_ABOUT_SYNC_PENDING_MESSAGE =
+  '저장은 됐지만 화면 반영이 늦어지고 있어요. 잠시 후 다시 확인해 주세요.';
+
 /**
  * "이따 이야기하기" — the client half of the bilateral conversation marks.
  *

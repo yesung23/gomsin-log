@@ -1,10 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Bookmark, ChevronLeft, Phone } from 'lucide-react';
+import { ArrowUpRight, ChevronLeft, Phone } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
-import { visibleRecordsForViewer } from '@/lib/privacy';
 import type { DailyRecord } from '@/types';
+import { buildTalkAboutTopics, type TalkAboutActorState } from '@/lib/talkAboutList';
+import { Bookmark } from '@/components/paper';
+import { OFFLINE_READONLY_MESSAGE, useOnlineStatus } from '@/lib/useOnlineStatus';
+import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
 /**
  * 이야기할 것 — 인스타의 `저장됨` 자리.
@@ -31,16 +34,13 @@ import type { DailyRecord } from '@/types';
 
 export function SavedTopicsPage() {
   const navigate = useNavigate();
-  const { state, unmarkTalkAbout } = useStore();
+  const { state, markTalkAbout, unmarkTalkAbout, resolveTalkAbout } = useStore();
   const { profile, talkAboutMarks } = state;
-
-  const records = useMemo(
-    () => visibleRecordsForViewer(state.records, {
-      userId: profile.id,
-      role: profile.role,
-    }),
-    [state.records, profile.id, profile.role],
-  );
+  const isOnline = useOnlineStatus();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const pendingRecordIdRef = useRef<string | null>(null);
+  const [pendingRecordId, setPendingRecordId] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState('');
 
   /*
     표시된 기록을 원본과 이어 붙인다.
@@ -50,16 +50,79 @@ export function SavedTopicsPage() {
     그 줄은 사실대로 비운다.
   */
   const topics = useMemo(() => {
-    const byId = new Map(records.map((record) => [record.id, record]));
-    return (talkAboutMarks ?? []).map((mark) => ({
-      id: mark.recordId,
-      record: byId.get(mark.recordId) ?? null,
-    }));
-  }, [records, talkAboutMarks]);
+    return buildTalkAboutTopics(
+      talkAboutMarks ?? [],
+      state.records,
+      { userId: profile.id, role: profile.role },
+    );
+  }, [state.records, talkAboutMarks, profile.id, profile.role]);
 
-  const remove = async (recordId: string) => {
-    const result = await unmarkTalkAbout(recordId);
-    if (!result.ok) toast.error(result.error || '책갈피를 빼지 못했어요.');
+  const toggle = async (recordId: string, actorState: TalkAboutActorState) => {
+    if (pendingRecordIdRef.current) return;
+    if (!isOnline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+    pendingRecordIdRef.current = recordId;
+    setPendingRecordId(recordId);
+    try {
+      const markedByViewer = actorState === 'mine' || actorState === 'both';
+      const result = markedByViewer
+        ? await unmarkTalkAbout(recordId)
+        : await markTalkAbout(recordId);
+      if (!result.ok) {
+        toast.error(result.error || '책갈피를 바꾸지 못했어요.');
+        return;
+      }
+      if (result.syncPending) {
+        toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+        setStatusMessage(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+        return;
+      }
+      if (markedByViewer) {
+        setStatusMessage('책갈피를 뺐어요.');
+        // A mine-only row disappears after reconciliation. Move focus before
+        // that happens so keyboard and VoiceOver users do not fall back to the
+        // document body.
+        if (actorState === 'mine') headingRef.current?.focus();
+      } else {
+        setStatusMessage('책갈피를 표시했어요.');
+      }
+    } catch {
+      toast.error('책갈피를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      pendingRecordIdRef.current = null;
+      setPendingRecordId(null);
+    }
+  };
+
+  const clearUnavailable = async (recordId: string) => {
+    if (pendingRecordIdRef.current) return;
+    if (!isOnline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+    pendingRecordIdRef.current = recordId;
+    setPendingRecordId(recordId);
+    try {
+      const result = await resolveTalkAbout(recordId);
+      if (!result.ok) {
+        toast.error(result.error || '목록에서 정리하지 못했어요.');
+        return;
+      }
+      if (result.syncPending) {
+        toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+        setStatusMessage(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+        return;
+      }
+      setStatusMessage('열 수 없는 이야기거리를 목록에서 정리했어요.');
+      headingRef.current?.focus();
+    } catch {
+      toast.error('목록에서 정리하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      pendingRecordIdRef.current = null;
+      setPendingRecordId(null);
+    }
   };
 
   return (
@@ -76,28 +139,48 @@ export function SavedTopicsPage() {
         >
           <ChevronLeft size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
         </button>
-        <span className="flex-1 text-body font-semibold" style={{ color: 'var(--ink)' }}>
+        <h1
+          ref={headingRef}
+          tabIndex={-1}
+          className="flex-1 text-body font-semibold outline-none"
+          style={{ color: 'var(--ink)' }}
+        >
           이야기할 것
-        </span>
+        </h1>
       </header>
 
       <div className="min-h-0 flex-1 px-4 pb-24">
+        <p role="status" aria-live="polite" className="sr-only">
+          {statusMessage}
+        </p>
         {topics.length === 0 ? (
           <p className="pt-12 text-center text-label" style={{ color: 'var(--ink-soft)' }}>
             책갈피가 비었어요
           </p>
         ) : (
-          <ul>
-            {topics.map(({ id, record }) => (
+          <ul aria-busy={pendingRecordId !== null || undefined}>
+            {topics.map((topic) => topic.unavailable ? (
+              <UnavailableTopic
+                key={topic.recordId}
+                disabled={!isOnline || pendingRecordId !== null}
+                onClear={() => void clearUnavailable(topic.recordId)}
+              />
+            ) : (
               <Topic
-                key={id}
-                recordId={id}
-                record={record}
+                key={topic.recordId}
+                record={topic.record}
+                actorState={topic.actorState}
                 partnerName={profile.couple.partnerName || '상대'}
                 myName={profile.myName || '나'}
                 viewerId={profile.id}
-                onOpen={() => navigate(`/record?record=${encodeURIComponent(id)}`)}
-                onRemove={() => void remove(id)}
+                disabled={!isOnline || pendingRecordId !== null}
+                disabledReason={!isOnline
+                  ? OFFLINE_READONLY_MESSAGE
+                  : pendingRecordId !== null
+                    ? '다른 책갈피를 바꾸는 중이에요.'
+                    : undefined}
+                onOpen={() => navigate(`/record?record=${encodeURIComponent(topic.recordId)}`)}
+                onToggle={() => void toggle(topic.recordId, topic.actorState)}
               />
             ))}
           </ul>
@@ -126,39 +209,77 @@ export function SavedTopicsPage() {
           className="whitespace-pre-line pt-4 text-center text-caption leading-relaxed"
           style={{ color: 'var(--ink-soft)' }}
         >
-          이야기 나눈 건 책갈피를 빼면 여기서 사라져요.{'\n'}날짜가 지나도 저절로 없어지지 않고, 재촉하지 않아요.
+          각자 붙인 책갈피는 자기 것만 뺄 수 있어요.{'\n'}날짜가 지나도 저절로 없어지지 않고, 재촉하지 않아요.
         </p>
+        {!isOnline ? (
+          <p className="pt-2 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
+            {OFFLINE_READONLY_MESSAGE}
+          </p>
+        ) : null}
       </div>
     </div>
   );
 }
 
+function UnavailableTopic({
+  disabled,
+  onClear,
+}: {
+  disabled: boolean;
+  onClear: () => void;
+}) {
+  return (
+    <li className="py-4">
+      <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
+        원본을 더 이상 열 수 없는 이야기거리예요.
+      </p>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClear}
+        className="mt-2 min-h-11 rounded-control px-1 text-caption disabled:opacity-50"
+        style={{ color: 'var(--ink-soft)' }}
+      >
+        목록에서 정리하기
+      </button>
+      <div className="ink-rule mt-3" aria-hidden="true" />
+    </li>
+  );
+}
+
 function Topic({
-  recordId,
   record,
+  actorState,
   partnerName,
   myName,
   viewerId,
   onOpen,
-  onRemove,
+  disabled,
+  disabledReason,
+  onToggle,
 }: {
-  recordId: string;
-  record: DailyRecord | null;
+  record: DailyRecord;
+  actorState: TalkAboutActorState;
   partnerName: string;
   myName: string;
   viewerId?: string;
+  disabled: boolean;
+  disabledReason?: string;
   onOpen: () => void;
-  onRemove: () => void;
+  onToggle: () => void;
 }) {
-  const author = record ? (record.userId === viewerId ? myName : partnerName) : null;
-  const [, month, day] = record ? record.date.split('-') : [null, null, null];
+  const author = record.userId === viewerId ? myName : partnerName;
+  const [, month, day] = record.date.split('-');
+  const markedByViewer = actorState === 'mine' || actorState === 'both';
+  const partnerMarked = actorState === 'partner_only' || actorState === 'both';
+  const namedPartner = partnerName.endsWith('님') ? partnerName : `${partnerName}님`;
+  const preview = record.log.trim()
+    || (record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간');
 
   return (
     <li className="py-4">
       <p className="pb-1 text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
-        {record && author
-          ? `${author} · ${Number(month)}월 ${Number(day)}일 ${record.time}`
-          : '표시해 둔 기록'}
+        {`${author} · ${Number(month)}월 ${Number(day)}일 ${record.time}`}
       </p>
 
       {/*
@@ -167,24 +288,24 @@ function Topic({
         본문이 없으면 그 사실을 말한다. 다른 기록으로 채우면 사용자는 자기가 표시한 것이
         무엇이었는지 영영 알 수 없게 된다.
       */}
-      {record && !record.contentUnavailable ? (
-        <p className="hand-text text-body" style={{ color: 'var(--ink)' }}>
-          {record.log.split('\n')[0]}
+      <p className="hand-text text-body" style={{ color: 'var(--ink)' }}>
+        {preview.split('\n')[0]}
+      </p>
+
+      {partnerMarked ? (
+        <p className="pt-1 text-caption" style={{ color: 'var(--ink-accent)' }}>
+          {actorState === 'both'
+            ? `${namedPartner}도 함께 표시했어요`
+            : `${namedPartner}이 이야기하고 싶어 해요`}
         </p>
-      ) : (
-        <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
-          {record?.contentUnavailable === 'key_unavailable'
-            ? '이 기기에서 아직 열 수 없어요'
-            : '이 기록은 더 이상 볼 수 없어요'}
-        </p>
-      )}
+      ) : null}
 
       <div className="flex items-center gap-1 pt-2">
         <button
           type="button"
           onClick={onOpen}
           className="flex min-h-11 items-center gap-1 px-1"
-          aria-label={`${recordId} 원본 보기`}
+          aria-label={`${author}의 ${Number(month)}월 ${Number(day)}일 기록 원본 보기`}
         >
           <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>원본 보기</span>
           <ArrowUpRight size={13} className="pen-icon" color="var(--ink-soft)" aria-hidden="true" />
@@ -196,20 +317,14 @@ function Topic({
           인스타의 저장 취소와 같은 자리, 같은 아이콘, 같은 동작이다. 동사를 붙이지 않는
           것이 요점 -- `했어요` 가 붙는 순간 숙제가 된다.
         */}
-        <button
-          type="button"
-          aria-label="책갈피 빼기"
-          onClick={onRemove}
-          className="flex min-h-11 w-11 items-center justify-center"
-        >
-          <Bookmark
-            size={19}
-            className="pen-icon"
-            color="var(--ink-accent)"
-            fill="var(--ink-accent)"
-            aria-hidden="true"
-          />
-        </button>
+        <Bookmark
+          marked={markedByViewer}
+          partnerMarked={partnerMarked}
+          partnerName={partnerName}
+          onToggle={onToggle}
+          disabled={disabled}
+          disabledReason={disabledReason}
+        />
       </div>
       <div className="ink-rule mt-3" aria-hidden="true" />
     </li>

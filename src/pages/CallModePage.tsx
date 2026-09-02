@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ChevronRight, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,6 +6,20 @@ import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { recordProductEvent } from '@/lib/productEvents';
+import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
+
+interface CallSession {
+  /** Stable exact ids left in this pass; index zero is always the visible topic. */
+  remaining: string[];
+  /** Exact ids skipped in this pass. They remain unresolved. */
+  skipped: string[];
+  /** Resolved locally this visit, even while realtime reconciliation catches up. */
+  settled: string[];
+}
+
+function sameIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
 
 /**
  * 통화 모드 — the last arrow of the daily loop.
@@ -53,16 +67,43 @@ export function CallModePage() {
     [state.talkAboutMarks, state.records, profile.id, profile.role],
   );
 
-  /**
-   * Which remaining topic is on screen.
-   *
-   * Not an id: completing a topic removes it from `topics`, so the same index
-   * then addresses the NEXT one and the screen advances without being told to.
-   * Skipping moves the index instead and leaves the list alone, which is the
-   * whole difference between the two controls.
-   */
-  const [position, setPosition] = useState(0);
+  /*
+    Pin the call session to exact ids instead of a live array index. Realtime can
+    prepend a new mark or reorder a record when the partner joins it. Neither is
+    allowed to replace the topic the user is currently reading.
+  */
+  const [session, setSession] = useState<CallSession>(() => ({
+    remaining: topics.map((topic) => topic.recordId),
+    skipped: [],
+    settled: [],
+  }));
   const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+
+  useEffect(() => {
+    const activeIds = topics.map((topic) => topic.recordId);
+    const active = new Set(activeIds);
+    setSession((previous) => {
+      const settled = new Set(previous.settled);
+      const remaining = previous.remaining.filter((id) => active.has(id) && !settled.has(id));
+      const skipped = previous.skipped.filter((id) => active.has(id) && !settled.has(id));
+      const known = new Set([...remaining, ...skipped, ...previous.settled]);
+
+      // New realtime topics wait behind the current session instead of jumping
+      // in front of the sentence already on screen.
+      for (const id of activeIds) {
+        if (!known.has(id)) {
+          remaining.push(id);
+          known.add(id);
+        }
+      }
+
+      if (sameIds(remaining, previous.remaining) && sameIds(skipped, previous.skipped)) {
+        return previous;
+      }
+      return { ...previous, remaining, skipped };
+    });
+  }, [topics]);
 
   /*
     Opening the call screen, once per visit. This is the step the strategy needs
@@ -77,45 +118,74 @@ export function CallModePage() {
     void recordProductEvent({ kind: 'call_mode_opened', screen: 'call' });
   }, []);
 
-  const current = topics[position];
+  const topicsById = useMemo(
+    () => new Map(topics.map((topic) => [topic.recordId, topic])),
+    [topics],
+  );
+  const currentId = session.remaining[0];
+  const current = currentId ? topicsById.get(currentId) : undefined;
   /** Skipped past the end with topics still unfinished -- not the same as done. */
-  const wrapped = !current && topics.length > 0;
+  const wrapped = session.remaining.length === 0 && session.skipped.length > 0;
+  const done = session.remaining.length === 0 && session.skipped.length === 0;
 
   const leave = () => navigate('/');
 
   const complete = async () => {
-    if (!current || pending) return;
+    if (!current || pendingRef.current) return;
     if (isOffline) {
       toast.error(OFFLINE_READONLY_MESSAGE);
       return;
     }
+    pendingRef.current = true;
     setPending(true);
+    const recordId = current.recordId;
+    const unavailable = current.unavailable;
     try {
-      const result = await resolveTalkAbout(current.recordId);
+      const result = await resolveTalkAbout(recordId);
       if (!result.ok) {
         // Left in place on failure. Telling someone a topic is handled when the
         // server refused the write would lose it silently at the next reload.
         toast.error(result.error || '처리하지 못했어요.');
         return;
       }
-      /*
-        The index is NOT advanced here. `topics` just got shorter, so this same
-        position already points at the next one. Advancing as well would step over
-        a topic nobody saw.
-      */
+      setSession((previous) => ({
+        remaining: previous.remaining.filter((id) => id !== recordId),
+        skipped: previous.skipped.filter((id) => id !== recordId),
+        settled: previous.settled.includes(recordId)
+          ? previous.settled
+          : [...previous.settled, recordId],
+      }));
       /*
         The loop's last arrow, measured. §19 permits the event kind and an opaque
         id; the record's text is not read here and has no field to travel in.
       */
-      void recordProductEvent({
-        kind: 'talk_about_resolved',
-        screen: 'call',
-        subjectId: current.recordId,
-      });
-      toast.success('이야기한 걸로 정리했어요.');
+      if (result.syncPending) {
+        toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+      } else if (unavailable) {
+        toast.success('열 수 없는 이야기거리를 목록에서 정리했어요.');
+      } else {
+        void recordProductEvent({
+          kind: 'talk_about_resolved',
+          screen: 'call',
+          subjectId: recordId,
+        });
+        toast.success('이야기한 걸로 정리했어요.');
+      }
+    } catch {
+      toast.error('처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
+  };
+
+  const skip = () => {
+    if (pendingRef.current) return;
+    setSession((previous) => {
+      const [id, ...remaining] = previous.remaining;
+      if (!id) return previous;
+      return { ...previous, remaining, skipped: [...previous.skipped, id] };
+    });
   };
 
   return (
@@ -138,7 +208,7 @@ export function CallModePage() {
         </button>
       </header>
 
-      {topics.length === 0 ? (
+      {done ? (
         <section
           data-testid="call-mode-done"
           className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
@@ -167,12 +237,16 @@ export function CallModePage() {
           */}
           <p className="text-heading text-foreground break-keep">건너뛴 이야기거리가 남았어요</p>
           <p className="text-body text-muted-foreground break-keep">
-            아직 {topics.length}개가 그대로 있어요.
+              아직 {session.skipped.length}개가 그대로 있어요.
           </p>
           <div className="flex flex-col gap-2 w-full max-w-xs mt-2">
             <button
               type="button"
-              onClick={() => setPosition(0)}
+              onClick={() => setSession((previous) => ({
+                ...previous,
+                remaining: previous.skipped,
+                skipped: [],
+              }))}
               className="press-response min-h-12 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold"
             >
               처음부터 다시 보기
@@ -186,10 +260,18 @@ export function CallModePage() {
             </button>
           </div>
         </section>
+      ) : !current ? (
+        <section
+          aria-live="polite"
+          className="flex-1 flex items-center justify-center px-6 text-center"
+        >
+          <p className="text-body text-muted-foreground">이야기거리 목록을 맞추는 중이에요.</p>
+        </section>
       ) : (
         <>
           <section
             data-testid="call-mode-topic"
+            aria-busy={pending || undefined}
             className="flex-1 flex flex-col justify-center gap-4 px-6 py-4"
           >
             {/*
@@ -198,39 +280,39 @@ export function CallModePage() {
               last topic.
             */}
             <p className="text-caption text-muted-foreground tabular-nums">
-              {position + 1} / {topics.length}
+              {session.skipped.length + 1} / {session.remaining.length + session.skipped.length}
             </p>
 
             <p className="text-heading text-foreground break-keep leading-relaxed">
-              {current.record
-                ? (current.record.log
-                  || (current.record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간'))
-                : '이 기록은 더 이상 볼 수 없어요'}
+              {current.unavailable
+                ? '원본을 더 이상 열 수 없는 이야기거리예요.'
+                : current.record.log
+                  || (current.record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간')}
             </p>
 
-            <p className="text-caption text-muted-foreground break-keep">
-              {current.record
-                ? `${current.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${current.record.date}`
-                : '원본을 확인할 수 없어요'}
-            </p>
+            {!current.unavailable ? (
+              <p className="text-caption text-muted-foreground break-keep">
+                {`${current.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${current.record.date}`}
+              </p>
+            ) : null}
 
             {/*
               Reading the exact original is still one tap away, but it leaves this
               screen, so it is drawn as the quiet option. During a call the text
               above is usually enough to remember what this was.
             */}
-            {current.record && (
+            {!current.unavailable ? (
               <button
                 type="button"
                 onClick={() => {
                   setHighlightedRecordId(current.recordId);
-                  navigate(`/record?record=${current.recordId}`);
+                  navigate(`/record?record=${encodeURIComponent(current.recordId)}`);
                 }}
                 className="press-response-row self-start min-h-11 -mx-1 px-1 rounded-control text-caption text-coral"
               >
                 원본 보기
               </button>
-            )}
+            ) : null}
           </section>
 
           <footer className="px-6 pb-8 pt-2 flex flex-col gap-2">
@@ -243,14 +325,19 @@ export function CallModePage() {
               className="press-response min-h-14 w-full rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <Check size={18} aria-hidden="true" />
-              {pending ? '정리하는 중...' : '이야기했어요'}
+              {pending
+                ? '정리하는 중...'
+                : current.unavailable
+                  ? '목록에서 정리하기'
+                  : '이야기했어요'}
             </button>
 
             <button
               type="button"
               data-testid="call-mode-skip"
-              onClick={() => setPosition((at) => at + 1)}
-              className="press-response min-h-12 w-full rounded-control bg-muted text-label font-bold text-muted-foreground flex items-center justify-center gap-1"
+              onClick={skip}
+              disabled={pending}
+              className="press-response min-h-12 w-full rounded-control bg-muted text-label font-bold text-muted-foreground flex items-center justify-center gap-1 disabled:opacity-50"
             >
               다음
               <ChevronRight size={16} aria-hidden="true" />

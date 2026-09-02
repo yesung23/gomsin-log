@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AppState, DailyRecord, TalkAboutMark } from '@/types';
 import { toast } from 'sonner';
@@ -131,11 +131,18 @@ function three() {
   return { records, marks };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   resolveTalkAbout.mockClear();
   resolveTalkAbout.mockResolvedValue({ ok: true });
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.error).mockClear();
+  vi.mocked(toast.warning).mockClear();
   setHighlightedRecordId.mockClear();
   navigate.mockClear();
   online = true;
@@ -236,9 +243,87 @@ describe('one topic at a time', () => {
     renderPage(records, marks);
     expect(screen.getByText('1 / 3')).toBeInTheDocument();
   });
+
+  it('deduplicates two actors marking the same exact record', () => {
+    renderPage([record()], [
+      mark({ actorUserId: ME }),
+      mark({ id: 'partner-mark', actorUserId: PARTNER }),
+    ]);
+
+    expect(screen.getByText('1 / 1')).toBeInTheDocument();
+    expect(screen.getAllByText('훈련 끝나고 노을을 봤어')).toHaveLength(1);
+  });
+
+  it('keeps the exact current record when realtime reorders or prepends topics', async () => {
+    const { records, marks } = three();
+    const { rerender } = renderPage(records, marks);
+
+    await userEvent.click(screen.getByTestId('call-mode-skip'));
+    expect(screen.getByText('둘째')).toBeInTheDocument();
+
+    const newRecord = record({ id: 'rec-new', log: '방금 추가됨' });
+    const partnerJoinedCurrent = mark({
+      id: 'partner-on-b',
+      recordId: 'rec-b',
+      actorUserId: PARTNER,
+      createdAt: '2026-08-21T14:00:00.000Z',
+    });
+    const newMark = mark({
+      id: 'm-new',
+      recordId: 'rec-new',
+      createdAt: '2026-08-21T15:00:00.000Z',
+    });
+    currentState = makeState([...records, newRecord], [newMark, partnerJoinedCurrent, ...marks]);
+    rerender(<CallModePage />);
+
+    expect(screen.getByText('둘째')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('call-mode-complete'));
+    expect(resolveTalkAbout).toHaveBeenCalledWith('rec-b');
+  });
+
+  it('advances without skipping when a previously skipped topic resolves elsewhere', async () => {
+    const { records, marks } = three();
+    const { rerender } = renderPage(records, marks);
+
+    await userEvent.click(screen.getByTestId('call-mode-skip'));
+    expect(screen.getByText('둘째')).toBeInTheDocument();
+
+    currentState = makeState(records, marks.slice(1));
+    rerender(<CallModePage />);
+
+    expect(screen.getByText('둘째')).toBeInTheDocument();
+  });
 });
 
 describe('each completion stands on its own', () => {
+  it('single-flights same-frame completion and blocks next until a failed write settles', async () => {
+    const pending = deferred<{ ok: boolean; error?: string }>();
+    resolveTalkAbout.mockImplementationOnce(() => pending.promise);
+    const { records, marks } = three();
+    renderPage(records, marks);
+
+    const complete = screen.getByTestId('call-mode-complete');
+    const skip = screen.getByTestId('call-mode-skip');
+    fireEvent.click(complete);
+    fireEvent.click(complete);
+    fireEvent.click(skip);
+
+    expect(resolveTalkAbout).toHaveBeenCalledTimes(1);
+    expect(resolveTalkAbout).toHaveBeenCalledWith('rec-a');
+    expect(complete).toBeDisabled();
+    expect(skip).toBeDisabled();
+    expect(screen.getByText('첫째')).toBeInTheDocument();
+
+    pending.resolve({ ok: false, error: '잠시 실패했어요.' });
+    await waitFor(() => expect(complete).not.toBeDisabled());
+    expect(skip).not.toBeDisabled();
+    expect(screen.getByText('첫째')).toBeInTheDocument();
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith('잠시 실패했어요.');
+
+    fireEvent.click(complete);
+    await waitFor(() => expect(resolveTalkAbout).toHaveBeenCalledTimes(2));
+  });
+
   it('reports a refused write as a failure, never as a completion', async () => {
     /*
       A call ends abruptly, so a completion that silently failed would be
@@ -273,6 +358,35 @@ describe('each completion stands on its own', () => {
     expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
   });
 
+  it('advances a committed topic but reports delayed reconciliation instead of full success', async () => {
+    resolveTalkAbout.mockResolvedValueOnce({ ok: true, syncPending: true });
+    const { records, marks } = three();
+    renderPage(records, marks);
+
+    await userEvent.click(screen.getByTestId('call-mode-complete'));
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(
+      expect.stringContaining('저장은 됐지만 화면 반영이 늦어지고 있어요'),
+    ));
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByText('둘째')).toBeInTheDocument();
+  });
+
+  it('handles an unexpected rejected write and restores both controls', async () => {
+    resolveTalkAbout.mockRejectedValueOnce(new Error('network exploded'));
+    const { records, marks } = three();
+    renderPage(records, marks);
+
+    await userEvent.click(screen.getByTestId('call-mode-complete'));
+
+    await waitFor(() => {
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith('처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    });
+    expect(screen.getByTestId('call-mode-complete')).not.toBeDisabled();
+    expect(screen.getByTestId('call-mode-skip')).not.toBeDisabled();
+    expect(vi.mocked(toast.success)).not.toHaveBeenCalled();
+  });
+
   it('cannot complete while offline, and says why', () => {
     online = true;
     const { records, marks } = three();
@@ -300,22 +414,24 @@ describe('the states either side of a topic', () => {
     expect(screen.getByTestId('call-mode-topic')).toBeInTheDocument();
   });
 
-  it('shows a safe unavailable state, and can still clear it', async () => {
-    /*
-      §8 keeps the coordination state when the original goes away. The pair can
-      still have had the conversation, so the completion has to remain reachable --
-      but nothing derived from the record may appear.
-    */
-    const user = userEvent.setup();
-    renderPage([], [mark({ recordId: 'rec-gone' })]);
+  it('keeps a missing original generic while omitting private and unreadable originals', () => {
+    renderPage([
+      record({ id: 'rec-private', isPrivate: true, log: '비공개 원문' }),
+      record({
+        id: 'rec-locked',
+        date: '2026-09-01',
+        contentUnavailable: 'key_unavailable',
+        log: '',
+      }),
+    ], [
+      mark({ id: 'missing-mark', recordId: 'rec-gone' }),
+      mark({ id: 'private-mark', recordId: 'rec-private' }),
+      mark({ id: 'locked-mark', recordId: 'rec-locked' }),
+    ]);
 
-    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
-    expect(screen.queryByText('rec-gone')).toBeNull();
-    // No 원본 보기 for something there is no original to show.
-    expect(screen.queryByText('원본 보기')).toBeNull();
-
-    await user.click(screen.getByTestId('call-mode-complete'));
-    await waitFor(() => expect(resolveTalkAbout).toHaveBeenCalledWith('rec-gone'));
+    expect(screen.getByTestId('call-mode-topic')).toBeInTheDocument();
+    expect(screen.getByText('원본을 더 이상 열 수 없는 이야기거리예요.')).toBeInTheDocument();
+    expect(screen.queryByText(/비공개 원문|2026-09-01|몽룡|원본 보기|rec-gone/)).not.toBeInTheDocument();
   });
 
   it('reaches the exact original through the durable route', async () => {

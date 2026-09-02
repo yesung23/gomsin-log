@@ -108,6 +108,7 @@ import type {
   RecordMutationReason,
   RecordMutationResult,
   SharedSyncStatus,
+  TalkAboutMutationResult,
 } from '@/lib/storeContext';
 import {
   assertNever,
@@ -3956,24 +3957,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * place that knows the authoritative `created_at` -- so a refetch is both
    * cheaper to reason about and the only way the two clients converge.
    */
-  const refreshTalkAboutMarks = async (expected?: ActiveWorkspace): Promise<void> => {
+  const refreshTalkAboutMarks = async (expected?: ActiveWorkspace): Promise<boolean> => {
     const coupleId = stateRef.current.profile.couple.coupleId;
     const userId = stateRef.current.authenticatedUser?.id || stateRef.current.profile.id;
     const workspace: ActiveWorkspace | null = coupleId && userId
       ? { coupleId, userId, generation: sessionGenerationRef.current }
       : null;
-    if (!workspace || (expected && !workspaceRefMatches(workspace, expected))) return;
-    const result = await fetchTalkAboutMarksResultFromDB(workspace.coupleId);
+    if (!workspace || (expected && !workspaceRefMatches(workspace, expected))) return false;
+    let result;
+    try {
+      result = await fetchTalkAboutMarksResultFromDB(workspace.coupleId);
+    } catch {
+      console.error('[gomsinlog] Failed to reconcile talk-about marks.');
+      return false;
+    }
     if (!workspaceRefMatches({
       coupleId: stateRef.current.profile.couple.coupleId || '',
       userId: stateRef.current.authenticatedUser?.id || stateRef.current.profile.id || '',
       generation: sessionGenerationRef.current,
-    }, workspace)) return;
-    if (!result.ok) return;
+    }, workspace)) return false;
+    if (!result.ok) return false;
     updateStateImmediately((prev) => ({ ...prev, talkAboutMarks: result.marks }));
+    return true;
   };
 
-  const markTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+  const markTalkAbout = async (recordId: string): Promise<TalkAboutMutationResult> => {
     const current = stateRef.current;
     const coupleId = current.profile.couple.coupleId;
     const userId = current.authenticatedUser?.id || current.profile.id;
@@ -3987,32 +3995,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // whether marking something leads to talking about it -- which is the
       // question the whole 이따 이야기하기 feature exists to answer.
       void recordProductEvent({ kind: 'talk_about_marked', subjectId: recordId });
-      await refreshTalkAboutMarks(workspace);
+      const reconciled = await refreshTalkAboutMarks(workspace);
+      return reconciled ? result : { ...result, syncPending: true };
     }
     return result;
   };
 
   /** Withdraw only your own flag; the partner's stays. */
-  const unmarkTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+  const unmarkTalkAbout = async (recordId: string): Promise<TalkAboutMutationResult> => {
     const current = stateRef.current;
     const userId = current.authenticatedUser?.id || current.profile.id;
     const coupleId = current.profile.couple.coupleId;
     if (!userId || !coupleId) return { ok: false, error: '해제할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
     const result = await unmarkTalkAboutInDB(recordId, userId);
-    if (result.ok) await refreshTalkAboutMarks(workspace);
+    if (result.ok) {
+      const reconciled = await refreshTalkAboutMarks(workspace);
+      return reconciled ? result : { ...result, syncPending: true };
+    }
     return result;
   };
 
   /** 이야기했어요 — the conversation happened, so clear it for both. */
-  const resolveTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+  const resolveTalkAbout = async (recordId: string): Promise<TalkAboutMutationResult> => {
     const current = stateRef.current;
     const coupleId = current.profile.couple.coupleId;
     const userId = current.authenticatedUser?.id || current.profile.id;
     if (!coupleId || !userId) return { ok: false, error: '커플 연결이 확인되지 않아 처리할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
     const result = await resolveTalkAboutInDB(recordId, coupleId);
-    if (result.ok) await refreshTalkAboutMarks(workspace);
+    if (result.ok) {
+      const reconciled = await refreshTalkAboutMarks(workspace);
+      return reconciled ? result : { ...result, syncPending: true };
+    }
     return result;
   };
 

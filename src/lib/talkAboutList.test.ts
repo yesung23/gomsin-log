@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { buildTalkAboutTopics, isMarkedByViewer } from '@/lib/talkAboutList';
+import {
+  buildTalkAboutTopics,
+  getTalkAboutActorState,
+  isMarkedByViewer,
+} from '@/lib/talkAboutList';
 import { isTalkAboutMarkActive } from '@/lib/talkAbout';
 import type { DailyRecord, TalkAboutMark } from '@/types';
 
@@ -60,8 +64,10 @@ describe('buildTalkAboutTopics: the list is a join, not a copy', () => {
       NOW,
     );
     expect(topics).toHaveLength(1);
+    expect(topics[0].recordId).toBe('rec-1');
     expect(topics[0].markedBy).toHaveLength(2);
     expect(topics[0].markedByViewer).toBe(true);
+    expect(topics[0].actorState).toBe('both');
     // Ordered by the newest mark on the topic.
     expect(topics[0].latestAt).toBe('2026-08-13T11:30:00.000Z');
   });
@@ -78,6 +84,19 @@ describe('buildTalkAboutTopics: the list is a join, not a copy', () => {
     );
     expect(topics.map((topic) => topic.recordId)).toEqual(['rec-new', 'rec-old']);
   });
+
+  it('breaks equal-time ties by exact record id so input order cannot reshuffle the list', () => {
+    const marks = [
+      mark({ id: 'm-b', recordId: 'rec-b', createdAt: '2026-08-13T11:00:00.000Z' }),
+      mark({ id: 'm-a', recordId: 'rec-a', createdAt: '2026-08-13T11:00:00.000Z' }),
+    ];
+    const records = [record({ id: 'rec-b' }), record({ id: 'rec-a' })];
+
+    expect(buildTalkAboutTopics(marks, records, viewer, NOW).map((topic) => topic.recordId))
+      .toEqual(['rec-a', 'rec-b']);
+    expect(buildTalkAboutTopics([...marks].reverse(), records, viewer, NOW).map((topic) => topic.recordId))
+      .toEqual(['rec-a', 'rec-b']);
+  });
 });
 
 describe('buildTalkAboutTopics: nothing the viewer may not see', () => {
@@ -86,27 +105,60 @@ describe('buildTalkAboutTopics: nothing the viewer may not see', () => {
    * resolve must produce a generic unavailable entry only. It must not use a
    * different record or expose source-derived content.
    */
-  it('keeps an unavailable topic without fabricating source content', () => {
+  it('keeps an absent exact source as a generic unavailable topic with no record metadata', () => {
     const topics = buildTalkAboutTopics([mark({ recordId: 'rec-gone' })], [], viewer, NOW);
     expect(topics).toHaveLength(1);
-    expect(topics[0]).toMatchObject({ recordId: 'rec-gone', unavailable: true, record: undefined });
+    expect(topics[0]).toMatchObject({
+      recordId: 'rec-gone',
+      unavailable: true,
+      record: undefined,
+      actorState: 'partner_only',
+    });
   });
 
-  it("keeps a generic unavailable topic for a partner's private record", () => {
+  it("drops a partner's private record", () => {
     const privateRecord = record({ id: 'rec-1', userId: PARTNER, isPrivate: true });
     const topics = buildTalkAboutTopics([mark()], [privateRecord], viewer, NOW);
-    expect(topics[0]).toMatchObject({ unavailable: true, record: undefined });
+    expect(topics).toEqual([]);
   });
 
-  it("still shows the viewer's OWN private record when they marked it themselves", () => {
+  it("drops the viewer's own private record because couple conversation marks require sharing", () => {
     const ownPrivate = record({ id: 'rec-1', userId: ME, isPrivate: true });
     const topics = buildTalkAboutTopics([mark({ actorUserId: ME })], [ownPrivate], viewer, NOW);
-    expect(topics).toHaveLength(1);
+    expect(topics).toEqual([]);
+  });
+
+  it('drops a source this device cannot decrypt', () => {
+    const locked = record({ contentUnavailable: 'key_unavailable', log: '' });
+    const topics = buildTalkAboutTopics([mark()], [locked], viewer, NOW);
+    expect(topics).toEqual([]);
   });
 
   it('keeps a pending mark regardless of its age', () => {
     const stale = mark({ createdAt: '2026-07-01T00:00:00.000Z' });
     expect(buildTalkAboutTopics([stale], [record()], viewer, NOW)).toHaveLength(1);
+  });
+});
+
+describe('talk-about actor state', () => {
+  it.each([
+    { label: 'none', marks: [], want: 'none' },
+    { label: 'mine', marks: [mark({ actorUserId: ME })], want: 'mine' },
+    { label: 'partner only', marks: [mark({ actorUserId: PARTNER })], want: 'partner_only' },
+    {
+      label: 'both',
+      marks: [mark({ id: 'mine', actorUserId: ME }), mark({ id: 'theirs', actorUserId: PARTNER })],
+      want: 'both',
+    },
+  ])('derives $label from active marks on the exact record', ({ marks, want }) => {
+    expect(getTalkAboutActorState(marks, 'rec-1', ME, NOW)).toBe(want);
+  });
+
+  it('ignores completed marks and marks for another source', () => {
+    expect(getTalkAboutActorState([
+      mark({ actorUserId: ME, isCompleted: true }),
+      mark({ id: 'other', recordId: 'rec-other', actorUserId: PARTNER }),
+    ], 'rec-1', ME, NOW)).toBe('none');
   });
 });
 
@@ -124,6 +176,7 @@ describe('isMarkedByViewer', () => {
     expect(isMarkedByViewer(marks, 'rec-1', ME)).toBe(false);
     expect(isMarkedByViewer([...marks, mark({ id: 'm2', actorUserId: ME })], 'rec-1', ME)).toBe(true);
     expect(isMarkedByViewer(marks, 'rec-other', PARTNER)).toBe(false);
+    expect(isMarkedByViewer([mark({ actorUserId: ME, isCompleted: true })], 'rec-1', ME)).toBe(false);
   });
 
   it('is false with no viewer identity rather than throwing', () => {

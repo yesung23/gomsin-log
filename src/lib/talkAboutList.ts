@@ -18,19 +18,68 @@ import { isVisibleToViewer, type Viewer } from '@/lib/privacy';
  * being able to say what, which is exactly the hidden-record-existence leak
  * PRODUCT_V3 §6.4 rules out.
  */
-export interface TalkAboutTopic {
+interface TalkAboutTopicBase {
   /** Exact original id. Never substitute a different record for this id. */
   recordId: string;
-  /** Present only when the viewer may still read this exact original. */
-  record?: DailyRecord;
-  /** An unavailable source never exposes record-derived content. */
-  unavailable: boolean;
   /** Distinct users who marked this record, newest mark first. */
   markedBy: string[];
   /** Whether the viewer is one of them -- drives 표시 해제 vs 나도 표시. */
   markedByViewer: boolean;
+  /** Whose active intention exists for this exact source record. */
+  actorState: TalkAboutActorState;
   /** The newest mark's timestamp, for ordering. */
   latestAt: string;
+}
+
+export type TalkAboutTopic = TalkAboutTopicBase & (
+  | {
+    /** Exact readable original. */
+    record: DailyRecord;
+    unavailable: false;
+  }
+  | {
+    /** A deleted original keeps only its opaque id so the couple can clear the stranded mark. */
+    record?: undefined;
+    unavailable: true;
+  }
+);
+
+export type TalkAboutActorState = 'none' | 'mine' | 'partner_only' | 'both';
+
+function actorStateFromMarks(
+  marks: TalkAboutMark[],
+  viewerUserId: string | undefined,
+): TalkAboutActorState {
+  const mine = Boolean(viewerUserId)
+    && marks.some((mark) => mark.actorUserId === viewerUserId);
+  const partner = marks.some((mark) => mark.actorUserId !== viewerUserId);
+  if (mine && partner) return 'both';
+  if (mine) return 'mine';
+  if (partner) return 'partner_only';
+  return 'none';
+}
+
+/** Actor state for one exact source, considering pending marks only. */
+export function getTalkAboutActorState(
+  marks: TalkAboutMark[],
+  recordId: string,
+  viewerUserId: string | undefined,
+  now: Date = new Date(),
+): TalkAboutActorState {
+  return actorStateFromMarks(
+    marks.filter((mark) => mark.recordId === recordId && isTalkAboutMarkActive(mark, now)),
+    viewerUserId,
+  );
+}
+
+function compareTimestampDesc(a: string, b: string): number {
+  const aTime = Date.parse(a);
+  const bTime = Date.parse(b);
+  if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+    return bTime - aTime;
+  }
+  if (Number.isFinite(aTime) !== Number.isFinite(bTime)) return Number.isFinite(bTime) ? 1 : -1;
+  return b.localeCompare(a);
 }
 
 export function buildTalkAboutTopics(
@@ -52,23 +101,32 @@ export function buildTalkAboutTopics(
   const topics: TalkAboutTopic[] = [];
   for (const [recordId, recordMarks] of grouped) {
     const record = byId.get(recordId);
-    const visibleRecord = record && isVisibleToViewer(record, viewer) ? record : undefined;
     const sorted = [...recordMarks].sort(
-      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+      (a, b) => compareTimestampDesc(a.createdAt, b.createdAt)
+        || a.actorUserId.localeCompare(b.actorUserId)
+        || a.id.localeCompare(b.id),
     );
-    topics.push({
+    const actorState = actorStateFromMarks(sorted, viewer.userId);
+    const base: TalkAboutTopicBase = {
       recordId,
-      record: visibleRecord,
-      unavailable: !visibleRecord,
       markedBy: [...new Set(sorted.map((mark) => mark.actorUserId))],
-      markedByViewer: viewer.userId
-        ? sorted.some((mark) => mark.actorUserId === viewer.userId)
-        : false,
+      markedByViewer: actorState === 'mine' || actorState === 'both',
+      actorState,
       latestAt: sorted[0].createdAt,
-    });
+    };
+
+    if (!record) {
+      topics.push({ ...base, record: undefined, unavailable: true });
+      continue;
+    }
+    if (record.isPrivate || record.contentUnavailable || !isVisibleToViewer(record, viewer)) {
+      continue;
+    }
+    topics.push({ ...base, record, unavailable: false });
   }
 
-  return topics.sort((a, b) => Date.parse(b.latestAt) - Date.parse(a.latestAt));
+  return topics.sort((a, b) => compareTimestampDesc(a.latestAt, b.latestAt)
+    || a.recordId.localeCompare(b.recordId));
 }
 
 /** Whether the viewer has personally marked this record. */
@@ -77,8 +135,6 @@ export function isMarkedByViewer(
   recordId: string,
   viewerUserId: string | undefined,
 ): boolean {
-  if (!viewerUserId) return false;
-  return marks.some(
-    (mark) => mark.recordId === recordId && mark.actorUserId === viewerUserId,
-  );
+  const state = getTalkAboutActorState(marks, recordId, viewerUserId);
+  return state === 'mine' || state === 'both';
 }

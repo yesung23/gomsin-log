@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageCircle, Check, ChevronDown, ChevronUp, Phone } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,6 +6,7 @@ import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { recordProductEvent } from '@/lib/productEvents';
+import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
 /**
  * "오늘 이야기할 것" — the short list the marks add up to.
@@ -49,6 +50,8 @@ export function TalkAboutListWidget() {
    * adding the separate tab §8 explicitly rules out.
    */
   const [expanded, setExpanded] = useState(false);
+  const pendingRef = useRef<string | null>(null);
+  const [pendingRecordId, setPendingRecordId] = useState<string | null>(null);
 
   const topics = useMemo(
     () => buildTalkAboutTopics(
@@ -78,54 +81,79 @@ export function TalkAboutListWidget() {
       ) : (
         <ul className="divide-y divide-border">
           {visible.map((topic) => (
-            <li key={topic.recordId} className="py-2 flex items-start gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setHighlightedRecordId(topic.recordId);
-                  // Durable addressing from P2, so a reload still lands here.
-                  navigate(`/record?record=${topic.recordId}`);
-                }}
-                /* The row that opens 정확한 원본. Tinted, not scaled -- it shares a line
-                   with the 이야기했어요 control and the two must not move apart. */
-                className="press-response-row flex-1 min-w-0 text-left min-h-11 rounded-control px-1 -mx-1"
-              >
-                <span className="block text-body text-foreground break-keep line-clamp-2">
-                  {topic.record
-                    ? (topic.record.log
-                      || (topic.record.attachments?.length ? '사진·음성으로 남긴 순간' : '남긴 순간'))
-                    : '이 기록은 더 이상 볼 수 없어요'}
-                </span>
-                <span className="block text-caption text-muted-foreground mt-0.5">
-                  {topic.record
-                    ? `${topic.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${topic.record.date}`
-                    : '원본을 확인할 수 없어요'}
-                  {topic.markedByViewer ? ' · 내가 표시' : ` · ${profile.couple.partnerName || '상대방'}가 표시`}
-                </span>
-                <span className="block text-caption text-coral mt-0.5">원본 보기</span>
-              </button>
+            <li
+              key={topic.recordId}
+              aria-busy={pendingRecordId === topic.recordId || undefined}
+              className="py-2 flex items-start gap-2"
+            >
+              {topic.unavailable ? (
+                <p className="flex-1 min-w-0 py-2 text-caption text-muted-foreground break-keep">
+                  원본을 더 이상 열 수 없는 이야기거리예요.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHighlightedRecordId(topic.recordId);
+                    // Durable addressing from P2, so a reload still lands here.
+                    navigate(`/record?record=${encodeURIComponent(topic.recordId)}`);
+                  }}
+                  /* The row that opens 정확한 원본. Tinted, not scaled -- it shares a line
+                     with the 이야기했어요 control and the two must not move apart. */
+                  className="press-response-row flex-1 min-w-0 text-left min-h-11 rounded-control px-1 -mx-1"
+                >
+                  <span className="block text-body text-foreground break-keep line-clamp-2">
+                    {topic.record.log
+                      || (topic.record.attachments?.length ? '사진·음성으로 남긴 순간' : '남긴 순간')}
+                  </span>
+                  <span className="block text-caption text-muted-foreground mt-0.5">
+                    {`${topic.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${topic.record.date}`}
+                    {topic.markedByViewer ? ' · 내가 표시' : ` · ${profile.couple.partnerName || '상대방'}가 표시`}
+                  </span>
+                  <span className="block text-caption text-coral mt-0.5">원본 보기</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={async () => {
+                  if (pendingRef.current) return;
                   if (isOffline) {
                     toast.error(OFFLINE_READONLY_MESSAGE);
                     return;
                   }
-                  const result = await resolveTalkAbout(topic.recordId);
-                  if (!result.ok) {
-                    toast.error(result.error || '처리하지 못했어요.');
-                    return;
+                  pendingRef.current = topic.recordId;
+                  setPendingRecordId(topic.recordId);
+                  try {
+                    const result = await resolveTalkAbout(topic.recordId);
+                    if (!result.ok) {
+                      toast.error(result.error || '처리하지 못했어요.');
+                      return;
+                    }
+                    if (result.syncPending) {
+                      toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+                      return;
+                    }
+                    if (topic.unavailable) {
+                      toast.success('열 수 없는 이야기거리를 목록에서 정리했어요.');
+                      return;
+                    }
+                    void recordProductEvent({
+                      kind: 'talk_about_resolved',
+                      screen: 'home',
+                      subjectId: topic.recordId,
+                    });
+                    toast.success('이야기한 걸로 정리했어요.');
+                  } catch {
+                    toast.error('처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
+                  } finally {
+                    pendingRef.current = null;
+                    setPendingRecordId(null);
                   }
-                  void recordProductEvent({
-                    kind: 'talk_about_resolved',
-                    screen: 'home',
-                    subjectId: topic.recordId,
-                  });
-                  toast.success('이야기한 걸로 정리했어요.');
                 }}
-                aria-label="이야기했어요"
+                disabled={pendingRecordId !== null || isOffline}
+                aria-label={topic.unavailable ? '목록에서 정리하기' : '이야기했어요'}
                 /* Square and small, so this one scales. 0.95 was a flinch at 44px. */
-                className="press-response shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground"
+                className="press-response shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground disabled:opacity-50"
               >
                 <Check size={16} aria-hidden="true" />
               </button>

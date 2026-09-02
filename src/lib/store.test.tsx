@@ -186,14 +186,17 @@ vi.mock('@/lib/trips', () => ({
 
 const fetchTalkAboutMarksResultFromDB = vi.fn()
   .mockResolvedValue({ ok: true, marks: [] });
+const markTalkAboutInDB = vi.fn().mockResolvedValue({ ok: true });
+const unmarkTalkAboutInDB = vi.fn().mockResolvedValue({ ok: true });
+const resolveTalkAboutInDB = vi.fn().mockResolvedValue({ ok: true });
 
 // Talk-about marks load alongside the other shared slices. A failed read keeps
 // the old list; the normal default here is an authoritative empty result.
 vi.mock('@/lib/talkAbout', () => ({
   fetchTalkAboutMarksResultFromDB: (...args: unknown[]) => fetchTalkAboutMarksResultFromDB(...args),
-  markTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
-  unmarkTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
-  resolveTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
+  markTalkAboutInDB: (...args: unknown[]) => markTalkAboutInDB(...args),
+  unmarkTalkAboutInDB: (...args: unknown[]) => unmarkTalkAboutInDB(...args),
+  resolveTalkAboutInDB: (...args: unknown[]) => resolveTalkAboutInDB(...args),
 }));
 
 const { StoreProvider } = await import('@/lib/store');
@@ -211,6 +214,7 @@ let lastMediaResult: {
   recordId?: string;
 } | null = null;
 let lastFlushResult: { delivered: number; requeued: number; blocked: number } | null = null;
+let lastTalkAboutResult: { ok: boolean; error?: string; syncPending?: boolean } | null = null;
 
 function Probe({
   files = [] as File[],
@@ -232,6 +236,7 @@ function Probe({
     outboxBlocked,
     addEvent,
     reloadEvents,
+    markTalkAbout,
   } = useStore();
   return (
     <div>
@@ -318,6 +323,9 @@ function Probe({
         }
       }}>add-event</button>
       <button onClick={() => void reloadEvents()}>reload-events</button>
+      <button onClick={() => {
+        void markTalkAbout('record-talk').then((result) => { lastTalkAboutResult = result; });
+      }}>mark-talk</button>
     </div>
   );
 }
@@ -374,6 +382,10 @@ describe('StoreProvider auth lifecycle', () => {
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
     fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });
     fetchTalkAboutMarksResultFromDB.mockReset().mockResolvedValue({ ok: true, marks: [] });
+    markTalkAboutInDB.mockReset().mockResolvedValue({ ok: true });
+    unmarkTalkAboutInDB.mockReset().mockResolvedValue({ ok: true });
+    resolveTalkAboutInDB.mockReset().mockResolvedValue({ ok: true });
+    lastTalkAboutResult = null;
     saveEventToDB.mockReset().mockResolvedValue(null);
     updateEventInDB.mockReset().mockResolvedValue(null);
     deleteEventFromDB.mockReset().mockResolvedValue(true);
@@ -591,6 +603,63 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('records')).toHaveTextContent('');
     expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
     expect(screen.getByTestId('name')).toHaveTextContent('');
+  });
+
+  it('reports a committed talk-about write separately when reconciliation is delayed', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      error: new Error('refresh failed'),
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+
+    screen.getByText('mark-talk').click();
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true, syncPending: true }));
+    expect(markTalkAboutInDB).toHaveBeenCalledWith('record-talk', 'couple-1', 'user-a');
+  });
+
+  it('returns a fully reconciled talk-about success only after the authoritative list refreshes', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      marks: [{
+        id: 'mark-new', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+      }],
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+
+    screen.getByText('mark-talk').click();
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-new');
   });
 
   it('fails closed immediately while a different account is hydrating', async () => {

@@ -177,7 +177,7 @@ export function PaperHome() {
             type="button"
             aria-label="이야기할 것"
             onClick={() => navigate('/saved')}
-            className="relative flex h-11 w-11 items-center justify-center"
+            className="press-response relative flex h-11 w-11 items-center justify-center"
           >
             <Bookmark size={22} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
             {/* 인스타의 빨간 점과 같은 자리. 개수를 적지 않는다 -- 개수는 부채다. */}
@@ -193,7 +193,7 @@ export function PaperHome() {
             type="button"
             aria-label="통화 모드"
             onClick={() => navigate('/call')}
-            className="flex h-11 w-11 items-center justify-center"
+            className="press-response flex h-11 w-11 items-center justify-center"
           >
             <Phone size={21} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
           </button>
@@ -218,7 +218,7 @@ export function PaperHome() {
           <button
             type="button"
             onClick={() => navigate('/story/mine')}
-            className="flex w-[72px] flex-col items-center gap-1.5"
+            className="press-response flex w-[72px] flex-col items-center gap-1.5"
           >
             <InkCircle size={66} ring="seen"><PenFace size={44} tone="b" /></InkCircle>
             <span className="text-caption leading-none" style={{ color: 'var(--ink-soft)' }}>내 스토리</span>
@@ -236,7 +236,7 @@ export function PaperHome() {
               문이므로, 22px 그대로 두면 앱에서 가장 중요한 동작이 가장 놓치기 쉬운
               표적이 된다.
             */
-            className="absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full before:absolute before:-inset-3 before:content-['']"
+            className="press-response absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full before:absolute before:-inset-3 before:content-['']"
             style={{ background: 'var(--ink)', border: '2px solid var(--paper)' }}
           >
             <Plus size={13} color="var(--paper)" strokeWidth={2.6} aria-hidden="true" />
@@ -248,7 +248,7 @@ export function PaperHome() {
             type="button"
             onClick={() => navigate('/story/partner')}
             aria-label={`${partnerName}의 스토리`}
-            className="flex w-[72px] flex-col items-center gap-1.5"
+            className="press-response flex w-[72px] flex-col items-center gap-1.5"
           >
             {/*
               링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
@@ -309,7 +309,7 @@ export function PaperHome() {
         <button
           type="button"
           onClick={() => navigate(`/record?record=${encodeURIComponent(onThisDay.record.id)}`)}
-          className="flex min-h-11 w-full items-baseline gap-2 px-4 text-left"
+          className="press-response flex min-h-11 w-full items-baseline gap-2 px-4 text-left"
         >
           <span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>
             {onThisDayLabel(onThisDay)}
@@ -453,7 +453,7 @@ function Post({
           type="button"
           aria-label={`${author}의 기록 열기`}
           onClick={onOpen}
-          className="flex h-11 w-11 items-center justify-center"
+          className="press-response flex h-11 w-11 items-center justify-center"
         >
           <MoreHorizontal size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
         </button>
@@ -462,7 +462,7 @@ function Post({
           aria-label={marked ? '이따 이야기하기 취소' : '이따 이야기하기'}
           aria-pressed={marked}
           onClick={onToggleTalkAbout}
-          className="flex h-11 w-11 items-center justify-center"
+          className="press-response flex h-11 w-11 items-center justify-center"
         >
           <Bookmark
             size={21}

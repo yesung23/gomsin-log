@@ -188,8 +188,8 @@ describe('P0: daily symptoms never create or extend a menstrual period', () => {
 
     await renderLoaded({ periods: [COMPLETED_PERIOD] });
 
-    // Prediction before the symptom is logged.
-    const rangeBefore = (await screen.findByTestId('cycle-prediction-window')).textContent;
+    // One start is deliberately insufficient for a personalised date.
+    const stateBefore = screen.getByTestId('cycle-hero-state').textContent;
 
     fireEvent.click(screen.getByRole('button', { name: /두통/ }));
 
@@ -212,11 +212,12 @@ describe('P0: daily symptoms never create or extend a menstrual period', () => {
     expect(legacyDeleteEntry).not.toHaveBeenCalled();
 
     // Active period stays false: 8/5 ended, and 8/14 is not a start.
-    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('prediction');
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('insufficient_data');
     expect(screen.queryByRole('button', { name: /오늘 생리 끝났어요/ })).not.toBeInTheDocument();
 
-    // Prediction source unchanged, so the rendered window is identical.
-    expect((await screen.findByTestId('cycle-prediction-window')).textContent).toBe(rangeBefore);
+    // Prediction source unchanged, so no date appears after a condition write.
+    expect(screen.getByTestId('cycle-hero-state').textContent).toBe(stateBefore);
+    expect(screen.queryByTestId('cycle-prediction-window')).not.toBeInTheDocument();
   });
 
   it('never reads the legacy cycle_entries table on load', async () => {
@@ -374,8 +375,8 @@ describe('detailed daily log persistence', () => {
   });
 });
 
-describe('prediction is rendered as a range, not a single confident date', () => {
-  it('renders a personalized window with a confidence word and no percentage', async () => {
+describe('prediction is rendered as an evidence-bounded range', () => {
+  it('renders a personalized window with record sufficiency and no probability claim', async () => {
     await renderLoaded({
       periods: [
         // Every historical period is closed. An open one would still be "active".
@@ -386,13 +387,14 @@ describe('prediction is rendered as a range, not a single confident date', () =>
       ],
     });
 
-    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('prediction');
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('personalized');
     const window = await screen.findByTestId('cycle-prediction-window');
-    // 8/8 + 28 = 9/5, variability 0 -> clamped to 1 day either side.
-    expect(window).toHaveTextContent('9월 4일');
-    expect(window).toHaveTextContent('9월 6일');
-    expect(screen.getByTestId('cycle-prediction-confidence')).toHaveTextContent('높음');
-    expect(screen.getByTestId('cycle-prediction-basis')).toHaveTextContent('최근');
+    // 8/8 + observed 28 days, with the documented two-day safety margin.
+    expect(window).toHaveTextContent('9월 3일');
+    expect(window).toHaveTextContent('9월 7일');
+    expect(screen.queryByTestId('cycle-prediction-confidence')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cycle-prediction-basis')).toHaveTextContent('기록 충분도');
+    expect(screen.getByTestId('cycle-prediction-basis')).toHaveTextContent('3번');
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
 
@@ -403,10 +405,11 @@ describe('prediction is rendered as a range, not a single confident date', () =>
     expect(screen.queryByTestId('cycle-prediction-window')).not.toBeInTheDocument();
   });
 
-  it('labels a one-record estimate as a default-setting estimate', async () => {
+  it('withholds a date when only one start is recorded', async () => {
     await renderLoaded({ periods: [COMPLETED_PERIOD] });
-    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('prediction');
-    expect(screen.getByTestId('cycle-prediction-basis')).toHaveTextContent('기본 설정');
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('insufficient_data');
+    expect(screen.getByText(/실제 시작일 1개/)).toBeInTheDocument();
+    expect(screen.queryByTestId('cycle-prediction-window')).not.toBeInTheDocument();
   });
 
   it('asks about an open period that has run implausibly long instead of editing it', async () => {
@@ -438,7 +441,11 @@ describe('prediction is rendered as a range, not a single confident date', () =>
 describe('calendar distinguishes actual, predicted and logged days without relying on colour', () => {
   it('labels actual period days, predicted days and days carrying a condition log', async () => {
     await renderLoaded({
-      periods: [COMPLETED_PERIOD],
+      periods: [
+        { id: 'p1', userId: 'user-a', startDate: '2026-05-23', endDate: '2026-05-27' },
+        { id: 'p2', userId: 'user-a', startDate: '2026-06-20', endDate: '2026-06-24' },
+        { id: 'p3', userId: 'user-a', startDate: '2026-07-18', endDate: '2026-07-22' },
+      ],
       dailyLogs: [{
         id: 'log-814',
         userId: 'user-a',
@@ -447,10 +454,11 @@ describe('calendar distinguishes actual, predicted and logged days without relyi
       }],
     });
 
-    // 8/1 is a real recorded start.
-    expect(screen.getByRole('button', { name: /2026-08-01.*생리 기록/ })).toBeInTheDocument();
-    // 8/29 ± 2 is the configured-estimate window.
-    expect(screen.getByRole('button', { name: /2026-08-29.*생리 예상 기간/ })).toBeInTheDocument();
+    // 7/18 is a real recorded start and 8/15 is inside the observed range.
+    fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
+    expect(screen.getByRole('button', { name: /2026-07-18.*생리 기록/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
+    expect(screen.getByRole('button', { name: /2026-08-15.*생리 예상 기간/ })).toBeInTheDocument();
     // 8/14 carries a condition log, announced in the label rather than by colour.
     expect(screen.getByRole('button', { name: /2026-08-14.*컨디션 기록 있음/ })).toBeInTheDocument();
   });
@@ -477,69 +485,24 @@ describe('the main screen is not a pile of settings', () => {
     expect(screen.queryByText(/민감정보 동의 철회/)).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 
-    // They are reachable from one settings entry point.
+    // Only owner settings and consent are reachable from the entry point.
     fireEvent.click(screen.getByRole('button', { name: '내 몸의 리듬 설정' }));
     const settings = await screen.findByRole('dialog', { name: '내 몸의 리듬 설정' });
     expect(settings).toHaveTextContent('주기 설정');
-    expect(settings).toHaveTextContent('파트너 배려 공유');
+    expect(settings).toHaveTextContent('민감정보 동의');
+    expect(settings).not.toHaveTextContent('파트너 배려 공유');
   });
 });
 
-describe('sharing preferences are server state, not local state', () => {
-  it('reads preferences from the server and persists a toggle', async () => {
-    saveSharingPreferences.mockResolvedValue({
-      ok: true,
-      preferences: {
-        userId: 'user-a',
-        shareCurrentPeriod: true,
-        sharePredictionWindow: false,
-        shareFertilityWindow: false,
-      },
-    });
+describe('automatic partner projection has no user path', () => {
+  it('does not fetch legacy preferences or expose a projection switch', async () => {
     await renderLoaded({ periods: [COMPLETED_PERIOD] });
+    expect(fetchSharingPreferences).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '내 몸의 리듬 설정' }));
-    fireEvent.click(await screen.findByRole('button', { name: /파트너 배려 공유/ }));
-
-    const toggle = await screen.findByRole('switch', { name: /생리 진행 상태 공유/ });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(saveSharingPreferences).toHaveBeenCalledWith(
-      expect.objectContaining({ shareCurrentPeriod: true }),
-      'user-a',
-    ));
-    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
-  });
-
-  it('rolls the toggle back and names the real cause when the server refuses', async () => {
-    saveSharingPreferences.mockResolvedValue({ ok: false, reason: 'forbidden' });
-    await renderLoaded({ periods: [COMPLETED_PERIOD] });
-
-    fireEvent.click(screen.getByRole('button', { name: '내 몸의 리듬 설정' }));
-    fireEvent.click(await screen.findByRole('button', { name: /파트너 배려 공유/ }));
-    const toggle = await screen.findByRole('switch', { name: /생리 진행 상태 공유/ });
-    fireEvent.click(toggle);
-
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('권한이 없어요');
-    expect(alert).not.toHaveTextContent('인터넷 연결');
-    // Rolled back: an unsaved preference must not look saved.
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('previews exactly what the partner sees, derived from the real preferences', async () => {
-    await renderLoaded({ periods: [COMPLETED_PERIOD] });
-    fireEvent.click(screen.getByRole('button', { name: '내 몸의 리듬 설정' }));
-    fireEvent.click(await screen.findByRole('button', { name: /파트너 배려 공유/ }));
-
-    // Everything OFF: the preview must say nothing is shared.
-    const preview = await screen.findByTestId('cycle-partner-preview');
-    expect(preview).toHaveTextContent('현재 파트너에게 공유되는 주기 정보가 없어요');
-    // No raw health vocabulary may appear in a partner-facing preview.
-    for (const forbidden of ['두통', '출혈', '통증', '메모']) {
-      expect(preview).not.toHaveTextContent(forbidden);
-    }
+    const settings = await screen.findByRole('dialog', { name: '내 몸의 리듬 설정' });
+    expect(settings).not.toHaveTextContent('파트너 배려 공유');
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
 });
 
@@ -653,12 +616,16 @@ describe('revoking consent also stops partner sharing', () => {
     }));
   });
 
-  it('skips the extra write when nothing was shared', async () => {
+  it('clears the legacy row even when the current client never enabled sharing', async () => {
     await renderLoaded({ periods: [COMPLETED_PERIOD] });
     fireEvent.click(await openPrivacy());
 
     await waitFor(() => expect(revokeConsent).toHaveBeenCalled());
-    expect(saveSharingPreferences).not.toHaveBeenCalled();
+    await waitFor(() => expect(saveSharingPreferences).toHaveBeenCalledWith({
+      shareCurrentPeriod: false,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
+    }, 'user-a'));
   });
 
   it('keeps the surface locked when the server revoke itself is refused', async () => {

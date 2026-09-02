@@ -10,7 +10,6 @@ import {
   fetchCycleDailyLogsResultFromDB,
   fetchCyclePeriodsResultFromDB,
   fetchCycleSettingsResultFromDB,
-  fetchCycleSharingPreferencesFromDB,
   localToday,
   saveCycleDailyLogToDB,
   saveCyclePeriodToDB,
@@ -39,7 +38,6 @@ import { Button } from '@/components/ui/Button';
 import type {
   CycleDailyLog,
   CyclePeriod,
-  CycleSharingPreferences,
   CycleSymptom,
 } from '@/types';
 import { CycleCalendar } from '@/components/cycle/CycleCalendar';
@@ -56,7 +54,6 @@ import { Card } from '@/components/ui/Card';
 import { isNativePlatform } from '@/lib/platform';
 
 type LoadState = 'loading' | 'ready' | CycleFetchFailureReason;
-type ShareKey = 'shareCurrentPeriod' | 'sharePredictionWindow' | 'shareFertilityWindow';
 type ConsentAuthorityPhase =
   | 'checking'
   | 'granted'
@@ -83,13 +80,6 @@ type OpenSheet =
   | { kind: 'dailyLog'; date: string }
   | { kind: 'period'; period: CyclePeriod }
   | { kind: 'settings' };
-
-const EMPTY_PREFERENCES: CycleSharingPreferences = {
-  userId: '',
-  shareCurrentPeriod: false,
-  sharePredictionWindow: false,
-  shareFertilityWindow: false,
-};
 
 function failureMessage(
   state: Extract<LoadState, 'unauthenticated' | 'forbidden' | 'not_deployed' | 'error'>,
@@ -118,8 +108,9 @@ function failureMessage(
  * read or write `cycle_entries`; `src/components/cycleV3DataPath.test.tsx`
  * enforces that with a source guard so the regression cannot come back quietly.
  *
- * Screen order is Hero -> Calendar -> Quick log -> Summary. Settings, sharing and
- * consent live behind a single header action.
+ * Screen order is Hero -> Calendar -> Quick log -> Summary. Settings and consent
+ * live behind one header action. Partner care is a separate deliberate signal;
+ * no value is derived automatically from this private tracker.
  */
 export function CycleTrackerSection({ userId }: { userId?: string }) {
   const today = localToday();
@@ -243,7 +234,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [dailyLogs, setDailyLogs] = useState<CycleDailyLog[]>([]);
   const [cycleLength, setCycleLength] = useState(28);
   const [periodLength, setPeriodLength] = useState(5);
-  const [preferences, setPreferences] = useState<CycleSharingPreferences>(EMPTY_PREFERENCES);
 
   const [viewYear, setViewYear] = useState(initialYear);
   const [viewMonth, setViewMonth] = useState(initialMonthNumber - 1);
@@ -261,8 +251,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [dailyLogError, setDailyLogError] = useState<string | null>(null);
   const [settingsPending, setSettingsPending] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [sharingPendingKey, setSharingPendingKey] = useState<ShareKey | null>(null);
-  const [sharingError, setSharingError] = useState<string | null>(null);
 
   /**
    * Remove every health-derived value before consent is rechecked.
@@ -278,7 +266,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setDailyLogs([]);
     setCycleLength(28);
     setPeriodLength(5);
-    setPreferences(EMPTY_PREFERENCES);
     setSheet({ kind: 'none' });
     setPeriodPending(false);
     setPeriodDeletePending(false);
@@ -289,8 +276,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setDailyLogError(null);
     setSettingsPending(false);
     setSettingsError(null);
-    setSharingPendingKey(null);
-    setSharingError(null);
   }, []);
 
   /*
@@ -339,7 +324,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setDailyLogs([]);
     setCycleLength(28);
     setPeriodLength(5);
-    setPreferences(EMPTY_PREFERENCES);
     setSelectedDate(today);
     setSheet({ kind: 'none' });
     setPeriodPending(false);
@@ -351,8 +335,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setDailyLogError(null);
     setSettingsPending(false);
     setSettingsError(null);
-    setSharingPendingKey(null);
-    setSharingError(null);
   }, [today, userId]);
 
   /*
@@ -505,10 +487,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setCycleLength(settingResult.settings?.averageCycleLength ?? 28);
       setPeriodLength(settingResult.settings?.averagePeriodLength ?? 5);
       setLoadState('ready');
-
-      const nextPreferences = await fetchCycleSharingPreferencesFromDB(authority.userId);
-      if (!isCurrentGrantedAuthority(authority)) return;
-      setPreferences(nextPreferences);
     } catch (error) {
       if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to load private cycle data.');
@@ -878,31 +856,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     }
   };
 
-  const toggleSharing = async (key: ShareKey, next: boolean) => {
-    const authority = captureGrantedAuthority();
-    if (!authority || sharingPendingKey) return;
-    setSharingPendingKey(key);
-    setSharingError(null);
-    try {
-      if (!isCurrentGrantedAuthority(authority)) return;
-      const result = await saveCycleSharingPreferencesToDB({ [key]: next }, authority.userId);
-      if (!isCurrentGrantedAuthority(authority)) return;
-      if (!result.ok) {
-        // No optimistic flip: an unsaved preference must never look saved, because
-        // the user would believe they had shared (or stopped sharing) something.
-        setSharingError(serverErrorMessage(result.reason));
-        return;
-      }
-      setPreferences(result.preferences);
-    } catch (error) {
-      if (!isCurrentGrantedAuthority(authority)) return;
-      console.error('[gomsinlog] Failed to save cycle sharing preferences.');
-      setSharingError(classifyServerError(error).message);
-    } finally {
-      if (isCurrentGrantedAuthority(authority)) setSharingPendingKey(null);
-    }
-  };
-
   const acceptConsent = async () => {
     const current = authorityRef.current;
     if (!userId
@@ -961,9 +914,6 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     if (!userId
       || current.userId !== userId
       || (current.phase !== 'granted' && current.phase !== 'locked_error')) return;
-    const shouldResetSharing = preferences.shareCurrentPeriod
-      || preferences.sharePredictionWindow
-      || preferences.shareFertilityWindow;
     const authority = beginAuthorityOperation('revoking');
     if (!authority) return;
 
@@ -996,24 +946,19 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setConsentChecked(false);
       toast.info('민감정보 동의를 철회했어요.');
 
-      // Remove stale opt-ins after authority is gone. This is hygiene rather
-      // than the privacy boundary: migration 069 already returns no projection
-      // for revoked consent, and grant clears these values again before unlock.
-      // It deliberately runs in the background so a slow cleanup cannot hold
-      // sensitive UI in a pending state after revocation already succeeded.
-      if (shouldResetSharing) {
-        void saveCycleSharingPreferencesToDB({
-          shareCurrentPeriod: false,
-          sharePredictionWindow: false,
-          shareFertilityWindow: false,
-        }, authority.userId).then((stopSharing) => {
-          if (!stopSharing.ok) {
-            console.error('[gomsinlog] Could not reset cycle sharing after consent revoke.');
-          }
-        }).catch(() => {
+      // Automatic partner projection is disabled. Keep the legacy row all-false
+      // for older clients after the consent authority has been removed.
+      void saveCycleSharingPreferencesToDB({
+        shareCurrentPeriod: false,
+        sharePredictionWindow: false,
+        shareFertilityWindow: false,
+      }, authority.userId).then((stopSharing) => {
+        if (!stopSharing.ok) {
           console.error('[gomsinlog] Could not reset cycle sharing after consent revoke.');
-        });
-      }
+        }
+      }).catch(() => {
+        console.error('[gomsinlog] Could not reset cycle sharing after consent revoke.');
+      });
     } catch (error) {
       if (!isCurrentAuthority(authority)) return;
       commitAuthority(authority, 'locked_error');
@@ -1319,20 +1264,14 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           cycleLength={cycleLength}
           periodLength={periodLength}
           prediction={prediction}
-          periodActive={!!activePeriod}
-          preferences={preferences}
-          sharingPendingKey={sharingPendingKey}
-          sharingError={sharingError}
           settingsPending={settingsPending}
           settingsError={settingsError}
           consentPending={consentPending}
           consentError={consentError}
           onSaveLengths={(nextCycle, nextPeriod) => void saveLengths(nextCycle, nextPeriod)}
-          onToggleSharing={(key, next) => void toggleSharing(key, next)}
           onRevokeConsent={() => void revokeConsent()}
           onClose={() => {
             setSettingsError(null);
-            setSharingError(null);
             setSheet({ kind: 'none' });
           }}
         />

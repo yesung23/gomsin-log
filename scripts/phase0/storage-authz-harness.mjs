@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Executable proof for the real fresh active chain through the latest migration in ORDER.
+ * Executable proof for the real fresh active chain. Migration 071 is applied
+ * after the 069/070 upgrade-contract checks so both the old and final states are
+ * exercised in one throwaway cluster.
  *
  * The string-level tests next to these migrations prove the SQL text says what
  * we think it says. They cannot prove the policies DENY anything, because a
@@ -128,6 +130,7 @@ const ORDER = [
   '069_require_current_cycle_consent.sql',
   '070_cycle_consent_atomic_write_gate.sql',
 ];
+const FINAL_MIGRATION = '071_disable_automatic_cycle_projection.sql';
 
 /**
  * The one deviation the README prescribes for a fresh database.
@@ -424,8 +427,8 @@ function checkVisible(userId, predicate, expected, message) {
 // Derived from ORDER rather than typed, because the typed version was already
 // wrong: it still said 043..050 with 051 in the chain, and had said 043..045
 // long after that stopped being true.
-const chainSpan = `${ORDER[0].slice(0, 3)}..${ORDER[ORDER.length - 1].slice(0, 3)}`;
-console.log(`active fresh-chain harness — ${ORDER.length} migrations (${chainSpan}, 041/042 frozen) on throwaway PostgreSQL 17\n`);
+const chainSpan = `${ORDER[0].slice(0, 3)}..${FINAL_MIGRATION.slice(0, 3)}`;
+console.log(`active fresh-chain harness — ${ORDER.length + 1} migrations (${chainSpan}, 041/042 frozen) on throwaway PostgreSQL 17\n`);
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -5491,6 +5494,182 @@ async function proveCycleGrantDeletionOrdering() {
 }
 
 await proveCycleGrantDeletionOrdering();
+
+// ---------------------------------------------------------------------------
+// 071 — automatic partner cycle projection is disabled
+// ---------------------------------------------------------------------------
+
+const projectionFixtureIds = Array.from({ length: 8 }, (_, index) =>
+  `71000000-0000-4000-8000-00000000000${index}`);
+const projectionCombinations = [
+  [false, false, false],
+  [true, false, false],
+  [false, true, false],
+  [false, false, true],
+  [true, true, false],
+  [true, false, true],
+  [false, true, true],
+  [true, true, true],
+];
+const sqlBoolean = (value) => value ? 'true' : 'false';
+
+mustSql(`
+  INSERT INTO auth.users (id, email) VALUES
+    ${projectionFixtureIds.map((id, index) =>
+    `('${id}', 'cycle071-${index}@example.test')`).join(',\n    ')}
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.cycle_sharing_preferences (
+    user_id, share_current_period, share_prediction_window, share_fertility_window
+  ) VALUES
+    ${projectionFixtureIds.map((id, index) => {
+    const [current, prediction, fertility] = projectionCombinations[index];
+    return `('${id}', ${sqlBoolean(current)}, ${sqlBoolean(prediction)}, ${sqlBoolean(fertility)})`;
+  }).join(',\n    ')}
+  ON CONFLICT (user_id) DO UPDATE
+  SET share_current_period = EXCLUDED.share_current_period,
+      share_prediction_window = EXCLUDED.share_prediction_window,
+      share_fertility_window = EXCLUDED.share_fertility_window;
+`, '071 all legacy toggle combinations fixture');
+
+function rawCycleSnapshot(table) {
+  return mustSql(`
+    SELECT COALESCE(
+      jsonb_agg(to_jsonb(snapshot_row) ORDER BY to_jsonb(snapshot_row)::text)::text,
+      '[]'
+    )
+    FROM public.${table} AS snapshot_row
+  `, `071 ${table} snapshot`);
+}
+
+const rawCycleTables = ['cycle_periods', 'cycle_daily_logs', 'cycle_settings', 'cycle_entries'];
+const rawBefore071 = new Map(rawCycleTables.map((table) => [table, rawCycleSnapshot(table)]));
+const applied071 = psqlScript(readFileSync(join(MIGRATIONS, FINAL_MIGRATION), 'utf8'));
+if (!applied071.ok) {
+  throw new Error(`071 migration failed:\n${applied071.stderr.trim()}`);
+}
+
+check(
+  mustSql(`
+    SELECT count(*)::text || '|' ||
+           bool_and(
+             NOT share_current_period
+             AND NOT share_prediction_window
+             AND NOT share_fertility_window
+           )::text
+    FROM public.cycle_sharing_preferences
+    WHERE user_id IN (${projectionFixtureIds.map((id) => `'${id}'`).join(', ')})
+  `, '071 backfilled combinations') === '8|true',
+  '071 backfills every one of the eight legacy toggle combinations to all-false',
+);
+
+check(
+  mustSql(`
+    SELECT convalidated::text
+    FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.cycle_sharing_preferences'::pg_catalog.regclass
+      AND conname = 'cycle_sharing_preferences_automatic_projection_disabled'
+  `, '071 validated projection constraint') === 'true',
+  '071 validates the permanent all-false projection constraint',
+);
+
+const oldClientUpdate = asUser(A, `
+  UPDATE public.cycle_sharing_preferences
+  SET share_current_period = true
+  WHERE user_id = '${A}'
+`);
+check(!oldClientUpdate.ok, '071 rejects an old-client true UPDATE');
+check(
+  mustSql(`
+    SELECT pg_catalog.concat_ws('|', share_current_period::text,
+                    share_prediction_window::text, share_fertility_window::text)
+    FROM public.cycle_sharing_preferences WHERE user_id = '${A}'
+  `, '071 preserved all-false row after update refusal') === 'false|false|false',
+  '071 a refused old-client UPDATE leaves the existing row all-false',
+);
+
+const allFalseUpsert = asUser(A, `
+  INSERT INTO public.cycle_sharing_preferences (
+    user_id, share_current_period, share_prediction_window, share_fertility_window
+  ) VALUES ('${A}', false, false, false)
+  ON CONFLICT (user_id) DO UPDATE
+  SET share_current_period = EXCLUDED.share_current_period,
+      share_prediction_window = EXCLUDED.share_prediction_window,
+      share_fertility_window = EXCLUDED.share_fertility_window
+`);
+check(allFalseUpsert.ok, '071 current-client all-false UPSERT succeeds on an existing row');
+
+const trueConflictUpsert = asUser(A, `
+  INSERT INTO public.cycle_sharing_preferences (
+    user_id, share_current_period, share_prediction_window, share_fertility_window
+  ) VALUES ('${A}', false, true, false)
+  ON CONFLICT (user_id) DO UPDATE
+  SET share_current_period = EXCLUDED.share_current_period,
+      share_prediction_window = EXCLUDED.share_prediction_window,
+      share_fertility_window = EXCLUDED.share_fertility_window
+`);
+check(!trueConflictUpsert.ok, '071 rejects an any-true UPSERT on an existing row');
+check(
+  mustSql(`
+    SELECT pg_catalog.concat_ws('|', share_current_period::text,
+                    share_prediction_window::text, share_fertility_window::text)
+    FROM public.cycle_sharing_preferences WHERE user_id = '${A}'
+  `, '071 preserved all-false row after upsert refusal') === 'false|false|false',
+  '071 a refused any-true UPSERT leaves the existing row all-false',
+);
+
+mustSql(`DELETE FROM public.cycle_sharing_preferences WHERE user_id = '${B}'`,
+  '071 old-client insert fixture');
+const oldClientInsert = asUser(B, `
+  INSERT INTO public.cycle_sharing_preferences (
+    user_id, share_current_period, share_prediction_window, share_fertility_window
+  ) VALUES ('${B}', false, true, false)
+`);
+check(!oldClientInsert.ok, '071 rejects an old-client true INSERT');
+check(
+  mustSql(`SELECT count(*) FROM public.cycle_sharing_preferences WHERE user_id = '${B}'`,
+    '071 refused insert recount') === '0',
+  '071 a refused old-client INSERT creates no preference row',
+);
+
+for (const [actor, label] of [[A, 'owner'], [B, 'partner'], [C, 'unrelated user']]) {
+  checkCycleProjection(actor, 'false|false|false|false', `071 ${label} receives no automatic health projection`);
+}
+check(!asAnon('SELECT * FROM public.get_partner_cycle_projection()').ok,
+  '071 anon cannot execute the compatibility projection');
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '071 disconnect partner');
+checkCycleProjection(B, 'false|false|false|false', '071 a former partner receives no health projection');
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '071 restore partner');
+
+check(
+  mustSql(`SELECT (pg_catalog.to_regprocedure('public.cycle_prediction_window(uuid)') IS NULL)::text`,
+    '071 removed helper') === 'true',
+  '071 removes the arbitrary-owner prediction helper',
+);
+check(
+  mustSql(`SELECT prosecdef::text || '|' || provolatile::text || '|' ||
+                  array_to_string(proconfig, ',')
+           FROM pg_catalog.pg_proc
+           WHERE oid = 'public.get_partner_cycle_projection()'::pg_catalog.regprocedure`,
+  '071 compatibility projection flags') === 'false|s|search_path=public, pg_temp',
+  '071 compatibility projection is SECURITY INVOKER, STABLE and path-pinned',
+);
+check(
+  mustSql(`SELECT relrowsecurity::text FROM pg_catalog.pg_class
+           WHERE oid = 'public.cycle_sharing_preferences'::pg_catalog.regclass`,
+  '071 sharing RLS state') === 'true',
+  '071 keeps RLS enabled on legacy sharing preferences',
+);
+
+for (const table of rawCycleTables) {
+  check(
+    rawCycleSnapshot(table) === rawBefore071.get(table),
+    `071 preserves every raw row and value in ${table}`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Report

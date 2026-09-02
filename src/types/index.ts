@@ -259,10 +259,9 @@ export interface CycleSettings {
 /**
  * What a person may log about their own body.
  *
- * PERSONAL ONLY. None of this is ever partner-visible: the partner-facing payload
- * is `CyclePartnerProjection`, which has no field that could carry a symptom, and
- * the only other thing a partner sees is a `CycleSupportSignal` the owner chose to
- * send.
+ * PERSONAL ONLY. None of this or its predictions are automatically partner-visible.
+ * The only current partner-facing path is a short-lived `CycleSupportSignal` the
+ * owner deliberately chooses; it is not derived from these fields.
  *
  * `nausea` and `breast_tenderness` were added 2026-08-20. Two of the most commonly
  * reported, and until now the two most likely to end up written into `note` --
@@ -339,13 +338,12 @@ export interface CycleSharingPreferences {
 }
 
 /**
- * The ONLY cycle information a partner ever receives.
+ * Legacy compatibility shape for installed clients.
  *
- * Produced by the `get_partner_cycle_projection()` RPC, which reads the owner's
- * raw tables under SECURITY DEFINER and returns nothing but these booleans and
- * date ranges. The shape is the enforcement: there is no field here that could
- * carry a symptom, flow, pain level, mood, note, row id, or actual period date,
- * so a future change cannot leak one by accident.
+ * Automatic cycle/health projection is disabled. Migration 071 preserves the
+ * eight-column RPC shape but returns only false/null values, and the current
+ * client never calls it. Keep this type only while older installed builds need
+ * schema compatibility; `CycleSupportSignal` is the sole current partner path.
  */
 export interface CyclePartnerProjection {
   isCurrentPeriodShared: boolean;

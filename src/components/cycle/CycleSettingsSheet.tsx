@@ -7,27 +7,19 @@ import {
   PERIOD_LENGTH_MIN,
 } from '@/lib/cycle';
 import type { CyclePrediction } from '@/lib/cyclePrediction';
-import type { CycleSharingPreferences } from '@/types';
 import { CycleSheet } from './CycleSheet';
-import { CycleSharingSettings } from './CycleSharingSettings';
 
-type ShareKey = 'shareCurrentPeriod' | 'sharePredictionWindow' | 'shareFertilityWindow';
-type Pane = 'root' | 'cycle' | 'sharing' | 'privacy';
+type Pane = 'root' | 'cycle' | 'privacy';
 
 interface CycleSettingsSheetProps {
   cycleLength: number;
   periodLength: number;
   prediction: CyclePrediction;
-  periodActive: boolean;
-  preferences: CycleSharingPreferences;
-  sharingPendingKey: ShareKey | null;
-  sharingError: string | null;
   settingsPending: boolean;
   settingsError: string | null;
   consentPending: boolean;
   consentError: string | null;
   onSaveLengths: (cycleLength: number, periodLength: number) => void;
-  onToggleSharing: (key: ShareKey, next: boolean) => void;
   onRevokeConsent: () => void;
   onClose: () => void;
 }
@@ -44,16 +36,11 @@ export function CycleSettingsSheet({
   cycleLength,
   periodLength,
   prediction,
-  periodActive,
-  preferences,
-  sharingPendingKey,
-  sharingError,
   settingsPending,
   settingsError,
   consentPending,
   consentError,
   onSaveLengths,
-  onToggleSharing,
   onRevokeConsent,
   onClose,
 }: CycleSettingsSheetProps) {
@@ -65,8 +52,7 @@ export function CycleSettingsSheet({
   const title = pane === 'root'
     ? '내 몸의 리듬 설정'
     : pane === 'cycle' ? '주기 설정'
-      : pane === 'sharing' ? '파트너 배려 공유'
-        : '민감정보 동의';
+      : '민감정보 동의';
 
   return (
     <CycleSheet title={title} onClose={onClose} busy={settingsPending || consentPending}>
@@ -85,10 +71,6 @@ export function CycleSettingsSheet({
         <ul className="divide-y divide-border/40">
           {([
             ['cycle', '주기 설정', `평균 주기 ${cycleLength}일 · 평균 기간 ${periodLength}일`],
-            ['sharing', '파트너 배려 공유', preferences.shareCurrentPeriod
-              || preferences.sharePredictionWindow
-              || preferences.shareFertilityWindow
-              ? '일부 항목을 공유하고 있어요' : '공유 중인 정보 없음'],
             ['privacy', '민감정보 동의', '수집 항목과 동의 철회'],
           ] as Array<[Pane, string, string]>).map(([target, label, hint]) => (
             <li key={target}>
@@ -159,22 +141,11 @@ export function CycleSettingsSheet({
         </div>
       )}
 
-      {pane === 'sharing' && (
-        <CycleSharingSettings
-          preferences={preferences}
-          prediction={prediction}
-          periodActive={periodActive}
-          pendingKey={sharingPendingKey}
-          error={sharingError}
-          onToggle={onToggleSharing}
-        />
-      )}
-
       {pane === 'privacy' && (
         <div className="space-y-3 text-caption text-muted-foreground leading-relaxed">
           <p><strong className="text-foreground">수집 항목:</strong> 생리 시작·종료일, 일별 컨디션(증상·통증·기분·메모), 평균 주기 설정</p>
           <p><strong className="text-foreground">이용 목적:</strong> 본인 주기 기록, 본인 주기 예상, 본인 패턴 참고</p>
-          <p><strong className="text-foreground">파트너 공유:</strong> 직접 선택한 항목만. 원본 기록은 공유되지 않아요.</p>
+          <p><strong className="text-foreground">파트너 공유:</strong> 주기 기록과 예상은 자동 공유하지 않아요. 오늘 직접 고른 짧은 배려 신호만 별도 기능에서 보낼 수 있어요.</p>
           <p><strong className="text-foreground">보유 기간:</strong> 직접 삭제하거나 회원 탈퇴할 때까지</p>
           <a
             href="/legal/privacy"

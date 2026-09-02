@@ -3,7 +3,6 @@ import { ChevronRight, Clock, Shield } from 'lucide-react';
 import { AppBar } from '@/components/ui/AppBar';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
-import { CyclePartnerCard } from '@/components/cycle/CyclePartnerCard';
 import { computeServiceProgress } from '@/lib/milestones';
 import { localToday } from '@/lib/cycle';
 import { useStore } from '@/lib/useStore';
@@ -114,14 +113,7 @@ function MePageBody() {
             key={authenticatedUser?.id || 'signed-out'}
             userId={authenticatedUser?.id}
           />
-        ) : (
-          <CyclePartnerCard
-            key={authenticatedUser?.id || 'signed-out'}
-            authenticated={authenticated}
-            userId={authenticatedUser?.id}
-            connected={connected}
-          />
-        )}
+        ) : null}
 
         {serving ? (
           <ServiceCard

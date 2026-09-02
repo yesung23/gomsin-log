@@ -3,7 +3,7 @@ import type { CyclePrediction } from '@/lib/cyclePrediction';
 import { isPeriodImplausiblyLong, periodDayNumber } from '@/lib/cycle';
 import { cn } from '@/lib/utils';
 import type { CyclePeriod } from '@/types';
-import { confidenceLabels, formatKoreanDate } from './cycleFormatting';
+import { formatKoreanDate } from './cycleFormatting';
 
 interface CycleStatusHeroProps {
   activePeriod: CyclePeriod | null;
@@ -19,8 +19,8 @@ interface CycleStatusHeroProps {
  * next one.
  *
  * The prediction is rendered as a RANGE, never as a single confident date. A
- * lone `8월 26일` reads as a promise the statistics cannot make; `8월 24일 ~ 28일`
- * with a confidence word is honest about the same estimate.
+ * lone `8월 26일` reads as a promise the statistics cannot make. The range and
+ * exact number of observed intervals state only what the records support.
  */
 export function CycleStatusHero({
   activePeriod,
@@ -36,7 +36,7 @@ export function CycleStatusHero({
    */
   const heroState = activePeriod
     ? 'active'
-    : prediction.status === 'insufficient_data' ? 'insufficient_data' : 'prediction';
+    : prediction.status;
 
   /*
    * Today's period is already recorded as ending today.
@@ -88,13 +88,34 @@ export function CycleStatusHero({
             내 주기를 알아가는 중
           </p>
           <p className="text-caption text-muted-foreground leading-relaxed">
-            첫 생리 시작일을 기록하면 예상 기간을 알려드릴게요.
+            {prediction.periodsUsed === 0
+              ? '첫 생리 시작일을 기록해 주세요.'
+              : `실제 시작일 ${prediction.periodsUsed}개를 기록했어요.`}
+            {' '}개인 예상은 시작일이 3개 이상 쌓이면 보여드려요.
           </p>
+        </div>
+      ) : prediction.status === 'withheld' ? (
+        <div className="space-y-1">
+          <p id="cycle-hero-title" className="text-title text-foreground font-bold">
+            예상은 잠시 쉬어갈게요
+          </p>
+          <p className="text-caption text-muted-foreground leading-relaxed">
+            {prediction.reviewReason === 'wide_variation'
+              ? '최근 시작 간격의 차이가 커서 날짜를 좁혀 보여주지 않아요.'
+              : prediction.reviewReason === 'stale_window'
+                ? '이전 예상 범위가 지났어요. 새 시작일을 기록하면 다시 계산해요.'
+                : '최근 기록만으로는 예상 범위를 안전하게 계산하기 어려워요.'}
+          </p>
+          {prediction.intervalsUsed > 0 && (
+            <p className="text-caption text-muted-foreground" data-testid="cycle-prediction-basis">
+              기록 충분도 · 최근 {prediction.intervalsUsed}번의 실제 시작 간격
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-1">
           <p id="cycle-hero-title" className="text-caption text-muted-foreground">
-            {prediction.isOverdue ? '예상 기간이 지났어요' : '다음 생리 예상'}
+            다음 생리 예상
           </p>
           <p
             className="text-title text-foreground font-bold"
@@ -104,22 +125,9 @@ export function CycleStatusHero({
             {' ~ '}
             {formatKoreanDate(prediction.windowEnd || '')}
           </p>
-          <p className="text-caption text-muted-foreground">
-            예측 신뢰도 ·{' '}
-            <span data-testid="cycle-prediction-confidence" className="font-medium text-foreground">
-              {confidenceLabels[prediction.confidence]}
-            </span>
-          </p>
           <p className="text-caption text-muted-foreground" data-testid="cycle-prediction-basis">
-            {prediction.status === 'personalized'
-              ? `최근 ${prediction.intervalsUsed}번의 실제 생리 기록 기준`
-              : '기본 설정을 이용한 예상이에요.'}
+            기록 충분도 · 최근 {prediction.intervalsUsed}번의 실제 시작 간격
           </p>
-          {prediction.isOverdue && (
-            <p className="text-caption text-muted-foreground leading-relaxed pt-0.5">
-              아직 시작하지 않았다면 주기가 평소와 달라졌을 수 있어요.
-            </p>
-          )}
         </div>
       )}
 

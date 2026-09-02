@@ -1054,12 +1054,10 @@ export async function fetchCycleSharingPreferencesFromDB(
     .maybeSingle();
 
   if (error || !data) return { ...defaultPrefs, userId };
-  return {
-    userId: data.user_id,
-    shareCurrentPeriod: !!data.share_current_period,
-    sharePredictionWindow: !!data.share_prediction_window,
-    shareFertilityWindow: !!data.share_fertility_window,
-  };
+  // Automatic partner projection is disabled. Read the row only to preserve
+  // identity and migration compatibility; legacy true values are never surfaced
+  // back into the current client.
+  return { ...defaultPrefs, userId: data.user_id };
 }
 
 /**
@@ -1075,7 +1073,7 @@ export type CycleSharingPreferencesWriteResult =
   | CycleWriteFailure;
 
 export async function saveCycleSharingPreferencesToDB(
-  prefs: Partial<CycleSharingPreferences>,
+  _prefs: Partial<CycleSharingPreferences>,
   expectedUserId?: string,
 ): Promise<CycleSharingPreferencesWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
@@ -1084,12 +1082,11 @@ export async function saveCycleSharingPreferencesToDB(
   const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return unauthenticatedFailure();
 
-  const current = await fetchCycleSharingPreferencesFromDB(userId);
   const next = {
     user_id: userId,
-    share_current_period: prefs.shareCurrentPeriod ?? current.shareCurrentPeriod,
-    share_prediction_window: prefs.sharePredictionWindow ?? current.sharePredictionWindow,
-    share_fertility_window: prefs.shareFertilityWindow ?? current.shareFertilityWindow,
+    share_current_period: false,
+    share_prediction_window: false,
+    share_fertility_window: false,
     updated_at: new Date().toISOString(),
   };
 
@@ -1107,9 +1104,9 @@ export async function saveCycleSharingPreferencesToDB(
     ok: true,
     preferences: {
       userId: data.user_id,
-      shareCurrentPeriod: !!data.share_current_period,
-      sharePredictionWindow: !!data.share_prediction_window,
-      shareFertilityWindow: !!data.share_fertility_window,
+      shareCurrentPeriod: false,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
     },
   };
 }
@@ -1121,54 +1118,19 @@ export async function saveCycleSharingPreferencesToDB(
 /**
  * Read the sanitized cycle projection the partner is allowed to see.
  *
- * This is the ONLY path by which cycle information reaches a partner. It calls
- * `get_partner_cycle_projection()`, a SECURITY DEFINER RPC that reads the
- * owner's raw tables and returns nothing but the booleans and date ranges the
- * owner explicitly turned on. The partner's own credentials can never read
- * `cycle_periods`, `cycle_daily_logs`, `cycle_settings`,
- * `cycle_sharing_preferences`, or `user_sensitive_consents` — those stay
- * owner-only under RLS.
- *
- * Before this existed the three sharing toggles wrote to the database and
- * changed nothing a partner could see. The promise was recorded and never kept.
+ * Automatic cycle projection is disabled until a separate partner-provision
+ * consent contract exists. Keep this compatibility function fail-closed so a
+ * stale caller cannot revive the old RPC path. Deliberate, expiring support
+ * signals use their own sanitized table and API.
  */
 export async function fetchPartnerCycleProjectionFromDB(): Promise<CyclePartnerProjectionFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
   const userId = await currentUserId();
   if (!userId) return { ok: false, reason: 'unauthenticated' };
-
-  const { data, error } = await supabase.rpc('get_partner_cycle_projection');
-
-  if (error) {
-    console.error('[gomsinlog] Failed to fetch partner cycle projection.');
-    // `PGRST202` is the missing-function answer, the RPC analogue of a missing
-    // table. Reporting it as a bad connection would invite a pointless retry.
-    if (error.code === 'PGRST202') return { ok: false, reason: 'not_deployed' };
-    return fetchFailure(error);
-  }
-
-  // No row means there is nothing to project: no active couple, or no partner.
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) return { ok: true, projection: null };
-
-  return {
-    ok: true,
-    projection: {
-      isCurrentPeriodShared: !!row.has_current_period_status,
-      isPeriodActive: !!row.current_period_active,
-      isPredictionShared: !!row.has_prediction_window,
-      predictedWindowStart: row.prediction_window_start || undefined,
-      predictedWindowEnd: row.prediction_window_end || undefined,
-      isFertilityShared: !!row.has_fertility_window,
-      fertilityWindowStart: row.fertility_window_start || undefined,
-      fertilityWindowEnd: row.fertility_window_end || undefined,
-    },
-  };
+  return { ok: true, projection: null };
 }
 
-/** True when the owner has turned on nothing at all. */
-export function isPartnerProjectionEmpty(projection: CyclePartnerProjection): boolean {
-  return !projection.isCurrentPeriodShared
-    && !projection.isPredictionShared
-    && !projection.isFertilityShared;
+/** Automatic projection is always empty in the current privacy contract. */
+export function isPartnerProjectionEmpty(_projection: CyclePartnerProjection): boolean {
+  return true;
 }

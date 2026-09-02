@@ -60,9 +60,11 @@ export function CycleSummary({
 }: CycleSummaryProps) {
   const measured = measuredPeriodLength(periods);
   const frequentSymptom = mostLoggedSymptom(dailyLogs);
+  const hasObservedCycle = prediction.averageCycleLength !== undefined
+    && prediction.intervalsUsed > 0;
   const hasRange = prediction.status === 'personalized'
-    && prediction.medianCycleLength !== undefined
-    && prediction.variabilityDays !== undefined;
+    && prediction.shortestCycleLength !== undefined
+    && prediction.longestCycleLength !== undefined;
 
   return (
     <section className="space-y-2" aria-labelledby="cycle-summary-title">
@@ -71,10 +73,10 @@ export function CycleSummary({
         <div className="flex items-baseline justify-between gap-3 py-2">
           <dt className="text-caption text-muted-foreground">평균 주기</dt>
           <dd className="text-body text-foreground">
-            {prediction.medianCycleLength ?? configuredCycleLength}일
-            {prediction.status !== 'personalized' && (
-              <span className="text-caption text-muted-foreground"> (설정값)</span>
-            )}
+            {hasObservedCycle ? prediction.averageCycleLength : configuredCycleLength}일
+            <span className="text-caption text-muted-foreground">
+              {hasObservedCycle ? ` (최근 ${prediction.intervalsUsed}번 기록)` : ' (설정값)'}
+            </span>
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-3 py-2">
@@ -90,9 +92,7 @@ export function CycleSummary({
           <div className="flex items-baseline justify-between gap-3 py-2">
             <dt className="text-caption text-muted-foreground">최근 범위</dt>
             <dd className="text-body text-foreground">
-              {(prediction.medianCycleLength as number) - (prediction.variabilityDays as number)}
-              ~
-              {(prediction.medianCycleLength as number) + (prediction.variabilityDays as number)}일
+              {prediction.shortestCycleLength}~{prediction.longestCycleLength}일
             </dd>
           </div>
         )}

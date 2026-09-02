@@ -675,8 +675,8 @@ describe('CycleTrackerSection write integrity', () => {
     fireEvent.click(screen.getByRole('button', { name: /오늘 생리 시작했어요/ }));
 
     await waitFor(() => expect(savePeriod).toHaveBeenCalled());
-    // The hero stays in its prediction state: no local period was invented.
-    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('prediction');
+    // The hero stays in its insufficient-data state: no local period was invented.
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('insufficient_data');
   });
 
   it('reports a rejected settings save with its real cause and keeps the stored average', async () => {

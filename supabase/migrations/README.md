@@ -222,9 +222,11 @@ V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 �
 `shared_for_date`는 소유자가 고르고, `expires_at`은 하루, `revoked_at`으로 철회. 그래서
 **어휘 한 값만 넓혔습니다.**
 
-`cyclePartnerMessage.ts`의 withholding 문장 "증상, 출혈량, 통증, 기분, 메모는 어떤
-경우에도 보이지 않아요"는 **그대로 참**입니다. `feeling_unwell`은 기록된 통증 값이
-아니고, 등급이 없으며, 개인 기록에서 파생되지 않는 독립 opt-in 신호이기 때문입니다.
+당시 `cyclePartnerMessage.ts`의 withholding 문장 "증상, 출혈량, 통증, 기분, 메모는 어떤
+경우에도 보이지 않아요"도 같은 경계를 설명했습니다. 현재 client에서는 migration 071과
+함께 자동 projection UI 및 해당 파일을 제거했고, 같은 약속을 주기 설정의 개인정보 안내가
+직접 설명합니다. `feeling_unwell`은 기록된 통증 값이 아니고, 등급이 없으며, 개인 기록에서
+파생되지 않는 독립 opt-in 신호라는 원칙은 유지됩니다.
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 
@@ -998,3 +1000,24 @@ supabase functions deploy delete-account
 - **원격 적용 상태: NOT APPLIED / UNVERIFIED.** Production Supabase에는 접근하거나
   적용하지 않았습니다. 선행 migration과 원격 카탈로그를 확인한 별도 배포 게이트 전에는
   070을 적용하지 않습니다.
+
+## 071 — 자동 주기 projection 비활성화 (2026-09-03)
+
+- `071_disable_automatic_cycle_projection.sql`은 현재 개인정보 동의·고지 범위에 없는
+  건강 파생정보의 자동 파트너 제공을 닫습니다. `현재 생리 여부`, `예상 범위`, `가임 추정`
+  세 legacy toggle을 모두 `false`로 backfill하고, 이후에도 모두 `false`만 허용하는 CHECK와
+  restrictive RLS 정책을 둡니다.
+- 설치된 구버전이 8열 RPC를 호출해도 파싱 오류 대신 `false/null`만 받도록 반환 형태는
+  유지합니다. 실행 권한은 `authenticated`에만 있고 함수는 `SECURITY INVOKER`, 고정
+  `search_path`이며 원본 건강 테이블을 읽지 않습니다. 임의 소유자 UUID를 받던 예측 helper는
+  모든 client role의 실행 권한을 회수한 뒤 제거합니다.
+- 원본 `cycle_periods`, `cycle_daily_logs`, `cycle_settings`, `cycle_entries` 행은 수정·삭제하지
+  않습니다. 사용자가 그날 직접 고르고 만료되는 `cycle_support_signals`도 독립 경로로
+  보존합니다.
+- 로컬 fresh-chain actor 하네스는 8개 toggle 조합 backfill, 구버전 INSERT/UPDATE 거부,
+  owner/partner/unrelated/former-partner의 all-false 결과, anon 거부, helper 제거, RLS 유지,
+  네 원본 테이블의 migration 전후 exact snapshot 보존을 검증했습니다.
+- rollback은 자동 건강정보 제공을 재활성화하지 않습니다. 재도입하려면 별도 partner-provision
+  동의, 새 동의 버전, 법무 검토와 forward migration이 필요합니다.
+- **원격 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업은 로컬 fresh chain만 사용했고
+  Production Supabase에는 접근하거나 적용하지 않았습니다.

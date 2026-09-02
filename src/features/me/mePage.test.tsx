@@ -39,9 +39,6 @@ vi.mock('@/components/CycleSupportSection', () => ({
 vi.mock('@/components/CycleTrackerSection', () => ({
   CycleTrackerSection: () => <div data-testid="cycle-tracker" />,
 }));
-vi.mock('@/components/cycle/CyclePartnerCard', () => ({
-  CyclePartnerCard: () => <div data-testid="cycle-partner" />,
-}));
 
 const { MePage } = await import('./MePage');
 
@@ -97,6 +94,13 @@ describe('컨디션은 양쪽 모두의 것이다', () => {
     const mine = screen.getByTestId('care-mine');
     const partner = screen.getByTestId('care-partner');
     expect(mine.compareDocumentPosition(partner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('주기 원본과 파생 상태는 파트너 화면에 자동으로 나타나지 않는다', () => {
+    currentState = stateWith(SERVING, 'soldier');
+    renderMe();
+    expect(screen.queryByTestId('cycle-tracker')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/생리 기간|생리 예상|가임|배란/);
   });
 });
 

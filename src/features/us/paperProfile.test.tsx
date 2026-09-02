@@ -490,6 +490,90 @@ describe('PaperProfile (우리 화면)', () => {
     );
 
     expect(screen.getByText(/아직 게시물이 없어요/)).toBeInTheDocument();
+    const create = screen.getByRole('button', { name: '첫 게시물 만들기' });
+    fireEvent.click(create);
+    const composer = screen.getByRole('dialog', { name: '새 게시물' });
+    const closeComposer = screen.getByRole('button', { name: '게시물 만들기 닫기' });
+    const storySource = within(composer).getByRole('tab', { name: '스토리에서' });
+    const tripSource = within(composer).getByRole('tab', { name: '여행에서' });
+    const storySourcePanel = document.getElementById('post-source-panel-story');
+    expect(closeComposer).toHaveFocus();
+    expect(composer.querySelector('input[type="file"]')).toHaveAttribute('tabindex', '-1');
+    expect(composer.querySelector('input[type="file"]')).toHaveAttribute('aria-hidden', 'true');
+    expect(storySource).toHaveAttribute('aria-controls', 'post-source-panel-story');
+    expect(tripSource).toHaveAttribute('tabindex', '-1');
+    expect(storySourcePanel).not.toHaveAttribute('hidden');
+    expect(document.getElementById('post-source-panel-trip')).toHaveAttribute('hidden');
+
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(storySourcePanel).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(closeComposer).toHaveFocus();
+
+    storySource.focus();
+    fireEvent.keyDown(storySource, { key: 'ArrowRight' });
+    expect(tripSource).toHaveFocus();
+    expect(tripSource).toHaveAttribute('aria-selected', 'true');
+    expect(document.getElementById('post-source-panel-story')).toHaveAttribute('hidden');
+    expect(screen.getByRole('tabpanel', { name: '여행에서' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '새 게시물' })).not.toBeInTheDocument();
+    expect(create).toHaveFocus();
+  });
+
+  it('게시물·사진·여행을 표준 탭으로 읽고 화살표 키로 이동한다', () => {
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    const tabs = screen.getByRole('tablist', { name: '우리의 기억 보기' });
+    const posts = within(tabs).getByRole('tab', { name: '게시물' });
+    const photos = within(tabs).getByRole('tab', { name: '사진' });
+    const trips = within(tabs).getByRole('tab', { name: '여행' });
+    expect(posts).toHaveAttribute('aria-selected', 'true');
+    expect(posts).toHaveAttribute('aria-controls', 'profile-panel-grid');
+    expect(posts).toHaveAttribute('tabindex', '0');
+    expect(photos).toHaveAttribute('tabindex', '-1');
+    expect(document.getElementById('profile-panel-grid')).not.toHaveAttribute('hidden');
+    expect(document.getElementById('profile-panel-grid')).toHaveAttribute('aria-labelledby', 'profile-tab-grid');
+    expect(document.getElementById('profile-panel-photo')).toHaveAttribute('hidden');
+    expect(document.getElementById('profile-panel-trip')).toHaveAttribute('hidden');
+
+    posts.focus();
+    fireEvent.keyDown(posts, { key: 'ArrowRight' });
+    expect(photos).toHaveFocus();
+    expect(photos).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel', { name: '사진' })).toBeInTheDocument();
+    expect(document.getElementById('profile-panel-grid')).toHaveAttribute('hidden');
+    expect(document.getElementById('profile-panel-photo')).not.toHaveAttribute('hidden');
+
+    fireEvent.keyDown(photos, { key: 'End' });
+    expect(trips).toHaveFocus();
+    fireEvent.keyDown(trips, { key: 'ArrowRight' });
+    expect(posts).toHaveFocus();
+    fireEvent.keyDown(posts, { key: 'ArrowLeft' });
+    expect(trips).toHaveFocus();
+    fireEvent.keyDown(trips, { key: 'Home' });
+    expect(posts).toHaveFocus();
+  });
+
+  it('연결 전 빈 우리 공간은 게시물 대신 상대 연결 경로를 설명한다', () => {
+    storeState = baseState();
+    storeState.profile.couple.connected = false;
+    storeState.profile.couple.status = 'pending';
+
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(/상대를 연결하면 둘만의 게시물을 만들 수 있어요/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '상대 연결하기' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/settings');
   });
 
   it('사진 탭은 비공개 기록을 제외한 공유 기록 목록을 사용한다', () => {
@@ -508,7 +592,7 @@ describe('PaperProfile (우리 화면)', () => {
     );
 
     // 사진(기록) 탭 클릭
-    const photoTab = screen.getByRole('button', { name: '사진' });
+    const photoTab = screen.getByRole('tab', { name: '사진' });
     fireEvent.click(photoTab);
 
     expect(screen.getByTestId('profile-record-list')).toBeInTheDocument();
@@ -537,7 +621,7 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    const tripTab = screen.getByRole('button', { name: '여행' });
+    const tripTab = screen.getByRole('tab', { name: '여행' });
     fireEvent.click(tripTab);
 
     expect(screen.getByTestId('profile-trips-list')).toBeInTheDocument();

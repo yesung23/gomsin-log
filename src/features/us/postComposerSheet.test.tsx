@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord } from '@/types';
@@ -245,6 +245,32 @@ describe('게시물 만들기 3단계', () => {
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.click(screen.getByRole('button', { name: '1번째 사진 빼기' }));
     expect(screen.getAllByRole('button', { name: /사진 빼기/ })).toHaveLength(1);
+  });
+
+  it('공유가 시작된 직후 Escape를 눌러도 진행 중인 초안을 닫지 않는다', async () => {
+    storeState.records = [record({
+      id: 'r1',
+      attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    let finishDownload!: (result: { file: File }) => void;
+    downloadRecordPhotoForReuse.mockReturnValueOnce(new Promise((resolve) => {
+      finishDownload = resolve;
+    }));
+
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getByTestId('post-source-photo'));
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+
+    fireEvent.click(screen.getByTestId('post-share'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByTestId('post-composer')).toBeInTheDocument();
+
+    await act(async () => {
+      finishDownload({ file: new File(['photo'], 'a.jpg', { type: 'image/jpeg' }) });
+    });
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
   });
 
   it('글을 쓰고 공유하면 기존 사진을 새 파일로 복사해 저장한다', async () => {

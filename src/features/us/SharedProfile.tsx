@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, MoreHorizontal, Plane, Plus, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,6 +28,12 @@ import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { useDialogFocus } from '@/lib/useDialogFocus';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
+
+const PROFILE_TABS = [
+  { id: 'grid', Icon: Grid3x3, label: '게시물' },
+  { id: 'photo', Icon: ImageIcon, label: '사진' },
+  { id: 'trip', Icon: Plane, label: '여행' },
+] as const;
 
 export type PostRetryPhase = 'media' | 'publication';
 
@@ -97,6 +103,7 @@ export function SharedProfile() {
   const { profile } = state;
   const todayStr = localToday();
   const [tab, setTab] = useState<ProfileTab>('grid');
+  const profileTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const selectedPostTriggerRef = useRef<HTMLElement | null>(null);
   const [editingHighlightId, setEditingHighlightId] = useState<string | null | undefined>(undefined);
@@ -106,6 +113,7 @@ export function SharedProfile() {
   const [highlightCoverId, setHighlightCoverId] = useState<string | undefined>();
   const [isSavingHighlight, setIsSavingHighlight] = useState(false);
   const [composingPost, setComposingPost] = useState(false);
+  const postComposerTriggerRef = useRef<HTMLElement | null>(null);
   const [isPaperMenuOpen, setIsPaperMenuOpen] = useState(false);
   const paperMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const [isPublishingPost, setIsPublishingPost] = useState(false);
@@ -401,6 +409,11 @@ export function SharedProfile() {
     discardPostDraft();
   };
 
+  const openPostComposer = (trigger: HTMLElement) => {
+    postComposerTriggerRef.current = trigger;
+    setComposingPost(true);
+  };
+
   const sharedRecords = useMemo(
     () => visibleRecordsForViewer(state.records ?? [], { userId: profile.id, role: profile.role })
       .filter((record) => !record.isPrivate),
@@ -453,6 +466,25 @@ export function SharedProfile() {
     }),
     [effectiveMilitary, profile.couple?.anniversaryDate, profile.profileCaption, sharedEvents, todayStr],
   );
+
+  const selectProfileTab = (nextTab: ProfileTab, focus = false) => {
+    setTab(nextTab);
+    if (focus) {
+      const index = PROFILE_TABS.findIndex(({ id }) => id === nextTab);
+      profileTabRefs.current[index]?.focus();
+    }
+  };
+
+  const moveProfileTab = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % PROFILE_TABS.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + PROFILE_TABS.length) % PROFILE_TABS.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = PROFILE_TABS.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    selectProfileTab(PROFILE_TABS[nextIndex].id, true);
+  };
 
   const openCreateHighlight = () => {
     highlightTriggerRef.current = document.activeElement instanceof HTMLElement
@@ -564,7 +596,7 @@ export function SharedProfile() {
                 : '게시물 만들기'
             }
             data-testid="open-post-composer"
-            onClick={() => setComposingPost(true)}
+            onClick={(event) => openPostComposer(event.currentTarget)}
             className="flex h-11 w-11 shrink-0 items-center justify-center"
           >
             <Plus size={22} color="var(--ink)" aria-hidden="true" />
@@ -661,36 +693,65 @@ export function SharedProfile() {
         />
       ) : null}
 
-      <div className="mt-4 flex border-t" style={{ borderColor: 'var(--ink-faint)' }}>
-        {([
-          { id: 'grid', Icon: Grid3x3, label: '격자' },
-          { id: 'photo', Icon: ImageIcon, label: '사진' },
-          { id: 'trip', Icon: Plane, label: '여행' },
-        ] as const).map(({ id, Icon, label }) => (
-          <button key={id} type="button" aria-label={label} aria-pressed={tab === id} onClick={() => setTab(id)} className="profile-tab flex min-h-11 flex-1 items-center justify-center py-3" style={{ borderBottom: `var(--stroke-bold) solid ${tab === id ? 'var(--ink)' : 'transparent'}` }}>
+      <div role="tablist" aria-label="우리의 기억 보기" className="mt-4 flex border-t" style={{ borderColor: 'var(--ink-faint)' }}>
+        {PROFILE_TABS.map(({ id, Icon, label }, index) => (
+          <button
+            key={id}
+            ref={(element) => { profileTabRefs.current[index] = element; }}
+            id={`profile-tab-${id}`}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            aria-controls={`profile-panel-${id}`}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => selectProfileTab(id)}
+            onKeyDown={(event) => moveProfileTab(event, index)}
+            className="profile-tab flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 py-2"
+            style={{ borderBottom: `var(--stroke-bold) solid ${tab === id ? 'var(--ink)' : 'transparent'}` }}
+          >
             <Icon size={20} color={tab === id ? 'var(--ink)' : 'var(--ink-soft)'} aria-hidden="true" />
+            <span className="text-caption font-semibold" style={{ color: tab === id ? 'var(--ink)' : 'var(--ink-soft)' }}>{label}</span>
           </button>
         ))}
       </div>
 
-      {tab === 'trip' ? (
-        <SharedTripList trips={state.trips ?? []} todayStr={todayStr} onOpen={(id) => navigate(`/trips/${encodeURIComponent(id)}`)} onOpenAll={() => navigate('/trips')} />
-      ) : tab === 'photo' ? (
-        <SharedRecordList records={sharedRecords} coupleId={profile.couple.coupleId} onOpen={(id) => navigate(`/record?record=${encodeURIComponent(id)}`)} />
-      ) : (
-        <PostGrid
-          records={profilePostRecords}
-          coupleId={profile.couple.coupleId}
-          onOpen={(recordId) => {
-            selectedPostTriggerRef.current = document.activeElement instanceof HTMLElement
-              ? document.activeElement
-              : null;
-            setSelectedPostId(recordId);
-          }}
-          emptyMessage="아직 게시물이 없어요."
-          ariaLabel="사진 게시물 격자"
-        />
-      )}
+      {PROFILE_TABS.map(({ id }) => (
+        <section
+          key={id}
+          id={`profile-panel-${id}`}
+          role="tabpanel"
+          aria-labelledby={`profile-tab-${id}`}
+          tabIndex={0}
+          hidden={tab !== id}
+        >
+          {tab === id ? (
+            id === 'trip' ? (
+              <SharedTripList trips={state.trips ?? []} todayStr={todayStr} onOpen={(tripId) => navigate(`/trips/${encodeURIComponent(tripId)}`)} onOpenAll={() => navigate('/trips')} />
+            ) : id === 'photo' ? (
+              <SharedRecordList records={sharedRecords} coupleId={profile.couple.coupleId} onOpen={(recordId) => navigate(`/record?record=${encodeURIComponent(recordId)}`)} />
+            ) : (
+              <PostGrid
+                records={profilePostRecords}
+                coupleId={profile.couple.coupleId}
+                onOpen={(recordId) => {
+                  selectedPostTriggerRef.current = document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null;
+                  setSelectedPostId(recordId);
+                }}
+                emptyMessage={profile.couple.connected
+                  ? '아직 게시물이 없어요. 둘이 간직할 사진과 이야기를 골라 보세요.'
+                  : '아직 둘만의 게시물이 없어요. 상대를 연결하면 둘만의 게시물을 만들 수 있어요.'}
+                emptyActionLabel={profile.couple.connected ? '첫 게시물 만들기' : '상대 연결하기'}
+                onEmptyAction={profile.couple.connected
+                  ? openPostComposer
+                  : () => navigate('/settings')}
+                ariaLabel="사진 게시물 격자"
+              />
+            )
+          ) : null}
+        </section>
+      ))}
 
       {selectedPost ? (
         <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} restoreFocusRef={selectedPostTriggerRef} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
@@ -710,6 +771,7 @@ export function SharedProfile() {
           setItems={setPostItems}
           caption={postCaption}
           setCaption={setPostCaption}
+          restoreFocusRef={postComposerTriggerRef}
           onClose={() => { void closePostComposer(); }}
           onSubmit={(input) => { void publishPost(input); }}
         />

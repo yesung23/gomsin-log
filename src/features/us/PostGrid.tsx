@@ -1,4 +1,5 @@
 import { ImageOff, Images, Lock } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
 import { buildPostTiles, type PostTile } from '@/features/us/postTiles';
 import type { DailyRecord } from '@/types';
@@ -20,6 +21,8 @@ interface PostGridProps {
   coupleId?: string;
   onOpen: (recordId: string) => void;
   emptyMessage?: string;
+  emptyActionLabel?: string;
+  onEmptyAction?: (trigger: HTMLButtonElement) => void;
   ariaLabel?: string;
 }
 
@@ -74,14 +77,33 @@ function PhotoTile({
   );
 }
 
-export function PostGrid({ records, coupleId, onOpen, emptyMessage = '아직 사진이 없어요.', ariaLabel = '사진 게시물' }: PostGridProps) {
+export function PostGrid({
+  records,
+  coupleId,
+  onOpen,
+  emptyMessage = '아직 사진이 없어요.',
+  emptyActionLabel,
+  onEmptyAction,
+  ariaLabel = '사진 게시물',
+}: PostGridProps) {
   const tiles = buildPostTiles(records);
 
   if (tiles.length === 0) {
     return (
-      <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
-        {emptyMessage}
-      </p>
+      <div className="flex flex-col items-center gap-3 px-8 pt-10 text-center">
+        <p className="text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
+          {emptyMessage}
+        </p>
+        {emptyActionLabel && onEmptyAction ? (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={(event) => onEmptyAction(event.currentTarget)}
+          >
+            {emptyActionLabel}
+          </Button>
+        ) : null}
+      </div>
     );
   }
 

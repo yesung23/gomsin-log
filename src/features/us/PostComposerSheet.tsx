@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { ChevronDown, ChevronLeft, ChevronUp, GripVertical, Image as ImageIcon, Plane, Sparkles, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { MEDIA_ACCEPT, MEDIA_POLICY_REFUSAL, classifyMediaFile } from '@/lib/records';
 import { formatLocalDate } from '@/lib/utils';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 import {
   MAX_POST_PHOTOS,
   containsAttachment,
@@ -40,6 +41,12 @@ import type { Attachment, DailyRecord, Trip } from '@/types';
  */
 
 type Step = 'source' | 'arrange' | 'caption';
+type PhotoSource = 'story' | 'trip';
+
+const PHOTO_SOURCE_TABS = [
+  { id: 'story', label: '스토리에서', Icon: Sparkles },
+  { id: 'trip', label: '여행에서', Icon: Plane },
+] as const;
 
 export interface PostComposerSheetProps {
   /** 이미 권한 판정을 통과한, 이 커플이 볼 수 있는 기록 전부. */
@@ -67,6 +74,7 @@ export interface PostComposerSheetProps {
   setItems: (next: PostDraftItem[] | ((prev: PostDraftItem[]) => PostDraftItem[])) => void;
   caption: string;
   setCaption: (value: string) => void;
+  restoreFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   onSubmit: (input: {
     caption: string;
@@ -88,6 +96,7 @@ export function PostComposerSheet({
   setItems,
   caption,
   setCaption,
+  restoreFocusRef,
   onClose,
   onSubmit,
 }: PostComposerSheetProps) {
@@ -96,8 +105,16 @@ export function PostComposerSheet({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => closeRef.current?.focus(), []);
+  useDialogFocus({
+    active: true,
+    panelRef,
+    restoreFocusRef,
+    initialFocusRef: closeRef,
+    onClose,
+    closeDisabled: busy,
+  });
 
   /*
     미리보기 URL 해제는 이 시트가 하지 않는다.
@@ -195,6 +212,7 @@ export function PostComposerSheet({
       */
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="post-composer-title"
@@ -272,6 +290,8 @@ export function PostComposerSheet({
         <input
           ref={fileInputRef}
           type="file"
+          tabIndex={-1}
+          aria-hidden="true"
           accept={MEDIA_ACCEPT}
           multiple
           className="sr-only"
@@ -300,8 +320,45 @@ function SourceStep({
   items: PostDraftItem[];
   onAdd: (photo: SelectablePhoto) => void;
 }) {
-  const [source, setSource] = useState<'trip' | 'story'>('story');
+  const [source, setSource] = useState<PhotoSource>('story');
+  const sourceTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const list = source === 'trip' ? tripPhotos : storyPhotos;
+  const selectSource = (nextSource: PhotoSource, focus = false) => {
+    setSource(nextSource);
+    if (focus) {
+      const index = PHOTO_SOURCE_TABS.findIndex(({ id }) => id === nextSource);
+      sourceTabRefs.current[index]?.focus();
+    }
+  };
+  const moveSourceTab = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % PHOTO_SOURCE_TABS.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + PHOTO_SOURCE_TABS.length) % PHOTO_SOURCE_TABS.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = PHOTO_SOURCE_TABS.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    selectSource(PHOTO_SOURCE_TABS[nextIndex].id, true);
+  };
+
+  const sourceContent = list.length === 0 ? (
+    <p className="px-6 pt-8 pb-4 text-center text-label leading-relaxed text-muted-foreground">
+      {source === 'trip' ? '여행 기간에 남긴 사진이 아직 없어요.' : '고를 수 있는 사진이 아직 없어요.'}
+    </p>
+  ) : (
+    <ul className="grid grid-cols-3 gap-1 pt-3" data-testid="post-source-photos" aria-label="고를 수 있는 사진">
+      {list.map((photo) => (
+        <li key={`${photo.recordId}-${photo.attachment.path}`}>
+          <ExistingPhotoButton
+            photo={photo}
+            coupleId={coupleId}
+            picked={containsAttachment(items, photo.attachment)}
+            onAdd={onAdd}
+          />
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <div className="pt-3">
@@ -314,35 +371,39 @@ function SourceStep({
       </p>
 
       <div className="mt-4 flex gap-2" role="tablist" aria-label="사진 가져올 곳">
-        {([
-          { id: 'story', label: '스토리에서', Icon: Sparkles },
-          { id: 'trip', label: '여행에서', Icon: Plane },
-        ] as const).map(({ id, label, Icon }) => (
-          <button key={id} type="button" role="tab" aria-selected={source === id} onClick={() => setSource(id)} className="press-response-row inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-control text-label font-semibold" style={{ border: 'var(--stroke-thin) solid var(--ink-faint)', background: source === id ? 'var(--paper-deep, var(--paper))' : 'transparent', color: 'var(--ink)' }}>
+        {PHOTO_SOURCE_TABS.map(({ id, label, Icon }, index) => (
+          <button
+            key={id}
+            ref={(element) => { sourceTabRefs.current[index] = element; }}
+            id={`post-source-tab-${id}`}
+            type="button"
+            role="tab"
+            aria-selected={source === id}
+            aria-controls={`post-source-panel-${id}`}
+            tabIndex={source === id ? 0 : -1}
+            onClick={() => selectSource(id)}
+            onKeyDown={(event) => moveSourceTab(event, index)}
+            className="press-response-row inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-control text-label font-semibold"
+            style={{ border: 'var(--stroke-thin) solid var(--ink-faint)', background: source === id ? 'var(--paper-deep, var(--paper))' : 'transparent', color: 'var(--ink)' }}
+          >
             <Icon size={15} aria-hidden="true" />
             {label}
           </button>
         ))}
       </div>
 
-      {list.length === 0 ? (
-        <p className="px-6 pt-8 pb-4 text-center text-label leading-relaxed text-muted-foreground">
-          {source === 'trip' ? '여행 기간에 남긴 사진이 아직 없어요.' : '고를 수 있는 사진이 아직 없어요.'}
-        </p>
-      ) : (
-        <ul className="grid grid-cols-3 gap-1 pt-3" data-testid="post-source-photos" aria-label="고를 수 있는 사진">
-          {list.map((photo) => (
-            <li key={`${photo.recordId}-${photo.attachment.path}`}>
-              <ExistingPhotoButton
-                photo={photo}
-                coupleId={coupleId}
-                picked={containsAttachment(items, photo.attachment)}
-                onAdd={onAdd}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
+      {PHOTO_SOURCE_TABS.map(({ id }) => (
+        <div
+          key={id}
+          id={`post-source-panel-${id}`}
+          role="tabpanel"
+          aria-labelledby={`post-source-tab-${id}`}
+          tabIndex={0}
+          hidden={source !== id}
+        >
+          {source === id ? sourceContent : null}
+        </div>
+      ))}
     </div>
   );
 }

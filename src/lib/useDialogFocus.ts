@@ -1,6 +1,18 @@
 import { useEffect, useRef, type RefObject } from 'react';
 
-const FOCUSABLE_SELECTOR = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled]):not([tabindex="-1"]):not([aria-hidden="true"])',
+  '[href]:not([tabindex="-1"]):not([aria-hidden="true"])',
+  'input:not([disabled]):not([tabindex="-1"]):not([aria-hidden="true"])',
+  'select:not([disabled]):not([tabindex="-1"]):not([aria-hidden="true"])',
+  'textarea:not([disabled]):not([tabindex="-1"]):not([aria-hidden="true"])',
+  '[tabindex]:not([tabindex="-1"]):not([aria-hidden="true"])',
+].join(', ');
+
+function focusableElements(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter((element) => element.closest('[hidden], [aria-hidden="true"], [inert]') === null);
+}
 
 interface DialogFocusOptions {
   active: boolean;
@@ -33,7 +45,7 @@ export function useDialogFocus({
 
     const panel = panelRef.current;
     const restoreTarget = restoreFocusRef.current;
-    (initialFocusRef?.current ?? panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR))?.focus();
+    (initialFocusRef?.current ?? (panel ? focusableElements(panel)[0] : undefined))?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -42,7 +54,7 @@ export function useDialogFocus({
       }
       if (event.key !== 'Tab' || !panel) return;
 
-      const focusable = panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      const focusable = focusableElements(panel);
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];

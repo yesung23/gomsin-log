@@ -122,6 +122,8 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     const exp = computeServiceExp(SERVING_MILITARY);
 
     expect(screen.getByTestId('soldier-service-info')).toBeInTheDocument();
+    expect(screen.getByTestId('soldier-service-info')).toHaveClass('ink-box');
+    expect(screen.getByTestId('soldier-service-info')).not.toHaveClass('bg-card');
     expect(screen.queryByRole('button', { name: '내 복무 현황 열기' })).not.toBeInTheDocument();
     expect(screen.getByText('내 복무')).toBeInTheDocument();
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
@@ -154,6 +156,11 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
     expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
     expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
+    expect(screen.getByTestId('service-exp-readout')).not.toHaveClass('bg-card/60');
+    expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' }).firstElementChild)
+      .toHaveClass('motion-safe:transition-[width]');
+    expect(screen.getByRole('progressbar', { name: '현재 복무 레벨 경험치 진행률' }).firstElementChild)
+      .toHaveClass('motion-safe:transition-[width]');
     expect(screen.getByTestId('service-today-exp')).toBeInTheDocument();
     expect(screen.getByText(/평일 18:00–21:00/)).toBeInTheDocument();
     expect(screen.queryByTestId('cycle-tracker-section')).not.toBeInTheDocument();
@@ -425,7 +432,14 @@ describe('검색 입력 및 네비게이션', () => {
   it('상단 검색창과 기록 남기기 버튼이 상시 존재한다', () => {
     renderSearch();
 
-    expect(screen.getByPlaceholderText('쓴 말이나 날짜로 찾기')).toBeInTheDocument();
+    const searchRegion = screen.getByRole('search', { name: '기록 찾기' });
+    const input = screen.getByPlaceholderText('쓴 말이나 날짜로 찾기');
+    expect(searchRegion).toContainElement(input);
+    expect(input).toHaveAttribute('aria-describedby', 'record-search-help');
+    expect(input).toHaveAttribute('aria-controls', 'record-search-results');
+    expect(document.getElementById('record-search-help')).toHaveTextContent('이 기기 안에서만 찾아요');
+    expect(document.getElementById('record-search-results')).toBeInTheDocument();
+    expect(screen.getByTestId('record-search-field')).toHaveStyle({ background: 'var(--paper)' });
     const composeBtn = screen.getByRole('button', { name: '기록 남기기' });
     expect(composeBtn).toBeInTheDocument();
     expect(composeBtn).toHaveClass('press-response', 'h-11', 'w-11');
@@ -445,7 +459,7 @@ describe('검색 입력 및 네비게이션', () => {
     const input = screen.getByPlaceholderText('쓴 말이나 날짜로 찾기');
     fireEvent.change(input, { target: { value: '면회' } });
 
-    expect(screen.getByText('1개 찾았어요')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1개 찾았어요');
     expect(screen.getByText('면회')).toBeInTheDocument();
     expect(screen.queryByTestId('soldier-search-surface')).not.toBeInTheDocument();
   });
@@ -475,7 +489,7 @@ describe('검색 입력 및 네비게이션', () => {
     const input = screen.getByPlaceholderText('쓴 말이나 날짜로 찾기');
     fireEvent.change(input, { target: { value: '없는단어' } });
 
-    expect(screen.getByText('그 말이 들어간 기록이 없어요')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('그 말이 들어간 기록이 없어요');
   });
 
   it('날짜 검색 시 0건이면 날짜용 메시지를 표시한다', () => {
@@ -485,7 +499,7 @@ describe('검색 입력 및 네비게이션', () => {
     const input = screen.getByPlaceholderText('쓴 말이나 날짜로 찾기');
     fireEvent.change(input, { target: { value: '8/14' } });
 
-    expect(screen.getByText('그날은 남긴 것이 없어요')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('그날은 남긴 것이 없어요');
   });
 
   it('지우기 버튼을 누르면 검색어가 비워지고 다시 역할별 기본 주 콘텐츠가 보인다', () => {
@@ -496,11 +510,12 @@ describe('검색 입력 및 네비게이션', () => {
     fireEvent.change(input, { target: { value: '외출' } });
     expect(screen.queryByTestId('soldier-search-surface')).not.toBeInTheDocument();
 
-    const clearBtn = screen.getByRole('button', { name: '지우기' });
+    const clearBtn = screen.getByRole('button', { name: '검색어 지우기' });
     expect(clearBtn).toHaveClass('press-response', 'h-11', 'w-11');
     fireEvent.click(clearBtn);
 
     expect(screen.getByTestId('soldier-search-surface')).toBeInTheDocument();
+    expect(input).toHaveFocus();
   });
 });
 

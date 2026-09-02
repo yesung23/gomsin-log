@@ -228,14 +228,14 @@ function InlineServiceInfo({
   const currentTier = expState.tier;
 
   return (
-    <section className="rounded-control border border-border bg-card p-4 space-y-3.5 relative overflow-hidden" data-testid="soldier-service-info">
+    <section className="ink-box relative space-y-3.5 overflow-hidden p-4" data-testid="soldier-service-info">
       {/* Level-up / Promo Accessible Feedback */}
       {feedback ? (
         <div
           role="status"
           aria-live="polite"
           className={cn(
-            'flex items-center gap-1.5 rounded-lg border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong transition-all duration-300',
+            'flex items-center gap-1.5 rounded-lg border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong motion-safe:transition-all motion-safe:duration-300',
             feedback.isBent && 'ring-2 ring-coral/20 motion-safe:animate-pulse',
           )}
           data-testid="service-feedback"
@@ -252,12 +252,12 @@ function InlineServiceInfo({
 
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2.5">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-coral/10 text-coral-strong p-1">
+          <div className="ink-chip flex h-10 w-10 shrink-0 items-center justify-center p-1 text-coral-strong">
             <RankInsignia bars={expState.rank.bars} size={32} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-label font-bold text-card-foreground">{title}</span>
+              <h2 className="text-label font-bold" style={{ color: 'var(--ink)' }}>{title}</h2>
             </div>
             <div className="text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
@@ -302,11 +302,12 @@ function InlineServiceInfo({
           aria-valuemax={100}
           aria-valuenow={expState.totalPercent}
           aria-valuetext={`복무율 ${formatExpPercent(expState.totalPercent, 4)}, 현재 복무 레벨 ${expState.levelBadge} ${currentTier.label}, ${nextGuide}`}
-          className="h-2 overflow-hidden rounded-full bg-muted"
+          className="h-2 overflow-hidden rounded-full border"
+          style={{ background: 'var(--paper)', borderColor: 'var(--ink-faint)' }}
         >
           <div
-            className="h-full rounded-full bg-coral-strong transition-[width] duration-700 ease-out"
-            style={{ width: `${expState.totalPercent}%` }}
+            className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out"
+            style={{ width: `${expState.totalPercent}%`, background: 'var(--ink-accent)' }}
           />
         </div>
         <div className="flex justify-between gap-3 text-caption text-muted-foreground">
@@ -316,7 +317,8 @@ function InlineServiceInfo({
       </div>
 
       {/* Service tier, real-time EXP and connected roadmap track */}
-      <div className="rounded-xl border border-border/70 bg-muted/20 p-3.5 space-y-3">
+      <div className="ink-rule" aria-hidden="true" />
+      <div className="space-y-3 pt-0.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <div className="flex items-center gap-1.5" data-testid="service-level">
@@ -359,7 +361,7 @@ function InlineServiceInfo({
         </p>
 
         {/* Real-time EXP Readout */}
-        <div className="rounded-lg border border-border/60 bg-card/60 p-2.5 space-y-1.5" data-testid="service-exp-readout">
+        <div className="space-y-1.5" data-testid="service-exp-readout">
           <div className="flex items-baseline justify-between gap-2">
             <div className="flex items-baseline gap-1 text-label font-bold text-card-foreground tabular-nums">
               <span className="font-extrabold text-coral-strong">{formatExpNumber(expState.intoLevelSec)}</span>
@@ -379,16 +381,20 @@ function InlineServiceInfo({
                 aria-valuemax={100}
                 aria-valuenow={expState.levelExpPercent}
                 aria-valuetext={`${expState.levelBadge} ${currentTier.label} 경험치 ${formatExpPercent(expState.levelExpPercent, 4)}`}
-                className="h-1.5 overflow-hidden rounded-full bg-muted"
+                className="h-1.5 overflow-hidden rounded-full border"
+                style={{ background: 'var(--paper)', borderColor: 'var(--ink-faint)' }}
               >
                 <div
-                  className="h-full rounded-full bg-coral-strong transition-[width] duration-300 ease-out"
-                  style={{ width: `${expState.levelExpPercent}%` }}
+                  className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-300 motion-safe:ease-out"
+                  style={{ width: `${expState.levelExpPercent}%`, background: 'var(--ink-accent)' }}
                 />
               </div>
-              <div className="flex justify-between text-caption text-muted-foreground tabular-nums">
+              <div
+                className="grid gap-0.5 text-caption text-muted-foreground tabular-nums min-[375px]:grid-cols-2"
+                data-testid="service-level-progress-copy"
+              >
                 <span>{expState.levelBadge} 진행 {formatExpPercent(expState.levelExpPercent, 1)}</span>
-                <span>{`다음 Lv.${expState.level + 1}까지 ${formatRemainingDuration(expState.toNextLevelSec)}`}</span>
+                <span className="min-[375px]:text-right">{`다음 Lv.${expState.level + 1}까지 ${formatRemainingDuration(expState.toNextLevelSec)}`}</span>
               </div>
             </div>
           ) : null}
@@ -410,7 +416,7 @@ function InlineServiceInfo({
               <div className="absolute top-[26px] left-[7.14%] right-[7.14%] h-0.5 -translate-y-1/2 bg-border" />
               {/* Active progress rail */}
               <div
-                className="absolute top-[26px] left-[7.14%] h-0.5 -translate-y-1/2 bg-coral-strong transition-[width] duration-700 ease-out"
+                className="absolute top-[26px] left-[7.14%] h-0.5 -translate-y-1/2 bg-coral-strong motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out"
                 style={{
                   width: expState.isDischarged
                     ? '85.72%'
@@ -426,13 +432,13 @@ function InlineServiceInfo({
                       data-testid={`service-tier-step-${idx + 1}`}
                       data-tier-key={stage.key}
                       className={cn(
-                        'flex flex-col items-center justify-center text-center transition-all px-0.5',
+                        'flex flex-col items-center justify-center px-0.5 text-center motion-safe:transition-all',
                         stage.isCurrent && 'scale-105',
                       )}
                     >
                       <div
                         className={cn(
-                          'mb-1.5 flex h-7 w-7 items-center justify-center rounded-full text-caption font-bold transition-all',
+                          'mb-1.5 flex h-7 w-7 items-center justify-center rounded-full text-caption font-bold motion-safe:transition-all',
                           stage.isCurrent && 'bg-coral-strong text-coral-strong-foreground ring-4 ring-coral/20',
                           stage.isPast && 'bg-coral-strong text-coral-strong-foreground',
                           stage.isCurrent && stage.isMax && 'ring-coral/30',
@@ -625,6 +631,7 @@ function SearchPageBody() {
   const navigate = useNavigate();
   const { state } = useStore();
   const [query, setQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   /*
     내 기록 + 상대가 공유한 것. `RecordPage` 와 같은 필터를 쓴다.
@@ -681,24 +688,39 @@ function SearchPageBody() {
   return (
     <div className="min-h-full pb-24">
       <div className="px-4 pt-3 pb-2">
-        <div className="flex items-center gap-2">
-          <div className="ink-chip flex flex-1 items-center gap-2 px-3">
+        <form
+          role="search"
+          aria-label="기록 찾기"
+          onSubmit={(event) => event.preventDefault()}
+          className="flex items-center gap-2"
+        >
+          <div
+            className="ink-chip flex flex-1 items-center gap-2 px-3"
+            data-testid="record-search-field"
+            style={{ background: 'var(--paper)' }}
+          >
             <Search size={16} className="pen-icon" color="var(--ink-soft)" aria-hidden="true" />
             <input
+              ref={searchInputRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="쓴 말이나 날짜로 찾기"
               aria-label="쓴 말이나 날짜로 찾기"
+              aria-describedby="record-search-help"
+              aria-controls="record-search-results"
               enterKeyHint="search"
               type="search"
-              className="hand-text min-h-11 w-full flex-1 bg-transparent text-body outline-none placeholder:opacity-45"
+              className="hand-text min-h-11 w-full flex-1 bg-transparent text-body outline-none placeholder:text-[var(--ink-soft)] placeholder:opacity-100"
               style={{ color: 'var(--ink)' }}
             />
             {query ? (
               <button
                 type="button"
-                aria-label="지우기"
-                onClick={() => setQuery('')}
+                aria-label="검색어 지우기"
+                onClick={() => {
+                  setQuery('');
+                  searchInputRef.current?.focus();
+                }}
                 className="press-response flex h-11 w-11 items-center justify-center"
               >
                 <X size={16} className="pen-icon" color="var(--ink-soft)" aria-hidden="true" />
@@ -715,38 +737,40 @@ function SearchPageBody() {
           >
             <SquarePen size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
           </button>
-        </div>
+        </form>
 
-        <p className="pt-1.5 text-caption" style={{ color: 'var(--ink-soft)' }}>
+        <p id="record-search-help" className="pt-1.5 text-caption" style={{ color: 'var(--ink-soft)' }}>
           {/* 왜 기기 안인지 말한다. 제약처럼 보이는 것이 실은 이 구조가 준 것이다. */}
           이 기기 안에서만 찾아요 · 8/14 처럼 날짜로도 찾을 수 있어요
         </p>
       </div>
 
-      {result.kind === 'empty' ? (
-        <div className="px-4 py-3">
-          {isSoldier ? (
-            <SoldierSearchSurface
-              military={state.profile.military}
-              contact={state.profile.contact}
-              events={state.events}
-              today={today}
-              onOpenService={() => navigate('/service')}
-            />
-          ) : (
-            <GomsinSearchSurface
-              authenticated={Boolean(state.authenticatedUser?.id)}
-              userId={state.authenticatedUser?.id}
-              coupleId={state.profile.couple?.coupleId}
-              connected={Boolean(state.profile.couple?.connected)}
-              partnerName={state.profile.couple?.partnerName || ''}
-              partnerMilitary={resolveEffectiveMilitary(state.profile)}
-            />
-          )}
-        </div>
-      ) : (
-        <Results result={result} onOpen={openRecord} />
-      )}
+      <div id="record-search-results">
+        {result.kind === 'empty' ? (
+          <div className="px-4 py-3">
+            {isSoldier ? (
+              <SoldierSearchSurface
+                military={state.profile.military}
+                contact={state.profile.contact}
+                events={state.events}
+                today={today}
+                onOpenService={() => navigate('/service')}
+              />
+            ) : (
+              <GomsinSearchSurface
+                authenticated={Boolean(state.authenticatedUser?.id)}
+                userId={state.authenticatedUser?.id}
+                coupleId={state.profile.couple?.coupleId}
+                connected={Boolean(state.profile.couple?.connected)}
+                partnerName={state.profile.couple?.partnerName || ''}
+                partnerMilitary={resolveEffectiveMilitary(state.profile)}
+              />
+            )}
+          </div>
+        ) : (
+          <Results result={result} onOpen={openRecord} />
+        )}
+      </div>
     </div>
   );
 }
@@ -760,7 +784,7 @@ function Results({
 }) {
   if (result.matches.length === 0) {
     return (
-      <p className="px-4 pt-8 text-center text-label" style={{ color: 'var(--ink-soft)' }}>
+      <p role="status" className="px-4 pt-8 text-center text-label" style={{ color: 'var(--ink-soft)' }}>
         {result.kind === 'date' ? '그날은 남긴 것이 없어요' : '그 말이 들어간 기록이 없어요'}
       </p>
     );
@@ -769,14 +793,14 @@ function Results({
   return (
     <div>
       {result.kind === 'date' ? (
-        <div className="flex items-center gap-1.5 px-4 pb-2">
+        <div role="status" className="flex items-center gap-1.5 px-4 pb-2">
           <CalendarDays size={14} className="pen-icon" color="var(--ink-soft)" aria-hidden="true" />
           <span className="text-caption" style={{ color: 'var(--ink-soft)' }}>
             {result.date} · {result.matches.length}개
           </span>
         </div>
       ) : (
-        <p className="px-4 pb-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
+        <p role="status" className="px-4 pb-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
           {result.matches.length}개 찾았어요
         </p>
       )}

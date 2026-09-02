@@ -60,4 +60,15 @@ describe('종이 바탕 설정', () => {
     expect(css).toContain('background-size: 20px 20px');
     expect(css).toContain('background-size: 18px 18px');
   });
+
+  it('고정 헤더용 재사용 레이어도 모든 종이 선택의 같은 표면을 쓴다', () => {
+    const css = readFileSync('src/styles/paper.css', 'utf8');
+    expect(css).toMatch(/\.notebook\s*,\s*\.paper-texture-layer\s*\{/);
+    expect(css).toMatch(/\[data-theme='dark'\] \.notebook\s*,\s*\[data-theme='dark'\] \.paper-texture-layer\s*\{/);
+    for (const texture of ['plain', 'grid', 'dot', 'cream']) {
+      expect(css).toMatch(new RegExp(
+        `\\[data-paper='${texture}'\\] \\.notebook\\s*,\\s*\\[data-paper='${texture}'\\] \\.paper-texture-layer\\s*[,\\{]`,
+      ));
+    }
+  });
 });

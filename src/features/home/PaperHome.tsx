@@ -2,9 +2,11 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bookmark, MoreHorizontal, Phone, Plus } from 'lucide-react';
 import { useStore } from '@/lib/useStore';
-import { visibleRecordsForViewer } from '@/lib/privacy';
+import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { usePartnerDay } from '@/lib/usePartnerDay';
 import { localToday } from '@/lib/cycle';
+import { isRecordContentAvailable } from '@/lib/recordAvailability';
+import { parseLocalDate, toLocalDateString } from '@/lib/utils';
 import { InkCircle, PenFace } from '@/components/paper';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
@@ -39,8 +41,8 @@ import type { DailyRecord } from '@/types';
  *
  * ## 피드가 담는 구간
  *
- * §6.1 -- 아직 확인하지 않은 것은 **스토리**가, 확인했고 오늘이 아닌 것은 이 지면이,
- * 지난 달은 `우리` 가 갖는다. 같은 기록이 두 자리에 동시에 있지 않는다.
+ * 최근 이레 동안 현재 상대가 공유한 기록을 보여 준다. 스토리는 아직 읽지 않은 구간을
+ * 알려 주지만, 그 사실이 홈에서 상대의 기록을 숨기는 조건이 되지는 않는다.
  */
 
 /** 지면이 담는 구간. 그 앞은 `우리` 의 격자가 갖는다. */
@@ -61,7 +63,7 @@ function timeAgo(record: DailyRecord, todayStr: string): string {
 
 export function PaperHome() {
   const navigate = useNavigate();
-  const { state, markTalkAbout, unmarkTalkAbout } = useStore();
+  const { state, coupleLifecycle, markTalkAbout, unmarkTalkAbout } = useStore();
   const { profile, talkAboutMarks } = state;
   const todayStr = localToday();
 
@@ -75,35 +77,48 @@ export function PaperHome() {
     [state.records, profile.id, profile.role],
   );
 
-  /*
-    지면에 오는 것.
-
-    스토리가 가진 것 -- 상대의 아직 확인하지 않은 구간 -- 은 빼고, 최근 7일만 남긴다.
-    경계가 날짜가 아니라 **확인 여부**인 이유는 §6.1의 놓친 구간이 어제·그제까지 뻗을 수
-    있기 때문이다. 날짜로 자르면 겹친다.
-  */
-  const inStory = useMemo(
-    () => new Set(partnerDay.surface.map((record) => record.id)),
-    [partnerDay.surface],
-  );
+  const activePartnerUserId = coupleLifecycle === 'connected'
+    && profile.couple.connected
+    && profile.couple.status === 'active'
+    && profile.couple.partnerUserId
+    && profile.couple.partnerUserId !== profile.id
+    ? profile.couple.partnerUserId
+    : undefined;
 
   const feed = useMemo(() => {
-    const from = new Date(`${todayStr}T00:00:00`);
+    if (!activePartnerUserId) return [];
+    const from = parseLocalDate(todayStr);
     from.setDate(from.getDate() - (FEED_DAYS - 1));
-    const fromStr = from.toISOString().slice(0, 10);
+    const fromStr = toLocalDateString(from);
     return records
-      .filter((record) => record.date >= fromStr && !inStory.has(record.id))
+      .filter((record) => (
+        record.date >= fromStr
+        && record.date <= todayStr
+        && record.userId === activePartnerUserId
+        && isRecordContentAvailable(record)
+      ))
       .sort((a, b) => (a.date === b.date ? b.time.localeCompare(a.time) : b.date.localeCompare(a.date)));
-  }, [records, inStory, todayStr]);
+  }, [records, activePartnerUserId, todayStr]);
 
   /*
     1년 전 오늘. 지면 위 조용한 한 줄(계획 #29).
 
-    `records` 를 쓴다 -- 이미 보는 사람 기준으로 걸러진 목록이라, 상대의 비공개 기록이
-    여기로 새어 나올 길이 없다. 피드의 7일 창과 달리 이것은 **오래된 것일수록 값이
-    있으므로** 창을 두지 않는다.
+    내 기록은 연결 상태와 무관하게 남기되, 상대 기록은 서버가 현재 연결을 확인하고 그
+    상대의 id가 정확히 일치할 때만 남긴다. 로컬 캐시에 이전 상대의 공유 기록이 남아도
+    홈으로 되돌아오지 않아야 한다. 피드의 7일 창과 달리 이것은 **오래된 것일수록 값이
+    있으므로** 날짜 창은 두지 않는다.
   */
-  const onThisDay = useMemo(() => selectOnThisDay(records, todayStr), [records, todayStr]);
+  const memoryRecords = useMemo(() => records.filter((record) => (
+    isRecordContentAvailable(record)
+    && (
+      isOwnRecord(record, { userId: profile.id, role: profile.role })
+      || (!!activePartnerUserId && record.userId === activePartnerUserId)
+    )
+  )), [records, profile.id, profile.role, activePartnerUserId]);
+  const onThisDay = useMemo(
+    () => selectOnThisDay(memoryRecords, todayStr),
+    [memoryRecords, todayStr],
+  );
 
   const markedIds = useMemo(
     () => new Set((talkAboutMarks ?? []).map((mark) => mark.recordId)),
@@ -135,8 +150,7 @@ export function PaperHome() {
     <div className="min-h-full pb-6" data-testid="home-core">
       <header
         data-testid="home-sticky-header"
-        className="sticky top-0 z-40 flex h-14 items-center justify-between px-4"
-        style={{ background: 'var(--paper)' }}
+        className="paper-texture-layer sticky top-0 z-40 flex h-14 items-center justify-between px-4"
       >
         {/*
           로고 자리. 이 앱의 이름은 손글씨다 -- 인스타의 로고가 그 앱의 손글씨인 것과

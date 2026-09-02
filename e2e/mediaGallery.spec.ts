@@ -56,7 +56,7 @@ const PNG = Buffer.from(
 
 const PHOTO_RECORD = record({
   id: 'rec-photos',
-  user_id: 'user-creator',
+  user_id: 'user-partner',
   log_text: '오늘 본 노을',
   record_time: '18:40:37',
   attachments: [
@@ -152,7 +152,7 @@ test('홈 사진 포스트는 사진, 이름 없는 글, 분 단위 시간과 �
   const media = article.getByTestId('record-media-carousel');
   const body = article.getByText('오늘 본 노을', { exact: true });
   const time = article.getByText('오늘 18:40', { exact: true });
-  const original = article.getByRole('button', { name: '춘향의 기록 열기' });
+  const original = article.getByRole('button', { name: '몽룡의 기록 열기' });
   const bookmark = article.getByRole('button', { name: '이따 이야기하기' });
 
   await expect(article).toBeVisible({ timeout: 20_000 });
@@ -340,18 +340,14 @@ test("상대방의 오늘 shows the partner's photo at full width", async ({ bro
    * The partner's own record carries the media here, so this exercises the home
    * feed's copy of the gallery rather than the 기록 tab's.
    *
-   * V4 이전에는 `widget-partner-day` 위젯이 그 사본을 갖고 있었다. 홈이 피드가 되면서
-   * 상대의 오늘은 **스토리**가 되었다 -- 그리고 홈의 피드는 스토리에 있는 기록을
-   * 일부러 제외한다(`PaperHome.feed`). 같은 하루가 두 번 나오면 피드가 스토리의
-   * 그림자가 되기 때문이다.
-   *
-   * 그래서 사진을 보는 자리도 스토리 안이다. 지키는 것은 그대로다 -- 상대의 사진이
-   * 본문 폭을 채우는가.
+   * 스토리는 아직 읽지 않은 구간을 알려 주는 보조 흐름이다. 그 surface에 들어간 기록도
+   * 홈에서는 사라지지 않아야 하므로, 사진을 홈에서 직접 확인한다.
    */
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, {
     ...CREATOR,
     userId: 'user-partner',
+    partnerUserId: 'user-creator',
     displayName: '몽룡',
     role: 'soldier',
     partnerName: '춘향',
@@ -373,9 +369,6 @@ test("상대방의 오늘 shows the partner's photo at full width", async ({ bro
 
   await page.goto('/home');
   await ready(page);
-
-  await page.getByRole('button', { name: '춘향의 스토리' }).click();
-  await expect(page).toHaveURL(/\/story\/partner$/);
 
   const media = page.getByTestId('record-attachment').first();
   await expect(media).toBeVisible({ timeout: 15_000 });
